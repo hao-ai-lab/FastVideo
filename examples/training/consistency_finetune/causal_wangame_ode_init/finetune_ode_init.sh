@@ -9,7 +9,7 @@ export TOKENIZERS_PARALLELISM=false
 MODEL_PATH="Wan2.1-Fun-1.3B-InP-Diffusers"
 DATA_DIR="../traindata_0209_1500/ode_init_mc/preprocessed/combined_parquet_dataset/worker_0"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-NUM_GPUS=4
+NUM_GPUS=1
 export CUDA_VISIBLE_DEVICES=4,5,6,7
 # IP=[MASTER NODE IP]
 
@@ -18,8 +18,8 @@ training_args=(
   --tracker_project_name "wangame_ode_init"
   --output_dir "checkpoints/wangame_ode_init"
   --override_transformer_cls_name "CausalWanGameActionTransformer3DModel"
-  --wandb_run_name "0211_1830_steps2000_bs_8"
-  --max_train_steps 2000
+  --wandb_run_name "0213_2100_test"
+  --max_train_steps 1
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1

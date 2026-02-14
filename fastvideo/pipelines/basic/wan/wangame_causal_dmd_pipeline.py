@@ -6,7 +6,7 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
-                                        CausalDMDDenosingStage,
+                                        MatrixGameCausalDenoisingStage,
                                         MatrixGameImageEncodingStage,
                                         InputValidationStage,
                                         LatentPreparationStage,
@@ -54,10 +54,11 @@ class WanGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                        stage=MatrixGameImageVAEEncodingStage(vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=CausalDMDDenosingStage(
+                       stage=MatrixGameCausalDenoisingStage(
                            transformer=self.get_module("transformer"),
                            transformer_2=self.get_module("transformer_2", None),
                            scheduler=self.get_module("scheduler"),
+                           pipeline=self,
                            vae=self.get_module("vae")))
 
         self.add_stage(stage_name="decoding_stage",
