@@ -355,11 +355,14 @@ def test_gen3c_transformer_parity():
         official_state_dict = official_checkpoint.get("state_dict", official_checkpoint)
         
         # Create official model with matching config
+        # Total input channels: 16 (latent) + 1 (mask) + 64 (2 buffers * 32 channels each) = 81
+        buffer_channels = 2 * 32  # frame_buffer_max * CHANNELS_PER_BUFFER
+        official_in_channels = 16 + 1 + buffer_channels  # 81
         official_model = VideoExtendGeneralDIT(
             max_img_h=720,
             max_img_w=1280,
             max_frames=128,
-            in_channels=16 + 16 * 4 + 1,  # latent + buffers + mask
+            in_channels=official_in_channels,
             out_channels=16,
             patch_spatial=(2, 2),
             patch_temporal=1,

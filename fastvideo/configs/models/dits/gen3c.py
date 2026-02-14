@@ -42,6 +42,7 @@ class Gen3CArchConfig(DiTArchConfig):
             r"augment_sigma_embed.t_embedder.linear_2.\1",
 
             # Affine embedding norm: net.affline_norm.weight -> affine_norm.weight
+            # Note: "affline" is a typo in the official GEN3C checkpoint (should be "affine")
             r"^net\.affline_norm\.(.*)$":
             r"affine_norm.\1",
 
@@ -139,7 +140,10 @@ class Gen3CArchConfig(DiTArchConfig):
     in_channels: int = 16
     out_channels: int = 16
 
-    # Number of 3D cache buffers (each buffer = warped_frame + warped_mask = 32 latent channels)
+    # Channels per 3D cache buffer: 16 (warped frame latent) + 16 (warped mask latent)
+    CHANNELS_PER_BUFFER: int = 32
+
+    # Number of 3D cache buffers
     frame_buffer_max: int = 2
 
     # Attention configuration (7B model: 32 heads x 128 dim = 4096 hidden)
@@ -199,7 +203,7 @@ class Gen3CArchConfig(DiTArchConfig):
         # - condition_video_input_mask (1): Binary mask for conditioning frames
         # - condition_video_pose (frame_buffer_max * 32): 3D cache buffers
         # - padding_mask (1 if concat_padding_mask): Padding mask
-        self.buffer_channels = self.frame_buffer_max * 32  # Each buffer: 16 (frame) + 16 (mask)
+        self.buffer_channels = self.frame_buffer_max * self.CHANNELS_PER_BUFFER
         self.total_input_channels = (
             self.in_channels +  # 16: VAE latent
             1 +  # 1: condition_video_input_mask

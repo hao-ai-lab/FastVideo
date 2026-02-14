@@ -109,7 +109,17 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
 
         # Prepare condition_video_pose (3D cache buffers - to be filled by cache rendering)
         frame_buffer_max = getattr(pipeline_config, 'frame_buffer_max', 2)
-        buffer_channels = frame_buffer_max * 32  # Each buffer: 16 (frame) + 16 (mask)
+        channels_per_buffer = getattr(
+            pipeline_config, 'dit_config', None)
+        if channels_per_buffer is not None:
+            channels_per_buffer = getattr(
+                channels_per_buffer, 'arch_config', None)
+        if channels_per_buffer is not None:
+            channels_per_buffer = getattr(
+                channels_per_buffer, 'CHANNELS_PER_BUFFER', 32)
+        else:
+            channels_per_buffer = 32
+        buffer_channels = frame_buffer_max * channels_per_buffer
 
         batch.condition_video_pose = torch.zeros(batch_size,
                                                  buffer_channels,
@@ -157,16 +167,14 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
             1, 1, 1, 3, 1, 1)
 
         latent_condition = []
-        for i in range(condition_state.shape[2]):  # Iterate over buffers
-            # Encode image buffer
-            current_video_latent = vae.encode(condition_state[:, :, i].permute(
-                0, 2, 1, 3, 4).to(dtype)).contiguous()
-
-            # Encode mask buffer
-            current_mask_latent = vae.encode(
-                condition_state_mask[:, :,
-                                     i].permute(0, 2, 1, 3,
-                                                4).to(dtype)).contiguous()
+        num_buffers = condition_state.shape[2]
+        for i in range(num_buffers):
+            # Batch image and mask into a single VAE encode call per buffer
+            img_input = condition_state[:, :, i].permute(0, 2, 1, 3, 4).to(dtype)
+            mask_input = condition_state_mask[:, :, i].permute(0, 2, 1, 3, 4).to(dtype)
+            batched_input = torch.cat([img_input, mask_input], dim=0)
+            batched_latent = vae.encode(batched_input).contiguous()
+            current_video_latent, current_mask_latent = batched_latent.chunk(2, dim=0)
 
             latent_condition.append(current_video_latent)
             latent_condition.append(current_mask_latent)
@@ -226,6 +234,7 @@ class Gen3CDenoisingStage(DenoisingStage):
         latents = batch.latents
         num_inference_steps = batch.num_inference_steps
         guidance_scale = batch.guidance_scale
+        fps = getattr(fastvideo_args.pipeline_config, 'fps', 24)
 
         sigma_max = 80.0
         sigma_min = 0.002
@@ -296,7 +305,7 @@ class Gen3CDenoisingStage(DenoisingStage):
                             timestep=timestep.to(target_dtype),
                             encoder_hidden_states=batch.prompt_embeds[0].to(
                                 target_dtype),
-                            fps=24,  # TODO: get fps from batch or config
+                            fps=fps,
                             condition_video_input_mask=condition_video_input_mask
                             .to(target_dtype)
                             if condition_video_input_mask is not None else None,
@@ -336,7 +345,7 @@ class Gen3CDenoisingStage(DenoisingStage):
                                 timestep=timestep.to(target_dtype),
                                 encoder_hidden_states=batch.
                                 negative_prompt_embeds[0].to(target_dtype),
-                                fps=24,
+                                fps=fps,
                                 condition_video_input_mask=
                                 condition_video_input_mask.to(target_dtype)
                                 if condition_video_input_mask is not None else
