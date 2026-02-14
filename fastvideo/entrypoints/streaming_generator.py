@@ -169,8 +169,10 @@ class StreamingVideoGenerator(VideoGenerator):
         self.sampling_param.return_frames = True
         self.sampling_param.save_video = False
 
+        batch_kw = shallow_asdict(self.sampling_param)
+        batch_kw.pop("video_quality", None)  # writer-only, not a ForwardBatch field
         self.batch = ForwardBatch(
-            **shallow_asdict(self.sampling_param),
+            **batch_kw,
             eta=0.0,
             n_tokens=n_tokens,
             VSA_sparsity=fastvideo_args.VSA_sparsity,
