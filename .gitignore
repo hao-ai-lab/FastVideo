@@ -1,5 +1,6 @@
 __pycache__
 .ipynb_checkpoints
+id_ed25519
 *.pth
 UCF-101/
 results/
