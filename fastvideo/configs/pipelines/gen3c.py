@@ -30,7 +30,8 @@ def t5_large_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
         attention_mask = outputs.attention_mask
         lengths = attention_mask.sum(dim=1)
         max_len = hidden_state.shape[1]
-        mask = torch.arange(max_len, device=hidden_state.device)[None, :] >= lengths[:, None]
+        mask = torch.arange(
+            max_len, device=hidden_state.device)[None, :] >= lengths[:, None]
         hidden_state[mask] = 0.0
 
     return hidden_state
