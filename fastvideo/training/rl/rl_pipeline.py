@@ -49,6 +49,17 @@ from fastvideo.forward_context import set_forward_context
 
 logger = init_logger(__name__)
 
+# Align-debug logs: under ALIGN_LOGS_ROOT (env var) or repo root. Structure: <root>/align_logs/fv_logs, <root>/align_logs/flow_logs
+_ALIGN_LOGS_ROOT = os.environ.get("ALIGN_LOGS_ROOT")
+if _ALIGN_LOGS_ROOT:
+    _ALIGN_LOGS_ROOT = os.path.abspath(_ALIGN_LOGS_ROOT)
+    ALIGN_FV_LOGS_DIR = os.path.join(_ALIGN_LOGS_ROOT, "align_logs", "fv_logs")
+    ALIGN_FLOW_DEBUG_METRICS_PATH = os.path.join(_ALIGN_LOGS_ROOT, "align_logs", "flow_logs", "debug_metrics.txt")
+else:
+    _file_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+    ALIGN_FV_LOGS_DIR = os.path.join(_file_root, "align_logs", "fv_logs")
+    ALIGN_FLOW_DEBUG_METRICS_PATH = os.path.join(_file_root, "flow_grpo", "align_logs", "flow_logs", "debug_metrics.txt")
+
 
 def _to_device_dtype(
     d: dict[str, Any],
@@ -134,8 +145,8 @@ class RLPipeline(TrainingPipeline):
             train_batch_size=training_args.train_batch_size,
             test_batch_size=4,  # Hardcoded for now
             k=rl_num_image_per_prompt,
-            seed=training_args.seed if training_args.seed is not None else 42,
-            train_num_workers=training_args.dataloader_num_workers,
+            seed=42,
+            train_num_workers=0,
             test_num_workers=0,
             num_replicas=num_replicas,
             rank=rank)
@@ -264,24 +275,25 @@ class RLPipeline(TrainingPipeline):
         
         Args:
             training_batch: Current training batch
-        
         Returns:
             Updated training_batch with prompts in input_kwargs
         """
         with self.tracker.timed("timing/get_next_batch"):
-            try:
-                batch = next(self.train_loader_iter)
-                self.current_step += 1
-                self.train_sampler.set_step(self.current_step)
-            except StopIteration:
-                # Reset iterator for next epoch
-                self.train_sampler.set_step(0)
-                self.train_loader_iter = iter(self.train_dataloader)
-                batch = next(self.train_loader_iter)
+            # try:
+            batch = next(self.train_loader_iter)
+            logger.info(f"==== prompt batch ====")
+            logger.info(f"{'\n'.join([p for p in batch[0]])}")
+            self.current_step += 1
+            self.train_sampler.set_step(self.current_step)
+            # except StopIteration:
+            #     # Reset iterator for next epoch
+            #     self.train_sampler.set_step(0)
+            #     self.train_loader_iter = iter(self.train_dataloader)
+            #     batch = next(self.train_loader_iter)
 
-                batch = next(self.train_loader_iter)
-                self.current_step += 1
-                self.train_sampler.set_step(self.current_step)
+            #     batch = next(self.train_loader_iter)
+            #     self.current_step += 1
+            #     self.train_sampler.set_step(self.current_step)
 
             # RL prompt dataloader returns (prompts, metadatas) tuple
             prompts, metadatas = batch
@@ -587,6 +599,8 @@ class RLPipeline(TrainingPipeline):
 
         # Set sampling_param fields to match validation pipeline pattern
         sampling_param.prompt = prompts  # Will be set per-batch in loop
+        # Align with flow_grpo: use empty string for negative so negative_prompt_embeds match (flow_grpo uses [""])
+        sampling_param.negative_prompt = ""
         sampling_param.height = height
         sampling_param.width = width
         sampling_param.num_inference_steps = num_inference_steps
@@ -778,7 +792,7 @@ class RLPipeline(TrainingPipeline):
         # Store decoded videos in input_kwargs (same pattern as validation)
         training_batch.input_kwargs["decoded_videos"] = decoded_videos
 
-        # myregion debug: save collected videos, prompts, and debug metrics (rank 0 only)
+        # myregion debug: save collected videos and log metrics for each batch (rank 0 only)
         if self.global_rank == 0:
             from contextlib import nullcontext
             import numpy as np
@@ -787,8 +801,9 @@ class RLPipeline(TrainingPipeline):
             region_cm = (controller.region("my region") if controller is not None
                         and getattr(controller, "has_profiler", False) else nullcontext())
             with region_cm:
-                out_dir = "/mnt/fast-disks/hao_lab/shijie/mylogs/fv_videos"
+                out_dir = ALIGN_FV_LOGS_DIR
                 os.makedirs(out_dir, exist_ok=True)
+                batch_index = getattr(self, "_debug_current_batch_index", 0)
                 batch_size = decoded_videos.shape[0]
                 fps = 24
                 for batch_idx in range(batch_size):
@@ -800,13 +815,11 @@ class RLPipeline(TrainingPipeline):
                     vid_np = np.clip(vid_np, 0.0, 1.0)
                     vid_np = (vid_np * 255.0).round().astype(np.uint8)
                     imageio.mimsave(
-                        os.path.join(out_dir, f"debug_step0_batch_{batch_idx}.mp4"),
+                        os.path.join(out_dir, f"debug_batch{batch_index}_sample{batch_idx}.mp4"),
                         [vid_np[t] for t in range(vid_np.shape[0])],
                         fps=fps,
                     )
-                with open(os.path.join(out_dir, "prompts.txt"), "w") as f:
-                    f.write("\n".join(prompts))
-                # fp64 sums from existing data
+                # fp64 sums and per-step metrics for this batch
                 traj = training_batch.latents
                 sum_initial = traj[:, 0].to(torch.float64).sum().item()
                 sum_intermediate = traj.to(torch.float64).sum().item()
@@ -845,7 +858,7 @@ class RLPipeline(TrainingPipeline):
                         lines.append(f"step_{step_i} sum_variance_noise_fp64: {variance_noise_per_step[step_i]}")
                 for k, v in hyperparams.items():
                     lines.append(f"{k}: {v}")
-                flow_path = "/mnt/fast-disks/hao_lab/shijie/mylogs/flow_videos/debug_metrics.txt"
+                flow_path = ALIGN_FLOW_DEBUG_METRICS_PATH
                 flow_vals = {}
                 if os.path.isfile(flow_path):
                     with open(flow_path) as f:
@@ -868,10 +881,13 @@ class RLPipeline(TrainingPipeline):
                                     "sum_negative_prompt_embeds_fp64": sum_negative_prompt_embeds, "sum_decoded_fp64": sum_decoded}[key]
                             pct = 100.0 * (ours - fv) / (abs(fv) + 1e-20)
                             lines.append(f"pct_diff_vs_flow_{key}: {pct:.6f}%")
-                with open(os.path.join(out_dir, "debug_metrics.txt"), "w") as f:
-                    f.write("\n".join(lines))
-                logger.info("RL_METRIC: Debug region saved fv_videos, prompts, and metrics; stopping.")
-            raise KeyboardInterrupt("Debug stop after saving decoded video (my region).")
+                metrics_path = os.path.join(out_dir, "debug_metrics.txt")
+                with open(metrics_path, "a") as f:
+                    f.write("\n".join(lines) + "\n")
+                if len(getattr(self, "_debug_batches_data", [])) == 0:
+                    self._debug_first_batch_metrics = lines
+                    self._debug_rewards_advantages_log_pending = True
+                    logger.info("RL_METRIC: Debug region saving fv_logs and metrics per batch; will log rewards/advantages after sampling loop.")
         # endregion
 
         logger.info("==== RL pipeline: collect_trajectories FINISH ====")
@@ -1061,11 +1077,15 @@ class RLPipeline(TrainingPipeline):
                                                          rewards=rewards_global,
                                                          type='grpo')
 
-                # myregion debug
-                logger.info(f"gathered_rewards: {gathered_rewards}")
-                logger.info(f"advantages_np: {advantages_np}")
-                logger.info(f"prompts_global: {prompts_global}")
-                logger.info(f"prompts: {prompts}")
+                # myregion debug: append this batch's gathered data for post-loop logging (rank 0 only)
+                if global_rank == 0 and getattr(self, "_debug_rewards_advantages_log_pending", False):
+                    self._debug_batches_data.append(
+                        (
+                            rewards_global.cpu().numpy().ravel(),
+                            np.asarray(advantages_np).ravel(),
+                            list(prompts_global),
+                        )
+                    )
                 # endregion
 
                 # Slice back to this rank's indices (same as flow_grpo reshape + [rank])
@@ -1087,9 +1107,27 @@ class RLPipeline(TrainingPipeline):
                 advantages = torch.as_tensor(advantages_np,
                                              device=rewards.device,
                                              dtype=rewards.dtype)
+                # myregion debug: append this batch's data for post-loop logging (rank 0 only)
+                if global_rank == 0 and getattr(self, "_debug_rewards_advantages_log_pending", False):
+                    self._debug_batches_data.append(
+                        (
+                            rewards.cpu().numpy().ravel(),
+                            np.asarray(advantages_np).ravel(),
+                            list(prompts),
+                        )
+                    )
+                # endregion
         else:
             # Global normalization: (reward - global_mean) / global_std
             advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-4)
+            if global_rank == 0 and getattr(self, "_debug_rewards_advantages_log_pending", False):
+                self._debug_batches_data.append(
+                    (
+                        rewards.cpu().numpy().ravel(),
+                        advantages.cpu().numpy().ravel(),
+                        list(prompts),
+                    )
+                )
 
         # Get values (use zeros if algorithm doesn't use value model)
         if training_batch.values is not None:
@@ -1642,7 +1680,16 @@ class RLPipeline(TrainingPipeline):
         # Sampling: M batches, advantage computed per batch (per group)
         # Use a new TrainingBatch per iteration so each collected[i] holds distinct data (avoids identical reward/loss per step).
         collected: list[TrainingBatch] = []
-        for _ in range(M):
+        if self.global_rank == 0:
+            self._debug_batches_data = []
+        for b in range(M):
+            if self.global_rank == 0:
+                self._debug_current_batch_index = b
+                out_dir = ALIGN_FV_LOGS_DIR
+                os.makedirs(out_dir, exist_ok=True)
+                metrics_path = os.path.join(out_dir, "debug_metrics.txt")
+                with open(metrics_path, "w" if b == 0 else "a") as f:
+                    f.write(f"=== batch {b} ===\n")
             tb = TrainingBatch()
             tb.current_timestep = getattr(training_batch, "current_timestep", 0)
             tb.current_vsa_sparsity = getattr(training_batch, "current_vsa_sparsity", 0.0)
@@ -1651,6 +1698,35 @@ class RLPipeline(TrainingPipeline):
             tb = self.compute_rewards(tb)
             tb = self.compute_advantages(tb)
             collected.append(tb)
+
+        # myregion debug: after sampling loop, write prompts.txt and append reward/advantage to debug_metrics.txt then stop (rank 0 only)
+        if getattr(self, "_debug_rewards_advantages_log_pending", False) and self.global_rank == 0:
+            out_dir = ALIGN_FV_LOGS_DIR
+            os.makedirs(out_dir, exist_ok=True)
+            batches_data = getattr(self, "_debug_batches_data", [])
+            # prompts.txt: gathered prompts per batch with header === batch b ===
+            with open(os.path.join(out_dir, "prompts.txt"), "w") as f:
+                for b, (_, _, prompts_list) in enumerate(batches_data):
+                    if b > 0:
+                        f.write("\n")
+                    f.write(f"=== batch {b} ===\n")
+                    f.write("\n".join(prompts_list) + "\n")
+            # debug_metrics.txt: per-batch metrics already written in collect_trajectories; append reward/advantage section
+            with open(os.path.join(out_dir, "debug_metrics.txt"), "a") as f:
+                f.write("\n=== reward, advantage, prompt (one per line) ===\n")
+                for rewards_arr, advantages_arr, prompts_list in batches_data:
+                    rewards_arr = np.asarray(rewards_arr).ravel()
+                    advantages_arr = np.asarray(advantages_arr).ravel()
+                    n = len(rewards_arr)
+                    for i in range(n):
+                        prompt = prompts_list[i] if i < len(prompts_list) else ""
+                        f.write(f"{float(rewards_arr[i])}, {float(advantages_arr[i])}, {repr(prompt)}\n")
+            logger.info("RL_METRIC: Debug region wrote prompts and appended rewards/advantages to fv_logs; stopping.")
+            for attr in ("_debug_rewards_advantages_log_pending", "_debug_first_batch_metrics", "_debug_batches_data", "_debug_current_batch_index"):
+                if hasattr(self, attr):
+                    delattr(self, attr)
+            raise KeyboardInterrupt("Debug stop after logging prompts and rewards/advantages.")
+        # endregion
 
         # Training: backward, then optimizer step and log per batch
         self.optimizer.zero_grad(set_to_none=True)

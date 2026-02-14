@@ -1,0 +1,224 @@
+=== batch 0 ===
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: 9565.066785273018
+sum_model_pred_fp64: -165470.64760923386
+sum_prompt_embeds_fp64: 170.33617508131508
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 13206315.607404143
+step_0 sum_model_pred_fp64: -15647.525955200195
+step_0 sum_intermediate_latents_fp64: -2642.3185963454016
+step_0 sum_variance_noise_fp64: -789.6831162320522
+step_1 sum_model_pred_fp64: -10256.395767211914
+step_1 sum_intermediate_latents_fp64: -2644.574036830716
+step_1 sum_variance_noise_fp64: -1650.2171930825245
+step_2 sum_model_pred_fp64: 7935.746501922607
+step_2 sum_intermediate_latents_fp64: -2663.278800086482
+step_2 sum_variance_noise_fp64: 877.1397947799464
+step_3 sum_model_pred_fp64: 7272.354513168335
+step_3 sum_intermediate_latents_fp64: -2696.8268261103076
+step_3 sum_variance_noise_fp64: 736.812491993373
+step_4 sum_model_pred_fp64: -629.7927627563477
+step_4 sum_intermediate_latents_fp64: -2370.163657589059
+step_4 sum_variance_noise_fp64: 2061.4611658635285
+step_5 sum_model_pred_fp64: -4597.980796813965
+step_5 sum_intermediate_latents_fp64: -2106.0700284745544
+step_5 sum_variance_noise_fp64: 847.0691408767577
+step_6 sum_model_pred_fp64: -9628.167214870453
+step_6 sum_intermediate_latents_fp64: -1995.6476687968825
+step_6 sum_variance_noise_fp64: -1336.0408117195327
+step_7 sum_model_pred_fp64: -10522.54606628418
+step_7 sum_intermediate_latents_fp64: -1641.677333572734
+step_7 sum_variance_noise_fp64: -11.548195632876286
+step_8 sum_model_pred_fp64: -8843.99035358429
+step_8 sum_intermediate_latents_fp64: -1413.3389211184185
+step_8 sum_variance_noise_fp64: -694.2449807570147
+step_9 sum_model_pred_fp64: -8907.210451126099
+step_9 sum_intermediate_latents_fp64: -943.3800754957774
+step_9 sum_variance_noise_fp64: 732.648895439603
+step_10 sum_model_pred_fp64: -10909.808128356934
+step_10 sum_intermediate_latents_fp64: -170.2461774002004
+step_10 sum_variance_noise_fp64: 1982.1610815613558
+step_11 sum_model_pred_fp64: -11647.639251708984
+step_11 sum_intermediate_latents_fp64: 332.71699426785926
+step_11 sum_variance_noise_fp64: -418.57023844048274
+step_12 sum_model_pred_fp64: -12417.173933029175
+step_12 sum_intermediate_latents_fp64: 1178.5617338609154
+step_12 sum_variance_noise_fp64: 1222.7006414796608
+step_13 sum_model_pred_fp64: -12174.595069885254
+step_13 sum_intermediate_latents_fp64: 1665.6379182862584
+step_13 sum_variance_noise_fp64: -1694.874662188572
+step_14 sum_model_pred_fp64: -12429.79390335083
+step_14 sum_intermediate_latents_fp64: 2536.9059676428587
+step_14 sum_variance_noise_fp64: 221.7823308666558
+step_15 sum_model_pred_fp64: -11009.334121704102
+step_15 sum_intermediate_latents_fp64: 3455.9651641104138
+step_15 sum_variance_noise_fp64: 623.7748358961333
+step_16 sum_model_pred_fp64: -8727.254570007324
+step_16 sum_intermediate_latents_fp64: 4302.243818594492
+step_16 sum_variance_noise_fp64: 838.3412947085856
+step_17 sum_model_pred_fp64: -8840.951693534851
+step_17 sum_intermediate_latents_fp64: 5426.7511466030555
+step_17 sum_variance_noise_fp64: 2384.4944336419594
+step_18 sum_model_pred_fp64: -7741.917388916016
+step_18 sum_intermediate_latents_fp64: 6286.323730757009
+step_18 sum_variance_noise_fp64: -299.3766390163852
+step_19 sum_model_pred_fp64: -15746.671195983887
+step_19 sum_intermediate_latents_fp64: 8501.44575356532
+step_19 sum_variance_noise_fp64: 86.60947481863718
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: -22.544971%
+pct_diff_vs_flow_sum_model_pred_fp64: 4.930263%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: -11.606663%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: 0.909939%
+=== batch 1 ===
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: 1133546.5697708917
+sum_model_pred_fp64: -3393310.4697351456
+sum_prompt_embeds_fp64: 549.0616661570037
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 25907766.223434627
+step_0 sum_model_pred_fp64: -238894.54167175293
+step_0 sum_intermediate_latents_fp64: 1208.6336692048062
+step_0 sum_variance_noise_fp64: -789.6831162320522
+step_1 sum_model_pred_fp64: -149375.49809265137
+step_1 sum_intermediate_latents_fp64: 3764.7658236643183
+step_1 sum_variance_noise_fp64: -1650.2171930825245
+step_2 sum_model_pred_fp64: -163966.28494930267
+step_2 sum_intermediate_latents_fp64: 7155.799303658132
+step_2 sum_variance_noise_fp64: 877.1397947799464
+step_3 sum_model_pred_fp64: -156421.09802246094
+step_3 sum_intermediate_latents_fp64: 10614.32682174645
+step_3 sum_variance_noise_fp64: 736.812491993373
+step_4 sum_model_pred_fp64: -161703.1552886963
+step_4 sum_intermediate_latents_fp64: 14649.99256084206
+step_4 sum_variance_noise_fp64: 2061.4611658635285
+step_5 sum_model_pred_fp64: -163598.75257492065
+step_5 sum_intermediate_latents_fp64: 18878.293920679367
+step_5 sum_variance_noise_fp64: 847.0691408767577
+step_6 sum_model_pred_fp64: -166791.64916992188
+step_6 sum_intermediate_latents_fp64: 23245.401890865614
+step_6 sum_variance_noise_fp64: -1336.0408117195327
+step_7 sum_model_pred_fp64: -169304.6035900116
+step_7 sum_intermediate_latents_fp64: 28294.50123652583
+step_7 sum_variance_noise_fp64: -11.548195632876286
+step_8 sum_model_pred_fp64: -169915.09013175964
+step_8 sum_intermediate_latents_fp64: 33745.21046825711
+step_8 sum_variance_noise_fp64: -694.2449807570147
+step_9 sum_model_pred_fp64: -168183.39477729797
+step_9 sum_intermediate_latents_fp64: 39890.63726748081
+step_9 sum_variance_noise_fp64: 732.648895439603
+step_10 sum_model_pred_fp64: -167163.1702260971
+step_10 sum_intermediate_latents_fp64: 46807.05779268386
+step_10 sum_variance_noise_fp64: 1982.1610815613558
+step_11 sum_model_pred_fp64: -167464.10496139526
+step_11 sum_intermediate_latents_fp64: 54116.24528180441
+step_11 sum_variance_noise_fp64: -418.57023844048274
+step_12 sum_model_pred_fp64: -167132.22951507568
+step_12 sum_intermediate_latents_fp64: 62511.115094355206
+step_12 sum_variance_noise_fp64: 1222.7006414796608
+step_13 sum_model_pred_fp64: -167685.43507003784
+step_13 sum_intermediate_latents_fp64: 71542.4955724284
+step_13 sum_variance_noise_fp64: -1694.874662188572
+step_14 sum_model_pred_fp64: -168584.726521492
+step_14 sum_intermediate_latents_fp64: 82145.1082146138
+step_14 sum_variance_noise_fp64: 221.7823308666558
+step_15 sum_model_pred_fp64: -167337.35968399048
+step_15 sum_intermediate_latents_fp64: 94202.22835164363
+step_15 sum_variance_noise_fp64: 623.7748358961333
+step_16 sum_model_pred_fp64: -166436.84350967407
+step_16 sum_intermediate_latents_fp64: 108030.41466461703
+step_16 sum_variance_noise_fp64: 838.3412947085856
+step_17 sum_model_pred_fp64: -167336.59844970703
+step_17 sum_intermediate_latents_fp64: 124384.82993291278
+step_17 sum_variance_noise_fp64: 2384.4944336419594
+step_18 sum_model_pred_fp64: -167271.52228927612
+step_18 sum_intermediate_latents_fp64: 143369.1888528063
+step_18 sum_variance_noise_fp64: -299.3766390163852
+step_19 sum_model_pred_fp64: -178744.41123962402
+step_19 sum_intermediate_latents_fp64: 167824.28637069647
+step_19 sum_variance_noise_fp64: 86.60947481863718
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: -2.656246%
+pct_diff_vs_flow_sum_model_pred_fp64: 2.527237%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: 0.822205%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: -0.325127%
+
+=== reward, advantage, prompt (one per line) ===
+0.00937500037252903, -0.6409952000323516, 'Retro gaming cartridge label with bold, neon colors: "Pong 2 The Reckoning". The label features a vintage 8-bit aesthetic with pixelated graphics of two futuristic paddles and a glowing ball, set against a backdrop of 1980s arcade patterns.'
+0.017500000074505806, 0.2515612671253406, 'A bustling urban street at dusk, with a large digital billboard cycling through various colorful ads, each transitioning smoothly into the next. The final ad displays a clear message: "Drive Safely", illuminated against a darkening sky. Pedestrians and vehicles are visible, adding life to the scene.'
+0.0243055559694767, 1.3736342010920854, 'A detailed close-up of a dragon rider\'s leather jacket, showcasing an intricately embroidered patch that reads "License to Burninate" in bold, fiery letters, surrounded by swirling flames and a majestic dragon in mid-flight.'
+0.02083333395421505, 0.7389880086381206, 'A superhero stands on a city rooftop at sunset, his cape emblazoned with the embroidered words "Cape City Protector" billowing in the wind, casting a determined silhouette against the skyline.'
+0.01666666753590107, -0.08385350580472863, 'A bustling urban street at dusk, with a large digital billboard cycling through various colorful ads, each transitioning smoothly into the next. The final ad displays a clear message: "Drive Safely", illuminated against a darkening sky. Pedestrians and vehicles are visible, adding life to the scene.'
+0.0, -1.1543686410445575, 'A detailed close-up of a dragon rider\'s leather jacket, showcasing an intricately embroidered patch that reads "License to Burninate" in bold, fiery letters, surrounded by swirling flames and a majestic dragon in mid-flight.'
+0.0, -0.5720389012104236, 'A high-resolution screen in a modern digital museum displays "Exhibit A", featuring an interactive interface with elegant typography and a minimalist design, set against a sleek, black background.'
+0.0, -0.5720389012104236, 'A high-resolution screen in a modern digital museum displays "Exhibit A", featuring an interactive interface with elegant typography and a minimalist design, set against a sleek, black background.'
+0.0, -0.6918888537044106, 'A close-up photograph of a plant tag in a garden center, clearly displaying the text "Sunflower Tall Variety", with a backdrop of vibrant sunflower plants towering behind it.'
+0.02395833283662796, 1.0674269822025966, 'A superhero stands on a city rooftop at sunset, his cape emblazoned with the embroidered words "Cape City Protector" billowing in the wind, casting a determined silhouette against the skyline.'
+0.019999999552965164, 1.257806335626703, 'A bustling urban street at dusk, with a large digital billboard cycling through various colorful ads, each transitioning smoothly into the next. The final ad displays a clear message: "Drive Safely", illuminated against a darkening sky. Pedestrians and vehicles are visible, adding life to the scene.'
+0.028703704476356506, 1.3787444652813279, 'Retro gaming cartridge label with bold, neon colors: "Pong 2 The Reckoning". The label features a vintage 8-bit aesthetic with pixelated graphics of two futuristic paddles and a glowing ball, set against a backdrop of 1980s arcade patterns.'
+0.020304568111896515, -1.0304777566077064, 'A roadside warning sign, shaped as a yellow diamond, prominently displays "Sharp Turn Ahead" in bold black letters, set against a backdrop of winding road and lush greenery, under a clear blue sky.'
+0.004166666883975267, -1.1852364321659914, 'Retro gaming cartridge label with bold, neon colors: "Pong 2 The Reckoning". The label features a vintage 8-bit aesthetic with pixelated graphics of two futuristic paddles and a glowing ball, set against a backdrop of 1980s arcade patterns.'
+0.013333333656191826, -1.425514096947315, 'A bustling urban street at dusk, with a large digital billboard cycling through various colorful ads, each transitioning smoothly into the next. The final ad displays a clear message: "Drive Safely", illuminated against a darkening sky. Pedestrians and vehicles are visible, adding life to the scene.'
+0.01149425283074379, -0.32288145708903215, 'A close-up photograph of a plant tag in a garden center, clearly displaying the text "Sunflower Tall Variety", with a backdrop of vibrant sunflower plants towering behind it.'
+0.004464285913854837, -0.6900415755576209, 'A detailed close-up of a dragon rider\'s leather jacket, showcasing an intricately embroidered patch that reads "License to Burninate" in bold, fiery letters, surrounded by swirling flames and a majestic dragon in mid-flight.'
+0.05076142027974129, 1.0497389160792991, 'A roadside warning sign, shaped as a yellow diamond, prominently displays "Sharp Turn Ahead" in bold black letters, set against a backdrop of winding road and lush greenery, under a clear blue sky.'
+0.021432600915431976, -0.9534326098433359, 'A roadside warning sign, shaped as a yellow diamond, prominently displays "Sharp Turn Ahead" in bold black letters, set against a backdrop of winding road and lush greenery, under a clear blue sky.'
+0.024872448295354843, 1.7161167036312708, 'A high-resolution screen in a modern digital museum displays "Exhibit A", featuring an interactive interface with elegant typography and a minimalist design, set against a sleek, black background.'
+0.01979166641831398, 0.4474871669170149, 'Retro gaming cartridge label with bold, neon colors: "Pong 2 The Reckoning". The label features a vintage 8-bit aesthetic with pixelated graphics of two futuristic paddles and a glowing ball, set against a backdrop of 1980s arcade patterns.'
+0.010416666977107525, -0.35580899406753225, 'A superhero stands on a city rooftop at sunset, his cape emblazoned with the embroidered words "Cape City Protector" billowing in the wind, casting a determined silhouette against the skyline.'
+0.021996615454554558, -1.5270233613310857, 'A realistic photograph of a bus stop with a modern schedule sign prominently displaying "Route 66 Next Bus 5 PM" under a clear blue sky, with a few people waiting and a cityscape in the background.'
+0.04624929651618004, 0.3226106583297, 'A realistic photograph of a bus stop with a modern schedule sign prominently displaying "Route 66 Next Bus 5 PM" under a clear blue sky, with a few people waiting and a cityscape in the background.'
+0.049069374799728394, 0.934171450371743, 'A roadside warning sign, shaped as a yellow diamond, prominently displays "Sharp Turn Ahead" in bold black letters, set against a backdrop of winding road and lush greenery, under a clear blue sky.'
+0.015625, 0.47077601551009296, 'A detailed close-up of a dragon rider\'s leather jacket, showcasing an intricately embroidered patch that reads "License to Burninate" in bold, fiery letters, surrounded by swirling flames and a majestic dragon in mid-flight.'
+0.04173716902732849, -0.02150735828132858, 'A realistic photograph of a bus stop with a modern schedule sign prominently displaying "Route 66 Next Bus 5 PM" under a clear blue sky, with a few people waiting and a cityscape in the background.'
+0.05809362605214119, 1.2259200612827144, 'A realistic photograph of a bus stop with a modern schedule sign prominently displaying "Route 66 Next Bus 5 PM" under a clear blue sky, with a few people waiting and a cityscape in the background.'
+0.0, -0.5720389012104236, 'A high-resolution screen in a modern digital museum displays "Exhibit A", featuring an interactive interface with elegant typography and a minimalist design, set against a sleek, black background.'
+0.0, -1.450605996773185, 'A superhero stands on a city rooftop at sunset, his cape emblazoned with the embroidered words "Cape City Protector" billowing in the wind, casting a determined silhouette against the skyline.'
+0.07471264153718948, 1.7066591644978533, 'A close-up photograph of a plant tag in a garden center, clearly displaying the text "Sunflower Tall Variety", with a backdrop of vibrant sunflower plants towering behind it.'
+0.0, -0.6918888537044106, 'A close-up photograph of a plant tag in a garden center, clearly displaying the text "Sunflower Tall Variety", with a backdrop of vibrant sunflower plants towering behind it.'
+0.012658228166401386, 0.8062390662221443, 'A beautifully decorated birthday cake with smooth, white icing and colorful accents. The icing elegantly reads "Happy 30th Birthday" in bold, cursive letters. The cake is surrounded by lit candles, creating a warm and festive atmosphere.'
+0.00390625, -0.288340853645679, 'In a bustling mall, a modern, illuminated sign reads "sounds", hanging above a busy electronics section where shoppers browse through headphones and speakers. The vibrant lights and dynamic atmosphere highlight the technological and social hub of the mall.'
+0.024752475321292877, 1.3043217417688584, 'A close-up of a motivational wristband, intricately engraved with "Never Give Up", worn on a tanned arm, with a soft focus on a vibrant sunset in the background, emphasizing the message of perseverance.'
+0.017045455053448677, 1.7088978294001396, 'A vibrant close-up of a festival wristband "Music Fest 2024" featuring neon colors and intricate designs, set against a blurred background of excited concert-goers and colorful lights, capturing the energetic atmosphere of the music festival.'
+0.0, -0.5696326098000465, 'A vibrant close-up of a festival wristband "Music Fest 2024" featuring neon colors and intricate designs, set against a blurred background of excited concert-goers and colorful lights, capturing the energetic atmosphere of the music festival.'
+0.0, -0.7002563307942768, 'In a bustling mall, a modern, illuminated sign reads "sounds", hanging above a busy electronics section where shoppers browse through headphones and speakers. The vibrant lights and dynamic atmosphere highlight the technological and social hub of the mall.'
+0.0, -0.7002563307942768, 'In a bustling mall, a modern, illuminated sign reads "sounds", hanging above a busy electronics section where shoppers browse through headphones and speakers. The vibrant lights and dynamic atmosphere highlight the technological and social hub of the mall.'
+0.004219409078359604, -0.5959158248274883, 'A beautifully decorated birthday cake with smooth, white icing and colorful accents. The icing elegantly reads "Happy 30th Birthday" in bold, cursive letters. The cake is surrounded by lit candles, creating a warm and festive atmosphere.'
+0.02760736271739006, 1.1053502721938577, 'A realistic photograph of graffiti spray-painted "Revolution Now" on a crumbling brick wall, with peeling paint and moss adding to the aged, urban decay aesthetic.'
+0.0, -1.296993192980193, 'A beautifully decorated birthday cake with smooth, white icing and colorful accents. The icing elegantly reads "Happy 30th Birthday" in bold, cursive letters. The cake is surrounded by lit candles, creating a warm and festive atmosphere.'
+0.02265625074505806, 1.6888535152342328, 'In a bustling mall, a modern, illuminated sign reads "sounds", hanging above a busy electronics section where shoppers browse through headphones and speakers. The vibrant lights and dynamic atmosphere highlight the technological and social hub of the mall.'
+0.020987654104828835, -0.06546080776074203, 'A close-up photograph of a shiny dog collar tag, shaped like a realistic bone, with the text "Good Boy" engraved on it, set against a soft, blurred background of grass and flowers.'
+0.024875622242689133, -0.3087091550748101, 'A bustling city street with a vintage store window displaying a retro price tag that reads "5 Dollar Sale Today", surrounded by colorful merchandise and illuminated by the warm glow of the setting sun.'
+0.046991657465696335, 0.7191515978557873, 'A detailed diagram from a wizard school textbook, titled "Levitate Your Ex 101", showing various magical techniques and incantations for levitation, with illustrations of wands, floating objects, and a whimsical, illustrated ex-partner floating mid-air.'
+0.0, -0.9889975673406546, 'A realistic photograph of graffiti spray-painted "Revolution Now" on a crumbling brick wall, with peeling paint and moss adding to the aged, urban decay aesthetic.'
+0.01697312667965889, 0.4725804018307541, 'A close-up of a motivational wristband, intricately engraved with "Never Give Up", worn on a tanned arm, with a soft focus on a vibrant sunset in the background, emphasizing the message of perseverance.'
+0.0, -0.5696326098000465, 'A vibrant close-up of a festival wristband "Music Fest 2024" featuring neon colors and intricate designs, set against a blurred background of excited concert-goers and colorful lights, capturing the energetic atmosphere of the music festival.'
+0.024875622242689133, -0.3087091550748101, 'A bustling city street with a vintage store window displaying a retro price tag that reads "5 Dollar Sale Today", surrounded by colorful merchandise and illuminated by the warm glow of the setting sun.'
+0.03425559774041176, -1.419862945916402, 'A detailed diagram from a wizard school textbook, titled "Levitate Your Ex 101", showing various magical techniques and incantations for levitation, with illustrations of wands, floating objects, and a whimsical, illustrated ex-partner floating mid-air.'
+0.04040404036641121, -0.3872352351298279, 'A detailed diagram from a wizard school textbook, titled "Levitate Your Ex 101", showing various magical techniques and incantations for levitation, with illustrations of wands, floating objects, and a whimsical, illustrated ex-partner floating mid-air.'
+0.03086419776082039, 0.6498178050736985, 'A close-up photograph of a shiny dog collar tag, shaped like a realistic bone, with the text "Good Boy" engraved on it, set against a soft, blurred background of grass and flowers.'
+0.0357142873108387, 1.0010707784107182, 'A close-up photograph of a shiny dog collar tag, shaped like a realistic bone, with the text "Good Boy" engraved on it, set against a soft, blurred background of grass and flowers.'
+0.024539876729249954, 0.8726448624874514, 'A realistic photograph of graffiti spray-painted "Revolution Now" on a crumbling brick wall, with peeling paint and moss adding to the aged, urban decay aesthetic.'
+0.04918752610683441, 1.0879465831904427, 'A detailed diagram from a wizard school textbook, titled "Levitate Your Ex 101", showing various magical techniques and incantations for levitation, with illustrations of wands, floating objects, and a whimsical, illustrated ex-partner floating mid-air.'
+0.0, -1.3421282296766597, 'A close-up of a motivational wristband, intricately engraved with "Never Give Up", worn on a tanned arm, with a soft focus on a vibrant sunset in the background, emphasizing the message of perseverance.'
+0.014345991425216198, 1.086669951585537, 'A beautifully decorated birthday cake with smooth, white icing and colorful accents. The icing elegantly reads "Happy 30th Birthday" in bold, cursive letters. The cake is surrounded by lit candles, creating a warm and festive atmosphere.'
+0.014925372786819935, -1.0257112000202835, 'A bustling city street with a vintage store window displaying a retro price tag that reads "5 Dollar Sale Today", surrounded by colorful merchandise and illuminated by the warm glow of the setting sun.'
+0.008486563339829445, -0.4347739139229528, 'A close-up of a motivational wristband, intricately engraved with "Never Give Up", worn on a tanned arm, with a soft focus on a vibrant sunset in the background, emphasizing the message of perseverance.'
+0.0, -0.5696326098000465, 'A vibrant close-up of a festival wristband "Music Fest 2024" featuring neon colors and intricate designs, set against a blurred background of excited concert-goers and colorful lights, capturing the energetic atmosphere of the music festival.'
+0.05196240916848183, 1.643129510169904, 'A bustling city street with a vintage store window displaying a retro price tag that reads "5 Dollar Sale Today", surrounded by colorful merchandise and illuminated by the warm glow of the setting sun.'
+0.0, -0.9889975673406546, 'A realistic photograph of graffiti spray-painted "Revolution Now" on a crumbling brick wall, with peeling paint and moss adding to the aged, urban decay aesthetic.'
+0.0, -1.5854277757236745, 'A close-up photograph of a shiny dog collar tag, shaped like a realistic bone, with the text "Good Boy" engraved on it, set against a soft, blurred background of grass and flowers.'

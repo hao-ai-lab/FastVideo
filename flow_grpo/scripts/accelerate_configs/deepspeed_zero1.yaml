@@ -1,0 +1,10 @@
+compute_environment: LOCAL_MACHINE
+distributed_type: DEEPSPEED
+downcast_bf16: 'yes'
+deepspeed_config:
+  deepspeed_multinode_launcher: standard
+  zero3_init_flag: false
+  zero_stage: 1
+machine_rank: 0
+num_machines: 1
+num_processes: 8

@@ -3,7 +3,9 @@
 
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
-export WANDB_API_KEY="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"
+export WANDB_API_KEY=""
+# Set to a directory where align_logs/fv_logs (and flow_logs when running flow_grpo) will be written
+export ALIGN_LOGS_ROOT="path/to/your/folder"
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 # For alignment with flow_grpo prompts, set to flow_grpo's dataset dir (e.g. /path/to/flow_grpo/dataset/ocr).
@@ -13,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALIDATION_DATASET_FILE="$SCRIPT_DIR/validation.json"
 NUM_GPUS=4
 
-export CUDA_VISIBLE_DEVICES=4,5,6,7
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Training arguments (aligned with WandB sample + train; SFT not used)
