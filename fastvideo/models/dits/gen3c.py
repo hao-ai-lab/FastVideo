@@ -107,17 +107,21 @@ class Gen3CTimestepEmbedding(nn.Module):
     def forward(self, sample: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
         Returns:
-            emb: Standard embedding (B, D)
+            emb: Standard embedding (B, D) - the original sinusoidal input
             adaln_lora: AdaLN-LoRA parameters (B, 3D) or None
+
+        Note: When use_adaln_lora=True, the standard embedding is the INPUT
+        (sinusoidal timestep embedding), not the processed output. The processed
+        output (linear_2) is used exclusively for AdaLN-LoRA parameters.
+        This matches the official GEN3C implementation.
         """
         emb = self.linear_1(sample)
         emb = self.activation(emb)
         emb = self.linear_2(emb)
 
         if self.use_adaln_lora:
-            adaln_lora = emb  # (B, 3D)
-            # Return the first 1/3 as the standard embedding
-            emb_standard = emb[..., :emb.shape[-1] // 3]
+            adaln_lora = emb  # (B, 3D) - full processed embedding for LoRA
+            emb_standard = sample  # (B, D) - original input as the standard embedding
         else:
             emb_standard = emb
             adaln_lora = None

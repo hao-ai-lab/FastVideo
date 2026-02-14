@@ -17,12 +17,15 @@ class Gen3CArchConfig(DiTArchConfig):
 
     param_names_mapping: dict = field(
         default_factory=lambda: {
-            # Remove "net." prefix and map official structure to FastVideo
+            # Official GEN3C checkpoint key naming to FastVideo mapping.
+            # The official checkpoint uses nn.Sequential patterns like attn.to_q.0 (Linear)
+            # and attn.to_q.1 (RMSNorm), and layer1/layer2 for MLP.
+            #
             # Patch embedding: net.x_embedder.proj.1.weight -> patch_embed.proj.weight
             r"^net\.x_embedder\.proj\.1\.(.*)$":
             r"patch_embed.proj.\1",
 
-            # Time embedding: net.t_embedder.1.linear_1.weight -> time_embed.t_embedder.linear_1.weight
+            # Time embedding: net.t_embedder.1.linear_*.weight -> time_embed.t_embedder.linear_*.weight
             r"^net\.t_embedder\.0\.(.*)$":
             r"time_embed.time_proj.\1",
             r"^net\.t_embedder\.1\.linear_1\.(.*)$":
@@ -51,54 +54,46 @@ class Gen3CArchConfig(DiTArchConfig):
             r"learnable_pos_embed.pos_emb_w",
 
             # Transformer blocks: net.blocks.blockN -> transformer_blocks.N
-            # Self-attention (self_attn -> attn1)
-            r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.self_attn\.q_proj\.(.*)$":
+            # Official uses: block.attn.to_q.0 (Linear), block.attn.to_q.1 (QK RMSNorm)
+            #
+            # Self-attention (block index 0)
+            r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.attn\.to_q\.0\.(.*)$":
             r"transformer_blocks.\1.attn1.to_q.\2",
-            r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.self_attn\.k_proj\.(.*)$":
+            r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.attn\.to_q\.1\.(.*)$":
+            r"transformer_blocks.\1.attn1.norm_q.\2",
+            r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.attn\.to_k\.0\.(.*)$":
             r"transformer_blocks.\1.attn1.to_k.\2",
-            r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.self_attn\.v_proj\.(.*)$":
+            r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.attn\.to_k\.1\.(.*)$":
+            r"transformer_blocks.\1.attn1.norm_k.\2",
+            r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.attn\.to_v\.0\.(.*)$":
             r"transformer_blocks.\1.attn1.to_v.\2",
-            r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.self_attn\.output_proj\.(.*)$":
+            r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.attn\.to_out\.0\.(.*)$":
             r"transformer_blocks.\1.attn1.to_out.\2",
-            r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.self_attn\.q_norm\.weight$":
-            r"transformer_blocks.\1.attn1.norm_q.weight",
-            r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.self_attn\.k_norm\.weight$":
-            r"transformer_blocks.\1.attn1.norm_k.weight",
-            # RMSNorm _extra_state keys
-            r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.self_attn\.q_norm\._extra_state$":
-            r"transformer_blocks.\1.attn1.norm_q._extra_state",
-            r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.self_attn\.k_norm\._extra_state$":
-            r"transformer_blocks.\1.attn1.norm_k._extra_state",
             # AdaLN modulation for self-attention
             r"^net\.blocks\.block(\d+)\.blocks\.0\.adaLN_modulation\.(.*)$":
             r"transformer_blocks.\1.adaln_modulation_self_attn.\2",
 
-            # Cross-attention (cross_attn -> attn2)
-            r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.cross_attn\.q_proj\.(.*)$":
+            # Cross-attention (block index 1)
+            r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.attn\.to_q\.0\.(.*)$":
             r"transformer_blocks.\1.attn2.to_q.\2",
-            r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.cross_attn\.k_proj\.(.*)$":
+            r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.attn\.to_q\.1\.(.*)$":
+            r"transformer_blocks.\1.attn2.norm_q.\2",
+            r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.attn\.to_k\.0\.(.*)$":
             r"transformer_blocks.\1.attn2.to_k.\2",
-            r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.cross_attn\.v_proj\.(.*)$":
+            r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.attn\.to_k\.1\.(.*)$":
+            r"transformer_blocks.\1.attn2.norm_k.\2",
+            r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.attn\.to_v\.0\.(.*)$":
             r"transformer_blocks.\1.attn2.to_v.\2",
-            r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.cross_attn\.output_proj\.(.*)$":
+            r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.attn\.to_out\.0\.(.*)$":
             r"transformer_blocks.\1.attn2.to_out.\2",
-            r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.cross_attn\.q_norm\.weight$":
-            r"transformer_blocks.\1.attn2.norm_q.weight",
-            r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.cross_attn\.k_norm\.weight$":
-            r"transformer_blocks.\1.attn2.norm_k.weight",
-            # RMSNorm _extra_state keys for cross-attention
-            r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.cross_attn\.q_norm\._extra_state$":
-            r"transformer_blocks.\1.attn2.norm_q._extra_state",
-            r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.cross_attn\.k_norm\._extra_state$":
-            r"transformer_blocks.\1.attn2.norm_k._extra_state",
             # AdaLN modulation for cross-attention
             r"^net\.blocks\.block(\d+)\.blocks\.1\.adaLN_modulation\.(.*)$":
             r"transformer_blocks.\1.adaln_modulation_cross_attn.\2",
 
-            # MLP: net.blocks.blockN.blocks.2.block.mlp.layer1 -> transformer_blocks.N.mlp.fc_in
-            r"^net\.blocks\.block(\d+)\.blocks\.2\.block\.mlp\.layer1\.(.*)$":
+            # MLP (block index 2): layer1 -> fc_in, layer2 -> fc_out
+            r"^net\.blocks\.block(\d+)\.blocks\.2\.block\.layer1\.(.*)$":
             r"transformer_blocks.\1.mlp.fc_in.\2",
-            r"^net\.blocks\.block(\d+)\.blocks\.2\.block\.mlp\.layer2\.(.*)$":
+            r"^net\.blocks\.block(\d+)\.blocks\.2\.block\.layer2\.(.*)$":
             r"transformer_blocks.\1.mlp.fc_out.\2",
             # AdaLN modulation for MLP
             r"^net\.blocks\.block(\d+)\.blocks\.2\.adaLN_modulation\.(.*)$":
@@ -114,6 +109,7 @@ class Gen3CArchConfig(DiTArchConfig):
             # Note: The following keys from official checkpoint are NOT mapped and can be safely ignored:
             # - net.pos_embedder.* (rope position embeddings computed dynamically)
             # - net.accum_* keys (training metadata)
+            # - logvar.* (training-only module, not used in inference)
         })
 
     lora_param_names_mapping: dict = field(

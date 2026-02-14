@@ -107,6 +107,7 @@ PARAM_NAMES_MAPPING: dict[str, str] = {
 SKIP_PATTERNS = [
     "net.pos_embedder.",  # RoPE computed dynamically
     "net.accum_",  # Training accumulation metadata
+    "logvar.",  # Training-only logvar module (not used for inference)
 ]
 
 
@@ -359,8 +360,8 @@ def build_model_index() -> dict:
     return {
         "_class_name": "Gen3CPipeline",
         "_diffusers_version": "0.33.0.dev0",
-        "transformer": ["fastvideo", "Gen3CTransformer3DModel"],
-        "vae": ["fastvideo", "AutoencoderKLWan"],
+        "transformer": ["diffusers", "Gen3CTransformer3DModel"],
+        "vae": ["diffusers", "AutoencoderKLWan"],
         "text_encoder": ["transformers", "T5EncoderModel"],
         "tokenizer": ["transformers", "T5Tokenizer"],
         "scheduler": ["diffusers", "FlowMatchEulerDiscreteScheduler"],
