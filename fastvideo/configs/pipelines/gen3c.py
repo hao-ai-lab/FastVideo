@@ -25,12 +25,13 @@ def t5_large_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
     if nan_count > 0:
         hidden_state = hidden_state.masked_fill(torch.isnan(hidden_state), 0.0)
 
-    # Zero out embeddings beyond actual sequence length
+    # Zero out embeddings beyond actual sequence length (vectorized)
     if outputs.attention_mask is not None:
         attention_mask = outputs.attention_mask
-        lengths = attention_mask.sum(dim=1).cpu()
-        for i, length in enumerate(lengths):
-            hidden_state[i, length:] = 0
+        lengths = attention_mask.sum(dim=1)
+        max_len = hidden_state.shape[1]
+        mask = torch.arange(max_len, device=hidden_state.device)[None, :] >= lengths[:, None]
+        hidden_state[mask] = 0.0
 
     return hidden_state
 
@@ -92,6 +93,9 @@ class Gen3CConfig(PipelineConfig):
     # Video generation settings
     video_resolution: tuple[int, int] = (720, 1280)  # H, W
     num_frames: int = 121  # Default number of frames to generate
+
+    # Generation frame rate
+    fps: int = 24
 
     # Autoregressive generation settings
     autoregressive_chunk_frames: int = 121  # Frames per chunk
