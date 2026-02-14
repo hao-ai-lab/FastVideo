@@ -65,7 +65,7 @@ dependencies = [
     "remote-pdb",
 
     # Kernel & Packaging
-    "fastvideo-kernel==0.2.5",
+    "fastvideo-kernel==0.2.6",
     "wheel",
 
     # Training Dependencies

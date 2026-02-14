@@ -20,6 +20,8 @@ from fastvideo.pipelines.stages.image_encoding import (
     ImageEncodingStage, MatrixGameImageEncodingStage, RefImageEncodingStage,
     ImageVAEEncodingStage, VideoVAEEncodingStage, Hy15ImageEncodingStage,
     HYWorldImageEncodingStage)
+from fastvideo.pipelines.stages.gamecraft_image_encoding import (
+    GameCraftImageVAEEncodingStage)
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.latent_preparation import (
     Cosmos25LatentPreparationStage, CosmosLatentPreparationStage,
@@ -33,6 +35,7 @@ from fastvideo.pipelines.stages.ltx2_text_encoding import LTX2TextEncodingStage
 from fastvideo.pipelines.stages.matrixgame_denoising import (
     MatrixGameCausalDenoisingStage)
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
+from fastvideo.pipelines.stages.gamecraft_denoising import GameCraftDenoisingStage
 from fastvideo.pipelines.stages.stepvideo_encoding import (
     StepvideoPromptEncodingStage)
 from fastvideo.pipelines.stages.text_encoding import (Cosmos25TextEncodingStage,
@@ -64,6 +67,7 @@ __all__ = [
     "CausalDMDDenosingStage",
     "MatrixGameCausalDenoisingStage",
     "HYWorldDenoisingStage",
+    "GameCraftDenoisingStage",
     "CosmosDenoisingStage",
     "Cosmos25DenoisingStage",
     "Cosmos25T2WDenoisingStage",
@@ -81,6 +85,7 @@ __all__ = [
     "RefImageEncodingStage",
     "ImageVAEEncodingStage",
     "VideoVAEEncodingStage",
+    "GameCraftImageVAEEncodingStage",
     "TextEncodingStage",
     "Cosmos25TextEncodingStage",
     "StepvideoPromptEncodingStage",

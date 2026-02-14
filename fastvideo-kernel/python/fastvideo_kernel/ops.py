@@ -141,12 +141,6 @@ def video_sparse_attn(
         # Use autograd-enabled wrapper so backward works (and still uses SM90 kernel when available)
         out_s = block_sparse_attn(q, k, v, mask, variable_block_sizes)[0]
     else:
-        if q_seq_len != kv_seq_len:
-            raise RuntimeError(
-                "q/k have different lengths, but the compiled CUDA kernel (block_sparse_fwd) "
-                "is not available. The Triton fallback currently requires q and k/v to have "
-                "the same padded length."
-            )
         # Triton-only forward (kept for environments without the wrapper deps)
         out_s, _ = triton_block_sparse_attn_forward(q, k, v, idx, num, variable_block_sizes)
 

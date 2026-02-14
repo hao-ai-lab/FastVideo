@@ -287,9 +287,8 @@ def block_sparse_attn(
     block_sparse_fwd, block_sparse_bwd = _get_sm90_ops()
     if (not _force_triton()) and _is_sm90() and (block_sparse_fwd is not None) and (block_sparse_bwd is not None):
         return block_sparse_attn_sm90(q, k, v, block_map, variable_block_sizes)
-    # Triton path: generally assumes q/k/v share the same padded length
-    if q.shape[2] != k.shape[2] or q.shape[2] != v.shape[2]:
-        raise RuntimeError("Triton fallback requires q/k/v to have the same padded length.")
+    # Triton path: supports q_seq_len != kv_seq_len as long as both are padded
+    # to a multiple of the block size (64 tokens).
     return block_sparse_attn_triton(q, k, v, block_map, variable_block_sizes)
 
 

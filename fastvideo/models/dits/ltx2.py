@@ -1534,6 +1534,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
         audio: TransformerArgs | None,
         video_attention_mask: torch.Tensor | None = None,
         audio_attention_mask: torch.Tensor | None = None,
+        skip_cross_modal_attn: bool = False,
     ) -> tuple[TransformerArgs | None, TransformerArgs | None]:
         """Forward pass for transformer block.
 
@@ -1542,6 +1543,8 @@ class BasicAVTransformerBlock(torch.nn.Module):
             audio: Audio transformer args
             video_attention_mask: SP padding attention mask for video [B, padded_seq_len]
             audio_attention_mask: SP padding attention mask for audio [B, padded_seq_len]
+            skip_cross_modal_attn: If True, skip A2V and V2A cross-modal
+                attention (used for the modality-isolated CFG pass).
         """
         vx = video.x if video is not None else None
         ax = audio.x if audio is not None else None
@@ -1585,7 +1588,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 mask=audio.context_mask,
             )
 
-        if run_a2v or run_v2a:
+        if (run_a2v or run_v2a) and not skip_cross_modal_attn:
             vx_norm3 = torch.nn.functional.rms_norm(vx, (vx.shape[-1],), eps=self.norm_eps)
             ax_norm3 = torch.nn.functional.rms_norm(ax, (ax.shape[-1],), eps=self.norm_eps)
 
@@ -2006,6 +2009,7 @@ class LTXModel(torch.nn.Module):
         audio: TransformerArgs | None,
         video_attention_mask: torch.Tensor | None = None,
         audio_attention_mask: torch.Tensor | None = None,
+        skip_cross_modal_attn: bool = False,
     ) -> tuple[TransformerArgs | None, TransformerArgs | None]:
         for block in self.transformer_blocks:
             video, audio = block(
@@ -2013,6 +2017,7 @@ class LTXModel(torch.nn.Module):
                 audio=audio,
                 video_attention_mask=video_attention_mask,
                 audio_attention_mask=audio_attention_mask,
+                skip_cross_modal_attn=skip_cross_modal_attn,
             )
         return video, audio
 
@@ -2039,6 +2044,7 @@ class LTXModel(torch.nn.Module):
         audio: Modality | None,
         video_attention_mask: torch.Tensor | None = None,
         audio_attention_mask: torch.Tensor | None = None,
+        skip_cross_modal_attn: bool = False,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
         """Forward pass through the LTX model.
 
@@ -2047,6 +2053,9 @@ class LTXModel(torch.nn.Module):
             audio: Audio modality input
             video_attention_mask: SP padding attention mask for video [B, padded_seq_len]
             audio_attention_mask: SP padding attention mask for audio [B, padded_seq_len]
+            skip_cross_modal_attn: If True, skip A2V and V2A cross-modal
+                attention in all transformer blocks (modality-isolated
+                CFG pass).
         """
         if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
             _debug_block_log_line(
@@ -2070,6 +2079,7 @@ class LTXModel(torch.nn.Module):
             audio_args,
             video_attention_mask=video_attention_mask,
             audio_attention_mask=audio_attention_mask,
+            skip_cross_modal_attn=skip_cross_modal_attn,
         )
 
         vx = (
@@ -2238,6 +2248,7 @@ class LTX2Transformer3DModel(CachableDiT):
         audio_encoder_hidden_states: torch.Tensor | None = None,
         audio_timestep: torch.Tensor | None = None,
         audio_encoder_attention_mask: torch.Tensor | None = None,
+        skip_cross_modal_attn: bool = False,
         **kwargs,
     ) -> torch.Tensor:
         if isinstance(encoder_hidden_states, list):
@@ -2394,6 +2405,7 @@ class LTX2Transformer3DModel(CachableDiT):
             audio=audio_modality,
             video_attention_mask=video_attention_mask,
             audio_attention_mask=audio_attention_mask,
+            skip_cross_modal_attn=skip_cross_modal_attn,
         )
 
         # Denoised prediction

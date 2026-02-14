@@ -136,6 +136,14 @@ class ForwardBatch:
     # Camera control inputs (HYWorld)
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
 
+    # Camera/action control inputs (GameCraft)
+    camera_states: torch.Tensor | None = None  # Plücker coordinates [B, T, 6, H, W]
+    gt_latents: torch.Tensor | None = None  # Ground truth latents for conditioning [B, 16, T, H, W]
+    conditioning_mask: torch.Tensor | None = None  # Mask for conditioning [B, 1, T, H, W]
+    camera_trajectory: str | None = None  # Camera trajectory file/identifier
+    action_list: list[
+        str] | None = None  # List of actions (e.g., ['forward', 'left'])
+    action_speed_list: list[float] | None = None  # Speed for each action
     # Camera control inputs (LingBotWorld)
     c2ws_plucker_emb: torch.Tensor | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
 
@@ -166,6 +174,13 @@ class ForwardBatch:
     guidance_rescale: float = 0.0
     eta: float = 0.0
     sigmas: list[float] | None = None
+
+    # LTX-2 multi-modal CFG parameters
+    ltx2_cfg_scale_video: float = 1.0
+    ltx2_cfg_scale_audio: float = 1.0
+    ltx2_modality_scale_video: float = 1.0
+    ltx2_modality_scale_audio: float = 1.0
+    ltx2_rescale_scale: float = 0.0
 
     n_tokens: int | None = None
 

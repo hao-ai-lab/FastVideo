@@ -67,6 +67,9 @@ jobs:
             - torch-version: '2.9.1'
               cuda-version: '12.8.0'
               torch-cuda-short: 'cu128'
+            - torch-version: '2.10.0'
+              cuda-version: '12.8.0'
+              torch-cuda-short: 'cu128'
 
     steps:
       - name: Free up disk space
