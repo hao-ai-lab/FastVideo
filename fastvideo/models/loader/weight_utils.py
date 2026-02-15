@@ -151,9 +151,57 @@ def pt_weights_iterator(
             disable=not enable_tqdm,
             bar_format=_BAR_FORMAT,
     ):
-        state = torch.load(bin_file, map_location=device, weights_only=True)
+        try:
+            state = torch.load(bin_file, map_location=device, weights_only=True)
+        except Exception:
+            # Some legacy checkpoints contain objects unsupported by
+            # weights_only=True. Fall back for trusted local checkpoints.
+            state = torch.load(bin_file, map_location=device, weights_only=False)
+        state = extract_tensor_state_dict(state)
         yield from state.items()
         del state
+
+
+def extract_tensor_state_dict(state: object) -> dict[str, torch.Tensor]:
+    """Extract a plain tensor state_dict from common checkpoint wrappers."""
+
+    def _is_tensor_dict(obj: object) -> bool:
+        return isinstance(obj, dict) and all(
+            isinstance(k, str) and isinstance(v, torch.Tensor)
+            for k, v in obj.items())
+
+    def _dfs_find_tensor_dict(obj: object, depth: int = 3) -> dict[str, torch.Tensor] | None:
+        if depth < 0:
+            return None
+        if _is_tensor_dict(obj):
+            return obj  # type: ignore[return-value]
+        if not isinstance(obj, dict):
+            return None
+        for key in (
+                "state_dict",
+                "model",
+                "module",
+                "model_state_dict",
+                "ema",
+                "generator_ema",
+                "weights",
+        ):
+            if key in obj:
+                found = _dfs_find_tensor_dict(obj[key], depth - 1)
+                if found is not None:
+                    return found
+        for value in obj.values():
+            found = _dfs_find_tensor_dict(value, depth - 1)
+            if found is not None:
+                return found
+        return None
+
+    found = _dfs_find_tensor_dict(state)
+    if found is None:
+        raise ValueError(
+            "Failed to find a tensor state_dict in checkpoint. "
+            "Expected a dict[str, torch.Tensor] or a common wrapper around it.")
+    return found
 
 
 def default_weight_loader(param: torch.Tensor,
