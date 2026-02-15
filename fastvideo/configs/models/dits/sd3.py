@@ -21,7 +21,7 @@ class SD3Transformer2DArchConfig(DiTArchConfig):
     qk_norm: str = "rms_norm"
     in_channels: int = 16
     out_channels: int = 16
-    num_attention_heads = 24
+    num_attention_heads: int = 24
 
 
 @dataclass
