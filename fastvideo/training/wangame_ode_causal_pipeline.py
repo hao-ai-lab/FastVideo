@@ -607,6 +607,26 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
             video = pixel_latent.cpu().float()
             video = video.permute(0, 2, 1, 3, 4)
             video = (video * 255).numpy().astype(np.uint8)
+
+            keyboard_cond = getattr(training_batch, "keyboard_cond", None)
+            mouse_cond = getattr(training_batch, "mouse_cond", None)
+            for batch_idx in range(video.shape[0]):
+                sample_batch = type("ValidationBatch", (), {})()
+                if keyboard_cond is not None and batch_idx < keyboard_cond.shape[0]:
+                    sample_batch.keyboard_cond = keyboard_cond[batch_idx:batch_idx + 1]
+                if mouse_cond is not None and batch_idx < mouse_cond.shape[0]:
+                    sample_batch.mouse_cond = mouse_cond[batch_idx:batch_idx + 1]
+
+                video_frames = [
+                    np.transpose(video[batch_idx, frame_idx], (1, 2, 0))
+                    for frame_idx in range(video.shape[1])
+                ]
+                video_frames = self._post_process_validation_frames(
+                    video_frames, cast(ForwardBatch, sample_batch))
+                video[batch_idx] = np.stack([
+                    np.transpose(frame, (2, 0, 1)) for frame in video_frames
+                ], axis=0)
+
             video_artifact = self.tracker.video(
                 video, fps=16, format="mp4")  # change to 16 for Wan2.1
             if video_artifact is not None:
