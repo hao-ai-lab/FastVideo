@@ -5,6 +5,7 @@ import torch.nn as nn
 
 from fastvideo.layers.activation import get_act_fn
 from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.profiler import nvtx_range
 
 
 class MLP(nn.Module):
@@ -38,7 +39,10 @@ class MLP(nn.Module):
                                        params_dtype=dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x, _ = self.fc_in(x)
-        x = self.act(x)
-        x, _ = self.fc_out(x)
+        with nvtx_range("MLP.forward.fc_in"):
+            x, _ = self.fc_in(x)
+        with nvtx_range("MLP.forward.act"):
+            x = self.act(x)
+        with nvtx_range("MLP.forward.fc_out"):
+            x, _ = self.fc_out(x)
         return x

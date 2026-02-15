@@ -377,7 +377,10 @@ class TorchProfilerController:
             yield
             return
 
-        with torch.profiler.record_function(f"fastvideo.region::{region}"):
+        nvtx_name = f"fastvideo.region::{region}"
+        # Push NVTX range for Nsight Systems visibility
+        torch.cuda.nvtx.range_push(nvtx_name)
+        with torch.profiler.record_function(nvtx_name):
             self._active_region_depth += 1
             if self._active_region_depth == 1:
                 logger.info(
@@ -395,6 +398,8 @@ class TorchProfilerController:
                         "PROFILER: Setting collection to False upon exiting region %s",
                         region)
                     self._set_collection(False)
+        # Pop NVTX range
+        torch.cuda.nvtx.range_pop()
 
     def start(self) -> None:
         """Start the profiler and pause collection until a region is entered."""
@@ -454,3 +459,87 @@ def profile_region(
         return wrapped
 
     return decorator
+
+
+# ---------------------------------------------------------------------------
+# Standalone NVTX utilities (work independently of PyTorch profiler)
+# ---------------------------------------------------------------------------
+
+
+@contextlib.contextmanager
+def nvtx_range(name: str):
+    """Context manager that emits an NVTX range for Nsight Systems profiling.
+
+    This works independently of the PyTorch profiler and is captured by
+    ``nsys profile --trace=nvtx``.
+
+    Example usage::
+
+        with nvtx_range("forward_pass"):
+            output = model(input)
+
+    Parameters
+    ----------
+    name:
+        The label shown in the Nsight Systems timeline.
+    """
+    torch.cuda.nvtx.range_push(name)
+    try:
+        yield
+    finally:
+        torch.cuda.nvtx.range_pop()
+
+
+def nvtx_annotate(name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Decorator that wraps a function/method in an NVTX range.
+
+    Example usage::
+
+        @nvtx_annotate("my_function")
+        def my_function():
+            ...
+
+        # Or with automatic naming:
+        @nvtx_annotate("")  # Will use function name
+        def another_function():
+            ...
+
+    Parameters
+    ----------
+    name:
+        The label shown in the Nsight Systems timeline.
+        If empty string, uses the function's ``__qualname__``.
+    """
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        label = name if name else fn.__qualname__
+
+        @functools.wraps(fn)
+        def wrapped(*args, **kwargs):
+            torch.cuda.nvtx.range_push(label)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                torch.cuda.nvtx.range_pop()
+
+        return wrapped
+
+    return decorator
+
+
+def nvtx_mark(message: str) -> None:
+    """Emit an instantaneous NVTX marker (single point in time, not a range).
+
+    Useful for marking specific events like "batch_start", "checkpoint_saved", etc.
+
+    Example usage::
+
+        nvtx_mark("epoch_start")
+        for batch in dataloader:
+            ...
+
+    Parameters
+    ----------
+    message:
+        The label shown in the Nsight Systems timeline.
+    """
+    torch.cuda.nvtx.mark(message)
