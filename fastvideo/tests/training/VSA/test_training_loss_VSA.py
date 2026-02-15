@@ -122,9 +122,9 @@ def test_distributed_training():
 
     fields_and_thresholds = {
         'avg_step_time': 15,
-        'grad_norm': 4.0,
+        'grad_norm': 0.5,
         'step_time': 15,
-        'train_loss': 3
+        'train_loss': 0.04
     }
 
     failures = []
