@@ -11,6 +11,7 @@ import torch
 
 from fastvideo.attention.backends.sdpa import SDPAMetadata
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.pipelines.stages.waypoint_stages import WaypointTextEncodingStage
 from fastvideo.utils import PRECISION_TO_TYPE
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
@@ -136,7 +137,12 @@ class WaypointPipeline(ComposedPipelineBase):
         head_dim = getattr(arch, "attention_head_dim",
                            arch.d_model // arch.n_heads)
         tokens_per_frame = getattr(arch, "tokens_per_frame", 256)
-        max_frames = getattr(pipeline_config, "max_kv_cache_frames", 64)
+        # Use at least num_frames so long videos don't evict; override from batch if present
+        cfg_max = getattr(pipeline_config, "max_kv_cache_frames", 64)
+        batch_frames = batch.num_frames
+        if isinstance(batch_frames, list):
+            batch_frames = max(batch_frames) if batch_frames else 0
+        max_frames = max(cfg_max, batch_frames or 0) or cfg_max
         cache_size = max_frames * tokens_per_frame
         device = next(transformer.parameters()).device
         dtype = next(transformer.parameters()).dtype
@@ -182,37 +188,17 @@ class WaypointPipeline(ComposedPipelineBase):
         if not self.post_init_called:
             self.post_init()
 
-        # Encode prompt using text encoder
+        # Encode prompt using WaypointTextEncodingStage (reuse stages)
         text_encoder = self.get_module("text_encoder", None)
         tokenizer = self.get_module("tokenizer", None)
-
         prompt_emb = None
         prompt_pad_mask = None
-
         if text_encoder is not None and tokenizer is not None:
-            max_length = getattr(getattr(text_encoder, "config", None),
-                                 "text_len", 512)
-            text_inputs = tokenizer(
-                batch.prompt,
-                padding="max_length",
-                max_length=max_length,
-                truncation=True,
-                return_tensors="pt",
-            )
-
-            enc_device = next(text_encoder.parameters()).device
-            input_ids = text_inputs.input_ids.to(enc_device)
-            attention_mask = text_inputs.attention_mask.to(enc_device)
-
-            outputs = text_encoder(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-            )
-            prompt_emb = outputs.last_hidden_state
-            # Zero out padding so cross-attention does not attend to pad tokens (match HF)
-            prompt_emb = prompt_emb * attention_mask.unsqueeze(-1).to(
-                prompt_emb.dtype)
-            prompt_pad_mask = attention_mask.eq(0)
+            text_stage = WaypointTextEncodingStage(text_encoder, tokenizer)
+            batch = text_stage(batch, fastvideo_args)
+            extra = getattr(batch, "extra", None) or {}
+            prompt_emb = extra.get("waypoint_prompt_emb")
+            prompt_pad_mask = extra.get("waypoint_prompt_pad_mask")
 
         # Build KV cache for autoregressive cross-frame attention (HF parity)
         kv_cache = self._create_waypoint_kv_cache(batch, fastvideo_args)
