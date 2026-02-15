@@ -22,6 +22,10 @@ if "A40" in device_name:
     device_reference_folder = "A40" + device_reference_folder_suffix
 elif "L40S" in device_name:
     device_reference_folder = "L40S" + device_reference_folder_suffix
+elif "H100" in device_name:
+    device_reference_folder = "H100" + device_reference_folder_suffix
+elif "H200" in device_name:
+    device_reference_folder = "H200" + device_reference_folder_suffix
 else:
     # device_reference_folder = "L40S" + device_reference_folder_suffix
     logger.warning(f"Unsupported device for ssim tests: {device_name}")

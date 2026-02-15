@@ -22,6 +22,8 @@ def _device_reference_folder() -> str:
         return "L40S" + suffix
     if "H100" in device_name:
         return "H100" + suffix
+    if "H200" in device_name:
+        return "H200" + suffix
     if "RTX 4090" in device_name or "4090" in device_name:
         return "RTX4090" + suffix
 
