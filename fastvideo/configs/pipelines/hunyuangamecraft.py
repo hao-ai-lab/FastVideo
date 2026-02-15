@@ -58,9 +58,10 @@ def llama_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
     """Extract hidden states from LLaMA output, skipping instruction tokens."""
     hidden_state_skip_layer = 2
     hidden_states = outputs.hidden_states
-    if hidden_states is not None and len(hidden_states) > hidden_state_skip_layer:
-        last_hidden_state: torch.Tensor = hidden_states[
-            -(hidden_state_skip_layer + 1)]
+    if hidden_states is not None and len(
+            hidden_states) > hidden_state_skip_layer:
+        last_hidden_state: torch.Tensor = hidden_states[-(
+            hidden_state_skip_layer + 1)]
     elif outputs.last_hidden_state is not None:
         # Fallback for encoder outputs without hidden_states.
         last_hidden_state = outputs.last_hidden_state
