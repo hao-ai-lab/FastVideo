@@ -248,14 +248,52 @@ class CausalWanGameActionSelfAttention(WanGameActionSelfAttention):
             num_new_tokens = roped_query.shape[1]
 
             # rope+prope
-            if kv_cache["k"].shape[-1] == self.head_dim:
+            cache_head_dim = kv_cache["k"].shape[-1]
+            local_end_index = kv_cache["local_end_index"].item()
+
+            # read cache but never mutate it.
+            if not is_cache:
+                if cache_head_dim not in (self.head_dim, self.head_dim * 2):
+                    raise ValueError(
+                        f"Unexpected kv_cache head dim: {cache_head_dim}, "
+                        f"expected {self.head_dim} or {self.head_dim * 2}")
+
+                cache_k_rope = kv_cache["k"][..., :self.head_dim]
+                cache_v_rope = kv_cache["v"][..., :self.head_dim]
+                rope_k = torch.cat(
+                    [cache_k_rope[:, :local_end_index], roped_key], dim=1)
+                rope_v = torch.cat(
+                    [cache_v_rope[:, :local_end_index], v], dim=1)
+                rope_k = rope_k[:, -self.max_attention_size:]
+                rope_v = rope_v[:, -self.max_attention_size:]
+                rope_x = self.local_attn(roped_query, rope_k, rope_v)
+
+                if cache_head_dim == self.head_dim * 2:
+                    cache_k_prope = kv_cache["k"][..., self.head_dim:]
+                    cache_v_prope = kv_cache["v"][..., self.head_dim:]
+                    prope_k = torch.cat(
+                        [cache_k_prope[:, :local_end_index], key_prope], dim=1)
+                    prope_v = torch.cat(
+                        [cache_v_prope[:, :local_end_index], value_prope], dim=1)
+                    prope_k = prope_k[:, -self.max_attention_size:]
+                    prope_v = prope_v[:, -self.max_attention_size:]
+                    prope_x = self.local_attn(query_prope, prope_k, prope_v)
+                else:
+                    prope_x = self.local_attn(
+                        query_prope, key_prope, value_prope)
+
+                prope_x = apply_fn_o(prope_x.transpose(1, 2)).transpose(1, 2)
+                return rope_x, prope_x
+
+            # update cache.
+            if cache_head_dim == self.head_dim:
                 kv_cache["k"] = torch.cat(
                     [kv_cache["k"], torch.zeros_like(kv_cache["k"])], dim=-1)
                 kv_cache["v"] = torch.cat(
                     [kv_cache["v"], torch.zeros_like(kv_cache["v"])], dim=-1)
-            elif kv_cache["k"].shape[-1] != self.head_dim * 2:
+            elif cache_head_dim != self.head_dim * 2:
                 raise ValueError(
-                    f"Unexpected kv_cache head dim: {kv_cache['k'].shape[-1]}, "
+                    f"Unexpected kv_cache head dim: {cache_head_dim}, "
                     f"expected {self.head_dim} or {self.head_dim * 2}")
 
             cache_k_rope = kv_cache["k"][..., :self.head_dim]

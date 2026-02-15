@@ -569,6 +569,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     "crossattn_cache": ctx.crossattn_cache,
                     "current_start": start_index * self.frame_seq_length,
                     "start_frame": start_index,
+                    "is_cache": False,
                 }
 
                 if self.use_action_module and current_model == self.transformer:
@@ -692,6 +693,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 "crossattn_cache": ctx.crossattn_cache,
                 "current_start": start_index * self.frame_seq_length,
                 "start_frame": start_index,
+                "is_cache": True,
             }
 
             if self.use_action_module:
@@ -704,7 +706,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 context_model_kwargs.update(action_kwargs)
 
             if ctx.boundary_timestep is not None and self.transformer_2 is not None:
-                self.transformer_2(
+                cache_update_ret_2 = self.transformer_2(
                     context_input,
                     prompt_embeds,
                     t_context,
@@ -712,12 +714,15 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     crossattn_cache=ctx.crossattn_cache,
                     current_start=start_index * self.frame_seq_length,
                     start_frame=start_index,
+                    is_cache=True,
                     **camera_action_kwargs,
                     **ctx.image_kwargs,
                     **ctx.pos_cond_kwargs,
                 )
+                if isinstance(cache_update_ret_2, list) and len(cache_update_ret_2) > 0:
+                    ctx.kv_cache2 = cache_update_ret_2
 
-            self.transformer(
+            cache_update_ret = self.transformer(
                 context_input,
                 prompt_embeds,
                 t_context,
@@ -726,6 +731,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 **ctx.pos_cond_kwargs,
                 **context_model_kwargs,
             )
+            if isinstance(cache_update_ret, list) and len(cache_update_ret) > 0:
+                ctx.kv_cache1 = cache_update_ret
 
     def streaming_reset(self, batch: ForwardBatch,
                         fastvideo_args: FastVideoArgs) -> ForwardBatch:
