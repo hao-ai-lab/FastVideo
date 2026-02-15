@@ -339,7 +339,6 @@ class TextEncoderLoader(ComponentLoader):
             fastvideo_args.text_encoder_cpu_offload
             and len(getattr(model_config, "_fsdp_shard_conditions", [])) > 0
         )
-        assert use_cpu_offload, "cpu offload is not enabled for text encoder"
 
         from fastvideo.platforms import current_platform
 
@@ -846,7 +845,6 @@ class TransformerLoader(ComponentLoader):
             or cls_name == "Cosmos25Transformer3DModel"
             or getattr(fastvideo_args.pipeline_config, "prefix", "") == "Cosmos25"
         )
-        assert fastvideo_args.dit_cpu_offload, "cpu offload is not enabled for transformer"
         model = maybe_load_fsdp_model(
             model_cls=model_cls,
             init_params={"config": dit_config, "hf_config": hf_config},

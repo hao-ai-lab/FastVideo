@@ -4,13 +4,15 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 
-MODEL_PATH="Davids048/LTX2-Base-Diffusers"
+# MODEL_PATH="Davids048/LTX2-Base-Diffusers"
+MODEL_PATH="FastVideo/LTX2-Distilled-Diffusers"
 # Also can use simple 1 video for overfitting experiments.
 # DATA_DIR="/home/hal-jundas/codes/FastVideo/data/crush-smol"
-DATA_DIR="<PATH_TO_PROCESSED_DATASET>"
+# DATA_DIR="<PATH_TO_PROCESSED_DATASET>"
+DATA_DIR=/home/d1su/codes/FastVideo-demo/examples/training/finetune/ltx2/overfit/data
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 echo  VALIDATION_DATASET_FILE: $VALIDATION_DATASET_FILE
-NUM_GPUS=4
+NUM_GPUS=8
 OVERFIT_HEIGHT=480
 OVERFIT_WIDTH=832
 OVERFIT_FRAMES=73
@@ -21,22 +23,21 @@ training_args=(
   --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
+  --gradient_accumulation_steps 4
   --num_latent_t 10
   --num_height $OVERFIT_HEIGHT
   --num_width $OVERFIT_WIDTH
   --num_frames $OVERFIT_FRAMES
-  --ltx2-first-frame-conditioning-p 0.1
   --enable_gradient_checkpointing_type "full"
   --mode "finetuning"
 )
 
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size $NUM_GPUS
+  --sp_size 4
   --tp_size 1
-  --hsdp_replicate_dim 1
-  --hsdp_shard_dim $NUM_GPUS
+  --hsdp_replicate_dim 2
+  --hsdp_shard_dim 4
 )
 
 model_args=(
@@ -54,7 +55,7 @@ validation_args=(
   --validation_dataset_file $VALIDATION_DATASET_FILE
   --validation_steps 50
   --validation_sampling_steps "50"
-  --validation_guidance_scale "3.0"
+  --validation_guidance_scale "1.0"
 )
 
 optimizer_args=(
@@ -76,6 +77,7 @@ miscellaneous_args=(
   --text_encoder_cpu_offload False
   --image_encoder_cpu_offload False
   --vae_cpu_offload False
+  --ltx2-first-frame-conditioning-p 0.0
 )
 
 # NOTE: Setting this environment variable to TORCH_SDPA to avoid the issue of stacking that failed in flash attn. 
@@ -84,6 +86,7 @@ export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 torchrun \
   --nnodes 1 \
+  --master_port 29501 \
   --nproc_per_node $NUM_GPUS \
     fastvideo/training/ltx2_training_pipeline.py \
     "${parallel_args[@]}" \

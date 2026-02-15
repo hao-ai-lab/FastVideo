@@ -60,9 +60,9 @@ class LTX2TrainingPipeline(TrainingPipeline):
         self.local_rank = world_group.local_rank
         self.transformer = self.get_module("transformer")
         self.transformer_2 = self.get_module("transformer_2", None)
-        # self.text_encoder = self.get_module("text_encoder")
-        # self.text_encoder.eval()
-        # self.text_encoder.to(self.device)
+        self.text_encoder = self.get_module("text_encoder")
+        self.text_encoder.eval()
+        self.text_encoder.to(self.device)
         self.seed = training_args.seed
 
         assert self.seed is not None, "seed must be set"
