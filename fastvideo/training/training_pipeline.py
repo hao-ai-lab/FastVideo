@@ -856,6 +856,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
             step_videos: list[np.ndarray] = []
             step_captions: list[str] = []
 
+            step_audio: list[np.ndarray | None] = []
+            step_sample_rates: list[int | None] = []
+
             for validation_batch in validation_dataloader:
                 batch = self._prepare_validation_batch(sampling_param,
                                                        training_args,
@@ -875,6 +878,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 output_batch = self.validation_pipeline.forward(
                     batch, training_args)
                 samples = output_batch.output.cpu()
+                
+                # Capture audio if available
+                audio = output_batch.extra.get("audio")
+                sample_rate = output_batch.extra.get("audio_sample_rate")
+                
+                if audio is not None and torch.is_tensor(audio):
+                    audio = audio.detach().cpu().float().numpy()
+                
+                step_audio.append(audio)
+                step_sample_rates.append(sample_rate)
 
                 if self.rank_in_sp_group != 0:
                     continue
@@ -894,18 +907,25 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 # Global rank 0 collects results from all sp_group leaders
                 all_videos = step_videos  # Start with own results
                 all_captions = step_captions
+                all_audios = step_audio
+                all_sample_rates = step_sample_rates
 
                 # Receive from other sp_group leaders
                 for sp_group_idx in range(1, num_sp_groups):
                     src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
                     recv_videos = world_group.recv_object(src=src_rank)
                     recv_captions = world_group.recv_object(src=src_rank)
+                    recv_audios = world_group.recv_object(src=src_rank)
+                    recv_sample_rates = world_group.recv_object(src=src_rank)
+                    
                     all_videos.extend(recv_videos)
                     all_captions.extend(recv_captions)
+                    all_audios.extend(recv_audios)
+                    all_sample_rates.extend(recv_sample_rates)
 
                 video_filenames = []
-                for i, (video, caption) in enumerate(
-                        zip(all_videos, all_captions, strict=True)):
+                for i, (video, caption, audio, sample_rate) in enumerate(
+                        zip(all_videos, all_captions, all_audios, all_sample_rates, strict=True)):
                     os.makedirs(training_args.output_dir, exist_ok=True)
                     filename = os.path.join(
                         training_args.output_dir,
@@ -913,14 +933,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     )
                     imageio.mimsave(filename, video, fps=sampling_param.fps)
                     # Mux audio if available
-                    audio = output_batch.extra.get("audio")
-                    audio_sample_rate = output_batch.extra.get(
-                        "audio_sample_rate")
-                    if (audio is not None and audio_sample_rate is not None
+                    if (audio is not None and sample_rate is not None
                             and not self._mux_audio(
                                 filename,
                                 audio,
-                                audio_sample_rate,
+                                sample_rate,
                             )):
                         logger.warning(
                             "Audio mux failed for validation video %s; saved video without audio.",
@@ -945,6 +962,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 # Other sp_group leaders send their results to global rank 0
                 world_group.send_object(step_videos, dst=0)
                 world_group.send_object(step_captions, dst=0)
+                world_group.send_object(step_audio, dst=0)
+                world_group.send_object(step_sample_rates, dst=0)
 
         # Re-enable gradients for training
         training_args.inference_mode = False
