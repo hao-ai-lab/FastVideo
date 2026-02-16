@@ -22,6 +22,8 @@ the output path in the file browser and play the video.
 
 If the video looks blurry: use --video-quality 9 or 10 for sharper MP4 encoding,
 --num_inference_steps 4 (default), and --height 368 --width 640 (multiples of 16).
+Set WAYPOINT_DEBUG=1 to enable extensive tensor logging for blur diagnosis.
+Use --debug-output fastvideo_debug.json to save structured stats (with WAYPOINT_DEBUG).
 Use --output waypoint_7.mp4 (etc.) to keep multiple runs. --seed for repro.
 
 Memory: The model can exceed 16GB VRAM (the official HF Space also hits this).
@@ -42,7 +44,7 @@ import torch
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
 
 OUTPUT_DIR = "video_samples_waypoint_runpod"
-OUTPUT_MP4 = "waypoint_runpod.mp4"
+OUTPUT_MP4 = "waypoint_runpod_1000.mp4"
 
 # Owl-Control keycodes: W=forward, A=left, S=back, D=right, Space=jump
 KEY_FORWARD = 17   # W
@@ -80,7 +82,7 @@ def main():
     parser.add_argument(
         "--output",
         default=None,
-        help="Output filename (e.g. waypoint_fp32_test.mp4). Default: waypoint_runpod.mp4",
+        help="Output filename (e.g. waypoint_fp32_test.mp4). Default: waypoint_runpod_70.mp4",
     )
     parser.add_argument(
         "--height",
@@ -110,7 +112,16 @@ def main():
         default=8,
         help="MP4 encoding quality 0-10 (higher = sharper, less blur). Default 8.",
     )
+    parser.add_argument(
+        "--debug-output",
+        default=None,
+        help="Save debug tensor stats to JSON (enables WAYPOINT_DEBUG). Compare with official.",
+    )
     args = parser.parse_args()
+
+    if args.debug_output:
+        os.environ["WAYPOINT_DEBUG"] = "1"
+        os.environ["WAYPOINT_DEBUG_FILE"] = os.path.abspath(args.debug_output)
 
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is required for Waypoint inference.")
@@ -146,7 +157,7 @@ def main():
     )
 
     print("Resetting streaming session...")
-    generator.reset(
+    reset_kw = dict(
         prompt=args.prompt,
         num_frames=num_frames_cap,
         height=args.height,
@@ -156,6 +167,9 @@ def main():
         save_video=True,
         video_quality=args.video_quality,
     )
+    if args.seed is not None:
+        reset_kw["seed"] = args.seed
+    generator.reset(**reset_kw)
 
     if args.seed is not None:
         torch.manual_seed(args.seed)

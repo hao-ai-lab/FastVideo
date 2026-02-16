@@ -6,7 +6,13 @@ Waypoint uses a streaming interface; these stages encapsulate the logic
 for text encoding and frame generation.
 """
 
+import os
+
 import torch
+
+from fastvideo.logger import init_logger
+
+_WAYPOINT_DEBUG = os.environ.get("WAYPOINT_DEBUG", "0") in ("1", "true", "yes")
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -63,4 +69,18 @@ class WaypointTextEncodingStage(PipelineStage):
             batch.extra = {}
         batch.extra["waypoint_prompt_emb"] = prompt_emb
         batch.extra["waypoint_prompt_pad_mask"] = prompt_pad_mask
+
+        if _WAYPOINT_DEBUG:
+            log = init_logger(__name__)
+            f = prompt_emb.float()
+            log.info(
+                "DEBUG [text_stage] input_ids shape=%s prompt_emb: mean=%.6f "
+                "std=%.6f min=%.6f max=%.6f pad_mask_sum=%d",
+                tuple(input_ids.shape),
+                f.mean().item(),
+                f.std().item(),
+                f.min().item(),
+                f.max().item(),
+                int(prompt_pad_mask.sum().item()),
+            )
         return batch

@@ -30,3 +30,6 @@ class WaypointSamplingParam(SamplingParam):
     # Waypoint-specific parameters
     # Control inputs are passed separately during generation
     video_quality: int = 8  # FFmpeg CRF-style quality (used by StreamingVideoGenerator)
+    # KV cache size (frames). Increase for longer videos to avoid eviction/blur.
+    # Default 128 is enough for ~2s; use 256+ for 1min+.
+    max_kv_cache_frames: int = 128

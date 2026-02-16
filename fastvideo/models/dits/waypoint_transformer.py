@@ -17,11 +17,23 @@ generating multiple frames autoregressively.
 """
 
 import math
+import os
 from typing import Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+try:
+    from torch.nn.attention.flex_attention import (
+        create_block_mask,
+        flex_attention,
+        noop_mask,
+    )
+
+    _FLEX_ATTN_AVAILABLE = True
+except ImportError:
+    _FLEX_ATTN_AVAILABLE = False
 
 from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.layers.layernorm import AdaLN, rms_norm
@@ -39,6 +51,14 @@ _DEFAULT_WAYPOINT_CONFIG = WaypointConfig()
 _DEFAULT_WAYPOINT_ARCH = _DEFAULT_WAYPOINT_CONFIG.arch_config
 
 logger = init_logger(__name__)
+_WAYPOINT_DEBUG = os.environ.get("WAYPOINT_DEBUG", "0") in ("1", "true", "yes")
+
+if _FLEX_ATTN_AVAILABLE:
+    _flex_attention = torch.compile(
+        flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs"
+    )
+else:
+    _flex_attention = None
 
 
 # =============================================================================
@@ -424,15 +444,54 @@ class GatedSelfAttention(nn.Module):
             q = self.rope(q, pos_ids)
             k = self.rope(k, pos_ids)
 
-        # Use DistributedAttention when no KV cache (enables sequence parallelism).
+        # Use flex_attention when no KV cache (match WanVideo/MatrixGame pattern).
         # With cache, use SDPA directly (DistributedAttention has no cache support).
         if kv_cache is None:
-            # Expand k,v for GQA: DistributedAttention expects [B,L,n_heads,head_dim]
-            if self.n_kv_heads != self.n_heads:
-                rep = self.n_heads // self.n_kv_heads
-                k = k.repeat_interleave(rep, dim=2)
-                v = v.repeat_interleave(rep, dim=2)
-            attn_out, _ = self.attn(q, k, v, freqs_cis=None, attention_mask=None)
+            if _FLEX_ATTN_AVAILABLE and _flex_attention is not None:
+                # Bidirectional spatial attention via flex_attention (like WanVideo)
+                padded_length = math.ceil(L / 128) * 128 - L
+                total_len = L + padded_length
+                block_mask = create_block_mask(
+                    noop_mask,
+                    B=None,
+                    H=None,
+                    Q_LEN=total_len,
+                    KV_LEN=total_len,
+                    device=q.device,
+                    _compile=False,
+                )
+                q_pad = F.pad(
+                    q.transpose(1, 2),
+                    (0, 0, 0, padded_length),
+                    value=0,
+                )
+                k_pad = F.pad(
+                    k.transpose(1, 2),
+                    (0, 0, 0, padded_length),
+                    value=0,
+                )
+                v_pad = F.pad(
+                    v.transpose(1, 2),
+                    (0, 0, 0, padded_length),
+                    value=0,
+                )
+                attn_out = _flex_attention(
+                    q_pad,
+                    k_pad,
+                    v_pad,
+                    block_mask=block_mask,
+                    scale=self.scale,
+                    enable_gqa=(self.n_kv_heads != self.n_heads),
+                )[:, :, :L].transpose(1, 2)
+            else:
+                # Fallback: DistributedAttention (sequence parallelism)
+                if self.n_kv_heads != self.n_heads:
+                    rep = self.n_heads // self.n_kv_heads
+                    k = k.repeat_interleave(rep, dim=2)
+                    v = v.repeat_interleave(rep, dim=2)
+                attn_out, _ = self.attn(
+                    q, k, v, freqs_cis=None, attention_mask=None
+                )
         elif kv_cache is not None:
             cache_end = kv_cache["end"]
             if isinstance(cache_end, torch.Tensor):
@@ -492,6 +551,12 @@ class GatedSelfAttention(nn.Module):
             kv_cache["end"] = end + L
         else:
             num_keep = cache_size - L
+            if _WAYPOINT_DEBUG:
+                logger.info(
+                    "DEBUG [kv_cache] EVICTION: end=%d L=%d cache_size=%d "
+                    "num_keep=%d (rolling)",
+                    end, L, cache_size, num_keep,
+                )
             cache_k[:, :, :num_keep, :].copy_(
                 cache_k[:, :, end - num_keep : end, :]
             )
