@@ -59,6 +59,9 @@ function toast(msg, isError = false) {
 let models = [];
 let pollTimer = null;
 
+// Track which consoles are open and their scroll-offset for incremental fetch
+const openConsoles = new Map(); // jobId -> { after: number, autoScroll: bool }
+
 // ── Bootstrap ────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -103,7 +106,10 @@ function populateModelSelect(models) {
 
 function startPolling() {
   if (pollTimer) return;
-  pollTimer = setInterval(refreshJobs, 3000);
+  pollTimer = setInterval(() => {
+    refreshJobs();
+    pollOpenConsoles();
+  }, 2000);
 }
 
 // ── Create Job ───────────────────────────────────────────────
@@ -164,6 +170,7 @@ async function deleteJob(id) {
   try {
     await api("DELETE", `/api/jobs/${id}`);
     toast("Job deleted");
+    openConsoles.delete(id);
     refreshJobs();
   } catch (err) {
     toast("Delete failed: " + err.message, true);
@@ -183,6 +190,52 @@ function closeModal() {
   modal.classList.add("hidden");
   video.pause();
   video.src = "";
+}
+
+// ── Console toggling ─────────────────────────────────────────
+
+function toggleConsole(id) {
+  const panel = document.getElementById(`console-${id}`);
+  if (!panel) return;
+
+  if (panel.classList.contains("hidden")) {
+    panel.classList.remove("hidden");
+    if (!openConsoles.has(id)) {
+      openConsoles.set(id, { after: 0, autoScroll: true });
+    }
+    // Fetch immediately
+    fetchLogs(id);
+  } else {
+    panel.classList.add("hidden");
+    openConsoles.delete(id);
+  }
+}
+
+async function fetchLogs(id) {
+  const state = openConsoles.get(id);
+  if (!state) return;
+  try {
+    const data = await api("GET", `/api/jobs/${id}/logs?after=${state.after}`);
+    const pre = document.getElementById(`console-output-${id}`);
+    if (!pre) return;
+
+    if (data.lines.length > 0) {
+      pre.textContent += data.lines.join("\n") + "\n";
+      state.after = data.total;
+      // Auto-scroll to bottom
+      if (state.autoScroll) {
+        pre.scrollTop = pre.scrollHeight;
+      }
+    }
+  } catch {
+    // silently ignore fetch errors for logs
+  }
+}
+
+function pollOpenConsoles() {
+  for (const id of openConsoles.keys()) {
+    fetchLogs(id);
+  }
 }
 
 // ── Render Jobs ──────────────────────────────────────────────
@@ -205,17 +258,37 @@ function renderJobs(jobs) {
     return;
   }
 
+  // Preserve open console contents across re-renders
+  const savedConsoles = {};
+  for (const [id] of openConsoles) {
+    const pre = document.getElementById(`console-output-${id}`);
+    if (pre) savedConsoles[id] = pre.textContent;
+  }
+
   container.innerHTML = jobs.map(renderJobCard).join("");
+
+  // Restore console contents
+  for (const [id, text] of Object.entries(savedConsoles)) {
+    const pre = document.getElementById(`console-output-${id}`);
+    if (pre) {
+      pre.textContent = text;
+      pre.scrollTop = pre.scrollHeight;
+    }
+    // Make sure the panel is visible
+    const panel = document.getElementById(`console-${id}`);
+    if (panel) panel.classList.remove("hidden");
+  }
 
   // Bind action buttons
   container.querySelectorAll("[data-action]").forEach((btn) => {
     const action = btn.dataset.action;
     const id     = btn.dataset.id;
     btn.addEventListener("click", () => {
-      if (action === "start")  startJob(id);
-      if (action === "stop")   stopJob(id);
-      if (action === "delete") deleteJob(id);
-      if (action === "view")   viewVideo(id);
+      if (action === "start")   startJob(id);
+      if (action === "stop")    stopJob(id);
+      if (action === "delete")  deleteJob(id);
+      if (action === "view")    viewVideo(id);
+      if (action === "console") toggleConsole(id);
     });
   });
 }
@@ -224,6 +297,7 @@ function renderJobCard(job) {
   const badgeCls = `badge badge-${job.status}`;
   const modelLabel = models.find(m => m.id === job.model_id)?.label || job.model_id;
 
+  // ── Action buttons ──
   let actions = "";
   if (job.status === "pending" || job.status === "stopped" || job.status === "failed") {
     actions += `<button class="btn btn-start" data-action="start" data-id="${job.id}">&#9654; Start</button>`;
@@ -234,18 +308,40 @@ function renderJobCard(job) {
   if (job.status === "completed") {
     actions += `<button class="btn btn-view" data-action="view" data-id="${job.id}">&#9654; View</button>`;
   }
+  actions += `<button class="btn btn-console" data-action="console" data-id="${job.id}">&#9000; Console</button>`;
   actions += `<button class="btn btn-delete" data-action="delete" data-id="${job.id}">&#10005; Delete</button>`;
 
+  // ── Error ──
   let errorHtml = "";
   if (job.error) {
     errorHtml = `<div class="job-error">${escapeHtml(job.error)}</div>`;
   }
 
+  // ── Timing ──
   const elapsed = job.status === "running"
     ? `⏱ ${duration(job.started_at)}`
     : job.started_at
       ? `⏱ ${duration(job.started_at, job.finished_at)}`
       : "";
+
+  // ── Progress bar ──
+  const pct = Math.min(Math.max(job.progress || 0, 0), 100);
+  const progressLabel = job.progress_msg || job.phase || "";
+  const showBar = job.status === "running" || job.status === "completed";
+  const progressHtml = showBar ? `
+    <div class="progress-container">
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill ${job.status === "completed" ? "completed" : ""}" style="width:${pct}%"></div>
+      </div>
+      <span class="progress-label">${escapeHtml(progressLabel)}${pct > 0 ? ` — ${pct.toFixed(0)}%` : ""}</span>
+    </div>` : "";
+
+  // ── Console panel (hidden by default) ──
+  const consoleOpen = openConsoles.has(job.id);
+  const consoleHtml = `
+    <div id="console-${job.id}" class="console-panel ${consoleOpen ? "" : "hidden"}">
+      <pre id="console-output-${job.id}" class="console-output"></pre>
+    </div>`;
 
   return `
     <div class="job-card">
@@ -261,8 +357,10 @@ function renderJobCard(job) {
         <span>Steps: ${job.num_inference_steps}</span>
         <span>Seed: ${job.seed}</span>
       </div>
+      ${progressHtml}
       ${errorHtml}
       <div class="job-actions">${actions}</div>
+      ${consoleHtml}
     </div>
   `;
 }
