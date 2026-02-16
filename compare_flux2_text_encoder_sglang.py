@@ -183,14 +183,16 @@ def main():
     if args.use_sglang:
         try:
             from sglang.multimodal_gen.runtime.loader.component_loader import TextEncoderLoader as SGLangTextEncoderLoader
-            from sglang.multimodal_gen.runtime.server_args import ServerArgs
+            from sglang.multimodal_gen.runtime.server_args import ServerArgs, set_global_server_args
             from sglang.multimodal_gen.configs.pipeline_configs.flux import Flux2KleinPipelineConfig as SGLangFlux2KleinConfig
 
-            print("Loading SGLang text encoder ...")
+            print("Loading SGLang text encoder (attention_backend=torch_sdpa) ...")
             sgl_args = ServerArgs(
                 model_path=model_path,
                 pipeline_config=SGLangFlux2KleinConfig(),
+                attention_backend="torch_sdpa",
             )
+            set_global_server_args(sgl_args)
             sgl_loader = SGLangTextEncoderLoader()
             sgl_encoder = sgl_loader.load(model_path, sgl_args)
             sgl_encoder = sgl_encoder.to(device).to(dtype).eval()
