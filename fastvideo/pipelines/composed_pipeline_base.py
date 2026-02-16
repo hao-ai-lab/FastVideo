@@ -128,16 +128,21 @@ class ComposedPipelineBase(ABC):
 
                 if self.fastvideo_args.activation_offloading:
                     for name, module in self.named_modules():
-                        for attr_name in ["blocks", "layers", "transformer_blocks"]:
+                        for attr_name in [
+                                "blocks", "layers", "transformer_blocks"
+                        ]:
                             blocks = getattr(module, attr_name, None)
                             if isinstance(blocks, torch.nn.ModuleList):
                                 for layer in blocks:
                                     # Original forward method
                                     original_forward = layer.forward
                                     # Patch with the function
-                                    layer.forward = functools.partial(offloaded_forward, original_forward)
-                                
-                                logger.info(f"Successfully enabled activation offloading for {len(blocks)} layers in {name}.")
+                                    layer.forward = functools.partial(
+                                        offloaded_forward, original_forward)
+
+                                logger.info(
+                                    f"Successfully enabled activation offloading for {len(blocks)} layers in {name}."
+                                )
                                 return
 
     @staticmethod
