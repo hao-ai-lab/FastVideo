@@ -6,27 +6,31 @@ import random
 
 def generate_merged_validation_json(input_dir, output_file):
     # read in video2caption.json
-    with open(os.path.join(input_dir, "video2caption_replace.json"), "r") as f:
+    with open(os.path.join(input_dir, "videos2caption.json"), "r") as f:
         video2caption = json.load(f)
 
     # count how many elements are in the list
     num_elements = len(video2caption)
     print(f"Number of elements in video2caption.json: {num_elements}")
 
-    # randomly sample 64 elements from the list
-    sampled_elements = random.sample(video2caption, 64)
+    # randomly sample 32 elements from the list
+    sampled_elements = random.sample(video2caption, 32)
 
     # Transform sampled elements into validation.json format
     validation_data = []
     for element in sampled_elements:
         assert element.get("cap") is not None, f"Caption is None for element: {element}"
+        caption = element["cap"]
+        if isinstance(caption, list):
+            caption = caption[0]
+            
         validation_entry = {
-            "caption": element["cap"],
+            "caption": caption,
             "video_path": element.get("path", ""),
-            "num_inference_steps": 40,
-            "height": 480,
-            "width": 832,
-            "num_frames": 77
+            "num_inference_steps": 8,
+            "height": 1088,
+            "width": 1920,
+            "num_frames": 121
         }
         validation_data.append(validation_entry)
 

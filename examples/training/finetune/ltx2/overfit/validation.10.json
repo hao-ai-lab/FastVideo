@@ -1,0 +1,94 @@
+{
+  "data": [
+    {
+      "caption": "A warm sunny backyard. The camera starts in a tight cinematic close-up of a woman and a man in their 30s, facing each other with serious expressions. The woman, emotional and dramatic, says softly, \"That's it... Dad's lost it. And we've lost Dad.\" The man exhales, slightly annoyed: \"Stop being so dramatic, Jess.\" A beat. He glances aside, then mutters defensively, \"He's just having fun.\" The camera slowly pans right, revealing the grandfather in the garden wearing enormous butterfly wings, waving his arms in the air like he's trying to take off. He shouts, \"Wheeeew!\" as he flaps his wings with full commitment. The woman covers her face, on the verge of tears. Audio is clear and synchronized: soft birds, distant lawn mower, fabric rustle, and the grandfather's shout.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 8,
+      "height": 1088,
+      "width": 1920,
+      "num_frames": 121
+    },
+    {
+      "caption": "Night rain falls over a narrow neon alley as a courier on a red bicycle skids to a stop beside a flickering noodle stand. The shot begins overhead, then cranes down to eye level while steam curls around his face mask and rain beads on his jacket. He pulls a metal case from the bike basket and says in a low voice, \"I made it in six minutes.\" A woman in a yellow raincoat answers, \"You are late by twenty seconds.\" She snaps the case open, revealing glowing circuit boards. Audio is synchronized and layered: rain striking metal awnings, bicycle brakes squealing, neon buzzing, footsteps splashing, and tense whispered dialogue.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 8,
+      "height": 1088,
+      "width": 1920,
+      "num_frames": 121
+    },
+    {
+      "caption": "A crowded subway platform at morning rush. The camera tracks backward in front of a teenage violinist weaving through commuters, then swings left to reveal a child clapping in perfect rhythm. The violinist smiles, pivots, and plays faster as the train headlights bloom into frame. A businesswoman drops a coin into the open case and says, \"Play that part again.\" The violinist nods and crescendos while the arriving train blasts wind through loose flyers. Audio is synchronized with crisp detail: violin melody, train brakes screeching, station announcements over speakers, footsteps, applause, and echoing chatter.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 8,
+      "height": 1088,
+      "width": 1920,
+      "num_frames": 121
+    },
+    {
+      "caption": "At golden hour on a snowy mountain ridge, a rescue team climbs toward a stranded hiker waving a silver emergency blanket. The scene starts with a wide drone shot, then cuts to a shoulder-level handheld view that shakes with each step in deep snow. The lead rescuer reaches the hiker, clips a harness, and says, \"Stay with me, breathe slow.\" The hiker nods, teeth chattering, while a helicopter appears from behind the ridge line. The camera tilts up as rotor wash throws snow crystals across the lens. Audio is synchronized: heavy breathing, crunching snow, radio crackle, rotor thunder, and urgent but calm dialogue.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 8,
+      "height": 1088,
+      "width": 1920,
+      "num_frames": 121
+    },
+    {
+      "caption": "Inside a tiny bakery before sunrise, warm tungsten light spills across marble counters dusted with flour. The camera glides past trays of croissants and lands on a baker scoring sourdough with deliberate precision. Her apprentice rushes in carrying coffee beans and asks, \"Do we have enough for the breakfast rush?\" Without looking up she replies, \"If the dough rises, we do.\" She slides loaves into a deck oven and steam blooms out in a glowing cloud. Audio is synchronized and intimate: mixer hum, oven doors clanking, espresso steaming, quiet street traffic outside, and soft kitchen banter.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 8,
+      "height": 1088,
+      "width": 1920,
+      "num_frames": 121
+    },
+    {
+      "caption": "An outdoor basketball court at dusk under orange floodlights. The shot opens on a close-up of sneakers squeaking, then whips up to a fast break as two players sprint toward the rim. A guard fakes left, crosses right, and yells, \"Corner, now!\" The ball snaps to a waiting shooter who releases just before a defender leaps across frame. The camera follows the arc in slow motion, then cuts to the bench exploding as the shot drops through the net. Audio is synchronized: dribbling impacts, shoe squeaks, chain-link fence rattling, crowd cheers, distant traffic, and players calling plays.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 8,
+      "height": 1088,
+      "width": 1920,
+      "num_frames": 121
+    },
+    {
+      "caption": "Beneath clear tropical water, a diver drifts over a coral wall while schools of bright fish split around her flashlight beam. The camera starts in a wide underwater panorama, then moves in for a close-up of her gloved hand brushing silt from a carved stone mask. She signals to her partner, points at the find, and their eyes widen behind fogged visors. A reef shark passes in the background and both divers freeze until it glides away. Audio is synchronized in underwater style: muffled bubble streams, regulator breaths, distant whale song, clicking shrimp, and muted metal tank taps for hand signals.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 8,
+      "height": 1088,
+      "width": 1920,
+      "num_frames": 121
+    },
+    {
+      "caption": "A lonely desert highway at noon with heat ripples bending the horizon. The camera tracks beside an old pickup truck as it coughs, backfires, and rolls to a stop near a weathered gas station sign. A woman steps out, slams the hood, and mutters, \"Not today, please.\" She opens the engine bay while her teenage son turns the radio knob, catching fragments of a storm warning between static bursts. The camera pushes in as dust devils spin across the road behind them. Audio is synchronized: dry wind, engine ticking, radio static and voiceover, metal tools clinking, and distant thunder approaching.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 8,
+      "height": 1088,
+      "width": 1920,
+      "num_frames": 121
+    },
+    {
+      "caption": "Inside a grand library reading room at midnight, rows of green lamps cast pools of light over endless wooden tables. The camera dolly moves between stacks and finds a graduate student matching handwritten notes to a brittle map. A floorboard creaks behind her; she turns and whispers, \"Who's there?\" No answer. She keeps working until a red security light starts blinking at the far door and a faint alarm tone begins. The camera slowly zooms on her face as she folds the map and slips it into her coat. Audio is synchronized: page turns, pencil scratches, ticking clock, low alarm beeps, echoing footsteps, and tense breathing.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 8,
+      "height": 1088,
+      "width": 1920,
+      "num_frames": 121
+    },
+    {
+      "caption": "On a rooftop wedding reception at twilight, string lights sway in a warm breeze while a city skyline glows blue behind the couple. The camera begins in a medium shot during vows, then circles clockwise as the bride laughs through tears and says, \"I still choose you, every day.\" The groom answers, \"Even when the power goes out and we eat cereal for dinner.\" Guests laugh and raise glasses. A sudden gust lifts loose petals into the air and the couple leans into their first dance. Audio is synchronized: gentle live guitar, soft crowd laughter, clinking glasses, distant siren doppler, wind, and clear vow dialogue.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 8,
+      "height": 1088,
+      "width": 1920,
+      "num_frames": 121
+    }
+  ]
+}
