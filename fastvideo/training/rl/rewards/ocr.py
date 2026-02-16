@@ -57,12 +57,13 @@ class OcrScorerVideo(BaseRewardModel):
             Average reward across positive-scoring frames
         """
         # Extract target text from prompt
-        try:
-            target_text = prompt.split('"')[1].replace(' ', '').lower()
-        except IndexError:
-            logger.warning("Failed to extract quoted text from prompt: %s",
-                           prompt)
-            target_text = prompt.replace(' ', '').lower()
+        # try:
+        #     target_text = prompt.split('"')[1].replace(' ', '').lower()
+        # except IndexError:
+        #     logger.warning("Failed to extract quoted text from prompt: %s",
+        #                    prompt)
+        #     target_text = prompt.replace(' ', '').lower()
+        target_text = prompt
         
         if not target_text:
             return 0.0

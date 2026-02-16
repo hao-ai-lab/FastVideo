@@ -5,7 +5,7 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export WANDB_API_KEY=""
 # Set to a directory where align_logs/fv_logs (and flow_logs when running flow_grpo) will be written
-export ALIGN_LOGS_ROOT="path/to/your/folder"
+export ALIGN_LOGS_ROOT="/mnt/fast-disks/hao_lab/shijie/FastVideo"
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 # For alignment with flow_grpo prompts, set to flow_grpo's dataset dir (e.g. /path/to/flow_grpo/dataset/ocr).

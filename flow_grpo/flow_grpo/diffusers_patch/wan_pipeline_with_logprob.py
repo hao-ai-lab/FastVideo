@@ -261,11 +261,11 @@ def wan_pipeline_with_logprob(
     all_log_probs = []
     all_kl = []
     if return_debug_metrics:
-        debug_sum_initial_latents = latents.double().sum().item()
+        debug_sum_initial_latents = latents.to(torch.float64).sum().item()
         debug_sum_intermediate_latents = debug_sum_initial_latents
         debug_sum_model_pred = 0.0
-        debug_sum_prompt_embeds = prompt_embeds.double().sum().item()
-        debug_sum_negative_prompt_embeds = negative_prompt_embeds.double().sum().item() if negative_prompt_embeds is not None else 0.0
+        debug_sum_prompt_embeds = prompt_embeds.to(torch.float64).sum().item()
+        debug_sum_negative_prompt_embeds = negative_prompt_embeds.to(torch.float64).sum().item() if negative_prompt_embeds is not None else 0.0
         debug_model_pred_per_step = []
         debug_intermediate_latents_per_step = []
         debug_variance_noise_sum_per_step = []

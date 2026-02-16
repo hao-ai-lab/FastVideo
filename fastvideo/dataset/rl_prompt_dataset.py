@@ -4,6 +4,10 @@ from torch.utils.data import Dataset, DataLoader, Sampler
 import json
 import os
 
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
+
 
 FIXED_DEBUG_PROMPT = (
     "\"A detailed, vintage-style alien abduction pamphlet titled Probing FAQs, featuring illustrations of extraterrestrial beings and spacecraft, alongside text explaining common questions and procedures.\""
@@ -24,8 +28,8 @@ class TextPromptDataset(Dataset):
     def __getitem__(self, idx):
         # Debug mode: always return the same prompt for evaluation.
         # Keep dataset length/sampling behavior unchanged.
-        # return {"prompt": self.prompts[idx], "metadata": {}}
-        return {"prompt": FIXED_DEBUG_PROMPT, "metadata": {}}
+        return {"prompt": self.prompts[idx], "metadata": {}}
+        # return {"prompt": FIXED_DEBUG_PROMPT, "metadata": {}}
 
     @staticmethod
     def collate_fn(examples):
@@ -78,12 +82,17 @@ class KRepeatSampler(Sampler):
 
     def __iter__(self):
         while True:
-            # Deterministic sync across ranks (same as flow_grpo DistributedKRepeatSampler).
-            g = torch.Generator(device="cpu")
-            g.manual_seed(self.seed + self.step)
+            # Deterministic sync across ranks. Align with flow_grpo: flow_grpo uses seed+epoch with
+            # epoch = epoch*num_batches_per_epoch+i and skips the first 2 epochs, so first real batch
+            # uses seed + 2*num_batches_per_epoch; we use seed+step+4 so step 0,1,... matches that.
+            g = torch.Generator()
+            g.manual_seed(self.seed + self.step + 3)
+            logger.info(f"sampler manual_seed: {self.seed + self.step + 4}")
             
             # Randomly select m unique samples
             indices = torch.randperm(len(self.dataset), generator=g)[:self.m].tolist()
+            logger.info(f"len(dataset): {len(self.dataset)}")
+            logger.info(f"indices: {indices}")
             
             # Repeat each sample k times to generate a total of n*b samples
             repeated_indices = [idx for idx in indices for _ in range(self.k)]
@@ -100,6 +109,7 @@ class KRepeatSampler(Sampler):
                 per_card_samples.append(shuffled_samples[start:end])
             
             # Return the sample indices for the current card
+            logger.info(f"per_card_samples[self.rank]: {per_card_samples[self.rank]}")
             yield per_card_samples[self.rank]
         
     def __len__(self):

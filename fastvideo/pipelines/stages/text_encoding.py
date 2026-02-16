@@ -64,6 +64,7 @@ class TextEncodingStage(PipelineStage):
         assert batch.prompt is not None
         prompt_text: str | list[str] = batch.prompt
         all_indices: list[int] = list(range(len(self.text_encoders)))
+        logger.info("===positive prompt===")
         prompt_embeds_list, prompt_masks_list = self.encode_text(
             prompt_text,
             fastvideo_args,
@@ -102,6 +103,7 @@ class TextEncodingStage(PipelineStage):
                 else:
                     negative_prompt_text = ""
             
+            logger.info("===negative prompt===")
             neg_embeds_list, neg_masks_list = self.encode_text(
                 negative_prompt_text,
                 fastvideo_args,
@@ -179,6 +181,8 @@ class TextEncodingStage(PipelineStage):
         assert len(self.text_encoders) == len(
             fastvideo_args.pipeline_config.text_encoder_configs)
 
+        logger.info("prompt_embedding_fv: num_text_encoders=%s num_text_tokenizers=%s", len(self.text_encoders), len(self.tokenizers))
+
         # Resolve selection into indices
         encoder_cfgs = fastvideo_args.pipeline_config.text_encoder_configs
         if encoder_index is None:
@@ -255,6 +259,10 @@ class TextEncodingStage(PipelineStage):
                                                  dtype=torch.int64)
                     embeds_list.append(prompt_embeds)
                     attn_masks_list.append(attention_mask)
+                    for idx, am in enumerate(attn_masks_list):
+                        logger.info("prompt_embedding_fv: attention_mask[%s] shape=%s sum_fp64=%s", idx, tuple(am.shape), am.to(torch.float64).sum().item())
+                    for idx, emb in enumerate(embeds_list):
+                        logger.info("prompt_embedding_fv: embedding[%s] sum_fp64=%s", idx, emb.to(torch.float64).sum().item())
                     return self.return_embeds(embeds_list, attn_masks_list,
                                               return_type,
                                               return_attention_mask, indices)
@@ -287,6 +295,14 @@ class TextEncodingStage(PipelineStage):
             embeds_list.append(prompt_embeds)
             if return_attention_mask:
                 attn_masks_list.append(attention_mask)
+
+        # Debug: attention mask shapes and fp64 sums; embedding fp64 sums per encoder
+        if attn_masks_list:
+            for idx, am in enumerate(attn_masks_list):
+                logger.info("prompt_embedding_fv: attention_mask[%s] shape=%s sum_fp64=%s", idx, tuple(am.shape), am.to(torch.float64).sum().item())
+        if embeds_list:
+            for idx, emb in enumerate(embeds_list):
+                logger.info("prompt_embedding_fv: embedding[%s] sum_fp64=%s", idx, emb.to(torch.float64).sum().item())
 
         return self.return_embeds(embeds_list, attn_masks_list, return_type,
                                   return_attention_mask, indices)

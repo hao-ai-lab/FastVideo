@@ -102,12 +102,11 @@ def sde_step_with_logprob(
 
     variance_noise_sum_fp64: float = 0.0
     if prev_sample is None:
-        # For GRPO training, each timestep should have different random noise.
-        # Do NOT use generator here - this ensures truly stochastic noise at each step.
+        # When generator is provided (e.g. debug: torch.Generator("cpu").manual_seed(42)), use it for reproducible variance_noise.
+        # Otherwise None for GRPO training (independent random noise per timestep).
         variance_noise = randn_tensor(
             model_output.shape,
-            generator=
-            None,  # Always None for GRPO - each timestep gets independent random noise
+            generator=generator,
             device=model_output.device,
             dtype=model_output.dtype,
         )
@@ -363,6 +362,13 @@ class DenoisingStage(PipelineStage):
             }
             rl_per_step_contexts = []
 
+        # Debug: one generator (seed 42, cpu) for all SDE steps so variance_noise is deterministic and comparable across codebases.
+        # debug_sde_generator = None
+        # if rl_data is not None and getattr(rl_data, "collect_debug_sums", False):
+        #     debug_sde_generator = torch.Generator("cpu").manual_seed(42)
+        debug_sde_generator = torch.Generator("cpu").manual_seed(42)
+
+
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -576,7 +582,7 @@ class DenoisingStage(PipelineStage):
                                 t,
                                 prev_latents.float(),
                                 prev_sample=None,
-                                generator=None,
+                                generator=debug_sde_generator,
                                 deterministic=False,
                                 return_dt_and_std_dev_t=True,
                                 return_variance_noise_sum=True,
