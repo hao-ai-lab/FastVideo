@@ -356,6 +356,13 @@ def main():
         ref_attn_mod.rotary_emb.register_forward_hook(_rope_hook(ref_qr, ref_kr))
         fv_attn_mod.attn.register_forward_hook(_out(fv_attn_out))
         ref_attn_mod.attn.register_forward_hook(_out(ref_attn_out))
+        fv_o_in, ref_o_in = [], []
+
+        def _pre_hook(storage):
+            return lambda m, i: storage.append(i[0].detach())
+
+        fv_attn_mod.o_proj.register_forward_pre_hook(_pre_hook(fv_o_in))
+        ref_attn_mod.o_proj.register_forward_pre_hook(_pre_hook(ref_o_in))
         fv_attn_mod.o_proj.register_forward_hook(_out(fv_o))
         ref_attn_mod.o_proj.register_forward_hook(_out(ref_o))
 
@@ -377,6 +384,33 @@ def main():
                 d = (fa[0].float() - ra[0].float()).abs()
                 status = "OK" if d.max().item() < 1e-3 else "DIVERGE"
                 print(f"  {name}: max={d.max().item():.6f} mean={d.mean().item():.6f}  {status}")
+
+        # 6. o_proj input + weight/bias comparison
+        print("\n--- 6. o_proj debug (input + weights) ---")
+        if fv_o_in and ref_o_in:
+            d_in = (fv_o_in[0].float() - ref_o_in[0].float()).abs()
+            status = "OK" if d_in.max().item() < 1e-5 else "DIVERGE"
+            print(f"  o_proj input: max_diff={d_in.max().item():.6e} mean={d_in.mean().item():.6e}  {status}")
+        fv_o_proj = fv_attn_mod.o_proj
+        ref_o_proj = ref_attn_mod.o_proj
+        for name, fv_param, ref_param in [
+            ("o_proj.weight", getattr(fv_o_proj, "weight", None), getattr(ref_o_proj, "weight", None)),
+            ("o_proj.bias", getattr(fv_o_proj, "bias", None), getattr(ref_o_proj, "bias", None)),
+        ]:
+            if fv_param is None or ref_param is None:
+                print(f"  {name}: N/A (one side missing)")
+                continue
+            try:
+                fv_data = fv_param.data.float().contiguous()
+                ref_data = ref_param.data.float().contiguous()
+                if fv_data.shape != ref_data.shape:
+                    print(f"  {name}: SHAPE MISMATCH fv={fv_data.shape} ref={ref_data.shape}")
+                else:
+                    d_w = (fv_data - ref_data).abs()
+                    status = "OK" if d_w.max().item() < 1e-5 else "DIVERGE"
+                    print(f"  {name}: max_diff={d_w.max().item():.6e} mean={d_w.mean().item():.6e}  {status}")
+            except Exception as e:
+                print(f"  {name}: error comparing ({e})")
     else:
         print("\n  -> All layers match within tolerance.")
 
