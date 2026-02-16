@@ -161,6 +161,7 @@ def main():
         hsdp_shard_dim=1,
         hsdp_replicate_dim=1,
         attention_backend="torch_sdpa",
+        text_encoder_cpu_offload=False,
     )
     sgl_args.model_paths = {"text_encoder": text_encoder_path}
     set_global_server_args(sgl_args)
