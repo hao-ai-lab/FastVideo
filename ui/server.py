@@ -13,10 +13,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import collections
 import enum
+import io
 import logging
 import os
+import re
 import signal
+import sys
 import threading
 import time
 import uuid
@@ -46,62 +50,164 @@ DEFAULT_OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "..", "outputs", "ui_jobs"
 )
 
-# Well-known text-to-video models supported by FastVideo.
-AVAILABLE_MODELS: list[dict[str, str]] = [
-    {
-        "id": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        "label": "Wan 2.1 T2V 1.3B",
-        "type": "t2v",
-    },
-    {
-        "id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
-        "label": "Wan 2.2 T2V A14B",
-        "type": "t2v",
-    },
-    {
-        "id": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
-        "label": "FastWan 2.1 T2V 1.3B (Distilled)",
-        "type": "t2v",
-    },
-    {
-        "id": "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
-        "label": "FastWan 2.2 TI2V 5B (Distilled)",
-        "type": "t2v",
-    },
-    {
-        "id": "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",
-        "label": "TurboWan 2.1 T2V 1.3B",
-        "type": "t2v",
-    },
-    {
-        "id": "loayrashid/TurboWan2.1-T2V-14B-Diffusers",
-        "label": "TurboWan 2.1 T2V 14B",
-        "type": "t2v",
-    },
-    {
-        "id": "FastVideo/LTX2-Distilled-Diffusers",
-        "label": "LTX2 Distilled",
-        "type": "t2v",
-    },
-    {
-        "id": "Davids048/LTX2-Base-Diffusers",
-        "label": "LTX2 Base",
-        "type": "t2v",
-    },
-    {
-        "id": (
-            "hunyuanvideo-community/"
-            "HunyuanVideo-1.5-Diffusers-480p_t2v"
-        ),
-        "label": "HunyuanVideo 1.5 480p",
-        "type": "t2v",
-    },
-    {
-        "id": "FastVideo/LongCat-Video-T2V-Diffusers",
-        "label": "LongCat Video T2V",
-        "type": "t2v",
-    },
+# ---------------------------------------------------------------------------
+# Dynamic model catalogue — built from fastvideo.registry
+# ---------------------------------------------------------------------------
+
+_WORKLOAD_PATTERNS: list[tuple[str, str]] = [
+    ("v2v", "v2v"),
+    ("v2w", "v2w"),
+    ("i2w", "i2w"),
+    ("t2w", "t2w"),
+    ("t2i", "t2i"),
+    ("i2v", "i2v"),
+    ("ti2v", "ti2v"),
+    ("t2v", "t2v"),
 ]
+
+
+def _infer_workload_type(model_path: str) -> str:
+    """Best-effort workload type from the HF model path."""
+    low = model_path.lower()
+    for token, wtype in _WORKLOAD_PATTERNS:
+        if token in low:
+            return wtype
+    return "t2v"  # default
+
+
+def _make_label(model_path: str) -> str:
+    """Derive a readable label from a HF model path."""
+    name = model_path.split("/")[-1] if "/" in model_path else model_path
+    # Strip common suffixes that add noise
+    for suffix in ("-Diffusers", "_Diffusers", "-diffusers"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+    # Replace separators with spaces
+    return name.replace("-", " ").replace("_", " ")
+
+
+def _get_available_models() -> list[dict[str, str]]:
+    """Build the model catalogue from the fastvideo registry."""
+    from fastvideo.registry import get_registered_model_paths
+
+    models: list[dict[str, str]] = []
+    for path in get_registered_model_paths():
+        models.append({
+            "id": path,
+            "label": _make_label(path),
+            "type": _infer_workload_type(path),
+        })
+    return models
+
+
+# Lazily cached so the import only happens on first access.
+_available_models_cache: list[dict[str, str]] | None = None
+
+
+def _available_models() -> list[dict[str, str]]:
+    global _available_models_cache  # noqa: PLW0603
+    if _available_models_cache is None:
+        _available_models_cache = _get_available_models()
+    return _available_models_cache
+
+# ---------------------------------------------------------------------------
+# Per-job log buffer & progress tracker
+# ---------------------------------------------------------------------------
+
+# Regex patterns for parsing tqdm-style progress output.
+# Matches e.g. " 40%|████      | 20/50 " or " 20/50 "
+_TQDM_PCT_RE = re.compile(r"(\d+)%\|")
+_TQDM_FRAC_RE = re.compile(r"\b(\d+)/(\d+)\b")
+
+_MAX_LOG_LINES = 2000  # ring-buffer cap per job
+
+
+class JobLogBuffer:
+    """Thread-safe ring-buffer that stores log lines for a single job.
+
+    It also continuously parses tqdm progress output so the UI can
+    display a determinate progress bar.
+    """
+
+    def __init__(self, maxlen: int = _MAX_LOG_LINES) -> None:
+        self._lines: collections.deque[str] = collections.deque(
+            maxlen=maxlen
+        )
+        self._lock = threading.Lock()
+        self.progress: float = 0.0        # 0 – 100
+        self.progress_msg: str = ""       # e.g. "20/50 steps"
+        self.phase: str = "initializing"  # human-readable phase
+
+    def write(self, text: str) -> None:
+        """Append *text* (may contain embedded newlines)."""
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            with self._lock:
+                self._lines.append(stripped)
+            self._parse_progress(stripped)
+
+    def get_lines(self, after: int = 0) -> tuple[list[str], int]:
+        """Return ``(lines[after:], total_len)``."""
+        with self._lock:
+            all_lines = list(self._lines)
+        return all_lines[after:], len(all_lines)
+
+    # -- internal helpers ---------------------------------------------------
+
+    def _parse_progress(self, line: str) -> None:
+        """Try to extract a percentage / fraction from a tqdm line."""
+        m = _TQDM_PCT_RE.search(line)
+        if m:
+            self.progress = min(float(m.group(1)), 100.0)
+        m2 = _TQDM_FRAC_RE.search(line)
+        if m2:
+            cur, total = int(m2.group(1)), int(m2.group(2))
+            if total > 0:
+                self.progress = min(cur / total * 100.0, 100.0)
+                self.progress_msg = f"{cur}/{total} steps"
+        # Detect high-level phases from FastVideo log messages
+        low = line.lower()
+        if "loading model" in low or "loading" in low and "checkpoint" in low:
+            self.phase = "loading model"
+        elif "denoising" in low or "timestep" in low:
+            self.phase = "denoising"
+        elif "saving" in low or "saved" in low:
+            self.phase = "saving"
+        elif "encoding" in low or "vae" in low:
+            self.phase = "VAE encoding"
+
+
+class _JobLogHandler(logging.Handler):
+    """A logging.Handler that forwards records to a JobLogBuffer."""
+
+    def __init__(self, buf: JobLogBuffer) -> None:
+        super().__init__()
+        self.buf = buf
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self.buf.write(self.format(record))
+        except Exception:
+            pass
+
+
+class _TqdmCapture(io.StringIO):
+    """Intercepts stderr writes (where tqdm prints) for a job thread."""
+
+    def __init__(self, buf: JobLogBuffer, original: io.TextIOBase) -> None:
+        super().__init__()
+        self.buf = buf
+        self.original = original
+
+    def write(self, s: str) -> int:  # type: ignore[override]
+        self.buf.write(s)
+        return self.original.write(s)
+
+    def flush(self) -> None:
+        self.original.flush()
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -141,6 +247,9 @@ class Job:
     _stop_event: threading.Event = field(
         default_factory=threading.Event, repr=False
     )
+    _log_buf: JobLogBuffer = field(
+        default_factory=JobLogBuffer, repr=False
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -160,6 +269,9 @@ class Job:
             "guidance_scale": self.guidance_scale,
             "seed": self.seed,
             "num_gpus": self.num_gpus,
+            "progress": self._log_buf.progress,
+            "progress_msg": self._log_buf.progress_msg,
+            "phase": self._log_buf.phase,
         }
 
 
@@ -245,15 +357,32 @@ def _get_or_create_generator(
 
 def _run_job(job: Job) -> None:
     """Execute video generation for *job* (called in a daemon thread)."""
+    buf = job._log_buf
+
+    # ── Attach a logging handler so all fastvideo.* logs go to the
+    #    job's buffer while this thread is running. ──
+    log_handler = _JobLogHandler(buf)
+    log_handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
+    root_logger = logging.getLogger()  # capture everything
+    root_logger.addHandler(log_handler)
+
+    # ── Redirect stderr so tqdm output is captured too. ──
+    original_stderr = sys.stderr
+    sys.stderr = _TqdmCapture(buf, original_stderr)  # type: ignore[assignment]
+
     try:
         job.status = JobStatus.RUNNING
         job.started_at = time.time()
+        buf.phase = "starting"
 
         if job._stop_event.is_set():
             job.status = JobStatus.STOPPED
             job.finished_at = time.time()
             return
 
+        buf.phase = "loading model"
         generator = _get_or_create_generator(
             job.model_id, job.num_gpus
         )
@@ -261,6 +390,7 @@ def _run_job(job: Job) -> None:
         job_output_dir = os.path.join(_output_dir, job.id)
         os.makedirs(job_output_dir, exist_ok=True)
 
+        buf.phase = "generating"
         logger.info(
             "Starting generation for job %s (model=%s)", job.id, job.model_id
         )
@@ -277,6 +407,8 @@ def _run_job(job: Job) -> None:
             seed=job.seed,
         )
 
+        buf.phase = "saving"
+
         # Find the generated video file
         video_files = sorted(Path(job_output_dir).glob("*.mp4"))
         if video_files:
@@ -291,7 +423,9 @@ def _run_job(job: Job) -> None:
             job.status = JobStatus.STOPPED
         else:
             job.status = JobStatus.COMPLETED
+            buf.progress = 100.0
         job.finished_at = time.time()
+        buf.phase = "done"
         logger.info("Job %s completed successfully", job.id)
 
     except Exception as exc:
@@ -299,6 +433,12 @@ def _run_job(job: Job) -> None:
         job.status = JobStatus.FAILED
         job.error = str(exc)
         job.finished_at = time.time()
+        buf.phase = "failed"
+
+    finally:
+        # ── Restore stderr and remove the per-job log handler. ──
+        sys.stderr = original_stderr  # type: ignore[assignment]
+        root_logger.removeHandler(log_handler)
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +463,7 @@ app.add_middleware(
 @app.get("/api/models")
 def list_models() -> list[dict[str, str]]:
     """Return the catalogue of available video-generation models."""
-    return AVAILABLE_MODELS
+    return _available_models()
 
 
 # ---- Jobs CRUD ------------------------------------------------------------
@@ -352,7 +492,7 @@ def get_job(job_id: str) -> dict[str, Any]:
 @app.post("/api/jobs", status_code=201)
 def create_job(req: CreateJobRequest) -> dict[str, Any]:
     """Create a new job (does **not** start it automatically)."""
-    valid_ids = {m["id"] for m in AVAILABLE_MODELS}
+    valid_ids = {m["id"] for m in _available_models()}
     if req.model_id not in valid_ids:
         raise HTTPException(
             status_code=400,
@@ -409,6 +549,7 @@ def start_job(job_id: str) -> dict[str, Any]:
     job.started_at = None
     job.finished_at = None
     job._stop_event.clear()
+    job._log_buf = JobLogBuffer()  # fresh log buffer
 
     thread = threading.Thread(
         target=_run_job, args=(job,), daemon=True
@@ -456,6 +597,31 @@ def delete_job(job_id: str) -> dict[str, str]:
     job._stop_event.set()
     logger.info("Deleted job %s", job.id)
     return {"detail": f"Job {job_id} deleted"}
+
+
+# ---- Job logs --------------------------------------------------------------
+
+
+@app.get("/api/jobs/{job_id}/logs")
+def get_job_logs(job_id: str, after: int = 0) -> dict[str, Any]:
+    """Return log lines for a job.
+
+    Query params:
+        after: return only lines after this index (for incremental polling).
+    """
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    lines, total = job._log_buf.get_lines(after=after)
+    return {
+        "lines": lines,
+        "total": total,
+        "progress": job._log_buf.progress,
+        "progress_msg": job._log_buf.progress_msg,
+        "phase": job._log_buf.phase,
+    }
 
 
 # ---- Serve generated videos -----------------------------------------------
