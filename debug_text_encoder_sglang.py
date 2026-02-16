@@ -398,6 +398,10 @@ def main():
                 return None
             data = param.data
             if hasattr(data, "full_tensor"):
+                # DTensor on CPU triggers "No backend type associated with device type cpu"
+                # when full_tensor() runs collectives. Move to CUDA first so NCCL is used.
+                if getattr(data, "device", None) and data.device.type == "cpu" and torch.cuda.is_available():
+                    data = data.to(device)
                 data = data.full_tensor()
             return data.float().contiguous()
 
