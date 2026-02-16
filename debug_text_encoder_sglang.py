@@ -440,6 +440,27 @@ def main():
                     print(f"  o_proj.bias: max_diff={d_b.max().item():.6e} mean={d_b.mean().item():.6e}  {status}")
             except Exception as e:
                 print(f"  o_proj.bias: error comparing ({e})")
+
+        # 7. Manual F.linear sanity check
+        if fv_o_in and ref_o_in and fv_o and ref_o and fv_w is not None and ref_w is not None:
+            print("\n--- 7. Manual F.linear sanity check ---")
+            try:
+                fv_in = fv_o_in[0].float()
+                ref_in = ref_o_in[0].float()
+                fv_w_local = _to_local_tensor(fv_w).to(fv_in.device)
+                ref_w_local = _to_local_tensor(ref_w).to(ref_in.device)
+                fv_out_manual = torch.nn.functional.linear(fv_in, fv_w_local, None)
+                ref_out_manual = torch.nn.functional.linear(ref_in, ref_w_local, None)
+                hooked_fv = fv_o[0].float()
+                hooked_ref = ref_o[0].float()
+                d_manual = (fv_out_manual - ref_out_manual).abs()
+                d_fv_hook_vs_manual = (fv_out_manual - hooked_fv).abs()
+                d_ref_hook_vs_manual = (ref_out_manual - hooked_ref).abs()
+                print(f"  F.linear manual (FV vs SGLang): max_diff={d_manual.max().item():.6e}  {'OK' if d_manual.max().item() < 1e-5 else 'DIVERGE'}")
+                print(f"  FV hooked vs manual:            max_diff={d_fv_hook_vs_manual.max().item():.6e}  {'OK' if d_fv_hook_vs_manual.max().item() < 1e-3 else 'DIVERGE'}")
+                print(f"  SGLang hooked vs manual:        max_diff={d_ref_hook_vs_manual.max().item():.6e}  {'OK' if d_ref_hook_vs_manual.max().item() < 1e-3 else 'DIVERGE'}")
+            except Exception as e:
+                print(f"  Manual F.linear check failed: {e}")
     else:
         print("\n  -> All layers match within tolerance.")
 
