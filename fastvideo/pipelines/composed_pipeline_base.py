@@ -31,14 +31,23 @@ from fastvideo.utils import (maybe_download_model,
 logger = init_logger(__name__)
 
 def pack_hook(tensor: torch.Tensor):
+    """
+    Moves activations from GPU to CPU memory during the forward pass.
+    """
     return tensor.to("cpu", non_blocking=True)
 
 def unpack_hook(packed_tensor):
+    """
+    Fetches activations back to the GPU from CPU memory during the backward pass.
+    """
     return packed_tensor.to("cuda", non_blocking=True)
 
 def offloaded_forward(module, *args, **kwargs):
-        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
-            return module(*args, **kwargs)
+    """
+    A wrapper for a module's forward pass that enables activation offloading.
+    """
+    with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+        return module(*args, **kwargs)
 
 class ComposedPipelineBase(ABC):
     """
