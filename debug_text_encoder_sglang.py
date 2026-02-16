@@ -391,26 +391,51 @@ def main():
             d_in = (fv_o_in[0].float() - ref_o_in[0].float()).abs()
             status = "OK" if d_in.max().item() < 1e-5 else "DIVERGE"
             print(f"  o_proj input: max_diff={d_in.max().item():.6e} mean={d_in.mean().item():.6e}  {status}")
+
+        def _to_local_tensor(param):
+            """Convert param.data to local float tensor, handling DTensor/FSDP."""
+            if param is None:
+                return None
+            data = param.data
+            if hasattr(data, "full_tensor"):
+                data = data.full_tensor()
+            return data.float().contiguous()
+
         fv_o_proj = fv_attn_mod.o_proj
         ref_o_proj = ref_attn_mod.o_proj
-        for name, fv_param, ref_param in [
-            ("o_proj.weight", getattr(fv_o_proj, "weight", None), getattr(ref_o_proj, "weight", None)),
-            ("o_proj.bias", getattr(fv_o_proj, "bias", None), getattr(ref_o_proj, "bias", None)),
-        ]:
-            if fv_param is None or ref_param is None:
-                print(f"  {name}: N/A (one side missing)")
-                continue
+        fv_w = getattr(fv_o_proj, "weight", None)
+        ref_w = getattr(ref_o_proj, "weight", None)
+        fv_b = getattr(fv_o_proj, "bias", None)
+        ref_b = getattr(ref_o_proj, "bias", None)
+
+        if fv_b is None or ref_b is None:
+            print(f"  o_proj.bias: FastVideo={'present' if fv_b is not None else 'None'}, SGLang={'present' if ref_b is not None else 'None'}")
+        if fv_w is not None and ref_w is not None:
             try:
-                fv_data = fv_param.data.float().contiguous()
-                ref_data = ref_param.data.float().contiguous()
+                fv_data = _to_local_tensor(fv_w)
+                ref_data = _to_local_tensor(ref_w)
                 if fv_data.shape != ref_data.shape:
-                    print(f"  {name}: SHAPE MISMATCH fv={fv_data.shape} ref={ref_data.shape}")
+                    print(f"  o_proj.weight: SHAPE MISMATCH fv={fv_data.shape} ref={ref_data.shape}")
                 else:
                     d_w = (fv_data - ref_data).abs()
                     status = "OK" if d_w.max().item() < 1e-5 else "DIVERGE"
-                    print(f"  {name}: max_diff={d_w.max().item():.6e} mean={d_w.mean().item():.6e}  {status}")
+                    print(f"  o_proj.weight: max_diff={d_w.max().item():.6e} mean={d_w.mean().item():.6e}  {status}")
             except Exception as e:
-                print(f"  {name}: error comparing ({e})")
+                print(f"  o_proj.weight: error comparing ({e})")
+        else:
+            print(f"  o_proj.weight: N/A (one side missing)")
+        if fv_b is not None and ref_b is not None:
+            try:
+                fv_data = _to_local_tensor(fv_b)
+                ref_data = _to_local_tensor(ref_b)
+                if fv_data.shape != ref_data.shape:
+                    print(f"  o_proj.bias: SHAPE MISMATCH fv={fv_data.shape} ref={ref_data.shape}")
+                else:
+                    d_b = (fv_data - ref_data).abs()
+                    status = "OK" if d_b.max().item() < 1e-5 else "DIVERGE"
+                    print(f"  o_proj.bias: max_diff={d_b.max().item():.6e} mean={d_b.mean().item():.6e}  {status}")
+            except Exception as e:
+                print(f"  o_proj.bias: error comparing ({e})")
     else:
         print("\n  -> All layers match within tolerance.")
 
