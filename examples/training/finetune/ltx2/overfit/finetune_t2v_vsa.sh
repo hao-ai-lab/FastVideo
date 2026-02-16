@@ -4,16 +4,18 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 
-MODEL_PATH="Davids048/LTX2-Base-Diffusers"
+# MODEL_PATH="Davids048/LTX2-Base-Diffusers"
+MODEL_PATH="FastVideo/LTX2-Distilled-Diffusers"
 # Also can use simple 1 video for overfitting experiments.
 # DATA_DIR="/home/hal-jundas/codes/FastVideo/data/crush-smol"
-DATA_DIR="<PATH_TO_PROCESSED_DATASET>"
+# DATA_DIR="<PATH_TO_PROCESSED_DATASET>"
+DATA_DIR=/home/d1su/codes/FastVideo-demo/examples/training/finetune/ltx2/overfit/data
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 echo  VALIDATION_DATASET_FILE: $VALIDATION_DATASET_FILE
-NUM_GPUS=4
-OVERFIT_HEIGHT=480
-OVERFIT_WIDTH=832
-OVERFIT_FRAMES=73
+NUM_GPUS=8
+OVERFIT_HEIGHT=1088
+OVERFIT_WIDTH=1920
+OVERFIT_FRAMES=121
 
 training_args=(
   --tracker_project_name "ltx2_t2v_finetune"
@@ -21,19 +23,19 @@ training_args=(
   --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
-  --num_latent_t 10
+  --gradient_accumulation_steps 2
+  --num_latent_t 16
   --num_height $OVERFIT_HEIGHT
   --num_width $OVERFIT_WIDTH
   --num_frames $OVERFIT_FRAMES
-  --ltx2-first-frame-conditioning-p 0.1
+  --ltx2-first-frame-conditioning-p 0.0
   --enable_gradient_checkpointing_type "full"
   --mode "finetuning"
 )
 
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size $NUM_GPUS
+  --sp_size 2
   --tp_size 1
   --hsdp_replicate_dim 1
   --hsdp_shard_dim $NUM_GPUS
@@ -52,9 +54,9 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 50
-  --validation_sampling_steps "50"
-  --validation_guidance_scale "3.0"
+  --validation_steps 20
+  --validation_sampling_steps "8"
+  --validation_guidance_scale "1.0"
 )
 
 optimizer_args=(

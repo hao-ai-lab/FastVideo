@@ -13,9 +13,9 @@ DATA_DIR=/home/d1su/codes/FastVideo-demo/examples/training/finetune/ltx2/overfit
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 echo  VALIDATION_DATASET_FILE: $VALIDATION_DATASET_FILE
 NUM_GPUS=8
-OVERFIT_HEIGHT=480
-OVERFIT_WIDTH=832
-OVERFIT_FRAMES=73
+OVERFIT_HEIGHT=1088
+OVERFIT_WIDTH=1920
+OVERFIT_FRAMES=121
 
 training_args=(
   --tracker_project_name "ltx2_t2v_finetune"
@@ -23,8 +23,8 @@ training_args=(
   --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 4
-  --num_latent_t 10
+  --gradient_accumulation_steps 2
+  --num_latent_t 16
   --num_height $OVERFIT_HEIGHT
   --num_width $OVERFIT_WIDTH
   --num_frames $OVERFIT_FRAMES
@@ -34,10 +34,10 @@ training_args=(
 
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size 4
+  --sp_size 2
   --tp_size 1
-  --hsdp_replicate_dim 2
-  --hsdp_shard_dim 4
+  --hsdp_replicate_dim 1
+  --hsdp_shard_dim $NUM_GPUS
 )
 
 model_args=(
@@ -53,8 +53,8 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 50
-  --validation_sampling_steps "50"
+  --validation_steps 20
+  --validation_sampling_steps "8"
   --validation_guidance_scale "1.0"
 )
 
@@ -81,7 +81,6 @@ miscellaneous_args=(
 )
 
 # NOTE: Setting this environment variable to TORCH_SDPA to avoid the issue of stacking that failed in flash attn. 
-export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 
 torchrun \
