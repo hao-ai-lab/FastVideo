@@ -240,6 +240,73 @@ textarea { resize: vertical; }
   word-break: break-word;
 }
 
+/* ── Progress bar ─────────────────────────────────────────── */
+.progress-container {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+.progress-bar-bg {
+  height: 6px;
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width .4s ease;
+  min-width: 0;
+}
+.progress-bar-fill.completed {
+  background: var(--green);
+}
+.progress-label {
+  font-size: .72rem;
+  color: var(--text-dim);
+}
+
+/* ── Console panel ────────────────────────────────────────── */
+.console-panel {
+  margin-top: .4rem;
+}
+.console-panel.hidden {
+  display: none;
+}
+.console-output {
+  background: #0a0c10;
+  color: #c9d1d9;
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: .75rem;
+  line-height: 1.5;
+  padding: .6rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  max-height: 280px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.console-output::-webkit-scrollbar {
+  width: 6px;
+}
+.console-output::-webkit-scrollbar-track {
+  background: transparent;
+}
+.console-output::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+/* Console button */
+.btn-console {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.btn-console:hover { background: var(--border); color: var(--text); }
+
 /* ── Modal ────────────────────────────────────────────────── */
 .modal {
   position: fixed;
