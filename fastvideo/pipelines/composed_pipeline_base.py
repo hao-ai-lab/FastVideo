@@ -35,22 +35,24 @@ def pack_hook(tensor: torch.Tensor):
     """
     Moves activations from GPU to CPU memory during the forward pass.
     """
-    return tensor.to("cpu", non_blocking=True)
+    original_device = tensor.device
+    return tensor.to("cpu", non_blocking=True), original_device
 
 
-def unpack_hook(packed_tensor):
+def unpack_hook(packed_tensor_info):
     """
     Fetches activations back to the GPU from CPU memory during the backward pass.
     """
-    return packed_tensor.to("cuda", non_blocking=True)
+    packed_tensor, original_device = packed_tensor_info
+    return packed_tensor.to(original_device, non_blocking=True)
 
 
-def offloaded_forward(module, *args, **kwargs):
+def offloaded_forward(func, *args, **kwargs):
     """
     A wrapper for a module's forward pass that enables activation offloading.
     """
     with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
-        return module(*args, **kwargs)
+        return func(*args, **kwargs)
 
 
 class ComposedPipelineBase(ABC):
@@ -124,27 +126,19 @@ class ComposedPipelineBase(ABC):
                 module.requires_grad_(True)
                 module.train()
 
-                if getattr(self.fastvideo_args, "activation_offloading", False):
-                    blocks = None
-                    for attr in ["layers", "blocks", "transformer_blocks"]:
-                        if hasattr(module, attr):
-                            blocks = getattr(module, attr)
-                            logger.info(
-                                f"Found transformer blocks in attribute: {attr}"
-                            )
-                            break
-
-                    if blocks is not None:
-                        for i, layer in enumerate(blocks):
-                            # Apply the monkeypatch
-                            layer.forward = functools.partial(
-                                offloaded_forward, layer)
-                        logger.info(
-                            f"Successfully wrapped {len(blocks)} blocks for offloading."
-                        )
-                    else:
-                        logger.warning(
-                            f"Could not find layers to offload in {name}!")
+                if self.fastvideo_args.activation_offloading:
+                    for name, module in self.named_modules():
+                        for attr_name in ["blocks", "layers", "transformer_blocks"]:
+                            blocks = getattr(module, attr_name, None)
+                            if isinstance(blocks, torch.nn.ModuleList):
+                                for layer in blocks:
+                                    # Original forward method
+                                    original_forward = layer.forward
+                                    # Patch with the function
+                                    layer.forward = functools.partial(offloaded_forward, original_forward)
+                                
+                                logger.info(f"Successfully enabled activation offloading for {len(blocks)} layers in {name}.")
+                                return
 
     @staticmethod
     def _compile_with_conditions(
