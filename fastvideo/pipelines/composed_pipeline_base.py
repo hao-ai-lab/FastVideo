@@ -30,11 +30,13 @@ from fastvideo.utils import (maybe_download_model,
 
 logger = init_logger(__name__)
 
+
 def pack_hook(tensor: torch.Tensor):
     """
     Moves activations from GPU to CPU memory during the forward pass.
     """
     return tensor.to("cpu", non_blocking=True)
+
 
 def unpack_hook(packed_tensor):
     """
@@ -42,12 +44,14 @@ def unpack_hook(packed_tensor):
     """
     return packed_tensor.to("cuda", non_blocking=True)
 
+
 def offloaded_forward(module, *args, **kwargs):
     """
     A wrapper for a module's forward pass that enables activation offloading.
     """
     with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
         return module(*args, **kwargs)
+
 
 class ComposedPipelineBase(ABC):
     """
@@ -107,7 +111,7 @@ class ComposedPipelineBase(ABC):
         logger.info("Loading pipeline modules...")
         with self.profiler_controller.region("profiler_region_model_loading"):
             self.modules = self.load_modules(fastvideo_args, loaded_modules)
-        
+
     def set_trainable(self) -> None:
         # Only train DiT
         if getattr(self.fastvideo_args, "training_mode", False):
@@ -125,16 +129,22 @@ class ComposedPipelineBase(ABC):
                     for attr in ["layers", "blocks", "transformer_blocks"]:
                         if hasattr(module, attr):
                             blocks = getattr(module, attr)
-                            logger.info(f"Found transformer blocks in attribute: {attr}")
+                            logger.info(
+                                f"Found transformer blocks in attribute: {attr}"
+                            )
                             break
-                    
+
                     if blocks is not None:
                         for i, layer in enumerate(blocks):
                             # Apply the monkeypatch
-                            layer.forward = functools.partial(offloaded_forward, layer)
-                        logger.info(f"Successfully wrapped {len(blocks)} blocks for offloading.")
+                            layer.forward = functools.partial(
+                                offloaded_forward, layer)
+                        logger.info(
+                            f"Successfully wrapped {len(blocks)} blocks for offloading."
+                        )
                     else:
-                        logger.warning(f"Could not find layers to offload in {name}!")
+                        logger.warning(
+                            f"Could not find layers to offload in {name}!")
 
     @staticmethod
     def _compile_with_conditions(

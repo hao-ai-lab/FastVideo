@@ -1125,12 +1125,10 @@ class TrainingArgs(FastVideoArgs):
                             help="Directory for logging")
 
         # Training configuration
-        parser.add_argument(
-            "--activation-offloading",
-            action=StoreBoolean,
-            default=False,
-            help="Offload activations to CPU to save VRAM."
-        )
+        parser.add_argument("--activation-offloading",
+                            action=StoreBoolean,
+                            default=False,
+                            help="Offload activations to CPU to save VRAM.")
         parser.add_argument("--num-train-epochs",
                             type=int,
                             help="Number of training epochs")
