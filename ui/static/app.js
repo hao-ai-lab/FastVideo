@@ -2,7 +2,9 @@
    FastVideo Job Runner – Frontend Application
    ──────────────────────────────────────────────────────────── */
 
-const API = "";  // same origin
+// Get API URL from meta tag or use same origin
+const API_META = document.querySelector('meta[name="api-url"]');
+const API = API_META ? API_META.getAttribute('content') || '' : '';
 
 // ── Helpers ──────────────────────────────────────────────────
 
