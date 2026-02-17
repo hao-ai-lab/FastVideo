@@ -1,0 +1,26 @@
+python_env: fastvideo
+
+# Dataset inputs
+prompts_jsonl: data/Davids048/ltx2-data/merged_prompts_semantic_unique_16k/video_prompts.gpt-5-mini-2025-08-07.0-1000.jsonl
+data_root: examples/training/finetune/ltx2/overfit_v2/data
+
+# Stage A: prepare_raw_dataset.sh
+generate_videos: true
+start_idx: 0
+end_idx: 125
+num_gpus_generate: 1
+manifest_workers: 1
+
+# Stage B: precompute_dataset.sh
+model_path: FastVideo/LTX2-Distilled-Diffusers
+num_gpus_preprocess: 4
+preprocess_master_port: 29513
+with_audio: true
+preprocess_video_loader_type: torchvision
+preprocess_video_batch_size: 1
+preprocess_dataloader_num_workers: 0
+max_height: 1088
+max_width: 1920
+num_frames: 121
+train_fps: 24
+video_length_tolerance_range: 5
