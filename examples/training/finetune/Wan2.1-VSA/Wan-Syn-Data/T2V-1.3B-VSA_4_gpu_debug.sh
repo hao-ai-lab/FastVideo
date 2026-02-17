@@ -11,7 +11,7 @@ export NODE_RANK=0
 export TOKENIZERS_PARALLELISM=false
 export WANDB_BASE_URL="https://api.wandb.ai"
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
-export WANDB_API_KEY=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
+export WANDB_API_KEY="your_wandb_api_key_here" # TODO: Replace with your actual key or load from a secure location
 
 # Configs
 NUM_GPUS=4
