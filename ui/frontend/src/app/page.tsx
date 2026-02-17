@@ -2,9 +2,9 @@ import { getJobsList } from "@/lib/api";
 import { Job } from "@/lib/types";
 import Link from "next/link";
 import CreateJobButton from "@/components/CreateJobButton";
-import cardStyles from "@/components/Card.module.css";
-import jobCardStyles from "@/components/JobCard.module.css";
-import badgeStyles from "@/components/Badge.module.css";
+import cardStyles from "@styles/Card.module.css";
+import jobCardStyles from "@styles/JobCard.module.css";
+import badgeStyles from "@styles/Badge.module.css";
 import layoutStyles from "./Layout.module.css";
 
 function getBadgeClass(status: string) {

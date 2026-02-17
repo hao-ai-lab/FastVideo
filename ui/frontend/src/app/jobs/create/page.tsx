@@ -3,9 +3,9 @@
 import { createJob } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import cardStyles from "@/components/Card.module.css";
-import formStyles from "@/components/Form.module.css";
-import buttonStyles from "@/components/Button.module.css";
+import cardStyles from "@styles/Card.module.css";
+import formStyles from "@styles/Form.module.css";
+import buttonStyles from "@styles/Button.module.css";
 import layoutStyles from "../../Layout.module.css";
 
 export default function CreateJobPage() {
