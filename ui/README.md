@@ -15,15 +15,37 @@ jobs.
 
 ## Quick Start
 
+### Option 1: Combined Server (Default)
+
+Run both the API and web server together:
+
 ```bash
 # From the repository root
 pip install fastvideo fastapi uvicorn
 
-# Launch the server (defaults to http://0.0.0.0:8188)
+# Launch the combined server (defaults to http://0.0.0.0:8188)
 python -m ui.server
 
 # Or with a custom output directory
 python -m ui.server --output-dir /path/to/videos --port 8080
+```
+
+Then open [http://localhost:8188](http://localhost:8188) in your browser.
+
+### Option 2: Separate API and Web Servers
+
+Run the API server and web server separately for better scalability:
+
+```bash
+# Terminal 1: Start the API server (defaults to http://0.0.0.0:8189)
+python -m ui.api_server --output-dir /path/to/videos
+
+# Terminal 2: Start the web server (defaults to http://0.0.0.0:8188)
+# With API proxy (recommended):
+python -m ui.web_server --api-url http://localhost:8189
+
+# Or without proxy (requires CORS on API server):
+python -m ui.web_server
 ```
 
 Then open [http://localhost:8188](http://localhost:8188) in your browser.
@@ -61,17 +83,24 @@ Then open [http://localhost:8188](http://localhost:8188) in your browser.
 
 ```
 ui/
-├── server.py            # FastAPI backend with job management
-├── requirements.txt     # Python dependencies (fastapi, uvicorn)
+├── server.py            # Combined FastAPI server (API + static files)
+├── api_server.py        # API-only server (REST endpoints)
+├── web_server.py        # Web-only server (static files + optional API proxy)
+├── requirements.txt     # Python dependencies (fastapi, uvicorn, httpx)
 └── static/
     ├── index.html       # Single-page application
     ├── style.css        # Dark-themed responsive styles
     └── app.js           # Frontend logic (fetch API, polling, rendering)
 ```
 
-- **Backend**: A FastAPI server manages an in-memory job store. Each job runs
+- **API Server** (`api_server.py`): A FastAPI server that manages an in-memory job store. Each job runs
   in a daemon thread that uses `fastvideo.VideoGenerator` to generate videos.
   Model instances are cached so switching between prompts on the same model
-  doesn't reload weights.
+  doesn't reload weights. Provides REST endpoints under `/api/*`.
+- **Web Server** (`web_server.py`): Serves static HTML/CSS/JS files. Optionally proxies API requests
+  to a separate API server or relies on CORS for cross-origin requests.
+- **Combined Server** (`server.py`): Legacy combined server that serves both API and static files
+  from a single process. Use this for simple deployments.
 - **Frontend**: A vanilla HTML/CSS/JS single-page app. Jobs are polled every
-  3 seconds and rendered as cards with status badges and action buttons.
+  2 seconds and rendered as cards with status badges and action buttons. The API
+  base URL can be configured via a meta tag injected by the web server.
