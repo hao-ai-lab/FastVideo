@@ -1,0 +1,17 @@
+/* ── Header ───────────────────────────────────────────────── */
+.header {
+  text-align: center;
+  padding: 2rem 1rem 1rem;
+}
+
+.header h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+
+.subtitle {
+  color: var(--text-dim);
+  font-size: .9rem;
+  margin-top: .25rem;
+}

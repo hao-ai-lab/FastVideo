@@ -5,21 +5,27 @@ import { Job } from "@/lib/types";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import cardStyles from "@/components/Card.module.css";
+import jobCardStyles from "@/components/JobCard.module.css";
+import badgeStyles from "@/components/Badge.module.css";
+import progressBarStyles from "@/components/ProgressBar.module.css";
+import buttonStyles from "@/components/Button.module.css";
+import layoutStyles from "../../Layout.module.css";
 
 function getBadgeClass(status: string) {
   switch (status) {
     case "pending":
-      return "badge-pending";
+      return badgeStyles.badgePending;
     case "running":
-      return "badge-running";
+      return badgeStyles.badgeRunning;
     case "completed":
-      return "badge-completed";
+      return badgeStyles.badgeCompleted;
     case "failed":
-      return "badge-failed";
+      return badgeStyles.badgeFailed;
     case "stopped":
-      return "badge-stopped";
+      return badgeStyles.badgeStopped;
     default:
-      return "badge-pending";
+      return badgeStyles.badgePending;
   }
 }
 
@@ -35,9 +41,9 @@ export default function JobDetailsPage() {
 
   if (!job) {
     return (
-      <main>
-        <section className="card">
-          <p className="placeholder">Loading…</p>
+      <main className={layoutStyles.main}>
+        <section className={cardStyles.card}>
+          <p className={layoutStyles.placeholder}>Loading…</p>
         </section>
       </main>
     );
@@ -47,44 +53,44 @@ export default function JobDetailsPage() {
   const isCompleted = job.status === "completed";
 
   return (
-    <main>
-      <section className="card">
-        <div className="section-header">
+    <main className={layoutStyles.main}>
+      <section className={cardStyles.card}>
+        <div className={layoutStyles.sectionHeader}>
           <h2>Job Details</h2>
-          <Link href="/" className="btn btn-small">
+          <Link href="/" className={`${buttonStyles.btn} ${buttonStyles.btnSmall}`}>
             ← Back
           </Link>
         </div>
 
-        <div className="job-card">
-          <div className="job-header">
-            <span className="job-model">{job.model_id}</span>
-            <span className={`badge badge-${job.status}`}>
+        <div className={jobCardStyles.jobCard}>
+          <div className={jobCardStyles.jobHeader}>
+            <span className={jobCardStyles.jobModel}>{job.model_id}</span>
+            <span className={`${badgeStyles.badge} ${getBadgeClass(job.status)}`}>
               {job.status}
             </span>
           </div>
-          <p className="job-prompt" style={{ whiteSpace: "normal" }}>{job.prompt}</p>
-          <div className="job-meta">
+          <p className={jobCardStyles.jobPrompt} style={{ whiteSpace: "normal" }}>{job.prompt}</p>
+          <div className={jobCardStyles.jobMeta}>
             <span>{job.num_frames} frames</span>
             <span>{job.height}×{job.width}</span>
           </div>
 
           {(job.status === "running" || job.status === "completed") && (
-            <div className="progress-container">
-              <div className="progress-bar-bg">
+            <div className={progressBarStyles.progressContainer}>
+              <div className={progressBarStyles.progressBarBg}>
                 <div
-                  className={`progress-bar-fill ${isCompleted ? "completed" : ""}`}
+                  className={`${progressBarStyles.progressBarFill} ${isCompleted ? progressBarStyles.progressBarFillCompleted : ""}`}
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
-              <span className="progress-label">
+              <span className={progressBarStyles.progressLabel}>
                 {job.progress_msg || `${Math.round(progressPercent)}%`}
               </span>
             </div>
           )}
 
           {job.error && (
-            <div className="job-error">{job.error}</div>
+            <div className={jobCardStyles.jobError}>{job.error}</div>
           )}
         </div>
       </section>
