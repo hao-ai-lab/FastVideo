@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import Image from "next/image";
 import "./globals.css";
+import headerStyles from "@/components/Header.module.css";
 
 export const metadata: Metadata = {
   title: "FastVideo",
@@ -15,11 +16,8 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
-        <header>
-          <Link href="/">
-            <h1>FastVideo Job Runner</h1>
-          </Link>
-          <p className="subtitle">Create and manage video generation jobs</p>
+        <header className={headerStyles.header}>
+          <Image src="/logo.svg" alt="FastVideo Logo" width={252} height={105} />
         </header>
         {children}
       </body>

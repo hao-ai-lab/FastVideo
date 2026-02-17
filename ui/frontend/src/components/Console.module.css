@@ -1,0 +1,36 @@
+/* ── Console panel ────────────────────────────────────────── */
+.consolePanel {
+  margin-top: .4rem;
+}
+
+.consolePanel.hidden {
+  display: none;
+}
+
+.consoleOutput {
+  background: #0a0c10;
+  color: #c9d1d9;
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: .75rem;
+  line-height: 1.5;
+  padding: .6rem .8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  max-height: 280px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.consoleOutput::-webkit-scrollbar {
+  width: 6px;
+}
+
+.consoleOutput::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.consoleOutput::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}

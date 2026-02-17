@@ -1,0 +1,107 @@
+/* ── Modal ────────────────────────────────────────────────── */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: modal-fade-in 0.2s ease-out;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modalBackdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, .7);
+  animation: backdrop-fade-in 0.2s ease-out;
+}
+
+.modalContent {
+  position: relative;
+  z-index: 1;
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #000;
+  animation: modal-content-scale-in 0.2s ease-out;
+}
+
+.modalContent video {
+  display: block;
+  max-width: 90vw;
+  max-height: 85vh;
+}
+
+.modalClose {
+  position: absolute;
+  top: .5rem;
+  right: .75rem;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 1.6rem;
+  cursor: pointer;
+  z-index: 2;
+  line-height: 1;
+}
+
+.modalClose:hover {
+  opacity: .7;
+}
+
+.modalClose:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.modalForm {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 0;
+  max-width: 500px;
+  width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modalForm .card {
+  padding: 1.5rem;
+}
+
+.modalForm .modalClose {
+  color: var(--text);
+}
+
+@keyframes backdrop-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-content-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}

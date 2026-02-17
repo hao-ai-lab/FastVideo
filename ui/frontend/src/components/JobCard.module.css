@@ -1,0 +1,65 @@
+/* ── Job Card ─────────────────────────────────────────────── */
+.jobCard {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.15rem;
+  margin-bottom: .75rem;
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+}
+
+.jobCard:last-child {
+  margin-bottom: 0;
+}
+
+.jobHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.jobModel {
+  font-weight: 600;
+  font-size: .95rem;
+}
+
+.jobPrompt {
+  font-size: .85rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.jobMeta {
+  font-size: .75rem;
+  color: var(--text-dim);
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.jobActions {
+  display: flex;
+  gap: .4rem;
+  flex-wrap: wrap;
+}
+
+.jobActions .btn {
+  font-size: .75rem;
+  padding: .3rem .7rem;
+}
+
+.jobError {
+  font-size: .8rem;
+  color: var(--red);
+  background: rgba(239, 68, 68, .08);
+  border-radius: var(--radius);
+  padding: .4rem .6rem;
+  word-break: break-word;
+}
