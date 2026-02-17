@@ -38,7 +38,7 @@ Run the API server and web server separately for better scalability:
 
 ```bash
 # Terminal 1: Start the API server (defaults to http://0.0.0.0:8189)
-python -m ui.api_server --output-dir /path/to/videos
+python -m ui.api_server --output-dir /path/to/videos --log-dir /path/to/logs
 
 # Terminal 2: Start the web server (defaults to http://0.0.0.0:8188)
 # With API proxy (recommended):
@@ -62,6 +62,7 @@ Then open [http://localhost:8188](http://localhost:8188) in your browser.
 | `POST`   | `/api/jobs/{id}/stop`        | Request a running job to stop      |
 | `DELETE` | `/api/jobs/{id}`             | Delete a job                       |
 | `GET`    | `/api/jobs/{id}/video`       | Stream the generated video/image   |
+| `GET`    | `/api/jobs/{id}/log`          | Download the job's log file       |
 
 ### Create Job Request Body
 
@@ -97,6 +98,12 @@ ui/
   in a daemon thread that uses `fastvideo.VideoGenerator` to generate videos.
   Model instances are cached so switching between prompts on the same model
   doesn't reload weights. Provides REST endpoints under `/api/*`.
+  - **Error Handling**: Jobs that crash are automatically marked as `FAILED` without
+    crashing the server. Error details are stored in the job's `error` field.
+  - **Log Files**: Each job maintains a persistent log file (`{job_id}.log`) in a
+    dedicated log directory (configurable via `--log-dir`), containing all logs from
+    model loading through completion or failure. Log files are named after the job ID
+    for easy identification.
 - **Web Server** (`web_server.py`): Serves static HTML/CSS/JS files. Optionally proxies API requests
   to a separate API server or relies on CORS for cross-origin requests.
 - **Combined Server** (`server.py`): Legacy combined server that serves both API and static files
