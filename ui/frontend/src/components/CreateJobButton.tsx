@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import CreateJobModal from "./CreateJobModal";
-import buttonStyles from "./Button.module.css";
+import buttonStyles from "./styles/Button.module.css";
 
 export default function CreateJobButton() {
   const router = useRouter();

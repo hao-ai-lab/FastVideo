@@ -2,10 +2,10 @@
 
 import { createJob } from "@/lib/api";
 import { useEffect, useState } from "react";
-import modalStyles from "./Modal.module.css";
-import formStyles from "./Form.module.css";
-import cardStyles from "./Card.module.css";
-import buttonStyles from "./Button.module.css";
+import modalStyles from "./styles/Modal.module.css";
+import formStyles from "./styles/Form.module.css";
+import cardStyles from "./styles/Card.module.css";
+import buttonStyles from "./styles/Button.module.css";
 
 interface CreateJobModalProps {
   isOpen: boolean;
