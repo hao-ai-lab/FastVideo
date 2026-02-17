@@ -72,7 +72,7 @@ See below for recipes and datasets:
 
 ### Generating Your First Video
 
-Here's a minimal example to generate a video using the default settings. Make sure VSA kernels are [installed](https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation/). Create a file called `example.py` with the following code:
+Here's a minimal example to generate a video using the default settings. Make sure VSA kernels are [installed](https://haoailab.com/FastVideo/attention/vsa/#installation). Create a file called `example.py` with the following code:
 
 ```python
 import os
