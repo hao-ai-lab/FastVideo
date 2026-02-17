@@ -6,6 +6,10 @@ export WANDB_MODE=online
 export WANDB_API_KEY=""
 # Set to a directory where align_logs/fv_logs (and flow_logs when running flow_grpo) will be written
 export ALIGN_LOGS_ROOT="/mnt/fast-disks/hao_lab/shijie/FastVideo"
+export USE_ALIGN_DECODED_VIDEOS=1
+# Reward verification: run flow_grpo first to populate align_logs/fv_logs/decoded_videos/*.safetensors,
+# then run FastVideo with USE_ALIGN_DECODED_VIDEOS=1 to use those videos for reward/advantage (same batch/rank).
+# export USE_ALIGN_DECODED_VIDEOS=1
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 # For alignment with flow_grpo prompts, set to flow_grpo's dataset dir (e.g. /path/to/flow_grpo/dataset/ocr).

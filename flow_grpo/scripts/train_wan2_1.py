@@ -5,6 +5,8 @@ import datetime
 from concurrent import futures
 import time
 import json
+
+from six import print_
 from absl import app, flags
 from accelerate import Accelerator
 from ml_collections import config_flags
@@ -33,13 +35,14 @@ import random
 from torch.utils.data import Dataset, DataLoader, Sampler
 from flow_grpo.ema import EMAModuleWrapper
 import imageio
+from safetensors.torch import save_file as save_safetensors
 tqdm = partial(tqdm.tqdm, dynamic_ncols=True)
 
 
 FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file("config", "config/base.py", "Training configuration.")
 
-logger = get_logger(__name__)
+logger = get_logger(__name__, log_level="INFO")
 
 # Align-debug logs: under ALIGN_LOGS_ROOT (env var) or flow_grpo root. Structure: <root>/align_logs/flow_logs
 _FLOW_GRPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,6 +51,13 @@ ALIGN_FLOW_LOGS_DIR = os.path.join(
     os.path.abspath(_align_root) if _align_root else _FLOW_GRPO_ROOT,
     "align_logs",
     "flow_logs",
+)
+# Decoded videos for FastVideo reward verification: <root>/align_logs/fv_logs/decoded_videos
+DECODED_VIDEOS_DIR = os.path.join(
+    os.path.abspath(_align_root) if _align_root else _FLOW_GRPO_ROOT,
+    "align_logs",
+    "fv_logs",
+    "decoded_videos",
 )
 
 # Debug: log rewards/advantages for first batch only once, then stop
@@ -670,6 +680,11 @@ def main(_):
             train_sampler.set_epoch(epoch * config.sample.num_batches_per_epoch + i)
             prompts, prompt_metadata = next(train_iter)
 
+            if accelerator.is_main_process and epoch >= 2:
+                print(f"===local prompts===")
+                for p in prompts:
+                    print(p)
+
             prompt_embeds = compute_text_embeddings(
                 prompts, 
                 text_encoders, 
@@ -772,6 +787,11 @@ def main(_):
                     if i == 0 and j == 0:
                         logger.info("RL_METRIC: Debug region saving flow_logs and metrics per batch; will log rewards/advantages then stop.")
                 videos, latents, log_probs, kls = out[:4]
+                # Save decoded videos to safetensors for FastVideo reward verification (each batch, each rank)
+                if epoch >= 2 and j == 0:
+                    os.makedirs(DECODED_VIDEOS_DIR, exist_ok=True)
+                    path = os.path.join(DECODED_VIDEOS_DIR, f"batch_{i}_rank_{accelerator.process_index}.safetensors")
+                    save_safetensors({"decoded_videos": videos.detach().cpu()}, path)
                 # endregion
 
                 latents = torch.stack(
@@ -913,6 +933,7 @@ def main(_):
 
         # ungather advantages; we only need to keep the entries corresponding to the samples on this process
         advantages = torch.as_tensor(advantages)
+        logger.info
 
         # myregion debug: log reward, advantage, prompt per sample (64 lines) to flow_logs/debug_metrics.txt then stop
         global _debug_rewards_advantages_logged
@@ -950,11 +971,13 @@ def main(_):
             with open(os.path.join(out_dir, "debug_metrics.txt"), "a") as f:
                 f.write("\n=== reward, advantage, prompt (one per line, same order as prompts.txt) ===\n")
                 for i in range(n):
-                    f.write(f"{float(rewards_1d[i])}, {float(advantages_1d[i])}, {repr(prompts_ordered[i])}\n")
+                    f.write(f"{float(rewards_1d[i])}, {float(advantages_1d[i])}, {prompts_ordered[i]}\n")
             logger.info("RL_METRIC: Debug region appended full rewards/advantages to flow_logs/debug_metrics.txt; stopping.")
             _debug_rewards_advantages_logged = True
             raise KeyboardInterrupt("Debug stop after logging rewards and advantages.")
         # endregion
+
+
 
         samples["advantages"] = (
             advantages.reshape(accelerator.num_processes, -1, advantages.shape[-1])[accelerator.process_index]

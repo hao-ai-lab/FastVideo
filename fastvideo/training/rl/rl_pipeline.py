@@ -769,6 +769,32 @@ class RLPipeline(TrainingPipeline):
             decoded_videos = all_decoded_videos_list[0]  # [B, C, T, H, W]
             training_batch.prompt_ids = None
 
+        # Optionally replace decoded videos with flow_grpo-saved tensors for reward verification
+        if os.environ.get("USE_ALIGN_DECODED_VIDEOS") and sample_time_per_prompt == 1:
+            from safetensors.torch import load_file as load_safetensors
+            batch_index = getattr(self, "_debug_current_batch_index", 0)
+            rank = self.global_rank
+            decoded_dir = os.path.join(ALIGN_FV_LOGS_DIR, "decoded_videos")
+            path = os.path.join(decoded_dir, f"batch_{batch_index}_rank_{rank}.safetensors")
+            if os.path.isfile(path):
+                loaded = load_safetensors(path)
+                align_videos = loaded["decoded_videos"].to(
+                    device=decoded_videos.device, dtype=decoded_videos.dtype
+                ).permute(0, 2, 1, 3, 4) # [B, T, C, H, W] --> [B, C, T, H, W]
+                if align_videos.shape == decoded_videos.shape:
+                    decoded_videos = align_videos
+                    logger.info(
+                        "USE_ALIGN_DECODED_VIDEOS: replaced decoded_videos with flow_grpo batch=%s rank=%s",
+                        batch_index, rank,
+                    )
+                else:
+                    logger.warning(
+                        "USE_ALIGN_DECODED_VIDEOS: shape mismatch batch=%s rank=%s: loaded %s vs %s",
+                        batch_index, rank, tuple(align_videos.shape), tuple(decoded_videos.shape),
+                    )
+            else:
+                logger.warning("USE_ALIGN_DECODED_VIDEOS: file not found %s", path)
+
         # Store old log probs for importance ratio computation
         training_batch.old_log_probs = training_batch.log_probs.clone()
 
@@ -1683,8 +1709,8 @@ class RLPipeline(TrainingPipeline):
         if self.global_rank == 0:
             self._debug_batches_data = []
         for b in range(M):
+            self._debug_current_batch_index = b  # all ranks (for USE_ALIGN_DECODED_VIDEOS load by batch/rank)
             if self.global_rank == 0:
-                self._debug_current_batch_index = b
                 out_dir = ALIGN_FV_LOGS_DIR
                 os.makedirs(out_dir, exist_ok=True)
                 metrics_path = os.path.join(out_dir, "debug_metrics.txt")
@@ -1720,7 +1746,7 @@ class RLPipeline(TrainingPipeline):
                     n = len(rewards_arr)
                     for i in range(n):
                         prompt = prompts_list[i] if i < len(prompts_list) else ""
-                        f.write(f"{float(rewards_arr[i])}, {float(advantages_arr[i])}, {repr(prompt)}\n")
+                        f.write(f"{float(rewards_arr[i])}, {float(advantages_arr[i])}, {prompt}\n")
             logger.info("RL_METRIC: Debug region wrote prompts and appended rewards/advantages to fv_logs; stopping.")
             for attr in ("_debug_rewards_advantages_log_pending", "_debug_first_batch_metrics", "_debug_batches_data", "_debug_current_batch_index"):
                 if hasattr(self, attr):

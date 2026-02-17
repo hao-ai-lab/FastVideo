@@ -125,12 +125,23 @@ class OcrScorer_video_or_image:
         return rewards
 
 if __name__ == "__main__":
-    example_image_path = "media_images_eval_images_499_ef42de47b8ec98892954.jpg"
-    example_image = Image.open(example_image_path)
-    example_prompt = 'New York Skyline with "Hello World" written with fireworks on the sky'
-    # Instantiate scorer
-    scorer = OcrScorer(use_gpu=False)
+    # Unit test: same as FastVideo — read decoded videos from safetensor, prompts from prompts.txt
+    import os
+    from safetensors.torch import load_file as load_safetensors
 
-    # Call scorer and print result
-    reward = scorer([example_image], [example_prompt])
-    print(f"OCR Reward: {reward}")
+    SAFETENSOR_PATH = "/mnt/fast-disks/hao_lab/shijie/FastVideo/align_logs/fv_logs/decoded_videos/batch_0_rank_0.safetensors"
+    if not os.path.isfile(SAFETENSOR_PATH):
+        print(f"Missing {SAFETENSOR_PATH}; run flow_grpo first to generate decoded_videos.")
+        exit(1)
+    data = load_safetensors(SAFETENSOR_PATH)
+    # decoded_videos: [B, T, C, H, W] -> list of [B, T, H, W, C] for OcrScorer_video_or_image
+    videos = data["decoded_videos"].permute(0, 1, 3, 4, 2)
+    videos = (videos * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
+
+    with open("prompts.txt", "r", encoding="utf-8") as f:
+        lines = [line.strip() for line in f]
+    prompts = lines[: videos.shape[0]]
+
+    scorer = OcrScorer_video_or_image()
+    rewards = scorer(videos, prompts)
+    print("OCR rewards:\n", rewards)

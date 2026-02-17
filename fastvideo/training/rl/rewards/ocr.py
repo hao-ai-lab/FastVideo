@@ -56,32 +56,21 @@ class OcrScorerVideo(BaseRewardModel):
         Returns:
             Average reward across positive-scoring frames
         """
-        # Extract target text from prompt
-        # try:
-        #     target_text = prompt.split('"')[1].replace(' ', '').lower()
-        # except IndexError:
-        #     logger.warning("Failed to extract quoted text from prompt: %s",
-        #                    prompt)
-        #     target_text = prompt.replace(' ', '').lower()
-        target_text = prompt
-        
+        # Same as flow_grpo OcrScorer_video_or_image: use full prompt, normalized
+        target_text = prompt.replace(" ", "").lower()
         if not target_text:
             return 0.0
 
         # video_tensor is [C, T, H, W]
         C, T, H, W = video_tensor.shape
 
-        # Convert to numpy and move to CPU if needed
-        video_np = video_tensor.detach().cpu().numpy()
+        # Convert to numpy and move to CPU if needed (align with flow_grpo)
+        video_np = video_tensor.detach().float().cpu().numpy()
 
-        # Convert from [C, T, H, W] to [T, H, W, C] for easier frame extraction
-        video_np = np.transpose(video_np, (1, 2, 3, 0))  # [T, H, W, C]
+        video_np = np.transpose(video_np, (1, 2, 3, 0))  # [C, T, H, W] --> [T, H, W, C]
 
-        # Normalize to [0, 255] uint8 if needed
-        if video_np.max() <= 1.0:
-            video_np = (video_np * 255).astype(np.uint8)
-        else:
-            video_np = video_np.astype(np.uint8)
+        # Same as flow_grpo: (videos * 255).round().clamp(0, 255) -> uint8
+        video_np = np.clip(np.round(video_np * 255.0), 0.0, 255.0).astype(np.uint8)
 
         frame_rewards = []
 
@@ -91,21 +80,19 @@ class OcrScorerVideo(BaseRewardModel):
             # Run OCR
             try:
                 result = self.ocr.ocr(frame, cls=False)
-                if result and result[0]:
-                    recognized_text = "".join(
-                        [line[1][0] for line in result[0] if line[1][1] > 0])
-                else:
-                    recognized_text = ""
+                # Same text extraction as flow_grpo OcrScorer_video_or_image
+                recognized_text = (
+                    "".join([res[1][0] if res[1][1] > 0 else "" for res in result[0]])
+                    if result and result[0]
+                    else ""
+                )
             except Exception as e:
                 logger.info("OCR failed on frame %d: %s", frame_idx, str(e))
-                recognized_text = ''
+                recognized_text = ""
 
-
-            recognized_text = recognized_text.replace(' ', '').lower()
-            if target_text in recognized_text:
-                dist = 0
-            else:
-                dist = distance(recognized_text, target_text)
+            recognized_text = recognized_text.replace(" ", "").lower()
+            # Same as flow_grpo: always use distance (no substring check)
+            dist = distance(recognized_text, target_text)
             dist = min(dist, len(target_text))
             reward = 1.0 - dist / len(target_text)
 
@@ -113,8 +100,8 @@ class OcrScorerVideo(BaseRewardModel):
                 frame_rewards.append(reward)
 
 
-        return sum([reward / len(frame_rewards)
-                    for reward in frame_rewards]) if frame_rewards else 0.0
+        # Same as flow_grpo: average of positive frame rewards
+        return (sum(frame_rewards) / len(frame_rewards)) if frame_rewards else 0.0
 
     @torch.no_grad()
     def compute_reward(self, videos: torch.Tensor, prompts: list[str],
@@ -166,31 +153,41 @@ class OcrScorerVideo(BaseRewardModel):
 
 
 if __name__ == "__main__":
-    example_image_path = "flowgrpo_cmd.png"
-    example_image = Image.open(example_image_path)
-    example_prompt = '/f1ow_grpo$'
+    # # Original unit test using a single image as video
+    # example_image_path = "flowgrpo_cmd.png"
+    # example_image = Image.open(example_image_path)
+    # example_prompt = '/f1ow_grpo$'
+    # if example_image.mode != 'RGB':
+    #     example_image = example_image.convert('RGB')
+    # image_np = np.array(example_image)
+    # image_np = image_np.astype(np.float32) / 255.0
+    # image_tensor = torch.from_numpy(image_np).permute(2, 0, 1)
+    # video_tensor = image_tensor.unsqueeze(1).unsqueeze(0)
+    # scorer = OcrScorerVideo(device="cpu")
+    # reward = scorer.compute_reward(video_tensor, [example_prompt])
 
-    # Convert image to RGB if needed
-    if example_image.mode != 'RGB':
-        example_image = example_image.convert('RGB')
+    # Unit test: read decoded videos from a flow_grpo safetensor and print rewards
+    import os
+    from safetensors.torch import load_file as load_safetensors
 
-    # Convert PIL Image to numpy array [H, W, C]
-    image_np = np.array(example_image)
+    SAFETENSOR_PATH = "/mnt/fast-disks/hao_lab/shijie/FastVideo/align_logs/fv_logs/decoded_videos/batch_0_rank_0.safetensors"  # flow_grpo saved: decoded_videos [B, C, T, H, W]
+    if not os.path.isfile(SAFETENSOR_PATH):
+        print(f"Missing {SAFETENSOR_PATH}; run flow_grpo first to generate decoded_videos, or copy a file here.")
+        exit(1)
+    data = load_safetensors(SAFETENSOR_PATH)
+    # Same load and normalization as flow_grpo: permute(0,1,3,4,2) then *255 round clamp
+    raw = data["decoded_videos"]  # [B, T, C, H, W]
+    videos_np = (raw.permute(0, 1, 3, 4, 2) * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
+    # Convert [B, T, H, W, C] to [B, C, T, H, W] in [0,1] so _process_single_video *255 matches flow_grpo
+    videos = torch.from_numpy(videos_np.transpose(0, 4, 1, 2, 3)).float() / 255.0
+    B = videos.shape[0]
 
-    # Normalize to [0, 1] range and convert to float32
-    image_np = image_np.astype(np.float32) / 255.0
+    # Same prompt parsing as flow_grpo: all lines, first B
+    with open("prompts.txt", "r", encoding="utf-8") as f:
+        lines = [line.strip() for line in f]
+    prompts = lines[:B]
 
-    # Convert to torch tensor and reshape: [H, W, C] -> [C, H, W]
-    image_tensor = torch.from_numpy(image_np).permute(2, 0, 1)
-
-    # Add temporal dimension: [C, H, W] -> [C, T, H, W] where T=1
-    video_tensor = image_tensor.unsqueeze(1)  # [C, 1, H, W]
-
-    # Add batch dimension: [C, T, H, W] -> [B, C, T, H, W] where B=1
-    video_tensor = video_tensor.unsqueeze(0)  # [1, C, 1, H, W]
-
-    # Instantiate scorer
+    # Use CPU to match flow_grpo OcrScorer_video_or_image(use_gpu=False)
     scorer = OcrScorerVideo(device="cpu")
-
-    # Call compute_reward method with video tensor
-    reward = scorer.compute_reward(video_tensor, [example_prompt])
+    rewards = scorer.compute_reward(videos, prompts)
+    print("OCR rewards:\n", rewards.tolist())
