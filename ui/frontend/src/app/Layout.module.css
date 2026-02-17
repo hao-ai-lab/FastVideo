@@ -1,0 +1,35 @@
+/* ── Layout ───────────────────────────────────────────────── */
+.main {
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 0 1rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Responsive */
+@media (max-width: 520px) {
+  .main {
+    padding: 0 .5rem 2rem;
+  }
+}
+
+/* ── Section header ─────────────────────────────────────── */
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.sectionHeader h2 {
+  margin-bottom: 0;
+}
+
+/* ── Jobs Container ─────────────────────────────────────── */
+.placeholder {
+  text-align: center;
+  color: var(--text-dim);
+  padding: 2rem 0;
+}
