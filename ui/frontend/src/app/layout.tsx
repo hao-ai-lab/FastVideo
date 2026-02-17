@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import "./globals.css";
-import headerStyles from "@/components/Header.module.css";
+import headerStyles from "@styles/Header.module.css";
 
 export const metadata: Metadata = {
   title: "FastVideo",
