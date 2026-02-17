@@ -1,4 +1,5 @@
 import os
+import time
 from fastvideo import VideoGenerator
 import argparse
 
@@ -22,8 +23,41 @@ output_path = "outputs_video/ltx2_basic/output_ltx2_distilled_t2v.mp4"
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpus", type=int, default=1)
+    parser.add_argument("--trace", action="store_true")
+    parser.add_argument("--attn", type=str, choices=["", "vsa"], default="")
+    parser.add_argument("--compile", action="store_true")
     args = parser.parse_args()
     os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
+
+    if args.compile:
+        do_compile = True
+    else:
+        do_compile = False
+
+    if args.attn == "vsa":
+        os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+        os.environ["FASTVIDEO_TORCH_PROFILER_DIR"] = "./vsa-traces-0.7"
+    else:
+        os.environ["FASTVIDEO_TORCH_PROFILER_DIR"] = "./traces"
+    
+    if args.trace:
+        os.environ["FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES"] = "0"
+        os.environ["FASTVIDEO_TORCH_PROFILER_WITH_FLOPS"] = "0"
+        os.environ["FASTVIDEO_TORCH_PROFILER_WAIT_STEPS"] = "2"
+        os.environ["FASTVIDEO_TORCH_PROFILER_WARMUP_STEPS"] = "2"
+        os.environ["FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS"] = "2"
+        os.environ["FASTVIDEO_TORCH_PROFILE_REGIONS"] = "profiler_region_dit_forward"
+    else:
+        os.environ["FASTVIDEO_TORCH_PROFILER_DIR"] = "" # Disable tracing
+
+    # If the trace dir exist and has files, create a new folder with a postfix which is the timestamp. 
+    trace_dir = os.environ.get("FASTVIDEO_TORCH_PROFILER_DIR", "")
+    if trace_dir and os.path.isdir(trace_dir):
+        with os.scandir(trace_dir) as entries:
+            if any(entries):
+                os.environ["FASTVIDEO_TORCH_PROFILER_DIR"] = (
+                    f"{trace_dir}_{time.strftime('%Y%m%d_%H%M%S')}"
+                ) 
 
     generator = VideoGenerator.from_pretrained(
         "FastVideo/LTX2-Distilled-Diffusers",
@@ -36,7 +70,8 @@ def main() -> None:
         text_encoder_cpu_offload=False,
         pin_cpu_memory=True, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
         dit_layerwise_offload=False,
-        enable_torch_compile=False,
+        enable_torch_compile=do_compile,
+        VSA_sparsity=0.7  # inference/validation sparsity
     )
 
     all_stage_times: list[list[float]] = []  # Each element is one iteration's stage times
