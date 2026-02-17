@@ -11,8 +11,8 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/../../../../../.." && pwd)"
+ROOT_DIR="/mnt/weka/home/hao.zhang/ds8-agent/codes/FastVideo-demo"
+SCRIPT_DIR="${ROOT_DIR}/examples/training/finetune/ltx2/overfit_v2/launch_scripts"
 
 mkdir -p "${SCRIPT_DIR}/slurm_logs"
 
@@ -28,11 +28,16 @@ fi
 JSONL_STEM="$(basename "${JSONL}" .jsonl)"
 OUTPUT_ROOT="${DATA_ROOT_BASE}/${JSONL_STEM}_output"
 
+START_IDX=0
+END_IDX=1000
+
 bash "${PREPARE_SCRIPT}" \
   --config "${CONFIG}" \
   --prompts-jsonl "${JSONL}" \
   --num-gpus 8 \
-  --output-root "${OUTPUT_ROOT}"
+  --output-root "${OUTPUT_ROOT}" \
+  --start-idx "${START_IDX}" \
+  --end-idx "${END_IDX}"
 
 bash "${PRECOMPUTE_SCRIPT}" \
   --config "${CONFIG}" \

@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=ltx2_raw_2000_3000
+#SBATCH --job-name=ltx2_raw_7000_8000
 #SBATCH --partition=main
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -16,7 +16,7 @@ SCRIPT_DIR="${ROOT_DIR}/examples/training/finetune/ltx2/overfit_v2/launch_script
 
 mkdir -p "${SCRIPT_DIR}/slurm_logs"
 
-JSONL="${ROOT_DIR}/data/Davids048/ltx2-data/merged_prompts_semantic_unique_64k/video_prompts.gpt-5-mini-2025-08-07.2000-3000.jsonl"
+JSONL="${ROOT_DIR}/data/Davids048/ltx2-data/merged_prompts_semantic_unique_64k/video_prompts.gpt-5-mini-2025-08-07.7000-8000.jsonl"
 CONFIG="${ROOT_DIR}/examples/training/finetune/ltx2/overfit_v2/configs/overfit_v2.yaml"
 PREPARE_SCRIPT="${ROOT_DIR}/examples/training/finetune/ltx2/overfit_v2/prepare_raw_dataset.sh"
 PRECOMPUTE_SCRIPT="${ROOT_DIR}/examples/training/finetune/ltx2/overfit_v2/precompute_dataset.sh"

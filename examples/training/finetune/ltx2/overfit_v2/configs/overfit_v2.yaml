@@ -1,4 +1,4 @@
-python_env: fastvideo
+python_env: ds8-fv 
 
 # Dataset inputs
 prompts_jsonl: data/Davids048/ltx2-data/merged_prompts_semantic_unique_16k/video_prompts.gpt-5-mini-2025-08-07.0-1000.jsonl
