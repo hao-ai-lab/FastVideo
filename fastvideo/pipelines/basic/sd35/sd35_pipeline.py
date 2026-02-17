@@ -7,7 +7,7 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
-from fastvideo.pipelines.stages.sd35_timestep_preparation import (
+from fastvideo.pipelines.stages.timestep_preparation import (
     SD35TimestepPreparationStage, )
 from fastvideo.pipelines.stages.sd35_conditioning import (
     SD35ConditioningStage,
@@ -38,7 +38,6 @@ class SD35Pipeline(ComposedPipelineBase):
         te_cfgs = list(fastvideo_args.pipeline_config.text_encoder_configs)
         if len(te_cfgs) >= 2:
             for i in (0, 1):
-                te_cfgs[i].arch_config.output_hidden_states = True
                 te_cfgs[i].tokenizer_kwargs.setdefault("padding", "max_length")
                 te_cfgs[i].tokenizer_kwargs.setdefault("max_length", 77)
                 te_cfgs[i].tokenizer_kwargs.setdefault("truncation", True)

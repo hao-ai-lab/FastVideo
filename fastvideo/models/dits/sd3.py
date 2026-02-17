@@ -13,7 +13,9 @@ import torch.nn.functional as F
 from fastvideo.attention import DistributedAttention
 from fastvideo.configs.models import DiTConfig
 from fastvideo.forward_context import get_forward_context, set_forward_context
+from fastvideo.layers.activation import get_act_fn
 from fastvideo.layers.layernorm import RMSNorm
+from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
@@ -244,16 +246,16 @@ class SD3TimestepEmbedding(nn.Module):
     ) -> None:
         super().__init__()
 
-        self.linear_1 = nn.Linear(in_channels, time_embed_dim, bias=True)
-        if act_fn != "silu":
-            raise ValueError(f"Unsupported act_fn: {act_fn}")
-        self.act = nn.SiLU()
-        self.linear_2 = nn.Linear(time_embed_dim, time_embed_dim, bias=True)
+        self.linear_1 = ReplicatedLinear(in_channels, time_embed_dim,
+                                         bias=True)
+        self.act = get_act_fn(act_fn)
+        self.linear_2 = ReplicatedLinear(time_embed_dim, time_embed_dim,
+                                         bias=True)
 
     def forward(self, sample: torch.Tensor) -> torch.Tensor:
-        sample = self.linear_1(sample)
+        sample, _ = self.linear_1(sample)
         sample = self.act(sample)
-        sample = self.linear_2(sample)
+        sample, _ = self.linear_2(sample)
         return sample
 
 
@@ -271,24 +273,14 @@ class SD3TextProjection(nn.Module):
         if out_features is None:
             out_features = hidden_size
 
-        self.linear_1 = nn.Linear(
-            in_features=in_features,
-            out_features=hidden_size,
-            bias=True,
-        )
-        if act_fn != "silu":
-            raise ValueError(f"Unsupported act_fn: {act_fn}")
-        self.act_1 = nn.SiLU()
-        self.linear_2 = nn.Linear(
-            in_features=hidden_size,
-            out_features=out_features,
-            bias=True,
-        )
+        self.linear_1 = ReplicatedLinear(in_features, hidden_size, bias=True)
+        self.act_1 = get_act_fn(act_fn)
+        self.linear_2 = ReplicatedLinear(hidden_size, out_features, bias=True)
 
     def forward(self, caption: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.linear_1(caption)
+        hidden_states, _ = self.linear_1(caption)
         hidden_states = self.act_1(hidden_states)
-        hidden_states = self.linear_2(hidden_states)
+        hidden_states, _ = self.linear_2(hidden_states)
         return hidden_states
 
 
@@ -336,7 +328,8 @@ class SD35AdaLayerNormZeroX(nn.Module):
         super().__init__()
 
         self.silu = nn.SiLU()
-        self.linear = nn.Linear(embedding_dim, 9 * embedding_dim, bias=bias)
+        self.linear = ReplicatedLinear(embedding_dim, 9 * embedding_dim,
+                                       bias=bias)
 
         if norm_type != "layer_norm":
             raise ValueError(
@@ -351,7 +344,7 @@ class SD35AdaLayerNormZeroX(nn.Module):
         hidden_states: torch.Tensor,
         emb: torch.Tensor,
     ) -> tuple[torch.Tensor, ...]:
-        emb = self.linear(self.silu(emb))
+        emb, _ = self.linear(self.silu(emb))
         (shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp,
          shift_msa2, scale_msa2,
          gate_msa2) = emb.chunk(9, dim=1)
@@ -383,7 +376,8 @@ class SD3AdaLayerNormZero(nn.Module):
         super().__init__()
 
         self.silu = nn.SiLU()
-        self.linear = nn.Linear(embedding_dim, 6 * embedding_dim, bias=bias)
+        self.linear = ReplicatedLinear(embedding_dim, 6 * embedding_dim,
+                                       bias=bias)
 
         if norm_type != "layer_norm":
             raise ValueError(
@@ -399,7 +393,7 @@ class SD3AdaLayerNormZero(nn.Module):
         emb: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
                torch.Tensor]:
-        emb = self.linear(self.silu(emb))
+        emb, _ = self.linear(self.silu(emb))
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             emb.chunk(6, dim=1))
         x = self.norm(x) * (1 + scale_msa[:, None]) + shift_msa[:, None]
@@ -420,7 +414,7 @@ class SD3AdaLayerNormContinuous(nn.Module):
         super().__init__()
 
         self.silu = nn.SiLU()
-        self.linear = nn.Linear(
+        self.linear = ReplicatedLinear(
             conditioning_embedding_dim,
             embedding_dim * 2,
             bias=bias,
@@ -440,7 +434,7 @@ class SD3AdaLayerNormContinuous(nn.Module):
         x: torch.Tensor,
         conditioning_embedding: torch.Tensor,
     ) -> torch.Tensor:
-        emb = self.linear(self.silu(conditioning_embedding).to(x.dtype))
+        emb, _ = self.linear(self.silu(conditioning_embedding).to(x.dtype))
         scale, shift = torch.chunk(emb, 2, dim=1)
         x = self.norm(x) * (1 + scale)[:, None, :] + shift[:, None, :]
         return x
@@ -456,11 +450,11 @@ class SD3GELU(nn.Module):
         bias: bool = True,
     ) -> None:
         super().__init__()
-        self.proj = nn.Linear(dim_in, dim_out, bias=bias)
+        self.proj = ReplicatedLinear(dim_in, dim_out, bias=bias)
         self.approximate = approximate
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.proj(hidden_states)
+        hidden_states, _ = self.proj(hidden_states)
         return F.gelu(hidden_states, approximate=self.approximate)
 
 
@@ -499,13 +493,16 @@ class SD3FeedForward(nn.Module):
         self.net = nn.ModuleList()
         self.net.append(act_fn)
         self.net.append(nn.Dropout(dropout))
-        self.net.append(nn.Linear(inner_dim, dim_out, bias=bias))
+        self.net.append(ReplicatedLinear(inner_dim, dim_out, bias=bias))
         if final_dropout:
             self.net.append(nn.Dropout(dropout))
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         for module in self.net:
-            hidden_states = module(hidden_states)
+            if isinstance(module, ReplicatedLinear):
+                hidden_states, _ = module(hidden_states)
+            else:
+                hidden_states = module(hidden_states)
         return hidden_states
 
 
@@ -552,29 +549,29 @@ class SD3Attention(nn.Module):
         self.inner_dim = out_dim
         self.context_pre_only = context_pre_only
 
-        self.to_q = nn.Linear(query_dim, self.inner_dim, bias=True)
-        self.to_k = nn.Linear(query_dim, self.inner_dim, bias=True)
-        self.to_v = nn.Linear(query_dim, self.inner_dim, bias=True)
+        self.to_q = ReplicatedLinear(query_dim, self.inner_dim, bias=True)
+        self.to_k = ReplicatedLinear(query_dim, self.inner_dim, bias=True)
+        self.to_v = ReplicatedLinear(query_dim, self.inner_dim, bias=True)
 
         self.norm_q, self.norm_k = _build_qk_norm(qk_norm, dim_head, eps)
 
-        self.add_q_proj: nn.Linear | None = None
-        self.add_k_proj: nn.Linear | None = None
-        self.add_v_proj: nn.Linear | None = None
+        self.add_q_proj: ReplicatedLinear | None = None
+        self.add_k_proj: ReplicatedLinear | None = None
+        self.add_v_proj: ReplicatedLinear | None = None
         self.norm_added_q: nn.Module | None = None
         self.norm_added_k: nn.Module | None = None
         if added_kv_proj_dim is not None:
-            self.add_q_proj = nn.Linear(
+            self.add_q_proj = ReplicatedLinear(
                 added_kv_proj_dim,
                 self.inner_dim,
                 bias=True,
             )
-            self.add_k_proj = nn.Linear(
+            self.add_k_proj = ReplicatedLinear(
                 added_kv_proj_dim,
                 self.inner_dim,
                 bias=True,
             )
-            self.add_v_proj = nn.Linear(
+            self.add_v_proj = ReplicatedLinear(
                 added_kv_proj_dim,
                 self.inner_dim,
                 bias=True,
@@ -586,12 +583,13 @@ class SD3Attention(nn.Module):
             )
 
         self.to_out = nn.ModuleList([
-            nn.Linear(self.inner_dim, out_dim, bias=True),
+            ReplicatedLinear(self.inner_dim, out_dim, bias=True),
             nn.Dropout(0.0),
         ])
 
         if context_pre_only is not None and not context_pre_only:
-            self.to_add_out = nn.Linear(self.inner_dim, out_dim, bias=True)
+            self.to_add_out = ReplicatedLinear(self.inner_dim, out_dim,
+                                               bias=True)
         else:
             self.to_add_out = None
 
@@ -610,9 +608,9 @@ class SD3Attention(nn.Module):
         batch_size = hidden_states.shape[0]
         residual_seq_len = hidden_states.shape[1]
 
-        query = self.to_q(hidden_states)
-        key = self.to_k(hidden_states)
-        value = self.to_v(hidden_states)
+        query, _ = self.to_q(hidden_states)
+        key, _ = self.to_k(hidden_states)
+        value, _ = self.to_v(hidden_states)
 
         query = query.view(batch_size, -1, self.heads, self.head_dim)
         key = key.view(batch_size, -1, self.heads, self.head_dim)
@@ -631,9 +629,9 @@ class SD3Attention(nn.Module):
                     " added projections"
                 )
 
-            encoder_query = self.add_q_proj(encoder_hidden_states)
-            encoder_key = self.add_k_proj(encoder_hidden_states)
-            encoder_value = self.add_v_proj(encoder_hidden_states)
+            encoder_query, _ = self.add_q_proj(encoder_hidden_states)
+            encoder_key, _ = self.add_k_proj(encoder_hidden_states)
+            encoder_value, _ = self.add_v_proj(encoder_hidden_states)
 
             encoder_query = encoder_query.view(
                 batch_size,
@@ -671,12 +669,12 @@ class SD3Attention(nn.Module):
             hidden_out = attn_output[:, :residual_seq_len]
             context_out = attn_output[:, residual_seq_len:]
             if self.to_add_out is not None:
-                context_out = self.to_add_out(context_out)
+                context_out, _ = self.to_add_out(context_out)
         else:
             hidden_out = attn_output
             context_out = None
 
-        hidden_out = self.to_out[0](hidden_out)
+        hidden_out, _ = self.to_out[0](hidden_out)
         hidden_out = self.to_out[1](hidden_out)
 
         if context_out is not None:
@@ -918,8 +916,8 @@ class SD3Transformer2DModel(BaseDiT):
             embedding_dim=self.inner_dim,
             pooled_projection_dim=arch.pooled_projection_dim,
         )
-        self.context_embedder = nn.Linear(arch.joint_attention_dim,
-                                          arch.caption_projection_dim)
+        self.context_embedder = ReplicatedLinear(arch.joint_attention_dim,
+                                                 arch.caption_projection_dim)
 
         dual_layers = getattr(arch, "dual_attention_layers", ())
         dual_layers = tuple(dual_layers) if isinstance(dual_layers,
@@ -945,7 +943,7 @@ class SD3Transformer2DModel(BaseDiT):
             bias=True,
             norm_type="layer_norm",
         )
-        self.proj_out = nn.Linear(
+        self.proj_out = ReplicatedLinear(
             self.inner_dim,
             arch.patch_size * arch.patch_size * self.out_channels,
             bias=True,
@@ -1028,7 +1026,8 @@ class SD3Transformer2DModel(BaseDiT):
 
             hidden_states = self.pos_embed(hidden_states)
             temb = self.time_text_embed(timestep, pooled_projections)
-            encoder_hidden_states = self.context_embedder(encoder_hidden_states)
+            encoder_hidden_states, _ = self.context_embedder(
+                encoder_hidden_states)
 
             for index_block, block in enumerate(self.transformer_blocks):
                 is_skip = bool(
@@ -1051,7 +1050,7 @@ class SD3Transformer2DModel(BaseDiT):
                         int(index_block / interval_control)]
 
             hidden_states = self.norm_out(hidden_states, temb)
-            hidden_states = self.proj_out(hidden_states)
+            hidden_states, _ = self.proj_out(hidden_states)
 
             patch_size = self.patch_size
             height = height // patch_size

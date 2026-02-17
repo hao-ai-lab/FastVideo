@@ -75,10 +75,7 @@ class SD35Config(PipelineConfig):
         default_factory=lambda: ("fp32", "fp32", "bf16"))
 
     def __post_init__(self) -> None:
-        try:
-            te_cfgs = list(self.text_encoder_configs)
-            for idx in (0, 1):
-                if idx < len(te_cfgs):
-                    te_cfgs[idx].arch_config.output_hidden_states = True
-        except Exception:
-            pass
+        te_cfgs = list(self.text_encoder_configs)
+        for idx in (0, 1):
+            if idx < len(te_cfgs):
+                te_cfgs[idx].arch_config.output_hidden_states = True
