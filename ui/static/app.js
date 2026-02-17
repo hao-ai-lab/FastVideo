@@ -60,6 +60,7 @@ function toast(msg, isError = false) {
 
 let models = [];
 let pollTimer = null;
+let currentJobs = [];
 
 // Track which consoles are open and their scroll-offset for incremental fetch
 const openConsoles = new Map(); // jobId -> { after: number, autoScroll: bool }
@@ -236,7 +237,10 @@ async function fetchLogs(id) {
 
 function pollOpenConsoles() {
   for (const id of openConsoles.keys()) {
-    fetchLogs(id);
+    const job = currentJobs.find(j => j.id === id);
+    if (job && job.status === 'running') {
+      fetchLogs(id);
+    }
   }
 }
 
@@ -245,6 +249,7 @@ function pollOpenConsoles() {
 async function refreshJobs() {
   try {
     const jobs = await api("GET", "/api/jobs");
+    currentJobs = jobs;
     renderJobs(jobs);
   } catch (err) {
     // Silently swallow poll errors to avoid toast spam
