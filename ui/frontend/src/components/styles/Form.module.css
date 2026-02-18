@@ -8,9 +8,8 @@
 
 .formRow label {
   font-size: .8rem;
-  font-weight: 600;
   color: var(--text-dim);
-  text-transform: uppercase;
+  padding-left: 3px;
   letter-spacing: .04em;
 }
 

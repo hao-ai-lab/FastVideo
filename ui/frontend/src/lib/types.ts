@@ -10,6 +10,7 @@ export interface Job {
     finished_at: number | null;
     error: string | null;
     output_path: string | null;
+    log_file_path: string | null;
     num_inference_steps: number;
     num_frames: number;
     height: number;
