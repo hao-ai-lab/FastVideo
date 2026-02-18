@@ -2,9 +2,20 @@
 
 import { Job } from "./types";
 
-const API_BASE_URL = 
-  (typeof process !== "undefined" && process.env.API_BASE_URL) ||
-  "http://localhost:8189/api";
+function getApiBaseUrl(): string {
+  const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+  
+  if (!apiUrl) {
+    throw new Error(
+      "Please set NEXT_PUBLIC_API_BASE_URL in your .env.local file or as an environment variable. " +
+      "Example: NEXT_PUBLIC_API_BASE_URL=http://localhost:8189/api"
+    );
+  }
+  
+  return apiUrl;
+}
+
+const API_BASE_URL = getApiBaseUrl();
 
 export interface CreateJobRequest {
     model_id: string;
