@@ -3,6 +3,31 @@
 A lightweight web-based UI for creating and managing FastVideo video generation
 jobs.
 
+## Quick Start
+
+First run the API server:
+
+```bash
+python -m ui.api_server --output-dir /path/to/videos --log-dir /path/to/logs
+```
+
+The API server starts running at [http://localhost:8188](http://localhost:8188) by default. You can
+configure this using the `--api-url` parameter.
+
+Now you have to configure the environment file to include the API server path.
+
+```bash
+cd frontend
+cp .env.example .env.local
+# Edit the file to set the API server path
+```
+
+Run the web server:
+
+```bash
+npm i && npm run dev
+```
+
 ## Features
 
 - Select from supported FastVideo text-to-video models
@@ -12,43 +37,6 @@ jobs.
 - Live-polling job status updates
 - In-browser video preview for completed jobs
 - Generated videos are saved to a configurable output directory
-
-## Quick Start
-
-### Option 1: Combined Server (Default)
-
-Run both the API and web server together:
-
-```bash
-# From the repository root
-pip install fastvideo fastapi uvicorn
-
-# Launch the combined server (defaults to http://0.0.0.0:8188)
-python -m ui.server
-
-# Or with a custom output directory
-python -m ui.server --output-dir /path/to/videos --port 8080
-```
-
-Then open [http://localhost:8188](http://localhost:8188) in your browser.
-
-### Option 2: Separate API and Web Servers
-
-Run the API server and web server separately for better scalability:
-
-```bash
-# Terminal 1: Start the API server (defaults to http://0.0.0.0:8189)
-python -m ui.api_server --output-dir /path/to/videos --log-dir /path/to/logs
-
-# Terminal 2: Start the web server (defaults to http://0.0.0.0:8188)
-# With API proxy (recommended):
-python -m ui.web_server --api-url http://localhost:8189
-
-# Or without proxy (requires CORS on API server):
-python -m ui.web_server
-```
-
-Then open [http://localhost:8188](http://localhost:8188) in your browser.
 
 ## API Endpoints
 
