@@ -127,23 +127,27 @@ class ComposedPipelineBase(ABC):
                 module.train()
 
                 if self.fastvideo_args.activation_offloading:
-                    for name, module in self.named_modules():
-                        for attr_name in [
-                                "blocks", "layers", "transformer_blocks"
-                        ]:
-                            blocks = getattr(module, attr_name, None)
-                            if isinstance(blocks, torch.nn.ModuleList):
-                                for layer in blocks:
-                                    # Original forward method
-                                    original_forward = layer.forward
-                                    # Patch with the function
-                                    layer.forward = functools.partial(
-                                        offloaded_forward, original_forward)
+                    # Iterate through the actual model components
+                    for module_name, model_obj in self.modules.items():
+                        if not isinstance(model_obj, torch.nn.Module):
+                            continue
 
-                                logger.info(
-                                    f"Successfully enabled activation offloading for {len(blocks)} layers in {name}."
-                                )
-                                return
+                        # Scan each submodule within the model (blocks or layers etc.)
+                        for name, submodule in model_obj.named_modules():
+                            for attr_name in [
+                                    "blocks", "layers", "transformer_blocks"
+                            ]:
+                                blocks = getattr(submodule, attr_name, None)
+
+                                if isinstance(blocks, torch.nn.ModuleList):
+                                    for layer in blocks:
+                                        original_forward = layer.forward
+                                        layer.forward = functools.partial(
+                                            offloaded_forward, original_forward)
+
+                                    logger.info(
+                                        "Successfully enabled activation offloading for %d layers in %s.%s.",
+                                        len(blocks), module_name, name)
 
     @staticmethod
     def _compile_with_conditions(
