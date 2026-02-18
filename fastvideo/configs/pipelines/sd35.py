@@ -23,8 +23,7 @@ def _sd35_clip_text_postprocess(outputs: BaseEncoderOutput) -> torch.Tensor:
     if hs is None:
         raise RuntimeError(
             "SD3.5 CLIP prompt embeddings require hidden_states. "
-            "Set output_hidden_states=True for CLIP encoders."
-        )
+            "Set output_hidden_states=True for CLIP encoders.")
     return hs[-2]
 
 
