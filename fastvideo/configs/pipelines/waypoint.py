@@ -64,14 +64,13 @@ class WaypointT2VConfig(PipelineConfig):
     # Fixed sigma schedule (no flow shift). Match official Overworld transformer config.
     # 5 sigmas = 4 denoising steps (official: Overworld/Waypoint-1-Small transformer config.json).
     flow_shift: float | None = None
-    scheduler_sigmas: list[float] = field(
-        default_factory=lambda: [
-            1.0,
-            0.8609585762023926,
-            0.729332447052002,
-            0.3205108940601349,
-            0.0,
-        ])
+    scheduler_sigmas: list[float] = field(default_factory=lambda: [
+        1.0,
+        0.8609585762023926,
+        0.729332447052002,
+        0.3205108940601349,
+        0.0,
+    ])
 
     # Interactive generation settings
     is_causal: bool = True

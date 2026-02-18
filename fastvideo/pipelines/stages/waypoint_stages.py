@@ -10,13 +10,12 @@ import os
 
 import torch
 
-from fastvideo.logger import init_logger
-
-_WAYPOINT_DEBUG = os.environ.get("WAYPOINT_DEBUG", "0") in ("1", "true", "yes")
-
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
+
+_WAYPOINT_DEBUG = os.environ.get("WAYPOINT_DEBUG", "0") in ("1", "true", "yes")
 
 
 class WaypointTextEncodingStage(PipelineStage):

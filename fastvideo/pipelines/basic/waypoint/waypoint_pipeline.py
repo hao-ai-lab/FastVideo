@@ -11,6 +11,7 @@ import atexit
 import json
 import os
 from dataclasses import dataclass, field
+from typing import Any
 
 import torch
 
@@ -27,7 +28,7 @@ logger = init_logger(__name__)
 # Set WAYPOINT_DEBUG=1 for extensive tensor logging (blur diagnosis)
 _WAYPOINT_DEBUG = os.environ.get("WAYPOINT_DEBUG", "0") in ("1", "true", "yes")
 _WAYPOINT_DEBUG_FILE = os.environ.get("WAYPOINT_DEBUG_FILE", "")
-_DEBUG_COLLECTOR: list[dict] = []
+_DEBUG_COLLECTOR: list[dict[str, Any]] = []
 
 
 def _stats_dict(
@@ -69,19 +70,16 @@ def _stats_rgb(t: torch.Tensor | None) -> list[dict]:
         slices = [f[:, c] for c in range(3)]
     else:
         return []
-    return [
-        {
-            "ch": c,
-            "mean": float(s.mean()),
-            "std": float(s.std()) if s.numel() > 1 else 0.0,
-            "min": float(s.min()),
-            "max": float(s.max()),
-        }
-        for c, s in enumerate(slices)
-    ]
+    return [{
+        "ch": c,
+        "mean": float(s.mean()),
+        "std": float(s.std()) if s.numel() > 1 else 0.0,
+        "min": float(s.min()),
+        "max": float(s.max()),
+    } for c, s in enumerate(slices)]
 
 
-def _collect_debug(tag: str, frame: int | None = None, **kwargs: dict) -> None:
+def _collect_debug(tag: str, frame: int | None = None, **kwargs: Any) -> None:
     """Append debug entry when WAYPOINT_DEBUG_FILE is set."""
     if not _WAYPOINT_DEBUG_FILE:
         return
@@ -115,8 +113,7 @@ def _tensor_stats(t: torch.Tensor, name: str = "t") -> str:
     f = t.float()
     return (
         f"{name} shape={tuple(t.shape)} mean={f.mean().item():.6f} std={f.std().item():.6f} "
-        f"min={f.min().item():.6f} max={f.max().item():.6f}"
-    )
+        f"min={f.min().item():.6f} max={f.max().item():.6f}")
 
 
 @dataclass
@@ -330,7 +327,8 @@ class WaypointPipeline(ComposedPipelineBase):
             logger.info(
                 "DEBUG [kv_cache] created: layers=%d cache_size=%d "
                 "max_frames~=%d",
-                len(kv_cache), cache_size,
+                len(kv_cache),
+                cache_size,
                 cache_size // tokens_per_frame if tokens_per_frame else 0,
             )
         if _WAYPOINT_DEBUG and prompt_emb is not None:
@@ -343,7 +341,9 @@ class WaypointPipeline(ComposedPipelineBase):
             n_valid = prompt_pad_mask.numel() - n_pad
             logger.info(
                 "DEBUG [text] prompt_pad_mask: shape=%s pad_count=%d valid_count=%d",
-                tuple(prompt_pad_mask.shape), int(n_pad), int(n_valid),
+                tuple(prompt_pad_mask.shape),
+                int(n_pad),
+                int(n_valid),
             )
 
     @torch.no_grad()
@@ -441,18 +441,18 @@ class WaypointPipeline(ComposedPipelineBase):
                 latent_w,
             )
             seed = getattr(ctx.batch, "seed", None) or getattr(
-                ctx.fastvideo_args, "seed", None
-            ) or 0
-            g = torch.Generator(device=device).manual_seed(
-                int(seed) + ctx.frame_index
-            )
-            x = torch.randn(
-                latent_shape, device=device, dtype=dtype, generator=g
-            )
+                ctx.fastvideo_args, "seed", None) or 0
+            g = torch.Generator(
+                device=device).manual_seed(int(seed) + ctx.frame_index)
+            x = torch.randn(latent_shape,
+                            device=device,
+                            dtype=dtype,
+                            generator=g)
             if _WAYPOINT_DEBUG and ctx.frame_index == 0:
                 logger.info(
                     "DEBUG [noise] frame=%d %s",
-                    ctx.frame_index, _tensor_stats(x, "x_init"),
+                    ctx.frame_index,
+                    _tensor_stats(x, "x_init"),
                 )
             if _WAYPOINT_DEBUG_FILE and ctx.frame_index < 20:
                 _collect_debug(
@@ -530,7 +530,8 @@ class WaypointPipeline(ComposedPipelineBase):
                 if DEBUG_STEPS_FRAME0 and ctx.frame_index == 0:
                     logger.info(
                         "DEBUG [denoise] step=%d x_before: %s",
-                        i, _tensor_stats(x, "x"),
+                        i,
+                        _tensor_stats(x, "x"),
                     )
 
                 # Ensure prompt tensors are on same device as transformer (needed with CPU offload)
@@ -597,7 +598,8 @@ class WaypointPipeline(ComposedPipelineBase):
                 if DEBUG_STEPS_FRAME0 and ctx.frame_index == 0:
                     logger.info(
                         "DEBUG [denoise] step=%d x_after: %s",
-                        i, _tensor_stats(x, "x"),
+                        i,
+                        _tensor_stats(x, "x"),
                     )
 
             if _WAYPOINT_DEBUG_FILE and ctx.frame_index < 30:
@@ -622,7 +624,9 @@ class WaypointPipeline(ComposedPipelineBase):
                     if has_nan or has_inf:
                         logger.warning(
                             "DEBUG [denoised] frame=%d HAS_NAN=%s HAS_INF=%s",
-                            ctx.frame_index, has_nan, has_inf,
+                            ctx.frame_index,
+                            has_nan,
+                            has_inf,
                         )
             elif _is_last_window:
                 xf = x.float()
@@ -670,7 +674,8 @@ class WaypointPipeline(ComposedPipelineBase):
                         ends = [c["end"] for c in ctx.kv_cache[:3]]
                         logger.info(
                             "DEBUG [kv_cache] frame=%d layer_ends[:3]=%s",
-                            ctx.frame_index, ends,
+                            ctx.frame_index,
+                            ends,
                         )
 
             # Decode latent to frame (WorldEngineVAE / OWL VAE).
@@ -751,14 +756,17 @@ class WaypointPipeline(ComposedPipelineBase):
                             torch.isnan(_df).any().item(),
                             torch.isinf(_df).any().item(),
                         )
-                if _WAYPOINT_DEBUG_FILE and isinstance(_d, torch.Tensor) and ctx.frame_index < 30:
+                if _WAYPOINT_DEBUG_FILE and isinstance(
+                        _d, torch.Tensor) and ctx.frame_index < 30:
                     vae_stats = _stats_dict(_d, include_sample=True)
                     rgb = _stats_rgb(_d)
                     _collect_debug(
                         "vae_out",
                         frame=ctx.frame_index,
                         vae_out=vae_stats,
-                        **({"vae_out_rgb": rgb} if rgb else {}),
+                        **({
+                            "vae_out_rgb": rgb
+                        } if rgb else {}),
                     )
                 if isinstance(_d, torch.Tensor
                               ) and ctx.frame_index < DEBUG_MULTIFRAME_MAX:
