@@ -121,7 +121,11 @@ async def serve_index():
 
     # Inject API URL meta tag if API URL is configured
     if _api_url:
-        api_meta = f'<meta name="api-url" content="{_api_url}" />'
+        # Ensure API URL includes /api path
+        api_url_with_path = _api_url.rstrip('/')
+        if not api_url_with_path.endswith('/api'):
+            api_url_with_path = f"{api_url_with_path}/api"
+        api_meta = f'<meta name="api-url" content="{api_url_with_path}" />'
         # Insert after the viewport meta tag
         content = content.replace(
             '<meta name="viewport"',
@@ -173,10 +177,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--api-url",
-        default=None,
+        default=os.environ.get("FASTVIDEO_API_URL"),
         help=(
             "URL of the API server to proxy requests to "
-            "(e.g., http://localhost:8189). "
+            "Can also be set via FASTVIDEO_API_URL environment variable. "
             "If not set, API requests must be on the same origin or CORS-enabled."
         ),
     )

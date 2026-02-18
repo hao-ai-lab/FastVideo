@@ -2,7 +2,33 @@
 
 import { Job } from "./types";
 
-const API_BASE_URL = "http://localhost:8189/api";
+// Get API base URL from:
+// 1. Environment variable (NEXT_PUBLIC_API_BASE_URL)
+// 2. Meta tag (when served by web_server.py)
+// 3. Default fallback
+function getApiBaseUrl(): string {
+  // Check environment variable first (for Next.js builds)
+  if (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_BASE_URL) {
+    return process.env.NEXT_PUBLIC_API_BASE_URL;
+  }
+  
+  // Check meta tag (for web_server.py injection)
+  if (typeof document !== "undefined") {
+    const metaTag = document.querySelector('meta[name="api-url"]');
+    if (metaTag) {
+      const apiUrl = metaTag.getAttribute("content");
+      if (apiUrl) {
+        // Ensure it ends with /api if not already
+        return apiUrl.endsWith("/api") ? apiUrl : `${apiUrl}/api`;
+      }
+    }
+  }
+  
+  // Default fallback
+  return "http://localhost:8189/api";
+}
+
+const API_BASE_URL = getApiBaseUrl();
 
 export interface CreateJobRequest {
     model_id: string;
