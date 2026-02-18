@@ -2,6 +2,7 @@
 # adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/docs/source/generate_examples.py
 
 import itertools
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -126,8 +127,18 @@ class Example:
         Raises:
             IndexError: If no Markdown files are found in the directory.
         """ # noqa: E501
-        return self.path if self.path.is_file() else list(
-            self.path.glob("*.md")).pop()
+        if self.path.is_file():
+            return self.path
+
+        markdown_files = sorted(self.path.glob("*.md"))
+        if not markdown_files:
+            raise IndexError(f"No Markdown files found in {self.path}")
+
+        readme_files = [f for f in markdown_files if f.name.lower() == "readme.md"]
+        if readme_files:
+            return readme_files[0]
+
+        return markdown_files[0]
 
     def determine_other_files(self) -> list[Path]:
         """
@@ -521,11 +532,11 @@ def generate_examples(generate_main_index: bool = False) -> None:
             # Add to main index if it exists
             if generate_main_index and examples_index:
                 main_index_dir = examples_index.path.parent
-                rel_path = category_index.path.relative_to(
-                    main_index_dir.parent)
+                rel_path = os.path.relpath(category_index.path,
+                                           start=main_index_dir)
                 examples_index.documents.insert(
                     0,
-                    str(rel_path).replace(".md", ""))
+                    str(rel_path).replace("\\", "/").replace(".md", ""))
 
             # Write the category index file
             with open(category_index.path, "w+") as f:

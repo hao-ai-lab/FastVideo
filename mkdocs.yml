@@ -125,6 +125,7 @@ nav:
   - Inference:
     - Quick Start: inference/inference_quick_start.md
     - Configuration: inference/configuration.md
+    - Offloading: inference/offloading.md
     - Optimizations: inference/optimizations.md
     - ComfyUI: inference/comfyui.md
     - Support Matrix: inference/support_matrix.md

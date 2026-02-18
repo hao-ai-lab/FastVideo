@@ -1,104 +1,85 @@
 # FastVideo CLI Inference
 
-The FastVideo CLI provides a quick way to access the FastVideo inference pipeline for video generation. For more advanced usage,
-see the Python interface [here](examples/basic.md).
+The FastVideo CLI exposes the same core inference controls as the Python API.
 
 ## Basic Usage
 
-The basic command to generate a video is:
+Use either:
+
+1. `--model-path` + `--prompt`
+2. `--model-path` + `--prompt-txt` (batch prompts, one line per prompt)
+3. `--config` (JSON/YAML)
 
 ```bash
-fastvideo generate --model-path {MODEL_PATH} --prompt {PROMPT}
+fastvideo generate --model-path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
+  --prompt "A cat playing with a ball of yarn"
 ```
 
-### Required Parameters
+```bash
+fastvideo generate --model-path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
+  --prompt-txt prompts.txt
+```
 
-- `--model-path {MODEL_PATH}`: Path to the model or model ID
-- `--prompt {PROMPT}`: Text description for the video you want to generate
+You cannot provide both `--prompt` and `--prompt-txt` in the same run.
 
-## Common Arguments
-
-To see all the options, you can use the `--help` flag:
+## View All Arguments
 
 ```bash
 fastvideo generate --help
 ```
 
-### Hardware Configuration
+Arguments come from:
 
-- `--num-gpus {NUM_GPUS}`: Number of GPUs to use
-- `--tp-size {TP_SIZE}`: Tensor parallelism size (only for the encoder, should not be larger than 1 if text encoder offload is enabled, as layerwise offload + prefetch is faster)
-- `--sp-size {SP_SIZE}`: Sequence parallelism size (Typically should match the number of GPUs)
+- FastVideo runtime args (`FastVideoArgs`)
+- Sampling args (`SamplingParam`)
+- Pipeline config args (`PipelineConfig`)
 
-#### Video Configuration
+## Common Arguments
 
-- `--height {HEIGHT}`: Height of the generated video
-- `--width {WIDTH}`: Width of the generated video
-- `--num-frames {NUM_FRAMES}`: Number of frames to generate
-- `--fps {FPS}`: Frames per second for the saved video
+### Parallelism
 
-#### Generation Parameters
+- `--num-gpus`
+- `--sp-size`
+- `--tp-size`
 
-- `--num-inference-steps {STEPS}`: Number of denoising steps
-- `--negative-prompt {PROMPT}`: Negative prompt to guide generation away from certain concepts
-- `--seed {SEED}`: Random seed for reproducible generation
+### Sampling
 
-#### Output Options
+- `--num-frames`
+- `--height` / `--width`
+- `--num-inference-steps`
+- `--guidance-scale`
+- `--seed`
+- `--negative-prompt`
 
-- `--output-path {PATH}`: Directory to save the generated video
-- `--save-video`: Whether to save the video to disk
-- `--return-frames`: Whether to return the raw frames
+### Output
 
-## Using Configuration Files
+- `--output-path`
+- `--save-video` / `--no-save-video`
+- `--return-frames`
 
-Instead of specifying all parameters on the command line, you can use a configuration file:
+### Offloading and Performance
+
+- `--dit-layerwise-offload`
+- `--use-fsdp-inference`
+- `--text-encoder-cpu-offload`
+- `--image-encoder-cpu-offload`
+- `--vae-cpu-offload`
+- `--enable-torch-compile`
+- `--torch-compile-kwargs`
+
+## Using Config Files
 
 ```bash
-fastvideo generate --config {CONFIG_FILE_PATH}
+fastvideo generate --config config.yaml
 ```
 
-The config file should be in JSON or YAML format with the same parameter names as the CLI options. Command-line arguments will take precedence over settings in the configuration file, allowing you to override specific values while keeping the rest from the config file.
+Config files can be JSON or YAML. CLI flags override config-file values.
 
-Example configuration file (config.json):
-
-```json
-{
-    "model_path": "FastVideo/FastHunyuan-diffusers",
-    "prompt": "A beautiful woman in a red dress walking down a street",
-    "output_path": "outputs/",
-    "num_gpus": 2,
-    "sp_size": 2,
-    "tp_size": 1,
-    "num_frames": 45,
-    "height": 720,
-    "width": 1280,
-    "num_inference_steps": 6,
-    "seed": 1024,
-    "fps": 24,
-    "precision": "bf16",
-    "vae_precision": "fp16",
-    "vae_tiling": true,
-    "vae_sp": true,
-    "vae_config": {
-        "load_encoder": false,
-        "load_decoder": true,
-        "tile_sample_min_height": 256,
-        "tile_sample_min_width": 256
-    },
-    "text_encoder_precisions": [
-        "fp16",
-        "fp16"
-    ],
-    "mask_strategy_file_path": null,
-    "enable_torch_compile": false
-}
-```
-
-Or using YAML format (config.yaml):
+Example `config.yaml`:
 
 ```yaml
 model_path: "FastVideo/FastHunyuan-diffusers"
-prompt: "A beautiful woman in a red dress walking down a street"
+prompt: "A capybara lounging in a hammock"
 output_path: "outputs/"
 num_gpus: 2
 sp_size: 2
@@ -108,44 +89,34 @@ height: 720
 width: 1280
 num_inference_steps: 6
 seed: 1024
-fps: 24
-precision: "bf16"
+dit_precision: "bf16"
 vae_precision: "fp16"
 vae_tiling: true
 vae_sp: true
-vae_config:
-  load_encoder: false
-  load_decoder: true
-  tile_sample_min_height: 256
-  tile_sample_min_width: 256
-text_encoder_precisions:
-  - "fp16"
-  - "fp16"
-mask_strategy_file_path: null
 enable_torch_compile: false
 ```
 
+Notes:
+
+- Use `dit_precision` / `vae_precision` (not `precision`).
+- Nested config objects are supported, for example `vae_config` and
+  `dit_config`.
+
 ## Examples
 
-Generating a simple video:
+Simple generation:
 
 ```bash
-fastvideo generate --model-path FastVideo/FastHunyuan-diffusers --prompt "A cat playing with a ball of yarn" --num-frames 45 --height 720 --width 1280 --num-inference-steps 6 --seed 1024 --output-path outputs/
+fastvideo generate \
+  --model-path FastVideo/FastHunyuan-diffusers \
+  --prompt "A cat playing with a ball of yarn" \
+  --num-frames 45 --height 720 --width 1280 \
+  --num-inference-steps 6 --seed 1024 \
+  --output-path outputs/
 ```
 
-Using a negative prompt to avoid certain elements:
+Config + CLI override:
 
 ```bash
-fastvideo generate --model-path FastVideo/FastHunyuan-diffusers --prompt "A beautiful forest landscape" --negative-prompt "people, buildings, roads"
+fastvideo generate --config config.yaml --prompt "A panda skiing at sunset"
 ```
-
-Combining command line arguments and a configuration file:
-
-```bash
-fastvideo generate --config config.json --prompt "A capybara lounging in a hammock"
-```
-
-## Troubleshooting
-
-- If you encounter CUDA out-of-memory errors, try reducing the video dimensions or number of frames, or the number of inference steps.
-- For reproducible results, set the same seed value between runs.
