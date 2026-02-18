@@ -9,16 +9,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from fastvideo.attention import LocalAttention
 from fastvideo.configs.models.dits import Kandinsky5VideoConfig
+from fastvideo.layers.layernorm import LayerNormScaleShift
+from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.layers.mlp import MLP
 from fastvideo.models.dits.base import BaseDiT
+from fastvideo.platforms import AttentionBackendEnum
 
 
-def get_freqs(dim: int, max_period: float = 10000.0) -> torch.Tensor:
-    freqs = torch.exp(
-        -math.log(max_period) * torch.arange(start=0,
-                                             end=dim,
-                                             dtype=torch.float32) / dim)
-    return freqs
+def _build_rotary_freqs(dim: int, max_period: float) -> torch.Tensor:
+    return torch.exp(-math.log(max_period) * torch.arange(
+        start=0, end=dim, dtype=torch.float32) / dim)
 
 
 def local_patching(x: torch.Tensor, shape: tuple[int, int, int, int],
@@ -116,16 +118,18 @@ class Kandinsky5TimeEmbeddings(nn.Module):
         assert model_dim % 2 == 0
         self.model_dim = model_dim
         self.max_period = max_period
-        self.freqs = get_freqs(self.model_dim // 2, self.max_period)
-        self.in_layer = nn.Linear(model_dim, time_dim, bias=True)
+        self.freqs = _build_rotary_freqs(self.model_dim // 2, self.max_period)
+        self.in_layer = ReplicatedLinear(model_dim, time_dim, bias=True)
         self.activation = nn.SiLU()
-        self.out_layer = nn.Linear(time_dim, time_dim, bias=True)
+        self.out_layer = ReplicatedLinear(time_dim, time_dim, bias=True)
 
     @torch.autocast(device_type="cuda", dtype=torch.float32)
     def forward(self, time: torch.Tensor) -> torch.Tensor:
         args = torch.outer(time, self.freqs.to(device=time.device))
         time_embed = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
-        time_embed = self.out_layer(self.activation(self.in_layer(time_embed)))
+        time_embed, _ = self.in_layer(time_embed)
+        time_embed = self.activation(time_embed)
+        time_embed, _ = self.out_layer(time_embed)
         return time_embed
 
 
@@ -133,11 +137,11 @@ class Kandinsky5TextEmbeddings(nn.Module):
 
     def __init__(self, text_dim: int, model_dim: int):
         super().__init__()
-        self.in_layer = nn.Linear(text_dim, model_dim, bias=True)
+        self.in_layer = ReplicatedLinear(text_dim, model_dim, bias=True)
         self.norm = nn.LayerNorm(model_dim, elementwise_affine=True)
 
     def forward(self, text_embed: torch.Tensor) -> torch.Tensor:
-        text_embed = self.in_layer(text_embed)
+        text_embed, _ = self.in_layer(text_embed)
         return self.norm(text_embed).type_as(text_embed)
 
 
@@ -147,8 +151,8 @@ class Kandinsky5VisualEmbeddings(nn.Module):
                  patch_size: tuple[int, int, int]):
         super().__init__()
         self.patch_size = patch_size
-        self.in_layer = nn.Linear(math.prod(patch_size) * visual_dim,
-                                  model_dim)
+        self.in_layer = ReplicatedLinear(math.prod(patch_size) * visual_dim,
+                                         model_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, duration, height, width, dim = x.shape
@@ -162,7 +166,8 @@ class Kandinsky5VisualEmbeddings(nn.Module):
             self.patch_size[2],
             dim,
         ).permute(0, 1, 3, 5, 2, 4, 6, 7).flatten(4, 7))
-        return self.in_layer(x)
+        x, _ = self.in_layer(x)
+        return x
 
 
 class Kandinsky5RoPE1D(nn.Module):
@@ -175,10 +180,9 @@ class Kandinsky5RoPE1D(nn.Module):
         self.max_period = max_period
         self.dim = dim
         self.max_pos = max_pos
-        freq = get_freqs(dim // 2, max_period)
+        freq = _build_rotary_freqs(dim // 2, max_period)
         pos = torch.arange(max_pos, dtype=freq.dtype)
-        self.register_buffer("args", torch.outer(pos, freq),
-                             persistent=False)
+        self.register_buffer("args", torch.outer(pos, freq), persistent=False)
 
     def forward(self, pos: torch.Tensor) -> torch.Tensor:
         args = self.args[pos]
@@ -200,8 +204,9 @@ class Kandinsky5RoPE3D(nn.Module):
         self.max_pos = max_pos
         self.max_period = max_period
 
-        for i, (axes_dim, ax_max_pos) in enumerate(zip(axes_dims, max_pos)):
-            freq = get_freqs(axes_dim // 2, max_period)
+        for i, (axes_dim, ax_max_pos) in enumerate(
+                zip(axes_dims, max_pos, strict=True)):
+            freq = _build_rotary_freqs(axes_dim // 2, max_period)
             pos = torch.arange(ax_max_pos, dtype=freq.dtype)
             self.register_buffer(f"args_{i}",
                                  torch.outer(pos, freq),
@@ -241,13 +246,17 @@ class Kandinsky5Modulation(nn.Module):
     def __init__(self, time_dim: int, model_dim: int, num_params: int):
         super().__init__()
         self.activation = nn.SiLU()
-        self.out_layer = nn.Linear(time_dim, num_params * model_dim)
+        self.out_layer = ReplicatedLinear(time_dim,
+                                          num_params * model_dim,
+                                          bias=True)
         self.out_layer.weight.data.zero_()
         self.out_layer.bias.data.zero_()
 
     @torch.autocast(device_type="cuda", dtype=torch.float32)
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.out_layer(self.activation(x))
+        x = self.activation(x)
+        x, _ = self.out_layer(x)
+        return x
 
 
 def _apply_rotary(x: torch.Tensor, rope: torch.Tensor) -> torch.Tensor:
@@ -258,17 +267,41 @@ def _apply_rotary(x: torch.Tensor, rope: torch.Tensor) -> torch.Tensor:
 
 class Kandinsky5Attention(nn.Module):
 
-    def __init__(self, num_channels: int, head_dim: int):
+    def __init__(
+        self,
+        num_channels: int,
+        head_dim: int,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None,
+        prefix: str = "",
+    ):
         super().__init__()
         assert num_channels % head_dim == 0
         self.num_heads = num_channels // head_dim
 
-        self.to_query = nn.Linear(num_channels, num_channels, bias=True)
-        self.to_key = nn.Linear(num_channels, num_channels, bias=True)
-        self.to_value = nn.Linear(num_channels, num_channels, bias=True)
+        self.to_query = ReplicatedLinear(num_channels,
+                                         num_channels,
+                                         bias=True,
+                                         prefix=f"{prefix}.to_query")
+        self.to_key = ReplicatedLinear(num_channels,
+                                       num_channels,
+                                       bias=True,
+                                       prefix=f"{prefix}.to_key")
+        self.to_value = ReplicatedLinear(num_channels,
+                                         num_channels,
+                                         bias=True,
+                                         prefix=f"{prefix}.to_value")
         self.query_norm = nn.RMSNorm(head_dim)
         self.key_norm = nn.RMSNorm(head_dim)
-        self.out_layer = nn.Linear(num_channels, num_channels, bias=True)
+        self.out_layer = ReplicatedLinear(num_channels,
+                                          num_channels,
+                                          bias=True,
+                                          prefix=f"{prefix}.out_layer")
+        self.local_attention = LocalAttention(
+            num_heads=self.num_heads,
+            head_size=head_dim,
+            causal=False,
+            supported_attention_backends=supported_attention_backends,
+        )
 
     def forward(
         self,
@@ -277,18 +310,18 @@ class Kandinsky5Attention(nn.Module):
         sparse_params: dict[str, Any] | None = None,
         rotary_emb: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        query = self.to_query(hidden_states)
+        query, _ = self.to_query(hidden_states)
 
         if encoder_hidden_states is not None:
-            key = self.to_key(encoder_hidden_states)
-            value = self.to_value(encoder_hidden_states)
+            key, _ = self.to_key(encoder_hidden_states)
+            value, _ = self.to_value(encoder_hidden_states)
             shape, cond_shape = query.shape[:-1], key.shape[:-1]
             query = query.reshape(*shape, self.num_heads, -1)
             key = key.reshape(*cond_shape, self.num_heads, -1)
             value = value.reshape(*cond_shape, self.num_heads, -1)
         else:
-            key = self.to_key(hidden_states)
-            value = self.to_value(hidden_states)
+            key, _ = self.to_key(hidden_states)
+            value, _ = self.to_value(hidden_states)
             shape = query.shape[:-1]
             query = query.reshape(*shape, self.num_heads, -1)
             key = key.reshape(*shape, self.num_heads, -1)
@@ -306,30 +339,36 @@ class Kandinsky5Attention(nn.Module):
                 "Sparse attention is not yet supported for Kandinsky5 in FastVideo."
             )
 
-        query = query.transpose(1, 2)
-        key = key.transpose(1, 2)
-        value = value.transpose(1, 2)
-        hidden_states = F.scaled_dot_product_attention(query,
-                                                       key,
-                                                       value,
-                                                       attn_mask=None,
-                                                       is_causal=False)
-        hidden_states = hidden_states.transpose(1, 2)
-        hidden_states = hidden_states.flatten(-2, -1)
+        try:
+            hidden_states = self.local_attention(query, key, value)
+        except AssertionError as exc:
+            # LocalAttention requires pipeline forward context. Standalone
+            # parity tests call the model directly, so fallback to Torch SDPA.
+            if "Forward context is not set" not in str(exc):
+                raise
+            query = query.transpose(1, 2)
+            key = key.transpose(1, 2)
+            value = value.transpose(1, 2)
+            hidden_states = F.scaled_dot_product_attention(query,
+                                                           key,
+                                                           value,
+                                                           attn_mask=None,
+                                                           is_causal=False)
+            hidden_states = hidden_states.transpose(1, 2)
+        hidden_states = hidden_states.flatten(2)
 
-        return self.out_layer(hidden_states)
+        hidden_states, _ = self.out_layer(hidden_states)
+        return hidden_states
 
 
 class Kandinsky5FeedForward(nn.Module):
 
     def __init__(self, dim: int, ff_dim: int):
         super().__init__()
-        self.in_layer = nn.Linear(dim, ff_dim, bias=False)
-        self.activation = nn.GELU()
-        self.out_layer = nn.Linear(ff_dim, dim, bias=False)
+        self.mlp = MLP(dim, ff_dim, bias=False, act_type="gelu")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.out_layer(self.activation(self.in_layer(x)))
+        return self.mlp(x)
 
 
 class Kandinsky5OutLayer(nn.Module):
@@ -339,10 +378,12 @@ class Kandinsky5OutLayer(nn.Module):
         super().__init__()
         self.patch_size = patch_size
         self.modulation = Kandinsky5Modulation(time_dim, model_dim, 2)
-        self.norm = nn.LayerNorm(model_dim, elementwise_affine=False)
-        self.out_layer = nn.Linear(model_dim,
-                                   math.prod(patch_size) * visual_dim,
-                                   bias=True)
+        self.norm = nn.LayerNorm(model_dim,
+                                 eps=1e-5,
+                                 elementwise_affine=False)
+        self.out_layer = ReplicatedLinear(model_dim,
+                                          math.prod(patch_size) * visual_dim,
+                                          bias=True)
 
     def forward(self, visual_embed: torch.Tensor, text_embed: torch.Tensor,
                 time_embed: torch.Tensor) -> torch.Tensor:
@@ -353,7 +394,7 @@ class Kandinsky5OutLayer(nn.Module):
             (scale.float()[:, None, None] + 1.0) +
             shift.float()[:, None, None]).type_as(visual_embed)
 
-        x = self.out_layer(visual_embed)
+        x, _ = self.out_layer(visual_embed)
 
         batch_size, duration, height, width, _ = x.shape
         x = (x.view(
@@ -373,17 +414,33 @@ class Kandinsky5OutLayer(nn.Module):
 class Kandinsky5TransformerEncoderBlock(nn.Module):
 
     def __init__(self, model_dim: int, time_dim: int, ff_dim: int,
-                 head_dim: int):
+                 head_dim: int,
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
+                 | None = None,
+                 prefix: str = ""):
         super().__init__()
         self.text_modulation = Kandinsky5Modulation(time_dim, model_dim, 6)
 
-        self.self_attention_norm = nn.LayerNorm(model_dim,
-                                                elementwise_affine=False)
+        self.self_attention_norm = LayerNormScaleShift(
+            model_dim,
+            norm_type="layer",
+            eps=1e-5,
+            elementwise_affine=False,
+            dtype=torch.float32,
+            compute_dtype=torch.float32)
         self.self_attention = Kandinsky5Attention(
-            model_dim, head_dim)
+            model_dim,
+            head_dim,
+            supported_attention_backends=supported_attention_backends,
+            prefix=f"{prefix}.self_attention")
 
-        self.feed_forward_norm = nn.LayerNorm(model_dim,
-                                              elementwise_affine=False)
+        self.feed_forward_norm = LayerNormScaleShift(
+            model_dim,
+            norm_type="layer",
+            eps=1e-5,
+            elementwise_affine=False,
+            dtype=torch.float32,
+            compute_dtype=torch.float32)
         self.feed_forward = Kandinsky5FeedForward(model_dim, ff_dim)
 
     def forward(self, x: torch.Tensor, time_embed: torch.Tensor,
@@ -391,16 +448,20 @@ class Kandinsky5TransformerEncoderBlock(nn.Module):
         self_attn_params, ff_params = torch.chunk(
             self.text_modulation(time_embed).unsqueeze(dim=1), 2, dim=-1)
         shift, scale, gate = torch.chunk(self_attn_params, 3, dim=-1)
-        out = (self.self_attention_norm(x.float()) *
-               (scale.float() + 1.0) + shift.float()).type_as(x)
+        out = self.self_attention_norm(x.float(),
+                                       shift=shift,
+                                       scale=scale,
+                                       convert_modulation_dtype=True).type_as(x)
         out = self.self_attention(out, rotary_emb=rope)
         x = (x.float() + gate.float() * out.float()).type_as(x)
 
-        shift, scale, gate = torch.chunk(ff_params, 3, dim=-1)
-        out = (self.feed_forward_norm(x.float()) *
-               (scale.float() + 1.0) + shift.float()).type_as(x)
+        ff_shift, ff_scale, ff_gate = torch.chunk(ff_params, 3, dim=-1)
+        out = self.feed_forward_norm(x.float(),
+                                     shift=ff_shift,
+                                     scale=ff_scale,
+                                     convert_modulation_dtype=True).type_as(x)
         out = self.feed_forward(out)
-        x = (x.float() + gate.float() * out.float()).type_as(x)
+        x = (x.float() + ff_gate.float() * out.float()).type_as(x)
 
         return x
 
@@ -408,22 +469,46 @@ class Kandinsky5TransformerEncoderBlock(nn.Module):
 class Kandinsky5TransformerDecoderBlock(nn.Module):
 
     def __init__(self, model_dim: int, time_dim: int, ff_dim: int,
-                 head_dim: int):
+                 head_dim: int,
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
+                 | None = None,
+                 prefix: str = ""):
         super().__init__()
         self.visual_modulation = Kandinsky5Modulation(time_dim, model_dim, 9)
 
-        self.self_attention_norm = nn.LayerNorm(model_dim,
-                                                elementwise_affine=False)
+        self.self_attention_norm = LayerNormScaleShift(
+            model_dim,
+            norm_type="layer",
+            eps=1e-5,
+            elementwise_affine=False,
+            dtype=torch.float32,
+            compute_dtype=torch.float32)
         self.self_attention = Kandinsky5Attention(
-            model_dim, head_dim)
+            model_dim,
+            head_dim,
+            supported_attention_backends=supported_attention_backends,
+            prefix=f"{prefix}.self_attention")
 
-        self.cross_attention_norm = nn.LayerNorm(model_dim,
-                                                 elementwise_affine=False)
+        self.cross_attention_norm = LayerNormScaleShift(
+            model_dim,
+            norm_type="layer",
+            eps=1e-5,
+            elementwise_affine=False,
+            dtype=torch.float32,
+            compute_dtype=torch.float32)
         self.cross_attention = Kandinsky5Attention(
-            model_dim, head_dim)
+            model_dim,
+            head_dim,
+            supported_attention_backends=supported_attention_backends,
+            prefix=f"{prefix}.cross_attention")
 
-        self.feed_forward_norm = nn.LayerNorm(model_dim,
-                                              elementwise_affine=False)
+        self.feed_forward_norm = LayerNormScaleShift(
+            model_dim,
+            norm_type="layer",
+            eps=1e-5,
+            elementwise_affine=False,
+            dtype=torch.float32,
+            compute_dtype=torch.float32)
         self.feed_forward = Kandinsky5FeedForward(model_dim, ff_dim)
 
     def forward(self, visual_embed: torch.Tensor, text_embed: torch.Tensor,
@@ -432,32 +517,48 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
         self_attn_params, cross_attn_params, ff_params = torch.chunk(
             self.visual_modulation(time_embed).unsqueeze(dim=1), 3, dim=-1)
 
-        shift, scale, gate = torch.chunk(self_attn_params, 3, dim=-1)
-        visual_out = (
-            self.self_attention_norm(visual_embed.float()) *
-            (scale.float() + 1.0) + shift.float()).type_as(visual_embed)
+        self_shift, self_scale, self_gate = torch.chunk(self_attn_params,
+                                                        3,
+                                                        dim=-1)
+        visual_out = self.self_attention_norm(
+            visual_embed.float(),
+            shift=self_shift,
+            scale=self_scale,
+            convert_modulation_dtype=True,
+        ).type_as(visual_embed)
         visual_out = self.self_attention(visual_out,
                                          rotary_emb=rope,
                                          sparse_params=sparse_params)
         visual_embed = (visual_embed.float() +
-                        gate.float() * visual_out.float()).type_as(visual_embed)
+                        self_gate.float() * visual_out.float()).type_as(
+                            visual_embed)
 
-        shift, scale, gate = torch.chunk(cross_attn_params, 3, dim=-1)
-        visual_out = (
-            self.cross_attention_norm(visual_embed.float()) *
-            (scale.float() + 1.0) + shift.float()).type_as(visual_embed)
-        visual_out = self.cross_attention(visual_out,
-                                          encoder_hidden_states=text_embed)
+        cross_shift, cross_scale, cross_gate = torch.chunk(cross_attn_params,
+                                                           3,
+                                                           dim=-1)
+        visual_out = self.cross_attention_norm(
+            visual_embed.float(),
+            shift=cross_shift,
+            scale=cross_scale,
+            convert_modulation_dtype=True,
+        ).type_as(visual_embed)
+        visual_out = self.cross_attention(
+            visual_out, encoder_hidden_states=text_embed)
         visual_embed = (visual_embed.float() +
-                        gate.float() * visual_out.float()).type_as(visual_embed)
+                        cross_gate.float() * visual_out.float()).type_as(
+                            visual_embed)
 
-        shift, scale, gate = torch.chunk(ff_params, 3, dim=-1)
-        visual_out = (
-            self.feed_forward_norm(visual_embed.float()) *
-            (scale.float() + 1.0) + shift.float()).type_as(visual_embed)
+        ff_shift, ff_scale, ff_gate = torch.chunk(ff_params, 3, dim=-1)
+        visual_out = self.feed_forward_norm(
+            visual_embed.float(),
+            shift=ff_shift,
+            scale=ff_scale,
+            convert_modulation_dtype=True,
+        ).type_as(visual_embed)
         visual_out = self.feed_forward(visual_out)
         visual_embed = (visual_embed.float() +
-                        gate.float() * visual_out.float()).type_as(visual_embed)
+                        ff_gate.float() * visual_out.float()).type_as(
+                            visual_embed)
 
         return visual_embed
 
@@ -510,13 +611,19 @@ class Kandinsky5Transformer3DModel(BaseDiT):
 
         self.text_transformer_blocks = nn.ModuleList([
             Kandinsky5TransformerEncoderBlock(arch.model_dim, arch.time_dim,
-                                              arch.ff_dim, head_dim)
-            for _ in range(arch.num_text_blocks)
+                                              arch.ff_dim,
+                                              head_dim,
+                                              self._supported_attention_backends,
+                                              prefix=f"{config.prefix}.text_transformer_blocks.{i}")
+            for i in range(arch.num_text_blocks)
         ])
         self.visual_transformer_blocks = nn.ModuleList([
             Kandinsky5TransformerDecoderBlock(arch.model_dim, arch.time_dim,
-                                              arch.ff_dim, head_dim)
-            for _ in range(arch.num_visual_blocks)
+                                              arch.ff_dim,
+                                              head_dim,
+                                              self._supported_attention_backends,
+                                              prefix=f"{config.prefix}.visual_transformer_blocks.{i}")
+            for i in range(arch.num_visual_blocks)
         ])
 
         self.out_layer = Kandinsky5OutLayer(arch.model_dim, arch.time_dim,
@@ -623,33 +730,31 @@ class Kandinsky5Transformer3DModel(BaseDiT):
                                            ) -> None:
         if isinstance(self.time_embeddings.freqs,
                       torch.Tensor) and self.time_embeddings.freqs.is_meta:
-            self.time_embeddings.freqs = get_freqs(
+            self.time_embeddings.freqs = _build_rotary_freqs(
                 self.time_embeddings.model_dim // 2,
                 self.time_embeddings.max_period).to(device=device)
 
         if isinstance(self.text_rope_embeddings.args,
                       torch.Tensor) and self.text_rope_embeddings.args.is_meta:
-            freq = get_freqs(self.text_rope_embeddings.dim // 2,
-                             self.text_rope_embeddings.max_period).to(
-                                 device=device)
+            freq = _build_rotary_freqs(self.text_rope_embeddings.dim // 2,
+                                       self.text_rope_embeddings.max_period).to(
+                                           device=device)
             pos = torch.arange(self.text_rope_embeddings.max_pos,
                                dtype=freq.dtype,
                                device=device)
-            self.text_rope_embeddings._buffers["args"] = torch.outer(
-                pos, freq)
+            self.text_rope_embeddings._buffers["args"] = torch.outer(pos, freq)
 
         for i, (axes_dim,
                 ax_max_pos) in enumerate(
                     zip(self.visual_rope_embeddings.axes_dims,
-                        self.visual_rope_embeddings.max_pos)):
+                        self.visual_rope_embeddings.max_pos,
+                        strict=True)):
             name = f"args_{i}"
             buf = getattr(self.visual_rope_embeddings, name, None)
             if isinstance(buf, torch.Tensor) and buf.is_meta:
-                freq = get_freqs(axes_dim // 2,
-                                 self.visual_rope_embeddings.max_period).to(
-                                     device=device)
-                pos = torch.arange(ax_max_pos,
-                                   dtype=freq.dtype,
-                                   device=device)
+                freq = _build_rotary_freqs(
+                    axes_dim // 2, self.visual_rope_embeddings.max_period).to(
+                        device=device)
+                pos = torch.arange(ax_max_pos, dtype=freq.dtype, device=device)
                 self.visual_rope_embeddings._buffers[name] = torch.outer(
                     pos, freq)

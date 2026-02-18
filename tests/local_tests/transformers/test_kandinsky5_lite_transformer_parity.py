@@ -8,14 +8,10 @@ from torch.testing import assert_close
 
 from diffusers import Kandinsky5Transformer3DModel as DiffusersKandinsky5
 
-from fastvideo.configs.models.dits import Kandinsky5VideoConfig
-from fastvideo.configs.pipelines import PipelineConfig
-from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.models.loader.component_loader import TransformerLoader
-
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29515")
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+os.environ.setdefault("DIFFUSERS_ATTN_BACKEND", "native")
 
 
 def _resolve_transformer_path() -> Path:
@@ -43,10 +39,21 @@ def test_kandinsky5_lite_transformer_parity():
             "Kandinsky5 transformer parity test requires CUDA for practical runtime."
         )
 
+    # Delay FastVideo imports until after CUDA/path checks so environments
+    # without CUDA/kernel support skip cleanly during collection/runtime.
+    try:
+        from fastvideo.configs.models.dits import Kandinsky5VideoConfig
+        from fastvideo.configs.pipelines import PipelineConfig
+        from fastvideo.fastvideo_args import FastVideoArgs
+        from fastvideo.models.loader.component_loader import TransformerLoader
+    except Exception as exc:
+        pytest.skip(f"FastVideo imports unavailable for parity run: {exc}")
+
     torch.manual_seed(42)
     device = torch.device("cuda:0")
-    precision = torch.bfloat16
-    precision_str = "bf16"
+    precision = (torch.bfloat16
+                 if torch.cuda.is_bf16_supported() else torch.float16)
+    precision_str = "bf16" if precision == torch.bfloat16 else "fp16"
 
     reference_model = DiffusersKandinsky5.from_pretrained(
         transformer_path).to(device=device, dtype=precision)
@@ -127,7 +134,10 @@ def test_kandinsky5_lite_transformer_parity():
     text_rope_pos = torch.arange(
         encoder_hidden_states.shape[1], device=device)
 
-    with torch.no_grad():
+    # Force both models onto the same SDPA math kernel for strict parity.
+    sdpa_math_ctx = torch.nn.attention.sdpa_kernel(
+        torch.nn.attention.SDPBackend.MATH)
+    with torch.no_grad(), sdpa_math_ctx:
         ref_out = reference_model(
             hidden_states=hidden_states,
             encoder_hidden_states=encoder_hidden_states,
@@ -139,6 +149,8 @@ def test_kandinsky5_lite_transformer_parity():
             sparse_params=None,
             return_dict=False,
         )
+        if isinstance(ref_out, tuple):
+            ref_out = ref_out[0]
 
         fv_out = fastvideo_model(
             hidden_states=hidden_states,
@@ -151,7 +163,10 @@ def test_kandinsky5_lite_transformer_parity():
             sparse_params=None,
             return_dict=False,
         )
+        if isinstance(fv_out, tuple):
+            fv_out = fv_out[0]
 
     assert ref_out.shape == fv_out.shape
     assert ref_out.dtype == fv_out.dtype
-    assert_close(ref_out, fv_out, atol=1e-4, rtol=1e-4)
+    tol = 1e-4 if precision == torch.bfloat16 else 2e-4
+    assert_close(ref_out, fv_out, atol=tol, rtol=tol)

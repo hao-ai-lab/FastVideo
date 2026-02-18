@@ -13,8 +13,15 @@ class Kandinsky5ArchConfig(DiTArchConfig):
             and n.split(".")[-1].isdigit()
         ])
 
-    # Native FastVideo implementation uses the same parameter names as diffusers.
-    param_names_mapping: dict = field(default_factory=lambda: {})
+    # Native FastVideo implementation uses the same parameter names as diffusers
+    # except FFN internals: Diffusers FFN uses `in_layer/out_layer`, while
+    # FastVideo uses MLP `fc_in/fc_out`.
+    param_names_mapping: dict = field(default_factory=lambda: {
+        r"^(.*feed_forward)\.in_layer\.(weight|bias)$":
+        r"\1.mlp.fc_in.\2",
+        r"^(.*feed_forward)\.out_layer\.(weight|bias)$":
+        r"\1.mlp.fc_out.\2",
+    })
 
     reverse_param_names_mapping: dict = field(default_factory=lambda: {})
 
