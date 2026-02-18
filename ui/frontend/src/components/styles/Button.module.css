@@ -82,3 +82,13 @@
   background: var(--border);
   color: var(--text);
 }
+
+.btnActive {
+  background: var(--accent) !important;
+  color: #fff !important;
+  border-color: var(--accent) !important;
+}
+
+.btnActive:hover:not(:disabled) {
+  background: var(--accent-h) !important;
+}

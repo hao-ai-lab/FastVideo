@@ -1,16 +1,18 @@
 'use client';
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import CreateJobModal from "./CreateJobModal";
 import buttonStyles from "./styles/Button.module.css";
 
-export default function CreateJobButton() {
-  const router = useRouter();
+interface CreateJobButtonProps {
+  onJobCreated?: () => void;
+}
+
+export default function CreateJobButton({ onJobCreated }: CreateJobButtonProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const handleSuccess = () => {
-    router.refresh();
+    onJobCreated?.();
   };
 
   return (

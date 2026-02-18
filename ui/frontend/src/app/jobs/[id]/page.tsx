@@ -12,23 +12,6 @@ import progressBarStyles from "@styles/ProgressBar.module.css";
 import buttonStyles from "@styles/Button.module.css";
 import layoutStyles from "../../Layout.module.css";
 
-function getBadgeClass(status: string) {
-  switch (status) {
-    case "pending":
-      return badgeStyles.badgePending;
-    case "running":
-      return badgeStyles.badgeRunning;
-    case "completed":
-      return badgeStyles.badgeCompleted;
-    case "failed":
-      return badgeStyles.badgeFailed;
-    case "stopped":
-      return badgeStyles.badgeStopped;
-    default:
-      return badgeStyles.badgePending;
-  }
-}
-
 export default function JobDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const [job, setJob] = useState<Job | null>(null);
@@ -51,6 +34,7 @@ export default function JobDetailsPage() {
 
   const progressPercent = typeof job.progress === "number" ? job.progress : 0;
   const isCompleted = job.status === "completed";
+  const badgeClass = `badge${job.status.charAt(0).toUpperCase() + job.status.slice(1)}`;
 
   return (
     <main className={layoutStyles.main}>
@@ -65,7 +49,7 @@ export default function JobDetailsPage() {
         <div className={jobCardStyles.jobCard}>
           <div className={jobCardStyles.jobHeader}>
             <span className={jobCardStyles.jobModel}>{job.model_id}</span>
-            <span className={`${badgeStyles.badge} ${getBadgeClass(job.status)}`}>
+            <span className={`${badgeStyles.badge} ${badgeStyles[badgeClass as keyof typeof badgeStyles] || badgeStyles.badgePending}`}>
               {job.status}
             </span>
           </div>

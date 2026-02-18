@@ -1,57 +1,71 @@
+'use client';
+
 import { getJobsList } from "@/lib/api";
-import { Job } from "@/lib/types";
-import Link from "next/link";
+import { useEffect, useState, useRef, useCallback } from "react";
 import CreateJobButton from "@/components/CreateJobButton";
+import JobCard from "@/components/JobCard";
 import cardStyles from "@styles/Card.module.css";
-import jobCardStyles from "@styles/JobCard.module.css";
-import badgeStyles from "@styles/Badge.module.css";
 import layoutStyles from "./Layout.module.css";
 
-function getBadgeClass(status: string) {
-  switch (status) {
-    case "pending":
-      return badgeStyles.badgePending;
-    case "running":
-      return badgeStyles.badgeRunning;
-    case "completed":
-      return badgeStyles.badgeCompleted;
-    case "failed":
-      return badgeStyles.badgeFailed;
-    case "stopped":
-      return badgeStyles.badgeStopped;
-    default:
-      return badgeStyles.badgePending;
-  }
-}
+export default function Home() {
+  const [jobs, setJobs] = useState<Awaited<ReturnType<typeof getJobsList>>>([]);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-export default async function Home() {
-  const jobs = await getJobsList();
+  const fetchJobs = useCallback(async () => {
+    try {
+      const jobsList = await getJobsList();
+      setJobs(jobsList);
+    } catch (error) {
+      console.error("Failed to fetch jobs:", error);
+    }
+  }, []);
+
+  // Initial fetch
+  useEffect(() => {
+    getJobsList()
+      .then(setJobs)
+      .catch((error) => {
+        console.error("Failed to fetch jobs:", error);
+      });
+  }, []);
+
+  // Poll every second if there are running jobs
+  useEffect(() => {
+    // Clear any existing interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
+    const hasRunningJobs = jobs.some(job => job.status === "running");
+    
+    if (hasRunningJobs) {
+      intervalRef.current = setInterval(() => {
+        fetchJobs();
+      }, 1000);
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [jobs, fetchJobs]);
 
   return (
     <main className={layoutStyles.main}>
       <section className={cardStyles.card}>
         <div className={layoutStyles.sectionHeader}>
           <h2>Jobs</h2>
-          <CreateJobButton />
+          <CreateJobButton onJobCreated={fetchJobs} />
         </div>
         <div id="jobs-container">
           {jobs.length === 0 ? (
             <p className={layoutStyles.placeholder}>No jobs yet. Create one above.</p>
           ) : (
             jobs.map((job) => (
-              <Link href={`/jobs/${job.id}`} key={job.id} className={jobCardStyles.jobCard} style={{ textDecoration: "none", color: "inherit" }}>
-                <div className={jobCardStyles.jobHeader}>
-                  <span className={jobCardStyles.jobModel}>{job.model_id}</span>
-                  <span className={`${badgeStyles.badge} ${getBadgeClass(job.status)}`}>
-                    {job.status}
-                  </span>
-                </div>
-                <p className={jobCardStyles.jobPrompt}>{job.prompt}</p>
-                <div className={jobCardStyles.jobMeta}>
-                  <span>{job.num_frames} frames</span>
-                  <span>{job.height}×{job.width}</span>
-                </div>
-              </Link>
+              <JobCard key={job.id} job={job} onJobUpdated={fetchJobs} />
             ))
           )}
         </div>
