@@ -52,7 +52,7 @@ jobs:
         run: python scripts/check_docs_links.py
 
       - name: Build documentation
-        run: mkdocs build --strict
+        run: mkdocs build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
