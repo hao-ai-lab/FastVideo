@@ -2,7 +2,25 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+### Configuration
+
+Set the API server URL via environment variable:
+
+```bash
+# Option 1: Create .env.local file
+echo "API_BASE_URL=http://localhost:8189/api" > .env.local
+
+# Option 2: Set via command line
+API_BASE_URL=http://localhost:8189/api npm run dev
+
+# Option 3: Export as system environment variable
+export API_BASE_URL=http://localhost:8189/api
+npm run dev
+```
+
+The default API URL is `http://localhost:8189/api` if not specified.
+
+### Running the Development Server
 
 ```bash
 npm run dev
