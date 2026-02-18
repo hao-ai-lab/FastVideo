@@ -8,7 +8,7 @@ from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
 from fastvideo.pipelines.stages.timestep_preparation import (
-    TimestepPreparationStage, )
+    SD35TimestepPreparationStage, )
 from fastvideo.pipelines.stages.sd35_conditioning import (
     SD35ConditioningStage,
     SD35DecodingStage,
@@ -71,7 +71,7 @@ class SD35Pipeline(ComposedPipelineBase):
 
         self.add_stage(
             stage_name="timestep_preparation_stage",
-            stage=TimestepPreparationStage(
+            stage=SD35TimestepPreparationStage(
                 scheduler=self.get_module("scheduler")),
         )
 
