@@ -42,6 +42,10 @@ TEST_PROMPTS = [
     "a photo of a cat",
 ]
 
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:.*torch.jit.script_method.*:DeprecationWarning",
+)
+
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="SD3.5 SSIM test requires CUDA")
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["TORCH_SDPA"])
@@ -59,7 +63,9 @@ def test_sd35_similarity(prompt: str, ATTENTION_BACKEND: str) -> None:
         )
 
     old_backend = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
+    old_transformers_verbosity = os.environ.get("TRANSFORMERS_VERBOSITY")
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    os.environ["TRANSFORMERS_VERBOSITY"] = "error"
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         output_dir = os.path.join(
@@ -80,7 +86,8 @@ def test_sd35_similarity(prompt: str, ATTENTION_BACKEND: str) -> None:
 
         init_kwargs = {
             "num_gpus": 1,
-            "workload_type": "t2i",
+            # Save a single-frame MP4 to reuse the existing video-SSIM harness.
+            "workload_type": "t2v",
             "sp_size": 1,
             "tp_size": 1,
             "dit_cpu_offload": False,
@@ -191,3 +198,7 @@ def test_sd35_similarity(prompt: str, ATTENTION_BACKEND: str) -> None:
             os.environ.pop("FASTVIDEO_ATTENTION_BACKEND", None)
         else:
             os.environ["FASTVIDEO_ATTENTION_BACKEND"] = old_backend
+        if old_transformers_verbosity is None:
+            os.environ.pop("TRANSFORMERS_VERBOSITY", None)
+        else:
+            os.environ["TRANSFORMERS_VERBOSITY"] = old_transformers_verbosity

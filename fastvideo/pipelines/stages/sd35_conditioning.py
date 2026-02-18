@@ -52,6 +52,15 @@ class SD35LatentPreparationStage(PipelineStage):
 
         in_channels = fastvideo_args.pipeline_config.dit_config.arch_config.in_channels
         spatial_ratio = fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio
+        patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
+        if not isinstance(patch_size, int):
+            raise TypeError(
+                f"SD3.5 expects integer patch_size, got {type(patch_size)}")
+        required_divisor = spatial_ratio * patch_size
+        if batch.height % required_divisor != 0 or batch.width % required_divisor != 0:
+            raise ValueError(
+                f"height/width must be divisible by {required_divisor} for SD3.5 "
+                f"(got height={batch.height}, width={batch.width})")
         h_lat = batch.height // spatial_ratio
         w_lat = batch.width // spatial_ratio
         shape = (batch_size, in_channels, 1, h_lat, w_lat)
