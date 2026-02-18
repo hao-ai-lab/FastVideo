@@ -559,9 +559,21 @@ class WorkerMultiprocProc:
 
             worker.worker_busy_loop()
 
-        except Exception:
+        except Exception as exc:
             if ready_pipe is not None:
                 logger.exception("WorkerMultiprocProc failed to start.")
+                # Send error status to parent before closing pipe
+                try:
+                    traceback_str = get_exception_traceback()
+                    ready_pipe.send({
+                        "status": "ERROR",
+                        "error": str(exc),
+                        "traceback": traceback_str,
+                        "rank": rank,
+                    })
+                except Exception:
+                    # If sending fails, at least log it
+                    pass
             else:
                 logger.exception("WorkerMultiprocProc failed.")
 
@@ -571,7 +583,8 @@ class WorkerMultiprocProc:
             shutdown_requested = True
             traceback = get_exception_traceback()
             logger.error("Worker %d hit an exception: %s", rank, traceback)
-            parent_process.send_signal(signal.SIGQUIT)
+            if parent_process:
+                parent_process.send_signal(signal.SIGQUIT)
 
         finally:
             if ready_pipe is not None:
@@ -592,6 +605,7 @@ class WorkerMultiprocProc:
         pipes = {handle.ready_pipe: handle for handle in unready_proc_handles}
         ready_proc_handles: list[WorkerProcHandle
                                  | None] = ([None] * len(unready_proc_handles))
+        worker_errors: list[str] = []
         while pipes:
             ready = mp.connection.wait(pipes.keys())
             for pipe in ready:
@@ -600,20 +614,41 @@ class WorkerMultiprocProc:
                     # Wait until the WorkerProc is ready.
                     unready_proc_handle = pipes.pop(pipe)
                     response: dict[str, Any] = pipe.recv()
-                    if response["status"] != "READY":
+                    if response["status"] == "ERROR":
+                        # Worker sent error details
+                        error_msg = response.get("error", "Unknown error")
+                        traceback_str = response.get("traceback", "")
+                        rank = response.get("rank", "unknown")
+                        error_info = f"Worker {rank} error: {error_msg}"
+                        if traceback_str:
+                            error_info += f"\n{traceback_str}"
+                        worker_errors.append(error_info)
+                        logger.error("Worker %s initialization failed: %s", rank, error_info)
+                        # Continue to check other workers, but we'll fail at the end
+                    elif response["status"] != "READY":
+                        worker_errors.append(f"Worker returned unexpected status: {response.get('status', 'unknown')}")
                         raise e
 
-                    ready_proc_handles[unready_proc_handle.rank] = (
-                        WorkerProcHandle.from_unready_handle(
-                            unready_proc_handle))
+                    if response["status"] == "READY":
+                        ready_proc_handles[unready_proc_handle.rank] = (
+                            WorkerProcHandle.from_unready_handle(
+                                unready_proc_handle))
 
                 except EOFError:
+                    # Pipe closed without sending status - worker crashed
+                    worker_errors.append(f"Worker process crashed (pipe closed unexpectedly)")
                     e.__suppress_context__ = True
                     raise e from None
 
                 finally:
                     # Close connection.
                     pipe.close()
+        
+        # If any workers failed, raise exception with details
+        if worker_errors:
+            error_msg = "WorkerMultiprocProc initialization failed due to exceptions in background processes:\n"
+            error_msg += "\n".join(f"  - {err}" for err in worker_errors)
+            raise Exception(error_msg) from None
 
         logger.info("%d workers ready", len(ready_proc_handles))
         return cast(list[WorkerProcHandle], ready_proc_handles)
