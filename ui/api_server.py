@@ -243,6 +243,9 @@ class Job:
     guidance_scale: float = 5.0
     seed: int = 1024
     num_gpus: int = 1
+    dit_cpu_offload: bool | None = None
+    text_encoder_cpu_offload: bool | None = None
+    use_fsdp_inference: bool | None = None
     # Internal
     _thread: threading.Thread | None = field(
         default=None, repr=False
@@ -276,6 +279,9 @@ class Job:
             "guidance_scale": self.guidance_scale,
             "seed": self.seed,
             "num_gpus": self.num_gpus,
+            "dit_cpu_offload": self.dit_cpu_offload,
+            "text_encoder_cpu_offload": self.text_encoder_cpu_offload,
+            "use_fsdp_inference": self.use_fsdp_inference,
             "progress": self._log_buf.progress,
             "progress_msg": self._log_buf.progress_msg,
             "phase": self._log_buf.phase,
@@ -297,6 +303,9 @@ class CreateJobRequest(BaseModel):
     guidance_scale: float = 5.0
     seed: int = 1024
     num_gpus: int = 1
+    dit_cpu_offload: bool | None = None
+    text_encoder_cpu_offload: bool | None = None
+    use_fsdp_inference: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -309,36 +318,56 @@ _log_dir: str = os.path.join(
     os.path.dirname(__file__), "logs"
 )
 
-# Cache of loaded generators keyed by model_id so that we only pay the
-# model-loading cost once per model.
-_generators: dict[str, Any] = {}
+# Cache of loaded generators keyed by (model_id, num_gpus, dit_cpu_offload, 
+# text_encoder_cpu_offload, use_fsdp_inference) so that we only pay the
+# model-loading cost once per model configuration.
+_generators: dict[tuple[str, int, bool | None, bool | None, bool | None], Any] = {}
 _generators_lock = threading.Lock()
 
 
 def _get_or_create_generator(
-    model_id: str, num_gpus: int
+    model_id: str,
+    num_gpus: int,
+    dit_cpu_offload: bool | None = None,
+    text_encoder_cpu_offload: bool | None = None,
+    use_fsdp_inference: bool | None = None,
 ) -> Any:
     """Return a cached VideoGenerator, creating one on first use.
     
     This function handles exceptions that may occur during generator creation,
     including worker process failures that might send signals to the parent.
+    
+    Generators are cached by model_id and configuration parameters to ensure
+    different configurations get separate generator instances.
     """
+    cache_key = (model_id, num_gpus, dit_cpu_offload, text_encoder_cpu_offload, use_fsdp_inference)
+    
     with _generators_lock:
-        if model_id in _generators:
-            return _generators[model_id]
+        if cache_key in _generators:
+            return _generators[cache_key]
 
     # Import lazily so starting the server is fast even without a GPU.
     from fastvideo import VideoGenerator
 
-    logger.info("Loading model %s (num_gpus=%d) …", model_id, num_gpus)
+    logger.info(
+        "Loading model %s (num_gpus=%d, dit_cpu_offload=%s, "
+        "text_encoder_cpu_offload=%s, use_fsdp_inference=%s) …",
+        model_id, num_gpus, dit_cpu_offload, text_encoder_cpu_offload, use_fsdp_inference
+    )
+    
+    # Build kwargs for VideoGenerator, only including non-None values
+    generator_kwargs: dict[str, Any] = {"num_gpus": num_gpus}
+    if dit_cpu_offload is not None:
+        generator_kwargs["dit_cpu_offload"] = dit_cpu_offload
+    if text_encoder_cpu_offload is not None:
+        generator_kwargs["text_encoder_cpu_offload"] = text_encoder_cpu_offload
+    if use_fsdp_inference is not None:
+        generator_kwargs["use_fsdp_inference"] = use_fsdp_inference
     
     # Wrap generator creation in exception handling to catch worker process failures
     # Worker processes may send SIGQUIT on failure, but we handle exceptions here
     try:
-        gen = VideoGenerator.from_pretrained(
-            model_id,
-            num_gpus=num_gpus,
-        )
+        gen = VideoGenerator.from_pretrained(model_id, **generator_kwargs)
     except BaseException as exc:
         # If generator creation fails (e.g., worker process crashes),
         # log the error and re-raise so the job can be marked as failed
@@ -350,14 +379,14 @@ def _get_or_create_generator(
     
     with _generators_lock:
         # Another thread may have created it while we were loading.
-        if model_id not in _generators:
-            _generators[model_id] = gen
+        if cache_key not in _generators:
+            _generators[cache_key] = gen
         else:
             try:
                 gen.shutdown()
             except Exception:
                 pass  # Ignore shutdown errors if generator creation failed
-            gen = _generators[model_id]
+            gen = _generators[cache_key]
     return gen
 
 
@@ -438,7 +467,11 @@ def _run_job(job: Job) -> None:
             # Wrap generator creation in try-except to catch worker process failures
             try:
                 generator = _get_or_create_generator(
-                    job.model_id, job.num_gpus
+                    job.model_id,
+                    job.num_gpus,
+                    dit_cpu_offload=job.dit_cpu_offload,
+                    text_encoder_cpu_offload=job.text_encoder_cpu_offload,
+                    use_fsdp_inference=job.use_fsdp_inference,
                 )
             except BaseException as gen_exc:
                 # If generator creation fails (e.g., worker process crashes),
@@ -676,6 +709,9 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         guidance_scale=req.guidance_scale,
         seed=req.seed,
         num_gpus=req.num_gpus,
+        dit_cpu_offload=req.dit_cpu_offload,
+        text_encoder_cpu_offload=req.text_encoder_cpu_offload,
+        use_fsdp_inference=req.use_fsdp_inference,
     )
     with _jobs_lock:
         _jobs[job.id] = job
@@ -835,7 +871,7 @@ def get_video(job_id: str) -> FileResponse:
     return FileResponse(job.output_path, media_type=media_type)
 
 
-@app.get("/api/jobs/{job_id}/log")
+@app.get("/api/jobs/{job_id}/download_log")
 def get_job_log_file(job_id: str) -> FileResponse:
     """Download the log file for a job."""
     with _jobs_lock:
