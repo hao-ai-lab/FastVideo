@@ -96,6 +96,12 @@ conda run --no-capture-output -n "${PYTHON_ENV}" python -u \
   --data-root "${DATA_ROOT}" \
   --output-report "${RAW_REPORT_JSON}"
 
+# Ensure the conda env's libstdc++ is found before the system's older version.
+# Compute nodes may have an old /lib/x86_64-linux-gnu/libstdc++.so.6 that lacks
+# CXXABI_1.3.15, which is required by libtbb.so.12 (used by torchcodec/FFmpeg 7).
+CONDA_LIB_DIR="$(conda run --no-capture-output -n "${PYTHON_ENV}" python -c 'import sys; print(sys.prefix)')/lib"
+export LD_LIBRARY_PATH="${CONDA_LIB_DIR}:${LD_LIBRARY_PATH:-}"
+
 conda run --no-capture-output -n "${PYTHON_ENV}" \
   torchrun --nproc_per_node="${NUM_GPUS_PREPROCESS}" \
   --master_port="${PREPROCESS_MASTER_PORT}" \

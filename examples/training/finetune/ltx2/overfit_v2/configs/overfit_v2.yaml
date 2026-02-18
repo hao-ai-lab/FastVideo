@@ -13,7 +13,7 @@ manifest_workers: 1
 
 # Stage B: precompute_dataset.sh
 model_path: FastVideo/LTX2-Distilled-Diffusers
-num_gpus_preprocess: 4
+num_gpus_preprocess: 8
 preprocess_master_port: 29513
 with_audio: true
 preprocess_video_loader_type: torchvision
