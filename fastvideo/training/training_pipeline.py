@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Iterator
 from typing import Any
-from fastvideo.profiler import profile_region
+from fastvideo.profiler import profile_region, nvtx_range
 import imageio
 import numpy as np
 import torch
@@ -441,7 +441,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         with self.tracker.timed("timing/forward_backward"), set_forward_context(
                 current_timestep=training_batch.current_timestep,
                 attn_metadata=training_batch.attn_metadata):
-            model_pred = current_model(**input_kwargs)
+            with nvtx_range("transformer_forward"):
+                model_pred = current_model(**input_kwargs)
             if self.training_args.precondition_outputs:
                 assert training_batch.sigmas is not None
                 model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
@@ -462,24 +463,27 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 # (t*h*w) with optional padding so (t*h*w) need not be divisible by sp_size.
                 sp_world_size = get_sp_group().world_size
                 if sp_world_size > 1:
-                    sharded_pred = shard_latents_across_sp(model_pred)
-                    sharded_target = shard_latents_across_sp(target)
-                    local_sse = ((sharded_pred.float() -
-                                  sharded_target.float())**2).sum()
-                    loss = (sp_world_size * local_sse / model_pred.numel()
-                            ) / self.training_args.gradient_accumulation_steps
+                    with nvtx_range("compute_loss_sp"):
+                        sharded_pred = shard_latents_across_sp(model_pred)
+                        sharded_target = shard_latents_across_sp(target)
+                        local_sse = ((sharded_pred.float() -
+                                      sharded_target.float())**2).sum()
+                        loss = (sp_world_size * local_sse / model_pred.numel()
+                                ) / self.training_args.gradient_accumulation_steps
                 else:
-                    loss = (torch.mean(
-                        (model_pred.float() - target.float())**2) /
-                            self.training_args.gradient_accumulation_steps)
+                    with nvtx_range("compute_loss"):
+                        loss = (torch.mean(
+                            (model_pred.float() - target.float())**2) /
+                                self.training_args.gradient_accumulation_steps)
 
-            loss.backward()
+            with nvtx_range("backward"):
+                loss.backward()
 
             avg_loss = loss.detach().clone()
 
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
         #             local_main_process_only=False)
-        with self.tracker.timed("timing/reduce_loss"):
+        with nvtx_range("reduce_loss"), self.tracker.timed("timing/reduce_loss"):
             world_group = get_world_group()
             avg_loss = world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         training_batch.total_loss += avg_loss.item()
@@ -548,10 +552,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
             training_batch = self._transformer_forward_and_compute_loss(
                 training_batch)
 
-        training_batch = self._clip_grad_norm(training_batch)
+        with nvtx_range("clip_grad_norm"):
+            training_batch = self._clip_grad_norm(training_batch)
 
         # Only step the optimizer and scheduler for the model that is currently training
-        with self.tracker.timed("timing/optimizer_step"):
+        with nvtx_range("optimizer_step"), self.tracker.timed("timing/optimizer_step"):
             if self.train_transformer_2 and self.transformer_2 is not None:
                 self.optimizer_2.step()
                 self.lr_scheduler_2.step()
@@ -630,31 +635,34 @@ class TrainingPipeline(LoRAPipeline, ABC):
         )
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
-            start_time = time.perf_counter()
-            if vsa_available:
-                vsa_sparsity = self.training_args.VSA_sparsity
-                vsa_decay_rate = self.training_args.VSA_decay_rate
-                vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
-                current_decay_times = min(step // vsa_decay_interval_steps,
-                                          vsa_sparsity // vsa_decay_rate)
-                current_vsa_sparsity = current_decay_times * vsa_decay_rate
-            elif vmoba_available:
-                #TODO: add vmoba sparsity scheduling here
-                current_vsa_sparsity = 0.0
-            else:
-                current_vsa_sparsity = 0.0
+            with nvtx_range(f"train_step_{step}"):
+                torch.cuda.synchronize()
+                start_time = time.perf_counter()
+                if vsa_available:
+                    vsa_sparsity = self.training_args.VSA_sparsity
+                    vsa_decay_rate = self.training_args.VSA_decay_rate
+                    vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
+                    current_decay_times = min(step // vsa_decay_interval_steps,
+                                              vsa_sparsity // vsa_decay_rate)
+                    current_vsa_sparsity = current_decay_times * vsa_decay_rate
+                elif vmoba_available:
+                    #TODO: add vmoba sparsity scheduling here
+                    current_vsa_sparsity = 0.0
+                else:
+                    current_vsa_sparsity = 0.0
 
-            training_batch = TrainingBatch()
-            training_batch.current_timestep = step
-            training_batch.current_vsa_sparsity = current_vsa_sparsity
-            training_batch = self.train_one_step(training_batch)
+                training_batch = TrainingBatch()
+                training_batch.current_timestep = step
+                training_batch.current_vsa_sparsity = current_vsa_sparsity
+                training_batch = self.train_one_step(training_batch)
 
-            loss = training_batch.total_loss
-            grad_norm = training_batch.grad_norm
+                loss = training_batch.total_loss
+                grad_norm = training_batch.grad_norm
 
-            step_time = time.perf_counter() - start_time
-            step_times.append(step_time)
-            avg_step_time = sum(step_times) / len(step_times)
+                torch.cuda.synchronize()
+                step_time = time.perf_counter() - start_time
+                step_times.append(step_time)
+                avg_step_time = sum(step_times) / len(step_times)
 
             progress_bar.set_postfix({
                 "loss": f"{loss:.4f}",
@@ -708,7 +716,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
                                     self.noise_random_generator)
                 self.transformer.train()
                 self.sp_group.barrier()
-
             if self.training_args.log_visualization and step % self.training_args.visualization_steps == 0:
                 self.visualize_intermediate_latents(training_batch,
                                                     self.training_args, step)
@@ -835,7 +842,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)
-
         self.transformer.eval()
         if getattr(self, "transformer_2", None) is not None:
             self.transformer_2.eval()
