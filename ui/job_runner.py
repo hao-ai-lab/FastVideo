@@ -393,13 +393,9 @@ class JobRunner:
         text_encoder_cpu_offload: bool = False,
         use_fsdp_inference: bool = False
     ) -> Any:
-        """Return a cached VideoGenerator, creating one on first use.
-        
-        Generators are cached by model_id and configuration parameters to ensure
-        different configurations get separate generator instances.
-        """
         cache_key = (model_id, num_gpus, dit_cpu_offload, text_encoder_cpu_offload, use_fsdp_inference)
         
+        # Generators are cached by model_id and configuration parameters
         with self._generators_lock:
             if cache_key in self._generators:
                 return self._generators[cache_key]
@@ -429,12 +425,6 @@ class JobRunner:
         return gen
 
     def _run_job(self, job: Job):
-        """Execute video generation for *job* (called in a background thread).
-        
-        This function is wrapped in comprehensive exception handling to ensure
-        that any errors during job execution are caught and the job status is
-        set to FAILED, without crashing the API server.
-        """
         buf = job._log_buf
         os.makedirs(self.log_dir, exist_ok=True)
         job.log_file_path = os.path.join(self.log_dir, f"{job.id}.log")
@@ -442,14 +432,15 @@ class JobRunner:
         # Add file handler to persist logs
         file_handler = logging.FileHandler(job.log_file_path, mode='w', encoding='utf-8')
         file_handler.setFormatter(
-                logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-            )
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        )
         job.log_file_handler = file_handler
 
-        # Hook logger output into job log buffer    
-        root_logger = logging.getLogger()
+        # Hook logger output into job log buffer
+        fastvideo_logger = logging.getLogger("fastvideo")
         buffer_handler = LogBufferHandler(buf)
-        root_logger.addHandler(buffer_handler)
+        fastvideo_logger.addHandler(buffer_handler)
+        fastvideo_logger.addHandler(file_handler)
 
         # Set output directory, create if it doesn't exist
         job_output_dir = os.path.join(self.output_dir, job.id)
@@ -524,7 +515,7 @@ class JobRunner:
             buf.phase = "done"
 
         except Exception as exception:
-            error_msg = str(exception) if self.verbose else str(exception).split('\n')[0]
+            error_msg = str(exception)
             logger.error(f"Critical error in job thread: {error_msg}")
             job.status = JobStatus.FAILED
             job.error = f"Critical error ({type(exception).__name__}): {error_msg}"
@@ -532,8 +523,9 @@ class JobRunner:
             buf.phase = "failed"
 
         finally:
-            # Save log file
+            # Remove handlers and close file
+            fastvideo_logger.removeHandler(buffer_handler)
+            fastvideo_logger.removeHandler(file_handler)
             file_handler.flush()
             file_handler.close()
-            root_logger.removeHandler(buffer_handler)
             job.log_file_handler = None
