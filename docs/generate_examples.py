@@ -134,7 +134,9 @@ class Example:
         if not markdown_files:
             raise IndexError(f"No Markdown files found in {self.path}")
 
-        readme_files = [f for f in markdown_files if f.name.lower() == "readme.md"]
+        readme_files = [
+            f for f in markdown_files if f.name.lower() == "readme.md"
+        ]
         if readme_files:
             return readme_files[0]
 
