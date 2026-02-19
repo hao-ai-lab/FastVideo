@@ -17,12 +17,71 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [showConsole, setShowConsole] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
+  const [currentTime, setCurrentTime] = useState(Date.now());
   const logAfterRef = useRef(0);
   const isPollingRef = useRef(false);
   const consoleRef = useRef<HTMLPreElement>(null);
   const previousJobIdRef = useRef<string | null>(null);
   const previousStatusRef = useRef<string | null>(null);
   const badgeClass = `badge${job.status.charAt(0).toUpperCase() + job.status.slice(1)}`;
+  
+  // Format duration in a human-readable way
+  const formatDuration = (seconds: number): string => {
+    // Round to nearest second for display
+    const roundedSeconds = Math.round(seconds);
+    
+    if (roundedSeconds < 60) {
+      return `${roundedSeconds}s`;
+    } else if (roundedSeconds < 3600) {
+      const mins = Math.floor(roundedSeconds / 60);
+      const secs = roundedSeconds % 60;
+      return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+    } else {
+      const hours = Math.floor(roundedSeconds / 3600);
+      const mins = Math.floor((roundedSeconds % 3600) / 60);
+      return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    }
+  };
+  
+  // Calculate elapsed time from API data (started_at and finished_at)
+  const getElapsedTime = (): string | null => {
+    // Only show timer if job has started
+    if (!job.started_at) return null;
+    
+    let endTime: number;
+    
+    if (job.status === "running") {
+      // For running jobs, use current time for live updates
+      endTime = currentTime;
+    } else {
+      // For completed/failed/stopped jobs, require finished_at from API
+      if (!job.finished_at) return null;
+      endTime = job.finished_at;
+    }
+    
+    // Convert Python timestamps (seconds) to JavaScript timestamps (milliseconds)
+    const startedAtMs = job.started_at < 1e12 ? job.started_at * 1000 : job.started_at;
+    const endTimeMs = endTime < 1e12 ? endTime * 1000 : endTime;
+    
+    const elapsedSeconds = (endTimeMs - startedAtMs) / 1000;
+    
+    // Don't show timer if elapsed time is negative or zero
+    if (elapsedSeconds <= 0) return null;
+    return formatDuration(elapsedSeconds);
+  };
+  
+  // Update current time every second for running jobs to show live elapsed time
+  useEffect(() => {
+    if (job.status !== "running" || !job.started_at) {
+      return;
+    }
+    
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [job.status, job.started_at]);
   
   const handleStart = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -237,6 +296,11 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
         <div className={jobCardStyles.jobMeta}>
           <span>{job.num_frames} frames</span>
           <span>{job.height}×{job.width}</span>
+          {getElapsedTime() && (
+            <span className={jobCardStyles.jobDuration}>
+              {"⏱ " + getElapsedTime()}
+            </span>
+          )}
         </div>
       </Link>
       <div className={jobCardStyles.jobActions}>
