@@ -242,19 +242,33 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
       <div className={jobCardStyles.jobActions}>
         {getActionButton()}
         <button
-          className={`${buttonStyles.btn} ${buttonStyles.btnSmall} ${showConsole ? buttonStyles.btnActive : ''}`}
-          onClick={toggleConsole}
-          disabled={isLoading}
-          title="Toggle console"
-        >
-          {showConsole ? "Hide Logs" : "Show Logs"}
-        </button>
-        <button
           className={`${buttonStyles.btn} ${buttonStyles.btnDelete} ${buttonStyles.btnSmall}`}
           onClick={handleDelete}
           disabled={isLoading}
         >
           Delete
+        </button>
+        <button
+          className={`${jobCardStyles.toggleButton} ${showConsole ? jobCardStyles.toggleButtonOpen : ''}`}
+          onClick={toggleConsole}
+          disabled={isLoading}
+          title={showConsole ? "Hide logs" : "Show logs"}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M4 6L8 10L12 6"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
         </button>
       </div>
       {showConsole && (
