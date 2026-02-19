@@ -123,6 +123,21 @@ class JobLogBuffer:
         elif "encoding" in low or "vae" in low:
             self.phase = "VAE encoding"
 
+
+class LogBufferHandler(logging.Handler):
+    """Logging handler that writes to a JobLogBuffer."""
+    
+    def __init__(self, buffer: JobLogBuffer):
+        super().__init__()
+        self.buffer = buffer
+    
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self.buffer.write(msg)
+        except Exception:
+            self.handleError(record)
+
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
@@ -286,23 +301,24 @@ def _get_or_create_generator(
 
 
 def _run_job(job: Job):
-    """Execute video generation for *job* (called in a daemon thread).
-    
-    This function is wrapped in comprehensive exception handling to ensure
-    that any errors during job execution are caught and the job status is
-    set to FAILED, without crashing the API server.
-    """
+    # Create log buffer
     buf = job._log_buf
-
     os.makedirs(_log_dir, exist_ok=True)
     job.log_file_path = os.path.join(_log_dir, f"{job.id}.log")
-    
+
+    # Add file handler to persist logs
     file_handler = logging.FileHandler(job.log_file_path, mode='w', encoding='utf-8')
     file_handler.setFormatter(
             logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
         )
     job._file_handler = file_handler
 
+    # Hook logger output into job log buffer    
+    root_logger = logging.getLogger()
+    buffer_handler = LogBufferHandler(buf)
+    root_logger.addHandler(buffer_handler)
+
+    # Set output directory, create if it doesn't exist
     job_output_dir = os.path.join(_output_dir, job.id)
     os.makedirs(job_output_dir, exist_ok=True)
     
@@ -390,6 +406,7 @@ def _run_job(job: Job):
         # Save log file
         file_handler.flush()
         file_handler.close()
+        root_logger.removeHandler(buffer_handler)
         job._file_handler = None
 
 
