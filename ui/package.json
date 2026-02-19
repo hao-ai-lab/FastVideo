@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "concurrently \"npm:start:api\" \"npm:start:web\"",
+    "start": "npm:start:api && npm:start:web",
     "start:api": "cd .. && python -m ui.server",
     "start:web": "next start",
     "lint": "eslint"
