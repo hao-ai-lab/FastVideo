@@ -48,11 +48,43 @@
   display: flex;
   gap: .4rem;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .jobActions .btn {
   font-size: .75rem;
   padding: .3rem .7rem;
+}
+
+.toggleButton {
+  margin-left: auto;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: .3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  transition: transform 0.2s, color 0.15s;
+  width: 24px;
+  height: 24px;
+  transform: rotate(-90deg);
+}
+
+.toggleButton:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--border);
+}
+
+.toggleButton:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.toggleButtonOpen {
+  transform: rotate(0deg);
 }
 
 .jobError {
