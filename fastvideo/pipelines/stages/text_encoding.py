@@ -259,10 +259,12 @@ class TextEncodingStage(PipelineStage):
                                                  dtype=torch.int64)
                     embeds_list.append(prompt_embeds)
                     attn_masks_list.append(attention_mask)
-                    for idx, am in enumerate(attn_masks_list):
-                        logger.info("prompt_embedding_fv: attention_mask[%s] shape=%s sum_fp64=%s", idx, tuple(am.shape), am.to(torch.float64).sum().item())
-                    for idx, emb in enumerate(embeds_list):
-                        logger.info("prompt_embedding_fv: embedding[%s] sum_fp64=%s", idx, emb.to(torch.float64).sum().item())
+        # myregion debug
+                    # for idx, am in enumerate(attn_masks_list):
+                    #     logger.info("prompt_embedding_fv: attention_mask[%s] shape=%s sum_fp64=%s", idx, tuple(am.shape), am.to(torch.float64).sum().item())
+                    # for idx, emb in enumerate(embeds_list):
+                    #     logger.info("prompt_embedding_fv: embedding[%s] sum_fp64=%s", idx, emb.to(torch.float64).sum().item())
+        # endregion
                     return self.return_embeds(embeds_list, attn_masks_list,
                                               return_type,
                                               return_attention_mask, indices)
@@ -296,13 +298,14 @@ class TextEncodingStage(PipelineStage):
             if return_attention_mask:
                 attn_masks_list.append(attention_mask)
 
-        # Debug: attention mask shapes and fp64 sums; embedding fp64 sums per encoder
-        if attn_masks_list:
-            for idx, am in enumerate(attn_masks_list):
-                logger.info("prompt_embedding_fv: attention_mask[%s] shape=%s sum_fp64=%s", idx, tuple(am.shape), am.to(torch.float64).sum().item())
-        if embeds_list:
-            for idx, emb in enumerate(embeds_list):
-                logger.info("prompt_embedding_fv: embedding[%s] sum_fp64=%s", idx, emb.to(torch.float64).sum().item())
+        # myregion Debug: attention mask shapes and fp64 sums; embedding fp64 sums per encoder
+        # if attn_masks_list:
+        #     for idx, am in enumerate(attn_masks_list):
+        #         logger.info("prompt_embedding_fv: attention_mask[%s] shape=%s sum_fp64=%s", idx, tuple(am.shape), am.to(torch.float64).sum().item())
+        # if embeds_list:
+        #     for idx, emb in enumerate(embeds_list):
+        #         logger.info("prompt_embedding_fv: embedding[%s] sum_fp64=%s", idx, emb.to(torch.float64).sum().item())
+        # endregion
 
         return self.return_embeds(embeds_list, attn_masks_list, return_type,
                                   return_attention_mask, indices)

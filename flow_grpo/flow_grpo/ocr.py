@@ -83,8 +83,8 @@ class OcrScorer_video_or_image:
         :param prompts: List of prompts containing target text
         :return: (List of OCR rewards, Tensor of attention regions)
         """
-        # prompts = [prompt.split('"')[1] for prompt in prompts]
-        # assert len(images) == len(prompts), "Mismatch between images and prompts."
+        prompts = [prompt.split('"')[1] for prompt in prompts]
+        assert len(images) == len(prompts), "Mismatch between images and prompts."
 
         rewards = []
         for img, prompt in zip(images, prompts):

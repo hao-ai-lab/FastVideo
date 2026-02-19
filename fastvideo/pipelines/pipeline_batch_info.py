@@ -329,7 +329,7 @@ class TrainingBatch:
     # RL metrics
     advantage_mean: float = 0.0  # Mean advantage (should be ~0 after normalization)
     advantage_std: float = 1.0  # Std of advantages
-    reward_mean: float = 0.0  # Mean reward across batch
+    reward_mean: float = 0.0  # Mean reward across batchp
     reward_std: float = 0.0  # Std of rewards
     value_mean: float = 0.0  # Mean value prediction
     entropy: float = 0.0  # Policy entropy (for exploration)

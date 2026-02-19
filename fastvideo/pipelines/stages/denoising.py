@@ -366,7 +366,6 @@ class DenoisingStage(PipelineStage):
         # debug_sde_generator = None
         # if rl_data is not None and getattr(rl_data, "collect_debug_sums", False):
         #     debug_sde_generator = torch.Generator("cpu").manual_seed(42)
-        debug_sde_generator = torch.Generator("cpu").manual_seed(42)
 
 
         # Run denoising loop
@@ -582,7 +581,7 @@ class DenoisingStage(PipelineStage):
                                 t,
                                 prev_latents.float(),
                                 prev_sample=None,
-                                generator=debug_sde_generator,
+                                generator=None, #debug_sde_generator,
                                 deterministic=False,
                                 return_dt_and_std_dev_t=True,
                                 return_variance_noise_sum=True,

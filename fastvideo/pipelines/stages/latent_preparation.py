@@ -138,9 +138,8 @@ class LatentPreparationStage(PipelineStage):
         # Generate or use provided latents
         if latents is None:
             # If doing RL training, latents should be generated without seed
-            if batch.rl_data is not None:
-                # generator = [torch.Generator("cpu").manual_seed(41)] * len(generator) if isinstance(generator, list) else None
-                generator = torch.Generator("cpu").manual_seed(41)
+            # if batch.rl_data is not None:
+            #     generator = torch.Generator("cpu").manual_seed(41)
             
             # Handle batch processing: if generator is a list, generate latents for each item separately
             # This ensures each batch item gets unique randomness from its own generator

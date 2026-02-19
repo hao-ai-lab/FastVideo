@@ -121,6 +121,9 @@ class OcrScorerVideo(BaseRewardModel):
         Returns:
             Reward tensor [B] with averaged OCR similarity scores across frames
         """
+        prompts = [prompt.split('"')[1] for prompt in prompts]
+        assert len(videos) == len(prompts), "Mismatch between images and prompts."
+
         # Ensure videos is a torch tensor with correct shape
         assert isinstance(
             videos,
