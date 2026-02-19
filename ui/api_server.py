@@ -17,16 +17,14 @@ from __future__ import annotations
 import argparse
 import collections
 import enum
-import io
 import logging
 import os
 import re
 import signal
-import sys
 import threading
 import time
-import traceback
 import uuid
+import uvicorn
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,6 +33,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+
+from fastvideo.registry import get_registered_model_paths
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -52,65 +52,13 @@ DEFAULT_OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "..", "outputs", "ui_jobs"
 )
 
-# ---------------------------------------------------------------------------
-# Dynamic model catalogue — built from fastvideo.registry
-# ---------------------------------------------------------------------------
-
-_WORKLOAD_PATTERNS: list[tuple[str, str]] = [
-    ("v2v", "v2v"),
-    ("v2w", "v2w"),
-    ("i2w", "i2w"),
-    ("t2w", "t2w"),
-    ("t2i", "t2i"),
-    ("i2v", "i2v"),
-    ("ti2v", "ti2v"),
-    ("t2v", "t2v"),
-]
-
-
-def _infer_workload_type(model_path: str) -> str:
-    """Best-effort workload type from the HF model path."""
-    low = model_path.lower()
-    for token, wtype in _WORKLOAD_PATTERNS:
-        if token in low:
-            return wtype
-    return "t2v"  # default
-
-
-def _make_label(model_path: str) -> str:
+def _get_model_label(model_path: str) -> str:
     """Derive a readable label from a HF model path."""
-    name = model_path.split("/")[-1] if "/" in model_path else model_path
-    # Strip common suffixes that add noise
-    for suffix in ("-Diffusers", "_Diffusers", "-diffusers"):
-        if name.endswith(suffix):
-            name = name[: -len(suffix)]
-    # Replace separators with spaces
-    return name.replace("-", " ").replace("_", " ")
+    return model_path.split("/")[-1].replace("-", " ").replace("_", " ")
 
-
-def _get_available_models() -> list[dict[str, str]]:
-    """Build the model catalogue from the fastvideo registry."""
-    from fastvideo.registry import get_registered_model_paths
-
-    models: list[dict[str, str]] = []
-    for path in get_registered_model_paths():
-        models.append({
-            "id": path,
-            "label": _make_label(path),
-            "type": _infer_workload_type(path),
-        })
-    return models
-
-
-# Lazily cached so the import only happens on first access.
-_available_models_cache: list[dict[str, str]] | None = None
-
-
-def _available_models() -> list[dict[str, str]]:
-    global _available_models_cache  # noqa: PLW0603
-    if _available_models_cache is None:
-        _available_models_cache = _get_available_models()
-    return _available_models_cache
+_available_models: list[dict[str, str]] = [
+    {"id": path, "label": _get_model_label(path)} for path in get_registered_model_paths()
+]
 
 # ---------------------------------------------------------------------------
 # Per-job log buffer & progress tracker
@@ -125,13 +73,8 @@ _MAX_LOG_LINES = 2000  # ring-buffer cap per job
 
 
 class JobLogBuffer:
-    """Thread-safe ring-buffer that stores log lines for a single job.
 
-    It also continuously parses tqdm progress output so the UI can
-    display a determinate progress bar.
-    """
-
-    def __init__(self, maxlen: int = _MAX_LOG_LINES) -> None:
+    def __init__(self, maxlen: int = _MAX_LOG_LINES):
         self._lines: collections.deque[str] = collections.deque(
             maxlen=maxlen
         )
@@ -140,7 +83,7 @@ class JobLogBuffer:
         self.progress_msg: str = ""       # e.g. "20/50 steps"
         self.phase: str = "initializing"  # human-readable phase
 
-    def write(self, text: str) -> None:
+    def write(self, text: str):
         """Append *text* (may contain embedded newlines)."""
         for line in text.splitlines():
             stripped = line.strip()
@@ -158,7 +101,7 @@ class JobLogBuffer:
 
     # -- internal helpers ---------------------------------------------------
 
-    def _parse_progress(self, line: str) -> None:
+    def _parse_progress(self, line: str):
         """Try to extract a percentage / fraction from a tqdm line."""
         m = _TQDM_PCT_RE.search(line)
         if m:
@@ -180,41 +123,9 @@ class JobLogBuffer:
         elif "encoding" in low or "vae" in low:
             self.phase = "VAE encoding"
 
-
-class _JobLogHandler(logging.Handler):
-    """A logging.Handler that forwards records to a JobLogBuffer."""
-
-    def __init__(self, buf: JobLogBuffer) -> None:
-        super().__init__()
-        self.buf = buf
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            self.buf.write(self.format(record))
-        except Exception:
-            pass
-
-
-class _TqdmCapture(io.StringIO):
-    """Intercepts stderr writes (where tqdm prints) for a job thread."""
-
-    def __init__(self, buf: JobLogBuffer, original: io.TextIOBase) -> None:
-        super().__init__()
-        self.buf = buf
-        self.original = original
-
-    def write(self, s: str) -> int:  # type: ignore[override]
-        self.buf.write(s)
-        return self.original.write(s)
-
-    def flush(self) -> None:
-        self.original.flush()
-
-
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
-
 
 class JobStatus(str, enum.Enum):
     PENDING = "pending"
@@ -243,9 +154,9 @@ class Job:
     guidance_scale: float = 5.0
     seed: int = 1024
     num_gpus: int = 1
-    dit_cpu_offload: bool | None = None
-    text_encoder_cpu_offload: bool | None = None
-    use_fsdp_inference: bool | None = None
+    dit_cpu_offload: bool = False
+    text_encoder_cpu_offload: bool = False
+    use_fsdp_inference: bool = False
     # Internal
     _thread: threading.Thread | None = field(
         default=None, repr=False
@@ -303,9 +214,9 @@ class CreateJobRequest(BaseModel):
     guidance_scale: float = 5.0
     seed: int = 1024
     num_gpus: int = 1
-    dit_cpu_offload: bool | None = None
-    text_encoder_cpu_offload: bool | None = None
-    use_fsdp_inference: bool | None = None
+    dit_cpu_offload: bool = False
+    text_encoder_cpu_offload: bool = False
+    use_fsdp_inference: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -328,14 +239,11 @@ _generators_lock = threading.Lock()
 def _get_or_create_generator(
     model_id: str,
     num_gpus: int,
-    dit_cpu_offload: bool | None = None,
-    text_encoder_cpu_offload: bool | None = None,
-    use_fsdp_inference: bool | None = None,
+    dit_cpu_offload: bool = False,
+    text_encoder_cpu_offload: bool = False,
+    use_fsdp_inference: bool = False
 ) -> Any:
     """Return a cached VideoGenerator, creating one on first use.
-    
-    This function handles exceptions that may occur during generator creation,
-    including worker process failures that might send signals to the parent.
     
     Generators are cached by model_id and configuration parameters to ensure
     different configurations get separate generator instances.
@@ -355,37 +263,18 @@ def _get_or_create_generator(
         model_id, num_gpus, dit_cpu_offload, text_encoder_cpu_offload, use_fsdp_inference
     )
     
-    # Build kwargs for VideoGenerator, only including non-None values
-    generator_kwargs: dict[str, Any] = {"num_gpus": num_gpus}
-    if dit_cpu_offload is not None:
-        generator_kwargs["dit_cpu_offload"] = dit_cpu_offload
-    if text_encoder_cpu_offload is not None:
-        generator_kwargs["text_encoder_cpu_offload"] = text_encoder_cpu_offload
-    if use_fsdp_inference is not None:
-        generator_kwargs["use_fsdp_inference"] = use_fsdp_inference
-    
-    # Wrap generator creation in exception handling to catch worker process failures
-    # Worker processes may send SIGQUIT on failure, but we handle exceptions here
-    try:
-        gen = VideoGenerator.from_pretrained(model_id, **generator_kwargs)
-    except BaseException as exc:
-        # If generator creation fails (e.g., worker process crashes),
-        # log the error and re-raise so the job can be marked as failed
-        logger.exception(
-            "Failed to create VideoGenerator for model %s: %s",
-            model_id, exc
-        )
-        raise
+    gen = VideoGenerator.from_pretrained(
+        model_id,
+        dit_cpu_offload=dit_cpu_offload,
+        text_encoder_cpu_offload=text_encoder_cpu_offload,
+        use_fsdp_inference=use_fsdp_inference
+    )
     
     with _generators_lock:
-        # Another thread may have created it while we were loading.
         if cache_key not in _generators:
             _generators[cache_key] = gen
-        else:
-            try:
-                gen.shutdown()
-            except Exception:
-                pass  # Ignore shutdown errors if generator creation failed
+        else: # Another thread may have created it while we were loading.
+            gen.shutdown()
             gen = _generators[cache_key]
     return gen
 
@@ -395,7 +284,7 @@ def _get_or_create_generator(
 # ---------------------------------------------------------------------------
 
 
-def _run_job(job: Job) -> None:
+def _run_job(job: Job):
     """Execute video generation for *job* (called in a daemon thread).
     
     This function is wrapped in comprehensive exception handling to ensure
@@ -403,242 +292,109 @@ def _run_job(job: Job) -> None:
     set to FAILED, without crashing the API server.
     """
     buf = job._log_buf
-    log_handler: logging.Handler | None = None
-    file_handler: logging.FileHandler | None = None
-    original_stderr: io.TextIOBase | None = None
-    root_logger = logging.getLogger()
 
+    os.makedirs(_log_dir, exist_ok=True)
+    job.log_file_path = os.path.join(_log_dir, f"{job.id}.log")
+    
+    file_handler = logging.FileHandler(job.log_file_path, mode='w', encoding='utf-8')
+    file_handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        )
+    job._file_handler = file_handler
+
+    job_output_dir = os.path.join(_output_dir, job.id)
+    os.makedirs(job_output_dir, exist_ok=True)
+    
     try:
-        # ── Set up log directory and log file early ──
-        os.makedirs(_log_dir, exist_ok=True)
-        
-        # Create log file for this job (named after job ID)
-        log_file_path = os.path.join(_log_dir, f"{job.id}.log")
-        job.log_file_path = log_file_path
-        
-        # ── Set up job output directory ──
-        job_output_dir = os.path.join(_output_dir, job.id)
-        os.makedirs(job_output_dir, exist_ok=True)
-        
-        # ── Set up file handler to write logs to disk ──
-        file_handler = logging.FileHandler(log_file_path, mode='w', encoding='utf-8')
-        file_handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-        )
-        root_logger.addHandler(file_handler)
-        job._file_handler = file_handler
+        job.status = JobStatus.RUNNING
+        job.started_at = time.time()
+        buf.phase = "starting"
+        buf.write(f"Job {job.id} started at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(job.started_at))}")
+        buf.write(f"Model: {job.model_id}")
+        buf.write(f"Prompt: {job.prompt}")
 
-        # ── Attach a logging handler so all fastvideo.* logs go to the
-        #    job's buffer while this thread is running. ──
-        log_handler = _JobLogHandler(buf)
-        log_handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-        )
-        root_logger.addHandler(log_handler)
-        
-        # ── FastVideo loggers have propagate=False, so we need to add handlers
-        #    directly to the fastvideo logger to capture component logs ──
-        fastvideo_logger = logging.getLogger("fastvideo")
-        fastvideo_logger.addHandler(file_handler)
-        fastvideo_logger.addHandler(log_handler)
-
-        # ── Redirect stderr so tqdm output is captured too. ──
-        original_stderr = sys.stderr
-        sys.stderr = _TqdmCapture(buf, original_stderr)  # type: ignore[assignment]
-
-        # ── Main job execution ──
-        try:
-            job.status = JobStatus.RUNNING
-            job.started_at = time.time()
-            buf.phase = "starting"
-            buf.write(f"Job {job.id} started at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(job.started_at))}")
-            buf.write(f"Model: {job.model_id}")
-            buf.write(f"Prompt: {job.prompt}")
-
-            if job._stop_event.is_set():
-                job.status = JobStatus.STOPPED
-                job.finished_at = time.time()
-                buf.write("Job stopped before execution started")
-                return
-
-            buf.phase = "loading model"
-            buf.write("Loading model...")
-            
-            # Wrap generator creation in try-except to catch worker process failures
-            try:
-                generator = _get_or_create_generator(
-                    job.model_id,
-                    job.num_gpus,
-                    dit_cpu_offload=job.dit_cpu_offload,
-                    text_encoder_cpu_offload=job.text_encoder_cpu_offload,
-                    use_fsdp_inference=job.use_fsdp_inference,
-                )
-            except BaseException as gen_exc:
-                # If generator creation fails (e.g., worker process crashes),
-                # catch it here and mark job as failed
-                error_msg = f"Failed to load model: {str(gen_exc)}"
-                buf.write(error_msg)
-                buf.write(f"Error type: {type(gen_exc).__name__}")
-                traceback_str = traceback.format_exc()
-                buf.write(f"Traceback:\n{traceback_str}")
-                raise  # Re-raise to be caught by outer exception handler
-
-            buf.phase = "generating"
-            buf.write(
-                f"Starting generation for job {job.id} (model={job.model_id})"
-            )
-            logger.info(
-                "Starting generation for job %s (model=%s)", job.id, job.model_id
-            )
-
-            # Wrap video generation in try-except to catch any failures
-            try:
-                generator.generate_video(
-                    prompt=job.prompt,
-                    output_path=job_output_dir,
-                    save_video=True,
-                    num_inference_steps=job.num_inference_steps,
-                    num_frames=job.num_frames,
-                    height=job.height,
-                    width=job.width,
-                    guidance_scale=job.guidance_scale,
-                    seed=job.seed,
-                )
-            except BaseException as gen_exc:
-                # Catch any exception during video generation
-                error_msg = f"Video generation failed: {str(gen_exc)}"
-                buf.write(error_msg)
-                buf.write(f"Error type: {type(gen_exc).__name__}")
-                traceback_str = traceback.format_exc()
-                buf.write(f"Traceback:\n{traceback_str}")
-                raise  # Re-raise to be caught by outer exception handler
-
-            buf.phase = "saving"
-            buf.write("Generation completed, searching for output file...")
-
-            # Find the generated video file
-            video_files = sorted(Path(job_output_dir).glob("*.mp4"))
-            if video_files:
-                job.output_path = str(video_files[0])
-                buf.write(f"Found video output: {job.output_path}")
-            else:
-                # Could be an image workload
-                image_files = sorted(Path(job_output_dir).glob("*.png"))
-                if image_files:
-                    job.output_path = str(image_files[0])
-                    buf.write(f"Found image output: {job.output_path}")
-                else:
-                    buf.write("Warning: No output file found in job directory")
-
-            if job._stop_event.is_set():
-                job.status = JobStatus.STOPPED
-                buf.write("Job was stopped during execution")
-            else:
-                job.status = JobStatus.COMPLETED
-                buf.progress = 100.0
-                buf.write("Job completed successfully")
-            job.finished_at = time.time()
-            buf.phase = "done"
-            logger.info("Job %s completed successfully", job.id)
-
-        except KeyboardInterrupt:
-            # Handle keyboard interrupt gracefully
-            buf.write("Job interrupted by user")
+        if job._stop_event.is_set():
             job.status = JobStatus.STOPPED
             job.finished_at = time.time()
-            buf.phase = "stopped"
-            logger.warning("Job %s interrupted by keyboard", job.id)
-            
-        except SystemExit:
-            # Handle system exit gracefully (shouldn't happen, but catch it)
-            buf.write("Job terminated by system exit")
-            job.status = JobStatus.FAILED
-            job.error = "System exit was called"
-            job.finished_at = time.time()
-            buf.phase = "failed"
-            logger.error("Job %s terminated by system exit", job.id)
-            
-        except BaseException as exc:
-            # Catch ALL exceptions including SystemExit, KeyboardInterrupt, etc.
-            # This ensures nothing can crash the server
-            error_msg = f"Job execution failed: {str(exc)}"
-            try:
-                buf.write(error_msg)
-                buf.write(f"Error type: {type(exc).__name__}")
-                traceback_str = traceback.format_exc()
-                buf.write(f"Traceback:\n{traceback_str}")
-            except Exception:
-                pass  # If even writing to buffer fails, continue
-            
-            try:
-                logger.exception("Job %s failed with %s", job.id, type(exc).__name__)
-            except Exception:
-                pass  # If logging fails, continue
-            
-            job.status = JobStatus.FAILED
-            job.error = f"{type(exc).__name__}: {str(exc)}"
-            job.finished_at = time.time()
-            try:
-                if buf:
-                    buf.phase = "failed"
-            except Exception:
-                pass
-            
-    except BaseException as outer_exc:
-        # Catch ANY exception during setup/teardown to prevent server crash
-        # This includes SystemExit, KeyboardInterrupt, and all other exceptions
-        error_msg = f"Critical error in job thread: {str(outer_exc)}"
-        try:
-            if buf:
-                buf.write(error_msg)
-                buf.write(f"Error type: {type(outer_exc).__name__}")
-                traceback_str = traceback.format_exc()
-                buf.write(f"Traceback:\n{traceback_str}")
-        except Exception:
-            pass  # If even logging fails, just continue
+            buf.write("Job stopped before execution started")
+            return
+
+        buf.phase = "loading model"
+        buf.write("Loading model...")
         
-        try:
-            logger.exception("Critical error in job %s thread: %s", job.id, type(outer_exc).__name__)
-        except Exception:
-            pass  # If logging fails, continue
-        
-        job.status = JobStatus.FAILED
-        job.error = f"Critical error ({type(outer_exc).__name__}): {str(outer_exc)}"
+        generator = _get_or_create_generator(
+            job.model_id,
+            job.num_gpus,
+            dit_cpu_offload=job.dit_cpu_offload,
+            text_encoder_cpu_offload=job.text_encoder_cpu_offload,
+            use_fsdp_inference=job.use_fsdp_inference,
+        )
+        buf.phase = "generating"
+        buf.write(
+            f"Starting generation for job {job.id} (model={job.model_id})"
+        )
+        logger.info(
+            "Starting generation for job %s (model=%s)", job.id, job.model_id
+        )
+
+        generator.generate_video(
+            prompt=job.prompt,
+            output_path=job_output_dir,
+            save_video=True,
+            num_inference_steps=job.num_inference_steps,
+            num_frames=job.num_frames,
+            height=job.height,
+            width=job.width,
+            guidance_scale=job.guidance_scale,
+            seed=job.seed,
+        )
+    
+        buf.phase = "saving"
+        buf.write("Generation completed, searching for output file...")
+
+        # Find the generated video file
+        video_files = sorted(Path(job_output_dir).glob("*.mp4"))
+        if video_files:
+            job.output_path = str(video_files[0])
+            buf.write(f"Found video output: {job.output_path}")
+        else:
+            # Could be an image workload
+            image_files = sorted(Path(job_output_dir).glob("*.png"))
+            if image_files:
+                job.output_path = str(image_files[0])
+                buf.write(f"Found image output: {job.output_path}")
+            else:
+                buf.write("Warning: No output file found in job directory")
+
+        if job._stop_event.is_set():
+            job.status = JobStatus.STOPPED
+            buf.write("Job was stopped during execution")
+        else:
+            job.status = JobStatus.COMPLETED
+            buf.progress = 100.0
+            buf.write("Job completed successfully")
         job.finished_at = time.time()
-        try:
-            if buf:
-                buf.phase = "failed"
-        except Exception:
-            pass
+        buf.phase = "done"
+        logger.info("Job %s completed successfully", job.id)
+
+    except Exception as exception:
+        buf.write(f"Critical error in job thread: {exception}")
+        buf.write(f"Error type: {type(exception).__name__}")
+        # traceback_str = traceback.format_exc()
+        # buf.write(f"Traceback:\n{traceback_str}")
+        # logger.exception("Critical error in job %s thread: %s", job.id, type(outer_exc).__name__)
+        job.status = JobStatus.FAILED
+        job.error = f"Critical error ({type(exception).__name__}): {str(exception)}"
+        job.finished_at = time.time()
+        buf.phase = "failed"
 
     finally:
-        # ── Cleanup: Restore stderr and remove log handlers ──
-        try:
-            if original_stderr is not None:
-                sys.stderr = original_stderr  # type: ignore[assignment]
-            if log_handler is not None:
-                root_logger.removeHandler(log_handler)
-                # Also remove from fastvideo logger
-                fastvideo_logger = logging.getLogger("fastvideo")
-                if log_handler in fastvideo_logger.handlers:
-                    fastvideo_logger.removeHandler(log_handler)
-            if file_handler is not None:
-                file_handler.flush()
-                file_handler.close()
-                root_logger.removeHandler(file_handler)
-                # Also remove from fastvideo logger
-                fastvideo_logger = logging.getLogger("fastvideo")
-                if file_handler in fastvideo_logger.handlers:
-                    fastvideo_logger.removeHandler(file_handler)
-                job._file_handler = None
-        except Exception as cleanup_exc:
-            # Even cleanup errors shouldn't crash the server
-            logger.error("Error during job cleanup: %s", cleanup_exc)
+        # Save log file
+        file_handler.flush()
+        file_handler.close()
+        job._file_handler = None
 
 
-# ---------------------------------------------------------------------------
-# FastAPI application
-# ---------------------------------------------------------------------------
 app = FastAPI(
     title="FastVideo Job Runner API",
     version="0.1.0",
@@ -653,16 +409,10 @@ app.add_middleware(
 )
 
 
-# ---- Models ---------------------------------------------------------------
-
-
 @app.get("/api/models")
 def list_models() -> list[dict[str, str]]:
     """Return the catalogue of available video-generation models."""
-    return _available_models()
-
-
-# ---- Jobs CRUD ------------------------------------------------------------
+    return _available_models
 
 
 @app.get("/api/jobs")
@@ -688,7 +438,7 @@ def get_job(job_id: str) -> dict[str, Any]:
 @app.post("/api/jobs", status_code=201)
 def create_job(req: CreateJobRequest) -> dict[str, Any]:
     """Create a new job (does **not** start it automatically)."""
-    valid_ids = {m["id"] for m in _available_models()}
+    valid_ids = {m["id"] for m in _available_models}
     if req.model_id not in valid_ids:
         raise HTTPException(
             status_code=400,
@@ -754,7 +504,7 @@ def start_job(job_id: str) -> dict[str, Any]:
 
     # Wrap _run_job in an additional safety layer to catch any exceptions
     # that might escape (though they shouldn't with our comprehensive handling)
-    def safe_run_job(job: Job) -> None:
+    def safe_run_job(job: Job):
         """Wrapper to ensure _run_job never raises an unhandled exception."""
         try:
             _run_job(job)
@@ -819,9 +569,6 @@ def delete_job(job_id: str) -> dict[str, str]:
     return {"detail": f"Job {job_id} deleted"}
 
 
-# ---- Job logs --------------------------------------------------------------
-
-
 @app.get("/api/jobs/{job_id}/logs")
 def get_job_logs(job_id: str, after: int = 0) -> dict[str, Any]:
     """Return log lines for a job.
@@ -842,9 +589,6 @@ def get_job_logs(job_id: str, after: int = 0) -> dict[str, Any]:
         "progress_msg": job._log_buf.progress_msg,
         "phase": job._log_buf.phase,
     }
-
-
-# ---- Serve generated videos -----------------------------------------------
 
 
 @app.get("/api/jobs/{job_id}/video")
@@ -894,46 +638,23 @@ def get_job_log_file(job_id: str) -> FileResponse:
     )
 
 
-# ---------------------------------------------------------------------------
-# CLI entry-point
-# ---------------------------------------------------------------------------
-
-
-def _setup_signal_handlers() -> None:
-    """Set up signal handlers to prevent worker process crashes from killing the server.
-    
-    FastVideo worker processes may send SIGQUIT when they crash, which could
-    terminate the server. We install handlers to ignore or handle these gracefully.
-    """
+def _setup_signal_handlers():
     def handle_sigquit(signum, frame):
-        """Handle SIGQUIT from worker processes gracefully."""
         logger.warning(
             "Received SIGQUIT (likely from a crashed worker process). "
             "Ignoring to keep server running."
         )
-        # Don't exit - just log and continue
     
     def handle_sigterm(signum, frame):
-        """Handle SIGTERM gracefully."""
         logger.info("Received SIGTERM. Shutting down gracefully...")
-        # Allow normal shutdown
         raise SystemExit(0)
     
-    # Install signal handlers
-    try:
-        signal.signal(signal.SIGQUIT, handle_sigquit)
-    except (AttributeError, ValueError):
-        # SIGQUIT might not be available on all platforms (e.g., Windows)
-        pass
-    
-    try:
+    signal.signal(signal.SIGQUIT, handle_sigquit)
+    if hasattr(signal, "SIGQUIT"): # SIGQUIT might not be available on all platforms (e.g., Windows)
         signal.signal(signal.SIGTERM, handle_sigterm)
-    except (AttributeError, ValueError):
-        # SIGTERM might not be available on all platforms
-        pass
 
 
-def main() -> None:
+def main():
     global _output_dir, _log_dir  # noqa: PLW0603
 
     # Set up signal handlers to prevent worker crashes from killing the server
@@ -982,8 +703,6 @@ def main() -> None:
     _log_dir = os.path.abspath(args.log_dir)
     os.makedirs(_log_dir, exist_ok=True)
     logger.info("Log directory: %s", _log_dir)
-
-    import uvicorn
 
     uvicorn.run(
         app,
