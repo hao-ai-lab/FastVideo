@@ -4,18 +4,16 @@ import { Job } from "./types";
 
 function getApiBaseUrl(): string {
   const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-  
+
   if (!apiUrl) {
     throw new Error(
       "Please set NEXT_PUBLIC_API_BASE_URL in your .env.local file or as an environment variable. " +
       "Example: NEXT_PUBLIC_API_BASE_URL=http://localhost:8189/api"
     );
   }
-  
+
   return apiUrl;
 }
-
-const API_BASE_URL = getApiBaseUrl();
 
 export interface CreateJobRequest {
     model_id: string;
@@ -41,23 +39,26 @@ export interface Model {
 // MARK: - API Functions
 
 export async function getModels(): Promise<Model[]> {
-  const response = await fetch(`${API_BASE_URL}/models`);
-  if (!response.ok) {
-    throw new Error("Failed to fetch models");
-  }
-  return response.json();
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/models`);
+    if (!response.ok) {
+        throw new Error("Failed to fetch models");
+    }
+    return response.json();
 }
 
 export async function getJobsList(): Promise<Job[]> {
-  const response = await fetch(`${API_BASE_URL}/jobs`);
-  if (!response.ok) {
-    throw new Error("Failed to fetch jobs");
-  }
-  return response.json();
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/jobs`);
+    if (!response.ok) {
+        throw new Error("Failed to fetch jobs");
+    }
+    return response.json();
 }
 
 export async function createJob(job: CreateJobRequest): Promise<Job> {
-    const response = await fetch(`${API_BASE_URL}/jobs`, {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/jobs`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -71,7 +72,8 @@ export async function createJob(job: CreateJobRequest): Promise<Job> {
 }
 
 export async function getJobDetails(id: string): Promise<Job> {
-    const response = await fetch(`${API_BASE_URL}/jobs/${id}`);
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/jobs/${id}`);
     if (!response.ok) {
         throw new Error("Failed to fetch job");
     }
@@ -79,7 +81,8 @@ export async function getJobDetails(id: string): Promise<Job> {
 }
 
 export async function startJob(id: string): Promise<Job> {
-    const response = await fetch(`${API_BASE_URL}/jobs/${id}/start`, {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/jobs/${id}/start`, {
         method: "POST",
     });
     if (!response.ok) {
@@ -90,7 +93,8 @@ export async function startJob(id: string): Promise<Job> {
 }
 
 export async function stopJob(id: string): Promise<Job> {
-    const response = await fetch(`${API_BASE_URL}/jobs/${id}/stop`, {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/jobs/${id}/stop`, {
         method: "POST",
     });
     if (!response.ok) {
@@ -101,7 +105,8 @@ export async function stopJob(id: string): Promise<Job> {
 }
 
 export async function deleteJob(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/jobs/${id}`, {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/jobs/${id}`, {
         method: "DELETE",
     });
     if (!response.ok) {
@@ -119,7 +124,8 @@ export interface JobLogs {
 }
 
 export async function getJobLogs(id: string, after: number = 0): Promise<JobLogs> {
-    const response = await fetch(`${API_BASE_URL}/jobs/${id}/logs?after=${after}`);
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/jobs/${id}/logs?after=${after}`);
     if (!response.ok) {
         throw new Error("Failed to fetch job logs");
     }
@@ -127,7 +133,8 @@ export async function getJobLogs(id: string, after: number = 0): Promise<JobLogs
 }
 
 export async function downloadJobLog(id: string): Promise<Blob> {
-    const response = await fetch(`${API_BASE_URL}/jobs/${id}/download_log`);
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/jobs/${id}/download_log`);
     if (!response.ok) {
         throw new Error("Failed to download job log");
     }
