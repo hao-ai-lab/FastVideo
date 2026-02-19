@@ -228,6 +228,7 @@ _output_dir: str = DEFAULT_OUTPUT_DIR
 _log_dir: str = os.path.join(
     os.path.dirname(__file__), "logs"
 )
+_verbose: bool = False
 
 # Cache of loaded generators keyed by (model_id, num_gpus, dit_cpu_offload, 
 # text_encoder_cpu_offload, use_fsdp_inference) so that we only pay the
@@ -378,13 +379,10 @@ def _run_job(job: Job):
         logger.info("Job %s completed successfully", job.id)
 
     except Exception as exception:
-        buf.write(f"Critical error in job thread: {exception}")
-        buf.write(f"Error type: {type(exception).__name__}")
-        # traceback_str = traceback.format_exc()
-        # buf.write(f"Traceback:\n{traceback_str}")
-        # logger.exception("Critical error in job %s thread: %s", job.id, type(outer_exc).__name__)
+        error_msg = str(exception) if _verbose else str(exception).split('\n')[0]
+        buf.write(f"Critical error in job thread: {error_msg}")
         job.status = JobStatus.FAILED
-        job.error = f"Critical error ({type(exception).__name__}): {str(exception)}"
+        job.error = f"Critical error ({type(exception).__name__}): {error_msg}"
         job.finished_at = time.time()
         buf.phase = "failed"
 
@@ -655,7 +653,7 @@ def _setup_signal_handlers():
 
 
 def main():
-    global _output_dir, _log_dir  # noqa: PLW0603
+    global _output_dir, _log_dir, _verbose  # noqa: PLW0603
 
     # Set up signal handlers to prevent worker crashes from killing the server
     _setup_signal_handlers()
@@ -694,7 +692,14 @@ def main():
             f"(default: {default_log_dir})"
         ),
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print full tracebacks in error messages (default: False)",
+    )
     args = parser.parse_args()
+
+    _verbose = args.verbose
 
     _output_dir = os.path.abspath(args.output_dir)
     os.makedirs(_output_dir, exist_ok=True)
