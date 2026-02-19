@@ -18,12 +18,25 @@ conda activate fastvideo
 pip install fastvideo
 ```
 
+### Using uv
+
+```bash
+# Create and activate a new uv environment
+uv venv --python 3.12 --seed
+source .venv/bin/activate
+
+uv pip install fastvideo
+```
+
 ### From source
 
 ```bash
 git clone https://github.com/hao-ai-lab/FastVideo.git
 cd FastVideo
 pip install -e .
+
+# or if you are using uv
+uv pip install -e .
 ```
 
 Also optionally install flash-attn:

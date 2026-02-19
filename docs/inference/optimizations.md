@@ -25,6 +25,9 @@ This page describes the various options for speeding up generation times in Fast
 - Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
+- Video MoBA Attention: `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`
+- Sparse Linear Attention: `FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
+- SageSLA Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_SLA_ATTN`
 
 ### Configuring Backends
 
@@ -70,22 +73,15 @@ python setup.py install
 
 **`SLIDING_TILE_ATTN`**
 
-```bash
-pip install st_attn==0.0.4
-```
-
-Please see [this page](../attention/sta/index.md) for more installation instructions.
+Sliding Tile Attention is provided by `fastvideo-kernel`.
+See [STA docs](../attention/sta/index.md) for installation details.
 
 ### Video Sparse Attention
 
 **`VIDEO_SPARSE_ATTN`**
 
-```bash
-git submodule update --init --recursive
-python setup_vsa.py install
-```
-
-Please see [this page](../attention/vsa/index.md) for more installation instructions.
+Video Sparse Attention is provided by `fastvideo-kernel`.
+See [VSA docs](../attention/vsa/index.md) for installation details.
 
 ### Sage Attention
 
@@ -114,6 +110,12 @@ python setup.py install  # or pip install -e .
 Note that Sage Attention 3 requires `python>=3.13`, `torch>=2.8.0`, `CUDA >=12.8`. If you are using `uv` and using `torch==2.8.0` make sure that `sentencepiece==0.2.1` in the pyproject.toml file.
 
 To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repository to install the package from source.
+
+### V-MoBA / SLA / SageSLA
+
+These backends are model-specific and require the corresponding kernels and
+dependencies. Use the support matrix and model examples to confirm compatibility
+before enabling them.
 
 ## Teacache
 
