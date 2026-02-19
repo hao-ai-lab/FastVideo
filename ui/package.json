@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "concurrently \"npm:start:api\" \"npm:start:web\"",
+    "start:api": "cd .. && python -m ui.server",
+    "start:web": "next start",
     "lint": "eslint"
   },
   "dependencies": {
@@ -19,6 +21,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
+    "concurrently": "^9",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",

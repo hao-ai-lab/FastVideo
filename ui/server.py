@@ -242,6 +242,23 @@ def _setup_signal_handlers():
         signal.signal(signal.SIGTERM, handle_sigterm)
 
 
+def create_local_env(host: str, port: int) -> None:
+    """Check if .env.local exists in the ui directory, and create it if not."""
+    ui_dir = os.path.dirname(__file__)
+    env_local_path = os.path.join(ui_dir, ".env.local")
+    
+    # Use localhost for the API URL since browsers can't connect to 0.0.0.0
+    api_host = "localhost" if host == "0.0.0.0" else host
+    api_url = f"http://{api_host}:{port}/api"
+    
+    if not os.path.exists(env_local_path):
+        logger.info(f"Creating .env.local with API URL: {api_url}")
+        with open(env_local_path, "w", encoding="utf-8") as f:
+            f.write(f"NEXT_PUBLIC_API_BASE_URL={api_url}\n")
+    else:
+        logger.debug(f".env.local already exists at {env_local_path}")
+
+
 def main():
     global job_runner  # noqa: PLW0603
 
@@ -291,6 +308,8 @@ def main():
 
     output_dir = os.path.abspath(args.output_dir)
     log_dir = os.path.abspath(args.log_dir)
+    
+    create_local_env(args.host, args.port)
     
     # Initialize job runner
     job_runner = JobRunner(
