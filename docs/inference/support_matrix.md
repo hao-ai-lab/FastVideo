@@ -1,6 +1,10 @@
 # Compatibility Matrix
 
-The table below shows every supported model and optimizations supported for them.
+This page summarizes common model + optimization combinations.
+
+For the canonical, code-level list of model IDs recognized by
+`VideoGenerator.from_pretrained(...)`, see the registrations in
+`fastvideo/registry.py` (`register_configs(...)` entries).
 
 The symbols used have the following meanings:
 
@@ -10,7 +14,9 @@ The symbols used have the following meanings:
 
 ## Models x Optimization
 
-The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods and FastVideo will use the optimal default parameters when initializing and generating videos.
+The `HuggingFace Model ID` can be passed directly to
+`from_pretrained()`. FastVideo then uses model-specific default settings for
+pipeline initialization and sampling.
 
 <style>
   /* Target tables in this section */
@@ -56,12 +62,19 @@ The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods a
 | StepVideo T2V | `FastVideo/stepvideo-t2v-diffusers` | 768px768px204f<br>544px992px204f<br>544px992px136f | ❌ | ❌ | ✅ | ⭕ | ⭕ |
 | TurboWan2.1 T2V 1.3B | `loayrashid/TurboWan2.1-T2V-1.3B-Diffusers` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | TurboWan2.1 T2V 14B | `loayrashid/TurboWan2.1-T2V-14B-Diffusers` | 480P, 720P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
+| TurboWan2.2 I2V A14B | `loayrashid/TurboWan2.2-I2V-A14B-Diffusers` | 480P<br>720P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | LongCat T2V 13.6B | See note** | 480P<br>720P | ❌ | ❌ | ❌ | ⭕ | ✅ |
 | Matrix Game 2.0 Base | `FastVideo/Matrix-Game-2.0-Base-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Matrix Game 2.0 GTA | `FastVideo/Matrix-Game-2.0-GTA-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Matrix Game 2.0 TempleRun | `FastVideo/Matrix-Game-2.0-TempleRun-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 
 **Note**: Wan2.2 TI2V 5B has some quality issues when performing I2V generation. We are working on fixing this issue.
+
+## Canonical Supported IDs
+
+The authoritative source for model-ID recognition is
+`fastvideo/registry.py`. If a model ID is registered there, FastVideo can
+resolve default pipeline and sampling configuration for it.
 
 ## Special requirements
 

@@ -40,7 +40,7 @@ FastVideo has the following features:
 - Diverse hardware and OS support
   - Support H100, A100, 4090
   - Support Linux, Windows, MacOS
-  - See this [page](https://hao-ai-lab.github.io/FastVideo/inference/hardware_support/) for full list of supported hardware and OS.
+  - See this [page](https://hao-ai-lab.github.io/FastVideo/inference/support_matrix/) for full list of supported models, hardware assumptions, and optimization compatibility.
 
 ## Getting Started
 
@@ -72,7 +72,7 @@ See below for recipes and datasets:
 
 ### Generating Your First Video
 
-Here's a minimal example to generate a video using the default settings. Make sure VSA kernels are [installed](https://haoailab.com/FastVideo/attention/vsa/#installation). Create a file called `example.py` with the following code:
+Here's a minimal example to generate a video using the default settings. Make sure VSA kernels are [installed](https://hao-ai-lab.github.io/FastVideo/attention/vsa/#installation). Create a file called `example.py` with the following code:
 
 ```python
 import os
