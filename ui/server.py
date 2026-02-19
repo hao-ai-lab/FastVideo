@@ -130,6 +130,11 @@ class LogBufferHandler(logging.Handler):
     def __init__(self, buffer: JobLogBuffer):
         super().__init__()
         self.buffer = buffer
+        self.thread_id = threading.get_ident()
+        self.setFormatter(logging.Formatter("%(levelname)s %(asctime)s [%(name)s] %(message)s"))
+    
+    def filter(self, record):
+        return threading.get_ident() == self.thread_id
     
     def emit(self, record):
         try:
@@ -182,7 +187,7 @@ class Job:
     _log_buf: JobLogBuffer = field(
         default_factory=JobLogBuffer, repr=False
     )
-    _file_handler: logging.FileHandler | None = field(
+    log_file_handler: logging.FileHandler | None = field(
         default=None, repr=False
     )
 
@@ -311,7 +316,7 @@ def _run_job(job: Job):
     file_handler.setFormatter(
             logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
         )
-    job._file_handler = file_handler
+    job.log_file_handler = file_handler
 
     # Hook logger output into job log buffer    
     root_logger = logging.getLogger()
@@ -326,18 +331,18 @@ def _run_job(job: Job):
         job.status = JobStatus.RUNNING
         job.started_at = time.time()
         buf.phase = "starting"
-        buf.write(f"Job {job.id} started at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(job.started_at))}")
-        buf.write(f"Model: {job.model_id}")
-        buf.write(f"Prompt: {job.prompt}")
+        logger.info(f"Job {job.id} started at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(job.started_at))}")
+        logger.info(f"Model: {job.model_id}")
+        logger.info(f"Prompt: {job.prompt}")
 
         if job._stop_event.is_set():
             job.status = JobStatus.STOPPED
             job.finished_at = time.time()
-            buf.write("Job stopped before execution started")
+            logger.warning("Job stopped before execution started")
             return
 
         buf.phase = "loading model"
-        buf.write("Loading model...")
+        logger.info("Loading model...")
         
         generator = _get_or_create_generator(
             job.model_id,
@@ -347,9 +352,6 @@ def _run_job(job: Job):
             use_fsdp_inference=job.use_fsdp_inference,
         )
         buf.phase = "generating"
-        buf.write(
-            f"Starting generation for job {job.id} (model={job.model_id})"
-        )
         logger.info(
             "Starting generation for job %s (model=%s)", job.id, job.model_id
         )
@@ -367,36 +369,35 @@ def _run_job(job: Job):
         )
     
         buf.phase = "saving"
-        buf.write("Generation completed, searching for output file...")
+        logger.info("Generation completed, searching for output file...")
 
         # Find the generated video file
         video_files = sorted(Path(job_output_dir).glob("*.mp4"))
         if video_files:
             job.output_path = str(video_files[0])
-            buf.write(f"Found video output: {job.output_path}")
+            logger.info(f"Found video output: {job.output_path}")
         else:
             # Could be an image workload
             image_files = sorted(Path(job_output_dir).glob("*.png"))
             if image_files:
                 job.output_path = str(image_files[0])
-                buf.write(f"Found image output: {job.output_path}")
+                logger.info(f"Found image output: {job.output_path}")
             else:
-                buf.write("Warning: No output file found in job directory")
+                logger.warning("No output file found in job directory")
 
         if job._stop_event.is_set():
             job.status = JobStatus.STOPPED
-            buf.write("Job was stopped during execution")
+            logger.warning("Job was stopped during execution")
         else:
             job.status = JobStatus.COMPLETED
             buf.progress = 100.0
-            buf.write("Job completed successfully")
+            logger.info("Job completed successfully")
         job.finished_at = time.time()
         buf.phase = "done"
-        logger.info("Job %s completed successfully", job.id)
 
     except Exception as exception:
         error_msg = str(exception) if _verbose else str(exception).split('\n')[0]
-        buf.write(f"Critical error in job thread: {error_msg}")
+        logger.error(f"Critical error in job thread: {error_msg}")
         job.status = JobStatus.FAILED
         job.error = f"Critical error ({type(exception).__name__}): {error_msg}"
         job.finished_at = time.time()
@@ -407,7 +408,7 @@ def _run_job(job: Job):
         file_handler.flush()
         file_handler.close()
         root_logger.removeHandler(buffer_handler)
-        job._file_handler = None
+        job.log_file_handler = None
 
 
 app = FastAPI(
@@ -515,7 +516,7 @@ def start_job(job_id: str) -> dict[str, Any]:
     job.finished_at = None
     job._stop_event.clear()
     job._log_buf = JobLogBuffer()  # fresh log buffer
-    job._file_handler = None  # Reset file handler
+    job.log_file_handler = None  # Reset file handler
 
     # Wrap _run_job in an additional safety layer to catch any exceptions
     # that might escape (though they shouldn't with our comprehensive handling)
