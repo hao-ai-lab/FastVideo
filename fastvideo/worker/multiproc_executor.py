@@ -327,6 +327,12 @@ class MultiprocExecutor(Executor):
             return  # Prevent multiple shutdown calls
 
         logger.info("Shutting down MultiprocExecutor...")
+
+        # Check if workers were initialized (they might not be if initialization failed)
+        if not hasattr(self, 'workers') or not self.workers:
+            logger.info("No workers to shut down.")
+            return
+
         self.shutting_down = True
 
         # First try gentle termination
@@ -623,7 +629,8 @@ class WorkerMultiprocProc:
                         if traceback_str:
                             error_info += f"\n{traceback_str}"
                         worker_errors.append(error_info)
-                        logger.error("Worker %s initialization failed: %s", rank, error_info)
+                        # Log a concise error message (full traceback will be in the exception)
+                        logger.error("Worker %s initialization failed: %s", rank, error_msg)
                         # Continue to check other workers, but we'll fail at the end
                     elif response["status"] != "READY":
                         worker_errors.append(f"Worker returned unexpected status: {response.get('status', 'unknown')}")
