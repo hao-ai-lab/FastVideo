@@ -118,7 +118,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
     // Only set up polling interval for running/pending jobs
     if (shouldPoll) {
       // Poll every 500ms when job is running, every 2s when pending
-      const pollIntervalMs = job.status === "running" ? 500 : 2000;
+      const pollIntervalMs = 2000;
       pollInterval = setInterval(pollLogs, pollIntervalMs);
     }
 
