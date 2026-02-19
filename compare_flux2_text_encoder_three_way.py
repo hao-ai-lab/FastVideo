@@ -3,8 +3,9 @@
 Compare FastVideo, SGLang, and Diffusers Flux2 Klein text encoder outputs in one run.
 
 Uses the same tokenized input (diffusers pipeline tokenizer) for all three.
+Forces FastVideo and SGLang to use torch_sdpa attention for a fair comparison.
+Prints hidden_states layout (len, shapes at layers 9/18/27) for each encoder.
 Reports pairwise max diff: FV vs Diffusers, SGLang vs Diffusers, FV vs SGLang.
-Diffusers is the reference implementation.
 
   python compare_flux2_text_encoder_three_way.py
   python compare_flux2_text_encoder_three_way.py --no-sglang   # skip SGLang (no SGLANG_PATH)
@@ -57,6 +58,21 @@ def flux2_klein_postprocess(outputs, hidden_states_layers=(9, 18, 27)):
         batch_size, seq_len, num_channels * hidden_dim
     )
     return prompt_embeds
+
+
+def _print_hidden_states_diagnostics(name, encoder, outputs, layers=(9, 18, 27)):
+    """Print encoder type, number of hidden_states, and shapes at layer indices."""
+    if outputs.hidden_states is None:
+        print(f"  [{name}] no hidden_states")
+        return
+    hs = outputs.hidden_states
+    n = len(hs)
+    print(f"  [{name}] encoder type: {type(encoder).__name__}, len(hidden_states) = {n}")
+    for k in layers:
+        if k < n:
+            print(f"    hidden_states[{k}].shape = {hs[k].shape}")
+        else:
+            print(f"    hidden_states[{k}] OUT OF RANGE (max index {n - 1})")
 
 
 def _tokenize_with_pipeline(pipe, messages, device, max_length=512):
@@ -121,6 +137,10 @@ def main():
     dtype = torch.bfloat16
     messages = [{"role": "user", "content": args.prompt}]
     max_length = 512
+    hidden_states_layers = (9, 18, 27)
+
+    # Force SDPA for FastVideo so all encoders use same attention backend (set before FV imports)
+    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "torch_sdpa"
 
     # 1. Load diffusers pipeline (tokenizer + reference encoder)
     try:
@@ -133,7 +153,7 @@ def main():
     input_ids, attention_mask = _tokenize_with_pipeline(pipe, messages, device, max_length)
     print(f"  Tokenized prompt: {args.prompt!r} -> input_ids shape {input_ids.shape}")
 
-    # 2. Run Diffusers encoder
+    # 2. Run Diffusers encoder (same input_ids as FV/SGLang)
     enc = pipe.text_encoder
     enc_kwargs = {
         "input_ids": input_ids,
@@ -144,7 +164,10 @@ def main():
         enc_kwargs["use_cache"] = False
     with torch.no_grad():
         diffusers_outputs = enc(**enc_kwargs)
-    diffusers_prompt_embeds = flux2_klein_postprocess(diffusers_outputs)
+    _print_hidden_states_diagnostics("Diffusers", enc, diffusers_outputs, hidden_states_layers)
+    diffusers_prompt_embeds = flux2_klein_postprocess(
+        diffusers_outputs, hidden_states_layers=hidden_states_layers
+    )
     diffusers_prompt_embeds = diffusers_prompt_embeds.detach().cpu().float()
     print(f"  Diffusers prompt_embeds shape: {diffusers_prompt_embeds.shape}")
 
@@ -173,7 +196,8 @@ def main():
             attention_mask=attention_mask,
             output_hidden_states=True,
         )
-    fv_prompt_embeds = flux2_klein_postprocess(fv_outputs)
+    _print_hidden_states_diagnostics("FastVideo", fv_encoder, fv_outputs, hidden_states_layers)
+    fv_prompt_embeds = flux2_klein_postprocess(fv_outputs, hidden_states_layers=hidden_states_layers)
     fv_prompt_embeds = fv_prompt_embeds.cpu().float()
     print(f"  FastVideo prompt_embeds shape: {fv_prompt_embeds.shape}")
 
@@ -218,7 +242,10 @@ def main():
                     attention_mask=attention_mask,
                     output_hidden_states=True,
                 )
-            sglang_prompt_embeds = flux2_klein_postprocess(sgl_outputs)
+            _print_hidden_states_diagnostics("SGLang", sgl_encoder, sgl_outputs, hidden_states_layers)
+            sglang_prompt_embeds = flux2_klein_postprocess(
+                sgl_outputs, hidden_states_layers=hidden_states_layers
+            )
             sglang_prompt_embeds = sglang_prompt_embeds.cpu().float()
             print(f"  SGLang prompt_embeds shape: {sglang_prompt_embeds.shape}")
         except ImportError as e:
