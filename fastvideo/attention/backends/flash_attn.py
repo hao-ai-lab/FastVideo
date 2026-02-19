@@ -4,26 +4,36 @@ import torch
 import torch.nn.functional as F
 from flash_attn import flash_attn_func as flash_attn_2_func
 from dataclasses import dataclass
-try:
-    from flash_attn_interface import flash_attn_func as flash_attn_3_func
-
-    # flash_attn 3 no longer have a different API, see following commit:
-    # https://github.com/Dao-AILab/flash-attention/commit/ed209409acedbb2379f870bbd03abce31a7a51b7
-    flash_attn_func = flash_attn_3_func
-except ImportError:
-    flash_attn_func = flash_attn_2_func
-
-from fastvideo.attention.backends.abstract import (AttentionBackend,
-                                                   AttentionImpl,
-                                                   AttentionMetadata,
-                                                   AttentionMetadataBuilder)
+from fastvideo.attention.backends.abstract import (
+    AttentionBackend,
+    AttentionImpl,
+    AttentionMetadata,
+    AttentionMetadataBuilder,
+)
 from fastvideo.logger import init_logger
+
+fa_ver = 2
+try:
+    from flash_attn.cute import flash_attn_func
+
+    fa_ver = 4
+except ImportError:
+    try:
+        from flash_attn_interface import flash_attn_func as flash_attn_3_func
+
+        # flash_attn 3 no longer have a different API, see following commit:
+        # https://github.com/Dao-AILab/flash-attention/commit/ed209409acedbb2379f870bbd03abce31a7a51b7
+        flash_attn_func = flash_attn_3_func
+        fa_ver = 3
+    except ImportError:
+        flash_attn_func = flash_attn_2_func
 
 logger = init_logger(__name__)
 
+logger.info("Using FlashAttention-%d backend.", fa_ver)
+
 
 class FlashAttentionBackend(AttentionBackend):
-
     accept_output_buffer: bool = True
 
     @staticmethod
@@ -92,10 +102,11 @@ class FlashAttentionImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: FlashAttnMetadata,
     ):
-        if attn_metadata is not None and hasattr(
-                attn_metadata,
-                "attn_mask") and attn_metadata.attn_mask is not None:
-            from fastvideo.attention.utils.flash_attn_no_pad import flash_attn_no_pad
+        if (attn_metadata is not None and hasattr(attn_metadata, "attn_mask")
+                and attn_metadata.attn_mask is not None):
+            from fastvideo.attention.utils.flash_attn_no_pad import (
+                flash_attn_no_pad, )
+
             attn_mask = attn_metadata.attn_mask
             qkv = torch.stack([query, key, value], dim=2)
 
@@ -106,11 +117,16 @@ class FlashAttentionImpl(AttentionImpl):
                                        causal=False,
                                        dropout_p=0,
                                        softmax_scale=None)
+            if isinstance(output, tuple):
+                output = output[0]
         else:
             output = flash_attn_func(
                 query,  # type: ignore[no-untyped-call]
                 key,
                 value,
                 softmax_scale=self.softmax_scale,
-                causal=self.causal)
+                causal=self.causal,
+            )
+            if isinstance(output, tuple):
+                output = output[0]
         return output
