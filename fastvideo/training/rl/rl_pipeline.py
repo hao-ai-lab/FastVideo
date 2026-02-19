@@ -34,6 +34,12 @@ from fastvideo.distributed import get_world_group
 from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch, TrainingBatch
+from fastvideo.pipelines.pipeline_batch_info import (
+    concat_training_batches,
+    get_training_batch_sample_size,
+    split_training_batch,
+    TRAINING_BATCH_SAMPLE_TENSOR_FIELDS,
+)
 from fastvideo.pipelines.stages.denoising import sde_step_with_logprob
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.rl.rewards import (create_reward_models,
@@ -76,6 +82,148 @@ def _to_device_dtype(
         else:
             out[k] = v
     return out
+
+
+def _apply_mask_to_training_batch(batch: TrainingBatch, mask: torch.Tensor) -> TrainingBatch:
+    """Return a new TrainingBatch with only samples where mask is True.
+    Only masks/shuffles sample tensor fields and batch-indexed structured fields that are present.
+    """
+    indices = torch.where(mask)[0]
+    out = TrainingBatch()
+    out.current_timestep = batch.current_timestep
+    out.current_vsa_sparsity = batch.current_vsa_sparsity
+    for f in TRAINING_BATCH_SAMPLE_TENSOR_FIELDS:
+        t = getattr(batch, f)
+        if t is not None:
+            idx = indices.to(t.device)
+            setattr(out, f, t[idx].clone() if t.is_cuda else t[idx])
+    if batch.input_kwargs:
+        out.input_kwargs = {}
+        idx_list = indices.cpu().tolist()
+        for k, v in batch.input_kwargs.items():
+            if k == "decoded_videos" and isinstance(v, torch.Tensor):
+                out.input_kwargs[k] = v[indices.to(v.device)]
+            elif isinstance(v, list):
+                out.input_kwargs[k] = [v[i] for i in idx_list]
+            else:
+                out.input_kwargs[k] = v
+    if batch.infos:
+        idx_list = indices.cpu().tolist()
+        out.infos = [batch.infos[i] for i in idx_list]
+    out.rl_transformer_forward_contexts = batch.rl_transformer_forward_contexts
+    if batch.rl_transformer_forward_kwargs:
+
+        def _index_kwargs(obj: Any, idx: torch.Tensor) -> Any:
+            if isinstance(obj, torch.Tensor):
+                return obj[idx.to(obj.device)]
+            if isinstance(obj, dict):
+                return {k: _index_kwargs(v, idx) for k, v in obj.items()}
+            return obj
+
+        out.rl_transformer_forward_kwargs = _index_kwargs(batch.rl_transformer_forward_kwargs, indices)
+    if batch.raw_latent_shape is not None:
+        out.raw_latent_shape = (len(indices),) + tuple(batch.raw_latent_shape[1:])
+    return out
+
+
+def mask_training_batches(
+    collected: list[TrainingBatch],
+    num_batches: int,
+    device: torch.device,
+) -> list[TrainingBatch]:
+    """
+    Port of flow_grpo masking: drop samples where advantages are zero across time;
+    ensure kept count is divisible by num_batches by randomly un-dropping some if needed.
+    Operates on concatenated collected list and returns a new list of num_batches TrainingBatches.
+    """
+    if not collected:
+        return collected
+    if num_batches <= 0:
+        return collected
+    cat = concat_training_batches(collected)
+    adv = cat.advantages
+    if adv is None:
+        return collected
+    # mask: True = keep
+    if adv.dim() == 2:
+        mask = (adv.abs().sum(dim=1) != 0)
+    else:
+        mask = (adv.abs() != 0)
+    true_count = mask.sum().item()
+    if true_count == 0:
+        cat.advantages = cat.advantages + 1e-6
+        adv = cat.advantages
+        mask = (adv.abs().sum(dim=1) != 0) if adv.dim() == 2 else (adv.abs() != 0)
+        true_count = int(mask.sum().item())
+    if true_count % num_batches != 0:
+        false_indices = torch.where(~mask)[0]
+        num_to_change = num_batches - (true_count % num_batches)
+        if len(false_indices) >= num_to_change:
+            rand_device = false_indices.device
+            random_indices = torch.randperm(len(false_indices), device=rand_device)[:num_to_change]
+            mask[false_indices[random_indices]] = True
+    masked = _apply_mask_to_training_batch(cat, mask)
+    return split_training_batch(masked, num_batches)
+
+
+def _apply_perm_to_training_batch(batch: TrainingBatch, perm: torch.Tensor) -> TrainingBatch:
+    """Return a new TrainingBatch with batch dimension permuted by perm.
+    Only permutes sample tensor fields and batch-indexed structured fields that are present.
+    """
+    perm_list = perm.cpu().tolist()
+    out = TrainingBatch()
+    out.current_timestep = batch.current_timestep
+    out.current_vsa_sparsity = batch.current_vsa_sparsity
+    for f in TRAINING_BATCH_SAMPLE_TENSOR_FIELDS:
+        t = getattr(batch, f)
+        if t is not None:
+            p = perm.to(t.device)
+            setattr(out, f, t[p].clone() if t.is_cuda else t[p])
+    if batch.input_kwargs:
+        out.input_kwargs = {}
+        for k, v in batch.input_kwargs.items():
+            if k == "decoded_videos" and isinstance(v, torch.Tensor):
+                out.input_kwargs[k] = v[perm.to(v.device)]
+            elif isinstance(v, list):
+                out.input_kwargs[k] = [v[i] for i in perm_list]
+            else:
+                out.input_kwargs[k] = v
+    if batch.infos:
+        out.infos = [batch.infos[i] for i in perm_list]
+    out.rl_transformer_forward_contexts = batch.rl_transformer_forward_contexts
+    if batch.rl_transformer_forward_kwargs:
+
+        def _perm_kwargs(obj: Any, p: torch.Tensor) -> Any:
+            if isinstance(obj, torch.Tensor):
+                return obj[p.to(obj.device)]
+            if isinstance(obj, dict):
+                return {k: _perm_kwargs(v, p) for k, v in obj.items()}
+            return obj
+
+        out.rl_transformer_forward_kwargs = _perm_kwargs(batch.rl_transformer_forward_kwargs, perm)
+    if batch.raw_latent_shape is not None:
+        out.raw_latent_shape = batch.raw_latent_shape
+    return out
+
+
+def shuffle_training_batches(
+    collected: list[TrainingBatch],
+    device: torch.device,
+) -> list[TrainingBatch]:
+    """
+    Port of flow_grpo shuffling: shuffle samples along batch dimension (one perm for full concatenated batch).
+    """
+    if not collected:
+        return collected
+    cat = concat_training_batches(collected)
+    B = get_training_batch_sample_size(cat)
+    if B <= 1:
+        return collected
+    perm = torch.randperm(B, device=device)
+
+    logger.info(f"shuffle_training_batches perm: {perm}")
+    shuffled = _apply_perm_to_training_batch(cat, perm)
+    return split_training_batch(shuffled, len(collected))
 
 
 class RLPipeline(TrainingPipeline):
@@ -1170,6 +1318,7 @@ class RLPipeline(TrainingPipeline):
         training_batch.returns = returns
         training_batch.advantage_mean = advantages.mean().item()
         training_batch.advantage_std = advantages.std().item()
+        logger.info(f"training_batch.advantages.shape: {training_batch.advantages.shape}")
 
         # Reset stats so next step uses current-batch-only mean/std (same as flow_grpo per epoch)
         self.stat_tracker.clear()
@@ -1751,7 +1900,29 @@ class RLPipeline(TrainingPipeline):
             for attr in ("_debug_rewards_advantages_log_pending", "_debug_first_batch_metrics", "_debug_batches_data", "_debug_current_batch_index"):
                 if hasattr(self, attr):
                     delattr(self, attr)
-            raise KeyboardInterrupt("Debug stop after logging prompts and rewards/advantages.")
+            # raise KeyboardInterrupt("Debug stop after logging prompts and rewards/advantages.")
+
+        # endregion
+
+        # myregion masking
+        collected = mask_training_batches(collected, num_batches=M, device=self.device)
+        # endregion masking
+
+        # myregion shuffling
+        collected = shuffle_training_batches(collected, device=self.device)
+        # endregion shuffling
+
+        # myregion print rewards after masking & shuffling
+        wg = get_world_group()
+        for batch_index, tb in enumerate(collected):
+            adv = tb.advantages  # [B, num_steps] or [B]
+            mean_adv = adv.mean(dim=1) if adv.dim() == 2 else adv.view(-1)
+            mean_adv = mean_adv.contiguous().to(self.device)
+            gathered_mean_adv = wg.all_gather(mean_adv, dim=0)
+            if self.global_rank == 0:
+                gathered_list = gathered_mean_adv.cpu().tolist()
+                print(f"==== training batch {batch_index} ====")
+                print(f"mean(advantages) (global batch size {len(gathered_list)}): {gathered_list}")
         # endregion
 
         # Training: backward, then optimizer step and log per batch
@@ -1787,6 +1958,8 @@ class RLPipeline(TrainingPipeline):
                 training_batch.kl_divergence,
                 kl_threshold,
             )
+
+        raise KeyboardInterrupt("Debug stop after end of step.")
         return training_batch
 
     def set_trainable(self) -> None:

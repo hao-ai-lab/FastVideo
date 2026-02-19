@@ -933,7 +933,6 @@ def main(_):
 
         # ungather advantages; we only need to keep the entries corresponding to the samples on this process
         advantages = torch.as_tensor(advantages)
-        logger.info
 
         # myregion debug: log reward, advantage, prompt per sample (64 lines) to flow_logs/debug_metrics.txt then stop
         global _debug_rewards_advantages_logged
@@ -974,15 +973,15 @@ def main(_):
                     f.write(f"{float(rewards_1d[i])}, {float(advantages_1d[i])}, {prompts_ordered[i]}\n")
             logger.info("RL_METRIC: Debug region appended full rewards/advantages to flow_logs/debug_metrics.txt; stopping.")
             _debug_rewards_advantages_logged = True
-            raise KeyboardInterrupt("Debug stop after logging rewards and advantages.")
+            
         # endregion
-
 
 
         samples["advantages"] = (
             advantages.reshape(accelerator.num_processes, -1, advantages.shape[-1])[accelerator.process_index]
             .to(accelerator.device)
         )
+
         if accelerator.is_local_main_process:
             print("advantages: ", samples["advantages"].abs().mean())
             print("kl: ", samples["kl"].mean())
@@ -1021,11 +1020,16 @@ def main(_):
 
         total_batch_size, num_timesteps = samples["timesteps"].shape
         assert num_timesteps == config.sample.num_steps
+        logger.info(f"total_batch_size: {total_batch_size}")
 
         #################### TRAINING ####################
         for inner_epoch in range(config.train.num_inner_epochs):
             # shuffle samples along batch dimension
-            perm = torch.randperm(total_batch_size, device=accelerator.device)
+            g = torch.Generator(device='cuda').manual_seed(50)
+            # perm = torch.randperm(total_batch_size, device=accelerator.device, generator=g)
+            perm = torch.randperm(total_batch_size, device='cuda', generator=g)
+            if accelerator.is_main_process:
+                print(f"shuffle_training_batches perm: {perm}")
             # perm = torch.arange(total_batch_size, device=accelerator.device)
             samples = {k: v[perm] for k, v in samples.items()}
 
@@ -1054,6 +1058,15 @@ def main(_):
             samples_batched = [
                 dict(zip(samples_batched, x)) for x in zip(*samples_batched.values())
             ]
+            # myregion debug
+            for batch_index, sample in enumerate(samples_batched):
+                mean_adv = sample["advantages"].mean(dim=1)  # [micoe_batch] per rank
+                gathered_mean_adv = accelerator.gather(mean_adv).cpu().tolist()
+                if accelerator.is_main_process:
+                    print(f"==== training batch {batch_index} ====")
+                    print(f"mean(advantages) (global batch size {len(gathered_mean_adv)}): {gathered_mean_adv}")
+            # endregion 
+
 
             # train
             pipeline.transformer.train()
@@ -1152,7 +1165,7 @@ def main(_):
                     ema.step(transformer_trainable_parameters, global_step)
             # make sure we did an optimization step at the end of the inner epoch
             # assert accelerator.sync_gradients
-        raise KeyboardInterrupt
+        raise KeyboardInterrupt("Debug stop after training one step ends.")
 if __name__ == "__main__":
     app.run(main)
 

@@ -86,8 +86,7 @@ class KRepeatSampler(Sampler):
             # epoch = epoch*num_batches_per_epoch+i and skips the first 2 epochs, so first real batch
             # uses seed + 2*num_batches_per_epoch; we use seed+step+4 so step 0,1,... matches that.
             g = torch.Generator()
-            g.manual_seed(self.seed + self.step + 3)
-            logger.info(f"sampler manual_seed: {self.seed + self.step + 4}")
+            g.manual_seed(self.seed + self.step + 3+5)
             
             # Randomly select m unique samples
             indices = torch.randperm(len(self.dataset), generator=g)[:self.m].tolist()

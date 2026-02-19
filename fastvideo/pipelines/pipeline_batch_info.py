@@ -333,12 +333,38 @@ class TrainingBatch:
     reward_std: float = 0.0  # Std of rewards
     value_mean: float = 0.0  # Mean value prediction
     entropy: float = 0.0  # Policy entropy (for exploration)
-    '''
-    "latents", "timesteps", "old_log_probs", "advantages", "reward_scores",
-        "log_probs", "kl", "prompt_ids", "prompt_embeds", "negative_prompt_embeds",
-        "values", "returns", "encoder_hidden_states", "encoder_attention_mask",
-        "noise_latents", "trajectory_latents", "trajectory_timesteps",
-    '''
+
+
+# Tensor attributes with batch dimension that are part of collected samples and used in
+# the RL training step (concat/split/mask/shuffle must all use this list).
+TRAINING_BATCH_SAMPLE_TENSOR_FIELDS = [
+    "latents",
+    "timesteps",
+    "old_log_probs",
+    "advantages",
+    "reward_scores",
+    "log_probs",
+    "kl",
+    "prompt_ids",
+    "prompt_embeds",
+    "negative_prompt_embeds",
+    "values",
+    "returns",
+    "encoder_hidden_states",
+    "encoder_attention_mask",
+    "noise_latents",
+    "trajectory_latents",
+    "trajectory_timesteps",
+]
+
+
+def get_training_batch_sample_size(batch: TrainingBatch) -> int:
+    """Return batch size (first dim) from the first present sample tensor field."""
+    for f in TRAINING_BATCH_SAMPLE_TENSOR_FIELDS:
+        t = getattr(batch, f)
+        if t is not None and isinstance(t, torch.Tensor):
+            return t.shape[0]
+    return 0
 
 
 def _cat_tensors_or_none(tensors: list) -> torch.Tensor | None:
@@ -379,13 +405,7 @@ def concat_training_batches(batches: list[TrainingBatch]) -> TrainingBatch:
     out.current_timestep = batches[0].current_timestep
     out.current_vsa_sparsity = batches[0].current_vsa_sparsity
 
-    tensor_fields = [
-        "latents", "timesteps", "old_log_probs", "advantages", "reward_scores",
-        "log_probs", "kl", "prompt_ids", "prompt_embeds", "negative_prompt_embeds",
-        "values", "returns", "encoder_hidden_states", "encoder_attention_mask",
-        "noise_latents", "trajectory_latents", "trajectory_timesteps",
-    ]
-    for f in tensor_fields:
+    for f in TRAINING_BATCH_SAMPLE_TENSOR_FIELDS:
         vals = [getattr(b, f) for b in batches]
         if any(v is not None for v in vals):
             setattr(out, f, _cat_tensors_or_none(vals))
@@ -423,7 +443,7 @@ def split_training_batch(batch: TrainingBatch, num_splits: int) -> list[Training
     """Split a TrainingBatch into num_splits chunks along batch dim (for per-batch optimizer step)."""
     if num_splits <= 1:
         return [batch]
-    B = batch.latents.shape[0] if batch.latents is not None else (batch.reward_scores.shape[0] if batch.reward_scores is not None else 0)
+    B = get_training_batch_sample_size(batch)
     if B == 0:
         return [batch]
     sizes = [B // num_splits] * num_splits
@@ -433,19 +453,13 @@ def split_training_batch(batch: TrainingBatch, num_splits: int) -> list[Training
     for s in sizes:
         offsets.append(offsets[-1] + s)
 
-    tensor_fields = [
-        "latents", "timesteps", "old_log_probs", "advantages", "reward_scores",
-        "log_probs", "kl", "prompt_ids", "prompt_embeds", "negative_prompt_embeds",
-        "values", "returns", "encoder_hidden_states", "encoder_attention_mask",
-        "noise_latents", "trajectory_latents", "trajectory_timesteps",
-    ]
     out_batches = []
     for i in range(num_splits):
         s, e = offsets[i], offsets[i + 1]
         sub = TrainingBatch()
         sub.current_timestep = batch.current_timestep
         sub.current_vsa_sparsity = batch.current_vsa_sparsity
-        for f in tensor_fields:
+        for f in TRAINING_BATCH_SAMPLE_TENSOR_FIELDS:
             t = getattr(batch, f)
             if t is not None:
                 setattr(sub, f, t[s:e].clone() if t.is_cuda else t[s:e])

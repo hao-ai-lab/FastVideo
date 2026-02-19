@@ -3,10 +3,10 @@
 
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
-export WANDB_API_KEY=""
+export WANDB_API_KEY="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"
 # Set to a directory where align_logs/fv_logs (and flow_logs when running flow_grpo) will be written
 export ALIGN_LOGS_ROOT="/mnt/fast-disks/hao_lab/shijie/FastVideo"
-export USE_ALIGN_DECODED_VIDEOS=1
+# export USE_ALIGN_DECODED_VIDEOS=1
 # Reward verification: run flow_grpo first to populate align_logs/fv_logs/decoded_videos/*.safetensors,
 # then run FastVideo with USE_ALIGN_DECODED_VIDEOS=1 to use those videos for reward/advantage (same batch/rank).
 # export USE_ALIGN_DECODED_VIDEOS=1
@@ -17,9 +17,9 @@ MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 RL_DATASET_DIR="${FLOW_GRPO_DATASET_OCR:-data/ocr/}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALIDATION_DATASET_FILE="$SCRIPT_DIR/validation.json"
-NUM_GPUS=4
+NUM_GPUS=2
 
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=4,5
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Training arguments (aligned with WandB sample + train; SFT not used)
