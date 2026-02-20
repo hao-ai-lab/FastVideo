@@ -621,7 +621,8 @@ class WaypointPipeline(ComposedPipelineBase):
                 _collect_debug(
                     "denoised",
                     frame=ctx.frame_index,
-                    denoised=_stats_dict(x, include_sample=(ctx.frame_index < 5)),
+                    denoised=_stats_dict(x,
+                                         include_sample=(ctx.frame_index < 5)),
                 )
             if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
                 xf = x.float()
@@ -740,15 +741,14 @@ class WaypointPipeline(ComposedPipelineBase):
                     shift_s = None
                     if shift_val is not None and isinstance(
                             shift_val, torch.Tensor):
-                        shift_s = float(
-                            shift_val.item()) if shift_val.numel() == 1 else None
+                        shift_s = float(shift_val.item()) if shift_val.numel(
+                        ) == 1 else None
                     elif shift_val is not None:
                         shift_s = float(shift_val)
                     _collect_debug(
                         "vae_config",
-                        scaling_factor=(
-                            float(scaling_factor)
-                            if scaling_factor is not None else 1.0),
+                        scaling_factor=(float(scaling_factor)
+                                        if scaling_factor is not None else 1.0),
                         shift_factor=shift_s,
                     )
                 if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
