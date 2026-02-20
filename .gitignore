@@ -37,6 +37,14 @@ weights/
 official_weights/
 converted_weights/
 
+# Local / personal (do not commit)
+docs/waypoint_official_vs_fastvideo_diff.md
+docs/waypoint_runpod_compare.md
+official_debug.json
+scripts/official_waypoint.py
+scripts/run_diffusers_waypoint.py
+scripts/waypoint_compare_fastvideo_vs_diffusers.py
+
 # SSIM test outputs
 fastvideo/tests/ssim/generated_videos/
 
