@@ -95,6 +95,26 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
 
 
 def get_parquet_files_and_length(path: str):
+    path = os.path.abspath(path)
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"Dataset path does not exist: {path}. "
+            "Expected a directory containing *.parquet files.")
+    if not os.path.isdir(path):
+        raise NotADirectoryError(
+            f"Dataset path is not a directory: {path}. "
+            "Expected a directory containing *.parquet files.")
+    has_parquet_file = False
+    for _, _, files in os.walk(path):
+        if any(file.endswith(".parquet") for file in files):
+            has_parquet_file = True
+            break
+    if not has_parquet_file:
+        raise FileNotFoundError(
+            "No parquet files found under dataset path: "
+            f"{path}. "
+            "Please verify this path points to preprocessed parquet data.")
+
     # Check if cached info exists
     cache_dir = os.path.join(path, "map_style_cache")
     cache_file = os.path.join(cache_dir, "file_info.pkl")
@@ -111,6 +131,10 @@ def get_parquet_files_and_length(path: str):
             try:
                 with open(cache_file, "rb") as f:
                     file_names_sorted, lengths_sorted = pickle.load(f)
+                if len(file_names_sorted) == 0:
+                    raise ValueError(
+                        "Cached parquet metadata is empty in "
+                        f"{cache_file}.")
                 cache_loaded = True
                 logger.info("Successfully loaded cached file info")
             except Exception as e:
@@ -128,6 +152,12 @@ def get_parquet_files_and_length(path: str):
                     if file.endswith('.parquet'):
                         file_path = os.path.join(root, file)
                         file_names.append(file_path)
+            if len(file_names) == 0:
+                raise FileNotFoundError(
+                    "No parquet files found under dataset path: "
+                    f"{path}. "
+                    "Please verify this path points to preprocessed parquet "
+                    "data.")
             for file_path in tqdm.tqdm(
                     file_names, desc="Reading parquet files to get lengths"):
                 num_rows = pq.ParquetFile(file_path).metadata.num_rows
@@ -138,9 +168,6 @@ def get_parquet_files_and_length(path: str):
                                                                 strict=True),
                                                             key=lambda x: x[0]),
                                                     strict=True)
-            assert len(
-                file_names_sorted) != 0, "No parquet files found in the dataset"
-
             # Save the cache
             os.makedirs(cache_dir, exist_ok=True)
             with open(cache_file, "wb") as f:
@@ -155,6 +182,15 @@ def get_parquet_files_and_length(path: str):
     logger.info("Loading cached file info from %s after barrier", cache_file)
     with open(cache_file, "rb") as f:
         file_names_sorted, lengths_sorted = pickle.load(f)
+    if len(file_names_sorted) == 0:
+        raise RuntimeError(
+            "Cached parquet metadata is empty after synchronization at "
+            f"{cache_file}. "
+            "Please verify the dataset path and regenerate cache.")
+    if len(file_names_sorted) != len(lengths_sorted):
+        raise RuntimeError(
+            "Cached parquet metadata is corrupted at "
+            f"{cache_file}: file count and length count do not match.")
 
     return file_names_sorted, lengths_sorted
 

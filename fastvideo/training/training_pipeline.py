@@ -19,6 +19,7 @@ from einops import rearrange
 from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
+from diffusers import FlowMatchEulerDiscreteScheduler
 
 import fastvideo.envs as envs
 try:
@@ -605,6 +606,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             device="cpu").manual_seed(self.seed + self.global_rank)
         logger.info("Initialized random seeds with seed: %s",
                     self.seed + self.global_rank)
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()

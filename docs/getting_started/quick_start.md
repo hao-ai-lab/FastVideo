@@ -79,5 +79,6 @@ if __name__ == '__main__':
 
 - [Installation Guide](installation.md) - Detailed installation instructions
 - [Configuration](../inference/configuration.md) - Learn about configuration options
-- [Examples](../inference/examples/) - Explore more examples
+- [Examples](../inference/examples/examples_inference_index.md) - Explore more
+  examples
 - [Optimizations](../inference/optimizations.md) - Performance optimization tips

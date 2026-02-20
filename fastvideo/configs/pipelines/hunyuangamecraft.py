@@ -57,10 +57,18 @@ def llama_preprocess_text(prompt: str) -> str:
 def llama_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
     """Extract hidden states from LLaMA output, skipping instruction tokens."""
     hidden_state_skip_layer = 2
-    assert outputs.hidden_states is not None
-    hidden_states: tuple[torch.Tensor, ...] = outputs.hidden_states
-    last_hidden_state: torch.Tensor = hidden_states[-(hidden_state_skip_layer +
-                                                      1)]
+    hidden_states = outputs.hidden_states
+    if hidden_states is not None and len(
+            hidden_states) > hidden_state_skip_layer:
+        last_hidden_state: torch.Tensor = hidden_states[-(
+            hidden_state_skip_layer + 1)]
+    elif outputs.last_hidden_state is not None:
+        # Fallback for encoder outputs without hidden_states.
+        last_hidden_state = outputs.last_hidden_state
+    else:
+        raise ValueError(
+            "LLaMA encoder output must contain hidden_states or last_hidden_state."
+        )
     crop_start = prompt_template_video.get("crop_start", -1)
     last_hidden_state = last_hidden_state[:, crop_start:]
     return last_hidden_state

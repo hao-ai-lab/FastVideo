@@ -19,8 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-from transformers import PretrainedConfig
-from transformers.modeling_utils import PreTrainedModel
+from transformers import PretrainedConfig, PreTrainedModel
 
 from fastvideo.models.dits.stepvideo import StepVideoRMSNorm
 

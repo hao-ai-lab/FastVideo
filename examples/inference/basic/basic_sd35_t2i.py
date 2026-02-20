@@ -32,13 +32,13 @@ def _safe_filename(text: str, max_len: int = 100) -> str:
 
 def _remove_existing_outputs(out_dir: str, filename_base: str) -> None:
     """
-    Ensure deterministic naming by deleting any existing mp4s that would
+    Ensure deterministic naming by deleting any existing outputs that would
     cause VideoGenerator to append suffixes like _1, _2, etc.
     """
     if not os.path.isdir(out_dir):
         return
 
-    pattern = re.compile(rf"^{re.escape(filename_base)}(_\d+)?\.mp4$")
+    pattern = re.compile(rf"^{re.escape(filename_base)}(_\d+)?\.(mp4|png)$")
     for fn in os.listdir(out_dir):
         if pattern.match(fn):
             try:
