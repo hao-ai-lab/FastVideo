@@ -21,6 +21,7 @@ from fastvideo.models.dits.ltx2 import (
 )
 from fastvideo.models.loader.weight_utils import default_weight_loader
 from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.distributed import get_local_torch_device
 
 
 def _debug_log_line(message: str) -> None:
@@ -516,15 +517,18 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
             attention_mask = torch.ones_like(input_ids)
 
         model = self.gemma_model
-        input_ids = input_ids.to(device=model.device)
-        attention_mask = attention_mask.to(device=model.device)
+        orig_device = model.device
+        model.to(device=get_local_torch_device())
+        # input_ids = input_ids.to(device=model.device)
+        # attention_mask = attention_mask.to(device=model.device)
         outputs = model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             output_hidden_states=True,
             return_dict=True,
         )
-
+        model.to(device=orig_device)
+        
         encoded_inputs = self._run_feature_extractor(
             outputs.hidden_states,
             attention_mask,

@@ -44,8 +44,8 @@ VALIDATION_DATASET_FILE=your_validation_dataset_file
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
-# Training arguments
-training_args=(
+# Core training arguments
+core_training_args=(
   --tracker_project_name wan_t2v_VSA
   --output_dir "checkpoints/wan_t2v_finetune_VSA"
   --max_train_steps 4000
@@ -53,10 +53,14 @@ training_args=(
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --num_latent_t 21
+  # --enable_gradient_checkpointing_type "full" # if OOM enable this
+)
+
+# Validation generation shape arguments (used during training validation)
+validation_generation_shape_args=(
   --num_height 480
   --num_width 832
   --num_frames 81
-  # --enable_gradient_checkpointing_type "full" # if OOM enable this
 )
 
 # Parallel arguments
@@ -127,7 +131,8 @@ srun torchrun \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \
-    "${training_args[@]}" \
+    "${core_training_args[@]}" \
+    "${validation_generation_shape_args[@]}" \
     "${optimizer_args[@]}" \
     "${validation_args[@]}" \
     "${miscellaneous_args[@]}" \

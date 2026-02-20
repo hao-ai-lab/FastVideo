@@ -14,18 +14,25 @@ import torch.distributed as dist
 from safetensors.torch import load_file as safetensors_load_file
 from torch.testing import assert_close
 from transformers import AutoTokenizer, CLIPTextModelWithProjection
+from transformers.utils import logging as hf_logging
 from diffusers import SD3Transformer2DModel
 from diffusers import AutoencoderKL
 from transformers import T5EncoderModel as RefT5EncoderModel
 from diffusers import FlowMatchEulerDiscreteScheduler as RefScheduler
 from safetensors.torch import safe_open
 
-pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available(),
-    reason="SD3.5 component parity tests require CUDA",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not torch.cuda.is_available(),
+        reason="SD3.5 component parity tests require CUDA",
+    ),
+    pytest.mark.filterwarnings(
+        "ignore:.*torch.jit.script_method.*:DeprecationWarning",
+    ),
+]
 
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+hf_logging.set_verbosity_error()
 
 MODEL_DIR = Path(
     os.getenv(
@@ -447,7 +454,7 @@ def test_sd35_t5_encoder_model_parity():
         pytest.skip("FastVideo T5EncoderModel parity requires CUDA")
 
     from fastvideo.configs.models.encoders.t5 import T5Config
-    from fastvideo.models.registry import ModelRegistry
+    from fastvideo.models.encoders.t5_hf import T5EncoderModel as FVT5HFModel
 
     device = torch.device("cuda")
     dtype = torch.bfloat16
@@ -524,8 +531,7 @@ def test_sd35_t5_encoder_model_parity():
     fv_cfg = T5Config()
     fv_cfg.update_model_arch(cfg_raw)
 
-    fv_cls, _ = ModelRegistry.resolve_model_cls("T5EncoderModel")
-    fv = fv_cls.from_pretrained_local(  # type: ignore[attr-defined]
+    fv = FVT5HFModel.from_pretrained_local(
         str(text_encoder_dir),
         fv_cfg,
         dtype=dtype,

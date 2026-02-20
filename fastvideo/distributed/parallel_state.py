@@ -990,9 +990,10 @@ def maybe_init_distributed_environment_and_model_parallel(
 
     # set device if we're on a CUDA/NPU platform
     from fastvideo.platforms import current_platform
-    device_type = current_platform.device_type
-    device = torch.device(f"{device_type}:{local_rank}")
-    current_platform.get_torch_device().set_device(device)
+    if current_platform.is_cuda_alike() or current_platform.is_npu():
+        device_type = current_platform.device_type
+        device = torch.device(f"{device_type}:{local_rank}")
+        current_platform.get_torch_device().set_device(device)
 
 
 def model_parallel_is_initialized() -> bool:
