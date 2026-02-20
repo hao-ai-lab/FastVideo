@@ -1935,5 +1935,5 @@ class EMA_FSDP:
             self.saved.clear()
             return False
 
-    def apply_to_model(self, module):
+    def apply_to_model(self, module: torch.nn.Module) -> _ApplyEMACtx:
         return EMA_FSDP._ApplyEMACtx(self, module)
