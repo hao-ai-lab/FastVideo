@@ -30,7 +30,7 @@ import torch
 logger = logging.getLogger(__name__)
 
 # OVIS_WEIGHTS = os.getenv("OVIS_WEIGHTS", "AIDC-AI/Ovis-Image-7B")
-OVIS_WEIGHTS = "/workspace/FastVideo/official_weights/ovis_image"
+OVIS_WEIGHTS = os.getenv("OVIS_WEIGHTS", "AIDC-AI/Ovis-Image-7B")
 MODEL_ID = "Ovis-Image-7B"
 
 TEST_PROMPTS = [
