@@ -7,7 +7,7 @@ OUTPUT_DIR="$DATASET_PATH"
 WITH_AUDIO=true
 
 
-python -m torch.distributed.run  --nproc_per_node=$GPU_NUM \
+torchrun  --nproc_per_node=$GPU_NUM \
     --master_port=29513 \
     -m fastvideo.pipelines.preprocess.v1_preprocessing_new \
     --model_path $MODEL_PATH \
