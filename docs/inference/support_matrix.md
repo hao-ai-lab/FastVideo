@@ -48,6 +48,7 @@ pipeline initialization and sampling.
 
 | Model Name | HuggingFace Model ID | Resolutions | TeaCache | Sliding Tile Attn | Sage Attn | VSA | BSA |
 |------------|---------------------|-------------|----------|-------------------|-----------|-----|-----|
+| Ovis-Image 7B | `AIDC-AI/Ovis-Image-7B` | 1024×1024 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | FastWan2.1 T2V 1.3B | `FastVideo/FastWan2.1-T2V-1.3B-Diffusers` | 480P | ⭕ | ⭕ | ⭕ | ✅ | ⭕ |
 | FastWan2.2 TI2V 5B Full Attn* | `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers` | 720P | ⭕ | ⭕ | ⭕ | ✅ | ⭕ |
 | Wan2.2 TI2V 5B | `Wan-AI/Wan2.2-TI2V-5B-Diffusers` | 720P | ⭕ | ⭕ | ✅ | ⭕ | ⭕ |
