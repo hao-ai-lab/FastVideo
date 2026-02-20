@@ -1535,6 +1535,8 @@ class BasicAVTransformerBlock(torch.nn.Module):
         video_attention_mask: torch.Tensor | None = None,
         audio_attention_mask: torch.Tensor | None = None,
         skip_cross_modal_attn: bool = False,
+        skip_video_self_attn: bool = False,
+        skip_audio_self_attn: bool = False,
     ) -> tuple[TransformerArgs | None, TransformerArgs | None]:
         """Forward pass for transformer block.
 
@@ -1545,6 +1547,10 @@ class BasicAVTransformerBlock(torch.nn.Module):
             audio_attention_mask: SP padding attention mask for audio [B, padded_seq_len]
             skip_cross_modal_attn: If True, skip A2V and V2A cross-modal
                 attention (used for the modality-isolated CFG pass).
+            skip_video_self_attn: If True, skip video self-attention
+                in this block (used for STG perturbed pass).
+            skip_audio_self_attn: If True, skip audio self-attention
+                in this block (used for STG perturbed pass).
         """
         vx = video.x if video is not None else None
         ax = audio.x if audio is not None else None
@@ -1558,12 +1564,13 @@ class BasicAVTransformerBlock(torch.nn.Module):
             vshift_msa, vscale_msa, vgate_msa = self.get_ada_values(
                 self.scale_shift_table, vx.shape[0], video.timesteps, slice(0, 3)
             )
-            norm_vx = torch.nn.functional.rms_norm(vx, (vx.shape[-1],), eps=self.norm_eps) * (1 + vscale_msa) + vshift_msa
-            # Self-attention: pass SP attention mask for distributed attention
-            if self.use_distributed_attention:
-                vx = vx + self.attn1(norm_vx, pe=video.positional_embeddings, attention_mask=video_attention_mask) * vgate_msa
-            else:
-                vx = vx + self.attn1(norm_vx, pe=video.positional_embeddings) * vgate_msa
+            if not skip_video_self_attn:
+                norm_vx = torch.nn.functional.rms_norm(vx, (vx.shape[-1],), eps=self.norm_eps) * (1 + vscale_msa) + vshift_msa
+                # Self-attention: pass SP attention mask for distributed attention
+                if self.use_distributed_attention:
+                    vx = vx + self.attn1(norm_vx, pe=video.positional_embeddings, attention_mask=video_attention_mask) * vgate_msa
+                else:
+                    vx = vx + self.attn1(norm_vx, pe=video.positional_embeddings) * vgate_msa
             # Text cross-attention: no SP mask needed (text is replicated, uses local attention)
             vx = vx + self.attn2(
                 torch.nn.functional.rms_norm(vx, (vx.shape[-1],), eps=self.norm_eps),
@@ -1575,12 +1582,13 @@ class BasicAVTransformerBlock(torch.nn.Module):
             ashift_msa, ascale_msa, agate_msa = self.get_ada_values(
                 self.audio_scale_shift_table, ax.shape[0], audio.timesteps, slice(0, 3)
             )
-            norm_ax = torch.nn.functional.rms_norm(ax, (ax.shape[-1],), eps=self.norm_eps) * (1 + ascale_msa) + ashift_msa
-            # Self-attention: pass SP attention mask for distributed attention
-            if self.use_distributed_attention:
-                ax = ax + self.audio_attn1(norm_ax, pe=audio.positional_embeddings, attention_mask=audio_attention_mask) * agate_msa
-            else:
-                ax = ax + self.audio_attn1(norm_ax, pe=audio.positional_embeddings) * agate_msa
+            if not skip_audio_self_attn:
+                norm_ax = torch.nn.functional.rms_norm(ax, (ax.shape[-1],), eps=self.norm_eps) * (1 + ascale_msa) + ashift_msa
+                # Self-attention: pass SP attention mask for distributed attention
+                if self.use_distributed_attention:
+                    ax = ax + self.audio_attn1(norm_ax, pe=audio.positional_embeddings, attention_mask=audio_attention_mask) * agate_msa
+                else:
+                    ax = ax + self.audio_attn1(norm_ax, pe=audio.positional_embeddings) * agate_msa
             # Text cross-attention: no SP mask needed (text is replicated, uses local attention)
             ax = ax + self.audio_attn2(
                 torch.nn.functional.rms_norm(ax, (ax.shape[-1],), eps=self.norm_eps),
@@ -2010,14 +2018,22 @@ class LTXModel(torch.nn.Module):
         video_attention_mask: torch.Tensor | None = None,
         audio_attention_mask: torch.Tensor | None = None,
         skip_cross_modal_attn: bool = False,
+        skip_video_self_attn_blocks: list[int] | None = None,
+        skip_audio_self_attn_blocks: list[int] | None = None,
     ) -> tuple[TransformerArgs | None, TransformerArgs | None]:
-        for block in self.transformer_blocks:
+        for idx, block in enumerate(self.transformer_blocks):
+            skip_v_sa = (skip_video_self_attn_blocks is not None
+                         and idx in skip_video_self_attn_blocks)
+            skip_a_sa = (skip_audio_self_attn_blocks is not None
+                         and idx in skip_audio_self_attn_blocks)
             video, audio = block(
                 video=video,
                 audio=audio,
                 video_attention_mask=video_attention_mask,
                 audio_attention_mask=audio_attention_mask,
                 skip_cross_modal_attn=skip_cross_modal_attn,
+                skip_video_self_attn=skip_v_sa,
+                skip_audio_self_attn=skip_a_sa,
             )
         return video, audio
 
@@ -2045,6 +2061,8 @@ class LTXModel(torch.nn.Module):
         video_attention_mask: torch.Tensor | None = None,
         audio_attention_mask: torch.Tensor | None = None,
         skip_cross_modal_attn: bool = False,
+        skip_video_self_attn_blocks: list[int] | None = None,
+        skip_audio_self_attn_blocks: list[int] | None = None,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
         """Forward pass through the LTX model.
 
@@ -2056,6 +2074,10 @@ class LTXModel(torch.nn.Module):
             skip_cross_modal_attn: If True, skip A2V and V2A cross-modal
                 attention in all transformer blocks (modality-isolated
                 CFG pass).
+            skip_video_self_attn_blocks: Block indices where video
+                self-attention is skipped (STG perturbed pass).
+            skip_audio_self_attn_blocks: Block indices where audio
+                self-attention is skipped (STG perturbed pass).
         """
         if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
             _debug_block_log_line(
@@ -2080,6 +2102,8 @@ class LTXModel(torch.nn.Module):
             video_attention_mask=video_attention_mask,
             audio_attention_mask=audio_attention_mask,
             skip_cross_modal_attn=skip_cross_modal_attn,
+            skip_video_self_attn_blocks=skip_video_self_attn_blocks,
+            skip_audio_self_attn_blocks=skip_audio_self_attn_blocks,
         )
 
         vx = (
@@ -2249,6 +2273,8 @@ class LTX2Transformer3DModel(CachableDiT):
         audio_timestep: torch.Tensor | None = None,
         audio_encoder_attention_mask: torch.Tensor | None = None,
         skip_cross_modal_attn: bool = False,
+        skip_video_self_attn_blocks: list[int] | None = None,
+        skip_audio_self_attn_blocks: list[int] | None = None,
         **kwargs,
     ) -> torch.Tensor:
         if isinstance(encoder_hidden_states, list):
@@ -2406,6 +2432,8 @@ class LTX2Transformer3DModel(CachableDiT):
             video_attention_mask=video_attention_mask,
             audio_attention_mask=audio_attention_mask,
             skip_cross_modal_attn=skip_cross_modal_attn,
+            skip_video_self_attn_blocks=skip_video_self_attn_blocks,
+            skip_audio_self_attn_blocks=skip_audio_self_attn_blocks,
         )
 
         # Denoised prediction
