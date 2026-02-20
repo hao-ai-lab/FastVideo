@@ -1,16 +1,13 @@
 #!/bin/bash
 
 GPU_NUM=8
-# MODEL_PATH="Davids048/LTX2-Base-Diffusers"
 MODEL_PATH="FastVideo/LTX2-Distilled-Diffusers"
-# DATASET_PATH="data/overfit"
-# DATASET_PATH="data/crush-smol"
-DATASET_PATH="data"
+DATASET_PATH="data/crush-smol"
 OUTPUT_DIR="$DATASET_PATH"
 WITH_AUDIO=true
 
 
-torchrun --nproc_per_node=$GPU_NUM \
+python -m torch.distributed.run  --nproc_per_node=$GPU_NUM \
     --master_port=29513 \
     -m fastvideo.pipelines.preprocess.v1_preprocessing_new \
     --model_path $MODEL_PATH \
