@@ -10,10 +10,12 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.dits.ltx2 import (
-    AudioLatentShape, DEFAULT_LTX2_AUDIO_CHANNELS, DEFAULT_LTX2_AUDIO_DOWNSAMPLE,
-    DEFAULT_LTX2_AUDIO_HOP_LENGTH, DEFAULT_LTX2_AUDIO_MEL_BINS,
-    DEFAULT_LTX2_AUDIO_SAMPLE_RATE)
+from fastvideo.models.dits.ltx2 import (AudioLatentShape,
+                                        DEFAULT_LTX2_AUDIO_CHANNELS,
+                                        DEFAULT_LTX2_AUDIO_DOWNSAMPLE,
+                                        DEFAULT_LTX2_AUDIO_HOP_LENGTH,
+                                        DEFAULT_LTX2_AUDIO_MEL_BINS,
+                                        DEFAULT_LTX2_AUDIO_SAMPLE_RATE)
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
@@ -49,8 +51,8 @@ class LTX2DistillationPipeline(DistillationPipeline):
         fastvideo_args: FastVideoArgs,
         loaded_modules: dict[str, torch.nn.Module] | None = None,
     ):
-        modules = super(DistillationPipeline, self).load_modules(
-            fastvideo_args, loaded_modules)
+        modules = super(DistillationPipeline,
+                        self).load_modules(fastvideo_args, loaded_modules)
         training_args = cast(TrainingArgs, fastvideo_args)
 
         if training_args.real_score_model_path:
@@ -103,9 +105,8 @@ class LTX2DistillationPipeline(DistillationPipeline):
 
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
         if self.training_args.boundary_ratio is not None:
-            self.boundary_timestep = (
-                self.training_args.boundary_ratio *
-                self.noise_scheduler.num_train_timesteps)
+            self.boundary_timestep = (self.training_args.boundary_ratio *
+                                      self.noise_scheduler.num_train_timesteps)
         else:
             self.boundary_timestep = None
 
@@ -134,8 +135,8 @@ class LTX2DistillationPipeline(DistillationPipeline):
         fake_score_lr = (training_args.fake_score_learning_rate
                          if training_args.fake_score_learning_rate > 0 else
                          training_args.learning_rate)
-        betas = tuple(float(x.strip())
-                      for x in training_args.fake_score_betas.split(","))
+        betas = tuple(
+            float(x.strip()) for x in training_args.fake_score_betas.split(","))
 
         self.fake_score_optimizer = torch.optim.AdamW(
             fake_score_params,
@@ -162,11 +163,10 @@ class LTX2DistillationPipeline(DistillationPipeline):
             device=get_local_torch_device(),
         )
         if training_args.warp_denoising_step:
-            timesteps = torch.cat(
-                (
-                    self.noise_scheduler.timesteps.cpu(),
-                    torch.tensor([0], dtype=torch.float32),
-                )).to(get_local_torch_device())
+            timesteps = torch.cat((
+                self.noise_scheduler.timesteps.cpu(),
+                torch.tensor([0], dtype=torch.float32),
+            )).to(get_local_torch_device())
             self.denoising_step_list = timesteps[1000 -
                                                  self.denoising_step_list]
 
@@ -241,8 +241,7 @@ class LTX2DistillationPipeline(DistillationPipeline):
                 training_args.validation_guidance_scale)
 
         if validation_batch.get("negative_prompt") is not None:
-            sampling_param.negative_prompt = validation_batch[
-                "negative_prompt"]
+            sampling_param.negative_prompt = validation_batch["negative_prompt"]
         if validation_batch.get("fps") is not None:
             sampling_param.fps = int(validation_batch["fps"])
 
@@ -303,9 +302,9 @@ class LTX2DistillationPipeline(DistillationPipeline):
         ) + shift
         return torch.sigmoid(normal_samples).to(device=device, dtype=dtype)
 
-    def _build_data_free_audio_latents(
-            self, batch_size: int, device: torch.device,
-            dtype: torch.dtype) -> torch.Tensor:
+    def _build_data_free_audio_latents(self, batch_size: int,
+                                       device: torch.device,
+                                       dtype: torch.dtype) -> torch.Tensor:
         fps = 24.0
         duration = float(self.training_args.num_frames) / fps
         audio_shape = AudioLatentShape.from_duration(
@@ -352,27 +351,27 @@ class LTX2DistillationPipeline(DistillationPipeline):
                 prompt_embeds, prompt_attention_mask))
 
         batch_size = video_embeds.shape[0]
-        vae_config = (self.training_args.pipeline_config
-                      .vae_config.arch_config)
+        vae_config = (self.training_args.pipeline_config.vae_config.arch_config)
         num_channels = vae_config.z_dim
         scr = vae_config.spatial_compression_ratio
         latent_h = self.training_args.num_height // scr
         latent_w = self.training_args.num_width // scr
-        latents = torch.zeros(
-            batch_size, num_channels,
-            self.training_args.num_latent_t,
-            latent_h, latent_w,
-            device=device, dtype=dtype)
+        latents = torch.zeros(batch_size,
+                              num_channels,
+                              self.training_args.num_latent_t,
+                              latent_h,
+                              latent_w,
+                              device=device,
+                              dtype=dtype)
 
         training_batch.latents = latents
-        training_batch.encoder_hidden_states = video_embeds.to(
-            device, dtype=dtype)
-        training_batch.encoder_attention_mask = attention_mask.to(
-            device, dtype=dtype)
+        training_batch.encoder_hidden_states = video_embeds.to(device,
+                                                               dtype=dtype)
+        training_batch.encoder_attention_mask = attention_mask.to(device,
+                                                                  dtype=dtype)
 
-        training_batch.audio_latents = (
-            self._build_data_free_audio_latents(
-                batch_size=batch_size, device=device, dtype=dtype))
+        training_batch.audio_latents = (self._build_data_free_audio_latents(
+            batch_size=batch_size, device=device, dtype=dtype))
         training_batch.audio_encoder_hidden_states = audio_embeds.to(
             device, dtype=dtype)
         training_batch.audio_encoder_attention_mask = (
@@ -391,66 +390,62 @@ class LTX2DistillationPipeline(DistillationPipeline):
         if ("video_prompt_embeds" in conditions
                 and "audio_prompt_embeds" in conditions
                 and "prompt_attention_mask" in conditions):
-            video_embeds = conditions["video_prompt_embeds"].to(
-                device)
-            audio_embeds = conditions["audio_prompt_embeds"].to(
-                device)
+            video_embeds = conditions["video_prompt_embeds"].to(device)
+            audio_embeds = conditions["audio_prompt_embeds"].to(device)
             attention_mask = conditions["prompt_attention_mask"].to(
                 device, dtype=torch.int64)
         else:
             prompt_embeds = conditions["prompt_embeds"].to(device)
-            prompt_attention_mask = conditions[
-                "prompt_attention_mask"].to(device, dtype=torch.int64)
+            prompt_attention_mask = conditions["prompt_attention_mask"].to(
+                device, dtype=torch.int64)
             video_embeds, audio_embeds, attention_mask = (
                 self.validation_pipeline.modules["text_encoder"].run_connectors(
                     prompt_embeds, prompt_attention_mask))
 
         if self.training_args.simulate_generator_forward:
             batch_size = video_embeds.shape[0]
-            vae_config = (self.training_args.pipeline_config
-                          .vae_config.arch_config)
+            vae_config = (
+                self.training_args.pipeline_config.vae_config.arch_config)
             num_channels = vae_config.z_dim
             scr = vae_config.spatial_compression_ratio
             latent_h = self.training_args.num_height // scr
             latent_w = self.training_args.num_width // scr
-            latents = torch.zeros(
-                batch_size, num_channels,
-                self.training_args.num_latent_t,
-                latent_h, latent_w,
-                device=device, dtype=dtype)
+            latents = torch.zeros(batch_size,
+                                  num_channels,
+                                  self.training_args.num_latent_t,
+                                  latent_h,
+                                  latent_w,
+                                  device=device,
+                                  dtype=dtype)
         else:
-            latents = batch["latents"]["latents"].to(
-                device, dtype=dtype)
+            latents = batch["latents"]["latents"].to(device, dtype=dtype)
             latents = latents[:, :, :self.training_args.num_latent_t]
 
         training_batch.latents = latents
-        training_batch.encoder_hidden_states = video_embeds.to(
-            device, dtype=dtype)
-        training_batch.encoder_attention_mask = attention_mask.to(
-            device, dtype=dtype)
+        training_batch.encoder_hidden_states = video_embeds.to(device,
+                                                               dtype=dtype)
+        training_batch.encoder_attention_mask = attention_mask.to(device,
+                                                                  dtype=dtype)
 
         if self.training_args.simulate_generator_forward:
-            training_batch.audio_latents = (
-                self._build_data_free_audio_latents(
-                    batch_size=latents.shape[0],
-                    device=device, dtype=dtype))
-            training_batch.audio_encoder_hidden_states = (
-                audio_embeds.to(device, dtype=dtype))
+            training_batch.audio_latents = (self._build_data_free_audio_latents(
+                batch_size=latents.shape[0], device=device, dtype=dtype))
+            training_batch.audio_encoder_hidden_states = (audio_embeds.to(
+                device, dtype=dtype))
             training_batch.audio_encoder_attention_mask = (
                 attention_mask.to(device))
         elif self.with_audio and "audio_latents" in batch:
-            audio_latents = batch["audio_latents"]["latents"].to(
-                device, dtype=dtype)
+            audio_latents = batch["audio_latents"]["latents"].to(device,
+                                                                 dtype=dtype)
             training_batch.audio_latents = audio_latents
-            training_batch.audio_encoder_hidden_states = (
-                audio_embeds.to(device, dtype=dtype))
+            training_batch.audio_encoder_hidden_states = (audio_embeds.to(
+                device, dtype=dtype))
             training_batch.audio_encoder_attention_mask = (
                 attention_mask.to(device))
 
         idxs = batch.get("idx")
         if idxs is not None and torch.is_tensor(idxs):
-            training_batch.infos = [
-                {"idx": int(i)} for i in idxs.tolist()]
+            training_batch.infos = [{"idx": int(i)} for i in idxs.tolist()]
         else:
             training_batch.infos = []
         training_batch.raw_latent_shape = latents.shape
@@ -507,7 +502,8 @@ class LTX2DistillationPipeline(DistillationPipeline):
             if exact.numel() > 0:
                 idx = int(exact[0].item())
             else:
-                idx = int(torch.argmin(torch.abs(schedule_timesteps - t)).item())
+                idx = int(
+                    torch.argmin(torch.abs(schedule_timesteps - t)).item())
             step_indices.append(idx)
 
         sigma = sigmas[step_indices].flatten()
@@ -541,8 +537,8 @@ class LTX2DistillationPipeline(DistillationPipeline):
         sigma = self._sigma_from_timestep(
             timestep.reshape(-1).expand(batch_size).to(self.device), n_dim=5)
         video_timestep = self._timestep_tokens_from_sigma(
-            noise_input, sigma.reshape(batch_size)).to(
-                noise_input.device, dtype=noise_input.dtype)
+            noise_input, sigma.reshape(batch_size)).to(noise_input.device,
+                                                       dtype=noise_input.dtype)
 
         training_batch.input_kwargs = {
             "hidden_states": noise_input,
@@ -555,8 +551,9 @@ class LTX2DistillationPipeline(DistillationPipeline):
                 and audio_noise_input is not None):
             audio_sigma = self._sigma_from_timestep(
                 timestep.reshape(-1).expand(batch_size).to(self.device),
-                n_dim=4).reshape(batch_size, 1).expand(
-                    batch_size, audio_noise_input.shape[2])
+                n_dim=4).reshape(batch_size,
+                                 1).expand(batch_size,
+                                           audio_noise_input.shape[2])
             training_batch.input_kwargs.update({
                 "audio_hidden_states":
                 audio_noise_input,
@@ -581,16 +578,19 @@ class LTX2DistillationPipeline(DistillationPipeline):
         timestep = self.denoising_step_list[index]
         training_batch.dmd_latent_vis_dict["generator_timestep"] = timestep
 
-        noise = torch.randn(self.video_latent_shape, device=self.device, dtype=dtype)
-        sigma = self._sigma_from_timestep(
-            timestep.expand(latents.shape[0]).to(self.device), n_dim=5).to(dtype)
+        noise = torch.randn(self.video_latent_shape,
+                            device=self.device,
+                            dtype=dtype)
+        sigma = self._sigma_from_timestep(timestep.expand(latents.shape[0]).to(
+            self.device),
+                                          n_dim=5).to(dtype)
         noisy_latent = (1.0 - sigma) * latents + sigma * noise
 
         noisy_audio = None
         if training_batch.audio_latents is not None:
-            audio_sigma = self._sigma_from_timestep(
-                timestep.expand(latents.shape[0]).to(self.device),
-                n_dim=4).to(dtype)
+            audio_sigma = self._sigma_from_timestep(timestep.expand(
+                latents.shape[0]).to(self.device),
+                                                    n_dim=4).to(dtype)
             audio_noise = torch.randn_like(training_batch.audio_latents)
             noisy_audio = ((1.0 - audio_sigma) * training_batch.audio_latents +
                            audio_sigma * audio_noise)
@@ -602,8 +602,9 @@ class LTX2DistillationPipeline(DistillationPipeline):
             training_batch,
             audio_noise_input=noisy_audio,
         )
-        with set_forward_context(current_timestep=timestep,
-                                 attn_metadata=training_batch.attn_metadata_vsa):
+        with set_forward_context(
+                current_timestep=timestep,
+                attn_metadata=training_batch.attn_metadata_vsa):
             pred = self.transformer(**training_batch.input_kwargs)
         if isinstance(pred, tuple):
             return pred[0], pred[1]
@@ -646,13 +647,14 @@ class LTX2DistillationPipeline(DistillationPipeline):
                 else:
                     pred_video, pred_audio = pred, None
 
-                next_timestep = self.denoising_step_list[step_idx + 1:step_idx
-                                                         + 2]
-                next_sigma = self._sigma_from_timestep(
-                    next_timestep.expand(latents.shape[0]).to(self.device),
-                    n_dim=5).to(dtype)
+                next_timestep = self.denoising_step_list[step_idx + 1:step_idx +
+                                                         2]
+                next_sigma = self._sigma_from_timestep(next_timestep.expand(
+                    latents.shape[0]).to(self.device),
+                                                       n_dim=5).to(dtype)
                 noise = torch.randn_like(pred_video)
-                noisy_input = (1.0 - next_sigma) * pred_video + next_sigma * noise
+                noisy_input = (1.0 -
+                               next_sigma) * pred_video + next_sigma * noise
                 if pred_audio is not None and noisy_audio is not None:
                     next_audio_sigma = self._sigma_from_timestep(
                         next_timestep.expand(latents.shape[0]).to(self.device),
@@ -668,8 +670,9 @@ class LTX2DistillationPipeline(DistillationPipeline):
             training_batch,
             audio_noise_input=noisy_audio,
         )
-        with set_forward_context(current_timestep=target_timestep,
-                                 attn_metadata=training_batch.attn_metadata_vsa):
+        with set_forward_context(
+                current_timestep=target_timestep,
+                attn_metadata=training_batch.attn_metadata_vsa):
             pred = self.transformer(**training_batch.input_kwargs)
         if isinstance(pred, tuple):
             pred_video, pred_audio = pred
@@ -693,9 +696,9 @@ class LTX2DistillationPipeline(DistillationPipeline):
                                       self.num_train_timestep)
             timestep = timestep.clamp(self.min_timestep, self.max_timestep)
 
-            sigma = self._sigma_from_timestep(
-                timestep.expand(original_latent.shape[0]).to(self.device),
-                n_dim=5).to(original_latent.dtype)
+            sigma = self._sigma_from_timestep(timestep.expand(
+                original_latent.shape[0]).to(self.device),
+                                              n_dim=5).to(original_latent.dtype)
             noise = torch.randn(self.video_latent_shape,
                                 device=self.device,
                                 dtype=original_latent.dtype)
@@ -758,16 +761,18 @@ class LTX2DistillationPipeline(DistillationPipeline):
                 else:
                     real_uncond_video, real_uncond_audio = real_uncond, None
                 real_score_pred_video = real_cond_video + (
-                    real_cond_video - real_uncond_video
-                ) * self.real_score_guidance_scale
+                    real_cond_video -
+                    real_uncond_video) * self.real_score_guidance_scale
                 if real_cond_audio is not None and real_uncond_audio is not None:
                     real_score_pred_audio = real_cond_audio + (
-                        real_cond_audio - real_uncond_audio
-                    ) * self.real_score_guidance_scale
+                        real_cond_audio -
+                        real_uncond_audio) * self.real_score_guidance_scale
                 else:
                     real_score_pred_audio = real_cond_audio
             else:
-                raise NotImplementedError("Missing unconditional prediction for LTX-2 distillation pipeline")
+                raise NotImplementedError(
+                    "Missing unconditional prediction for LTX-2 distillation pipeline"
+                )
                 real_score_pred_video = real_cond_video
                 real_score_pred_audio = real_cond_audio
 
@@ -781,8 +786,8 @@ class LTX2DistillationPipeline(DistillationPipeline):
                 audio_denom = torch.abs(original_audio -
                                         real_score_pred_audio).mean().clamp_min(
                                             1e-6)
-                grad_audio = (fake_pred_audio - real_score_pred_audio
-                              ) / audio_denom
+                grad_audio = (fake_pred_audio -
+                              real_score_pred_audio) / audio_denom
                 grad_audio = torch.nan_to_num(grad_audio)
 
         dmd_loss = 0.5 * torch.nn.functional.mse_loss(
@@ -815,7 +820,9 @@ class LTX2DistillationPipeline(DistillationPipeline):
                 generator_pred_video, generator_pred_audio = self._generator_multi_step_simulation_forward(
                     training_batch)
             else:
-                raise NotImplementedError("Generator forward is not implemented for LTX-2 distillation pipeline")
+                raise NotImplementedError(
+                    "Generator forward is not implemented for LTX-2 distillation pipeline"
+                )
                 generator_pred_video, generator_pred_audio = self._generator_forward(
                     training_batch)
 
@@ -826,16 +833,16 @@ class LTX2DistillationPipeline(DistillationPipeline):
         fake_score_timestep = shift_timestep(fake_score_timestep,
                                              self.timestep_shift,
                                              self.num_train_timestep)
-        fake_score_timestep = fake_score_timestep.clamp(
-            self.min_timestep, self.max_timestep)
+        fake_score_timestep = fake_score_timestep.clamp(self.min_timestep,
+                                                        self.max_timestep)
 
         fake_score_noise = torch.randn(self.video_latent_shape,
                                        device=self.device,
                                        dtype=generator_pred_video.dtype)
-        sigma = self._sigma_from_timestep(
-            fake_score_timestep.expand(generator_pred_video.shape[0]).to(
-                self.device),
-            n_dim=5).to(generator_pred_video.dtype)
+        sigma = self._sigma_from_timestep(fake_score_timestep.expand(
+            generator_pred_video.shape[0]).to(self.device),
+                                          n_dim=5).to(
+                                              generator_pred_video.dtype)
         noisy_generator_pred_video = ((1.0 - sigma) * generator_pred_video +
                                       sigma * fake_score_noise)
         noisy_generator_pred_audio = None
@@ -846,9 +853,9 @@ class LTX2DistillationPipeline(DistillationPipeline):
                     self.device),
                 n_dim=4).to(generator_pred_audio.dtype)
             fake_score_audio_noise = torch.randn_like(generator_pred_audio)
-            noisy_generator_pred_audio = ((1.0 - audio_sigma) *
-                                          generator_pred_audio +
-                                          audio_sigma * fake_score_audio_noise)
+            noisy_generator_pred_audio = (
+                (1.0 - audio_sigma) * generator_pred_audio +
+                audio_sigma * fake_score_audio_noise)
 
         training_batch = self._build_distill_input_kwargs(
             noisy_generator_pred_video,
@@ -867,9 +874,11 @@ class LTX2DistillationPipeline(DistillationPipeline):
         else:
             fake_score_denoised, fake_score_audio_denoised = pred, None
 
-        pred_velocity = (noisy_generator_pred_video - fake_score_denoised) / sigma
+        pred_velocity = (noisy_generator_pred_video -
+                         fake_score_denoised) / sigma
         target = fake_score_noise - generator_pred_video
-        flow_matching_loss = torch.mean((pred_velocity.float() - target.float())**2)
+        flow_matching_loss = torch.mean(
+            (pred_velocity.float() - target.float())**2)
         if (fake_score_audio_denoised is not None
                 and noisy_generator_pred_audio is not None
                 and generator_pred_audio is not None
@@ -878,8 +887,8 @@ class LTX2DistillationPipeline(DistillationPipeline):
                 fake_score_timestep.expand(generator_pred_video.shape[0]).to(
                     self.device),
                 n_dim=4).to(fake_score_audio_denoised.dtype)
-            pred_audio_velocity = (
-                noisy_generator_pred_audio - fake_score_audio_denoised) / audio_sigma
+            pred_audio_velocity = (noisy_generator_pred_audio -
+                                   fake_score_audio_denoised) / audio_sigma
             audio_target = fake_score_audio_noise - generator_pred_audio
             flow_matching_loss = flow_matching_loss + torch.mean(
                 (pred_audio_velocity.float() - audio_target.float())**2)
@@ -887,10 +896,8 @@ class LTX2DistillationPipeline(DistillationPipeline):
         training_batch.fake_score_latent_vis_dict = {
             "training_batch_fakerscore_fwd_clean_latent":
             training_batch.latents,
-            "generator_pred_video":
-            generator_pred_video,
-            "fake_score_timestep":
-            fake_score_timestep,
+            "generator_pred_video": generator_pred_video,
+            "fake_score_timestep": fake_score_timestep,
         }
         return training_batch, flow_matching_loss
 

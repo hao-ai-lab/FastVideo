@@ -89,8 +89,8 @@ class DistillationPipeline(TrainingPipeline):
         if isinstance(value, list):
             return [DistillationPipeline._clone_batch_value(v) for v in value]
         if isinstance(value, tuple):
-            return tuple(DistillationPipeline._clone_batch_value(v)
-                         for v in value)
+            return tuple(
+                DistillationPipeline._clone_batch_value(v) for v in value)
         return copy.deepcopy(value)
 
     def _clone_training_batch(self, batch: TrainingBatch) -> TrainingBatch:
@@ -1260,7 +1260,7 @@ class DistillationPipeline(TrainingPipeline):
 
             # Helper function to run validation with optional EMA contexts
             def run_validation_with_ema(
-                    steps: int
+                steps: int
             ) -> tuple[list[np.ndarray], list[str], list[Any], list[Any]]:
                 videos: list[np.ndarray] = []
                 captions: list[str] = []
@@ -1319,22 +1319,22 @@ class DistillationPipeline(TrainingPipeline):
             if ema_context is not None and ema_2_context is not None:
                 with ema_context, ema_2_context:
                     (step_videos, step_captions, step_audios,
-                     step_audio_sample_rates) = run_validation_with_ema(
-                         num_inference_steps)
+                     step_audio_sample_rates
+                     ) = run_validation_with_ema(num_inference_steps)
             elif ema_context is not None:
                 with ema_context:
                     (step_videos, step_captions, step_audios,
-                     step_audio_sample_rates) = run_validation_with_ema(
-                         num_inference_steps)
+                     step_audio_sample_rates
+                     ) = run_validation_with_ema(num_inference_steps)
             elif ema_2_context is not None:
                 with ema_2_context:
                     (step_videos, step_captions, step_audios,
-                     step_audio_sample_rates) = run_validation_with_ema(
-                         num_inference_steps)
+                     step_audio_sample_rates
+                     ) = run_validation_with_ema(num_inference_steps)
             else:
                 (step_videos, step_captions, step_audios,
-                 step_audio_sample_rates) = run_validation_with_ema(
-                     num_inference_steps)
+                 step_audio_sample_rates
+                 ) = run_validation_with_ema(num_inference_steps)
 
             # Log validation results for this step
             world_group = get_world_group()
@@ -1364,12 +1364,13 @@ class DistillationPipeline(TrainingPipeline):
                         all_audio_sample_rates.extend(recv_audio_sample_rates)
 
                     video_filenames = []
-                    for i, (video, caption, audio, audio_sample_rate) in enumerate(
-                            zip(all_videos,
-                                all_captions,
-                                all_audios,
-                                all_audio_sample_rates,
-                                strict=True)):
+                    for i, (video, caption, audio,
+                            audio_sample_rate) in enumerate(
+                                zip(all_videos,
+                                    all_captions,
+                                    all_audios,
+                                    all_audio_sample_rates,
+                                    strict=True)):
                         os.makedirs(training_args.output_dir, exist_ok=True)
                         filename = os.path.join(
                             training_args.output_dir,
@@ -1415,6 +1416,7 @@ class DistillationPipeline(TrainingPipeline):
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
         """Add visualization data to tracker logging and save frames to disk."""
+
         def _prepare_vae_latents(latents: torch.Tensor) -> torch.Tensor:
             # Most training paths store latents as [B, C, T, H, W]. Older
             # visualization code permuted to [B, T, C, H, W] for WAN-like VAEs.
@@ -1514,13 +1516,14 @@ class DistillationPipeline(TrainingPipeline):
             set_random_seed(seed + self.global_rank)
 
         # Set random seeds for deterministic training
-        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
-            self.seed + self.global_rank)
-        self.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(
-            self.seed + self.global_rank)
+        self.noise_random_generator = torch.Generator(
+            device="cpu").manual_seed(self.seed + self.global_rank)
+        self.noise_gen_cuda = torch.Generator(
+            device="cuda").manual_seed(self.seed + self.global_rank)
         self.validation_random_generator = torch.Generator(
             device="cpu").manual_seed(self.seed + self.global_rank)
-        logger.info("Initialized random seeds with seed: %s", seed + self.global_rank)
+        logger.info("Initialized random seeds with seed: %s",
+                    seed + self.global_rank)
 
         # Initialize current_trainstep for EMA ready checks
         #TODO: check if needed

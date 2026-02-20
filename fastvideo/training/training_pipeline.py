@@ -878,14 +878,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 output_batch = self.validation_pipeline.forward(
                     batch, training_args)
                 samples = output_batch.output.cpu()
-                
+
                 # Capture audio if available
                 audio = output_batch.extra.get("audio")
                 sample_rate = output_batch.extra.get("audio_sample_rate")
-                
+
                 if audio is not None and torch.is_tensor(audio):
                     audio = audio.detach().cpu().float().numpy()
-                
+
                 step_audio.append(audio)
                 step_sample_rates.append(sample_rate)
 
@@ -917,7 +917,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     recv_captions = world_group.recv_object(src=src_rank)
                     recv_audios = world_group.recv_object(src=src_rank)
                     recv_sample_rates = world_group.recv_object(src=src_rank)
-                    
+
                     all_videos.extend(recv_videos)
                     all_captions.extend(recv_captions)
                     all_audios.extend(recv_audios)
@@ -925,7 +925,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
                 video_filenames = []
                 for i, (video, caption, audio, sample_rate) in enumerate(
-                        zip(all_videos, all_captions, all_audios, all_sample_rates, strict=True)):
+                        zip(all_videos,
+                            all_captions,
+                            all_audios,
+                            all_sample_rates,
+                            strict=True)):
                     os.makedirs(training_args.output_dir, exist_ok=True)
                     filename = os.path.join(
                         training_args.output_dir,

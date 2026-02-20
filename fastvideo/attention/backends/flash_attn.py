@@ -92,6 +92,7 @@ class FlashAttentionImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: FlashAttnMetadata,
     ):
+
         def _key_padding_mask_from_attn_mask(attn_mask: torch.Tensor,
                                              key_len: int) -> torch.Tensor:
             # Normalize attn_mask to [B, key_len] where True means valid token.

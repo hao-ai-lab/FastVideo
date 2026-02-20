@@ -6,14 +6,19 @@ from fastvideo.configs.models.encoders.base import (
     TextEncoderConfig,
 )
 
+
 def _is_feature_extractor_linear(n: str, m) -> bool:
     return n.endswith("feature_extractor_linear")
 
+
 def _is_embeddings(n: str, m) -> bool:
-    return n.endswith("embeddings_connector") or n.endswith("audio_embeddings_connector")
+    return n.endswith("embeddings_connector") or n.endswith(
+        "audio_embeddings_connector")
+
 
 def _is_gemma_model(n: str, m) -> bool:
     return "_gemma_model" in n
+
 
 @dataclass
 class LTX2GemmaArchConfig(TextEncoderArchConfig):

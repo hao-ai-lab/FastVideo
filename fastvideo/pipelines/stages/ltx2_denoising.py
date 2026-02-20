@@ -245,8 +245,8 @@ class LTX2DenoisingStage(PipelineStage):
         )
         use_vsa = (vsa_available
                    and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN")
-        vsa_metadata_builder = (
-            VideoSparseAttentionMetadataBuilder() if use_vsa else None)
+        vsa_metadata_builder = (VideoSparseAttentionMetadataBuilder()
+                                if use_vsa else None)
 
         for step_index in tqdm(range(len(sigmas) - 1)):
             sigma = sigmas[step_index]
@@ -259,7 +259,8 @@ class LTX2DenoisingStage(PipelineStage):
                 attn_metadata = vsa_metadata_builder.build(
                     current_timestep=step_index,
                     raw_latent_shape=latents.shape[2:5],
-                    patch_size=fastvideo_args.pipeline_config.dit_config.patch_size,
+                    patch_size=fastvideo_args.pipeline_config.dit_config.
+                    patch_size,
                     VSA_sparsity=fastvideo_args.VSA_sparsity,
                     device=latents.device,
                 )
