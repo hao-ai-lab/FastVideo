@@ -538,7 +538,12 @@ class GatedSelfAttention(nn.Module):
         v: torch.Tensor,
         L: int,
     ) -> None:
-        """Write current frame K/V into the layer cache (ring buffer)."""
+        """Write current frame K/V into the layer cache (ring buffer).
+        StaticKVCache semantics: no-op when cache is frozen (read-only during denoise).
+        """
+        frozen_ref = kv_cache.get("frozen_ref")
+        if frozen_ref is not None and frozen_ref[0]:
+            return
         cache_k = kv_cache["k"]
         cache_v = kv_cache["v"]
         cache_size = cache_k.shape[2]

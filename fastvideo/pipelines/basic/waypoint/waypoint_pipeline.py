@@ -243,6 +243,9 @@ class WaypointPipeline(ComposedPipelineBase):
         device = next(transformer.parameters()).device
         dtype = next(transformer.parameters()).dtype
         B = 1
+        # Shared frozen flag: StaticKVCache semantics (read-only during denoise,
+        # write only in cache pass). All layers share the same list ref.
+        frozen_ref = [True]
         kv_cache = []
         for _ in range(n_layers):
             kv_cache.append({
@@ -266,6 +269,8 @@ class WaypointPipeline(ComposedPipelineBase):
                 ),
                 "end":
                 0,
+                "frozen_ref":
+                frozen_ref,
             })
         return kv_cache
 
@@ -296,7 +301,8 @@ class WaypointPipeline(ComposedPipelineBase):
             prompt_emb = extra.get("waypoint_prompt_emb")
             prompt_pad_mask = extra.get("waypoint_prompt_pad_mask")
 
-        # Build KV cache for autoregressive cross-frame attention (HF parity)
+        # Build KV cache for autoregressive cross-frame attention (StaticKVCache
+        # semantics: frozen during denoise, unfrozen only for sigma=0 cache pass).
         kv_cache = self._create_waypoint_kv_cache(batch, fastvideo_args)
 
         self._streaming_ctx = StreamingContext(
@@ -311,7 +317,7 @@ class WaypointPipeline(ComposedPipelineBase):
         self._vae_cache = None
         logger.info(
             "Waypoint streaming reset complete (KV cache: %s)",
-            "enabled" if kv_cache else "disabled",
+            "enabled (StaticKVCache semantics)" if kv_cache else "disabled",
         )
         if _WAYPOINT_DEBUG and kv_cache:
             cache_size = kv_cache[0]["k"].shape[2] if kv_cache else 0
@@ -344,6 +350,11 @@ class WaypointPipeline(ComposedPipelineBase):
                 tuple(prompt_pad_mask.shape),
                 int(n_pad),
                 int(n_valid),
+            )
+        if _WAYPOINT_DEBUG_FILE and prompt_emb is not None:
+            _collect_debug(
+                "prompt_emb",
+                prompt_emb=_stats_dict(prompt_emb, include_sample=True),
             )
 
     @torch.no_grad()
@@ -502,6 +513,10 @@ class WaypointPipeline(ComposedPipelineBase):
                     frame_ts[0, 0].item(),
                 )
 
+            # StaticKVCache semantics: cache is read-only during denoise.
+            if ctx.kv_cache is not None:
+                ctx.kv_cache[0]["frozen_ref"][0] = True
+
             # Denoise through sigma schedule
             if ctx.frame_index == 0:
                 logger.info(
@@ -602,11 +617,11 @@ class WaypointPipeline(ComposedPipelineBase):
                         _tensor_stats(x, "x"),
                     )
 
-            if _WAYPOINT_DEBUG_FILE and ctx.frame_index < 30:
+            if _WAYPOINT_DEBUG_FILE and ctx.frame_index < 120:
                 _collect_debug(
                     "denoised",
                     frame=ctx.frame_index,
-                    denoised=_stats_dict(x, include_sample=True),
+                    denoised=_stats_dict(x, include_sample=(ctx.frame_index < 5)),
                 )
             if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
                 xf = x.float()
@@ -640,8 +655,10 @@ class WaypointPipeline(ComposedPipelineBase):
                     xf.max().item(),
                 )
 
-            # Cache pass: run forward with sigma=0 to update KV cache for next frame
+            # Cache pass: run forward with sigma=0 to update KV cache for next frame.
+            # StaticKVCache semantics: unfreeze for this pass only, then re-freeze.
             if ctx.kv_cache is not None:
+                ctx.kv_cache[0]["frozen_ref"][0] = False
                 sigma_zero = torch.zeros(x.shape[0],
                                          1,
                                          device=device,
@@ -664,19 +681,20 @@ class WaypointPipeline(ComposedPipelineBase):
                         kv_cache=ctx.kv_cache,
                         update_cache=True,
                     )
-                    if ctx.frame_index < DEBUG_MULTIFRAME_MAX or _is_last_window:
-                        logger.info(
-                            "DEBUG %sframe %d: KV cache updated (sigma=0 pass done)",
-                            "(last) " if _is_last_window else "",
-                            ctx.frame_index,
-                        )
-                    if _WAYPOINT_DEBUG and ctx.kv_cache and ctx.frame_index < 3:
-                        ends = [c["end"] for c in ctx.kv_cache[:3]]
-                        logger.info(
-                            "DEBUG [kv_cache] frame=%d layer_ends[:3]=%s",
-                            ctx.frame_index,
-                            ends,
-                        )
+                ctx.kv_cache[0]["frozen_ref"][0] = True
+                if ctx.frame_index < DEBUG_MULTIFRAME_MAX or _is_last_window:
+                    logger.info(
+                        "DEBUG %sframe %d: KV cache updated (sigma=0 pass done)",
+                        "(last) " if _is_last_window else "",
+                        ctx.frame_index,
+                    )
+                if _WAYPOINT_DEBUG and ctx.kv_cache and ctx.frame_index < 3:
+                    ends = [c["end"] for c in ctx.kv_cache[:3]]
+                    logger.info(
+                        "DEBUG [kv_cache] frame=%d layer_ends[:3]=%s",
+                        ctx.frame_index,
+                        ends,
+                    )
 
             # Decode latent to frame (WorldEngineVAE / OWL VAE).
             # CRITICAL: Do NOT resize/interpolate latents before decode. The VAE is a
@@ -716,6 +734,22 @@ class WaypointPipeline(ComposedPipelineBase):
                         scaling_factor,
                         getattr(vae_config, "shift_factor", None),
                         latent_in.dtype,
+                    )
+                if _WAYPOINT_DEBUG_FILE and ctx.frame_index == 0:
+                    shift_val = getattr(vae_config, "shift_factor", None)
+                    shift_s = None
+                    if shift_val is not None and isinstance(
+                            shift_val, torch.Tensor):
+                        shift_s = float(
+                            shift_val.item()) if shift_val.numel() == 1 else None
+                    elif shift_val is not None:
+                        shift_s = float(shift_val)
+                    _collect_debug(
+                        "vae_config",
+                        scaling_factor=(
+                            float(scaling_factor)
+                            if scaling_factor is not None else 1.0),
+                        shift_factor=shift_s,
                     )
                 if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
                     lf = latent_in.float()
