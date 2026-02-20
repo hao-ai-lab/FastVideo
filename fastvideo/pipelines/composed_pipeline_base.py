@@ -375,7 +375,7 @@ class ComposedPipelineBase(ABC):
 
         modules = {}
         for module_name, module_spec in model_index.items():
-            if not isinstance(module_spec, (list, tuple)):
+            if not isinstance(module_spec, list | tuple):
                 logger.info(
                     "Skipping non-module config entry %s=%s",
                     module_name,

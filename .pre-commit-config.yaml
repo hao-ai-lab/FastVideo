@@ -59,7 +59,7 @@ repos:
   rev: v1.15.0
   hooks:
   - id: mypy
-    args: [--python-version, '3.10', --follow-imports, "skip", "--disable-error-code", "union-attr", "--disable-error-code", "override" ]
+    args: [--python-version, '3.10', --explicit-package-bases, --follow-imports, "skip", "--disable-error-code", "union-attr", "--disable-error-code", "override" ]
     additional_dependencies: [types-cachetools, types-setuptools, types-PyYAML, types-requests]
 - repo: local
   hooks:

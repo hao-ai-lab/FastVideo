@@ -141,6 +141,7 @@ ignore_missing_imports = true
 disallow_untyped_calls = true
 check_untyped_defs = true
 follow_imports = "silent"
+explicit_package_bases = true
 
 [tool.codespell]
 skip ="./data,./wandb,./csrc/sliding_tile_attention/tk"

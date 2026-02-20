@@ -1377,12 +1377,12 @@ class DistillationPipeline(TrainingPipeline):
                             f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
                         )
                         imageio.mimsave(filename, video, fps=sampling_param.fps)
-                        if audio is not None and audio_sample_rate is not None:
-                            if not self._mux_audio(filename, audio,
-                                                   audio_sample_rate):
-                                logger.warning(
-                                    "Audio mux failed for validation video %s; saved video without audio.",
-                                    filename)
+                        if (audio is not None and audio_sample_rate is not None
+                                and not self._mux_audio(filename, audio,
+                                                        audio_sample_rate)):
+                            logger.warning(
+                                "Audio mux failed for validation video %s; saved video without audio.",
+                                filename)
                         video_filenames.append(filename)
 
                     artifacts = []
