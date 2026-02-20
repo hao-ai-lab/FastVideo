@@ -20,7 +20,7 @@ def main():
     # Load Ovis-Image model
     # Using local path to the downloaded model
     generator = VideoGenerator.from_pretrained(
-        "/workspace/FastVideo/official_weights/ovis_image",
+        "AIDC-AI/Ovis-Image-7B",
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
         use_fsdp_inference=False,
