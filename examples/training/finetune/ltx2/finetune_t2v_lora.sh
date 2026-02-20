@@ -4,7 +4,7 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 
-MODEL_PATH="/path/to/LTX-2"
+MODEL_PATH="FastVideo/LTX2-Distilled-Diffusers"
 DATA_DIR="data/crush-smol"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=1

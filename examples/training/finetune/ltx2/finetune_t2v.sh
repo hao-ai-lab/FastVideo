@@ -7,9 +7,9 @@ export TOKENIZERS_PARALLELISM=false
 # MODEL_PATH="Davids048/LTX2-Base-Diffusers"
 MODEL_PATH="FastVideo/LTX2-Distilled-Diffusers"
 # Also can use simple 1 video for overfitting experiments.
-# DATA_DIR="/home/hal-jundas/codes/FastVideo/data/crush-smol"
+# DATA_DIR="data/crush-smol"
 # DATA_DIR="<PATH_TO_PROCESSED_DATASET>"
-DATA_DIR=/home/d1su/codes/FastVideo-demo/examples/training/finetune/ltx2/overfit/data
+DATA_DIR="data/crush-smol"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 echo  VALIDATION_DATASET_FILE: $VALIDATION_DATASET_FILE
 NUM_GPUS=8
