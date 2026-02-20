@@ -1,0 +1,37 @@
+{
+  "embedded_cfg_scale": 5.0,
+  "flow_shift": 3.0,
+  "dit_cpu_offload": false,
+  "disable_autocast": false,
+  "precision": "bf16",
+  "vae_precision": "fp32",
+  "vae_tiling": true,
+  "vae_sp": false,
+  "vae_config": {
+    "load_encoder": false,
+    "load_decoder": true,
+    "tile_sample_min_height": 256,
+    "tile_sample_min_width": 256,
+    "tile_sample_stride_height": 192,
+    "tile_sample_stride_width": 192,
+    "use_tiling": true,
+    "use_temporal_tiling": false,
+    "use_parallel_tiling": false,
+    "use_feature_cache": true
+  },
+  "dit_config": {
+    "prefix": "OvisImage",
+    "quant_config": null
+  },
+  "text_encoder_precisions": [
+    "bf16"
+  ],
+  "text_encoder_configs": [
+    {
+      "prefix": "qwen3",
+      "quant_config": null,
+      "lora_config": null
+    }
+  ],
+  "enable_torch_compile": false
+}

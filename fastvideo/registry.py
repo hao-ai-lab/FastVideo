@@ -47,6 +47,7 @@ from fastvideo.configs.pipelines.wan import (
     WanT2V480PConfig,
     WanT2V720PConfig,
 )
+from fastvideo.configs.pipelines.ovis_image import OvisImageT2IConfig
 from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.configs.sample.cosmos import (
@@ -568,6 +569,19 @@ def _register_configs() -> None:
         hf_model_paths=[
             "rand0nmr/SFWan2.2-T2V-A14B-Diffusers",
             "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers",
+        ],
+    )
+
+    # Ovis-Image
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=OvisImageT2IConfig,
+        hf_model_paths=[
+            "AIDC-AI/Ovis-Image-7B",
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower()
+                             for token in ("ovis-image", "ovis_image")),
         ],
     )
 
