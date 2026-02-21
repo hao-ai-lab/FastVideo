@@ -458,7 +458,6 @@ def _print_ssim_task_results(
             failed_task_results.append((task, result))
         elif result.status == "terminated":
             terminated.append(task.test_name)
-            failed_task_results.append((task, result))
         elif result.status == "skipped":
             skipped.append(task.test_name)
 
