@@ -104,19 +104,70 @@ SSIM_PYTEST_PREFIX = (
 )
 
 
+def _run_test_captured(pytest_command: str) -> tuple:
+    """Like run_test but captures output and returns it.
+
+    Returns (returncode, combined_output) so the caller can
+    print results without interleaving from parallel containers.
+    """
+    import subprocess
+    import os
+
+    git_repo = os.environ.get("BUILDKITE_REPO")
+    git_commit = os.environ.get("BUILDKITE_COMMIT")
+    pr_number = os.environ.get("BUILDKITE_PULL_REQUEST")
+
+    if pr_number and pr_number != "false":
+        checkout_command = (
+            "git fetch --prune origin "
+            f"refs/pull/{pr_number}/head "
+            "&& git checkout FETCH_HEAD"
+        )
+    else:
+        checkout_command = f"git checkout {git_commit}"
+
+    command = f"""
+    source $HOME/.local/bin/env &&
+    source /opt/venv/bin/activate &&
+    git clone {git_repo} /FastVideo &&
+    cd /FastVideo &&
+    {checkout_command} &&
+    git submodule update --init --recursive &&
+    cd fastvideo-kernel &&
+    ./build.sh &&
+    cd .. &&
+    uv pip install -e .[test] &&
+    {pytest_command}
+    """
+
+    result = subprocess.run(
+        ["/bin/bash", "-c", command],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    return (result.returncode, result.stdout)
+
+
 @app.function(gpu="L40S:1", **SSIM_COMMON_KWARGS)
 def run_ssim_test_1gpu(test_file: str):
-    run_test(f"{SSIM_PYTEST_PREFIX} {test_file} -vs")
+    return _run_test_captured(
+        f"{SSIM_PYTEST_PREFIX} {test_file} -vs"
+    )
 
 
 @app.function(gpu="L40S:2", **SSIM_COMMON_KWARGS)
 def run_ssim_test_2gpu(test_file: str):
-    run_test(f"{SSIM_PYTEST_PREFIX} {test_file} -vs")
+    return _run_test_captured(
+        f"{SSIM_PYTEST_PREFIX} {test_file} -vs"
+    )
 
 
 @app.function(gpu="L40S:4", **SSIM_COMMON_KWARGS)
 def run_ssim_test_4gpu(test_file: str):
-    run_test(f"{SSIM_PYTEST_PREFIX} {test_file} -vs")
+    return _run_test_captured(
+        f"{SSIM_PYTEST_PREFIX} {test_file} -vs"
+    )
 
 
 SSIM_GPU_TIER_FUNCS = {
@@ -173,13 +224,24 @@ def run_ssim_tests():
         print(f"Spawning {name} on L40S:{gpus}")
         handles.append((name, func.spawn(rel_path)))
 
-    # Collect results
+    # Collect results and print each test's output in order
     failed = []
     for name, handle in handles:
         try:
-            handle.get()
-            print(f"PASSED: {name}")
+            returncode, output = handle.get()
+            print(f"\n{'=' * 60}")
+            print(f"  {name} (exit code {returncode})")
+            print(f"{'=' * 60}")
+            print(output)
+            if returncode != 0:
+                print(f"FAILED: {name}")
+                failed.append(name)
+            else:
+                print(f"PASSED: {name}")
         except Exception as e:
+            print(f"\n{'=' * 60}")
+            print(f"  {name}")
+            print(f"{'=' * 60}")
             print(f"FAILED: {name}: {e}")
             failed.append(name)
 
