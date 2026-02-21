@@ -407,14 +407,24 @@ class VideoGenerator:
         # Run inference
         start_time = time.perf_counter()
 
-        # Execute forward pass in a new thread for non-blocking tensor allocation
+        # Execute forward pass in a new thread for non-blocking tensor
+        # allocation. Capture thread exceptions so we can surface the true
+        # failure in the main thread instead of later hitting None outputs.
         result_container = {
-            'output_batch': ForwardBatch(data_type=batch.data_type)
+            "output_batch": ForwardBatch(data_type=batch.data_type)
         }
+        thread_error: dict[str, BaseException | None] = {"error": None}
+        thread_error_traceback: dict[str, str] = {"traceback": ""}
 
         def execute_forward_thread():
-            result_container['output_batch'] = self.executor.execute_forward(
-                batch, fastvideo_args)
+            import traceback
+            try:
+                result_container[
+                    "output_batch"] = self.executor.execute_forward(
+                        batch, fastvideo_args)
+            except BaseException as error:  # noqa: BLE001
+                thread_error["error"] = error
+                thread_error_traceback["traceback"] = traceback.format_exc()
 
         thread = threading.Thread(target=execute_forward_thread)
         thread.start()
@@ -425,7 +435,17 @@ class VideoGenerator:
                               pin_memory=fastvideo_args.pin_cpu_memory)
         thread.join()
 
-        output_batch = result_container['output_batch']
+        if thread_error["error"] is not None:
+            raise RuntimeError("Forward execution thread failed.\n"
+                               f"{thread_error_traceback['traceback']}"
+                               ) from thread_error["error"]
+
+        output_batch = result_container["output_batch"]
+        if output_batch.output is None:
+            raise RuntimeError(
+                "Forward execution returned no output tensor. "
+                "This usually means the executor/pipeline failed earlier.")
+
         if output_batch.output.shape == samples.shape:
             samples.copy_(output_batch.output)
         else:
