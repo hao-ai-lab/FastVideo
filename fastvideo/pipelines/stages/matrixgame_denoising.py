@@ -139,14 +139,15 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         self._streaming_initialized: bool = False
         self._streaming_ctx: BlockProcessingContext | None = None
 
-    def _propagate_local_attn_size(self, transformer, local_attn_size: int) -> None:
+    def _propagate_local_attn_size(self, transformer,
+                                   local_attn_size: int) -> None:
         transformer.local_attn_size = local_attn_size
         if hasattr(transformer, "blocks"):
             for block in transformer.blocks:
                 if hasattr(block, "local_attn_size"):
                     block.local_attn_size = local_attn_size
                 if hasattr(block, "attn1") and hasattr(block.attn1,
-                                                        "local_attn_size"):
+                                                       "local_attn_size"):
                     block.attn1.local_attn_size = local_attn_size
 
     def forward(
