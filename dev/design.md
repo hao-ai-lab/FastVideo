@@ -1,325 +1,435 @@
-# Distill 重构设计草案：`models={teacher, student, critic, ...}` + 算法/模型解耦
+# Distill 重构设计（吸收 FastGen 架构）：`models={...}` + Method/Trainer/Adapter 解耦
 
-这份文档的目标是：在不牺牲当前训练基础设施（分布式、tracker、checkpoint、
-VSA/VMoBA 等）的前提下，把 distill 训练部分重构成：
+本文是基于：
 
-1. **模型输入是显式的 `models` 映射**（teacher/student/critic/...），critic 可选
-2. **distill 算法与具体模型解耦**：算法通过 “pipeline adapter/capability” 来
-   调用模型，而不是写死 Wan 的张量布局/归一化/输入 key
-3. **易扩展**：新增算法或新增模型架构，只需要新增一个 strategy 或 adapter，
-   不需要到处改训练 loop
+- FastVideo 当前 distill 实现：`dev/distill_structure.md`
+- FastGen distillation pipeline 的优秀结构：`dev/fastgen_structure.md`
 
-下面所有 “设计” 都会同时写 “原因”，方便取舍。
+做出的“面向落地”的重构设计草案。重点是把 **算法**（DMD2/Self-forcing/…）
+与 **模型/管线**（Wan/其它架构）彻底解耦，并让训练循环（Trainer）保持长期稳定。
 
-## 一句话总结（推荐的最终形态）
+---
 
-- `DistillTrainer`（统一训练 loop） + `DistillAlgorithm`（DMD2/SelfForcing/…）
-  + `DistillAdapter`（把具体 pipeline 适配成统一接口） + `ModelBundle`
-  （按角色组织的模型对象/optimizer/EMA）。
+## 0. TL;DR（推荐最终形态）
 
-## 现状痛点（为什么要重构）
+把 FastGen 的四层结构迁移到 FastVideo，并显式引入 `models={...}`：
 
-> 这里只列与架构强相关的点；代码细节见 `dev/distill_structure.md`。
+- `DistillTrainer`：只做训练基础设施（循环、分布式、grad accum、logging、ckpt、validate）
+- `DistillMethod`：一个“可训练对象”，封装 distill 算法 + 多角色模型 + 多优化器/交替更新
+- `DistillAdapter`：把具体 pipeline/network 适配成统一的 noise/forward/CFG/cache 接口
+- `ModelBundle`：`models={student, teacher, critic, ...}` 的统一容器（含 optim/ema/fsdp 策略）
+- `ConditioningProvider`（或 dataset 常量注入）：显式提供 `neg_condition` 等 conditioning 常量
 
-- distill 逻辑 **Wan 耦合严重**（normalize / override cls name / input layout）
-- DMD 与 Self-forcing 两套 pipeline 各自维护一份训练 loop，重复且容易 drift
-- “需要 teacher/critic/CFG/uncond embedding”等约束不显式，依赖隐含流程
-- MoE/dual-transformer（`transformer_2`）的选择、更新在不同 pipeline 里不统一
-- 想支持更多模型（Hunyuan/LTX2/LongCat/…）或更多 distill 算法会越来越难
+关键原则：**Trainer 不认识 teacher/critic，也不写 DMD/SF 的 if/else。**
 
-## 设计目标与非目标
+---
 
-### 目标
+## 1. 现状与痛点（FastVideo）
 
-- 用 `models: dict[str, ...]` 显式描述参与训练的所有模型角色
-- 算法（DMD2/Self-forcing/未来更多）只依赖统一接口，不依赖 Wan 特有细节
-- 训练 loop 统一（分布式/日志/checkpoint/validation 只实现一次）
-- 在 adapter 层支持多种输入来源：
-  - 已 preprocess 的 parquet（含 `vae_latent`/`text_embedding`）
-  - 或者（可选）原始数据在线 encode（由 pipeline 决定）
+（细节见 `dev/distill_structure.md`，这里仅列架构层面的痛点）
 
-### 非目标（第一阶段先不做）
+- **Wan 耦合**：normalize/layout/transformer override 等散落在训练代码里，换模型不可能仅靠配置
+- **算法分叉**：DMD2 与 Self-forcing 各自维护训练 loop，扩展新算法/新模型成本高且容易 drift
+- **conditioning 隐式依赖**：`neg_condition/uncond` 可能依赖 validation 初始化等副作用
+- **多网络调度不稳**：交替更新时，scheduler step 与 optimizer step 不严格对齐（会引入 lr 偏差）
+- **专家/双 transformer 逻辑分散**：MoE/expert 选择与“哪个 timestep 更新哪个 expert”缺乏单点抽象
 
-- 不强求“一套 adapter 自动适配所有模型”，允许为不同架构写显式 adapter
-- 不强求把所有训练 pipeline（finetune、matrixgame、ltx2 等）一起重构掉
-- 不追求立刻改变 checkpoint 格式（可以先兼容旧格式再演进）
+---
 
-## 总体架构（模块分层）
+## 2. FastGen 架构要点（我们要吸收什么）
 
-建议把 distill 拆成四层，从下到上：
+### 2.1 FastGen 的四层分离（核心）
 
-1. **Adapter 层**（模型相关）
-   - 把某个 pipeline/transformer 的 forward 细节封装起来
-2. **Algorithm/Strategy 层**（算法相关）
-   - DMD2 / Self-forcing / 其它 distill 算法
-3. **Trainer/Engine 层**（基础设施）
-   - 分布式、seed、grad accumulation、优化器 step、日志、checkpoint、验证
-4. **CLI/Entrypoint 层**
-   - 解析参数、加载 models、选择算法、启动 trainer
+FastGen 把 distillation 的复杂度拆成：
 
-## 关键设计决策（每项含原因）
+1. `Trainer`：训练循环与分布式/accum/validate/ckpt/callbacks
+2. `Method(FastGenModel)`：算法 + 多网络容器 + 多优化器调度（交替更新在这里）
+3. `Network`：统一 forward contract（pred_type/features/cache），并提供少量 hook
+4. `Dataset/Preprocess`：提供 `real/condition/neg_condition`，并支持常量注入
 
-### 设计 1：用 `ModelBundle` 统一承载多角色模型（核心）
+这种结构的长期价值是：**训练循环不随算法增长而膨胀**，算法复用与组合能力强。
+
+### 2.2 FastGen → FastVideo 对照表（建议直接照搬）
+
+| FastGen 概念 | FastVideo 目标概念 | 说明 |
+|---|---|---|
+| `Trainer.run(model)` | `DistillTrainer.run(method)` | Trainer 只依赖统一接口 |
+| `FastGenModel.single_train_step()` | `DistillMethod.single_train_step()` | 返回 `loss_map["total_loss"]` |
+| `get_optimizers()/get_lr_schedulers()` | 同名接口 | 交替更新/多 optim 的唯一入口 |
+| `model_dict/optimizer_dict/scheduler_dict` | 同名映射 | checkpoint 以 role 命名空间泛化 |
+| `DDPWrapper.single_train_step()` | `DDPTrainStepWrapper`（可选） | 让训练 step 吃到 DDP hooks |
+| dataset `files_map/presets_map` | dataset 常量注入（推荐） | `neg_condition` 不再隐式依赖 |
+| callbacks + checkpointer + autoresume | 回调 + checkpoint + resume | 基础设施通用化，算法不介入 |
+| meta-init + rank0 broadcast（FSDP2） | 可选的大模型加载策略 | teacher/critic ≥10B 时显著收益 |
+
+### 2.3 我们希望复制的“具体模式”（不止抽象名词）
+
+- **统一训练入口**：Trainer 每个（micro）step 都只做：
+  - `loss_map, outputs = method_ddp.single_train_step(batch, iter)`
+  - backward 只对 `loss_map["total_loss"]`
+  - 在 accum 最后一步调用：
+    - `method.optimizers_schedulers_step(iter)`
+    - `method.optimizers_zero_grad(iter)`
+- **交替更新收敛到 method**：更新 student/critic 的比例完全由
+  `get_optimizers(iter)` 决定，Trainer 永不写 role-aware 的分支。
+- **conditioning 显式化**：`neg_condition` 最好是 dataset 常量（或启动时一次性缓存/广播），
+  绝不依赖 validation 副作用。
+- **role 命名空间 checkpoint**：把保存/加载做成 “按 role key 的映射”，未来加模型不会改协议。
+
+---
+
+## 3. 总体架构（FastVideo 版本）
+
+### 3.1 一次训练的总数据流（推荐）
+
+```text
+CLI/YAML config
+  -> build ModelBundle(models={student, teacher, critic?, ...})
+  -> build DistillAdapter.from_pipelines(bundle)  # pipeline/network 适配
+  -> build DistillMethod(adapter, bundle, method_cfg)
+  -> DistillTrainer(trainer_cfg, callbacks, checkpointer).run(method)
+```
+
+### 3.2 分层职责（把边界画清楚）
+
+1. **Data/Conditioning 层**
+   - dataloader 输出：`real`、`condition`、`neg_condition`（可选）以及 I2V/V2V 的额外条件
+   - `ConditioningProvider`：若 dataloader 不提供 `neg_condition`，则构建并缓存/广播
+
+2. **Adapter/Network 层（模型相关）**
+   - `DistillAdapter`：layout/normalize/noise schedule/CFG/forward/(可选)cache
+   - 每个架构一个 adapter：`WanAdapter`、`HunyuanAdapter`、`LTX2Adapter`…
+
+3. **Method 层（算法相关 + 多网络训练）**
+   - `DistillMethod` 基类（FastGenModel analog）
+   - `DMD2Method` / `SelfForcingMethod` /（未来）`TeacherOnlyMethod` 等
+
+4. **Trainer/Engine 层（基础设施）**
+   - `DistillTrainer.run(method)`：DDP/FSDP、grad accum、日志、验证、断点、回调
+   - Trainer 永不写 DMD/SF 专有逻辑
+
+---
+
+## 4. 核心对象与接口（建议 API）
+
+### 4.1 `ModelBundle`：角色显式化（外部输入）
+
+目标：让入口层显式传入 `models={student, teacher, critic, ...}`，并把所有
+“训练态（optim/ema/fsdp 策略）”结构化地挂在 role 下。
+
+```text
+ModelBundle
+  roles: dict[str, RoleHandle]  # key == "student"/"teacher"/"critic"/...
+
+RoleHandle
+  modules: dict[str, nn.Module]      # e.g. {"transformer": ..., "transformer_2": ...}
+  frozen: bool
+  precision: optional               # bf16/fp16/fp32
+  fsdp_policy: optional             # shard strategy / ignored modules
+  ema: optional
+  optimizers/schedulers: optional
+```
+
+约定：
+
+- canonical roles：`student`, `teacher`, `critic`
+- optional roles：`discriminator`, `reward`, `refiner`, `aux_teacher`, ...
+
+### 4.2 `DistillAdapter`：把 pipeline/network 适配成算法可消费接口
+
+adapter 的职责是“怎么调用模型”，而不是“什么时候更新谁”。建议接口包含：
+
+- noise & target：
+  - `add_noise(x0, noise, t) -> x_t`
+  - `pred_to_x0(pred, x_t, t)`（或统一为 `pred_to_target`）
+- forward：
+  - `forward(role, x_t, t, cond, *, fwd_pred_type=..., neg_cond=None, cfg=None, caches=None)`
+- layout & normalize（按模型需要）：
+  - `to_model_layout(x)` / `from_model_layout(x)`
+  - `normalize_latents` / `denormalize_latents`
+- conditioning：
+  - `encode_condition(raw_cond) -> cond`
+  - `encode_neg_condition(raw_neg_cond) -> neg_cond`（或由 dataset 提供 embedding）
+- cache（可选，Self-forcing 用）：
+  - `supports_kv_cache`
+  - `clear_caches(role=...)`
+
+此外建议 adapter 暴露 capabilities，避免 method 靠 if/else 猜：
+
+```text
+adapter.capabilities = {
+  "supports_cfg": True/False,
+  "supports_kv_cache": True/False,
+  "supported_pred_types": {...},
+  "supports_features": True/False,
+  "supports_expert_routing": ...,
+}
+```
+
+### 4.3 `DistillMethod`：算法 + 多网络 + 多优化器调度（核心）
+
+这是 FastGen 最值得抄的点：把 distill 的关键复杂度集中在 method。
+
+**最小接口（强制）**
+
+- `single_train_step(batch, iteration) -> (loss_map, outputs)`
+  - `loss_map` 必须包含 `total_loss`
+  - `outputs` 仅用于日志/验证/可视化
+- `get_optimizers(iteration)` / `get_lr_schedulers(iteration)`
+  - 返回本次 iteration 应该 step 的 optimizer/scheduler 列表（交替更新就在这里实现）
+- `optimizers_schedulers_step(iteration)` / `optimizers_zero_grad(iteration)`
+  - Trainer 只调用它们，不关心内部有哪些 optimizer
+- `model_dict/optimizer_dict/scheduler_dict`
+  - 给 CheckpointManager 使用（key == role 或 role 内模块）
+
+**建议能力（可选但推荐）**
+
+- `autocast()` / `grad_scaler`：统一 AMP 管理，Trainer 不关心精度细节
+- `sample_for_logging(...)`：返回可调用的采样函数或采样结果，Trainer 不写采样逻辑
+- `set_trainable(role, enabled)`：method 内部统一 `requires_grad_` 切换（Self-forcing/critic alternation）
+
+> 直接收益：scheduler step 的粒度天然与 optimizer step 对齐，避免 update ratio 引入 lr 偏差。
+
+### 4.4 `DistillTrainer`：完全算法无关的训练循环
+
+Trainer 只依赖 method 的统一接口，推荐对齐 FastGen 的关键形态：
+
+- grad accumulation：Trainer 计算 `sync_grads`，并在 DDP/FSDP 下用 context 禁止同步
+- forward/backward：只围绕 `loss_map["total_loss"]`
+- step/zero_grad：只在 accum 最后一次调用 method 接口
+- validate：可复用 `single_train_step`（no_grad + autocast），并允许 method 扩展额外 eval
+- callbacks：把 EMA / grad clip / logger / profiler 等都做成回调（可保存状态）
+
+**DDP 的一个关键实现点（强烈建议照 FastGen）**
+
+如果 `single_train_step` 不是 `forward()`，DDP 的隐式 hooks 可能不生效。
+FastGen 用 `DDPWrapper` 临时把 `module.forward` 指到 `single_train_step`，
+然后通过 `ddp_model(*args)` 触发 hooks。
+
+在 FastVideo 落地时建议二选一：
+
+1) `DistillMethod.forward = single_train_step`（简单，但 forward 被占用）
+2) 实现一个 `DDPTrainStepWrapper.single_train_step()`（推荐，行为更明确）
+
+### 4.5 `CheckpointManager`：围绕 role 命名空间泛化
+
+建议统一协议：
+
+- 输入：`model_dict/optimizer_dict/scheduler_dict/grad_scaler/callback_state/iteration`
+- 输出：按 role key 保存（尤其是 FSDP sharded state）
+
+并显式支持：
+
+- **只导出 student** 的 inference 权重（teacher/critic 不随推理包分发）
+- **兼容旧 distill ckpt**：至少提供一次性迁移脚本或兼容 loader
+
+### 4.6 `Callback` 系统：把“训练周边复杂度”解耦出去
+
+把这些都做成 callbacks（并进入 checkpoint），Trainer/Method 都不硬编码：
+
+- EMA 更新
+- grad clipping
+- logging（wandb/tensorboard/本地）
+- profiler/step timer
+- param count / debug dumps
+- autoresume（从 ckpt 恢复 callback 状态）
+
+---
+
+## 5. 关键设计决策（每条含原因）
+
+### 设计 1：引入 `DistillMethod`（Method 中心，而非 Algorithm/Trainer 中心）
 
 **设计**
 
-- 引入一个只做 “容器” 的数据结构（建议 dataclass）：
-
-  - `models: dict[str, ModelHandle]`
-  - 推荐 canonical keys：`student`, `teacher`, `critic`
-  - 允许扩展：`reward`, `refiner`, `aux_teacher`, `student_ema` 等
-
-- `ModelHandle` 不是裸 `nn.Module`，而是：
-
-  - `module`: 主要网络（如 transformer）
-  - `extra_modules`: 可选模块（如 `transformer_2`、image encoder 等）
-  - `optimizers`, `schedulers`, `ema`（可选）
-  - `trainable: bool` + `param_groups`（用于决定哪些参数会更新）
-  - `capabilities`: 模型端能力声明（见设计 3）
+- DMD2/Self-forcing/未来算法都实现为 `DistillMethod` 子类
+- Method 负责多角色模型、交替更新、optim/sched/EMA、缓存生命周期等
 
 **原因**
 
-- 角色显式化后，算法只需要声明 “我需要哪些 role”，无需硬编码一堆参数名
-- `ModelHandle` 把 optimizer/EMA 等训练态绑定到 role，checkpoint/save/resume
-  逻辑才能自然泛化
-- 对 MoE/dual-transformer 这类 “一个 role 内部有多个可训练模块” 的情况，
-  `extra_modules` 能承载而不污染最上层 `models` 命名空间
+- distill 的“本质复杂度”就是多网络 + 多优化器调度；放在 Method 最自然
+- Trainer 只需要稳定地做基础设施，长期维护成本最低
 
-### 设计 2：把“加载模型”从“训练算法”中剥离成 ModelFactory/Loader
+### 设计 2：`models={...}` 显式输入 + `ModelBundle` 结构化承载训练态
 
 **设计**
 
-- 单独实现 `ModelFactory`：
-  - 输入：`ModelSpec`（路径/是否冻结/precision/offload/fsdp 等）
-  - 输出：`ModelHandle`
-- teacher/critic 只加载算法需要的最小组件（通常只要 transformer），其余组件
-  （VAE/scheduler/text encoder）优先复用 student pipeline 的 shared 部分，
-  由 adapter 决定是否允许共享
+- 配置/CLI 显式给出 `student/teacher/critic?`
+- `ModelBundle` 统一挂载冻结策略、precision、FSDP 策略、EMA、optim/sched
 
 **原因**
 
-- 让算法代码完全不关心 “从哪里 load”、“如何 CPU offload”、“如何 FSDP 包装”
-- 有利于做 memory/throughput 优化（teacher/critic 可以走不同策略）
-- 避免现状里 `load_modules` 里混杂大量 Wan 特判/override 的情况
+- 角色显式化是解耦的前提，且天然支持未来扩展更多角色
+- checkpoint 也可以自然以 role 命名空间组织
 
-### 设计 3：用 `DistillAdapter` 做“pipeline 适配层”，并显式声明 capability
+### 设计 3：Trainer 固化成“只认一个接口”的稳定循环
 
 **设计**
 
-- 定义一个 adapter 接口（Protocol/ABC 均可），把下列能力抽象出来：
-
-  1. **latent 规范化/布局**
-     - `normalize_latents(x)` / `denormalize_latents(x)`（如需）
-     - `to_model_layout(x)` / `from_model_layout(x)`
-  2. **conditioning 规范化**
-     - 把 dataset/pipeline 产生的 conditioning 变成统一结构
-       （例如 `Conditioning` = dict[str, Tensor]）
-  3. **噪声与 parameterization**
-     - `add_noise(x0, noise, t)`
-     - `pred_to_x0(pred, x_t, t)` 或 `pred_to_video_latent(...)`
-     - 声明 `prediction_type`（eps/v/x0/flow），由 adapter 负责转换
-  4. **模型 forward**
-     - `forward(role, x_t, t, cond, *, caches=None, return_dict=False)`
-     - 允许 adapter 在内部处理 `set_forward_context` / attention metadata
-  5. **CFG 支持（可选）**
-     - `supports_cfg: bool`
-     - `build_uncond(cond, negative_prompt=...)` 或直接提供
-       `uncond_conditioning_cache`
-
-- adapter 要返回一个 `Capabilities` 对象（dataclass）：
-  - 是否支持 CFG/uncond
-  - 是否支持 KV cache（self-forcing 需要）
-  - 是否存在/如何选择 `transformer_2`（MoE）
-  - 输入 key 要求（`encoder_attention_mask` 是否必须等）
+- Trainer 仅调用：
+  - `loss_map, outputs = method_ddp.single_train_step(...)`
+  - backward `total_loss`
+  - `method.optimizers_schedulers_step()` / `optimizers_zero_grad()`
+- validate 也尽可能复用 `single_train_step`
 
 **原因**
 
-- “算法与模型解耦”只能靠明确的接口边界实现；adapter 是最合适的边界
-- capability 显式化后，算法可以做：
-  - `if not supports_cfg: raise/降级`
-  - `if supports_kv_cache: enable self-forcing` 否则 fallback
-- 避免用脆弱的反射去“猜 pipeline 有哪些 stage/属性”，可维护性更高
+- 彻底杜绝算法越写越多导致 trainer 分叉、难以测试和维护
+- validate 复用训练逻辑能减少“训练/验证 drift”
 
-### 设计 4：用 Strategy 模式承载 distill 算法（DMD2/SF/未来更多）
+### 设计 4：交替更新/多 optimizer 调度统一走 `get_optimizers()`（FastGen 关键模式）
 
 **设计**
 
-- `DistillAlgorithm` 负责：
-  - 声明需要的 roles：`required_roles`, `optional_roles`
-  - 声明每一步要更新哪些 role（以及 update ratio/交替策略）
-  - 定义 loss：
-    - `compute_losses(batch, ctx) -> LossBundle`
-    - 或者更细：`losses_for(role)` + `metrics`
-  - （可选）维护算法内部状态（例如 self-forcing 的 cache 管理/exit flag 采样）
-
-- 例子：
-  - `DMD2Algorithm`：
-    - `required_roles = {student, teacher, critic}`
-    - loss = 当前 `_dmd_forward` + critic flow-matching
-  - `SelfForcingAlgorithm`：
-    - 基于 DMD2，但 student forward 换成 causal/self-forcing 的 trajectory
-    - 需要 `supports_kv_cache` + `is_causal` 等 capability
-  - `TeacherOnlyAlgorithm`（未来可选）：
-    - `required_roles = {student, teacher}`
-    - 不依赖 critic（满足 “critic optional” 的场景）
+- DMD2：
+  - `iter % student_update_freq == 0`：更新 student
+  - 否则更新 critic（+ 可选 discriminator）
+- Self-forcing：
+  - 复用相同调度，只替换 student rollout
 
 **原因**
 
-- 把 “训练 loop” 从 pipeline class 里抽出来后，DMD/SF 不需要两份 train()
-- 新增算法不会影响 adapter/trainer，只需要加一个 strategy 类和少量配置
-- 更容易做 unit test：给一个 dummy adapter + dummy models 就能测 loss 逻辑
+- update ratio 的复杂度从 trainer 中消失，且扩展更多 role 不改 trainer
+- scheduler step 与 optimizer step 自动对齐（减少 lr 偏差）
 
-### 设计 5：`DistillTrainer` 统一训练基础设施，并用“更新计划”驱动 optimizer
+### 设计 5：adapter 明确 capability，而不是靠 if/else 猜
 
 **设计**
 
-- trainer 只做基础设施：
-  - 数据迭代（dataloader / batch builder）
-  - grad accumulation + autocast + clip grad
-  - 按 strategy 给出的 “更新计划” 去 step 不同 optimizer
-  - all-reduce loss/metrics
-  - tracker log + checkpoint + validation hook
-- trainer 不写任何 DMD/SF 专有逻辑（最多提供 hook 点）
-- “更新计划”可以是：
-  - `UpdatePlan = list[Update(role, loss_key, optimizer_key, scheduler_key)]`
-  - 或者简单：`roles_to_update = {...}` + `losses`
+- adapter 暴露 `capabilities`，method 启动时检查依赖
+- 自适应训练：method 根据 capability 选择路径或报错/降级
 
 **原因**
 
-- 训练 loop 只实现一次，避免 DMD/SF drift
-- update ratio（generator_update_interval / dfake_gen_update_ratio）变成算法参数，
-  不再散落在不同 pipeline 里
-- 支持更多角色/更多 optimizer 组合时不会爆炸
+- 新增模型架构时，差异集中在 adapter；method 保持稳定
+- 失败要早失败（init-time），避免跑到中途才出形状/feature 错
 
-### 设计 6：把 distill 专有参数从 `TrainingArgs` 里拆成 `DistillConfig`
+### 设计 6：`neg_condition` 变成“数据常量”或“启动一次性缓存/广播”
 
 **设计**
 
-- `TrainingArgs` 保持偏 “训练基础设施”：
-  - 数据、输出目录、分布式、optimizer 基本参数、logging/checkpoint
-- distill 算法专有参数放到 `DistillConfig`：
-  - DMD2：timestep ratio、guidance scale、denoising steps、update interval 等
-  - Self-forcing：num_frame_per_block、gradient masking 等
-  - Critic：fake_score lr/betas/scheduler 等
-- CLI 层把 config 做成 namespace：
-  - `--distill.algo dmd2`
-  - `--distill.dmd2.generator_update_interval 5`
-  - `--distill.sf.num_frame_per_block 3`
+两条路径（二选一或同时支持）：
+
+1) dataset 常量注入：dataloader 直接输出 `neg_condition` embedding
+2) provider 缓存：训练开始时用 adapter 编码 negative prompt，并缓存/广播
 
 **原因**
 
-- 现在 `TrainingArgs` 已经非常大；继续塞 distill 参数会让其它训练模式更难维护
-- 分离后能清晰表达：某些参数只对某个算法生效
-- 便于做默认值管理（不同 pipeline/算法可提供不同 defaults）
+- 消除 “依赖 validation 初始化 uncond embedding” 这类隐式耦合
+- negative prompt embedding 通常是常量，适合缓存（性能更稳）
 
-### 设计 7：checkpoint 以 role 为单位泛化（并提供推理导出）
+### 设计 7：用 role 命名空间做 checkpoint 协议（对齐 `model_dict`）
 
 **设计**
 
-- 引入 `CheckpointManager`：
-  - `save(role_states, shared_states, step)`
-  - `load(...)`
-- role_states 来自 `ModelHandle`：
-  - trainable role 保存 optimizer/scheduler/ema
-  - frozen role（teacher）通常只保存 path 或权重 hash（可选）
-- “推理导出”是一个独立通道：
-  - 例如只导出 `student`（和可选 `student.transformer_2`）到 diffusers 格式
+- `model_dict/optimizer_dict/scheduler_dict` 的 key 直接是 role
+- FSDP 情况下按 role key 分 shard 保存；非 FSDP rank0 写单文件
 
 **原因**
 
-- 现有 `save_distillation_checkpoint` 已经在 role 粒度上开始泛化
-  （generator/critic/generator_2/critic_2/real_score_2），继续泛化会更自然
-- 未来支持更多角色时（reward/refiner）不需要再复制粘贴一套 save/load
+- 多网络 distill 的保存/加载本质就是 “多个命名空间的 state”
+- 未来新增/删减 role 不改变 checkpoint 顶层协议
 
-### 设计 8：把 “uncond conditioning” 做成显式的 ConditioningProvider
+### 设计 8：DDP 训练 step 触发 hooks（借鉴 FastGen 的 wrapper 技巧）
 
 **设计**
 
-- 对需要 CFG 的算法，提供一个 `ConditioningProvider`：
-  - 在训练开始时就构建/缓存 negative prompt embedding（或从 dataset 读取）
-  - 不依赖 “是否开启 validation logging”
-- provider 与 adapter 配合：
-  - adapter 负责怎么 encode negative prompt（模型不同，编码方式不同）
-  - provider 负责生命周期与 cache（rank0 广播、避免重复算）
+- 为 DDP 场景提供 `DDPTrainStepWrapper.single_train_step()`：
+  临时重定向 `forward` 到 `single_train_step`，再调用 `ddp_model(...)`
 
 **原因**
 
-- 现状里 uncond embedding 依赖 `_log_validation`，属于隐式耦合，容易踩坑
-- provider 显式后，算法与 trainer 的依赖更清晰，validation 也可以变成可选
+- 让 “训练 step != forward” 的结构仍能享受 DDP 的正确行为与 hooks
+- 避免强行把算法逻辑写进 `forward` 导致语义混乱
 
-## CLI 形态建议（与 `models={...}` 对齐）
+### 设计 9（可选）：meta-init + rank0 broadcast 的大模型加载
 
-### 推荐参数形式
+**设计**
+
+- teacher/critic ≥10B 时，非 rank0 以 `torch.device("meta")` 构建空权重
+- rank0 加载权重，FSDP wrap 后 broadcast
+
+**原因**
+
+- 显著减少多机启动 I/O contention 与峰值内存
+
+---
+
+## 6. 配置与 CLI 形态（渐进式）
+
+### 6.1 最小可用（建议先落地）
 
 - `--models.student <path>`
 - `--models.teacher <path>`
 - `--models.critic <path>`（可选）
+- `--distill.method dmd2|self_forcing|teacher_only`
 
-如果需要支持更复杂的配置（比如每个 role 的 precision/offload）：
+distill 专有参数建议用 namespace：
+
+- `--distill.dmd2.student_update_freq 5`
+- `--distill.dmd2.guidance_scale 3.5`
+- `--distill.sf.num_frame_per_block 3`
+
+### 6.2 复杂配置（建议支持）
 
 - `--models_json path/to/models.json`
+  - per-role precision/offload/trainable/fsdp_policy/ckpt_path 等
 
-示例 JSON（建议）：
+### 6.3 配置系统演进（可选吸收 FastGen 的优点）
 
-```json
-{
-  "student": {"path": "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers", "trainable": true},
-  "teacher": {"path": "Wan-AI/Wan2.1-T2V-14B-Diffusers", "trainable": false},
-  "critic":  {"path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "trainable": true}
-}
-```
+FastGen 的 python config + instantiate + override 很优秀，但 FastVideo 现阶段可以先：
 
-**原因**
+- 保留现有 YAML/argparse
+- 内部把配置整理成结构化 dataclass：
+  - `TrainerConfig / DataConfig / MethodConfig / ModelsConfig`
+- 后续再逐步引入“延迟实例化/override”能力（不阻塞 distill 重构）
 
-- 直接映射到 `models: dict[str, ModelSpec]`，减少 “某个 role 的 path 到底对应哪个
-  CLI 参数” 的歧义
-- JSON 形式在复杂场景下更可扩展（多模块、MoE、不同 offload 策略等）
+---
 
-## 迁移计划（推荐分阶段）
+## 7. 目录落地建议（FastVideo 内）
 
-### Phase 0：只加新框架，不动现有入口
+建议新增 `fastvideo/distill/`（或 `fastvideo/training/distill/`），结构对齐 FastGen：
 
-- 新增 `fastvideo/distill/`（或 `fastvideo/training/distill/`）：
-  - `models.py`：`ModelSpec/ModelHandle/ModelBundle`
-  - `adapters/`：`WanDistillAdapter`（先只支持 wan）
-  - `algorithms/`：`DMD2Algorithm`、`SelfForcingAlgorithm`
-  - `trainer.py`：`DistillTrainer`
-- 先用单元测试覆盖核心 loss（不用真模型，dummy adapter 即可）
+- `fastvideo/distill/bundle.py`：`ModelBundle/RoleHandle/RoleSpec`
+- `fastvideo/distill/adapters/`：`WanAdapter`（先支持 Wan）、后续扩展更多模型
+- `fastvideo/distill/methods/`：`base.py`、`dmd2.py`、`self_forcing.py`
+- `fastvideo/distill/trainer.py`：`DistillTrainer`
+- `fastvideo/distill/checkpoint.py`：`CheckpointManager`（先兼容旧格式）
+- `fastvideo/distill/callbacks/`：EMA/clip/log/profiler 等
 
-**原因**
+旧入口（如 `fastvideo/training/*distillation_pipeline.py`）先保留，
+通过 flag 切新旧框架做 A/B 对齐。
 
-- 风险最小：不影响现有脚本/训练
-- 先把边界（adapter/strategy/trainer）跑通，后面迁移才不痛
+---
 
-### Phase 1：把现有 Wan DMD / Wan Self-forcing 迁移到新框架（行为对齐）
+## 8. 迁移计划（低风险）
 
-- 新建一个新的入口脚本（或训练文件）：
-  - `fastvideo/training/distill.py`（仅示例）
-- 让旧入口（`wan_distillation_pipeline.py` 等）可以选用新 trainer（通过 flag）
-- 对齐：
-  - loss 数值
-  - checkpoint 目录结构
-  - validation 输出
+### Phase 0：框架落地 + Wan(DMD2) 跑通
 
-**原因**
+- 新增 `DistillTrainer/DistillMethod/ModelBundle/WanAdapter`
+- `DMD2Method` 覆盖现有 Wan distill 训练（student+teacher+critic）
+- checkpoint 至少能：
+  - 保存/加载新格式
+  - 从旧格式加载 student 初始化（兼容迁移）
 
-- 迁移时可 A/B 对比，减少“重构引入质量回归”的概率
+### Phase 1：Self-forcing 迁移（复用 DMD2 框架）
 
-### Phase 2：清理旧实现 + 扩展更多模型/算法
+- `SelfForcingMethod(DMD2Method)`：只覆写 student rollout / cache 生命周期
+- 对齐现有 self-forcing 输出与 loss（允许数值差异但要解释）
 
-- 删除或冻结旧 distill pipeline（保留兼容入口也行）
-- 为其它模型实现 adapter（Hunyuan/LTX2/LongCat…）
-- 引入更多算法（teacher-only、multi-teacher、RLHF-style…）
+### Phase 2：清理旧实现 + 扩展新模型/新算法
 
-**原因**
+- 逐步冻结或移除旧 distill pipeline（保留兼容入口亦可）
+- 新增更多 adapter（Hunyuan/LTX2/LongCat…）
+- 新增更多 method（teacher-only、多 teacher、KD 轨迹蒸馏等）
 
-- 把新增工作限制在 “写 adapter / 写 strategy”，让扩展成本线性增长
+---
 
-## 额外建议（踩坑预防）
+## 9. Guardrails / 测试建议（避免重构“跑得通但不可维护”）
 
-- 明确 role 的训练/冻结策略：teacher 永远 `no_grad + eval`，critic/trainable
-  role 的 `requires_grad` 与 optimizer param group 必须绑定在一起
-- MoE/dual-transformer：建议把 “按 timestep 选择哪个 expert 更新” 的逻辑放到
-  adapter 或 strategy 的单一位置，避免像现状一样分散在多处
-- lr scheduler 的 step 粒度：建议按 optimizer step，而不是按 global step
-  （否则 update ratio 会改变 effective schedule）
+- **scheduler step 对齐测试**：交替更新下，未 step 的 optimizer 对应 scheduler 不应 step
+- **batch_size > 1**：消除所有隐式 `B==1` 的 reshape/unflatten 假设
+- **role 可选性**：critic 可选时应有清晰报错/降级路径（teacher-only）
+- **conditioning 显式性**：训练开始前必须具备 `neg_condition`（来自数据或 provider）
+- **checkpoint roundtrip**：save → load → loss 不发散（最小 smoke test）
+
