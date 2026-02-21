@@ -408,7 +408,7 @@ class VideoGenerator:
         start_time = time.perf_counter()
 
         # Execute forward pass in a new thread for non-blocking tensor allocation
-        result_container = {}
+        result_container = {'output_batch': ForwardBatch()}
 
         def execute_forward_thread():
             result_container['output_batch'] = self.executor.execute_forward(
