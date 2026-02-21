@@ -26,6 +26,7 @@ from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.configs.pipelines.ltx2 import LTX2T2VConfig
+from fastvideo.configs.pipelines.lucy_edit import LucyEditConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
@@ -64,6 +65,7 @@ from fastvideo.configs.sample.hunyuangamecraft import HunyuanGameCraftSamplingPa
 from fastvideo.configs.sample.lingbotworld import LingBotWorld_SamplingParam
 from fastvideo.configs.sample.ltx2 import (LTX2BaseSamplingParam,
                                            LTX2DistilledSamplingParam)
+from fastvideo.configs.sample.lucy_edit import LucyEditSamplingParam
 from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 from fastvideo.configs.sample.turbodiffusion import (
     TurboDiffusionI2V_A14B_SamplingParam,
@@ -584,6 +586,19 @@ def _register_configs() -> None:
                 "stablediffusion3",
                 "stabilityai__stable-diffusion-3.5-medium",
             )),
+        ],
+    )
+
+    # Lucy-Edit (decart-ai video editing)
+    register_configs(
+        sampling_param_cls=LucyEditSamplingParam,
+        pipeline_config_cls=LucyEditConfig,
+        hf_model_paths=[
+            "decart-ai/Lucy-Edit-Dev",
+        ],
+        model_detectors=[
+            lambda path: "lucyeditpipeline" in path.lower() or "lucy-edit" in
+            path.lower(),
         ],
     )
 
