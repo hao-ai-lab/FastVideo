@@ -143,7 +143,7 @@ def run_ssim_tests():
     import sys
 
     ssim_dir = os.path.join(
-        os.path.dirname(__file__), "..", "..", "ssim"
+        os.path.dirname(__file__), "..", "ssim"
     )
     test_files = sorted(
         glob.glob(os.path.join(ssim_dir, "test_*.py"))
