@@ -4,18 +4,14 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 
-# MODEL_PATH="Davids048/LTX2-Base-Diffusers"
 MODEL_PATH="FastVideo/LTX2-Distilled-Diffusers"
-# Also can use simple 1 video for overfitting experiments.
-# DATA_DIR="data/crush-smol"
-# DATA_DIR="<PATH_TO_PROCESSED_DATASET>"
 DATA_DIR="data/crush-smol"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 echo  VALIDATION_DATASET_FILE: $VALIDATION_DATASET_FILE
 NUM_GPUS=8
-OVERFIT_HEIGHT=1088
-OVERFIT_WIDTH=1920
-OVERFIT_FRAMES=121
+HEIGHT=1088
+WIDTH=1920
+FRAMES=121
 
 training_args=(
   --tracker_project_name "ltx2_t2v_finetune"
@@ -23,11 +19,11 @@ training_args=(
   --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 2
+  --gradient_accumulation_steps 1
   --num_latent_t 16
-  --num_height $OVERFIT_HEIGHT
-  --num_width $OVERFIT_WIDTH
-  --num_frames $OVERFIT_FRAMES
+  --num_height $HEIGHT
+  --num_width $WIDTH
+  --num_frames $FRAMES
   --enable_gradient_checkpointing_type "full"
   --mode "finetuning"
 )
