@@ -16,6 +16,38 @@
 
 ---
 
+## Phase 0 TODO List（Review Checklist）
+
+> 目的：把 Phase 0 的“可交付”拆成可审查的 checklist，方便你决定是否开启 Phase 1。
+
+### Phase 0 可交付（应全部完成）
+
+- [x] 新 distill 框架骨架落地（Method/Trainer/Adapter/Bundle），且 **不影响旧 pipeline**
+  - `fastvideo/distillation/`
+- [x] 新框架跑通 Wan DMD2（student + teacher + critic）
+  - 入口：`fastvideo/training/wan_distillation_v2.py`
+  - method：`fastvideo/distillation/methods/wan_dmd2.py`
+  - adapter：`fastvideo/distillation/adapters/wan.py`
+- [x] 消除 DMD2 的隐式耦合：uncond/negative conditioning **不再依赖 validation 副作用**
+  - `fastvideo/distillation/adapters/wan.py`（`ensure_negative_conditioning()`）
+- [x] 多优化器更新节奏下，optimizer step 与 lr_scheduler step 对齐（避免 lr schedule 漂移）
+  - `fastvideo/distillation/methods/base.py`
+  - `fastvideo/tests/distillation/test_phase0_schedule.py`
+- [x] 提供 few-step distill 示例脚本（可直接改路径运行）
+  - `examples/distillation/phase0/distill_wan2.1_t2v_1.3B_dmd2_8steps.sh`
+  - `examples/distillation/phase0/temp.sh`
+- [x] validation 能在新 Trainer 中被统一触发（Phase 0 先复用旧 `_log_validation`）
+  - hook：`fastvideo/distillation/trainer.py`
+  - 实现：`fastvideo/distillation/methods/wan_dmd2.py::log_validation`
+
+### Phase 0 明确不做 / 延后到 Phase 1+
+
+- [ ] 把 `WanDMD2Method` 演进为通用 `DMD2Method`（算法与 Wan 解耦）
+- [ ] 把 `WanPipelineAdapter` 演进为真正 `WanAdapter`（不再调用旧 pipeline 私有 helper）
+- [ ] v2 path 的 checkpoint/save/resume（role-based）
+- [ ] Self-forcing v2（method + adapter）
+- [ ] Builder 层：用 config 直接构建 `models={...}`（不再依赖 legacy pipeline 负责加载）
+
 ## 0. 关键风险与应对
 
 ### 风险 A：`negative_prompt_embeds` 目前只在 validation 中被初始化
@@ -48,7 +80,7 @@ methods**（normalize/noise/timestep/attention metadata/build_input_kwargs 等�
 
 ## 1. 代码落地点（具体到文件）
 
-> 约定：Phase 0 把新框架放到 `fastvideo/distillation/`（目前该目录为空）。
+> 约定：Phase 0 把新框架放到 `fastvideo/distillation/`。
 
 ### 1.1 新增 distill 框架骨架
 

@@ -391,14 +391,17 @@ FastGen 的 python config + instantiate + override 很优秀，但 FastVideo 现
 
 ## 7. 目录落地建议（FastVideo 内）
 
-建议新增 `fastvideo/distill/`（或 `fastvideo/training/distill/`），结构对齐 FastGen：
+Phase 0 的实践表明：先把新框架以 **additive** 方式落地到一个独立目录最稳妥。
+目前已选择并落地在 `fastvideo/distillation/`（建议继续沿用该路径，避免再迁一次目录）。
 
-- `fastvideo/distill/bundle.py`：`ModelBundle/RoleHandle/RoleSpec`
-- `fastvideo/distill/adapters/`：`WanAdapter`（先支持 Wan）、后续扩展更多模型
-- `fastvideo/distill/methods/`：`base.py`、`dmd2.py`、`self_forcing.py`
-- `fastvideo/distill/trainer.py`：`DistillTrainer`
-- `fastvideo/distill/checkpoint.py`：`CheckpointManager`（先兼容旧格式）
-- `fastvideo/distill/callbacks/`：EMA/clip/log/profiler 等
+建议结构（已部分实现）：
+
+- `fastvideo/distillation/bundle.py`：`ModelBundle/RoleHandle`
+- `fastvideo/distillation/adapters/`：`WanPipelineAdapter`（Phase 0 过渡版）→ `WanAdapter`（目标）
+- `fastvideo/distillation/methods/`：`base.py`、（目标）`dmd2.py`、（目标）`self_forcing.py`
+- `fastvideo/distillation/trainer.py`：`DistillTrainer`
+- （后续）`fastvideo/distillation/checkpoint.py`：role-based `CheckpointManager`（先兼容旧格式）
+- （后续）`fastvideo/distillation/callbacks/`：EMA/clip/log/profiler 等
 
 旧入口（如 `fastvideo/training/*distillation_pipeline.py`）先保留，
 通过 flag 切新旧框架做 A/B 对齐。
@@ -407,24 +410,54 @@ FastGen 的 python config + instantiate + override 很优秀，但 FastVideo 现
 
 ## 8. 迁移计划（低风险）
 
-### Phase 0：框架落地 + Wan(DMD2) 跑通
+### Phase 0（已完成）：框架落地 + Wan(DMD2) 跑通（过渡实现）
 
-- 新增 `DistillTrainer/DistillMethod/ModelBundle/WanAdapter`
-- `DMD2Method` 覆盖现有 Wan distill 训练（student+teacher+critic）
-- checkpoint 至少能：
-  - 保存/加载新格式
-  - 从旧格式加载 student 初始化（兼容迁移）
+Phase 0 的定位在实践中更明确了：它是“**把旧 Wan distill pipeline 包一层新框架壳**”，
+先把训练循环/多 optimizer 调度/validation hook 等基础设施固定下来，再逐步解耦。
 
-### Phase 1：Self-forcing 迁移（复用 DMD2 框架）
+- ✅ 新增 `DistillTrainer/DistillMethod/ModelBundle/(pipeline-backed) WanAdapter`
+- ✅ 新增一个 additive 入口：`fastvideo/training/wan_distillation_v2.py`
+  - 复用 legacy `WanDistillationPipeline` 完成模型加载/optimizer/dataloader/tracker
+  - 再把 student/teacher/critic 打包为 `ModelBundle(roles={...})`
+- ✅ 跑通 Wan DMD2（student + teacher + critic）
+  - 过渡命名：`WanDMD2Method`（刻意暴露耦合，避免误解为通用 DMD2）
+- ✅ 消除一个关键隐式耦合：训练前显式初始化 `neg/uncond conditioning`
+  - 不再依赖 validation 的副作用（见 `ensure_negative_conditioning()`）
+- ✅ 修正并用单测锁定一个关键语义：scheduler step 与 optimizer step 对齐
+  - `generator_update_interval > 1` 时不会“空 step scheduler”
+- ✅ 提供 few-step distill 示例脚本 + 可直接跑的 temp 脚本
 
-- `SelfForcingMethod(DMD2Method)`：只覆写 student rollout / cache 生命周期
-- 对齐现有 self-forcing 输出与 loss（允许数值差异但要解释）
+Phase 0 明确没有做（刻意延期）：
+
+- ❌ v2 path 的 checkpoint/save/resume（role-based）
+- ❌ `DMD2Method` 的真正算法解耦（目前仍调用旧 pipeline 内部函数）
+- ❌ Self-forcing v2 迁移
+
+### Phase 1（建议开启）：算法与模型真正解耦（先把 DMD2 “抠出来”）
+
+Phase 1 的核心目标：把 Phase 0 的“脚手架耦合”逐步替换为 **Method(算法) + Adapter(模型)**
+的稳定边界，让其它模型/其它方法可以复用 Trainer。
+
+- 产出通用算法：`fastvideo/distillation/methods/dmd2.py::DMD2Method`
+  - 不再依赖 `fastvideo/training/distillation_pipeline.py` 的私有函数
+  - 只依赖 adapter 提供的 primitives（noise/add_noise/pred_to_x0/teacher_cfg/critic_forward 等）
+- 产出真正模型适配：`WanAdapter`（替换 `WanPipelineAdapter`）
+  - 逐步把 normalize/layout/attention metadata/输入 kwargs 组装等从 legacy pipeline 迁出
+- Builder 层雏形：从 `TrainingArgs/FastVideoArgs`（或 `--models_json`）直接构建
+  `ModelBundle + Adapter + Method`
+  - 目标：最终不再依赖 legacy pipeline 才能启动 v2
+- Validation 进一步抽象（可选）：把“怎么验证”从 method 里抽走，变成通用 hook/组件
 
 ### Phase 2：清理旧实现 + 扩展新模型/新算法
 
-- 逐步冻结或移除旧 distill pipeline（保留兼容入口亦可）
+在 Phase 1 的稳定边界之上，Phase 2 再做“功能扩展 + 旧实现收敛”：
+
+- Self-forcing v2：`SelfForcingMethod(DMD2Method)`（只覆写 student rollout / cache 生命周期）
+  - 并把 ODE-init（若需要）归类为 **student 初始化策略**（builder/config 层），而不是 Trainer 特例
+- role-based checkpoint/save/resume（v2 path）
 - 新增更多 adapter（Hunyuan/LTX2/LongCat…）
 - 新增更多 method（teacher-only、多 teacher、KD 轨迹蒸馏等）
+- 逐步冻结或移除旧 distill pipeline（保留兼容入口亦可）
 
 ---
 
