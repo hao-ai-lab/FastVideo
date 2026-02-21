@@ -9,6 +9,7 @@ from fastvideo.pipelines import TrainingBatch
 
 
 class DistillAdapter(ABC):
+
     @abstractmethod
     def prepare_batch(
         self,
@@ -17,4 +18,3 @@ class DistillAdapter(ABC):
         current_vsa_sparsity: float = 0.0,
     ) -> TrainingBatch:
         raise NotImplementedError
-

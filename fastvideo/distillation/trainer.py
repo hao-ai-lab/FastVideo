@@ -23,7 +23,11 @@ class TrainLoopState:
 
 
 class DistillTrainer:
-    def __init__(self, training_args: TrainingArgs, *, tracker: BaseTracker
+
+    def __init__(self,
+                 training_args: TrainingArgs,
+                 *,
+                 tracker: BaseTracker
                  | None = None) -> None:
         self.training_args = training_args
         self.world_group = get_world_group()
@@ -60,20 +64,21 @@ class DistillTrainer:
         max_steps: int,
         start_step: int = 0,
     ) -> None:
-        grad_accum = max(1, int(self.training_args.gradient_accumulation_steps
-                                or 1))
+        grad_accum = max(
+            1, int(self.training_args.gradient_accumulation_steps or 1))
 
         if hasattr(method, "on_train_start"):
             method.on_train_start()  # type: ignore[attr-defined]
 
         validation_interval = int(self.training_args.validation_steps or 0)
         if (getattr(self.training_args, "log_validation", False)
-                and validation_interval > 0 and hasattr(method,
-                                                       "log_validation")):
+                and validation_interval > 0
+                and hasattr(method, "log_validation")):
             method.log_validation(start_step)  # type: ignore[attr-defined]
 
         if hasattr(method, "optimizers_zero_grad"):
-            method.optimizers_zero_grad(start_step)  # type: ignore[attr-defined]
+            method.optimizers_zero_grad(
+                start_step)  # type: ignore[attr-defined]
 
         data_stream = self._iter_dataloader(dataloader)
         progress = tqdm(
@@ -115,7 +120,8 @@ class DistillTrainer:
                             v.detach().item())
 
             if hasattr(method, "optimizers_schedulers_step"):
-                method.optimizers_schedulers_step(step)  # type: ignore[attr-defined]
+                method.optimizers_schedulers_step(
+                    step)  # type: ignore[attr-defined]
             if hasattr(method, "optimizers_zero_grad"):
                 method.optimizers_zero_grad(step)  # type: ignore[attr-defined]
 

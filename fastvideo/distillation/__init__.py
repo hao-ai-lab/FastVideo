@@ -8,4 +8,3 @@ __all__ = [
     "ModelBundle",
     "RoleHandle",
 ]
-

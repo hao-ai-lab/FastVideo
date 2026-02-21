@@ -19,6 +19,7 @@ from fastvideo.distillation.adapters.base import DistillAdapter
 
 
 class WanPipelineAdapter(DistillAdapter):
+
     def __init__(self, pipeline: DistillationPipeline) -> None:
         self.pipeline = pipeline
 
@@ -39,10 +40,12 @@ class WanPipelineAdapter(DistillAdapter):
         neg_mask: torch.Tensor | None = None
 
         if world_group.rank_in_group == 0:
-            sampling_param = SamplingParam.from_pretrained(training_args.model_path)
+            sampling_param = SamplingParam.from_pretrained(
+                training_args.model_path)
             negative_prompt = sampling_param.negative_prompt
 
-            prompt_pipeline = getattr(self.pipeline, "validation_pipeline", None)
+            prompt_pipeline = getattr(self.pipeline, "validation_pipeline",
+                                      None)
             created_pipeline = False
             if prompt_pipeline is None:
                 args_copy = copy.deepcopy(training_args)
@@ -51,7 +54,9 @@ class WanPipelineAdapter(DistillAdapter):
                     training_args.model_path,
                     args=args_copy,
                     inference_mode=True,
-                    loaded_modules={"transformer": self.pipeline.get_module("transformer")},
+                    loaded_modules={
+                        "transformer": self.pipeline.get_module("transformer")
+                    },
                     tp_size=training_args.tp_size,
                     sp_size=training_args.sp_size,
                     num_gpus=training_args.num_gpus,
@@ -71,8 +76,10 @@ class WanPipelineAdapter(DistillAdapter):
                 training_args,
             )
 
-            neg_embeds = result_batch.prompt_embeds[0].to(device=device, dtype=dtype)
-            neg_mask = result_batch.prompt_attention_mask[0].to(device=device, dtype=dtype)
+            neg_embeds = result_batch.prompt_embeds[0].to(device=device,
+                                                          dtype=dtype)
+            neg_mask = result_batch.prompt_attention_mask[0].to(device=device,
+                                                                dtype=dtype)
 
             if created_pipeline:
                 del prompt_pipeline
@@ -80,7 +87,7 @@ class WanPipelineAdapter(DistillAdapter):
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
-        meta = torch.zeros((2,), device=device, dtype=torch.int64)
+        meta = torch.zeros((2, ), device=device, dtype=torch.int64)
         if world_group.rank_in_group == 0:
             assert neg_embeds is not None
             assert neg_mask is not None
@@ -90,17 +97,23 @@ class WanPipelineAdapter(DistillAdapter):
         embed_ndim, mask_ndim = (int(meta[0].item()), int(meta[1].item()))
 
         max_ndim = 8
-        embed_shape = torch.full((max_ndim,), -1, device=device, dtype=torch.int64)
-        mask_shape = torch.full((max_ndim,), -1, device=device, dtype=torch.int64)
+        embed_shape = torch.full((max_ndim, ),
+                                 -1,
+                                 device=device,
+                                 dtype=torch.int64)
+        mask_shape = torch.full((max_ndim, ),
+                                -1,
+                                device=device,
+                                dtype=torch.int64)
         if world_group.rank_in_group == 0:
             assert neg_embeds is not None
             assert neg_mask is not None
-            embed_shape[:embed_ndim] = torch.tensor(
-                list(neg_embeds.shape), device=device, dtype=torch.int64
-            )
-            mask_shape[:mask_ndim] = torch.tensor(
-                list(neg_mask.shape), device=device, dtype=torch.int64
-            )
+            embed_shape[:embed_ndim] = torch.tensor(list(neg_embeds.shape),
+                                                    device=device,
+                                                    dtype=torch.int64)
+            mask_shape[:mask_ndim] = torch.tensor(list(neg_mask.shape),
+                                                  device=device,
+                                                  dtype=torch.int64)
         world_group.broadcast(embed_shape, src=0)
         world_group.broadcast(mask_shape, src=0)
 
@@ -130,7 +143,8 @@ class WanPipelineAdapter(DistillAdapter):
         device = get_local_torch_device()
         dtype = self._get_training_dtype()
 
-        training_batch = TrainingBatch(current_vsa_sparsity=current_vsa_sparsity)
+        training_batch = TrainingBatch(
+            current_vsa_sparsity=current_vsa_sparsity)
         encoder_hidden_states = raw_batch["text_embedding"]
         encoder_attention_mask = raw_batch["text_attention_mask"]
         infos = raw_batch.get("info_list")
@@ -157,23 +171,22 @@ class WanPipelineAdapter(DistillAdapter):
                     "vae_latent not found in batch and simulate_generator_forward is False"
                 )
             latents = raw_batch["vae_latent"]
-            latents = latents[:, :, : self.pipeline.training_args.num_latent_t]
+            latents = latents[:, :, :self.pipeline.training_args.num_latent_t]
             latents = latents.to(device, dtype=dtype)
 
         training_batch.latents = latents
         training_batch.encoder_hidden_states = encoder_hidden_states.to(
-            device, dtype=dtype
-        )
+            device, dtype=dtype)
         training_batch.encoder_attention_mask = encoder_attention_mask.to(
-            device, dtype=dtype
-        )
+            device, dtype=dtype)
         training_batch.infos = infos
 
         training_batch = self.pipeline._normalize_dit_input(training_batch)
         training_batch = self.pipeline._prepare_dit_inputs(training_batch)
         training_batch = self.pipeline._build_attention_metadata(training_batch)
 
-        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
+        training_batch.attn_metadata_vsa = copy.deepcopy(
+            training_batch.attn_metadata)
         if training_batch.attn_metadata is not None:
             training_batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore[attr-defined]
 

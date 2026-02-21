@@ -10,8 +10,7 @@ import torch
 from fastvideo.distributed import get_world_group
 from fastvideo.forward_context import set_forward_context
 from fastvideo.training.training_utils import (
-    clip_grad_norm_while_handling_failing_dtensor_cases,
-)
+    clip_grad_norm_while_handling_failing_dtensor_cases, )
 from fastvideo.utils import set_random_seed
 
 from fastvideo.distillation.bundle import ModelBundle
@@ -20,6 +19,7 @@ from fastvideo.distillation.adapters.wan import WanPipelineAdapter
 
 
 class WanDMD2Method(DistillMethod):
+
     def __init__(
         self,
         *,
@@ -38,7 +38,8 @@ class WanDMD2Method(DistillMethod):
 
         pipeline = self.adapter.pipeline
         if pipeline.sp_world_size > 1:
-            sp_group_seed = seed + (pipeline.global_rank // pipeline.sp_world_size)
+            sp_group_seed = seed + (pipeline.global_rank //
+                                    pipeline.sp_world_size)
             set_random_seed(sp_group_seed)
         else:
             set_random_seed(seed + pipeline.global_rank)
@@ -48,7 +49,8 @@ class WanDMD2Method(DistillMethod):
         pipeline.validation_random_generator = torch.Generator(
             device="cpu").manual_seed(seed)
         if pipeline.device.type == "cuda":
-            pipeline.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(seed)
+            pipeline.noise_gen_cuda = torch.Generator(
+                device="cuda").manual_seed(seed)
         else:
             pipeline.noise_gen_cuda = torch.Generator(
                 device=pipeline.device).manual_seed(seed)
@@ -123,25 +125,27 @@ class WanDMD2Method(DistillMethod):
             batch_gen = copy.deepcopy(training_batch)
             with torch.autocast(device_type, dtype=batch_gen.latents.dtype):
                 with set_forward_context(
-                    current_timestep=batch_gen.timesteps,
-                    attn_metadata=batch_gen.attn_metadata_vsa,
+                        current_timestep=batch_gen.timesteps,
+                        attn_metadata=batch_gen.attn_metadata_vsa,
                 ):
                     if self.training_args.simulate_generator_forward:
                         generator_pred_video = (
                             pipeline._generator_multi_step_simulation_forward(
                                 batch_gen))
                     else:
-                        generator_pred_video = pipeline._generator_forward(batch_gen)
+                        generator_pred_video = pipeline._generator_forward(
+                            batch_gen)
 
                 with set_forward_context(
-                    current_timestep=batch_gen.timesteps,
-                    attn_metadata=batch_gen.attn_metadata,
+                        current_timestep=batch_gen.timesteps,
+                        attn_metadata=batch_gen.attn_metadata,
                 ):
                     generator_loss = pipeline._dmd_forward(
                         generator_pred_video=generator_pred_video,
                         training_batch=batch_gen,
                     )
-            student_backward_ctx = (batch_gen.timesteps, batch_gen.attn_metadata_vsa)
+            student_backward_ctx = (batch_gen.timesteps,
+                                    batch_gen.attn_metadata_vsa)
 
         batch_fake = copy.deepcopy(training_batch)
         with torch.autocast(device_type, dtype=batch_fake.latents.dtype):
@@ -156,7 +160,8 @@ class WanDMD2Method(DistillMethod):
         outputs = {}
         if update_student and batch_gen is not None:
             outputs["dmd_latent_vis_dict"] = batch_gen.dmd_latent_vis_dict
-        outputs["fake_score_latent_vis_dict"] = batch_fake.fake_score_latent_vis_dict
+        outputs[
+            "fake_score_latent_vis_dict"] = batch_fake.fake_score_latent_vis_dict
         outputs["_fv_backward"] = {
             "update_student": update_student,
             "student_ctx": student_backward_ctx,
@@ -174,7 +179,9 @@ class WanDMD2Method(DistillMethod):
         grad_accum_rounds = max(1, int(grad_accum_rounds))
         backward_ctx = outputs.get("_fv_backward")
         if not isinstance(backward_ctx, dict):
-            super().backward(loss_map, outputs, grad_accum_rounds=grad_accum_rounds)
+            super().backward(loss_map,
+                             outputs,
+                             grad_accum_rounds=grad_accum_rounds)
             return
 
         update_student = bool(backward_ctx.get("update_student", False))
@@ -184,15 +191,15 @@ class WanDMD2Method(DistillMethod):
                 raise RuntimeError("Missing student backward context")
             timesteps, attn_metadata = student_ctx
             with set_forward_context(
-                current_timestep=timesteps,
-                attn_metadata=attn_metadata,
+                    current_timestep=timesteps,
+                    attn_metadata=attn_metadata,
             ):
                 (loss_map["generator_loss"] / grad_accum_rounds).backward()
 
         timesteps, attn_metadata = backward_ctx["critic_ctx"]
         with set_forward_context(
-            current_timestep=timesteps,
-            attn_metadata=attn_metadata,
+                current_timestep=timesteps,
+                attn_metadata=attn_metadata,
         ):
             (loss_map["fake_score_loss"] / grad_accum_rounds).backward()
 
@@ -207,7 +214,8 @@ class WanDMD2Method(DistillMethod):
         schedulers: list[Any] = []
         schedulers.extend(self.bundle.role("critic").lr_schedulers.values())
         if self._should_update_student(iteration):
-            schedulers.extend(self.bundle.role("student").lr_schedulers.values())
+            schedulers.extend(
+                self.bundle.role("student").lr_schedulers.values())
         return schedulers
 
     def optimizers_schedulers_step(self, iteration: int) -> None:

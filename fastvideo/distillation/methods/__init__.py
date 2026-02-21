@@ -5,4 +5,3 @@ from fastvideo.distillation.methods.base import DistillMethod
 __all__ = [
     "DistillMethod",
 ]
-

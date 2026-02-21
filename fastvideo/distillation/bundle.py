@@ -36,4 +36,3 @@ class ModelBundle:
         if role not in self.roles:
             raise KeyError(f"Unknown role: {role}")
         return self.roles[role]
-

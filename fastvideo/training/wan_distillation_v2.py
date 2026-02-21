@@ -16,8 +16,7 @@ logger = init_logger(__name__)
 
 
 def _build_bundle_from_wan_pipeline(
-    pipeline: WanDistillationPipeline,
-) -> ModelBundle:
+    pipeline: WanDistillationPipeline, ) -> ModelBundle:
     roles: dict[str, RoleHandle] = {
         "student":
         RoleHandle(
@@ -69,4 +68,3 @@ if __name__ == "__main__":
     parser = FastVideoArgs.add_cli_args(parser)
     args = parser.parse_args(argv[1:])
     main(args)
-
