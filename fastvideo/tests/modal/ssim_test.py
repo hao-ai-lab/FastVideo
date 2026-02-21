@@ -444,9 +444,22 @@ def _print_ssim_task_results(
     terminated = []
     skipped = []
     passed = []
+    failed_task_results = []
 
     for task in tasks:
         result = results[task.task_id]
+        if result.status == "passed":
+            passed.append(task.test_name)
+        elif result.status == "failed":
+            failed.append(task.test_name)
+            failed_task_results.append((task, result))
+        elif result.status == "terminated":
+            terminated.append(task.test_name)
+            failed_task_results.append((task, result))
+        elif result.status == "skipped":
+            skipped.append(task.test_name)
+
+    for task, result in failed_task_results:
         print(f"\n{'=' * 60}")
         print(f"Task: {task.test_name}")
         print(f"GPUs: {task.required_gpus}")
@@ -458,15 +471,6 @@ def _print_ssim_task_results(
                 print(log_file.read())
         else:
             print("No log output.")
-
-        if result.status == "passed":
-            passed.append(task.test_name)
-        elif result.status == "failed":
-            failed.append(task.test_name)
-        elif result.status == "terminated":
-            terminated.append(task.test_name)
-        elif result.status == "skipped":
-            skipped.append(task.test_name)
 
     print("\nSSIM summary:")
     print(f"  passed: {len(passed)}")

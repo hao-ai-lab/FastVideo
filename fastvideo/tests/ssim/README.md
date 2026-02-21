@@ -12,8 +12,9 @@ causal videos were generated on commit b318063c0a4618f1d5d99ea82ca67a06aad0d19d
 SSIM CI runs in one Modal instance (`L40S:8`). The orchestrator
 (`fastvideo/tests/modal/ssim_test.py`) clones/builds/installs once, then
 schedules multiple `pytest` subprocesses by GPU demand. Logs are printed in
-deterministic order (file name, then model id), and fail-fast is enabled: if
-one task fails, active tasks are terminated and the full SSIM step fails.
+deterministic order for failed tasks (file name, then model id), and
+fail-fast is enabled: if one task fails, active tasks are terminated and the
+full SSIM step fails.
 
 The orchestrator auto-discovers every `test_*.py` file here, so no CI config
 changes are needed when adding a new test. To declare how many GPUs your test
