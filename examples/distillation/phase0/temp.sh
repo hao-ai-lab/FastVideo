@@ -21,6 +21,11 @@ export WANDB_MODE=${WANDB_MODE:-offline}
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 export MASTER_PORT=${MASTER_PORT:-29503}
 
+if [[ "$WANDB_MODE" == "online" && -z "${WANDB_API_KEY:-}" ]]; then
+  echo "WANDB_MODE=online requires WANDB_API_KEY in env." >&2
+  exit 1
+fi
+
 if [[ -z "${NUM_GPUS:-}" ]]; then
   if command -v nvidia-smi >/dev/null 2>&1; then
     NUM_GPUS=$(nvidia-smi -L | wc -l)
@@ -40,7 +45,8 @@ DEFAULT_VALIDATION_DATASET_FILE=\
 "examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json"
 VALIDATION_DATASET_FILE=${VALIDATION_DATASET_FILE:-"$DEFAULT_VALIDATION_DATASET_FILE"}
 
-OUTPUT_DIR=${OUTPUT_DIR:-"outputs/phase0_wan2.1_dmd2_8steps_wansyn"}
+RUN_ID=${RUN_ID:-"$(date +%Y%m%d_%H%M%S)"}
+OUTPUT_DIR=${OUTPUT_DIR:-"outputs/phase0_wan2.1_dmd2_8steps_wansyn_${RUN_ID}"}
 
 training_args=(
   --tracker_project_name "phase0_wan_dmd2_8steps_wansyn"
