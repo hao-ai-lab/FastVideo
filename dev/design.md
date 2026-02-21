@@ -132,8 +132,11 @@ RoleHandle
 
 约定：
 
-- canonical roles：`student`, `teacher`, `critic`
-- optional roles：`discriminator`, `reward`, `refiner`, `aux_teacher`, ...
+- `role` 只是一个字符串 key；Trainer/Checkpoint 对所有 role **一视同仁**（不做“主次”区分）。
+- 为了可读性，推荐使用一些常见命名（非强制）：
+  `student`, `teacher`, `critic`, `discriminator`, `reward`, `refiner`, `aux_teacher`, ...
+- 每个 `DistillMethod` 应显式声明并在初始化时校验自己需要的 roles
+  （例如 DMD2 需要 `student+teacher+critic`，teacher-only 只需要 `student+teacher`）。
 
 ### 4.2 `DistillAdapter`：把 pipeline/network 适配成算法可消费接口
 
@@ -432,4 +435,3 @@ FastGen 的 python config + instantiate + override 很优秀，但 FastVideo 现
 - **role 可选性**：critic 可选时应有清晰报错/降级路径（teacher-only）
 - **conditioning 显式性**：训练开始前必须具备 `neg_condition`（来自数据或 provider）
 - **checkpoint roundtrip**：save → load → loss 不发散（最小 smoke test）
-
