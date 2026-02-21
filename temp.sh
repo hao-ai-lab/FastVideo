@@ -1,42 +1,58 @@
 #!/bin/bash
 set -e -x
 
-# Phase 0 example: run Wan DMD2 distillation via Method/Trainer entrypoint.
-# Validation is supported via `--log_validation` (see `validation_args` below).
+# One-shot launch script for Phase0 (Method/Trainer) Wan DMD2 few-step distillation.
+# Uses local Wan-Syn parquet dataset + a small validation json already in this repo.
+#
+# Notes:
+# - By default this runs W&B in offline mode (safer for overnight runs).
+#   If you want online logging:
+#     export WANDB_MODE=online
+#     export WANDB_API_KEY=...
+# - Phase0 v2 currently focuses on "can it train + can it validate".
+#   Checkpoint save/resume is NOT wired yet in v2.
 
 export NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-1}
 export TORCH_NCCL_ENABLE_MONITORING=${TORCH_NCCL_ENABLE_MONITORING:-0}
 export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-false}
 export FASTVIDEO_ATTENTION_BACKEND=${FASTVIDEO_ATTENTION_BACKEND:-FLASH_ATTN}
+export WANDB_BASE_URL=${WANDB_BASE_URL:-"https://api.wandb.ai"}
 export WANDB_MODE=${WANDB_MODE:-offline}
+export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 export MASTER_PORT=${MASTER_PORT:-29503}
 
-NUM_GPUS=${NUM_GPUS:-1}
+if [[ -z "${NUM_GPUS:-}" ]]; then
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    NUM_GPUS=$(nvidia-smi -L | wc -l)
+  else
+    NUM_GPUS=1
+  fi
+fi
 
 # Models
 STUDENT_MODEL_PATH=${STUDENT_MODEL_PATH:-"Wan-AI/Wan2.1-T2V-1.3B-Diffusers"}
-# For best distillation, point TEACHER_MODEL_PATH to a stronger teacher (e.g. 14B).
-# For a cheaper smoke run, set it to the same 1.3B model.
 TEACHER_MODEL_PATH=${TEACHER_MODEL_PATH:-"Wan-AI/Wan2.1-T2V-14B-Diffusers"}
 CRITIC_MODEL_PATH=${CRITIC_MODEL_PATH:-"Wan-AI/Wan2.1-T2V-1.3B-Diffusers"}
 
 # Data (parquet dataset folder)
-DATA_DIR=${DATA_DIR:-"your_data_dir"}
-VALIDATION_DATASET_FILE=${VALIDATION_DATASET_FILE:-"your_validation_dataset_file"}
+DATA_DIR=${DATA_DIR:-"data/Wan-Syn_77x448x832_600k"}
+DEFAULT_VALIDATION_DATASET_FILE=\
+"examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json"
+VALIDATION_DATASET_FILE=${VALIDATION_DATASET_FILE:-"$DEFAULT_VALIDATION_DATASET_FILE"}
 
-OUTPUT_DIR=${OUTPUT_DIR:-"outputs/phase0_wan2.1_t2v_1.3B_dmd2_8steps"}
+OUTPUT_DIR=${OUTPUT_DIR:-"outputs/phase0_wan2.1_dmd2_8steps_wansyn"}
 
 training_args=(
-  --tracker_project_name "phase0_wan_dmd2_8steps"
+  --tracker_project_name "phase0_wan_dmd2_8steps_wansyn"
   --output_dir "$OUTPUT_DIR"
   --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 21
-  --num_height 480
+  --num_latent_t 20
+  --num_height 448
   --num_width 832
-  --num_frames 81
+  --num_frames 77
   --enable_gradient_checkpointing_type "full"
   --simulate_generator_forward
 )
@@ -66,11 +82,11 @@ validation_args=(
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 50
   --validation_sampling_steps "8"
-  --validation_guidance_scale "6.0" # not used for dmd inference
+  --validation_guidance_scale "6.0"
 )
 
 optimizer_args=(
-  --learning_rate 1e-5
+  --learning_rate 2e-6
   --mixed_precision "bf16"
   --weight_decay 0.01
   --betas '0.0,0.999'
@@ -89,7 +105,6 @@ miscellaneous_args=(
 )
 
 dmd_args=(
-  # 8-step schedule (same as Wan2.2 self-forcing examples)
   --dmd_denoising_steps '1000,850,700,550,350,275,200,125'
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.98
@@ -98,15 +113,16 @@ dmd_args=(
 )
 
 torchrun \
---nnodes 1 \
---master_port "$MASTER_PORT" \
---nproc_per_node "$NUM_GPUS" \
-    fastvideo/training/wan_distillation_v2.py \
-    "${parallel_args[@]}" \
-    "${model_args[@]}" \
-    "${dataset_args[@]}" \
-    "${training_args[@]}" \
-    "${optimizer_args[@]}" \
-    "${validation_args[@]}" \
-    "${miscellaneous_args[@]}" \
-    "${dmd_args[@]}"
+  --nnodes 1 \
+  --nproc_per_node "$NUM_GPUS" \
+  --master_addr "$MASTER_ADDR" \
+  --master_port "$MASTER_PORT" \
+  fastvideo/training/wan_distillation_v2.py \
+  "${parallel_args[@]}" \
+  "${model_args[@]}" \
+  "${dataset_args[@]}" \
+  "${training_args[@]}" \
+  "${optimizer_args[@]}" \
+  "${validation_args[@]}" \
+  "${miscellaneous_args[@]}" \
+  "${dmd_args[@]}"
