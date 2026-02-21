@@ -9,18 +9,24 @@ causal videos were generated on commit b318063c0a4618f1d5d99ea82ca67a06aad0d19d
 
 ## Adding a New SSIM Test
 
-Each test file in this directory runs in its own Modal container in CI. The
-CI orchestrator (`fastvideo/tests/modal/pr_test.py`) auto-discovers every
-`test_*.py` file here, so no CI config changes are needed when adding a new
-test. To declare how many GPUs your test requires, add a module-level
-constant near the top of the file:
+SSIM CI runs in one Modal instance (`L40S:8`). The orchestrator
+(`fastvideo/tests/modal/ssim_test.py`) clones/builds/installs once, then
+schedules multiple `pytest` subprocesses by GPU demand. Logs are printed in
+deterministic order (file name, then model id), and fail-fast is enabled: if
+one task fails, active tasks are terminated and the full SSIM step fails.
+
+The orchestrator auto-discovers every `test_*.py` file here, so no CI config
+changes are needed when adding a new test. To declare how many GPUs your test
+requires, add a module-level constant near the top of the file:
 
 ```python
 REQUIRED_GPUS = 2
 ```
 
-If `REQUIRED_GPUS` is omitted, the test defaults to 1 GPU. The orchestrator
-maps the value to the smallest available GPU tier (1, 2, or 4 L40S GPUs).
+If `REQUIRED_GPUS` is omitted, the test defaults to 1 GPU.
+
+For files that define model maps (`*_MODEL_TO_PARAMS`), CI splits execution
+into one subprocess per model id by setting `FASTVIDEO_SSIM_MODEL_ID`.
 
 ## Generation Details
 
