@@ -292,6 +292,21 @@ class WanAdapter(DistillAdapter):
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(int(seed))
         self.noise_gen_cuda = torch.Generator(device=self.device).manual_seed(int(seed))
 
+        pipeline = self._validation_pipeline_owner
+        if pipeline is not None:
+            if not hasattr(pipeline, "validation_random_generator"):
+                pipeline.validation_random_generator = torch.Generator(  # type: ignore[attr-defined]
+                    device="cpu"
+                ).manual_seed(int(seed))
+            if not hasattr(pipeline, "noise_random_generator"):
+                pipeline.noise_random_generator = torch.Generator(  # type: ignore[attr-defined]
+                    device="cpu"
+                ).manual_seed(int(seed))
+            if not hasattr(pipeline, "noise_gen_cuda"):
+                pipeline.noise_gen_cuda = torch.Generator(  # type: ignore[attr-defined]
+                    device=self.device
+                ).manual_seed(int(seed))
+
         self.ensure_negative_conditioning()
 
     def ensure_negative_conditioning(self) -> None:
