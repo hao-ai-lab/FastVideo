@@ -101,7 +101,9 @@ torchrun \
 --nnodes 1 \
 --master_port "$MASTER_PORT" \
 --nproc_per_node "$NUM_GPUS" \
-    fastvideo/training/wan_distillation_v3.py \
+    fastvideo/training/distill.py \
+    --distill_model "wan" \
+    --distill_method "dmd2" \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \
@@ -110,4 +112,3 @@ torchrun \
     "${validation_args[@]}" \
     "${miscellaneous_args[@]}" \
     "${dmd_args[@]}"
-
