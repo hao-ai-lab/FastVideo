@@ -42,6 +42,15 @@ except Exception:
 
 
 class WanPipelineAdapter(DistillAdapter):
+    """Phase 0 adapter (legacy-backed).
+
+    This adapter intentionally reuses helper methods on the legacy
+    `fastvideo.training.distillation_pipeline.DistillationPipeline` to keep the
+    Phase 0 change set low-risk.
+
+    Prefer `WanAdapter` (Phase 1+) for algorithm/model decoupling.
+    """
+
     def __init__(self, pipeline: DistillationPipeline) -> None:
         self.pipeline = pipeline
 

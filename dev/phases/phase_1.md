@@ -83,7 +83,7 @@ Phase 1 的定位：**在不破坏 Phase 0 可跑性的前提下**，把算法�
   - `_get_real_score_transformer/_get_fake_score_transformer`（Phase 1 先保证 teacher 侧可选 transformer_2；critic MoE/optimizer 选择后续再补齐）
   - `denoising_step_list` 构造、warp 逻辑、`min/max_timestep`、`timestep_shift`
   - `ensure_negative_conditioning()`（Phase 0 已有，Phase 1 要确保能被复用）
-- [ ] `WanPipelineAdapter` 继续保留（Phase 0 兜底），但在文档/代码里标注为“legacy-backed”
+- [x] `WanPipelineAdapter` 继续保留（Phase 0 兜底），并在文档/代码里标注为“legacy-backed”
 
 ### E. Builder 雏形（config -> instantiate）
 
