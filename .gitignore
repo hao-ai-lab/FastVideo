@@ -1,5 +1,6 @@
 __pycache__
 .ipynb_checkpoints
+id_ed25519
 *.pth
 UCF-101/
 results/
@@ -35,6 +36,23 @@ env
 weights/
 official_weights/
 converted_weights/
+
+# Local / personal (do not commit)
+docs/waypoint_official_vs_fastvideo_diff.md
+docs/waypoint_hf_vs_fastvideo.md
+docs/waypoint_runpod_compare.md
+official_debug.json
+scripts/official_waypoint.py
+scripts/run_diffusers_waypoint.py
+scripts/waypoint_compare_fastvideo_vs_diffusers.py
+scripts/huggingface/upload_waypoint_hf.py
+examples/inference/basic/WAYPOINT_QUICKSTART.md
+examples/inference/basic/basic_waypoint_diffusers_baseline.py
+examples/inference/basic/basic_waypoint_local_live.py
+examples/inference/basic/basic_waypoint_streaming.py
+examples/inference/basic/run_waypoint_diffusers_baseline.sh
+run_fastvideo_single_frame.py
+test_official_model.py
 
 # SSIM test outputs
 fastvideo/tests/ssim/generated_videos/
@@ -83,3 +101,10 @@ docs/distillation/examples/
 
 dmd_t2v_output/
 preprocess_output_text/
+
+# Local temp/debug (commit locally, do not push to PR)
+bundle_umt5.py
+diagnose_weights.py
+converted/
+*.bak
+video_samples_waypoint_runpod/
