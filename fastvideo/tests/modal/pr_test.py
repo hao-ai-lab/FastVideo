@@ -1,8 +1,10 @@
+import glob
+import os
+import re
+
 import modal
 
 app = modal.App()
-
-import os
 
 model_vol = modal.Volume.from_name("hf-model-weights")
 image_version = os.getenv("IMAGE_VERSION")
@@ -85,15 +87,109 @@ def run_vae_tests():
 def run_transformer_tests():
     run_test("export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/transformers -vs")
 
-@app.function(
-    gpu="L40S:4", 
-    image=image, 
-    timeout=6000, 
-    secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})],
-    volumes={"/root/data": model_vol} 
+SSIM_COMMON_KWARGS = dict(
+    image=image,
+    timeout=1800,
+    secrets=[modal.Secret.from_dict(
+        {"HF_API_KEY": os.environ.get("HF_API_KEY", "")}
+    )],
+    volumes={"/root/data": model_vol},
 )
+
+SSIM_PYTEST_PREFIX = (
+    "export HF_HOME='/root/data/.cache'"
+    " && export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
+    " && hf auth login --token $HF_API_KEY"
+    " && pytest"
+)
+
+
+@app.function(gpu="L40S:1", **SSIM_COMMON_KWARGS)
+def run_ssim_test_1gpu(test_file: str):
+    run_test(f"{SSIM_PYTEST_PREFIX} {test_file} -vs")
+
+
+@app.function(gpu="L40S:2", **SSIM_COMMON_KWARGS)
+def run_ssim_test_2gpu(test_file: str):
+    run_test(f"{SSIM_PYTEST_PREFIX} {test_file} -vs")
+
+
+@app.function(gpu="L40S:4", **SSIM_COMMON_KWARGS)
+def run_ssim_test_4gpu(test_file: str):
+    run_test(f"{SSIM_PYTEST_PREFIX} {test_file} -vs")
+
+
+SSIM_GPU_TIER_FUNCS = {
+    1: run_ssim_test_1gpu,
+    2: run_ssim_test_2gpu,
+    4: run_ssim_test_4gpu,
+}
+
+
+def _extract_required_gpus(filepath: str) -> int:
+    """Read REQUIRED_GPUS from a test file. Defaults to 1."""
+    with open(filepath) as f:
+        for line in f:
+            m = re.match(r"^REQUIRED_GPUS\s*=\s*(\d+)", line)
+            if m:
+                return int(m.group(1))
+    return 1
+
+
+@app.local_entrypoint()
 def run_ssim_tests():
-    run_test("export HF_HOME='/root/data/.cache' && export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/ssim -vs")
+    """Discover SSIM test files and dispatch each to a
+    separate Modal container with the right GPU count."""
+    import sys
+
+    ssim_dir = os.path.join(
+        os.path.dirname(__file__), "..", "..", "ssim"
+    )
+    test_files = sorted(
+        glob.glob(os.path.join(ssim_dir, "test_*.py"))
+    )
+    if not test_files:
+        print("No SSIM test files found!")
+        sys.exit(1)
+
+    # Spawn all tests in parallel
+    handles = []
+    for filepath in test_files:
+        name = os.path.basename(filepath)
+        gpus = _extract_required_gpus(filepath)
+        rel_path = f"./fastvideo/tests/ssim/{name}"
+
+        # Pick smallest GPU tier >= required
+        func = None
+        for tier in sorted(SSIM_GPU_TIER_FUNCS):
+            if tier >= gpus:
+                func = SSIM_GPU_TIER_FUNCS[tier]
+                break
+        if func is None:
+            func = SSIM_GPU_TIER_FUNCS[
+                max(SSIM_GPU_TIER_FUNCS)
+            ]
+
+        print(f"Spawning {name} on L40S:{gpus}")
+        handles.append((name, func.spawn(rel_path)))
+
+    # Collect results
+    failed = []
+    for name, handle in handles:
+        try:
+            handle.get()
+            print(f"PASSED: {name}")
+        except Exception as e:
+            print(f"FAILED: {name}: {e}")
+            failed.append(name)
+
+    if failed:
+        print(
+            f"\n{len(failed)} test(s) failed: "
+            f"{', '.join(failed)}"
+        )
+        sys.exit(1)
+    print(f"\nAll {len(handles)} SSIM tests passed!")
 
 @app.function(gpu="L40S:4", 
     image=image, 

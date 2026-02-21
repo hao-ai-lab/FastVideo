@@ -7,6 +7,21 @@ run `bash update_reference_videos.sh` from inside the `fastvideo/tests/ssim/` di
 reference videos were generated on commit `4aeabbc629e0edf91477e80e795e7bb1823c71cb`
 causal videos were generated on commit b318063c0a4618f1d5d99ea82ca67a06aad0d19d
 
+## Adding a New SSIM Test
+
+Each test file in this directory runs in its own Modal container in CI. The
+CI orchestrator (`fastvideo/tests/modal/pr_test.py`) auto-discovers every
+`test_*.py` file here, so no CI config changes are needed when adding a new
+test. To declare how many GPUs your test requires, add a module-level
+constant near the top of the file:
+
+```python
+REQUIRED_GPUS = 2
+```
+
+If `REQUIRED_GPUS` is omitted, the test defaults to 1 GPU. The orchestrator
+maps the value to the smallest available GPU tier (1, 2, or 4 L40S GPUs).
+
 ## Generation Details
 
 2 x NVIDIA L40S GPUs

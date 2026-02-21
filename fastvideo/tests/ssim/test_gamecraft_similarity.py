@@ -26,6 +26,8 @@ from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
 
+REQUIRED_GPUS = 1
+
 # ---------------------------------------------------------------------------
 # Device-dependent reference folder
 # ---------------------------------------------------------------------------
