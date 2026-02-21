@@ -259,7 +259,10 @@ def _spawn_ssim_task(
     )
     env = os.environ.copy()
     env["HF_HOME"] = "/root/data/.cache"
-    env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    # MultiprocExecutor returns CUDA tensors through mp pipes (CUDA IPC).
+    # On kernels without pidfd_open support, PyTorch fails when
+    # expandable_segments=True. Force False for CI compatibility.
+    env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:False"
     env["CUDA_VISIBLE_DEVICES"] = ",".join(
         str(gpu_id) for gpu_id in assigned_gpu_ids
     )
