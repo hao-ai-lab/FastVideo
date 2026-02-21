@@ -39,11 +39,20 @@ converted_weights/
 
 # Local / personal (do not commit)
 docs/waypoint_official_vs_fastvideo_diff.md
+docs/waypoint_hf_vs_fastvideo.md
 docs/waypoint_runpod_compare.md
 official_debug.json
 scripts/official_waypoint.py
 scripts/run_diffusers_waypoint.py
 scripts/waypoint_compare_fastvideo_vs_diffusers.py
+scripts/huggingface/upload_waypoint_hf.py
+examples/inference/basic/WAYPOINT_QUICKSTART.md
+examples/inference/basic/basic_waypoint_diffusers_baseline.py
+examples/inference/basic/basic_waypoint_local_live.py
+examples/inference/basic/basic_waypoint_streaming.py
+examples/inference/basic/run_waypoint_diffusers_baseline.sh
+run_fastvideo_single_frame.py
+test_official_model.py
 
 # SSIM test outputs
 fastvideo/tests/ssim/generated_videos/
