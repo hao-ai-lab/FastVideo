@@ -38,6 +38,17 @@ class DistillMethod(torch.nn.Module, ABC):
     def get_lr_schedulers(self, iteration: int) -> Sequence[Any]:
         raise NotImplementedError
 
+    def backward(
+        self,
+        loss_map: dict[str, torch.Tensor],
+        outputs: dict[str, Any],
+        *,
+        grad_accum_rounds: int = 1,
+    ) -> None:
+        del outputs
+        grad_accum_rounds = max(1, int(grad_accum_rounds))
+        (loss_map["total_loss"] / grad_accum_rounds).backward()
+
     def optimizers_schedulers_step(self, iteration: int) -> None:
         for optimizer in self.get_optimizers(iteration):
             optimizer.step()
@@ -50,4 +61,3 @@ class DistillMethod(torch.nn.Module, ABC):
                 optimizer.zero_grad(set_to_none=True)
             except TypeError:
                 optimizer.zero_grad()
-

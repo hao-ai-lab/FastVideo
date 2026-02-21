@@ -84,7 +84,7 @@ class DistillTrainer:
             for accum_iter in range(grad_accum):
                 batch = next(data_stream)
                 if hasattr(method, "single_train_step"):
-                    loss_map, _ = method.single_train_step(  # type: ignore[attr-defined]
+                    loss_map, outputs = method.single_train_step(  # type: ignore[attr-defined]
                         batch,
                         step,
                         current_vsa_sparsity=current_vsa_sparsity,
@@ -93,8 +93,15 @@ class DistillTrainer:
                     raise AttributeError(
                         "method must implement single_train_step()")
 
-                total_loss = loss_map["total_loss"] / grad_accum
-                total_loss.backward()
+                if hasattr(method, "backward"):
+                    method.backward(  # type: ignore[attr-defined]
+                        loss_map,
+                        outputs,
+                        grad_accum_rounds=grad_accum,
+                    )
+                else:
+                    total_loss = loss_map["total_loss"] / grad_accum
+                    total_loss.backward()
 
                 for k, v in loss_map.items():
                     if isinstance(v, torch.Tensor):
@@ -112,4 +119,3 @@ class DistillTrainer:
                 self.tracker.log(metrics, step)
 
         self.tracker.finish()
-

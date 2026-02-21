@@ -100,6 +100,18 @@ methods**（normalize/noise/timestep/attention metadata/build_input_kwargs 等�
   （这是对旧实现的一个显式修正：旧实现会每步 step generator scheduler）
 - fake_score optimizer/scheduler 每步 step
 
+关于 backward 的一个 Phase 0 现实约束：
+
+- 由于 FastVideo 的 attention/kernel 依赖 `set_forward_context(...)`，并且训练里常开
+  activation checkpointing，**backward 可能触发 forward 重算**，重算时也必须处于正确的
+  forward_context 里。
+- 旧实现通过在 backward 前重新 `set_forward_context` 来保证这一点（且 generator/critic
+  的 context 可能不同）。
+- 因此 Phase 0 的接口在 `DistillMethod` 里增加 `backward(loss_map, outputs, grad_accum_rounds)`
+  这个 hook：Trainer 调用它，但不关心里面怎么拆分 loss/怎么设置 context。
+  默认实现仍然是对 `total_loss` 做 backward；Wan(DMD2) method 会覆写为
+  “generator_loss 在 vsa context 下 backward + fake_score_loss 在 normal context 下 backward”。
+
 > 如果后续发现这个 scheduler 行为变化会影响 A/B 对齐，我们可以在 Phase 0
 > 加一个 “legacy 模式开关”；但默认先按“optimizer step 对齐 scheduler step”的正确语义实现。
 
@@ -129,4 +141,3 @@ methods**（normalize/noise/timestep/attention metadata/build_input_kwargs 等�
 - `models={...}` + adapter 的抽象无法覆盖 Wan 的关键差异（例如 conditioning/CFG 方式根本不一致）
 - DMD2 的计算图要求导致 Method/Trainer 的边界必须反转（Trainer 不可算法无关）
 - 现有 pipeline 的 helper 复用导致强耦合无法逐步迁移（必须一次性大重构才可跑通）
-
