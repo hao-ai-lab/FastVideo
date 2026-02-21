@@ -66,6 +66,12 @@ class DistillTrainer:
         if hasattr(method, "on_train_start"):
             method.on_train_start()  # type: ignore[attr-defined]
 
+        validation_interval = int(self.training_args.validation_steps or 0)
+        if (getattr(self.training_args, "log_validation", False)
+                and validation_interval > 0 and hasattr(method,
+                                                       "log_validation")):
+            method.log_validation(start_step)  # type: ignore[attr-defined]
+
         if hasattr(method, "optimizers_zero_grad"):
             method.optimizers_zero_grad(start_step)  # type: ignore[attr-defined]
 
@@ -117,5 +123,11 @@ class DistillTrainer:
             metrics["step_time_sec"] = time.perf_counter() - t0
             if self.global_rank == 0 and metrics:
                 self.tracker.log(metrics, step)
+
+            if (getattr(self.training_args, "log_validation", False)
+                    and validation_interval > 0
+                    and step % validation_interval == 0
+                    and hasattr(method, "log_validation")):
+                method.log_validation(step)  # type: ignore[attr-defined]
 
         self.tracker.finish()

@@ -43,13 +43,38 @@ class WanDMD2Method(DistillMethod):
         else:
             set_random_seed(seed + pipeline.global_rank)
 
-        pipeline.noise_random_generator = torch.Generator(device="cpu").manual_seed(seed)
+        pipeline.noise_random_generator = torch.Generator(
+            device="cpu").manual_seed(seed)
+        pipeline.validation_random_generator = torch.Generator(
+            device="cpu").manual_seed(seed)
         if pipeline.device.type == "cuda":
             pipeline.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(seed)
         else:
-            pipeline.noise_gen_cuda = torch.Generator(device=pipeline.device).manual_seed(seed)
+            pipeline.noise_gen_cuda = torch.Generator(
+                device=pipeline.device).manual_seed(seed)
 
         self.adapter.ensure_negative_conditioning()
+
+    def log_validation(self, iteration: int) -> None:
+        pipeline = self.adapter.pipeline
+        training_args = pipeline.training_args
+        if not getattr(training_args, "log_validation", False):
+            return
+
+        if getattr(pipeline, "validation_pipeline", None) is None:
+            pipeline.initialize_validation_pipeline(training_args)
+
+        old_inference_mode = training_args.inference_mode
+        old_dit_cpu_offload = training_args.dit_cpu_offload
+        try:
+            pipeline._log_validation(
+                pipeline.transformer,
+                training_args,
+                iteration,
+            )
+        finally:
+            training_args.inference_mode = old_inference_mode
+            training_args.dit_cpu_offload = old_dit_cpu_offload
 
     def _should_update_student(self, iteration: int) -> bool:
         interval = int(self.training_args.generator_update_interval or 1)
@@ -87,7 +112,11 @@ class WanDMD2Method(DistillMethod):
         device = pipeline.device
         device_type = device.type
 
-        generator_loss = torch.zeros((), device=device, dtype=training_batch.latents.dtype)
+        generator_loss = torch.zeros(
+            (),
+            device=device,
+            dtype=training_batch.latents.dtype,
+        )
         batch_gen = None
         student_backward_ctx = None
         if update_student:
@@ -98,9 +127,9 @@ class WanDMD2Method(DistillMethod):
                     attn_metadata=batch_gen.attn_metadata_vsa,
                 ):
                     if self.training_args.simulate_generator_forward:
-                        generator_pred_video = pipeline._generator_multi_step_simulation_forward(
-                            batch_gen
-                        )
+                        generator_pred_video = (
+                            pipeline._generator_multi_step_simulation_forward(
+                                batch_gen))
                     else:
                         generator_pred_video = pipeline._generator_forward(batch_gen)
 

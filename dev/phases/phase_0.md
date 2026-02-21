@@ -130,7 +130,8 @@ methods**（normalize/noise/timestep/attention metadata/build_input_kwargs 等�
 后续增量（Phase 0 内可迭代）：
 
 - checkpoint/resume 接入（优先复用 `save_distillation_checkpoint/load_distillation_checkpoint`）
-- validation/logging 接入（可先调用旧 pipeline 的 `_log_validation`）
+- validation 接入：已通过 `DistillTrainer` -> `method.log_validation(step)` hook
+  接入旧 pipeline 的 `_log_validation`（见 `WanDMD2Method.log_validation()`）
 
 ---
 
