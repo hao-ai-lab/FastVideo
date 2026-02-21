@@ -91,7 +91,7 @@ Phase 1 的定位：**在不破坏 Phase 0 可跑性的前提下**，把算法�
   - `build_models(args) -> ModelBundle + Adapter`（Phase 1 先实现 Wan）
   - `build_method(args, bundle, adapter) -> DistillMethod`（DMD2 先实现）
   - 让 entrypoint 不再手写 `_build_bundle_from_wan_pipeline(...)`
-- [x] 新增一个“通用 distill entrypoint”（`fastvideo/training/distill.py`）
+- [x] 新增一个“通用 distill entrypoint”（`fastvideo/training/distillation.py`）
   - CLI 通过 `--distill_model/--distill_method` 选择并运行
   - Phase 1 先支持：`wan + dmd2`
 - [x] 新增一个“Phase 1 entrypoint”（`fastvideo/training/wan_distillation_v3.py`，后续会变为 wrapper）

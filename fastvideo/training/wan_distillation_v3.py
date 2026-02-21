@@ -6,7 +6,7 @@ import sys
 
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
-from fastvideo.training.distill import run_distillation
+from fastvideo.training.distillation import run_distillation
 from fastvideo.utils import FlexibleArgumentParser
 
 logger = init_logger(__name__)
@@ -14,7 +14,7 @@ logger = init_logger(__name__)
 
 def main(args) -> None:
     logger.info(
-        "Starting Wan distillation v3 (wrapper for training/distill.py: wan + dmd2)..."
+        "Starting Wan distillation v3 (wrapper for training/distillation.py: wan + dmd2)..."
     )
     run_distillation(args, distill_model="wan", distill_method="dmd2")
     logger.info("Wan distillation v3 completed")

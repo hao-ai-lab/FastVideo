@@ -101,4 +101,3 @@ if __name__ == "__main__":
     parser = FastVideoArgs.add_cli_args(parser)
     args = parser.parse_args(argv[1:])
     main(args)
-
