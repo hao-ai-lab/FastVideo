@@ -257,11 +257,6 @@ class FastVideoArgs:
             help=
             "The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
         )
-        parser.add_argument(
-            "--model-dir",
-            type=str,
-            help="Directory containing StepVideo model",
-        )
 
         # Running mode
         parser.add_argument(
