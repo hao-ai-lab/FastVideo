@@ -141,3 +141,54 @@ methods**（normalize/noise/timestep/attention metadata/build_input_kwargs 等�
 - `models={...}` + adapter 的抽象无法覆盖 Wan 的关键差异（例如 conditioning/CFG 方式根本不一致）
 - DMD2 的计算图要求导致 Method/Trainer 的边界必须反转（Trainer 不可算法无关）
 - 现有 pipeline 的 helper 复用导致强耦合无法逐步迁移（必须一次性大重构才可跑通）
+
+---
+
+## 5. Phase 0 的“耦合债务”与命名说明（非常重要，避免未来遗忘）
+
+### 5.1 为什么现在会有 `WanDMD2Method` 这种名字？
+
+结论：这是 **Phase 0 的过渡实现**，名字里带 `Wan` 是“刻意暴露耦合”，防止误用。
+
+原因：当前 `fastvideo/distillation/methods/wan_dmd2.py` 并不是一个纯算法层的 DMD2。
+它直接复用/依赖了旧实现 `fastvideo/training/distillation_pipeline.py` 的 Wan-only 私有逻辑：
+
+- DMD2 的关键计算来自旧 pipeline 的内部函数：`_dmd_forward(...)`、`faker_score_forward(...)`、
+  `_generator_forward(...)` 等（它们隐含了 layout/normalize/CFG/uncond 等具体假设）
+- `fastvideo/distillation/adapters/wan.py` 也在复用旧 pipeline 的 helper：
+  `_normalize_dit_input/_prepare_dit_inputs/_build_attention_metadata`
+
+因此它在语义上等价于：**“把旧 Wan distill pipeline 包了一层 Method/Trainer 外壳”**，
+而不是一个可对接任意 adapter 的“通用 DMD2Method”。
+
+### 5.2 FastGen 有没有类似的做法？
+
+FastGen 的命名与分层更“干净”：
+
+- 算法层叫 `DMD2Model`（算法名），不会叫 `WanDMD2Model`
+- 网络/架构差异在 `networks/*` + config 里选择（网络与算法解耦）
+
+所以我们现在的 `WanDMD2Method` 更像是 Phase 0 的迁移脚手架，而不是最终形态。
+
+### 5.3 TODO（必须做）：把 `WanDMD2Method` 演进为 **算法名 method + 模型名 adapter**
+
+为了避免“又一次耦合到 Wan”，必须把 Phase 0 的耦合逐步清掉，目标对齐 FastGen：
+
+1) **把算法从旧 pipeline 里抠出来**
+   - 新增：`fastvideo/distillation/methods/dmd2.py`（`DMD2Method`，不依赖任何具体模型）
+   - `DMD2Method` 只依赖 adapter 提供的 primitives（noise/pred_to_x0/teacher_cfg/critic_loss 等）
+
+2) **把模型差异收敛到 adapter（WanAdapter）**
+   - 演进：`WanPipelineAdapter` -> `WanAdapter`
+   - `WanAdapter` 不再调用 `DistillationPipeline` 的私有 helper 方法，
+     而是自己实现 normalize/layout/attention metadata/输入 kwargs 组装等
+
+3) **最终命名与入口应变成**
+   - `DMD2Method + WanAdapter`（method 不带模型名）
+   - `fastvideo/training/wan_distillation_v2.py` 里只选择 adapter，不再选择“WanDMD2Method”
+
+4) **迁移后应删除/冻结 Phase 0 的 pipeline-backed 版本**
+   - 避免未来复制粘贴 `WanDMD2Method` 去做其它模型（那会把耦合扩散）
+
+> 备注：Phase 0 用 `WanDMD2Method` 的意义是“先把训练循环与多 optimizer 调度结构稳定下来”，
+> 但我们必须把它当成临时脚手架，Phase 1/2 逐步替换为真正解耦的 method+adapter。
