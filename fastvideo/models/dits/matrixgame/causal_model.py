@@ -279,6 +279,13 @@ class CausalMatrixGameSelfAttention(nn.Module):
             )
 
             kv_cache_size = kv_cache["k"].shape[1]
+            if kv_cache_size <= 0:
+                raise RuntimeError(
+                    "Invalid kv_cache size for MatrixGame causal attention: "
+                    f"kv_cache_size={kv_cache_size}, "
+                    f"local_attn_size={self.local_attn_size}, "
+                    f"frame_seqlen={frame_seqlen}"
+                )
             num_new_tokens = roped_query.shape[1]
 
             if (current_end > kv_cache["global_end_index"]) and (
@@ -325,8 +332,37 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 )
                 local_start_index = local_end_index - num_new_tokens
 
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
+            # Defensive bounds handling: in some environments cache indices can
+            # become stale (e.g., global/local cursor mismatch). Clamp and
+            # align source slices so assignment shapes always match.
+            local_end_index = int(local_end_index)
+            local_end_index = max(0, min(local_end_index, kv_cache_size))
+            if local_end_index == 0 and num_new_tokens > 0:
+                local_end_index = min(num_new_tokens, kv_cache_size)
+            local_start_index = local_end_index - num_new_tokens
+
+            key_to_write = roped_key
+            value_to_write = v
+            if local_start_index < 0:
+                keep_tokens = local_end_index
+                key_to_write = key_to_write[:, -keep_tokens:]
+                value_to_write = value_to_write[:, -keep_tokens:]
+                local_start_index = 0
+
+            if local_start_index >= local_end_index:
+                raise RuntimeError(
+                    "Invalid KV cache write range in MatrixGame causal "
+                    "attention: "
+                    f"local_start_index={local_start_index}, "
+                    f"local_end_index={local_end_index}, "
+                    f"num_new_tokens={num_new_tokens}, "
+                    f"global_end_index={kv_cache['global_end_index']}, "
+                    f"cache_size={kv_cache_size}, "
+                    f"current_start={current_start}, current_end={current_end}"
+                )
+
+            kv_cache["k"][:, local_start_index:local_end_index] = key_to_write
+            kv_cache["v"][:, local_start_index:local_end_index] = value_to_write
 
             kv_start = max(0, local_end_index - max_attention_size)
             k_for_attn = kv_cache["k"][:, kv_start:local_end_index]
