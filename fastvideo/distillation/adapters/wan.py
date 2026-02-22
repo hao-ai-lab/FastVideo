@@ -122,6 +122,22 @@ class WanAdapter(DistillAdapter):
 
         self.ensure_negative_conditioning()
 
+    def get_rng_generators(self) -> dict[str, torch.Generator]:
+        """Return RNG generators that should be checkpointed for exact resume."""
+
+        generators: dict[str, torch.Generator] = {}
+        if self.noise_random_generator is not None:
+            generators["noise_cpu"] = self.noise_random_generator
+        if self.noise_gen_cuda is not None:
+            generators["noise_cuda"] = self.noise_gen_cuda
+
+        validator = getattr(self, "_validator", None)
+        validation_gen = getattr(validator, "validation_random_generator", None)
+        if isinstance(validation_gen, torch.Generator):
+            generators["validation_cpu"] = validation_gen
+
+        return generators
+
     def ensure_negative_conditioning(self) -> None:
         if self.negative_prompt_embeds is not None:
             return

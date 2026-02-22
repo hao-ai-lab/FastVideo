@@ -64,7 +64,7 @@ distillation pipeline**（`fastvideo/training/*distillation_pipeline.py`）。
   - 支持 few-step：`validation_sampling_steps` + `validation_guidance_scale` + seed/RNG（不依赖 legacy pipeline）
 - [x] `fastvideo/distillation/adapters/wan.py::WanAdapter.log_validation()` 支持注入 validator
   - Phase 2 路径：走新 validator
-  - Phase 1 路径：未提供 validator 时，仍可回退到 legacy pipeline（保留兼容）
+  - 未提供 validator 时：不做 validation（不再回退到 legacy pipeline）
 
 ### B. Builder/Runtime 脱离 pipeline（Phase 2.2）
 
@@ -94,23 +94,31 @@ distillation pipeline**（`fastvideo/training/*distillation_pipeline.py`）。
 
 ### C. role-based checkpoint/save/resume（Phase 2.3）
 
-- [ ] 新增 `DistillCheckpointManager`
-  - 保存内容：
-    - `bundle.roles[*].modules`（仅 trainable params 或全量可配置）
-    - `bundle.roles[*].optimizers / lr_schedulers`
-    - `StatefulDataLoader`（如果使用）
-    - `RandomStateWrapper`（torch/numpy/python/cuda + noise generators）
-  - 恢复内容：
-    - `start_step`、dataloader iterator state、optimizer/scheduler state、RNG
-- [ ] 将 checkpoint manager 接入 `DistillTrainer`
-  - `--resume_from_checkpoint`
-  - `--checkpointing_steps`（或复用现有 args）
-  - `--checkpoints_total_limit`
+- [x] 新增 `fastvideo/distillation/checkpoint.py::DistillCheckpointManager`
+  - 保存内容（Phase 2 路径）：
+    - **trainable roles** 的 `modules/optimizers/lr_schedulers`（teacher 默认 frozen，不保存）
+    - `StatefulDataLoader`（Wan-Syn parquet loader 是 `torchdata.stateful_dataloader.StatefulDataLoader`）
+    - RNG states：
+      - 全局 torch/numpy/python/cuda
+      - adapter 暴露的 generators（`WanAdapter.get_rng_generators()`：noise_cpu/noise_cuda/validation_cpu）
+  - 保存位置：
+    - `${output_dir}/checkpoint-<step>/dcp/`（torch.distributed.checkpoint）
+  - 旧 checkpoint 清理：
+    - 由 `training.checkpoints_total_limit` 控制（只保留最近 N 个）
+- [x] 将 checkpoint manager 接入 `fastvideo/distillation/trainer.py::DistillTrainer`
+  - resume 参数来自 CLI：`fastvideo/training/distillation.py --resume-from-checkpoint <path>`
+    - 支持传入：`checkpoint-<step>` / `checkpoint-<step>/dcp` / `output_dir`（自动选最新）
+  - checkpoint 策略来自 YAML（TrainingArgs 字段）：
+    - `training.training_state_checkpointing_steps`: 训练态 checkpoint 保存间隔（<=0 关闭保存）
+    - `training.checkpoints_total_limit`: 保留最近 N 个 checkpoint（<=0 不清理）
+  - 行为：
+    - `on_train_start()` 之后再 `dcp.load(...)`，确保 adapter generators 已创建，可恢复其状态
+    - checkpoint 保存发生在 **每步训练完成**（optim step + zero_grad）之后、validation 之前
 
 ### D. 示例脚本（Phase 2）
 
 - [x] 最小 smoke（训练 + few-step validation）：`examples/distillation/phase2/temp.sh`
-- [ ] Save/Resume 示例：等 Phase 2.3 checkpoint manager 完成后再补
+- [x] Save/Resume 用法说明：`examples/distillation/phase2/README.md`
 
 ### E. 最小单测（可选但建议）
 

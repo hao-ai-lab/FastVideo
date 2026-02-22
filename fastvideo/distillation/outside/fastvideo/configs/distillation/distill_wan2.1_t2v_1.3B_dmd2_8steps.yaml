@@ -39,6 +39,7 @@ training:
   output_dir: outputs/phase2_wan2.1_dmd2_8steps_wansyn
   max_train_steps: 4000
   seed: 1000
+  checkpoints_total_limit: 3
 
   # Optimizer
   learning_rate: 2.0e-6

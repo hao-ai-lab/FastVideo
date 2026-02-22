@@ -59,12 +59,21 @@ class DistillTrainer:
         dataloader: Any,
         max_steps: int,
         start_step: int = 0,
+        checkpoint_manager: Any | None = None,
     ) -> None:
         grad_accum = max(1, int(self.training_args.gradient_accumulation_steps
                                 or 1))
 
         if hasattr(method, "on_train_start"):
             method.on_train_start()  # type: ignore[attr-defined]
+
+        resume_from_checkpoint = getattr(self.training_args, "resume_from_checkpoint", "") or ""
+        if checkpoint_manager is not None:
+            resumed_step = checkpoint_manager.maybe_resume(
+                resume_from_checkpoint=resume_from_checkpoint
+            )
+            if resumed_step is not None:
+                start_step = int(resumed_step)
 
         validation_interval = int(self.training_args.validation_steps or 0)
         if (getattr(self.training_args, "log_validation", False)
@@ -124,10 +133,16 @@ class DistillTrainer:
             if self.global_rank == 0 and metrics:
                 self.tracker.log(metrics, step)
 
+            if checkpoint_manager is not None:
+                checkpoint_manager.maybe_save(step)
+
             if (getattr(self.training_args, "log_validation", False)
                     and validation_interval > 0
                     and step % validation_interval == 0
                     and hasattr(method, "log_validation")):
                 method.log_validation(step)  # type: ignore[attr-defined]
+
+        if checkpoint_manager is not None:
+            checkpoint_manager.save_final(max_steps)
 
         self.tracker.finish()
