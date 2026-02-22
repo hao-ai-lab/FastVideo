@@ -28,8 +28,6 @@ training:
   num_gpus: 1
   sp_size: 1
   tp_size: 1
-  hsdp_replicate_dim: 1
-  hsdp_shard_dim: 1
 
   # Data (parquet dataset folder)
   data_path: data/Wan-Syn_77x448x832_600k
