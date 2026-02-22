@@ -543,6 +543,17 @@ def _register_configs() -> None:
         ],
     )
     register_configs(
+        sampling_param_cls=Wan2_2_I2V_A14B_SamplingParam,
+        pipeline_config_cls=Wan2_2_I2V_A14B_Config,
+        hf_model_paths=[
+            "robbyant/lingbot-world-base-cam",
+        ],
+        model_detectors=[
+            lambda path: "lingbot-world" in path.lower(),
+            lambda path: "wancamimagetovideopipeline" in path.lower(),
+        ],
+    )
+    register_configs(
         sampling_param_cls=SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
         pipeline_config_cls=SelfForcingWanT2V480PConfig,
         hf_model_paths=[
