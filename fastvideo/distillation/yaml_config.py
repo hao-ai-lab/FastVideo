@@ -142,6 +142,10 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
     # Entrypoint invariants.
     training_kwargs["mode"] = ExecutionMode.DISTILLATION
     training_kwargs["inference_mode"] = False
+    # Match the training-mode loader behavior in `ComposedPipelineBase`:
+    # training uses fp32 master weights and should not CPU-offload DiT weights.
+    training_kwargs.setdefault("dit_precision", "fp32")
+    training_kwargs["dit_cpu_offload"] = False
 
     # Use student path as the default base model_path. This is needed for
     # PipelineConfig registry lookup.
@@ -173,4 +177,3 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
         training_args=training_args,
         raw=cfg,
     )
-

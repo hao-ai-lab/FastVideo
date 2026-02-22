@@ -55,12 +55,14 @@ class WanAdapter(DistillAdapter):
         noise_scheduler: Any,
         vae: Any,
         validation_pipeline: DistillationPipeline | None = None,
+        validator: Any | None = None,
     ) -> None:
         self.bundle = bundle
         self.training_args = training_args
         self.noise_scheduler = noise_scheduler
         self.vae = vae
         self._validation_pipeline_owner = validation_pipeline
+        self._validator = validator
 
         self.world_group = get_world_group()
         self.sp_group = get_sp_group()
@@ -229,6 +231,11 @@ class WanAdapter(DistillAdapter):
         self.negative_prompt_attention_mask = neg_mask
 
     def log_validation(self, iteration: int) -> None:
+        validator = getattr(self, "_validator", None)
+        if validator is not None:
+            validator.log_validation(iteration)
+            return
+
         pipeline = self._validation_pipeline_owner
         if pipeline is None:
             return
