@@ -75,6 +75,30 @@ class DistillationPipeline(TrainingPipeline):
     video_latent_shape_sp: tuple[int, ...]
     train_fake_score_transformer_2: bool = False
 
+    @staticmethod
+    def _clone_batch_value(value: Any) -> Any:
+        """Clone values in a TrainingBatch without tensor deepcopy."""
+        if isinstance(value, torch.Tensor):
+            # Avoid torch tensor deepcopy limitations on non-leaf tensors.
+            return value.detach().clone()
+        if isinstance(value, dict):
+            return {
+                k: DistillationPipeline._clone_batch_value(v)
+                for k, v in value.items()
+            }
+        if isinstance(value, list):
+            return [DistillationPipeline._clone_batch_value(v) for v in value]
+        if isinstance(value, tuple):
+            return tuple(
+                DistillationPipeline._clone_batch_value(v) for v in value)
+        return copy.deepcopy(value)
+
+    def _clone_training_batch(self, batch: TrainingBatch) -> TrainingBatch:
+        cloned_batch = TrainingBatch()
+        for key, value in batch.__dict__.items():
+            setattr(cloned_batch, key, self._clone_batch_value(value))
+        return cloned_batch
+
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(
             "create_pipeline_stages should not be called for training pipeline")
@@ -971,13 +995,13 @@ class DistillationPipeline(TrainingPipeline):
                 batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore
             batches.append(batch)
 
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad(set_to_none=True)
         total_dmd_loss = 0.0
         dmd_latent_vis_dict = {}
         fake_score_latent_vis_dict = {}
         if (self.current_trainstep % self.generator_update_interval == 0):
             for batch in batches:
-                batch_gen = copy.deepcopy(batch)
+                batch_gen = self._clone_training_batch(batch)
 
                 with set_forward_context(
                         current_timestep=batch_gen.timesteps,
@@ -1022,12 +1046,12 @@ class DistillationPipeline(TrainingPipeline):
         else:
             training_batch.generator_loss = 0.0
 
-        self.fake_score_optimizer.zero_grad()
+        self.fake_score_optimizer.zero_grad(set_to_none=True)
         if self.fake_score_transformer_2 is not None:
-            self.fake_score_optimizer_2.zero_grad()
+            self.fake_score_optimizer_2.zero_grad(set_to_none=True)
         total_fake_score_loss = 0.0
         for batch in batches:
-            batch_fake = copy.deepcopy(batch)
+            batch_fake = self._clone_training_batch(batch)
             batch_fake, fake_score_loss = self.faker_score_forward(batch_fake)
             with set_forward_context(current_timestep=batch_fake.timesteps,
                                      attn_metadata=batch_fake.attn_metadata):
@@ -1236,9 +1260,12 @@ class DistillationPipeline(TrainingPipeline):
 
             # Helper function to run validation with optional EMA contexts
             def run_validation_with_ema(
-                    steps: int) -> tuple[list[np.ndarray], list[str]]:
+                steps: int
+            ) -> tuple[list[np.ndarray], list[str], list[Any], list[Any]]:
                 videos: list[np.ndarray] = []
                 captions: list[str] = []
+                audios: list[Any] = []
+                audio_sample_rates: list[Any] = []
                 for validation_batch in validation_dataloader:
                     batch = self._prepare_validation_batch(
                         sampling_param, training_args, validation_batch, steps)
@@ -1282,25 +1309,32 @@ class DistillationPipeline(TrainingPipeline):
                         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                         frames.append((x * 255).numpy().astype(np.uint8))
                     videos.append(frames)
+                    audios.append(output_batch.extra.get("audio"))
+                    audio_sample_rates.append(
+                        output_batch.extra.get("audio_sample_rate"))
 
-                return videos, captions
+                return videos, captions, audios, audio_sample_rates
 
             # Apply EMA contexts if available (nested context managers)
             if ema_context is not None and ema_2_context is not None:
                 with ema_context, ema_2_context:
-                    step_videos, step_captions = run_validation_with_ema(
-                        num_inference_steps)
+                    (step_videos, step_captions, step_audios,
+                     step_audio_sample_rates
+                     ) = run_validation_with_ema(num_inference_steps)
             elif ema_context is not None:
                 with ema_context:
-                    step_videos, step_captions = run_validation_with_ema(
-                        num_inference_steps)
+                    (step_videos, step_captions, step_audios,
+                     step_audio_sample_rates
+                     ) = run_validation_with_ema(num_inference_steps)
             elif ema_2_context is not None:
                 with ema_2_context:
-                    step_videos, step_captions = run_validation_with_ema(
-                        num_inference_steps)
+                    (step_videos, step_captions, step_audios,
+                     step_audio_sample_rates
+                     ) = run_validation_with_ema(num_inference_steps)
             else:
-                step_videos, step_captions = run_validation_with_ema(
-                    num_inference_steps)
+                (step_videos, step_captions, step_audios,
+                 step_audio_sample_rates
+                 ) = run_validation_with_ema(num_inference_steps)
 
             # Log validation results for this step
             world_group = get_world_group()
@@ -1313,24 +1347,42 @@ class DistillationPipeline(TrainingPipeline):
                     # Global rank 0 collects results from all sp_group leaders
                     all_videos = step_videos  # Start with own results
                     all_captions = step_captions
+                    all_audios = step_audios
+                    all_audio_sample_rates = step_audio_sample_rates
 
                     # Receive from other sp_group leaders
                     for sp_group_idx in range(1, num_sp_groups):
                         src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
                         recv_videos = world_group.recv_object(src=src_rank)
                         recv_captions = world_group.recv_object(src=src_rank)
+                        recv_audios = world_group.recv_object(src=src_rank)
+                        recv_audio_sample_rates = world_group.recv_object(
+                            src=src_rank)
                         all_videos.extend(recv_videos)
                         all_captions.extend(recv_captions)
+                        all_audios.extend(recv_audios)
+                        all_audio_sample_rates.extend(recv_audio_sample_rates)
 
                     video_filenames = []
-                    for i, (video, caption) in enumerate(
-                            zip(all_videos, all_captions, strict=True)):
+                    for i, (video, caption, audio,
+                            audio_sample_rate) in enumerate(
+                                zip(all_videos,
+                                    all_captions,
+                                    all_audios,
+                                    all_audio_sample_rates,
+                                    strict=True)):
                         os.makedirs(training_args.output_dir, exist_ok=True)
                         filename = os.path.join(
                             training_args.output_dir,
                             f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
                         )
                         imageio.mimsave(filename, video, fps=sampling_param.fps)
+                        if (audio is not None and audio_sample_rate is not None
+                                and not self._mux_audio(filename, audio,
+                                                        audio_sample_rate)):
+                            logger.warning(
+                                "Audio mux failed for validation video %s; saved video without audio.",
+                                filename)
                         video_filenames.append(filename)
 
                     artifacts = []
@@ -1351,16 +1403,38 @@ class DistillationPipeline(TrainingPipeline):
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
+                    world_group.send_object(step_audios, dst=0)
+                    world_group.send_object(step_audio_sample_rates, dst=0)
 
         # Re-enable gradients for training - set both transformers back to train mode
         transformer.train()
         if hasattr(self, 'transformer_2') and self.transformer_2 is not None:
             self.transformer_2.train()
         gc.collect()
+        torch.cuda.empty_cache()
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
         """Add visualization data to tracker logging and save frames to disk."""
+
+        def _prepare_vae_latents(latents: torch.Tensor) -> torch.Tensor:
+            # Most training paths store latents as [B, C, T, H, W]. Older
+            # visualization code permuted to [B, T, C, H, W] for WAN-like VAEs.
+            # LTX2 VAE expects [B, C, T, H, W], so keep native layout there.
+            if hasattr(self.vae, "TIME_SCALE") and hasattr(
+                    self.vae, "SPATIAL_SCALE"):
+                return latents
+            return latents.permute(0, 2, 1, 3, 4)
+
+        def _apply_vae_scale(latents: torch.Tensor) -> torch.Tensor:
+            scaling_factor = getattr(self.vae, "scaling_factor", None)
+            if scaling_factor is None:
+                return latents
+            if isinstance(scaling_factor, torch.Tensor):
+                return latents / scaling_factor.to(latents.device,
+                                                   latents.dtype)
+            return latents / scaling_factor
+
         tracker_loss_dict: dict[str, Any] = {}
         dmd_latents_vis_dict = training_batch.dmd_latent_vis_dict
         fake_score_latents_vis_dict = training_batch.fake_score_latent_vis_dict
@@ -1369,13 +1443,8 @@ class DistillationPipeline(TrainingPipeline):
 
         for latent_key in fake_score_log_keys:
             latents = fake_score_latents_vis_dict[latent_key]
-            latents = latents.permute(0, 2, 1, 3, 4)
-
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents / self.vae.scaling_factor.to(
-                    latents.device, latents.dtype)
-            else:
-                latents = latents / self.vae.scaling_factor
+            latents = _prepare_vae_latents(latents)
+            latents = _apply_vae_scale(latents)
 
             # Apply shifting if needed
             if (hasattr(self.vae, "shift_factor")
@@ -1402,13 +1471,9 @@ class DistillationPipeline(TrainingPipeline):
         if 'generator_pred_video' in dmd_latents_vis_dict:
             for latent_key in dmd_log_keys:
                 latents = dmd_latents_vis_dict[latent_key]
-                latents = latents.permute(0, 2, 1, 3, 4)
+                latents = _prepare_vae_latents(latents)
                 # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-                if isinstance(self.vae.scaling_factor, torch.Tensor):
-                    latents = latents / self.vae.scaling_factor.to(
-                        latents.device, latents.dtype)
-                else:
-                    latents = latents / self.vae.scaling_factor
+                latents = _apply_vae_scale(latents)
 
                 # Apply shifting if needed
                 if (hasattr(self.vae, "shift_factor")
@@ -1451,13 +1516,14 @@ class DistillationPipeline(TrainingPipeline):
             set_random_seed(seed + self.global_rank)
 
         # Set random seeds for deterministic training
-        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
-            self.seed)
-        self.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(
-            self.seed)
+        self.noise_random_generator = torch.Generator(
+            device="cpu").manual_seed(self.seed + self.global_rank)
+        self.noise_gen_cuda = torch.Generator(
+            device="cuda").manual_seed(self.seed + self.global_rank)
         self.validation_random_generator = torch.Generator(
-            device="cpu").manual_seed(self.seed)
-        logger.info("Initialized random seeds with seed: %s", seed)
+            device="cpu").manual_seed(self.seed + self.global_rank)
+        logger.info("Initialized random seeds with seed: %s",
+                    seed + self.global_rank)
 
         # Initialize current_trainstep for EMA ready checks
         #TODO: check if needed
@@ -1488,6 +1554,9 @@ class DistillationPipeline(TrainingPipeline):
         use_vsa = vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN"
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
+            if step % 5 == 0:
+                gc.collect()
+                torch.cuda.empty_cache()
             start_time = time.perf_counter()
             if use_vsa:
                 vsa_sparsity = self.training_args.VSA_sparsity
