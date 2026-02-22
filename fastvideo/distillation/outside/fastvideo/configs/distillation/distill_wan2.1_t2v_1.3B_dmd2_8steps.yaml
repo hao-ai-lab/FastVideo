@@ -1,10 +1,3 @@
-# NOTE:
-# Phase 2 does not rewrite config paths automatically. Put runnable YAML under:
-#   fastvideo/distillation/outside/fastvideo/configs/distillation/
-#
-# The runnable copy for this template lives at:
-#   fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps.yaml
-#
 distill:
   model: wan
   method: dmd2
@@ -83,3 +76,4 @@ training:
 pipeline_config:
   flow_shift: 8
   dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
+

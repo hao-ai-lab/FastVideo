@@ -30,52 +30,24 @@ def _distillation_root() -> Path:
     return Path(__file__).resolve().parent
 
 
-def _repo_root() -> Path:
-    # .../fastvideo/distillation -> .../<repo_root>
-    return _distillation_root().parent.parent
+def _resolve_existing_file(path: str) -> str:
+    """Resolve a user-provided config path and require it exists.
 
-
-def _outside_root() -> Path:
-    return _distillation_root() / "outside"
-
-
-def resolve_outside_overlay(path: str) -> str:
-    """Resolve ``path`` via the distillation ``outside/`` overlay if present.
-
-    The overlay root is ``fastvideo/distillation/outside/`` and mirrors the
-    repository layout. For example, if the run config references:
-
-        fastvideo/configs/foo.json
-
-    then we first check:
-
-        fastvideo/distillation/outside/fastvideo/configs/foo.json
-
-    and fall back to the original path when the overlay file does not exist.
+    Phase 2 intentionally does not perform any "overlay" path rewriting. The
+    caller must pass the real path (typically under
+    ``fastvideo/distillation/outside/``).
     """
 
     if not path:
         return path
 
     expanded = os.path.expanduser(path)
-    candidate: Path | None = None
-
-    p = Path(expanded)
-    if p.is_absolute():
-        try:
-            rel = p.resolve().relative_to(_repo_root())
-        except Exception:
-            rel = None
-        if rel is not None:
-            candidate = _outside_root() / rel
-    else:
-        candidate = _outside_root() / p
-
-    if candidate is not None and candidate.exists():
-        logger.info("Using outside overlay for %s -> %s", path, candidate)
-        return str(candidate)
-
-    return expanded
+    resolved = Path(expanded).resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"Config file not found: {resolved}")
+    if not resolved.is_file():
+        raise ValueError(f"Expected a file path, got: {resolved}")
+    return str(resolved)
 
 
 def _require_mapping(raw: Any, *, where: str) -> dict[str, Any]:
@@ -105,7 +77,7 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
     file is the single source of truth for a run.
     """
 
-    path = resolve_outside_overlay(path)
+    path = _resolve_existing_file(path)
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     cfg = _require_mapping(raw, where=path)
@@ -170,10 +142,10 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
 
     if pipeline_cfg_path is not None:
         pipeline_cfg_path = _require_str(pipeline_cfg_path, where="pipeline_config_path")
-        training_kwargs["pipeline_config"] = resolve_outside_overlay(pipeline_cfg_path)
+        training_kwargs["pipeline_config"] = _resolve_existing_file(pipeline_cfg_path)
     elif pipeline_cfg_raw is not None:
         if isinstance(pipeline_cfg_raw, str):
-            training_kwargs["pipeline_config"] = resolve_outside_overlay(pipeline_cfg_raw)
+            training_kwargs["pipeline_config"] = _resolve_existing_file(pipeline_cfg_raw)
         elif isinstance(pipeline_cfg_raw, dict):
             training_kwargs["pipeline_config"] = pipeline_cfg_raw
         else:

@@ -38,15 +38,15 @@ Phase 2 的定位：在 Phase 1 已经验证 “Wan DMD2 训练行为对齐 base
 
 ## 当前“仍依赖 legacy”的点（Phase 2 要消灭）
 
-以 Phase 1 的 Wan DMD2 为例，当前仍有两类耦合：
+以 Wan DMD2 为例，我们现在同时存在两条路径：
 
-1. **启动/加载耦合**：
-   - `fastvideo/training/distillation.py` 仍通过 `WanDistillationPipeline.from_pretrained(...)`
-     完成模型加载、optimizer/scheduler、dataloader、tracker。
-2. **validation 耦合**：
-   - `WanAdapter.log_validation()` 仍复用 legacy `pipeline._log_validation(...)`
+1. **Phase 1（legacy pipeline path）**：仍然依赖 `WanDistillationPipeline.from_pretrained(...)`，
+   validation 也会走 legacy `_log_validation(...)`（因为 Phase 1 需要保持与 baseline 的对齐与可用性）。
+2. **Phase 2（standalone runtime path）**：已替换为 **YAML-only + builder/runtime + standalone validator**，
+   不再依赖 legacy pipeline。
 
-Phase 2 的 deliverable 就是把这两类耦合点都替换掉。
+Phase 2 的 deliverable 是让 Phase 2 路径完全自洽（训练/validation/checkpoint-resume），同时 Phase 1
+路径仍可跑（兼容历史脚本）。
 
 ---
 
@@ -54,40 +54,38 @@ Phase 2 的 deliverable 就是把这两类耦合点都替换掉。
 
 ### A. Validation 独立化（Phase 2.1）
 
-- [ ] 定义通用接口：`DistillValidator`
-  - 输入：`bundle + adapter + training_args + tracker`
-  - 输出：`log_validation(step)`（只在 rank0 真正写 artifact）
-- [ ] 实现 `WanValidator`（Wan + T2V 的最小版本）
-  - 复用 `fastvideo/dataset/validation_dataset.py::ValidationDataset`
-  - 复用模块化 **inference pipeline**（建议：`fastvideo/pipelines/basic/wan/wan_dmd_pipeline.py::WanDMDPipeline`）
-  - 支持关键参数：
-    - `validation_sampling_steps`（few-step）
-    - `validation_guidance_scale`
-    - seed / RNG（不依赖 legacy pipeline 初始化副作用）
-- [ ] 将 Phase 1 的 `WanAdapter.log_validation()` 切到新 validator（不再依赖 legacy pipeline）
+- [x] 定义通用接口：`fastvideo/distillation/validators/base.py::DistillValidator`
+  - 入口：`log_validation(step)`
+  - 行为：rank0 写 artifacts（其余 rank 走 gather/send）
+- [x] 实现 `fastvideo/distillation/validators/wan.py::WanValidator`（Wan + T2V 最小版本）
+  - 复用 `ValidationDataset`
+  - 使用模块化 inference pipeline：`WanDMDPipeline`
+  - 支持 few-step：`validation_sampling_steps` + `validation_guidance_scale` + seed/RNG（不依赖 legacy pipeline）
+- [x] `fastvideo/distillation/adapters/wan.py::WanAdapter.log_validation()` 支持注入 validator
+  - Phase 2 路径：走新 validator
+  - Phase 1 路径：未提供 validator 时，仍可回退到 legacy pipeline（保留兼容）
 
 ### B. Builder/Runtime 脱离 pipeline（Phase 2.2）
 
-- [ ] 定义结构化 spec（角色驱动）：`ModelSpec / RoleSpec / DistillSpec`
+- [x] 定义结构化 spec（角色驱动）：`DistillSpec / RoleSpec`
   - 目标：`models={role -> spec}` 成为唯一真相
   - method 自己声明需要哪些 roles（缺失则报错）
-- [ ] 新增 YAML 配置解析（Phase 2 必做）
-  - [ ] `fastvideo/training/distillation.py` 支持 `--config path/to/distill.yaml`
-  - [ ] 解析策略：`yaml.safe_load` + schema 校验（不做 legacy CLI merge）
-  - [ ] YAML schema 最小包含：`distill.{model,method}` + `models{role->spec}` + `training{...}` + `pipeline_config{...}`
-- [ ] 支持 `outside/` overlay（Phase 2 workaround）
-  - [ ] 新增目录：`fastvideo/distillation/outside/`（视作外部 repo root）
-  - [ ] 约定覆盖路径：`fastvideo/distillation/outside/fastvideo/configs/...`
-  - [ ] config loader 在解析 `pipeline_config_path`/yaml include 时：outside 优先、repo fallback
-  - [ ] 不通过 `sys.path` shadow `fastvideo` 包；outside 仅做文件 overlay（必要时用 `importlib` 按路径加载 .py config）
-- [ ] 实现 “standalone runtime builder”
+- [x] 新增 YAML 配置解析：`fastvideo/distillation/yaml_config.py::load_distill_run_config`
+  - `yaml.safe_load` + 最小 schema 校验（不做 legacy CLI merge）
+  - schema：`distill + models + training + (pipeline_config|pipeline_config_path)`
+- [x] 修改入口：`fastvideo/training/distillation.py`
+  - `--config` 为必需参数：Phase 2 路径 **YAML-only**
+  - legacy distill 仍通过旧入口文件可跑（两套路径并存）
+- [x] 支持 `outside/`（你拍板的 Phase 2 workaround）
+  - 新增目录：`fastvideo/distillation/outside/`（视作外部 repo root）
+  - 覆盖路径：`fastvideo/distillation/outside/<repo-relative-path>`
+  - **无自动补全/overlay**：config loader 不做路径重写；运行时传入 outside YAML 的真实路径（无 fallback）
+- [x] 实现 standalone runtime builder：`fastvideo/distillation/builder.py::build_wan_dmd2_runtime_from_config`
   - 直接加载 modules（student/teacher/critic）并构建 `ModelBundle`
-  - 构建 per-role optimizers/schedulers（复用现有 TrainingArgs 超参）
-  - 构建 dataloader（直接调用 `fastvideo/dataset/parquet_dataset_map_style.py::build_parquet_map_style_dataloader`）
+  - 构建 per-role optimizers/schedulers（复用 TrainingArgs 超参）
+  - 构建 dataloader（`build_parquet_map_style_dataloader`）
   - 初始化 tracker（复用 `fastvideo/training/trackers/`）
-- [ ] 修改现有入口 `fastvideo/training/distillation.py`（不新增入口文件）
-  - `--config` 为必需参数：只跑 standalone builder 路径（YAML-only）
-  - legacy distill 通过旧入口文件继续可跑（不在该入口做 fallback）
+  - 通过 `WanAdapter(validator=...)` 接入独立 validation
 
 ### C. role-based checkpoint/save/resume（Phase 2.3）
 
@@ -106,9 +104,8 @@ Phase 2 的 deliverable 就是把这两类耦合点都替换掉。
 
 ### D. 示例脚本（Phase 2）
 
-- [ ] `examples/distillation/phase2/`：
-  - 最小 smoke：Wan 1.3B 学 14B（DMD2）+ few-step validation + save/resume
-  - 提供 `distill.yaml` 模板（role-based）
+- [x] 最小 smoke（训练 + few-step validation）：`examples/distillation/phase2/temp.sh`
+- [ ] Save/Resume 示例：等 Phase 2.3 checkpoint manager 完成后再补
 
 ### E. 最小单测（可选但建议）
 
