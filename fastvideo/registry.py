@@ -373,6 +373,19 @@ def _register_configs() -> None:
         ],
     )
 
+    # Kandinsky5 Lite T2V
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=PipelineConfig,
+        hf_model_paths=[
+            "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower()
+                             for token in ("kandinsky5", "kandinsky-5")),
+        ],
+    )
+
     # LongCat
     register_configs(
         sampling_param_cls=None,

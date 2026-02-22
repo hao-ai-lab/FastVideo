@@ -41,6 +41,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "LTX2Transformer3DModel": ("dits", "ltx2", "LTX2Transformer3DModel"),
     "SD3Transformer2DModel": ("dits", "sd3", "SD3Transformer2DModel"),
     "LingBotWorldTransformer3DModel": ("dits", "lingbotworld", "LingBotWorldTransformer3DModel"),
+    "Kandinsky5Transformer3DModel":
+    ("dits", "kandinsky5", "Kandinsky5Transformer3DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {

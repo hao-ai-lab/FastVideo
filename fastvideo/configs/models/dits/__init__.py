@@ -8,10 +8,12 @@ from fastvideo.configs.models.dits.ltx2 import LTX2VideoConfig
 from fastvideo.configs.models.dits.stepvideo import StepVideoConfig
 from fastvideo.configs.models.dits.wanvideo import WanVideoConfig
 from fastvideo.configs.models.dits.hyworld import HYWorldConfig
+from fastvideo.configs.models.dits.kandinsky5 import Kandinsky5VideoConfig
 
 __all__ = [
     "HunyuanVideoConfig", "HunyuanVideo15Config", "HunyuanGameCraftConfig",
     "WanVideoConfig", "StepVideoConfig", "CosmosVideoConfig",
     "Cosmos25VideoConfig", "LongCatVideoConfig", "LTX2VideoConfig",
-    "HYWorldConfig"
+    "HYWorldConfig",
+    "Kandinsky5VideoConfig"
 ]
