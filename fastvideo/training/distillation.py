@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import sys
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from fastvideo.logger import init_logger
 from fastvideo.utils import FlexibleArgumentParser
@@ -112,8 +113,8 @@ def run_distillation_from_config(config_path: str, *, dry_run: bool = False) -> 
 
 
 def main(args: Any) -> None:
-    config_path = str(getattr(args, "config"))
-    dry_run = bool(getattr(args, "dry_run", False))
+    config_path = str(args.config)
+    dry_run = bool(args.dry_run)
     logger.info("Starting Phase 2 distillation from config=%s", config_path)
     run_distillation_from_config(config_path, dry_run=dry_run)
     logger.info("Distillation completed")

@@ -61,7 +61,7 @@ def _load_module_from_path(
     component_path = os.path.join(local_model_path, module_type)
 
     if mark_teacher_critic:
-        setattr(training_args, "_loading_teacher_critic_model", True)
+        training_args._loading_teacher_critic_model = True
     try:
         module = PipelineComponentLoader.load_module(
             module_name=module_type,
@@ -71,7 +71,7 @@ def _load_module_from_path(
         )
     finally:
         if mark_teacher_critic and hasattr(training_args, "_loading_teacher_critic_model"):
-            delattr(training_args, "_loading_teacher_critic_model")
+            del training_args._loading_teacher_critic_model
 
     if not isinstance(module, torch.nn.Module):
         raise TypeError(f"Loaded {module_type!r} is not a torch.nn.Module: {type(module)}")
@@ -238,12 +238,25 @@ def build_wan_dmd2_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:
 
     bundle = ModelBundle(roles=role_handles)
 
+    tracker = _build_tracker(training_args, config=cfg.raw)
+
+    validator = None
+    if getattr(training_args, "log_validation", False):
+        from fastvideo.distillation.validators.wan import WanValidator
+
+        validator = WanValidator(
+            bundle=bundle,
+            training_args=training_args,
+            tracker=tracker,
+        )
+
     adapter = WanAdapter(
         bundle=bundle,
         training_args=training_args,
         noise_scheduler=noise_scheduler,
         vae=vae,
         validation_pipeline=None,
+        validator=validator,
     )
 
     method = DMD2Method(bundle=bundle, adapter=adapter)
@@ -262,8 +275,6 @@ def build_wan_dmd2_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:
         text_padding_length=int(text_len),
         seed=int(training_args.seed or 0),
     )
-
-    tracker = _build_tracker(training_args, config=cfg.raw)
 
     return DistillRuntime(
         training_args=training_args,

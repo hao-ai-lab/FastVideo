@@ -106,7 +106,7 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
     """
 
     path = resolve_outside_overlay(path)
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     cfg = _require_mapping(raw, where=path)
 
@@ -146,6 +146,16 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
     # training uses fp32 master weights and should not CPU-offload DiT weights.
     training_kwargs.setdefault("dit_precision", "fp32")
     training_kwargs["dit_cpu_offload"] = False
+
+    # Default distributed sizes. These must be set *before* TrainingArgs
+    # construction because `check_fastvideo_args()` asserts they are not -1 in
+    # training mode.
+    num_gpus = int(training_kwargs.get("num_gpus", 1) or 1)
+    training_kwargs.setdefault("num_gpus", num_gpus)
+    training_kwargs.setdefault("tp_size", 1)
+    training_kwargs.setdefault("sp_size", num_gpus)
+    training_kwargs.setdefault("hsdp_replicate_dim", 1)
+    training_kwargs.setdefault("hsdp_shard_dim", num_gpus)
 
     # Use student path as the default base model_path. This is needed for
     # PipelineConfig registry lookup.

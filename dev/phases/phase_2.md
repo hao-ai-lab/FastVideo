@@ -128,7 +128,7 @@ Phase 2 的 deliverable 就是把这两类耦合点都替换掉。
 
 建议落地：
 
-- 新增目录：`fastvideo/distillation/validation/`
+- 新增目录：`fastvideo/distillation/validators/`
   - `base.py`：`DistillValidator` 抽象
   - `wan.py`：`WanValidator`
 

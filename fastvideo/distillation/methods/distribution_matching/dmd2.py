@@ -108,6 +108,8 @@ class DMD2Method(DistillMethod):
     ) -> None:
         super().__init__(bundle)
         bundle.require_roles(["student", "teacher", "critic"])
+        if getattr(bundle.role("teacher"), "trainable", False):
+            raise ValueError("DMD2Method requires models.teacher.trainable=false")
         self.adapter = adapter
         self.training_args = adapter.training_args
 

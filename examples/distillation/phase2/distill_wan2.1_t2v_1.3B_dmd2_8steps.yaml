@@ -1,0 +1,78 @@
+distill:
+  model: wan
+  method: dmd2
+
+models:
+  student:
+    family: wan
+    path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+  teacher:
+    family: wan
+    path: Wan-AI/Wan2.1-T2V-14B-Diffusers
+    trainable: false
+  critic:
+    family: wan
+    path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+
+training:
+  # Distributed
+  num_gpus: 1
+  sp_size: 1
+  tp_size: 1
+  hsdp_replicate_dim: 1
+  hsdp_shard_dim: 1
+
+  # Data
+  data_path: your_data_dir
+  dataloader_num_workers: 4
+
+  # Batch / shape
+  train_batch_size: 1
+  train_sp_batch_size: 1
+  gradient_accumulation_steps: 1
+  num_latent_t: 21
+  num_height: 480
+  num_width: 832
+  num_frames: 81
+
+  # Output / steps
+  output_dir: outputs/phase2_wan2.1_t2v_1.3B_dmd2_8steps
+  max_train_steps: 4000
+  seed: 1000
+
+  # Optimizer
+  learning_rate: 1.0e-5
+  betas: "0.0,0.999"
+  weight_decay: 0.01
+  lr_scheduler: constant
+  lr_warmup_steps: 0
+  max_grad_norm: 1.0
+
+  fake_score_learning_rate: 8.0e-6
+  fake_score_betas: "0.0,0.999"
+  fake_score_lr_scheduler: constant
+
+  # Distillation
+  min_timestep_ratio: 0.02
+  max_timestep_ratio: 0.98
+  generator_update_interval: 5
+  real_score_guidance_scale: 3.5
+  simulate_generator_forward: true
+  enable_gradient_checkpointing_type: full
+
+  # Tracking / validation
+  tracker_project_name: phase2_wan_dmd2_8steps
+  wandb_run_name: phase2_wan_dmd2_8steps
+  log_validation: true
+  validation_dataset_file: your_validation_dataset_file
+  validation_steps: 50
+  validation_sampling_steps: "8"
+  validation_guidance_scale: "6.0"
+
+pipeline_config:
+  flow_shift: 8
+  # 8-step schedule (same as Wan2.2 self-forcing examples)
+  dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
+
