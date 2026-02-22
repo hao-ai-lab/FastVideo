@@ -36,17 +36,18 @@ Phase 2 的定位：在 Phase 1 已经验证 “Wan DMD2 训练行为对齐 base
 
 ---
 
-## 当前“仍依赖 legacy”的点（Phase 2 要消灭）
+## 当前与 legacy 的关系（Phase 2 目标）
 
-以 Wan DMD2 为例，我们现在同时存在两条路径：
+Phase 2 的目标是：**新 distill 代码路径在 import 与 runtime 两个层面都不再依赖 legacy
+distillation pipeline**（`fastvideo/training/*distillation_pipeline.py`）。
 
-1. **Phase 1（legacy pipeline path）**：仍然依赖 `WanDistillationPipeline.from_pretrained(...)`，
-   validation 也会走 legacy `_log_validation(...)`（因为 Phase 1 需要保持与 baseline 的对齐与可用性）。
-2. **Phase 2（standalone runtime path）**：已替换为 **YAML-only + builder/runtime + standalone validator**，
-   不再依赖 legacy pipeline。
+当前状态（已达成）：
 
-Phase 2 的 deliverable 是让 Phase 2 路径完全自洽（训练/validation/checkpoint-resume），同时 Phase 1
-路径仍可跑（兼容历史脚本）。
+- Phase 2 entrypoint：`fastvideo/training/distillation.py --config <outside yaml>`
+- runtime：`build_wan_dmd2_runtime_from_config(...)`
+- validation：`fastvideo/distillation/validators/wan.py::WanValidator`
+
+以上链路不再实例化/调用 legacy `WanDistillationPipeline` / `DistillationPipeline._log_validation(...)`。
 
 ---
 
@@ -86,6 +87,10 @@ Phase 2 的 deliverable 是让 Phase 2 路径完全自洽（训练/validation/ch
   - 构建 dataloader（`build_parquet_map_style_dataloader`）
   - 初始化 tracker（复用 `fastvideo/training/trackers/`）
   - 通过 `WanAdapter(validator=...)` 接入独立 validation
+- [x] 移除 Phase 1 legacy bridge（不影响 Phase 2）
+  - `fastvideo/distillation/builder.py::build_wan_dmd2_method` 已移除
+  - `fastvideo/distillation/adapters/wan.py` 已移除 legacy pipeline fallback
+  - `fastvideo/training/wan_distillation_v3.py` 已移除
 
 ### C. role-based checkpoint/save/resume（Phase 2.3）
 

@@ -57,11 +57,11 @@ Phase 1 的定位：把 distillation 从 “pipeline god object” 拆成稳定�
 
 ### E. Builder + 通用入口（config -> instantiate）
 
-- [x] 新增 `fastvideo/distillation/builder.py::build_wan_dmd2_method`
-  - Phase 1 先实现：`wan + dmd2`
-- [x] 新增通用 distill 入口：`fastvideo/training/distillation.py`
-  - CLI：`--distill-model` / `--distill-method`
-- [x] 保留一个 Wan wrapper：`fastvideo/training/wan_distillation_v3.py`
+- [x] （Phase 1 过渡实现；Phase 2 已移除）`fastvideo/distillation/builder.py::build_wan_dmd2_method`
+  - 说明：Phase 1 用 legacy pipeline 启动，快速对齐 baseline
+- [x] （Phase 2 已改为 YAML-only）通用 distill 入口：`fastvideo/training/distillation.py`
+  - Phase 1：CLI 驱动；Phase 2：`--config /real/path/to/distill.yaml`
+- [x] （Phase 1 过渡实现；Phase 2 已移除）Wan wrapper：`fastvideo/training/wan_distillation_v3.py`
 
 ### F. 示例脚本（Phase 1）
 
