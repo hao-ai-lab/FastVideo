@@ -5,11 +5,10 @@ Sampling parameters for HunyuanGameCraft video generation.
 GameCraft generates game-like videos with camera/action control.
 Default parameters are based on the official implementation.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from fastvideo.configs.sample.base import SamplingParam
-from fastvideo.configs.sample.teacache import TeaCacheParams
 
 
 @dataclass
@@ -63,16 +62,6 @@ class HunyuanGameCraftSamplingParam(SamplingParam):
 
     # Number of conditioning frames (for autoregressive) - maps to num_cond_frames
     num_cond_frames: int = 0
-
-    # TeaCache parameters (if enabled)
-    teacache_params: TeaCacheParams = field(
-        default_factory=lambda: TeaCacheParams(
-            teacache_thresh=0.15,
-            coefficients=[
-                7.33226126e+02, -4.01131952e+02, 6.75869174e+01,
-                -3.14987800e+00, 9.61237896e-02
-            ],
-        ))
 
     def __post_init__(self) -> None:
         super().__post_init__()

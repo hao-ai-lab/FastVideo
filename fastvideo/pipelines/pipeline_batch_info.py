@@ -21,7 +21,6 @@ import time
 from collections import OrderedDict
 
 from fastvideo.attention import AttentionMetadata
-from fastvideo.configs.sample.teacache import TeaCacheParams, WanTeaCacheParams
 
 
 class PipelineLoggingInfo:
@@ -204,10 +203,6 @@ class ForwardBatch:
     # Misc
     save_video: bool = True
     return_frames: bool = False
-
-    # TeaCache parameters
-    enable_teacache: bool = False
-    teacache_params: TeaCacheParams | WanTeaCacheParams | None = None
 
     # STA parameters
     STA_param: list | None = None
