@@ -36,7 +36,6 @@
       "lora_config": null
     }
   ],
-  "mask_strategy_file_path": null,
   "enable_torch_compile": false,
   "image_encoder_config": {
     "prefix": "clip",

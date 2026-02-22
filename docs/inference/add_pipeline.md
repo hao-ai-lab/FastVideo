@@ -123,7 +123,7 @@ self.attn = DistributedAttention(
     softmax_scale=None,
     causal=False,
     supported_attention_backends=(
-        AttentionBackendEnum.SLIDING_TILE_ATTN,
+        AttentionBackendEnum.VIDEO_SPARSE_ATTN,
         AttentionBackendEnum.FLASH_ATTN,
         AttentionBackendEnum.TORCH_SDPA,
     )

@@ -11,14 +11,6 @@ from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 try:
-    from fastvideo.attention.backends.sliding_tile_attn import (
-        SlidingTileAttentionBackend)
-    st_attn_available = True
-except ImportError:
-    st_attn_available = False
-    SlidingTileAttentionBackend = None  # type: ignore
-
-try:
     from fastvideo.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
     vsa_available = True
@@ -100,10 +92,6 @@ class CausalDMDDenosingStage(DenoisingStage):
                 "encoder_attention_mask": batch.prompt_attention_mask,
             },
         )
-
-        # STA
-        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
-            self.prepare_sta_param(batch, fastvideo_args)
 
         # Latents and prompts
         assert batch.latents is not None, "latents must be provided"
@@ -261,7 +249,6 @@ class CausalDMDDenosingStage(DenoisingStage):
                                                   w),  # type: ignore
                                 patch_size=fastvideo_args.pipeline_config.
                                 dit_config.patch_size,  # type: ignore
-                                STA_param=batch.STA_param,  # type: ignore
                                 VSA_sparsity=fastvideo_args.
                                 VSA_sparsity,  # type: ignore
                                 device=get_local_torch_device(),  # type: ignore
