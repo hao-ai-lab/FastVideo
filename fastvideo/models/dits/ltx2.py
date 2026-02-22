@@ -30,7 +30,7 @@ from fastvideo.distributed.parallel_state import get_sp_parallel_rank, get_sp_wo
 from fastvideo.distributed.utils import create_attention_mask_for_padding
 from fastvideo.forward_context import ForwardContext, get_forward_context, set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.dits.base import CachableDiT
+from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 
 logger = init_logger(__name__)
@@ -2204,7 +2204,7 @@ class LTXModel(torch.nn.Module):
         return vx, ax
 
 
-class LTX2Transformer3DModel(CachableDiT):
+class LTX2Transformer3DModel(BaseDiT):
     """
     LTX-2 transformer using native FastVideo LTX-2 modules.
     """
