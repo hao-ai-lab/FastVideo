@@ -15,7 +15,7 @@ class RoleHandle:
     modules: dict[str, torch.nn.Module] = field(default_factory=dict)
     optimizers: dict[str, torch.optim.Optimizer] = field(default_factory=dict)
     lr_schedulers: dict[str, Any] = field(default_factory=dict)
-    frozen: bool = False
+    trainable: bool = True
 
     def require_module(self, name: str) -> torch.nn.Module:
         if name not in self.modules:
@@ -36,4 +36,3 @@ class ModelBundle:
         if role not in self.roles:
             raise KeyError(f"Unknown role: {role}")
         return self.roles[role]
-

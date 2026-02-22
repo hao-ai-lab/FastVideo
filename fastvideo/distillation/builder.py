@@ -17,17 +17,19 @@ def build_wan_dmd2_method(
             modules={"transformer": pipeline.transformer},
             optimizers={"main": pipeline.optimizer},
             lr_schedulers={"main": pipeline.lr_scheduler},
+            trainable=True,
         ),
         "teacher":
         RoleHandle(
             modules={"transformer": pipeline.real_score_transformer},
-            frozen=True,
+            trainable=False,
         ),
         "critic":
         RoleHandle(
             modules={"transformer": pipeline.fake_score_transformer},
             optimizers={"main": pipeline.fake_score_optimizer},
             lr_schedulers={"main": pipeline.fake_score_lr_scheduler},
+            trainable=True,
         ),
     }
     bundle = ModelBundle(roles=roles)
