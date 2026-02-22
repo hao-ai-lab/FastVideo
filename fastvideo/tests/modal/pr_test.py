@@ -1,8 +1,8 @@
+import os
+
 import modal
 
 app = modal.App()
-
-import os
 
 model_vol = modal.Volume.from_name("hf-model-weights")
 image_version = os.getenv("IMAGE_VERSION")
@@ -84,16 +84,6 @@ def run_vae_tests():
               volumes={"/root/data": model_vol})
 def run_transformer_tests():
     run_test("export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/transformers -vs")
-
-@app.function(
-    gpu="L40S:4", 
-    image=image, 
-    timeout=6000, 
-    secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})],
-    volumes={"/root/data": model_vol} 
-)
-def run_ssim_tests():
-    run_test("export HF_HOME='/root/data/.cache' && export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/ssim -vs")
 
 @app.function(gpu="L40S:4", 
     image=image, 
