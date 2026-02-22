@@ -17,7 +17,7 @@ These are e2e example scripts for finetuning LTX-2 on the crush-smol dataset.
 
 ### Edit the following file and run finetuning:
 
-`bash examples/training/finetune/ltx2/overfit/finetune_t2v.sh`
+`bash examples/training/finetune/ltx2/finetune_t2v.sh`
 
 Notes:
 - Update `DATASET_PATH` in the preprocess script to point to your merged dataset root (`videos/` + `videos2caption.json`).
