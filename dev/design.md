@@ -123,7 +123,7 @@ ModelBundle
 
 RoleHandle
   modules: dict[str, nn.Module]      # e.g. {"transformer": ..., "transformer_2": ...}
-  frozen: bool
+  trainable: bool
   precision: optional               # bf16/fp16/fp32
   fsdp_policy: optional             # shard strategy / ignored modules
   ema: optional
@@ -360,34 +360,16 @@ FastGen 用 `DDPWrapper` 临时把 `module.forward` 指到 `single_train_step`�
 
 ## 6. 配置与 CLI 形态（渐进式）
 
-> Phase 2 开始，我们需要把 “如何启动一次 distill” 从大量 CLI 参数，演进为 **YAML 驱动**
-> 的结构化配置（可读、可复现、可审查）。同时为了不破坏现有用法，CLI 只作为 override。
+> Phase 2 开始，新的 distillation 入口 **不再兼容旧式 CLI 传参**。
+> 我们只接受新的结构化配置（YAML），让一次运行可读、可复现、可审查。
 
 ### 6.1 最小可用（建议先落地）
 
-**推荐（Phase 2 目标）**：一个 YAML 配置文件描述一次 distill 运行，入口只需要：
+**Phase 2 目标**：一个 YAML 配置文件描述一次 distill 运行，入口只需要：
 
 - `fastvideo/training/distillation.py --config path/to/distill.yaml`
 
-并允许少量 CLI overrides（只覆盖显式提供的参数）。
-
-**当前（Phase 1 已落地）**：仍然复用 FastVideo 现有 TrainingArgs/FastVideoArgs 的 CLI，
-再加一个 “选择 distill 组合” 的入口参数：
-
-- `--distill-model wan|...`
-- `--distill-method dmd2|...`
-
-其中 “roles -> model path” 暂时仍沿用现有 WAN distill 参数（Phase 2 会统一成 role-based 形态）：
-
-- student：`--model_path` / `--pretrained_model_name_or_path`
-- teacher：`--real_score_model_path`
-- critic：`--fake_score_model_path`（可选，取决于 method 需求）
-
-distill 专有参数建议用 namespace：
-
-- `--distill.dmd2.student_update_freq 5`
-- `--distill.dmd2.guidance_scale 3.5`
-- `--distill.sf.num_frame_per_block 3`
+除此之外的训练参数/模型选择/方法选择，都写入 YAML。
 
 ### 6.2 复杂配置（建议支持）
 
@@ -411,7 +393,7 @@ models:
   teacher:
     family: wan
     path: Wan-AI/Wan2.1-T2V-14B-Diffusers
-    frozen: true
+    trainable: false
   critic:
     family: wan
     path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
@@ -431,16 +413,15 @@ pipeline_config:
 
 **解析策略（最优雅且低风险）**
 
-- 入口 parser 仍然保留（便于 torchrun/集群 launch），但只保留：
-  - `--config distill.yaml`
-  - 以及少量 override（可选）
-- 若提供 `--config`：
+- 新入口的 parser 只保留 `--config distill.yaml`（以及少量 meta flags，如 `--dry-run`）。
+- 训练相关的所有参数（TrainingArgs/FastVideoArgs/pipeline_config/method/models）都来自 YAML。
+- 解析流程：
   1) `yaml.safe_load` 得到 dict
-  2) 用现有 `clean_cli_args(args)` 收集“显式提供的 CLI 参数”
-  3) 做 merge：`yaml_cfg` <- `cli_overrides`
-  4) 最终用 `TrainingArgs.from_kwargs(**merged)` 实例化（由现有 PipelineConfig/PreprocessConfig 负责子配置）
+  2) 规范化/校验 schema（distill/models/training/pipeline_config/...）
+  3) 将 `training:` 与 `pipeline_config:` 合成 kwargs，调用 `TrainingArgs.from_kwargs(**kwargs)`
+     （由现有 PipelineConfig/PreprocessConfig 负责子配置实例化与校验）
 
-这样不需要推翻现有 TrainingArgs/FastVideoArgs 体系，只是把 “输入源” 从 CLI 扩展为 YAML。
+这样不需要推翻现有 TrainingArgs/FastVideoArgs 体系，但从入口层面彻底摒弃旧式 CLI 传参方式。
 
 ### 6.4 `outside/` overlay（Phase 2 约束下的 workaround）
 
@@ -533,7 +514,8 @@ Phase 1 的“辉煌”（落地与收益）：
 - ✅ Builder 雏形：`fastvideo/distillation/builder.py`
   - 把 “roles -> bundle -> method” 的胶水集中在一处，便于扩展新 method/new model
 - ✅ 通用入口：`fastvideo/training/distillation.py`
-  - CLI 选择：`--distill-model` + `--distill-method`
+  - Phase 1 仍是 CLI 选择：`--distill-model` + `--distill-method`
+  - Phase 2 起将切换为 **YAML-only**（见第 6 节），并逐步废弃这套 CLI
 - ✅ 训练效果对齐：Phase 1 跑出来的 WAN DMD2 与 Phase 0/baseline 行为一致（已实测）
 
 ### Phase 2（建议重点推进）：彻底脱离 legacy distill pipeline（让新框架可独立存在）
@@ -558,9 +540,9 @@ Phase 1 的“辉煌”（落地与收益）：
 
 - 目标：`fastvideo/training/distillation.py` 不再先 instantiate `WanDistillationPipeline`
 - 建议实现：
-  - 定义结构化 spec：`RoleSpec/ModelSpec`（role -> {family, path, precision, frozen/trainable,...}）
+  - 定义结构化 spec：`RoleSpec/ModelSpec`（role -> {family, path, precision, trainable,...}）
   - 配置形态落地（Phase 2 必做）：
-    - `--config path/to/distill.yaml`（YAML 为 single source of truth；CLI 只做 override）
+    - `--config path/to/distill.yaml`（YAML 为 single source of truth；CLI 仅指定配置路径）
     - `outside/` overlay：解析 `pipeline_config_path` 等文件路径时 outside 优先、repo fallback
     - （可选）保留 `--models_json` 作为“程序生成配置”的接口
   - builder 根据 spec：
@@ -568,9 +550,9 @@ Phase 1 的“辉煌”（落地与收益）：
     - 构建 role-based optimizers/schedulers
     - 组装 `ModelBundle + Adapter + Method`
     - 构建 dataloader（直接复用 dataset 代码，不经由 legacy pipeline class）
-  - 不新增入口文件：直接增强 `fastvideo/training/distillation.py`
-    - 有 `--config` 时走新 builder/runtime
-    - 无 `--config` 时保留旧 pipeline 路径（legacy 仍可跑）
+  - 不新增入口文件：直接增强 `fastvideo/training/distillation.py`，并把它定义为 **YAML-only distill entrypoint**
+    - 仅支持 `--config distill.yaml`（以及少量 meta flags），不再兼容旧式 CLI configs
+    - legacy distill 继续通过原有 `fastvideo/training/*distillation_pipeline.py` 入口运行（两套路径并存）
 - 收益：distill 路径具备真正的“模型/算法 catalog + instantiate”，开始能支持更多模型家族
 
 #### Phase 2.3：role-based checkpoint/save/resume（新框架自洽）
