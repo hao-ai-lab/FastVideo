@@ -602,7 +602,7 @@ class LongCatCrossAttention(nn.Module):
             return out
 
         # === Standard cross-attention ===
-        # Project Q, K, V (standard cross-attention like WanVideo/StepVideo/Cosmos)
+        # Project Q, K, V (standard cross-attention like WanVideo/Cosmos)
         q, _ = self.to_q(x)
         k, _ = self.to_k(context)
         v, _ = self.to_v(context)

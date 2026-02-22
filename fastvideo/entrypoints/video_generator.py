@@ -6,7 +6,6 @@ This module provides a consolidated interface for generating videos using
 diffusion models.
 """
 
-import math
 import os
 import re
 import threading
@@ -336,30 +335,19 @@ class VideoGenerator:
 
         temporal_scale_factor = pipeline_config.vae_config.arch_config.temporal_compression_ratio
         num_frames = sampling_param.num_frames
-        num_gpus = fastvideo_args.num_gpus
         use_temporal_scaling_frames = pipeline_config.vae_config.use_temporal_scaling_frames
 
         # Adjust number of frames based on number of GPUs
-        if use_temporal_scaling_frames:
-            orig_latent_num_frames = (num_frames -
-                                      1) // temporal_scale_factor + 1
-        else:  # stepvideo only
-            orig_latent_num_frames = sampling_param.num_frames // 17 * 3
+        if not use_temporal_scaling_frames:
+            raise ValueError(
+                "Only temporal-scaling-frame VAE configs are supported.")
+        orig_latent_num_frames = (num_frames - 1) // temporal_scale_factor + 1
 
         if orig_latent_num_frames % fastvideo_args.num_gpus != 0:
-
-            if use_temporal_scaling_frames:
-                # Convert back to number of frames, ensuring num_frames-1 is a multiple of temporal_scale_factor
-                new_num_frames = (orig_latent_num_frames -
-                                  1) * temporal_scale_factor + 1
-            else:  # stepvideo only
-                # Find the least common multiple of 3 and num_gpus
-                divisor = math.lcm(3, num_gpus)
-                # Round up to the nearest multiple of this LCM
-                orig_latent_num_frames = (
-                    (orig_latent_num_frames + divisor - 1) // divisor) * divisor
-                # Convert back to actual frames using the StepVideo formula
-                new_num_frames = orig_latent_num_frames // 3 * 17
+            # Convert back to number of frames, ensuring num_frames-1 is a
+            # multiple of temporal_scale_factor.
+            new_num_frames = (orig_latent_num_frames -
+                              1) * temporal_scale_factor + 1
 
             logger.info(
                 "Adjusting number of frames from %s to %s based on number of GPUs (%s)",
