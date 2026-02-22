@@ -42,7 +42,7 @@ class DistillTrainer:
             yield batch
 
     def _get_current_vsa_sparsity(self, step: int) -> float:
-        # Phase 0: keep behavior close to existing pipelines.
+        # Keep behavior close to existing pipelines.
         vsa_sparsity = self.training_args.VSA_sparsity
         vsa_decay_rate = self.training_args.VSA_decay_rate
         vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps

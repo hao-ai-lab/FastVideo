@@ -69,7 +69,7 @@ class _ScheduleMethod(DistillMethod):
         return schedulers
 
 
-def test_phase0_optimizer_scheduler_alignment() -> None:
+def test_optimizer_scheduler_alignment() -> None:
     method = _ScheduleMethod(interval=5)
 
     for step in range(1, 11):
@@ -79,4 +79,3 @@ def test_phase0_optimizer_scheduler_alignment() -> None:
     assert method.critic_sched.step_calls == 10
     assert method.student_opt.step_calls == 2
     assert method.student_sched.step_calls == 2
-

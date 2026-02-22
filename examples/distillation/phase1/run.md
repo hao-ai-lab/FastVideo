@@ -1,1 +1,3 @@
-https://wandb.ai/alexzms-ucsd/phase0_wan_dmd2_8steps_wansyn/runs/cpw05inn?nw=nwuseralexzms
+# Phase 1 run link (optional)
+
+Paste your W&B run URL here for quick access.

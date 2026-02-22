@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e -x
 
-# One-shot launch script for Phase1 (DMD2Method + WanAdapter) Wan DMD2 few-step distillation.
-# Uses the same local Wan-Syn parquet dataset + validation json as Phase0 temp.sh.
+# One-shot launch script for Phase 1 (DMD2Method + WanAdapter) Wan DMD2 few-step distillation.
+# Uses the Wan-Syn parquet dataset + validation json (paths configurable below).
 #
 # Notes:
 # - By default this runs W&B in offline mode (safer for overnight runs).
