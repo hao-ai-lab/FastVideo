@@ -360,9 +360,18 @@ FastGen 用 `DDPWrapper` 临时把 `module.forward` 指到 `single_train_step`�
 
 ## 6. 配置与 CLI 形态（渐进式）
 
+> Phase 2 开始，我们需要把 “如何启动一次 distill” 从大量 CLI 参数，演进为 **YAML 驱动**
+> 的结构化配置（可读、可复现、可审查）。同时为了不破坏现有用法，CLI 只作为 override。
+
 ### 6.1 最小可用（建议先落地）
 
-Phase 1 已经落地的最小形态是：**复用 FastVideo 现有 TrainingArgs/FastVideoArgs**，
+**推荐（Phase 2 目标）**：一个 YAML 配置文件描述一次 distill 运行，入口只需要：
+
+- `fastvideo/training/distillation.py --config path/to/distill.yaml`
+
+并允许少量 CLI overrides（只覆盖显式提供的参数）。
+
+**当前（Phase 1 已落地）**：仍然复用 FastVideo 现有 TrainingArgs/FastVideoArgs 的 CLI，
 再加一个 “选择 distill 组合” 的入口参数：
 
 - `--distill-model wan|...`
@@ -385,7 +394,80 @@ distill 专有参数建议用 namespace：
 - `--models_json path/to/models.json`
   - per-role precision/offload/trainable/fsdp_policy/ckpt_path 等
 
-### 6.3 配置系统演进（可选吸收 FastGen 的优点）
+### 6.3 YAML 配置（Phase 2 必做）：结构化训练参数 + roles 选择
+
+我们希望最终的 “单次运行” 配置长这样（示意；字段可迭代）：
+
+```yaml
+distill:
+  model: wan
+  method: dmd2
+
+models:
+  student:
+    family: wan
+    path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+  teacher:
+    family: wan
+    path: Wan-AI/Wan2.1-T2V-14B-Diffusers
+    frozen: true
+  critic:
+    family: wan
+    path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+
+training:
+  output_dir: outputs/...
+  max_train_steps: 4000
+  seed: 1000
+  # ... (TrainingArgs/FastVideoArgs 的字段)
+
+pipeline_config:
+  # 支持直接内联覆盖，也支持只给 pipeline_config_path
+  # pipeline_config_path: fastvideo/configs/wan_1.3B_t2v_pipeline.json
+  flow_shift: 8
+```
+
+**解析策略（最优雅且低风险）**
+
+- 入口 parser 仍然保留（便于 torchrun/集群 launch），但只保留：
+  - `--config distill.yaml`
+  - 以及少量 override（可选）
+- 若提供 `--config`：
+  1) `yaml.safe_load` 得到 dict
+  2) 用现有 `clean_cli_args(args)` 收集“显式提供的 CLI 参数”
+  3) 做 merge：`yaml_cfg` <- `cli_overrides`
+  4) 最终用 `TrainingArgs.from_kwargs(**merged)` 实例化（由现有 PipelineConfig/PreprocessConfig 负责子配置）
+
+这样不需要推翻现有 TrainingArgs/FastVideoArgs 体系，只是把 “输入源” 从 CLI 扩展为 YAML。
+
+### 6.4 `outside/` overlay（Phase 2 约束下的 workaround）
+
+我们不能直接修改大项目里的 `fastvideo/configs/`（避免冲突/合并成本）。
+因此 Phase 2 建议在 distillation 侧新增一个 overlay 根目录：
+
+- `fastvideo/distillation/outside/`
+
+并约定：
+
+- 把“本应在外部 repo 存在的新增/改版配置”放进：
+  - `fastvideo/distillation/outside/fastvideo/configs/...`
+- distillation 的配置加载器在解析任何 config 路径时：
+  - **先查 outside overlay 是否存在同路径文件**
+  - 若不存在，再 fallback 到 repo 内的 `fastvideo/configs/...`
+
+这让我们可以在不侵入主仓库配置的情况下，迭代 YAML/JSON config、做实验性变更，
+同时不影响 legacy 代码路径。
+
+**实现注意**
+
+- 不建议把 `outside/` 直接插入 `sys.path` 去 shadow 整个 `fastvideo` 包（风险太高、调试困难）。
+- 推荐把 `outside/` 仅作为 **配置文件 overlay**（YAML/JSON）来做路径解析。
+- 如果确实需要覆盖 Python config（`.py`）：
+  - 用 `importlib` 的“按文件路径加载模块”方式加载为独立 module name，避免影响全局 import。
+
+### 6.5 配置系统演进（可选吸收 FastGen 的优点）
 
 FastGen 的 python config + instantiate + override 很优秀，但 FastVideo 现阶段可以先：
 
@@ -477,14 +559,18 @@ Phase 1 的“辉煌”（落地与收益）：
 - 目标：`fastvideo/training/distillation.py` 不再先 instantiate `WanDistillationPipeline`
 - 建议实现：
   - 定义结构化 spec：`RoleSpec/ModelSpec`（role -> {family, path, precision, frozen/trainable,...}）
-  - CLI 形态落地（择一）：
-    - `--models_json path/to/models.json`（推荐）
-    - 或 `--models.student ... --models.teacher ...`（人类可读但可扩展性较弱）
+  - 配置形态落地（Phase 2 必做）：
+    - `--config path/to/distill.yaml`（YAML 为 single source of truth；CLI 只做 override）
+    - `outside/` overlay：解析 `pipeline_config_path` 等文件路径时 outside 优先、repo fallback
+    - （可选）保留 `--models_json` 作为“程序生成配置”的接口
   - builder 根据 spec：
     - 加载 modules（student/teacher/critic）
     - 构建 role-based optimizers/schedulers
     - 组装 `ModelBundle + Adapter + Method`
     - 构建 dataloader（直接复用 dataset 代码，不经由 legacy pipeline class）
+  - 不新增入口文件：直接增强 `fastvideo/training/distillation.py`
+    - 有 `--config` 时走新 builder/runtime
+    - 无 `--config` 时保留旧 pipeline 路径（legacy 仍可跑）
 - 收益：distill 路径具备真正的“模型/算法 catalog + instantiate”，开始能支持更多模型家族
 
 #### Phase 2.3：role-based checkpoint/save/resume（新框架自洽）

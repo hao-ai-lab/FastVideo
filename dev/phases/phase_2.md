@@ -7,6 +7,9 @@ Phase 2 的定位：在 Phase 1 已经验证 “Wan DMD2 训练行为对齐 base
 > 约束：本 phase 采用 **非侵入式** 策略 —— 优先新增代码路径，不强行重构/迁移 legacy 文件。
 > 等到完全解耦之后，旧代码的清理由你手动完成（不在 Phase 2 做“删除/搬家”）。
 
+> 额外约束（你拍板）：**不新增任何入口文件**。
+> Phase 2 的新能力直接落在 `fastvideo/training/distillation.py` 内，通过配置选择走新/旧路径。
+
 ---
 
 ## Phase 2 目标（可交付）
@@ -18,6 +21,8 @@ Phase 2 的定位：在 Phase 1 已经验证 “Wan DMD2 训练行为对齐 base
    - per-role modules / optimizers / schedulers
    - RNG states（含用于噪声采样的 generator）
    - StatefulDataLoader（若使用）
+4. **YAML 驱动的训练参数解析**：用 `distill.yaml` 描述一次运行，CLI 仅做 override。
+5. **`outside/` overlay workaround**：不修改主仓库 `fastvideo/configs/`，在 distillation 内提供可覆盖的“外部配置根”。
 
 ---
 
@@ -64,17 +69,23 @@ Phase 2 的 deliverable 就是把这两类耦合点都替换掉。
 - [ ] 定义结构化 spec（角色驱动）：`ModelSpec / RoleSpec / DistillSpec`
   - 目标：`models={role -> spec}` 成为唯一真相
   - method 自己声明需要哪些 roles（缺失则报错）
-- [ ] 支持配置入口（择一优先落地）
-  - [ ] `--models_json path/to/models.json`（推荐）
-  - [ ] （可选）`--models.student ... --models.teacher ...`（快捷但可扩展性较弱）
+- [ ] 新增 YAML 配置解析（Phase 2 必做）
+  - [ ] `fastvideo/training/distillation.py` 支持 `--config path/to/distill.yaml`
+  - [ ] 解析策略：`yaml.safe_load` + `clean_cli_args(args)` merge（CLI 仅覆盖显式传入字段）
+  - [ ] YAML schema 最小包含：`distill.{model,method}` + `models{role->spec}` + `training{...}` + `pipeline_config{...}`
+- [ ] 支持 `outside/` overlay（Phase 2 workaround）
+  - [ ] 新增目录：`fastvideo/distillation/outside/`（视作外部 repo root）
+  - [ ] 约定覆盖路径：`fastvideo/distillation/outside/fastvideo/configs/...`
+  - [ ] config loader 在解析 `pipeline_config_path`/yaml include 时：outside 优先、repo fallback
+  - [ ] 不通过 `sys.path` shadow `fastvideo` 包；outside 仅做文件 overlay（必要时用 `importlib` 按路径加载 .py config）
 - [ ] 实现 “standalone runtime builder”
   - 直接加载 modules（student/teacher/critic）并构建 `ModelBundle`
   - 构建 per-role optimizers/schedulers（复用现有 TrainingArgs 超参）
   - 构建 dataloader（直接调用 `fastvideo/dataset/parquet_dataset_map_style.py::build_parquet_map_style_dataloader`）
   - 初始化 tracker（复用 `fastvideo/training/trackers/`）
-- [ ] 新增一个 **standalone entrypoint**（不替换旧入口）
-  - 例如：`fastvideo/training/distillation_standalone.py`
-  - 和 Phase 1 `distillation.py` 并存（用于 A/B 与回滚）
+- [ ] 修改现有入口 `fastvideo/training/distillation.py`（不新增入口文件）
+  - 若提供 `--config`（或未来 `--models_json`）：走 standalone builder 路径
+  - 否则：保留现有 legacy pipeline 路径（确保旧 code 可跑）
 
 ### C. role-based checkpoint/save/resume（Phase 2.3）
 
@@ -95,7 +106,7 @@ Phase 2 的 deliverable 就是把这两类耦合点都替换掉。
 
 - [ ] `examples/distillation/phase2/`：
   - 最小 smoke：Wan 1.3B 学 14B（DMD2）+ few-step validation + save/resume
-  - 提供 `models.json` 模板（role-based）
+  - 提供 `distill.yaml` 模板（role-based）
 
 ### E. 最小单测（可选但建议）
 
@@ -144,18 +155,22 @@ Phase 2 的 deliverable 就是把这两类耦合点都替换掉。
   - `RoleSpec`：`role/frozen/optimizer/scheduler/...`
   - `DistillSpec`：`method + models{role->RoleSpec} + adapter_family(optional)`
 
-一个最小的 `models.json` 示例（Wan 1.3B 学 14B + critic=1.3B）：
+一个最小的 `distill.yaml` 示例（Wan 1.3B 学 14B + critic=1.3B；示意）：
 
-```json
-{
-  "adapter_family": "wan",
-  "method": "dmd2",
-  "models": {
-    "student": {"family": "wan", "path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "trainable": true},
-    "teacher": {"family": "wan", "path": "Wan-AI/Wan2.1-T2V-14B-Diffusers", "frozen": true},
-    "critic":  {"family": "wan", "path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "trainable": true}
-  }
-}
+```yaml
+distill:
+  model: wan
+  method: dmd2
+
+models:
+  student: {family: wan, path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers, trainable: true}
+  teacher: {family: wan, path: Wan-AI/Wan2.1-T2V-14B-Diffusers, frozen: true}
+  critic:  {family: wan, path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers, trainable: true}
+
+training:
+  output_dir: outputs/phase2_wan_dmd2
+  max_train_steps: 4000
+  seed: 1000
 ```
 
 **加载实现建议（Wan）**
@@ -178,18 +193,9 @@ Phase 2 的 deliverable 就是把这两类耦合点都替换掉。
 
 **入口文件**
 
-- 新增 `fastvideo/training/distillation_standalone.py`
-  - 解析 args（复用 TrainingArgs/FastVideoArgs）
-  - 读取 `models_json`（若存在）
-  - 调用 standalone builder 构建：
-    - `method`
-    - `dataloader`
-    - `tracker`
-    - `validator`
-    - `checkpoint_manager`
-  - `DistillTrainer.run(method, ...)`
-
-> 这条路径与 `fastvideo/training/distillation.py` 并存，旧路径不动。
+- 不新增入口文件；直接增强 `fastvideo/training/distillation.py`：
+  - `--config distill.yaml` 走 standalone builder
+  - 不传 `--config` 则走 legacy pipeline（保持旧代码可跑）
 
 ### 2.3 role-based checkpoint：`DistillCheckpointManager`
 
@@ -206,4 +212,3 @@ Phase 2 的 deliverable 就是把这两类耦合点都替换掉。
 - `optimizers/{role}/{name}`
 - `schedulers/{role}/{name}`
 - `random/{name}`（全局 RNG + per-role noise generator）
-
