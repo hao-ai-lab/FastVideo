@@ -1,0 +1,1 @@
+https://wandb.ai/alexzms-ucsd/phase0_wan_dmd2_8steps_wansyn/runs/cpw05inn?nw=nwuseralexzms
