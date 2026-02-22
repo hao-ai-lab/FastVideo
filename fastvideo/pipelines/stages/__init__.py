@@ -36,8 +36,6 @@ from fastvideo.pipelines.stages.matrixgame_denoising import (
     MatrixGameCausalDenoisingStage)
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
 from fastvideo.pipelines.stages.gamecraft_denoising import GameCraftDenoisingStage
-from fastvideo.pipelines.stages.stepvideo_encoding import (
-    StepvideoPromptEncodingStage)
 from fastvideo.pipelines.stages.text_encoding import (Cosmos25TextEncodingStage,
                                                       TextEncodingStage)
 from fastvideo.pipelines.stages.timestep_preparation import (
@@ -88,7 +86,6 @@ __all__ = [
     "GameCraftImageVAEEncodingStage",
     "TextEncodingStage",
     "Cosmos25TextEncodingStage",
-    "StepvideoPromptEncodingStage",
     # LongCat stages
     "LongCatVideoVAEEncodingStage",
     "LongCatKVCacheInitStage",
