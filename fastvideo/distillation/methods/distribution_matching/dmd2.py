@@ -16,6 +16,18 @@ from fastvideo.distillation.methods.base import DistillMethod
 
 
 class _DMD2Adapter(Protocol):
+    """Algorithm-specific adapter contract for :class:`DMD2Method`.
+
+    The method layer is intentionally model-agnostic: it should not import or
+    depend on any concrete pipeline/model implementation. Instead, all
+    model-specific primitives (batch preparation, noise schedule helpers,
+    forward-context management, and role-specific backward behavior) are
+    provided by an adapter (e.g. ``WanAdapter``).
+
+    This ``Protocol`` documents the required surface area and helps static type
+    checkers/IDE tooling; it is not enforced at runtime (duck typing).
+    """
+
     training_args: Any
 
     def on_train_start(self) -> None:
@@ -75,6 +87,19 @@ class _DMD2Adapter(Protocol):
 
 
 class DMD2Method(DistillMethod):
+    """DMD2 distillation algorithm (method layer).
+
+    Owns the algorithmic orchestration (loss construction + update policy) and
+    stays independent of any specific model family. It requires a
+    :class:`~fastvideo.distillation.bundle.ModelBundle` containing at least the
+    roles ``student``, ``teacher``, and ``critic``.
+
+    All model-family details (how to run student rollout, teacher CFG
+    prediction, critic loss, and how to safely run backward under activation
+    checkpointing/forward-context constraints) are delegated to the adapter
+    passed in at construction time.
+    """
+
     def __init__(
         self,
         *,
@@ -247,4 +272,3 @@ class DMD2Method(DistillMethod):
             self._clip_grad_norm(module)
 
         super().optimizers_schedulers_step(iteration)
-
