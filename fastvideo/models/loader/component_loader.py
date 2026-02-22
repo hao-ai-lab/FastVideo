@@ -518,10 +518,25 @@ class TokenizerLoader(ComponentLoader):
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the tokenizer based on the model path, and inference args."""
         logger.info("Loading tokenizer from %s", model_path)
+        resolved_model_path = model_path
+
+        # LTX2 checkpoints may not ship a top-level tokenizer/ directory.
+        # In that case, tokenizer assets live under text_encoder/gemma/.
+        if not os.path.isdir(resolved_model_path):
+            ltx2_gemma_path = os.path.normpath(
+                os.path.join(resolved_model_path, "..", "text_encoder",
+                             "gemma"))
+            if os.path.isdir(ltx2_gemma_path):
+                logger.info(
+                    "Tokenizer directory %s missing; falling back to %s",
+                    resolved_model_path,
+                    ltx2_gemma_path,
+                )
+                resolved_model_path = ltx2_gemma_path
 
         # Cosmos2.5 stores an AutoProcessor config in `tokenizer/config.json` (not a tokenizer
         # config). Use its `_name_or_path` (e.g. Qwen/Qwen2.5-VL-7B-Instruct) as the source.
-        tokenizer_cfg_path = os.path.join(model_path, "config.json")
+        tokenizer_cfg_path = os.path.join(resolved_model_path, "config.json")
         if os.path.exists(tokenizer_cfg_path):
             try:
                 with open(tokenizer_cfg_path, "r") as f:
@@ -547,10 +562,11 @@ class TokenizerLoader(ComponentLoader):
                 pass
 
         tokenizer = AutoTokenizer.from_pretrained(
-            model_path,  # "<path to model>/tokenizer"
+            resolved_model_path,  # "<path to model>/tokenizer"
             # in v0, this was same string as encoder_name "ClipTextModel"
             # TODO(will): pass these tokenizer kwargs from inference args? Maybe
             # other method of config?
+            local_files_only=os.path.isdir(resolved_model_path),
         )
         padding_side = None
         if hasattr(fastvideo_args.pipeline_config, "text_encoder_configs"):

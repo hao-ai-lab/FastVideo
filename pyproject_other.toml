@@ -75,7 +75,7 @@ dependencies = [
     "av",
 
     # Preprocessing Dependencies
-    "torchcodec==0.5.0",
+    "torchcodec",
     "ray>=2.49.1",
 ]
 
