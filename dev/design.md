@@ -362,10 +362,17 @@ FastGen 用 `DDPWrapper` 临时把 `module.forward` 指到 `single_train_step`�
 
 ### 6.1 最小可用（建议先落地）
 
-- `--models.student <path>`
-- `--models.teacher <path>`
-- `--models.critic <path>`（可选）
-- `--distill.method dmd2|self_forcing|teacher_only`
+Phase 1 已经落地的最小形态是：**复用 FastVideo 现有 TrainingArgs/FastVideoArgs**，
+再加一个 “选择 distill 组合” 的入口参数：
+
+- `--distill-model wan|...`
+- `--distill-method dmd2|...`
+
+其中 “roles -> model path” 暂时仍沿用现有 WAN distill 参数（Phase 2 会统一成 role-based 形态）：
+
+- student：`--model_path` / `--pretrained_model_name_or_path`
+- teacher：`--real_score_model_path`
+- critic：`--fake_score_model_path`（可选，取决于 method 需求）
 
 distill 专有参数建议用 namespace：
 
@@ -397,9 +404,11 @@ Phase 0 的实践表明：先把新框架以 **additive** 方式落地到一个�
 建议结构（已部分实现）：
 
 - `fastvideo/distillation/bundle.py`：`ModelBundle/RoleHandle`
-- `fastvideo/distillation/adapters/`：`WanPipelineAdapter`（Phase 0 过渡版）→ `WanAdapter`（目标）
-- `fastvideo/distillation/methods/`：`base.py`、（目标）`dmd2.py`、（目标）`self_forcing.py`
+- `fastvideo/distillation/adapters/`：`WanAdapter`（Phase 1 已落地；后续新增更多 adapter）
+- `fastvideo/distillation/methods/`：`base.py`、`distribution_matching/dmd2.py`、（目标）`self_forcing.py`
 - `fastvideo/distillation/trainer.py`：`DistillTrainer`
+- `fastvideo/distillation/builder.py`：把 “config -> roles -> bundle/adapter/method” 的胶水集中起来
+- `fastvideo/training/distillation.py`：通用入口（选择 distill_model + distill_method）
 - （后续）`fastvideo/distillation/checkpoint.py`：role-based `CheckpointManager`（先兼容旧格式）
 - （后续）`fastvideo/distillation/callbacks/`：EMA/clip/log/profiler 等
 
@@ -415,17 +424,10 @@ Phase 0 的实践表明：先把新框架以 **additive** 方式落地到一个�
 Phase 0 的定位在实践中更明确了：它是“**把旧 Wan distill pipeline 包一层新框架壳**”，
 先把训练循环/多 optimizer 调度/validation hook 等基础设施固定下来，再逐步解耦。
 
-- ✅ 新增 `DistillTrainer/DistillMethod/ModelBundle/(pipeline-backed) WanAdapter`
-- ✅ 新增一个 additive 入口：`fastvideo/training/wan_distillation_v2.py`
-  - 复用 legacy `WanDistillationPipeline` 完成模型加载/optimizer/dataloader/tracker
-  - 再把 student/teacher/critic 打包为 `ModelBundle(roles={...})`
-- ✅ 跑通 Wan DMD2（student + teacher + critic）
-  - 过渡命名：`WanDMD2Method`（刻意暴露耦合，避免误解为通用 DMD2）
-- ✅ 消除一个关键隐式耦合：训练前显式初始化 `neg/uncond conditioning`
-  - 不再依赖 validation 的副作用（见 `ensure_negative_conditioning()`）
-- ✅ 修正并用单测锁定一个关键语义：scheduler step 与 optimizer step 对齐
+- ✅ 新增 `DistillTrainer/DistillMethod/ModelBundle` 的骨架，并跑通 WAN distill
+- ✅ 用单测锁定关键语义：scheduler step 与 optimizer step 对齐
   - `generator_update_interval > 1` 时不会“空 step scheduler”
-- ✅ 提供 few-step distill 示例脚本 + 可直接跑的 temp 脚本
+- ✅ 为后续解耦铺路：把 “roles={student,teacher,critic}” 显式化到 bundle
 
 Phase 0 明确没有做（刻意延期）：
 
@@ -433,22 +435,69 @@ Phase 0 明确没有做（刻意延期）：
 - ❌ `DMD2Method` 的真正算法解耦（目前仍调用旧 pipeline 内部函数）
 - ❌ Self-forcing v2 迁移
 
-### Phase 1（建议开启）：算法与模型真正解耦（先把 DMD2 “抠出来”）
+### Phase 1（已完成）：算法与模型真正解耦（先把 DMD2 “抠出来”）
 
 Phase 1 的核心目标：把 Phase 0 的“脚手架耦合”逐步替换为 **Method(算法) + Adapter(模型)**
 的稳定边界，让其它模型/其它方法可以复用 Trainer。
 
-- 产出通用算法：`fastvideo/distillation/methods/dmd2.py::DMD2Method`
-  - 不再依赖 `fastvideo/training/distillation_pipeline.py` 的私有函数
-  - 只依赖 adapter 提供的 primitives（noise/add_noise/pred_to_x0/teacher_cfg/critic_forward 等）
-- 产出真正模型适配：`WanAdapter`（替换 `WanPipelineAdapter`）
-  - 逐步把 normalize/layout/attention metadata/输入 kwargs 组装等从 legacy pipeline 迁出
-- Builder 层雏形：从 `TrainingArgs/FastVideoArgs`（或 `--models_json`）直接构建
-  `ModelBundle + Adapter + Method`
-  - 目标：最终不再依赖 legacy pipeline 才能启动 v2
-- Validation 进一步抽象（可选）：把“怎么验证”从 method 里抽走，变成通用 hook/组件
+Phase 1 的“辉煌”（落地与收益）：
 
-### Phase 2：清理旧实现 + 扩展新模型/新算法
+- ✅ 通用算法 method：`fastvideo/distillation/methods/distribution_matching/dmd2.py::DMD2Method`
+  - 算法层不再调用 legacy pipeline 私有算法函数
+  - 依赖面缩到 adapter primitives（通过 `Protocol` 约束 surface）
+- ✅ 真正的 WAN 适配层：`fastvideo/distillation/adapters/wan.py::WanAdapter`
+  - `forward_context` 与 backward 重算约束收敛到 adapter（method 只实现算法）
+  - `ensure_negative_conditioning()` 显式化（不再依赖 validation 的隐式副作用）
+- ✅ Builder 雏形：`fastvideo/distillation/builder.py`
+  - 把 “roles -> bundle -> method” 的胶水集中在一处，便于扩展新 method/new model
+- ✅ 通用入口：`fastvideo/training/distillation.py`
+  - CLI 选择：`--distill-model` + `--distill-method`
+- ✅ 训练效果对齐：Phase 1 跑出来的 WAN DMD2 与 Phase 0/baseline 行为一致（已实测）
+
+### Phase 2（建议重点推进）：彻底脱离 legacy distill pipeline（让新框架可独立存在）
+
+你提的建议我同意：Phase 2 应该把 Phase 1 仍然残留的 legacy 依赖清干净，让新的 distill
+代码路径可以 **不依赖** `fastvideo/training/*distillation_pipeline.py` 和
+`WanDistillationPipeline` 仍可运行训练与验证。
+
+为了降低风险，建议 Phase 2 按 “先 validation、再 builder/runtime、最后清理入口” 的顺序推进。
+
+#### Phase 2.1：Validation 独立化（优先级最高，收益最大）
+
+- 目标：`WanAdapter.log_validation()` 不再调用 legacy `pipeline._log_validation(...)`
+- 建议实现：
+  - 新增 `fastvideo/distillation/validation/`（或 `fastvideo/distillation/validators/`）
+  - 由 adapter 提供 `build_validator(...)` 或直接实现 `adapter.sample(...)`
+  - 复用模块化 inference pipeline（例如 `fastvideo/pipelines/basic/wan/wan_dmd_pipeline.py`）
+    来生成视频并交给 tracker 记录
+- 收益：彻底消除 “validation 初始化副作用/属性缺失” 这类隐式耦合与脆弱点
+
+#### Phase 2.2：Builder/Runtime 脱离 pipeline（roles/spec -> instantiate）
+
+- 目标：`fastvideo/training/distillation.py` 不再先 instantiate `WanDistillationPipeline`
+- 建议实现：
+  - 定义结构化 spec：`RoleSpec/ModelSpec`（role -> {family, path, precision, frozen/trainable,...}）
+  - CLI 形态落地（择一）：
+    - `--models_json path/to/models.json`（推荐）
+    - 或 `--models.student ... --models.teacher ...`（人类可读但可扩展性较弱）
+  - builder 根据 spec：
+    - 加载 modules（student/teacher/critic）
+    - 构建 role-based optimizers/schedulers
+    - 组装 `ModelBundle + Adapter + Method`
+    - 构建 dataloader（直接复用 dataset 代码，不经由 legacy pipeline class）
+- 收益：distill 路径具备真正的“模型/算法 catalog + instantiate”，开始能支持更多模型家族
+
+#### Phase 2.3：role-based checkpoint/save/resume（新框架自洽）
+
+- 目标：新框架训练可 save/resume，且协议围绕 role 命名空间（不再绑死 WAN pipeline）
+- 建议实现：
+  - `fastvideo/distillation/checkpoint.py`：保存/加载 modules + optimizers + schedulers + RNG states
+  - 明确兼容策略：兼容旧格式（若必要）或提供一次性转换脚本
+
+#### Phase 2.4（Deferred）：收敛与清理（暂不做；完全解耦后手动处理）
+
+本轮 Phase 2 采用 **非侵入式** 策略：只新增新路径所需的代码，不做 legacy 代码搬家/清理。
+当 Phase 2.1/2.2/2.3 全部完成、并且新框架可以独立运行后，再由你手动清理旧入口/旧实现。
 
 在 Phase 1 的稳定边界之上，Phase 2 再做“功能扩展 + 旧实现收敛”：
 

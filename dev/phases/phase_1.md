@@ -79,7 +79,7 @@ Phase 1 的定位：把 distillation 从 “pipeline god object” 拆成稳定�
 - [x] 移除 legacy-backed `WanPipelineAdapter`
 - [x] 移除旧的强耦合方法 `WanDMD2Method`
 - [x] 移除旧入口 `fastvideo/training/wan_distillation_v2.py`
-- [x] 移除 `examples/distillation/phase0/`（避免误用旧脚本）
+- [ ] 保留 `examples/distillation/phase0/`（暂存脚本用于对照；最终会统一清理）
 - [x] 清理代码里残留的 `Phase 0/phase0` 调用与命名
 
 ---
