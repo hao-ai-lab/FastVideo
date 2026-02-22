@@ -365,9 +365,9 @@ FastGen 用 `DDPWrapper` 临时把 `module.forward` 指到 `single_train_step`�
 
 ### 6.1 最小可用（建议先落地）
 
-**Phase 2 目标**：一个 YAML 配置文件描述一次 distill 运行，入口只需要：
+**Phase 2+ 目标**：一个 YAML 配置文件描述一次运行（distill/finetune/…），入口只需要：
 
-- `fastvideo/training/distillation.py --config path/to/distill.yaml`
+- `fastvideo/training/distillation.py --config path/to/run.yaml`
 
 除此之外的训练参数/模型选择/方法选择，都写入 YAML。
 
@@ -376,13 +376,17 @@ FastGen 用 `DDPWrapper` 临时把 `module.forward` 指到 `single_train_step`�
 - `--models_json path/to/models.json`
   - per-role precision/offload/trainable/fsdp_policy/ckpt_path 等
 
-### 6.3 YAML 配置（Phase 2 必做）：结构化训练参数 + roles 选择
+### 6.3 YAML schema v2（Phase 3）：`recipe` + `method_config`
 
-我们希望最终的 “单次运行” 配置长这样（示意；字段可迭代）：
+说明：
+- Phase 2 的 YAML schema v1 使用 `distill:` 顶层（历史原因）
+- Phase 3 将升级为 schema v2：用 `recipe:` 顶层，并引入 `method_config:`（语义更通用）
+
+schema v2 的 “单次运行” 配置示意（字段可迭代）：
 
 ```yaml
-distill:
-  model: wan
+recipe:
+  family: wan
   method: dmd2
 
 models:
@@ -409,15 +413,20 @@ pipeline_config:
   # 支持直接内联覆盖，也支持只给 pipeline_config_path
   # pipeline_config_path: fastvideo/configs/wan_1.3B_t2v_pipeline.json
   flow_shift: 8
+
+method_config:
+  # method-specific 超参（不进入 TrainingArgs；由 method/adapter 自行解析）
+  generator_update_interval: 5
+  real_score_guidance_scale: 3.5
 ```
 
 **解析策略（最优雅且低风险）**
 
-- 新入口的 parser 只保留 `--config distill.yaml`（以及少量 meta flags，如 `--dry-run`）。
+- 新入口的 parser 只保留 `--config run.yaml`（以及少量 meta flags，如 `--dry-run`）。
 - 训练相关的所有参数（TrainingArgs/FastVideoArgs/pipeline_config/method/models）都来自 YAML。
 - 解析流程：
   1) `yaml.safe_load` 得到 dict
-  2) 规范化/校验 schema（distill/models/training/pipeline_config/...）
+  2) 规范化/校验 schema（recipe/models/training/pipeline_config/method_config/...）
   3) 将 `training:` 与 `pipeline_config:` 合成 kwargs，调用 `TrainingArgs.from_kwargs(**kwargs)`
      （由现有 PipelineConfig/PreprocessConfig 负责子配置实例化与校验）
 
@@ -434,9 +443,9 @@ pipeline_config:
 
 - 把“本应在外部 repo 存在的新增/改版配置”放进：
   - `fastvideo/distillation/outside/fastvideo/configs/...`
-- distillation 的配置加载器在解析任何 config 路径时：
-  - **先查 outside overlay 是否存在同路径文件**
-  - 若不存在，再 fallback 到 repo 内的 `fastvideo/configs/...`
+- distillation 入口 **不做任何自动补全/overlay 重写**：
+  - 用户传入的 `--config` 必须是一个真实存在的文件路径（通常位于 `outside/` 下）
+  - config 内引用的其它路径（如 `pipeline_config_path`）也必须是 **真实路径**
 
 这让我们可以在不侵入主仓库配置的情况下，迭代 YAML/JSON config、做实验性变更，
 同时不影响 legacy 代码路径。
@@ -444,7 +453,7 @@ pipeline_config:
 **实现注意**
 
 - 不建议把 `outside/` 直接插入 `sys.path` 去 shadow 整个 `fastvideo` 包（风险太高、调试困难）。
-- 推荐把 `outside/` 仅作为 **配置文件 overlay**（YAML/JSON）来做路径解析。
+- 推荐把 `outside/` 仅作为 **外部配置存放目录**（YAML/JSON），避免运行时“魔法寻路”。
 - 如果确实需要覆盖 Python config（`.py`）：
   - 用 `importlib` 的“按文件路径加载模块”方式加载为独立 module name，避免影响全局 import。
 
@@ -471,7 +480,7 @@ Phase 0 的实践表明：先把新框架以 **additive** 方式落地到一个�
 - `fastvideo/distillation/methods/`：`base.py`、`distribution_matching/dmd2.py`、（目标）`self_forcing.py`
 - `fastvideo/distillation/trainer.py`：`DistillTrainer`
 - `fastvideo/distillation/builder.py`：把 “config -> roles -> bundle/adapter/method” 的胶水集中起来
-- `fastvideo/training/distillation.py`：通用入口（选择 distill_model + distill_method）
+- `fastvideo/training/distillation.py`：通用入口（YAML-only：`--config path/to/run.yaml`）
 - （后续）`fastvideo/distillation/checkpoint.py`：role-based `CheckpointManager`（先兼容旧格式）
 - （后续）`fastvideo/distillation/callbacks/`：EMA/clip/log/profiler 等
 
@@ -518,7 +527,7 @@ Phase 1 的“辉煌”（落地与收益）：
   - Phase 2 起将切换为 **YAML-only**（见第 6 节），并逐步废弃这套 CLI
 - ✅ 训练效果对齐：Phase 1 跑出来的 WAN DMD2 与 Phase 0/baseline 行为一致（已实测）
 
-### Phase 2（建议重点推进）：彻底脱离 legacy distill pipeline（让新框架可独立存在）
+### Phase 2（已完成）：彻底脱离 legacy distill pipeline（让新框架可独立存在）
 
 你提的建议我同意：Phase 2 应该把 Phase 1 仍然残留的 legacy 依赖清干净，让新的 distill
 代码路径可以 **不依赖** `fastvideo/training/*distillation_pipeline.py` 和
@@ -542,8 +551,8 @@ Phase 1 的“辉煌”（落地与收益）：
 - 建议实现：
   - 定义结构化 spec：`RoleSpec/ModelSpec`（role -> {family, path, precision, trainable,...}）
   - 配置形态落地（Phase 2 必做）：
-    - `--config path/to/distill.yaml`（YAML 为 single source of truth；CLI 仅指定配置路径）
-    - `outside/` overlay：解析 `pipeline_config_path` 等文件路径时 outside 优先、repo fallback
+    - `--config path/to/run.yaml`（YAML 为 single source of truth；CLI 仅指定配置路径）
+    - `outside/` workaround：把新增/实验性 configs 放在 `outside/`，入口只接受真实路径（不做 overlay 寻路）
     - （可选）保留 `--models_json` 作为“程序生成配置”的接口
   - builder 根据 spec：
     - 加载 modules（student/teacher/critic）
@@ -551,7 +560,7 @@ Phase 1 的“辉煌”（落地与收益）：
     - 组装 `ModelBundle + Adapter + Method`
     - 构建 dataloader（直接复用 dataset 代码，不经由 legacy pipeline class）
   - 不新增入口文件：直接增强 `fastvideo/training/distillation.py`，并把它定义为 **YAML-only distill entrypoint**
-    - 仅支持 `--config distill.yaml`（以及少量 meta flags），不再兼容旧式 CLI configs
+    - 仅支持 `--config run.yaml`（以及少量 meta flags），不再兼容旧式 CLI configs
     - legacy distill 继续通过原有 `fastvideo/training/*distillation_pipeline.py` 入口运行（两套路径并存）
 - 收益：distill 路径具备真正的“模型/算法 catalog + instantiate”，开始能支持更多模型家族
 
@@ -575,6 +584,109 @@ Phase 1 的“辉煌”（落地与收益）：
 - 新增更多 adapter（Hunyuan/LTX2/LongCat…）
 - 新增更多 method（teacher-only、多 teacher、KD 轨迹蒸馏等）
 - 逐步冻结或移除旧 distill pipeline（保留兼容入口亦可）
+
+### Phase 3（计划）：优雅 dispatch + Recipe config + Finetuning（统一到同一框架）
+
+Phase 3 的定位：在 Phase 2 已经证明“新 distill 框架可独立运行”的基础上，解决两个长期
+扩展的核心问题：
+
+1) **真正优雅的 dispatch（避免 N×M builder 组合爆炸）**  
+2) **配置语义升级（`distill` -> `recipe`，引入 `method_config`）**  
+3) **把 finetuning 作为一种 method 接入框架**（只需要 `student` + dataset）
+
+#### Phase 3.1：真正优雅的 dispatch（N+M，而不是 N×M）
+
+目标：新增第 5 个模型家族 + 第 5 个算法时，不需要写 25 个 `build_<model>_<method>()`。
+
+核心思路：把 “可组合的变化” 拆成两类 registry，然后用 adapter capability/protocol 做约束：
+
+- **Model family registry**（按 `recipe.family` 注册）
+  - 负责：按 role 加载 modules、构建 adapter、构建 validator、构建 dataloader（或 data hooks）
+- **Method registry**（按 `recipe.method` 注册）
+  - 负责：构建 method（算法）；声明 `required_roles`；声明需要的 adapter primitives（Protocol 或 capability）
+
+入口层只做组合（伪代码）：
+
+```text
+cfg = load_run_config(...)
+family = FAMILY_REGISTRY[cfg.recipe.family]
+method = METHOD_REGISTRY[cfg.recipe.method]
+
+bundle = family.build_bundle(cfg.models, cfg.training, cfg.pipeline_config)
+adapter = family.build_adapter(bundle, cfg.training, cfg.pipeline_config, cfg.method_config)
+validator = family.build_validator(...)  # optional
+dataloader = family.build_dataloader(cfg.training, cfg.data?)  # optional
+
+distill_method = method.build(bundle=bundle, adapter=adapter, method_config=cfg.method_config)
+trainer.run(distill_method, dataloader, ...)
+```
+
+这样新增扩展的成本是：
+- 新模型家族：新增 1 个 family plugin（N）
+- 新算法：新增 1 个 method plugin（M）
+- 组合不需要额外代码（不再写 N×M）
+
+实现落点（建议，Phase 3 落地到代码时再细化）：
+- `fastvideo/distillation/registry.py`
+  - `register_family(name)(cls)` / `register_method(name)(cls)` 装饰器
+  - `get_family(name)` / `get_method(name)` + “可用项”错误提示
+- `fastvideo/distillation/builder.py`
+  - 收敛为 `build_runtime_from_config(cfg)`（通用），内部查 registry
+  - Wan 的加载逻辑迁移为 `WanFamily` plugin（保留当前 Phase2 的 loader 复用）
+
+#### Phase 3.2：配置语义升级（`distill` -> `recipe`，引入 `method_config`）
+
+动机：
+- `distill.method=finetune` 语义别扭，因为 finetune 是一种训练 recipe，不一定是“蒸馏”。
+- method-specific 参数长期塞进 `training:`（TrainingArgs）会让配置语义越来越混杂。
+
+Phase 3 计划把 YAML schema 升级为：
+
+```yaml
+recipe: {family: wan, method: dmd2}   # 只负责 “选什么”
+models: {student: ..., teacher: ...}  # 参与者
+training: {...}                       # infra 参数（映射到 TrainingArgs）
+pipeline_config: {...}                # pipeline/backbone config（模型侧）
+method_config: {...}                  # algorithm/method 超参（方法侧）
+```
+
+同时保持与 FastVideo 现有语义对齐：
+- 入口层会根据 `recipe.method` 推导 `TrainingArgs.mode`
+  - `finetune` -> `ExecutionMode.FINETUNING`
+  - 其它 distillation methods -> `ExecutionMode.DISTILLATION`
+
+迁移策略（建议）：
+- Phase 3 先把 `method_config` 作为新增字段引入，并逐步把以下参数从 `training:` 挪过去：
+  - DMD2：`generator_update_interval`, `real_score_guidance_scale`, `simulate_generator_forward`, ...
+  - Self-forcing：ODE-init / cache / rollout 策略相关参数
+  - Finetune：loss/target/pred_type 等
+- `training:` 保持 “trainer/infra” 语义（分布式、优化器、ckpt、logging、数据路径等）。
+
+#### Phase 3.3：Finetuning 作为一种 method 接入（only student）
+
+目标：让 finetuning 跟 distillation 一样走同一套：
+`ModelBundle + Adapter + Method + Trainer + (Validator/Checkpoint)`。
+
+建议落地形态（Phase 3 落地到代码时）：
+- 新增 method：`fastvideo/distillation/methods/fine_tuning/finetune.py::FineTuneMethod`
+  - `bundle.require_roles(["student"])`
+  - 复用 trainer 的 step/ckpt/validation
+  - 通过 adapter 提供的 primitives 完成 forward/loss/backward（避免 method 管 forward_context）
+- 为 finetune 定义 adapter contract（类似 `_DMD2Adapter` 的做法）：
+  - `_FineTuneAdapter(Protocol)`：`prepare_batch()` + `sample_train_timestep()` + `student_predict()` + `training_loss()` 等
+  - Wan 侧由 `WanAdapter` 实现该 contract（或拆出 `WanAdapterBase + WanFineTuneOps` 以避免 adapter 过度膨胀）
+
+Finetune 的 config（示意）：
+```yaml
+recipe: {family: wan, method: finetune}
+models:
+  student: {family: wan, path: ..., trainable: true}
+training: {...}
+pipeline_config: {...}
+method_config:
+  pred_type: x0
+  loss: flow_matching
+```
 
 ---
 

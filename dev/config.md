@@ -141,3 +141,83 @@ pipeline_config_path: /abs/path/to/wan_1.3B_t2v_pipeline.json
 - `models` 至少包含 `student/teacher/critic`
 - `training.data_path / output_dir / max_train_steps / seed` 等训练必须项
 - `pipeline_config.flow_shift` + `pipeline_config.dmd_denoising_steps`（8 steps）用于 few-step schedule
+
+## 8) Phase 3 计划：`recipe` 顶层 + `method_config`
+
+Phase 2 的 YAML schema 使用 `distill:` 作为顶层选择（历史原因：当时入口只跑 distillation）。
+但随着我们计划把 **finetuning 也纳入同一框架**，`distill.method=finetune` 的语义会显得别扭。
+
+因此 Phase 3 计划升级 schema：
+
+```yaml
+recipe: {family: wan, method: dmd2}   # 只负责选择（更通用）
+models: {...}                         # role -> {family/path/trainable}
+training: {...}                       # infra 参数（映射到 TrainingArgs）
+pipeline_config: {...}                # pipeline/backbone config（模型侧）
+method_config: {...}                  # method-specific 超参（方法侧）
+```
+
+同时保持与 FastVideo 的 `ExecutionMode` 语义对齐（Phase 3 计划）：
+- `recipe.method=finetune` 时：入口层设置 `training.mode=FINETUNING`
+- 其它 distillation methods：入口层设置 `training.mode=DISTILLATION`
+
+### 8.1 为什么需要 `method_config`？
+
+动机是把语义分清楚：
+- `training:`（TrainingArgs）应该尽量只承载 **基础设施**：分布式、优化器、ckpt、logging、数据路径等
+- `method_config:` 承载 **算法/recipe** 的超参：DMD2 / Self-Forcing / Finetune 各自不同
+
+这样未来 method 变多时，不会出现所有参数都混在 `training:` 里，导致配置难读、难 review、难复现。
+
+### 8.2 示例：DMD2（新 schema）
+
+```yaml
+recipe:
+  family: wan
+  method: dmd2
+
+models:
+  student: {family: wan, path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers, trainable: true}
+  teacher: {family: wan, path: Wan-AI/Wan2.1-T2V-14B-Diffusers, trainable: false}
+  critic:  {family: wan, path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers, trainable: true}
+
+training:
+  # ... TrainingArgs fields ...
+  output_dir: outputs/...
+  max_train_steps: 4000
+  seed: 1000
+
+pipeline_config:
+  flow_shift: 8
+  dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
+
+method_config:
+  generator_update_interval: 5
+  real_score_guidance_scale: 3.5
+  simulate_generator_forward: true
+```
+
+### 8.3 示例：Finetuning（only student）
+
+```yaml
+recipe:
+  family: wan
+  method: finetune
+
+models:
+  student: {family: wan, path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers, trainable: true}
+
+training:
+  # ... TrainingArgs fields ...
+  data_path: ...
+  output_dir: outputs/...
+  max_train_steps: 4000
+  seed: 1000
+
+pipeline_config:
+  flow_shift: 8
+
+method_config:
+  pred_type: x0
+  loss: flow_matching
+```
