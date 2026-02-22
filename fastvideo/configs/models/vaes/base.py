@@ -17,6 +17,26 @@ class VAEArchConfig(ArchConfig):
     temporal_compression_ratio: int = 4
     spatial_compression_ratio: int = 8
 
+    # Additional fields from diffusers AutoencoderKL
+    act_fn: str = "silu"
+    block_out_channels: list[int] = field(
+        default_factory=lambda: [128, 256, 512, 512])
+    down_block_types: list[str] = field(default_factory=list)
+    up_block_types: list[str] = field(default_factory=list)
+    force_upcast: bool = False
+    in_channels: int = 3
+    latent_channels: int = 16
+    latents_mean: list[float] | None = None
+    latents_std: list[float] | None = None
+    layers_per_block: int = 2
+    mid_block_add_attention: bool = True
+    norm_num_groups: int = 32
+    out_channels: int = 3
+    sample_size: int = 1024
+    shift_factor: float | None = None
+    use_post_quant_conv: bool = False
+    use_quant_conv: bool = False
+
 
 @dataclass
 class VAEConfig(ModelConfig):

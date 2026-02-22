@@ -19,7 +19,7 @@ try:
     from fastvideo.attention.backends.sliding_tile_attn import (
         SlidingTileAttentionBackend)
     st_attn_available = True
-except ImportError:
+except (ImportError, RuntimeError):
     st_attn_available = False
     SlidingTileAttentionBackend = None  # type: ignore
 
@@ -27,7 +27,7 @@ try:
     from fastvideo.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
     vsa_available = True
-except ImportError:
+except (ImportError, RuntimeError):
     vsa_available = False
     VideoSparseAttentionBackend = None  # type: ignore
 
@@ -335,9 +335,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                0,
+                torch.tensor([0], dtype=torch.long, device=device),
                 "local_end_index":
-                0,
+                torch.tensor([0], dtype=torch.long, device=device),
             })
 
         return kv_cache
@@ -373,9 +373,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                0,
+                torch.tensor([0], dtype=torch.long, device=device),
                 "local_end_index":
-                0,
+                torch.tensor([0], dtype=torch.long, device=device),
             })
             kv_cache_mouse.append({
                 "k":
@@ -393,9 +393,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                0,
+                torch.tensor([0], dtype=torch.long, device=device),
                 "local_end_index":
-                0,
+                torch.tensor([0], dtype=torch.long, device=device),
             })
 
         return kv_cache_mouse, kv_cache_keyboard
