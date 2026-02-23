@@ -5,7 +5,7 @@ export FASTVIDEO_ATTENTION_BACKEND=SLIDING_TILE_ATTN
 export MODEL_BASE=Wan-AI/Wan2.1-T2V-14B-Diffusers
 
 base_port=29503
-num_gpu=1
+num_gpu=8
 gpu_ids=$(seq 0 $((num_gpu-1)))
 skip_time_steps=12
 

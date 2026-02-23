@@ -722,20 +722,14 @@ class DenoisingStage(PipelineStage):
         from fastvideo.attention.backends.STA_configuration import save_mask_search_results
         if batch.mask_search_final_result_pos is not None and batch.prompt is not None:
             save_mask_search_results(
-                [
-                    dict(layer_data)
-                    for layer_data in batch.mask_search_final_result_pos
-                ],
+                batch.mask_search_final_result_pos,
                 prompt=str(batch.prompt),
                 mask_strategies=sparse_mask_candidates_searching,
                 output_dir=f'output/mask_search_result_pos_{size[0]}x{size[1]}/'
             )
         if batch.mask_search_final_result_neg is not None and batch.prompt is not None:
             save_mask_search_results(
-                [
-                    dict(layer_data)
-                    for layer_data in batch.mask_search_final_result_neg
-                ],
+                batch.mask_search_final_result_neg,
                 prompt=str(batch.prompt),
                 mask_strategies=sparse_mask_candidates_searching,
                 output_dir=f'output/mask_search_result_neg_{size[0]}x{size[1]}/'

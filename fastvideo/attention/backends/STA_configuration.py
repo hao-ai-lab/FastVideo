@@ -350,7 +350,7 @@ def select_best_mask_strategy(
 
 
 def save_mask_search_results(
-        mask_search_final_result: list[dict[str, list[float]]],
+        mask_search_final_result: list[Any],
         prompt: str,
         mask_strategies: list[str],
         output_dir: str = 'output/mask_search_result/') -> str | None:
@@ -358,8 +358,9 @@ def save_mask_search_results(
         print("No mask search results to save")
         return None
 
-    # Create result dictionary with defaultdict for nested lists
-    mask_search_dict: dict[str, dict[str, list[list[float]]]] = {
+    # Create result dictionary with nested lists:
+    # [timesteps][layers][heads].
+    mask_search_dict: dict[str, dict[str, list[list[list[float]]]]] = {
         "L2_loss": defaultdict(list),
         "L1_loss": defaultdict(list)
     }
@@ -371,23 +372,79 @@ def save_mask_search_results(
         masks_list = [int(x) for x in mask.split(',')]
         selected_masks.append(masks_list)
 
+    def _to_float_list(loss_values: Any, loss_name: str) -> list[float]:
+        if isinstance(loss_values, np.ndarray):
+            loss_values = loss_values.tolist()
+        if not isinstance(loss_values, list | tuple):
+            raise ValueError(
+                f"{loss_name} must be a sequence of numeric values")
+
+        float_values = []
+        for loss in loss_values:
+            try:
+                float_values.append(float(loss))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Invalid {loss_name} value {loss!r}: expected a number"
+                ) from exc
+        return float_values
+
+    def _extract_timestep_layer_losses(step_data: Any, loss_name: str,
+                                       strategy_idx: int) -> list[list[float]]:
+        if isinstance(step_data, dict):
+            layer_data_list = [step_data]
+        elif isinstance(step_data, list):
+            layer_data_list = step_data
+        else:
+            return []
+
+        timestep_layer_losses: list[list[float]] = []
+        for layer_data in layer_data_list:
+            if not isinstance(layer_data, dict) or loss_name not in layer_data:
+                continue
+
+            raw_losses = layer_data[loss_name]
+            if isinstance(raw_losses, np.ndarray):
+                raw_losses = raw_losses.tolist()
+            if not isinstance(raw_losses, list | tuple):
+                raise ValueError(f"{loss_name} must be a list or tuple")
+            raw_losses = list(raw_losses)
+
+            if raw_losses and isinstance(raw_losses[0], list | tuple
+                                         | np.ndarray):
+                if strategy_idx >= len(raw_losses):
+                    raise ValueError(
+                        f"Missing strategy index {strategy_idx} in {loss_name}")
+                strategy_losses = raw_losses[strategy_idx]
+            else:
+                if strategy_idx > 0:
+                    continue
+                strategy_losses = raw_losses
+
+            timestep_layer_losses.append(
+                _to_float_list(strategy_losses, loss_name))
+
+        return timestep_layer_losses
+
     # Process each mask strategy
     for i, mask_strategy in enumerate(selected_masks):
         mask_strategy_str = str(mask_strategy)
-        # Process L2 loss
-        step_results: list[list[float]] = []
-        for step_data in mask_search_final_result:
-            if isinstance(step_data, dict) and "L2_loss" in step_data:
-                layer_losses = [float(loss) for loss in step_data["L2_loss"]]
-                step_results.append(layer_losses)
-        mask_search_dict["L2_loss"][mask_strategy_str] = step_results
+        l2_step_results: list[list[list[float]]] = []
+        l1_step_results: list[list[list[float]]] = []
 
-        step_results = []
         for step_data in mask_search_final_result:
-            if isinstance(step_data, dict) and "L1_loss" in step_data:
-                layer_losses = [float(loss) for loss in step_data["L1_loss"]]
-                step_results.append(layer_losses)
-        mask_search_dict["L1_loss"][mask_strategy_str] = step_results
+            l2_layer_losses = _extract_timestep_layer_losses(
+                step_data, "L2_loss", i)
+            if l2_layer_losses:
+                l2_step_results.append(l2_layer_losses)
+
+            l1_layer_losses = _extract_timestep_layer_losses(
+                step_data, "L1_loss", i)
+            if l1_layer_losses:
+                l1_step_results.append(l1_layer_losses)
+
+        mask_search_dict["L2_loss"][mask_strategy_str] = l2_step_results
+        mask_search_dict["L1_loss"][mask_strategy_str] = l1_step_results
 
     # Create the output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
