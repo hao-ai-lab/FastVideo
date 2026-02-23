@@ -100,8 +100,9 @@ class LTX2DenoisingStage(PipelineStage):
         neg_prompt_mask = None
         # Only load negative prompts if CFG is actually enabled
         if batch.do_classifier_free_guidance:
-            assert batch.negative_prompt_embeds is not None, (
-                "CFG is enabled but negative_prompt_embeds is None")
+            if not batch.negative_prompt_embeds:
+                raise ValueError(
+                    "CFG is enabled but negative_prompt_embeds is empty")
             neg_prompt_embeds = batch.negative_prompt_embeds[0]
 
         # Ensure text conditioning is on the same device as latents.
@@ -228,6 +229,11 @@ class LTX2DenoisingStage(PipelineStage):
         do_mod = (modality_scale_video != 1.0 or modality_scale_audio != 1.0)
         do_guidance = do_cfg_text or do_mod or do_stg
 
+        if do_cfg_text and neg_prompt_embeds is None:
+            raise ValueError("LTX-2 text CFG is enabled "
+                             "(ltx2_cfg_scale_video/audio != 1.0), "
+                             "but negative prompt embeddings are missing")
+
         logger.info(
             "[LTX2] Denoising start: steps=%d dtype=%s "
             "cfg_video=%.1f cfg_audio=%.1f mod_video=%.1f "
@@ -289,7 +295,7 @@ class LTX2DenoisingStage(PipelineStage):
                     ptb_audio = pos_audio
 
                     # Pass 2: text CFG (negative prompt)
-                    if do_cfg_text and neg_prompt_embeds is not None:
+                    if do_cfg_text:
                         neg_outputs = self.transformer(
                             hidden_states=latents.to(target_dtype),
                             encoder_hidden_states=neg_prompt_embeds,

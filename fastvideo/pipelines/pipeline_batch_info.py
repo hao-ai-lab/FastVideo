@@ -230,8 +230,10 @@ class ForwardBatch:
     def __post_init__(self):
         """Initialize dependent fields after dataclass initialization."""
 
-        # Set do_classifier_free_guidance based on guidance scale and negative prompt
-        if self.guidance_scale > 1.0:
+        # Enable CFG for standard guidance_scale and LTX-2 text CFG scales.
+        ltx2_text_cfg_enabled = (self.ltx2_cfg_scale_video != 1.0
+                                 or self.ltx2_cfg_scale_audio != 1.0)
+        if self.guidance_scale > 1.0 or ltx2_text_cfg_enabled:
             self.do_classifier_free_guidance = True
         if self.negative_prompt_embeds is None:
             self.negative_prompt_embeds = []
