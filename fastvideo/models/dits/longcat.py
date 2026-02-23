@@ -17,7 +17,7 @@ from fastvideo.layers.layernorm import RMSNorm, FP32LayerNorm
 from fastvideo.layers.activation import get_act_fn
 from fastvideo.layers.rotary_embedding_3d import RotaryPositionalEmbedding3D
 from fastvideo.attention.layer import DistributedAttention, LocalAttention
-from fastvideo.models.dits.base import CachableDiT
+from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.third_party.longcat_video.block_sparse_attention.bsa_interface import flash_attn_bsa_3d
 
@@ -929,7 +929,7 @@ class FinalLayer(nn.Module):
 # Main Model
 # ============================================================================
 
-class LongCatTransformer3DModel(CachableDiT):
+class LongCatTransformer3DModel(BaseDiT):
     """
     Native LongCat Video Transformer using FastVideo layers.
     """

@@ -31,7 +31,7 @@ from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
                                                TimestepEmbedder, unpatchify)
-from fastvideo.models.dits.base import CachableDiT
+from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.logger import init_logger
 from fastvideo.forward_context import set_forward_context
@@ -389,7 +389,7 @@ class MMDoubleStreamBlock(nn.Module):
         return img, txt
 
 
-class HunyuanVideo15Transformer3DModel(CachableDiT):
+class HunyuanVideo15Transformer3DModel(BaseDiT):
     r"""
     A Transformer model for video-like data used in [HunyuanVideo1.5](https://huggingface.co/tencent/HunyuanVideo1.5).
     """

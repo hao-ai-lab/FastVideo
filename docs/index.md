@@ -27,7 +27,6 @@ FastVideo has the following features:
 
 - State-of-the-art performance optimizations for inference
   - [Sliding Tile Attention](https://arxiv.org/pdf/2502.04507)
-  - [TeaCache](https://arxiv.org/pdf/2411.19108)
   - [Sage Attention](https://arxiv.org/abs/2410.02367)
 - E2E post-training support
   - Data preprocessing pipeline for video data

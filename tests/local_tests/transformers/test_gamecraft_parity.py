@@ -402,7 +402,7 @@ def test_gamecraft_transformer_parity():
     from fastvideo.forward_context import set_forward_context
     from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
     
-    forward_batch = ForwardBatch(data_type="video", enable_teacache=False)
+    forward_batch = ForwardBatch(data_type="video")
     
     # Run FastVideo model
     with torch.no_grad():
