@@ -119,10 +119,11 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "turbodiffusion" in id.lower() or "turbowan" in id.lower(),
     "ltx2":
     lambda id: "ltx2" in id.lower() or "ltx-2" in id.lower(),
-    "flux2":
-    lambda id: "flux2" in id.lower() or "flux_2" in id.lower() or "flux-2" in id.lower(),
+    # flux2klein before flux2 so Flux2KleinPipeline gets Flux2KleinPipelineConfig
     "flux2klein":
     lambda id: "flux2klein" in id.lower() or "flux2-klein" in id.lower() or "flux.2-klein" in id.lower(),
+    "flux2":
+    lambda id: "flux2" in id.lower() or "flux_2" in id.lower() or "flux-2" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -147,10 +148,31 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "stepvideo": StepVideoT2VConfig,
     "turbodiffusion": TurboDiffusionT2V_1_3B_Config,
     "ltx2": LTX2T2VConfig,
+    "flux2klein": Flux2KleinPipelineConfig,  # before flux2 so Flux2KleinPipeline matches Klein
     "flux2": Flux2PipelineConfig,
-    "flux2klein": Flux2KleinPipelineConfig,
     # Other fallbacks by architecture
 }
+
+
+def _normalize_hf_cache_path_to_repo_id(pipeline_name_or_path: str) -> str | None:
+    """If path looks like a HuggingFace hub cache path, return org/repo id else None."""
+    if not pipeline_name_or_path:
+        return None
+    # HF cache: .../models--org--repo/snapshots/... or ...\models--org--repo\...
+    needle = "models--"
+    idx = pipeline_name_or_path.lower().find(needle)
+    if idx == -1:
+        return None
+    start = idx + len(needle)
+    rest = pipeline_name_or_path[start:]
+    # Take until next path separator
+    for i, c in enumerate(rest):
+        if c in "/\\":
+            rest = rest[:i]
+            break
+    if not rest:
+        return None
+    return rest.replace("--", "/")
 
 
 def get_pipeline_config_cls_from_name(
@@ -185,14 +207,17 @@ def get_pipeline_config_cls_from_name(
 
     pipeline_config_cls: type[PipelineConfig] | None = None
 
+    # Normalize HF cache paths (e.g. .../models--org--repo/...) to org/repo for registry lookup
+    lookup_id = _normalize_hf_cache_path_to_repo_id(pipeline_name_or_path) or pipeline_name_or_path
+
     # First try exact match for specific weights
-    if pipeline_name_or_path in PIPE_NAME_TO_CONFIG:
-        pipeline_config_cls = PIPE_NAME_TO_CONFIG[pipeline_name_or_path]
+    if lookup_id in PIPE_NAME_TO_CONFIG:
+        pipeline_config_cls = PIPE_NAME_TO_CONFIG[lookup_id]
         return pipeline_config_cls
 
     # Try partial matches (for local paths that might include the weight ID)
     for registered_id, config_class in PIPE_NAME_TO_CONFIG.items():
-        if registered_id in pipeline_name_or_path:
+        if registered_id in lookup_id:
             pipeline_config_cls = config_class
             break
 
@@ -207,12 +232,20 @@ def get_pipeline_config_cls_from_name(
         )
 
         pipeline_name = config["_class_name"]
-        # Try to determine pipeline architecture for fallback
+        # Try to determine pipeline architecture for fallback (flux2klein before flux2 in dict)
         for pipeline_type, detector in PIPELINE_DETECTOR.items():
             if detector(pipeline_name.lower()):
                 pipeline_config_cls = PIPELINE_FALLBACK_CONFIG.get(
                     pipeline_type)
                 break
+        # If no match from _class_name, try path (e.g. .../FLUX.2-klein-4B or ...models--...--FLUX.2-klein-4B)
+        if pipeline_config_cls is None:
+            path_lower = pipeline_name_or_path.lower()
+            for pipeline_type, detector in PIPELINE_DETECTOR.items():
+                if detector(path_lower):
+                    pipeline_config_cls = PIPELINE_FALLBACK_CONFIG.get(
+                        pipeline_type)
+                    break
 
         if pipeline_config_cls is not None:
             logger.warning(
