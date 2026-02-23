@@ -140,18 +140,6 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/**"
-                - "fastvideo-kernel/**"
-                - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
-              config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Inference Tests STA"
-                env:
-                  - TEST_TYPE=inference_sta
-                agents:
-                  queue: "default"
-            - path:
                 - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"

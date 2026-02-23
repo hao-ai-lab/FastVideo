@@ -139,9 +139,6 @@ class FastVideoArgs:
     vae_cpu_offload: bool = True
     pin_cpu_memory: bool = True
 
-    # STA (Sliding Tile Attention) parameters
-    mask_strategy_file_path: str | None = None
-
     # Compilation
     enable_torch_compile: bool = False
     torch_compile_kwargs: dict[str, Any] = field(default_factory=dict)
@@ -457,12 +454,6 @@ class FastVideoArgs:
             help="BSA chunk_3d_shape_k as three ints, e.g., 4 4 4.",
         )
 
-        # STA (Sliding Tile Attention) parameters
-        parser.add_argument(
-            "--mask-strategy-file-path",
-            type=str,
-            help="Path to mask strategy JSON file for STA",
-        )
         parser.add_argument(
             "--enable-torch-compile",
             action=StoreBoolean,

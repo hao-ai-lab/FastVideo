@@ -209,11 +209,7 @@ class ForwardBatch:
     save_video: bool = True
     return_frames: bool = False
 
-    # STA parameters
-    STA_param: list | None = None
     is_cfg_negative: bool = False
-    mask_search_final_result_pos: list[list] | None = None
-    mask_search_final_result_neg: list[list] | None = None
 
     # VSA parameters
     VSA_sparsity: float = 0.0

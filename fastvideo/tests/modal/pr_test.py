@@ -115,10 +115,6 @@ def run_training_lora_tests():
 def run_training_tests_VSA():
     run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/VSA -srP")
 
-@app.function(gpu="H100:2", image=image, timeout=900)
-def run_inference_tests_STA():
-    run_test("pytest ./fastvideo/tests/inference/STA -srP")
-
 @app.function(gpu="H100:1", image=image, timeout=900)
 def run_kernel_tests():
     run_test("pytest fastvideo-kernel/tests/ -vs")

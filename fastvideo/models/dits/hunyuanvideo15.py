@@ -770,7 +770,7 @@ class IndividualTokenRefinerBlock(nn.Module):
         self.attn = LocalAttention(
             num_heads=num_attention_heads,
             head_size=hidden_size // num_attention_heads,
-            # TODO: remove hardcode; remove STA
+            # TODO: remove hardcode
             supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
                                           AttentionBackendEnum.TORCH_SDPA),
         )

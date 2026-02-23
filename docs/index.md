@@ -26,7 +26,7 @@ FastVideo is an inference and post-training framework for diffusion models. It f
 FastVideo has the following features:
 
 - State-of-the-art performance optimizations for inference
-  - [Sliding Tile Attention](https://arxiv.org/pdf/2502.04507)
+  - [Sliding Tile Attention](attention/sta/index.md)
   - [Sage Attention](https://arxiv.org/abs/2410.02367)
 - E2E post-training support
   - Data preprocessing pipeline for video data
@@ -44,7 +44,7 @@ Use the navigation menu on the left to explore different sections:
 - **Inference**: Learn how to use FastVideo for video generation
 - **Training**: Data preprocessing and fine-tuning workflows
 - **Distillation**: Post-training optimization techniques
-- **Sliding Tile Attention**: Advanced attention mechanisms
+- **Sliding Tile Attention**: Legacy workflow docs and kernel notes
 - **Video Sparse Attention**: Efficient attention for video models
 - **Design**: Framework architecture and design principles
 - **Developer Guide**: Contributing and development setup
