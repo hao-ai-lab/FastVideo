@@ -89,10 +89,6 @@ case "$TEST_TYPE" in
         log "Running training VSA tests..."
         MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_tests_VSA"
         ;;
-    "inference_sta")
-        log "Running inference STA tests..."
-        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_inference_tests_STA"
-        ;;
     "kernel_tests")
         log "Running kernel tests..."
         MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_kernel_tests"

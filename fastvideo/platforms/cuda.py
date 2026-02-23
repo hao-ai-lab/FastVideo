@@ -124,22 +124,7 @@ class CudaPlatformBase(Platform):
         logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s",
                     envs.FASTVIDEO_ATTENTION_BACKEND)
         logger.info("Selected backend: %s", selected_backend)
-        if selected_backend == AttentionBackendEnum.SLIDING_TILE_ATTN:
-            try:
-                from fastvideo_kernel import sliding_tile_attention  # noqa: F401
-
-                from fastvideo.attention.backends.sliding_tile_attn import (  # noqa: F401
-                    SlidingTileAttentionBackend)
-                logger.info("Using Sliding Tile Attention backend.")
-
-                return "fastvideo.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
-            except ImportError as e:
-                logger.error(
-                    "Failed to import Sliding Tile Attention backend: %s",
-                    str(e))
-                raise ImportError(
-                    "Sliding Tile Attention backend is not installed. ") from e
-        elif selected_backend == AttentionBackendEnum.SAGE_ATTN:
+        if selected_backend == AttentionBackendEnum.SAGE_ATTN:
             try:
                 from sageattention import sageattn  # noqa: F401
 

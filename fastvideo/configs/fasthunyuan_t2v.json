@@ -43,6 +43,5 @@
       "require_post_norm": null
     }
   ],
-  "mask_strategy_file_path": null,
   "enable_torch_compile": false
 }

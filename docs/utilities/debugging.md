@@ -49,7 +49,9 @@ combinations.
 If forcing a backend fails, verify optional dependencies are installed:
 
 - `FLASH_ATTN`: `flash-attn`
-- `SLIDING_TILE_ATTN` and `VIDEO_SPARSE_ATTN`: `fastvideo-kernel`
+- `VIDEO_SPARSE_ATTN`: `fastvideo-kernel`
+- `SLIDING_TILE_ATTN`: STA legacy workflow in
+  `sta_do_not_delete` + `fastvideo-kernel`
 - `SAGE_ATTN` / `SAGE_ATTN_THREE`: SageAttention packages
 
 As a fallback, use:

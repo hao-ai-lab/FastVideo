@@ -8,7 +8,7 @@ This page describes the various options for speeding up generation times in Fast
 - Optimized Attention Backends
 
   - [Flash Attention](#flash-attention)
-  - [Sliding Tile Attention](#sliding-tile-attention)
+  - [Sliding Tile Attention (Archived)](#sliding-tile-attention-archived)
   - [Sage Attention](#sage-attention)
   - [Sage Attention 3](#sage-attention-3)
 
@@ -18,13 +18,14 @@ This page describes the various options for speeding up generation times in Fast
 
 - Torch SDPA: `FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA`
 - Flash Attention 2 and 3: `FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN`
-- Sliding Tile Attention: `FASTVIDEO_ATTENTION_BACKEND=SLIDING_TILE_ATTN`
 - Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
 - Video MoBA Attention: `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`
 - Sparse Linear Attention: `FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
 - SageSLA Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_SLA_ATTN`
+- Sliding Tile Attention (archived branch only):
+  `FASTVIDEO_ATTENTION_BACKEND=SLIDING_TILE_ATTN`
 
 ### Configuring Backends
 
@@ -35,7 +36,7 @@ There are two ways to configure the attention backend in FastVideo.
 In python, set the `FASTVIDEO_ATTENTION_BACKEND` environment variable before instantiating `VideoGenerator` like this:
 
 ```python
-os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "SLIDING_TILE_ATTN"
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
 ```
 
 #### 2. In CLI
@@ -66,12 +67,20 @@ pip install ninja
 python setup.py install
 ```
 
-### Sliding Tile Attention
+### Sliding Tile Attention (Archived)
 
 **`SLIDING_TILE_ATTN`**
 
-Sliding Tile Attention is provided by `fastvideo-kernel`.
-See [STA docs](../attention/sta/index.md) for installation details.
+The full STA integration in `fastvideo/` is archived from `main` and preserved
+at:
+
+- https://github.com/hao-ai-lab/FastVideo/tree/sta_do_not_delete
+
+We keep STA off `main` because we believe VSA is strictly better than STA for
+the actively maintained FastVideo path.
+
+Kernel code in `fastvideo-kernel` is still retained. For mask search and STA
+inference workflow, see [STA docs](../attention/sta/index.md).
 
 ### Video Sparse Attention
 

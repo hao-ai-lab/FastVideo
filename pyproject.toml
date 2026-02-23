@@ -143,7 +143,7 @@ check_untyped_defs = true
 follow_imports = "silent"
 
 [tool.codespell]
-skip ="./data,./wandb,./csrc/sliding_tile_attention/tk"
+skip ="./data,./wandb"
 
 [tool.ruff]
 # Allow lines to be as long as 80.
@@ -179,7 +179,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"csrc/sliding_tile_attention/test/bench.py" = ["F841"]
 # Ignore all files that end in `_test.py`.
 "fastvideo/models/hunyuan/diffusion/pipelines/pipeline_hunyuan_video.py" = ["E741"]
 

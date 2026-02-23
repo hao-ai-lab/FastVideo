@@ -134,7 +134,7 @@ nav:
     - Examples:
       - Basic: inference/examples/basic.md
       - Optimizations: inference/examples/optimizations.md
-      - STA Mask Search: inference/examples/sta_mask_search.md
+      - STA Mask Search (Archived): inference/examples/sta_mask_search.md
   - Training:
     - Overview: training/overview.md
     - Data Preprocessing: training/data_preprocess.md
@@ -152,7 +152,7 @@ nav:
   - Attention:
     - Overview: attention/index.md
     - Video Sparse Attention: attention/vsa/index.md
-    - Sliding Tile Attention: attention/sta/index.md
+    - Sliding Tile Attention (Archived): attention/sta/index.md
     - Backend Development: contributing/attention_backend.md
   - Utilities:
     - LoRA: utilities/lora.md
