@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import gc
-from typing import Any
+from typing import Any, Literal
 
 import torch
 
@@ -29,6 +29,7 @@ from fastvideo.training.training_utils import (
 from fastvideo.utils import is_vmoba_available, is_vsa_available, set_random_seed
 
 from fastvideo.distillation.adapters.base import DistillAdapter
+from fastvideo.distillation.bundle import RoleHandle
 
 try:
     from fastvideo.attention.backends.video_sparse_attn import (
@@ -49,13 +50,13 @@ class WanAdapter(DistillAdapter):
     def __init__(
         self,
         *,
-        bundle: Any,
+        prompt_handle: RoleHandle,
         training_args: Any,
         noise_scheduler: Any,
         vae: Any,
         validator: Any | None = None,
     ) -> None:
-        self.bundle = bundle
+        self.prompt_handle = prompt_handle
         self.training_args = training_args
         self.noise_scheduler = noise_scheduler
         self.vae = vae
@@ -97,12 +98,19 @@ class WanAdapter(DistillAdapter):
             self.denoising_step_list = timesteps[1000 - self.denoising_step_list]
             self.denoising_step_list = self.denoising_step_list.to(self.device)
 
-        if getattr(self.training_args, "boundary_ratio", None) is not None:
-            self.boundary_timestep = float(self.training_args.boundary_ratio) * float(
-                self.num_train_timestep
-            )
+        boundary_ratio = getattr(self.training_args, "boundary_ratio", None)
+        if boundary_ratio is not None:
+            self.boundary_timestep = float(boundary_ratio) * float(self.num_train_timestep)
         else:
             self.boundary_timestep = None
+
+    @property
+    def num_train_timesteps(self) -> int:
+        return int(self.num_train_timestep)
+
+    def shift_and_clamp_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
+        timestep = shift_timestep(timestep, self.timestep_shift, self.num_train_timestep)
+        return timestep.clamp(self.min_timestep, self.max_timestep)
 
     def on_train_start(self) -> None:
         seed = self.training_args.seed
@@ -157,7 +165,7 @@ class WanAdapter(DistillAdapter):
             args_copy = copy.deepcopy(training_args)
             args_copy.inference_mode = True
 
-            student_transformer = self.bundle.role("student").require_module("transformer")
+            student_transformer = self.prompt_handle.require_module("transformer")
             prompt_pipeline = WanDMDPipeline.from_pretrained(
                 training_args.model_path,
                 args=args_copy,
@@ -400,17 +408,6 @@ class WanAdapter(DistillAdapter):
 
         return training_batch
 
-    def sample_dmd_timestep(self, *, device: torch.device) -> torch.Tensor:
-        timestep = torch.randint(
-            0,
-            self.num_train_timestep,
-            [1],
-            device=device,
-            dtype=torch.long,
-        )
-        timestep = shift_timestep(timestep, self.timestep_shift, self.num_train_timestep)
-        return timestep.clamp(self.min_timestep, self.max_timestep)
-
     def add_noise(
         self,
         clean_latents: torch.Tensor,
@@ -441,24 +438,18 @@ class WanAdapter(DistillAdapter):
             "return_dict": False,
         }
 
-    def _get_teacher_transformer(self, timestep: torch.Tensor) -> torch.nn.Module:
-        role = self.bundle.role("teacher")
-        transformer = role.require_module("transformer")
-        transformer_2 = role.modules.get("transformer_2")
+    def _get_transformer(self, handle: RoleHandle, timestep: torch.Tensor) -> torch.nn.Module:
+        transformer = handle.require_module("transformer")
+        transformer_2 = handle.modules.get("transformer_2")
         if (
             transformer_2 is not None
             and self.boundary_timestep is not None
-            and float(timestep.item()) < self.boundary_timestep
+            and float(timestep.item()) < float(self.boundary_timestep)
         ):
             return transformer_2
         return transformer
 
-    def _get_critic_transformer(self, timestep: torch.Tensor) -> torch.nn.Module:
-        # Phase 1: prefer a single critic transformer unless MoE is fully wired.
-        role = self.bundle.role("critic")
-        return role.require_module("transformer")
-
-    def student_rollout(self, batch: TrainingBatch) -> tuple[torch.Tensor, Any]:
+    def student_rollout(self, handle: RoleHandle, batch: TrainingBatch) -> tuple[torch.Tensor, Any]:
         device_type = self.device.type
         dtype = batch.latents.dtype
         with torch.autocast(device_type, dtype=dtype), set_forward_context(
@@ -466,12 +457,12 @@ class WanAdapter(DistillAdapter):
             attn_metadata=batch.attn_metadata_vsa,
         ):
             if self.training_args.simulate_generator_forward:
-                pred_x0 = self._student_multi_step_simulation(batch)
+                pred_x0 = self._student_multi_step_simulation(handle, batch)
             else:
-                pred_x0 = self._student_single_step(batch)
+                pred_x0 = self._student_single_step(handle, batch)
         return pred_x0, (batch.timesteps, batch.attn_metadata_vsa)
 
-    def _student_single_step(self, batch: TrainingBatch) -> torch.Tensor:
+    def _student_single_step(self, handle: RoleHandle, batch: TrainingBatch) -> torch.Tensor:
         latents = batch.latents
         b, t = latents.shape[:2]
         index = torch.randint(
@@ -496,7 +487,7 @@ class WanAdapter(DistillAdapter):
             timestep,
             batch.conditional_dict,
         )
-        transformer = self.bundle.role("student").require_module("transformer")
+        transformer = handle.require_module("transformer")
         pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
         pred_x0 = pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
@@ -506,7 +497,7 @@ class WanAdapter(DistillAdapter):
         ).unflatten(0, pred_noise.shape[:2])
         return pred_x0
 
-    def _student_multi_step_simulation(self, batch: TrainingBatch) -> torch.Tensor:
+    def _student_multi_step_simulation(self, handle: RoleHandle, batch: TrainingBatch) -> torch.Tensor:
         latents = batch.latents
         dtype = latents.dtype
 
@@ -527,7 +518,7 @@ class WanAdapter(DistillAdapter):
         noise_latents: list[torch.Tensor] = []
         noise_latent_index = target_timestep_idx_int - 1
 
-        transformer = self.bundle.role("student").require_module("transformer")
+        transformer = handle.require_module("transformer")
 
         if max_target_idx > 0:
             with torch.no_grad():
@@ -587,13 +578,15 @@ class WanAdapter(DistillAdapter):
         batch.dmd_latent_vis_dict["generator_timestep"] = target_timestep.float().detach()
         return pred_x0
 
-    def teacher_predict_x0(
+    def predict_x0(
         self,
+        handle: RoleHandle,
         noisy_latents: torch.Tensor,
         timestep: torch.Tensor,
         batch: TrainingBatch,
         *,
         conditional: bool,
+        attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
         device_type = self.device.type
         dtype = noisy_latents.dtype
@@ -601,39 +594,19 @@ class WanAdapter(DistillAdapter):
         if text_dict is None:
             raise RuntimeError("Missing unconditional_dict; ensure_negative_conditioning() may have failed")
 
+        if attn_kind == "dense":
+            attn_metadata = batch.attn_metadata
+        elif attn_kind == "vsa":
+            attn_metadata = batch.attn_metadata_vsa
+        else:
+            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
+
         with torch.autocast(device_type, dtype=dtype), set_forward_context(
             current_timestep=batch.timesteps,
-            attn_metadata=batch.attn_metadata,
+            attn_metadata=attn_metadata,
         ):
             input_kwargs = self._build_distill_input_kwargs(noisy_latents, timestep, text_dict)
-            transformer = self._get_teacher_transformer(timestep)
-            pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
-            pred_x0 = pred_noise_to_pred_video(
-                pred_noise=pred_noise.flatten(0, 1),
-                noise_input_latent=noisy_latents.flatten(0, 1),
-                timestep=timestep,
-                scheduler=self.noise_scheduler,
-            ).unflatten(0, pred_noise.shape[:2])
-        return pred_x0
-
-    def critic_predict_x0(
-        self,
-        noisy_latents: torch.Tensor,
-        timestep: torch.Tensor,
-        batch: TrainingBatch,
-    ) -> torch.Tensor:
-        device_type = self.device.type
-        dtype = noisy_latents.dtype
-        with torch.autocast(device_type, dtype=dtype), set_forward_context(
-            current_timestep=batch.timesteps,
-            attn_metadata=batch.attn_metadata,
-        ):
-            input_kwargs = self._build_distill_input_kwargs(
-                noisy_latents,
-                timestep,
-                batch.conditional_dict,
-            )
-            transformer = self._get_critic_transformer(timestep)
+            transformer = self._get_transformer(handle, timestep)
             pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
             pred_x0 = pred_noise_to_pred_video(
                 pred_noise=pred_noise.flatten(0, 1),
@@ -645,6 +618,9 @@ class WanAdapter(DistillAdapter):
 
     def critic_flow_matching_loss(
         self,
+        *,
+        student: RoleHandle,
+        critic: RoleHandle,
         batch: TrainingBatch,
     ) -> tuple[torch.Tensor, Any, dict[str, Any]]:
         device_type = self.device.type
@@ -655,9 +631,9 @@ class WanAdapter(DistillAdapter):
             attn_metadata=batch.attn_metadata_vsa,
         ):
             if self.training_args.simulate_generator_forward:
-                generator_pred_x0 = self._student_multi_step_simulation(batch)
+                generator_pred_x0 = self._student_multi_step_simulation(student, batch)
             else:
-                generator_pred_x0 = self._student_single_step(batch)
+                generator_pred_x0 = self._student_single_step(student, batch)
 
         fake_score_timestep = torch.randint(
             0,
@@ -666,11 +642,7 @@ class WanAdapter(DistillAdapter):
             device=self.device,
             dtype=torch.long,
         )
-        fake_score_timestep = shift_timestep(
-            fake_score_timestep,
-            self.timestep_shift,
-            self.num_train_timestep,
-        ).clamp(self.min_timestep, self.max_timestep)
+        fake_score_timestep = self.shift_and_clamp_timestep(fake_score_timestep)
 
         noise = torch.randn(
             generator_pred_x0.shape,
@@ -693,7 +665,7 @@ class WanAdapter(DistillAdapter):
                 fake_score_timestep,
                 batch.conditional_dict,
             )
-            transformer = self._get_critic_transformer(fake_score_timestep)
+            transformer = self._get_transformer(critic, fake_score_timestep)
             pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
 
         target = noise - generator_pred_x0
@@ -706,12 +678,7 @@ class WanAdapter(DistillAdapter):
         outputs = {"fake_score_latent_vis_dict": batch.fake_score_latent_vis_dict}
         return flow_matching_loss, (batch.timesteps, batch.attn_metadata), outputs
 
-    def backward_student(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
-        timesteps, attn_metadata = ctx
-        with set_forward_context(current_timestep=timesteps, attn_metadata=attn_metadata):
-            (loss / max(1, int(grad_accum_rounds))).backward()
-
-    def backward_critic(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
+    def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
         timesteps, attn_metadata = ctx
         with set_forward_context(current_timestep=timesteps, attn_metadata=attn_metadata):
             (loss / max(1, int(grad_accum_rounds))).backward()

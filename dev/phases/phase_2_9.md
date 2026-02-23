@@ -124,13 +124,13 @@ handle 是为 **forward/select module** 服务的：比如选择哪个 transform
 
 ### 3.1 Registry + Families（优雅 dispatch，N+M）
 
-- [ ] 新增 `fastvideo/distillation/registry.py`
+- [x] 新增 `fastvideo/distillation/registry.py`
   - `register_family(name)` / `register_method(name)` 装饰器
   - `get_family(name)` / `get_method(name)`（错误信息包含可用项）
   - `ensure_builtin_registrations()`：导入内置 family/method 以完成注册
-- [ ] 新增 `fastvideo/distillation/families/`
+- [x] 新增 `fastvideo/distillation/families/`
   - `fastvideo/distillation/families/__init__.py`
-  - `fastvideo/distillation/families/wan.py`：`WanFamily`
+  - `fastvideo/distillation/families/wan.py`：`build_wan_family_artifacts`
     - 从 Phase 2 builder 迁移 Wan-specific build-time 逻辑：
       - 加载 role modules（transformer/transformer_2/vae 等）
       - shared components（scheduler/noise_scheduler）
@@ -138,7 +138,7 @@ handle 是为 **forward/select module** 服务的：比如选择哪个 transform
       - tracker
       - validator（WanValidator）
       - adapter 实例化（WanAdapter）
-- [ ] 改造 `fastvideo/distillation/builder.py`
+- [x] 改造 `fastvideo/distillation/builder.py`
   - 新增/收敛为 `build_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime`
   - `DistillRuntime.method` 类型改为 `DistillMethod`（而不是 `DMD2Method`）
   - builder 内部逻辑：
@@ -146,20 +146,20 @@ handle 是为 **forward/select module** 服务的：比如选择哪个 transform
     - `method = registry.get_method(cfg.distill.method)`
     - 调用 family 构建 bundle/adapter/dataloader/tracker
     - 调用 method factory 构建 DistillMethod
-- [ ] 改造入口 `fastvideo/training/distillation.py`
+- [x] 改造入口 `fastvideo/training/distillation.py`
   - 删除 `if cfg.distill.model == "wan" and cfg.distill.method == "dmd2": ...`
   - 统一走：`runtime = build_runtime_from_config(cfg)`
 
 ### 3.2 Adapter API：从 role-centric 收敛到 operation-centric（A）
 
-- [ ] 更新 `fastvideo/distillation/methods/distribution_matching/dmd2.py`
+- [x] 更新 `fastvideo/distillation/methods/distribution_matching/dmd2.py`
   - `_DMD2Adapter` Protocol 改为 operation-centric：
     - `predict_x0(handle, noisy_latents, timestep, batch, *, conditional, attn_kind)`
     - `backward(loss, ctx, ...)`
     - `select_module(handle, module_name, timestep)`（可选：用于 transformer_2/boundary）
     - `timestep_ops`（见 3.3）
   - 移除对 `teacher_predict_x0/critic_predict_x0/backward_student/backward_critic` 的直接依赖
-- [ ] 更新 `fastvideo/distillation/adapters/wan.py`
+- [x] 更新 `fastvideo/distillation/adapters/wan.py`
   - 把 `teacher_predict_x0/critic_predict_x0` 合并为 `predict_x0(handle=...)`
   - 把 `backward_student/backward_critic` 合并为 `backward(loss, ctx, ...)`
   - 将 `get_teacher_transformer/get_critic_transformer` 改为 `get_transformer(handle, timestep)`
@@ -167,18 +167,16 @@ handle 是为 **forward/select module** 服务的：比如选择哪个 transform
 
 ### 3.3 Timestep sampling policy 回归 method（B）
 
-- [ ] DMD2Method 内实现 timestep sampling policy：
+- [x] DMD2Method 内实现 timestep sampling policy：
   - `t = torch.randint(0, adapter.num_train_timesteps, ...)`（policy：uniform）
   - 然后调用 adapter 的 mechanics：
     - `t = adapter.shift_and_clamp_timestep(t)`（mechanics：shift/clamp 语义）
-- [ ] `WanAdapter` 去掉 `sample_dmd_timestep()`（或保留为 deprecated wrapper，直到 DMD2Method 完成迁移）
+- [x] `WanAdapter` 去掉 `sample_dmd_timestep()`（改为提供 `shift_and_clamp_timestep()`）
 
 ### 3.4 兼容性与安全落地（降低风险）
 
-- [ ] 允许“过渡期双接口”以降低一次性重构风险：
-  - adapter 新增 operation-centric API
-  - 旧 API 暂时保留为薄 wrapper（在一个 PR 内完成迁移后再删除）
-- [ ] 明确哪些行为必须保持一致（不引入训练 drift）：
+- [x] （选择 direct cut）一次性迁移到 operation-centric API（不保留旧 role-centric API wrapper）
+- [x] 明确哪些行为必须保持一致（不引入训练 drift）：
   - forward_context 的 ctx 捕获/恢复方式不改变
   - teacher 的 `transformer_2` boundary 逻辑不变
   - validation 路径不回退到 legacy

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import torch
 import torch.nn.functional as F
@@ -12,7 +12,10 @@ from fastvideo.training.training_utils import (
 )
 
 from fastvideo.distillation.bundle import ModelBundle
+from fastvideo.distillation.bundle import RoleHandle
 from fastvideo.distillation.methods.base import DistillMethod
+from fastvideo.distillation.registry import register_method
+from fastvideo.distillation.yaml_config import DistillRunConfig
 
 
 class _DMD2Adapter(Protocol):
@@ -41,10 +44,14 @@ class _DMD2Adapter(Protocol):
     ) -> Any:
         ...
 
-    def student_rollout(self, batch: Any) -> tuple[torch.Tensor, Any]:
+    def student_rollout(self, handle: RoleHandle, batch: Any) -> tuple[torch.Tensor, Any]:
         ...
 
-    def sample_dmd_timestep(self, *, device: torch.device) -> torch.Tensor:
+    @property
+    def num_train_timesteps(self) -> int:
+        ...
+
+    def shift_and_clamp_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
         ...
 
     def add_noise(
@@ -55,31 +62,28 @@ class _DMD2Adapter(Protocol):
     ) -> torch.Tensor:
         ...
 
-    def teacher_predict_x0(
+    def predict_x0(
         self,
+        handle: RoleHandle,
         noisy_latents: torch.Tensor,
         timestep: torch.Tensor,
         batch: Any,
         *,
         conditional: bool,
+        attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
         ...
 
-    def critic_predict_x0(
+    def critic_flow_matching_loss(
         self,
-        noisy_latents: torch.Tensor,
-        timestep: torch.Tensor,
+        *,
+        student: RoleHandle,
+        critic: RoleHandle,
         batch: Any,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, Any, dict[str, Any]]:
         ...
 
-    def critic_flow_matching_loss(self, batch: Any) -> tuple[torch.Tensor, Any, dict[str, Any]]:
-        ...
-
-    def backward_student(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
-        ...
-
-    def backward_critic(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
+    def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
         ...
 
     def log_validation(self, iteration: int) -> None:
@@ -108,7 +112,10 @@ class DMD2Method(DistillMethod):
     ) -> None:
         super().__init__(bundle)
         bundle.require_roles(["student", "teacher", "critic"])
-        if getattr(bundle.role("teacher"), "trainable", False):
+        self.student = bundle.role("student")
+        self.teacher = bundle.role("teacher")
+        self.critic = bundle.role("critic")
+        if getattr(self.teacher, "trainable", False):
             raise ValueError("DMD2Method requires models.teacher.trainable=false")
         self.adapter = adapter
         self.training_args = adapter.training_args
@@ -142,7 +149,14 @@ class DMD2Method(DistillMethod):
         device = generator_pred_x0.device
 
         with torch.no_grad():
-            timestep = self.adapter.sample_dmd_timestep(device=device)
+            timestep = torch.randint(
+                0,
+                int(self.adapter.num_train_timesteps),
+                [1],
+                device=device,
+                dtype=torch.long,
+            )
+            timestep = self.adapter.shift_and_clamp_timestep(timestep)
 
             noise = torch.randn(
                 generator_pred_x0.shape,
@@ -151,18 +165,29 @@ class DMD2Method(DistillMethod):
             )
             noisy_latents = self.adapter.add_noise(generator_pred_x0, noise, timestep)
 
-            faker_x0 = self.adapter.critic_predict_x0(noisy_latents, timestep, batch)
-            real_cond_x0 = self.adapter.teacher_predict_x0(
+            faker_x0 = self.adapter.predict_x0(
+                self.critic,
                 noisy_latents,
                 timestep,
                 batch,
                 conditional=True,
+                attn_kind="dense",
             )
-            real_uncond_x0 = self.adapter.teacher_predict_x0(
+            real_cond_x0 = self.adapter.predict_x0(
+                self.teacher,
+                noisy_latents,
+                timestep,
+                batch,
+                conditional=True,
+                attn_kind="dense",
+            )
+            real_uncond_x0 = self.adapter.predict_x0(
+                self.teacher,
                 noisy_latents,
                 timestep,
                 batch,
                 conditional=False,
+                attn_kind="dense",
             )
             real_cfg_x0 = real_cond_x0 + (real_cond_x0 - real_uncond_x0) * guidance_scale
 
@@ -197,11 +222,16 @@ class DMD2Method(DistillMethod):
         )
         student_ctx = None
         if update_student:
-            generator_pred_x0, student_ctx = self.adapter.student_rollout(training_batch)
+            generator_pred_x0, student_ctx = self.adapter.student_rollout(
+                self.student,
+                training_batch,
+            )
             generator_loss = self._dmd_loss(generator_pred_x0, training_batch)
 
         fake_score_loss, critic_ctx, critic_outputs = self.adapter.critic_flow_matching_loss(
-            training_batch
+            student=self.student,
+            critic=self.critic,
+            batch=training_batch,
         )
 
         total_loss = generator_loss + fake_score_loss
@@ -237,7 +267,7 @@ class DMD2Method(DistillMethod):
             student_ctx = backward_ctx.get("student_ctx")
             if student_ctx is None:
                 raise RuntimeError("Missing student backward context")
-            self.adapter.backward_student(
+            self.adapter.backward(
                 loss_map["generator_loss"],
                 student_ctx,
                 grad_accum_rounds=grad_accum_rounds,
@@ -246,7 +276,7 @@ class DMD2Method(DistillMethod):
         critic_ctx = backward_ctx.get("critic_ctx")
         if critic_ctx is None:
             raise RuntimeError("Missing critic backward context")
-        self.adapter.backward_critic(
+        self.adapter.backward(
             loss_map["fake_score_loss"],
             critic_ctx,
             grad_accum_rounds=grad_accum_rounds,
@@ -254,9 +284,9 @@ class DMD2Method(DistillMethod):
 
     def get_optimizers(self, iteration: int) -> list[torch.optim.Optimizer]:
         optimizers: list[torch.optim.Optimizer] = []
-        optimizers.extend(self.bundle.role("critic").optimizers.values())
+        optimizers.extend(self.critic.optimizers.values())
         if self._should_update_student(iteration):
-            optimizers.extend(self.bundle.role("student").optimizers.values())
+            optimizers.extend(self.student.optimizers.values())
         return optimizers
 
     def get_lr_schedulers(self, iteration: int) -> list[Any]:
@@ -274,3 +304,14 @@ class DMD2Method(DistillMethod):
             self._clip_grad_norm(module)
 
         super().optimizers_schedulers_step(iteration)
+
+
+@register_method("dmd2")
+def build_dmd2_method(
+    *,
+    cfg: DistillRunConfig,
+    bundle: ModelBundle,
+    adapter: _DMD2Adapter,
+) -> DistillMethod:
+    del cfg
+    return DMD2Method(bundle=bundle, adapter=adapter)

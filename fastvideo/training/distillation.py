@@ -25,7 +25,7 @@ def run_distillation_from_config(
         DistillCheckpointConfig,
         DistillCheckpointManager,
     )
-    from fastvideo.distillation.builder import build_wan_dmd2_runtime_from_config
+    from fastvideo.distillation.builder import build_runtime_from_config
     from fastvideo.distillation.yaml_config import load_distill_run_config
 
     cfg = load_distill_run_config(config_path)
@@ -41,13 +41,7 @@ def run_distillation_from_config(
         training_args.sp_size,
     )
 
-    if cfg.distill.model == "wan" and cfg.distill.method == "dmd2":
-        runtime = build_wan_dmd2_runtime_from_config(cfg)
-    else:
-        raise ValueError(
-            f"Unsupported distillation config: model={cfg.distill.model!r}, "
-            f"method={cfg.distill.method!r}"
-        )
+    runtime = build_runtime_from_config(cfg)
 
     if dry_run:
         logger.info("Dry-run: config parsed and runtime built successfully.")
