@@ -19,7 +19,8 @@ from fastvideo.dataset.validation_dataset import ValidationDataset
 from fastvideo.distributed import get_sp_group, get_world_group
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
-from fastvideo.pipelines.basic.wan.wan_dmd_pipeline import WanDMDPipeline
+from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
+from fastvideo.distillation.validators.base import ValidationRequest
 from fastvideo.utils import shallow_asdict
 
 logger = init_logger(__name__)
@@ -37,11 +38,9 @@ class WanValidator:
     def __init__(
         self,
         *,
-        bundle: Any,
         training_args: Any,
         tracker: Any,
     ) -> None:
-        self.bundle = bundle
         self.training_args = training_args
         self.tracker = tracker
 
@@ -57,7 +56,8 @@ class WanValidator:
         self.seed = int(seed)
         self.validation_random_generator = torch.Generator(device="cpu").manual_seed(self.seed)
 
-        self._pipeline: WanDMDPipeline | None = None
+        self._pipeline: WanPipeline | None = None
+        self._pipeline_transformer_id: int | None = None
         self._sampling_param: SamplingParam | None = None
 
     def _get_sampling_param(self) -> SamplingParam:
@@ -65,25 +65,26 @@ class WanValidator:
             self._sampling_param = SamplingParam.from_pretrained(self.training_args.model_path)
         return self._sampling_param
 
-    def _get_pipeline(self) -> WanDMDPipeline:
-        if self._pipeline is not None:
+    def _get_pipeline(self, *, transformer: torch.nn.Module) -> WanPipeline:
+        transformer_id = id(transformer)
+        if self._pipeline is not None and self._pipeline_transformer_id == transformer_id:
             return self._pipeline
 
         args_copy = copy.deepcopy(self.training_args)
         args_copy.inference_mode = True
 
-        student_transformer = self.bundle.role("student").require_module("transformer")
-        self._pipeline = WanDMDPipeline.from_pretrained(
+        self._pipeline = WanPipeline.from_pretrained(
             self.training_args.model_path,
-            args=args_copy,  # ignored in inference branch but keeps parity
+            args=args_copy,  # inference_mode=True uses FastVideoArgs branch
             inference_mode=True,
-            loaded_modules={"transformer": student_transformer},
+            loaded_modules={"transformer": transformer},
             tp_size=self.training_args.tp_size,
             sp_size=self.training_args.sp_size,
             num_gpus=self.training_args.num_gpus,
             pin_cpu_memory=self.training_args.pin_cpu_memory,
             dit_cpu_offload=True,
         )
+        self._pipeline_transformer_id = transformer_id
         return self._pipeline
 
     def _parse_validation_steps(self) -> list[int]:
@@ -96,13 +97,17 @@ class WanValidator:
         sampling_param: SamplingParam,
         validation_batch: dict[str, Any],
         num_inference_steps: int,
+        *,
+        guidance_scale: float | None = None,
     ) -> ForwardBatch:
         sampling_param.prompt = validation_batch["prompt"]
         sampling_param.height = self.training_args.num_height
         sampling_param.width = self.training_args.num_width
         sampling_param.num_inference_steps = num_inference_steps
         sampling_param.data_type = "video"
-        if getattr(self.training_args, "validation_guidance_scale", ""):
+        if guidance_scale is not None:
+            sampling_param.guidance_scale = float(guidance_scale)
+        elif getattr(self.training_args, "validation_guidance_scale", ""):
             sampling_param.guidance_scale = float(self.training_args.validation_guidance_scale)
         sampling_param.seed = self.seed
 
@@ -129,9 +134,15 @@ class WanValidator:
         )
         return batch
 
-    def _run_validation_for_steps(self, num_inference_steps: int) -> _ValidationStepResult:
+    def _run_validation_for_steps(
+        self,
+        num_inference_steps: int,
+        *,
+        transformer: torch.nn.Module,
+        guidance_scale: float | None = None,
+    ) -> _ValidationStepResult:
         training_args = self.training_args
-        pipeline = self._get_pipeline()
+        pipeline = self._get_pipeline(transformer=transformer)
         sampling_param = self._get_sampling_param()
 
         dataset = ValidationDataset(training_args.validation_dataset_file)
@@ -141,7 +152,12 @@ class WanValidator:
         captions: list[str] = []
 
         for validation_batch in dataloader:
-            batch = self._prepare_validation_batch(sampling_param, validation_batch, num_inference_steps)
+            batch = self._prepare_validation_batch(
+                sampling_param,
+                validation_batch,
+                num_inference_steps,
+                guidance_scale=guidance_scale,
+            )
 
             assert batch.prompt is not None and isinstance(batch.prompt, str)
             captions.append(batch.prompt)
@@ -163,31 +179,41 @@ class WanValidator:
 
         return _ValidationStepResult(videos=videos, captions=captions)
 
-    def log_validation(self, step: int) -> None:
+    def log_validation(self, step: int, *, request: ValidationRequest | None = None) -> None:
         training_args = self.training_args
         if not getattr(training_args, "log_validation", False):
             return
         if not getattr(training_args, "validation_dataset_file", ""):
             raise ValueError("validation_dataset_file must be set when log_validation is enabled")
 
-        validation_steps = self._parse_validation_steps()
+        guidance_scale = getattr(request, "guidance_scale", None)
+        validation_steps = getattr(request, "sampling_steps", None) or self._parse_validation_steps()
         if not validation_steps:
             return
 
-        student_transformer = self.bundle.role("student").require_module("transformer")
-        was_training = bool(getattr(student_transformer, "training", False))
+        sample_handle = getattr(request, "sample_handle", None)
+        if sample_handle is None:
+            raise ValueError("ValidationRequest.sample_handle must be provided by the method")
+        transformer = sample_handle.require_module("transformer")
+        was_training = bool(getattr(transformer, "training", False))
+
+        output_dir = getattr(request, "output_dir", None) or training_args.output_dir
 
         old_inference_mode = training_args.inference_mode
         old_dit_cpu_offload = training_args.dit_cpu_offload
         try:
             training_args.inference_mode = True
             training_args.dit_cpu_offload = True
-            student_transformer.eval()
+            transformer.eval()
 
             num_sp_groups = self.world_group.world_size // self.sp_group.world_size
 
             for num_inference_steps in validation_steps:
-                result = self._run_validation_for_steps(num_inference_steps)
+                result = self._run_validation_for_steps(
+                    num_inference_steps,
+                    transformer=transformer,
+                    guidance_scale=guidance_scale,
+                )
 
                 if self.rank_in_sp_group != 0:
                     continue
@@ -202,12 +228,12 @@ class WanValidator:
                         all_videos.extend(recv_videos)
                         all_captions.extend(recv_captions)
 
-                    os.makedirs(training_args.output_dir, exist_ok=True)
+                    os.makedirs(output_dir, exist_ok=True)
                     video_filenames: list[str] = []
                     sampling_param = self._get_sampling_param()
                     for i, video in enumerate(all_videos):
                         filename = os.path.join(
-                            training_args.output_dir,
+                            output_dir,
                             f"validation_step_{step}_inference_steps_{num_inference_steps}_video_{i}.mp4",
                         )
                         imageio.mimsave(filename, video, fps=sampling_param.fps)
@@ -228,4 +254,4 @@ class WanValidator:
             training_args.inference_mode = old_inference_mode
             training_args.dit_cpu_offload = old_dit_cpu_offload
             if was_training:
-                student_transformer.train()
+                transformer.train()

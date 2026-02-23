@@ -52,10 +52,12 @@ def run_distillation_from_config(
         keep_last=int(getattr(training_args, "checkpoints_total_limit", 0) or 0),
     )
 
-    adapter = getattr(runtime.method, "adapter", None)
-    get_rng_generators = getattr(adapter, "get_rng_generators", None)
+    get_rng_generators = getattr(runtime.method, "get_rng_generators", None)
     if not callable(get_rng_generators):
-        get_rng_generators = None
+        adapter = getattr(runtime.method, "adapter", None)
+        get_rng_generators = getattr(adapter, "get_rng_generators", None)
+        if not callable(get_rng_generators):
+            get_rng_generators = None
 
     checkpoint_manager = DistillCheckpointManager(
         bundle=runtime.method.bundle,

@@ -174,7 +174,6 @@ def build_wan_family_artifacts(*, cfg: DistillRunConfig) -> FamilyArtifacts:
         from fastvideo.distillation.validators.wan import WanValidator
 
         validator = WanValidator(
-            bundle=bundle,
             training_args=training_args,
             tracker=tracker,
         )
@@ -189,7 +188,6 @@ def build_wan_family_artifacts(*, cfg: DistillRunConfig) -> FamilyArtifacts:
         training_args=training_args,
         noise_scheduler=noise_scheduler,
         vae=vae,
-        validator=validator,
     )
 
     from fastvideo.dataset import build_parquet_map_style_dataloader
@@ -213,5 +211,6 @@ def build_wan_family_artifacts(*, cfg: DistillRunConfig) -> FamilyArtifacts:
         adapter=adapter,
         dataloader=dataloader,
         tracker=tracker,
+        validator=validator,
         start_step=0,
     )

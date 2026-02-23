@@ -19,7 +19,12 @@ def build_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:
     artifacts = family_builder(cfg=cfg)
 
     method_builder = get_method(str(cfg.distill.method))
-    method = method_builder(cfg=cfg, bundle=artifacts.bundle, adapter=artifacts.adapter)
+    method = method_builder(
+        cfg=cfg,
+        bundle=artifacts.bundle,
+        adapter=artifacts.adapter,
+        validator=artifacts.validator,
+    )
 
     return DistillRuntime(
         training_args=artifacts.training_args,
@@ -40,4 +45,3 @@ def build_wan_dmd2_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:
             f"method={cfg.distill.method!r}"
         )
     return build_runtime_from_config(cfg)
-

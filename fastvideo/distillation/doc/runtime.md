@@ -11,6 +11,7 @@
     - `adapter`
     - `dataloader`
     - `tracker`
+    - `validator`（可选；family-specific）
     - `start_step`（用于 resume / warm-start）
 - `DistillRuntime`
   - `DistillTrainer.run()` 所需的最小集合：
@@ -24,4 +25,3 @@
 - family 负责把 “零件” 装配成 `FamilyArtifacts`
 - method 负责把算法绑定到（bundle + adapter）上
 - trainer 只接收 `method` 并开始训练
-

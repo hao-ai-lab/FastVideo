@@ -6,7 +6,7 @@
   - 包含 Wan 特有的模块加载、shared components、dataloader schema 等逻辑
 
 **产物**
-- `FamilyArtifacts(training_args, bundle, adapter, dataloader, tracker, start_step)`
+- `FamilyArtifacts(training_args, bundle, adapter, dataloader, tracker, validator, start_step)`
 
 **主要职责**
 1) **加载 shared components**
@@ -23,6 +23,10 @@
 4) **tracker / validator（可选）**
    - tracker：`initialize_trackers(...)`（rank0 才启用）
    - validator：`WanValidator`（当 `training_args.log_validation=true`）
+     - family 只负责构建并返回 `validator`
+     - validator 本身不应 hardcode `bundle.role("student")` 等角色语义；
+       method 通过 `ValidationRequest.sample_handle` 指定要采样的模型
+     - 是否调用、用什么采样配置由 method 决定（method-managed validation）
 
 **Phase 2.9 的关键变化**
 - ✅ family 不再创建 optimizers/schedulers。
@@ -32,4 +36,3 @@
 **注意 / TODO**
 - YAML 中目前仍使用 `training.fake_score_*` 这类字段作为 DMD2 的 critic 超参来源；
   Phase 3 计划把它们迁移到 `method_config`，进一步减少 “training_args 承载算法语义”。
-

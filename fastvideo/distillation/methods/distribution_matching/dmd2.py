@@ -16,6 +16,7 @@ from fastvideo.distillation.bundle import ModelBundle
 from fastvideo.distillation.bundle import RoleHandle
 from fastvideo.distillation.methods.base import DistillMethod
 from fastvideo.distillation.registry import register_method
+from fastvideo.distillation.validators.base import ValidationRequest
 from fastvideo.distillation.yaml_config import DistillRunConfig
 
 
@@ -87,9 +88,6 @@ class _DMD2Adapter(Protocol):
     def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
         ...
 
-    def log_validation(self, iteration: int) -> None:
-        ...
-
 
 class DMD2Method(DistillMethod):
     """DMD2 distillation algorithm (method layer).
@@ -110,6 +108,7 @@ class DMD2Method(DistillMethod):
         *,
         bundle: ModelBundle,
         adapter: _DMD2Adapter,
+        validator: Any | None = None,
     ) -> None:
         super().__init__(bundle)
         bundle.require_roles(["student", "teacher", "critic"])
@@ -123,6 +122,7 @@ class DMD2Method(DistillMethod):
         if not getattr(self.critic, "trainable", False):
             raise ValueError("DMD2Method requires models.critic.trainable=true")
         self.adapter = adapter
+        self.validator = validator
         self.training_args = adapter.training_args
         self._simulate_generator_forward = bool(
             getattr(self.training_args, "simulate_generator_forward", False)
@@ -221,8 +221,48 @@ class DMD2Method(DistillMethod):
         self.adapter.on_train_start()
 
     def log_validation(self, iteration: int) -> None:
-        if hasattr(self.adapter, "log_validation"):
-            self.adapter.log_validation(iteration)
+        validator = getattr(self, "validator", None)
+        if validator is None:
+            return
+        if not getattr(self.training_args, "log_validation", False):
+            return
+
+        raw_steps = str(getattr(self.training_args, "validation_sampling_steps", "") or "")
+        sampling_steps = [int(s) for s in raw_steps.split(",") if s.strip()]
+        sampling_steps = [s for s in sampling_steps if s > 0]
+        if not sampling_steps:
+            # Default to the few-step student rollout step count for DMD2.
+            raw_rollout = getattr(self.training_args.pipeline_config, "dmd_denoising_steps", None)
+            if not raw_rollout:
+                return
+            sampling_steps = [int(len(raw_rollout))]
+
+        raw_guidance = getattr(self.training_args, "validation_guidance_scale", None)
+        guidance_scale = float(raw_guidance) if raw_guidance not in (None, "") else None
+
+        request = ValidationRequest(
+            sample_handle=self.student,
+            sampling_steps=sampling_steps,
+            guidance_scale=guidance_scale,
+        )
+        validator.log_validation(iteration, request=request)
+
+    def get_rng_generators(self) -> dict[str, torch.Generator]:
+        """Return RNG generators that should be checkpointed for exact resume."""
+
+        generators: dict[str, torch.Generator] = {}
+
+        adapter = getattr(self, "adapter", None)
+        get_adapter_generators = getattr(adapter, "get_rng_generators", None)
+        if callable(get_adapter_generators):
+            generators.update(get_adapter_generators())
+
+        validator = getattr(self, "validator", None)
+        validation_gen = getattr(validator, "validation_random_generator", None)
+        if isinstance(validation_gen, torch.Generator):
+            generators["validation_cpu"] = validation_gen
+
+        return generators
 
     def _should_update_student(self, iteration: int) -> bool:
         interval = int(getattr(self.training_args, "generator_update_interval", 1) or 1)
@@ -576,6 +616,7 @@ def build_dmd2_method(
     cfg: DistillRunConfig,
     bundle: ModelBundle,
     adapter: _DMD2Adapter,
+    validator: Any | None,
 ) -> DistillMethod:
     del cfg
-    return DMD2Method(bundle=bundle, adapter=adapter)
+    return DMD2Method(bundle=bundle, adapter=adapter, validator=validator)

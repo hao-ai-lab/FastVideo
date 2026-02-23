@@ -54,13 +54,11 @@ class WanAdapter(DistillAdapter):
         training_args: Any,
         noise_scheduler: Any,
         vae: Any,
-        validator: Any | None = None,
     ) -> None:
         self.prompt_handle = prompt_handle
         self.training_args = training_args
         self.noise_scheduler = noise_scheduler
         self.vae = vae
-        self._validator = validator
 
         self.world_group = get_world_group()
         self.sp_group = get_sp_group()
@@ -123,11 +121,6 @@ class WanAdapter(DistillAdapter):
             generators["noise_cpu"] = self.noise_random_generator
         if self.noise_gen_cuda is not None:
             generators["noise_cuda"] = self.noise_gen_cuda
-
-        validator = getattr(self, "_validator", None)
-        validation_gen = getattr(validator, "validation_random_generator", None)
-        if isinstance(validation_gen, torch.Generator):
-            generators["validation_cpu"] = validation_gen
 
         return generators
 
@@ -220,12 +213,6 @@ class WanAdapter(DistillAdapter):
 
         self.negative_prompt_embeds = neg_embeds
         self.negative_prompt_attention_mask = neg_mask
-
-    def log_validation(self, iteration: int) -> None:
-        validator = getattr(self, "_validator", None)
-        if validator is None:
-            return
-        validator.log_validation(iteration)
 
     def _sample_timesteps(self, batch_size: int, device: torch.device) -> torch.Tensor:
         if self.noise_random_generator is None:

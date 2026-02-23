@@ -23,6 +23,7 @@ class MethodBuilder(Protocol):
         cfg: DistillRunConfig,
         bundle: ModelBundle,
         adapter: Any,
+        validator: Any | None,
     ) -> DistillMethod:
         ...
 
@@ -93,4 +94,3 @@ def get_method(name: str) -> MethodBuilder:
     if name not in _METHODS:
         raise KeyError(f"Unknown method {name!r}. Available: {available_methods()}")
     return _METHODS[name]
-

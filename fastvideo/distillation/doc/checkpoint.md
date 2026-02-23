@@ -4,7 +4,7 @@
 - Phase 2 的 role-based checkpoint/save-resume 管理：
   - 按 role 保存/恢复 modules、optimizers、schedulers
   - 可选保存 dataloader 状态（如果 dataloader 是 stateful）
-  - 保存 RNG（全局 RNG + adapter/validator 暴露的额外 generator）
+  - 保存 RNG（全局 RNG + method 暴露的额外 generators，例如 adapter/validator 的 RNG）
 
 **关键类型**
 - `DistillCheckpointConfig`
@@ -25,4 +25,3 @@
 **与 Method 的关系**
 - 该文件假设：训练开始前 `RoleHandle.optimizers/lr_schedulers` 已经就绪。
   Phase 2.9 开始，它们通常由 method（例如 `DMD2Method`）在构造时创建并写回 handle。
-

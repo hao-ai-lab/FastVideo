@@ -8,7 +8,7 @@
 
 **关键概念**
 - `FamilyBuilder(cfg) -> FamilyArtifacts`
-- `MethodBuilder(cfg, bundle, adapter) -> DistillMethod`
+- `MethodBuilder(cfg, bundle, adapter, validator) -> DistillMethod`
 
 **关键 API**
 - `register_family(name)` / `register_method(name)`：装饰器注册
@@ -19,4 +19,3 @@
 **扩展方式**
 - 新增 family：实现 `fastvideo/distillation/families/<name>.py` 并用 `@register_family("<name>")`
 - 新增 method：实现 `fastvideo/distillation/methods/...` 并用 `@register_method("<name>")`
-

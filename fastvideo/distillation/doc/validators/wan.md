@@ -11,13 +11,14 @@
 **关键点**
 - validator 运行在分布式环境下：
   - 以 SP group 为单位做采样，最终由 global rank0 聚合写文件与 log
-- 通过 `loaded_modules={"transformer": student_transformer}` 复用训练中的 student 模块权重。
+- 通过 `ValidationRequest.sample_handle` 获取本次要采样的 transformer，
+  并以 `loaded_modules={"transformer": transformer}` 复用训练中的权重。
+- method 通过 `ValidationRequest` 覆盖采样配置（例如 sampling steps / guidance / output_dir）。
 
 **依赖**
-- 当前使用 `WanDMDPipeline` 做采样推理（FlowMatch scheduler + DmdDenoisingStage）。
-  这属于 validation 选择（并不影响 adapter 的“无算法命名耦合”约束）。
+- 当前使用 `WanPipeline` 做采样推理（Wan 通用 inference pipeline）。
+  Phase 2.9 约束：validator 应保持 method-agnostic（不依赖具体 distillation method）。
 
 **可演进方向（Phase 3+）**
 - 将 validation steps/guidance 等采样配置从 `TrainingArgs` 迁移到更明确的配置块（例如 `validation:`）。
 - 进一步抽象 validator API，使其更容易被不同 family/method 复用。
-

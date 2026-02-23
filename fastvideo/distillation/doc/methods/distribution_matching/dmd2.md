@@ -39,7 +39,12 @@
   - critic 的 optimizer/scheduler：优先使用 `training.fake_score_*` 覆盖（否则回退到 student）
 - 这样 Wan family 可以完全不“懂” DMD2 的 critic 超参，从 build-time 层面解耦。
 
+**validation 的归属（Phase 2.9）**
+- `DMD2Method` 持有 family-specific `validator`（build-time 注入），并在 `log_validation()` 中调用。
+- method 通过 `ValidationRequest` 明确传入 sampling steps/guidance 等参数；
+  同时通过 `ValidationRequest.sample_handle` 指定要采样的模型（通常是 student），
+  validator 负责执行采样与记录，保持 method-agnostic。
+
 **配置语义的 TODO（Phase 3）**
 - 目前仍从 `training_args` 读取 DMD2/critic 专属字段（例如 `fake_score_*`、`dmd_denoising_steps`）。
   Phase 3 计划引入 `method_config`，把这些算法超参从 `training:` / `pipeline_config:` 中迁移出去。
-

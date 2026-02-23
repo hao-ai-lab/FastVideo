@@ -25,6 +25,7 @@ class FamilyArtifacts:
     adapter: Any
     dataloader: Any
     tracker: Any
+    validator: Any | None = None
     start_step: int = 0
 
 
@@ -37,4 +38,3 @@ class DistillRuntime:
     dataloader: Any
     tracker: Any
     start_step: int = 0
-
