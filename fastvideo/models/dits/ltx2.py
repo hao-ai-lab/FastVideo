@@ -2021,11 +2021,13 @@ class LTXModel(torch.nn.Module):
         skip_video_self_attn_blocks: list[int] | None = None,
         skip_audio_self_attn_blocks: list[int] | None = None,
     ) -> tuple[TransformerArgs | None, TransformerArgs | None]:
+        # Convert once so per-block membership checks stay O(1).
+        skip_video_self_attn_block_set = set(skip_video_self_attn_blocks or [])
+        skip_audio_self_attn_block_set = set(skip_audio_self_attn_blocks or [])
+
         for idx, block in enumerate(self.transformer_blocks):
-            skip_v_sa = (skip_video_self_attn_blocks is not None
-                         and idx in skip_video_self_attn_blocks)
-            skip_a_sa = (skip_audio_self_attn_blocks is not None
-                         and idx in skip_audio_self_attn_blocks)
+            skip_v_sa = idx in skip_video_self_attn_block_set
+            skip_a_sa = idx in skip_audio_self_attn_block_set
             video, audio = block(
                 video=video,
                 audio=audio,
