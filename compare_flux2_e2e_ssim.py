@@ -118,6 +118,72 @@ def get_diffusers_prompt_embeds(
     return prompt_embeds
 
 
+def get_diffusers_image_and_or_embeds(
+    prompt: str,
+    seed: int,
+    model_id: str,
+    output_dir: str,
+    need_image: bool = True,
+    need_embeds: bool = False,
+) -> tuple[np.ndarray | None, torch.Tensor | None]:
+    """
+    Load diffusers Flux2KleinPipeline once, optionally get image and/or prompt_embeds,
+    then free the pipeline and clear CUDA cache so FastVideo can run afterward without OOM.
+    Returns (image_array or None, prompt_embeds or None).
+    """
+    try:
+        from diffusers import Flux2KleinPipeline
+    except ImportError:
+        from diffusers.pipelines.flux2 import Flux2KleinPipeline
+
+    device = "cuda"
+    dtype = torch.bfloat16
+    print("Loading diffusers Flux2KleinPipeline (will free after this step to avoid OOM) ...")
+    pipe = Flux2KleinPipeline.from_pretrained(model_id, torch_dtype=dtype)
+    pipe = pipe.to(device)
+
+    img_out: np.ndarray | None = None
+    embeds_out: torch.Tensor | None = None
+
+    if need_embeds:
+        prompt_embeds, _ = pipe.encode_prompt(
+            prompt=prompt,
+            device=device,
+            num_images_per_prompt=1,
+            max_sequence_length=512,
+            text_encoder_out_layers=(9, 18, 27),
+        )
+        embeds_out = prompt_embeds.detach()  # keep a copy before we delete the pipe
+
+    if need_image:
+        generator = torch.Generator(device=device).manual_seed(seed)
+        print(f"Generating diffusers image (prompt={prompt!r}, seed={seed}) ...")
+        image = pipe(
+            prompt=prompt,
+            height=SIZE[0],
+            width=SIZE[1],
+            guidance_scale=1.0,
+            num_inference_steps=4,
+            generator=generator,
+        ).images[0]
+        img = np.array(image)
+        if img.ndim == 2:
+            img = np.stack([img] * 3, axis=-1)
+        elif img.shape[2] == 4:
+            img = img[:, :, :3]
+        img_out = _resize_to(img, SIZE)
+        out_path = os.path.join(output_dir, "diffusers.png")
+        image.save(out_path)
+        print(f"Saved {out_path}")
+
+    # Free diffusers pipeline so FastVideo can use GPU memory
+    del pipe
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    print("Freed diffusers pipeline and cleared CUDA cache.")
+
+    return (img_out, embeds_out)
+
 def get_fastvideo_image_with_diffusers_embeds(
     prompt: str,
     seed: int,
@@ -178,38 +244,41 @@ def get_diffusers_image(
     model_id: str,
     output_dir: str,
 ) -> np.ndarray:
-    """Generate one image with diffusers Flux2KleinPipeline, return RGB numpy (H, W, 3) in [0, 255]."""
+    """Generate one image with diffusers Flux2KleinPipeline, return RGB numpy (H, W, 3) in [0, 255].
+    Frees the pipeline afterward to avoid OOM when FastVideo runs next."""
+    img, _ = get_diffusers_image_and_or_embeds(
+        prompt, seed, model_id, output_dir, need_image=True, need_embeds=False
+    )
+    assert img is not None
+    return img
+
+
+def get_diffusers_prompt_embeds(
+    prompt: str,
+    model_id: str,
+    device: str = "cuda",
+    dtype: torch.dtype = torch.bfloat16,
+) -> torch.Tensor:
+    """Get Flux2 Klein prompt_embeds from diffusers (layers 9, 18, 27). Returns tensor on device.
+    Loads and frees the pipeline (use get_diffusers_image_and_or_embeds(need_embeds=True) to avoid loading twice)."""
     try:
         from diffusers import Flux2KleinPipeline
     except ImportError:
         from diffusers.pipelines.flux2 import Flux2KleinPipeline
-
-    device = "cuda"
-    dtype = torch.bfloat16
-    print("Loading diffusers Flux2KleinPipeline ...")
     pipe = Flux2KleinPipeline.from_pretrained(model_id, torch_dtype=dtype)
     pipe = pipe.to(device)
-    # Flux2 transformer uses Flux2Attention; AttnProcessor2_0 is incompatible (expects spatial_norm).
-    # Rely on diffusers default; PyTorch 2 often uses SDPA by default.
-    generator = torch.Generator(device=device).manual_seed(seed)
-    print(f"Generating (prompt={prompt!r}, seed={seed}) ...")
-    image = pipe(
+    prompt_embeds, _ = pipe.encode_prompt(
         prompt=prompt,
-        height=SIZE[0],
-        width=SIZE[1],
-        guidance_scale=1.0,
-        num_inference_steps=4,
-        generator=generator,
-    ).images[0]
-    img = np.array(image)
-    if img.ndim == 2:
-        img = np.stack([img] * 3, axis=-1)
-    elif img.shape[2] == 4:
-        img = img[:, :, :3]
-    out_path = os.path.join(output_dir, "diffusers.png")
-    image.save(out_path)
-    print(f"Saved {out_path}")
-    return _resize_to(img, SIZE)
+        device=device,
+        num_images_per_prompt=1,
+        max_sequence_length=512,
+        text_encoder_out_layers=(9, 18, 27),
+    )
+    out = prompt_embeds.detach()
+    del pipe
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return out
 
 
 def load_image(path: str) -> np.ndarray:
@@ -275,7 +344,25 @@ def main() -> None:
 
     os.makedirs(args.output_dir, exist_ok=True)
     images: dict[str, np.ndarray] = {}
+    diffusers_embeds: torch.Tensor | None = None
 
+    # Phase 1: Run diffusers first (if needed), then free pipeline so FastVideo can use GPU without OOM
+    need_diffusers = not args.skip_diffusers or args.fastvideo_diffusers_te
+    if need_diffusers:
+        # Need diffusers image when not skipping diffusers, or when we want to compare FastVideo (diffusers TE) vs diffusers
+        need_image = not args.skip_diffusers or args.fastvideo_diffusers_te
+        diffusers_img, diffusers_embeds = get_diffusers_image_and_or_embeds(
+            args.prompt,
+            args.seed,
+            args.model_id,
+            args.output_dir,
+            need_image=need_image,
+            need_embeds=args.fastvideo_diffusers_te,
+        )
+        if diffusers_img is not None:
+            images["diffusers"] = diffusers_img
+
+    # Phase 2: FastVideo (only one pipeline on GPU at a time)
     if not args.skip_fastvideo:
         try:
             images["FastVideo"] = get_fastvideo_image(
@@ -301,22 +388,7 @@ def main() -> None:
         else:
             print("--skip-fastvideo but no mp4 found in output-dir; skipping FastVideo")
 
-    if not args.skip_diffusers:
-        images["diffusers"] = get_diffusers_image(
-            args.prompt, args.seed, args.model_id, args.output_dir
-        )
-
-    if args.fastvideo_diffusers_te:
-        if "diffusers" not in images:
-            print("--fastvideo-diffusers-te requires diffusers; running diffusers first.")
-            images["diffusers"] = get_diffusers_image(
-                args.prompt, args.seed, args.model_id, args.output_dir
-            )
-        print("Getting diffusers prompt_embeds ...")
-        dtype = torch.bfloat16
-        diffusers_embeds = get_diffusers_prompt_embeds(
-            args.prompt, args.model_id, device="cuda", dtype=dtype
-        )
+    if args.fastvideo_diffusers_te and diffusers_embeds is not None:
         images["FastVideo (diffusers TE)"] = get_fastvideo_image_with_diffusers_embeds(
             args.prompt,
             args.seed,
