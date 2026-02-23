@@ -58,6 +58,10 @@ class TextEncodingStage(PipelineStage):
         assert len(self.text_encoders) == len(
             fastvideo_args.pipeline_config.text_encoder_configs)
 
+        # Skip encoding if precomputed prompt_embeds were provided (e.g. from diffusers for e2e comparison)
+        if batch.prompt_embeds is not None and len(batch.prompt_embeds) > 0:
+            return batch
+
         # Encode positive prompt with all available encoders
         assert batch.prompt is not None
         prompt_text: str | list[str] = batch.prompt
