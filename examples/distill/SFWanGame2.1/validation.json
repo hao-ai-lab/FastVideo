@@ -1,0 +1,164 @@
+{
+    "data": [
+        {
+            "caption": "Hold [W] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000000.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [S] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000000.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000001_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [A] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000000.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000002_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [D] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000000.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000003_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [W] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000001.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [S] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000001.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000001_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [A] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000001.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000002_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [D] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000001.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000003_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [W] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [S] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000001_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [A] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000002_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [D] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000003_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [W] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [S] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000001_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [A] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000002_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "Hold [D] + Static",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/vizdoom/gen/validate/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin/examples/training/finetune/MatrixGame2.0/action/000003_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        }
+    ]
+}
