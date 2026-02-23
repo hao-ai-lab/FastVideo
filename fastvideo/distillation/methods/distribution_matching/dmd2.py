@@ -9,6 +9,7 @@ import torch.nn.functional as F
 
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
+    get_scheduler,
 )
 
 from fastvideo.distillation.bundle import ModelBundle
@@ -115,14 +116,106 @@ class DMD2Method(DistillMethod):
         self.student = bundle.role("student")
         self.teacher = bundle.role("teacher")
         self.critic = bundle.role("critic")
+        if not getattr(self.student, "trainable", False):
+            raise ValueError("DMD2Method requires models.student.trainable=true")
         if getattr(self.teacher, "trainable", False):
             raise ValueError("DMD2Method requires models.teacher.trainable=false")
+        if not getattr(self.critic, "trainable", False):
+            raise ValueError("DMD2Method requires models.critic.trainable=true")
         self.adapter = adapter
         self.training_args = adapter.training_args
         self._simulate_generator_forward = bool(
             getattr(self.training_args, "simulate_generator_forward", False)
         )
         self._denoising_step_list: torch.Tensor | None = None
+        self._init_optimizers_and_schedulers()
+
+    def _parse_betas(self, raw: Any, *, where: str) -> tuple[float, float]:
+        if raw is None:
+            raise ValueError(f"Missing betas for {where}")
+        if isinstance(raw, (tuple, list)) and len(raw) == 2:
+            return float(raw[0]), float(raw[1])
+        if isinstance(raw, str):
+            parts = [p.strip() for p in raw.split(",") if p.strip()]
+            if len(parts) != 2:
+                raise ValueError(f"Expected betas as 'b1,b2' at {where}, got {raw!r}")
+            return float(parts[0]), float(parts[1])
+        raise ValueError(f"Expected betas as 'b1,b2' at {where}, got {type(raw).__name__}")
+
+    def _build_role_optimizer_and_scheduler(
+        self,
+        *,
+        role: str,
+        handle: RoleHandle,
+        learning_rate: float,
+        betas: tuple[float, float],
+        scheduler_name: str,
+    ) -> None:
+        modules = handle.modules
+        params: list[torch.nn.Parameter] = []
+        for module in modules.values():
+            params.extend([p for p in module.parameters() if p.requires_grad])
+        if not params:
+            raise ValueError(f"Role {role!r} is trainable but has no trainable parameters")
+
+        optimizer = torch.optim.AdamW(
+            params,
+            lr=float(learning_rate),
+            betas=betas,
+            weight_decay=float(getattr(self.training_args, "weight_decay", 0.0) or 0.0),
+            eps=1e-8,
+        )
+
+        scheduler = get_scheduler(
+            str(scheduler_name),
+            optimizer=optimizer,
+            num_warmup_steps=int(getattr(self.training_args, "lr_warmup_steps", 0) or 0),
+            num_training_steps=int(getattr(self.training_args, "max_train_steps", 0) or 0),
+            num_cycles=int(getattr(self.training_args, "lr_num_cycles", 0) or 0),
+            power=float(getattr(self.training_args, "lr_power", 0.0) or 0.0),
+            min_lr_ratio=float(getattr(self.training_args, "min_lr_ratio", 0.5) or 0.5),
+            last_epoch=-1,
+        )
+
+        handle.optimizers = {"main": optimizer}
+        handle.lr_schedulers = {"main": scheduler}
+
+    def _init_optimizers_and_schedulers(self) -> None:
+        training_args = self.training_args
+
+        # Student optimizer/scheduler (default training hyperparams).
+        student_lr = float(getattr(training_args, "learning_rate", 0.0) or 0.0)
+        student_betas = self._parse_betas(
+            getattr(training_args, "betas", None),
+            where="training.betas",
+        )
+        student_sched = str(getattr(training_args, "lr_scheduler", "constant"))
+        self._build_role_optimizer_and_scheduler(
+            role="student",
+            handle=self.student,
+            learning_rate=student_lr,
+            betas=student_betas,
+            scheduler_name=student_sched,
+        )
+
+        # Critic optimizer/scheduler (DMD2-specific overrides).
+        critic_lr = float(getattr(training_args, "fake_score_learning_rate", 0.0) or 0.0)
+        if critic_lr == 0.0:
+            critic_lr = student_lr
+
+        critic_betas_raw = getattr(training_args, "fake_score_betas", None)
+        if critic_betas_raw is None:
+            critic_betas_raw = getattr(training_args, "betas", None)
+        critic_betas = self._parse_betas(critic_betas_raw, where="training.fake_score_betas")
+
+        critic_sched = str(getattr(training_args, "fake_score_lr_scheduler", None) or student_sched)
+        self._build_role_optimizer_and_scheduler(
+            role="critic",
+            handle=self.critic,
+            learning_rate=critic_lr,
+            betas=critic_betas,
+            scheduler_name=critic_sched,
+        )
 
     def on_train_start(self) -> None:
         self.adapter.on_train_start()

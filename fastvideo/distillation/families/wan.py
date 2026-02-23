@@ -19,13 +19,7 @@ from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
 )
 from fastvideo.training.activation_checkpoint import apply_activation_checkpointing
 from fastvideo.training.trackers import initialize_trackers, Trackers
-from fastvideo.training.training_utils import get_scheduler
 from fastvideo.utils import maybe_download_model, verify_model_config_and_directory
-
-
-def _parse_betas(betas: str) -> tuple[float, float]:
-    beta1, beta2 = (float(x.strip()) for x in betas.split(","))
-    return beta1, beta2
 
 
 def _load_module_from_path(
@@ -73,54 +67,6 @@ def _apply_trainable(module: torch.nn.Module, *, trainable: bool) -> torch.nn.Mo
     else:
         module.eval()
     return module
-
-
-def _build_optimizer_and_scheduler(
-    *,
-    role: str,
-    role_modules: dict[str, torch.nn.Module],
-    training_args: Any,
-) -> tuple[dict[str, torch.optim.Optimizer], dict[str, Any]]:
-    if role == "critic":
-        lr = float(getattr(training_args, "fake_score_learning_rate", 0.0) or 0.0)
-        if lr == 0.0:
-            lr = float(training_args.learning_rate)
-        betas = _parse_betas(str(getattr(training_args, "fake_score_betas", training_args.betas)))
-        scheduler_name = str(
-            getattr(training_args, "fake_score_lr_scheduler", training_args.lr_scheduler)
-        )
-    else:
-        lr = float(training_args.learning_rate)
-        betas = _parse_betas(str(training_args.betas))
-        scheduler_name = str(training_args.lr_scheduler)
-
-    params = []
-    for module in role_modules.values():
-        params.extend([p for p in module.parameters() if p.requires_grad])
-
-    if not params:
-        raise ValueError(f"Role {role!r} is trainable but has no trainable parameters")
-
-    optimizer = torch.optim.AdamW(
-        params,
-        lr=lr,
-        betas=betas,
-        weight_decay=float(getattr(training_args, "weight_decay", 0.0) or 0.0),
-        eps=1e-8,
-    )
-
-    scheduler = get_scheduler(
-        scheduler_name,
-        optimizer=optimizer,
-        num_warmup_steps=int(getattr(training_args, "lr_warmup_steps", 0) or 0),
-        num_training_steps=int(getattr(training_args, "max_train_steps", 0) or 0),
-        num_cycles=int(getattr(training_args, "lr_num_cycles", 0) or 0),
-        power=float(getattr(training_args, "lr_power", 0.0) or 0.0),
-        min_lr_ratio=float(getattr(training_args, "min_lr_ratio", 0.5) or 0.5),
-        last_epoch=-1,
-    )
-
-    return {"main": optimizer}, {"main": scheduler}
 
 
 def _build_tracker(training_args: Any, *, config: dict[str, Any] | None) -> Any:
@@ -212,12 +158,6 @@ def build_wan_family_artifacts(*, cfg: DistillRunConfig) -> FamilyArtifacts:
 
         optimizers: dict[str, torch.optim.Optimizer] = {}
         lr_schedulers: dict[str, Any] = {}
-        if role_spec.trainable:
-            optimizers, lr_schedulers = _build_optimizer_and_scheduler(
-                role=role,
-                role_modules=modules,
-                training_args=training_args,
-            )
 
         role_handles[role] = RoleHandle(
             modules=modules,

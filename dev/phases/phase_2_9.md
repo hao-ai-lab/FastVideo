@@ -109,6 +109,7 @@ handle 是为 **forward/select module** 服务的：比如选择哪个 transform
 - DMD2 的 timestep sampling policy 从 adapter 迁移到 method（最少把 `sample_dmd_timestep()` 挪走）。
 - few-step rollout 的 step list / simulate 逻辑从 adapter 迁移到 method（未来应进一步移到 `method_config`）。
 - `WanAdapter` 不应包含 method-specific 命名/概念（例如不应依赖 `*DMD*Pipeline` 这类算法命名）。
+- optimizer/scheduler 的创建归属 method（update policy），family 不再出现 DMD2/critic 专属超参（例如 `fake_score_*`）。
 - Phase 2 的训练行为/结果应尽可能保持一致（同 config 下 loss 形态、validation 产物趋势不应漂移）。
 
 ---
@@ -190,6 +191,9 @@ handle 是为 **forward/select module** 服务的：比如选择哪个 transform
   - forward_context 的 ctx 捕获/恢复方式不改变
   - teacher 的 `transformer_2` boundary 逻辑不变
   - validation 路径不回退到 legacy
+- [x] Wan family 不再创建 optimizers/schedulers
+  - `fastvideo/distillation/families/wan.py` 只负责加载 modules + 构建 `ModelBundle`
+  - `DMD2Method` 在 init 时为 student/critic 创建 optimizers/schedulers（复用 TrainingArgs 字段，未来迁移到 `method_config`）
 
 ---
 
