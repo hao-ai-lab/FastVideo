@@ -180,6 +180,11 @@ class ForwardBatch:
     ltx2_modality_scale_video: float = 1.0
     ltx2_modality_scale_audio: float = 1.0
     ltx2_rescale_scale: float = 0.0
+    # STG (Spatio-Temporal Guidance) parameters
+    ltx2_stg_scale_video: float = 0.0
+    ltx2_stg_scale_audio: float = 0.0
+    ltx2_stg_blocks_video: list[int] = field(default_factory=list)
+    ltx2_stg_blocks_audio: list[int] = field(default_factory=list)
 
     n_tokens: int | None = None
 
@@ -220,8 +225,10 @@ class ForwardBatch:
     def __post_init__(self):
         """Initialize dependent fields after dataclass initialization."""
 
-        # Set do_classifier_free_guidance based on guidance scale and negative prompt
-        if self.guidance_scale > 1.0:
+        # Enable CFG for standard guidance_scale and LTX-2 text CFG scales.
+        ltx2_text_cfg_enabled = (self.ltx2_cfg_scale_video != 1.0
+                                 or self.ltx2_cfg_scale_audio != 1.0)
+        if self.guidance_scale > 1.0 or ltx2_text_cfg_enabled:
             self.do_classifier_free_guidance = True
         if self.negative_prompt_embeds is None:
             self.negative_prompt_embeds = []

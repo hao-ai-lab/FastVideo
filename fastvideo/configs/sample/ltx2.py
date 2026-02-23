@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastvideo.configs.sample.base import SamplingParam
 
@@ -44,6 +44,11 @@ class LTX2BaseSamplingParam(SamplingParam):
     ltx2_modality_scale_video: float = 3.0
     ltx2_modality_scale_audio: float = 3.0
     ltx2_rescale_scale: float = 0.7
+    # STG (Spatio-Temporal Guidance) defaults from official LTX-2.
+    ltx2_stg_scale_video: float = 1.0
+    ltx2_stg_scale_audio: float = 1.0
+    ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
+    ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
 
 
 @dataclass

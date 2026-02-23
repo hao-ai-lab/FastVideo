@@ -109,8 +109,9 @@ class LTX2DenoisingStage(PipelineStage):
         neg_prompt_mask = None
         # Only load negative prompts if CFG is actually enabled
         if batch.do_classifier_free_guidance:
-            assert batch.negative_prompt_embeds is not None, (
-                "CFG is enabled but negative_prompt_embeds is None")
+            if not batch.negative_prompt_embeds:
+                raise ValueError(
+                    "CFG is enabled but negative_prompt_embeds is empty")
             neg_prompt_embeds = batch.negative_prompt_embeds[0]
 
         # Ensure text conditioning is on the same device as latents.
@@ -225,13 +226,28 @@ class LTX2DenoisingStage(PipelineStage):
         modality_scale_video = batch.ltx2_modality_scale_video
         modality_scale_audio = batch.ltx2_modality_scale_audio
         rescale_scale = batch.ltx2_rescale_scale
+        # STG (Spatio-Temporal Guidance) parameters.
+        stg_scale_video = batch.ltx2_stg_scale_video
+        stg_scale_audio = batch.ltx2_stg_scale_audio
+        stg_blocks_video = batch.ltx2_stg_blocks_video
+        stg_blocks_audio = batch.ltx2_stg_blocks_audio
+        do_stg_video = stg_scale_video != 0.0
+        do_stg_audio = stg_scale_audio != 0.0
+        do_stg = do_stg_video or do_stg_audio
+        do_cfg_text = (cfg_scale_video != 1.0 or cfg_scale_audio != 1.0)
+        do_mod = (modality_scale_video != 1.0 or modality_scale_audio != 1.0)
+        do_guidance = do_cfg_text or do_mod or do_stg
 
-        do_cfg = batch.do_classifier_free_guidance
+        if do_cfg_text and neg_prompt_embeds is None:
+            raise ValueError("LTX-2 text CFG is enabled "
+                             "(ltx2_cfg_scale_video/audio != 1.0), "
+                             "but negative prompt embeddings are missing")
 
         logger.info(
             "[LTX2] Denoising start: steps=%d dtype=%s "
             "cfg_video=%.1f cfg_audio=%.1f mod_video=%.1f "
             "mod_audio=%.1f rescale=%.2f "
+            "stg_video=%.1f stg_audio=%.1f "
             "sigmas_shape=%s latents_shape=%s",
             batch.num_inference_steps,
             target_dtype,
@@ -240,6 +256,8 @@ class LTX2DenoisingStage(PipelineStage):
             modality_scale_video,
             modality_scale_audio,
             rescale_scale,
+            stg_scale_video,
+            stg_scale_audio,
             tuple(sigmas.shape),
             tuple(latents.shape),
         )
@@ -290,51 +308,83 @@ class LTX2DenoisingStage(PipelineStage):
                     pos_denoised = pos_outputs
                     pos_audio = None
 
-                if do_cfg:
-                    # Pass 2: Unconditioned text (negative prompt)
-                    neg_outputs = self.transformer(
-                        hidden_states=latents.to(target_dtype),
-                        encoder_hidden_states=neg_prompt_embeds,
-                        encoder_attention_mask=neg_prompt_mask,
-                        timestep=timestep,
-                        audio_hidden_states=audio_latents,
-                        audio_encoder_hidden_states=audio_context_n,
-                        audio_timestep=audio_timestep,
-                    )
-                    if isinstance(neg_outputs, tuple):
-                        neg_denoised, neg_audio = neg_outputs
-                    else:
-                        neg_denoised = neg_outputs
-                        neg_audio = None
+                if do_guidance:
+                    # Defaults: (pos - pos) = 0 under each scale.
+                    neg_denoised = pos_denoised
+                    neg_audio = pos_audio
+                    mod_denoised = pos_denoised
+                    mod_audio = pos_audio
+                    ptb_denoised = pos_denoised
+                    ptb_audio = pos_audio
 
-                    # Pass 3: Modality-isolated (skip cross-modal attn)
-                    mod_outputs = self.transformer(
-                        hidden_states=latents.to(target_dtype),
-                        encoder_hidden_states=prompt_embeds,
-                        encoder_attention_mask=prompt_mask,
-                        timestep=timestep,
-                        audio_hidden_states=audio_latents,
-                        audio_encoder_hidden_states=audio_context_p,
-                        audio_timestep=audio_timestep,
-                        skip_cross_modal_attn=True,
-                    )
-                    if isinstance(mod_outputs, tuple):
-                        mod_denoised, mod_audio = mod_outputs
-                    else:
-                        mod_denoised = mod_outputs
-                        mod_audio = None
+                    # Pass 2: text CFG (negative prompt)
+                    if do_cfg_text:
+                        neg_outputs = self.transformer(
+                            hidden_states=latents.to(target_dtype),
+                            encoder_hidden_states=neg_prompt_embeds,
+                            encoder_attention_mask=neg_prompt_mask,
+                            timestep=timestep,
+                            audio_hidden_states=audio_latents,
+                            audio_encoder_hidden_states=audio_context_n,
+                            audio_timestep=audio_timestep,
+                        )
+                        if isinstance(neg_outputs, tuple):
+                            neg_denoised, neg_audio = neg_outputs
+                        else:
+                            neg_denoised = neg_outputs
+
+                    # Pass 3: Modality-isolated (skip cross-modal
+                    # attn)
+                    if do_mod:
+                        mod_outputs = self.transformer(
+                            hidden_states=latents.to(target_dtype),
+                            encoder_hidden_states=prompt_embeds,
+                            encoder_attention_mask=prompt_mask,
+                            timestep=timestep,
+                            audio_hidden_states=audio_latents,
+                            audio_encoder_hidden_states=audio_context_p,
+                            audio_timestep=audio_timestep,
+                            skip_cross_modal_attn=True,
+                        )
+                        if isinstance(mod_outputs, tuple):
+                            mod_denoised, mod_audio = mod_outputs
+                        else:
+                            mod_denoised = mod_outputs
+
+                    # Pass 4: STG perturbed (skip self-attn in
+                    # specified blocks)
+                    if do_stg:
+                        ptb_outputs = self.transformer(
+                            hidden_states=latents.to(target_dtype),
+                            encoder_hidden_states=prompt_embeds,
+                            encoder_attention_mask=prompt_mask,
+                            timestep=timestep,
+                            audio_hidden_states=audio_latents,
+                            audio_encoder_hidden_states=(audio_context_p),
+                            audio_timestep=audio_timestep,
+                            skip_video_self_attn_blocks=(
+                                stg_blocks_video if do_stg_video else None),
+                            skip_audio_self_attn_blocks=(
+                                stg_blocks_audio if do_stg_audio else None),
+                        )
+                        if isinstance(ptb_outputs, tuple):
+                            ptb_denoised, ptb_audio = ptb_outputs
+                        else:
+                            ptb_denoised = ptb_outputs
 
                     # Multi-modal guidance formula per stream.
                     vid = (pos_denoised + (cfg_scale_video - 1) *
                            (pos_denoised - neg_denoised) +
                            (modality_scale_video - 1) *
-                           (pos_denoised - mod_denoised))
+                           (pos_denoised - mod_denoised) + stg_scale_video *
+                           (pos_denoised - ptb_denoised))
                     aud = None
                     if pos_audio is not None:
                         aud = (pos_audio + (cfg_scale_audio - 1) *
                                (pos_audio - neg_audio) +
                                (modality_scale_audio - 1) *
-                               (pos_audio - mod_audio))
+                               (pos_audio - mod_audio) + stg_scale_audio *
+                               (pos_audio - ptb_audio))
 
                     # Guidance rescaling (prevents saturation).
                     if rescale_scale > 0:
