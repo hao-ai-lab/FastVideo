@@ -154,27 +154,6 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
 }
 
 
-def _normalize_hf_cache_path_to_repo_id(pipeline_name_or_path: str) -> str | None:
-    """If path looks like a HuggingFace hub cache path, return org/repo id else None."""
-    if not pipeline_name_or_path:
-        return None
-    # HF cache: .../models--org--repo/snapshots/... or ...\models--org--repo\...
-    needle = "models--"
-    idx = pipeline_name_or_path.lower().find(needle)
-    if idx == -1:
-        return None
-    start = idx + len(needle)
-    rest = pipeline_name_or_path[start:]
-    # Take until next path separator
-    for i, c in enumerate(rest):
-        if c in "/\\":
-            rest = rest[:i]
-            break
-    if not rest:
-        return None
-    return rest.replace("--", "/")
-
-
 def get_pipeline_config_cls_from_name(
         pipeline_name_or_path: str) -> type[PipelineConfig]:
     """Get the appropriate configuration class for a given pipeline name or path.
@@ -207,17 +186,14 @@ def get_pipeline_config_cls_from_name(
 
     pipeline_config_cls: type[PipelineConfig] | None = None
 
-    # Normalize HF cache paths (e.g. .../models--org--repo/...) to org/repo for registry lookup
-    lookup_id = _normalize_hf_cache_path_to_repo_id(pipeline_name_or_path) or pipeline_name_or_path
-
     # First try exact match for specific weights
-    if lookup_id in PIPE_NAME_TO_CONFIG:
-        pipeline_config_cls = PIPE_NAME_TO_CONFIG[lookup_id]
+    if pipeline_name_or_path in PIPE_NAME_TO_CONFIG:
+        pipeline_config_cls = PIPE_NAME_TO_CONFIG[pipeline_name_or_path]
         return pipeline_config_cls
 
     # Try partial matches (for local paths that might include the weight ID)
     for registered_id, config_class in PIPE_NAME_TO_CONFIG.items():
-        if registered_id in lookup_id:
+        if registered_id in pipeline_name_or_path:
             pipeline_config_cls = config_class
             break
 
@@ -232,20 +208,12 @@ def get_pipeline_config_cls_from_name(
         )
 
         pipeline_name = config["_class_name"]
-        # Try to determine pipeline architecture for fallback (flux2klein before flux2 in dict)
+        # Try to determine pipeline architecture for fallback
         for pipeline_type, detector in PIPELINE_DETECTOR.items():
             if detector(pipeline_name.lower()):
                 pipeline_config_cls = PIPELINE_FALLBACK_CONFIG.get(
                     pipeline_type)
                 break
-        # If no match from _class_name, try path (e.g. .../FLUX.2-klein-4B or ...models--...--FLUX.2-klein-4B)
-        if pipeline_config_cls is None:
-            path_lower = pipeline_name_or_path.lower()
-            for pipeline_type, detector in PIPELINE_DETECTOR.items():
-                if detector(path_lower):
-                    pipeline_config_cls = PIPELINE_FALLBACK_CONFIG.get(
-                        pipeline_type)
-                    break
 
         if pipeline_config_cls is not None:
             logger.warning(
