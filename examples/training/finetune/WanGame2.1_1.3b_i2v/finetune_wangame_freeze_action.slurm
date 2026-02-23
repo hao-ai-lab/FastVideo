@@ -40,8 +40,9 @@ BS_PER_GPU=1
 GRADIENT_ACCUMULATION_STEPS=1
 WANDB_RUN_NAME="Doom from MC freeze action"
 RUN_DIR="wangame_1.3b"
-CHECKPOINTING_STEPS=100000
-ACTION_WARMUP_STEPS=100000
+CHECKPOINTING_STEPS=100000 # This means checkpoint every 100000 steps, effectively no ckpt will be saved
+ACTION_WARMUP_STEPS=100000 # This means the action modules will be frozen for the first 100000 steps. 
+# Effectively, during the total 100000 steps, action modules are always frozen.
 LEARNING_RATE=1e-5
 # Freeze base DiT, only train action modules
 Freeze_DiT=false
@@ -65,7 +66,7 @@ DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/camer
 DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed:0" # key_camera_excl_1_action_rand
 DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/alex/wm-lab/datas/cache/zelda_overfit:0" # zelda 
 
-VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random.json" # TODO: double check this, you can remove some MC data and add more doom data
+VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random.json" # TODO: double check this, you may remove some MC image and add more doom image
 #
 # Single-dir / validation alternatives (comment out DATA_DIR above and uncomment one block):
 # MC wasd only:
