@@ -585,56 +585,32 @@ Phase 1 的“辉煌”（落地与收益）：
 - 新增更多 method（teacher-only、多 teacher、KD 轨迹蒸馏等）
 - 逐步冻结或移除旧 distill pipeline（保留兼容入口亦可）
 
-### Phase 3（计划）：优雅 dispatch + Recipe config + Finetuning（统一到同一框架）
+### Phase 2.9（计划）：A+B+Families 语义收敛（为 Phase 3 铺路）
 
-Phase 3 的定位：在 Phase 2 已经证明“新 distill 框架可独立运行”的基础上，解决两个长期
-扩展的核心问题：
+动机：Phase 2 已经完成“独立可跑”，但仍存在几个会阻碍长期扩展的结构性问题：
 
-1) **真正优雅的 dispatch（避免 N×M builder 组合爆炸）**  
-2) **配置语义升级（`distill` -> `recipe`，引入 `method_config`）**  
-3) **把 finetuning 作为一种 method 接入框架**（只需要 `student` + dataset）
+- adapter API 仍有一定 **role-centric / method-specific** 倾向（例如 `sample_dmd_timestep()`、`teacher/critic` 分叉函数）
+- entrypoint/builder 的组合 dispatch 未来如果扩展，会走向 N×M（写大量组合函数或 if/else）
 
-#### Phase 3.1：真正优雅的 dispatch（N+M，而不是 N×M）
+因此引入一个 **Phase 2.9**，先把语义边界收敛好，再开始 Phase 3（配置 schema 升级 + finetune）。
 
-目标：新增第 5 个模型家族 + 第 5 个算法时，不需要写 25 个 `build_<model>_<method>()`。
+Phase 2.9 目标（简称 A+B+Families）：
 
-核心思路：把 “可组合的变化” 拆成两类 registry，然后用 adapter capability/protocol 做约束：
+- A) 把 adapter API 收敛为 **operation-centric**（role 只是 key，不暴露 teacher/critic/student 专用函数）
+- B) 把 “timestep sampling policy” 等 **算法策略** 挪回 method（adapter 只保留 scheduler 语义转换）
+- Families) 引入 family registry + method registry，完成 **优雅 dispatch（N+M）**
+  - 这一步做完后，Phase 3 不再需要改 entrypoint/builder 的 dispatch 逻辑
 
-- **Model family registry**（按 `recipe.family` 注册）
-  - 负责：按 role 加载 modules、构建 adapter、构建 validator、构建 dataloader（或 data hooks）
-- **Method registry**（按 `recipe.method` 注册）
-  - 负责：构建 method（算法）；声明 `required_roles`；声明需要的 adapter primitives（Protocol 或 capability）
+详细执行清单见：`dev/phases/phase_2_9.md`
 
-入口层只做组合（伪代码）：
+### Phase 3（计划）：Recipe config + method_config + Finetuning（统一到同一框架）
 
-```text
-cfg = load_run_config(...)
-family = FAMILY_REGISTRY[cfg.recipe.family]
-method = METHOD_REGISTRY[cfg.recipe.method]
+Phase 3 的定位：在 Phase 2.9 已经完成“优雅 dispatch + adapter/method 语义收敛”的基础上：
 
-bundle = family.build_bundle(cfg.models, cfg.training, cfg.pipeline_config)
-adapter = family.build_adapter(bundle, cfg.training, cfg.pipeline_config, cfg.method_config)
-validator = family.build_validator(...)  # optional
-dataloader = family.build_dataloader(cfg.training, cfg.data?)  # optional
+1) **配置语义升级（`distill` -> `recipe`，引入 `method_config`）**  
+2) **把 finetuning 作为一种 method 接入框架**（只需要 `student` + dataset）
 
-distill_method = method.build(bundle=bundle, adapter=adapter, method_config=cfg.method_config)
-trainer.run(distill_method, dataloader, ...)
-```
-
-这样新增扩展的成本是：
-- 新模型家族：新增 1 个 family plugin（N）
-- 新算法：新增 1 个 method plugin（M）
-- 组合不需要额外代码（不再写 N×M）
-
-实现落点（建议，Phase 3 落地到代码时再细化）：
-- `fastvideo/distillation/registry.py`
-  - `register_family(name)(cls)` / `register_method(name)(cls)` 装饰器
-  - `get_family(name)` / `get_method(name)` + “可用项”错误提示
-- `fastvideo/distillation/builder.py`
-  - 收敛为 `build_runtime_from_config(cfg)`（通用），内部查 registry
-  - Wan 的加载逻辑迁移为 `WanFamily` plugin（保留当前 Phase2 的 loader 复用）
-
-#### Phase 3.2：配置语义升级（`distill` -> `recipe`，引入 `method_config`）
+#### Phase 3.1：配置语义升级（`distill` -> `recipe`，引入 `method_config`）
 
 动机：
 - `distill.method=finetune` 语义别扭，因为 finetune 是一种训练 recipe，不一定是“蒸馏”。
@@ -662,7 +638,7 @@ method_config: {...}                  # algorithm/method 超参（方法侧）
   - Finetune：loss/target/pred_type 等
 - `training:` 保持 “trainer/infra” 语义（分布式、优化器、ckpt、logging、数据路径等）。
 
-#### Phase 3.3：Finetuning 作为一种 method 接入（only student）
+#### Phase 3.2：Finetuning 作为一种 method 接入（only student）
 
 目标：让 finetuning 跟 distillation 一样走同一套：
 `ModelBundle + Adapter + Method + Trainer + (Validator/Checkpoint)`。
