@@ -16,7 +16,7 @@ set -e -x
 # Environment Setup
 source ~/conda/miniconda/bin/activate
 conda activate /mnt/weka/home/hao.zhang/conda/miniconda/envs/mhuo-fv
-export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin:$PYTHONPATH"
+export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo:$PYTHONPATH"
 
 # Basic Info
 export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
@@ -36,13 +36,12 @@ echo "RUN_NAME: $RUN_NAME"
 
 # Model paths for Self-Forcing DMD distillation:
 # GENERATOR_MODEL_PATH="../wg_models/WanGame-2.1-Student-VizDoom1k-1000steps-Diffusers"
-GENERATOR_MODEL_PATH="../wg_models/WanGame-2.1-Student-VizDoom1k-1000steps-Diffusers"
-REAL_SCORE_MODEL_PATH="../wg_models/WanGame-2.1-Foundation-VizDoom1k-1000steps-Diffusers"  # Teacher model
-FAKE_SCORE_MODEL_PATH="../wg_models/WanGame-2.1-Foundation-VizDoom1k-1000steps-Diffusers"  # Critic model
+GENERATOR_MODEL_PATH="../wg_models/SFWanGame-2.1-0223-9000steps"
+REAL_SCORE_MODEL_PATH="../wg_models/WanGame-2.1-0223-9000steps"  # Teacher model
+FAKE_SCORE_MODEL_PATH="../wg_models/WanGame-2.1-0223-9000steps"  # Critic model
 
-DATA_DIR="../traindata_0209_1500/wg_ode_init/preprocessed"
-VALIDATION_DATASET_FILE="examples/distill/SFWanGame2.1/validation.json"
-CKPT_SAFETENSOR="checkpoints/wangame_ode_init_vizdoom_new/checkpoint-6000/transformer/diffusion_pytorch_model.safetensors"
+DATA_DIR="../traindata_0222_0030/ode_init_mc_with_mouse/preprocessed_wangame"
+VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_wangame_ode_init/validation.json"
 
 # Training arguments
 training_args=(

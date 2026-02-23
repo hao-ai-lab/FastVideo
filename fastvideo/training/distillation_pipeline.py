@@ -1251,10 +1251,14 @@ class DistillationPipeline(TrainingPipeline):
                         prompt_embeds=[],
                         prompt_attention_mask=[],
                     )
-                    result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore
-                        batch_negative, training_args)
-                    self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
-                        0], result_batch.prompt_attention_mask[0]
+                    if hasattr(self.validation_pipeline, "prompt_encoding_stage"):
+                        result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore
+                            batch_negative, training_args)
+                        self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
+                            0], result_batch.prompt_attention_mask[0]
+                    else:
+                        self.negative_prompt_embeds = None
+                        self.negative_prompt_attention_mask = None
 
                     logger.info(
                         "rank: %s: rank_in_sp_group: %s, batch.prompt: %s",

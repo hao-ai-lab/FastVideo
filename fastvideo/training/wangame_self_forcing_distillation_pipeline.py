@@ -626,13 +626,16 @@ class WanGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
             image_latents = image_latents[:, :, frame_start:frame_end, :, :]
 
         vae_temporal_compression_ratio = 4
-        if frame_end is not None:
+        if frame_start is not None and frame_end is not None:
+            action_frame_start = frame_start * vae_temporal_compression_ratio
             action_frame_end = (frame_end -
                                 1) * vae_temporal_compression_ratio + 1
-            keyboard_cond_sliced = training_batch.keyboard_cond[:, :
-                                                                action_frame_end, :] if training_batch.keyboard_cond is not None else None
-            mouse_cond_sliced = training_batch.mouse_cond[:, :
-                                                          action_frame_end, :] if training_batch.mouse_cond is not None else None
+            if frame_start == 0:
+                action_frame_start = 0
+            keyboard_cond_sliced = training_batch.keyboard_cond[:,
+                                                                action_frame_start:action_frame_end, :] if training_batch.keyboard_cond is not None else None
+            mouse_cond_sliced = training_batch.mouse_cond[:,
+                                                          action_frame_start:action_frame_end, :] if training_batch.mouse_cond is not None else None
         else:
             keyboard_cond_sliced = training_batch.keyboard_cond
             mouse_cond_sliced = training_batch.mouse_cond
@@ -857,14 +860,20 @@ class WanGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
         if "keyboard_cond" in validation_batch and validation_batch[
                 "keyboard_cond"] is not None:
             keyboard_cond = validation_batch["keyboard_cond"]
-            keyboard_cond = torch.tensor(keyboard_cond, dtype=torch.bfloat16)
+            if isinstance(keyboard_cond, torch.Tensor):
+                keyboard_cond = keyboard_cond.detach().clone().to(dtype=torch.bfloat16)
+            else:
+                keyboard_cond = torch.tensor(keyboard_cond, dtype=torch.bfloat16)
             keyboard_cond = keyboard_cond.unsqueeze(0)
             batch.keyboard_cond = keyboard_cond
 
         if "mouse_cond" in validation_batch and validation_batch[
                 "mouse_cond"] is not None:
             mouse_cond = validation_batch["mouse_cond"]
-            mouse_cond = torch.tensor(mouse_cond, dtype=torch.bfloat16)
+            if isinstance(mouse_cond, torch.Tensor):
+                mouse_cond = mouse_cond.detach().clone().to(dtype=torch.bfloat16)
+            else:
+                mouse_cond = torch.tensor(mouse_cond, dtype=torch.bfloat16)
             mouse_cond = mouse_cond.unsqueeze(0)
             batch.mouse_cond = mouse_cond
 

@@ -51,16 +51,6 @@
             "num_frames": 81
         },
         {
-            "caption": "04: Idle",
-            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000004.jpg",
-            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000004_action.npy",
-            "video_path": null,
-            "num_inference_steps": 4,
-            "height": 352,
-            "width": 640,
-            "num_frames": 81
-        },
-        {
             "caption": "05: camera down",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000005.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000005_action.npy",
