@@ -429,8 +429,9 @@ class VideoGenerator:
         frames = []
         for x in videos:
             x = torchvision.utils.make_grid(x, nrow=6)
-            x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-            frames.append((x * 255).numpy().astype(np.uint8))
+            x = x.permute(1, 2, 0).squeeze(-1)
+            x = (x * 255).to(torch.uint8)
+            frames.append(x.cpu().numpy())
 
         # Save output if requested
         if batch.save_video:
