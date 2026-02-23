@@ -221,7 +221,9 @@ class LTX2DenoisingStage(PipelineStage):
         stg_scale_audio = batch.ltx2_stg_scale_audio
         stg_blocks_video = batch.ltx2_stg_blocks_video
         stg_blocks_audio = batch.ltx2_stg_blocks_audio
-        do_stg = stg_scale_video != 0.0 or stg_scale_audio != 0.0
+        do_stg_video = stg_scale_video != 0.0
+        do_stg_audio = stg_scale_audio != 0.0
+        do_stg = do_stg_video or do_stg_audio
         do_cfg_text = (cfg_scale_video != 1.0 or cfg_scale_audio != 1.0)
         do_mod = (modality_scale_video != 1.0 or modality_scale_audio != 1.0)
         do_guidance = do_cfg_text or do_mod or do_stg
@@ -331,8 +333,10 @@ class LTX2DenoisingStage(PipelineStage):
                             audio_hidden_states=audio_latents,
                             audio_encoder_hidden_states=(audio_context_p),
                             audio_timestep=audio_timestep,
-                            skip_video_self_attn_blocks=(stg_blocks_video),
-                            skip_audio_self_attn_blocks=(stg_blocks_audio),
+                            skip_video_self_attn_blocks=(
+                                stg_blocks_video if do_stg_video else None),
+                            skip_audio_self_attn_blocks=(
+                                stg_blocks_audio if do_stg_audio else None),
                         )
                         if isinstance(ptb_outputs, tuple):
                             ptb_denoised, ptb_audio = ptb_outputs
