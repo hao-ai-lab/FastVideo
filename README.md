@@ -1,153 +1,101 @@
-<div align="center">
-<img src=assets/logos/logo.svg width="30%"/>
-</div>
+# Sliding Tile Attention (STA) Branch
 
-<p align="center">
-     | <a href="https://hao-ai-lab.github.io/FastVideo"><b>Documentation</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start/"><b> Quick Start</b></a> | <a href="https://github.com/hao-ai-lab/FastVideo/discussions/982"  target="_blank"><b>Weekly Dev Meeting</b></a>  | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-3f4lao1uq-u~Ipx6Lt4J27AlD2y~IdLQ" target="_blank"> <b>Slack</b> </a> |  🟣💬 <a href="https://github.com/hao-ai-lab/FastVideo/discussions/1097" target="_blank"> <b> WeChat </b> </a> |
-</p>
+This branch is a stash/testing branch for people who want to try
+Sliding Tile Attention (STA). The top-level README is intentionally
+STA-only.
 
-**FastVideo is a unified post-training and inference framework for accelerated video generation.**
+## What is STA
 
-## NEWS
+Sliding Tile Attention is an optimized attention backend for
+window-based video generation.
 
-- `2025/11/19`: Release [CausalWan2.2 I2V A14B Preview](https://huggingface.co/FastVideo/CausalWan2.2-I2V-A14B-Preview-Diffusers) models, [Blog](https://hao-ai-lab.github.io/blogs/fastvideo_causalwan_preview/) and [Inference Code!](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_self_forcing_causal_wan2_2_i2v.py)
-- `2025/08/04`: Release [FastWan](https://hao-ai-lab.github.io/FastVideo/distillation/dmd) models and [Sparse-Distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
+- Blog: https://hao-ai-lab.github.io/blogs/sta/
+- Paper: https://arxiv.org/abs/2502.04507
+- In-repo STA docs: `docs/attention/sta/index.md`
 
-### More News
+## Setup
 
-- `2025/06/14`: Release finetuning and inference code for [VSA](https://arxiv.org/pdf/2505.13389)
-- `2025/04/24`: [FastVideo V1](https://hao-ai-lab.github.io/blogs/fastvideo/) is released!
-- `2025/02/18`: Release the inference code for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
-
-## Key Features
-
-FastVideo has the following features:
-
-- End-to-end post-training support for bidirectional and autoregressive models:
-  - Support full finetuning and LoRA finetuning for state-of-the-art open video DiTs
-  - Data preprocessing pipeline for video, image, and text data
-  - Distribution Matching Distillation (DMD2) stepwise distillation.
-  - Sparse attention with [Video Sparse Attention](https://arxiv.org/pdf/2505.13389)
-  - [Sparse distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/) to achieve >50x denoising speedup
-  - Scalable training with FSDP2, sequence parallelism, and selective activation checkpointing.
-  - Causal distillation through Self-Forcing
-  - See this [page](https://hao-ai-lab.github.io/FastVideo/training/overview/) for full list of supported models and recipes.
-- State-of-the-art performance optimizations for inference
-  - Sequence Parallelism for distributed inference
-  - Multiple state-of-the-art attention backends
-  - User-friendly CLI and Python API
-  - See this [page](https://hao-ai-lab.github.io/FastVideo/inference/optimizations/) for full list of supported optimizations.
-- Diverse hardware and OS support
-  - Support H100, A100, 4090
-  - Support Linux, Windows, MacOS
-  - See this [page](https://hao-ai-lab.github.io/FastVideo/inference/support_matrix/) for full list of supported models, hardware assumptions, and optimization compatibility.
-
-## Getting Started
-
-We recommend using an environment manager such as `Conda` to create a clean environment:
+Install FastVideo from source:
 
 ```bash
-# Create and activate a new conda environment
-conda create -n fastvideo python=3.12
-conda activate fastvideo
-
-# Install FastVideo
-pip install fastvideo
+uv pip install -e .
 ```
 
-Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/) for more detailed installation instructions.
-
-## Sparse Distillation
-
-For our sparse distillation techniques, please see our [distillation docs](https://hao-ai-lab.github.io/FastVideo/distillation/dmd/) and check out our [blog](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
-
-See below for recipes and datasets:
-
-| Model                                                                                 | Sparse Distillation                                                                                             | Dataset                                                                                                  |
-| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| [FastWan2.1-T2V-1.3B](https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers) | [Recipe](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/distill/Wan2.1-T2V/Wan-Syn-Data-480P)       | [FastVideo Synthetic Wan2.1 480P](https://huggingface.co/datasets/FastVideo/Wan-Syn_77x448x832_600k)     |
-| [FastWan2.2-TI2V-5B](https://huggingface.co/FastVideo/FastWan2.2-TI2V-5B-Diffusers)   | [Recipe](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/distill/Wan2.2-TI2V-5B-Diffusers/Data-free) | [FastVideo Synthetic Wan2.2 720P](https://huggingface.co/datasets/FastVideo/Wan2.2-Syn-121x704x1280_32k) |
-
-## Inference
-
-### Generating Your First Video
-
-Here's a minimal example to generate a video using the default settings. Make sure VSA kernels are [installed](https://hao-ai-lab.github.io/FastVideo/attention/vsa/#installation). Create a file called `example.py` with the following code:
-
-```python
-import os
-from fastvideo import VideoGenerator
-
-def main():
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
-
-    # Create a video generator with a pre-trained model
-    generator = VideoGenerator.from_pretrained(
-        "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
-        num_gpus=1,  # Adjust based on your hardware
-    )
-
-    # Define a prompt for your video
-    prompt = "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes wide with interest."
-
-    # Generate the video
-    video = generator.generate_video(
-        prompt,
-        return_frames=True,  # Also return frames from this call (defaults to False)
-        output_path="my_videos/",  # Controls where videos are saved
-        save_video=True
-    )
-
-if __name__ == '__main__':
-    main()
-```
-
-Run the script with:
+Build the STA kernel package:
 
 ```bash
-python example.py
+cd fastvideo-kernel
+./build.sh
+cd ..
 ```
 
-For a more detailed guide, please see our [inference quick start](https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start/).
+## Run STA Inference
 
-## More Guides
+STA backend:
 
-- [Design Overview](https://hao-ai-lab.github.io/FastVideo/design/overview/)
-- [Distillation Guide](https://hao-ai-lab.github.io/FastVideo/distillation/dmd/)
-- [Contribution Guide](https://hao-ai-lab.github.io/FastVideo/contributing/overview/)
+```bash
+export FASTVIDEO_ATTENTION_BACKEND=SLIDING_TILE_ATTN
+```
 
-## Awesome work using FastVideo or our research projects
+Ready-to-run examples:
 
-- [SGLang](https://github.com/sgl-project/sglang/tree/main/python/sglang/multimodal_gen): SGLang's diffusion inference functionality is based on a fork of FastVideo on Sept. 24, 2025.
-- [DanceGRPO](https://github.com/XueZeyue/DanceGRPO): A unified framework to adapt Group Relative Policy Optimization (GRPO) to visual generation paradigms. Code based on FastVideo.
-- [SRPO](https://github.com/Tencent-Hunyuan/SRPO): A method to directly align the full diffusion trajectory with fine-grained human preference. Code based on FastVideo.
-- [DCM](https://github.com/Vchitect/DCM): Dual-expert consistency model for efficient and high-quality video generation. Code based on FastVideo.
-- [HY-WorldPlay](https://github.com/Tencent-Hunyuan/HY-WorldPlay): An action-conditioned world model model trained using FastVideo framework.
-- [Hunyuan Video 1.5](https://github.com/Tencent-Hunyuan/HunyuanVideo-1.5): A leading lightweight video generation model, where they proposed SSTA based on Sliding Tile Attention.
-- [Kandinsky-5.0](https://github.com/kandinskylab/kandinsky-5): A family of diffusion models for video & image generation, where their NABLA attention includes a Sliding Tile Attention branch.
-- [LongCat Video](https://github.com/meituan-longcat/LongCat-Video): A foundational video generation model with 13.6B parameters with block-sparse attention similar to Video Sparse Attention.
+- HunyuanVideo: `scripts/inference/v1_inference_hunyuan_STA.sh`
+- Wan2.1-T2V-14B: `scripts/inference/v1_inference_wan_STA.sh`
 
-## 🤝 Contributing
+Run:
 
-We welcome all contributions. Please check out our guide [here](https://hao-ai-lab.github.io/FastVideo/contributing/overview/).
-See details in [development roadmap](https://github.com/hao-ai-lab/FastVideo/issues/899).
+```bash
+bash scripts/inference/v1_inference_hunyuan_STA.sh
+# or
+bash scripts/inference/v1_inference_wan_STA.sh
+```
 
-## Acknowledgement
+Both scripts already set STA-related env vars:
 
-We learned the design and reused code from the following projects: [Wan-Video](https://github.com/Wan-Video), [ThunderKittens](https://github.com/HazyResearch/ThunderKittens), [DMD2](https://github.com/tianweiy/DMD2), [diffusers](https://github.com/huggingface/diffusers), [xDiT](https://github.com/xdit-project/xDiT), [vLLM](https://github.com/vllm-project/vllm), [SGLang](https://github.com/sgl-project/sglang). We thank [MBZUAI](https://ifm.mbzuai.ac.ae/), [Anyscale](https://www.anyscale.com/), and [GMI Cloud](https://www.gmicloud.ai/) for their support throughout this project.
+- `FASTVIDEO_ATTENTION_BACKEND=SLIDING_TILE_ATTN`
+- `FASTVIDEO_ATTENTION_CONFIG` to an STA mask strategy JSON
+
+## STA Mask Strategy Files
+
+- HunyuanVideo config: `assets/mask_strategy_hunyuan.json`
+- Wan config: `assets/mask_strategy_wan.json`
+
+## STA Mask Search (Wan2.1-T2V-14B)
+
+Run mask search + tuning from repo root:
+
+```bash
+bash examples/inference/sta_mask_search/inference_wan_sta.sh
+```
+
+What this script does:
+
+- Runs `STA_searching` first.
+- Runs `STA_tuning` next (`skip_time_steps=12` by default).
+- Uses prompt shards from `assets/prompt_0.txt` to `assets/prompt_7.txt`.
+
+Important notes:
+
+- Default script is set to 8 GPUs (`num_gpu=8`). If needed, edit
+  `examples/inference/sta_mask_search/inference_wan_sta.sh`.
+- STA searching/tuning currently supports `69x768x1280` (Wan setting).
+
+Generated files:
+
+- Search results: `output/mask_search_result_pos_1280x768/`
+- Tuned strategy: `output/mask_search_strategy_1280x768/mask_strategy_s12.json`
+
+Use the tuned mask for STA inference:
+
+```bash
+export FASTVIDEO_ATTENTION_BACKEND=SLIDING_TILE_ATTN
+export FASTVIDEO_ATTENTION_CONFIG=output/mask_search_strategy_1280x768/mask_strategy_s12.json
+python examples/inference/sta_mask_search/wan_example.py --STA_mode STA_inference --num_gpus 1
+```
 
 ## Citation
 
-If you find FastVideo useful, please consider citing our research work:
-
 ```bibtex
-@article{zhang2025vsa,
-  title={Vsa: Faster video diffusion with trainable sparse attention},
-  author={Zhang, Peiyuan and Chen, Yongqi and Huang, Haofeng and Lin, Will and Liu, Zhengzhong and Stoica, Ion and Xing, Eric and Zhang, Hao},
-  journal={arXiv preprint arXiv:2505.13389},
-  year={2025}
-}
-
 @article{zhang2025fast,
   title={Fast video generation with sliding tile attention},
   author={Zhang, Peiyuan and Chen, Yongqi and Su, Runlong and Ding, Hangliang and Stoica, Ion and Liu, Zhengzhong and Zhang, Hao},
