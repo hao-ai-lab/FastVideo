@@ -44,9 +44,6 @@ class _DMD2Adapter(Protocol):
     ) -> Any:
         ...
 
-    def student_rollout(self, handle: RoleHandle, batch: Any) -> tuple[torch.Tensor, Any]:
-        ...
-
     @property
     def num_train_timesteps(self) -> int:
         ...
@@ -74,13 +71,16 @@ class _DMD2Adapter(Protocol):
     ) -> torch.Tensor:
         ...
 
-    def critic_flow_matching_loss(
+    def predict_noise(
         self,
-        *,
-        student: RoleHandle,
-        critic: RoleHandle,
+        handle: RoleHandle,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
         batch: Any,
-    ) -> tuple[torch.Tensor, Any, dict[str, Any]]:
+        *,
+        conditional: bool,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> torch.Tensor:
         ...
 
     def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
@@ -119,6 +119,10 @@ class DMD2Method(DistillMethod):
             raise ValueError("DMD2Method requires models.teacher.trainable=false")
         self.adapter = adapter
         self.training_args = adapter.training_args
+        self._simulate_generator_forward = bool(
+            getattr(self.training_args, "simulate_generator_forward", False)
+        )
+        self._denoising_step_list: torch.Tensor | None = None
 
     def on_train_start(self) -> None:
         self.adapter.on_train_start()
@@ -143,6 +147,179 @@ class DMD2Method(DistillMethod):
             foreach=None,
         )
         return float(grad_norm.item()) if grad_norm is not None else 0.0
+
+    def _get_denoising_step_list(self, device: torch.device) -> torch.Tensor:
+        if self._denoising_step_list is not None and self._denoising_step_list.device == device:
+            return self._denoising_step_list
+
+        raw = getattr(self.training_args.pipeline_config, "dmd_denoising_steps", None)
+        if not raw:
+            raise ValueError("pipeline_config.dmd_denoising_steps must be set for DMD2 distillation")
+
+        steps = torch.tensor(raw, dtype=torch.long, device=device)
+
+        if getattr(self.training_args, "warp_denoising_step", False):
+            noise_scheduler = getattr(self.adapter, "noise_scheduler", None)
+            if noise_scheduler is None:
+                raise ValueError("warp_denoising_step requires adapter.noise_scheduler.timesteps")
+
+            timesteps = torch.cat(
+                (
+                    noise_scheduler.timesteps.to("cpu"),
+                    torch.tensor([0], dtype=torch.float32),
+                )
+            ).to(device)
+            steps = timesteps[1000 - steps]
+
+        self._denoising_step_list = steps
+        return steps
+
+    def _sample_rollout_timestep(self, device: torch.device) -> torch.Tensor:
+        step_list = self._get_denoising_step_list(device)
+        index = torch.randint(
+            0,
+            len(step_list),
+            [1],
+            device=device,
+            dtype=torch.long,
+        )
+        return step_list[index]
+
+    def _student_rollout(self, batch: Any, *, with_grad: bool) -> torch.Tensor:
+        latents = batch.latents
+        device = latents.device
+        dtype = latents.dtype
+        step_list = self._get_denoising_step_list(device)
+
+        if not self._simulate_generator_forward:
+            timestep = self._sample_rollout_timestep(device)
+            noise = torch.randn(latents.shape, device=device, dtype=dtype)
+            noisy_latents = self.adapter.add_noise(latents, noise, timestep)
+            pred_x0 = self.adapter.predict_x0(
+                self.student,
+                noisy_latents,
+                timestep,
+                batch,
+                conditional=True,
+                attn_kind="vsa",
+            )
+            batch.dmd_latent_vis_dict["generator_timestep"] = timestep
+            return pred_x0
+
+        target_timestep_idx = torch.randint(
+            0,
+            len(step_list),
+            [1],
+            device=device,
+            dtype=torch.long,
+        )
+        target_timestep_idx_int = int(target_timestep_idx.item())
+        target_timestep = step_list[target_timestep_idx]
+
+        current_noise_latents = torch.randn(latents.shape, device=device, dtype=dtype)
+        current_noise_latents_copy = current_noise_latents.clone()
+
+        max_target_idx = len(step_list) - 1
+        noise_latents: list[torch.Tensor] = []
+        noise_latent_index = target_timestep_idx_int - 1
+
+        if max_target_idx > 0:
+            with torch.no_grad():
+                for step_idx in range(max_target_idx):
+                    current_timestep = step_list[step_idx]
+                    current_timestep_tensor = current_timestep * torch.ones(
+                        1, device=device, dtype=torch.long
+                    )
+
+                    pred_clean = self.adapter.predict_x0(
+                        self.student,
+                        current_noise_latents,
+                        current_timestep_tensor,
+                        batch,
+                        conditional=True,
+                        attn_kind="vsa",
+                    )
+
+                    next_timestep = step_list[step_idx + 1]
+                    next_timestep_tensor = next_timestep * torch.ones(
+                        1, device=device, dtype=torch.long
+                    )
+                    noise = torch.randn(latents.shape, device=device, dtype=pred_clean.dtype)
+                    current_noise_latents = self.adapter.add_noise(
+                        pred_clean,
+                        noise,
+                        next_timestep_tensor,
+                    )
+                    noise_latents.append(current_noise_latents.clone())
+
+        if noise_latent_index >= 0:
+            if noise_latent_index >= len(noise_latents):
+                raise RuntimeError("noise_latent_index is out of bounds")
+            noisy_input = noise_latents[noise_latent_index]
+        else:
+            noisy_input = current_noise_latents_copy
+
+        if with_grad:
+            pred_x0 = self.adapter.predict_x0(
+                self.student,
+                noisy_input,
+                target_timestep,
+                batch,
+                conditional=True,
+                attn_kind="vsa",
+            )
+        else:
+            with torch.no_grad():
+                pred_x0 = self.adapter.predict_x0(
+                    self.student,
+                    noisy_input,
+                    target_timestep,
+                    batch,
+                    conditional=True,
+                    attn_kind="vsa",
+                )
+
+        batch.dmd_latent_vis_dict["generator_timestep"] = target_timestep.float().detach()
+        return pred_x0
+
+    def _critic_flow_matching_loss(self, batch: Any) -> tuple[torch.Tensor, Any, dict[str, Any]]:
+        with torch.no_grad():
+            generator_pred_x0 = self._student_rollout(batch, with_grad=False)
+
+        device = generator_pred_x0.device
+        fake_score_timestep = torch.randint(
+            0,
+            int(self.adapter.num_train_timesteps),
+            [1],
+            device=device,
+            dtype=torch.long,
+        )
+        fake_score_timestep = self.adapter.shift_and_clamp_timestep(fake_score_timestep)
+
+        noise = torch.randn(
+            generator_pred_x0.shape,
+            device=device,
+            dtype=generator_pred_x0.dtype,
+        )
+        noisy_x0 = self.adapter.add_noise(generator_pred_x0, noise, fake_score_timestep)
+
+        pred_noise = self.adapter.predict_noise(
+            self.critic,
+            noisy_x0,
+            fake_score_timestep,
+            batch,
+            conditional=True,
+            attn_kind="dense",
+        )
+        target = noise - generator_pred_x0
+        flow_matching_loss = torch.mean((pred_noise - target) ** 2)
+
+        batch.fake_score_latent_vis_dict = {
+            "generator_pred_video": generator_pred_x0,
+            "fake_score_timestep": fake_score_timestep,
+        }
+        outputs = {"fake_score_latent_vis_dict": batch.fake_score_latent_vis_dict}
+        return flow_matching_loss, (batch.timesteps, batch.attn_metadata), outputs
 
     def _dmd_loss(self, generator_pred_x0: torch.Tensor, batch: Any) -> torch.Tensor:
         guidance_scale = float(getattr(self.training_args, "real_score_guidance_scale", 1.0))
@@ -222,17 +399,11 @@ class DMD2Method(DistillMethod):
         )
         student_ctx = None
         if update_student:
-            generator_pred_x0, student_ctx = self.adapter.student_rollout(
-                self.student,
-                training_batch,
-            )
+            generator_pred_x0 = self._student_rollout(training_batch, with_grad=True)
+            student_ctx = (training_batch.timesteps, training_batch.attn_metadata_vsa)
             generator_loss = self._dmd_loss(generator_pred_x0, training_batch)
 
-        fake_score_loss, critic_ctx, critic_outputs = self.adapter.critic_flow_matching_loss(
-            student=self.student,
-            critic=self.critic,
-            batch=training_batch,
-        )
+        fake_score_loss, critic_ctx, critic_outputs = self._critic_flow_matching_loss(training_batch)
 
         total_loss = generator_loss + fake_score_loss
         loss_map = {
