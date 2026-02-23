@@ -1,9 +1,9 @@
 {
     "data": [
         {
-            "caption": "",
-            "image_path": "/mnt/fast-disks/hao_lab/kaiqin/traindata_0209_1500/ode_init_mc/images/000000.jpg",
-            "action_path": "/mnt/fast-disks/hao_lab/kaiqin/traindata_0209_1500/ode_init_mc/images/000000_action.npy",
+            "caption": "00: W",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000000.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000000_action.npy",
             "video_path": null,
             "num_inference_steps": 4,
             "height": 352,
@@ -11,9 +11,9 @@
             "num_frames": 81
         },
         {
-            "caption": "",
-            "image_path": "/mnt/fast-disks/hao_lab/kaiqin/traindata_0209_1500/ode_init_mc/images/000001.jpg",
-            "action_path": "/mnt/fast-disks/hao_lab/kaiqin/traindata_0209_1500/ode_init_mc/images/000001_action.npy",
+            "caption": "01: S",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000001.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000001_action.npy",
             "video_path": null,
             "num_inference_steps": 4,
             "height": 352,
@@ -21,9 +21,9 @@
             "num_frames": 81
         },
         {
-            "caption": "00: A",
-            "image_path": "/mnt/fast-disks/hao_lab/kaiqin/traindata_0209_1500/ode_init_mc/images/000002.jpg",
-            "action_path": "/mnt/fast-disks/hao_lab/kaiqin/traindata_0209_1500/ode_init_mc/images/000002_action.npy",
+            "caption": "02: A",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000002_action.npy",
             "video_path": null,
             "num_inference_steps": 4,
             "height": 352,
@@ -31,9 +31,299 @@
             "num_frames": 81
         },
         {
-            "caption": "00: D",
-            "image_path": "/mnt/fast-disks/hao_lab/kaiqin/traindata_0209_1500/ode_init_mc/images/000003.jpg",
-            "action_path": "/mnt/fast-disks/hao_lab/kaiqin/traindata_0209_1500/ode_init_mc/images/000003_action.npy",
+            "caption": "03: D",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000003_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "04: Idle",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000004.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000004_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "04: Idle",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000004.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000004_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "05: camera down",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000005.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000005_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "06: camera up",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000006.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000006_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "07: camera right",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000007.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000007_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "08: camera left",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000008.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000008_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "09: W",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000009.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000009_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "10: S",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000010.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000010_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "11: A",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000011.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000011_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "12: D", 
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000012.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000012_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "13: Idle",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000013.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000013_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "14: Idle",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000014.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000014_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "15: camera down",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000015.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000015_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "16: camera up",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000016.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000016_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "17: camera right",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000017.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000017_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "18: camera left",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000018.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000018_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "19: W",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000019.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000019_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "20: S",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000020.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000020_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "21: A",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000021.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000021_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "22: D",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000022.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000022_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "23: Idle",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000023.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000023_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "24: Idle",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000024.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000024_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "25: camera down",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000025.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000025_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "26: camera up",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000026.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000026_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "27: camera right",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000027.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000027_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "28: camera left",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000028.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000028_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "29: W",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000029.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000029_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "30: S",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000030.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000030_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "31: A",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000031.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_with_mouse/images/000031_action.npy",
             "video_path": null,
             "num_inference_steps": 4,
             "height": 352,

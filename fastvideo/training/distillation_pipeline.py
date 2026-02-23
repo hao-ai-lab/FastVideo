@@ -1453,8 +1453,7 @@ class DistillationPipeline(TrainingPipeline):
                 imageio.mimsave(video_filename, video_frames, fps=24)
 
                 video_artifact = self.tracker.video(
-                    video, fps=24, format="mp4",
-                    video_filename, caption=latent_key)  # change to 16 for Wan2.1
+                    video, fps=24, format="mp4", caption=latent_key)  # change to 16 for Wan2.1
                 if video_artifact is not None:
                     tracker_loss_dict[latent_key] = video_artifact
                 # Clean up references

@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=wg-ode
 #SBATCH --partition=main
-#SBATCH --nodes=8
-#SBATCH --ntasks=8
+#SBATCH --nodes=4
+#SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -30,18 +30,21 @@ export TOKENIZERS_PARALLELISM=false
 echo "MASTER_ADDR: $MASTER_ADDR"
 echo "NODE_RANK: $NODE_RANK"
 
+RUN_NAME=$(date +"%m%d_%H%M")
+echo "RUN_NAME: $RUN_NAME"
+
 # Configs
 MODEL_PATH="weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers"
-DATA_DIR="../traindata_0209_1500/ode_init/preprocessed"
+DATA_DIR="../traindata_0222_0030/ode_init_mc_with_mouse/preprocessed_wangame"
 VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_wangame_ode_init/validation.json"
-CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_with_warmup_lr_1e-5/checkpoint-7000/transformer/diffusion_pytorch_model.safetensors"
+CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_1action_rand_from_scratch/checkpoint-9000/transformer/diffusion_pytorch_model.safetensors"
 
 # Training arguments
 training_args=(
   --tracker_project_name "wangame_ode_init"
-  --output_dir "checkpoints/wangame_ode_init"
+  --output_dir "checkpoints/wangame_ode_init_${RUN_NAME}"
   --override_transformer_cls_name "CausalWanGameActionTransformer3DModel"
-  --wandb_run_name "wangame_ode_init_64gpu"
+  --wandb_run_name "${RUN_NAME}_bs32"
   --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -57,11 +60,11 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 64
+  --num_gpus 32
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 64
+  --hsdp_shard_dim 32
 )
 
 # Model arguments
@@ -79,8 +82,10 @@ dataset_args=(
 # Validation arguments
 validation_args=(
   --log_validation
+  --log-visualization
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 100
+  --visualization-steps 100
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )
@@ -104,7 +109,6 @@ miscellaneous_args=(
   --not_apply_cfg_solver
   --dit_precision "fp32"
   --num_euler_timesteps 50
-  --ema_start_step 0
 )
 
 mkdir -p ode_train_output
