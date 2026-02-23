@@ -15,6 +15,9 @@ Usage:
   # Custom prompt/seed/output dir
   python compare_flux2_e2e_ssim.py --prompt "a blue car" --seed 123 --output-dir ./my_compare
 
+  # Run FastVideo with diffusers text encoder embeddings (to see how much TE explains the SSIM gap)
+  python compare_flux2_e2e_ssim.py --fastvideo-diffusers-te
+
 Requires: FastVideo, diffusers, torch, torchvision. For SSIM: pytorch-msssim (pip install pytorch-msssim).
 """
 from __future__ import annotations
@@ -75,6 +78,83 @@ def get_fastvideo_image(
         for f in os.listdir(output_dir):
             if f.endswith(".mp4"):
                 mp4_path = os.path.join(output_dir, f)
+                break
+    if not os.path.isfile(mp4_path):
+        raise FileNotFoundError(f"Expected FastVideo output at {mp4_path}")
+    frames, _, _ = read_video(mp4_path, pts_unit="sec", output_format="TCHW")
+    if frames.shape[0] == 0:
+        raise RuntimeError(f"No frames in {mp4_path}")
+    frame0 = frames[0]
+    img = frame0.permute(1, 2, 0).numpy()
+    if img.shape[2] == 4:
+        img = img[:, :, :3]
+    if img.max() <= 1.0:
+        img = (img * 255).clip(0, 255).astype(np.uint8)
+    else:
+        img = img.clip(0, 255).astype(np.uint8)
+    return _resize_to(img, SIZE)
+
+
+def get_diffusers_prompt_embeds(
+    prompt: str,
+    model_id: str,
+    device: str = "cuda",
+    dtype: torch.dtype = torch.bfloat16,
+) -> torch.Tensor:
+    """Get Flux2 Klein prompt_embeds from diffusers (layers 9, 18, 27). Returns tensor on device."""
+    try:
+        from diffusers import Flux2KleinPipeline
+    except ImportError:
+        from diffusers.pipelines.flux2 import Flux2KleinPipeline
+    pipe = Flux2KleinPipeline.from_pretrained(model_id, torch_dtype=dtype)
+    pipe = pipe.to(device)
+    prompt_embeds, _ = pipe.encode_prompt(
+        prompt=prompt,
+        device=device,
+        num_images_per_prompt=1,
+        max_sequence_length=512,
+        text_encoder_out_layers=(9, 18, 27),
+    )
+    return prompt_embeds
+
+
+def get_fastvideo_image_with_diffusers_embeds(
+    prompt: str,
+    seed: int,
+    model_id: str,
+    output_dir: str,
+    diffusers_prompt_embeds: torch.Tensor,
+    num_gpus: int = 1,
+) -> np.ndarray:
+    """Run FastVideo (Flux2 Klein) with precomputed diffusers prompt_embeds; return frame 0 as RGB numpy."""
+    from fastvideo import VideoGenerator
+    from fastvideo.configs.sample import SamplingParam
+    from fastvideo.attention.selector import global_force_attn_backend
+    from fastvideo.platforms import AttentionBackendEnum
+
+    global_force_attn_backend(AttentionBackendEnum.TORCH_SDPA)
+    os.makedirs(output_dir, exist_ok=True)
+    # Use a subdir so we don't overwrite the normal FastVideo mp4
+    fv_te_dir = os.path.join(output_dir, "fastvideo_diffusers_te")
+    os.makedirs(fv_te_dir, exist_ok=True)
+    print("Loading FastVideo generator (attention=TORCH_SDPA) for diffusers-TE run ...")
+    generator = VideoGenerator.from_pretrained(model_id, num_gpus=num_gpus)
+    sampling = SamplingParam.from_pretrained(model_id)
+    print(f"Generating with diffusers prompt_embeds (prompt={prompt!r}, seed={seed}) ...")
+    generator.generate_video(
+        prompt,
+        sampling_param=sampling,
+        output_path=fv_te_dir,
+        save_video=True,
+        seed=seed,
+        prompt_embeds=[diffusers_prompt_embeds],
+    )
+    prompt_part = _sanitize_filename_component(prompt[:100])
+    mp4_path = os.path.join(fv_te_dir, f"{prompt_part}.mp4")
+    if not os.path.isfile(mp4_path):
+        for f in os.listdir(fv_te_dir):
+            if f.endswith(".mp4"):
+                mp4_path = os.path.join(fv_te_dir, f)
                 break
     if not os.path.isfile(mp4_path):
         raise FileNotFoundError(f"Expected FastVideo output at {mp4_path}")
@@ -182,6 +262,11 @@ def main() -> None:
     parser.add_argument("--num-gpus", type=int, default=1, help="Number of GPUs for FastVideo")
     parser.add_argument("--skip-fastvideo", action="store_true", help="Skip FastVideo generation")
     parser.add_argument("--skip-diffusers", action="store_true", help="Skip diffusers generation")
+    parser.add_argument(
+        "--fastvideo-diffusers-te",
+        action="store_true",
+        help="Also run FastVideo with diffusers text encoder embeddings to measure how much TE explains SSIM gap",
+    )
     args = parser.parse_args()
 
     if args.seed < 1:
@@ -219,6 +304,26 @@ def main() -> None:
     if not args.skip_diffusers:
         images["diffusers"] = get_diffusers_image(
             args.prompt, args.seed, args.model_id, args.output_dir
+        )
+
+    if args.fastvideo_diffusers_te:
+        if "diffusers" not in images:
+            print("--fastvideo-diffusers-te requires diffusers; running diffusers first.")
+            images["diffusers"] = get_diffusers_image(
+                args.prompt, args.seed, args.model_id, args.output_dir
+            )
+        print("Getting diffusers prompt_embeds ...")
+        dtype = torch.bfloat16
+        diffusers_embeds = get_diffusers_prompt_embeds(
+            args.prompt, args.model_id, device="cuda", dtype=dtype
+        )
+        images["FastVideo (diffusers TE)"] = get_fastvideo_image_with_diffusers_embeds(
+            args.prompt,
+            args.seed,
+            args.model_id,
+            args.output_dir,
+            diffusers_embeds,
+            num_gpus=args.num_gpus,
         )
 
     if args.sglang_image and os.path.isfile(args.sglang_image):
