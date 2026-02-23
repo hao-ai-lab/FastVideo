@@ -6,7 +6,8 @@ Phase 2 已经实现了“新框架可独立运行（不依赖 legacy distill pi
 本 Phase 2.9 的目标是先把语义边界收敛好（A+B+Families），并把 dispatch 做到真正优雅（N+M），
 让 Phase 3 只需要在此基础上加 config schema 与新 method，而不需要再动 entrypoint/builder 的组合逻辑。
 
-本文件只做**代码层面的设计**（不写代码），后续实现过程中如果有小调整会回填；遇到重大风险会停下讨论。
+本文件最初用于 **Phase 2.9 的代码层面设计**；目前 Phase 2.9 已实现，下面 checklist 已同步打勾。
+后续如果在实践过程中发现有小调整，会继续回填；遇到重大风险会停下讨论。
 
 ---
 
@@ -106,6 +107,8 @@ handle 是为 **forward/select module** 服务的：比如选择哪个 transform
   - 不再暴露 `teacher_*` / `critic_*` / `student_*` 专用函数给 method 使用
   - DMD2Method 通过通用操作（如 `predict_x0(handle=...)`）完成 teacher/critic/student 的调用
 - DMD2 的 timestep sampling policy 从 adapter 迁移到 method（最少把 `sample_dmd_timestep()` 挪走）。
+- few-step rollout 的 step list / simulate 逻辑从 adapter 迁移到 method（未来应进一步移到 `method_config`）。
+- `WanAdapter` 不应包含 method-specific 命名/概念（例如不应依赖 `*DMD*Pipeline` 这类算法命名）。
 - Phase 2 的训练行为/结果应尽可能保持一致（同 config 下 loss 形态、validation 产物趋势不应漂移）。
 
 ---
@@ -115,8 +118,8 @@ handle 是为 **forward/select module** 服务的：比如选择哪个 transform
 - 不做 YAML schema v2（`recipe` + `method_config`）升级（留到 Phase 3）。
 - 不新增 finetune method（留到 Phase 3）。
 - 不新增新模型家族（Phase 2.9 只整理 Wan）。
-- 不追求把所有 DMD2 逻辑从 adapter 中抠干净（例如 critic loss 里 student rollout 的复用）；
-  Phase 2.9 先解决“role-centric API + policy 泄漏”这两个最大痛点。
+- 不追求把所有“validation / sample / prompt encode”的实现都完全脱离 pipeline（Phase 2.9 先保证训练路径独立可跑）；
+  但 adapter 层需要避免 method-specific policy/rollout 泄漏，并避免 method-specific 命名耦合。
 
 ---
 
@@ -164,6 +167,9 @@ handle 是为 **forward/select module** 服务的：比如选择哪个 transform
   - 把 `backward_student/backward_critic` 合并为 `backward(loss, ctx, ...)`
   - 将 `get_teacher_transformer/get_critic_transformer` 改为 `get_transformer(handle, timestep)`
     - handle 不包含“语义”
+- [x] `fastvideo/distillation/adapters/wan.py` 不再出现 method-specific 命名
+  - 移除 `WanDMDPipeline` 依赖，prompt encoding 改用 `WanPipeline`
+  - adapter 内不再出现 `dmd/DMD` 字眼（避免“命名耦合”）
 
 ### 3.3 Timestep sampling policy 回归 method（B）
 
@@ -172,6 +178,10 @@ handle 是为 **forward/select module** 服务的：比如选择哪个 transform
   - 然后调用 adapter 的 mechanics：
     - `t = adapter.shift_and_clamp_timestep(t)`（mechanics：shift/clamp 语义）
 - [x] `WanAdapter` 去掉 `sample_dmd_timestep()`（改为提供 `shift_and_clamp_timestep()`）
+- [x] few-step rollout policy 回归 method
+  - denoising step list / warp mapping / multi-step simulate 全部由 `DMD2Method` 管理
+  - adapter 只提供单步 primitives（如 `predict_x0` / `predict_noise` / `add_noise`）
+  - TODO(Phase 3): 将 `pipeline_config.dmd_denoising_steps` 迁移到 `method_config`，避免“pipeline_config 承载算法语义”
 
 ### 3.4 兼容性与安全落地（降低风险）
 

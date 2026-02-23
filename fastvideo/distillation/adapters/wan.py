@@ -19,7 +19,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.pipelines.basic.wan.wan_dmd_pipeline import WanDMDPipeline
+from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
 from fastvideo.training.training_utils import (
     compute_density_for_timestep_sampling,
     get_sigmas,
@@ -44,7 +44,7 @@ except Exception:
 class WanAdapter(DistillAdapter):
     """
     Phase 1 target adapter: provide Wan-specific primitives without calling
-    legacy distillation pipeline algorithm helpers (e.g. `_dmd_forward`).
+    legacy distillation pipeline algorithm helpers (e.g. pipeline-private forward wrappers).
     """
 
     def __init__(
@@ -151,7 +151,7 @@ class WanAdapter(DistillAdapter):
             args_copy.inference_mode = True
 
             student_transformer = self.prompt_handle.require_module("transformer")
-            prompt_pipeline = WanDMDPipeline.from_pretrained(
+            prompt_pipeline = WanPipeline.from_pretrained(
                 training_args.model_path,
                 args=args_copy,
                 inference_mode=True,
@@ -330,9 +330,6 @@ class WanAdapter(DistillAdapter):
                 "encoder_hidden_states": neg_embeds,
                 "encoder_attention_mask": neg_mask,
             }
-
-        training_batch.dmd_latent_vis_dict = {}
-        training_batch.fake_score_latent_vis_dict = {}
 
         training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         return training_batch
