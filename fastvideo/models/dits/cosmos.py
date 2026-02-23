@@ -7,16 +7,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.configs.models.dits.cosmos import CosmosVideoConfig
-from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import RMSNorm
-from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import apply_rotary_emb
 from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.platforms import AttentionBackendEnum
 
 
 class CosmosPatchEmbed(nn.Module):
@@ -605,18 +601,6 @@ class CosmosTransformer3DModel(BaseDiT):
                                   bias=False)
 
         self.gradient_checkpointing = False
-
-        # For TeaCache
-        self.previous_e0_even = None
-        self.previous_e0_odd = None
-        self.previous_residual_even = None
-        self.previous_residual_odd = None
-        self.is_even = True
-        self.should_calc_even = True
-        self.should_calc_odd = True
-        self.accumulated_rel_l1_distance_even = 0
-        self.accumulated_rel_l1_distance_odd = 0
-        self.cnt = 0
         self.__post_init__()
 
     def forward(self,
@@ -628,10 +612,6 @@ class CosmosTransformer3DModel(BaseDiT):
                 condition_mask: torch.Tensor | None = None,
                 padding_mask: torch.Tensor | None = None,
                 **kwargs) -> torch.Tensor:
-        forward_batch = get_forward_context().forward_batch
-        enable_teacache = forward_batch is not None and forward_batch.enable_teacache
-
-        orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
 

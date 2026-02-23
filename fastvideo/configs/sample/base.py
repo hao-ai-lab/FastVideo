@@ -73,9 +73,6 @@ class SamplingParam:
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
 
-    # TeaCache parameters
-    enable_teacache: bool = False
-
     # Misc
     save_video: bool = True
     return_frames: bool = False
