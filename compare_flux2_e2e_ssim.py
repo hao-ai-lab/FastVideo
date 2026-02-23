@@ -3,6 +3,7 @@
 End-to-end image comparison (SSIM / PSNR) for Flux2 Klein across FastVideo, diffusers, and optionally SGLang.
 
 Uses the same prompt and seed for all backends, then compares the first frame (or single image) with SSIM and PSNR.
+Attention is forced to torch SDPA on both FastVideo and diffusers for a fair comparison.
 
 Usage:
   # FastVideo + diffusers only (SGLang skipped)
@@ -50,9 +51,13 @@ def get_fastvideo_image(
     """Generate one image with FastVideo (Flux2 Klein), return frame 0 as RGB numpy (H, W, 3) in [0, 255]."""
     from fastvideo import VideoGenerator
     from fastvideo.configs.sample import SamplingParam
+    from fastvideo.attention.selector import global_force_attn_backend
+    from fastvideo.platforms import AttentionBackendEnum
 
+    # Enforce torch SDPA for fair comparison with diffusers
+    global_force_attn_backend(AttentionBackendEnum.TORCH_SDPA)
     os.makedirs(output_dir, exist_ok=True)
-    print("Loading FastVideo generator ...")
+    print("Loading FastVideo generator (attention=TORCH_SDPA) ...")
     generator = VideoGenerator.from_pretrained(model_id, num_gpus=num_gpus)
     sampling = SamplingParam.from_pretrained(model_id)
     print(f"Generating (prompt={prompt!r}, seed={seed}) ...")
@@ -104,6 +109,20 @@ def get_diffusers_image(
     print("Loading diffusers Flux2KleinPipeline ...")
     pipe = Flux2KleinPipeline.from_pretrained(model_id, torch_dtype=dtype)
     pipe = pipe.to(device)
+    # Enforce SDPA for fair comparison with FastVideo
+    try:
+        from diffusers.models.attention_processor import AttnProcessor2_0
+        pipe.transformer.set_attn_processor(AttnProcessor2_0())
+        print("  Using AttnProcessor2_0 (SDPA) for transformer.")
+    except ImportError:
+        try:
+            from diffusers.models.attention_processor import SdpaAttnProcessor
+            pipe.transformer.set_attn_processor(SdpaAttnProcessor())
+            print("  Using SdpaAttnProcessor for transformer.")
+        except ImportError as e:
+            print(f"  Could not set SDPA attn processor: {e}; using default.")
+    except Exception as e:
+        print(f"  Could not set SDPA attn processor: {e}; using default.")
     generator = torch.Generator(device=device).manual_seed(seed)
     print(f"Generating (prompt={prompt!r}, seed={seed}) ...")
     image = pipe(
