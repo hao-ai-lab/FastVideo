@@ -47,6 +47,57 @@ adapter 只保留 scheduler 相关的 mechanics：
 
 ---
 
+## 0.5) 常见疑问（为什么这么拆？）
+
+### backward 为什么不需要传 handle？
+
+因为 backward 本质上只做两件事：
+1) 让 autograd 通过 **已有的计算图** 反传（参数由计算图决定，不需要再“选择模块”）
+2) 在 FastVideo/Wan 这种依赖全局 forward_context 的实现里，在 backward 期间 **恢复必要的上下文**
+
+因此 adapter 的 backward 更像：
+- `adapter.backward(loss, ctx)`：ctx 里带着 forward_context 所需的 timesteps/attn_metadata 等信息
+
+handle 是为 **forward/select module** 服务的：比如选择哪个 transformer（以及 transformer_2/boundary）。而 backward 只需要“把当时 forward 用的上下文恢复回来”，不需要知道 handle。
+
+如果未来真的出现 role/handle 相关的 backward 特殊逻辑（例如不同模块需要不同 backward context），也更推荐：
+- 把 handle 放进 ctx（由 forward 返回），而不是让 adapter.backward(handle, ...) 成为常态 API。
+
+### Families 和 Adapter 的关系是什么？
+
+- `Family`（build-time）：负责“装配/构建”
+  - 从 config 解析 roles -> 加载 modules -> 构建 `ModelBundle`
+  - 构建 shared components（scheduler/vae/tokenizer/...）
+  - 构建 dataloader/validator/tracker（可选）
+  - **实例化 adapter**（把 bundle + shared components 注入进去）
+
+- `Adapter`（runtime/step-time）：负责“操作/执行”
+  - prepare_batch / forward_context / attention metadata
+  - `predict_x0(handle, ...)` 这类 operation-centric primitives
+  - backward 时恢复 forward_context
+
+一句话：**Family 负责把一堆零件装成可运行的 runtime；Adapter 负责在训练 step 里把 FastVideo 的模型/管线差异变成可复用的操作。**
+
+### 每个 family 都一定要有自己的 adapter 吗？能否复用？
+
+通常会是 “一个模型家族（Wan/SDXL/Flux/...）至少有一个 adapter”，因为：
+- raw batch schema 不同
+- forward_context / attention metadata 的机制不同
+- 预测目标（pred noise / pred x0 / flow-matching 等）的转换不同
+
+但并不是强制 1:1：
+- 一个 family 可能有多个 adapter（例如不同 pipeline 类型）
+- 不同 family 也可能共享一个 adapter 基类或部分 mixin（当 runtime mechanics 很像时）
+
+### 为什么不把 Family 和 Adapter 合并成一个东西？
+
+可以合并，但会带来三个长期问题（这也是我们保留 Families 的核心原因）：
+1) **高内聚被破坏**：build-time（下载/加载/优化器/dataloader）和 step-time（forward/backward/context）混在一起，类会膨胀成 God object。
+2) **扩展成本回退到 N×M**：新增 method 时更容易被迫去改“合体的 adapter/builder”，最终又会出现各种 if/else 组合分支。
+3) **语义边界变模糊**：method 想保持纯算法；adapter 想保持纯 runtime；family 想保持纯装配。合并后这些边界会互相污染，导致未来很难做 finetune/新 method 的接入。
+
+---
+
 ## 1) Phase 2.9 交付目标（Definition of Done）
 
 - `fastvideo/training/distillation.py` 不再硬编码 `wan + dmd2` 分支；
