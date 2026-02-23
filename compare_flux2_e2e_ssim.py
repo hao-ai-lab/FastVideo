@@ -3,7 +3,7 @@
 End-to-end image comparison (SSIM / PSNR) for Flux2 Klein across FastVideo, diffusers, and optionally SGLang.
 
 Uses the same prompt and seed for all backends, then compares the first frame (or single image) with SSIM and PSNR.
-Attention is forced to torch SDPA on both FastVideo and diffusers for a fair comparison.
+FastVideo attention is forced to torch SDPA for reproducibility; diffusers uses its default (Flux2 transformer is not compatible with generic AttnProcessor2_0).
 
 Usage:
   # FastVideo + diffusers only (SGLang skipped)
@@ -109,20 +109,8 @@ def get_diffusers_image(
     print("Loading diffusers Flux2KleinPipeline ...")
     pipe = Flux2KleinPipeline.from_pretrained(model_id, torch_dtype=dtype)
     pipe = pipe.to(device)
-    # Enforce SDPA for fair comparison with FastVideo
-    try:
-        from diffusers.models.attention_processor import AttnProcessor2_0
-        pipe.transformer.set_attn_processor(AttnProcessor2_0())
-        print("  Using AttnProcessor2_0 (SDPA) for transformer.")
-    except ImportError:
-        try:
-            from diffusers.models.attention_processor import SdpaAttnProcessor
-            pipe.transformer.set_attn_processor(SdpaAttnProcessor())
-            print("  Using SdpaAttnProcessor for transformer.")
-        except ImportError as e:
-            print(f"  Could not set SDPA attn processor: {e}; using default.")
-    except Exception as e:
-        print(f"  Could not set SDPA attn processor: {e}; using default.")
+    # Flux2 transformer uses Flux2Attention; AttnProcessor2_0 is incompatible (expects spatial_norm).
+    # Rely on diffusers default; PyTorch 2 often uses SDPA by default.
     generator = torch.Generator(device=device).manual_seed(seed)
     print(f"Generating (prompt={prompt!r}, seed={seed}) ...")
     image = pipe(
