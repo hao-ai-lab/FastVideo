@@ -600,6 +600,43 @@ def _capture_official_double4_context_ff(pipe, latent, prompt_embeds, timestep_s
     return ctx_ff_out.float(), official_context_ff_update, c_gate_mlp_raw.float()
 
 
+def _capture_official_double4_before_ff(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, block_index=4):
+    """Run official transformer with pre_hook on block 4's ff_context; return the input to ff_context (before_ff = after norm+mod)."""
+    trans = pipe.transformer
+    if not hasattr(trans, "transformer_blocks") or block_index >= len(trans.transformer_blocks):
+        return None
+    captured_before_ff = []
+
+    def ff_pre_hook(_module, args):
+        if args and len(args) > 0:
+            captured_before_ff.append(args[0].detach().clone().float())
+
+    block4 = trans.transformer_blocks[block_index]
+    handle = block4.ff_context.register_forward_pre_hook(ff_pre_hook)
+    dtype = next(trans.parameters()).dtype
+    latent_d = latent.to(device, dtype=dtype)
+    timestep = timestep_scaled.to(device)
+    prompt_embeds_d = prompt_embeds.to(device, dtype=dtype)
+    text_ids_d = text_ids.to(device)
+    latent_ids_d = latent_ids.to(device)
+    try:
+        with torch.no_grad():
+            with trans.cache_context("cond"):
+                trans(
+                    hidden_states=latent_d,
+                    timestep=timestep,
+                    guidance=None,
+                    encoder_hidden_states=prompt_embeds_d,
+                    txt_ids=text_ids_d,
+                    img_ids=latent_ids_d,
+                    joint_attention_kwargs=getattr(pipe, "attention_kwargs", None) or {},
+                    return_dict=False,
+                )
+    finally:
+        handle.remove()
+    return captured_before_ff[0] if captured_before_ff else None
+
+
 def _collect_fv_activations(transformer, latent, prompt_embeds, timestep_scaled, device, num_txt_tokens, freqs_cis=None):
     """Run FastVideo transformer with hooks; return list of (block_name, tensor) per block."""
     activations = []
@@ -881,8 +918,19 @@ def main():
         off_ctx_ff_out, off_ctx_ff_update, off_c_gate_mlp = _capture_official_double4_context_ff(
             pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, block_index=TARGET_DOUBLE
         )
+        off_before_ff = _capture_official_double4_before_ff(
+            pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, block_index=TARGET_DOUBLE
+        )
         if fv_before_ff is not None:
             print(f"  FV before_ff (after norm+mod): shape={fv_before_ff.shape}")
+        if fv_before_ff is not None and off_before_ff is not None:
+            fv_bf = fv_before_ff.cpu().float() if fv_before_ff.is_cuda else fv_before_ff.float()
+            off_bf = off_before_ff.cpu().float() if off_before_ff.is_cuda else off_before_ff.float()
+            if fv_bf.shape == off_bf.shape:
+                d = (fv_bf - off_bf).abs()
+                print(f"  FV before_ff vs official (input to ff_context): max_diff={d.max().item():.4f} mean_diff={d.mean().item():.4f}")
+            else:
+                print(f"  before_ff shape mismatch: FV={fv_bf.shape} official={off_bf.shape}")
         if fv_context_ff_output is not None and off_ctx_ff_out is not None:
             fv_o = fv_context_ff_output.cpu().float() if fv_context_ff_output.is_cuda else fv_context_ff_output.float()
             off_o = off_ctx_ff_out.cpu().float() if off_ctx_ff_out.is_cuda else off_ctx_ff_out.float()
