@@ -30,12 +30,13 @@ def get_torch_tensors_from_row_dict(row_dict,
     """
     return_dict = {}
     for key in keys:
-        shape, bytes = None, None
+        shape, bytes, dtype_str = None, None, None
         if isinstance(key, tuple):
             for k in key:
                 try:
                     shape = row_dict[f"{k}_shape"]
                     bytes = row_dict[f"{k}_bytes"]
+                    dtype_str = row_dict.get(f"{k}_dtype", 'float32')
                 except KeyError:
                     continue
             key = key[0]
@@ -44,13 +45,25 @@ def get_torch_tensors_from_row_dict(row_dict,
         else:
             shape = row_dict[f"{key}_shape"]
             bytes = row_dict[f"{key}_bytes"]
+            dtype_str = row_dict.get(f"{key}_dtype", 'float32')
+
+        # Convert dtype string to numpy dtype
+        if 'float16' in dtype_str:
+            np_dtype = np.float16
+        elif 'float32' in dtype_str:
+            np_dtype = np.float32
+        elif 'float64' in dtype_str:
+            np_dtype = np.float64
+        else:
+            # Default to float32 if dtype is unrecognized
+            np_dtype = np.float32
 
         # TODO (peiyuan): read precision
         if key == 'text_embedding' and (rng.random()
                                         if rng else random.random()) < cfg_rate:
             data = np.zeros((512, 4096), dtype=np.float32)
         else:
-            data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
+            data = np.frombuffer(bytes, dtype=np_dtype).reshape(shape).copy()
         data = torch.from_numpy(data)
         if len(data.shape) == 3:
             B, L, D = data.shape
@@ -141,21 +154,35 @@ def collate_rows_from_parquet_schema(rows,
             # Get tensor data from row using the existing helper function pattern
             shape_key = f"{tensor_name}_shape"
             bytes_key = f"{tensor_name}_bytes"
+            dtype_key = f"{tensor_name}_dtype"
 
             if shape_key in row and bytes_key in row:
                 shape = row[shape_key]
                 bytes_data = row[bytes_key]
+                
+                # Get dtype from row, default to float32 for backward compatibility
+                dtype_str = row.get(dtype_key, 'float32')
+                # Convert dtype string to numpy dtype
+                if 'float16' in dtype_str:
+                    np_dtype = np.float16
+                elif 'float32' in dtype_str:
+                    np_dtype = np.float32
+                elif 'float64' in dtype_str:
+                    np_dtype = np.float64
+                else:
+                    # Default to float32 if dtype is unrecognized
+                    np_dtype = np.float32
 
                 if len(bytes_data) == 0:
                     tensor = torch.zeros(0, dtype=torch.bfloat16)
                 else:
-                    # Convert bytes to tensor using float32 as default
+                    # Convert bytes to tensor using the correct dtype
                     if tensor_name == 'text_embedding' and (rng.random(
                     ) if rng else random.random()) < cfg_rate:
                         data = np.zeros((512, 4096), dtype=np.float32)
                     else:
                         data = np.frombuffer(
-                            bytes_data, dtype=np.float32).reshape(shape).copy()
+                            bytes_data, dtype=np_dtype).reshape(shape).copy()
                     tensor = torch.from_numpy(data)
                     # if len(data.shape) == 3:
                     #     B, L, D = tensor.shape

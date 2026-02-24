@@ -43,12 +43,16 @@ if "A40" in device_name:
     device_reference_folder = "A40" + device_reference_folder_suffix
 elif "L40S" in device_name:
     device_reference_folder = "L40S" + device_reference_folder_suffix
+elif "H100" in device_name or "NVIDIA H100" in device_name:
+    device_reference_folder = "H100" + device_reference_folder_suffix
+
 else:
     # device_reference_folder = "L40S" + device_reference_folder_suffix
     logger.warning(f"Unsupported device for ssim tests: {device_name}")
     # raise ValueError(f"Unsupported device for ssim tests: {device_name}")
 
 # Base parameters from the shell script
+
 HUNYUAN_PARAMS = {
     "num_gpus": 4,
     "model_path": "FastVideo/FastHunyuan-diffusers",

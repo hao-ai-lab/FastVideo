@@ -281,11 +281,27 @@ class TrainingPipeline(LoRAPipeline, ABC):
     def _normalize_dit_input(self,
                              training_batch: TrainingBatch) -> TrainingBatch:
         # TODO(will): support other models
+        # Automatically detect model type based on VAE class name
+        vae = self.get_module("vae")
+        vae_class_name = vae.__class__.__name__
+        
+        # Map VAE class names to model types
+        if 'Hunyuan' in vae_class_name:
+            model_type = 'hunyuan'
+        elif 'Wan' in vae_class_name or 'AutoencoderKLCausal3D' in vae_class_name:
+            model_type = 'wan'
+        else:
+            # Default to checking for latents_mean attribute
+            if hasattr(vae, 'latents_mean'):
+                model_type = 'wan'
+            else:
+                model_type = 'hunyuan'
+        
         with self.tracker.timed("timing/normalize_input"):
             training_batch.latents = normalize_dit_input(
-                'wan',
+                model_type,
                 training_batch.latents,
-                self.get_module("vae"),
+                vae,
             )
         return training_batch
 
