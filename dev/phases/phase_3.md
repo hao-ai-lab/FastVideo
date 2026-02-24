@@ -52,32 +52,36 @@ method_config: {...}     # algorithm（方法侧）
 ```
 
 ### 文件 TODO（实现清单）
-- [ ] `fastvideo/distillation/specs.py`
+- [x] `fastvideo/distillation/specs.py`
   - 新增 `RecipeSpec(family: str, method: str)`
   - `DistillRunConfig` 增加 `recipe` 与 `method_config`
-- [ ] `fastvideo/distillation/yaml_config.py`
+- [x] `fastvideo/distillation/yaml_config.py`
   - 解析 `recipe:` 与 `method_config:`（默认 `{}`）
-  - 将 v1 的 `distill:` 视为不再支持（或仅保留一次性迁移期的兼容分支，需你拍板）
-- [ ] `fastvideo/distillation/builder.py`
+  - 将 v1 的 `distill:` 视为不再支持（breaking change，直接推进 schema v2）
+- [x] `fastvideo/distillation/builder.py`
   - 从 `cfg.recipe` 取 family/method（不再读 `cfg.distill`）
   - build method 时传入 `method_config`
-- [ ] `fastvideo/distillation/methods/distribution_matching/dmd2.py`
+- [x] `fastvideo/distillation/methods/distribution_matching/dmd2.py`
   - `DMD2Method(..., method_config=...)`
   - 关键参数读取优先级：`method_config` > `training_args`（迁移期平滑）
     - `generator_update_interval`
     - `real_score_guidance_scale`
     - `dmd_denoising_steps`（few-step step list）
     - `rollout_mode`（替代 `simulate_generator_forward`）
-- [ ] `fastvideo/distillation/adapters/wan.py`
+- [x] `fastvideo/distillation/adapters/wan.py`
   - 移除 `training_args.simulate_generator_forward` 的读取（这是 Phase 2.9 的残留耦合）
   - 把 batch 形态做成显式 API/参数，让 method 决定：
     - 选项 A（推荐）：拆分显式入口
       - `prepare_batch_from_data_latent(raw_batch, ...)`（必须有 `vae_latent`）
       - `prepare_batch_from_placeholder_latent(raw_batch, ...)`（不依赖 `vae_latent`）
-    - 选项 B：保留单入口但显式参数化：`prepare_batch(..., latents_source=...)`
-- [ ] configs / docs
-  - [ ] `fastvideo/distillation/outside/fastvideo/configs/distillation/*.yaml` 全部升级到 schema v2
-  - [ ] 更新 `dev/config.md`（描述 schema v2 与迁移策略）
+    - 选项 B：保留单入口但显式参数化：`prepare_batch(..., latents_source=...)`（本阶段采用）
+- [x] configs / docs
+  - [x] `fastvideo/distillation/outside/fastvideo/configs/distillation/*.yaml` 全部升级到 schema v2
+  - [x] 更新 `dev/config.md`（描述 schema v2 与迁移策略）
+
+### 可运行产物
+- Phase 3.1 YAML：`fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase3.1.yaml`
+- One-shot 脚本：`examples/distillation/phase3_1/temp.sh`
 
 ---
 
@@ -142,9 +146,7 @@ Phase 2.9 已验证：即使统一 timesteps/scheduler，**只要 denoising loop
 
 ## 备注：关于 `simulate_generator_forward`（Phase 2.9 的残留）
 
-目前 `WanAdapter.prepare_batch()` 仍读取 `training_args.simulate_generator_forward` 来决定是否需要 `vae_latent`。
-这不是“功能 bug”，但确实是语义耦合（把 DMD2 rollout 的开关泄漏到了 adapter）。
-
-结论：它 **应该在 Phase 3.1** 通过 `method_config.rollout_mode` + 显式 batch API 来解决；
-Phase 2.9 没处理是因为当时我们刻意不引入 schema v2/method_config，避免变量叠加导致定位困难。
-
+该耦合已在 Phase 3.1 解决：
+- `WanAdapter.prepare_batch()` 不再读取 `training_args.simulate_generator_forward`
+- `DMD2Method` 通过 `method_config.rollout_mode` 决定 `latents_source={zeros|data}`，
+  并把它作为参数传给 adapter（adapter 只处理 batch 形态，不解释 DMD2 语义）

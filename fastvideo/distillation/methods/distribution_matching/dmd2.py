@@ -43,6 +43,7 @@ class _DMD2Adapter(Protocol):
         raw_batch: dict[str, Any],
         *,
         current_vsa_sparsity: float = 0.0,
+        latents_source: Literal["data", "zeros"] = "data",
     ) -> Any:
         ...
 
@@ -108,6 +109,7 @@ class DMD2Method(DistillMethod):
         *,
         bundle: ModelBundle,
         adapter: _DMD2Adapter,
+        method_config: dict[str, Any] | None = None,
         validator: Any | None = None,
     ) -> None:
         super().__init__(bundle)
@@ -124,11 +126,58 @@ class DMD2Method(DistillMethod):
         self.adapter = adapter
         self.validator = validator
         self.training_args = adapter.training_args
-        self._simulate_generator_forward = bool(
-            getattr(self.training_args, "simulate_generator_forward", False)
-        )
+        self.method_config: dict[str, Any] = dict(method_config or {})
+        self._rollout_mode = self._parse_rollout_mode()
         self._denoising_step_list: torch.Tensor | None = None
         self._init_optimizers_and_schedulers()
+
+    def _parse_rollout_mode(self) -> Literal["simulate", "data_latent"]:
+        raw = self.method_config.get("rollout_mode", None)
+        if raw is None:
+            raise ValueError("method_config.rollout_mode must be set for DMD2")
+        if not isinstance(raw, str):
+            raise ValueError(
+                "method_config.rollout_mode must be a string, got "
+                f"{type(raw).__name__}"
+            )
+        mode = raw.strip().lower()
+        if mode in ("simulate", "sim"):
+            return "simulate"
+        if mode in ("data_latent", "data", "vae_latent"):
+            return "data_latent"
+        raise ValueError(
+            "method_config.rollout_mode must be one of "
+            "{simulate, data_latent}, got "
+            f"{raw!r}"
+        )
+
+    def _get_method_int(self, key: str) -> int | None:
+        raw = self.method_config.get(key, None)
+        if raw is None:
+            return None
+        if isinstance(raw, bool):
+            raise ValueError(f"method_config.{key} must be an int, got bool")
+        if isinstance(raw, int):
+            return int(raw)
+        if isinstance(raw, float) and raw.is_integer():
+            return int(raw)
+        if isinstance(raw, str) and raw.strip():
+            return int(raw)
+        raise ValueError(f"method_config.{key} must be an int, got {type(raw).__name__}")
+
+    def _get_method_float(self, key: str) -> float | None:
+        raw = self.method_config.get(key, None)
+        if raw is None:
+            return None
+        if isinstance(raw, bool):
+            raise ValueError(f"method_config.{key} must be a float, got bool")
+        if isinstance(raw, (int, float)):
+            return float(raw)
+        if isinstance(raw, str) and raw.strip():
+            return float(raw)
+        raise ValueError(
+            f"method_config.{key} must be a float, got {type(raw).__name__}"
+        )
 
     def _parse_betas(self, raw: Any, *, where: str) -> tuple[float, float]:
         if raw is None:
@@ -232,8 +281,8 @@ class DMD2Method(DistillMethod):
         sampling_steps = [s for s in sampling_steps if s > 0]
         if not sampling_steps:
             # Default to the few-step student rollout step count for DMD2.
-            raw_rollout = getattr(self.training_args.pipeline_config, "dmd_denoising_steps", None)
-            if not raw_rollout:
+            raw_rollout = self.method_config.get("dmd_denoising_steps", None)
+            if not isinstance(raw_rollout, list) or not raw_rollout:
                 return
             sampling_steps = [int(len(raw_rollout))]
 
@@ -265,18 +314,29 @@ class DMD2Method(DistillMethod):
         return generators
 
     def _should_update_student(self, iteration: int) -> bool:
-        interval = int(getattr(self.training_args, "generator_update_interval", 1) or 1)
+        interval = self._get_method_int("generator_update_interval")
+        if interval is None:
+            interval = int(getattr(self.training_args, "generator_update_interval", 1) or 1)
         if interval <= 0:
             return True
         return iteration % interval == 0
 
     def _clip_grad_norm(self, module: torch.nn.Module) -> float:
-        max_grad_norm = getattr(self.training_args, "max_grad_norm", None)
-        if not max_grad_norm:
+        max_grad_norm_raw = getattr(self.training_args, "max_grad_norm", None)
+        if max_grad_norm_raw is None:
+            return 0.0
+        try:
+            max_grad_norm = float(max_grad_norm_raw)
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                "training.max_grad_norm must be a number when set, got "
+                f"{max_grad_norm_raw!r}"
+            ) from e
+        if max_grad_norm <= 0.0:
             return 0.0
         grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
             [p for p in module.parameters()],
-            float(max_grad_norm),
+            max_grad_norm,
             foreach=None,
         )
         return float(grad_norm.item()) if grad_norm is not None else 0.0
@@ -285,13 +345,16 @@ class DMD2Method(DistillMethod):
         if self._denoising_step_list is not None and self._denoising_step_list.device == device:
             return self._denoising_step_list
 
-        raw = getattr(self.training_args.pipeline_config, "dmd_denoising_steps", None)
-        if not raw:
-            raise ValueError("pipeline_config.dmd_denoising_steps must be set for DMD2 distillation")
+        raw = self.method_config.get("dmd_denoising_steps", None)
+        if not isinstance(raw, list) or not raw:
+            raise ValueError("method_config.dmd_denoising_steps must be set for DMD2 distillation")
 
-        steps = torch.tensor(raw, dtype=torch.long, device=device)
+        steps = torch.tensor([int(s) for s in raw], dtype=torch.long, device=device)
 
-        if getattr(self.training_args, "warp_denoising_step", False):
+        warp = self.method_config.get("warp_denoising_step", None)
+        if warp is None:
+            warp = getattr(self.training_args, "warp_denoising_step", False)
+        if bool(warp):
             noise_scheduler = getattr(self.adapter, "noise_scheduler", None)
             if noise_scheduler is None:
                 raise ValueError("warp_denoising_step requires adapter.noise_scheduler.timesteps")
@@ -324,7 +387,7 @@ class DMD2Method(DistillMethod):
         dtype = latents.dtype
         step_list = self._get_denoising_step_list(device)
 
-        if not self._simulate_generator_forward:
+        if self._rollout_mode != "simulate":
             timestep = self._sample_rollout_timestep(device)
             noise = torch.randn(latents.shape, device=device, dtype=dtype)
             noisy_latents = self.adapter.add_noise(latents, noise, timestep)
@@ -455,7 +518,9 @@ class DMD2Method(DistillMethod):
         return flow_matching_loss, (batch.timesteps, batch.attn_metadata), outputs
 
     def _dmd_loss(self, generator_pred_x0: torch.Tensor, batch: Any) -> torch.Tensor:
-        guidance_scale = float(getattr(self.training_args, "real_score_guidance_scale", 1.0))
+        guidance_scale = self._get_method_float("real_score_guidance_scale")
+        if guidance_scale is None:
+            guidance_scale = float(getattr(self.training_args, "real_score_guidance_scale", 1.0))
         device = generator_pred_x0.device
 
         with torch.no_grad():
@@ -518,9 +583,14 @@ class DMD2Method(DistillMethod):
         *,
         current_vsa_sparsity: float = 0.0,
     ) -> tuple[dict[str, torch.Tensor], dict[str, Any]]:
+        latents_source: Literal["data", "zeros"] = "data"
+        if self._rollout_mode == "simulate":
+            latents_source = "zeros"
+
         training_batch = self.adapter.prepare_batch(
             batch,
             current_vsa_sparsity=current_vsa_sparsity,
+            latents_source=latents_source,
         )
 
         update_student = self._should_update_student(iteration)
@@ -618,5 +688,9 @@ def build_dmd2_method(
     adapter: _DMD2Adapter,
     validator: Any | None,
 ) -> DistillMethod:
-    del cfg
-    return DMD2Method(bundle=bundle, adapter=adapter, validator=validator)
+    return DMD2Method(
+        bundle=bundle,
+        adapter=adapter,
+        method_config=cfg.method_config,
+        validator=validator,
+    )

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from fastvideo.pipelines import TrainingBatch
@@ -16,5 +16,6 @@ class DistillAdapter(ABC):
         raw_batch: dict[str, Any],
         *,
         current_vsa_sparsity: float = 0.0,
-    ) -> "TrainingBatch":
+        latents_source: Literal["data", "zeros"] = "data",
+    ) -> TrainingBatch:
         raise NotImplementedError

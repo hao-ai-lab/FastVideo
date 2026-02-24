@@ -1,5 +1,5 @@
-distill:
-  model: wan
+recipe:
+  family: wan
   method: dmd2
 
 models:
@@ -11,10 +11,12 @@ models:
     family: wan
     path: Wan-AI/Wan2.1-T2V-14B-Diffusers
     trainable: false
+    disable_custom_init_weights: true
   critic:
     family: wan
     path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: true
+    disable_custom_init_weights: true
 
 training:
   # Distributed
@@ -58,9 +60,6 @@ training:
   training_cfg_rate: 0.0
   min_timestep_ratio: 0.02
   max_timestep_ratio: 0.98
-  generator_update_interval: 5
-  real_score_guidance_scale: 3.5
-  simulate_generator_forward: true
   enable_gradient_checkpointing_type: full
 
   # Tracking / validation
@@ -74,4 +73,14 @@ training:
 
 pipeline_config:
   flow_shift: 8
+  # NOTE: legacy SDE sampling (`WanDMDPipeline`) reads this field today.
+  # Phase 3.2 will make sampling timesteps an explicit request parameter.
+  dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
+
+method_config:
+  # Replace legacy `training.simulate_generator_forward`.
+  rollout_mode: simulate
+  generator_update_interval: 5
+  real_score_guidance_scale: 3.5
+  # Few-step schedule (kept here as the method single source of truth).
   dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]

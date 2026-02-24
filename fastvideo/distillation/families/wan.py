@@ -27,7 +27,7 @@ def _load_module_from_path(
     model_path: str,
     module_type: str,
     training_args: Any,
-    mark_teacher_critic: bool = False,
+    disable_custom_init_weights: bool = False,
 ) -> torch.nn.Module:
     local_model_path = maybe_download_model(model_path)
     config = verify_model_config_and_directory(local_model_path)
@@ -42,7 +42,10 @@ def _load_module_from_path(
     transformers_or_diffusers, _architecture = module_info
     component_path = os.path.join(local_model_path, module_type)
 
-    if mark_teacher_critic:
+    if disable_custom_init_weights:
+        # NOTE: This flag is used by PipelineComponentLoader to skip applying
+        # `init_weights_from_safetensors*` overrides when loading auxiliary
+        # roles (teacher/critic/etc). The attribute name is legacy.
         training_args._loading_teacher_critic_model = True
     try:
         module = PipelineComponentLoader.load_module(
@@ -52,7 +55,9 @@ def _load_module_from_path(
             fastvideo_args=training_args,
         )
     finally:
-        if mark_teacher_critic and hasattr(training_args, "_loading_teacher_critic_model"):
+        if disable_custom_init_weights and hasattr(
+            training_args, "_loading_teacher_critic_model"
+        ):
             del training_args._loading_teacher_critic_model
 
     if not isinstance(module, torch.nn.Module):
@@ -71,19 +76,19 @@ def _apply_trainable(module: torch.nn.Module, *, trainable: bool) -> torch.nn.Mo
 
 def _build_tracker(training_args: Any, *, config: dict[str, Any] | None) -> Any:
     world_group = get_world_group()
-    trackers = list(getattr(training_args, "trackers", []))
-    if not trackers and str(getattr(training_args, "tracker_project_name", "")):
+    trackers = list(training_args.trackers)
+    if not trackers and str(training_args.tracker_project_name):
         trackers.append(Trackers.WANDB.value)
     if world_group.rank != 0:
         trackers = []
 
-    tracker_log_dir = getattr(training_args, "output_dir", "") or os.getcwd()
+    tracker_log_dir = training_args.output_dir or os.getcwd()
     if trackers:
         tracker_log_dir = os.path.join(tracker_log_dir, "tracker")
 
     tracker_config = config if trackers else None
-    tracker_run_name = getattr(training_args, "wandb_run_name", "") or None
-    project = getattr(training_args, "tracker_project_name", "") or "fastvideo"
+    tracker_run_name = training_args.wandb_run_name or None
+    project = training_args.tracker_project_name or "fastvideo"
     return initialize_trackers(
         trackers,
         experiment_name=project,
@@ -122,28 +127,29 @@ def build_wan_family_artifacts(*, cfg: DistillRunConfig) -> FamilyArtifacts:
                 f"got {role}={role_spec.family!r}"
             )
 
-        mark_teacher_critic = role in ("teacher", "critic")
+        disable_custom_init_weights = bool(
+            getattr(role_spec, "disable_custom_init_weights", False)
+        )
         transformer = _load_module_from_path(
             model_path=role_spec.path,
             module_type="transformer",
             training_args=training_args,
-            mark_teacher_critic=mark_teacher_critic,
+            disable_custom_init_weights=disable_custom_init_weights,
         )
         modules: dict[str, torch.nn.Module] = {"transformer": transformer}
 
-        # Optional MoE support: allow teacher transformer_2 if present.
-        if role == "teacher":
-            try:
-                transformer_2 = _load_module_from_path(
-                    model_path=role_spec.path,
-                    module_type="transformer_2",
-                    training_args=training_args,
-                    mark_teacher_critic=mark_teacher_critic,
-                )
-            except Exception:
-                transformer_2 = None
-            if transformer_2 is not None:
-                modules["transformer_2"] = transformer_2
+        # Optional MoE support: load transformer_2 if present in the model.
+        try:
+            transformer_2 = _load_module_from_path(
+                model_path=role_spec.path,
+                module_type="transformer_2",
+                training_args=training_args,
+                disable_custom_init_weights=disable_custom_init_weights,
+            )
+        except ValueError:
+            transformer_2 = None
+        if transformer_2 is not None:
+            modules["transformer_2"] = transformer_2
 
         for name, module in list(modules.items()):
             module = _apply_trainable(module, trainable=bool(role_spec.trainable))

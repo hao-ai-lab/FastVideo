@@ -27,8 +27,10 @@
 
 **few-step rollout policy（Phase 2.9）**
 - rollout 的 step list / simulate 逻辑由 method 管理：
-  - `pipeline_config.dmd_denoising_steps` → `_get_denoising_step_list()`
-  - `simulate_generator_forward` 控制单步/多步模拟路径
+  - `method_config.dmd_denoising_steps` → `_get_denoising_step_list()`
+  - `method_config.rollout_mode={simulate|data_latent}`
+    - `simulate`：batch 不要求 `vae_latent`（adapter 用零 latents 构造形状）
+    - `data_latent`：batch 必须带 `vae_latent`
   - 可选 `warp_denoising_step`（通过 adapter.noise_scheduler.timesteps duck-typing）
 - adapter 只提供单步 primitives：
   - `predict_x0()` / `predict_noise()` / `add_noise()`
@@ -46,5 +48,11 @@
   validator 负责执行采样与记录，保持 method-agnostic。
 
 **配置语义的 TODO（Phase 3）**
-- 目前仍从 `training_args` 读取 DMD2/critic 专属字段（例如 `fake_score_*`、`dmd_denoising_steps`）。
-  Phase 3 计划引入 `method_config`，把这些算法超参从 `training:` / `pipeline_config:` 中迁移出去。
+- Phase 3.1 已引入 `method_config`，并将 rollout 的关键 knob 迁移到 method 层：
+  - `rollout_mode`
+  - `dmd_denoising_steps`
+  - `generator_update_interval`
+  - `real_score_guidance_scale`
+- 仍有一个过渡期现实：legacy SDE sampler（`WanDMDPipeline` / `DmdDenoisingStage`）
+  目前读取 `pipeline_config.dmd_denoising_steps`，因此 config 会短期出现重复字段。
+  Phase 3.2 会把 sampling timesteps 变成显式 request 参数，从而移除该重复。

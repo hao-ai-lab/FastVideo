@@ -38,7 +38,7 @@ training:
   num_frames: 77
 
   # Output / steps
-  output_dir: outputs/phase2_wan2.1_dmd2_8steps_wansyn
+  output_dir: outputs/phase3.1_wan2.1_dmd2_8steps_wansyn
   max_train_steps: 4000
   seed: 1000
   checkpoints_total_limit: 3
@@ -56,15 +56,15 @@ training:
   fake_score_betas: "0.0,0.999"
   fake_score_lr_scheduler: constant
 
-  # Distillation
+  # Distillation (method-agnostic knobs)
   training_cfg_rate: 0.0
   min_timestep_ratio: 0.02
   max_timestep_ratio: 0.98
   enable_gradient_checkpointing_type: full
 
   # Tracking / validation
-  tracker_project_name: phase2.9_wan_dmd2_8steps_wansyn
-  wandb_run_name: phase2.9_wan_dmd2_8steps_wansyn
+  tracker_project_name: phase3.1_wan_dmd2_8steps_wansyn
+  wandb_run_name: phase3.1_wan_dmd2_8steps_wansyn
   log_validation: true
   validation_dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
   validation_steps: 50
@@ -82,5 +82,5 @@ method_config:
   rollout_mode: simulate
   generator_update_interval: 5
   real_score_guidance_scale: 3.5
-  # Few-step schedule (kept here as the method single source of truth).
+  # Few-step schedule (single source of truth for the method).
   dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]

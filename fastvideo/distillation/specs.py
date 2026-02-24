@@ -8,14 +8,14 @@ RoleName = str
 
 
 @dataclass(slots=True)
-class DistillSpec:
-    """Selects the model family + distillation method.
+class RecipeSpec:
+    """Selects the model family + training method.
 
     This is intentionally small: everything else (roles, training args, and
     pipeline config) lives in the run config.
     """
 
-    model: str
+    family: str
     method: str
 
 
@@ -26,4 +26,4 @@ class RoleSpec:
     family: str
     path: str
     trainable: bool = True
-
+    disable_custom_init_weights: bool = False

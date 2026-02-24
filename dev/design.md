@@ -380,7 +380,8 @@ FastGen 用 `DDPWrapper` 临时把 `module.forward` 指到 `single_train_step`�
 
 说明：
 - Phase 2 的 YAML schema v1 使用 `distill:` 顶层（历史原因）
-- Phase 3 将升级为 schema v2：用 `recipe:` 顶层，并引入 `method_config:`（语义更通用）
+- Phase 3.1 已升级为 schema v2：用 `recipe:` 顶层，并引入 `method_config:`（语义更通用）
+  - 入口只接受 schema v2（不再兼容 `distill:`）
 
 schema v2 的 “单次运行” 配置示意（字段可迭代）：
 
@@ -398,10 +399,12 @@ models:
     family: wan
     path: Wan-AI/Wan2.1-T2V-14B-Diffusers
     trainable: false
+    disable_custom_init_weights: true
   critic:
     family: wan
     path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: true
+    disable_custom_init_weights: true
 
 training:
   output_dir: outputs/...
@@ -413,9 +416,14 @@ pipeline_config:
   # 支持直接内联覆盖，也支持只给 pipeline_config_path
   # pipeline_config_path: fastvideo/configs/wan_1.3B_t2v_pipeline.json
   flow_shift: 8
+  # NOTE: 当前 legacy SDE sampling（`WanDMDPipeline`）仍读取此字段；
+  # Phase 3.2 会把 sampling timesteps 变成显式 request 参数，从而移除依赖。
+  dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
 
 method_config:
-  # method-specific 超参（不进入 TrainingArgs；由 method/adapter 自行解析）
+  # method-specific 超参（不进入 TrainingArgs；由 method 自行解析）
+  rollout_mode: simulate
+  dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
   generator_update_interval: 5
   real_score_guidance_scale: 3.5
 ```
@@ -621,8 +629,8 @@ Phase 3 的定位：在 Phase 2.9 已经完成“优雅 dispatch + adapter/metho
 动机：
 - `distill.method=finetune` 语义别扭，因为 finetune 是一种训练 recipe，不一定是“蒸馏”。
 - method-specific 参数长期塞进 `training:`（TrainingArgs）/`pipeline_config:` 会让配置语义越来越混杂。
-- Phase 2.9 还残留少量 “method knob 泄漏到 adapter” 的问题（例如 `simulate_generator_forward`），需要借助
-  `method_config` 做干净的边界收敛。
+- Phase 2.9 暴露过 “method knob 泄漏到 adapter” 的问题（例如 `simulate_generator_forward`），因此需要引入
+  `method_config` 来做干净的边界收敛（Phase 3.1 已解决该耦合）。
 
 Phase 3.1 计划把 YAML schema 升级为：
 
@@ -636,7 +644,7 @@ method_config: {...}                  # algorithm/method 超参（方法侧）
 
 迁移策略（建议）：
 - DMD2：把 `generator_update_interval`, `real_score_guidance_scale`,
-  `dmd_denoising_steps`, `simulate_generator_forward`（或替代字段）迁移到 `method_config`。
+  `dmd_denoising_steps`, `rollout_mode`（替代 `simulate_generator_forward`）迁移到 `method_config`。
 - `training:` 保持纯 infra（分布式、优化器默认值、ckpt、logging、数据路径等）。
 
 #### Phase 3.2：统一 sampling 语义（ODE/SDE sampler 可插拔）

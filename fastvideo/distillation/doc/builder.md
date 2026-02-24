@@ -7,8 +7,8 @@
 
 **关键 API**
 - `build_runtime_from_config(cfg) -> DistillRuntime`
-  - `family_builder = registry.get_family(cfg.distill.model)`
-  - `method_builder = registry.get_method(cfg.distill.method)`
+  - `family_builder = registry.get_family(cfg.recipe.family)`
+  - `method_builder = registry.get_method(cfg.recipe.method)`
   - `method = method_builder(cfg=cfg, bundle=artifacts.bundle, adapter=artifacts.adapter, validator=artifacts.validator)`
 - `build_wan_dmd2_runtime_from_config(cfg)`
   - Phase 2.9 期间保留的兼容函数（最终可删除）

@@ -1,223 +1,144 @@
-# Phase 2 Distillation YAML Config
+# Distillation YAML config (schema v2)
 
-本文档描述当前 **Phase 2 distillation** 入口所使用的 YAML 配置结构、字段含义，以及为什么采用这种设计。
+本文档描述当前 distillation 入口所使用的 **YAML schema v2**、字段含义与设计取舍。
 
 相关实现：
 - YAML loader：`fastvideo/distillation/yaml_config.py`
-- Phase 2 入口：`fastvideo/training/distillation.py`
-- Phase 2 示例 YAML：`fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps.yaml`
+- Entrypoint：`fastvideo/training/distillation.py`
+- Schema 定义：`fastvideo/distillation/specs.py`
+- 示例 YAML（outside）：`fastvideo/distillation/outside/fastvideo/configs/distillation/`
 
 ## 1) 入口与约束（非常重要）
 
-Phase 2 distillation **只接受一个真实存在的 YAML 文件路径**，不会 fallback 到 legacy CLI/configs，也不会做 “overlay/补全 outside 路径” 的魔法。
+distillation 入口 **只接受一个真实存在的 YAML 文件路径**（不 merge legacy CLI/configs，
+也不做 outside 路径补全/overlay）。YAML 是 single source of truth。
 
 运行方式（示意）：
 ```bash
-python -m fastvideo.training.distillation \
+python fastvideo/training/distillation.py \
   --config /abs/path/to/fastvideo/distillation/outside/fastvideo/configs/distillation/xxx.yaml
 ```
 
-CLI 只保留少量 **runtime override**（不属于“实验定义”的内容）：
+CLI 仅保留少量 **runtime override**（不属于“实验定义”的内容）：
 - `--resume-from-checkpoint`：从 checkpoint 恢复
 - `--override-output-dir`：临时覆盖输出目录（方便重复跑实验）
 - `--dry-run`：只 parse + build runtime，不启动训练
 
-## 2) YAML 顶层结构
-
-目前 YAML 顶层包含 4 个部分：
+## 2) YAML 顶层结构（schema v2）
 
 ```yaml
-distill:        # 选择 “模型家族” + “蒸馏方法”
-models:         # 以 role 为 key 的模型参与者配置
-training:       # 训练参数（直接映射到 TrainingArgs）
-pipeline_config:        # pipeline_config 的内联配置（dict）
-# 或者 pipeline_config_path: /path/to/pipeline_config.json|yaml
+recipe:          # 选择 family + method（只负责“选什么”）
+models:          # role -> role spec（谁参与）
+training:        # infra 参数（直接映射到 TrainingArgs）
+pipeline_config: # 模型/pipeline 侧 config（可 inline）
+method_config:   # method/algorithm 超参（方法侧 single source of truth）
+# 或者 pipeline_config_path: /abs/path/to/pipeline_config.json|yaml
 ```
 
 loader 规则：
 - `pipeline_config` 与 `pipeline_config_path` **二选一**，不能同时提供。
-- `training` 会被传入 `TrainingArgs.from_kwargs(**training_kwargs)`；Phase 2 不重复造一套训练参数体系。
-- Phase 2 会强制一些 invariants（见第 5 节）。
+- `training` 会被传入 `TrainingArgs.from_kwargs(**training_kwargs)`；我们不重造一套训练参数体系。
+- 缺少 `recipe:` 会直接报错（schema v1 的 `distill:` 不再支持）。
 
-## 3) `distill`: 选择模型家族与蒸馏方法
+## 3) `recipe`: 选择 family 与 method
 
 ```yaml
-distill:
-  model: wan
+recipe:
+  family: wan
   method: dmd2
 ```
 
 用途：
-- 让入口决定用哪个 **runtime builder**（当前仅支持 `wan + dmd2`）。
-- 未来扩展时，用同样的 schema 接入更多 `model/method` 组合，而不需要为每个组合写一个新的 training entry file。
+- registry dispatch：选择 `families/<family>.py` + `methods/<method>.py` 的组合（N+M，而非 N×M）。
+- 语义更通用：未来把 finetuning 也纳入时不会出现 `distill.method=finetune` 的别扭表达。
 
-设计原因：
-- 把 “选择什么（model/method）” 与 “如何训练（training）/谁参与（models）” 分开，结构更稳定。
-- 更接近 FastGen：config 选择 `method` + `network`，训练逻辑由 method/adapter 决定。
-
-## 4) `models`: role-based 模型参与者
+## 4) `models`: role-based 参与者
 
 ```yaml
 models:
   student:
-    family: wan
     path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: true
   teacher:
-    family: wan
     path: Wan-AI/Wan2.1-T2V-14B-Diffusers
     trainable: false
+    disable_custom_init_weights: true
   critic:
-    family: wan
     path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: true
+    disable_custom_init_weights: true
 ```
 
 字段含义（见 `fastvideo/distillation/specs.py`）：
-- `family`：模型家族（可省略，默认等于 `distill.model`）
-- `path`：模型路径/Hub 名称（由 builder/loader 负责加载）
-- `trainable`：该 role 的参数是否参与训练（默认 `true`）
+- `family`：可选；默认继承 `recipe.family`
+- `path`：模型路径 / hub 名称（由 family 负责加载）
+- `trainable`：该 role 的参数是否参与训练（影响 `requires_grad`/train/eval）
+- `disable_custom_init_weights`：可选；禁用 family 的 “加载时自定义 init weights 逻辑”
 
-设计原因（为什么要 role-based）：
-- distillation setup 千差万别，不应 hard-code “只有 student/teacher/critic 才是核心角色”。**role 只是 key**，method 决定它需要哪些 role。
-- role-based bundle 让 Method 可以泛化：例如 CM/KD/SFT 可能需要 reward/refiner/aux_teacher 等，都可以用同一个结构表达。
-
-关于 `trainable` 应由谁决定：
-- YAML 里的 `trainable` 表示 **“训练配置的意图/策略”**（policy）。
-- Method 仍然可以施加 **算法不变量（invariants）**。例如 `DMD2Method` 会强制要求
-  `models.teacher.trainable=false`（否则直接报错），因为 DMD2 默认 teacher 作为固定 reference。
+设计原因：
+- role 只是 key；framework 不强行规定 “canonical roles”。method 决定它需要哪些 roles。
+- `trainable` 表示训练意图；method 仍可施加算法不变量（例如 DMD2 强制 teacher frozen）。
 
 ## 5) `training`: 直接映射到 `TrainingArgs`
 
-`training:` 下的 key 基本上就是 `TrainingArgs` 的字段（`fastvideo/fastvideo_args.py`），例如：
-- 分布式：`num_gpus`, `sp_size`, `tp_size`（以及内部需要的 hsdp 维度默认值）
-- 数据：`data_path`, `dataloader_num_workers`, batch/shape 相关字段
+`training:` 下的 key 基本上就是 `TrainingArgs` 字段（`fastvideo/fastvideo_args.py`），例如：
+- 分布式：`num_gpus`, `sp_size`, `tp_size`
+- 数据：`data_path`, `dataloader_num_workers`, shape/batch 相关字段
 - 输出：`output_dir`, `max_train_steps`, `seed`, `checkpoints_total_limit`
-- 优化器/调度器：`learning_rate`, `betas`, `lr_scheduler`, `fake_score_learning_rate`, ...
-- distill 相关：`generator_update_interval`, `real_score_guidance_scale`, ...
+- 优化器默认值：`learning_rate`, `betas`, `lr_scheduler`, ...
 - tracking/validation：`log_validation`, `validation_*`, `tracker_project_name`, ...
 
-Phase 2 loader 会强制/补全的关键 invariants（见 `fastvideo/distillation/yaml_config.py`）：
+loader 会注入/补全的 invariants（见 `fastvideo/distillation/yaml_config.py`）：
 - `mode = ExecutionMode.DISTILLATION`
 - `inference_mode = False`
+- `dit_precision` 默认 `fp32`（master weights）
 - `dit_cpu_offload = False`
-- `dit_precision` 默认 `fp32`（保持 training-mode loader 语义：fp32 master weights）
-- 若未显式提供，补默认分布式尺寸（例如 `num_gpus`、`sp_size/tp_size`、hsdp 维度）
-- 若 `training.model_path` 未提供，则默认取 `models.student.path`
-  - 这是为了让 FastVideo 的 pipeline/pipeline_config registry 能正常工作（以 student 为 base）。
-
-设计原因（为什么 training 直接复用 TrainingArgs）：
-- FastVideo 的大量组件（loader、pipeline config、distributed init、各种 utils）都以 `TrainingArgs` 为中心。
-- Phase 2 的目标是 **解耦 legacy pipeline**，但不等于要立刻重造整个 training 参数系统；复用 TrainingArgs 能显著降低迁移成本与风险。
+- 分布式尺寸默认值（`num_gpus/tp_size/sp_size/hsdp_*`）
+- `training.model_path` 若缺失，默认使用 `models.student.path`（供 pipeline_config registry 使用）
 
 ## 6) `pipeline_config` / `pipeline_config_path`
 
-两种等价写法（二选一）：
+两种写法（二选一）：
 
-1) 直接内联（推荐用于少量关键字段）：
+1) inline（适合少量 override）：
 ```yaml
 pipeline_config:
   flow_shift: 8
   dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
 ```
 
-2) 使用外部文件路径（适合复用现有 pipeline config 文件）：
+2) path（适合复用大型 config 文件）：
 ```yaml
 pipeline_config_path: /abs/path/to/wan_1.3B_t2v_pipeline.json
 ```
 
-设计原因：
-- 把 “运行一个 distillation 实验需要的最小 pipeline 配置” 放在 distill YAML 附近，便于复现实验。
-- 但也允许用 path 复用大型 config 文件，避免在 YAML 中塞进过多模型细节。
-- 同时与我们 “outside/ 非侵入式新增 config” 的策略兼容：不必修改上游 `fastvideo/configs/*`。
+备注（重要）：
+- 从语义上讲，`dmd_denoising_steps` 是 algorithm knob，不应长期存在于 pipeline_config。
+- 但当前 validation 仍使用 legacy SDE sampler（`WanDMDPipeline` / `DmdDenoisingStage`），
+  它会读取 `pipeline_config.dmd_denoising_steps`。
+- Phase 3.2 会把 sampling timesteps 变成显式 request 参数，从而移除该重复字段。
 
-## 7) 最小可运行示例（Wan few-step DMD2）
+## 7) `method_config`: method/algorithm 专属超参
 
-完整示例参考：
-`fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps.yaml`
-
-其核心要点是：
-- `distill: {model: wan, method: dmd2}`
-- `models` 至少包含 `student/teacher/critic`
-- `training.data_path / output_dir / max_train_steps / seed` 等训练必须项
-- `pipeline_config.flow_shift` + `pipeline_config.dmd_denoising_steps`（8 steps）用于 few-step schedule
-
-## 8) Phase 3 计划：`recipe` 顶层 + `method_config`
-
-Phase 2 的 YAML schema 使用 `distill:` 作为顶层选择（历史原因：当时入口只跑 distillation）。
-但随着我们计划把 **finetuning 也纳入同一框架**，`distill.method=finetune` 的语义会显得别扭。
-
-因此 Phase 3 计划升级 schema：
-
+`method_config` 由 method 自己解释。以 DMD2 为例：
 ```yaml
-recipe: {family: wan, method: dmd2}   # 只负责选择（更通用）
-models: {...}                         # role -> {family/path/trainable}
-training: {...}                       # infra 参数（映射到 TrainingArgs）
-pipeline_config: {...}                # pipeline/backbone config（模型侧）
-method_config: {...}                  # method-specific 超参（方法侧）
-```
-
-同时保持与 FastVideo 的 `ExecutionMode` 语义对齐（Phase 3 计划）：
-- `recipe.method=finetune` 时：入口层设置 `training.mode=FINETUNING`
-- 其它 distillation methods：入口层设置 `training.mode=DISTILLATION`
-
-### 8.1 为什么需要 `method_config`？
-
-动机是把语义分清楚：
-- `training:`（TrainingArgs）应该尽量只承载 **基础设施**：分布式、优化器、ckpt、logging、数据路径等
-- `method_config:` 承载 **算法/recipe** 的超参：DMD2 / Self-Forcing / Finetune 各自不同
-
-这样未来 method 变多时，不会出现所有参数都混在 `training:` 里，导致配置难读、难 review、难复现。
-
-### 8.2 示例：DMD2（新 schema）
-
-```yaml
-recipe:
-  family: wan
-  method: dmd2
-
-models:
-  student: {family: wan, path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers, trainable: true}
-  teacher: {family: wan, path: Wan-AI/Wan2.1-T2V-14B-Diffusers, trainable: false}
-  critic:  {family: wan, path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers, trainable: true}
-
-training:
-  # ... TrainingArgs fields ...
-  output_dir: outputs/...
-  max_train_steps: 4000
-  seed: 1000
-
-pipeline_config:
-  flow_shift: 8
-  dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
-
 method_config:
+  rollout_mode: simulate            # {simulate|data_latent}
   generator_update_interval: 5
   real_score_guidance_scale: 3.5
-  simulate_generator_forward: true
+  dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
 ```
 
-### 8.3 示例：Finetuning（only student）
+其中：
+- `rollout_mode` 替代 legacy 的 `training.simulate_generator_forward`：
+  - `simulate`：adapter 用零 latents 构造 batch（不依赖 `vae_latent`）
+  - `data_latent`：dataset batch 必须提供 `vae_latent`
+- `dmd_denoising_steps` 是 method 的 few-step schedule single source of truth。
 
-```yaml
-recipe:
-  family: wan
-  method: finetune
+## 8) 最小可运行示例（Wan few-step DMD2）
 
-models:
-  student: {family: wan, path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers, trainable: true}
+参考 outside 下的三个可运行 YAML：
+- `fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps.yaml`
+- `fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase2.9.yaml`
+- `fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase3.1.yaml`
 
-training:
-  # ... TrainingArgs fields ...
-  data_path: ...
-  output_dir: outputs/...
-  max_train_steps: 4000
-  seed: 1000
-
-pipeline_config:
-  flow_shift: 8
-
-method_config:
-  pred_type: x0
-  loss: flow_matching
-```

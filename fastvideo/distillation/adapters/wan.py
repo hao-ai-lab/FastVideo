@@ -327,6 +327,7 @@ class WanAdapter(DistillAdapter):
         raw_batch: dict[str, Any],
         *,
         current_vsa_sparsity: float = 0.0,
+        latents_source: Literal["data", "zeros"] = "data",
     ) -> TrainingBatch:
         self.ensure_negative_conditioning()
 
@@ -338,7 +339,7 @@ class WanAdapter(DistillAdapter):
         encoder_attention_mask = raw_batch["text_attention_mask"]
         infos = raw_batch.get("info_list")
 
-        if self.training_args.simulate_generator_forward:
+        if latents_source == "zeros":
             batch_size = encoder_hidden_states.shape[0]
             vae_config = self.training_args.pipeline_config.vae_config.arch_config
             num_channels = vae_config.z_dim
@@ -354,14 +355,16 @@ class WanAdapter(DistillAdapter):
                 device=device,
                 dtype=dtype,
             )
-        else:
+        elif latents_source == "data":
             if "vae_latent" not in raw_batch:
                 raise ValueError(
-                    "vae_latent not found in batch and simulate_generator_forward is False"
+                    "vae_latent not found in batch and latents_source='data'"
                 )
             latents = raw_batch["vae_latent"]
             latents = latents[:, :, : self.training_args.num_latent_t]
             latents = latents.to(device, dtype=dtype)
+        else:
+            raise ValueError(f"Unknown latents_source: {latents_source!r}")
 
         training_batch.latents = latents
         training_batch.encoder_hidden_states = encoder_hidden_states.to(device, dtype=dtype)

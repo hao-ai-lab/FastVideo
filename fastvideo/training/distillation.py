@@ -17,7 +17,7 @@ def run_distillation_from_config(
     resume_from_checkpoint: str | None = None,
     override_output_dir: str | None = None,
 ) -> None:
-    """Phase 2 entrypoint (YAML-only, standalone runtime builder)."""
+    """YAML-only distillation entrypoint (schema v2)."""
 
     from fastvideo.distributed import maybe_init_distributed_environment_and_model_parallel
     from fastvideo.distillation import DistillTrainer
@@ -82,7 +82,7 @@ def main(args: Any) -> None:
     dry_run = bool(args.dry_run)
     resume_from_checkpoint = getattr(args, "resume_from_checkpoint", None)
     override_output_dir = getattr(args, "override_output_dir", None)
-    logger.info("Starting Phase 2 distillation from config=%s", config_path)
+    logger.info("Starting distillation from config=%s", config_path)
     run_distillation_from_config(
         config_path,
         dry_run=dry_run,
@@ -103,7 +103,7 @@ if __name__ == "__main__":
         "--config",
         type=str,
         required=True,
-        help="Path to distillation YAML config (Phase 2 entrypoint).",
+        help="Path to distillation YAML config (schema v2).",
     )
     parser.add_argument(
         "--dry-run",

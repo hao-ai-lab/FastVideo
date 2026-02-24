@@ -12,16 +12,17 @@ import yaml
 from fastvideo.fastvideo_args import ExecutionMode, TrainingArgs
 from fastvideo.logger import init_logger
 
-from fastvideo.distillation.specs import DistillSpec, RoleName, RoleSpec
+from fastvideo.distillation.specs import RecipeSpec, RoleName, RoleSpec
 
 logger = init_logger(__name__)
 
 
 @dataclass(slots=True)
 class DistillRunConfig:
-    distill: DistillSpec
+    recipe: RecipeSpec
     roles: dict[RoleName, RoleSpec]
     training_args: TrainingArgs
+    method_config: dict[str, Any]
     raw: dict[str, Any]
 
 
@@ -71,7 +72,7 @@ def _get_bool(raw: Any, *, where: str, default: bool) -> bool:
 
 
 def load_distill_run_config(path: str) -> DistillRunConfig:
-    """Load a Phase 2 distillation run config from YAML.
+    """Load a distillation run config from YAML (schema v2).
 
     This loader intentionally does **not** merge with legacy CLI args. The YAML
     file is the single source of truth for a run.
@@ -82,17 +83,17 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
         raw = yaml.safe_load(f)
     cfg = _require_mapping(raw, where=path)
 
-    distill_raw = _require_mapping(cfg.get("distill"), where="distill")
-    distill_model = _require_str(distill_raw.get("model"), where="distill.model")
-    distill_method = _require_str(distill_raw.get("method"), where="distill.method")
-    distill = DistillSpec(model=distill_model, method=distill_method)
+    recipe_raw = _require_mapping(cfg.get("recipe"), where="recipe")
+    recipe_family = _require_str(recipe_raw.get("family"), where="recipe.family")
+    recipe_method = _require_str(recipe_raw.get("method"), where="recipe.method")
+    recipe = RecipeSpec(family=recipe_family, method=recipe_method)
 
     roles_raw = _require_mapping(cfg.get("models"), where="models")
     roles: dict[RoleName, RoleSpec] = {}
     for role, role_cfg_raw in roles_raw.items():
         role_str = _require_str(role, where="models.<role>")
         role_cfg = _require_mapping(role_cfg_raw, where=f"models.{role_str}")
-        family = role_cfg.get("family") or distill_model
+        family = role_cfg.get("family") or recipe_family
         family = _require_str(family, where=f"models.{role_str}.family")
         model_path = _require_str(role_cfg.get("path"), where=f"models.{role_str}.path")
         trainable = _get_bool(
@@ -100,9 +101,25 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
             where=f"models.{role_str}.trainable",
             default=True,
         )
-        roles[role_str] = RoleSpec(family=family, path=model_path, trainable=trainable)
+        disable_custom_init_weights = _get_bool(
+            role_cfg.get("disable_custom_init_weights"),
+            where=f"models.{role_str}.disable_custom_init_weights",
+            default=False,
+        )
+        roles[role_str] = RoleSpec(
+            family=family,
+            path=model_path,
+            trainable=trainable,
+            disable_custom_init_weights=disable_custom_init_weights,
+        )
 
     training_raw = _require_mapping(cfg.get("training"), where="training")
+
+    method_config_raw = cfg.get("method_config", None)
+    if method_config_raw is None:
+        method_config: dict[str, Any] = {}
+    else:
+        method_config = _require_mapping(method_config_raw, where="method_config")
 
     pipeline_cfg_raw = cfg.get("pipeline_config", None)
     pipeline_cfg_path = cfg.get("pipeline_config_path", None)
@@ -154,8 +171,9 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
     training_args = TrainingArgs.from_kwargs(**training_kwargs)
 
     return DistillRunConfig(
-        distill=distill,
+        recipe=recipe,
         roles=roles,
         training_args=training_args,
+        method_config=method_config,
         raw=cfg,
     )
