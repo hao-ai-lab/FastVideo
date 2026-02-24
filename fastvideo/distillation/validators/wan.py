@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -75,14 +74,15 @@ class WanValidator:
         if self._pipeline is not None and self._pipeline_key == key:
             return self._pipeline
 
-        args_copy = copy.deepcopy(self.training_args)
-        args_copy.inference_mode = True
-        args_copy.pipeline_config.sampler_kind = str(sampler_kind)
+        # NOTE: `ComposedPipelineBase.from_pretrained()` ignores `args` when
+        # `inference_mode=True`, so we must pass pipeline knobs via kwargs.
+        flow_shift = getattr(self.training_args.pipeline_config, "flow_shift", None)
 
         self._pipeline = WanPipeline.from_pretrained(
             self.training_args.model_path,
-            args=args_copy,  # inference_mode=True uses FastVideoArgs branch
             inference_mode=True,
+            sampler_kind=str(sampler_kind),
+            flow_shift=float(flow_shift) if flow_shift is not None else None,
             loaded_modules={"transformer": transformer},
             tp_size=self.training_args.tp_size,
             sp_size=self.training_args.sp_size,

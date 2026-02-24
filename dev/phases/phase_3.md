@@ -120,6 +120,10 @@ Phase 2.9 已验证：即使统一 timesteps/scheduler，**只要 denoising loop
 - [x] `fastvideo/distillation/methods/distribution_matching/dmd2.py`
   - validation request 指定 `sampler_kind="sde"` + `sampling_timesteps=<few-step list>`
 
+### 可运行产物
+- Phase 3.2 YAML：`fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase3.2.yaml`
+- One-shot 脚本：`examples/distillation/phase3_2/temp.sh`
+
 ---
 
 ## Phase 3.3：Finetuning method（only student）
