@@ -195,10 +195,11 @@ handle 是为 **forward/select module** 服务的：比如选择哪个 transform
 - [x] Wan family 不再创建 optimizers/schedulers
   - `fastvideo/distillation/families/wan.py` 只负责加载 modules + 构建 `ModelBundle`
   - `DMD2Method` 在 init 时为 student/critic 创建 optimizers/schedulers（复用 TrainingArgs 字段，未来迁移到 `method_config`）
-- [x] Wan validator 不引入 method-specific 依赖
-  - `fastvideo/distillation/validators/wan.py` 使用 `WanPipeline` 进行 validation 采样
+- [x] Wan validator 归属 method（method 决定是否/如何调用 validation）
+  - `fastvideo/distillation/validators/wan.py` 当前使用 `WanDMDPipeline` 进行 validation 采样（对齐 DMD2 的 SDE rollout，便于与 legacy apples-to-apples 对比）
   - validator 不 hardcode `bundle.role("student")` 等 role 语义；由 method 通过 `ValidationRequest.sample_handle` 指定采样模型
   - validator 不由 adapter 持有/调用；trainer 只调用 `method.log_validation(step)`
+  - TODO(Phase 3)：通过 “ODE/SDE sampler 可插拔” 的方式淘汰 `WanDMDPipeline`（validator 回到 method-agnostic）
 
 ---
 
@@ -276,72 +277,33 @@ method 决定如何 sample（policy），adapter 负责把 sample 结果转换�
 
 ---
 
-## 8) TODO（Phase 2.9 follow-up）：validation 采样语义彻底回归 method（解决 WanPipeline vs WanDMDPipeline drift）
+## 8) TODO（Phase 3）：统一 ODE/SDE sampling 语义（淘汰 `WanDMDPipeline`）
 
-### 8.1 背景：为什么会 drift？
+### 8.1 背景：为什么 WanPipeline 和 DMD2 sampling 会不一致？
 
-当前 Phase 2.9 的 `WanValidator` 为了保持 “validator method-agnostic / 不出现 DMD 依赖”，
-使用的是 `WanPipeline`（默认 scheduler=UniPC）。而 legacy pipeline 的 validation 使用的是
-`WanDMDPipeline`（scheduler=FlowMatchEulerDiscrete + 固定 `dmd_denoising_steps` 的 rollout）。
+- DMD2 的 few-step rollout（以及 legacy `WanDMDPipeline`）本质是 **SDE 风格**：
+  每一步先得到 `pred_x0`，再用 `add_noise(pred_x0, eps, next_t)` **重加噪**进入下一步。
+- `WanPipeline` 的默认采样 loop 是 **ODE/solver 风格**：
+  每一步用 `scheduler.step(noise_pred, t, latents)` 直接更新 latents（并包含 CFG 双 forward + mix）。
 
-即便训练完全一致，这两条 sampling 路径也可能产生 **不同的 validation video**，导致：
-- 难以与 legacy 结果 apples-to-apples 对比（尤其是 few-step 的 timesteps schedule）
-- method 的 sampling policy（timesteps/solver）被隐式地固定在 validator 的实现选择里
+因此即使我们把 timesteps/scheduler “看起来”统一，**只要 loop 更新公式不同，采样结果就可能 drift**。
 
-因此：**“用什么 schedule / solver 做 validation sampling” 必须由 method 决定**（或未来的 `method_config` 决定），
-validator 只负责执行与记录。
+### 8.2 Phase 2.9 的取舍（为了端到端对齐）
 
-### 8.2 目标（Design Constraints）
+为了确认 Phase 2.9 的新训练链路与 legacy 能 apples-to-apples 对比，
+当前 `WanValidator` 直接改为使用 `WanDMDPipeline` 做采样（对齐 SDE rollout）。
 
-- validator 仍然 **family-specific + method-agnostic**
-  - 不 import / 不依赖 `WanDMDPipeline` / `DmdDenoisingStage` / 任何 DMD 语义
-- method 负责提供 sampling policy（而不是 validator 自己猜）
-  - explicit timesteps（例如 DMD few-step schedule）
-  - 使用的 scheduler/solver 类型（以中性的术语描述，例如 `flowmatch_euler` vs `unipc`）
-  - guidance/output_dir/sample_handle 等
+缺点：validator 仍依赖一个带 method 命名的 pipeline 变体（不够优雅）。
 
-### 8.3 建议方案（最小可落地）
+### 8.3 Phase 3 的目标：让 sampling 语义可插拔（ODE/SDE），而不是靠 “<Model><Method>Pipeline”
 
-扩展 `ValidationRequest`，让 method 显式描述 sampling policy：
+在 Phase 3 我们应把 “denoising loop” 抽象成可注入的 sampler/integrator：
+- `OdeSampler`：`scheduler.step(...)`（当前 `DenoisingStage` 的语义）
+- `SdeSampler`：`pred_x0 -> add_noise(next_t, eps)`（当前 `DmdDenoisingStage` 的语义）
 
-- `sampling_timesteps: list[int] | None`
-  - 若提供，则 **优先于** `sampling_steps`（num_inference_steps）
-  - 用于表达 few-step 的固定 schedule（例如 `[1000, 850, ...]`）
-- `scheduler_kind: Literal["unipc", "flowmatch_euler"] | None`
-  - 以“solver/scheduler”术语描述，而不是 “dmd” 术语
+然后：
+- `WanPipeline` 通过参数选择 `sampler_kind: ode|sde`（默认 ode）
+- method（或 `method_config`）在 validation 时显式选择 sampler + step list
+- validator 回到 method-agnostic：只做 dataset + logging（不再 import `WanDMDPipeline`）
 
-`WanValidator` 执行策略：
-- 默认（保持现状）：`scheduler_kind="unipc"` → `WanPipeline`（UniPC）+ `num_inference_steps`
-- 当 `scheduler_kind="flowmatch_euler"` 且 `sampling_timesteps` 非空：
-  - 使用 `WanPipeline` 但注入 `FlowMatchEulerDiscreteScheduler(shift=flow_shift)`
-  - 在 `ForwardBatch` 里填 `timesteps=sampling_timesteps`
-  - 让 `TimestepPreparationStage` 走 “custom timesteps” 分支（`scheduler.set_timesteps(timesteps=...)`）
-
-> 备注：这条路径不引入任何 DMD pipeline/stage 依赖；但可以让 validation 的 timesteps/scheduler
-> 由 method 精确控制，从而减少 drift，并便于对齐 legacy 的 few-step schedule。
-
-### 8.4 文件 TODO（实现清单）
-
-- [ ] `fastvideo/distillation/validators/base.py`
-  - 扩展 `ValidationRequest`：增加 `sampling_timesteps` / `scheduler_kind`
-- [ ] `fastvideo/distillation/methods/distribution_matching/dmd2.py`
-  - `log_validation()` 构造 request 时：
-    - `request.sampling_timesteps = pipeline_config.dmd_denoising_steps`
-    - `request.scheduler_kind = "flowmatch_euler"`
-- [ ] `fastvideo/distillation/validators/wan.py`
-  - 支持根据 request 选择 scheduler/policy（保持默认 unipc）
-  - 当指定 flowmatch_euler + timesteps 时，走 “custom timesteps + FlowMatchEuler scheduler” 路径
-- [ ] docs
-  - `fastvideo/distillation/doc/validators/base.md`
-  - `fastvideo/distillation/doc/validators/wan.md`
-  - `fastvideo/distillation/doc/methods/distribution_matching/dmd2.md`
-
-### 8.5 风险与后续（如需 1:1 复刻 legacy）
-
-即使统一 timesteps + scheduler，`WanPipeline` 的 denoising loop 仍可能与 legacy 的
-`DmdDenoisingStage` 不完全一致（legacy 有自己的 loop / noise reinjection 语义）。
-
-如果我们需要 **严格复刻** legacy sampling 的每一个细节，建议在 Phase 3 做更系统的抽象：
-- method（或 `method_config`）提供 “rollout plan”
-- validator 仅做 dataset + logging
-- 具体 rollout 执行由一个中性组件实现（例如 `sampling/rollout.py`），并且不携带 DMD 命名
+> 这个设计会被写入 `dev/phases/phase_3.md` 并在 Phase 3 实施。

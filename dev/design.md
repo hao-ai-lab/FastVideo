@@ -585,7 +585,7 @@ Phase 1 的“辉煌”（落地与收益）：
 - 新增更多 method（teacher-only、多 teacher、KD 轨迹蒸馏等）
 - 逐步冻结或移除旧 distill pipeline（保留兼容入口亦可）
 
-### Phase 2.9（计划）：A+B+Families 语义收敛（为 Phase 3 铺路）
+### Phase 2.9（已完成）：A+B+Families 语义收敛（为 Phase 3 铺路）
 
 动机：Phase 2 已经完成“独立可跑”，但仍存在几个会阻碍长期扩展的结构性问题：
 
@@ -603,12 +603,28 @@ Phase 2.9 目标（简称 A+B+Families）：
 
 详细执行清单见：`dev/phases/phase_2_9.md`
 
+补充：Phase 2.9 实践过程中暴露了一个之前设计阶段没充分考虑的点——
+**distillation/sampling method 可能不仅仅改变 timesteps/scheduler，而是会改变 denoising loop 本身**
+（例如 DMD2 的 SDE 风格 `pred_x0 -> add_noise(next_t, eps)` 与常规 ODE/solver 风格 `scheduler.step(...)`）。
+这会直接导致 validation sampling 的 drift：即使训练一致，选不同 loop 的 pipeline 也可能出不同视频。
+
+Phase 2.9 为了端到端与 legacy apples-to-apples，对 Wan DMD2 的 validation 暂时使用
+`WanDMDPipeline`（SDE rollout）以避免漂移；Phase 3 会把它升级为可插拔的 ODE/SDE sampler，
+从而淘汰 `<Model><Method>Pipeline` 这种耦合。
+
 ### Phase 3（计划）：Recipe config + method_config + Finetuning（统一到同一框架）
 
 Phase 3 的定位：在 Phase 2.9 已经完成“优雅 dispatch + adapter/method 语义收敛”的基础上：
 
 1) **配置语义升级（`distill` -> `recipe`，引入 `method_config`）**  
 2) **把 finetuning 作为一种 method 接入框架**（只需要 `student` + dataset）
+
+3) **统一 sampling 语义（ODE/SDE sampler 可插拔）**  
+   - 背景：DMD2/Consistency 等方法可能需要不同的 denoising loop；如果靠 “每个 method 一个 pipeline 变体”
+     会重新回到 N×M 的组合爆炸。
+   - 目标：让 `WanPipeline`（以及未来其它 family 的 pipeline）通过参数选择 sampler/integrator（ODE vs SDE），
+     validation 由 method/method_config 显式指定 sampler+steps，validator 只做 dataset+logging。
+   - 结果：新框架不再需要依赖 `WanDMDPipeline`（保留 legacy 兼容即可）。
 
 #### Phase 3.1：配置语义升级（`distill` -> `recipe`，引入 `method_config`）
 

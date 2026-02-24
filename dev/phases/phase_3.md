@@ -8,6 +8,8 @@ Phase 3 的定位：在 Phase 2 已经证明“新 distill 框架可独立运行
 1) **彻底优雅的 dispatch**：避免 `wan+dmd2` 这种硬编码分支；扩展成本从 N×M 降到 N+M。  
 2) **YAML schema 升级**：顶层从 `distill` 改为 `recipe`，并新增 `method_config`。  
 3) **新增 finetuning 支持**：把 finetune 作为一种 method 接入框架（only student + dataset）。
+4) **统一 sampling 语义（ODE/SDE）**：把 “validation 用哪个 pipeline/loop” 从 `<Model><Method>Pipeline`
+   的耦合里解放出来，避免未来出现 25 个 pipeline 变体。
 
 约束：
 - 不新增 entry file：继续使用 `fastvideo/training/distillation.py` 作为统一入口。
@@ -132,6 +134,23 @@ Phase 3 的定位：在 Phase 2 已经证明“新 distill 框架可独立运行
 - [ ] `fastvideo/tests/distillation/test_registry_dispatch.py`
   - registry 能注册并 resolve `wan` + `dmd2` / `finetune`
 
+### B8.（建议纳入 Phase 3）ODE/SDE sampler 可插拔（淘汰 `WanDMDPipeline`）
+
+背景：Phase 2.9 暴露了一个关键事实——即使统一 timesteps/scheduler，`WanPipeline`（ODE/solver-style
+`scheduler.step`）与 DMD2/legacy `WanDMDPipeline`（SDE-style `pred_x0 -> add_noise(next_t, eps)`）
+仍可能产生不同的 sampling 结果。validation 若选错 loop，就无法与训练/legacy apples-to-apples。
+
+- [ ] 在 pipeline 层引入 “denoising loop / sampler” 抽象（中性命名，不出现 DMD）
+  - `OdeSampler`：使用 `scheduler.step(...)`
+  - `SdeSampler`：使用 `pred_x0 -> add_noise(next_t, eps)`（noise reinjection）
+- [ ] `WanPipeline` 支持选择 sampler（默认 ODE）
+  - 选项 A：`WanPipeline` 通过参数注入 sampler（更通用）
+  - 选项 B：保留 stage 选择（`DenoisingStage` vs `SdeDenoisingStage`），但把命名去 DMD 化
+- [ ] 更新 `WanValidator`：不再 import `WanDMDPipeline`
+  - method（或 `method_config`）在 `ValidationRequest` 里显式指定 `sampler_kind: ode|sde`
+  - `WanValidator` 仍保持 family-specific + method-agnostic：只负责 dataset + logging
+- [ ] 最终目标：`WanDMDPipeline` 仅作为 legacy 兼容（或被完全替代），新框架不依赖它
+
 ---
 
 ## C) 核心代码设计（具体到类/函数）
@@ -213,6 +232,26 @@ Finetune 的边界：
 
 > Wan 侧可以复用现有 `TrainingBatch` 字段与 `normalize_dit_input / get_sigmas` 等工具，
 > 目标是对齐 legacy `TrainingPipeline._transformer_forward_and_compute_loss()` 的 loss 语义。
+
+### C6. Phase 3 sampling：把 “ODE vs SDE” 变成可配置的 sampler/integrator
+
+目标：避免出现 `<Wan><DMD2>Pipeline` / `<Wan><CM>Pipeline` 这类组合爆炸，同时让 method 能精确控制
+validation 的 solver/loop 语义（与训练一致）。
+
+建议最小接口（示意）：
+
+- `Sampler`（pipeline 层抽象，不携带 method 命名）
+  - `run(transformer, batch, *, timesteps, guidance, rng, ...) -> latents`
+
+Wan 侧落地：
+- `OdeSampler` = 复用现有 `DenoisingStage` 语义（`scheduler.step` + CFG）
+- `SdeSampler` = 复用现有 `DmdDenoisingStage` 的语义，但把：
+  - `pipeline_config.dmd_denoising_steps` 改成显式输入的 `timesteps`
+  - class/变量命名去 DMD 化（例如 `SdeDenoisingStage` 或 `SdeSampler`）
+
+与 distillation 的边界：
+- method（或 `method_config`）决定 validation 用 `ode|sde`，以及用哪一组 timesteps。
+- validator 只执行与记录，不再隐式选择 `WanPipeline` 或 `WanDMDPipeline`。
 
 ---
 

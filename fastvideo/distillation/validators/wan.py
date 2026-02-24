@@ -19,7 +19,7 @@ from fastvideo.dataset.validation_dataset import ValidationDataset
 from fastvideo.distributed import get_sp_group, get_world_group
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
-from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
+from fastvideo.pipelines.basic.wan.wan_dmd_pipeline import WanDMDPipeline
 from fastvideo.distillation.validators.base import ValidationRequest
 from fastvideo.utils import shallow_asdict
 
@@ -56,7 +56,7 @@ class WanValidator:
         self.seed = int(seed)
         self.validation_random_generator = torch.Generator(device="cpu").manual_seed(self.seed)
 
-        self._pipeline: WanPipeline | None = None
+        self._pipeline: WanDMDPipeline | None = None
         self._pipeline_transformer_id: int | None = None
         self._sampling_param: SamplingParam | None = None
 
@@ -65,7 +65,7 @@ class WanValidator:
             self._sampling_param = SamplingParam.from_pretrained(self.training_args.model_path)
         return self._sampling_param
 
-    def _get_pipeline(self, *, transformer: torch.nn.Module) -> WanPipeline:
+    def _get_pipeline(self, *, transformer: torch.nn.Module) -> WanDMDPipeline:
         transformer_id = id(transformer)
         if self._pipeline is not None and self._pipeline_transformer_id == transformer_id:
             return self._pipeline
@@ -73,7 +73,7 @@ class WanValidator:
         args_copy = copy.deepcopy(self.training_args)
         args_copy.inference_mode = True
 
-        self._pipeline = WanPipeline.from_pretrained(
+        self._pipeline = WanDMDPipeline.from_pretrained(
             self.training_args.model_path,
             args=args_copy,  # inference_mode=True uses FastVideoArgs branch
             inference_mode=True,
