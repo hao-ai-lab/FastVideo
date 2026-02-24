@@ -138,10 +138,12 @@ Phase 2.9 已验证：即使统一 timesteps/scheduler，**只要 denoising loop
   - `FineTuneMethod(DistillMethod)` + `@register_method("finetune")`
   - `bundle.require_roles(["student"])`
   - `single_train_step()` 只更新 student
-- [ ] `fastvideo/distillation/adapters/wan.py`
-  - 增加 finetune 所需 primitives（operation-centric）：
-    - `predict_noise(handle, ...)` / `predict_x0(handle, ...)`（可复用已有）
-    - （按 legacy loss 语义）增加最小 `finetune_loss(...)` 或 `compute_training_loss(...)`
+- [ ] （如有必要）为 finetune 定义 adapter contract（类似 `_DMD2Adapter` 的做法）
+  - 重点：**loss 仍由 method 计算**；adapter 只提供 operation-centric primitives
+  - `_FineTuneAdapter(Protocol)` 推荐只包含：
+    - `prepare_batch(...)`（产出 latents/noise/timesteps/sigmas/conditioning）
+    - `predict_noise(handle, ...)`（以及可选 `predict_x0`）
+    - `backward(loss, ctx, ...)`（forward-context/activation ckpt 相关）
 - [ ] configs/examples
   - [ ] `fastvideo/distillation/outside/fastvideo/configs/distillation/finetune_*.yaml`
   - [ ] `examples/distillation/phase3/`（或更新现有 examples）

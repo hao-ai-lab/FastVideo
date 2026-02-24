@@ -670,8 +670,9 @@ Phase 3.1 的 `recipe/method_config` 对齐。
   - `bundle.require_roles(["student"])`
   - update policy 永远只 step student 的 optimizer/scheduler
 - 为 finetune 定义 adapter contract（类似 `_DMD2Adapter` 的做法）：
-  - `_FineTuneAdapter(Protocol)`：`prepare_batch()` + `predict_*()` + `compute_loss()` + `backward()`
-  - Wan 侧由 `WanAdapter` 实现该 contract（或拆出 mixin，避免 adapter 膨胀）
+  - `_FineTuneAdapter(Protocol)`：`prepare_batch()` + `predict_*()` + `backward()`
+  - **不建议把 `compute_loss()` 放进 adapter**：loss/policy 属于 method（参考 FastGen 的 `SFTModel.single_train_step()`）
+  - Wan 侧由 `WanAdapter` 实现该 contract；若未来出现 family-specific 分支，优先在 adapter 内部消化而不是膨胀 method
 
 Finetune 的 config（示意，schema v2）：
 ```yaml
