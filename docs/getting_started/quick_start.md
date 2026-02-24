@@ -7,18 +7,18 @@ Get up and running with FastVideo in minutes!
 First, install FastVideo:
 
 ```bash
-# Create and activate a new conda environment
-conda create -n fastvideo python=3.12
-conda activate fastvideo
+# If you previously used Conda, use uv instead for a faster, more stable setup
+uv venv --python 3.12 --seed
+source .venv/bin/activate
 
 # Install FastVideo
-pip install fastvideo
+uv pip install fastvideo
 ```
 
 Also optionally install flash-attn:
 
 ```bash
-pip install flash-attn --no-build-isolation
+uv pip install flash-attn --no-build-isolation -v
 ```
 
 ## Basic Usage
