@@ -21,7 +21,6 @@ import time
 from collections import OrderedDict
 
 from fastvideo.attention import AttentionMetadata
-from fastvideo.configs.sample.teacache import TeaCacheParams, WanTeaCacheParams
 
 
 class PipelineLoggingInfo:
@@ -136,6 +135,17 @@ class ForwardBatch:
     # Camera control inputs (HYWorld)
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
 
+    # Camera/action control inputs (GameCraft)
+    camera_states: torch.Tensor | None = None  # Plücker coordinates [B, T, 6, H, W]
+    gt_latents: torch.Tensor | None = None  # Ground truth latents for conditioning [B, 16, T, H, W]
+    conditioning_mask: torch.Tensor | None = None  # Mask for conditioning [B, 1, T, H, W]
+    camera_trajectory: str | None = None  # Camera trajectory file/identifier
+    action_list: list[
+        str] | None = None  # List of actions (e.g., ['forward', 'left'])
+    action_speed_list: list[float] | None = None  # Speed for each action
+    # Camera control inputs (LingBotWorld)
+    c2ws_plucker_emb: torch.Tensor | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
+
     # Latent dimensions
     height_latents: list[int] | int | None = None
     width_latents: list[int] | int | None = None
@@ -164,6 +174,18 @@ class ForwardBatch:
     eta: float = 0.0
     sigmas: list[float] | None = None
 
+    # LTX-2 multi-modal CFG parameters
+    ltx2_cfg_scale_video: float = 1.0
+    ltx2_cfg_scale_audio: float = 1.0
+    ltx2_modality_scale_video: float = 1.0
+    ltx2_modality_scale_audio: float = 1.0
+    ltx2_rescale_scale: float = 0.0
+    # STG (Spatio-Temporal Guidance) parameters
+    ltx2_stg_scale_video: float = 0.0
+    ltx2_stg_scale_audio: float = 0.0
+    ltx2_stg_blocks_video: list[int] = field(default_factory=list)
+    ltx2_stg_blocks_audio: list[int] = field(default_factory=list)
+
     n_tokens: int | None = None
 
     # Other parameters that may be needed by specific schedulers
@@ -187,15 +209,7 @@ class ForwardBatch:
     save_video: bool = True
     return_frames: bool = False
 
-    # TeaCache parameters
-    enable_teacache: bool = False
-    teacache_params: TeaCacheParams | WanTeaCacheParams | None = None
-
-    # STA parameters
-    STA_param: list | None = None
     is_cfg_negative: bool = False
-    mask_search_final_result_pos: list[list] | None = None
-    mask_search_final_result_neg: list[list] | None = None
 
     # VSA parameters
     VSA_sparsity: float = 0.0
@@ -207,8 +221,10 @@ class ForwardBatch:
     def __post_init__(self):
         """Initialize dependent fields after dataclass initialization."""
 
-        # Set do_classifier_free_guidance based on guidance scale and negative prompt
-        if self.guidance_scale > 1.0:
+        # Enable CFG for standard guidance_scale and LTX-2 text CFG scales.
+        ltx2_text_cfg_enabled = (self.ltx2_cfg_scale_video != 1.0
+                                 or self.ltx2_cfg_scale_audio != 1.0)
+        if self.guidance_scale > 1.0 or ltx2_text_cfg_enabled:
             self.do_classifier_free_guidance = True
         if self.negative_prompt_embeds is None:
             self.negative_prompt_embeds = []

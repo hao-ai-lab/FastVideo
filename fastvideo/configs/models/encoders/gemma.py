@@ -7,6 +7,19 @@ from fastvideo.configs.models.encoders.base import (
 )
 
 
+def _is_feature_extractor_linear(n: str, m) -> bool:
+    return n.endswith("feature_extractor_linear")
+
+
+def _is_embeddings(n: str, m) -> bool:
+    return n.endswith("embeddings_connector") or n.endswith(
+        "audio_embeddings_connector")
+
+
+def _is_gemma_model(n: str, m) -> bool:
+    return "_gemma_model" in n
+
+
 @dataclass
 class LTX2GemmaArchConfig(TextEncoderArchConfig):
     architectures: list[str] = field(
@@ -34,6 +47,10 @@ class LTX2GemmaArchConfig(TextEncoderArchConfig):
     connector_rope_type: str = "split"
     connector_double_precision_rope: bool = False
     connector_num_learnable_registers: int | None = 128
+
+    _fsdp_shard_conditions: list = field(
+        default_factory=lambda:
+        [_is_feature_extractor_linear, _is_embeddings, _is_gemma_model])
 
     def __post_init__(self) -> None:
         super().__post_init__()

@@ -45,6 +45,12 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
+      - name: Generate docs examples
+        run: python docs/generate_examples.py
+
+      - name: Check docs links
+        run: python scripts/check_docs_links.py
+
       - name: Build documentation
         run: mkdocs build
 

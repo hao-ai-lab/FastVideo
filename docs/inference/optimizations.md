@@ -8,12 +8,9 @@ This page describes the various options for speeding up generation times in Fast
 - Optimized Attention Backends
 
   - [Flash Attention](#flash-attention)
-  - [Sliding Tile Attention](#sliding-tile-attention)
+  - [Sliding Tile Attention (Archived)](#sliding-tile-attention-archived)
   - [Sage Attention](#sage-attention)
   - [Sage Attention 3](#sage-attention-3)
-
-- Caching Techniques
-  - [TeaCache](#teacache)
 
 ## Attention Backends
 
@@ -21,10 +18,14 @@ This page describes the various options for speeding up generation times in Fast
 
 - Torch SDPA: `FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA`
 - Flash Attention 2 and 3: `FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN`
-- Sliding Tile Attention: `FASTVIDEO_ATTENTION_BACKEND=SLIDING_TILE_ATTN`
 - Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
+- Video MoBA Attention: `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`
+- Sparse Linear Attention: `FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
+- SageSLA Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_SLA_ATTN`
+- Sliding Tile Attention (archived branch only):
+  `FASTVIDEO_ATTENTION_BACKEND=SLIDING_TILE_ATTN`
 
 ### Configuring Backends
 
@@ -35,7 +36,7 @@ There are two ways to configure the attention backend in FastVideo.
 In python, set the `FASTVIDEO_ATTENTION_BACKEND` environment variable before instantiating `VideoGenerator` like this:
 
 ```python
-os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "SLIDING_TILE_ATTN"
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
 ```
 
 #### 2. In CLI
@@ -66,26 +67,27 @@ pip install ninja
 python setup.py install
 ```
 
-### Sliding Tile Attention
+### Sliding Tile Attention (Archived)
 
 **`SLIDING_TILE_ATTN`**
 
-```bash
-pip install st_attn==0.0.4
-```
+The full STA integration in `fastvideo/` is archived from `main` and preserved
+at:
 
-Please see [this page](../attention/sta/index.md) for more installation instructions.
+- https://github.com/hao-ai-lab/FastVideo/tree/sta_do_not_delete
+
+We keep STA off `main` because we believe VSA is strictly better than STA for
+the actively maintained FastVideo path.
+
+Kernel code in `fastvideo-kernel` is still retained. For mask search and STA
+inference workflow, see [STA docs](../attention/sta/index.md).
 
 ### Video Sparse Attention
 
 **`VIDEO_SPARSE_ATTN`**
 
-```bash
-git submodule update --init --recursive
-python setup_vsa.py install
-```
-
-Please see [this page](../attention/vsa/index.md) for more installation instructions.
+Video Sparse Attention is provided by `fastvideo-kernel`.
+See [VSA docs](../attention/vsa/index.md) for installation details.
 
 ### Sage Attention
 
@@ -115,63 +117,30 @@ Note that Sage Attention 3 requires `python>=3.13`, `torch>=2.8.0`, `CUDA >=12.8
 
 To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repository to install the package from source.
 
-## Teacache
+### V-MoBA / SLA / SageSLA
 
-TeaCache is an optimization technique supported in FastVideo that can significantly speed up video generation by skipping redundant calculations across diffusion steps. This guide explains how to enable and configure TeaCache for optimal performance in FastVideo.
-
-### What is TeaCache?
-
-See the official [TeaCache](https://github.com/ali-vilab/TeaCache) repo and their paper for more details.
-
-### How to Enable TeaCache
-
-Enabling TeaCache is straightforward - simply add the `enable_teacache=True` parameter to your `generate_video()` call:
-
-```python
-# ... previous code
-generator.generate_video(
-    prompt="Your prompt here",
-    sampling_param=params,
-    enable_teacache=True
-)
-# more code ...
-```
-
-### Complete Example
-
-At the bottom is a complete example of using TeaCache for faster video generation. You can run it using the following command:
-
-```bash
-python examples/inference/optimizations/teacache_example.py
-```
-
-### Advanced Configuration
-
-While TeaCache works well with default settings, you can fine-tune its behavior by adjusting the threshold value:
-
-1. Lower threshold values (e.g., 0.1) will result in more skipped calculations and faster generation with slightly more potential for quality degradation
-2. Higher threshold values (e.g., 0.15-0.23) will skip fewer calculations but maintain quality closer to the original
-
-Note that the optimal threshold depends on your specific model and content.
+These backends are model-specific and require the corresponding kernels and
+dependencies. Use the support matrix and model examples to confirm compatibility
+before enabling them.
 
 ## Benchmarking different optimizations
 
-To benchmark the performance improvement, try generating the same video with and without TeaCache enabled and compare the generation times:
+To benchmark backend performance, generate the same prompt with the same seed and compare end-to-end generation times:
 
 ```python
-# Without TeaCache
-start_time = time.perf_counter()
-generator.generate_video(prompt="Your prompt", enable_teacache=False)
-standard_time = time.perf_counter() - start_time
+import os
+import time
 
-# With TeaCache
-start_time = time.perf_counter()
-generator.generate_video(prompt="Your prompt", enable_teacache=True)
-teacache_time = time.perf_counter() - start_time
-
-print(f"Standard generation: {standard_time:.2f} seconds")
-print(f"TeaCache generation: {teacache_time:.2f} seconds")
-print(f"Speedup: {standard_time/teacache_time:.2f}x")
+for backend in ["TORCH_SDPA", "FLASH_ATTN", "SAGE_ATTN"]:
+    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = backend
+    generator = VideoGenerator.from_pretrained("your-model-id")
+    start_time = time.perf_counter()
+    generator.generate_video(
+        prompt="Your prompt",
+        seed=1024,
+    )
+    elapsed = time.perf_counter() - start_time
+    print(f"{backend}: {elapsed:.2f}s")
 ```
 
-Note: If you want to benchmark different attention backends, you'll need to reinstantiate `VideoGenerator`.
+Note: reinstantiate `VideoGenerator` after changing `FASTVIDEO_ATTENTION_BACKEND`.

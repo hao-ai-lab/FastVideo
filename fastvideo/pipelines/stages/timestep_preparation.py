@@ -152,3 +152,78 @@ class Cosmos25TimestepPreparationStage(TimestepPreparationStage):
                                 **extra_kwargs)
         batch.timesteps = scheduler.timesteps
         return batch
+
+
+class SD35TimestepPreparationStage(TimestepPreparationStage):
+    """SD3/SD3.5 timestep preparation with optional dynamic shifting (mu).
+
+    When the scheduler supports `use_dynamic_shifting`, this stage computes a
+    resolution-dependent `mu` value and passes it to `set_timesteps()`.
+    """
+
+    @staticmethod
+    def _calculate_mu(
+        image_seq_len: int,
+        base_seq_len: int = 256,
+        max_seq_len: int = 4096,
+        base_shift: float = 0.5,
+        max_shift: float = 1.15,
+    ) -> float:
+        m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
+        b = base_shift - m * base_seq_len
+        return float(image_seq_len) * m + b
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        sig = inspect.signature(self.scheduler.set_timesteps)
+
+        if "mu" in sig.parameters:
+            cfg = getattr(self.scheduler, "config", None)
+            use_dynamic = bool(getattr(cfg, "use_dynamic_shifting",
+                                       False)) if cfg is not None else False
+
+            if use_dynamic:
+                arch = fastvideo_args.pipeline_config.dit_config.arch_config
+                vae_arch = fastvideo_args.pipeline_config.vae_config.arch_config
+                patch_size = getattr(arch, "patch_size", None)
+                spatial_ratio = getattr(vae_arch, "spatial_compression_ratio",
+                                        None)
+
+                if not isinstance(patch_size, int) or not isinstance(
+                        spatial_ratio, int):
+                    raise TypeError(
+                        "SD3.5 dynamic shifting requires integer patch_size "
+                        "and spatial_compression_ratio.")
+                if batch.height is None or batch.width is None:
+                    raise ValueError(
+                        "height/width must be set before timesteps.")
+
+                h_lat = batch.height // spatial_ratio
+                w_lat = batch.width // spatial_ratio
+                image_seq_len = (h_lat // patch_size) * (w_lat // patch_size)
+
+                base_seq_len = int(getattr(cfg, "base_image_seq_len", 256))
+                max_seq_len = int(getattr(cfg, "max_image_seq_len", 4096))
+                base_shift = float(getattr(cfg, "base_shift", 0.5))
+                max_shift = float(getattr(cfg, "max_shift", 1.15))
+
+                batch.n_tokens = None
+                device = get_local_torch_device()
+                self.scheduler.set_timesteps(
+                    batch.num_inference_steps,
+                    device=device,
+                    mu=self._calculate_mu(
+                        image_seq_len=image_seq_len,
+                        base_seq_len=base_seq_len,
+                        max_seq_len=max_seq_len,
+                        base_shift=base_shift,
+                        max_shift=max_shift,
+                    ),
+                )
+                batch.timesteps = self.scheduler.timesteps
+                return batch
+
+        return super().forward(batch, fastvideo_args)

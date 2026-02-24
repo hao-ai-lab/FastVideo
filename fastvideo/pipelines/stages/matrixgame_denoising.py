@@ -16,14 +16,6 @@ from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 try:
-    from fastvideo.attention.backends.sliding_tile_attn import (
-        SlidingTileAttentionBackend)
-    st_attn_available = True
-except ImportError:
-    st_attn_available = False
-    SlidingTileAttentionBackend = None  # type: ignore
-
-try:
     from fastvideo.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
     vsa_available = True
@@ -167,9 +159,6 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         # directly set the kwarg.
         image_kwargs = {"encoder_hidden_states_image": image_embeds}
         pos_cond_kwargs: dict[str, Any] = {}
-
-        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
-            self.prepare_sta_param(batch, fastvideo_args)
 
         assert batch.latents is not None, "latents must be provided"
         latents = batch.latents
@@ -335,9 +324,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                0,
                 "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                0,
             })
 
         return kv_cache
@@ -373,9 +362,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                0,
                 "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                0,
             })
             kv_cache_mouse.append({
                 "k":
@@ -393,9 +382,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                0,
                 "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                0,
             })
 
         return kv_cache_mouse, kv_cache_keyboard
@@ -480,7 +469,6 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                         raw_latent_shape=(current_num_frames, h, w),
                         patch_size=ctx.fastvideo_args.pipeline_config.
                         dit_config.patch_size,
-                        STA_param=batch.STA_param,
                         VSA_sparsity=ctx.fastvideo_args.VSA_sparsity,
                         device=get_local_torch_device(),
                     )
@@ -690,9 +678,6 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         # directly set the kwarg.
         image_kwargs = {"encoder_hidden_states_image": image_embeds}
         pos_cond_kwargs: dict[str, Any] = {}
-
-        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
-            self.prepare_sta_param(batch, fastvideo_args)
 
         assert batch.latents is not None, "latents must be provided"
         latents = batch.latents

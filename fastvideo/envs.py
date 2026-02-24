@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     FASTVIDEO_LOGGING_CONFIG_PATH: str | None = None
     FASTVIDEO_TRACE_FUNCTION: int = 0
     FASTVIDEO_ATTENTION_BACKEND: str | None = None
-    FASTVIDEO_ATTENTION_CONFIG: str | None = None
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "spawn"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
     MAX_JOBS: str | None = None
@@ -201,18 +200,11 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Available options:
     # - "TORCH_SDPA": use torch.nn.MultiheadAttention
     # - "FLASH_ATTN": use FlashAttention
-    # - "SLIDING_TILE_ATTN" : use Sliding Tile Attention
     # - "VIDEO_SPARSE_ATTN": use Video Sparse Attention
     # - "SAGE_ATTN": use Sage Attention
     # - "SAGE_ATTN_THREE": use Sage Attention 3
     "FASTVIDEO_ATTENTION_BACKEND":
     lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
-
-    # Path to the attention configuration file. Only used for sliding tile
-    # attention for now.
-    "FASTVIDEO_ATTENTION_CONFIG":
-    lambda: (None if os.getenv("FASTVIDEO_ATTENTION_CONFIG", None) is None else
-             os.path.expanduser(os.getenv("FASTVIDEO_ATTENTION_CONFIG", "."))),
 
     # Use dedicated multiprocess context for workers.
     "FASTVIDEO_WORKER_MULTIPROC_METHOD":

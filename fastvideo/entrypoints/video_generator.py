@@ -6,7 +6,6 @@ This module provides a consolidated interface for generating videos using
 diffusion models.
 """
 
-import math
 import os
 import re
 import threading
@@ -336,30 +335,19 @@ class VideoGenerator:
 
         temporal_scale_factor = pipeline_config.vae_config.arch_config.temporal_compression_ratio
         num_frames = sampling_param.num_frames
-        num_gpus = fastvideo_args.num_gpus
         use_temporal_scaling_frames = pipeline_config.vae_config.use_temporal_scaling_frames
 
         # Adjust number of frames based on number of GPUs
-        if use_temporal_scaling_frames:
-            orig_latent_num_frames = (num_frames -
-                                      1) // temporal_scale_factor + 1
-        else:  # stepvideo only
-            orig_latent_num_frames = sampling_param.num_frames // 17 * 3
+        if not use_temporal_scaling_frames:
+            raise ValueError(
+                "Only temporal-scaling-frame VAE configs are supported.")
+        orig_latent_num_frames = (num_frames - 1) // temporal_scale_factor + 1
 
         if orig_latent_num_frames % fastvideo_args.num_gpus != 0:
-
-            if use_temporal_scaling_frames:
-                # Convert back to number of frames, ensuring num_frames-1 is a multiple of temporal_scale_factor
-                new_num_frames = (orig_latent_num_frames -
-                                  1) * temporal_scale_factor + 1
-            else:  # stepvideo only
-                # Find the least common multiple of 3 and num_gpus
-                divisor = math.lcm(3, num_gpus)
-                # Round up to the nearest multiple of this LCM
-                orig_latent_num_frames = (
-                    (orig_latent_num_frames + divisor - 1) // divisor) * divisor
-                # Convert back to actual frames using the StepVideo formula
-                new_num_frames = orig_latent_num_frames // 3 * 17
+            # Convert back to number of frames, ensuring num_frames-1 is a
+            # multiple of temporal_scale_factor.
+            new_num_frames = (orig_latent_num_frames -
+                              1) * temporal_scale_factor + 1
 
             logger.info(
                 "Adjusting number of frames from %s to %s based on number of GPUs (%s)",
@@ -407,12 +395,24 @@ class VideoGenerator:
         # Run inference
         start_time = time.perf_counter()
 
-        # Execute forward pass in a new thread for non-blocking tensor allocation
-        result_container = {}
+        # Execute forward pass in a new thread for non-blocking tensor
+        # allocation. Capture thread exceptions so we can surface the true
+        # failure in the main thread instead of later hitting None outputs.
+        result_container = {
+            "output_batch": ForwardBatch(data_type=batch.data_type)
+        }
+        thread_error: dict[str, BaseException | None] = {"error": None}
+        thread_error_traceback: dict[str, str] = {"traceback": ""}
 
         def execute_forward_thread():
-            result_container['output_batch'] = self.executor.execute_forward(
-                batch, fastvideo_args)
+            import traceback
+            try:
+                result_container[
+                    "output_batch"] = self.executor.execute_forward(
+                        batch, fastvideo_args)
+            except BaseException as error:  # noqa: BLE001
+                thread_error["error"] = error
+                thread_error_traceback["traceback"] = traceback.format_exc()
 
         thread = threading.Thread(target=execute_forward_thread)
         thread.start()
@@ -423,7 +423,17 @@ class VideoGenerator:
                               pin_memory=fastvideo_args.pin_cpu_memory)
         thread.join()
 
-        output_batch = result_container['output_batch']
+        if thread_error["error"] is not None:
+            raise RuntimeError("Forward execution thread failed.\n"
+                               f"{thread_error_traceback['traceback']}"
+                               ) from thread_error["error"]
+
+        output_batch = result_container["output_batch"]
+        if output_batch.output is None:
+            raise RuntimeError(
+                "Forward execution returned no output tensor. "
+                "This usually means the executor/pipeline failed earlier.")
+
         if output_batch.output.shape == samples.shape:
             samples.copy_(output_batch.output)
         else:
@@ -441,8 +451,9 @@ class VideoGenerator:
         frames = []
         for x in videos:
             x = torchvision.utils.make_grid(x, nrow=6)
-            x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-            frames.append((x * 255).numpy().astype(np.uint8))
+            x = x.permute(1, 2, 0).squeeze(-1)
+            x = (x * 255).to(torch.uint8)
+            frames.append(x.cpu().numpy())
 
         # Save output if requested
         if batch.save_video:

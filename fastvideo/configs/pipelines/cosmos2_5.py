@@ -10,7 +10,7 @@ from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25ArchConfig
 from fastvideo.configs.models.encoders import BaseEncoderOutput
 from fastvideo.configs.models.encoders.reason1 import Reason1Config, Reason1ArchConfig
 from fastvideo.configs.models.vaes import Cosmos25VAEConfig
-from fastvideo.configs.pipelines.base import PipelineConfig, STA_Mode
+from fastvideo.configs.pipelines.base import PipelineConfig
 
 
 def _identity_preprocess_text(prompt: str) -> str:
@@ -79,9 +79,6 @@ class Cosmos25Config(PipelineConfig):
 
     vae_tiling: bool = False
     vae_sp: bool = False
-
-    STA_mode: STA_Mode = STA_Mode.NONE
-    skip_time_steps: int = 0
 
     def __post_init__(self):
         self.vae_config.load_encoder = True

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastvideo.configs.sample.base import SamplingParam
 
@@ -9,6 +9,7 @@ class LTX2BaseSamplingParam(SamplingParam):
     """Default sampling parameters for LTX-2 base one-stage T2V.
 
     Values follow the official LTX-2 one-stage defaults.
+    Multi-modal CFG params are read by ``LTX2DenoisingStage``.
     """
 
     seed: int = 10
@@ -37,6 +38,17 @@ class LTX2BaseSamplingParam(SamplingParam):
         "awkward pauses, incorrect timing, unnatural transitions, "
         "inconsistent framing, tilted camera, flat lighting, inconsistent "
         "tone, cinematic oversaturation, stylized filters, or AI artifacts.")
+    # Official LTX-2 multi-modal CFG defaults.
+    ltx2_cfg_scale_video: float = 3.0
+    ltx2_cfg_scale_audio: float = 7.0
+    ltx2_modality_scale_video: float = 3.0
+    ltx2_modality_scale_audio: float = 3.0
+    ltx2_rescale_scale: float = 0.7
+    # STG (Spatio-Temporal Guidance) defaults from official LTX-2.
+    ltx2_stg_scale_video: float = 1.0
+    ltx2_stg_scale_audio: float = 1.0
+    ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
+    ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
 
 
 @dataclass

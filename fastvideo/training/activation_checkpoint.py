@@ -51,6 +51,7 @@ def apply_activation_checkpointing(
 def _apply_activation_checkpointing_blocks(module: torch.nn.Module,
                                            n_layer: int | None = None
                                            ) -> torch.nn.Module:
+    applied = False
     for transformer_block_name in TRANSFORMER_BLOCK_NAMES:
         blocks: torch.nn.Module = getattr(module, transformer_block_name, None)
         if blocks is None:
@@ -59,6 +60,9 @@ def _apply_activation_checkpointing_blocks(module: torch.nn.Module,
             if n_layer is None or index % n_layer == 0:
                 block = checkpoint_wrapper(block, preserve_rng_state=False)
                 blocks.register_module(layer_id, block)
+        applied = True
+    if not applied:
+        raise ValueError("Activation checkpointing is not applied successfully")
     return module
 
 

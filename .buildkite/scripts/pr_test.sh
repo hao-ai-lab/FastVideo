@@ -51,6 +51,7 @@ else
 fi
 
 MODAL_TEST_FILE="fastvideo/tests/modal/pr_test.py"
+MODAL_SSIM_TEST_FILE="fastvideo/tests/modal/ssim_test.py"
 
 if [ -z "${TEST_TYPE:-}" ]; then
     log "Error: TEST_TYPE environment variable is not set"
@@ -75,7 +76,7 @@ case "$TEST_TYPE" in
         ;;
     "ssim")
         log "Running SSIM tests..."
-        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_ssim_tests"
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_SSIM_TEST_FILE::run_ssim_tests"
         ;;
     "training")
         log "Running training tests..."
@@ -88,10 +89,6 @@ case "$TEST_TYPE" in
     "training_vsa")
         log "Running training VSA tests..."
         MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_tests_VSA"
-        ;;
-    "inference_sta")
-        log "Running inference STA tests..."
-        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_inference_tests_STA"
         ;;
     "kernel_tests")
         log "Running kernel tests..."

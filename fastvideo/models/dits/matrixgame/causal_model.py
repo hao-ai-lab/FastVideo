@@ -49,7 +49,9 @@ from .model import MatrixGameCrossAttention
 logger = init_logger(__name__)
 
 
-def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
+def causal_rope_apply(
+    x: torch.Tensor, grid_sizes: tuple[int, int, int], freqs: torch.Tensor, start_frame: int = 0
+):
     n, c = x.size(2), x.size(3) // 2
 
     # split freqs
@@ -57,7 +59,7 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
 
     # loop over samples
     output = []
-    f, h, w = grid_sizes.tolist()
+    f, h, w = grid_sizes
 
     for i in range(len(x)):
         seq_len = f * h * w
@@ -176,16 +178,16 @@ class CausalMatrixGameSelfAttention(nn.Module):
         v: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         block_mask: BlockMask,
+        grid_sizes: tuple[int, int, int],
         kv_cache: dict | None = None,
         current_start: int = 0,
         cache_start: int | None = None,
-        grid_sizes: torch.Tensor | None = None,
     ):
         if cache_start is None:
             cache_start = current_start
 
         # Calculate start_frame for causal mode
-        if kv_cache is not None and grid_sizes is not None:
+        if kv_cache is not None:
             frame_seqlen = int(grid_sizes[1] * grid_sizes[2])
             start_frame = current_start // frame_seqlen
         else:
@@ -279,17 +281,14 @@ class CausalMatrixGameSelfAttention(nn.Module):
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
 
-            if (current_end > kv_cache["global_end_index"].item()) and (
-                num_new_tokens + kv_cache["local_end_index"].item()
-                > kv_cache_size
+            if (current_end > kv_cache["global_end_index"]) and (
+                num_new_tokens + kv_cache["local_end_index"] > kv_cache_size
             ):
                 num_evicted_tokens = (
-                    num_new_tokens
-                    + kv_cache["local_end_index"].item()
-                    - kv_cache_size
+                    num_new_tokens + kv_cache["local_end_index"] - kv_cache_size
                 )
                 num_rolled_tokens = (
-                    kv_cache["local_end_index"].item()
+                    kv_cache["local_end_index"]
                     - num_evicted_tokens
                     - sink_tokens
                 )
@@ -310,9 +309,9 @@ class CausalMatrixGameSelfAttention(nn.Module):
                     + num_rolled_tokens,
                 ].clone()
                 local_end_index = (
-                    kv_cache["local_end_index"].item()
+                    kv_cache["local_end_index"]
                     + current_end
-                    - kv_cache["global_end_index"].item()
+                    - kv_cache["global_end_index"]
                     - num_evicted_tokens
                 )
                 local_start_index = local_end_index - num_new_tokens
@@ -320,9 +319,9 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             else:
                 local_end_index = (
-                    kv_cache["local_end_index"].item()
+                    kv_cache["local_end_index"]
                     + current_end
-                    - kv_cache["global_end_index"].item()
+                    - kv_cache["global_end_index"]
                 )
                 local_start_index = local_end_index - num_new_tokens
 
@@ -339,8 +338,8 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 v_for_attn.transpose(1, 2),
             ).transpose(1, 2)
 
-            kv_cache["global_end_index"].fill_(current_end)
-            kv_cache["local_end_index"].fill_(local_end_index)
+            kv_cache["global_end_index"] = current_end
+            kv_cache["local_end_index"] = local_end_index
 
         return x
 
@@ -460,7 +459,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         temb: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         block_mask: BlockMask,
-        grid_sizes: torch.Tensor,
+        grid_sizes: tuple[int, int, int],
         mouse_cond: torch.Tensor | None = None,
         keyboard_cond: torch.Tensor | None = None,
         block_mask_mouse: BlockMask | None = None,
@@ -516,10 +515,10 @@ class CausalMatrixGameTransformerBlock(nn.Module):
             value,
             freqs_cis,
             block_mask,
+            grid_sizes,
             kv_cache,
             current_start,
             cache_start,
-            grid_sizes,
         )
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
@@ -546,9 +545,9 @@ class CausalMatrixGameTransformerBlock(nn.Module):
 
                 hidden_states = self.action_model(
                     hidden_states,
-                    int(grid_sizes[0]),
-                    int(grid_sizes[1]),
-                    int(grid_sizes[2]),
+                    grid_sizes[0],
+                    grid_sizes[1],
+                    grid_sizes[2],
                     mouse_cond,
                     keyboard_cond,
                     block_mask_mouse,
@@ -981,10 +980,7 @@ class CausalMatrixGameWanModel(BaseDiT):
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
 
         hidden_states = self.patch_embedding(hidden_states)
-        grid_sizes = torch.tensor(
-            [post_patch_num_frames, post_patch_height, post_patch_width],
-            device=hidden_states.device,
-        )
+        grid_sizes = (post_patch_num_frames, post_patch_height, post_patch_width)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
         if timestep.dim() == 2:
@@ -1200,9 +1196,9 @@ class CausalMatrixGameWanModel(BaseDiT):
             hidden_states.shape
         )
         p_t, p_h, p_w = self.patch_size
-        post_patch_num_frames = num_frames // p_t
-        post_patch_height = height // p_h
-        post_patch_width = width // p_w
+        post_patch_num_frames: int = num_frames // p_t
+        post_patch_height: int = height // p_h
+        post_patch_width: int = width // p_w
 
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
@@ -1263,10 +1259,7 @@ class CausalMatrixGameWanModel(BaseDiT):
             )
 
         hidden_states = self.patch_embedding(hidden_states)
-        grid_sizes = torch.tensor(
-            [post_patch_num_frames, post_patch_height, post_patch_width],
-            device=hidden_states.device,
-        )
+        grid_sizes = (post_patch_num_frames, post_patch_height, post_patch_width)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
         if timestep.dim() == 2:
@@ -1393,10 +1386,10 @@ class CausalMatrixGameWanModel(BaseDiT):
         else:
             return self._forward_train(*args, **kwargs)
 
-    def unpatchify(self, x, grid_sizes):
+    def unpatchify(self, x: torch.Tensor, grid_sizes: tuple[int, int, int]) -> torch.Tensor:
         c = self.proj_out.out_features // math.prod(self.patch_size)
         p_t, p_h, p_w = self.patch_size
-        f, h, w = grid_sizes.tolist()
+        f, h, w = grid_sizes
 
         x = x[:, : f * h * w].view(-1, f, h, w, p_t, p_h, p_w, c)
         x = x.permute(0, 7, 1, 4, 2, 5, 3, 6)

@@ -179,11 +179,11 @@ class LatentPreparationStage(PipelineStage):
 
         video_length = batch.num_frames
         use_temporal_scaling_frames = fastvideo_args.pipeline_config.vae_config.use_temporal_scaling_frames
-        if use_temporal_scaling_frames:
-            temporal_scale_factor = fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-            latent_num_frames = (video_length - 1) // temporal_scale_factor + 1
-        else:  # stepvideo only
-            latent_num_frames = video_length // 17 * 3
+        if not use_temporal_scaling_frames:
+            raise ValueError(
+                "Only temporal-scaling-frame VAE configs are supported.")
+        temporal_scale_factor = fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        latent_num_frames = (video_length - 1) // temporal_scale_factor + 1
         return int(latent_num_frames)
 
     def verify_input(self, batch: ForwardBatch,
@@ -687,11 +687,11 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
 
         video_length = batch.num_frames
         use_temporal_scaling_frames = fastvideo_args.pipeline_config.vae_config.use_temporal_scaling_frames
-        if use_temporal_scaling_frames:
-            temporal_scale_factor = fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-            latent_num_frames = (video_length - 1) // temporal_scale_factor + 1
-        else:  # stepvideo only
-            latent_num_frames = video_length // 17 * 3
+        if not use_temporal_scaling_frames:
+            raise ValueError(
+                "Only temporal-scaling-frame VAE configs are supported.")
+        temporal_scale_factor = fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        latent_num_frames = (video_length - 1) // temporal_scale_factor + 1
         return int(latent_num_frames)
 
     def verify_input(self, batch: ForwardBatch,
