@@ -459,8 +459,8 @@ def _collect_official_double_encoder_states(pipe, latent, prompt_embeds, timeste
 
 
 def _collect_fv_double4_intermediates(transformer, latent, prompt_embeds, timestep_scaled, device, freqs_cis, block_index=4):
-    """Run FastVideo transformer with _debug_double_enc for the given block; return after_attn and after_ff encoder states."""
-    debug = {"block_index": block_index, "after_attn": [], "after_ff": []}
+    """Run FastVideo transformer with _debug_double_enc for the given block; return after_attn, after_ff, and context_attn_output (update added to text stream)."""
+    debug = {"block_index": block_index, "after_attn": [], "after_ff": [], "context_attn_output": []}
     joint_kwargs = {"_debug_double_enc": debug}
 
     with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
@@ -474,7 +474,61 @@ def _collect_fv_double4_intermediates(transformer, latent, prompt_embeds, timest
         )
     after_attn = debug["after_attn"][0] if len(debug["after_attn"]) > 0 else None
     after_ff = debug["after_ff"][0] if len(debug["after_ff"]) > 0 else None
-    return after_attn, after_ff
+    context_attn_output = debug["context_attn_output"][0] if len(debug["context_attn_output"]) > 0 else None
+    return after_attn, after_ff, context_attn_output
+
+
+def _capture_official_double4_context_attn(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, block_index=4):
+    """Run official transformer with hook on block 4's attn; return the context update (c_gate_msa * context_attn_output) for the text stream."""
+    try:
+        from diffusers.models.transformers import transformer_flux2
+        Flux2Modulation = transformer_flux2.Flux2Modulation
+    except Exception:
+        return None
+    trans = pipe.transformer
+    if not hasattr(trans, "transformer_blocks") or block_index >= len(trans.transformer_blocks):
+        return None
+    captured_context_part = []
+
+    def attn_hook(_module, _inputs, outputs):
+        if isinstance(outputs, (tuple, list)) and len(outputs) >= 2:
+            captured_context_part.append(outputs[1].detach().clone().float())
+
+    block4 = trans.transformer_blocks[block_index]
+    handle = block4.attn.register_forward_hook(attn_hook)
+    dtype = next(trans.parameters()).dtype
+    latent_d = latent.to(device, dtype=dtype)
+    timestep = timestep_scaled.to(device)
+    prompt_embeds_d = prompt_embeds.to(device, dtype=dtype)
+    text_ids_d = text_ids.to(device)
+    latent_ids_d = latent_ids.to(device)
+    try:
+        timestep_1000 = timestep.to(latent_d.dtype) * 1000
+        temb = trans.time_guidance_embed(timestep_1000, None)
+        double_stream_mod_txt = trans.double_stream_modulation_txt(temb)
+        (c_shift_msa, c_scale_msa, c_gate_msa), _ = Flux2Modulation.split(double_stream_mod_txt, 2)
+        with torch.no_grad():
+            with trans.cache_context("cond"):
+                trans(
+                    hidden_states=latent_d,
+                    timestep=timestep,
+                    guidance=None,
+                    encoder_hidden_states=prompt_embeds_d,
+                    txt_ids=text_ids_d,
+                    img_ids=latent_ids_d,
+                    joint_attention_kwargs=getattr(pipe, "attention_kwargs", None) or {},
+                    return_dict=False,
+                )
+    finally:
+        handle.remove()
+    if not captured_context_part:
+        return None
+    context_before_gate = captured_context_part[0]
+    c_gate_msa = c_gate_msa.to(device=context_before_gate.device, dtype=context_before_gate.dtype)
+    if c_gate_msa.dim() == 2:
+        c_gate_msa = c_gate_msa.unsqueeze(1)
+    official_context_update = (c_gate_msa * context_before_gate).float()
+    return official_context_update
 
 
 def _collect_fv_activations(transformer, latent, prompt_embeds, timestep_scaled, device, num_txt_tokens, freqs_cis=None):
@@ -595,6 +649,9 @@ def main():
         print(f"Missing dump file: {args.dump}. Run dump_flux2_step0.py first.")
         sys.exit(1)
 
+    # Enforce same attention backend (SDPA) for reproducible comparison
+    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "TORCH_SDPA"
+
     os.environ.setdefault("LOCAL_RANK", "0")
     os.environ.setdefault("RANK", "0")
     os.environ.setdefault("WORLD_SIZE", "1")
@@ -710,7 +767,7 @@ def main():
     TARGET_DOUBLE = 4
     if n_double > TARGET_DOUBLE and len(enc_official) > TARGET_DOUBLE:
         print(f"\n--- double_{TARGET_DOUBLE} intermediates (context attn vs context FF) ---")
-        fv_after_attn, fv_after_ff = _collect_fv_double4_intermediates(
+        fv_after_attn, fv_after_ff, fv_context_attn = _collect_fv_double4_intermediates(
             transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis, block_index=TARGET_DOUBLE
         )
         _, off_enc4 = enc_official[TARGET_DOUBLE]
@@ -733,6 +790,22 @@ def main():
                 print(f"  Shape mismatch: fv_after_attn={fv_after_attn.shape} fv_after_ff={fv_after_ff.shape} official={off_enc4.shape}")
         else:
             print("  Missing one of fv_after_attn, fv_after_ff, or official double_4 output.")
+
+        # Compare context_attn update (the tensor added to encoder_hidden_states) FV vs official
+        if fv_context_attn is not None:
+            off_context_attn = _capture_official_double4_context_attn(
+                pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, block_index=TARGET_DOUBLE
+            )
+            if off_context_attn is not None:
+                fv_ctx = fv_context_attn.cpu().float() if fv_context_attn.is_cuda else fv_context_attn.float()
+                off_ctx = off_context_attn.cpu().float() if off_context_attn.is_cuda else off_context_attn.float()
+                if fv_ctx.shape == off_ctx.shape:
+                    d_ctx = (fv_ctx - off_ctx).abs()
+                    print(f"  FV context_attn_output (update) vs official: max_diff={d_ctx.max().item():.4f} mean_diff={d_ctx.mean().item():.4f}")
+                else:
+                    print(f"  context_attn_output shape mismatch: FV={fv_ctx.shape} official={off_ctx.shape}")
+            else:
+                print("  Could not capture official double_4 context_attn update.")
 
     # Sub-layer: attention output of double_0 (narrows down where divergence is)
     print("\n--- double_0 attention output (inside first block) ---")
