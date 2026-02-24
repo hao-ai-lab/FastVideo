@@ -255,8 +255,9 @@ class DMD2Method(DistillMethod):
 
         raw_guidance = getattr(self.training_args, "validation_guidance_scale",
                                None)
-        guidance_scale = float(raw_guidance) if raw_guidance not in (
-            None, "") else None
+        guidance_scale: float | None = None
+        if raw_guidance not in (None, ""):
+            guidance_scale = float(str(raw_guidance))
 
         request = ValidationRequest(
             sample_handle=self.student,

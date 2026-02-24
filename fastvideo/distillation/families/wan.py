@@ -8,6 +8,7 @@ from typing import Any
 import torch
 
 from fastvideo.distributed import get_world_group
+from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.distillation.adapters.wan import WanAdapter
 from fastvideo.distillation.bundle import ModelBundle, RoleHandle
 from fastvideo.distillation.registry import register_family
@@ -74,21 +75,22 @@ def _apply_trainable(module: torch.nn.Module, *,
     return module
 
 
-def _build_tracker(training_args: Any, *, config: dict[str, Any] | None) -> Any:
+def _build_tracker(training_args: TrainingArgs, *,
+                   config: dict[str, Any] | None) -> Any:
     world_group = get_world_group()
-    trackers = list(getattr(training_args, "trackers", []))
-    if not trackers and getattr(training_args, "tracker_project_name", ""):
+    trackers = list(training_args.trackers)
+    if not trackers and bool(training_args.tracker_project_name):
         trackers.append(Trackers.WANDB.value)
     if world_group.rank != 0:
         trackers = []
 
-    tracker_log_dir = getattr(training_args, "output_dir", "") or os.getcwd()
+    tracker_log_dir = training_args.output_dir or os.getcwd()
     if trackers:
         tracker_log_dir = os.path.join(tracker_log_dir, "tracker")
 
     tracker_config = config if trackers else None
-    tracker_run_name = getattr(training_args, "wandb_run_name", "") or None
-    project = getattr(training_args, "tracker_project_name", "") or "fastvideo"
+    tracker_run_name = training_args.wandb_run_name or None
+    project = training_args.tracker_project_name or "fastvideo"
     return initialize_trackers(
         trackers,
         experiment_name=project,
