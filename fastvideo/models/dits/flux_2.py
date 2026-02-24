@@ -544,11 +544,15 @@ class Flux2TransformerBlock(nn.Module):
         ) * norm_encoder_hidden_states + c_shift_msa
 
         # Attention on concatenated img + txt stream
+        attn_kwargs = {
+            k: v for k, v in joint_attention_kwargs.items()
+            if k not in ("_debug_double_enc", "_double_block_index")
+        }
         attention_outputs = self.attn(
             hidden_states=norm_hidden_states,
             encoder_hidden_states=norm_encoder_hidden_states,
             freqs_cis=freqs_cis,
-            **joint_attention_kwargs,
+            **attn_kwargs,
         )
 
         attn_output, context_attn_output = attention_outputs
