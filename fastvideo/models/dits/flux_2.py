@@ -569,9 +569,11 @@ class Flux2TransformerBlock(nn.Module):
 
         # Process attention outputs for the text stream (`encoder_hidden_states`).
         context_attn_output = c_gate_msa * context_attn_output
+        debug_enc = joint_attention_kwargs.get("_debug_double_enc")
+        if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
+            debug_enc["context_attn_output"].append(context_attn_output.detach().clone())
         encoder_hidden_states = encoder_hidden_states + context_attn_output
 
-        debug_enc = joint_attention_kwargs.get("_debug_double_enc")
         if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
             debug_enc["after_attn"].append(encoder_hidden_states.detach().clone())
 
