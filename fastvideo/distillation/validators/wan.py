@@ -131,6 +131,11 @@ class WanValidator:
         num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_factor + 1
         sampling_param.num_frames = int(num_frames)
 
+        sampling_timesteps_tensor = (
+            torch.tensor([int(s) for s in sampling_timesteps], dtype=torch.long)
+            if sampling_timesteps is not None
+            else None
+        )
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             latents=None,
@@ -138,11 +143,10 @@ class WanValidator:
             n_tokens=n_tokens,
             eta=0.0,
             VSA_sparsity=self.training_args.VSA_sparsity,
-            sampling_timesteps=(
-                torch.tensor([int(s) for s in sampling_timesteps], dtype=torch.long)
-                if sampling_timesteps is not None
-                else None
-            ),
+            # SDE-style sampling iterates `sampling_timesteps`. Some stages still
+            # expect `timesteps` to be set, so we mirror the same tensor there.
+            timesteps=sampling_timesteps_tensor,
+            sampling_timesteps=sampling_timesteps_tensor,
         )
         return batch
 
