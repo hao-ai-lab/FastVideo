@@ -25,5 +25,6 @@ class HYWorldConfig(Hunyuan15T2V480PConfig):
         default_factory=lambda: ("fp16", "fp32"))
 
     def __post_init__(self):
+        super().__post_init__()
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True

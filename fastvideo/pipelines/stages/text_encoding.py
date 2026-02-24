@@ -256,8 +256,6 @@ class TextEncodingStage(PipelineStage):
             want_hidden_states = bool(
                 getattr(getattr(encoder_config, "arch_config", None),
                         "output_hidden_states", False))
-            if is_ltx2:
-                want_hidden_states = True
 
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 outputs = text_encoder(
