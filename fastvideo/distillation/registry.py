@@ -70,6 +70,7 @@ def ensure_builtin_registrations() -> None:
     # order is stable and failures are debuggable.
     from fastvideo.distillation.families import wan as _wan  # noqa: F401
     from fastvideo.distillation.methods.distribution_matching import dmd2 as _dmd2  # noqa: F401
+    from fastvideo.distillation.methods.fine_tuning import finetune as _finetune  # noqa: F401
 
     _BUILTINS_REGISTERED = True
 

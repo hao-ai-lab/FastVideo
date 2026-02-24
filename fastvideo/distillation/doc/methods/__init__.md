@@ -6,6 +6,7 @@
 **当前导出**
 - `DistillMethod`：算法基类（抽象）
 - `DMD2Method`：distribution matching 目录下的一个具体方法实现
+- `FineTuneMethod`：fine tuning 目录下的一个具体方法实现（only student）
 
 **设计意图**
 - method 层应当是 **模型无关** 的（不 import 具体 pipeline/模型实现）；

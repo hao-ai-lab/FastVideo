@@ -1,14 +1,14 @@
-# `fastvideo/distillation/methods/fine_tuning/__init__.py`
+# `fastvideo/distillation/methods/fine_tuning/`
 
-**状态**
-- 当前是占位目录（`__all__ = []`），用于未来加入 finetuning（可视为只有 student 的特殊训练 recipe）。
+**目的**
+- 以 “method” 的形式实现 finetuning / SFT：把它看作一种特殊的 distillation recipe（只有 `student` + dataset）。
 
-**与 distillation 框架的关系**
-- finetune 可以复用同一套：
-  - YAML config（models 里只提供 student）
-  - family（加载 student 模块与数据）
-  - trainer（infra）
-- method 则实现：
-  - loss（SFT/finetune objective）
-  - optimizer/scheduler policy
+**当前实现**
+- `finetune.py`：`FineTuneMethod`
+  - 只要求 `models.student`
+  - loss/policy 在 method 层
+  - 复用同一套 trainer/bundle/adapter/family/validator/checkpoint 基础设施
 
+**设计要点**
+- adapter 仍保持 operation-centric（`prepare_batch / predict_* / backward`），不内置 finetune 的 loss 语义。
+- family 负责 build-time：加载 student modules、shared components（VAE/scheduler）、dataloader、validator。

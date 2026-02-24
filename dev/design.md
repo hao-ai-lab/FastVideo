@@ -665,6 +665,8 @@ method_config: {...}                  # algorithm/method 超参（方法侧）
 `ModelBundle + Adapter + Method + Trainer + (Validator/Checkpoint)` 基础设施，并让其配置语义与
 Phase 3.1 的 `recipe/method_config` 对齐。
 
+状态：**已完成**（`FineTuneMethod` + Phase 3.3 示例 YAML + one-shot 脚本）。
+
 建议落地形态（Phase 3 落地到代码时）：
 - 新增 method：`fastvideo/distillation/methods/fine_tuning/finetune.py::FineTuneMethod`
   - `bundle.require_roles(["student"])`

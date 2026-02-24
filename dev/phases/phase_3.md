@@ -134,7 +134,7 @@ Phase 2.9 已验证：即使统一 timesteps/scheduler，**只要 denoising loop
 - finetune 的 method 参数进入 `method_config`（与 Phase 3.1 schema 一致）。
 
 ### 文件 TODO（实现清单）
-- [ ] `fastvideo/distillation/methods/fine_tuning/finetune.py`
+- [x] `fastvideo/distillation/methods/fine_tuning/finetune.py`
   - `FineTuneMethod(DistillMethod)` + `@register_method("finetune")`
   - `bundle.require_roles(["student"])`
   - `single_train_step()` 只更新 student
@@ -144,9 +144,9 @@ Phase 2.9 已验证：即使统一 timesteps/scheduler，**只要 denoising loop
     - `prepare_batch(...)`（产出 latents/noise/timesteps/sigmas/conditioning）
     - `predict_noise(handle, ...)`（以及可选 `predict_x0`）
     - `backward(loss, ctx, ...)`（forward-context/activation ckpt 相关）
-- [ ] configs/examples
-  - [ ] `fastvideo/distillation/outside/fastvideo/configs/distillation/finetune_*.yaml`
-  - [ ] `examples/distillation/phase3/`（或更新现有 examples）
+- [x] configs/examples
+  - [x] `fastvideo/distillation/outside/fastvideo/configs/distillation/finetune_wan2.1_t2v_1.3B_phase3.3.yaml`
+  - [x] `examples/distillation/phase3_3/temp.sh`
 
 ---
 

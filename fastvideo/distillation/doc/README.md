@@ -46,6 +46,7 @@
 - `methods/consistency_model/__init__.md`
 - `methods/knowledge_distillation/__init__.md`
 - `methods/fine_tuning/__init__.md`
+- `methods/fine_tuning/finetune.md`
 
 ### validators/
 - `validators/__init__.md`
@@ -55,4 +56,4 @@
 ### outside/
 - `outside/README.md`
 - `outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps.md`
-
+- `outside/fastvideo/configs/distillation/finetune_wan2.1_t2v_1.3B_phase3.3.md`
