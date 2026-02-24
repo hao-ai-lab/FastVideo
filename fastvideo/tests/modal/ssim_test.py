@@ -76,7 +76,7 @@ class SSIMTask:
 class _RunningTask:
     task: SSIMTask
     process: Any
-    gpu_ids: list[int]
+    gpu_ids: list[str]
     log_path: str
     log_handle: Any
 
@@ -86,7 +86,7 @@ class _TaskResult:
     task: SSIMTask
     status: str
     returncode: int
-    gpu_ids: list[int]
+    gpu_ids: list[str]
     log_path: str | None = None
 
 
@@ -238,7 +238,7 @@ def _prepare_ssim_workspace() -> tuple[str, list[SSIMTask]]:
 def _spawn_ssim_task(
     task: SSIMTask,
     repo_root: str,
-    assigned_gpu_ids: list[int],
+    assigned_gpu_ids: list[str],
     log_dir: str,
     task_index: int,
 ) -> _RunningTask:
@@ -263,9 +263,7 @@ def _spawn_ssim_task(
     # On kernels without pidfd_open support, PyTorch fails when
     # expandable_segments=True. Force False for CI compatibility.
     env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:False"
-    env["CUDA_VISIBLE_DEVICES"] = ",".join(
-        str(gpu_id) for gpu_id in assigned_gpu_ids
-    )
+    env["CUDA_VISIBLE_DEVICES"] = ",".join(assigned_gpu_ids)
     if task.model_id is None:
         env.pop("FASTVIDEO_SSIM_MODEL_ID", None)
     else:
@@ -294,11 +292,14 @@ def _finalize_running_task(
     returncode: int,
     status: str,
     results: dict[int, _TaskResult],
-    available_gpu_ids: list[int],
+    available_gpu_ids: list[str],
+    gpu_order: dict[str, int],
 ) -> None:
     running_task.log_handle.close()
     available_gpu_ids.extend(running_task.gpu_ids)
-    available_gpu_ids.sort()
+    available_gpu_ids.sort(
+        key=lambda gpu_id: gpu_order.get(gpu_id, len(gpu_order))
+    )
     results[running_task.task.task_id] = _TaskResult(
         task=running_task.task,
         status=status,
@@ -311,7 +312,8 @@ def _finalize_running_task(
 def _terminate_running_tasks(
     running_tasks: list[_RunningTask],
     results: dict[int, _TaskResult],
-    available_gpu_ids: list[int],
+    available_gpu_ids: list[str],
+    gpu_order: dict[str, int],
 ) -> None:
     import signal
     import time
@@ -347,8 +349,27 @@ def _terminate_running_tasks(
             status=status,
             results=results,
             available_gpu_ids=available_gpu_ids,
+            gpu_order=gpu_order,
         )
         running_tasks.remove(running_task)
+
+
+def _get_visible_gpu_ids() -> list[str]:
+    cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if not cuda_visible_devices:
+        return [str(index) for index in range(SSIM_NUM_GPUS)]
+
+    gpu_ids = []
+    seen_gpu_ids: set[str] = set()
+    for gpu_id in cuda_visible_devices.split(","):
+        cleaned_gpu_id = gpu_id.strip()
+        if not cleaned_gpu_id or cleaned_gpu_id in seen_gpu_ids:
+            continue
+        seen_gpu_ids.add(cleaned_gpu_id)
+        gpu_ids.append(cleaned_gpu_id)
+    if not gpu_ids:
+        return [str(index) for index in range(SSIM_NUM_GPUS)]
+    return gpu_ids
 
 
 def _schedule_ssim_tasks(
@@ -360,7 +381,23 @@ def _schedule_ssim_tasks(
 
     pending_tasks = list(tasks)
     running_tasks = []
-    available_gpu_ids = list(range(SSIM_NUM_GPUS))
+    available_gpu_ids = _get_visible_gpu_ids()
+    gpu_order = {
+        gpu_id: index for index, gpu_id in enumerate(available_gpu_ids)
+    }
+    max_required_gpus = max(
+        (task.required_gpus for task in pending_tasks), default=0
+    )
+    if max_required_gpus > len(available_gpu_ids):
+        cuda_visible_devices = os.environ.get(
+            "CUDA_VISIBLE_DEVICES", "<unset>"
+        )
+        raise RuntimeError(
+            "SSIM task requires "
+            f"{max_required_gpus} GPUs but only "
+            f"{len(available_gpu_ids)} are visible via "
+            f"CUDA_VISIBLE_DEVICES={cuda_visible_devices!r}."
+        )
     results = {}
     fail_fast_triggered = False
     log_dir = tempfile.mkdtemp(prefix="fastvideo-ssim-logs-")
@@ -387,7 +424,7 @@ def _schedule_ssim_tasks(
             )
             print(
                 f"Started {task.test_name} on GPUs "
-                f"{','.join(str(idx) for idx in assigned_gpu_ids)}"
+                f"{','.join(assigned_gpu_ids)}"
             )
             running_tasks.append(running_task)
 
@@ -404,6 +441,7 @@ def _schedule_ssim_tasks(
                 status="passed" if returncode == 0 else "failed",
                 results=results,
                 available_gpu_ids=available_gpu_ids,
+                gpu_order=gpu_order,
             )
             running_tasks.remove(running_task)
             print(
@@ -419,6 +457,7 @@ def _schedule_ssim_tasks(
                 running_tasks=running_tasks,
                 results=results,
                 available_gpu_ids=available_gpu_ids,
+                gpu_order=gpu_order,
             )
 
         if not completed_tasks and not fail_fast_triggered and running_tasks:
