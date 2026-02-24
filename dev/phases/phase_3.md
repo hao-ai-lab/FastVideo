@@ -97,6 +97,23 @@ Phase 3 的定位：在 Phase 2 已经证明“新 distill 框架可独立运行
     - `prepare_batch()`（要求 finetune 路径必须提供真实 `vae_latent`）
     - `set_forward_context(...)` 的管理继续留在 adapter
 
+### B5.5 彻底去除 adapter 对 method knob 的读取（例如 `simulate_generator_forward`）
+
+动机：当前 `WanAdapter.prepare_batch()` 仍读取 `training_args.simulate_generator_forward` 来决定
+是否需要 `vae_latent`（或构造 placeholder）。这会把 DMD2/student-rollout 的语义泄漏到 adapter，
+违背 Phase 2.9 的 operation-centric 边界。
+
+- [ ] 调整 `WanAdapter` 的 batch API，使其不再读取 `training_args.simulate_generator_forward`
+  - 选项 A（推荐）：拆成两个显式入口
+    - `prepare_batch_with_vae_latent(raw_batch, ...)`：必须有 `vae_latent`
+    - `prepare_batch_text_only(raw_batch, ...)`：不依赖 `vae_latent`，只根据 family 规则构造 latents/shape
+  - 选项 B：保留单入口但显式参数化
+    - `prepare_batch(raw_batch, *, latents_source=...)`
+    - 由 method/`method_config` 决定使用 data latents 还是 placeholder latents
+- [ ] 将 “是否 simulate / rollout 模式” 的开关迁移到 `method_config`
+  - DMD2：例如 `method_config.rollout_mode = "data_latent" | "simulate"`
+  - adapter 不读取该开关；method 选择调用哪个 adapter API
+
 ### B6. examples / outside configs 更新到 schema v2
 
 - [ ] 更新 DMD2 YAML（schema v2）：
@@ -234,4 +251,3 @@ student:
 
 在语义上是等价的（都是一个 mapping）。Phase 3 的 examples/docs 我们将统一采用 **block
 style**（你偏好的后者），因为更可读、diff 更友好。
-

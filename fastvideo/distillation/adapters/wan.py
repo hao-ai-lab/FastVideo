@@ -82,10 +82,11 @@ class WanAdapter(DistillAdapter):
         self.max_timestep = int(self.training_args.max_timestep_ratio * self.num_train_timestep)
 
         boundary_ratio = getattr(self.training_args, "boundary_ratio", None)
-        if boundary_ratio is not None:
-            self.boundary_timestep = float(boundary_ratio) * float(self.num_train_timestep)
-        else:
-            self.boundary_timestep = None
+        self.boundary_timestep: float | None = (
+            float(boundary_ratio) * float(self.num_train_timestep)
+            if boundary_ratio is not None
+            else None
+        )
 
     @property
     def num_train_timesteps(self) -> int:
