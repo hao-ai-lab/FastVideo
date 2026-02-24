@@ -16,9 +16,10 @@
 - method 通过 `ValidationRequest` 覆盖采样配置（例如 sampling steps / guidance / output_dir）。
 
 **依赖**
-- 当前使用 `WanDMDPipeline` 做采样推理（对齐 DMD2/SDE rollout，便于与 legacy apples-to-apples 对比）。
-- 这不是最终形态：Phase 3 计划把 `WanPipeline` 的 denoising loop 抽象成可插拔的 sampler（ODE/SDE），
-  从而淘汰 `WanDMDPipeline`，让 validator 回到 method-agnostic。
+- 使用统一的 `WanPipeline` 做采样推理：
+  - `ValidationRequest.sampler_kind={ode|sde}` 选择 denoising loop
+  - `ValidationRequest.sampling_timesteps` 提供 few-step schedule（写入 `ForwardBatch.sampling_timesteps`）
+- 这样 validator 不再依赖 `<Model><Method>Pipeline`（例如 `WanDMDPipeline`），保持 method-agnostic。
 
 **可演进方向（Phase 3+）**
 - 将 validation steps/guidance 等采样配置从 `TrainingArgs` 迁移到更明确的配置块（例如 `validation:`）。

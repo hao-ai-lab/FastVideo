@@ -89,6 +89,11 @@ class PipelineConfig:
     # DMD parameters
     dmd_denoising_steps: list[int] | None = field(default=None)
 
+    # Sampler kind (controls the denoising loop semantics).
+    # - "ode": deterministic solver-style loop (default)
+    # - "sde": stochastic loop with noise injection
+    sampler_kind: str = "ode"
+
     # Wan2.2 TI2V parameters
     ti2v_task: bool = False
     boundary_ratio: float | None = None
@@ -217,6 +222,14 @@ class PipelineConfig:
             default=PipelineConfig.dmd_denoising_steps,
             help=
             "Comma-separated list of denoising steps (e.g., '1000,757,522')",
+        )
+        parser.add_argument(
+            f"--{prefix_with_dot}sampler-kind",
+            type=str,
+            choices=["ode", "sde"],
+            dest=f"{prefix_with_dot.replace('-', '_')}sampler_kind",
+            default=PipelineConfig.sampler_kind,
+            help="Sampling loop kind: ode (default) or sde.",
         )
 
         # STA (Sliding Tile Attention) parameters

@@ -18,8 +18,6 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -1330,14 +1328,16 @@ class Cosmos25AutoDenoisingStage(PipelineStage):
         return self._t2w.verify_output(batch, fastvideo_args)
 
 
-class DmdDenoisingStage(DenoisingStage):
-    """
-    Denoising stage for DMD.
+class SdeDenoisingStage(DenoisingStage):
+    """Denoising stage for SDE-style sampling.
+
+    This stage runs a stochastic rollout loop:
+    - predict x0 at timestep t
+    - inject fresh noise to reach the next timestep
     """
 
     def __init__(self, transformer, scheduler) -> None:
         super().__init__(transformer, scheduler)
-        self.scheduler = FlowMatchEulerDiscreteScheduler(shift=8.0)
 
     def forward(
         self,
@@ -1360,16 +1360,6 @@ class DmdDenoisingStage(DenoisingStage):
         target_dtype = torch.bfloat16
         autocast_enabled = (target_dtype != torch.float32
                             ) and not fastvideo_args.disable_autocast
-
-        # Get timesteps and calculate warmup steps
-        timesteps = batch.timesteps
-
-        # TODO(will): remove this once we add input/output validation for stages
-        if timesteps is None:
-            raise ValueError("Timesteps must be provided")
-        num_inference_steps = batch.num_inference_steps
-        num_warmup_steps = len(
-            timesteps) - num_inference_steps * self.scheduler.order
 
         # Prepare image latents and embeddings for I2V generation
         image_embeds = batch.image_embeds
@@ -1408,14 +1398,31 @@ class DmdDenoisingStage(DenoisingStage):
         prompt_embeds = batch.prompt_embeds
         assert not torch.isnan(
             prompt_embeds[0]).any(), "prompt_embeds contains nan"
-        timesteps = torch.tensor(
-            fastvideo_args.pipeline_config.dmd_denoising_steps,
-            dtype=torch.long,
-            device=get_local_torch_device())
+        loop_timesteps = batch.sampling_timesteps
+        if loop_timesteps is None:
+            legacy = getattr(fastvideo_args.pipeline_config, "dmd_denoising_steps", None)
+            if legacy is not None:
+                loop_timesteps = torch.tensor(legacy, dtype=torch.long)
+            else:
+                loop_timesteps = batch.timesteps
+
+        if loop_timesteps is None:
+            raise ValueError(
+                "SDE sampling requires `batch.sampling_timesteps` (preferred) "
+                "or `pipeline_config.dmd_denoising_steps`."
+            )
+        if not isinstance(loop_timesteps, torch.Tensor):
+            loop_timesteps = torch.tensor(loop_timesteps, dtype=torch.long)
+        if loop_timesteps.ndim != 1:
+            raise ValueError(
+                "Expected 1D `sampling_timesteps`, got shape "
+                f"{tuple(loop_timesteps.shape)}"
+            )
+        loop_timesteps = loop_timesteps.to(get_local_torch_device())
 
         # Run denoising loop
-        with self.progress_bar(total=len(timesteps)) as progress_bar:
-            for i, t in enumerate(timesteps):
+        with self.progress_bar(total=len(loop_timesteps)) as progress_bar:
+            for i, t in enumerate(loop_timesteps):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
@@ -1499,13 +1506,14 @@ class DmdDenoisingStage(DenoisingStage):
                         scheduler=self.scheduler).unflatten(
                             0, pred_noise.shape[:2])
 
-                    if i < len(timesteps) - 1:
-                        next_timestep = timesteps[i + 1] * torch.ones(
+                    if i < len(loop_timesteps) - 1:
+                        next_timestep = loop_timesteps[i + 1] * torch.ones(
                             [1], dtype=torch.long, device=pred_video.device)
                         noise = torch.randn(video_raw_latent_shape,
                                             dtype=pred_video.dtype,
-                                            generator=batch.generator[0]).to(
-                                                self.device)
+                                            generator=batch.generator[0]
+                                            if isinstance(batch.generator, list)
+                                            else batch.generator).to(self.device)
                         latents = self.scheduler.add_noise(
                             pred_video.flatten(0, 1), noise.flatten(0, 1),
                             next_timestep).unflatten(0, pred_video.shape[:2])
@@ -1513,11 +1521,7 @@ class DmdDenoisingStage(DenoisingStage):
                         latents = pred_video
 
                     # Update progress bar
-                    if i == len(timesteps) - 1 or (
-                        (i + 1) > num_warmup_steps and
-                        (i + 1) % self.scheduler.order == 0
-                            and progress_bar is not None):
-                        progress_bar.update()
+                    progress_bar.update()
 
         # Gather results if using sequence parallelism
         latents = latents.permute(0, 2, 1, 3, 4)
@@ -1525,3 +1529,7 @@ class DmdDenoisingStage(DenoisingStage):
         batch.latents = latents
 
         return batch
+
+
+# Backwards-compatible alias (legacy pipelines still import this symbol).
+DmdDenoisingStage = SdeDenoisingStage

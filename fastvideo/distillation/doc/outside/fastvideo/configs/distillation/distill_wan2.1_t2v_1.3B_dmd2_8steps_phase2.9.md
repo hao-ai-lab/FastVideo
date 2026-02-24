@@ -8,7 +8,6 @@ Wan few-step distillation（8 steps）+ DMD2。
 
 备注：
 - few-step step list 的 single source of truth 在 `method_config.dmd_denoising_steps`。
-- 由于当前 validation 仍使用 legacy SDE sampling（`WanDMDPipeline`），pipeline 会读取
-  `pipeline_config.dmd_denoising_steps`，因此该字段短期会与 `method_config` 重复；
-  Phase 3.2 会移除此重复（sampler 可插拔 + 显式 timesteps request）。
-
+- Phase 3.2 已将 validation 采样升级为可插拔的 ODE/SDE sampler：
+  - method 通过 `ValidationRequest` 显式指定 `sampler_kind` 与 `sampling_timesteps`
+  - validator 使用统一的 `WanPipeline` 执行采样（不再依赖 `WanDMDPipeline`）

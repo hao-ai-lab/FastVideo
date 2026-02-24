@@ -416,9 +416,6 @@ pipeline_config:
   # 支持直接内联覆盖，也支持只给 pipeline_config_path
   # pipeline_config_path: fastvideo/configs/wan_1.3B_t2v_pipeline.json
   flow_shift: 8
-  # NOTE: 当前 legacy SDE sampling（`WanDMDPipeline`）仍读取此字段；
-  # Phase 3.2 会把 sampling timesteps 变成显式 request 参数，从而移除依赖。
-  dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
 
 method_config:
   # method-specific 超参（不进入 TrainingArgs；由 method 自行解析）
@@ -617,10 +614,12 @@ Phase 2.9 目标（简称 A+B+Families）：
 这会直接导致 validation sampling 的 drift：即使训练一致，选不同 loop 的 pipeline 也可能出不同视频。
 
 Phase 2.9 为了端到端与 legacy apples-to-apples，对 Wan DMD2 的 validation 暂时使用
-`WanDMDPipeline`（SDE rollout）以避免漂移；Phase 3 会把它升级为可插拔的 ODE/SDE sampler，
-从而淘汰 `<Model><Method>Pipeline` 这种耦合。
+`WanDMDPipeline`（SDE rollout）以避免漂移；Phase 3.2 已将其升级为可插拔的 ODE/SDE sampler：
+- `WanPipeline` 通过 `pipeline_config.sampler_kind={ode|sde}` 选择 sampling loop
+- distillation validation 由 method 通过 `ValidationRequest` 显式指定 sampler + timesteps
+- `WanDMDPipeline` 退化为兼容 wrapper（新框架不再依赖）
 
-### Phase 3（计划）：3.1 Config schema v2 + 3.2 ODE/SDE sampler + 3.3 Finetuning
+### Phase 3：3.1 Config schema v2 + 3.2 ODE/SDE sampler + 3.3 Finetuning
 
 Phase 3 的定位：在 Phase 2.9 已经完成“优雅 dispatch + adapter/method 语义收敛”的基础上：
 
@@ -651,6 +650,9 @@ method_config: {...}                  # algorithm/method 超参（方法侧）
 
 背景：DMD2/Consistency 等方法可能需要不同的 denoising loop（不仅是 timesteps/scheduler），如果靠
 “每个 method 一个 pipeline 变体（例如 `WanDMDPipeline`）”会重新回到 N×M 的组合爆炸。
+
+状态：**已完成**（`WanPipeline` 支持 `pipeline_config.sampler_kind={ode|sde}`，distillation validation
+通过 `ValidationRequest` 显式传入 sampler + timesteps，`WanDMDPipeline` 仅作为兼容 wrapper 保留）。
 
 目标：
 - `WanPipeline`（以及未来其它 family）通过参数选择 sampler/integrator（`ode|sde`）。

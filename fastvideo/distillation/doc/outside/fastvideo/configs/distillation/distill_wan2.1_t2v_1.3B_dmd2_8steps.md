@@ -44,8 +44,9 @@
 
 ---
 
-## TODO（Phase 3）
+## 备注（Phase 3.2 已完成）
 
-Phase 3.2 会把 validation sampling 的 ODE/SDE loop 做成可插拔 sampler，
-从而淘汰对 `WanDMDPipeline` 的依赖，并移除 `pipeline_config.dmd_denoising_steps`
-这类 “algorithm knob” 在 pipeline config 里的残留。
+Phase 3.2 已将 validation sampling 的 ODE/SDE loop 做成可插拔 sampler：
+- method 通过 `ValidationRequest(sampler_kind=..., sampling_timesteps=...)` 显式指定采样方式与 timesteps
+- validator 使用统一的 `WanPipeline` 执行采样（不再依赖 `WanDMDPipeline`）
+- 因此该 YAML 不再需要 `pipeline_config.dmd_denoising_steps` 这类重复字段

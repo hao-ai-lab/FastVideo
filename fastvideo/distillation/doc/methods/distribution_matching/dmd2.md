@@ -53,6 +53,6 @@
   - `dmd_denoising_steps`
   - `generator_update_interval`
   - `real_score_guidance_scale`
-- 仍有一个过渡期现实：legacy SDE sampler（`WanDMDPipeline` / `DmdDenoisingStage`）
-  目前读取 `pipeline_config.dmd_denoising_steps`，因此 config 会短期出现重复字段。
-  Phase 3.2 会把 sampling timesteps 变成显式 request 参数，从而移除该重复。
+- Phase 3.2 已完成：sampling loop/timesteps 由 method 在 `ValidationRequest` 中显式指定
+  （`sampler_kind` + `sampling_timesteps`），validator 使用 `WanPipeline` 执行采样；
+  distillation config 不再需要 `pipeline_config.dmd_denoising_steps` 这种重复字段。

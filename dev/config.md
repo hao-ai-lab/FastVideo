@@ -104,7 +104,6 @@ loader 会注入/补全的 invariants（见 `fastvideo/distillation/yaml_config.
 ```yaml
 pipeline_config:
   flow_shift: 8
-  dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
 ```
 
 2) path（适合复用大型 config 文件）：
@@ -112,11 +111,16 @@ pipeline_config:
 pipeline_config_path: /abs/path/to/wan_1.3B_t2v_pipeline.json
 ```
 
+常见字段（非穷举）：
+- `flow_shift`：Wan 的 flow-matching shift（影响 noise schedule）。
+- `sampler_kind`：`ode|sde`，选择 sampling loop 语义（`WanPipeline` 内部切换）。
+
 备注（重要）：
-- 从语义上讲，`dmd_denoising_steps` 是 algorithm knob，不应长期存在于 pipeline_config。
-- 但当前 validation 仍使用 legacy SDE sampler（`WanDMDPipeline` / `DmdDenoisingStage`），
-  它会读取 `pipeline_config.dmd_denoising_steps`。
-- Phase 3.2 会把 sampling timesteps 变成显式 request 参数，从而移除该重复字段。
+- 从语义上讲，`dmd_denoising_steps` 是 algorithm knob，应当只存在于 `method_config`。
+- Phase 3.2 已将 sampling loop 语义显式化：
+  - method 通过 `ValidationRequest(sampler_kind=..., sampling_timesteps=...)` 指定采样方式与 few-step schedule
+  - `WanValidator` 将 timesteps 写入 `ForwardBatch.sampling_timesteps`，并使用 `WanPipeline` 执行采样
+  - `pipeline_config.dmd_denoising_steps` 不再是 distillation 的必需字段（仅保留为 inference/legacy 兼容）
 
 ## 7) `method_config`: method/algorithm 专属超参
 
@@ -141,4 +145,3 @@ method_config:
 - `fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps.yaml`
 - `fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase2.9.yaml`
 - `fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase3.1.yaml`
-

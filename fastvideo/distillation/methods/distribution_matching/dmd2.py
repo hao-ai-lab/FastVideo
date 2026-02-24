@@ -279,12 +279,17 @@ class DMD2Method(DistillMethod):
         raw_steps = str(getattr(self.training_args, "validation_sampling_steps", "") or "")
         sampling_steps = [int(s) for s in raw_steps.split(",") if s.strip()]
         sampling_steps = [s for s in sampling_steps if s > 0]
+
+        raw_rollout = self.method_config.get("dmd_denoising_steps", None)
+        sampling_timesteps: list[int] | None = None
+        if isinstance(raw_rollout, list) and raw_rollout:
+            sampling_timesteps = [int(s) for s in raw_rollout]
+
         if not sampling_steps:
             # Default to the few-step student rollout step count for DMD2.
-            raw_rollout = self.method_config.get("dmd_denoising_steps", None)
-            if not isinstance(raw_rollout, list) or not raw_rollout:
+            if sampling_timesteps is None:
                 return
-            sampling_steps = [int(len(raw_rollout))]
+            sampling_steps = [int(len(sampling_timesteps))]
 
         raw_guidance = getattr(self.training_args, "validation_guidance_scale", None)
         guidance_scale = float(str(raw_guidance)) if raw_guidance not in (None, "") else None
@@ -292,6 +297,8 @@ class DMD2Method(DistillMethod):
         request = ValidationRequest(
             sample_handle=self.student,
             sampling_steps=sampling_steps,
+            sampler_kind="sde",
+            sampling_timesteps=sampling_timesteps,
             guidance_scale=guidance_scale,
         )
         validator.log_validation(iteration, request=request)

@@ -73,9 +73,6 @@ training:
 
 pipeline_config:
   flow_shift: 8
-  # NOTE: legacy SDE sampling (`WanDMDPipeline`) reads this field today.
-  # Phase 3.2 will make sampling timesteps an explicit request parameter.
-  dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
 
 method_config:
   # Replace legacy `training.simulate_generator_forward`.

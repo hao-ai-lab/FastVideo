@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
+from typing import Literal
 
 from fastvideo.distillation.bundle import RoleHandle
 
@@ -19,6 +20,8 @@ class ValidationRequest:
 
     sample_handle: RoleHandle | None = None
     sampling_steps: list[int] | None = None
+    sampler_kind: Literal["ode", "sde"] | None = None
+    sampling_timesteps: list[int] | None = None
     guidance_scale: float | None = None
     output_dir: str | None = None
 

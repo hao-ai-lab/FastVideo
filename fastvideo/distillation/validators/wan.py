@@ -19,8 +19,8 @@ from fastvideo.dataset.validation_dataset import ValidationDataset
 from fastvideo.distributed import get_sp_group, get_world_group
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
-from fastvideo.pipelines.basic.wan.wan_dmd_pipeline import WanDMDPipeline
 from fastvideo.distillation.validators.base import ValidationRequest
+from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
 from fastvideo.utils import shallow_asdict
 
 logger = init_logger(__name__)
@@ -56,8 +56,8 @@ class WanValidator:
         self.seed = int(seed)
         self.validation_random_generator = torch.Generator(device="cpu").manual_seed(self.seed)
 
-        self._pipeline: WanDMDPipeline | None = None
-        self._pipeline_transformer_id: int | None = None
+        self._pipeline: WanPipeline | None = None
+        self._pipeline_key: tuple[int, str] | None = None
         self._sampling_param: SamplingParam | None = None
 
     def _get_sampling_param(self) -> SamplingParam:
@@ -65,15 +65,21 @@ class WanValidator:
             self._sampling_param = SamplingParam.from_pretrained(self.training_args.model_path)
         return self._sampling_param
 
-    def _get_pipeline(self, *, transformer: torch.nn.Module) -> WanDMDPipeline:
-        transformer_id = id(transformer)
-        if self._pipeline is not None and self._pipeline_transformer_id == transformer_id:
+    def _get_pipeline(
+        self,
+        *,
+        transformer: torch.nn.Module,
+        sampler_kind: str,
+    ) -> WanPipeline:
+        key = (id(transformer), str(sampler_kind))
+        if self._pipeline is not None and self._pipeline_key == key:
             return self._pipeline
 
         args_copy = copy.deepcopy(self.training_args)
         args_copy.inference_mode = True
+        args_copy.pipeline_config.sampler_kind = str(sampler_kind)
 
-        self._pipeline = WanDMDPipeline.from_pretrained(
+        self._pipeline = WanPipeline.from_pretrained(
             self.training_args.model_path,
             args=args_copy,  # inference_mode=True uses FastVideoArgs branch
             inference_mode=True,
@@ -84,7 +90,7 @@ class WanValidator:
             pin_cpu_memory=self.training_args.pin_cpu_memory,
             dit_cpu_offload=True,
         )
-        self._pipeline_transformer_id = transformer_id
+        self._pipeline_key = key
         return self._pipeline
 
     def _parse_validation_steps(self) -> list[int]:
@@ -98,6 +104,7 @@ class WanValidator:
         validation_batch: dict[str, Any],
         num_inference_steps: int,
         *,
+        sampling_timesteps: list[int] | None = None,
         guidance_scale: float | None = None,
     ) -> ForwardBatch:
         sampling_param.prompt = validation_batch["prompt"]
@@ -131,6 +138,11 @@ class WanValidator:
             n_tokens=n_tokens,
             eta=0.0,
             VSA_sparsity=self.training_args.VSA_sparsity,
+            sampling_timesteps=(
+                torch.tensor([int(s) for s in sampling_timesteps], dtype=torch.long)
+                if sampling_timesteps is not None
+                else None
+            ),
         )
         return batch
 
@@ -139,10 +151,12 @@ class WanValidator:
         num_inference_steps: int,
         *,
         transformer: torch.nn.Module,
+        sampler_kind: str,
+        sampling_timesteps: list[int] | None = None,
         guidance_scale: float | None = None,
     ) -> _ValidationStepResult:
         training_args = self.training_args
-        pipeline = self._get_pipeline(transformer=transformer)
+        pipeline = self._get_pipeline(transformer=transformer, sampler_kind=sampler_kind)
         sampling_param = self._get_sampling_param()
 
         dataset = ValidationDataset(training_args.validation_dataset_file)
@@ -156,6 +170,7 @@ class WanValidator:
                 sampling_param,
                 validation_batch,
                 num_inference_steps,
+                sampling_timesteps=sampling_timesteps,
                 guidance_scale=guidance_scale,
             )
 
@@ -190,6 +205,18 @@ class WanValidator:
         validation_steps = getattr(request, "sampling_steps", None) or self._parse_validation_steps()
         if not validation_steps:
             return
+        sampler_kind = getattr(request, "sampler_kind", None) or "ode"
+        sampling_timesteps = getattr(request, "sampling_timesteps", None)
+        if sampling_timesteps is not None:
+            expected = int(len(sampling_timesteps))
+            for steps in validation_steps:
+                if int(steps) != expected:
+                    raise ValueError(
+                        "validation_sampling_steps must match "
+                        f"len(request.sampling_timesteps)={expected} when "
+                        "sampling_timesteps is provided, got "
+                        f"{validation_steps!r}."
+                    )
 
         sample_handle = getattr(request, "sample_handle", None)
         if sample_handle is None:
@@ -212,6 +239,8 @@ class WanValidator:
                 result = self._run_validation_for_steps(
                     num_inference_steps,
                     transformer=transformer,
+                    sampler_kind=str(sampler_kind),
+                    sampling_timesteps=sampling_timesteps,
                     guidance_scale=guidance_scale,
                 )
 

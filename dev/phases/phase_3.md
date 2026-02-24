@@ -101,24 +101,24 @@ Phase 2.9 已验证：即使统一 timesteps/scheduler，**只要 denoising loop
 - `WanDMDPipeline` 保留为 legacy 兼容（可选），但新框架不依赖它。
 
 ### 文件 TODO（实现清单）
-- [ ] 抽象 sampler（中性命名，不出现 DMD）
-  - 选项 A：新增 `fastvideo/pipelines/samplers/`（推荐）
-  - 选项 B：在 `fastvideo/pipelines/stages/denoising.py` 内做 `OdeSampler/SdeSampler`
-- [ ] `fastvideo/pipelines/stages/denoising.py`
-  - 把 `DmdDenoisingStage` 的语义迁移为 `SdeSampler`（或 `SdeDenoisingStage`）
-  - `SdeSampler` 接受显式 `timesteps`（不再读 `pipeline_config.dmd_denoising_steps`）
-  - 继续使用 `batch.generator` 来生成每一步注入的 `eps`（保证可复现实验）
-- [ ] `fastvideo/pipelines/basic/wan/wan_pipeline.py`
-  - `initialize_pipeline/create_pipeline_stages` 支持选择 sampler
-- [ ] `fastvideo/distillation/validators/base.py`
-  - 扩展 `ValidationRequest`：
+- [x] 抽象 sampler（中性命名，不出现 DMD）
+  - `fastvideo/pipelines/samplers/`：`SamplerKind` + Wan sampler helpers
+  - `pipeline_config.sampler_kind={ode|sde}`：`WanPipeline` 通过该参数选择 sampling loop
+- [x] `fastvideo/pipelines/stages/denoising.py`
+  - `SdeDenoisingStage`：SDE 风格 rollout（`pred_x0 -> add_noise(next_t, eps)`）
+  - `SdeDenoisingStage` 接受显式 `batch.sampling_timesteps`（来自 ValidationRequest）
+  - 继续使用 `batch.generator` 生成每一步注入的 `eps`（可复现）
+  - 保留 `DmdDenoisingStage = SdeDenoisingStage` alias（legacy pipeline 兼容）
+- [x] `fastvideo/pipelines/basic/wan/wan_pipeline.py`
+  - `WanPipeline` 支持 `sampler_kind={ode|sde}`（单一 pipeline 覆盖两种 loop）
+- [x] `fastvideo/distillation/validators/base.py`
+  - `ValidationRequest` 新增：
     - `sampler_kind: Literal["ode", "sde"] | None`
-    - `sampling_timesteps: list[int] | None`（用于 few-step schedule）
-- [ ] `fastvideo/distillation/validators/wan.py`
-  - 改回使用 `WanPipeline`（不再 import `WanDMDPipeline`）
-  - 根据 request 选择 sampler + timesteps
-- [ ] `fastvideo/distillation/methods/distribution_matching/dmd2.py`
-  - validation request 里指定 `sampler_kind="sde"` + `sampling_timesteps=<few-step list>`
+    - `sampling_timesteps: list[int] | None`
+- [x] `fastvideo/distillation/validators/wan.py`
+  - 使用 `WanPipeline` + request 的 sampler/timesteps（不再 import `WanDMDPipeline`）
+- [x] `fastvideo/distillation/methods/distribution_matching/dmd2.py`
+  - validation request 指定 `sampler_kind="sde"` + `sampling_timesteps=<few-step list>`
 
 ---
 
