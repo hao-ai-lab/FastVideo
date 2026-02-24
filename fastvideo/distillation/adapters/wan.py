@@ -144,12 +144,12 @@ class WanAdapter(DistillAdapter):
             args_copy = copy.deepcopy(training_args)
             args_copy.inference_mode = True
 
-            student_transformer = self.prompt_handle.require_module("transformer")
+            prompt_transformer = self.prompt_handle.require_module("transformer")
             prompt_pipeline = WanPipeline.from_pretrained(
                 training_args.model_path,
                 args=args_copy,
                 inference_mode=True,
-                loaded_modules={"transformer": student_transformer},
+                loaded_modules={"transformer": prompt_transformer},
                 tp_size=training_args.tp_size,
                 sp_size=training_args.sp_size,
                 num_gpus=training_args.num_gpus,

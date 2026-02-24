@@ -612,67 +612,65 @@ Phase 2.9 为了端到端与 legacy apples-to-apples，对 Wan DMD2 的 validati
 `WanDMDPipeline`（SDE rollout）以避免漂移；Phase 3 会把它升级为可插拔的 ODE/SDE sampler，
 从而淘汰 `<Model><Method>Pipeline` 这种耦合。
 
-### Phase 3（计划）：Recipe config + method_config + Finetuning（统一到同一框架）
+### Phase 3（计划）：3.1 Config schema v2 + 3.2 ODE/SDE sampler + 3.3 Finetuning
 
 Phase 3 的定位：在 Phase 2.9 已经完成“优雅 dispatch + adapter/method 语义收敛”的基础上：
-
-1) **配置语义升级（`distill` -> `recipe`，引入 `method_config`）**  
-2) **把 finetuning 作为一种 method 接入框架**（只需要 `student` + dataset）
-
-3) **统一 sampling 语义（ODE/SDE sampler 可插拔）**  
-   - 背景：DMD2/Consistency 等方法可能需要不同的 denoising loop；如果靠 “每个 method 一个 pipeline 变体”
-     会重新回到 N×M 的组合爆炸。
-   - 目标：让 `WanPipeline`（以及未来其它 family 的 pipeline）通过参数选择 sampler/integrator（ODE vs SDE），
-     validation 由 method/method_config 显式指定 sampler+steps，validator 只做 dataset+logging。
-   - 结果：新框架不再需要依赖 `WanDMDPipeline`（保留 legacy 兼容即可）。
 
 #### Phase 3.1：配置语义升级（`distill` -> `recipe`，引入 `method_config`）
 
 动机：
 - `distill.method=finetune` 语义别扭，因为 finetune 是一种训练 recipe，不一定是“蒸馏”。
-- method-specific 参数长期塞进 `training:`（TrainingArgs）会让配置语义越来越混杂。
+- method-specific 参数长期塞进 `training:`（TrainingArgs）/`pipeline_config:` 会让配置语义越来越混杂。
+- Phase 2.9 还残留少量 “method knob 泄漏到 adapter” 的问题（例如 `simulate_generator_forward`），需要借助
+  `method_config` 做干净的边界收敛。
 
-Phase 3 计划把 YAML schema 升级为：
+Phase 3.1 计划把 YAML schema 升级为：
 
 ```yaml
 recipe: {family: wan, method: dmd2}   # 只负责 “选什么”
 models: {student: ..., teacher: ...}  # 参与者
 training: {...}                       # infra 参数（映射到 TrainingArgs）
-pipeline_config: {...}                # pipeline/backbone config（模型侧）
+pipeline_config: {...}                # backbone/pipeline config（模型侧）
 method_config: {...}                  # algorithm/method 超参（方法侧）
 ```
 
-同时保持与 FastVideo 现有语义对齐：
-- 入口层会根据 `recipe.method` 推导 `TrainingArgs.mode`
-  - `finetune` -> `ExecutionMode.FINETUNING`
-  - 其它 distillation methods -> `ExecutionMode.DISTILLATION`
-
 迁移策略（建议）：
-- Phase 3 先把 `method_config` 作为新增字段引入，并逐步把以下参数从 `training:` 挪过去：
-  - DMD2：`generator_update_interval`, `real_score_guidance_scale`, `simulate_generator_forward`, ...
-  - Self-forcing：ODE-init / cache / rollout 策略相关参数
-  - Finetune：loss/target/pred_type 等
-- `training:` 保持 “trainer/infra” 语义（分布式、优化器、ckpt、logging、数据路径等）。
+- DMD2：把 `generator_update_interval`, `real_score_guidance_scale`,
+  `dmd_denoising_steps`, `simulate_generator_forward`（或替代字段）迁移到 `method_config`。
+- `training:` 保持纯 infra（分布式、优化器默认值、ckpt、logging、数据路径等）。
 
-#### Phase 3.2：Finetuning 作为一种 method 接入（only student）
+#### Phase 3.2：统一 sampling 语义（ODE/SDE sampler 可插拔）
 
-目标：让 finetuning 跟 distillation 一样走同一套：
-`ModelBundle + Adapter + Method + Trainer + (Validator/Checkpoint)`。
+背景：DMD2/Consistency 等方法可能需要不同的 denoising loop（不仅是 timesteps/scheduler），如果靠
+“每个 method 一个 pipeline 变体（例如 `WanDMDPipeline`）”会重新回到 N×M 的组合爆炸。
+
+目标：
+- `WanPipeline`（以及未来其它 family）通过参数选择 sampler/integrator（`ode|sde`）。
+- validation 由 method/method_config 显式指定 sampler + steps/timesteps；validator 只做 dataset+logging。
+- 新框架不再依赖 `WanDMDPipeline`（可保留 legacy 兼容）。
+
+#### Phase 3.3：把 finetuning 作为一种 method 接入框架
+
+目标：把 finetune 作为一种 method（only `student` + dataset）接入同一套
+`ModelBundle + Adapter + Method + Trainer + (Validator/Checkpoint)` 基础设施，并让其配置语义与
+Phase 3.1 的 `recipe/method_config` 对齐。
 
 建议落地形态（Phase 3 落地到代码时）：
 - 新增 method：`fastvideo/distillation/methods/fine_tuning/finetune.py::FineTuneMethod`
   - `bundle.require_roles(["student"])`
-  - 复用 trainer 的 step/ckpt/validation
-  - 通过 adapter 提供的 primitives 完成 forward/loss/backward（避免 method 管 forward_context）
+  - update policy 永远只 step student 的 optimizer/scheduler
 - 为 finetune 定义 adapter contract（类似 `_DMD2Adapter` 的做法）：
-  - `_FineTuneAdapter(Protocol)`：`prepare_batch()` + `sample_train_timestep()` + `student_predict()` + `training_loss()` 等
-  - Wan 侧由 `WanAdapter` 实现该 contract（或拆出 `WanAdapterBase + WanFineTuneOps` 以避免 adapter 过度膨胀）
+  - `_FineTuneAdapter(Protocol)`：`prepare_batch()` + `predict_*()` + `compute_loss()` + `backward()`
+  - Wan 侧由 `WanAdapter` 实现该 contract（或拆出 mixin，避免 adapter 膨胀）
 
-Finetune 的 config（示意）：
+Finetune 的 config（示意，schema v2）：
 ```yaml
 recipe: {family: wan, method: finetune}
 models:
-  student: {family: wan, path: ..., trainable: true}
+  student:
+    family: wan
+    path: ...
+    trainable: true
 training: {...}
 pipeline_config: {...}
 method_config:

@@ -1,292 +1,150 @@
-# Phase 3：优雅 Dispatch（N+M）+ `recipe` 配置语义升级 + Finetuning 接入
+# Phase 3：3.1 Config schema v2 + 3.2 ODE/SDE sampler + 3.3 Finetuning
 
-Phase 3 的定位：在 Phase 2 已经证明“新 distill 框架可独立运行”的基础上，把它推进到
-“长期可扩展、可承载更多训练 recipe（包括 finetune）”的状态。
+Phase 2.9 已完成三件关键事情（为 Phase 3 铺路）：
+- operation-centric adapter（adapter 不看 role string，只收 `RoleHandle`）
+- policy 回归 method（few-step rollout / step list 等在 method 里）
+- families + registry + builder（优雅 dispatch：新增 family 或 method 是 N+M，不是 N×M）
 
-本 phase 目标（你已拍板）：
+因此 Phase 3 不再聚焦 dispatch；Phase 3 的新增工作按顺序拆成三个子阶段：
 
-1) **彻底优雅的 dispatch**：避免 `wan+dmd2` 这种硬编码分支；扩展成本从 N×M 降到 N+M。  
-2) **YAML schema 升级**：顶层从 `distill` 改为 `recipe`，并新增 `method_config`。  
-3) **新增 finetuning 支持**：把 finetune 作为一种 method 接入框架（only student + dataset）。
-4) **统一 sampling 语义（ODE/SDE）**：把 “validation 用哪个 pipeline/loop” 从 `<Model><Method>Pipeline`
-   的耦合里解放出来，避免未来出现 25 个 pipeline 变体。
+- **Phase 3.1：Config schema v2（`recipe` + `method_config`）**
+- **Phase 3.2：ODE/SDE sampler 可插拔（淘汰 `<Model><Method>Pipeline`）**
+- **Phase 3.3：Finetuning method 接入（only student + dataset）**
 
-约束：
-- 不新增 entry file：继续使用 `fastvideo/training/distillation.py` 作为统一入口。
-- Phase 3 仍遵循边界：**forward/backward context 由 adapter 托管**，method 只实现算法/编排。
-
----
-
-## A) Phase 3 交付目标（Definition of Done）
-
-- `fastvideo/training/distillation.py` 不再出现 `if family==... and method==...` 的组合硬编码；
-  而是通过 registry 查找 family/method 组件来构建 runtime。
-- YAML schema 支持 `recipe + models + training + pipeline_config + method_config`：
-  - `distill:` schema v1 可以选择性兼容（见“风险/决策点”）。
-  - 文档与 examples 更新到 schema v2（`recipe`）。
-- 能跑通两个 recipe：
-  1) `recipe.method=dmd2`（现有 few-step wan DMD2）  
-  2) `recipe.method=finetune`（wan finetune 最小版本，only student）
-- `method_config` 在代码中**真实生效**（至少 DMD2 的 update policy + guidance scale 使用它）。
+约束（延续前几个 phase）：
+- 不新增 entry file：继续使用 `fastvideo/training/distillation.py`。
+- forward/backward context 仍由 adapter 托管；method 只负责算法编排。
 
 ---
 
-## B) TODO List（Review Checklist）
+## Phase 3.1：Config schema v2（`recipe` + `method_config`）
 
-### B1. 彻底优雅的 dispatch（registry + 通用 builder）
+### 目标（DoD）
+- distillation 入口只接受 **schema v2** 的 YAML（顶层 `recipe:`），并作为 single source of truth。
+- `method_config` 能被解析并传入 method；至少 DMD2 的关键超参从 `method_config` 生效。
+- 将 “method knob” 从 `training_args/pipeline_config` 中剥离出来（逐步迁移），并修复 Phase 2.9
+  残留的语义泄漏：
+  - `WanAdapter.prepare_batch()` 不再读取 `training_args.simulate_generator_forward`。
 
-- [ ] 新增 `fastvideo/distillation/registry.py`
-  - `register_family(name)` / `register_method(name)` 装饰器
-  - `get_family(name)` / `get_method(name)`：带可用项提示的错误信息
-  - `ensure_builtin_registrations()`：导入内置 family/method 以完成注册
-- [ ] 新增 `fastvideo/distillation/families/`（model family 插件）
-  - `fastvideo/distillation/families/__init__.py`
-  - `fastvideo/distillation/families/wan.py`：`WanFamily`（复用 Phase 2 的加载与数据构建逻辑）
-- [ ] 改造 `fastvideo/distillation/builder.py`
-  - 把当前 `build_wan_dmd2_runtime_from_config()` 收敛为：
-    - `build_runtime_from_config(cfg: RunConfig) -> DistillRuntime`
-  - `DistillRuntime.method` 类型从 `DMD2Method` 泛化为 `DistillMethod`
-- [ ] 改造入口 `fastvideo/training/distillation.py`
-  - 入口只做：`cfg = load_run_config()` → `runtime = build_runtime_from_config(cfg)` → `trainer.run(...)`
-  - 不再写组合分支（`wan+dmd2` 等）
+### Schema v2（示意）
+```yaml
+recipe:
+  family: wan
+  method: dmd2
 
-### B2. YAML schema v2：`recipe` + `method_config`
+models:
+  student:
+    family: wan
+    path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+  teacher:
+    family: wan
+    path: Wan-AI/Wan2.1-T2V-14B-Diffusers
+    trainable: false
+  critic:
+    family: wan
+    path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
 
-- [ ] 更新 spec：`fastvideo/distillation/specs.py`
+training: {...}          # infra（映射到 TrainingArgs）
+pipeline_config: {...}   # backbone/pipeline（模型侧）
+method_config: {...}     # algorithm（方法侧）
+```
+
+### 文件 TODO（实现清单）
+- [ ] `fastvideo/distillation/specs.py`
   - 新增 `RecipeSpec(family: str, method: str)`
-  - 保留 `RoleSpec(family/path/trainable)`，与 Phase 2 兼容
-- [ ] 更新 YAML loader：`fastvideo/distillation/yaml_config.py`
-  - 新 schema：
-    - `recipe: {family, method}`
-    - `method_config: { ... }`（可选，默认 `{}`）
-  - 入口层推导 `TrainingArgs.mode`：
-    - `recipe.method == "finetune"` → `ExecutionMode.FINETUNING`
-    - 其它 method → `ExecutionMode.DISTILLATION`
-  - （可选）兼容 v1：若仅提供 `distill: {model, method}`：
-    - 转换为 `recipe.family = distill.model`，`recipe.method = distill.method`
-    - 打 warning 提示迁移（见“风险/决策点”）
-
-### B3. `method_config` 接入到 DMD2（让它真正生效）
-
-- [ ] 更新 `fastvideo/distillation/methods/distribution_matching/dmd2.py`
-  - `DMD2Method` 构造函数增加 `method_config: dict[str, Any] | None`
-  - 读取优先级：`method_config` > `training_args` 默认值（用于平滑迁移）
+  - `DistillRunConfig` 增加 `recipe` 与 `method_config`
+- [ ] `fastvideo/distillation/yaml_config.py`
+  - 解析 `recipe:` 与 `method_config:`（默认 `{}`）
+  - 将 v1 的 `distill:` 视为不再支持（或仅保留一次性迁移期的兼容分支，需你拍板）
+- [ ] `fastvideo/distillation/builder.py`
+  - 从 `cfg.recipe` 取 family/method（不再读 `cfg.distill`）
+  - build method 时传入 `method_config`
+- [ ] `fastvideo/distillation/methods/distribution_matching/dmd2.py`
+  - `DMD2Method(..., method_config=...)`
+  - 关键参数读取优先级：`method_config` > `training_args`（迁移期平滑）
     - `generator_update_interval`
     - `real_score_guidance_scale`
-    - （可选）`simulate_generator_forward`（若继续存在）
+    - `dmd_denoising_steps`（few-step step list）
+    - `rollout_mode`（替代 `simulate_generator_forward`）
+- [ ] `fastvideo/distillation/adapters/wan.py`
+  - 移除 `training_args.simulate_generator_forward` 的读取（这是 Phase 2.9 的残留耦合）
+  - 把 batch 形态做成显式 API/参数，让 method 决定：
+    - 选项 A（推荐）：拆分显式入口
+      - `prepare_batch_from_data_latent(raw_batch, ...)`（必须有 `vae_latent`）
+      - `prepare_batch_from_placeholder_latent(raw_batch, ...)`（不依赖 `vae_latent`）
+    - 选项 B：保留单入口但显式参数化：`prepare_batch(..., latents_source=...)`
+- [ ] configs / docs
+  - [ ] `fastvideo/distillation/outside/fastvideo/configs/distillation/*.yaml` 全部升级到 schema v2
+  - [ ] 更新 `dev/config.md`（描述 schema v2 与迁移策略）
 
-### B4. Finetuning method（only student）
+---
 
-- [ ] 新增 `fastvideo/distillation/methods/fine_tuning/finetune.py`
-  - `FineTuneMethod(DistillMethod)`
+## Phase 3.2：ODE/SDE sampler 可插拔（统一 sampling loop 语义）
+
+### 背景（为什么需要）
+Phase 2.9 已验证：即使统一 timesteps/scheduler，**只要 denoising loop 不同**，sampling 结果仍会 drift：
+- ODE/solver 风格：`scheduler.step(noise_pred, t, latents)`（当前 `WanPipeline`）
+- SDE 风格：`pred_x0 -> add_noise(next_t, eps)`（DMD2/legacy `WanDMDPipeline`）
+
+如果继续靠 `<Wan><DMD2>Pipeline` 这类 pipeline 变体来选择 loop，会重新走向 N×M 组合爆炸。
+
+### 目标（DoD）
+- `WanPipeline` 支持通过参数/配置选择 sampler（`ode|sde`），默认 `ode`。
+- distillation 的 validation 由 method/method_config 显式指定 sampler + step list；
+  validator 回到 method-agnostic，不再 import `WanDMDPipeline`。
+- `WanDMDPipeline` 保留为 legacy 兼容（可选），但新框架不依赖它。
+
+### 文件 TODO（实现清单）
+- [ ] 抽象 sampler（中性命名，不出现 DMD）
+  - 选项 A：新增 `fastvideo/pipelines/samplers/`（推荐）
+  - 选项 B：在 `fastvideo/pipelines/stages/denoising.py` 内做 `OdeSampler/SdeSampler`
+- [ ] `fastvideo/pipelines/stages/denoising.py`
+  - 把 `DmdDenoisingStage` 的语义迁移为 `SdeSampler`（或 `SdeDenoisingStage`）
+  - `SdeSampler` 接受显式 `timesteps`（不再读 `pipeline_config.dmd_denoising_steps`）
+  - 继续使用 `batch.generator` 来生成每一步注入的 `eps`（保证可复现实验）
+- [ ] `fastvideo/pipelines/basic/wan/wan_pipeline.py`
+  - `initialize_pipeline/create_pipeline_stages` 支持选择 sampler
+- [ ] `fastvideo/distillation/validators/base.py`
+  - 扩展 `ValidationRequest`：
+    - `sampler_kind: Literal["ode", "sde"] | None`
+    - `sampling_timesteps: list[int] | None`（用于 few-step schedule）
+- [ ] `fastvideo/distillation/validators/wan.py`
+  - 改回使用 `WanPipeline`（不再 import `WanDMDPipeline`）
+  - 根据 request 选择 sampler + timesteps
+- [ ] `fastvideo/distillation/methods/distribution_matching/dmd2.py`
+  - validation request 里指定 `sampler_kind="sde"` + `sampling_timesteps=<few-step list>`
+
+---
+
+## Phase 3.3：Finetuning method（only student）
+
+### 目标（DoD）
+- 新增 `finetune` method，复用同一套 Trainer/Bundle/Adapter/Family/Validator 基础设施。
+- 最小可运行：只需 `models.student` + dataset 即可训练。
+- finetune 的 method 参数进入 `method_config`（与 Phase 3.1 schema 一致）。
+
+### 文件 TODO（实现清单）
+- [ ] `fastvideo/distillation/methods/fine_tuning/finetune.py`
+  - `FineTuneMethod(DistillMethod)` + `@register_method("finetune")`
   - `bundle.require_roles(["student"])`
-  - `single_train_step()`：
-    - `training_batch = adapter.prepare_batch(...)`
-    - `pred = adapter.student_predict(...)`
-    - `loss = adapter.finetune_loss(...)`
-  - update policy：
-    - `get_optimizers()` / `get_lr_schedulers()` 始终返回 student 的
-- [ ] 在 `fastvideo/distillation/methods/fine_tuning/__init__.py` 暴露该 method（并注册）
-
-### B5. WanAdapter 增强 finetune primitives（不让 method 管 forward_context）
-
-- [ ] 更新 `fastvideo/distillation/adapters/wan.py`
-  - 新增 `_FineTuneAdapter(Protocol)` 所需 primitives：
-    - `student_predict_for_finetune(batch) -> torch.Tensor`
-    - `finetune_loss(batch, pred) -> torch.Tensor`
-    - （如 activation checkpoint/backward 重算需要）`backward_student(loss, ctx, ...)`
-  - 复用现有的：
-    - `prepare_batch()`（要求 finetune 路径必须提供真实 `vae_latent`）
-    - `set_forward_context(...)` 的管理继续留在 adapter
-
-### B5.5 彻底去除 adapter 对 method knob 的读取（例如 `simulate_generator_forward`）
-
-动机：当前 `WanAdapter.prepare_batch()` 仍读取 `training_args.simulate_generator_forward` 来决定
-是否需要 `vae_latent`（或构造 placeholder）。这会把 DMD2/student-rollout 的语义泄漏到 adapter，
-违背 Phase 2.9 的 operation-centric 边界。
-
-- [ ] 调整 `WanAdapter` 的 batch API，使其不再读取 `training_args.simulate_generator_forward`
-  - 选项 A（推荐）：拆成两个显式入口
-    - `prepare_batch_with_vae_latent(raw_batch, ...)`：必须有 `vae_latent`
-    - `prepare_batch_text_only(raw_batch, ...)`：不依赖 `vae_latent`，只根据 family 规则构造 latents/shape
-  - 选项 B：保留单入口但显式参数化
-    - `prepare_batch(raw_batch, *, latents_source=...)`
-    - 由 method/`method_config` 决定使用 data latents 还是 placeholder latents
-- [ ] 将 “是否 simulate / rollout 模式” 的开关迁移到 `method_config`
-  - DMD2：例如 `method_config.rollout_mode = "data_latent" | "simulate"`
-  - adapter 不读取该开关；method 选择调用哪个 adapter API
-
-### B6. examples / outside configs 更新到 schema v2
-
-- [ ] 更新 DMD2 YAML（schema v2）：
-  - `fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps.yaml`
-    - `distill -> recipe`
-    - 新增 `method_config`（至少包含 DMD2 的 interval + guidance scale + simulate flag）
-- [ ] 新增 finetune YAML（schema v2）：
-  - `fastvideo/distillation/outside/fastvideo/configs/distillation/finetune_wan2.1_t2v_1.3B.yaml`（命名可再讨论）
-- [ ] 更新 `examples/distillation/phase2/README.md` 与脚本说明（指向 `recipe` schema）
-
-### B7.（可选但推荐）最小单测
-
-- [ ] `fastvideo/tests/distillation/test_yaml_schema_v2.py`
-  - schema v2 能 parse
-  - （如兼容 v1）schema v1 → v2 conversion 能 parse
-- [ ] `fastvideo/tests/distillation/test_registry_dispatch.py`
-  - registry 能注册并 resolve `wan` + `dmd2` / `finetune`
-
-### B8.（建议纳入 Phase 3）ODE/SDE sampler 可插拔（淘汰 `WanDMDPipeline`）
-
-背景：Phase 2.9 暴露了一个关键事实——即使统一 timesteps/scheduler，`WanPipeline`（ODE/solver-style
-`scheduler.step`）与 DMD2/legacy `WanDMDPipeline`（SDE-style `pred_x0 -> add_noise(next_t, eps)`）
-仍可能产生不同的 sampling 结果。validation 若选错 loop，就无法与训练/legacy apples-to-apples。
-
-- [ ] 在 pipeline 层引入 “denoising loop / sampler” 抽象（中性命名，不出现 DMD）
-  - `OdeSampler`：使用 `scheduler.step(...)`
-  - `SdeSampler`：使用 `pred_x0 -> add_noise(next_t, eps)`（noise reinjection）
-- [ ] `WanPipeline` 支持选择 sampler（默认 ODE）
-  - 选项 A：`WanPipeline` 通过参数注入 sampler（更通用）
-  - 选项 B：保留 stage 选择（`DenoisingStage` vs `SdeDenoisingStage`），但把命名去 DMD 化
-- [ ] 更新 `WanValidator`：不再 import `WanDMDPipeline`
-  - method（或 `method_config`）在 `ValidationRequest` 里显式指定 `sampler_kind: ode|sde`
-  - `WanValidator` 仍保持 family-specific + method-agnostic：只负责 dataset + logging
-- [ ] 最终目标：`WanDMDPipeline` 仅作为 legacy 兼容（或被完全替代），新框架不依赖它
+  - `single_train_step()` 只更新 student
+- [ ] `fastvideo/distillation/adapters/wan.py`
+  - 增加 finetune 所需 primitives（operation-centric）：
+    - `predict_noise(handle, ...)` / `predict_x0(handle, ...)`（可复用已有）
+    - （按 legacy loss 语义）增加最小 `finetune_loss(...)` 或 `compute_training_loss(...)`
+- [ ] configs/examples
+  - [ ] `fastvideo/distillation/outside/fastvideo/configs/distillation/finetune_*.yaml`
+  - [ ] `examples/distillation/phase3/`（或更新现有 examples）
 
 ---
 
-## C) 核心代码设计（具体到类/函数）
+## 备注：关于 `simulate_generator_forward`（Phase 2.9 的残留）
 
-### C1. `registry.py`：N+M 组合的关键
+目前 `WanAdapter.prepare_batch()` 仍读取 `training_args.simulate_generator_forward` 来决定是否需要 `vae_latent`。
+这不是“功能 bug”，但确实是语义耦合（把 DMD2 rollout 的开关泄漏到了 adapter）。
 
-目标：入口/Builder 只写一次组合逻辑，不写 `build_<family>_<method>()`。
+结论：它 **应该在 Phase 3.1** 通过 `method_config.rollout_mode` + 显式 batch API 来解决；
+Phase 2.9 没处理是因为当时我们刻意不引入 schema v2/method_config，避免变量叠加导致定位困难。
 
-建议接口（简化版）：
-
-- `DistillFamily`（family 插件）
-  - `build_bundle(cfg) -> ModelBundle`
-  - `build_shared_components(cfg) -> ...`（如 vae/scheduler）
-  - `build_adapter(bundle, cfg, shared) -> DistillAdapter`
-  - `build_validator(bundle, cfg, tracker, shared) -> DistillValidator | None`
-  - `build_dataloader(cfg) -> DataLoaderLike`
-  - `build_optimizers_schedulers(bundle, cfg) -> None`（写入 RoleHandle）
-
-- `DistillMethodFactory`（method 插件）
-  - `build(bundle, adapter, cfg) -> DistillMethod`
-
-注册方式：
-- `@register_family("wan") class WanFamily: ...`
-- `@register_method("dmd2") def build_dmd2(...): ...`
-- `@register_method("finetune") def build_finetune(...): ...`
-
-> 这样新增一个 family 或 method 是一次注册（N+M），不会产生 N×M 组合函数。
-
-### C2. 通用 `build_runtime_from_config(cfg)`
-
-`fastvideo/distillation/builder.py` 收敛为一个通用入口：
-
-1) `ensure_builtin_registrations()`
-2) `family = get_family(cfg.recipe.family)`
-3) `method_factory = get_method(cfg.recipe.method)`
-4) `bundle = family.build_bundle(cfg)`
-5) `family.build_optimizers_schedulers(bundle, cfg)`（只给 trainable roles 创建）
-6) `shared = family.build_shared_components(cfg)`
-7) `tracker = family.build_tracker(cfg)`（或 builder 复用 training/trackers）
-8) `validator = family.build_validator(...)`（可选）
-9) `adapter = family.build_adapter(bundle, cfg, shared, validator)`
-10) `method = method_factory.build(bundle=bundle, adapter=adapter, cfg=cfg)`
-11) `dataloader = family.build_dataloader(cfg)`
-12) 返回 `DistillRuntime(training_args, method, dataloader, tracker, start_step=0)`
-
-### C3. YAML loader（schema v2）
-
-`fastvideo/distillation/yaml_config.py` 产出新的 `RunConfig`（命名可沿用 `DistillRunConfig`）：
-
-- `recipe: RecipeSpec`
-- `roles/models: dict[str, RoleSpec]`
-- `training_args: TrainingArgs`
-- `method_config: dict[str, Any]`
-- `raw: dict[str, Any]`
-
-并将 `training_args.mode` 与 `inference_mode` 强制一致（Phase 2 的经验）：
-- `finetune` → `FINETUNING` + `inference_mode=False`
-- distill methods → `DISTILLATION` + `inference_mode=False`
-
-### C4. DMD2：method_config 生效点
-
-Phase 3 最小要求：以下两个参数从 `method_config` 读取（否则 `method_config` 只是摆设）：
-- `generator_update_interval`
-- `real_score_guidance_scale`
-
-兼容策略（建议）：如果 `method_config` 缺失，则回落到 `training_args` 字段，避免破坏旧 YAML。
-
-### C5. Finetune：method + adapter contract
-
-Finetune 的边界：
-- method 负责算法编排（loss/optim schedule）
-- adapter 负责 forward_context + model/pipeline 差异
-
-建议 `_FineTuneAdapter` 的最小 surface：
-- `prepare_batch(raw_batch, current_vsa_sparsity=...) -> TrainingBatch`
-- `student_predict_for_finetune(batch) -> torch.Tensor`
-- `finetune_loss(batch, pred) -> torch.Tensor`
-- `backward_student(loss, ctx, grad_accum_rounds=...)`（如果需要）
-
-> Wan 侧可以复用现有 `TrainingBatch` 字段与 `normalize_dit_input / get_sigmas` 等工具，
-> 目标是对齐 legacy `TrainingPipeline._transformer_forward_and_compute_loss()` 的 loss 语义。
-
-### C6. Phase 3 sampling：把 “ODE vs SDE” 变成可配置的 sampler/integrator
-
-目标：避免出现 `<Wan><DMD2>Pipeline` / `<Wan><CM>Pipeline` 这类组合爆炸，同时让 method 能精确控制
-validation 的 solver/loop 语义（与训练一致）。
-
-建议最小接口（示意）：
-
-- `Sampler`（pipeline 层抽象，不携带 method 命名）
-  - `run(transformer, batch, *, timesteps, guidance, rng, ...) -> latents`
-
-Wan 侧落地：
-- `OdeSampler` = 复用现有 `DenoisingStage` 语义（`scheduler.step` + CFG）
-- `SdeSampler` = 复用现有 `DmdDenoisingStage` 的语义，但把：
-  - `pipeline_config.dmd_denoising_steps` 改成显式输入的 `timesteps`
-  - class/变量命名去 DMD 化（例如 `SdeDenoisingStage` 或 `SdeSampler`）
-
-与 distillation 的边界：
-- method（或 `method_config`）决定 validation 用 `ode|sde`，以及用哪一组 timesteps。
-- validator 只执行与记录，不再隐式选择 `WanPipeline` 或 `WanDMDPipeline`。
-
----
-
-## D) 风险点 / 需要你参与决策的地方（遇到会停下讨论）
-
-1) **schema v1 兼容性**：Phase 3 是否需要继续支持 `distill:`？
-   - 选项 A：完全切到 `recipe:`（更干净，但需要一次性改所有 YAML）
-   - 选项 B：兼容 v1 → v2 conversion + warning（更平滑，但多一点维护负担）
-
-2) **`method_config` 的形态**：是否需要做 method namespace？
-   - 选项 A：flat mapping（推荐）：`method_config: {generator_update_interval: 5, ...}`
-   - 选项 B：namespaced：`method_config: {dmd2: {...}}`（更显式但更啰嗦）
-
-3) **finetune 的 validation**：Phase 3 是否要求 finetune 也能 video validation？
-   - 最小交付可以先让 finetune 训练跑通，validation 可先关（`log_validation=false`）
-   - 若要开启，需要确认 `WanValidator` 的 sampling pipeline 是否应随 recipe.method 切换
-
----
-
-## E) YAML 小结：flow mapping vs block mapping
-
-YAML 语法上：
-
-```yaml
-student: {family: wan, path: ..., trainable: true}
-```
-
-与
-
-```yaml
-student:
-  family: wan
-  path: ...
-  trainable: true
-```
-
-在语义上是等价的（都是一个 mapping）。Phase 3 的 examples/docs 我们将统一采用 **block
-style**（你偏好的后者），因为更可读、diff 更友好。
