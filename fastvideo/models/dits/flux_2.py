@@ -567,6 +567,10 @@ class Flux2TransformerBlock(nn.Module):
         context_attn_output = c_gate_msa * context_attn_output
         encoder_hidden_states = encoder_hidden_states + context_attn_output
 
+        debug_enc = joint_attention_kwargs.get("_debug_double_enc")
+        if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
+            debug_enc["after_attn"].append(encoder_hidden_states.detach().clone())
+
         norm_encoder_hidden_states = self.norm2_context(encoder_hidden_states)
         norm_encoder_hidden_states = (
             norm_encoder_hidden_states * (1 + c_scale_mlp) + c_shift_mlp
@@ -576,6 +580,9 @@ class Flux2TransformerBlock(nn.Module):
         encoder_hidden_states = encoder_hidden_states + c_gate_mlp * context_ff_output
         if encoder_hidden_states.dtype == torch.float16:
             encoder_hidden_states = encoder_hidden_states.clip(-65504, 65504)
+
+        if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
+            debug_enc["after_ff"].append(encoder_hidden_states.detach().clone())
 
         return encoder_hidden_states, hidden_states
 
@@ -899,6 +906,8 @@ class Flux2Transformer2DModel(CachableDiT):
         # text prompts of different lengths. Is this a use case we want to support?
         # 4. Double Stream Transformer Blocks
         for index_block, block in enumerate(self.transformer_blocks):
+            if joint_attention_kwargs is not None:
+                joint_attention_kwargs["_double_block_index"] = index_block
             encoder_hidden_states, hidden_states = block(
                 hidden_states=hidden_states,
                 encoder_hidden_states=encoder_hidden_states,
