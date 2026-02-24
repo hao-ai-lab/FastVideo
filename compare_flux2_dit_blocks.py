@@ -389,6 +389,75 @@ def _capture_single_block_input_official(pipe, latent, prompt_embeds, timestep_s
     return captured
 
 
+def _collect_fv_double_encoder_states(transformer, latent, prompt_embeds, timestep_scaled, device, freqs_cis):
+    """Run FastVideo transformer; return list of (block_name, encoder_hidden_states) after each double block."""
+    enc_states = []
+
+    def make_hook(name):
+        def hook(_module, _inputs, outputs):
+            if len(outputs) >= 1 and outputs[0] is not None:
+                enc_states.append((name, outputs[0].detach().clone()))
+            else:
+                enc_states.append((name, None))
+        return hook
+
+    for i, block in enumerate(transformer.transformer_blocks):
+        block.register_forward_hook(make_hook(f"double_{i}"))
+
+    with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
+        transformer(
+            latent,
+            prompt_embeds,
+            timestep_scaled,
+            guidance=None,
+            freqs_cis=freqs_cis,
+        )
+    return enc_states
+
+
+def _collect_official_double_encoder_states(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device):
+    """Run official transformer; return list of (block_name, encoder_hidden_states) after each double block."""
+    enc_states = []
+    trans = pipe.transformer
+
+    def make_hook(name):
+        def hook(_module, _inputs, outputs):
+            try:
+                enc = outputs[0] if len(outputs) >= 1 else None
+                if enc is not None and enc.dim() >= 2:
+                    enc_states.append((name, enc.detach().clone().float()))
+                else:
+                    enc_states.append((name, None))
+            except Exception:
+                enc_states.append((name, None))
+        return hook
+
+    if not hasattr(trans, "transformer_blocks"):
+        return []
+    for i, block in enumerate(trans.transformer_blocks):
+        block.register_forward_hook(make_hook(f"double_{i}"))
+
+    dtype = next(trans.parameters()).dtype
+    latent_d = latent.to(device, dtype=dtype)
+    timestep = timestep_scaled.to(device)
+    prompt_embeds_d = prompt_embeds.to(device, dtype=dtype)
+    text_ids_d = text_ids.to(device)
+    latent_ids_d = latent_ids.to(device)
+    with torch.no_grad():
+        with trans.cache_context("cond"):
+            trans(
+                hidden_states=latent_d,
+                timestep=timestep,
+                guidance=None,
+                encoder_hidden_states=prompt_embeds_d,
+                txt_ids=text_ids_d,
+                img_ids=latent_ids_d,
+                joint_attention_kwargs=getattr(pipe, "attention_kwargs", None) or {},
+                return_dict=False,
+            )
+    return enc_states
+
+
 def _collect_fv_activations(transformer, latent, prompt_embeds, timestep_scaled, device, num_txt_tokens, freqs_cis=None):
     """Run FastVideo transformer with hooks; return list of (block_name, tensor) per block."""
     activations = []
@@ -591,8 +660,34 @@ def main():
         diff = (a_fv - a_o).abs()
         print(f"  {key}: shape={a_fv.shape} max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f}")
 
+    # Text stream (encoder_hidden_states) after each double block — find where 768 appears
+    print("\n--- Text stream (encoder_hidden_states) after each double block ---")
+    enc_fv = _collect_fv_double_encoder_states(
+        transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis
+    )
+    enc_official = []
+    if len(official_activations) > 0:
+        enc_official = _collect_official_double_encoder_states(
+            pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device
+        )
+    n_double = min(len(enc_fv), len(enc_official))
+    for i in range(n_double):
+        name_fv, t_fv = enc_fv[i]
+        name_o, t_o = enc_official[i]
+        if t_fv is None or t_o is None:
+            print(f"  {name_fv}: missing (fv={t_fv is not None}, official={t_o is not None})")
+            continue
+        t_fv = t_fv.cpu().float() if t_fv.is_cuda else t_fv.float()
+        t_o = t_o.cpu().float() if t_o.is_cuda else t_o.float()
+        if t_fv.shape != t_o.shape:
+            print(f"  {name_fv}: SHAPE MISMATCH {t_fv.shape} vs {t_o.shape}")
+            continue
+        diff = (t_fv - t_o).abs()
+        print(f"  {name_fv}: shape={t_fv.shape} max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f}")
+    if n_double == 0 and (enc_fv or enc_official):
+        print("  (one model has no double-block encoder states)")
+
     # Sub-layer: attention output of double_0 (narrows down where divergence is)
-    print("\n--- double_0 attention output (inside first block) ---")
     print("\n--- double_0 attention output (inside first block) ---")
     attn_fv = _capture_double0_attn_output_fv(
         transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis
