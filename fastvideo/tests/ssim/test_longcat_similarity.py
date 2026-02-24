@@ -25,6 +25,8 @@ from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_res
 
 logger = init_logger(__name__)
 
+REQUIRED_GPUS = 1
+
 # Device-specific reference folder
 device_name = torch.cuda.get_device_name()
 device_reference_folder_suffix = "_reference_videos"

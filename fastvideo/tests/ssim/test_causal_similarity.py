@@ -12,6 +12,8 @@ from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
 
+REQUIRED_GPUS = 1
+
 device_name = torch.cuda.get_device_name()
 device_reference_folder_suffix = '_reference_videos'
 

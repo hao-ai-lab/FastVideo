@@ -20,6 +20,8 @@ from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_res
 
 logger = init_logger(__name__)
 
+REQUIRED_GPUS = 2
+
 
 def _find_lingbotworld_examples_root() -> str | None:
     script_dir = os.path.dirname(os.path.abspath(__file__))

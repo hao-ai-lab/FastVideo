@@ -7,6 +7,28 @@ run `bash update_reference_videos.sh` from inside the `fastvideo/tests/ssim/` di
 reference videos were generated on commit `4aeabbc629e0edf91477e80e795e7bb1823c71cb`
 causal videos were generated on commit b318063c0a4618f1d5d99ea82ca67a06aad0d19d
 
+## Adding a New SSIM Test
+
+SSIM CI runs in one Modal instance (`L40S:8`). The orchestrator
+(`fastvideo/tests/modal/ssim_test.py`) clones/builds/installs once, then
+schedules multiple `pytest` subprocesses by GPU demand. Logs are printed in
+deterministic order for failed tasks (file name, then model id), and
+fail-fast is enabled: if one task fails, active tasks are terminated and the
+full SSIM step fails.
+
+The orchestrator auto-discovers every `test_*.py` file here, so no CI config
+changes are needed when adding a new test. To declare how many GPUs your test
+requires, add a module-level constant near the top of the file:
+
+```python
+REQUIRED_GPUS = 2
+```
+
+If `REQUIRED_GPUS` is omitted, the test defaults to 1 GPU.
+
+For files that define model maps (`*_MODEL_TO_PARAMS`), CI splits execution
+into one subprocess per model id by setting `FASTVIDEO_SSIM_MODEL_ID`.
+
 ## Generation Details
 
 2 x NVIDIA L40S GPUs
