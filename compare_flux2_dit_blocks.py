@@ -459,8 +459,16 @@ def _collect_official_double_encoder_states(pipe, latent, prompt_embeds, timeste
 
 
 def _collect_fv_double4_intermediates(transformer, latent, prompt_embeds, timestep_scaled, device, freqs_cis, block_index=4):
-    """Run FastVideo transformer with _debug_double_enc for the given block; return after_attn, after_ff, and context_attn_output (update added to text stream)."""
-    debug = {"block_index": block_index, "after_attn": [], "after_ff": [], "context_attn_output": []}
+    """Run FastVideo transformer with _debug_double_enc; return after_attn, after_ff, context_attn_output, and FF path tensors."""
+    debug = {
+        "block_index": block_index,
+        "after_attn": [],
+        "after_ff": [],
+        "context_attn_output": [],
+        "before_ff": [],
+        "context_ff_output": [],
+        "context_ff_update": [],
+    }
     joint_kwargs = {"_debug_double_enc": debug}
 
     with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
@@ -472,10 +480,16 @@ def _collect_fv_double4_intermediates(transformer, latent, prompt_embeds, timest
             freqs_cis=freqs_cis,
             joint_attention_kwargs=joint_kwargs,
         )
-    after_attn = debug["after_attn"][0] if len(debug["after_attn"]) > 0 else None
-    after_ff = debug["after_ff"][0] if len(debug["after_ff"]) > 0 else None
-    context_attn_output = debug["context_attn_output"][0] if len(debug["context_attn_output"]) > 0 else None
-    return after_attn, after_ff, context_attn_output
+    def first(key):
+        return debug[key][0] if len(debug[key]) > 0 else None
+    return (
+        first("after_attn"),
+        first("after_ff"),
+        first("context_attn_output"),
+        first("before_ff"),
+        first("context_ff_output"),
+        first("context_ff_update"),
+    )
 
 
 def _capture_official_double4_context_attn(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, block_index=4):
@@ -529,6 +543,58 @@ def _capture_official_double4_context_attn(pipe, latent, prompt_embeds, timestep
         c_gate_msa = c_gate_msa.unsqueeze(1)
     official_context_update = (c_gate_msa * context_before_gate).float()
     return official_context_update
+
+
+def _capture_official_double4_context_ff(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, block_index=4):
+    """Run official transformer with hook on block 4's ff_context; return (context_ff_output, context_ff_update) for the text stream."""
+    try:
+        from diffusers.models.transformers import transformer_flux2
+        Flux2Modulation = transformer_flux2.Flux2Modulation
+    except Exception:
+        return None, None
+    trans = pipe.transformer
+    if not hasattr(trans, "transformer_blocks") or block_index >= len(trans.transformer_blocks):
+        return None, None
+    captured_ff_output = []
+
+    def ff_hook(_module, _inputs, outputs):
+        captured_ff_output.append(outputs.detach().clone().float())
+
+    block4 = trans.transformer_blocks[block_index]
+    handle = block4.ff_context.register_forward_hook(ff_hook)
+    dtype = next(trans.parameters()).dtype
+    latent_d = latent.to(device, dtype=dtype)
+    timestep = timestep_scaled.to(device)
+    prompt_embeds_d = prompt_embeds.to(device, dtype=dtype)
+    text_ids_d = text_ids.to(device)
+    latent_ids_d = latent_ids.to(device)
+    try:
+        timestep_1000 = timestep.to(latent_d.dtype) * 1000
+        temb = trans.time_guidance_embed(timestep_1000, None)
+        double_stream_mod_txt = trans.double_stream_modulation_txt(temb)
+        _, (c_shift_mlp, c_scale_mlp, c_gate_mlp) = Flux2Modulation.split(double_stream_mod_txt, 2)
+        with torch.no_grad():
+            with trans.cache_context("cond"):
+                trans(
+                    hidden_states=latent_d,
+                    timestep=timestep,
+                    guidance=None,
+                    encoder_hidden_states=prompt_embeds_d,
+                    txt_ids=text_ids_d,
+                    img_ids=latent_ids_d,
+                    joint_attention_kwargs=getattr(pipe, "attention_kwargs", None) or {},
+                    return_dict=False,
+                )
+    finally:
+        handle.remove()
+    if not captured_ff_output:
+        return None, None
+    ctx_ff_out = captured_ff_output[0]
+    c_gate_mlp = c_gate_mlp.to(device=ctx_ff_out.device, dtype=ctx_ff_out.dtype)
+    if c_gate_mlp.dim() == 2:
+        c_gate_mlp = c_gate_mlp.unsqueeze(1)
+    official_context_ff_update = (c_gate_mlp * ctx_ff_out).float()
+    return ctx_ff_out.float(), official_context_ff_update
 
 
 def _collect_fv_activations(transformer, latent, prompt_embeds, timestep_scaled, device, num_txt_tokens, freqs_cis=None):
@@ -767,7 +833,7 @@ def main():
     TARGET_DOUBLE = 4
     if n_double > TARGET_DOUBLE and len(enc_official) > TARGET_DOUBLE:
         print(f"\n--- double_{TARGET_DOUBLE} intermediates (context attn vs context FF) ---")
-        fv_after_attn, fv_after_ff, fv_context_attn = _collect_fv_double4_intermediates(
+        fv_after_attn, fv_after_ff, fv_context_attn, fv_before_ff, fv_context_ff_output, fv_context_ff_update = _collect_fv_double4_intermediates(
             transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis, block_index=TARGET_DOUBLE
         )
         _, off_enc4 = enc_official[TARGET_DOUBLE]
@@ -806,6 +872,30 @@ def main():
                     print(f"  context_attn_output shape mismatch: FV={fv_ctx.shape} official={off_ctx.shape}")
             else:
                 print("  Could not capture official double_4 context_attn update.")
+
+        # Context FF path: before_ff, context_ff_output, context_ff_update
+        print(f"\n--- double_{TARGET_DOUBLE} context FF path ---")
+        off_ctx_ff_out, off_ctx_ff_update = _capture_official_double4_context_ff(
+            pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, block_index=TARGET_DOUBLE
+        )
+        if fv_before_ff is not None:
+            print(f"  FV before_ff (after norm+mod): shape={fv_before_ff.shape}")
+        if fv_context_ff_output is not None and off_ctx_ff_out is not None:
+            fv_o = fv_context_ff_output.cpu().float() if fv_context_ff_output.is_cuda else fv_context_ff_output.float()
+            off_o = off_ctx_ff_out.cpu().float() if off_ctx_ff_out.is_cuda else off_ctx_ff_out.float()
+            if fv_o.shape == off_o.shape:
+                d = (fv_o - off_o).abs()
+                print(f"  FV context_ff_output vs official: max_diff={d.max().item():.4f} mean_diff={d.mean().item():.4f}")
+            else:
+                print(f"  context_ff_output shape mismatch: FV={fv_o.shape} official={off_o.shape}")
+        if fv_context_ff_update is not None and off_ctx_ff_update is not None:
+            fv_u = fv_context_ff_update.cpu().float() if fv_context_ff_update.is_cuda else fv_context_ff_update.float()
+            off_u = off_ctx_ff_update.cpu().float() if off_ctx_ff_update.is_cuda else off_ctx_ff_update.float()
+            if fv_u.shape == off_u.shape:
+                d = (fv_u - off_u).abs()
+                print(f"  FV context_ff_update (c_gate_mlp*ff_out) vs official: max_diff={d.max().item():.4f} mean_diff={d.mean().item():.4f}")
+            else:
+                print(f"  context_ff_update shape mismatch: FV={fv_u.shape} official={off_u.shape}")
 
     # Sub-layer: attention output of double_0 (narrows down where divergence is)
     print("\n--- double_0 attention output (inside first block) ---")

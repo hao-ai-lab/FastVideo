@@ -581,9 +581,16 @@ class Flux2TransformerBlock(nn.Module):
         norm_encoder_hidden_states = (
             norm_encoder_hidden_states * (1 + c_scale_mlp) + c_shift_mlp
         )
+        if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
+            debug_enc["before_ff"].append(norm_encoder_hidden_states.detach().clone())
 
         context_ff_output = self.ff_context(norm_encoder_hidden_states)
-        encoder_hidden_states = encoder_hidden_states + c_gate_mlp * context_ff_output
+        if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
+            debug_enc["context_ff_output"].append(context_ff_output.detach().clone())
+        context_ff_update = c_gate_mlp * context_ff_output
+        if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
+            debug_enc["context_ff_update"].append(context_ff_update.detach().clone())
+        encoder_hidden_states = encoder_hidden_states + context_ff_update
         if encoder_hidden_states.dtype == torch.float16:
             encoder_hidden_states = encoder_hidden_states.clip(-65504, 65504)
 
