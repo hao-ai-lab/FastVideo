@@ -72,7 +72,7 @@ def _apply_trainable(module: torch.nn.Module, *, trainable: bool) -> torch.nn.Mo
 def _build_tracker(training_args: Any, *, config: dict[str, Any] | None) -> Any:
     world_group = get_world_group()
     trackers = list(getattr(training_args, "trackers", []))
-    if not trackers and getattr(training_args, "tracker_project_name", ""):
+    if not trackers and str(getattr(training_args, "tracker_project_name", "")):
         trackers.append(Trackers.WANDB.value)
     if world_group.rank != 0:
         trackers = []
