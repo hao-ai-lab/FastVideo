@@ -106,21 +106,6 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         except Exception:
             self.local_attn_size = -1
 
-        if self.local_attn_size <= 0:
-            fallback_local_attn_size = max(1, self.sliding_window_num_frames)
-            logger.warning(
-                "Invalid MatrixGame local_attn_size=%s. "
-                "Falling back to local_attn_size=%s.",
-                self.local_attn_size,
-                fallback_local_attn_size,
-            )
-            self.local_attn_size = fallback_local_attn_size
-            self._propagate_local_attn_size(self.transformer,
-                                            self.local_attn_size)
-            if self.transformer_2 is not None:
-                self._propagate_local_attn_size(self.transformer_2,
-                                                self.local_attn_size)
-
         assert self.local_attn_size != -1, (
             f"local_attn_size must be set for Matrix-Game causal inference, "
             f"got {self.local_attn_size}. Check MatrixGameWanVideoArchConfig.")
@@ -138,16 +123,6 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
         self._streaming_initialized: bool = False
         self._streaming_ctx: BlockProcessingContext | None = None
-
-    def _propagate_local_attn_size(self, transformer, local_attn_size: int) -> None:
-        transformer.local_attn_size = local_attn_size
-        if hasattr(transformer, "blocks"):
-            for block in transformer.blocks:
-                if hasattr(block, "local_attn_size"):
-                    block.local_attn_size = local_attn_size
-                if hasattr(block, "attn1") and hasattr(block.attn1,
-                                                        "local_attn_size"):
-                    block.attn1.local_attn_size = local_attn_size
 
     def forward(
         self,
