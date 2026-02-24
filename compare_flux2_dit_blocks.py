@@ -593,6 +593,7 @@ def main():
 
     # Sub-layer: attention output of double_0 (narrows down where divergence is)
     print("\n--- double_0 attention output (inside first block) ---")
+    print("\n--- double_0 attention output (inside first block) ---")
     attn_fv = _capture_double0_attn_output_fv(
         transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis
     )
@@ -646,6 +647,49 @@ def main():
     )
     # Cast to float for comparison
     fv_activations = [(n, t.cpu().float()) for n, t in fv_activations]
+
+    # single_0 and double_7 diagnostics: where does the 768 diff appear?
+    num_double = len(transformer.transformer_blocks)
+    print("\n--- single_0: input (concat), after_norm_mod, output (image part) ---")
+    in0_fv = _capture_single_block_input_fv(
+        transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, 0, freqs_cis
+    )
+    in0_official = {}
+    if len(official_activations) > 0:
+        in0_official = _capture_single_block_input_official(
+            pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, 0
+        )
+    for stage in ("input", "after_norm_mod"):
+        a_fv = in0_fv.get(stage)
+        a_o = in0_official.get(stage)
+        if a_fv is None or a_o is None:
+            print(f"  single_0 {stage}: missing (fv={a_fv is not None}, official={a_o is not None})")
+            continue
+        if a_fv.shape != a_o.shape:
+            print(f"  single_0 {stage}: SHAPE MISMATCH {a_fv.shape} vs {a_o.shape}")
+        else:
+            diff = (a_fv - a_o).abs()
+            ntxt = num_txt_tokens
+            if a_fv.shape[1] > ntxt:
+                d_txt = (a_fv[:, :ntxt] - a_o[:, :ntxt]).abs()
+                d_img = (a_fv[:, ntxt:] - a_o[:, ntxt:]).abs()
+                print(f"  single_0 {stage}: max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f} (text: max={d_txt.max().item():.4f}, image: max={d_img.max().item():.4f})")
+            else:
+                print(f"  single_0 {stage}: max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f}")
+    if num_double < len(fv_activations) and num_double < len(official_activations):
+        _, t0_fv = fv_activations[num_double]
+        _, t0_o = official_activations[num_double]
+        if t0_fv is not None and t0_o is not None and t0_fv.shape == t0_o.shape:
+            t0_o = t0_o.cpu().float() if t0_o.is_cuda else t0_o.float()
+            diff0 = (t0_fv - t0_o).abs()
+            print(f"  single_0 output (image): max_diff={diff0.max().item():.4f} mean_diff={diff0.mean().item():.4f}")
+    if num_double >= 1:
+        _, d7_fv = fv_activations[num_double - 1]
+        _, d7_o = official_activations[num_double - 1]
+        if d7_fv is not None and d7_o is not None and d7_fv.shape == d7_o.shape:
+            d7_o = d7_o.cpu().float() if d7_o.is_cuda else d7_o.float()
+            diff7 = (d7_fv - d7_o).abs()
+            print(f"  double_7 output (image): max_diff={diff7.max().item():.4f} mean_diff={diff7.mean().item():.4f}")
 
     # 3. Compare block-by-block (compare first N blocks where N = min of the two)
     if len(official_activations) == 0 or len(fv_activations) == 0:
