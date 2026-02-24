@@ -12,11 +12,13 @@ from fastvideo.distillation.yaml_config import DistillRunConfig
 
 
 class FamilyBuilder(Protocol):
+
     def __call__(self, *, cfg: DistillRunConfig) -> FamilyArtifacts:
         ...
 
 
 class MethodBuilder(Protocol):
+
     def __call__(
         self,
         *,
@@ -85,12 +87,14 @@ def available_methods() -> list[str]:
 def get_family(name: str) -> FamilyBuilder:
     ensure_builtin_registrations()
     if name not in _FAMILIES:
-        raise KeyError(f"Unknown family {name!r}. Available: {available_families()}")
+        raise KeyError(
+            f"Unknown family {name!r}. Available: {available_families()}")
     return _FAMILIES[name]
 
 
 def get_method(name: str) -> MethodBuilder:
     ensure_builtin_registrations()
     if name not in _METHODS:
-        raise KeyError(f"Unknown method {name!r}. Available: {available_methods()}")
+        raise KeyError(
+            f"Unknown method {name!r}. Available: {available_methods()}")
     return _METHODS[name]

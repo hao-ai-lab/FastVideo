@@ -54,7 +54,8 @@ class WanValidator:
         if seed is None:
             raise ValueError("training_args.seed must be set for validation")
         self.seed = int(seed)
-        self.validation_random_generator = torch.Generator(device="cpu").manual_seed(self.seed)
+        self.validation_random_generator = torch.Generator(
+            device="cpu").manual_seed(self.seed)
 
         self._pipeline: WanDMDPipeline | None = None
         self._pipeline_transformer_id: int | None = None
@@ -62,7 +63,8 @@ class WanValidator:
 
     def _get_sampling_param(self) -> SamplingParam:
         if self._sampling_param is None:
-            self._sampling_param = SamplingParam.from_pretrained(self.training_args.model_path)
+            self._sampling_param = SamplingParam.from_pretrained(
+                self.training_args.model_path)
         return self._sampling_param
 
     def _get_pipeline(self, *, transformer: torch.nn.Module) -> WanDMDPipeline:
@@ -88,7 +90,8 @@ class WanValidator:
         return self._pipeline
 
     def _parse_validation_steps(self) -> list[int]:
-        raw = str(getattr(self.training_args, "validation_sampling_steps", "") or "")
+        raw = str(
+            getattr(self.training_args, "validation_sampling_steps", "") or "")
         steps = [int(s) for s in raw.split(",") if s.strip()]
         return [s for s in steps if s > 0]
 
@@ -108,7 +111,8 @@ class WanValidator:
         if guidance_scale is not None:
             sampling_param.guidance_scale = float(guidance_scale)
         elif getattr(self.training_args, "validation_guidance_scale", ""):
-            sampling_param.guidance_scale = float(self.training_args.validation_guidance_scale)
+            sampling_param.guidance_scale = float(
+                self.training_args.validation_guidance_scale)
         sampling_param.seed = self.seed
 
         latents_size = [
@@ -119,9 +123,10 @@ class WanValidator:
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
         temporal_compression_factor = (
-            self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        )
-        num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_factor + 1
+            self.training_args.pipeline_config.vae_config.arch_config.
+            temporal_compression_ratio)
+        num_frames = (self.training_args.num_latent_t -
+                      1) * temporal_compression_factor + 1
         sampling_param.num_frames = int(num_frames)
 
         batch = ForwardBatch(
@@ -179,25 +184,34 @@ class WanValidator:
 
         return _ValidationStepResult(videos=videos, captions=captions)
 
-    def log_validation(self, step: int, *, request: ValidationRequest | None = None) -> None:
+    def log_validation(self,
+                       step: int,
+                       *,
+                       request: ValidationRequest | None = None) -> None:
         training_args = self.training_args
         if not getattr(training_args, "log_validation", False):
             return
         if not getattr(training_args, "validation_dataset_file", ""):
-            raise ValueError("validation_dataset_file must be set when log_validation is enabled")
+            raise ValueError(
+                "validation_dataset_file must be set when log_validation is enabled"
+            )
 
         guidance_scale = getattr(request, "guidance_scale", None)
-        validation_steps = getattr(request, "sampling_steps", None) or self._parse_validation_steps()
+        validation_steps = getattr(request, "sampling_steps",
+                                   None) or self._parse_validation_steps()
         if not validation_steps:
             return
 
         sample_handle = getattr(request, "sample_handle", None)
         if sample_handle is None:
-            raise ValueError("ValidationRequest.sample_handle must be provided by the method")
+            raise ValueError(
+                "ValidationRequest.sample_handle must be provided by the method"
+            )
         transformer = sample_handle.require_module("transformer")
         was_training = bool(getattr(transformer, "training", False))
 
-        output_dir = getattr(request, "output_dir", None) or training_args.output_dir
+        output_dir = getattr(request, "output_dir",
+                             None) or training_args.output_dir
 
         old_inference_mode = training_args.inference_mode
         old_dit_cpu_offload = training_args.dit_cpu_offload
@@ -224,7 +238,8 @@ class WanValidator:
                     for sp_group_idx in range(1, num_sp_groups):
                         src_rank = sp_group_idx * self.sp_world_size
                         recv_videos = self.world_group.recv_object(src=src_rank)
-                        recv_captions = self.world_group.recv_object(src=src_rank)
+                        recv_captions = self.world_group.recv_object(
+                            src=src_rank)
                         all_videos.extend(recv_videos)
                         all_captions.extend(recv_captions)
 
@@ -240,12 +255,18 @@ class WanValidator:
                         video_filenames.append(filename)
 
                     artifacts = []
-                    for filename, caption in zip(video_filenames, all_captions, strict=True):
-                        video_artifact = self.tracker.video(filename, caption=caption)
+                    for filename, caption in zip(video_filenames,
+                                                 all_captions,
+                                                 strict=True):
+                        video_artifact = self.tracker.video(filename,
+                                                            caption=caption)
                         if video_artifact is not None:
                             artifacts.append(video_artifact)
                     if artifacts:
-                        logs = {f"validation_videos_{num_inference_steps}_steps": artifacts}
+                        logs = {
+                            f"validation_videos_{num_inference_steps}_steps":
+                            artifacts
+                        }
                         self.tracker.log_artifacts(logs, step)
                 else:
                     self.world_group.send_object(result.videos, dst=0)

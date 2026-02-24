@@ -10,6 +10,7 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
+
 def run_distillation_from_config(
     config_path: str,
     *,
@@ -48,8 +49,11 @@ def run_distillation_from_config(
         return
 
     ckpt_config = DistillCheckpointConfig(
-        save_steps=int(getattr(training_args, "training_state_checkpointing_steps", 0) or 0),
-        keep_last=int(getattr(training_args, "checkpoints_total_limit", 0) or 0),
+        save_steps=int(
+            getattr(training_args, "training_state_checkpointing_steps", 0)
+            or 0),
+        keep_last=int(
+            getattr(training_args, "checkpoints_total_limit", 0) or 0),
     )
 
     get_rng_generators = getattr(runtime.method, "get_rng_generators", None)
@@ -114,16 +118,16 @@ if __name__ == "__main__":
         "--resume-from-checkpoint",
         type=str,
         default=None,
-        help=(
-            "Path to a checkpoint directory (checkpoint-<step>), its 'dcp/' subdir, "
-            "or an output_dir containing checkpoints (auto-picks latest)."
-        ),
+        help=
+        ("Path to a checkpoint directory (checkpoint-<step>), its 'dcp/' subdir, "
+         "or an output_dir containing checkpoints (auto-picks latest)."),
     )
     parser.add_argument(
         "--override-output-dir",
         type=str,
         default=None,
-        help="Override training.output_dir from YAML (useful for repeated runs).",
+        help=
+        "Override training.output_dir from YAML (useful for repeated runs).",
     )
     args = parser.parse_args(argv[1:])
     main(args)

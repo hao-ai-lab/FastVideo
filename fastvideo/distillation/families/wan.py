@@ -15,8 +15,7 @@ from fastvideo.distillation.runtime import FamilyArtifacts
 from fastvideo.distillation.yaml_config import DistillRunConfig
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler,
-)
+    FlowMatchEulerDiscreteScheduler, )
 from fastvideo.training.activation_checkpoint import apply_activation_checkpointing
 from fastvideo.training.trackers import initialize_trackers, Trackers
 from fastvideo.utils import maybe_download_model, verify_model_config_and_directory
@@ -33,11 +32,14 @@ def _load_module_from_path(
     config = verify_model_config_and_directory(local_model_path)
 
     if module_type not in config:
-        raise ValueError(f"Module {module_type!r} not found in config at {local_model_path}")
+        raise ValueError(
+            f"Module {module_type!r} not found in config at {local_model_path}")
 
     module_info = config[module_type]
     if module_info is None:
-        raise ValueError(f"Module {module_type!r} has null value in config at {local_model_path}")
+        raise ValueError(
+            f"Module {module_type!r} has null value in config at {local_model_path}"
+        )
 
     transformers_or_diffusers, _architecture = module_info
     component_path = os.path.join(local_model_path, module_type)
@@ -52,15 +54,18 @@ def _load_module_from_path(
             fastvideo_args=training_args,
         )
     finally:
-        if mark_teacher_critic and hasattr(training_args, "_loading_teacher_critic_model"):
+        if mark_teacher_critic and hasattr(training_args,
+                                           "_loading_teacher_critic_model"):
             del training_args._loading_teacher_critic_model
 
     if not isinstance(module, torch.nn.Module):
-        raise TypeError(f"Loaded {module_type!r} is not a torch.nn.Module: {type(module)}")
+        raise TypeError(
+            f"Loaded {module_type!r} is not a torch.nn.Module: {type(module)}")
     return module
 
 
-def _apply_trainable(module: torch.nn.Module, *, trainable: bool) -> torch.nn.Module:
+def _apply_trainable(module: torch.nn.Module, *,
+                     trainable: bool) -> torch.nn.Module:
     module.requires_grad_(trainable)
     if trainable:
         module.train()
@@ -111,16 +116,13 @@ def build_wan_family_artifacts(*, cfg: DistillRunConfig) -> FamilyArtifacts:
         training_args=training_args,
     )
     noise_scheduler = FlowMatchEulerDiscreteScheduler(
-        shift=float(training_args.pipeline_config.flow_shift or 0.0)
-    )
+        shift=float(training_args.pipeline_config.flow_shift or 0.0))
 
     role_handles: dict[str, RoleHandle] = {}
     for role, role_spec in roles_cfg.items():
         if role_spec.family != "wan":
-            raise ValueError(
-                "Wan family only supports wan roles; "
-                f"got {role}={role_spec.family!r}"
-            )
+            raise ValueError("Wan family only supports wan roles; "
+                             f"got {role}={role_spec.family!r}")
 
         mark_teacher_critic = role in ("teacher", "critic")
         transformer = _load_module_from_path(
@@ -146,13 +148,14 @@ def build_wan_family_artifacts(*, cfg: DistillRunConfig) -> FamilyArtifacts:
                 modules["transformer_2"] = transformer_2
 
         for name, module in list(modules.items()):
-            module = _apply_trainable(module, trainable=bool(role_spec.trainable))
+            module = _apply_trainable(module,
+                                      trainable=bool(role_spec.trainable))
             if role_spec.trainable and getattr(
-                training_args, "enable_gradient_checkpointing_type", None
-            ):
+                    training_args, "enable_gradient_checkpointing_type", None):
                 module = apply_activation_checkpointing(
                     module,
-                    checkpointing_type=training_args.enable_gradient_checkpointing_type,
+                    checkpointing_type=training_args.
+                    enable_gradient_checkpointing_type,
                 )
             modules[name] = module
 
@@ -182,7 +185,8 @@ def build_wan_family_artifacts(*, cfg: DistillRunConfig) -> FamilyArtifacts:
     # method-specific protocols via duck typing.
     prompt_handle = role_handles.get("student")
     if prompt_handle is None:
-        raise ValueError("Wan family requires a 'student' role for prompt encoding")
+        raise ValueError(
+            "Wan family requires a 'student' role for prompt encoding")
     adapter = WanAdapter(
         prompt_handle=prompt_handle,
         training_args=training_args,
@@ -193,7 +197,8 @@ def build_wan_family_artifacts(*, cfg: DistillRunConfig) -> FamilyArtifacts:
     from fastvideo.dataset import build_parquet_map_style_dataloader
     from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
 
-    text_len = training_args.pipeline_config.text_encoder_configs[0].arch_config.text_len  # type: ignore[attr-defined]
+    text_len = training_args.pipeline_config.text_encoder_configs[
+        0].arch_config.text_len  # type: ignore[attr-defined]
     _dataset, dataloader = build_parquet_map_style_dataloader(
         training_args.data_path,
         training_args.train_batch_size,

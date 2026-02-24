@@ -52,7 +52,8 @@ def _resolve_existing_file(path: str) -> str:
 
 def _require_mapping(raw: Any, *, where: str) -> dict[str, Any]:
     if not isinstance(raw, dict):
-        raise ValueError(f"Expected mapping at {where}, got {type(raw).__name__}")
+        raise ValueError(
+            f"Expected mapping at {where}, got {type(raw).__name__}")
     return raw
 
 
@@ -83,8 +84,10 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
     cfg = _require_mapping(raw, where=path)
 
     distill_raw = _require_mapping(cfg.get("distill"), where="distill")
-    distill_model = _require_str(distill_raw.get("model"), where="distill.model")
-    distill_method = _require_str(distill_raw.get("method"), where="distill.method")
+    distill_model = _require_str(distill_raw.get("model"),
+                                 where="distill.model")
+    distill_method = _require_str(distill_raw.get("method"),
+                                  where="distill.method")
     distill = DistillSpec(model=distill_model, method=distill_method)
 
     roles_raw = _require_mapping(cfg.get("models"), where="models")
@@ -94,20 +97,24 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
         role_cfg = _require_mapping(role_cfg_raw, where=f"models.{role_str}")
         family = role_cfg.get("family") or distill_model
         family = _require_str(family, where=f"models.{role_str}.family")
-        model_path = _require_str(role_cfg.get("path"), where=f"models.{role_str}.path")
+        model_path = _require_str(role_cfg.get("path"),
+                                  where=f"models.{role_str}.path")
         trainable = _get_bool(
             role_cfg.get("trainable"),
             where=f"models.{role_str}.trainable",
             default=True,
         )
-        roles[role_str] = RoleSpec(family=family, path=model_path, trainable=trainable)
+        roles[role_str] = RoleSpec(family=family,
+                                   path=model_path,
+                                   trainable=trainable)
 
     training_raw = _require_mapping(cfg.get("training"), where="training")
 
     pipeline_cfg_raw = cfg.get("pipeline_config", None)
     pipeline_cfg_path = cfg.get("pipeline_config_path", None)
     if pipeline_cfg_raw is not None and pipeline_cfg_path is not None:
-        raise ValueError("Provide either pipeline_config or pipeline_config_path, not both")
+        raise ValueError(
+            "Provide either pipeline_config or pipeline_config_path, not both")
 
     training_kwargs: dict[str, Any] = dict(training_raw)
 
@@ -134,22 +141,29 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
     if "model_path" not in training_kwargs:
         student = roles.get("student")
         if student is None:
-            raise ValueError("training.model_path is missing and models.student is not provided")
+            raise ValueError(
+                "training.model_path is missing and models.student is not provided"
+            )
         training_kwargs["model_path"] = student.path
 
     if "pretrained_model_name_or_path" not in training_kwargs:
-        training_kwargs["pretrained_model_name_or_path"] = training_kwargs["model_path"]
+        training_kwargs["pretrained_model_name_or_path"] = training_kwargs[
+            "model_path"]
 
     if pipeline_cfg_path is not None:
-        pipeline_cfg_path = _require_str(pipeline_cfg_path, where="pipeline_config_path")
-        training_kwargs["pipeline_config"] = _resolve_existing_file(pipeline_cfg_path)
+        pipeline_cfg_path = _require_str(pipeline_cfg_path,
+                                         where="pipeline_config_path")
+        training_kwargs["pipeline_config"] = _resolve_existing_file(
+            pipeline_cfg_path)
     elif pipeline_cfg_raw is not None:
         if isinstance(pipeline_cfg_raw, str):
-            training_kwargs["pipeline_config"] = _resolve_existing_file(pipeline_cfg_raw)
+            training_kwargs["pipeline_config"] = _resolve_existing_file(
+                pipeline_cfg_raw)
         elif isinstance(pipeline_cfg_raw, dict):
             training_kwargs["pipeline_config"] = pipeline_cfg_raw
         else:
-            raise ValueError("pipeline_config must be a mapping or a path string")
+            raise ValueError(
+                "pipeline_config must be a mapping or a path string")
 
     training_args = TrainingArgs.from_kwargs(**training_kwargs)
 

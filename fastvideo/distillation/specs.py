@@ -26,4 +26,3 @@ class RoleSpec:
     family: str
     path: str
     trainable: bool = True
-

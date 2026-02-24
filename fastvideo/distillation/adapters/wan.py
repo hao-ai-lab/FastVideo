@@ -33,8 +33,7 @@ from fastvideo.distillation.bundle import RoleHandle
 
 try:
     from fastvideo.attention.backends.video_sparse_attn import (
-        VideoSparseAttentionMetadataBuilder,
-    )
+        VideoSparseAttentionMetadataBuilder, )
     from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
 except Exception:
     VideoSparseAttentionMetadataBuilder = None  # type: ignore[assignment]
@@ -76,24 +75,27 @@ class WanAdapter(DistillAdapter):
         return torch.bfloat16
 
     def _init_timestep_mechanics(self) -> None:
-        self.timestep_shift = float(self.training_args.pipeline_config.flow_shift)
+        self.timestep_shift = float(
+            self.training_args.pipeline_config.flow_shift)
         self.num_train_timestep = int(self.noise_scheduler.num_train_timesteps)
-        self.min_timestep = int(self.training_args.min_timestep_ratio * self.num_train_timestep)
-        self.max_timestep = int(self.training_args.max_timestep_ratio * self.num_train_timestep)
+        self.min_timestep = int(self.training_args.min_timestep_ratio *
+                                self.num_train_timestep)
+        self.max_timestep = int(self.training_args.max_timestep_ratio *
+                                self.num_train_timestep)
 
         boundary_ratio = getattr(self.training_args, "boundary_ratio", None)
-        self.boundary_timestep: float | None = (
-            float(boundary_ratio) * float(self.num_train_timestep)
-            if boundary_ratio is not None
-            else None
-        )
+        self.boundary_timestep: float | None = (float(boundary_ratio) *
+                                                float(self.num_train_timestep)
+                                                if boundary_ratio is not None
+                                                else None)
 
     @property
     def num_train_timesteps(self) -> int:
         return int(self.num_train_timestep)
 
     def shift_and_clamp_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
-        timestep = shift_timestep(timestep, self.timestep_shift, self.num_train_timestep)
+        timestep = shift_timestep(timestep, self.timestep_shift,
+                                  self.num_train_timestep)
         return timestep.clamp(self.min_timestep, self.max_timestep)
 
     def on_train_start(self) -> None:
@@ -109,8 +111,10 @@ class WanAdapter(DistillAdapter):
         else:
             set_random_seed(int(seed) + global_rank)
 
-        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(int(seed))
-        self.noise_gen_cuda = torch.Generator(device=self.device).manual_seed(int(seed))
+        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
+            int(seed))
+        self.noise_gen_cuda = torch.Generator(device=self.device).manual_seed(
+            int(seed))
 
         self.ensure_negative_conditioning()
 
@@ -138,13 +142,15 @@ class WanAdapter(DistillAdapter):
         neg_mask: torch.Tensor | None = None
 
         if world_group.rank_in_group == 0:
-            sampling_param = SamplingParam.from_pretrained(training_args.model_path)
+            sampling_param = SamplingParam.from_pretrained(
+                training_args.model_path)
             negative_prompt = sampling_param.negative_prompt
 
             args_copy = copy.deepcopy(training_args)
             args_copy.inference_mode = True
 
-            student_transformer = self.prompt_handle.require_module("transformer")
+            student_transformer = self.prompt_handle.require_module(
+                "transformer")
             prompt_pipeline = WanPipeline.from_pretrained(
                 training_args.model_path,
                 args=args_copy,
@@ -168,15 +174,17 @@ class WanAdapter(DistillAdapter):
                 training_args,
             )
 
-            neg_embeds = result_batch.prompt_embeds[0].to(device=device, dtype=dtype)
-            neg_mask = result_batch.prompt_attention_mask[0].to(device=device, dtype=dtype)
+            neg_embeds = result_batch.prompt_embeds[0].to(device=device,
+                                                          dtype=dtype)
+            neg_mask = result_batch.prompt_attention_mask[0].to(device=device,
+                                                                dtype=dtype)
 
             del prompt_pipeline
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-        meta = torch.zeros((2,), device=device, dtype=torch.int64)
+        meta = torch.zeros((2, ), device=device, dtype=torch.int64)
         if world_group.rank_in_group == 0:
             assert neg_embeds is not None
             assert neg_mask is not None
@@ -186,17 +194,23 @@ class WanAdapter(DistillAdapter):
         embed_ndim, mask_ndim = (int(meta[0].item()), int(meta[1].item()))
 
         max_ndim = 8
-        embed_shape = torch.full((max_ndim,), -1, device=device, dtype=torch.int64)
-        mask_shape = torch.full((max_ndim,), -1, device=device, dtype=torch.int64)
+        embed_shape = torch.full((max_ndim, ),
+                                 -1,
+                                 device=device,
+                                 dtype=torch.int64)
+        mask_shape = torch.full((max_ndim, ),
+                                -1,
+                                device=device,
+                                dtype=torch.int64)
         if world_group.rank_in_group == 0:
             assert neg_embeds is not None
             assert neg_mask is not None
-            embed_shape[:embed_ndim] = torch.tensor(
-                list(neg_embeds.shape), device=device, dtype=torch.int64
-            )
-            mask_shape[:mask_ndim] = torch.tensor(
-                list(neg_mask.shape), device=device, dtype=torch.int64
-            )
+            embed_shape[:embed_ndim] = torch.tensor(list(neg_embeds.shape),
+                                                    device=device,
+                                                    dtype=torch.int64)
+            mask_shape[:mask_ndim] = torch.tensor(list(neg_mask.shape),
+                                                  device=device,
+                                                  dtype=torch.int64)
         world_group.broadcast(embed_shape, src=0)
         world_group.broadcast(mask_shape, src=0)
 
@@ -215,9 +229,12 @@ class WanAdapter(DistillAdapter):
         self.negative_prompt_embeds = neg_embeds
         self.negative_prompt_attention_mask = neg_mask
 
-    def _sample_timesteps(self, batch_size: int, device: torch.device) -> torch.Tensor:
+    def _sample_timesteps(self, batch_size: int,
+                          device: torch.device) -> torch.Tensor:
         if self.noise_random_generator is None:
-            raise RuntimeError("WanAdapter.on_train_start() must be called before prepare_batch()")
+            raise RuntimeError(
+                "WanAdapter.on_train_start() must be called before prepare_batch()"
+            )
 
         u = compute_density_for_timestep_sampling(
             weighting_scheme=self.training_args.weighting_scheme,
@@ -230,7 +247,8 @@ class WanAdapter(DistillAdapter):
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
         return self.noise_scheduler.timesteps[indices].to(device=device)
 
-    def _build_attention_metadata(self, training_batch: TrainingBatch) -> TrainingBatch:
+    def _build_attention_metadata(
+            self, training_batch: TrainingBatch) -> TrainingBatch:
         latents_shape = training_batch.raw_latent_shape
         patch_size = self.training_args.pipeline_config.dit_config.patch_size
         current_vsa_sparsity = training_batch.current_vsa_sparsity
@@ -238,12 +256,13 @@ class WanAdapter(DistillAdapter):
         assert training_batch.timesteps is not None
 
         if envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
-            if not is_vsa_available() or VideoSparseAttentionMetadataBuilder is None:
+            if not is_vsa_available(
+            ) or VideoSparseAttentionMetadataBuilder is None:
                 raise ImportError(
                     "FASTVIDEO_ATTENTION_BACKEND is VIDEO_SPARSE_ATTN, but fastvideo_kernel "
-                    "is not correctly installed or detected."
-                )
-            training_batch.attn_metadata = VideoSparseAttentionMetadataBuilder().build(  # type: ignore[misc]
+                    "is not correctly installed or detected.")
+            training_batch.attn_metadata = VideoSparseAttentionMetadataBuilder(
+            ).build(  # type: ignore[misc]
                 raw_latent_shape=latents_shape[2:5],
                 current_timestep=training_batch.timesteps,
                 patch_size=patch_size,
@@ -251,31 +270,37 @@ class WanAdapter(DistillAdapter):
                 device=self.device,
             )
         elif envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
-            if not is_vmoba_available() or VideoMobaAttentionMetadataBuilder is None:
+            if not is_vmoba_available(
+            ) or VideoMobaAttentionMetadataBuilder is None:
                 raise ImportError(
                     "FASTVIDEO_ATTENTION_BACKEND is VMOBA_ATTN, but fastvideo_kernel "
-                    "(or flash_attn>=2.7.4) is not correctly installed."
-                )
+                    "(or flash_attn>=2.7.4) is not correctly installed.")
             moba_params = self.training_args.moba_config.copy()
-            moba_params.update(
-                {
-                    "current_timestep": training_batch.timesteps,
-                    "raw_latent_shape": training_batch.raw_latent_shape[2:5],
-                    "patch_size": patch_size,
-                    "device": self.device,
-                }
-            )
-            training_batch.attn_metadata = VideoMobaAttentionMetadataBuilder().build(**moba_params)  # type: ignore[misc]
+            moba_params.update({
+                "current_timestep":
+                training_batch.timesteps,
+                "raw_latent_shape":
+                training_batch.raw_latent_shape[2:5],
+                "patch_size":
+                patch_size,
+                "device":
+                self.device,
+            })
+            training_batch.attn_metadata = VideoMobaAttentionMetadataBuilder(
+            ).build(**moba_params)  # type: ignore[misc]
         else:
             training_batch.attn_metadata = None
 
         return training_batch
 
-    def _prepare_dit_inputs(self, training_batch: TrainingBatch) -> TrainingBatch:
+    def _prepare_dit_inputs(self,
+                            training_batch: TrainingBatch) -> TrainingBatch:
         latents = training_batch.latents
         batch_size = latents.shape[0]
         if self.noise_gen_cuda is None:
-            raise RuntimeError("WanAdapter.on_train_start() must be called before prepare_batch()")
+            raise RuntimeError(
+                "WanAdapter.on_train_start() must be called before prepare_batch()"
+            )
 
         noise = torch.randn(
             latents.shape,
@@ -311,9 +336,11 @@ class WanAdapter(DistillAdapter):
             neg_embeds = self.negative_prompt_embeds
             neg_mask = self.negative_prompt_attention_mask
             if neg_embeds.shape[0] == 1 and batch_size > 1:
-                neg_embeds = neg_embeds.expand(batch_size, *neg_embeds.shape[1:]).contiguous()
+                neg_embeds = neg_embeds.expand(
+                    batch_size, *neg_embeds.shape[1:]).contiguous()
             if neg_mask.shape[0] == 1 and batch_size > 1:
-                neg_mask = neg_mask.expand(batch_size, *neg_mask.shape[1:]).contiguous()
+                neg_mask = neg_mask.expand(batch_size,
+                                           *neg_mask.shape[1:]).contiguous()
             training_batch.unconditional_dict = {
                 "encoder_hidden_states": neg_embeds,
                 "encoder_attention_mask": neg_mask,
@@ -333,7 +360,8 @@ class WanAdapter(DistillAdapter):
         dtype = self._get_training_dtype()
         device = self.device
 
-        training_batch = TrainingBatch(current_vsa_sparsity=current_vsa_sparsity)
+        training_batch = TrainingBatch(
+            current_vsa_sparsity=current_vsa_sparsity)
         encoder_hidden_states = raw_batch["text_embedding"]
         encoder_attention_mask = raw_batch["text_attention_mask"]
         infos = raw_batch.get("info_list")
@@ -360,19 +388,24 @@ class WanAdapter(DistillAdapter):
                     "vae_latent not found in batch and simulate_generator_forward is False"
                 )
             latents = raw_batch["vae_latent"]
-            latents = latents[:, :, : self.training_args.num_latent_t]
+            latents = latents[:, :, :self.training_args.num_latent_t]
             latents = latents.to(device, dtype=dtype)
 
         training_batch.latents = latents
-        training_batch.encoder_hidden_states = encoder_hidden_states.to(device, dtype=dtype)
-        training_batch.encoder_attention_mask = encoder_attention_mask.to(device, dtype=dtype)
+        training_batch.encoder_hidden_states = encoder_hidden_states.to(
+            device, dtype=dtype)
+        training_batch.encoder_attention_mask = encoder_attention_mask.to(
+            device, dtype=dtype)
         training_batch.infos = infos
 
-        training_batch.latents = normalize_dit_input("wan", training_batch.latents, self.vae)
+        training_batch.latents = normalize_dit_input("wan",
+                                                     training_batch.latents,
+                                                     self.vae)
         training_batch = self._prepare_dit_inputs(training_batch)
         training_batch = self._build_attention_metadata(training_batch)
 
-        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
+        training_batch.attn_metadata_vsa = copy.deepcopy(
+            training_batch.attn_metadata)
         if training_batch.attn_metadata is not None:
             training_batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore[attr-defined]
 
@@ -408,14 +441,12 @@ class WanAdapter(DistillAdapter):
             "return_dict": False,
         }
 
-    def _get_transformer(self, handle: RoleHandle, timestep: torch.Tensor) -> torch.nn.Module:
+    def _get_transformer(self, handle: RoleHandle,
+                         timestep: torch.Tensor) -> torch.nn.Module:
         transformer = handle.require_module("transformer")
         transformer_2 = handle.modules.get("transformer_2")
-        if (
-            transformer_2 is not None
-            and self.boundary_timestep is not None
-            and float(timestep.item()) < float(self.boundary_timestep)
-        ):
+        if (transformer_2 is not None and self.boundary_timestep is not None
+                and float(timestep.item()) < float(self.boundary_timestep)):
             return transformer_2
         return transformer
 
@@ -431,9 +462,12 @@ class WanAdapter(DistillAdapter):
     ) -> torch.Tensor:
         device_type = self.device.type
         dtype = noisy_latents.dtype
-        text_dict = batch.conditional_dict if conditional else getattr(batch, "unconditional_dict", None)
+        text_dict = batch.conditional_dict if conditional else getattr(
+            batch, "unconditional_dict", None)
         if text_dict is None:
-            raise RuntimeError("Missing unconditional_dict; ensure_negative_conditioning() may have failed")
+            raise RuntimeError(
+                "Missing unconditional_dict; ensure_negative_conditioning() may have failed"
+            )
 
         if attn_kind == "dense":
             attn_metadata = batch.attn_metadata
@@ -443,10 +477,11 @@ class WanAdapter(DistillAdapter):
             raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
 
         with torch.autocast(device_type, dtype=dtype), set_forward_context(
-            current_timestep=batch.timesteps,
-            attn_metadata=attn_metadata,
+                current_timestep=batch.timesteps,
+                attn_metadata=attn_metadata,
         ):
-            input_kwargs = self._build_distill_input_kwargs(noisy_latents, timestep, text_dict)
+            input_kwargs = self._build_distill_input_kwargs(
+                noisy_latents, timestep, text_dict)
             transformer = self._get_transformer(handle, timestep)
             pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
             pred_x0 = pred_noise_to_pred_video(
@@ -469,9 +504,12 @@ class WanAdapter(DistillAdapter):
     ) -> torch.Tensor:
         device_type = self.device.type
         dtype = noisy_latents.dtype
-        text_dict = batch.conditional_dict if conditional else getattr(batch, "unconditional_dict", None)
+        text_dict = batch.conditional_dict if conditional else getattr(
+            batch, "unconditional_dict", None)
         if text_dict is None:
-            raise RuntimeError("Missing unconditional_dict; ensure_negative_conditioning() may have failed")
+            raise RuntimeError(
+                "Missing unconditional_dict; ensure_negative_conditioning() may have failed"
+            )
 
         if attn_kind == "dense":
             attn_metadata = batch.attn_metadata
@@ -481,15 +519,18 @@ class WanAdapter(DistillAdapter):
             raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
 
         with torch.autocast(device_type, dtype=dtype), set_forward_context(
-            current_timestep=batch.timesteps,
-            attn_metadata=attn_metadata,
+                current_timestep=batch.timesteps,
+                attn_metadata=attn_metadata,
         ):
-            input_kwargs = self._build_distill_input_kwargs(noisy_latents, timestep, text_dict)
+            input_kwargs = self._build_distill_input_kwargs(
+                noisy_latents, timestep, text_dict)
             transformer = self._get_transformer(handle, timestep)
             pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
         return pred_noise
 
-    def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
+    def backward(self, loss: torch.Tensor, ctx: Any, *,
+                 grad_accum_rounds: int) -> None:
         timesteps, attn_metadata = ctx
-        with set_forward_context(current_timestep=timesteps, attn_metadata=attn_metadata):
+        with set_forward_context(current_timestep=timesteps,
+                                 attn_metadata=attn_metadata):
             (loss / max(1, int(grad_accum_rounds))).backward()

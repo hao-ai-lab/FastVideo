@@ -42,6 +42,5 @@ def build_wan_dmd2_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:
         raise ValueError(
             "build_wan_dmd2_runtime_from_config expects distill.model='wan' "
             f"and distill.method='dmd2', got model={cfg.distill.model!r}, "
-            f"method={cfg.distill.method!r}"
-        )
+            f"method={cfg.distill.method!r}")
     return build_runtime_from_config(cfg)

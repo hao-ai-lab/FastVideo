@@ -7,7 +7,8 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 import torch
 import torch.distributed as dist
@@ -24,14 +25,12 @@ from fastvideo.training.checkpointing_utils import (
 
 logger = init_logger(__name__)
 
-
 _CHECKPOINT_DIR_RE = re.compile(r"^checkpoint-(\d+)$")
 
 
 def _is_stateful(obj: Any) -> bool:
     return callable(getattr(obj, "state_dict", None)) and callable(
-        getattr(obj, "load_state_dict", None)
-    )
+        getattr(obj, "load_state_dict", None))
 
 
 def _rank() -> int:
@@ -50,8 +49,7 @@ def _parse_step_from_dir(checkpoint_dir: Path) -> int:
     if not match:
         raise ValueError(
             f"Invalid checkpoint directory name {checkpoint_dir.name!r}; "
-            "expected 'checkpoint-<step>'"
-        )
+            "expected 'checkpoint-<step>'")
     return int(match.group(1))
 
 
@@ -79,7 +77,8 @@ def _find_latest_checkpoint(output_dir: Path) -> Path | None:
     return candidates[-1][1]
 
 
-def _resolve_resume_checkpoint(resume_from_checkpoint: str, *, output_dir: str) -> Path:
+def _resolve_resume_checkpoint(resume_from_checkpoint: str, *,
+                               output_dir: str) -> Path:
     """Resolve a user-provided resume path to a concrete checkpoint dir.
 
     Accepted values:
@@ -98,7 +97,8 @@ def _resolve_resume_checkpoint(resume_from_checkpoint: str, *, output_dir: str) 
 
     if path.is_dir() and _CHECKPOINT_DIR_RE.match(path.name):
         if not (path / "dcp").is_dir():
-            raise FileNotFoundError(f"Missing dcp dir under checkpoint: {path / 'dcp'}")
+            raise FileNotFoundError(
+                f"Missing dcp dir under checkpoint: {path / 'dcp'}")
         return path
 
     # Treat as output_dir -> pick latest.
@@ -111,8 +111,7 @@ def _resolve_resume_checkpoint(resume_from_checkpoint: str, *, output_dir: str) 
     raise ValueError(
         "Could not resolve resume checkpoint. Expected a checkpoint directory "
         f"named 'checkpoint-<step>' (with 'dcp/' inside), or an output_dir "
-        f"containing such checkpoints. Got: {path} (output_dir={out})."
-    )
+        f"containing such checkpoints. Got: {path} (output_dir={out}).")
 
 
 class _RoleModuleContainer(torch.nn.Module):
@@ -148,7 +147,8 @@ class DistillCheckpointManager:
         dataloader: Any,
         output_dir: str,
         config: DistillCheckpointConfig,
-        get_rng_generators: Callable[[], dict[str, torch.Generator]] | None = None,
+        get_rng_generators: Callable[[], dict[str, torch.Generator]]
+        | None = None,
     ) -> None:
         self.bundle = bundle
         self.dataloader = dataloader
@@ -157,7 +157,8 @@ class DistillCheckpointManager:
         self._get_rng_generators = get_rng_generators
         self._last_saved_step: int | None = None
 
-    def _build_role_states(self, role: str, handle: RoleHandle) -> dict[str, Any]:
+    def _build_role_states(self, role: str,
+                           handle: RoleHandle) -> dict[str, Any]:
         if not handle.trainable:
             return {}
 
@@ -168,7 +169,8 @@ class DistillCheckpointManager:
             states[f"models.{role}.{module_name}"] = ModelWrapper(module)
 
         for name, optimizer in handle.optimizers.items():
-            states[f"optimizers.{role}.{name}"] = OptimizerWrapper(container, optimizer)
+            states[f"optimizers.{role}.{name}"] = OptimizerWrapper(
+                container, optimizer)
 
         for name, scheduler in handle.lr_schedulers.items():
             states[f"schedulers.{role}.{name}"] = SchedulerWrapper(scheduler)
@@ -236,7 +238,8 @@ class DistillCheckpointManager:
         if not resume_from_checkpoint:
             return None
 
-        resolved = _resolve_resume_checkpoint(resume_from_checkpoint, output_dir=self.output_dir)
+        resolved = _resolve_resume_checkpoint(resume_from_checkpoint,
+                                              output_dir=self.output_dir)
         step = _parse_step_from_dir(resolved)
 
         states = self._build_states()
@@ -269,9 +272,11 @@ class DistillCheckpointManager:
             candidates.append((step, child))
 
         candidates.sort(key=lambda x: x[0])
-        to_delete = candidates[:-keep_last] if len(candidates) > keep_last else []
+        to_delete = candidates[:-keep_last] if len(
+            candidates) > keep_last else []
         for step, path in to_delete:
-            logger.info("Removing old checkpoint (keep_last=%s): %s", keep_last, path)
+            logger.info("Removing old checkpoint (keep_last=%s): %s", keep_last,
+                        path)
             shutil.rmtree(path, ignore_errors=True)
 
         _barrier()

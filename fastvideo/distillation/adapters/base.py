@@ -10,11 +10,12 @@ if TYPE_CHECKING:
 
 
 class DistillAdapter(ABC):
+
     @abstractmethod
     def prepare_batch(
         self,
         raw_batch: dict[str, Any],
         *,
         current_vsa_sparsity: float = 0.0,
-    ) -> "TrainingBatch":
+    ) -> TrainingBatch:
         raise NotImplementedError

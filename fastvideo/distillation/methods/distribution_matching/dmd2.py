@@ -85,7 +85,8 @@ class _DMD2Adapter(Protocol):
     ) -> torch.Tensor:
         ...
 
-    def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
+    def backward(self, loss: torch.Tensor, ctx: Any, *,
+                 grad_accum_rounds: int) -> None:
         ...
 
 
@@ -116,31 +117,34 @@ class DMD2Method(DistillMethod):
         self.teacher = bundle.role("teacher")
         self.critic = bundle.role("critic")
         if not getattr(self.student, "trainable", False):
-            raise ValueError("DMD2Method requires models.student.trainable=true")
+            raise ValueError(
+                "DMD2Method requires models.student.trainable=true")
         if getattr(self.teacher, "trainable", False):
-            raise ValueError("DMD2Method requires models.teacher.trainable=false")
+            raise ValueError(
+                "DMD2Method requires models.teacher.trainable=false")
         if not getattr(self.critic, "trainable", False):
             raise ValueError("DMD2Method requires models.critic.trainable=true")
         self.adapter = adapter
         self.validator = validator
         self.training_args = adapter.training_args
         self._simulate_generator_forward = bool(
-            getattr(self.training_args, "simulate_generator_forward", False)
-        )
+            getattr(self.training_args, "simulate_generator_forward", False))
         self._denoising_step_list: torch.Tensor | None = None
         self._init_optimizers_and_schedulers()
 
     def _parse_betas(self, raw: Any, *, where: str) -> tuple[float, float]:
         if raw is None:
             raise ValueError(f"Missing betas for {where}")
-        if isinstance(raw, (tuple, list)) and len(raw) == 2:
+        if isinstance(raw, tuple | list) and len(raw) == 2:
             return float(raw[0]), float(raw[1])
         if isinstance(raw, str):
             parts = [p.strip() for p in raw.split(",") if p.strip()]
             if len(parts) != 2:
-                raise ValueError(f"Expected betas as 'b1,b2' at {where}, got {raw!r}")
+                raise ValueError(
+                    f"Expected betas as 'b1,b2' at {where}, got {raw!r}")
             return float(parts[0]), float(parts[1])
-        raise ValueError(f"Expected betas as 'b1,b2' at {where}, got {type(raw).__name__}")
+        raise ValueError(
+            f"Expected betas as 'b1,b2' at {where}, got {type(raw).__name__}")
 
     def _build_role_optimizer_and_scheduler(
         self,
@@ -156,24 +160,30 @@ class DMD2Method(DistillMethod):
         for module in modules.values():
             params.extend([p for p in module.parameters() if p.requires_grad])
         if not params:
-            raise ValueError(f"Role {role!r} is trainable but has no trainable parameters")
+            raise ValueError(
+                f"Role {role!r} is trainable but has no trainable parameters")
 
         optimizer = torch.optim.AdamW(
             params,
             lr=float(learning_rate),
             betas=betas,
-            weight_decay=float(getattr(self.training_args, "weight_decay", 0.0) or 0.0),
+            weight_decay=float(
+                getattr(self.training_args, "weight_decay", 0.0) or 0.0),
             eps=1e-8,
         )
 
         scheduler = get_scheduler(
             str(scheduler_name),
             optimizer=optimizer,
-            num_warmup_steps=int(getattr(self.training_args, "lr_warmup_steps", 0) or 0),
-            num_training_steps=int(getattr(self.training_args, "max_train_steps", 0) or 0),
-            num_cycles=int(getattr(self.training_args, "lr_num_cycles", 0) or 0),
+            num_warmup_steps=int(
+                getattr(self.training_args, "lr_warmup_steps", 0) or 0),
+            num_training_steps=int(
+                getattr(self.training_args, "max_train_steps", 0) or 0),
+            num_cycles=int(
+                getattr(self.training_args, "lr_num_cycles", 0) or 0),
             power=float(getattr(self.training_args, "lr_power", 0.0) or 0.0),
-            min_lr_ratio=float(getattr(self.training_args, "min_lr_ratio", 0.5) or 0.5),
+            min_lr_ratio=float(
+                getattr(self.training_args, "min_lr_ratio", 0.5) or 0.5),
             last_epoch=-1,
         )
 
@@ -199,16 +209,20 @@ class DMD2Method(DistillMethod):
         )
 
         # Critic optimizer/scheduler (DMD2-specific overrides).
-        critic_lr = float(getattr(training_args, "fake_score_learning_rate", 0.0) or 0.0)
+        critic_lr = float(
+            getattr(training_args, "fake_score_learning_rate", 0.0) or 0.0)
         if critic_lr == 0.0:
             critic_lr = student_lr
 
         critic_betas_raw = getattr(training_args, "fake_score_betas", None)
         if critic_betas_raw is None:
             critic_betas_raw = getattr(training_args, "betas", None)
-        critic_betas = self._parse_betas(critic_betas_raw, where="training.fake_score_betas")
+        critic_betas = self._parse_betas(critic_betas_raw,
+                                         where="training.fake_score_betas")
 
-        critic_sched = str(getattr(training_args, "fake_score_lr_scheduler", None) or student_sched)
+        critic_sched = str(
+            getattr(training_args, "fake_score_lr_scheduler", None)
+            or student_sched)
         self._build_role_optimizer_and_scheduler(
             role="critic",
             handle=self.critic,
@@ -227,18 +241,22 @@ class DMD2Method(DistillMethod):
         if not getattr(self.training_args, "log_validation", False):
             return
 
-        raw_steps = str(getattr(self.training_args, "validation_sampling_steps", "") or "")
+        raw_steps = str(
+            getattr(self.training_args, "validation_sampling_steps", "") or "")
         sampling_steps = [int(s) for s in raw_steps.split(",") if s.strip()]
         sampling_steps = [s for s in sampling_steps if s > 0]
         if not sampling_steps:
             # Default to the few-step student rollout step count for DMD2.
-            raw_rollout = getattr(self.training_args.pipeline_config, "dmd_denoising_steps", None)
+            raw_rollout = getattr(self.training_args.pipeline_config,
+                                  "dmd_denoising_steps", None)
             if not raw_rollout:
                 return
             sampling_steps = [int(len(raw_rollout))]
 
-        raw_guidance = getattr(self.training_args, "validation_guidance_scale", None)
-        guidance_scale = float(raw_guidance) if raw_guidance not in (None, "") else None
+        raw_guidance = getattr(self.training_args, "validation_guidance_scale",
+                               None)
+        guidance_scale = float(raw_guidance) if raw_guidance not in (
+            None, "") else None
 
         request = ValidationRequest(
             sample_handle=self.student,
@@ -265,7 +283,8 @@ class DMD2Method(DistillMethod):
         return generators
 
     def _should_update_student(self, iteration: int) -> bool:
-        interval = int(getattr(self.training_args, "generator_update_interval", 1) or 1)
+        interval = int(
+            getattr(self.training_args, "generator_update_interval", 1) or 1)
         if interval <= 0:
             return True
         return iteration % interval == 0
@@ -285,23 +304,26 @@ class DMD2Method(DistillMethod):
         if self._denoising_step_list is not None and self._denoising_step_list.device == device:
             return self._denoising_step_list
 
-        raw = getattr(self.training_args.pipeline_config, "dmd_denoising_steps", None)
+        raw = getattr(self.training_args.pipeline_config, "dmd_denoising_steps",
+                      None)
         if not raw:
-            raise ValueError("pipeline_config.dmd_denoising_steps must be set for DMD2 distillation")
+            raise ValueError(
+                "pipeline_config.dmd_denoising_steps must be set for DMD2 distillation"
+            )
 
         steps = torch.tensor(raw, dtype=torch.long, device=device)
 
         if getattr(self.training_args, "warp_denoising_step", False):
             noise_scheduler = getattr(self.adapter, "noise_scheduler", None)
             if noise_scheduler is None:
-                raise ValueError("warp_denoising_step requires adapter.noise_scheduler.timesteps")
-
-            timesteps = torch.cat(
-                (
-                    noise_scheduler.timesteps.to("cpu"),
-                    torch.tensor([0], dtype=torch.float32),
+                raise ValueError(
+                    "warp_denoising_step requires adapter.noise_scheduler.timesteps"
                 )
-            ).to(device)
+
+            timesteps = torch.cat((
+                noise_scheduler.timesteps.to("cpu"),
+                torch.tensor([0], dtype=torch.float32),
+            )).to(device)
             steps = timesteps[1000 - steps]
 
         self._denoising_step_list = steps
@@ -349,7 +371,9 @@ class DMD2Method(DistillMethod):
         target_timestep_idx_int = int(target_timestep_idx.item())
         target_timestep = step_list[target_timestep_idx]
 
-        current_noise_latents = torch.randn(latents.shape, device=device, dtype=dtype)
+        current_noise_latents = torch.randn(latents.shape,
+                                            device=device,
+                                            dtype=dtype)
         current_noise_latents_copy = current_noise_latents.clone()
 
         max_target_idx = len(step_list) - 1
@@ -361,8 +385,7 @@ class DMD2Method(DistillMethod):
                 for step_idx in range(max_target_idx):
                     current_timestep = step_list[step_idx]
                     current_timestep_tensor = current_timestep * torch.ones(
-                        1, device=device, dtype=torch.long
-                    )
+                        1, device=device, dtype=torch.long)
 
                     pred_clean = self.adapter.predict_x0(
                         self.student,
@@ -375,9 +398,10 @@ class DMD2Method(DistillMethod):
 
                     next_timestep = step_list[step_idx + 1]
                     next_timestep_tensor = next_timestep * torch.ones(
-                        1, device=device, dtype=torch.long
-                    )
-                    noise = torch.randn(latents.shape, device=device, dtype=pred_clean.dtype)
+                        1, device=device, dtype=torch.long)
+                    noise = torch.randn(latents.shape,
+                                        device=device,
+                                        dtype=pred_clean.dtype)
                     current_noise_latents = self.adapter.add_noise(
                         pred_clean,
                         noise,
@@ -412,10 +436,12 @@ class DMD2Method(DistillMethod):
                     attn_kind="vsa",
                 )
 
-        batch.dmd_latent_vis_dict["generator_timestep"] = target_timestep.float().detach()
+        batch.dmd_latent_vis_dict["generator_timestep"] = target_timestep.float(
+        ).detach()
         return pred_x0
 
-    def _critic_flow_matching_loss(self, batch: Any) -> tuple[torch.Tensor, Any, dict[str, Any]]:
+    def _critic_flow_matching_loss(
+            self, batch: Any) -> tuple[torch.Tensor, Any, dict[str, Any]]:
         with torch.no_grad():
             generator_pred_x0 = self._student_rollout(batch, with_grad=False)
 
@@ -427,14 +453,16 @@ class DMD2Method(DistillMethod):
             device=device,
             dtype=torch.long,
         )
-        fake_score_timestep = self.adapter.shift_and_clamp_timestep(fake_score_timestep)
+        fake_score_timestep = self.adapter.shift_and_clamp_timestep(
+            fake_score_timestep)
 
         noise = torch.randn(
             generator_pred_x0.shape,
             device=device,
             dtype=generator_pred_x0.dtype,
         )
-        noisy_x0 = self.adapter.add_noise(generator_pred_x0, noise, fake_score_timestep)
+        noisy_x0 = self.adapter.add_noise(generator_pred_x0, noise,
+                                          fake_score_timestep)
 
         pred_noise = self.adapter.predict_noise(
             self.critic,
@@ -445,17 +473,22 @@ class DMD2Method(DistillMethod):
             attn_kind="dense",
         )
         target = noise - generator_pred_x0
-        flow_matching_loss = torch.mean((pred_noise - target) ** 2)
+        flow_matching_loss = torch.mean((pred_noise - target)**2)
 
         batch.fake_score_latent_vis_dict = {
             "generator_pred_video": generator_pred_x0,
             "fake_score_timestep": fake_score_timestep,
         }
-        outputs = {"fake_score_latent_vis_dict": batch.fake_score_latent_vis_dict}
-        return flow_matching_loss, (batch.timesteps, batch.attn_metadata), outputs
+        outputs = {
+            "fake_score_latent_vis_dict": batch.fake_score_latent_vis_dict
+        }
+        return flow_matching_loss, (batch.timesteps,
+                                    batch.attn_metadata), outputs
 
-    def _dmd_loss(self, generator_pred_x0: torch.Tensor, batch: Any) -> torch.Tensor:
-        guidance_scale = float(getattr(self.training_args, "real_score_guidance_scale", 1.0))
+    def _dmd_loss(self, generator_pred_x0: torch.Tensor,
+                  batch: Any) -> torch.Tensor:
+        guidance_scale = float(
+            getattr(self.training_args, "real_score_guidance_scale", 1.0))
         device = generator_pred_x0.device
 
         with torch.no_grad():
@@ -473,7 +506,8 @@ class DMD2Method(DistillMethod):
                 device=device,
                 dtype=generator_pred_x0.dtype,
             )
-            noisy_latents = self.adapter.add_noise(generator_pred_x0, noise, timestep)
+            noisy_latents = self.adapter.add_noise(generator_pred_x0, noise,
+                                                   timestep)
 
             faker_x0 = self.adapter.predict_x0(
                 self.critic,
@@ -499,7 +533,8 @@ class DMD2Method(DistillMethod):
                 conditional=False,
                 attn_kind="dense",
             )
-            real_cfg_x0 = real_cond_x0 + (real_cond_x0 - real_uncond_x0) * guidance_scale
+            real_cfg_x0 = real_cond_x0 + (real_cond_x0 -
+                                          real_uncond_x0) * guidance_scale
 
             denom = torch.abs(generator_pred_x0 - real_cfg_x0).mean()
             grad = (faker_x0 - real_cfg_x0) / denom
@@ -532,11 +567,14 @@ class DMD2Method(DistillMethod):
         )
         student_ctx = None
         if update_student:
-            generator_pred_x0 = self._student_rollout(training_batch, with_grad=True)
-            student_ctx = (training_batch.timesteps, training_batch.attn_metadata_vsa)
+            generator_pred_x0 = self._student_rollout(training_batch,
+                                                      with_grad=True)
+            student_ctx = (training_batch.timesteps,
+                           training_batch.attn_metadata_vsa)
             generator_loss = self._dmd_loss(generator_pred_x0, training_batch)
 
-        fake_score_loss, critic_ctx, critic_outputs = self._critic_flow_matching_loss(training_batch)
+        fake_score_loss, critic_ctx, critic_outputs = self._critic_flow_matching_loss(
+            training_batch)
 
         total_loss = generator_loss + fake_score_loss
         loss_map = {
@@ -563,7 +601,9 @@ class DMD2Method(DistillMethod):
         grad_accum_rounds = max(1, int(grad_accum_rounds))
         backward_ctx = outputs.get("_fv_backward")
         if not isinstance(backward_ctx, dict):
-            super().backward(loss_map, outputs, grad_accum_rounds=grad_accum_rounds)
+            super().backward(loss_map,
+                             outputs,
+                             grad_accum_rounds=grad_accum_rounds)
             return
 
         update_student = bool(backward_ctx.get("update_student", False))
@@ -597,7 +637,8 @@ class DMD2Method(DistillMethod):
         schedulers: list[Any] = []
         schedulers.extend(self.bundle.role("critic").lr_schedulers.values())
         if self._should_update_student(iteration):
-            schedulers.extend(self.bundle.role("student").lr_schedulers.values())
+            schedulers.extend(
+                self.bundle.role("student").lr_schedulers.values())
         return schedulers
 
     def optimizers_schedulers_step(self, iteration: int) -> None:

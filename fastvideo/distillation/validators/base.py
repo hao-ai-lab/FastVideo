@@ -24,6 +24,10 @@ class ValidationRequest:
 
 
 class DistillValidator(ABC):
+
     @abstractmethod
-    def log_validation(self, step: int, *, request: ValidationRequest | None = None) -> None:
+    def log_validation(self,
+                       step: int,
+                       *,
+                       request: ValidationRequest | None = None) -> None:
         raise NotImplementedError

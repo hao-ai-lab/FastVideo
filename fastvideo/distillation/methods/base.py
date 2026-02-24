@@ -12,6 +12,7 @@ from fastvideo.distillation.bundle import ModelBundle
 
 
 class DistillMethod(torch.nn.Module, ABC):
+
     def __init__(self, bundle: ModelBundle) -> None:
         super().__init__()
         self.bundle = bundle
