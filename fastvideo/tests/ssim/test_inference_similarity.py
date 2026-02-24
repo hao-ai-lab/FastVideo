@@ -14,6 +14,8 @@ from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
 
+REQUIRED_GPUS = 2
+
 
 @contextmanager
 def _attention_backend(backend: str) -> Iterator[None]:
