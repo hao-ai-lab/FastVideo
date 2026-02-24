@@ -458,6 +458,25 @@ def _collect_official_double_encoder_states(pipe, latent, prompt_embeds, timeste
     return enc_states
 
 
+def _collect_fv_double4_intermediates(transformer, latent, prompt_embeds, timestep_scaled, device, freqs_cis, block_index=4):
+    """Run FastVideo transformer with _debug_double_enc for the given block; return after_attn and after_ff encoder states."""
+    debug = {"block_index": block_index, "after_attn": [], "after_ff": []}
+    joint_kwargs = {"_debug_double_enc": debug}
+
+    with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
+        transformer(
+            latent,
+            prompt_embeds,
+            timestep_scaled,
+            guidance=None,
+            freqs_cis=freqs_cis,
+            joint_attention_kwargs=joint_kwargs,
+        )
+    after_attn = debug["after_attn"][0] if len(debug["after_attn"]) > 0 else None
+    after_ff = debug["after_ff"][0] if len(debug["after_ff"]) > 0 else None
+    return after_attn, after_ff
+
+
 def _collect_fv_activations(transformer, latent, prompt_embeds, timestep_scaled, device, num_txt_tokens, freqs_cis=None):
     """Run FastVideo transformer with hooks; return list of (block_name, tensor) per block."""
     activations = []
@@ -686,6 +705,34 @@ def main():
         print(f"  {name_fv}: shape={t_fv.shape} max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f}")
     if n_double == 0 and (enc_fv or enc_official):
         print("  (one model has no double-block encoder states)")
+
+    # double_4 intermediates: after context attn vs after context FF (find whether 768 is attn or FF path)
+    TARGET_DOUBLE = 4
+    if n_double > TARGET_DOUBLE and len(enc_official) > TARGET_DOUBLE:
+        print(f"\n--- double_{TARGET_DOUBLE} intermediates (context attn vs context FF) ---")
+        fv_after_attn, fv_after_ff = _collect_fv_double4_intermediates(
+            transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis, block_index=TARGET_DOUBLE
+        )
+        _, off_enc4 = enc_official[TARGET_DOUBLE]
+        if fv_after_attn is not None and fv_after_ff is not None and off_enc4 is not None:
+            fv_after_attn = fv_after_attn.cpu().float() if fv_after_attn.is_cuda else fv_after_attn.float()
+            fv_after_ff = fv_after_ff.cpu().float() if fv_after_ff.is_cuda else fv_after_ff.float()
+            off_enc4 = off_enc4.cpu().float() if off_enc4.is_cuda else off_enc4.float()
+            if fv_after_attn.shape == off_enc4.shape and fv_after_ff.shape == off_enc4.shape:
+                d_attn_vs_off = (fv_after_attn - off_enc4).abs()
+                d_ff_vs_off = (fv_after_ff - off_enc4).abs()
+                print(f"  FV after_attn vs official double_{TARGET_DOUBLE} output: max_diff={d_attn_vs_off.max().item():.4f} mean_diff={d_attn_vs_off.mean().item():.4f}")
+                print(f"  FV after_ff    vs official double_{TARGET_DOUBLE} output: max_diff={d_ff_vs_off.max().item():.4f} mean_diff={d_ff_vs_off.mean().item():.4f}")
+                if d_attn_vs_off.max().item() > 100 and d_ff_vs_off.max().item() > 100:
+                    print("  -> Bug likely in context ATTENTION path (both after_attn and after_ff already far from official).")
+                elif d_attn_vs_off.max().item() < 50 and d_ff_vs_off.max().item() > 100:
+                    print("  -> Bug likely in context FF path (after_attn is close; after_ff diverges).")
+                else:
+                    print("  -> Compare context_attn_output / to_add_out and context_ff_output for scale or bias.")
+            else:
+                print(f"  Shape mismatch: fv_after_attn={fv_after_attn.shape} fv_after_ff={fv_after_ff.shape} official={off_enc4.shape}")
+        else:
+            print("  Missing one of fv_after_attn, fv_after_ff, or official double_4 output.")
 
     # Sub-layer: attention output of double_0 (narrows down where divergence is)
     print("\n--- double_0 attention output (inside first block) ---")
