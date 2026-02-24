@@ -468,6 +468,7 @@ def _collect_fv_double4_intermediates(transformer, latent, prompt_embeds, timest
         "before_ff": [],
         "context_ff_output": [],
         "context_ff_update": [],
+        "c_gate_mlp": [],
     }
     joint_kwargs = {"_debug_double_enc": debug}
 
@@ -489,6 +490,7 @@ def _collect_fv_double4_intermediates(transformer, latent, prompt_embeds, timest
         first("before_ff"),
         first("context_ff_output"),
         first("context_ff_update"),
+        first("c_gate_mlp"),
     )
 
 
@@ -546,15 +548,15 @@ def _capture_official_double4_context_attn(pipe, latent, prompt_embeds, timestep
 
 
 def _capture_official_double4_context_ff(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, block_index=4):
-    """Run official transformer with hook on block 4's ff_context; return (context_ff_output, context_ff_update) for the text stream."""
+    """Run official transformer with hook on block 4's ff_context; return (context_ff_output, context_ff_update, c_gate_mlp) for the text stream."""
     try:
         from diffusers.models.transformers import transformer_flux2
         Flux2Modulation = transformer_flux2.Flux2Modulation
     except Exception:
-        return None, None
+        return None, None, None
     trans = pipe.transformer
     if not hasattr(trans, "transformer_blocks") or block_index >= len(trans.transformer_blocks):
-        return None, None
+        return None, None, None
     captured_ff_output = []
 
     def ff_hook(_module, _inputs, outputs):
@@ -588,13 +590,14 @@ def _capture_official_double4_context_ff(pipe, latent, prompt_embeds, timestep_s
     finally:
         handle.remove()
     if not captured_ff_output:
-        return None, None
+        return None, None, None
     ctx_ff_out = captured_ff_output[0]
-    c_gate_mlp = c_gate_mlp.to(device=ctx_ff_out.device, dtype=ctx_ff_out.dtype)
+    c_gate_mlp_raw = c_gate_mlp.to(device=ctx_ff_out.device, dtype=ctx_ff_out.dtype)
+    c_gate_mlp = c_gate_mlp_raw
     if c_gate_mlp.dim() == 2:
         c_gate_mlp = c_gate_mlp.unsqueeze(1)
     official_context_ff_update = (c_gate_mlp * ctx_ff_out).float()
-    return ctx_ff_out.float(), official_context_ff_update
+    return ctx_ff_out.float(), official_context_ff_update, c_gate_mlp_raw.float()
 
 
 def _collect_fv_activations(transformer, latent, prompt_embeds, timestep_scaled, device, num_txt_tokens, freqs_cis=None):
@@ -833,7 +836,7 @@ def main():
     TARGET_DOUBLE = 4
     if n_double > TARGET_DOUBLE and len(enc_official) > TARGET_DOUBLE:
         print(f"\n--- double_{TARGET_DOUBLE} intermediates (context attn vs context FF) ---")
-        fv_after_attn, fv_after_ff, fv_context_attn, fv_before_ff, fv_context_ff_output, fv_context_ff_update = _collect_fv_double4_intermediates(
+        fv_after_attn, fv_after_ff, fv_context_attn, fv_before_ff, fv_context_ff_output, fv_context_ff_update, fv_c_gate_mlp = _collect_fv_double4_intermediates(
             transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis, block_index=TARGET_DOUBLE
         )
         _, off_enc4 = enc_official[TARGET_DOUBLE]
@@ -873,9 +876,9 @@ def main():
             else:
                 print("  Could not capture official double_4 context_attn update.")
 
-        # Context FF path: before_ff, context_ff_output, context_ff_update
+        # Context FF path: before_ff, context_ff_output, context_ff_update, c_gate_mlp
         print(f"\n--- double_{TARGET_DOUBLE} context FF path ---")
-        off_ctx_ff_out, off_ctx_ff_update = _capture_official_double4_context_ff(
+        off_ctx_ff_out, off_ctx_ff_update, off_c_gate_mlp = _capture_official_double4_context_ff(
             pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, block_index=TARGET_DOUBLE
         )
         if fv_before_ff is not None:
@@ -896,6 +899,15 @@ def main():
                 print(f"  FV context_ff_update (c_gate_mlp*ff_out) vs official: max_diff={d.max().item():.4f} mean_diff={d.mean().item():.4f}")
             else:
                 print(f"  context_ff_update shape mismatch: FV={fv_u.shape} official={off_u.shape}")
+        if fv_c_gate_mlp is not None and off_c_gate_mlp is not None:
+            fv_g = fv_c_gate_mlp.cpu().float() if fv_c_gate_mlp.is_cuda else fv_c_gate_mlp.float()
+            off_g = off_c_gate_mlp.cpu().float() if off_c_gate_mlp.is_cuda else off_c_gate_mlp.float()
+            print(f"  FV c_gate_mlp shape={fv_g.shape} official c_gate_mlp shape={off_g.shape}")
+            if fv_g.shape == off_g.shape:
+                d = (fv_g - off_g).abs()
+                print(f"  FV c_gate_mlp vs official: max_diff={d.max().item():.4f} mean_diff={d.mean().item():.4f}")
+            else:
+                print("  c_gate_mlp shape mismatch (check broadcast in block).")
 
     # Sub-layer: attention output of double_0 (narrows down where divergence is)
     print("\n--- double_0 attention output (inside first block) ---")

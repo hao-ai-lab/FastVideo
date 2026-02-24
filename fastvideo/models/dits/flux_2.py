@@ -587,6 +587,7 @@ class Flux2TransformerBlock(nn.Module):
         context_ff_output = self.ff_context(norm_encoder_hidden_states)
         if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
             debug_enc["context_ff_output"].append(context_ff_output.detach().clone())
+            debug_enc["c_gate_mlp"].append(c_gate_mlp.detach().clone())
         context_ff_update = c_gate_mlp * context_ff_output
         if debug_enc is not None and joint_attention_kwargs.get("_double_block_index") == debug_enc.get("block_index"):
             debug_enc["context_ff_update"].append(context_ff_update.detach().clone())
