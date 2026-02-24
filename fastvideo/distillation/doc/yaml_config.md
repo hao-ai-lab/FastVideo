@@ -10,6 +10,8 @@
   - `training_args: TrainingArgs`（来自 YAML 的 `training:`，并注入 entrypoint invariants）
   - `method_config: dict`（来自 YAML 的 `method_config:`，传给 method 解释）
   - `raw: dict`（原始 YAML，便于 tracker 记录）
+    - `wan` family 默认会把 `raw` 作为 W&B config 传给 `wandb.init(config=...)`
+    - 入口还会把 YAML 文件本身以 `run.yaml` 的形式上传到 tracker（如 W&B Files）
 
 **YAML 结构（schema v2）**
 - `recipe: {family: ..., method: ...}`

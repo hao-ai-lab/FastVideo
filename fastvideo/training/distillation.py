@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from typing import Any
 
@@ -46,6 +47,10 @@ def run_distillation_from_config(
     if dry_run:
         logger.info("Dry-run: config parsed and runtime built successfully.")
         return
+
+    # Attach the exact YAML used for this run to the tracker (e.g., W&B Files).
+    # This helps reproducibility and makes runs easy to inspect later.
+    runtime.tracker.log_file(os.path.abspath(os.path.expanduser(config_path)), name="run.yaml")
 
     ckpt_config = DistillCheckpointConfig(
         save_steps=int(getattr(training_args, "training_state_checkpointing_steps", 0) or 0),
