@@ -59,7 +59,7 @@ class Gen3CConfig(PipelineConfig):
                                                (t5_large_postprocess_text, ))
 
     dit_precision: str = "bf16"
-    vae_precision: str = "fp16"
+    vae_precision: str = "bf16"
     text_encoder_precisions: tuple[str, ...] = field(
         default_factory=lambda: ("bf16", ))
 
@@ -67,8 +67,9 @@ class Gen3CConfig(PipelineConfig):
     conditioning_strategy: str = "frame_replace"
     min_num_conditional_frames: int = 1
     max_num_conditional_frames: int = 2
-    sigma_conditional: float = 0.0001
-    sigma_data: float = 1.0
+    # Match official GEN3C/Cosmos inference defaults.
+    sigma_conditional: float = 0.001
+    sigma_data: float = 0.5
     state_ch: int = 16
     state_t: int = 16  # GEN3C uses 16 latent frames (121 pixel frames)
     text_encoder_class: str = "T5"
@@ -80,19 +81,21 @@ class Gen3CConfig(PipelineConfig):
     # GEN3C 3D Cache parameters
     frame_buffer_max: int = 2
     noise_aug_strength: float = 0.0
-    filter_points_threshold: float = 1.0
+    filter_points_threshold: float = 0.05
 
     # Depth estimation settings
     use_moge_depth: bool = True
     moge_model_name: str = "Ruicheng/moge-vitl"
+    offload_moge_after_depth: bool = True
 
-    # Camera trajectory settings
-    default_trajectory_type: str = "clockwise"
-    default_movement_distance: float = 0.03
+    # Camera trajectory settings (matching NVIDIA inference defaults)
+    default_trajectory_type: str = "left"
+    default_movement_distance: float = 0.3
     default_camera_rotation: str = "center_facing"
 
     # Video generation settings
-    video_resolution: tuple[int, int] = (720, 1280)  # H, W
+    # Match official GEN3C defaults (height=704, width=1280).
+    video_resolution: tuple[int, int] = (704, 1280)  # H, W
     num_frames: int = 121  # Default number of frames to generate
 
     # Generation frame rate
@@ -129,8 +132,8 @@ class Gen3CInferenceConfig(Gen3CConfig):
     gradient_checkpointing: bool = False
 
     # Inference-specific parameters
-    guidance_scale: float = 6.0
-    num_inference_steps: int = 50
+    guidance_scale: float = 1.0
+    num_inference_steps: int = 35
 
     # Disable noise augmentation during inference
     noise_aug_strength: float = 0.0
