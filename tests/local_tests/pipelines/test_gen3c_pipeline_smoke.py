@@ -18,6 +18,7 @@ Usage:
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -26,6 +27,8 @@ from fastvideo.configs.models.dits.gen3c import Gen3CArchConfig, Gen3CVideoConfi
 from fastvideo.configs.pipelines.gen3c import Gen3CConfig, t5_large_postprocess_text
 from fastvideo.configs.models.encoders import BaseEncoderOutput
 from fastvideo.models.dits.gen3c import Gen3CTransformer3DModel
+from fastvideo.pipelines.basic.gen3c.gen3c_pipeline import Gen3CCFGPolicyStage
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +107,8 @@ class TestGen3CPipelineConfig:
         assert config.frame_buffer_max == 2
         assert config.fps == 24
         assert config.num_frames == 121
-        assert config.video_resolution == (720, 1280)
+        # Official GEN3C/Cosmos inference defaults are 704x1280.
+        assert config.video_resolution == (704, 1280)
 
     def test_frame_buffer_max_mismatch_raises(self):
         """Pipeline and DiT frame_buffer_max should be consistent."""
@@ -112,6 +116,41 @@ class TestGen3CPipelineConfig:
         config.frame_buffer_max = 3  # mismatch with default DiT (2)
         with pytest.raises(ValueError, match="frame_buffer_max mismatch"):
             config.__post_init__()
+
+
+class TestGen3CCFGPolicy:
+    """Validate explicit CFG policy behavior for GEN3C."""
+
+    def test_official_unity_cfg_fills_default_negative_prompt(self):
+        config = Gen3CConfig()
+        config.cfg_behavior = "official_uncond_at_unity"
+        stage = Gen3CCFGPolicyStage()
+        batch = ForwardBatch(
+            data_type="video",
+            prompt="test prompt",
+            guidance_scale=1.0,
+        )
+
+        out = stage.forward(batch, SimpleNamespace(pipeline_config=config))
+
+        assert out.do_classifier_free_guidance is True
+        assert out.negative_prompt == config.default_negative_prompt
+
+    def test_official_unity_cfg_keeps_existing_negative_embeds(self):
+        config = Gen3CConfig()
+        config.cfg_behavior = "official_uncond_at_unity"
+        stage = Gen3CCFGPolicyStage()
+        batch = ForwardBatch(
+            data_type="video",
+            prompt="test prompt",
+            guidance_scale=1.0,
+            negative_prompt_embeds=[torch.zeros(1, 1, 1)],
+        )
+
+        out = stage.forward(batch, SimpleNamespace(pipeline_config=config))
+
+        assert out.do_classifier_free_guidance is True
+        assert out.negative_prompt is None
 
 
 class TestGen3CModelSmoke:
