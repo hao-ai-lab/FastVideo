@@ -81,6 +81,9 @@ _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo15": ("vaes", "hunyuan15vae", "AutoencoderKLHunyuanVideo15"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
     "AutoencoderKL": ("vaes", "autoencoder_kl", "AutoencoderKL"),
+    "AutoencoderKLGen3CTokenizer":
+    ("vaes", "gen3c_tokenizer_vae", "AutoencoderKLGen3CTokenizer"),
+    "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
     "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
 }
 

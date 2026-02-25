@@ -73,6 +73,14 @@ class SamplingParam:
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
 
+    # TeaCache parameters
+    enable_teacache: bool = False
+
+    # GEN3C camera control
+    trajectory_type: str | None = None
+    movement_distance: float | None = None
+    camera_rotation: str | None = None
+
     # Misc
     save_video: bool = True
     return_frames: bool = True

@@ -24,6 +24,7 @@ import gc
 import json
 import os
 import re
+import shutil
 from collections import OrderedDict
 from pathlib import Path
 from typing import Iterator
@@ -32,9 +33,10 @@ import torch
 from safetensors.torch import save_file
 
 try:
-    from huggingface_hub import hf_hub_download
+    from huggingface_hub import hf_hub_download, snapshot_download
 except ImportError:
     hf_hub_download = None
+    snapshot_download = None
 
 
 # Parameter name mapping from official GEN3C checkpoint to FastVideo format
@@ -361,7 +363,7 @@ def build_model_index() -> dict:
         "_class_name": "Gen3CPipeline",
         "_diffusers_version": "0.33.0.dev0",
         "transformer": ["diffusers", "Gen3CTransformer3DModel"],
-        "vae": ["diffusers", "AutoencoderKLWan"],
+        "vae": ["diffusers", "AutoencoderKLGen3CTokenizer"],
         "text_encoder": ["transformers", "T5EncoderModel"],
         "tokenizer": ["transformers", "T5Tokenizer"],
         "scheduler": ["diffusers", "FlowMatchEulerDiscreteScheduler"],
@@ -387,6 +389,85 @@ def download_checkpoint(
     )
     print(f"Downloaded to {path}")
     return Path(path)
+
+
+def resolve_model_dir(
+    model_name_or_path: str,
+    cache_dir: Path | None = None,
+) -> Path:
+    """Resolve a local model directory from path or HuggingFace repo id."""
+    model_path = Path(model_name_or_path)
+    if model_path.exists():
+        return model_path
+
+    if snapshot_download is None:
+        raise RuntimeError(
+            "huggingface_hub is required to download component source. "
+            "Install with: pip install huggingface_hub")
+
+    print(f"Downloading component source repo: {model_name_or_path}")
+    downloaded = snapshot_download(
+        repo_id=model_name_or_path,
+        allow_patterns=[
+            "model_index.json",
+            "vae/*",
+            "text_encoder/*",
+            "tokenizer/*",
+            "scheduler/*",
+        ],
+        local_dir=str(cache_dir) if cache_dir else None,
+        local_dir_use_symlinks=False,
+    )
+    print(f"Component source downloaded to {downloaded}")
+    return Path(downloaded)
+
+
+def add_inference_components(
+    source_dir: Path,
+    output_dir: Path,
+    link_components: bool = False,
+) -> None:
+    """Copy or symlink VAE/text encoder/tokenizer/scheduler into output dir."""
+    required_components = ("vae", "text_encoder", "tokenizer", "scheduler")
+    missing: list[str] = []
+
+    for component in required_components:
+        src = source_dir / component
+        dst = output_dir / component
+
+        if not src.exists():
+            missing.append(component)
+            continue
+
+        if dst.exists():
+            print(f"  Skipping {component}: already exists at {dst}")
+            continue
+
+        if link_components:
+            dst.symlink_to(src.resolve(), target_is_directory=True)
+            print(f"  Linked {component}: {dst} -> {src.resolve()}")
+        else:
+            shutil.copytree(src, dst, dirs_exist_ok=False)
+            print(f"  Copied {component}: {src} -> {dst}")
+
+    if missing:
+        raise FileNotFoundError(
+            f"Missing required components in source repo {source_dir}: {missing}"
+        )
+
+
+def patch_gen3c_vae_config(output_dir: Path) -> None:
+    """Tag copied VAE config with the Gen3C tokenizer-backed class name."""
+    vae_cfg_path = output_dir / "vae" / "config.json"
+    if not vae_cfg_path.exists():
+        return
+    with vae_cfg_path.open("r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    cfg["_class_name"] = "AutoencoderKLGen3CTokenizer"
+    with vae_cfg_path.open("w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+        f.write("\n")
+    print(f"  Patched VAE config class to AutoencoderKLGen3CTokenizer: {vae_cfg_path}")
 
 
 def main() -> None:
@@ -463,16 +544,73 @@ Examples:
         action="store_true",
         help="Disable memory-mapped loading (not recommended, uses more RAM)",
     )
+    parser.add_argument(
+        "--components-source",
+        type=str,
+        default=None,
+        help=(
+            "Optional local path or HF repo id containing diffusers components "
+            "(vae/text_encoder/tokenizer/scheduler) to copy into output. "
+            "Example: nvidia/Cosmos-Predict2-2B-Video2World"
+        ),
+    )
+    parser.add_argument(
+        "--components-cache-dir",
+        type=str,
+        default=None,
+        help="Optional cache/local directory used when downloading --components-source.",
+    )
+    parser.add_argument(
+        "--link-components",
+        action="store_true",
+        help="Create symlinks for components instead of copying (for local sources).",
+    )
+    parser.add_argument(
+        "--components-only",
+        action="store_true",
+        help=(
+            "Skip transformer conversion and only add "
+            "vae/text_encoder/tokenizer/scheduler into --output."
+        ),
+    )
     
     args = parser.parse_args()
     
     # Validate arguments
-    if args.download and args.source:
-        raise ValueError("Use either --download or --source, not both")
-    if not args.download and not args.source:
-        raise ValueError("Either --download or --source is required")
-    if not args.analyze and not args.output:
-        raise ValueError("--output is required when not using --analyze")
+    if args.components_only:
+        if args.output is None:
+            raise ValueError("--output is required with --components-only")
+        if args.components_source is None:
+            raise ValueError(
+                "--components-source is required with --components-only")
+    else:
+        if args.download and args.source:
+            raise ValueError("Use either --download or --source, not both")
+        if not args.download and not args.source:
+            raise ValueError("Either --download or --source is required")
+        if not args.analyze and not args.output:
+            raise ValueError("--output is required when not using --analyze")
+
+    if args.components_only:
+        output_dir = Path(args.output)
+        if not output_dir.exists():
+            raise FileNotFoundError(
+                f"--components-only expected existing output directory: {output_dir}"
+            )
+        component_source_dir = resolve_model_dir(
+            args.components_source,
+            cache_dir=Path(args.components_cache_dir)
+            if args.components_cache_dir else None,
+        )
+        print("Adding inference components only...")
+        add_inference_components(
+            source_dir=component_source_dir,
+            output_dir=output_dir,
+            link_components=args.link_components,
+        )
+        patch_gen3c_vae_config(output_dir)
+        print(f"Done. Components added to {output_dir}")
+        return
     
     # Parse dtype
     dtype_map = {
@@ -557,6 +695,24 @@ Examples:
         json.dump(model_index, f, indent=2)
         f.write("\n")
     print(f"\nSaved model_index.json to {model_index_path}")
+
+    if args.components_source is not None:
+        print("\nAdding inference components...")
+        component_source_dir = resolve_model_dir(
+            args.components_source,
+            cache_dir=Path(args.components_cache_dir)
+            if args.components_cache_dir else None,
+        )
+        add_inference_components(
+            source_dir=component_source_dir,
+            output_dir=output_dir,
+            link_components=args.link_components,
+        )
+        patch_gen3c_vae_config(output_dir)
+    else:
+        print("\nNote: Only transformer/model_index were written.")
+        print("FastVideo local loading also requires: vae/, text_encoder/, tokenizer/, scheduler/.")
+        print("Re-run with --components-source to add them automatically.")
     
     print(f"\nConversion complete! Output saved to {output_dir}")
     print("\nTo use with FastVideo:")

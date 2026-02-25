@@ -12,8 +12,12 @@ from fastvideo.pipelines.basic.gen3c.cache_3d import (
 )
 from fastvideo.pipelines.basic.gen3c.gen3c_pipeline import (
     Gen3CPipeline,
+    Gen3CConditioningStage,
     Gen3CDenoisingStage,
     Gen3CLatentPreparationStage,
+)
+from fastvideo.pipelines.basic.gen3c.camera_utils import (
+    generate_camera_trajectory,
 )
 
 __all__ = [
@@ -23,8 +27,11 @@ __all__ = [
     "forward_warp",
     "unproject_points",
     "project_points",
+    # Camera
+    "generate_camera_trajectory",
     # Pipeline
     "Gen3CPipeline",
+    "Gen3CConditioningStage",
     "Gen3CDenoisingStage",
     "Gen3CLatentPreparationStage",
 ]

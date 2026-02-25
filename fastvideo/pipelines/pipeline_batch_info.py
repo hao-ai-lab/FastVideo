@@ -146,6 +146,11 @@ class ForwardBatch:
     # Camera control inputs (LingBotWorld)
     c2ws_plucker_emb: torch.Tensor | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
 
+    # Camera control inputs (GEN3C)
+    trajectory_type: str | None = None
+    movement_distance: float | None = None
+    camera_rotation: str | None = None
+
     # Latent dimensions
     height_latents: list[int] | int | None = None
     width_latents: list[int] | int | None = None

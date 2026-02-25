@@ -588,6 +588,33 @@ class TokenizerLoader(ComponentLoader):
 class VAELoader(ComponentLoader):
     """Loader for VAE."""
 
+    @staticmethod
+    def _find_gen3c_tokenizer_checkpoint(model_path: str) -> str | None:
+        """Locate tokenizer-backed VAE checkpoint used by GEN3C integration."""
+        candidates = [
+            os.path.join(model_path, "tokenizer.pth"),
+            os.path.join(os.path.dirname(model_path), "tokenizer",
+                         "tokenizer.pth"),
+        ]
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    @staticmethod
+    def _find_gen3c_jit_tokenizer_dir(model_path: str) -> str | None:
+        """Locate official tokenizer JIT assets (encoder/decoder/mean_std)."""
+        candidates = [
+            model_path,
+            os.path.join(os.path.dirname(model_path), "tokenizer"),
+        ]
+        required = ("encoder.jit", "decoder.jit", "mean_std.pt")
+        for directory in candidates:
+            if all(os.path.exists(os.path.join(directory, name))
+                   for name in required):
+                return directory
+        return None
+
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the VAE based on the model path, and inference args."""
         config = get_diffusers_config(model=model_path)
@@ -614,8 +641,68 @@ class VAELoader(ComponentLoader):
             if fastvideo_args.pipeline_config.vae_precision
             else torch.bfloat16
         ):
+            pipeline_name = fastvideo_args.pipeline_config.__class__.__name__
+            is_gen3c = pipeline_name.startswith("Gen3C")
+            is_cosmos25 = pipeline_name == "Cosmos25Config"
+
+            # GEN3C: prefer tokenizer-backed VAE checkpoint when available.
+            # This aligns latent conditioning with the GEN3C temporal contract.
+            if is_gen3c and class_name in (
+                    "AutoencoderKLWan", "AutoencoderKLGen3CTokenizer"):
+                from fastvideo.models.vaes.gen3c_tokenizer_vae import (
+                    AutoencoderKLGen3CTokenizer)
+
+                dtype = PRECISION_TO_TYPE[
+                    fastvideo_args.pipeline_config.vae_precision]
+                num_frames = int(
+                    getattr(fastvideo_args.pipeline_config, "num_frames", 121))
+                state_t = int(
+                    getattr(fastvideo_args.pipeline_config, "state_t", 16))
+                if state_t > 1 and num_frames > 1:
+                    target_temporal = max(1,
+                                          (num_frames - 1) // (state_t - 1))
+                else:
+                    target_temporal = 8
+
+                jit_dir = self._find_gen3c_jit_tokenizer_dir(model_path)
+                if jit_dir is not None:
+                    vae = AutoencoderKLGen3CTokenizer.from_jit_tokenizer(
+                        jit_dir,
+                        device=target_device,
+                        dtype=dtype,
+                        target_temporal_compression=target_temporal,
+                        pixel_chunk_duration=num_frames,
+                    )
+                    logger.info(
+                        "Loaded GEN3C tokenizer VAE from JIT assets in %s (target temporal compression=%d)",
+                        jit_dir,
+                        target_temporal,
+                    )
+                    return vae.eval()
+
+                tokenizer_ckpt = self._find_gen3c_tokenizer_checkpoint(
+                    model_path)
+                if tokenizer_ckpt is not None:
+                    vae = AutoencoderKLGen3CTokenizer.from_tokenizer_checkpoint(
+                        tokenizer_ckpt,
+                        device=target_device,
+                        dtype=dtype,
+                        target_temporal_compression=target_temporal,
+                        pixel_chunk_duration=num_frames,
+                    )
+                    logger.info(
+                        "Loaded GEN3C tokenizer VAE from %s (target temporal compression=%d)",
+                        tokenizer_ckpt,
+                        target_temporal,
+                    )
+                    return vae.eval()
+                logger.warning(
+                    "GEN3C tokenizer VAE checkpoint not found near %s; falling back to configured class %s.",
+                    model_path,
+                    class_name,
+                )
+
             # Cosmos2.5 uses a Wan2.1 VAE stored as `tokenizer.safetensors` under the VAE folder.
-            is_cosmos25 = fastvideo_args.pipeline_config.__class__.__name__ == "Cosmos25Config"
             if class_name == "AutoencoderKLWan" and is_cosmos25:
                 from fastvideo.models.vaes.cosmos25wanvae import Cosmos25WanVAE
 
