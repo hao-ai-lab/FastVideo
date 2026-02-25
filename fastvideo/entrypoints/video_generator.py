@@ -6,6 +6,7 @@ This module provides a consolidated interface for generating videos using
 diffusion models.
 """
 
+import gc
 import os
 import re
 import threading
@@ -183,6 +184,7 @@ class VideoGenerator:
             for i, batch_prompt in enumerate(prompts):
                 logger.info("Processing prompt %d/%d: %s...", i + 1,
                             len(prompts), batch_prompt[:100])
+                result = None
                 try:
                     # Generate video for this prompt using the same logic below
                     output_path = self._prepare_output_path(
@@ -193,12 +195,25 @@ class VideoGenerator:
                         sampling_param=sampling_param,
                         **kwargs)
 
-                    # Add prompt info to result
+                    # Keep only lightweight metadata — heavy tensors already saved to disk
                     if isinstance(result, dict):
-                        result["prompt_index"] = i
-                        result["prompt"] = batch_prompt
+                        results.append({
+                            "prompt_index":
+                            i,
+                            "prompt":
+                            batch_prompt,
+                            "size":
+                            result.get("size"),
+                            "generation_time":
+                            result.get("generation_time"),
+                            "logging_info":
+                            result.get("logging_info"),
+                            "peak_memory_mb":
+                            result.get("peak_memory_mb"),
+                        })
+                    else:
+                        results.append(result)
 
-                    results.append(result)
                     logger.info("Successfully generated video for prompt %d",
                                 i + 1)
 
@@ -206,6 +221,12 @@ class VideoGenerator:
                     logger.error("Failed to generate video for prompt %d: %s",
                                  i + 1, e)
                     continue
+                finally:
+                    # Free memory between iterations
+                    del result
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    torch.cuda.reset_peak_memory_stats()
 
             logger.info(
                 "Completed batch processing. Generated %d videos successfully.",
