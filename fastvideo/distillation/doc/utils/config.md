@@ -49,14 +49,14 @@
   - `disable_custom_init_weights`: 是否禁用 family 的“加载时自定义 init weights 逻辑”
 
 ## 3) Builder 装配相关（build-time / run-time 边界）
-- `FamilyArtifacts`
-  - family 插件 build-time 的产物集合：
+- `FamilyComponents`
+  - model 插件 build-time 的产物集合：
     - `training_args`
     - `bundle`
     - `adapter`
     - `dataloader`
     - `tracker`
-    - `validator`（可选；family-specific）
+    - `validator`（可选；model-specific）
     - `start_step`（用于 resume / warm-start）
 - `DistillRuntime`
   - `DistillTrainer.run()` 所需的最小集合：

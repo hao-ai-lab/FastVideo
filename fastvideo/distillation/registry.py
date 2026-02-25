@@ -7,12 +7,12 @@ from typing import Any, Protocol
 
 from fastvideo.distillation.roles import ModelBundle
 from fastvideo.distillation.methods.base import DistillMethod
-from fastvideo.distillation.utils.config import FamilyArtifacts
+from fastvideo.distillation.utils.config import FamilyComponents
 from fastvideo.distillation.utils.config import DistillRunConfig
 
 
-class FamilyBuilder(Protocol):
-    def __call__(self, *, cfg: DistillRunConfig) -> FamilyArtifacts:
+class ModelBuilder(Protocol):
+    def __call__(self, *, cfg: DistillRunConfig) -> FamilyComponents:
         ...
 
 
@@ -28,20 +28,20 @@ class MethodBuilder(Protocol):
         ...
 
 
-_FAMILIES: dict[str, FamilyBuilder] = {}
+_MODELS: dict[str, ModelBuilder] = {}
 _METHODS: dict[str, MethodBuilder] = {}
 _BUILTINS_REGISTERED = False
 
 
-def register_family(name: str) -> Callable[[FamilyBuilder], FamilyBuilder]:
+def register_model(name: str) -> Callable[[ModelBuilder], ModelBuilder]:
     name = str(name).strip()
     if not name:
-        raise ValueError("family name cannot be empty")
+        raise ValueError("model name cannot be empty")
 
-    def decorator(builder: FamilyBuilder) -> FamilyBuilder:
-        if name in _FAMILIES:
-            raise KeyError(f"Family already registered: {name!r}")
-        _FAMILIES[name] = builder
+    def decorator(builder: ModelBuilder) -> ModelBuilder:
+        if name in _MODELS:
+            raise KeyError(f"Model already registered: {name!r}")
+        _MODELS[name] = builder
         return builder
 
     return decorator
@@ -75,19 +75,19 @@ def ensure_builtin_registrations() -> None:
     _BUILTINS_REGISTERED = True
 
 
-def available_families() -> list[str]:
-    return sorted(_FAMILIES.keys())
+def available_models() -> list[str]:
+    return sorted(_MODELS.keys())
 
 
 def available_methods() -> list[str]:
     return sorted(_METHODS.keys())
 
 
-def get_family(name: str) -> FamilyBuilder:
+def get_model(name: str) -> ModelBuilder:
     ensure_builtin_registrations()
-    if name not in _FAMILIES:
-        raise KeyError(f"Unknown family {name!r}. Available: {available_families()}")
-    return _FAMILIES[name]
+    if name not in _MODELS:
+        raise KeyError(f"Unknown model {name!r}. Available: {available_models()}")
+    return _MODELS[name]
 
 
 def get_method(name: str) -> MethodBuilder:

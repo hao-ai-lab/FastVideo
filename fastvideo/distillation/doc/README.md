@@ -5,14 +5,14 @@
 设计原则（对应 Phase 2.9）：
 - **Trainer** 只做 infra（loop/accum/日志/ckpt/validate 调用），不包含算法策略。
 - **Method** 只做算法（loss + update policy + 需要哪些 roles）。
-- **Family** 只做装配（build-time：加载 modules、构建 bundle/adapter/dataloader/validator/tracker；代码在 `models/`）。
+- **Model plugin** 只做装配（build-time：加载 modules、构建 bundle/adapter/dataloader/validator/tracker；代码在 `models/`）。
 - **Adapter** 只做运行时 primitive（step-time：prepare_batch/forward_context/predict/backward 等），
   API 以 operation 为中心，不以 role 为中心（避免 role 爆炸）。
 
 快速入口（从运行到训练）：
 `fastvideo/training/distillation.py` → `utils.config.load_distill_run_config()` →
-`builder.build_runtime_from_config()` → `registry.get_family()/get_method()` →
-`FamilyArtifacts + DistillMethod` → `DistillTrainer.run()`
+`builder.build_runtime_from_config()` → `registry.get_model()/get_method()` →
+`FamilyComponents + DistillMethod` → `DistillTrainer.run()`
 
 ---
 

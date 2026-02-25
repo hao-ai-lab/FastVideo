@@ -1,12 +1,12 @@
 # `fastvideo/distillation/models/wan.py`
 
 **定位**
-- `@register_family("wan")` 的 build-time 插件：
-  - 负责把 YAML config 装配成 `FamilyArtifacts`
+- `@register_model("wan")` 的 build-time 插件（实现：`build_wan_components(...)`）：
+  - 负责把 YAML config 装配成 `FamilyComponents`
   - 包含 Wan 特有的模块加载、shared components、dataloader schema 等逻辑
 
 **产物**
-- `FamilyArtifacts(training_args, bundle, adapter, dataloader, tracker, validator, start_step)`
+- `FamilyComponents(training_args, bundle, adapter, dataloader, tracker, validator, start_step)`
 
 **主要职责**
 1) **加载 shared components**
@@ -23,13 +23,13 @@
 4) **tracker / validator（可选）**
    - tracker：`initialize_trackers(...)`（rank0 才启用）
    - validator：`WanValidator`（当 `training_args.log_validation=true`）
-     - family 只负责构建并返回 `validator`
+     - model plugin 只负责构建并返回 `validator`
      - validator 本身不应 hardcode `bundle.role("student")` 等角色语义；
        method 通过 `ValidationRequest.sample_handle` 指定要采样的模型
      - 是否调用、用什么采样配置由 method 决定（method-managed validation）
 
 **Phase 2.9 的关键变化**
-- ✅ family 不再创建 optimizers/schedulers。
+- ✅ model plugin 不再创建 optimizers/schedulers。
   - 这类 update policy（哪些 role 训练、各自超参）属于 method/算法语义。
   - 当前由 `DMD2Method` 在初始化时创建并写回 `RoleHandle.optimizers/lr_schedulers`。
 

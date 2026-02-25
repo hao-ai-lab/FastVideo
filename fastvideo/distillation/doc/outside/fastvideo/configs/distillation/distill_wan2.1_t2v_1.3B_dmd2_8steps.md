@@ -25,7 +25,7 @@
 
 ## 关键语义归属（Phase 2.9 视角）
 
-**Family（Wan）关心：**
+**Model plugin（Wan）关心：**
 - `roles.*.path / trainable`
 - `training.data_path / dataloader_num_workers / train_batch_size / seed / output_dir`
 - Wan 相关的 shape 信息（`num_latent_t/num_height/num_width/...`）

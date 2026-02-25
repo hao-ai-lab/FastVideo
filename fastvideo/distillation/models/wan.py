@@ -9,8 +9,8 @@ import torch
 
 from fastvideo.distillation.adapters.wan import WanAdapter
 from fastvideo.distillation.roles import ModelBundle, RoleHandle
-from fastvideo.distillation.registry import register_family
-from fastvideo.distillation.utils.config import FamilyArtifacts
+from fastvideo.distillation.registry import register_model
+from fastvideo.distillation.utils.config import FamilyComponents
 from fastvideo.distillation.utils.config import DistillRunConfig
 from fastvideo.distillation.utils.data import build_parquet_t2v_train_dataloader
 from fastvideo.distillation.utils.tracking import build_tracker
@@ -74,8 +74,8 @@ def _apply_trainable(module: torch.nn.Module, *, trainable: bool) -> torch.nn.Mo
     return module
 
 
-@register_family("wan")
-def build_wan_family_artifacts(*, cfg: DistillRunConfig) -> FamilyArtifacts:
+@register_model("wan")
+def build_wan_components(*, cfg: DistillRunConfig) -> FamilyComponents:
     training_args = cfg.training_args
     roles_cfg = cfg.roles
 
@@ -178,7 +178,7 @@ def build_wan_family_artifacts(*, cfg: DistillRunConfig) -> FamilyArtifacts:
         parquet_schema=pyarrow_schema_t2v,
     )
 
-    return FamilyArtifacts(
+    return FamilyComponents(
         training_args=training_args,
         bundle=bundle,
         adapter=adapter,

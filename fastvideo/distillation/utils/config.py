@@ -201,12 +201,12 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
 
 
 @dataclass(slots=True)
-class FamilyArtifacts:
-    """Build-time outputs produced by a model family plugin.
+class FamilyComponents:
+    """Build-time outputs produced by a model plugin.
 
-    A family is responsible for loading modules, constructing a `ModelBundle`,
-    and assembling shared components needed by runtime adapters, dataloaders,
-    validators, and trackers.
+    A model plugin is responsible for loading modules, constructing a
+    `ModelBundle`, and assembling shared components needed by runtime adapters,
+    dataloaders, validators, and trackers.
     """
 
     training_args: TrainingArgs
