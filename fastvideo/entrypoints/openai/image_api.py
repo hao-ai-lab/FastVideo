@@ -6,6 +6,8 @@ import os
 import time
 from typing import List, Optional
 
+import aiofiles
+
 from fastapi import APIRouter, File, Form, HTTPException, Path, Query, UploadFile
 from fastapi.responses import FileResponse
 
@@ -120,8 +122,8 @@ async def generations(request: ImageGenerationsRequest):
     if resp_format == "b64_json":
         if not os.path.exists(save_file_path):
             raise HTTPException(status_code=500, detail="Image was not saved to disk")
-        with open(save_file_path, "rb") as f:
-            b64_data = base64.b64encode(f.read()).decode("utf-8")
+        async with aiofiles.open(save_file_path, "rb") as f:
+            b64_data = base64.b64encode(await f.read()).decode("utf-8")
         data = [ImageResponseData(b64_json=b64_data, revised_prompt=request.prompt)]
     elif resp_format == "url":
         data = [
@@ -227,8 +229,8 @@ async def edits(
 
     resp_format = (response_format or "b64_json").lower()
     if resp_format == "b64_json":
-        with open(save_file_path, "rb") as f:
-            b64_data = base64.b64encode(f.read()).decode("utf-8")
+        async with aiofiles.open(save_file_path, "rb") as f:
+            b64_data = base64.b64encode(await f.read()).decode("utf-8")
         data = [
             ImageResponseData(
                 b64_json=b64_data,
