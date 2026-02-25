@@ -3,7 +3,7 @@
 本文档描述当前 distillation 入口所使用的 **YAML schema v2**、字段含义与设计取舍。
 
 相关实现：
-- YAML loader：`fastvideo/distillation/yaml_config.py`
+- YAML loader：`fastvideo/distillation/utils/config.py::load_distill_run_config`
 - Entrypoint：`fastvideo/training/distillation.py`
 - Schema/类型定义：`fastvideo/distillation/utils/config.py`
 - 示例 YAML（outside）：`fastvideo/distillation/outside/fastvideo/configs/distillation/`
@@ -88,7 +88,7 @@ roles:
 - 优化器默认值：`learning_rate`, `betas`, `lr_scheduler`, ...
 - tracking/validation：`log_validation`, `validation_*`, `tracker_project_name`, ...
 
-loader 会注入/补全的 invariants（见 `fastvideo/distillation/yaml_config.py`）：
+loader 会注入/补全的 invariants（见 `fastvideo/distillation/utils/config.py`）：
 - `mode = ExecutionMode.DISTILLATION`
 - `inference_mode = False`
 - `dit_precision` 默认 `fp32`（master weights）

@@ -10,7 +10,7 @@
   API 以 operation 为中心，不以 role 为中心（避免 role 爆炸）。
 
 快速入口（从运行到训练）：
-`fastvideo/training/distillation.py` → `yaml_config.load_distill_run_config()` →
+`fastvideo/training/distillation.py` → `utils.config.load_distill_run_config()` →
 `builder.build_runtime_from_config()` → `registry.get_family()/get_method()` →
 `FamilyArtifacts + DistillMethod` → `DistillTrainer.run()`
 
@@ -20,7 +20,6 @@
 
 ### Core
 - `__init__.md`
-- `yaml_config.md`
 - `utils/__init__.md`
 - `utils/config.md`
 - `registry.md`

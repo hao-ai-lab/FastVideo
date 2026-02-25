@@ -17,7 +17,7 @@ from fastvideo.distillation.bundle import RoleHandle
 from fastvideo.distillation.methods.base import DistillMethod
 from fastvideo.distillation.registry import register_method
 from fastvideo.distillation.validators.base import ValidationRequest
-from fastvideo.distillation.yaml_config import DistillRunConfig
+from fastvideo.distillation.utils.config import DistillRunConfig
 
 
 class _DMD2Adapter(Protocol):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastvideo.distillation.registry import get_family, get_method
 from fastvideo.distillation.utils.config import DistillRuntime
-from fastvideo.distillation.yaml_config import DistillRunConfig
+from fastvideo.distillation.utils.config import DistillRunConfig
 
 
 def build_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:

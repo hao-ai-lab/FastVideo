@@ -56,7 +56,7 @@ method_config: {...}     # algorithm（方法侧）
 - [x] `fastvideo/distillation/utils/config.py`
   - 新增 `RecipeSpec(family: str, method: str)`
   - `DistillRunConfig` 增加 `recipe` 与 `method_config`
-- [x] `fastvideo/distillation/yaml_config.py`
+- [x] `fastvideo/distillation/utils/config.py`（包含 YAML loader + schema/dataclass）
   - 解析 `recipe:` 与 `method_config:`（默认 `{}`）
   - 将 v1 的 `distill:` 视为不再支持（breaking change，直接推进 schema v2）
 - [x] `fastvideo/distillation/builder.py`
@@ -192,6 +192,7 @@ Phase 3.1~3.3 已经把训练端到端跑通；但目前 `fastvideo/distillation
 
 4) **减少“文件级概念数量”**
 - 已将纯 dataclass（原 `specs.py/runtime.py`）合并到 `utils/config.py`，减少“文件级概念数量”
+- 已将 YAML loader（原 `yaml_config.py`）合并到 `utils/config.py`（schema+解析逻辑同处）
 - `registry.py + builder.py` 可以合并/重命名为更直觉的 `dispatch.py`（保留注册表与 build_runtime 的入口）
 
 5) **迁移策略：保证渐进、可回退**
@@ -244,6 +245,7 @@ Phase 3.4 目标：
 
 命名/结构（行为尽量不变）：
 - [x] YAML schema：顶层 `models:` → `roles:`（与 `DistillRunConfig.roles` 对齐）
+- [x] YAML loader：`fastvideo/distillation/yaml_config.py` → `fastvideo/distillation/utils/config.py`
 - [ ] 新增 `fastvideo/distillation/models/`（拷贝/迁移原 `families/`）
 - [ ] 保留 `fastvideo/distillation/families/` 作为兼容 re-export（短期）
 - [ ] 新增 `fastvideo/distillation/roles.py` 并迁移 `RoleHandle/ModelBundle`

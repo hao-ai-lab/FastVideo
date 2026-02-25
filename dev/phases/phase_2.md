@@ -71,7 +71,7 @@ distillation pipeline**（`fastvideo/training/*distillation_pipeline.py`）。
 - [x] 定义结构化 spec（角色驱动）：`DistillSpec / RoleSpec`
   - 目标：`models={role -> spec}` 成为唯一真相
   - method 自己声明需要哪些 roles（缺失则报错）
-- [x] 新增 YAML 配置解析：`fastvideo/distillation/yaml_config.py::load_distill_run_config`
+- [x] 新增 YAML 配置解析：`fastvideo/distillation/utils/config.py::load_distill_run_config`
   - `yaml.safe_load` + 最小 schema 校验（不做 legacy CLI merge）
   - schema：`distill + models + training + (pipeline_config|pipeline_config_path)`
 - [x] 修改入口：`fastvideo/training/distillation.py`
@@ -162,7 +162,7 @@ distillation pipeline**（`fastvideo/training/*distillation_pipeline.py`）。
 
 建议新增：
 
-- `fastvideo/distillation/specs.py`
+- `fastvideo/distillation/utils/config.py`（后续实现时收敛到该文件）
   - `ModelSpec`：`family/path/revision/precision/...`
   - `RoleSpec`：`role/trainable/optimizer/scheduler/...`
   - `DistillSpec`：`method + models{role->RoleSpec} + adapter_family(optional)`
