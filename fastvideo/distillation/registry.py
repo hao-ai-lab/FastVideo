@@ -7,12 +7,12 @@ from typing import Any, Protocol
 
 from fastvideo.distillation.roles import ModelBundle
 from fastvideo.distillation.methods.base import DistillMethod
-from fastvideo.distillation.utils.config import FamilyComponents
+from fastvideo.distillation.utils.config import ModelComponents
 from fastvideo.distillation.utils.config import DistillRunConfig
 
 
 class ModelBuilder(Protocol):
-    def __call__(self, *, cfg: DistillRunConfig) -> FamilyComponents:
+    def __call__(self, *, cfg: DistillRunConfig) -> ModelComponents:
         ...
 
 

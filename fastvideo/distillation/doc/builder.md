@@ -2,7 +2,7 @@
 
 **目的**
 - 把 YAML config（`DistillRunConfig`）装配成一个可运行的 `DistillRuntime`：
-  - `model plugin` 负责 build-time 产物（`FamilyComponents`）
+  - `model plugin` 负责 build-time 产物（`ModelComponents`）
   - `method` 负责算法（`DistillMethod`）
 
 **关键 API**

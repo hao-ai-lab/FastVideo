@@ -2,11 +2,11 @@
 
 **定位**
 - `@register_model("wan")` 的 build-time 插件（实现：`build_wan_components(...)`）：
-  - 负责把 YAML config 装配成 `FamilyComponents`
+  - 负责把 YAML config 装配成 `ModelComponents`
   - 包含 Wan 特有的模块加载、shared components、dataloader schema 等逻辑
 
 **产物**
-- `FamilyComponents(training_args, bundle, adapter, dataloader, tracker, validator, start_step)`
+- `ModelComponents(training_args, bundle, adapter, dataloader, tracker, validator, start_step)`
 
 **主要职责**
 1) **加载 shared components**

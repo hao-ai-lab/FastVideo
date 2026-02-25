@@ -201,7 +201,7 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
 
 
 @dataclass(slots=True)
-class FamilyComponents:
+class ModelComponents:
     """Build-time outputs produced by a model plugin.
 
     A model plugin is responsible for loading modules, constructing a

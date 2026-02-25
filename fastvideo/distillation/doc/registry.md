@@ -7,7 +7,7 @@
   - build 组合不需要写 N×M 的 if/else
 
 **关键概念**
-- `ModelBuilder(cfg) -> FamilyComponents`
+- `ModelBuilder(cfg) -> ModelComponents`
 - `MethodBuilder(cfg, bundle, adapter, validator) -> DistillMethod`
 
 **关键 API**

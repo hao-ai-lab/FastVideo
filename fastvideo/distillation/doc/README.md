@@ -12,7 +12,7 @@
 快速入口（从运行到训练）：
 `fastvideo/training/distillation.py` → `utils.config.load_distill_run_config()` →
 `builder.build_runtime_from_config()` → `registry.get_model()/get_method()` →
-`FamilyComponents + DistillMethod` → `DistillTrainer.run()`
+`ModelComponents + DistillMethod` → `DistillTrainer.run()`
 
 ---
 
