@@ -907,8 +907,14 @@ class TrainingArgs(FastVideoArgs):
     lora_training: bool = False
     ltx2_first_frame_conditioning_p: float = 0.1
 
-    # Action-only training (freeze base model, only train action params)
+    # Action-only training: freeze base DiT, only train action modules
     train_action_only: bool = False
+
+    # Which action modules to train (only effective when train_action_only=True):
+    #   "both"       – action_embedder + prope_proj  (default)
+    #   "action_mlp" – action_embedder only
+    #   "prope"      – prope_proj only
+    action_train_target: str = "both"
 
     # Action warmup: keep action modules (action_embedder, to_out_prope) at zero
     # for this many steps to let the base model stabilize first, then enable them.
@@ -1398,6 +1404,13 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=TrainingArgs.context_noise,
                             help="Context noise level for cache updates")
+        parser.add_argument(
+            "--action-train-target",
+            type=str,
+            default=TrainingArgs.action_train_target,
+            choices=["both", "action_mlp", "prope"],
+            help="Which action modules to train while freezing the base model",
+        )
 
         return parser
 

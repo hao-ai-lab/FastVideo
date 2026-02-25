@@ -15,6 +15,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torchvision
+from diffusers import FlowMatchEulerDiscreteScheduler
 from einops import rearrange
 from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -116,7 +117,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         # Set random seeds for deterministic training
         assert self.seed is not None, "seed must be set"
-        set_random_seed(self.seed + self.global_rank)
+        set_random_seed(self.seed)
         self.transformer.train()
         if training_args.enable_gradient_checkpointing_type is not None:
             self.transformer = apply_activation_checkpointing(
@@ -614,15 +615,15 @@ class TrainingPipeline(LoRAPipeline, ABC):
             )
 
         # Set random seeds for deterministic training
-        self.noise_random_generator = torch.Generator(
-            device="cpu").manual_seed(self.seed + self.global_rank)
+        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
+            self.seed)
         self.noise_gen_cuda = torch.Generator(
-            device=current_platform.device_name).manual_seed(self.seed +
-                                                             self.global_rank)
+            device=current_platform.device_name).manual_seed(self.seed)
         self.validation_random_generator = torch.Generator(
-            device="cpu").manual_seed(self.seed + self.global_rank)
-        logger.info("Initialized random seeds with seed: %s",
-                    self.seed + self.global_rank)
+            device="cpu").manual_seed(self.seed)
+        logger.info("Initialized random seeds with seed: %s", self.seed)
+
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
