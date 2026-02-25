@@ -12,8 +12,20 @@ Instructions to install FastVideo for NVIDIA CUDA GPUs.
 ## Set up using Python
 ### Create a new Python environment
 
-#### Conda
-You can create a new python environment using [Conda](https://docs.conda.io/projects/conda/en/stable/user-guide/getting-started.html)
+#### uv
+Recommended default: use [uv](https://docs.astral.sh/uv/) for faster and more stable environment setup.
+
+Please follow the [documentation](https://docs.astral.sh/uv/#getting-started) to install `uv`. After installing `uv`, create a new environment using:
+
+```console
+# (Recommended) Create a new uv environment. Use `--seed` to install `pip` and `setuptools`.
+uv venv --python 3.12 --seed
+source .venv/bin/activate
+```
+
+#### Conda (alternative)
+You can also create a Python environment using [Conda](https://docs.conda.io/projects/conda/en/stable/user-guide/getting-started.html).
+
 ##### 1. Install Miniconda (if not already installed)
 
 ```bash
@@ -25,34 +37,35 @@ source ~/.bashrc
 ##### 2. Create and activate a Conda environment for FastVideo
 
 ```bash
-# (Recommended) Create a new conda environment.
+# Create and activate a Conda environment
 conda create -n fastvideo python=3.12 -y
 conda activate fastvideo
 ```
 
-#### uv
-
-Or you can create a new Python environment using [uv](https://docs.astral.sh/uv/), a very fast Python environment manager. Please follow the [documentation](https://docs.astral.sh/uv/#getting-started) to install `uv`. After installing `uv`, you can create a new Python environment using the following command:
-
-```console
-# (Recommended) Create a new uv environment. Use `--seed` to install `pip` and `setuptools` in the environment.
-uv venv --python 3.12 --seed
-source .venv/bin/activate
-```
-
 ### Installation
 
-```bash
-pip install fastvideo
+#### With uv (recommended)
 
-# or if you are using uv
+```bash
 uv pip install fastvideo
 ```
 
-Also optionally install flash-attn:
+Also optionally install FlashAttention:
 
 ```bash
-pip install flash-attn --no-build-isolation
+uv pip install flash-attn --no-build-isolation -v
+```
+
+#### With Conda environment (alternative)
+
+```bash
+pip install fastvideo
+```
+
+Also optionally install FlashAttention:
+
+```bash
+pip install flash-attn --no-build-isolation -v
 ```
 
 ### Installation from Source
@@ -68,10 +81,13 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 Basic installation:
 
 ```bash
-pip install -e .
-
-# or if you are using uv
 uv pip install -e .
+```
+
+Alternative with Conda environment:
+
+```bash
+pip install -e .
 ```
 
 ### Optional Dependencies
@@ -79,7 +95,13 @@ uv pip install -e .
 #### Flash Attention
 
 ```bash
-pip install flash-attn --no-build-isolation
+uv pip install flash-attn --no-build-isolation -v
+```
+
+Alternative with Conda environment:
+
+```bash
+pip install flash-attn --no-build-isolation -v
 ```
 
 ## Set up using Docker

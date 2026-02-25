@@ -11,15 +11,15 @@ This page contains step-by-step instructions to get you quickly started with vid
 
 ## Installation
 
-We recommend using an environment manager such as `Conda` to create a clean environment:
+If you previously used Conda, we recommend using [uv](https://docs.astral.sh/uv/) instead for a faster and more stable environment setup:
 
 ```bash
-# Create and activate a new conda environment
-conda create -n fastvideo python=3.12
-conda activate fastvideo
+# Create and activate a new uv environment
+uv venv --python 3.12 --seed
+source .venv/bin/activate
 
 # Install FastVideo
-pip install fastvideo
+uv pip install fastvideo
 ```
 
 For advanced installation options, see the [Installation Guide](../getting_started/installation.md).
