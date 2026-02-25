@@ -5,6 +5,7 @@ import os
 import re
 from typing import Any, List, Optional, Union
 
+import aiofiles
 import httpx
 from fastapi import UploadFile
 
@@ -46,8 +47,8 @@ async def save_image_to_path(image: Union[UploadFile, str], target_path: str) ->
 async def _save_upload_to_path(upload: UploadFile, target_path: str) -> str:
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
     content = await upload.read()
-    with open(target_path, "wb") as f:
-        f.write(content)
+    async with aiofiles.open(target_path, "wb") as f:
+        await f.write(content)
     return target_path
 
 
@@ -84,8 +85,8 @@ async def _save_url_image_to_path(image_url: str, target_path: str) -> str:
                     ext = ".jpg"
                 target_path = f"{target_path}{ext}"
 
-            with open(target_path, "wb") as f:
-                f.write(response.content)
+            async with aiofiles.open(target_path, "wb") as f:
+                await f.write(response.content)
             return target_path
     except Exception as e:
         raise RuntimeError(f"Failed to download image from URL: {e}")
@@ -107,8 +108,8 @@ async def _save_base64_image_to_path(base64_data: str, target_path: str) -> str:
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
     try:
         image_data = base64.b64decode(data)
-        with open(target_path, "wb") as f:
-            f.write(image_data)
+        async with aiofiles.open(target_path, "wb") as f:
+            await f.write(image_data)
         return target_path
     except Exception as e:
         raise RuntimeError(f"Failed to decode base64 image: {e}")

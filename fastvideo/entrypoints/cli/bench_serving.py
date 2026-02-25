@@ -24,6 +24,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+import aiofiles
 import aiohttp
 import numpy as np
 import requests
@@ -364,9 +365,11 @@ async def async_request_image_sglang(
         # Add image file(s)
         for idx, img_path in enumerate(input.image_paths):
             if os.path.exists(img_path):
+                async with aiofiles.open(img_path, "rb") as f:
+                    file_bytes = await f.read()
                 data.add_field(
                     "image",
-                    open(img_path, "rb"),
+                    file_bytes,
                     filename=os.path.basename(img_path),
                     content_type="application/octet-stream",
                 )
@@ -460,9 +463,11 @@ async def async_request_video_sglang(
         # Add image file
         img_path = input.image_paths[0]
         if os.path.exists(img_path):
+            async with aiofiles.open(img_path, "rb") as f:
+                file_bytes = await f.read()
             data.add_field(
                 "input_reference",
-                open(img_path, "rb"),
+                file_bytes,
                 filename=os.path.basename(img_path),
                 content_type="application/octet-stream",
             )
@@ -600,24 +605,28 @@ def calculate_metrics(outputs: List[RequestFuncOutput], total_duration: float):
     return metrics
 
 
-def wait_for_service(base_url: str, timeout: int = 1200) -> None:
+async def wait_for_service(base_url: str, timeout: int = 1200) -> None:
     logger.info(f"Waiting for service at {base_url}...")
     start_time = time.time()
-    while True:
-        try:
-            resp = requests.get(f"{base_url}/health", timeout=1)
-            if resp.status_code == 200:
-                logger.info("Service is ready.")
-                break
-        except requests.exceptions.RequestException:
-            pass
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                async with session.get(
+                    f"{base_url}/health",
+                    timeout=aiohttp.ClientTimeout(total=1),
+                ) as resp:
+                    if resp.status == 200:
+                        logger.info("Service is ready.")
+                        return
+            except (aiohttp.ClientError, asyncio.TimeoutError):
+                pass
 
-        if time.time() - start_time > timeout:
-            raise TimeoutError(
-                f"Service at {base_url} did not start within {timeout} seconds."
-            )
+            if time.time() - start_time > timeout:
+                raise TimeoutError(
+                    f"Service at {base_url} did not start within {timeout} seconds."
+                )
 
-        time.sleep(1)
+            await asyncio.sleep(1)
 
 
 async def benchmark(args):
@@ -628,16 +637,20 @@ async def benchmark(args):
         args.base_url = f"http://{args.host}:{args.port}"
 
     # Wait for service
-    wait_for_service(args.base_url)
+    await wait_for_service(args.base_url)
 
     # Fetch model info
     try:
-        resp = requests.get(f"{args.base_url}/v1/model_info", timeout=5)
-        if resp.status_code == 200:
-            info = resp.json()
-            if "model_path" in info and info["model_path"]:
-                args.model = info["model_path"]
-                logger.info(f"Updated model name from server: {args.model}")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{args.base_url}/v1/model_info",
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                if resp.status == 200:
+                    info = await resp.json()
+                    if "model_path" in info and info["model_path"]:
+                        args.model = info["model_path"]
+                        logger.info(f"Updated model name from server: {args.model}")
     except Exception as e:
         logger.info(f"Failed to fetch model info: {e}. Using default: {args.model}")
 
@@ -767,8 +780,8 @@ async def benchmark(args):
     print("=" * 60)
 
     if args.output_file:
-        with open(args.output_file, "w") as f:
-            json.dump(metrics, f, indent=2)
+        async with aiofiles.open(args.output_file, "w") as f:
+            await f.write(json.dumps(metrics, indent=2))
         print(f"Metrics saved to {args.output_file}")
 
 

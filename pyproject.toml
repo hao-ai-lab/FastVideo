@@ -56,6 +56,7 @@ dependencies = [
     "flask",
     "flask_restful",
     "aiohttp",
+    "aiofiles",
     "huggingface_hub",
     "cloudpickle",
     "omegaconf",
