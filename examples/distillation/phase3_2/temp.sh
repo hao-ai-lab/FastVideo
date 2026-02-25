@@ -24,7 +24,7 @@ if [[ "$WANDB_MODE" == "online" && -z "${WANDB_API_KEY:-}" ]]; then
   exit 1
 fi
 
-CONFIG=${CONFIG:-"fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase3.2.yaml"}
+CONFIG=${CONFIG:-"examples/distillation/phase3_2/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase3.2.yaml"}
 
 if [[ ! -f "$CONFIG" ]]; then
   echo "Missing distillation YAML config at: $CONFIG" >&2
@@ -40,4 +40,3 @@ torchrun \
   --master_port "$MASTER_PORT" \
   fastvideo/training/distillation.py \
   --config "$CONFIG"
-

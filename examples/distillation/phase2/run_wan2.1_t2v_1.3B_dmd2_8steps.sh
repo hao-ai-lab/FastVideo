@@ -3,8 +3,9 @@ set -euo pipefail
 set -x
 
 # NOTE:
-# Phase 2 expects an explicit YAML path (we keep runnable YAML under outside/):
-#   fastvideo/distillation/outside/fastvideo/configs/distillation/*.yaml
+# Phase 2 expects an explicit YAML path (YAML-only entrypoint).
+# We keep runnable YAML next to this script under:
+#   examples/distillation/phase2/*.yaml
 
 export NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-1}
 export TORCH_NCCL_ENABLE_MONITORING=${TORCH_NCCL_ENABLE_MONITORING:-0}
@@ -13,7 +14,7 @@ export FASTVIDEO_ATTENTION_BACKEND=${FASTVIDEO_ATTENTION_BACKEND:-FLASH_ATTN}
 export WANDB_MODE=${WANDB_MODE:-offline}
 export MASTER_PORT=${MASTER_PORT:-29506}
 
-CONFIG=${CONFIG:-"fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps.yaml"}
+CONFIG=${CONFIG:-"examples/distillation/phase2/distill_wan2.1_t2v_1.3B_dmd2_8steps.yaml"}
 if [[ ! -f "$CONFIG" ]]; then
   echo "Missing Phase 2 YAML config at: $CONFIG" >&2
   exit 1

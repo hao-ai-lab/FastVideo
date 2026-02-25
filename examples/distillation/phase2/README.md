@@ -8,7 +8,7 @@ entrypoint:
 Important:
 
 - Phase 2 does not rewrite config paths automatically. Pass the explicit YAML
-  path (we keep runnable YAMLs under `fastvideo/distillation/outside/`).
+  path (we keep runnable YAMLs next to the scripts under `examples/distillation/`).
 
 Start from:
 
@@ -16,8 +16,7 @@ Start from:
 
 Recommended:
 
-- Edit the runnable YAML in:
-  `fastvideo/distillation/outside/fastvideo/configs/distillation/`
+- Edit the runnable YAML in this folder.
 - `temp.sh` (runs the config above; same dataset + validation defaults as Phase0/Phase1).
 
 Resume:

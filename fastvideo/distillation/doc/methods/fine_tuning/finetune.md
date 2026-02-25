@@ -3,8 +3,8 @@
 ## 目的
 - 将 “finetuning / SFT” 以 `DistillMethod` 的方式接入 Phase 2+ 架构：
   - 复用 `DistillTrainer`（infra loop / accum / step / ckpt / validate 调用）
-  - 复用 `ModelBundle`（角色容器，finetune 只需要 `student`）
-  - 复用 family/adapter（加载与 primitives）
+  - 复用 `RoleManager`（角色容器，finetune 只需要 `student`）
+  - 复用 model plugin/adapter（加载与 primitives）
 
 finetune 可以被视为一种特殊的 distillation recipe：**只有 student + dataset**。
 
@@ -29,7 +29,7 @@ finetune 可以被视为一种特殊的 distillation recipe：**只有 student +
 4. backward 通过 `adapter.backward(loss, ctx, ...)` 执行（确保 forward-context/activation ckpt 兼容）
 
 ## Optimizer / Scheduler
-- 由 method 创建（而非 family）：
+- 由 method 创建（而非 model plugin）：
   - 使用 `training.learning_rate / training.betas / training.lr_scheduler / ...`
   - 只为 `student` role 创建 `optimizer + lr_scheduler`
 
@@ -38,4 +38,4 @@ finetune 可以被视为一种特殊的 distillation recipe：**只有 student +
 - 具体 pipeline 与采样 loop 由 validator + `pipeline_config.sampler_kind` 决定（默认 `ode`）
 
 ## 配置示例
-- `fastvideo/distillation/outside/fastvideo/configs/distillation/finetune_wan2.1_t2v_1.3B_phase3.3.yaml`
+- `examples/distillation/phase3_3/finetune_wan2.1_t2v_1.3B_phase3.3.yaml`

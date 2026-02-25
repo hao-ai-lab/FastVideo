@@ -12,9 +12,9 @@ from fastvideo.training.training_utils import (
     get_scheduler,
 )
 
-from fastvideo.distillation.roles import ModelBundle, RoleHandle
+from fastvideo.distillation.roles import RoleHandle, RoleManager
 from fastvideo.distillation.methods.base import DistillMethod
-from fastvideo.distillation.registry import register_method
+from fastvideo.distillation.dispatch import register_method
 from fastvideo.distillation.validators.base import ValidationRequest
 from fastvideo.distillation.utils.config import DistillRunConfig
 
@@ -23,7 +23,7 @@ class _FineTuneAdapter(Protocol):
     """Adapter contract for :class:`FineTuneMethod`.
 
     Finetuning is implemented as a method (algorithm layer) on top of the
-    family-provided adapter. The method must remain model-family agnostic, so
+    model-plugin-provided adapter. The method must remain model-plugin agnostic, so
     it consumes only operation-centric primitives exposed by the adapter.
     """
 
@@ -69,7 +69,7 @@ class FineTuneMethod(DistillMethod):
     def __init__(
         self,
         *,
-        bundle: ModelBundle,
+        bundle: RoleManager,
         adapter: _FineTuneAdapter,
         method_config: dict[str, Any] | None = None,
         validator: Any | None = None,
@@ -337,7 +337,7 @@ class FineTuneMethod(DistillMethod):
 def build_finetune_method(
     *,
     cfg: DistillRunConfig,
-    bundle: ModelBundle,
+    bundle: RoleManager,
     adapter: _FineTuneAdapter,
     validator: Any | None,
 ) -> DistillMethod:

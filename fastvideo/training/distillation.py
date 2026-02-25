@@ -27,7 +27,7 @@ def run_distillation_from_config(
         DistillCheckpointConfig,
         DistillCheckpointManager,
     )
-    from fastvideo.distillation.builder import build_runtime_from_config
+    from fastvideo.distillation.dispatch import build_runtime_from_config
     from fastvideo.distillation.utils.config import load_distill_run_config
 
     cfg = load_distill_run_config(config_path)

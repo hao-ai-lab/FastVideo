@@ -4,6 +4,10 @@
 - 把 distillation 的 **YAML loader + schema/types + runtime 装配类型** 集中在一个更直觉的位置，
   减少文件级概念数量。
 
+备注：
+- model plugin 的 build-time 产物结构体 `ModelComponents` 在
+  `fastvideo/distillation/models/components.py`（更贴近语义归属）。
+
 这里包含：
 
 ## 1) YAML loader（schema v2；YAML-only）

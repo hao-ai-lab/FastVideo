@@ -10,4 +10,4 @@
   - tracker log dir 默认在 `output_dir/tracker/`
 
 **设计意图**
-- tracker 属于 infra：entrypoint/trainer 负责持有；method 只负责产出要 log 的 metrics/artifacts。
+- tracker 属于 infra：entrypoint/trainer 负责持有；method 只负责产出要 log 的 metrics/媒体（video/image/file 等，tracker API 里常叫 artifacts）。

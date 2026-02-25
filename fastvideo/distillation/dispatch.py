@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from fastvideo.distillation.roles import ModelBundle
 from fastvideo.distillation.methods.base import DistillMethod
-from fastvideo.distillation.utils.config import ModelComponents
-from fastvideo.distillation.utils.config import DistillRunConfig
+from fastvideo.distillation.models.components import ModelComponents
+from fastvideo.distillation.roles import RoleManager
+from fastvideo.distillation.utils.config import DistillRunConfig, DistillRuntime
 
 
 class ModelBuilder(Protocol):
@@ -21,7 +21,7 @@ class MethodBuilder(Protocol):
         self,
         *,
         cfg: DistillRunConfig,
-        bundle: ModelBundle,
+        bundle: RoleManager,
         adapter: Any,
         validator: Any | None,
     ) -> DistillMethod:
@@ -95,3 +95,32 @@ def get_method(name: str) -> MethodBuilder:
     if name not in _METHODS:
         raise KeyError(f"Unknown method {name!r}. Available: {available_methods()}")
     return _METHODS[name]
+
+
+def build_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:
+    """Build a distillation runtime from a YAML config.
+
+    Assembles:
+    - model components (bundle/adapter/dataloader/tracker/validator)
+    - method implementation (algorithm) on top of those components
+    """
+
+    model_builder = get_model(str(cfg.recipe.family))
+    components = model_builder(cfg=cfg)
+
+    method_builder = get_method(str(cfg.recipe.method))
+    method = method_builder(
+        cfg=cfg,
+        bundle=components.bundle,
+        adapter=components.adapter,
+        validator=components.validator,
+    )
+
+    return DistillRuntime(
+        training_args=components.training_args,
+        method=method,
+        dataloader=components.dataloader,
+        tracker=components.tracker,
+        start_step=int(getattr(components, "start_step", 0) or 0),
+    )
+

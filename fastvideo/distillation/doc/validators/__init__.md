@@ -6,4 +6,4 @@
 **当前导出**
 - `DistillValidator`：最小 validation 接口
 - `ValidationRequest`：method 提供的 validation overrides
-- `WanValidator`：Wan family 的 validation 采样与记录实现
+- `WanValidator`：Wan model plugin 的 validation 采样与记录实现

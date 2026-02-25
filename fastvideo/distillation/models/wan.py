@@ -8,10 +8,10 @@ from typing import Any
 import torch
 
 from fastvideo.distillation.adapters.wan import WanAdapter
-from fastvideo.distillation.roles import ModelBundle, RoleHandle
-from fastvideo.distillation.registry import register_model
-from fastvideo.distillation.utils.config import ModelComponents
+from fastvideo.distillation.roles import RoleHandle, RoleManager
+from fastvideo.distillation.dispatch import register_model
 from fastvideo.distillation.utils.config import DistillRunConfig
+from fastvideo.distillation.models.components import ModelComponents
 from fastvideo.distillation.utils.data import build_parquet_t2v_train_dataloader
 from fastvideo.distillation.utils.tracking import build_tracker
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
@@ -99,7 +99,7 @@ def build_wan_components(*, cfg: DistillRunConfig) -> ModelComponents:
     for role, role_spec in roles_cfg.items():
         if role_spec.family != "wan":
             raise ValueError(
-                "Wan family only supports wan roles; "
+                "Wan model plugin only supports roles with family='wan'; "
                 f"got {role}={role_spec.family!r}"
             )
 
@@ -148,7 +148,7 @@ def build_wan_components(*, cfg: DistillRunConfig) -> ModelComponents:
             trainable=bool(role_spec.trainable),
         )
 
-    bundle = ModelBundle(roles=role_handles)
+    bundle = RoleManager(roles=role_handles)
     tracker = build_tracker(training_args, config=cfg.raw)
 
     validator = None
@@ -160,11 +160,11 @@ def build_wan_components(*, cfg: DistillRunConfig) -> ModelComponents:
             tracker=tracker,
         )
 
-    # NOTE: adapter is the family runtime boundary; it may implement multiple
+    # NOTE: adapter is the model runtime boundary; it may implement multiple
     # method-specific protocols via duck typing.
     prompt_handle = role_handles.get("student")
     if prompt_handle is None:
-        raise ValueError("Wan family requires a 'student' role for prompt encoding")
+        raise ValueError("Wan model plugin requires a 'student' role for prompt encoding")
     adapter = WanAdapter(
         prompt_handle=prompt_handle,
         training_args=training_args,

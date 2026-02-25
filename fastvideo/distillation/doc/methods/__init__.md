@@ -10,8 +10,8 @@
 
 **设计意图**
 - method 层应当是 **模型无关** 的（不 import 具体 pipeline/模型实现）；
-  任何 family 细节都通过 adapter primitives（protocol）注入。
+  任何 model plugin 细节都通过 adapter primitives（protocol）注入。
 
 **实现细节**
-- 该模块对 `DMD2Method` 使用 lazy import（`__getattr__`），避免 registry/builder 在
-  import 时触发循环依赖（circular import）。
+- 该模块对 `DMD2Method` 使用 lazy import（`__getattr__`），避免 dispatch 在
+  import 时触发循环依赖（circular import）；dispatch 侧会在第一次查询时触发内置注册。

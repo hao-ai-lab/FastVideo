@@ -30,10 +30,10 @@
   `critic`……（不设“高低贵贱”，只是 key）。
 - **RoleHandle**：每个 role 对应的句柄，包含 `modules/optimizers/schedulers`
   以及类似 `trainable` 的标志。
-- **ModelBundle**：持有所有 `RoleHandle` 的容器（未来可能改名）。
+- **RoleManager**：持有所有 `RoleHandle` 的容器（role 索引与训练态命名空间）。
 - **Adapter**：训练原语的 operation-centric 接口（如 `prepare_batch`、
   `predict_noise/x0`、`add_noise`、`backward` 等）。它不应包含算法策略。
-- **Family**：构建期工厂：根据 config 组装 bundle + adapter + validator。
+- **Model plugin**：构建期工厂：根据 config 组装 roles + adapter + validator。
 - **Validator**：训练期 validation 的采样/记录层，由 method 通过
   `ValidationRequest` 提供关键参数（steps/sampler/guidance/…）。
 
@@ -164,7 +164,7 @@
 - 按 run config 构建 validator（采样 pipeline）并保持一致；
 - 只在 rank0 创建 tracker / run 元信息。
 
-如果移除 Family，工程上往往会以另外一种形式“复活”同样的东西：
+如果移除 model plugin（装配层），工程上往往会以另外一种形式“复活”同样的东西：
 - `SharedContext`，
 - `RuntimeFactory`，
 - 或“method 构造函数里做 assembly”。
@@ -179,8 +179,8 @@
 我们可以通过以下方式减少“概念感”，同时保持边界：
 
 1) **重命名 / 重塑概念**
-   - 例如 `ModelBundle` → `RoleManager`（语义更直观）。
-   - `Family` → `RuntimeFactory`（如果“Family”这个词更难理解）。
+   - 例如 `RoleManager`（替代旧的 `ModelBundle`）（语义更直观）。
+   - `Model plugin` → `RuntimeFactory`（如果“Model plugin”这个词仍然难理解）。
 
 2) **让 method “看起来像持有多个 adapter”，但底层共享 context**
    - 保留一份共享 adapter + context。

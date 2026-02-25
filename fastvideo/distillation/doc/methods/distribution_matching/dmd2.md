@@ -2,12 +2,12 @@
 
 **定位**
 - `DMD2Method`：DMD2 distillation 的算法实现（method layer）。
-- 该文件可以出现 DMD2/critic/fake_score 等算法术语；这些语义不应泄漏到 adapter/family。
+- 该文件可以出现 DMD2/critic/fake_score 等算法术语；这些语义不应泄漏到 adapter/model plugin。
 
 **依赖与边界**
 - ✅ 不 import 任何具体模型/管线实现（Wan/SDXL/...）。
 - ✅ 只依赖：
-  - `ModelBundle`/`RoleHandle`（获取 student/teacher/critic）
+  - `RoleManager`/`RoleHandle`（获取 student/teacher/critic）
   - adapter 提供的 primitives（通过 `_DMD2Adapter` Protocol）
 
 **需要的 roles**
@@ -39,10 +39,10 @@
 - `DMD2Method` 在初始化时创建并写回：
   - student 的 optimizer/scheduler：使用 `training.learning_rate/betas/lr_scheduler`
   - critic 的 optimizer/scheduler：优先使用 `training.fake_score_*` 覆盖（否则回退到 student）
-- 这样 Wan family 可以完全不“懂” DMD2 的 critic 超参，从 build-time 层面解耦。
+- 这样 Wan model plugin 完全不需要理解 DMD2 的 critic 超参，从 build-time 层面解耦。
 
 **validation 的归属（Phase 2.9）**
-- `DMD2Method` 持有 family-specific `validator`（build-time 注入），并在 `log_validation()` 中调用。
+- `DMD2Method` 持有 model-plugin-specific `validator`（build-time 注入），并在 `log_validation()` 中调用。
 - method 通过 `ValidationRequest` 明确传入 sampling steps/guidance 等参数；
   同时通过 `ValidationRequest.sample_handle` 指定要采样的模型（通常是 student），
   validator 负责执行采样与记录，保持 method-agnostic。

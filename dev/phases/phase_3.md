@@ -59,7 +59,7 @@ method_config: {...}     # algorithm（方法侧）
 - [x] `fastvideo/distillation/utils/config.py`（包含 YAML loader + schema/dataclass）
   - 解析 `recipe:` 与 `method_config:`（默认 `{}`）
   - 将 v1 的 `distill:` 视为不再支持（breaking change，直接推进 schema v2）
-- [x] `fastvideo/distillation/builder.py`
+- [x] `fastvideo/distillation/dispatch.py`
   - 从 `cfg.recipe` 取 family/method（不再读 `cfg.distill`）
   - build method 时传入 `method_config`
 - [x] `fastvideo/distillation/methods/distribution_matching/dmd2.py`
@@ -77,11 +77,11 @@ method_config: {...}     # algorithm（方法侧）
       - `prepare_batch_from_placeholder_latent(raw_batch, ...)`（不依赖 `vae_latent`）
     - 选项 B：保留单入口但显式参数化：`prepare_batch(..., latents_source=...)`（本阶段采用）
 - [x] configs / docs
-  - [x] `fastvideo/distillation/outside/fastvideo/configs/distillation/*.yaml` 全部升级到 schema v2
+  - [x] `examples/distillation/**.yaml` 全部升级到 schema v2
   - [x] 更新 `dev/config.md`（描述 schema v2 与迁移策略）
 
 ### 可运行产物
-- Phase 3.1 YAML：`fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase3.1.yaml`
+- Phase 3.1 YAML：`examples/distillation/phase3_1/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase3.1.yaml`
 - One-shot 脚本：`examples/distillation/phase3_1/temp.sh`
 
 ---
@@ -122,7 +122,7 @@ Phase 2.9 已验证：即使统一 timesteps/scheduler，**只要 denoising loop
   - validation request 指定 `sampler_kind="sde"` + `sampling_timesteps=<few-step list>`
 
 ### 可运行产物
-- Phase 3.2 YAML：`fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase3.2.yaml`
+- Phase 3.2 YAML：`examples/distillation/phase3_2/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase3.2.yaml`
 - One-shot 脚本：`examples/distillation/phase3_2/temp.sh`
 
 ---
@@ -146,9 +146,10 @@ Phase 2.9 已验证：即使统一 timesteps/scheduler，**只要 denoising loop
     - `predict_noise(handle, ...)`（以及可选 `predict_x0`）
     - `backward(loss, ctx, ...)`（forward-context/activation ckpt 相关）
 - [x] configs/examples
-  - [x] `fastvideo/distillation/outs
-  ide/fastvideo/configs/distillation/finetun e_wan2.1_t2v_1.3B_phase3.3.yaml`
-  - [x] `examples/distillation/phase3_3/temp.sh`  
+  - [x] `examples/distillation/phase3_3/finetune_wan2.1_t2v_1.3B_phase3.3.yaml`
+  - [x] `examples/distillation/phase3_3/finetune_wan2.1_t2v_1.3B_vsa_phase3.3.yaml`
+  - [x] `examples/distillation/phase3_3/temp.sh`
+  - [x] `examples/distillation/phase3_3/temp-vsa.sh`
 
 ---
 
@@ -168,7 +169,7 @@ Phase 2.9 已验证：即使统一 timesteps/scheduler，**只要 denoising loop
 Phase 3.1~3.3 已经把训练端到端跑通；但目前 `fastvideo/distillation/` 的概念命名偏“框架内部术语”，对新 reviewer 不友好：
 - `families/` 读起来像“人类家族”，但它实际承担的是 **model/pipeline contract 的集成/装配层**。
 - `bundle.py` 读起来像“打包”，但它本质是 **roles 管理/索引容器**。
-- `registry.py` / `builder.py` /（以及一些纯 dataclass 文件）分散在多个文件，阅读路径长，容易产生“概念过多”的感受。
+- `registry.py` / `builder.py` /（以及一些纯 dataclass 文件）分散在多个文件，阅读路径长，容易产生“概念过多”的感受（本阶段已收敛到 `dispatch.py` 与 `utils/config.py`）。
 
 我们希望把这些改成更直觉的命名，并把“infra”从“模型集成层”里抽出来。
 
@@ -187,7 +188,7 @@ Phase 3.1~3.3 已经把训练端到端跑通；但目前 `fastvideo/distillation
 
 2) **roles 容器命名统一**
 - `fastvideo/distillation/bundle.py` → `fastvideo/distillation/roles.py`
-- `ModelBundle` → `RoleManager`（或保持 `ModelBundle` 但在代码内逐步迁移到新名）
+- `ModelBundle` → `RoleManager`
 
 3) **把 infra 从 models(原 families) 中解耦合**
 - dataloader 构建逻辑从 `models/*` 抽到 `fastvideo/distillation/utils/`（或 `infra/`）
@@ -247,7 +248,7 @@ Phase 3.4 目标：
 - [x] `fastvideo/distillation/families/` → `fastvideo/distillation/models/`（直接迁移并更新所有 import）
 - [x] `fastvideo/distillation/bundle.py` → `fastvideo/distillation/roles.py`（直接迁移并更新所有 import）
 - [x] `fastvideo/distillation/specs.py` + `fastvideo/distillation/runtime.py` 合并到 `fastvideo/distillation/utils/config.py`
-- [ ] `fastvideo/distillation/registry.py` + `fastvideo/distillation/builder.py` 收敛为 `dispatch.py`（或最少改名）
+- [x] `fastvideo/distillation/dispatch.py`（合并 `registry.py` + `builder.py`）
 
 infra 解耦：
 - [x] 新增 `fastvideo/distillation/utils/`（或 `infra/`）
@@ -255,7 +256,7 @@ infra 解耦：
   - [x] `utils/data.py`：dataloader 构建（当前先覆盖 parquet T2V）
   - [x] `utils/checkpoint.py`：checkpoint manager / config（从 `distillation/checkpoint.py` 迁移）
 - [x] `models/*`（原 families）移除 tracker/dataloader/checkpointing 的内联实现（迁移到 `utils/`）
-- [ ] 更新 `utils/config.py` 的 artifacts 结构（必要时引入 factory/spec 而非直接对象）
+- [x] build-time “装配产物” 统一为 `models/components.py::ModelComponents`（不额外引入 artifacts/factory/spec 抽象）
 
 docs：
 - [x] 更新 `fastvideo/distillation/doc/README.md` 与各文件说明（路径/命名变化）

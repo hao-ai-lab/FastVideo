@@ -24,7 +24,7 @@ class RoleHandle:
 
 
 @dataclass(slots=True)
-class ModelBundle:
+class RoleManager:
     roles: dict[RoleName, RoleHandle]
 
     def require_roles(self, roles: list[RoleName]) -> None:

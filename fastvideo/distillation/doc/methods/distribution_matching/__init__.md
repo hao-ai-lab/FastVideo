@@ -9,6 +9,5 @@
 **扩展**
 - 新增方法时建议保持：
   - 算法逻辑在 method
-  - family/model 细节通过 adapter protocol 注入
+  - model plugin 细节通过 adapter protocol 注入
   - 注册通过 `@register_method("<name>")`
-

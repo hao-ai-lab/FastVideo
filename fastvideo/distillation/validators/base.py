@@ -13,7 +13,7 @@ from fastvideo.distillation.roles import RoleHandle
 class ValidationRequest:
     """Method-provided validation configuration overrides.
 
-    Validators are family-specific (e.g. Wan sampling), but should remain
+    Validators are model-plugin-specific (e.g. Wan sampling), but should remain
     method-agnostic. A method may override key sampling parameters by passing a
     request object here.
     """

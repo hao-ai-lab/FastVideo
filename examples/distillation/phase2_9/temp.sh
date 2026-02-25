@@ -4,7 +4,7 @@ if [[ "${DEBUG:-0}" == "1" ]]; then
   set -x
 fi
 
-# One-shot launch script for Phase 2.9 (Families + registry dispatch +
+# One-shot launch script for Phase 2.9 (models + registry dispatch +
 # operation-centric adapter + method-managed validation).
 #
 # Uses the same dataset/validation defaults as phase0/phase1/phase2; the main
@@ -24,7 +24,7 @@ if [[ "$WANDB_MODE" == "online" && -z "${WANDB_API_KEY:-}" ]]; then
   exit 1
 fi
 
-CONFIG=${CONFIG:-"fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase2.9.yaml"}
+CONFIG=${CONFIG:-"examples/distillation/phase2_9/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase2.9.yaml"}
 
 if [[ ! -f "$CONFIG" ]]; then
   echo "Missing distillation YAML config at: $CONFIG" >&2

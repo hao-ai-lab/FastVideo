@@ -8,11 +8,11 @@ from typing import Any
 
 import torch
 
-from fastvideo.distillation.roles import ModelBundle
+from fastvideo.distillation.roles import RoleManager
 
 
 class DistillMethod(torch.nn.Module, ABC):
-    def __init__(self, bundle: ModelBundle) -> None:
+    def __init__(self, bundle: RoleManager) -> None:
         super().__init__()
         self.bundle = bundle
         self.role_modules = torch.nn.ModuleDict()

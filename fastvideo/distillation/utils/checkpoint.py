@@ -13,7 +13,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 
-from fastvideo.distillation.roles import ModelBundle, RoleHandle
+from fastvideo.distillation.roles import RoleHandle, RoleManager
 from fastvideo.logger import init_logger
 from fastvideo.training.checkpointing_utils import (
     ModelWrapper,
@@ -144,7 +144,7 @@ class DistillCheckpointManager:
     def __init__(
         self,
         *,
-        bundle: ModelBundle,
+        bundle: RoleManager,
         dataloader: Any,
         output_dir: str,
         config: DistillCheckpointConfig,

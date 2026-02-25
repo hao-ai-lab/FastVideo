@@ -11,7 +11,6 @@ import yaml
 
 if TYPE_CHECKING:
     from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.distillation.roles import ModelBundle
     from fastvideo.distillation.methods.base import DistillMethod
 
 RoleName = str
@@ -19,7 +18,7 @@ RoleName = str
 
 @dataclass(slots=True)
 class RecipeSpec:
-    """Selects the model family + training method.
+    """Selects the model plugin key (``recipe.family``) + training method.
 
     This is intentionally small: everything else (roles, training args, and
     pipeline config) lives in the run config.
@@ -55,7 +54,7 @@ def _resolve_existing_file(path: str) -> str:
 
     Distillation intentionally does not perform any "overlay" path rewriting.
     The caller must pass a real file path (typically under
-    ``fastvideo/distillation/outside/``).
+    ``examples/distillation/``).
     """
 
     if not path:
@@ -198,24 +197,6 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
         method_config=method_config,
         raw=cfg,
     )
-
-
-@dataclass(slots=True)
-class ModelComponents:
-    """Build-time outputs produced by a model plugin.
-
-    A model plugin is responsible for loading modules, constructing a
-    `ModelBundle`, and assembling shared components needed by runtime adapters,
-    dataloaders, validators, and trackers.
-    """
-
-    training_args: TrainingArgs
-    bundle: ModelBundle
-    adapter: Any
-    dataloader: Any
-    tracker: Any
-    validator: Any | None = None
-    start_step: int = 0
 
 
 @dataclass(slots=True)

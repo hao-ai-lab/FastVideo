@@ -1,6 +1,6 @@
 import torch
 
-from fastvideo.distillation.roles import ModelBundle, RoleHandle
+from fastvideo.distillation.roles import RoleHandle, RoleManager
 from fastvideo.distillation.methods.base import DistillMethod
 
 
@@ -33,19 +33,18 @@ class _ScheduleMethod(DistillMethod):
         self.critic_opt = _FakeOptimizer()
         self.student_sched = _FakeScheduler()
         self.critic_sched = _FakeScheduler()
-        bundle = ModelBundle(
+        bundle = RoleManager(
             roles={
-                "student":
-                RoleHandle(
+                "student": RoleHandle(
                     optimizers={"main": self.student_opt},
                     lr_schedulers={"main": self.student_sched},
                 ),
-                "critic":
-                RoleHandle(
+                "critic": RoleHandle(
                     optimizers={"main": self.critic_opt},
                     lr_schedulers={"main": self.critic_sched},
                 ),
-            })
+            }
+        )
         super().__init__(bundle)
         self.interval = interval
 

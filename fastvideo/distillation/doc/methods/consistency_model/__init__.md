@@ -5,5 +5,4 @@
 
 **期望的演进方向**
 - 通过 `@register_method("cm")`（示例）注册具体实现。
-- method 只包含算法与 update policy；family/adapter 提供运行时 primitives。
-
+- method 只包含算法与 update policy；model plugin/adapter 提供运行时 primitives。

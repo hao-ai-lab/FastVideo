@@ -6,17 +6,17 @@
 - YAML loader：`fastvideo/distillation/utils/config.py::load_distill_run_config`
 - Entrypoint：`fastvideo/training/distillation.py`
 - Schema/类型定义：`fastvideo/distillation/utils/config.py`
-- 示例 YAML（outside）：`fastvideo/distillation/outside/fastvideo/configs/distillation/`
+- 示例 YAML（examples）：`examples/distillation/`
 
 ## 1) 入口与约束（非常重要）
 
 distillation 入口 **只接受一个真实存在的 YAML 文件路径**（不 merge legacy CLI/configs，
-也不做 outside 路径补全/overlay）。YAML 是 single source of truth。
+也不做路径补全/overlay）。YAML 是 single source of truth。
 
 运行方式（示意）：
 ```bash
 python fastvideo/training/distillation.py \
-  --config /abs/path/to/fastvideo/distillation/outside/fastvideo/configs/distillation/xxx.yaml
+  --config /abs/path/to/examples/distillation/<phase>/xxx.yaml
 ```
 
 CLI 仅保留少量 **runtime override**（不属于“实验定义”的内容）：
@@ -141,7 +141,8 @@ method_config:
 
 ## 8) 最小可运行示例（Wan few-step DMD2）
 
-参考 outside 下的三个可运行 YAML：
-- `fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps.yaml`
-- `fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase2.9.yaml`
-- `fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase3.1.yaml`
+参考 `examples/distillation/` 下的可运行 YAML：
+- `examples/distillation/phase2/distill_wan2.1_t2v_1.3B_dmd2_8steps.yaml`
+- `examples/distillation/phase2_9/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase2.9.yaml`
+- `examples/distillation/phase3_1/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase3.1.yaml`
+- `examples/distillation/phase3_2/distill_wan2.1_t2v_1.3B_dmd2_8steps_phase3.2.yaml`

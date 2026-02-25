@@ -6,7 +6,7 @@
   - 读取 validation dataset（json）
   - 调用 Wan pipeline 生成视频样本
   - 保存 mp4 到 `output_dir`
-  - 通过 tracker（例如 wandb）记录 artifacts
+  - 通过 tracker（例如 wandb）记录媒体（video/image/file 等；tracker API 里常叫 artifacts）
 
 **关键点**
 - validator 运行在分布式环境下：
@@ -23,4 +23,4 @@
 
 **可演进方向（Phase 3+）**
 - 将 validation steps/guidance 等采样配置从 `TrainingArgs` 迁移到更明确的配置块（例如 `validation:`）。
-- 进一步抽象 validator API，使其更容易被不同 family/method 复用。
+- 进一步抽象 validator API，使其更容易被不同 model plugin / method 复用。

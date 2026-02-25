@@ -17,7 +17,7 @@
 - `DistillTrainer`：只做训练基础设施（循环、分布式、grad accum、logging、ckpt、validate）
 - `DistillMethod`：一个“可训练对象”，封装 distill 算法 + 多角色模型 + 多优化器/交替更新
 - `DistillAdapter`：把具体 pipeline/network 适配成统一的 noise/forward/CFG/cache 接口
-- `ModelBundle`：`roles={student, teacher, critic, ...}` 的统一容器（含 optim/ema/fsdp 策略）
+- `RoleManager`：`roles={student, teacher, critic, ...}` 的统一容器（含 optim/ema/fsdp 策略）
 - `ConditioningProvider`（或 dataset 常量注入）：显式提供 `neg_condition` 等 conditioning 常量
 
 关键原则：**Trainer 不认识 teacher/critic，也不写 DMD/SF 的 if/else。**
@@ -84,7 +84,7 @@ FastGen 把 distillation 的复杂度拆成：
 
 ```text
 CLI/YAML config
-  -> build ModelBundle(roles={student, teacher, critic?, ...})
+  -> build RoleManager(roles={student, teacher, critic?, ...})
   -> build DistillAdapter.from_pipelines(bundle)  # pipeline/network 适配
   -> build DistillMethod(adapter, bundle, method_cfg)
   -> DistillTrainer(trainer_cfg, callbacks, checkpointer).run(method)
@@ -112,13 +112,13 @@ CLI/YAML config
 
 ## 4. 核心对象与接口（建议 API）
 
-### 4.1 `ModelBundle`：角色显式化（外部输入）
+### 4.1 `RoleManager`：角色显式化（外部输入）
 
 目标：让入口层显式传入 `roles={student, teacher, critic, ...}`，并把所有
 “训练态（optim/ema/fsdp 策略）”结构化地挂在 role 下。
 
 ```text
-ModelBundle
+RoleManager
   roles: dict[str, RoleHandle]  # key == "student"/"teacher"/"critic"/...
 
 RoleHandle
@@ -253,12 +253,12 @@ FastGen 用 `DDPWrapper` 临时把 `module.forward` 指到 `single_train_step`�
 - distill 的“本质复杂度”就是多网络 + 多优化器调度；放在 Method 最自然
 - Trainer 只需要稳定地做基础设施，长期维护成本最低
 
-### 设计 2：`roles={...}` 显式输入 + `ModelBundle` 结构化承载训练态
+### 设计 2：`roles={...}` 显式输入 + `RoleManager` 结构化承载训练态
 
 **设计**
 
 - 配置/CLI 显式给出 `student/teacher/critic?`
-- `ModelBundle` 统一挂载冻结策略、precision、FSDP 策略、EMA、optim/sched
+- `RoleManager` 统一挂载冻结策略、precision、FSDP 策略、EMA、optim/sched
 
 **原因**
 
@@ -437,30 +437,17 @@ method_config:
 
 这样不需要推翻现有 TrainingArgs/FastVideoArgs 体系，但从入口层面彻底摒弃旧式 CLI 传参方式。
 
-### 6.4 `outside/` overlay（Phase 2 约束下的 workaround）
+### 6.4 YAML configs in `examples/`（Phase 3.4+）
 
-我们不能直接修改大项目里的 `fastvideo/configs/`（避免冲突/合并成本）。
-因此 Phase 2 建议在 distillation 侧新增一个 overlay 根目录：
+我们不再使用 `outside/` overlay。为了避免修改主仓库的 `fastvideo/configs/` 树，同时让配置更直觉可运行，
+distillation 的 runnable YAML 统一放在：
 
-- `fastvideo/distillation/outside/`
+- `examples/distillation/<phase>/*.yaml`
 
 并约定：
-
-- 把“本应在外部 repo 存在的新增/改版配置”放进：
-  - `fastvideo/distillation/outside/fastvideo/configs/...`
 - distillation 入口 **不做任何自动补全/overlay 重写**：
-  - 用户传入的 `--config` 必须是一个真实存在的文件路径（通常位于 `outside/` 下）
+  - 用户传入的 `--config` 必须是一个真实存在的文件路径（通常位于 `examples/distillation/` 下）
   - config 内引用的其它路径（如 `pipeline_config_path`）也必须是 **真实路径**
-
-这让我们可以在不侵入主仓库配置的情况下，迭代 YAML/JSON config、做实验性变更，
-同时不影响 legacy 代码路径。
-
-**实现注意**
-
-- 不建议把 `outside/` 直接插入 `sys.path` 去 shadow 整个 `fastvideo` 包（风险太高、调试困难）。
-- 推荐把 `outside/` 仅作为 **外部配置存放目录**（YAML/JSON），避免运行时“魔法寻路”。
-- 如果确实需要覆盖 Python config（`.py`）：
-  - 用 `importlib` 的“按文件路径加载模块”方式加载为独立 module name，避免影响全局 import。
 
 ### 6.5 配置系统演进（可选吸收 FastGen 的优点）
 
@@ -480,11 +467,11 @@ Phase 0 的实践表明：先把新框架以 **additive** 方式落地到一个�
 
 建议结构（已部分实现）：
 
-- `fastvideo/distillation/roles.py`：`ModelBundle/RoleHandle`
+- `fastvideo/distillation/roles.py`：`RoleManager/RoleHandle`
 - `fastvideo/distillation/adapters/`：`WanAdapter`（Phase 1 已落地；后续新增更多 adapter）
 - `fastvideo/distillation/methods/`：`base.py`、`distribution_matching/dmd2.py`、（目标）`self_forcing.py`
 - `fastvideo/distillation/trainer.py`：`DistillTrainer`
-- `fastvideo/distillation/builder.py`：把 “config -> roles -> bundle/adapter/method” 的胶水集中起来
+- `fastvideo/distillation/dispatch.py`：把 “config -> model components -> method -> runtime” 的胶水集中起来
 - `fastvideo/training/distillation.py`：通用入口（YAML-only：`--config path/to/run.yaml`）
 - `fastvideo/distillation/utils/checkpoint.py`：role-based `CheckpointManager`
 - （后续）`fastvideo/distillation/callbacks/`：EMA/clip/log/profiler 等
@@ -501,7 +488,7 @@ Phase 0 的实践表明：先把新框架以 **additive** 方式落地到一个�
 Phase 0 的定位在实践中更明确了：它是“**把旧 Wan distill pipeline 包一层新框架壳**”，
 先把训练循环/多 optimizer 调度/validation hook 等基础设施固定下来，再逐步解耦。
 
-- ✅ 新增 `DistillTrainer/DistillMethod/ModelBundle` 的骨架，并跑通 WAN distill
+- ✅ 新增 `DistillTrainer/DistillMethod/RoleManager` 的骨架，并跑通 WAN distill
 - ✅ 用单测锁定关键语义：scheduler step 与 optimizer step 对齐
   - `generator_update_interval > 1` 时不会“空 step scheduler”
 - ✅ 为后续解耦铺路：把 “roles={student,teacher,critic}” 显式化到 bundle
@@ -525,8 +512,8 @@ Phase 1 的“辉煌”（落地与收益）：
 - ✅ 真正的 WAN 适配层：`fastvideo/distillation/adapters/wan.py::WanAdapter`
   - `forward_context` 与 backward 重算约束收敛到 adapter（method 只实现算法）
   - `ensure_negative_conditioning()` 显式化（不再依赖 validation 的隐式副作用）
-- ✅ Builder 雏形：`fastvideo/distillation/builder.py`
-  - 把 “roles -> bundle -> method” 的胶水集中在一处，便于扩展新 method/new model
+- ✅ Dispatch 入口：`fastvideo/distillation/dispatch.py`
+  - 把 “recipe/roles -> model components -> method -> runtime” 的胶水集中在一处，便于扩展新 method/new model
 - ✅ 通用入口：`fastvideo/training/distillation.py`
   - Phase 1 仍是 CLI 选择：`--distill-model` + `--distill-method`
   - Phase 2 起将切换为 **YAML-only**（见第 6 节），并逐步废弃这套 CLI
@@ -557,12 +544,12 @@ Phase 1 的“辉煌”（落地与收益）：
   - 定义结构化 spec：`RoleSpec/ModelSpec`（role -> {family, path, precision, trainable,...}）
   - 配置形态落地（Phase 2 必做）：
     - `--config path/to/run.yaml`（YAML 为 single source of truth；CLI 仅指定配置路径）
-    - `outside/` workaround：把新增/实验性 configs 放在 `outside/`，入口只接受真实路径（不做 overlay 寻路）
+    - runnable YAML：放在 `examples/distillation/<phase>/*.yaml`，入口只接受真实路径（不做 overlay 寻路）
     - （可选）保留 `--models_json` 作为“程序生成配置”的接口
   - builder 根据 spec：
     - 加载 modules（student/teacher/critic）
     - 构建 role-based optimizers/schedulers
-    - 组装 `ModelBundle + Adapter + Method`
+    - 组装 `RoleManager + Adapter + Method`
     - 构建 dataloader（直接复用 dataset 代码，不经由 legacy pipeline class）
   - 不新增入口文件：直接增强 `fastvideo/training/distillation.py`，并把它定义为 **YAML-only distill entrypoint**
     - 仅支持 `--config run.yaml`（以及少量 meta flags），不再兼容旧式 CLI configs
@@ -662,7 +649,7 @@ method_config: {...}                  # algorithm/method 超参（方法侧）
 #### Phase 3.3：把 finetuning 作为一种 method 接入框架
 
 目标：把 finetune 作为一种 method（only `student` + dataset）接入同一套
-`ModelBundle + Adapter + Method + Trainer + (Validator/Checkpoint)` 基础设施，并让其配置语义与
+`RoleManager + Adapter + Method + Trainer + (Validator/Checkpoint)` 基础设施，并让其配置语义与
 Phase 3.1 的 `recipe/method_config` 对齐。
 
 状态：**已完成**（`FineTuneMethod` + Phase 3.3 示例 YAML + one-shot 脚本）。

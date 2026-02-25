@@ -11,7 +11,7 @@
 
 快速入口（从运行到训练）：
 `fastvideo/training/distillation.py` → `utils.config.load_distill_run_config()` →
-`builder.build_runtime_from_config()` → `registry.get_model()/get_method()` →
+`dispatch.build_runtime_from_config()` →
 `ModelComponents + DistillMethod` → `DistillTrainer.run()`
 
 ---
@@ -25,8 +25,7 @@
 - `utils/data.md`
 - `utils/tracking.md`
 - `utils/checkpoint.md`
-- `registry.md`
-- `builder.md`
+- `dispatch.md`
 - `roles.md`
 - `trainer.md`
 
@@ -53,8 +52,3 @@
 - `validators/__init__.md`
 - `validators/base.md`
 - `validators/wan.md`
-
-### outside/
-- `outside/README.md`
-- `outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps.md`
-- `outside/fastvideo/configs/distillation/finetune_wan2.1_t2v_1.3B_phase3.3.md`

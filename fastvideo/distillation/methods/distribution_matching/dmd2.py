@@ -12,10 +12,10 @@ from fastvideo.training.training_utils import (
     get_scheduler,
 )
 
-from fastvideo.distillation.roles import ModelBundle
+from fastvideo.distillation.roles import RoleManager
 from fastvideo.distillation.roles import RoleHandle
 from fastvideo.distillation.methods.base import DistillMethod
-from fastvideo.distillation.registry import register_method
+from fastvideo.distillation.dispatch import register_method
 from fastvideo.distillation.validators.base import ValidationRequest
 from fastvideo.distillation.utils.config import DistillRunConfig
 
@@ -94,11 +94,11 @@ class DMD2Method(DistillMethod):
     """DMD2 distillation algorithm (method layer).
 
     Owns the algorithmic orchestration (loss construction + update policy) and
-    stays independent of any specific model family. It requires a
-    :class:`~fastvideo.distillation.roles.ModelBundle` containing at least the
+    stays independent of any specific model plugin. It requires a
+    :class:`~fastvideo.distillation.roles.RoleManager` containing at least the
     roles ``student``, ``teacher``, and ``critic``.
 
-    All model-family details (how to run student rollout, teacher CFG
+    All model-plugin details (how to run student rollout, teacher CFG
     prediction, critic loss, and how to safely run backward under activation
     checkpointing/forward-context constraints) are delegated to the adapter
     passed in at construction time.
@@ -107,7 +107,7 @@ class DMD2Method(DistillMethod):
     def __init__(
         self,
         *,
-        bundle: ModelBundle,
+        bundle: RoleManager,
         adapter: _DMD2Adapter,
         method_config: dict[str, Any] | None = None,
         validator: Any | None = None,
@@ -691,7 +691,7 @@ class DMD2Method(DistillMethod):
 def build_dmd2_method(
     *,
     cfg: DistillRunConfig,
-    bundle: ModelBundle,
+    bundle: RoleManager,
     adapter: _DMD2Adapter,
     validator: Any | None,
 ) -> DistillMethod:

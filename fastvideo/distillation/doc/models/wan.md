@@ -17,7 +17,7 @@
    - 根据 `RoleSpec.trainable` 设置 `requires_grad` + `train()/eval()`
    - 可选开启 activation checkpoint（仅对 trainable role）
 3) **构建 bundle / adapter / dataloader**
-   - `bundle = ModelBundle(roles=role_handles)`
+   - `bundle = RoleManager(roles=role_handles)`
    - `adapter = WanAdapter(prompt_handle=student_handle, ...)`
    - dataloader：parquet + `pyarrow_schema_t2v`
 4) **tracker / validator（可选）**

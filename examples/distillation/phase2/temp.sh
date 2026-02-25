@@ -9,9 +9,9 @@ set -e -x
 # - validation json: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
 #
 # Notes:
-# - Phase 2 expects an explicit YAML path (we keep runnable YAML under outside/).
-#   Put your YAML under:
-#     fastvideo/distillation/outside/fastvideo/configs/distillation/*.yaml
+# - Phase 2 expects an explicit YAML path (YAML-only entrypoint).
+#   We keep runnable YAML next to this script under:
+#     examples/distillation/phase2/*.yaml
 # - By default this runs W&B in offline mode (safer for overnight runs).
 #   If you want online logging:
 #     export WANDB_MODE=online
@@ -31,7 +31,7 @@ if [[ "$WANDB_MODE" == "online" && -z "${WANDB_API_KEY:-}" ]]; then
   exit 1
 fi
 
-CONFIG=${CONFIG:-"fastvideo/distillation/outside/fastvideo/configs/distillation/distill_wan2.1_t2v_1.3B_dmd2_8steps.yaml"}
+CONFIG=${CONFIG:-"examples/distillation/phase2/distill_wan2.1_t2v_1.3B_dmd2_8steps.yaml"}
 
 if [[ ! -f "$CONFIG" ]]; then
   echo "Missing Phase 2 YAML config at: $CONFIG" >&2

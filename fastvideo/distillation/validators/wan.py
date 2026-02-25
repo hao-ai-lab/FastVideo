@@ -272,13 +272,15 @@ class WanValidator:
                         imageio.mimsave(filename, video, fps=sampling_param.fps)
                         video_filenames.append(filename)
 
-                    artifacts = []
+                    video_logs = []
                     for filename, caption in zip(video_filenames, all_captions, strict=True):
                         video_artifact = self.tracker.video(filename, caption=caption)
                         if video_artifact is not None:
-                            artifacts.append(video_artifact)
-                    if artifacts:
-                        logs = {f"validation_videos_{num_inference_steps}_steps": artifacts}
+                            video_logs.append(video_artifact)
+                    if video_logs:
+                        logs = {f"validation_videos_{num_inference_steps}_steps": video_logs}
+                        # Tracker API name uses "artifacts" to mean media/files
+                        # (e.g., videos for W&B). We keep the upstream API name.
                         self.tracker.log_artifacts(logs, step)
                 else:
                     self.world_group.send_object(result.videos, dst=0)
