@@ -97,6 +97,20 @@ def maybe_load_fsdp_model(
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
+    # If the model config carries a quantization config, prepare nn.Linear
+    # modules for FP8 by scanning the checkpoint for FP8 weights and
+    # injecting the necessary parameters + forward hooks.
+    _config = init_params.get("config")
+    _quant_config = getattr(_config, "quant_config", None) if _config else None
+    if _quant_config is not None:
+        from fastvideo.layers.quantization.dit_fp8_bridge import (
+            prepare_model_for_fp8,
+            scan_fp8_modules,
+        )
+        fp8_prefixes = scan_fp8_modules(weight_dir_list)
+        if fp8_prefixes:
+            prepare_model_for_fp8(model, fp8_prefixes, default_dtype)
+
     # Check if we should use FSDP
     use_fsdp = training_mode or fsdp_inference
 
@@ -319,11 +333,19 @@ def load_model_from_full_model_state_dict(
                 f"Parameter {target_param_name} not found in custom model state dict. The hf to custom mapping may be incorrect."
             )
         if not hasattr(meta_sharded_param, "device_mesh"):
-            full_tensor = full_tensor.to(device=device, dtype=param_dtype)
+            # Respect the model's declared dtype for quantized parameters
+            # (e.g. FP8 weights stay float8_e4m3fn, scales stay float32).
+            target_dtype = (meta_sharded_param.dtype
+                            if meta_sharded_param.dtype != param_dtype
+                            else param_dtype)
+            full_tensor = full_tensor.to(device=device, dtype=target_dtype)
             # In cases where parts of the model aren't sharded, some parameters will be plain tensors
             sharded_tensor = full_tensor
         else:
-            full_tensor = full_tensor.to(device=device, dtype=param_dtype)
+            target_dtype = (meta_sharded_param.dtype
+                            if meta_sharded_param.dtype != param_dtype
+                            else param_dtype)
+            full_tensor = full_tensor.to(device=device, dtype=target_dtype)
             sharded_tensor = distribute_tensor(
                 full_tensor,
                 meta_sharded_param.device_mesh,
