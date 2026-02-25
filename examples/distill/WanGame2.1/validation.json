@@ -5,320 +5,320 @@
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000051.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000051_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "229",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000229.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000229_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "250",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000250.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000250_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "380",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000380.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000380_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "382",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000382.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000382_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "387",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000387.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000387_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "418",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000418.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000418_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "505",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000505.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000505_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "515",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000515.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000515_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "534",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000534.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000534_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "599",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000599.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000599_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "613",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000613.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000613_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "745",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000745.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000745_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "861",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000861.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000861_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "940",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000940.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000940_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "946",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000946.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000946_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "996",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000996.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/000996_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1011",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001011.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001011_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1037",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001037.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001037_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1057",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001057.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001057_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1195",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001195.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001195_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1236",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001236.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001236_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1276",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001276.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001276_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1368",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001368.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001368_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1403",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001403.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001403_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1417",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001417.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001417_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1481",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001481.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001481_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1489",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001489.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001489_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1618",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001618.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001618_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1779",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001779.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001779_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1867",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001867.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001867_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         },
         {
             "caption": "1949",
             "image_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001949.jpg",
             "action_path": "/mnt/weka/home/hao.zhang/kaiqin/traindata_0222_0030/ode_init_mc_Xonly_3k/images/001949_action.npy",
             "video_path": null,
-            "num_inference_steps": 4,
+            "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 81
+            "num_frames": 77
         }
     ]
 }

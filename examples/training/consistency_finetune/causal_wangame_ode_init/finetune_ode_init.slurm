@@ -35,8 +35,10 @@ echo "RUN_NAME: $RUN_NAME"
 
 # Configs
 MODEL_PATH="weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers"
-DATA_DIR="../traindata_0222_0030/ode_init_mc_with_mouse/preprocessed_wangame"
-VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_wangame_ode_init/validation.json"
+# DATA_DIR="../traindata_0222_0030/ode_init_mc_Xonly_3k/preprocessed"
+DATA_DIR="../traindata_0222_0030/ode_init_mc_random/preprocessed_wangame"
+# VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_wangame_ode_init/validation.json"
+VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_wangame_ode_init/validation_same.json"
 CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_1action_rand_from_scratch/checkpoint-9000/transformer/diffusion_pytorch_model.safetensors"
 
 # Training arguments
@@ -44,11 +46,11 @@ training_args=(
   --tracker_project_name "wangame_ode_init"
   --output_dir "checkpoints/wangame_ode_init_${RUN_NAME}"
   --override_transformer_cls_name "CausalWanGameActionTransformer3DModel"
-  --wandb_run_name "${RUN_NAME}_bs32"
+  --wandb_run_name "${RUN_NAME}_bs64_random"
   --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
+  --gradient_accumulation_steps 2
   --num_latent_t 21
   --num_height 352
   --num_width 640

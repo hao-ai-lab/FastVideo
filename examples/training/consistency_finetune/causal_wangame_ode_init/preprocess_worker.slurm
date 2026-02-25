@@ -17,7 +17,8 @@ START_FILE=${1:-1}  # Starting file number for this node
 NODE_ID=${2:-0}     # Node identifier (0-7)
 
 MODEL_PATH="./Wan2.1-Fun-1.3B-InP-Diffusers"
-OUTPUT_BASE="traindata_0222_0030/ode_init_mc_with_mouse/preprocessed_wangame"
+# OUTPUT_BASE="traindata_0222_0030/ode_init_mc_Xonly_3k/preprocessed"
+OUTPUT_BASE="traindata_0222_0030/ode_init_mc_same/preprocessed"
 
 # Port range calculation
 base_port=$((29500 + NODE_ID * 100))
@@ -28,7 +29,8 @@ for i in {1..8}; do
     gpu=${gpu_ids[((i-1))]}
     file_num=$((START_FILE + i - 1))
     
-    DATA_MERGE_PATH="traindata_0222_0030/ode_init_mc_with_mouse/merge_${file_num}.txt"
+    # DATA_MERGE_PATH="traindata_0222_0030/ode_init_mc_Xonly_3k/merge_${file_num}.txt"
+    DATA_MERGE_PATH="traindata_0222_0030/ode_init_mc_same/merge_${file_num}.txt"
     OUTPUT_DIR="${OUTPUT_BASE}/gpu_${gpu}_file_${file_num}"
     echo "DATA_MERGE_PATH: $DATA_MERGE_PATH"
     echo "OUTPUT_DIR: $OUTPUT_DIR"
