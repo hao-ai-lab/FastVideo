@@ -44,7 +44,7 @@ distillation pipeline**（`fastvideo/training/*distillation_pipeline.py`）。
 当前状态（已达成）：
 
 - Phase 2 entrypoint：`fastvideo/training/distillation.py --config <outside yaml>`
-- runtime：`build_wan_dmd2_runtime_from_config(...)`
+- runtime：`build_runtime_from_config(...)`
 - validation：`fastvideo/distillation/validators/wan.py::WanValidator`
 
 以上链路不再实例化/调用 legacy `WanDistillationPipeline` / `DistillationPipeline._log_validation(...)`。
@@ -81,7 +81,7 @@ distillation pipeline**（`fastvideo/training/*distillation_pipeline.py`）。
   - 新增目录：`fastvideo/distillation/outside/`（视作外部 repo root）
   - 覆盖路径：`fastvideo/distillation/outside/<repo-relative-path>`
   - **无自动补全/overlay**：config loader 不做路径重写；运行时传入 outside YAML 的真实路径（无 fallback）
-- [x] 实现 standalone runtime builder：`fastvideo/distillation/builder.py::build_wan_dmd2_runtime_from_config`
+- [x] 实现 standalone runtime builder：`fastvideo/distillation/builder.py::build_runtime_from_config`
   - 直接加载 modules（student/teacher/critic）并构建 `ModelBundle`
   - 构建 per-role optimizers/schedulers（复用 TrainingArgs 超参）
   - 构建 dataloader（`build_parquet_map_style_dataloader`）

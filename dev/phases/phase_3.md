@@ -175,6 +175,10 @@ Phase 3.1~3.3 已经把训练端到端跑通；但目前 `fastvideo/distillation
 > 备注：此阶段优先做 **低风险、可 review、行为不变（或可控变更）** 的整理。
 > 若某些重排会牵动较大行为差异（例如数据加载完全抽象成独立 registry），可以拆成 3.4.x 逐步落地。
 
+**本阶段决策（重要）**
+- 不做后向兼容：不保留 re-export shim，不保留旧路径别名。
+- 直接把全 repo 的 import / docs / YAML 示例统一到新语义，允许 breaking change。
+
 ### 目标（DoD）
 
 1) **更直觉的目录命名**
@@ -194,12 +198,6 @@ Phase 3.1~3.3 已经把训练端到端跑通；但目前 `fastvideo/distillation
 - 已将纯 dataclass（原 `specs.py/runtime.py`）合并到 `utils/config.py`，减少“文件级概念数量”
 - 已将 YAML loader（原 `yaml_config.py`）合并到 `utils/config.py`（schema+解析逻辑同处）
 - `registry.py + builder.py` 可以合并/重命名为更直觉的 `dispatch.py`（保留注册表与 build_runtime 的入口）
-
-5) **迁移策略：保证渐进、可回退**
-- 保留兼容 import（re-export shim）一段时间，避免全 repo 级别大范围改动：
-  - `fastvideo/distillation/families/__init__.py` re-export `fastvideo/distillation/models/*`
-  - `fastvideo/distillation/bundle.py` re-export `fastvideo/distillation/roles.py` 的类型
-- 更新 `fastvideo/distillation/doc/` 索引与各文件说明
 
 ### 具体设计：如何“解耦 dataloader/tracker”
 
@@ -245,11 +243,9 @@ Phase 3.4 目标：
 
 命名/结构（行为尽量不变）：
 - [x] YAML schema：顶层 `models:` → `roles:`（与 `DistillRunConfig.roles` 对齐）
-- [x] YAML loader：`fastvideo/distillation/yaml_config.py` → `fastvideo/distillation/utils/config.py`
-- [ ] 新增 `fastvideo/distillation/models/`（拷贝/迁移原 `families/`）
-- [ ] 保留 `fastvideo/distillation/families/` 作为兼容 re-export（短期）
-- [ ] 新增 `fastvideo/distillation/roles.py` 并迁移 `RoleHandle/ModelBundle`
-- [ ] `fastvideo/distillation/bundle.py` 变为兼容层（re-export）
+- [x] YAML loader：`fastvideo/distillation/utils/config.py`（包含 schema + 解析逻辑）
+- [ ] `fastvideo/distillation/families/` → `fastvideo/distillation/models/`（直接迁移并更新所有 import）
+- [ ] `fastvideo/distillation/bundle.py` → `fastvideo/distillation/roles.py`（直接迁移并更新所有 import）
 - [x] `fastvideo/distillation/specs.py` + `fastvideo/distillation/runtime.py` 合并到 `fastvideo/distillation/utils/config.py`
 - [ ] `fastvideo/distillation/registry.py` + `fastvideo/distillation/builder.py` 收敛为 `dispatch.py`（或最少改名）
 

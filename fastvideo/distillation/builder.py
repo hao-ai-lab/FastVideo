@@ -33,15 +33,3 @@ def build_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:
         tracker=artifacts.tracker,
         start_step=int(getattr(artifacts, "start_step", 0) or 0),
     )
-
-
-def build_wan_dmd2_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:
-    """Legacy Phase 2 helper kept for compatibility during Phase 2.9 rollout."""
-
-    if cfg.recipe.family != "wan" or cfg.recipe.method != "dmd2":
-        raise ValueError(
-            "build_wan_dmd2_runtime_from_config expects recipe.family='wan' "
-            f"and recipe.method='dmd2', got family={cfg.recipe.family!r}, "
-            f"method={cfg.recipe.method!r}"
-        )
-    return build_runtime_from_config(cfg)
