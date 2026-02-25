@@ -192,7 +192,7 @@ Phase 3.1~3.3 已经把训练端到端跑通；但目前 `fastvideo/distillation
 3) **把 infra 从 models(原 families) 中解耦合**
 - dataloader 构建逻辑从 `models/*` 抽到 `fastvideo/distillation/utils/`（或 `infra/`）
 - tracker 初始化从 `models/*` 抽到 `trainer/entrypoint`（更符合“infra 归 infra”）
-- checkpointing 相关（目前 `fastvideo/distillation/checkpoint.py`）移动到 `utils/`（或 `infra/`）
+- checkpointing 相关（`fastvideo/distillation/utils/checkpoint.py`）统一放在 `utils/`（或 `infra/`）
 
 4) **减少“文件级概念数量”**
 - 已将纯 dataclass（原 `specs.py/runtime.py`）合并到 `utils/config.py`，减少“文件级概念数量”
@@ -244,18 +244,18 @@ Phase 3.4 目标：
 命名/结构（行为尽量不变）：
 - [x] YAML schema：顶层 `models:` → `roles:`（与 `DistillRunConfig.roles` 对齐）
 - [x] YAML loader：`fastvideo/distillation/utils/config.py`（包含 schema + 解析逻辑）
-- [ ] `fastvideo/distillation/families/` → `fastvideo/distillation/models/`（直接迁移并更新所有 import）
-- [ ] `fastvideo/distillation/bundle.py` → `fastvideo/distillation/roles.py`（直接迁移并更新所有 import）
+- [x] `fastvideo/distillation/families/` → `fastvideo/distillation/models/`（直接迁移并更新所有 import）
+- [x] `fastvideo/distillation/bundle.py` → `fastvideo/distillation/roles.py`（直接迁移并更新所有 import）
 - [x] `fastvideo/distillation/specs.py` + `fastvideo/distillation/runtime.py` 合并到 `fastvideo/distillation/utils/config.py`
 - [ ] `fastvideo/distillation/registry.py` + `fastvideo/distillation/builder.py` 收敛为 `dispatch.py`（或最少改名）
 
 infra 解耦：
-- [ ] 新增 `fastvideo/distillation/utils/`（或 `infra/`）
-  - [ ] `utils/tracking.py`：tracker 初始化（rank0 only）+ W&B run YAML 上传（如果需要）
-  - [ ] `utils/data.py`：dataloader 构建（基于 `DataSpec`）
-  - [ ] `utils/checkpoint.py`：checkpoint manager / config（从 `distillation/checkpoint.py` 迁移）
-- [ ] `models/*`（原 families）移除 tracker/dataloader/checkpointing 的直接创建逻辑
+- [x] 新增 `fastvideo/distillation/utils/`（或 `infra/`）
+  - [x] `utils/tracking.py`：tracker 初始化（rank0 only）
+  - [x] `utils/data.py`：dataloader 构建（当前先覆盖 parquet T2V）
+  - [x] `utils/checkpoint.py`：checkpoint manager / config（从 `distillation/checkpoint.py` 迁移）
+- [x] `models/*`（原 families）移除 tracker/dataloader/checkpointing 的内联实现（迁移到 `utils/`）
 - [ ] 更新 `utils/config.py` 的 artifacts 结构（必要时引入 factory/spec 而非直接对象）
 
 docs：
-- [ ] 更新 `fastvideo/distillation/doc/README.md` 与各文件说明（路径/命名变化）
+- [x] 更新 `fastvideo/distillation/doc/README.md` 与各文件说明（路径/命名变化）

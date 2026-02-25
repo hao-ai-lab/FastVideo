@@ -86,7 +86,7 @@ methods**（normalize/noise/timestep/attention metadata/build_input_kwargs 等�
 
 - `fastvideo/distillation/__init__.py`
   - 导出 Phase 0 需要的核心类（Trainer/Method/Bundle）
-- `fastvideo/distillation/bundle.py`
+- `fastvideo/distillation/roles.py`
   - `RoleHandle` / `ModelBundle`：`roles: dict[str, RoleHandle]`
 - `fastvideo/distillation/trainer.py`
   - `DistillTrainer`：通用训练循环（grad accum + step/zero_grad），不认识 roles

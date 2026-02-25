@@ -7,7 +7,7 @@ fi
 # One-shot launch script for Phase 3.3 (finetune method on the distillation scaffold).
 #
 # - Same trainer/bundle/adapter/family infrastructure as distillation.
-# - Only `models.student` is required; the method updates student weights only.
+# - Only `roles.student` is required; the method updates student weights only.
 # - Validation is still supported via `ValidationRequest` + `WanValidator`.
 
 export NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-1}
@@ -40,4 +40,3 @@ torchrun \
   --master_port "$MASTER_PORT" \
   fastvideo/training/distillation.py \
   --config "$CONFIG"
-

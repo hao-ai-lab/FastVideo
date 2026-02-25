@@ -5,3 +5,6 @@
 
 当前包含：
 - `config.py`：YAML loader + schema/types + build-time artifacts + runtime 组装结果。
+- `data.py`：通用 dataloader 构建（按 dataset kind/schema 复用 FastVideo 现有实现）。
+- `tracking.py`：tracker 初始化（wandb / tensorboard 等）。
+- `checkpoint.py`：role-based checkpoint/save-resume（Phase 2 runtime）。

@@ -5,7 +5,7 @@
 设计原则（对应 Phase 2.9）：
 - **Trainer** 只做 infra（loop/accum/日志/ckpt/validate 调用），不包含算法策略。
 - **Method** 只做算法（loss + update policy + 需要哪些 roles）。
-- **Family** 只做装配（build-time：加载 modules、构建 bundle/adapter/dataloader/validator/tracker）。
+- **Family** 只做装配（build-time：加载 modules、构建 bundle/adapter/dataloader/validator/tracker；代码在 `models/`）。
 - **Adapter** 只做运行时 primitive（step-time：prepare_batch/forward_context/predict/backward 等），
   API 以 operation 为中心，不以 role 为中心（避免 role 爆炸）。
 
@@ -22,20 +22,22 @@
 - `__init__.md`
 - `utils/__init__.md`
 - `utils/config.md`
+- `utils/data.md`
+- `utils/tracking.md`
+- `utils/checkpoint.md`
 - `registry.md`
 - `builder.md`
-- `bundle.md`
+- `roles.md`
 - `trainer.md`
-- `checkpoint.md`
 
 ### adapters/
 - `adapters/__init__.md`
 - `adapters/base.md`
 - `adapters/wan.md`
 
-### families/
-- `families/__init__.md`
-- `families/wan.md`
+### models/
+- `models/__init__.md`
+- `models/wan.md`
 
 ### methods/
 - `methods/__init__.md`

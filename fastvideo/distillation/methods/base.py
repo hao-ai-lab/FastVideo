@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 
-from fastvideo.distillation.bundle import ModelBundle
+from fastvideo.distillation.roles import ModelBundle
 
 
 class DistillMethod(torch.nn.Module, ABC):

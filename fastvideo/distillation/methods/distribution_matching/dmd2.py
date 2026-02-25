@@ -12,8 +12,8 @@ from fastvideo.training.training_utils import (
     get_scheduler,
 )
 
-from fastvideo.distillation.bundle import ModelBundle
-from fastvideo.distillation.bundle import RoleHandle
+from fastvideo.distillation.roles import ModelBundle
+from fastvideo.distillation.roles import RoleHandle
 from fastvideo.distillation.methods.base import DistillMethod
 from fastvideo.distillation.registry import register_method
 from fastvideo.distillation.validators.base import ValidationRequest
@@ -95,7 +95,7 @@ class DMD2Method(DistillMethod):
 
     Owns the algorithmic orchestration (loss construction + update policy) and
     stays independent of any specific model family. It requires a
-    :class:`~fastvideo.distillation.bundle.ModelBundle` containing at least the
+    :class:`~fastvideo.distillation.roles.ModelBundle` containing at least the
     roles ``student``, ``teacher``, and ``critic``.
 
     All model-family details (how to run student rollout, teacher CFG
@@ -117,12 +117,12 @@ class DMD2Method(DistillMethod):
         self.student = bundle.role("student")
         self.teacher = bundle.role("teacher")
         self.critic = bundle.role("critic")
-        if not getattr(self.student, "trainable", False):
-            raise ValueError("DMD2Method requires models.student.trainable=true")
-        if getattr(self.teacher, "trainable", False):
-            raise ValueError("DMD2Method requires models.teacher.trainable=false")
-        if not getattr(self.critic, "trainable", False):
-            raise ValueError("DMD2Method requires models.critic.trainable=true")
+        if not self.student.trainable:
+            raise ValueError("DMD2Method requires roles.student.trainable=true")
+        if self.teacher.trainable:
+            raise ValueError("DMD2Method requires roles.teacher.trainable=false")
+        if not self.critic.trainable:
+            raise ValueError("DMD2Method requires roles.critic.trainable=true")
         self.adapter = adapter
         self.validator = validator
         self.training_args = adapter.training_args

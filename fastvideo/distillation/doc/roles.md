@@ -1,4 +1,4 @@
-# `fastvideo/distillation/bundle.py`
+# `fastvideo/distillation/roles.py`
 
 **目的**
 - 用统一的数据结构表达 “多角色（roles）参与的训练/蒸馏”：
@@ -17,6 +17,5 @@
   - `role(name)`：获取 handle
 
 **Phase 2.9 约定**
-- family 负责 **load modules + 设置 trainable** 并创建 `ModelBundle`
+- family(model plugin) 负责 **load modules + 设置 trainable** 并创建 `ModelBundle`
 - method 负责 **(按算法) 创建 optimizers/schedulers** 并写回对应的 `RoleHandle`
-

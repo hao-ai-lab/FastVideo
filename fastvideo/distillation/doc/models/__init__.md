@@ -1,4 +1,4 @@
-# `fastvideo/distillation/families/__init__.py`
+# `fastvideo/distillation/models/__init__.py`
 
 **目的**
 - families 是 build-time 插件层：
@@ -12,4 +12,3 @@
   - family 专注 build-time 高内聚
   - method 专注算法高内聚
   - entrypoint/builder 不需要 N×M 组合逻辑
-

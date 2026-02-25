@@ -11,6 +11,7 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
+
 def run_distillation_from_config(
     config_path: str,
     *,
@@ -22,7 +23,7 @@ def run_distillation_from_config(
 
     from fastvideo.distributed import maybe_init_distributed_environment_and_model_parallel
     from fastvideo.distillation import DistillTrainer
-    from fastvideo.distillation.checkpoint import (
+    from fastvideo.distillation.utils.checkpoint import (
         DistillCheckpointConfig,
         DistillCheckpointManager,
     )

@@ -13,7 +13,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 
-from fastvideo.distillation.bundle import ModelBundle, RoleHandle
+from fastvideo.distillation.roles import ModelBundle, RoleHandle
 from fastvideo.logger import init_logger
 from fastvideo.training.checkpointing_utils import (
     ModelWrapper,
@@ -165,7 +165,7 @@ class DistillCheckpointManager:
         container = _RoleModuleContainer(handle.modules)
 
         for module_name, module in handle.modules.items():
-            states[f"models.{role}.{module_name}"] = ModelWrapper(module)
+            states[f"roles.{role}.{module_name}"] = ModelWrapper(module)
 
         for name, optimizer in handle.optimizers.items():
             states[f"optimizers.{role}.{name}"] = OptimizerWrapper(container, optimizer)

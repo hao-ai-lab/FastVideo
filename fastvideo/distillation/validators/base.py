@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from typing import Literal
 
-from fastvideo.distillation.bundle import RoleHandle
+from fastvideo.distillation.roles import RoleHandle
 
 
 @dataclass(slots=True)

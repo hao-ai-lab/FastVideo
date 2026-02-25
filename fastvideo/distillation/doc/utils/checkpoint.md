@@ -1,4 +1,4 @@
-# `fastvideo/distillation/checkpoint.py`
+# `fastvideo/distillation/utils/checkpoint.py`
 
 **目的**
 - Phase 2 的 role-based checkpoint/save-resume 管理：

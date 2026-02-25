@@ -1,6 +1,6 @@
 import torch
 
-from fastvideo.distillation.bundle import ModelBundle, RoleHandle
+from fastvideo.distillation.roles import ModelBundle, RoleHandle
 from fastvideo.distillation.methods.base import DistillMethod
 
 

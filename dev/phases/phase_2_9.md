@@ -133,9 +133,9 @@ handle 是为 **forward/select module** 服务的：比如选择哪个 transform
   - `register_family(name)` / `register_method(name)` 装饰器
   - `get_family(name)` / `get_method(name)`（错误信息包含可用项）
   - `ensure_builtin_registrations()`：导入内置 family/method 以完成注册
-- [x] 新增 `fastvideo/distillation/families/`
-  - `fastvideo/distillation/families/__init__.py`
-  - `fastvideo/distillation/families/wan.py`：`build_wan_family_artifacts`
+- [x] 新增 `fastvideo/distillation/models/`
+  - `fastvideo/distillation/models/__init__.py`
+  - `fastvideo/distillation/models/wan.py`：`build_wan_family_artifacts`
     - 从 Phase 2 builder 迁移 Wan-specific build-time 逻辑：
       - 加载 role modules（transformer/transformer_2/vae 等）
       - shared components（scheduler/noise_scheduler）
@@ -193,7 +193,7 @@ handle 是为 **forward/select module** 服务的：比如选择哪个 transform
   - teacher 的 `transformer_2` boundary 逻辑不变
   - validation 路径不回退到 legacy
 - [x] Wan family 不再创建 optimizers/schedulers
-  - `fastvideo/distillation/families/wan.py` 只负责加载 modules + 构建 `ModelBundle`
+  - `fastvideo/distillation/models/wan.py` 只负责加载 modules + 构建 `ModelBundle`
   - `DMD2Method` 在 init 时为 student/critic 创建 optimizers/schedulers（复用 TrainingArgs 字段，未来迁移到 `method_config`）
 - [x] Wan validator 归属 method（method 决定是否/如何调用 validation）
   - `fastvideo/distillation/validators/wan.py` 当前使用 `WanDMDPipeline` 进行 validation 采样（对齐 DMD2 的 SDE rollout，便于与 legacy apples-to-apples 对比）

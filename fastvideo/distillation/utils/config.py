@@ -11,7 +11,7 @@ import yaml
 
 if TYPE_CHECKING:
     from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.distillation.bundle import ModelBundle
+    from fastvideo.distillation.roles import ModelBundle
     from fastvideo.distillation.methods.base import DistillMethod
 
 RoleName = str

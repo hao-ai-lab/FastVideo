@@ -12,7 +12,7 @@ from fastvideo.training.training_utils import (
     get_scheduler,
 )
 
-from fastvideo.distillation.bundle import ModelBundle, RoleHandle
+from fastvideo.distillation.roles import ModelBundle, RoleHandle
 from fastvideo.distillation.methods.base import DistillMethod
 from fastvideo.distillation.registry import register_method
 from fastvideo.distillation.validators.base import ValidationRequest
@@ -77,8 +77,8 @@ class FineTuneMethod(DistillMethod):
         super().__init__(bundle)
         bundle.require_roles(["student"])
         self.student = bundle.role("student")
-        if not getattr(self.student, "trainable", False):
-            raise ValueError("FineTuneMethod requires models.student.trainable=true")
+        if not self.student.trainable:
+            raise ValueError("FineTuneMethod requires roles.student.trainable=true")
 
         self.adapter = adapter
         self.validator = validator

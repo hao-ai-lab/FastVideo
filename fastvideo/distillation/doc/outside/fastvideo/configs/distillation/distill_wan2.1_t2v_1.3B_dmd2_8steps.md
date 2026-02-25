@@ -7,7 +7,7 @@
 ## 顶层结构
 
 - `recipe:`
-  - `family: wan` → registry dispatch 到 `families/wan.py`
+  - `family: wan` → registry dispatch 到 `models/wan.py`
   - `method: dmd2` → registry dispatch 到 `methods/distribution_matching/dmd2.py`
 - `roles:`
   - `student / teacher / critic` 三个 roles（role 名称本身由 method 解释语义）

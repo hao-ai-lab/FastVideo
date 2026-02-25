@@ -94,7 +94,7 @@ distillation pipeline**（`fastvideo/training/*distillation_pipeline.py`）。
 
 ### C. role-based checkpoint/save/resume（Phase 2.3）
 
-- [x] 新增 `fastvideo/distillation/checkpoint.py::DistillCheckpointManager`
+- [x] 新增 `fastvideo/distillation/utils/checkpoint.py::DistillCheckpointManager`
   - 保存内容（Phase 2 路径）：
     - **trainable roles** 的 `modules/optimizers/lr_schedulers`（teacher 默认 frozen，不保存）
     - `StatefulDataLoader`（Wan-Syn parquet loader 是 `torchdata.stateful_dataloader.StatefulDataLoader`）
@@ -213,7 +213,7 @@ training:
 
 建议新增：
 
-- `fastvideo/distillation/checkpoint.py`
+- `fastvideo/distillation/utils/checkpoint.py`
   - `DistillCheckpointManager`
   - 内部复用 `fastvideo/training/checkpointing_utils.py` 的 wrappers：
     - `ModelWrapper/OptimizerWrapper/SchedulerWrapper/RandomStateWrapper`

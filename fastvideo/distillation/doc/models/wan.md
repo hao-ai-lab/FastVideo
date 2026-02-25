@@ -1,4 +1,4 @@
-# `fastvideo/distillation/families/wan.py`
+# `fastvideo/distillation/models/wan.py`
 
 **定位**
 - `@register_family("wan")` 的 build-time 插件：

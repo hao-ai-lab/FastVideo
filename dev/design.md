@@ -480,13 +480,13 @@ Phase 0 的实践表明：先把新框架以 **additive** 方式落地到一个�
 
 建议结构（已部分实现）：
 
-- `fastvideo/distillation/bundle.py`：`ModelBundle/RoleHandle`
+- `fastvideo/distillation/roles.py`：`ModelBundle/RoleHandle`
 - `fastvideo/distillation/adapters/`：`WanAdapter`（Phase 1 已落地；后续新增更多 adapter）
 - `fastvideo/distillation/methods/`：`base.py`、`distribution_matching/dmd2.py`、（目标）`self_forcing.py`
 - `fastvideo/distillation/trainer.py`：`DistillTrainer`
 - `fastvideo/distillation/builder.py`：把 “config -> roles -> bundle/adapter/method” 的胶水集中起来
 - `fastvideo/training/distillation.py`：通用入口（YAML-only：`--config path/to/run.yaml`）
-- （后续）`fastvideo/distillation/checkpoint.py`：role-based `CheckpointManager`（先兼容旧格式）
+- `fastvideo/distillation/utils/checkpoint.py`：role-based `CheckpointManager`
 - （后续）`fastvideo/distillation/callbacks/`：EMA/clip/log/profiler 等
 
 旧入口（如 `fastvideo/training/*distillation_pipeline.py`）先保留，
@@ -573,7 +573,7 @@ Phase 1 的“辉煌”（落地与收益）：
 
 - 目标：新框架训练可 save/resume，且协议围绕 role 命名空间（不再绑死 WAN pipeline）
 - 建议实现：
-  - `fastvideo/distillation/checkpoint.py`：保存/加载 modules + optimizers + schedulers + RNG states
+  - `fastvideo/distillation/utils/checkpoint.py`：保存/加载 modules + optimizers + schedulers + RNG states
   - 明确兼容策略：兼容旧格式（若必要）或提供一次性转换脚本
 
 #### Phase 2.4（Deferred）：收敛与清理（暂不做；完全解耦后手动处理）

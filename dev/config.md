@@ -49,7 +49,7 @@ recipe:
 ```
 
 用途：
-- registry dispatch：选择 `families/<family>.py` + `methods/<method>.py` 的组合（N+M，而非 N×M）。
+- registry dispatch：选择 `models/<family>.py` + `methods/<method>.py` 的组合（N+M，而非 N×M）。
 - 语义更通用：未来把 finetuning 也纳入时不会出现 `distill.method=finetune` 的别扭表达。
 
 ## 4) `roles`: role-based 参与者

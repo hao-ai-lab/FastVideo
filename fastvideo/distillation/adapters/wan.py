@@ -29,7 +29,7 @@ from fastvideo.training.training_utils import (
 from fastvideo.utils import is_vmoba_available, is_vsa_available, set_random_seed
 
 from fastvideo.distillation.adapters.base import DistillAdapter
-from fastvideo.distillation.bundle import RoleHandle
+from fastvideo.distillation.roles import RoleHandle
 
 try:
     from fastvideo.attention.backends.video_sparse_attn import (

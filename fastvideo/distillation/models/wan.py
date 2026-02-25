@@ -7,18 +7,18 @@ from typing import Any
 
 import torch
 
-from fastvideo.distributed import get_world_group
 from fastvideo.distillation.adapters.wan import WanAdapter
-from fastvideo.distillation.bundle import ModelBundle, RoleHandle
+from fastvideo.distillation.roles import ModelBundle, RoleHandle
 from fastvideo.distillation.registry import register_family
 from fastvideo.distillation.utils.config import FamilyArtifacts
 from fastvideo.distillation.utils.config import DistillRunConfig
+from fastvideo.distillation.utils.data import build_parquet_t2v_train_dataloader
+from fastvideo.distillation.utils.tracking import build_tracker
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler,
 )
 from fastvideo.training.activation_checkpoint import apply_activation_checkpointing
-from fastvideo.training.trackers import initialize_trackers, Trackers
 from fastvideo.utils import maybe_download_model, verify_model_config_and_directory
 
 
@@ -72,30 +72,6 @@ def _apply_trainable(module: torch.nn.Module, *, trainable: bool) -> torch.nn.Mo
     else:
         module.eval()
     return module
-
-
-def _build_tracker(training_args: Any, *, config: dict[str, Any] | None) -> Any:
-    world_group = get_world_group()
-    trackers = list(training_args.trackers)
-    if not trackers and str(training_args.tracker_project_name):
-        trackers.append(Trackers.WANDB.value)
-    if world_group.rank != 0:
-        trackers = []
-
-    tracker_log_dir = training_args.output_dir or os.getcwd()
-    if trackers:
-        tracker_log_dir = os.path.join(tracker_log_dir, "tracker")
-
-    tracker_config = config if trackers else None
-    tracker_run_name = training_args.wandb_run_name or None
-    project = training_args.tracker_project_name or "fastvideo"
-    return initialize_trackers(
-        trackers,
-        experiment_name=project,
-        config=tracker_config,
-        log_dir=tracker_log_dir,
-        run_name=tracker_run_name,
-    )
 
 
 @register_family("wan")
@@ -173,7 +149,7 @@ def build_wan_family_artifacts(*, cfg: DistillRunConfig) -> FamilyArtifacts:
         )
 
     bundle = ModelBundle(roles=role_handles)
-    tracker = _build_tracker(training_args, config=cfg.raw)
+    tracker = build_tracker(training_args, config=cfg.raw)
 
     validator = None
     if getattr(training_args, "log_validation", False):
@@ -195,20 +171,11 @@ def build_wan_family_artifacts(*, cfg: DistillRunConfig) -> FamilyArtifacts:
         noise_scheduler=noise_scheduler,
         vae=vae,
     )
-
-    from fastvideo.dataset import build_parquet_map_style_dataloader
     from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
 
-    text_len = training_args.pipeline_config.text_encoder_configs[0].arch_config.text_len  # type: ignore[attr-defined]
-    _dataset, dataloader = build_parquet_map_style_dataloader(
-        training_args.data_path,
-        training_args.train_batch_size,
-        num_data_workers=training_args.dataloader_num_workers,
+    dataloader = build_parquet_t2v_train_dataloader(
+        training_args,
         parquet_schema=pyarrow_schema_t2v,
-        cfg_rate=training_args.training_cfg_rate,
-        drop_last=True,
-        text_padding_length=int(text_len),
-        seed=int(training_args.seed or 0),
     )
 
     return FamilyArtifacts(
