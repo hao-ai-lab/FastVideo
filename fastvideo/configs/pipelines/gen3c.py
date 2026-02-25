@@ -7,7 +7,7 @@ import torch
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits.gen3c import Gen3CVideoConfig
 from fastvideo.configs.models.encoders import BaseEncoderOutput, T5LargeConfig
-from fastvideo.configs.models.vaes import CosmosVAEConfig
+from fastvideo.configs.models.vaes import Gen3CVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
 
@@ -50,7 +50,7 @@ class Gen3CConfig(PipelineConfig):
 
     dit_config: DiTConfig = field(default_factory=Gen3CVideoConfig)
 
-    vae_config: VAEConfig = field(default_factory=CosmosVAEConfig)
+    vae_config: VAEConfig = field(default_factory=Gen3CVAEConfig)
 
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (T5LargeConfig(), ))
@@ -101,6 +101,19 @@ class Gen3CConfig(PipelineConfig):
     # Generation frame rate
     fps: int = 24
 
+    # Explicit CFG behavior policy:
+    # - "legacy": CFG branch only when guidance_scale > 1.0
+    # - "official_uncond_at_unity": also run uncond branch at guidance_scale == 1.0
+    cfg_behavior: str = "legacy"
+    default_negative_prompt: str = (
+        "The video captures a series of frames showing ugly scenes, static with no motion, motion blur, "
+        "over-saturation, shaky footage, low resolution, grainy texture, pixelated images, poorly lit areas, "
+        "underexposed and overexposed scenes, poor color balance, washed out colors, choppy sequences, "
+        "jerky movements, low frame rate, artifacting, color banding, unnatural transitions, outdated special "
+        "effects, fake elements, unconvincing visuals, poorly edited content, jump cuts, visual noise, and "
+        "flickering. Overall, the video is of poor quality."
+    )
+
     # Autoregressive generation settings
     autoregressive_chunk_frames: int = 121  # Frames per chunk
     autoregressive_overlap_frames: int = 1  # Overlap between chunks
@@ -119,6 +132,12 @@ class Gen3CConfig(PipelineConfig):
                 raise ValueError(
                     f"frame_buffer_max mismatch: pipeline config has {self.frame_buffer_max}, "
                     f"DiT config has {arch_config.frame_buffer_max}")
+
+        allowed_cfg_behavior = {"legacy", "official_uncond_at_unity"}
+        if self.cfg_behavior not in allowed_cfg_behavior:
+            raise ValueError(
+                f"cfg_behavior must be one of {sorted(allowed_cfg_behavior)}, got {self.cfg_behavior!r}"
+            )
 
 
 @dataclass

@@ -22,6 +22,12 @@ from torchvision import transforms
 
 from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.configs.models.dits.gen3c import Gen3CVideoConfig
+from fastvideo.distributed.communication_op import (
+    sequence_model_parallel_all_gather_with_unpad,
+    sequence_model_parallel_shard,
+)
+from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.distributed.utils import create_attention_mask_for_padding
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.mlp import MLP
@@ -250,6 +256,7 @@ class Gen3CSelfAttention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         rope_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
+        attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Args:
@@ -281,7 +288,7 @@ class Gen3CSelfAttention(nn.Module):
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
         
-        attn_output, _ = self.attn(query, key, value)
+        attn_output, _ = self.attn(query, key, value, attention_mask=attention_mask)
         attn_output = attn_output.flatten(-2, -1)  # (B, S, H*D_h)
 
         # Output projection
@@ -444,18 +451,18 @@ class Gen3CTransformerBlock(nn.Module):
     ) -> torch.Tensor:
         """
         Args:
-            hidden_states: (B, T, H, W, D)
+            hidden_states: (B, S, D) where S = T*H*W (sequence may be sharded with SP)
             encoder_hidden_states: (B, N, D_text)
             affine_emb: (B, D) affine embedding
             adaln_lora: (B, 3D) AdaLN-LoRA parameters
             rope_emb: Tuple of (cos, sin) for RoPE
-            extra_pos_emb: Optional learnable positional embeddings
+            extra_pos_emb: Optional learnable positional embeddings (B, S, D)
         """
         # Add extra positional embeddings if provided
         if extra_pos_emb is not None:
             hidden_states = hidden_states + extra_pos_emb
 
-        B, T, H, W, D = hidden_states.shape
+        B, S, D = hidden_states.shape
 
         # Compute modulation parameters
         if self.use_adaln_lora and adaln_lora is not None:
@@ -477,45 +484,43 @@ class Gen3CTransformerBlock(nn.Module):
             ).chunk(3, dim=-1)
             shift_mlp, scale_mlp, gate_mlp = self.adaln_modulation_mlp(affine_emb).chunk(3, dim=-1)
 
-        # Reshape modulation parameters for broadcasting: (B, D) -> (B, 1, 1, 1, D)
-        shift_self_attn = shift_self_attn.unsqueeze(1).unsqueeze(1).unsqueeze(1).type_as(hidden_states)
-        scale_self_attn = scale_self_attn.unsqueeze(1).unsqueeze(1).unsqueeze(1).type_as(hidden_states)
-        gate_self_attn = gate_self_attn.unsqueeze(1).unsqueeze(1).unsqueeze(1).type_as(hidden_states)
+        # Reshape modulation parameters for broadcasting: (B, D) -> (B, 1, D)
+        shift_self_attn = shift_self_attn.unsqueeze(1).type_as(hidden_states)
+        scale_self_attn = scale_self_attn.unsqueeze(1).type_as(hidden_states)
+        gate_self_attn = gate_self_attn.unsqueeze(1).type_as(hidden_states)
 
-        shift_cross_attn = shift_cross_attn.unsqueeze(1).unsqueeze(1).unsqueeze(1).type_as(hidden_states)
-        scale_cross_attn = scale_cross_attn.unsqueeze(1).unsqueeze(1).unsqueeze(1).type_as(hidden_states)
-        gate_cross_attn = gate_cross_attn.unsqueeze(1).unsqueeze(1).unsqueeze(1).type_as(hidden_states)
+        shift_cross_attn = shift_cross_attn.unsqueeze(1).type_as(hidden_states)
+        scale_cross_attn = scale_cross_attn.unsqueeze(1).type_as(hidden_states)
+        gate_cross_attn = gate_cross_attn.unsqueeze(1).type_as(hidden_states)
 
-        shift_mlp = shift_mlp.unsqueeze(1).unsqueeze(1).unsqueeze(1).type_as(hidden_states)
-        scale_mlp = scale_mlp.unsqueeze(1).unsqueeze(1).unsqueeze(1).type_as(hidden_states)
-        gate_mlp = gate_mlp.unsqueeze(1).unsqueeze(1).unsqueeze(1).type_as(hidden_states)
+        shift_mlp = shift_mlp.unsqueeze(1).type_as(hidden_states)
+        scale_mlp = scale_mlp.unsqueeze(1).type_as(hidden_states)
+        gate_mlp = gate_mlp.unsqueeze(1).type_as(hidden_states)
 
         # Self-attention block
         norm_hidden_states = self.norm1(hidden_states, shift_self_attn, scale_self_attn)
-        norm_hidden_states_flat = norm_hidden_states.flatten(1, 3)  # (B, THW, D)
-        
-        attn_output = self.attn1(norm_hidden_states_flat, rope_emb=rope_emb)
-        attn_output = attn_output.unflatten(1, (T, H, W))
+
+        attn_output = self.attn1(
+            norm_hidden_states,
+            rope_emb=rope_emb,
+            attention_mask=attention_mask,
+        )
         hidden_states = hidden_states + gate_self_attn * attn_output
 
         # Cross-attention block
         norm_hidden_states = self.norm2(hidden_states, shift_cross_attn, scale_cross_attn)
-        norm_hidden_states_flat = norm_hidden_states.flatten(1, 3)
-        
+
         attn_output = self.attn2(
-            norm_hidden_states_flat,
+            norm_hidden_states,
             encoder_hidden_states=encoder_hidden_states,
             attention_mask=attention_mask,
         )
-        attn_output = attn_output.unflatten(1, (T, H, W))
         hidden_states = hidden_states + gate_cross_attn * attn_output
 
         # MLP block
         norm_hidden_states = self.norm3(hidden_states, shift_mlp, scale_mlp)
-        norm_hidden_states_flat = norm_hidden_states.flatten(1, 3)
-        
-        mlp_output = self.mlp(norm_hidden_states_flat)
-        mlp_output = mlp_output.unflatten(1, (T, H, W))
+
+        mlp_output = self.mlp(norm_hidden_states)
         hidden_states = hidden_states + gate_mlp * mlp_output
 
         return hidden_states
@@ -702,9 +707,12 @@ class Gen3CFinalLayer(nn.Module):
         # Apply normalization and modulation
         hidden_states = self.norm(hidden_states)
 
-        # Reshape for broadcasting: (B, D) -> (B, 1, 1, 1, D)
-        shift = shift.unsqueeze(1).unsqueeze(1).unsqueeze(1)
-        scale = scale.unsqueeze(1).unsqueeze(1).unsqueeze(1)
+        # Broadcast over all non-channel dimensions. Supports both:
+        # - (B, T, H, W, D)
+        # - (B, S, D) when sequence-parallel path is active.
+        mod_shape = [hidden_states.shape[0]] + [1] * (hidden_states.dim() - 2) + [self.hidden_size]
+        shift = shift.view(*mod_shape)
+        scale = scale.view(*mod_shape)
 
         hidden_states = hidden_states * (1 + scale) + shift
 
@@ -904,6 +912,7 @@ class Gen3CTransformer3DModel(BaseDiT):
         # 4. Patchify input
         p_t, p_h, p_w = self.patch_size
         hidden_states = self.patch_embed(hidden_states)  # (B, T', H', W', D)
+        post_patch_num_frames, post_patch_height, post_patch_width = hidden_states.shape[1:4]
 
         # 5. Generate RoPE embeddings
         rope_emb = self.rope(hidden_states, fps=fps)
@@ -912,6 +921,35 @@ class Gen3CTransformer3DModel(BaseDiT):
         extra_pos_emb = None
         if self.learnable_pos_embed is not None:
             extra_pos_emb = self.learnable_pos_embed(hidden_states)
+
+        # Flatten to sequence representation for transformer blocks.
+        hidden_states = hidden_states.flatten(1, 3)  # (B, S, D)
+        if extra_pos_emb is not None:
+            extra_pos_emb = extra_pos_emb.flatten(1, 3)
+
+        # Sequence parallel sharding with optional padding.
+        # This is a no-op when SP world size is 1.
+        sp_world_size = get_sp_world_size()
+        original_seq_len = hidden_states.shape[1]
+        sp_attention_mask = None
+        if sp_world_size > 1:
+            hidden_states, original_seq_len = sequence_model_parallel_shard(
+                hidden_states, dim=1
+            )
+            if extra_pos_emb is not None:
+                extra_pos_emb, _ = sequence_model_parallel_shard(extra_pos_emb, dim=1)
+            rope_cos, _ = sequence_model_parallel_shard(rope_emb[0], dim=0)
+            rope_sin, _ = sequence_model_parallel_shard(rope_emb[1], dim=0)
+            rope_emb = (rope_cos, rope_sin)
+
+            padded_seq_len = hidden_states.shape[1] * sp_world_size
+            if padded_seq_len > original_seq_len:
+                sp_attention_mask = create_attention_mask_for_padding(
+                    seq_len=original_seq_len,
+                    padded_seq_len=padded_seq_len,
+                    batch_size=batch_size,
+                    device=hidden_states.device,
+                )
 
         # 7. Timestep embeddings
         affine_emb, adaln_lora = self.time_embed(timestep, hidden_states.dtype)
@@ -926,10 +964,6 @@ class Gen3CTransformer3DModel(BaseDiT):
         # 9. Apply affine normalization
         affine_emb = self.affine_norm(affine_emb)
 
-        # Prepare attention mask
-        if attention_mask is not None:
-            attention_mask = attention_mask.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, N)
-
         # 10. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for block in self.transformer_blocks:
@@ -941,7 +975,7 @@ class Gen3CTransformer3DModel(BaseDiT):
                     adaln_lora,
                     rope_emb,
                     extra_pos_emb,
-                    attention_mask,
+                    sp_attention_mask,
                 )
         else:
             for block in self.transformer_blocks:
@@ -952,13 +986,21 @@ class Gen3CTransformer3DModel(BaseDiT):
                     adaln_lora=adaln_lora,
                     rope_emb=rope_emb,
                     extra_pos_emb=extra_pos_emb,
-                    attention_mask=attention_mask,
+                    attention_mask=sp_attention_mask,
                 )
 
         # 11. Final layer
         hidden_states = self.final_layer(hidden_states, affine_emb, adaln_lora)
 
-        # 12. Unpatchify: (B, T', H', W', P) -> (B, C, T, H, W)
+        if sp_world_size > 1:
+            hidden_states = sequence_model_parallel_all_gather_with_unpad(
+                hidden_states, original_seq_len, dim=1
+            )
+
+        # 12. Unpatchify: (B, S, P) -> (B, T', H', W', P) -> (B, C, T, H, W)
+        hidden_states = hidden_states.unflatten(
+            1, (post_patch_num_frames, post_patch_height, post_patch_width)
+        )
         hidden_states = hidden_states.unflatten(-1, (p_t, p_h, p_w, self.out_channels))
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         hidden_states = hidden_states.flatten(2, 3).flatten(3, 4).flatten(4, 5)

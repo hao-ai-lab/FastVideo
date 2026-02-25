@@ -14,6 +14,7 @@ Environment variables:
 """
 
 import os
+from pathlib import Path
 
 import pytest
 import torch
@@ -24,6 +25,24 @@ from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_res
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
+
+
+def _resolve_gen3c_model_path() -> str:
+    """
+    Resolve a Diffusers-format GEN3C model path for SSIM tests.
+
+    Priority:
+    1) GEN3C_MODEL_PATH env var
+    2) Local converted checkpoint under repo root
+    """
+    env_model = os.getenv("GEN3C_MODEL_PATH")
+    if env_model:
+        return env_model
+
+    repo_root = Path(__file__).resolve().parents[3]
+    local_default = repo_root / "converted_weights" / "GEN3C-Cosmos-7B"
+    return str(local_default)
+
 
 # ---------------------------------------------------------------------------
 # Device detection
@@ -46,7 +65,7 @@ else:
 
 GEN3C_T2V_PARAMS = {
     "num_gpus": 1,
-    "model_path": os.getenv("GEN3C_MODEL_PATH", "nvidia/GEN3C-Cosmos-7B"),
+    "model_path": _resolve_gen3c_model_path(),
     "height": 720,
     "width": 1280,
     "num_frames": 121,
@@ -97,6 +116,20 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     BASE_PARAMS = MODEL_TO_PARAMS[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
+    model_path = BASE_PARAMS["model_path"]
+
+    # SSIM test requires a Diffusers-format model with model_index.json.
+    if os.path.exists(model_path):
+        model_index_path = os.path.join(model_path, "model_index.json")
+        if not os.path.exists(model_index_path):
+            pytest.skip(
+                f"GEN3C_MODEL_PATH is not Diffusers-format (missing model_index.json): {model_path}"
+            )
+    elif model_path.lower() == "nvidia/gen3c-cosmos-7b":
+        pytest.skip(
+            "nvidia/GEN3C-Cosmos-7B is the official raw checkpoint repo, not Diffusers format. "
+            "Set GEN3C_MODEL_PATH to converted_weights/GEN3C-Cosmos-7B."
+        )
 
     init_kwargs = {
         "num_gpus": BASE_PARAMS["num_gpus"],
@@ -119,7 +152,7 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     }
 
     generator = VideoGenerator.from_pretrained(
-        model_path=BASE_PARAMS["model_path"], **init_kwargs
+        model_path=model_path, **init_kwargs
     )
     generator.generate_video(prompt, **generation_kwargs)
 

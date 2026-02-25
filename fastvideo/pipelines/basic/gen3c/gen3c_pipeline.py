@@ -23,6 +23,46 @@ from fastvideo.pipelines.stages.latent_preparation import LatentPreparationStage
 logger = init_logger(__name__)
 
 
+class Gen3CCFGPolicyStage(PipelineStage):
+    """
+    Explicitly control when GEN3C runs a conditional/unconditional pair (CFG).
+
+    Policies:
+    - legacy: enable CFG only when guidance_scale > 1.0 (current FastVideo behavior)
+    - official_uncond_at_unity: also run CFG at guidance_scale == 1.0
+    """
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        pipeline_config = fastvideo_args.pipeline_config
+        policy = getattr(pipeline_config, "cfg_behavior", "legacy")
+
+        if policy == "legacy":
+            batch.do_classifier_free_guidance = batch.guidance_scale > 1.0
+            return batch
+
+        if policy == "official_uncond_at_unity":
+            batch.do_classifier_free_guidance = batch.guidance_scale >= 1.0
+            has_negative_embeds = (
+                batch.negative_prompt_embeds is not None
+                and len(batch.negative_prompt_embeds) > 0
+            )
+            if (
+                batch.do_classifier_free_guidance
+                and batch.negative_prompt is None
+                and not has_negative_embeds
+            ):
+                batch.negative_prompt = getattr(
+                    pipeline_config, "default_negative_prompt", ""
+                )
+            return batch
+
+        raise ValueError(f"Unsupported GEN3C cfg_behavior: {policy}")
+
+
 class Gen3CConditioningStage(PipelineStage):
     """
     3D cache conditioning stage for GEN3C.
@@ -494,6 +534,20 @@ class Gen3CDenoisingStage(DenoisingStage):
     def __init__(self, transformer, scheduler, pipeline=None) -> None:
         super().__init__(transformer, scheduler, pipeline)
 
+    def _has_edm_preconditioning(self) -> bool:
+        return hasattr(self.scheduler, "precondition_inputs")
+
+    def _precondition_inputs(
+        self,
+        sample: torch.Tensor,
+        sigma: float | torch.Tensor,
+    ) -> torch.Tensor:
+        if self._has_edm_preconditioning():
+            return self.scheduler.precondition_inputs(sample, sigma)
+        # FlowMatch schedulers in FastVideo do not expose EDM preconditioning.
+        # In that case keep the sample in latent space directly.
+        return sample
+
     @staticmethod
     def _reverse_precondition_input(
         xt: torch.Tensor,
@@ -536,10 +590,13 @@ class Gen3CDenoisingStage(DenoisingStage):
         augment_sigma = torch.tensor(
             [condition_augment_sigma], device=latent.device, dtype=latent.dtype)
         augment_latent = latent + noise * augment_sigma
-        augment_latent = self.scheduler.precondition_inputs(
+        augment_latent = self._precondition_inputs(
             augment_latent, condition_augment_sigma)
-        augment_latent_unscaled = self._reverse_precondition_input(
-            augment_latent, sigma=sigma, sigma_data=sigma_data)
+        if self._has_edm_preconditioning():
+            augment_latent_unscaled = self._reverse_precondition_input(
+                augment_latent, sigma=sigma, sigma_data=sigma_data)
+        else:
+            augment_latent_unscaled = augment_latent
 
         new_xt = active_indicator * augment_latent_unscaled + (
             1 - active_indicator) * xt
@@ -709,12 +766,15 @@ class Gen3CDenoisingStage(DenoisingStage):
                 model_output = pred
                 if (latent_for_replace is not None
                         and indicator_for_replace is not None):
-                    latent_unscaled = self._reverse_precondition_output(
-                        latent_for_replace,
-                        xt=model_input,
-                        sigma=sigma,
-                        sigma_data=sigma_data,
-                    )
+                    if self._has_edm_preconditioning():
+                        latent_unscaled = self._reverse_precondition_output(
+                            latent_for_replace,
+                            xt=model_input,
+                            sigma=sigma,
+                            sigma_data=sigma_data,
+                        )
+                    else:
+                        latent_unscaled = latent_for_replace
                     model_output = indicator_for_replace * latent_unscaled + (
                         1 - indicator_for_replace) * model_output
 
@@ -760,15 +820,29 @@ class Gen3CPipeline(ComposedPipelineBase):
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+        scheduler = self.modules.get("scheduler")
+        if scheduler is not None and hasattr(scheduler, "precondition_inputs"):
+            return
+
+        # GEN3C denoising uses EDM preconditioning terms. The converted
+        # model_index may point to FlowMatch scheduler configs that don't
+        # expose precondition_inputs, so force the official EDM scheduler here.
+        logger.warning(
+            "Replacing loaded scheduler (%s) with EDMEulerScheduler for GEN3C parity.",
+            type(scheduler).__name__ if scheduler is not None else "None",
+        )
         self.modules["scheduler"] = EDMEulerScheduler(
             sigma_max=80.0,
             sigma_min=0.0002,
-            sigma_data=float(getattr(fastvideo_args.pipeline_config,
-                                     "sigma_data", 0.5)),
+            sigma_data=float(
+                getattr(fastvideo_args.pipeline_config, "sigma_data", 0.5)),
         )
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
+
+        self.add_stage(stage_name="cfg_policy_stage",
+                       stage=Gen3CCFGPolicyStage())
 
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
