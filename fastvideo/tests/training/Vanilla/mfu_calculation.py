@@ -29,11 +29,9 @@ WANDB_SUMMARY_FILE = OUTPUT_DIR / "tracker/wandb/latest-run/files/wandb-summary.
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
 GRAD_ACCUM = "1"
-MASTER_PORT = "29510"
+MASTER_PORT = "29504"
 
 os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = MASTER_PORT
-os.environ["CUDA_VISIBLE_DEVICES"] = "5,6"
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
 
 
@@ -126,21 +124,12 @@ def test_distributed_training(profile=False):
             "--force-overwrite=true",
         ])
 
-    # Set up rendezvous arguments for multinode/multigpu
-    rdvz_backend = os.environ.get("TORCH_RDZV_BACKEND", "c10d")
-    master_addr = os.environ.get("MASTER_ADDR", "localhost")
-    master_port = os.environ.get("MASTER_PORT", MASTER_PORT)
-    rdvz_id = os.environ.get("TORCH_RDZV_ID", "default")
 
     cmd.extend([
         "torchrun",
         "--nnodes", NUM_NODES,
         "--nproc_per_node", NUM_GPUS_PER_NODE,
-        "--rdzv_backend", rdvz_backend,
-        "--rdzv_endpoint", f"{master_addr}:{master_port}",
-        "--rdzv_id", rdvz_id,
-        "--master_addr", master_addr,
-        "--master_port", master_port,
+        "--master_port", MASTER_PORT,
         str(current_file)
     ])
     process = subprocess.run(cmd, capture_output=True, text=True)
@@ -172,8 +161,6 @@ def test_distributed_training(profile=False):
         hidden_dim = wandb_summary.get("hidden_dim")
         num_layers = wandb_summary.get("num_layers")
         ffn_dim = wandb_summary.get("ffn_dim")
-
-        logger.info(f"batch_size: {batch_size}, seq_len: {seq_len}, context_len: {context_len}, avg_step_time: {avg_step_time}, hidden_dim: {hidden_dim}, num_layers: {num_layers}, ffn_dim: {ffn_dim}")
 
 
         
