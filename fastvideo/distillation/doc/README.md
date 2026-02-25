@@ -21,10 +21,10 @@
 ### Core
 - `__init__.md`
 - `yaml_config.md`
-- `specs.md`
+- `utils/__init__.md`
+- `utils/config.md`
 - `registry.md`
 - `builder.md`
-- `runtime.md`
 - `bundle.md`
 - `trainer.md`
 - `checkpoint.md`

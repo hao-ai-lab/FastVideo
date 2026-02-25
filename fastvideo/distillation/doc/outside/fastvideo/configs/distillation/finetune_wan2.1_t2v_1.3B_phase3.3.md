@@ -4,6 +4,6 @@
 
 关键点：
 - `recipe.method = finetune`
-- `models` 里只提供 `student`（no teacher/critic）
+- `roles` 里只提供 `student`（no teacher/critic）
 - 训练 loss 由 `FineTuneMethod` 实现（与 legacy `training_pipeline.py` 的目标对齐）
 - validation 通过 `ValidationRequest + WanValidator + WanPipeline` 执行（默认走 `ode` sampler）

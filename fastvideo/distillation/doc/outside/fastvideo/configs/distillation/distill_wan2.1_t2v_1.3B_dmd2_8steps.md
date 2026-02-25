@@ -9,7 +9,7 @@
 - `recipe:`
   - `family: wan` → registry dispatch 到 `families/wan.py`
   - `method: dmd2` → registry dispatch 到 `methods/distribution_matching/dmd2.py`
-- `models:`
+- `roles:`
   - `student / teacher / critic` 三个 roles（role 名称本身由 method 解释语义）
   - 每个 role 指定：
     - `family`（默认可省略，继承 `recipe.family`）
@@ -26,7 +26,7 @@
 ## 关键语义归属（Phase 2.9 视角）
 
 **Family（Wan）关心：**
-- `models.*.path / trainable`
+- `roles.*.path / trainable`
 - `training.data_path / dataloader_num_workers / train_batch_size / seed / output_dir`
 - Wan 相关的 shape 信息（`num_latent_t/num_height/num_width/...`）
 

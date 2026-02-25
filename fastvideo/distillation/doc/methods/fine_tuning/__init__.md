@@ -5,7 +5,7 @@
 
 **当前实现**
 - `finetune.py`：`FineTuneMethod`
-  - 只要求 `models.student`
+  - 只要求 `roles.student`
   - loss/policy 在 method 层
   - 复用同一套 trainer/bundle/adapter/family/validator/checkpoint 基础设施
 

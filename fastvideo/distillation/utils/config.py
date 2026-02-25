@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from fastvideo.fastvideo_args import TrainingArgs
-
-from fastvideo.distillation.bundle import ModelBundle
-from fastvideo.distillation.methods.base import DistillMethod
+if TYPE_CHECKING:
+    from fastvideo.fastvideo_args import TrainingArgs
+    from fastvideo.distillation.bundle import ModelBundle
+    from fastvideo.distillation.methods.base import DistillMethod
 
 RoleName = str
 
@@ -62,4 +62,3 @@ class DistillRuntime:
     dataloader: Any
     tracker: Any
     start_step: int = 0
-

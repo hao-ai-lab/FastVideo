@@ -13,7 +13,7 @@ finetune 可以被视为一种特殊的 distillation recipe：**只有 student +
 - 不需要：`teacher / critic / reward / ...`
 
 方法会强制：
-- `models.student.trainable=true`
+- `roles.student.trainable=true`
 
 ## 核心训练逻辑
 `FineTuneMethod.single_train_step()`：

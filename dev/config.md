@@ -5,7 +5,7 @@
 相关实现：
 - YAML loader：`fastvideo/distillation/yaml_config.py`
 - Entrypoint：`fastvideo/training/distillation.py`
-- Schema 定义：`fastvideo/distillation/specs.py`
+- Schema/类型定义：`fastvideo/distillation/utils/config.py`
 - 示例 YAML（outside）：`fastvideo/distillation/outside/fastvideo/configs/distillation/`
 
 ## 1) 入口与约束（非常重要）

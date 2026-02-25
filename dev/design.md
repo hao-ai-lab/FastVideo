@@ -1,4 +1,4 @@
-# Distill 重构设计（吸收 FastGen 架构）：`models={...}` + Method/Trainer/Adapter 解耦
+# Distill 重构设计（吸收 FastGen 架构）：`roles={...}` + Method/Trainer/Adapter 解耦
 
 本文是基于：
 
@@ -12,12 +12,12 @@
 
 ## 0. TL;DR（推荐最终形态）
 
-把 FastGen 的四层结构迁移到 FastVideo，并显式引入 `models={...}`：
+把 FastGen 的四层结构迁移到 FastVideo，并显式引入 `roles={...}`：
 
 - `DistillTrainer`：只做训练基础设施（循环、分布式、grad accum、logging、ckpt、validate）
 - `DistillMethod`：一个“可训练对象”，封装 distill 算法 + 多角色模型 + 多优化器/交替更新
 - `DistillAdapter`：把具体 pipeline/network 适配成统一的 noise/forward/CFG/cache 接口
-- `ModelBundle`：`models={student, teacher, critic, ...}` 的统一容器（含 optim/ema/fsdp 策略）
+- `ModelBundle`：`roles={student, teacher, critic, ...}` 的统一容器（含 optim/ema/fsdp 策略）
 - `ConditioningProvider`（或 dataset 常量注入）：显式提供 `neg_condition` 等 conditioning 常量
 
 关键原则：**Trainer 不认识 teacher/critic，也不写 DMD/SF 的 if/else。**
@@ -84,7 +84,7 @@ FastGen 把 distillation 的复杂度拆成：
 
 ```text
 CLI/YAML config
-  -> build ModelBundle(models={student, teacher, critic?, ...})
+  -> build ModelBundle(roles={student, teacher, critic?, ...})
   -> build DistillAdapter.from_pipelines(bundle)  # pipeline/network 适配
   -> build DistillMethod(adapter, bundle, method_cfg)
   -> DistillTrainer(trainer_cfg, callbacks, checkpointer).run(method)
@@ -114,7 +114,7 @@ CLI/YAML config
 
 ### 4.1 `ModelBundle`：角色显式化（外部输入）
 
-目标：让入口层显式传入 `models={student, teacher, critic, ...}`，并把所有
+目标：让入口层显式传入 `roles={student, teacher, critic, ...}`，并把所有
 “训练态（optim/ema/fsdp 策略）”结构化地挂在 role 下。
 
 ```text
@@ -253,7 +253,7 @@ FastGen 用 `DDPWrapper` 临时把 `module.forward` 指到 `single_train_step`�
 - distill 的“本质复杂度”就是多网络 + 多优化器调度；放在 Method 最自然
 - Trainer 只需要稳定地做基础设施，长期维护成本最低
 
-### 设计 2：`models={...}` 显式输入 + `ModelBundle` 结构化承载训练态
+### 设计 2：`roles={...}` 显式输入 + `ModelBundle` 结构化承载训练态
 
 **设计**
 
@@ -373,7 +373,7 @@ FastGen 用 `DDPWrapper` 临时把 `module.forward` 指到 `single_train_step`�
 
 ### 6.2 复杂配置（建议支持）
 
-- `--models_json path/to/models.json`
+- `--roles_json path/to/roles.json`
   - per-role precision/offload/trainable/fsdp_policy/ckpt_path 等
 
 ### 6.3 YAML schema v2（Phase 3）：`recipe` + `method_config`
@@ -390,7 +390,7 @@ recipe:
   family: wan
   method: dmd2
 
-models:
+roles:
   student:
     family: wan
     path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
@@ -428,10 +428,10 @@ method_config:
 **解析策略（最优雅且低风险）**
 
 - 新入口的 parser 只保留 `--config run.yaml`（以及少量 meta flags，如 `--dry-run`）。
-- 训练相关的所有参数（TrainingArgs/FastVideoArgs/pipeline_config/method/models）都来自 YAML。
+- 训练相关的所有参数（TrainingArgs/FastVideoArgs/pipeline_config/method/roles）都来自 YAML。
 - 解析流程：
   1) `yaml.safe_load` 得到 dict
-  2) 规范化/校验 schema（recipe/models/training/pipeline_config/method_config/...）
+  2) 规范化/校验 schema（recipe/roles/training/pipeline_config/method_config/...）
   3) 将 `training:` 与 `pipeline_config:` 合成 kwargs，调用 `TrainingArgs.from_kwargs(**kwargs)`
      （由现有 PipelineConfig/PreprocessConfig 负责子配置实例化与校验）
 
@@ -635,7 +635,7 @@ Phase 3.1 计划把 YAML schema 升级为：
 
 ```yaml
 recipe: {family: wan, method: dmd2}   # 只负责 “选什么”
-models: {student: ..., teacher: ...}  # 参与者
+roles: {student: ..., teacher: ...}   # 参与者
 training: {...}                       # infra 参数（映射到 TrainingArgs）
 pipeline_config: {...}                # backbone/pipeline config（模型侧）
 method_config: {...}                  # algorithm/method 超参（方法侧）
@@ -679,7 +679,7 @@ Phase 3.1 的 `recipe/method_config` 对齐。
 Finetune 的 config（示意，schema v2）：
 ```yaml
 recipe: {family: wan, method: finetune}
-models:
+roles:
   student:
     family: wan
     path: ...
