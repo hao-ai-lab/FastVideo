@@ -12,7 +12,7 @@ import yaml
 from fastvideo.fastvideo_args import ExecutionMode, TrainingArgs
 from fastvideo.logger import init_logger
 
-from fastvideo.distillation.specs import RecipeSpec, RoleName, RoleSpec
+from fastvideo.distillation.utils.config import RecipeSpec, RoleName, RoleSpec
 
 logger = init_logger(__name__)
 
@@ -88,22 +88,22 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
     recipe_method = _require_str(recipe_raw.get("method"), where="recipe.method")
     recipe = RecipeSpec(family=recipe_family, method=recipe_method)
 
-    roles_raw = _require_mapping(cfg.get("models"), where="models")
+    roles_raw = _require_mapping(cfg.get("roles"), where="roles")
     roles: dict[RoleName, RoleSpec] = {}
     for role, role_cfg_raw in roles_raw.items():
-        role_str = _require_str(role, where="models.<role>")
-        role_cfg = _require_mapping(role_cfg_raw, where=f"models.{role_str}")
+        role_str = _require_str(role, where="roles.<role>")
+        role_cfg = _require_mapping(role_cfg_raw, where=f"roles.{role_str}")
         family = role_cfg.get("family") or recipe_family
-        family = _require_str(family, where=f"models.{role_str}.family")
-        model_path = _require_str(role_cfg.get("path"), where=f"models.{role_str}.path")
+        family = _require_str(family, where=f"roles.{role_str}.family")
+        model_path = _require_str(role_cfg.get("path"), where=f"roles.{role_str}.path")
         trainable = _get_bool(
             role_cfg.get("trainable"),
-            where=f"models.{role_str}.trainable",
+            where=f"roles.{role_str}.trainable",
             default=True,
         )
         disable_custom_init_weights = _get_bool(
             role_cfg.get("disable_custom_init_weights"),
-            where=f"models.{role_str}.disable_custom_init_weights",
+            where=f"roles.{role_str}.disable_custom_init_weights",
             default=False,
         )
         roles[role_str] = RoleSpec(
@@ -151,7 +151,7 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
     if "model_path" not in training_kwargs:
         student = roles.get("student")
         if student is None:
-            raise ValueError("training.model_path is missing and models.student is not provided")
+            raise ValueError("training.model_path is missing and roles.student is not provided")
         training_kwargs["model_path"] = student.path
 
     if "pretrained_model_name_or_path" not in training_kwargs:

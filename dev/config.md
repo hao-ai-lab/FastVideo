@@ -28,7 +28,7 @@ CLI 仅保留少量 **runtime override**（不属于“实验定义”的内容�
 
 ```yaml
 recipe:          # 选择 family + method（只负责“选什么”）
-models:          # role -> role spec（谁参与）
+roles:           # role -> role spec（谁参与）
 training:        # infra 参数（直接映射到 TrainingArgs）
 pipeline_config: # 模型/pipeline 侧 config（可 inline）
 method_config:   # method/algorithm 超参（方法侧 single source of truth）
@@ -52,10 +52,10 @@ recipe:
 - registry dispatch：选择 `families/<family>.py` + `methods/<method>.py` 的组合（N+M，而非 N×M）。
 - 语义更通用：未来把 finetuning 也纳入时不会出现 `distill.method=finetune` 的别扭表达。
 
-## 4) `models`: role-based 参与者
+## 4) `roles`: role-based 参与者
 
 ```yaml
-models:
+roles:
   student:
     path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: true
@@ -69,7 +69,7 @@ models:
     disable_custom_init_weights: true
 ```
 
-字段含义（见 `fastvideo/distillation/specs.py`）：
+字段含义（见 `fastvideo/distillation/utils/config.py`）：
 - `family`：可选；默认继承 `recipe.family`
 - `path`：模型路径 / hub 名称（由 family 负责加载）
 - `trainable`：该 role 的参数是否参与训练（影响 `requires_grad`/train/eval）
@@ -94,7 +94,7 @@ loader 会注入/补全的 invariants（见 `fastvideo/distillation/yaml_config.
 - `dit_precision` 默认 `fp32`（master weights）
 - `dit_cpu_offload = False`
 - 分布式尺寸默认值（`num_gpus/tp_size/sp_size/hsdp_*`）
-- `training.model_path` 若缺失，默认使用 `models.student.path`（供 pipeline_config registry 使用）
+- `training.model_path` 若缺失，默认使用 `roles.student.path`（供 pipeline_config registry 使用）
 
 ## 6) `pipeline_config` / `pipeline_config_path`
 

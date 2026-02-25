@@ -7,7 +7,7 @@ from typing import Any, Protocol
 
 from fastvideo.distillation.bundle import ModelBundle
 from fastvideo.distillation.methods.base import DistillMethod
-from fastvideo.distillation.runtime import FamilyArtifacts
+from fastvideo.distillation.utils.config import FamilyArtifacts
 from fastvideo.distillation.yaml_config import DistillRunConfig
 
 

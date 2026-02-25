@@ -2,7 +2,7 @@ recipe:
   family: wan
   method: dmd2
 
-models:
+roles:
   student:
     family: wan
     path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
@@ -82,4 +82,3 @@ method_config:
   real_score_guidance_scale: 3.5
   # Few-step schedule (single source of truth for the method).
   dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
-

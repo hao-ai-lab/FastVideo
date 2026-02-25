@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastvideo.distillation.registry import get_family, get_method
-from fastvideo.distillation.runtime import DistillRuntime
+from fastvideo.distillation.utils.config import DistillRuntime
 from fastvideo.distillation.yaml_config import DistillRunConfig
 
 

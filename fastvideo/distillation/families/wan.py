@@ -11,7 +11,7 @@ from fastvideo.distributed import get_world_group
 from fastvideo.distillation.adapters.wan import WanAdapter
 from fastvideo.distillation.bundle import ModelBundle, RoleHandle
 from fastvideo.distillation.registry import register_family
-from fastvideo.distillation.runtime import FamilyArtifacts
+from fastvideo.distillation.utils.config import FamilyArtifacts
 from fastvideo.distillation.yaml_config import DistillRunConfig
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (

@@ -71,7 +71,8 @@
 ### B) “配置驱动加载仍需要边界”
 
 反驳点：
-- 即使 YAML 写清楚了 *路径*，加载的 *语义* 仍然是 model/pipeline 相关的：
+- 即使 YAML 写清楚了 *路径*，加载/运行的 *语义* 更准确地说是 **pipeline contract 相关**
+  （也就近似“模型家族相关”）：
   - 有哪些子模块（`transformer` / `vae` / `text_encoder` / …）；
   - latent 的归一化/布局；
   - attention metadata（VSA/VMoBA）如何构建；

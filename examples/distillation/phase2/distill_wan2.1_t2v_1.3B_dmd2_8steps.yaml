@@ -9,7 +9,7 @@ distill:
   model: wan
   method: dmd2
 
-models:
+roles:
   student:
     family: wan
     path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers

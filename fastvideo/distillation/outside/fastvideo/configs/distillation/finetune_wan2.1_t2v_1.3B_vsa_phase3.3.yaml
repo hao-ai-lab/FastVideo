@@ -2,7 +2,7 @@ recipe:
   family: wan
   method: finetune
 
-models:
+roles:
   student:
     family: wan
     path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
@@ -74,4 +74,3 @@ pipeline_config:
 method_config:
   # Use the VSA attention metadata when FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN.
   attn_kind: vsa
-

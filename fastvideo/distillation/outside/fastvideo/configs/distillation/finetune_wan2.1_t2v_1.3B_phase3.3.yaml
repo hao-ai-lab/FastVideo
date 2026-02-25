@@ -2,7 +2,7 @@ recipe:
   family: wan
   method: finetune
 
-models:
+roles:
   student:
     family: wan
     path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
@@ -62,4 +62,3 @@ pipeline_config:
   sampler_kind: ode
 
 method_config: {}
-
