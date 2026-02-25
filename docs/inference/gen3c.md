@@ -1,164 +1,114 @@
 # GEN3C: 3D-Informed Camera-Controlled Video Generation
 
-[GEN3C](https://arxiv.org/abs/2503.03751) is NVIDIA's 7B-parameter video diffusion model that generates camera-controlled videos from a single image using a 3D scene cache. It builds on the Cosmos architecture with additional conditioning for camera trajectories and 3D scene understanding.
+[GEN3C](https://arxiv.org/abs/2503.03751) is NVIDIA's Cosmos-7B-based video model for camera-controlled generation from a single image. The FastVideo integration supports the GEN3C I2V workflow, including 3D cache conditioning and tokenizer-based conditioning latents.
 
 ## Key Features
 
-- **Camera Control**: Generate videos with explicit camera trajectories (orbit, zoom, dolly, etc.)
-- **3D Cache**: Uses depth-estimated point clouds for geometrically consistent motion
-- **Single Image Input**: Generates multi-view consistent video from one reference image
-- **Autoregressive Generation**: Supports extending videos beyond the initial 121 frames
-- **7B Parameters**: Based on Cosmos-Predict1 architecture with 28 transformer blocks
+- **Camera trajectory control**: `left/right/up/down/zoom_in/zoom_out/clockwise/counterclockwise`
+- **3D cache conditioning**: depth prediction -> point cloud cache -> forward warping -> latent conditioning
+- **Single-image to video generation**: 121-frame generation with camera motion
+- **Official raw checkpoint conversion**: `model.pt` -> Diffusers/FastVideo layout
 
-## Requirements
+## Model Sources
 
-- **GPU**: NVIDIA GPU with at least 24 GB VRAM (A40, A100, H100, etc.)
-- **Disk**: ~30 GB for model weights
-- **Dependencies**: FastVideo with standard installation
+- Official raw checkpoint (not Diffusers): `nvidia/GEN3C-Cosmos-7B`
+- Diffusers-format checkpoint: `vbharath/GEN3C-Cosmos-7B-Diffusers`
 
 ## Quick Start
 
-### 1. Convert Official Weights
-
-GEN3C uses an official `model.pt` checkpoint that must be converted to FastVideo's safetensors format:
+### Option A: Use Diffusers-format weights directly
 
 ```bash
-# Download and convert (requires ~30 GB disk + ~15 GB GPU memory)
+python examples/inference/basic/basic_gen3c.py \
+  --model_path vbharath/GEN3C-Cosmos-7B-Diffusers \
+  --image_path /path/to/input.png \
+  --prompt "" \
+  --trajectory left \
+  --movement_distance 0.3 \
+  --camera_rotation center_facing \
+  --num_inference_steps 35 \
+  --guidance_scale 1.0 \
+  --output_path outputs_video/gen3c_output.mp4
+```
+
+### Option B: Convert official raw checkpoint locally
+
+1. Download:
+
+```bash
+huggingface-cli download nvidia/GEN3C-Cosmos-7B --local-dir official_weights/GEN3C-Cosmos-7B
+```
+
+2. Convert:
+
+```bash
 python scripts/checkpoint_conversion/convert_gen3c_to_fastvideo.py \
-    --download nvidia/GEN3C-Cosmos-7B \
-    --output ./gen3c_fastvideo
+  --source official_weights/GEN3C-Cosmos-7B/model.pt \
+  --output converted_weights/GEN3C-Cosmos-7B
 ```
 
-This will:
+3. Run:
 
-1. Download the official checkpoint from HuggingFace (`nvidia/GEN3C-Cosmos-7B`)
-2. Apply key remapping to match FastVideo's naming conventions
-3. Save as `model.safetensors` along with a `model_index.json`
-
-### 2. Generate Video
-
-```python
-from fastvideo import VideoGenerator
-
-generator = VideoGenerator.from_pretrained(
-    "gen3c_fastvideo",
-    num_gpus=1,
-)
-
-prompt = "A camera slowly orbits around a vase of flowers on a table."
-
-result = generator.generate_video(
-    prompt,
-    height=720,
-    width=1280,
-    num_frames=121,
-    num_inference_steps=50,
-    guidance_scale=6.0,
-    fps=24,
-    seed=42,
-    output_path="outputs/gen3c/",
-)
+```bash
+python examples/inference/basic/basic_gen3c.py \
+  --model_path converted_weights/GEN3C-Cosmos-7B \
+  --image_path /path/to/input.png \
+  --prompt "" \
+  --trajectory left \
+  --movement_distance 0.3 \
+  --camera_rotation center_facing \
+  --num_inference_steps 35 \
+  --guidance_scale 1.0 \
+  --output_path outputs_video/gen3c_output.mp4
 ```
 
-## Architecture Overview
+## FastVideo Defaults
 
-### Model Components
+GEN3C defaults in FastVideo:
 
-| Component | Implementation | Notes |
-|-----------|---------------|-------|
-| **DiT** | `Gen3CTransformer3DModel` | 7B params, 28 blocks, AdaLN-LoRA |
-| **VAE** | Cosmos/Wan VAE | 16 latent channels, 8x spatial / 4x temporal compression |
-| **Text Encoder** | T5-Large | 1024-dim embeddings, max 512 tokens |
-| **Scheduler** | Flow Matching Euler | sigma_max=80, sigma_min=0.002 |
+- `height=704`, `width=1280`
+- `num_frames=121`
+- `num_inference_steps=35`
+- `guidance_scale=1.0`
+- `fps=24`
 
-### 3D Cache Conditioning
+These values are defined in:
 
-GEN3C conditions generation on 3D scene information through a cache mechanism:
+- `fastvideo/configs/sample/gen3c.py`
+- `fastvideo/configs/pipelines/gen3c.py`
 
-1. **Depth Estimation**: MoGe estimates monocular depth from the input image
-2. **Point Cloud**: Depth + RGB creates an unprojected 3D point cloud
-3. **Camera Trajectory**: New camera poses are generated along a trajectory
-4. **Forward Warping**: The 3D cache is rendered from new viewpoints
-5. **VAE Encoding**: Rendered images and masks are encoded to latent space
-6. **Conditioning**: Encoded buffers are concatenated with the noise latent
+and align with the official GEN3C inference defaults in:
 
-The DiT receives these additional inputs at each denoising step:
+- `tmp/GEN3C/cosmos_predict1/diffusion/inference/inference_utils.py`
 
-- `condition_video_input_mask` (1 channel): Binary mask indicating conditioning frames
-- `condition_video_pose` (64 channels): VAE-encoded 3D cache buffers (2 buffers x 32 channels)
-- `condition_video_augment_sigma`: Noise augmentation level for conditioning frames
+## Scheduler Note
 
-### DiT Modifications from Cosmos
+The converted GEN3C Diffusers layout may include a FlowMatch scheduler config, but GEN3C denoising uses EDM preconditioning behavior. FastVideo's GEN3C pipeline enforces an EDM scheduler at runtime for parity with official inference behavior.
 
-GEN3C extends the Cosmos 2.5 DiT with:
+Implementation path:
 
-- **Extended Patch Embedding**: Accepts 82 input channels (16 latent + 1 mask + 64 buffers + 1 padding)
-- **AdaLN-LoRA**: Separate AdaLN modulation for self-attention, cross-attention, and MLP
-- **3D RoPE**: Rotary positional embeddings with per-axis learnable additions
-- **QK Normalization**: RMSNorm applied to Q and K projections
+- `fastvideo/pipelines/basic/gen3c/gen3c_pipeline.py`
 
-## Configuration
+## 3D Cache Conditioning Path
 
-### Pipeline Configuration
+FastVideo GEN3C conditioning stage performs:
 
-Key parameters in `Gen3CConfig`:
+1. MoGe depth estimation from input image
+2. 3D cache initialization
+3. Camera trajectory generation
+4. Forward rendering of warped frames + masks
+5. VAE/tokenizer encoding of conditioning buffers
+6. Denoising with condition mask + condition pose channels
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `frame_buffer_max` | 2 | Number of 3D cache buffers |
-| `noise_aug_strength` | 0.0 | Noise augmentation on conditioning frames |
-| `fps` | 24 | Generation frame rate |
-| `num_frames` | 121 | Frames to generate (pixel space) |
-| `video_resolution` | (720, 1280) | Output resolution (H, W) |
-| `flow_shift` | 1.0 | Flow matching shift parameter |
-| `guidance_scale` | 6.0 | Classifier-free guidance scale |
-| `num_inference_steps` | 50 | Denoising steps |
+Main implementation:
 
-### Sampling Parameters
-
-Default sampling parameters are defined in `Gen3C_Cosmos_7B_SamplingParam`:
-
-```python
-height: int = 720
-width: int = 1280
-num_frames: int = 121
-fps: int = 24
-guidance_scale: float = 6.0
-num_inference_steps: int = 50
-```
-
-## Weight Conversion Details
-
-The conversion script (`scripts/checkpoint_conversion/convert_gen3c_to_fastvideo.py`) transforms the official checkpoint's key naming:
-
-| Official Pattern | FastVideo Pattern |
-|-----------------|-------------------|
-| `net.x_embedder.proj.1.*` | `patch_embed.proj.*` |
-| `net.t_embedder.1.linear_*.*` | `time_embed.t_embedder.linear_*.*` |
-| `net.blocks.blockN.blocks.0.block.attn.to_q.0.*` | `transformer_blocks.N.attn1.to_q.*` |
-| `net.blocks.blockN.blocks.0.block.attn.to_q.1.*` | `transformer_blocks.N.attn1.norm_q.*` |
-| `net.blocks.blockN.blocks.1.block.attn.to_q.0.*` | `transformer_blocks.N.attn2.to_q.*` |
-| `net.blocks.blockN.blocks.2.block.layer1.*` | `transformer_blocks.N.mlp.fc_in.*` |
-| `net.final_layer.linear.*` | `final_layer.proj_out.*` |
-
-Keys not mapped (safely ignored): `net.pos_embedder.*`, `net.accum_*`, `logvar.*`.
-
-## Numerical Parity
-
-The FastVideo implementation achieves close numerical parity with the official GEN3C model:
-
-- **Max absolute difference**: ~0.015 (in bf16)
-- **Mean absolute difference**: ~0.002
-
-The small remaining difference is due to different attention backends (official uses Transformer Engine's `DotProductAttention`; FastVideo uses `torch.nn.functional.scaled_dot_product_attention`) accumulated over 28 transformer blocks in bf16 precision.
-
-## Limitations
-
-- **3D Cache Pipeline**: The full 3D cache pipeline (depth estimation, point cloud management, forward warping) requires the official GEN3C repository utilities. The FastVideo integration currently focuses on the DiT and denoising pipeline.
-- **Single GPU**: Currently tested on single-GPU configurations. Multi-GPU support follows FastVideo's standard distribution patterns.
+- `fastvideo/pipelines/basic/gen3c/gen3c_pipeline.py`
+- `fastvideo/pipelines/basic/gen3c/cache_3d.py`
+- `fastvideo/pipelines/basic/gen3c/depth_estimation.py`
+- `fastvideo/models/vaes/gen3c_tokenizer_vae.py`
 
 ## References
 
 - [GEN3C Paper](https://arxiv.org/abs/2503.03751)
 - [Official Repository](https://github.com/nv-tlabs/GEN3C)
-- [HuggingFace Weights](https://huggingface.co/nvidia/GEN3C-Cosmos-7B)
+- [Official Checkpoint (raw)](https://huggingface.co/nvidia/GEN3C-Cosmos-7B)
