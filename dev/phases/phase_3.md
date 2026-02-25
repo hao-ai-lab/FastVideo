@@ -145,8 +145,9 @@ Phase 2.9 已验证：即使统一 timesteps/scheduler，**只要 denoising loop
     - `predict_noise(handle, ...)`（以及可选 `predict_x0`）
     - `backward(loss, ctx, ...)`（forward-context/activation ckpt 相关）
 - [x] configs/examples
-  - [x] `fastvideo/distillation/outside/fastvideo/configs/distillation/finetune_wan2.1_t2v_1.3B_phase3.3.yaml`
-  - [x] `examples/distillation/phase3_3/temp.sh`
+  - [x] `fastvideo/distillation/outs
+  ide/fastvideo/configs/distillation/finetun e_wan2.1_t2v_1.3B_phase3.3.yaml`
+  - [x] `examples/distillation/phase3_3/temp.sh`  
 
 ---
 
