@@ -48,3 +48,7 @@ class LTX2T2VConfig(PipelineConfig):
     def __post_init__(self) -> None:
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
+        if self.text_encoder_configs:
+            # LTX2 uses hidden_states to carry the audio conditioning
+            # embeddings.
+            self.text_encoder_configs[0].arch_config.output_hidden_states = True

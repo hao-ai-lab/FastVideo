@@ -89,6 +89,9 @@ class HunyuanConfig(PipelineConfig):
     def __post_init__(self):
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
+        if self.text_encoder_configs:
+            # Hunyuan postprocess consumes intermediate LLaMA hidden states.
+            self.text_encoder_configs[0].arch_config.output_hidden_states = True
 
 
 @dataclass
