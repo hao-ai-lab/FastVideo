@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import torch
-from flash_attn.cute.interface import _flash_attn_bwd, _flash_attn_fwd
+if torch.cuda.is_available():
+    from flash_attn.cute.interface import _flash_attn_bwd, _flash_attn_fwd
+else:
+    # This error will be caught in flash_attn.py or flash_attn_no_pad.py
+    raise ImportError("flash_attn.cute is only available on CUDA devices; this error must be handled internally")
 
 
 def _check_dropout(dropout_p: float) -> None:
