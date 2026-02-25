@@ -37,7 +37,6 @@ from diffusers.loaders.lora_base import (
     _best_guess_weight_name)  # watch out for potetential removal from diffusers
 from einops import rearrange
 from huggingface_hub import snapshot_download
-from remote_pdb import RemotePdb
 from torch.distributed.fsdp import MixedPrecisionPolicy
 
 import fastvideo.envs as envs
@@ -729,6 +728,8 @@ class TypeBasedDispatcher:
 
 # For non-torch.distributed debugging
 def remote_breakpoint() -> None:
+    from remote_pdb import RemotePdb
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("localhost", 0))  # Let the OS pick an ephemeral port.
