@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 import torch
 import torch.nn.functional as F
@@ -84,8 +84,22 @@ class FineTuneMethod(DistillMethod):
         self.validator = validator
         self.training_args = adapter.training_args
         self.method_config: dict[str, Any] = dict(method_config or {})
+        self._attn_kind: Literal["dense", "vsa"] = self._parse_attn_kind(
+            self.method_config.get("attn_kind", None)
+        )
 
         self._init_optimizers_and_schedulers()
+
+    def _parse_attn_kind(self, raw: Any) -> Literal["dense", "vsa"]:
+        if raw in (None, ""):
+            return "dense"
+        kind = str(raw).strip().lower()
+        if kind not in {"dense", "vsa"}:
+            raise ValueError(
+                "method_config.attn_kind must be one of {'dense', 'vsa'}, "
+                f"got {raw!r}."
+            )
+        return cast(Literal["dense", "vsa"], kind)
 
     def _parse_betas(self, raw: Any, *, where: str) -> tuple[float, float]:
         if raw is None:
@@ -266,7 +280,7 @@ class FineTuneMethod(DistillMethod):
             timesteps,
             training_batch,
             conditional=True,
-            attn_kind="dense",
+            attn_kind=self._attn_kind,
         )
 
         if bool(getattr(self.training_args, "precondition_outputs", False)):
@@ -276,9 +290,14 @@ class FineTuneMethod(DistillMethod):
             target = noise - clean_latents
             loss = F.mse_loss(pred.float(), target.float())
 
+        if self._attn_kind == "vsa":
+            attn_metadata = training_batch.attn_metadata_vsa
+        else:
+            attn_metadata = training_batch.attn_metadata
+
         loss_map = {"total_loss": loss, "finetune_loss": loss}
         outputs: dict[str, Any] = {
-            "_fv_backward": (training_batch.timesteps, training_batch.attn_metadata)
+            "_fv_backward": (training_batch.timesteps, attn_metadata)
         }
         return loss_map, outputs
 

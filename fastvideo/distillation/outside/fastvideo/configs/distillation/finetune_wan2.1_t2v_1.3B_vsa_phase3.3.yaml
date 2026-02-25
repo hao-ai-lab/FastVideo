@@ -9,10 +9,12 @@ models:
     trainable: true
 
 training:
-  # Distributed
+  # Distributed (mirror legacy Wan VSA finetune scripts)
   num_gpus: 8
   sp_size: 1
   tp_size: 1
+  hsdp_replicate_dim: 8
+  hsdp_shard_dim: 1
 
   # Data (parquet dataset folder)
   data_path: data/Wan-Syn_77x448x832_600k
@@ -28,38 +30,48 @@ training:
   num_frames: 77
 
   # Output / steps
-  output_dir: outputs/phase3.3_wan2.1_finetune_wansyn
+  output_dir: outputs/phase3.3_wan2.1_finetune_vsa_wansyn
   max_train_steps: 4000
   seed: 1000
   checkpoints_total_limit: 3
 
-  # Optimizer
-  learning_rate: 2.0e-6
+  # Optimizer (match legacy defaults as closely as possible)
+  learning_rate: 1.0e-6
   mixed_precision: bf16
-  betas: "0.0,0.999"
+  betas: "0.9,0.999"
   weight_decay: 0.01
   lr_scheduler: constant
   lr_warmup_steps: 0
   max_grad_norm: 1.0
 
+  # Checkpointing
+  training_state_checkpointing_steps: 1000
+  weight_only_checkpointing_steps: 1000
+
   # Method-agnostic knobs
-  training_cfg_rate: 0.0
-  min_timestep_ratio: 0.02
-  max_timestep_ratio: 0.98
+  training_cfg_rate: 0.1
   enable_gradient_checkpointing_type: full
 
+  # VSA knobs (schedule ramps up sparsity during training)
+  VSA_sparsity: 0.9
+  VSA_decay_rate: 0.03
+  VSA_decay_interval_steps: 50
+
   # Tracking / validation
-  tracker_project_name: phase3.3_wan_finetune_wansyn
-  wandb_run_name: phase3.3_wan_finetune
+  tracker_project_name: phase3.3_wan_finetune_vsa_wansyn
+  wandb_run_name: phase3.3_wan_finetune_vsa
   log_validation: true
   validation_dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
-  validation_steps: 50
+  validation_steps: 200
   validation_sampling_steps: "50"
-  validation_guidance_scale: "6.0"
+  validation_guidance_scale: "5.0"
 
 pipeline_config:
-  flow_shift: 8
+  # Match legacy Wan VSA finetune scripts.
+  flow_shift: 1
   sampler_kind: ode
 
-method_config: {}
+method_config:
+  # Use the VSA attention metadata when FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN.
+  attn_kind: vsa
 
