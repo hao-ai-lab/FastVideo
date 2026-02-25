@@ -296,7 +296,7 @@ class WanGameTrainingPipeline(TrainingPipeline):
             # "encoder_attention_mask":
             # training_batch.encoder_attention_mask,
             "encoder_hidden_states_image":
-            encoder_hidden_states_image,
+            [encoder_hidden_states_image],
             # Action conditioning
             "viewmats": viewmats,
             "Ks": intrinsics,
