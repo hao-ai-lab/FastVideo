@@ -20,7 +20,7 @@ def main(text_encoder_path: str):
         text_encoder_cpu_offload=False,
         # AbsMaxFP8 is the quantization method used by ComfyUI; 
         # check fastvideo/layers/quantization/* for more quantization methods
-        override_text_encoder_quant="AbsMaxFP8",
+        text_encoder_quantization="AbsMaxFP8",
         # for Wan 2.2, this is the path to "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
         override_text_encoder_safetensors=text_encoder_path,
         pin_cpu_memory=True,  # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
