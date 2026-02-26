@@ -802,6 +802,7 @@ class TrainingArgs(FastVideoArgs):
     """
     data_path: str = ""
     dataloader_num_workers: int = 0
+    reshuffle_each_epoch: bool = True
     num_height: int = 0
     num_width: int = 0
     num_frames: int = 0
@@ -830,6 +831,7 @@ class TrainingArgs(FastVideoArgs):
     validation_sampling_steps: str = ""
     validation_guidance_scale: str = ""
     validation_steps: float = 0.0
+    validation_num_samples: int | None = None  # Limit number of validation samples (None = use all)
     log_validation: bool = False
     trackers: list[str] = dataclasses.field(default_factory=list)
     tracker_project_name: str = ""
@@ -891,6 +893,19 @@ class TrainingArgs(FastVideoArgs):
     lora_training: bool = False
     ltx2_first_frame_conditioning_p: float = 0.1
 
+    # Action-only training: freeze base DiT, only train action modules
+    train_action_only: bool = False
+
+    # Which action modules to train (only effective when train_action_only=True):
+    #   "both"       – action_embedder + prope_proj  (default)
+    #   "action_mlp" – action_embedder only
+    #   "prope"      – prope_proj only
+    action_train_target: str = "both"
+
+    # Action warmup: keep action modules (action_embedder, to_out_prope) at zero
+    # for this many steps to let the base model stabilize first, then enable them.
+    action_warmup_steps: int = 0
+
     # distillation args
     generator_update_interval: int = 5
     dfake_gen_update_ratio: int = 5  # self-forcing: how often to train generator vs critic
@@ -902,6 +917,7 @@ class TrainingArgs(FastVideoArgs):
     fake_score_betas: str = "0.9,0.999"  # betas for fake score optimizer, format: "beta1,beta2"
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
+    best_checkpoint_start_step: int = 0  # save best checkpoint (by mf_angle_err_mean) after this step; 0 = disabled
     log_visualization: bool = False
     visualization_steps: int = 0
     # simulate generator forward to match inference
@@ -970,11 +986,15 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--data-path",
                             type=str,
                             required=True,
-                            help="Path to parquet files")
+                            help="Path to parquet files (comma-separated for multiple; path:N for repeat count)")
         parser.add_argument("--dataloader-num-workers",
                             type=int,
                             required=True,
                             help="Number of workers for dataloader")
+        parser.add_argument("--reshuffle-each-epoch",
+                            action=StoreBoolean,
+                            default=TrainingArgs.reshuffle_each_epoch,
+                            help="Whether to reshuffle dataset order each epoch")
         parser.add_argument("--num-height",
                             type=int,
                             required=True,
@@ -1064,6 +1084,9 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--validation-steps",
                             type=float,
                             help="Number of validation steps")
+        parser.add_argument("--validation-num-samples",
+                            type=int,
+                            help="Limit number of validation samples (default: use all)")
         parser.add_argument("--log-validation",
                             action=StoreBoolean,
                             help="Whether to log validation results")
@@ -1098,6 +1121,11 @@ class TrainingArgs(FastVideoArgs):
             "--weight-only-checkpointing-steps",
             type=int,
             help="Steps between weight-only checkpoints (for inference)")
+        parser.add_argument(
+            "--best-checkpoint-start-step",
+            type=int,
+            help="Save best checkpoint (by mf_angle_err_mean) after this "
+            "step; 0 = disabled")
         parser.add_argument("--resume-from-checkpoint",
                             type=str,
                             help="Path to checkpoint to resume from")
@@ -1252,6 +1280,20 @@ class TrainingArgs(FastVideoArgs):
             "Probability of conditioning on the first frame during LTX-2 training",
         )
 
+        # Action-only training (freeze base model, only train action params)
+        parser.add_argument("--train-action-only",
+                            action=StoreBoolean,
+                            help="Whether to only train action-related parameters "
+                                 "(action_embedder and to_out_prope) while freezing base model")
+
+        # Action warmup: keep action modules frozen for N steps
+        parser.add_argument("--action-warmup-steps",
+                            type=int,
+                            default=0,
+                            help="Number of steps to keep action modules "
+                                 "(action_embedder, to_out_prope) frozen to let "
+                                 "the base model stabilize first")
+
         # V-MoBA parameters
         parser.add_argument(
             "--moba-config-path",
@@ -1348,6 +1390,13 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=TrainingArgs.context_noise,
                             help="Context noise level for cache updates")
+        parser.add_argument(
+            "--action-train-target",
+            type=str,
+            default=TrainingArgs.action_train_target,
+            choices=["both", "action_mlp", "prope"],
+            help="Which action modules to train while freezing the base model",
+        )
 
         return parser
 
