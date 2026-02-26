@@ -20,6 +20,7 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.distillation.validators.base import ValidationRequest
 from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
+from fastvideo.training.trackers import DummyTracker
 from fastvideo.utils import shallow_asdict
 
 logger = init_logger(__name__)
@@ -38,10 +39,10 @@ class WanValidator:
         self,
         *,
         training_args: Any,
-        tracker: Any,
+        tracker: Any | None = None,
     ) -> None:
         self.training_args = training_args
-        self.tracker = tracker
+        self.tracker = tracker or DummyTracker()
 
         self.world_group = get_world_group()
         self.sp_group = get_sp_group()
@@ -58,6 +59,9 @@ class WanValidator:
         self._pipeline: WanPipeline | None = None
         self._pipeline_key: tuple[int, str] | None = None
         self._sampling_param: SamplingParam | None = None
+
+    def set_tracker(self, tracker: Any) -> None:
+        self.tracker = tracker
 
     def _get_sampling_param(self) -> SamplingParam:
         if self._sampling_param is None:

@@ -5,7 +5,7 @@
 设计原则（对应 Phase 2.9）：
 - **Trainer** 只做 infra（loop/accum/日志/ckpt/validate 调用），不包含算法策略。
 - **Method** 只做算法（loss + update policy + 需要哪些 roles）。
-- **Model plugin** 只做装配（build-time：加载 modules、构建 bundle/adapter/dataloader/validator/tracker；代码在 `models/`）。
+- **Model plugin** 只做装配（build-time：加载 modules、构建 bundle/adapter/dataloader/validator；代码在 `models/`）。
 - **Adapter** 只做运行时 primitive（step-time：prepare_batch/forward_context/predict/backward 等），
   API 以 operation 为中心，不以 role 为中心（避免 role 爆炸）。
 
@@ -22,7 +22,9 @@
 - `__init__.md`
 - `utils/__init__.md`
 - `utils/config.md`
-- `utils/data.md`
+- `utils/dataloader.md`
+- `utils/moduleloader.md`
+- `utils/module_state.md`
 - `utils/tracking.md`
 - `utils/checkpoint.md`
 - `dispatch.md`

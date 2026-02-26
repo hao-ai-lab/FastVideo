@@ -24,3 +24,7 @@
 **可演进方向（Phase 3+）**
 - 将 validation steps/guidance 等采样配置从 `TrainingArgs` 迁移到更明确的配置块（例如 `validation:`）。
 - 进一步抽象 validator API，使其更容易被不同 model plugin / method 复用。
+
+**Tracker 注入**
+- `WanValidator` 不再要求 build-time 传入 tracker；
+  trainer 会通过 `method.set_tracker(...)` 把 tracker 注入到 validator。

@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 
 from fastvideo.distributed import get_sp_group, get_world_group
 from fastvideo.fastvideo_args import TrainingArgs
-from fastvideo.training.trackers import BaseTracker, DummyTracker
+from fastvideo.distillation.utils.tracking import build_tracker
 
 
 def _coerce_log_scalar(value: Any, *, where: str) -> float:
@@ -41,14 +41,14 @@ class DistillTrainer:
         self,
         training_args: TrainingArgs,
         *,
-        tracker: BaseTracker | None = None,
+        config: dict[str, Any] | None = None,
     ) -> None:
         self.training_args = training_args
         self.world_group = get_world_group()
         self.sp_group = get_sp_group()
         self.global_rank = self.world_group.rank
         self.local_rank = self.world_group.local_rank
-        self.tracker = tracker or DummyTracker()
+        self.tracker = build_tracker(training_args, config=config)
 
     def _iter_dataloader(self, dataloader: Any) -> Iterator[dict[str, Any]]:
         data_iter = iter(dataloader)
@@ -83,6 +83,9 @@ class DistillTrainer:
     ) -> None:
         grad_accum = max(1, int(self.training_args.gradient_accumulation_steps
                                 or 1))
+
+        if hasattr(method, "set_tracker"):
+            method.set_tracker(self.tracker)  # type: ignore[attr-defined]
 
         if hasattr(method, "on_train_start"):
             method.on_train_start()  # type: ignore[attr-defined]

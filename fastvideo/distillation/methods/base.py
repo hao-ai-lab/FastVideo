@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 
 from fastvideo.distillation.roles import RoleManager
+
+if TYPE_CHECKING:
+    from fastvideo.distillation.utils.config import DistillRunConfig
 
 LogScalar = float | int | torch.Tensor
 
@@ -17,10 +20,42 @@ class DistillMethod(torch.nn.Module, ABC):
     def __init__(self, bundle: RoleManager) -> None:
         super().__init__()
         self.bundle = bundle
+        self.tracker: Any | None = None
         self.role_modules = torch.nn.ModuleDict()
         for role, handle in bundle.roles.items():
             if handle.modules:
                 self.role_modules[role] = torch.nn.ModuleDict(handle.modules)
+
+    @classmethod
+    @abstractmethod
+    def build(
+        cls,
+        *,
+        cfg: DistillRunConfig,
+        bundle: RoleManager,
+        adapter: Any,
+        validator: Any | None,
+    ) -> "DistillMethod":
+        raise NotImplementedError
+
+    def set_tracker(self, tracker: Any) -> None:
+        """Attach a tracker (infra) to this method.
+
+        Trainer constructs/owns the tracker, but method-managed validation may
+        need it to log artifacts (videos/images/files). This is a best-effort
+        bridge that keeps model plugins free of tracker ownership.
+        """
+
+        self.tracker = tracker
+        validator = getattr(self, "validator", None)
+        if validator is None:
+            return
+        set_tracker = getattr(validator, "set_tracker", None)
+        if callable(set_tracker):
+            set_tracker(tracker)
+            return
+        if hasattr(validator, "tracker"):
+            validator.tracker = tracker  # type: ignore[attr-defined]
 
     @abstractmethod
     def single_train_step(

@@ -57,6 +57,7 @@ class _FineTuneAdapter(Protocol):
         ...
 
 
+@register_method("finetune")
 class FineTuneMethod(DistillMethod):
     """Supervised finetuning as a method: only `student` participates.
 
@@ -89,6 +90,22 @@ class FineTuneMethod(DistillMethod):
         )
 
         self._init_optimizers_and_schedulers()
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        cfg: DistillRunConfig,
+        bundle: RoleManager,
+        adapter: Any,
+        validator: Any | None,
+    ) -> DistillMethod:
+        return cls(
+            bundle=bundle,
+            adapter=adapter,
+            method_config=cfg.method_config,
+            validator=validator,
+        )
 
     def _parse_attn_kind(self, raw: Any) -> Literal["dense", "vsa"]:
         if raw in (None, ""):
@@ -332,19 +349,3 @@ class FineTuneMethod(DistillMethod):
         for module in self.student.modules.values():
             self._clip_grad_norm(module)
         super().optimizers_schedulers_step(iteration)
-
-
-@register_method("finetune")
-def build_finetune_method(
-    *,
-    cfg: DistillRunConfig,
-    bundle: RoleManager,
-    adapter: _FineTuneAdapter,
-    validator: Any | None,
-) -> DistillMethod:
-    return FineTuneMethod(
-        bundle=bundle,
-        adapter=adapter,
-        method_config=cfg.method_config,
-        validator=validator,
-    )

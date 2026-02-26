@@ -6,7 +6,7 @@
   - 包含 Wan 特有的模块加载、shared components、dataloader schema 等逻辑
 
 **产物**
-- `ModelComponents(training_args, bundle, adapter, dataloader, tracker, validator, start_step)`
+- `ModelComponents(training_args, bundle, adapter, dataloader, validator, start_step)`
 
 **主要职责**
 1) **加载 shared components**
@@ -21,9 +21,9 @@
    - `adapter = WanAdapter(prompt_handle=student_handle, ...)`
    - dataloader：parquet + `pyarrow_schema_t2v`
 4) **tracker / validator（可选）**
-   - tracker：`initialize_trackers(...)`（rank0 才启用）
    - validator：`WanValidator`（当 `training_args.log_validation=true`）
      - model plugin 只负责构建并返回 `validator`
+     - tracker 由 trainer 构建并注入到 method/validator（`method.set_tracker(...)`）
      - validator 本身不应 hardcode `bundle.role("student")` 等角色语义；
        method 通过 `ValidationRequest.sample_handle` 指定要采样的模型
      - 是否调用、用什么采样配置由 method 决定（method-managed validation）
@@ -32,6 +32,8 @@
 - ✅ model plugin 不再创建 optimizers/schedulers。
   - 这类 update policy（哪些 role 训练、各自超参）属于 method/算法语义。
   - 当前由 `DMD2Method` 在初始化时创建并写回 `RoleHandle.optimizers/lr_schedulers`。
+ - ✅ model plugin 不再构建/持有 tracker。
+   - tracker 属于 infra：由 `DistillTrainer` 构建并持有。
 
 **注意 / TODO**
 - YAML 中目前仍使用 `training.fake_score_*` 这类字段作为 DMD2 的 critic 超参来源；

@@ -56,3 +56,7 @@
 - Phase 3.2 已完成：sampling loop/timesteps 由 method 在 `ValidationRequest` 中显式指定
   （`sampler_kind` + `sampling_timesteps`），validator 使用 `WanPipeline` 执行采样；
   distillation config 不再需要 `pipeline_config.dmd_denoising_steps` 这种重复字段。
+
+**注册方式（Phase 3.4）**
+- `DMD2Method` 通过 `@register_method("dmd2")` 直接注册到 class。
+- 由 `DMD2Method.build(...)` 负责把 `cfg.method_config` 等注入到实例。

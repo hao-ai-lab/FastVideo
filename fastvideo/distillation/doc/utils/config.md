@@ -59,7 +59,6 @@
     - `bundle`
     - `adapter`
     - `dataloader`
-    - `tracker`
     - `validator`（可选；model-specific）
     - `start_step`（用于 resume / warm-start）
 - `DistillRuntime`
@@ -67,5 +66,7 @@
     - `training_args`
     - `method`（`DistillMethod`）
     - `dataloader`
-    - `tracker`
     - `start_step`
+
+备注：
+- tracker 由 `DistillTrainer` 构建并持有（避免 model plugin 变成 infra owner）。

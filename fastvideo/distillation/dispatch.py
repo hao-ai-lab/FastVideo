@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Protocol
 
 from fastvideo.distillation.methods.base import DistillMethod
 from fastvideo.distillation.models.components import ModelComponents
-from fastvideo.distillation.roles import RoleManager
 from fastvideo.distillation.utils.config import DistillRunConfig, DistillRuntime
 
 
@@ -16,20 +15,8 @@ class ModelBuilder(Protocol):
         ...
 
 
-class MethodBuilder(Protocol):
-    def __call__(
-        self,
-        *,
-        cfg: DistillRunConfig,
-        bundle: RoleManager,
-        adapter: Any,
-        validator: Any | None,
-    ) -> DistillMethod:
-        ...
-
-
 _MODELS: dict[str, ModelBuilder] = {}
-_METHODS: dict[str, MethodBuilder] = {}
+_METHODS: dict[str, type[DistillMethod]] = {}
 _BUILTINS_REGISTERED = False
 
 
@@ -47,16 +34,20 @@ def register_model(name: str) -> Callable[[ModelBuilder], ModelBuilder]:
     return decorator
 
 
-def register_method(name: str) -> Callable[[MethodBuilder], MethodBuilder]:
+def register_method(
+    name: str,
+) -> Callable[[type[DistillMethod]], type[DistillMethod]]:
     name = str(name).strip()
     if not name:
         raise ValueError("method name cannot be empty")
 
-    def decorator(builder: MethodBuilder) -> MethodBuilder:
+    def decorator(method_cls: type[DistillMethod]) -> type[DistillMethod]:
         if name in _METHODS:
             raise KeyError(f"Method already registered: {name!r}")
-        _METHODS[name] = builder
-        return builder
+        if not issubclass(method_cls, DistillMethod):
+            raise TypeError(f"Registered method must subclass DistillMethod: {method_cls}")
+        _METHODS[name] = method_cls
+        return method_cls
 
     return decorator
 
@@ -90,7 +81,7 @@ def get_model(name: str) -> ModelBuilder:
     return _MODELS[name]
 
 
-def get_method(name: str) -> MethodBuilder:
+def get_method(name: str) -> type[DistillMethod]:
     ensure_builtin_registrations()
     if name not in _METHODS:
         raise KeyError(f"Unknown method {name!r}. Available: {available_methods()}")
@@ -101,15 +92,15 @@ def build_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:
     """Build a distillation runtime from a YAML config.
 
     Assembles:
-    - model components (bundle/adapter/dataloader/tracker/validator)
+    - model components (bundle/adapter/dataloader/validator)
     - method implementation (algorithm) on top of those components
     """
 
     model_builder = get_model(str(cfg.recipe.family))
     components = model_builder(cfg=cfg)
 
-    method_builder = get_method(str(cfg.recipe.method))
-    method = method_builder(
+    method_cls = get_method(str(cfg.recipe.method))
+    method = method_cls.build(
         cfg=cfg,
         bundle=components.bundle,
         adapter=components.adapter,
@@ -120,7 +111,5 @@ def build_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:
         training_args=components.training_args,
         method=method,
         dataloader=components.dataloader,
-        tracker=components.tracker,
         start_step=int(getattr(components, "start_step", 0) or 0),
     )
-

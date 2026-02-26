@@ -11,6 +11,7 @@
   `self.role_modules: ModuleDict`，便于 DDP/FSDP/ckpt 系统统一发现参数。
 
 **需要子类实现的抽象方法**
+- `build(cfg, bundle, adapter, validator)`（classmethod）
 - `single_train_step(batch, iteration, current_vsa_sparsity=...)`
   - 返回：`(loss_map, outputs, metrics)`
     - `loss_map: dict[str, Tensor]`：必须包含 `total_loss`（用于 backward）
@@ -19,6 +20,7 @@
 - `get_lr_schedulers(iteration)`
 
 **默认实现**
+- `set_tracker(tracker)`：由 trainer 注入 tracker，并尽力转发到 `self.validator`
 - `backward()`：对 `loss_map["total_loss"]` 做 backward（子类可覆写以处理多 ctx）
 - `optimizers_schedulers_step()`：按 `get_optimizers/get_lr_schedulers` 的结果 step
 - `optimizers_zero_grad()`：对当前 iteration 的 optimizers 清梯度

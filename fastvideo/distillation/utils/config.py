@@ -206,5 +206,4 @@ class DistillRuntime:
     training_args: TrainingArgs
     method: DistillMethod
     dataloader: Any
-    tracker: Any
     start_step: int = 0

@@ -49,9 +49,11 @@ def run_distillation_from_config(
         logger.info("Dry-run: config parsed and runtime built successfully.")
         return
 
+    trainer = DistillTrainer(training_args, config=cfg.raw)
+
     # Attach the exact YAML used for this run to the tracker (e.g., W&B Files).
     # This helps reproducibility and makes runs easy to inspect later.
-    runtime.tracker.log_file(os.path.abspath(os.path.expanduser(config_path)), name="run.yaml")
+    trainer.tracker.log_file(os.path.abspath(os.path.expanduser(config_path)), name="run.yaml")
 
     ckpt_config = DistillCheckpointConfig(
         save_steps=int(getattr(training_args, "training_state_checkpointing_steps", 0) or 0),
@@ -73,7 +75,6 @@ def run_distillation_from_config(
         get_rng_generators=get_rng_generators,
     )
 
-    trainer = DistillTrainer(training_args, tracker=runtime.tracker)
     trainer.run(
         runtime.method,
         dataloader=runtime.dataloader,

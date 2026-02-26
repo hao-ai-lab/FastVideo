@@ -9,12 +9,13 @@
   - `run(method, dataloader, max_steps, ...)`
   - 支持：
     - grad accumulation
-    - tracker logging（rank0）
+    - tracker logging（rank0；tracker 由 trainer 构建并持有）
     - validation hook（`method.log_validation(step)`）
     - checkpoint hook（通过 `checkpoint_manager` 注入）
 
 **与 Method 的契约**
 `run()` 通过 duck-typing 调用（存在则调用）：
+- `method.set_tracker(tracker)`（注入 tracker；用于 method-managed validation artifacts）
 - `method.on_train_start()`
 - `method.single_train_step(batch, step, current_vsa_sparsity=...)`
   - 返回：`(loss_map, outputs, metrics)`

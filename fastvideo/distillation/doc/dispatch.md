@@ -8,7 +8,9 @@
 
 **关键概念**
 - `ModelBuilder(cfg) -> ModelComponents`
-- `MethodBuilder(cfg, bundle, adapter, validator) -> DistillMethod`
+- `DistillMethod` class（算法实现）
+  - `@register_method("...")` 直接注册到 class
+  - class 需要实现 `DistillMethod.build(cfg, bundle, adapter, validator)`
 
 **关键 API**
 - `register_model(name)` / `register_method(name)`：装饰器注册
@@ -21,4 +23,3 @@
 **边界**
 - ✅ 这里只做“装配 + dispatch”，不包含训练 loop / loss / rollout / optimizer policy。
 - ✅ method 层保持算法高内聚；model plugin 层保持集成高内聚。
-

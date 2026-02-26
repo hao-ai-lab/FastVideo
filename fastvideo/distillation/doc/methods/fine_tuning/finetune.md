@@ -39,3 +39,7 @@ finetune 可以被视为一种特殊的 distillation recipe：**只有 student +
 
 ## 配置示例
 - `examples/distillation/phase3_3/finetune_wan2.1_t2v_1.3B_phase3.3.yaml`
+
+## 注册方式（Phase 3.4）
+- `FineTuneMethod` 通过 `@register_method("finetune")` 直接注册到 class。
+- 由 `FineTuneMethod.build(...)` 负责把 `cfg.method_config` 等注入到实例。

@@ -90,6 +90,7 @@ class _DMD2Adapter(Protocol):
         ...
 
 
+@register_method("dmd2")
 class DMD2Method(DistillMethod):
     """DMD2 distillation algorithm (method layer).
 
@@ -130,6 +131,22 @@ class DMD2Method(DistillMethod):
         self._rollout_mode = self._parse_rollout_mode()
         self._denoising_step_list: torch.Tensor | None = None
         self._init_optimizers_and_schedulers()
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        cfg: DistillRunConfig,
+        bundle: RoleManager,
+        adapter: Any,
+        validator: Any | None,
+    ) -> DistillMethod:
+        return cls(
+            bundle=bundle,
+            adapter=adapter,
+            method_config=cfg.method_config,
+            validator=validator,
+        )
 
     def _parse_rollout_mode(self) -> Literal["simulate", "data_latent"]:
         raw = self.method_config.get("rollout_mode", None)
@@ -686,19 +703,3 @@ class DMD2Method(DistillMethod):
             self._clip_grad_norm(module)
 
         super().optimizers_schedulers_step(iteration)
-
-
-@register_method("dmd2")
-def build_dmd2_method(
-    *,
-    cfg: DistillRunConfig,
-    bundle: RoleManager,
-    adapter: _DMD2Adapter,
-    validator: Any | None,
-) -> DistillMethod:
-    return DMD2Method(
-        bundle=bundle,
-        adapter=adapter,
-        method_config=cfg.method_config,
-        validator=validator,
-    )
