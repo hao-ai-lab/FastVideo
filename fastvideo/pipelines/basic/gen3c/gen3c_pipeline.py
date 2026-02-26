@@ -5,6 +5,7 @@ Implements GEN3C video diffusion pipeline with 3D cache support for camera-contr
 
 import torch
 from diffusers import EDMEulerScheduler
+from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -303,13 +304,22 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
         latent_height = height // spatial_ratio
         latent_width = width // spatial_ratio
 
-        # Generate initial noise latents
-        latents = torch.randn(
-            batch_size,
-            num_channels_latents,
-            latent_frames,
-            latent_height,
-            latent_width,
+        generator = getattr(batch, "generator", None)
+        if isinstance(generator, list) and len(generator) != batch_size:
+            raise ValueError(
+                f"Expected {batch_size} generators, got {len(generator)}."
+            )
+
+        # Generate seeded initial noise latents for deterministic SSIM runs.
+        latents = randn_tensor(
+            (
+                batch_size,
+                num_channels_latents,
+                latent_frames,
+                latent_height,
+                latent_width,
+            ),
+            generator=generator,
             device=device,
             dtype=torch.float32,
         )

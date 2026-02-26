@@ -14,6 +14,7 @@ Environment variables:
 """
 
 import os
+import glob
 from pathlib import Path
 
 import pytest
@@ -44,6 +45,22 @@ def _resolve_gen3c_model_path() -> str:
     return str(local_default)
 
 
+def _resolve_gen3c_test_image_path() -> str:
+    """
+    Resolve image path for GEN3C I2V SSIM tests.
+
+    Priority:
+    1) GEN3C_TEST_IMAGE_PATH env var
+    2) Repo asset image
+    """
+    env_image = os.getenv("GEN3C_TEST_IMAGE_PATH")
+    if env_image:
+        return env_image
+
+    repo_root = Path(__file__).resolve().parents[3]
+    return str(repo_root / "assets" / "girl.png")
+
+
 # ---------------------------------------------------------------------------
 # Device detection
 # ---------------------------------------------------------------------------
@@ -69,11 +86,12 @@ GEN3C_T2V_PARAMS = {
     "height": 720,
     "width": 1280,
     "num_frames": 121,
-    "num_inference_steps": 50,
+    "num_inference_steps": 12,
     "guidance_scale": 6.0,
     "embedded_cfg_scale": 6,
     "flow_shift": 1.0,
     "seed": 1024,
+    "image_path": _resolve_gen3c_test_image_path(),
     "sp_size": 1,
     "tp_size": 1,
     "fps": 24,
@@ -84,10 +102,12 @@ MODEL_TO_PARAMS = {
 }
 
 TEST_PROMPTS = [
-    "A camera slowly orbits around a vase of flowers on a wooden table in a sunlit room. "
-    "The warm afternoon light casts soft shadows across the petals. "
-    "Cinematic, shallow depth of field, smooth camera motion.",
+    "A camera slowly orbits around a young woman sitting at a table with a coffee mug with coffee in it in front of her, "
+    "looking away naturally. Soft indoor lighting, cinematic framing, shallow depth of field, smooth camera motion.",
 ]
+
+BASELINE_VIDEO_NAME = "gen3c_ssim_baseline.mp4"
+CANDIDATE_VIDEO_NAME = "gen3c_ssim_candidate.mp4"
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +131,7 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     base_output_dir = os.path.join(script_dir, "generated_videos", model_id)
     output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
-    output_video_name = f"{prompt[:100].strip()}.mp4"
+    output_video_name = CANDIDATE_VIDEO_NAME
     os.makedirs(output_dir, exist_ok=True)
 
     BASE_PARAMS = MODEL_TO_PARAMS[model_id]
@@ -141,15 +161,28 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     generation_kwargs = {
         "num_inference_steps": num_inference_steps,
-        "output_path": output_dir,
+        "output_path": os.path.join(output_dir, output_video_name),
         "height": BASE_PARAMS["height"],
         "width": BASE_PARAMS["width"],
         "num_frames": BASE_PARAMS["num_frames"],
         "guidance_scale": BASE_PARAMS["guidance_scale"],
         "embedded_cfg_scale": BASE_PARAMS["embedded_cfg_scale"],
         "seed": BASE_PARAMS["seed"],
+        "image_path": BASE_PARAMS["image_path"],
         "fps": BASE_PARAMS["fps"],
     }
+
+    if not os.path.exists(generation_kwargs["image_path"]):
+        pytest.skip(
+            f"GEN3C test image not found: {generation_kwargs['image_path']}. "
+            "Set GEN3C_TEST_IMAGE_PATH to a valid local image."
+        )
+
+    # Keep local reruns deterministic: remove prior candidate outputs so
+    # VideoGenerator does not auto-suffix (_1, _2, ...).
+    stale_pattern = os.path.join(output_dir, "gen3c_ssim_candidate*.mp4")
+    for stale_video in glob.glob(stale_pattern):
+        os.remove(stale_video)
 
     generator = VideoGenerator.from_pretrained(
         model_path=model_path, **init_kwargs
@@ -169,19 +202,12 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
             f"Reference video folder does not exist: {reference_folder}"
         )
 
-    # Find matching reference video by prompt substring
-    reference_video_name = None
-    for filename in os.listdir(reference_folder):
-        if filename.endswith(".mp4") and prompt[:100].strip() in filename:
-            reference_video_name = filename
-            break
-
-    if not reference_video_name:
+    reference_video_path = os.path.join(reference_folder, BASELINE_VIDEO_NAME)
+    if not os.path.exists(reference_video_path):
         raise FileNotFoundError(
-            f"Reference video not found for prompt: {prompt[:60]}..."
+            f"Reference video not found: {reference_video_path}"
         )
 
-    reference_video_path = os.path.join(reference_folder, reference_video_name)
     generated_video_path = os.path.join(output_dir, output_video_name)
 
     logger.info(f"Computing SSIM: {reference_video_path} vs {generated_video_path}")
@@ -201,7 +227,7 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
         prompt,
     )
 
-    # GEN3C uses flow-matching with 50 steps; expect high consistency.
+    # GEN3C SSIM threshold for stable L40S reference comparisons.
     min_acceptable_ssim = 0.93
     assert mean_ssim >= min_acceptable_ssim, (
         f"SSIM {mean_ssim:.4f} < {min_acceptable_ssim} for {model_id} / {ATTENTION_BACKEND}"

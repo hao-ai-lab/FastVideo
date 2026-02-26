@@ -28,10 +28,13 @@ def load_moge_model(
     """
     try:
         from moge.model.v1 import MoGeModel
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "MoGe is required for GEN3C 3D cache conditioning. "
-            "Install it with: pip install moge-pytorch")
+            "Install it with: pip install git+https://github.com/microsoft/MoGe.git. "
+            "If import fails with libGL.so.1, install system deps: "
+            "sudo apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender1"
+        ) from exc
 
     logger.info("Loading MoGe depth model: %s", model_name)
     model = MoGeModel.from_pretrained(model_name).to(device)
