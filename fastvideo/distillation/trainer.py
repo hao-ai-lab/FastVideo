@@ -15,6 +15,20 @@ from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.training.trackers import BaseTracker, DummyTracker
 
 
+def _coerce_log_scalar(value: Any, *, where: str) -> float:
+    if isinstance(value, torch.Tensor):
+        if value.numel() != 1:
+            raise ValueError(
+                f"Expected scalar tensor at {where}, got shape={tuple(value.shape)}"
+            )
+        return float(value.detach().item())
+    if isinstance(value, (float, int)):
+        return float(value)
+    raise TypeError(
+        f"Expected a scalar (float/int/Tensor) at {where}, got {type(value).__name__}"
+    )
+
+
 @dataclass(slots=True)
 class TrainLoopState:
     step: int
@@ -23,8 +37,12 @@ class TrainLoopState:
 
 
 class DistillTrainer:
-    def __init__(self, training_args: TrainingArgs, *, tracker: BaseTracker
-                 | None = None) -> None:
+    def __init__(
+        self,
+        training_args: TrainingArgs,
+        *,
+        tracker: BaseTracker | None = None,
+    ) -> None:
         self.training_args = training_args
         self.world_group = get_world_group()
         self.sp_group = get_sp_group()
@@ -47,8 +65,10 @@ class DistillTrainer:
         vsa_decay_rate = self.training_args.VSA_decay_rate
         vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
         if vsa_decay_interval_steps > 1:
-            current_decay_times = min(step // vsa_decay_interval_steps,
-                                      int(vsa_sparsity // vsa_decay_rate))
+            current_decay_times = min(
+                step // vsa_decay_interval_steps,
+                int(vsa_sparsity // vsa_decay_rate),
+            )
             return current_decay_times * vsa_decay_rate
         return vsa_sparsity
 
@@ -96,10 +116,11 @@ class DistillTrainer:
             current_vsa_sparsity = self._get_current_vsa_sparsity(step)
 
             loss_sums: dict[str, float] = {}
+            metric_sums: dict[str, float] = {}
             for accum_iter in range(grad_accum):
                 batch = next(data_stream)
                 if hasattr(method, "single_train_step"):
-                    loss_map, outputs = method.single_train_step(  # type: ignore[attr-defined]
+                    loss_map, outputs, step_metrics = method.single_train_step(  # type: ignore[attr-defined]
                         batch,
                         step,
                         current_vsa_sparsity=current_vsa_sparsity,
@@ -122,6 +143,16 @@ class DistillTrainer:
                     if isinstance(v, torch.Tensor):
                         loss_sums[k] = loss_sums.get(k, 0.0) + float(
                             v.detach().item())
+                for k, v in step_metrics.items():
+                    if k in loss_sums:
+                        raise ValueError(
+                            f"Metric key {k!r} collides with loss key. "
+                            "Use a different name (e.g. prefix with 'train/')."
+                        )
+                    metric_sums[k] = metric_sums.get(k, 0.0) + _coerce_log_scalar(
+                        v,
+                        where=f"method.single_train_step().metrics[{k!r}]",
+                    )
 
             if hasattr(method, "optimizers_schedulers_step"):
                 method.optimizers_schedulers_step(step)  # type: ignore[attr-defined]
@@ -129,7 +160,9 @@ class DistillTrainer:
                 method.optimizers_zero_grad(step)  # type: ignore[attr-defined]
 
             metrics = {k: v / grad_accum for k, v in loss_sums.items()}
+            metrics.update({k: v / grad_accum for k, v in metric_sums.items()})
             metrics["step_time_sec"] = time.perf_counter() - t0
+            metrics["vsa_sparsity"] = float(current_vsa_sparsity)
             if self.global_rank == 0 and metrics:
                 self.tracker.log(metrics, step)
 

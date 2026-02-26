@@ -10,6 +10,8 @@ import torch
 
 from fastvideo.distillation.roles import RoleManager
 
+LogScalar = float | int | torch.Tensor
+
 
 class DistillMethod(torch.nn.Module, ABC):
     def __init__(self, bundle: RoleManager) -> None:
@@ -27,7 +29,7 @@ class DistillMethod(torch.nn.Module, ABC):
         iteration: int,
         *,
         current_vsa_sparsity: float = 0.0,
-    ) -> tuple[dict[str, torch.Tensor], dict[str, Any]]:
+    ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
         raise NotImplementedError
 
     @abstractmethod

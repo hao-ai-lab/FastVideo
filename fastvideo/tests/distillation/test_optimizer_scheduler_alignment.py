@@ -53,7 +53,7 @@ class _ScheduleMethod(DistillMethod):
 
     def single_train_step(self, batch, iteration, *, current_vsa_sparsity=0.0):  # noqa: ANN001, ANN201
         loss = torch.zeros((), requires_grad=True)
-        return {"total_loss": loss}, {}
+        return {"total_loss": loss}, {}, {}
 
     def get_optimizers(self, iteration):  # noqa: ANN001, ANN201
         optimizers = [self.critic_opt]

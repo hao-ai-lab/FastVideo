@@ -13,7 +13,7 @@ from fastvideo.training.training_utils import (
 )
 
 from fastvideo.distillation.roles import RoleHandle, RoleManager
-from fastvideo.distillation.methods.base import DistillMethod
+from fastvideo.distillation.methods.base import DistillMethod, LogScalar
 from fastvideo.distillation.dispatch import register_method
 from fastvideo.distillation.validators.base import ValidationRequest
 from fastvideo.distillation.utils.config import DistillRunConfig
@@ -247,7 +247,7 @@ class FineTuneMethod(DistillMethod):
         iteration: int,
         *,
         current_vsa_sparsity: float = 0.0,
-    ) -> tuple[dict[str, torch.Tensor], dict[str, Any]]:
+    ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
         del iteration
         training_batch = self.adapter.prepare_batch(
             batch,
@@ -299,7 +299,8 @@ class FineTuneMethod(DistillMethod):
         outputs: dict[str, Any] = {
             "_fv_backward": (training_batch.timesteps, attn_metadata)
         }
-        return loss_map, outputs
+        metrics: dict[str, LogScalar] = {}
+        return loss_map, outputs, metrics
 
     def backward(
         self,

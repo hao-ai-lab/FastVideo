@@ -14,7 +14,7 @@ from fastvideo.training.training_utils import (
 
 from fastvideo.distillation.roles import RoleManager
 from fastvideo.distillation.roles import RoleHandle
-from fastvideo.distillation.methods.base import DistillMethod
+from fastvideo.distillation.methods.base import DistillMethod, LogScalar
 from fastvideo.distillation.dispatch import register_method
 from fastvideo.distillation.validators.base import ValidationRequest
 from fastvideo.distillation.utils.config import DistillRunConfig
@@ -589,7 +589,7 @@ class DMD2Method(DistillMethod):
         iteration: int,
         *,
         current_vsa_sparsity: float = 0.0,
-    ) -> tuple[dict[str, torch.Tensor], dict[str, Any]]:
+    ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
         latents_source: Literal["data", "zeros"] = "data"
         if self._rollout_mode == "simulate":
             latents_source = "zeros"
@@ -628,7 +628,8 @@ class DMD2Method(DistillMethod):
             "student_ctx": student_ctx,
             "critic_ctx": critic_ctx,
         }
-        return loss_map, outputs
+        metrics: dict[str, LogScalar] = {"update_student": float(update_student)}
+        return loss_map, outputs, metrics
 
     def backward(
         self,

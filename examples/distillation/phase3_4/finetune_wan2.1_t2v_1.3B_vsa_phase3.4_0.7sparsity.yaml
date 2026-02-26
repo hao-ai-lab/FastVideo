@@ -30,7 +30,7 @@ training:
   num_frames: 77
 
   # Output / steps
-  output_dir: outputs/phase3.4_wan2.1_finetune_vsa_wansyn
+  output_dir: outputs/phase3.4_wan2.1_finetune_vsa_0.7_0.03_1_wansyn
   max_train_steps: 4000
   seed: 1000
   checkpoints_total_limit: 3
@@ -55,11 +55,11 @@ training:
   # VSA knobs (schedule ramps up sparsity during training)
   VSA_sparsity: 0.7
   VSA_decay_rate: 0.03
-  VSA_decay_interval_steps: 50
+  VSA_decay_interval_steps: 1
 
   # Tracking / validation
   tracker_project_name: distillation_phase3
-  wandb_run_name: phase3.4_wan_finetune_vsa_0.7_0.03_50
+  wandb_run_name: phase3.4_wan_finetune_vsa_0.7_0.03_1
   log_validation: true
   validation_dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
   validation_steps: 50

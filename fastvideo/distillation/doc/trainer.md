@@ -17,6 +17,9 @@
 `run()` 通过 duck-typing 调用（存在则调用）：
 - `method.on_train_start()`
 - `method.single_train_step(batch, step, current_vsa_sparsity=...)`
+  - 返回：`(loss_map, outputs, metrics)`
+    - `loss_map`：用于 backward 与默认标量 logging（`total_loss` 必需）
+    - `metrics`：额外的标量指标（非 loss，但希望记录到 tracker）
 - `method.backward(loss_map, outputs, grad_accum_rounds=...)`
 - `method.optimizers_schedulers_step(step)`
 - `method.optimizers_zero_grad(step)`
@@ -24,4 +27,3 @@
 **重要边界**
 - trainer 不应知道 roles（student/teacher/critic/...）也不应知道具体算法；
   optimizer cadence、multi-optimizer 更新策略都应由 method 决定并暴露为 hook。
-

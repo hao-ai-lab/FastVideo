@@ -12,6 +12,9 @@
 
 **需要子类实现的抽象方法**
 - `single_train_step(batch, iteration, current_vsa_sparsity=...)`
+  - 返回：`(loss_map, outputs, metrics)`
+    - `loss_map: dict[str, Tensor]`：必须包含 `total_loss`（用于 backward）
+    - `metrics: dict[str, scalar]`：额外要 log 的标量（float/int/0-dim Tensor）
 - `get_optimizers(iteration)`
 - `get_lr_schedulers(iteration)`
 
