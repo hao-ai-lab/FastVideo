@@ -67,7 +67,7 @@ training:
   tracker_project_name: distillation_wangame
   wandb_run_name: wangame_finetune
   log_validation: true
-  validation_dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random.json
+  validation_dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_8.json
   validation_steps: 100
   validation_sampling_steps: "40"
   validation_guidance_scale: "1.0"

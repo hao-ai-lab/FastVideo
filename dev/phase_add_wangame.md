@@ -3,7 +3,49 @@
 > 目标：在 **不回到 legacy training pipeline** 的前提下，让 `fastvideo/training/distillation.py`
 > 可以通过 YAML（schema v2）跑起 **WanGame** 的 finetune / distill（优先 finetune）。
 >
-> 本文件只做“代码层面规划”，不修改代码。
+> 本文件最初用于“代码层面规划”，现在也用来记录已落地的实现与遗留 TODO。
+
+---
+
+## 当前进展（已落地）
+
+> 下面是“已经写进代码库并通过静态检查（`compileall` + ruff）”的部分。
+> GPU 端到端训练/验证需要你在有 GPU 的机器上跑（我们这边环境可能没有 driver）。
+
+### ✅ 已实现（最小可用：finetune）
+
+- `recipe.family: wangame` + `recipe.method: finetune`
+- 新增 model plugin / adapter / validator：
+  - `fastvideo/distillation/models/wangame.py`
+  - `fastvideo/distillation/adapters/wangame.py`
+  - `fastvideo/distillation/validators/wangame.py`
+- builtin dispatch 注册：
+  - `fastvideo/distillation/dispatch.py:ensure_builtin_registrations()`
+- dataloader helper（复用 parquet loader，支持 `path:N` + 多路径）：
+  - `fastvideo/distillation/utils/dataloader.py:build_parquet_wangame_train_dataloader()`
+- examples（可直接跑）：
+  - `examples/distillation/wangame/finetune_wangame2.1_i2v_1.3B.yaml`
+    - 已把 legacy `finetune_wangame.slurm` 的 `DATA_DIR` 语义搬进来
+    - 用 YAML folded string（`>-`）让超长 `data_path` 更可读
+  - `examples/distillation/wangame/finetune-temp.sh`
+
+### ✅ 已实现（为 future DMD2 做好 primitives）
+
+- `WanGameAdapter` 已提供 DMD2 所需的 operation primitives：
+  - `num_train_timesteps / shift_and_clamp_timestep / add_noise`
+  - `predict_noise / predict_x0 / backward`
+  - attention metadata（dense/vsa）+ forward_context
+- `WanGameValidator` 支持根据 `ValidationRequest.sampler_kind` 选 pipeline：
+  - `ode` -> `WanGameActionImageToVideoPipeline`
+  - `sde` -> `WanGameCausalDMDPipeline`
+
+### ✅ 关键对齐说明（legacy vs 新框架）
+
+- **训练 noising scheduler**：新框架 wangame 训练使用
+  `FlowMatchEulerDiscreteScheduler`，与 legacy training loop（`TrainingPipeline`）
+  一致（训练阶段并不使用 UniPC 做 noising）。
+- **validation sampler**：validator 走 pipeline（ODE/SDE）时，仍由 pipeline
+  自己持有对应 scheduler（例如 ODE pipeline 使用 `FlowUniPCMultistepScheduler`）。
 
 ---
 
@@ -75,7 +117,7 @@ WanGame 不是“想象中的模型”，FastVideo 里已经有一整套（legac
 
 ### 3.1 新增：model plugin
 
-- [ ] `fastvideo/distillation/models/wangame.py`
+- [x] `fastvideo/distillation/models/wangame.py`
   - `@register_model("wangame")`
   - 主要职责：
     - 设置 `training_args.override_transformer_cls_name = "WanGameActionTransformer3DModel"`
@@ -90,7 +132,7 @@ WanGame 不是“想象中的模型”，FastVideo 里已经有一整套（legac
 
 ### 3.2 新增：adapter
 
-- [ ] `fastvideo/distillation/adapters/wangame.py`
+- [x] `fastvideo/distillation/adapters/wangame.py`
   - 复用 `WanAdapter` 的通用 mechanics（timestep/noise/attn_metadata/backward 的模式）
   - 重点实现（对齐 legacy `wangame_training_pipeline.py`）：
     - `prepare_batch(raw_batch, current_vsa_sparsity, latents_source=...)`
@@ -118,7 +160,7 @@ WanGame 不是“想象中的模型”，FastVideo 里已经有一整套（legac
 
 ### 3.3 新增：validator
 
-- [ ] `fastvideo/distillation/validators/wangame.py`
+- [x] `fastvideo/distillation/validators/wangame.py`
   - API 对齐 `WanValidator`：`log_validation(step, request=ValidationRequest)`
   - pipeline 选择：
     - `request.sampler_kind == "ode"`：`WanGameActionImageToVideoPipeline`
@@ -129,7 +171,7 @@ WanGame 不是“想象中的模型”，FastVideo 里已经有一整套（legac
 
 ### 3.4 改动：dispatch builtin registrations
 
-- [ ] `fastvideo/distillation/dispatch.py:ensure_builtin_registrations()`
+- [x] `fastvideo/distillation/dispatch.py:ensure_builtin_registrations()`
   - 显式 import 新增的 `fastvideo.distillation.models.wangame`
 
 ### 3.5 可选：dataloader util
@@ -137,9 +179,13 @@ WanGame 不是“想象中的模型”，FastVideo 里已经有一整套（legac
 当前 `fastvideo/distillation/utils/dataloader.py` 只有 T2V helper。
 wangame 需要 I2V+action schema，因此建议：
 
-- [ ] `fastvideo/distillation/utils/dataloader.py`
+- [x] `fastvideo/distillation/utils/dataloader.py`
   - 新增 `build_parquet_wangame_train_dataloader(training_args, parquet_schema=pyarrow_schema_wangame)`
   - 内部仍调用 `fastvideo.dataset.build_parquet_map_style_dataloader(...)`
+
+TODO（更通用的方向，暂不做）：
+- [ ] 扩展到更多 dataset kind（webdataset / precomputed / ode-init ...），
+  并用更统一的 config/dispatch 管理（例如 `DataSpec`）。
 
 ---
 
@@ -248,6 +294,14 @@ method_config:
    - 但执行必然落在 adapter（如何 zero_action/zero_image 是模型相关的），因此 adapter 需要提供一个 operation
      来承接该语义（例如“构造 uncond conditioning variant”）。
 
+   **新增 TODO（需要实现）**
+   - [ ] 为 wangame + DMD2 引入 `method_config.uncond_mode`
+     - DMD2Method：读取该字段，并在 teacher CFG 时把 `conditional=False`
+       映射到对应的 “uncond variant”
+     - WanGameAdapter：提供可解释的 uncond 变体构造（避免硬编码 DMD2 名词），例如：
+       - `conditional=False` 时按 `uncond_mode` 将 action/image conditioning 置零
+       - 或提供一个更显式的 operation（如 `build_conditioning_variant(...)`）
+
 2) **train_action_only / action_warmup_steps（细粒度 trainable）**
    legacy `wangame_training_pipeline.py` 支持更细粒度的训练策略：
    - `train_action_only`：冻结 base DiT，只训练 action 相关参数（pattern-based）
@@ -299,3 +353,13 @@ method_config:
 - distill（若做第二档）：
   - e2e 跑通（few-step）
   - validation 选择 `sde` 时，视觉应接近 legacy DMD pipeline 的 sampling 形态
+
+---
+
+## 8) 目前遗留 / 下一步（WanGame 接入方向）
+
+- [ ] DMD2 on wangame 的 `uncond` 语义（`method_config.uncond_mode`）
+- [ ] action-only / warmup（把 legacy 的 `train_action_only / action_warmup_steps`
+  接到新框架：归属在 method/role policy 而非 model plugin）
+- [ ] 若需要减少 ODE/SDE pipeline 分叉：将 wangame inference pipeline 也升级为
+  `sampler_kind` 可切换（侵入式更强，建议放更后面的 phase）

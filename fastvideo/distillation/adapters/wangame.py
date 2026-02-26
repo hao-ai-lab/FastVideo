@@ -398,20 +398,19 @@ class WanGameAdapter(DistillAdapter):
         self,
         noisy_video_latents: torch.Tensor,
         timestep: torch.Tensor,
-        batch: TrainingBatch,
+        *,
+        image_embeds: torch.Tensor,
+        image_latents: torch.Tensor,
+        mask_lat_size: torch.Tensor,
+        viewmats: torch.Tensor | None,
+        Ks: torch.Tensor | None,
+        action: torch.Tensor | None,
     ) -> dict[str, Any]:
-        if batch.image_embeds is None:
-            raise RuntimeError("WanGameAdapter requires TrainingBatch.image_embeds")
-        if batch.image_latents is None:
-            raise RuntimeError("WanGameAdapter requires TrainingBatch.image_latents")
-        if batch.mask_lat_size is None:
-            raise RuntimeError("WanGameAdapter requires TrainingBatch.mask_lat_size")
-
         hidden_states = torch.cat(
             [
                 noisy_video_latents.permute(0, 2, 1, 3, 4),
-                batch.mask_lat_size,
-                batch.image_latents,
+                mask_lat_size,
+                image_latents,
             ],
             dim=1,
         )
@@ -419,11 +418,135 @@ class WanGameAdapter(DistillAdapter):
             "hidden_states": hidden_states,
             "encoder_hidden_states": None,
             "timestep": timestep.to(device=self.device, dtype=torch.bfloat16),
-            "encoder_hidden_states_image": batch.image_embeds,
-            "viewmats": getattr(batch, "viewmats", None),
-            "Ks": getattr(batch, "Ks", None),
-            "action": getattr(batch, "action", None),
+            "encoder_hidden_states_image": image_embeds,
+            "viewmats": viewmats,
+            "Ks": Ks,
+            "action": action,
             "return_dict": False,
+        }
+
+    def _select_cfg_condition_inputs(
+        self,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cfg_uncond: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        image_embeds = batch.image_embeds
+        image_latents = batch.image_latents
+        mask_lat_size = batch.mask_lat_size
+        if image_embeds is None:
+            raise RuntimeError("WanGameAdapter requires TrainingBatch.image_embeds")
+        if image_latents is None:
+            raise RuntimeError("WanGameAdapter requires TrainingBatch.image_latents")
+        if mask_lat_size is None:
+            raise RuntimeError("WanGameAdapter requires TrainingBatch.mask_lat_size")
+
+        viewmats = getattr(batch, "viewmats", None)
+        Ks = getattr(batch, "Ks", None)
+        action = getattr(batch, "action", None)
+
+        if conditional or cfg_uncond is None:
+            return {
+                "image_embeds": image_embeds,
+                "image_latents": image_latents,
+                "mask_lat_size": mask_lat_size,
+                "viewmats": viewmats,
+                "Ks": Ks,
+                "action": action,
+            }
+
+        on_missing_raw = cfg_uncond.get("on_missing", "error")
+        if not isinstance(on_missing_raw, str):
+            raise ValueError(
+                "method_config.cfg_uncond.on_missing must be a string, got "
+                f"{type(on_missing_raw).__name__}"
+            )
+        on_missing = on_missing_raw.strip().lower()
+        if on_missing not in {"error", "ignore"}:
+            raise ValueError(
+                "method_config.cfg_uncond.on_missing must be one of {error, ignore}, got "
+                f"{on_missing_raw!r}"
+            )
+
+        supported_channels = {"image", "action"}
+        for channel, policy_raw in cfg_uncond.items():
+            if channel in {"on_missing"}:
+                continue
+            if channel in supported_channels:
+                continue
+            if policy_raw is None:
+                continue
+            if not isinstance(policy_raw, str):
+                raise ValueError(
+                    "method_config.cfg_uncond values must be strings, got "
+                    f"{channel}={type(policy_raw).__name__}"
+                )
+            policy = policy_raw.strip().lower()
+            if policy == "keep":
+                continue
+            if on_missing == "ignore":
+                continue
+            raise ValueError(
+                "WanGameAdapter does not support cfg_uncond channel "
+                f"{channel!r} (policy={policy!r}). "
+                "Set cfg_uncond.on_missing=ignore or remove the channel."
+            )
+
+        def _get_policy(channel: str) -> str:
+            raw = cfg_uncond.get(channel, "keep")
+            if raw is None:
+                return "keep"
+            if not isinstance(raw, str):
+                raise ValueError(
+                    "method_config.cfg_uncond values must be strings, got "
+                    f"{channel}={type(raw).__name__}"
+                )
+            policy = raw.strip().lower()
+            if policy not in {"keep", "zero", "drop"}:
+                raise ValueError(
+                    "method_config.cfg_uncond values must be one of {keep, zero, drop}, got "
+                    f"{channel}={raw!r}"
+                )
+            return policy
+
+        image_policy = _get_policy("image")
+        if image_policy == "zero":
+            image_embeds = torch.zeros_like(image_embeds)
+            image_latents = torch.zeros_like(image_latents)
+            mask_lat_size = torch.zeros_like(mask_lat_size)
+        elif image_policy == "drop":
+            raise ValueError(
+                "cfg_uncond.image=drop is not supported for WanGame I2V; "
+                "use cfg_uncond.image=zero or keep."
+            )
+
+        action_policy = _get_policy("action")
+        if action_policy == "zero":
+            if viewmats is None or Ks is None or action is None:
+                if on_missing == "ignore":
+                    pass
+                else:
+                    raise ValueError(
+                        "cfg_uncond.action=zero requires action conditioning tensors, "
+                        "but TrainingBatch is missing {viewmats, Ks, action}."
+                    )
+            else:
+                viewmats = torch.zeros_like(viewmats)
+                Ks = torch.zeros_like(Ks)
+                action = torch.zeros_like(action)
+        elif action_policy == "drop":
+            viewmats = None
+            Ks = None
+            action = None
+
+        return {
+            "image_embeds": image_embeds,
+            "image_latents": image_latents,
+            "mask_lat_size": mask_lat_size,
+            "viewmats": viewmats,
+            "Ks": Ks,
+            "action": action,
         }
 
     def _get_transformer(self, handle: RoleHandle, timestep: torch.Tensor) -> torch.nn.Module:
@@ -445,9 +568,9 @@ class WanGameAdapter(DistillAdapter):
         batch: TrainingBatch,
         *,
         conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
-        del conditional
         device_type = self.device.type
         dtype = noisy_latents.dtype
 
@@ -462,7 +585,21 @@ class WanGameAdapter(DistillAdapter):
             current_timestep=batch.timesteps,
             attn_metadata=attn_metadata,
         ):
-            input_kwargs = self._build_distill_input_kwargs(noisy_latents, timestep, batch)
+            cond_inputs = self._select_cfg_condition_inputs(
+                batch,
+                conditional=conditional,
+                cfg_uncond=cfg_uncond,
+            )
+            input_kwargs = self._build_distill_input_kwargs(
+                noisy_latents,
+                timestep,
+                image_embeds=cond_inputs["image_embeds"],
+                image_latents=cond_inputs["image_latents"],
+                mask_lat_size=cond_inputs["mask_lat_size"],
+                viewmats=cond_inputs["viewmats"],
+                Ks=cond_inputs["Ks"],
+                action=cond_inputs["action"],
+            )
             transformer = self._get_transformer(handle, timestep)
             pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
             pred_x0 = pred_noise_to_pred_video(
@@ -481,9 +618,9 @@ class WanGameAdapter(DistillAdapter):
         batch: TrainingBatch,
         *,
         conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
-        del conditional
         device_type = self.device.type
         dtype = noisy_latents.dtype
 
@@ -498,7 +635,21 @@ class WanGameAdapter(DistillAdapter):
             current_timestep=batch.timesteps,
             attn_metadata=attn_metadata,
         ):
-            input_kwargs = self._build_distill_input_kwargs(noisy_latents, timestep, batch)
+            cond_inputs = self._select_cfg_condition_inputs(
+                batch,
+                conditional=conditional,
+                cfg_uncond=cfg_uncond,
+            )
+            input_kwargs = self._build_distill_input_kwargs(
+                noisy_latents,
+                timestep,
+                image_embeds=cond_inputs["image_embeds"],
+                image_latents=cond_inputs["image_latents"],
+                mask_lat_size=cond_inputs["mask_lat_size"],
+                viewmats=cond_inputs["viewmats"],
+                Ks=cond_inputs["Ks"],
+                action=cond_inputs["action"],
+            )
             transformer = self._get_transformer(handle, timestep)
             pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
         return pred_noise

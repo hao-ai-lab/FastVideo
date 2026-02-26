@@ -75,6 +75,7 @@ class _DMD2Adapter(Protocol):
         batch: Any,
         *,
         conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
         ...
@@ -87,6 +88,7 @@ class _DMD2Adapter(Protocol):
         batch: Any,
         *,
         conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
         ...
@@ -133,6 +135,7 @@ class DMD2Method(DistillMethod):
         self.validator = validator
         self.training_args = adapter.training_args
         self.method_config: dict[str, Any] = dict(method_config or {})
+        self._cfg_uncond = self._parse_cfg_uncond()
         self._rollout_mode = self._parse_rollout_mode()
         self._denoising_step_list: torch.Tensor | None = None
         self._init_optimizers_and_schedulers()
@@ -172,6 +175,59 @@ class DMD2Method(DistillMethod):
             "{simulate, data_latent}, got "
             f"{raw!r}"
         )
+
+    def _parse_cfg_uncond(self) -> dict[str, Any] | None:
+        raw = self.method_config.get("cfg_uncond", None)
+        if raw is None:
+            return None
+        if not isinstance(raw, dict):
+            raise ValueError(
+                "method_config.cfg_uncond must be a dict when set, got "
+                f"{type(raw).__name__}"
+            )
+
+        cfg: dict[str, Any] = dict(raw)
+
+        on_missing_raw = cfg.get("on_missing", "error")
+        if on_missing_raw is None:
+            on_missing_raw = "error"
+        if not isinstance(on_missing_raw, str):
+            raise ValueError(
+                "method_config.cfg_uncond.on_missing must be a string, got "
+                f"{type(on_missing_raw).__name__}"
+            )
+        on_missing = on_missing_raw.strip().lower()
+        if on_missing not in {"error", "ignore"}:
+            raise ValueError(
+                "method_config.cfg_uncond.on_missing must be one of "
+                "{error, ignore}, got "
+                f"{on_missing_raw!r}"
+            )
+        cfg["on_missing"] = on_missing
+
+        for channel, policy_raw in list(cfg.items()):
+            if channel == "on_missing":
+                continue
+            if policy_raw is None:
+                continue
+            if not isinstance(policy_raw, str):
+                raise ValueError(
+                    "method_config.cfg_uncond values must be strings, got "
+                    f"{channel}={type(policy_raw).__name__}"
+                )
+            policy = policy_raw.strip().lower()
+            allowed = {"keep", "zero", "drop"}
+            if channel == "text":
+                allowed = {*allowed, "negative_prompt"}
+            if policy not in allowed:
+                raise ValueError(
+                    "method_config.cfg_uncond values must be one of "
+                    f"{sorted(allowed)}, got "
+                    f"{channel}={policy_raw!r}"
+                )
+            cfg[channel] = policy
+
+        return cfg
 
     def _build_role_optimizer_and_scheduler(
         self,
@@ -390,6 +446,7 @@ class DMD2Method(DistillMethod):
                 timestep,
                 batch,
                 conditional=True,
+                cfg_uncond=self._cfg_uncond,
                 attn_kind="vsa",
             )
             batch.dmd_latent_vis_dict["generator_timestep"] = timestep
@@ -426,6 +483,7 @@ class DMD2Method(DistillMethod):
                         current_timestep_tensor,
                         batch,
                         conditional=True,
+                        cfg_uncond=self._cfg_uncond,
                         attn_kind="vsa",
                     )
 
@@ -455,6 +513,7 @@ class DMD2Method(DistillMethod):
                 target_timestep,
                 batch,
                 conditional=True,
+                cfg_uncond=self._cfg_uncond,
                 attn_kind="vsa",
             )
         else:
@@ -465,6 +524,7 @@ class DMD2Method(DistillMethod):
                     target_timestep,
                     batch,
                     conditional=True,
+                    cfg_uncond=self._cfg_uncond,
                     attn_kind="vsa",
                 )
 
@@ -498,6 +558,7 @@ class DMD2Method(DistillMethod):
             fake_score_timestep,
             batch,
             conditional=True,
+            cfg_uncond=self._cfg_uncond,
             attn_kind="dense",
         )
         target = noise - generator_pred_x0
@@ -543,6 +604,7 @@ class DMD2Method(DistillMethod):
                 timestep,
                 batch,
                 conditional=True,
+                cfg_uncond=self._cfg_uncond,
                 attn_kind="dense",
             )
             real_cond_x0 = self.adapter.predict_x0(
@@ -551,6 +613,7 @@ class DMD2Method(DistillMethod):
                 timestep,
                 batch,
                 conditional=True,
+                cfg_uncond=self._cfg_uncond,
                 attn_kind="dense",
             )
             real_uncond_x0 = self.adapter.predict_x0(
@@ -559,6 +622,7 @@ class DMD2Method(DistillMethod):
                 timestep,
                 batch,
                 conditional=False,
+                cfg_uncond=self._cfg_uncond,
                 attn_kind="dense",
             )
             real_cfg_x0 = real_cond_x0 + (real_cond_x0 - real_uncond_x0) * guidance_scale

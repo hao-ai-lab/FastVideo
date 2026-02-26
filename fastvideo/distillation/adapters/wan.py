@@ -422,6 +422,100 @@ class WanAdapter(DistillAdapter):
             return transformer_2
         return transformer
 
+    def _get_uncond_text_dict(
+        self,
+        batch: TrainingBatch,
+        *,
+        cfg_uncond: dict[str, Any] | None,
+    ) -> dict[str, torch.Tensor]:
+        if cfg_uncond is None:
+            text_dict = getattr(batch, "unconditional_dict", None)
+            if text_dict is None:
+                raise RuntimeError(
+                    "Missing unconditional_dict; ensure_negative_conditioning() may have failed"
+                )
+            return text_dict
+
+        on_missing_raw = cfg_uncond.get("on_missing", "error")
+        if not isinstance(on_missing_raw, str):
+            raise ValueError(
+                "method_config.cfg_uncond.on_missing must be a string, got "
+                f"{type(on_missing_raw).__name__}"
+            )
+        on_missing = on_missing_raw.strip().lower()
+        if on_missing not in {"error", "ignore"}:
+            raise ValueError(
+                "method_config.cfg_uncond.on_missing must be one of {error, ignore}, got "
+                f"{on_missing_raw!r}"
+            )
+
+        # Wan only supports text CFG. If users configure other channels, fail
+        # fast (unless explicitly ignored).
+        for channel, policy_raw in cfg_uncond.items():
+            if channel in {"on_missing", "text"}:
+                continue
+            if policy_raw is None:
+                continue
+            if not isinstance(policy_raw, str):
+                raise ValueError(
+                    "method_config.cfg_uncond values must be strings, got "
+                    f"{channel}={type(policy_raw).__name__}"
+                )
+            policy = policy_raw.strip().lower()
+            if policy == "keep":
+                continue
+            if on_missing == "ignore":
+                continue
+            raise ValueError(
+                "WanAdapter does not support cfg_uncond channel "
+                f"{channel!r} (policy={policy!r}). "
+                "Set cfg_uncond.on_missing=ignore or remove the channel."
+            )
+
+        text_policy_raw = cfg_uncond.get("text", None)
+        if text_policy_raw is None:
+            text_policy = "negative_prompt"
+        elif not isinstance(text_policy_raw, str):
+            raise ValueError(
+                "method_config.cfg_uncond.text must be a string, got "
+                f"{type(text_policy_raw).__name__}"
+            )
+        else:
+            text_policy = text_policy_raw.strip().lower()
+
+        if text_policy in {"negative_prompt"}:
+            text_dict = getattr(batch, "unconditional_dict", None)
+            if text_dict is None:
+                raise RuntimeError(
+                    "Missing unconditional_dict; ensure_negative_conditioning() may have failed"
+                )
+            return text_dict
+        if text_policy == "keep":
+            if batch.conditional_dict is None:
+                raise RuntimeError("Missing conditional_dict in TrainingBatch")
+            return batch.conditional_dict
+        if text_policy == "zero":
+            if batch.conditional_dict is None:
+                raise RuntimeError("Missing conditional_dict in TrainingBatch")
+            cond = batch.conditional_dict
+            enc = cond["encoder_hidden_states"]
+            mask = cond["encoder_attention_mask"]
+            if not torch.is_tensor(enc) or not torch.is_tensor(mask):
+                raise TypeError("conditional_dict must contain tensor text inputs")
+            return {
+                "encoder_hidden_states": torch.zeros_like(enc),
+                "encoder_attention_mask": torch.zeros_like(mask),
+            }
+        if text_policy == "drop":
+            raise ValueError(
+                "cfg_uncond.text=drop is not supported for Wan. "
+                "Use {negative_prompt, keep, zero}."
+            )
+        raise ValueError(
+            "cfg_uncond.text must be one of {negative_prompt, keep, zero, drop}, got "
+            f"{text_policy_raw!r}"
+        )
+
     def predict_x0(
         self,
         handle: RoleHandle,
@@ -430,13 +524,17 @@ class WanAdapter(DistillAdapter):
         batch: TrainingBatch,
         *,
         conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
         device_type = self.device.type
         dtype = noisy_latents.dtype
-        text_dict = batch.conditional_dict if conditional else getattr(batch, "unconditional_dict", None)
-        if text_dict is None:
-            raise RuntimeError("Missing unconditional_dict; ensure_negative_conditioning() may have failed")
+        if conditional:
+            text_dict = batch.conditional_dict
+            if text_dict is None:
+                raise RuntimeError("Missing conditional_dict in TrainingBatch")
+        else:
+            text_dict = self._get_uncond_text_dict(batch, cfg_uncond=cfg_uncond)
 
         if attn_kind == "dense":
             attn_metadata = batch.attn_metadata
@@ -468,13 +566,17 @@ class WanAdapter(DistillAdapter):
         batch: TrainingBatch,
         *,
         conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
         device_type = self.device.type
         dtype = noisy_latents.dtype
-        text_dict = batch.conditional_dict if conditional else getattr(batch, "unconditional_dict", None)
-        if text_dict is None:
-            raise RuntimeError("Missing unconditional_dict; ensure_negative_conditioning() may have failed")
+        if conditional:
+            text_dict = batch.conditional_dict
+            if text_dict is None:
+                raise RuntimeError("Missing conditional_dict in TrainingBatch")
+        else:
+            text_dict = self._get_uncond_text_dict(batch, cfg_uncond=cfg_uncond)
 
         if attn_kind == "dense":
             attn_metadata = batch.attn_metadata

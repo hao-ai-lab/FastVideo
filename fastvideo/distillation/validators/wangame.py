@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset.validation_dataset import ValidationDataset
 from fastvideo.distributed import get_sp_group, get_world_group
+from fastvideo.fastvideo_args import ExecutionMode
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.distillation.validators.base import ValidationRequest
@@ -268,9 +269,11 @@ class WanGameValidator:
 
         old_inference_mode = training_args.inference_mode
         old_dit_cpu_offload = training_args.dit_cpu_offload
+        old_mode = training_args.mode
         try:
             training_args.inference_mode = True
             training_args.dit_cpu_offload = True
+            training_args.mode = ExecutionMode.INFERENCE
             transformer.eval()
 
             num_sp_groups = self.world_group.world_size // self.sp_group.world_size
@@ -322,6 +325,6 @@ class WanGameValidator:
         finally:
             training_args.inference_mode = old_inference_mode
             training_args.dit_cpu_offload = old_dit_cpu_offload
+            training_args.mode = old_mode
             if was_training:
                 transformer.train()
-
