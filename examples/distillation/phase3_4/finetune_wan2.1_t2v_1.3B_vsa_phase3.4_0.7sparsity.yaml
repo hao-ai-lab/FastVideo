@@ -68,7 +68,7 @@ training:
 
 pipeline_config:
   # Match legacy Wan VSA finetune scripts.
-  flow_shift: 1
+  flow_shift: 3
   sampler_kind: ode
 
 method_config:
