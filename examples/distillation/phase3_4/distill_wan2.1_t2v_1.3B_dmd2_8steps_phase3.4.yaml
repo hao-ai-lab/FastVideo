@@ -65,7 +65,7 @@ training:
 
   # Tracking / validation
   tracker_project_name: distillation_phase3
-  wandb_run_name: phase3.4_wan_dmd2_8steps_simulate
+  wandb_run_name: phase3.4_wan_dmd2_8steps_simulate_aftermergewangame
   log_validation: true
   validation_dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
   validation_steps: 50
