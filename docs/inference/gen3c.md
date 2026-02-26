@@ -14,6 +14,21 @@
 - Official raw checkpoint (not Diffusers): `nvidia/GEN3C-Cosmos-7B`
 - Diffusers-format checkpoint: `vbharath/GEN3C-Cosmos-7B-Diffusers`
 
+## Prerequisites
+
+- Install MoGe:
+
+```bash
+pip install git+https://github.com/microsoft/MoGe.git
+```
+
+- If you hit `ImportError: libGL.so.1` (common on Ubuntu/headless nodes), you can try installing OpenCV runtime libs:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender1
+```
+
 ## Quick Start
 
 ### Option A: Use Diffusers-format weights directly

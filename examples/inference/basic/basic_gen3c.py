@@ -6,7 +6,10 @@ The pipeline uses MoGe depth estimation, 3D point cloud forward warping,
 and the GEN3C diffusion model.
 
 Requirements:
-  1. Install MoGe: pip install moge-pytorch
+  1. Install MoGe:
+     pip install git+https://github.com/microsoft/MoGe.git
+     If you hit `ImportError: libGL.so.1`, install:
+     sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender1
   2. Download and convert weights:
      huggingface-cli download nvidia/GEN3C-Cosmos-7B --local-dir official_weights/GEN3C-Cosmos-7B
      python scripts/checkpoint_conversion/convert_gen3c_to_fastvideo.py \
