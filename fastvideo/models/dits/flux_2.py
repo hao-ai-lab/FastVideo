@@ -28,7 +28,7 @@ from fastvideo.layers.rotary_embedding import (
     get_1d_rotary_pos_embed,
     apply_rotary_emb,
 )
-from fastvideo.models.dits.base import CachableDiT
+from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 from fastvideo.logger import init_logger
 
@@ -736,7 +736,7 @@ class Flux2PosEmbed(nn.Module):
         return self.forward_uncached(pos=pos)
 
 
-class Flux2Transformer2DModel(CachableDiT):
+class Flux2Transformer2DModel(BaseDiT):
     """
     The Transformer model introduced in Flux 2.
 
@@ -745,6 +745,8 @@ class Flux2Transformer2DModel(CachableDiT):
     """
 
     param_names_mapping = Flux2Config().param_names_mapping
+    _fsdp_shard_conditions = Flux2Config()._fsdp_shard_conditions
+    _compile_conditions = Flux2Config()._compile_conditions
 
     def __init__(self, config: Flux2Config, hf_config: dict[str, Any]):
         super().__init__(config=config, hf_config=hf_config)
