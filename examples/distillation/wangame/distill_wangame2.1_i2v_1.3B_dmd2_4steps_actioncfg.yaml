@@ -10,17 +10,16 @@ recipe:
 roles:
   student:
     family: wangame
-    path: weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers
+    path: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
     trainable: true
   teacher:
     family: wangame
-    # TODO: replace with your teacher model path (wangame architecture).
-    path: YOUR_TEACHER_MODEL_PATH
+    path: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
     trainable: false
     disable_custom_init_weights: true
   critic:
     family: wangame
-    path: weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers
+    path: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
     trainable: true
     disable_custom_init_weights: true
 
@@ -35,7 +34,7 @@ training:
   # Data (parquet dataset folder).
   # Supports comma-separated `path` or `path:N` (repeat count) entries.
   data_path: >-
-    /mnt/weka/home/hao.zhang/kaiqin/FastVideo/fastvideo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed
+    /mnt/weka/home/hao.zhang/kaiqin/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed
   dataloader_num_workers: 4
 
   # Batch / shape
@@ -98,7 +97,7 @@ method_config:
   # Few-step schedule (single source of truth for the method).
   # These are "step indices" and will be warped by the (shifted) scheduler.
   warp_denoising_step: true
-  dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
+  dmd_denoising_steps: [1000,750,500,250]
 
   # Define CFG "uncond" semantics (operation-centric).
   #

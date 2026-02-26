@@ -63,52 +63,98 @@ class WanGameValidator:
     def set_tracker(self, tracker: Any) -> None:
         self.tracker = tracker
 
+    def _post_process_validation_frames(
+        self,
+        frames: list[np.ndarray],
+        batch: ForwardBatch,
+    ) -> list[np.ndarray]:
+        """Optionally overlay action indicators on validation frames.
+
+        Mirrors legacy `WanGameTrainingPipeline._post_process_validation_frames()`.
+        """
+
+        keyboard_cond = getattr(batch, "keyboard_cond", None)
+        mouse_cond = getattr(batch, "mouse_cond", None)
+        if keyboard_cond is None and mouse_cond is None:
+            return frames
+
+        try:
+            from fastvideo.models.dits.matrixgame.utils import (
+                draw_keys_on_frame,
+                draw_mouse_on_frame,
+            )
+        except Exception as e:
+            logger.warning("WanGame action overlay is unavailable: %s", e)
+            return frames
+
+        if keyboard_cond is not None and torch.is_tensor(keyboard_cond):
+            keyboard_np = keyboard_cond.squeeze(0).detach().cpu().float().numpy()
+        else:
+            keyboard_np = None
+
+        if mouse_cond is not None and torch.is_tensor(mouse_cond):
+            mouse_np = mouse_cond.squeeze(0).detach().cpu().float().numpy()
+        else:
+            mouse_np = None
+
+        # MatrixGame convention: keyboard [W, S, A, D, left, right],
+        # mouse [Pitch, Yaw].
+        key_names = ["W", "S", "A", "D", "left", "right"]
+
+        processed_frames: list[np.ndarray] = []
+        for frame_idx, frame in enumerate(frames):
+            frame = np.ascontiguousarray(frame.copy())
+
+            if keyboard_np is not None and frame_idx < len(keyboard_np):
+                keys = {
+                    key_names[i]: bool(keyboard_np[frame_idx, i])
+                    for i in range(min(len(key_names), int(keyboard_np.shape[1])))
+                }
+                draw_keys_on_frame(frame, keys, mode="universal")
+
+            if mouse_np is not None and frame_idx < len(mouse_np):
+                pitch = float(mouse_np[frame_idx, 0])
+                yaw = float(mouse_np[frame_idx, 1])
+                draw_mouse_on_frame(frame, pitch, yaw)
+
+            processed_frames.append(frame)
+
+        return processed_frames
+
     def _get_sampling_param(self) -> SamplingParam:
         if self._sampling_param is None:
             self._sampling_param = SamplingParam.from_pretrained(self.training_args.model_path)
         return self._sampling_param
 
     def _get_pipeline(self, *, transformer: torch.nn.Module, sampler_kind: str) -> Any:
-        key = (id(transformer), str(sampler_kind))
+        sampler_kind = str(sampler_kind).lower()
+        key = (id(transformer), sampler_kind)
         if self._pipeline is not None and self._pipeline_key == key:
             return self._pipeline
 
+        if sampler_kind not in {"ode", "sde"}:
+            raise ValueError(
+                f"Unknown sampler_kind for WanGame validation: {sampler_kind!r}"
+            )
+
         flow_shift = getattr(self.training_args.pipeline_config, "flow_shift", None)
 
-        if str(sampler_kind).lower() in {"ode"}:
-            from fastvideo.pipelines.basic.wan.wangame_i2v_pipeline import (
-                WanGameActionImageToVideoPipeline,
-            )
+        from fastvideo.pipelines.basic.wan.wangame_i2v_pipeline import (
+            WanGameActionImageToVideoPipeline,
+        )
 
-            self._pipeline = WanGameActionImageToVideoPipeline.from_pretrained(
-                self.training_args.model_path,
-                inference_mode=True,
-                flow_shift=float(flow_shift) if flow_shift is not None else None,
-                loaded_modules={"transformer": transformer},
-                tp_size=self.training_args.tp_size,
-                sp_size=self.training_args.sp_size,
-                num_gpus=self.training_args.num_gpus,
-                pin_cpu_memory=self.training_args.pin_cpu_memory,
-                dit_cpu_offload=True,
-            )
-        elif str(sampler_kind).lower() in {"sde"}:
-            from fastvideo.pipelines.basic.wan.wangame_causal_dmd_pipeline import (
-                WanGameCausalDMDPipeline,
-            )
-
-            self._pipeline = WanGameCausalDMDPipeline.from_pretrained(
-                self.training_args.model_path,
-                inference_mode=True,
-                flow_shift=float(flow_shift) if flow_shift is not None else None,
-                loaded_modules={"transformer": transformer},
-                tp_size=self.training_args.tp_size,
-                sp_size=self.training_args.sp_size,
-                num_gpus=self.training_args.num_gpus,
-                pin_cpu_memory=self.training_args.pin_cpu_memory,
-                dit_cpu_offload=True,
-            )
-        else:
-            raise ValueError(f"Unknown sampler_kind for WanGame validation: {sampler_kind!r}")
+        self._pipeline = WanGameActionImageToVideoPipeline.from_pretrained(
+            self.training_args.model_path,
+            inference_mode=True,
+            flow_shift=float(flow_shift) if flow_shift is not None else None,
+            sampler_kind=sampler_kind,
+            loaded_modules={"transformer": transformer},
+            tp_size=self.training_args.tp_size,
+            sp_size=self.training_args.sp_size,
+            num_gpus=self.training_args.num_gpus,
+            pin_cpu_memory=self.training_args.pin_cpu_memory,
+            dit_cpu_offload=True,
+        )
 
         self._pipeline_key = key
         return self._pipeline
@@ -231,6 +277,7 @@ class WanGameValidator:
                 x = torchvision.utils.make_grid(x, nrow=6)
                 x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                 frames.append((x * 255).numpy().astype(np.uint8))
+            frames = self._post_process_validation_frames(frames, batch)
             videos.append(frames)
 
         return _ValidationStepResult(videos=videos, captions=captions)
