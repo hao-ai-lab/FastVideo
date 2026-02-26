@@ -40,7 +40,7 @@ image = (
     })
 )
 
-SSIM_NUM_GPUS = 8
+SSIM_NUM_GPUS = 4
 SSIM_TERMINATE_TIMEOUT_S = 30
 SSIM_COMMON_KWARGS = dict(
     image=image,
