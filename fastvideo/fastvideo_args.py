@@ -931,6 +931,7 @@ class TrainingArgs(FastVideoArgs):
     fake_score_betas: str = "0.9,0.999"  # betas for fake score optimizer, format: "beta1,beta2"
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
+    best_checkpoint_start_step: int = 0  # save best checkpoint (by mf_angle_err_mean) after this step; 0 = disabled
     log_visualization: bool = False
     visualization_steps: int = 0
     # simulate generator forward to match inference
@@ -1134,6 +1135,11 @@ class TrainingArgs(FastVideoArgs):
             "--weight-only-checkpointing-steps",
             type=int,
             help="Steps between weight-only checkpoints (for inference)")
+        parser.add_argument(
+            "--best-checkpoint-start-step",
+            type=int,
+            help="Save best checkpoint (by mf_angle_err_mean) after this "
+            "step; 0 = disabled")
         parser.add_argument("--resume-from-checkpoint",
                             type=str,
                             help="Path to checkpoint to resume from")
