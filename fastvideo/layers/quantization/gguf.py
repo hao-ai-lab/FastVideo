@@ -11,8 +11,6 @@ from gguf import GGMLQuantizationType as WeightType
 from torch.library import Library, infer_schema
 from torch.nn.parameter import Parameter, UninitializedParameter
 
-from vllm import _custom_ops as ops
-
 from fastvideo.layers.linear import (
     LinearBase,
     LinearMethodBase,
@@ -31,6 +29,40 @@ from fastvideo.models.utils import set_weight_attrs
 from fastvideo.platforms import current_platform
 
 logger = init_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Lazy import for vLLM GGML CUDA kernels.
+# The ops are only needed at inference time, not at module import / config
+# registration time.  This allows the quantization method to be registered
+# even when vLLM is not compiled / installed.
+# ---------------------------------------------------------------------------
+
+_ops = None
+
+
+def _get_ops():
+    global _ops
+    if _ops is None:
+        try:
+            import sys
+            import importlib
+
+            vllm_root = str(
+                __import__("pathlib").Path(__file__).resolve().parents[3]
+                / "vllm"
+            )
+            if vllm_root not in sys.path:
+                sys.path.insert(0, vllm_root)
+            _ops = importlib.import_module("vllm._custom_ops")
+        except Exception as e:
+            raise RuntimeError(
+                "GGUF quantization requires vLLM's GGML CUDA kernels. "
+                "Please install or build vLLM so that "
+                "'from vllm import _custom_ops' works. "
+                f"Original error: {e}"
+            ) from e
+    return _ops
+
 
 # ---------------------------------------------------------------------------
 # Torch custom op registration utilities
@@ -209,6 +241,7 @@ def _fused_mul_mat_gguf(
     if qweight_type in UNQUANTIZED_TYPES:
         return x @ qweight.T
 
+    ops = _get_ops()
     if x.shape[0] <= mmvq_safe and qweight_type in MMVQ_QUANT_TYPES:
         y = ops.ggml_mul_mat_vec_a8(qweight, x, qweight_type, qweight.shape[0])
     elif qweight_type in MMQ_QUANT_TYPES:
@@ -259,6 +292,7 @@ def _apply_gguf_embedding(
     if qweight_type in UNQUANTIZED_TYPES:
         return torch.embedding(qweight, x)
     elif qweight_type in DEQUANT_TYPES:
+        ops = _get_ops()
         block_size, type_size = gguf.GGML_QUANT_SIZES[qweight_type]
         x_flat = x.flatten()
         assert hidden_size == qweight.shape[1] // type_size * block_size
