@@ -582,9 +582,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                0,
+                torch.tensor([0], dtype=torch.long, device=device),
                 "local_end_index":
-                0
+                torch.tensor([0], dtype=torch.long, device=device)
             })
 
         # Initialize cross-attention cache
@@ -616,8 +616,14 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         """Reset KV cache and cross-attention cache to clean state."""
         if kv_cache is not None:
             for cache_dict in kv_cache:
-                cache_dict["global_end_index"] = 0
-                cache_dict["local_end_index"] = 0
+                if isinstance(cache_dict["global_end_index"], torch.Tensor):
+                    cache_dict["global_end_index"].fill_(0)
+                else:
+                    cache_dict["global_end_index"] = 0
+                if isinstance(cache_dict["local_end_index"], torch.Tensor):
+                    cache_dict["local_end_index"].fill_(0)
+                else:
+                    cache_dict["local_end_index"] = 0
                 cache_dict["k"].zero_()
                 cache_dict["v"].zero_()
 

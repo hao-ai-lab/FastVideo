@@ -280,17 +280,25 @@ class CausalMatrixGameSelfAttention(nn.Module):
 
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
+            global_end_index = (
+                int(kv_cache["global_end_index"].item())
+                if isinstance(kv_cache["global_end_index"], torch.Tensor)
+                else int(kv_cache["global_end_index"])
+            )
+            local_end_index_prev = (
+                int(kv_cache["local_end_index"].item())
+                if isinstance(kv_cache["local_end_index"], torch.Tensor)
+                else int(kv_cache["local_end_index"])
+            )
 
-            if (current_end > kv_cache["global_end_index"]) and (
-                num_new_tokens + kv_cache["local_end_index"] > kv_cache_size
+            if (current_end > global_end_index) and (
+                num_new_tokens + local_end_index_prev > kv_cache_size
             ):
                 num_evicted_tokens = (
-                    num_new_tokens + kv_cache["local_end_index"] - kv_cache_size
+                    num_new_tokens + local_end_index_prev - kv_cache_size
                 )
                 num_rolled_tokens = (
-                    kv_cache["local_end_index"]
-                    - num_evicted_tokens
-                    - sink_tokens
+                    local_end_index_prev - num_evicted_tokens - sink_tokens
                 )
                 kv_cache["k"][
                     :, sink_tokens : sink_tokens + num_rolled_tokens
@@ -309,22 +317,17 @@ class CausalMatrixGameSelfAttention(nn.Module):
                     + num_rolled_tokens,
                 ].clone()
                 local_end_index = (
-                    kv_cache["local_end_index"]
-                    + current_end
-                    - kv_cache["global_end_index"]
-                    - num_evicted_tokens
+                    local_end_index_prev
+                    + current_end - global_end_index - num_evicted_tokens
                 )
                 local_start_index = local_end_index - num_new_tokens
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             else:
                 local_end_index = (
-                    kv_cache["local_end_index"]
-                    + current_end
-                    - kv_cache["global_end_index"]
+                    local_end_index_prev + current_end - global_end_index
                 )
                 local_start_index = local_end_index - num_new_tokens
-
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
 
@@ -338,8 +341,14 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 v_for_attn.transpose(1, 2),
             ).transpose(1, 2)
 
-            kv_cache["global_end_index"] = current_end
-            kv_cache["local_end_index"] = local_end_index
+            if isinstance(kv_cache["global_end_index"], torch.Tensor):
+                kv_cache["global_end_index"].fill_(current_end)
+            else:
+                kv_cache["global_end_index"] = current_end
+            if isinstance(kv_cache["local_end_index"], torch.Tensor):
+                kv_cache["local_end_index"].fill_(local_end_index)
+            else:
+                kv_cache["local_end_index"] = local_end_index
 
         return x
 
