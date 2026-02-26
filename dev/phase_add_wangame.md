@@ -170,6 +170,14 @@ method_config:
   attn_kind: dense
 ```
 
+### 4.1 roles 的“自由扩展字段”策略（保留核心字段强校验）
+
+建议 roles 仍强制解析这三个核心字段（保证错误信息清晰）：
+- `family / path / trainable`
+
+但允许 roles 下出现其它任意 key，并把它们原样保留（例如 `RoleSpec.extra`），
+由 `models/wangame.py` 自行解释（例如 action-only train patterns / cls_name / init 行为）。
+
 如果要支持 DMD2（第二档），需要：
 - roles 增加 teacher/critic（如果暂时没有更大 teacher，可先 teacher==student 跑通 e2e）
 - `pipeline_config.sampler_kind: sde`（validation 走 `WanGameCausalDMDPipeline`）
@@ -195,22 +203,91 @@ method_config:
 ## 6) 风险点 / 决策点（需要提前讲清楚）
 
 1) **DMD2 的 CFG（cond/uncond）语义在 wangame 上可能不存在**
-   - wangame training pipeline 里 `encoder_hidden_states=None`，主要 conditioning 是 image+action。
-   - 我们可以先让 `conditional` flag 在 adapter 里等价处理：
-     - `conditional=True/False` 都走同一条分支
-     - DMD2 的 `real_cond_x0 - real_uncond_x0` 近似为 0，guidance scale 失效但训练可跑通
-   - 若未来确实需要“uncond”，需要定义：
-     - uncond 是否代表“去掉 action”？“去掉 image cond”？还是别的？
+   先说明：在我们新框架里，`DMD2Method` 的 teacher CFG 语义来自 “文本 CFG”：
+   - `conditional=True`：用 prompt（正向）作为 conditioning；
+   - `conditional=False`：用 negative / uncond prompt 作为 conditioning；
+   - 最终 teacher 的 “real score” 用类似：
+     `real = uncond + guidance_scale * (cond - uncond)`。
+
+   这在 Wan(T2V) 上成立，因为：
+   - legacy / 我们的 `WanAdapter` 都显式构造了 negative prompt embeds（`ensure_negative_conditioning()`），
+     并把它塞进 `training_batch.unconditional_dict`，从而 `conditional` flag 有真实语义差异。
+
+   但在 **WanGame** 上，legacy 训练/推理几乎完全不依赖 text：
+   - legacy train：`fastvideo/training/wangame_training_pipeline.py:_build_input_kwargs()`
+     明确设置：
+     - `"encoder_hidden_states": training_batch.encoder_hidden_states  # None (no text conditioning)`
+     - `"encoder_hidden_states_image": image_embeds`（I2V conditioning）
+     - `"viewmats" / "Ks" / "action"`（action conditioning）
+   - legacy inference pipeline：`fastvideo/pipelines/basic/wan/wangame_i2v_pipeline.py`
+     没有 `TextEncodingStage`；因此 `ForwardBatch.prompt_embeds` 为空。
+     `LatentPreparationStage` 会把空 prompt embeds 变成一个 dummy（形状 `[B, 0, hidden_size]`），并且：
+     - `batch.do_classifier_free_guidance = False`
+     （见 `fastvideo/pipelines/stages/latent_preparation.py`）
+   - legacy scripts/示例也在暗示“没 CFG”：
+     - `examples/inference/basic/basic_wangame.py` 里 `guidance_scale=1.0`
+     - `examples/training/finetune/WanGame2.1_1.3b_i2v/finetune_wangame.slurm`
+       里 `validation_guidance_scale "1.0"`
+
+   因此：如果我们直接把 DMD2 的 `conditional/unconditional` 套到 wangame 上，
+   在 **不重新定义 uncond 的前提下**，它们很可能等价（cond == uncond），导致：
+   - `real_cond_x0 - real_uncond_x0 ≈ 0`
+   - guidance_scale 形式上存在，但语义上失效
+   - 训练可能仍能跑通，但已经不是“文本 CFG 意义下的 DMD2”
+
+   **建议的落地策略（按风险从低到高）：**
+   - A（最小可用，推荐先做）：在 `wangame` 的 adapter 里把 `conditional` 当作 no-op
+     （cond/uncond 同路），并在文档里明确 “wangame 暂不支持文本 CFG”。
+   - B（定义 wangame 的 uncond 语义）：由 `method_config` 显式声明 uncond 的定义，例如：
+     - `uncond_mode: none|zero_action|zero_image|zero_both`
+     - `zero_action`：把 action/viewmats/Ks 置零或置 None（需要确认 transformer 对 None 的容忍度）
+     - `zero_image`：把 `encoder_hidden_states_image` 置零（保持 shape）
+     这样 `conditional` 才有可解释的差异。
+   归属建议：
+   - 放在 `method_config`：因为它只在 “需要 CFG 的算法” 中有意义；finetune 等方法不应被迫理解 uncond 语义。
+   - 但执行必然落在 adapter（如何 zero_action/zero_image 是模型相关的），因此 adapter 需要提供一个 operation
+     来承接该语义（例如“构造 uncond conditioning variant”）。
 
 2) **train_action_only / action_warmup_steps（细粒度 trainable）**
-   - legacy `wangame_training_pipeline.py` 支持只训练 action 路径参数（pattern-based）
-   - 目前新框架 roles 只有 `trainable: bool`（整模块开关），不足以表达这一点
-   - 建议先把这一点作为可选增强：
-     - 最小实现：先不做（或要求用户在 wangame 上 train 全模型）
-     - 完整实现：在 `models/wangame.py` 内做参数 pattern 的 requires_grad 筛选
+   legacy `wangame_training_pipeline.py` 支持更细粒度的训练策略：
+   - `train_action_only`：冻结 base DiT，只训练 action 相关参数（pattern-based）
+   - `action_warmup_steps`：前 N 步把 action 参数 `requires_grad=False`，之后再打开
+
+   重要补充：这两个 knob 在 FastVideo 的 `TrainingArgs` 里已经存在（`fastvideo/fastvideo_args.py`），
+   也就是说 **YAML 的 `training:` 段本身就能表达**：
+   - `training.train_action_only: true`
+   - `training.action_train_target: both|action_mlp|prope`
+   - `training.action_warmup_steps: 1000`
+
+   我们新框架目前的问题不是 “config 表达不了”，而是：
+   - roles 只有 `trainable: bool`（整模块开关），无法表达“同一个 transformer 内只训练某些 param”
+   - warmup 属于 step-time policy，应该由 method（或 method_config）驱动，而不是 loader 一次性决定
+
+   **关于你提的方案：roles 允许自由 dict（而非完全结构化）**
+   - 优点：wangame 这类 family 很容易出现 role-specific knobs（比如 per-role train patterns / cls_name / init 行为），
+     不需要每加一个字段就改全局 schema。
+   - 缺点：弱化静态校验，typo 会变成 runtime 才爆；文档/IDE 提示也会更差。
+
+   **折中建议（更可控）：**
+   - roles 仍解析核心字段（`family/path/trainable`），但把未知字段原样保留到 `RoleSpec.extra`（或 `role_cfg_raw`），
+     由 `models/wangame.py` 自己读取解释。
+   - 这样既能满足“roles 自由 dict 扩展”，也不牺牲核心字段的错误提示质量。
 
 3) **validation pipeline 的 ODE/SDE 差异**
-   - 需要 validator 根据 `sampler_kind` 切 pipeline，避免出现“看起来像 ODE”但期望 SDE 的错觉。
+   现状：FastVideo 已经把 wangame 分成了两个 inference pipeline：
+   - ODE：`WanGameActionImageToVideoPipeline`（`fastvideo/pipelines/basic/wan/wangame_i2v_pipeline.py`）
+   - SDE/DMD：`WanGameCausalDMDPipeline`（`fastvideo/pipelines/basic/wan/wangame_causal_dmd_pipeline.py`）
+
+   对新框架而言，最小可用的做法是：
+   - `validators/wangame.py` 根据 `ValidationRequest.sampler_kind` 选择 pipeline class
+
+   你提的“一个 pipeline 支持多 sampler（ode/sde）”是好方向（我们对 Wan 已经这么做过）：
+   - 优点：减少 pipeline 分叉/重复逻辑，validation 不容易“走错范式”
+   - 代价：需要对 wangame pipeline 做更侵入式的重构（引入 `pipelines/samplers/`，并把 denoising loop 抽出来）
+
+   **建议顺序：**
+   - 接入阶段先做 validator 选 pipeline（改动小、风险低）
+   - 稳定后再把 wangame pipeline 也升级为 `sampler_kind` 可切换（更优雅，但属于额外工程）
 
 ---
 
@@ -222,4 +299,3 @@ method_config:
 - distill（若做第二档）：
   - e2e 跑通（few-step）
   - validation 选择 `sde` 时，视觉应接近 legacy DMD pipeline 的 sampling 形态
-
