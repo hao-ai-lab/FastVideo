@@ -3,6 +3,8 @@
 Implements GEN3C video diffusion pipeline with 3D cache support for camera-controlled video generation.
 """
 
+from typing import Any
+
 import torch
 from diffusers import EDMEulerScheduler
 from diffusers.utils.torch_utils import randn_tensor
@@ -47,18 +49,13 @@ class Gen3CCFGPolicyStage(PipelineStage):
 
         if policy == "official_uncond_at_unity":
             batch.do_classifier_free_guidance = batch.guidance_scale >= 1.0
-            has_negative_embeds = (
-                batch.negative_prompt_embeds is not None
-                and len(batch.negative_prompt_embeds) > 0
-            )
-            if (
-                batch.do_classifier_free_guidance
-                and batch.negative_prompt is None
-                and not has_negative_embeds
-            ):
-                batch.negative_prompt = getattr(
-                    pipeline_config, "default_negative_prompt", ""
-                )
+            has_negative_embeds = (batch.negative_prompt_embeds is not None
+                                   and len(batch.negative_prompt_embeds) > 0)
+            if (batch.do_classifier_free_guidance
+                    and batch.negative_prompt is None
+                    and not has_negative_embeds):
+                batch.negative_prompt = getattr(pipeline_config,
+                                                "default_negative_prompt", "")
             return batch
 
         raise ValueError(f"Unsupported GEN3C cfg_behavior: {policy}")
@@ -79,10 +76,10 @@ class Gen3CConditioningStage(PipelineStage):
 
     def __init__(self, vae=None) -> None:
         super().__init__()
-        self._moge_model = None
+        self._moge_model: Any | None = None
         self._vae = vae
 
-    def _get_moge_model(self, device: torch.device, model_name: str):
+    def _get_moge_model(self, device: torch.device, model_name: str) -> Any:
         """Lazy-load MoGe model on first use and ensure it is on target device."""
         if self._moge_model is None:
             from fastvideo.pipelines.basic.gen3c.depth_estimation import (
@@ -94,7 +91,7 @@ class Gen3CConditioningStage(PipelineStage):
                 self._moge_model = self._moge_model.to(device)
         return self._moge_model
 
-    def _offload_moge(self):
+    def _offload_moge(self) -> None:
         """Move MoGe to CPU to free GPU memory before denoising."""
         if self._moge_model is not None and torch.cuda.is_available():
             self._moge_model = self._moge_model.cpu()
@@ -112,8 +109,8 @@ class Gen3CConditioningStage(PipelineStage):
         batch_extra = getattr(batch, "extra", {}) or {}
 
         # Check if an input image was provided
-        image_path = getattr(batch, 'image_path', None) or batch_extra.get(
-            "image_path")
+        image_path = getattr(batch, 'image_path',
+                             None) or batch_extra.get("image_path")
         if image_path is None:
             logger.info(
                 "No image_path provided — skipping 3D cache conditioning "
@@ -130,23 +127,21 @@ class Gen3CConditioningStage(PipelineStage):
         num_frames = getattr(batch, 'num_frames', None) or getattr(
             pipeline_config, 'num_frames', 121)
 
-        trajectory_type = (
-            getattr(batch, 'trajectory_type', None)
-            or batch_extra.get("trajectory_type")
-            or getattr(pipeline_config, 'default_trajectory_type', 'left'))
-        movement_distance = (
-            getattr(batch, 'movement_distance', None)
-            or batch_extra.get("movement_distance")
-            or getattr(pipeline_config, 'default_movement_distance', 0.3))
-        camera_rotation = (
-            getattr(batch, 'camera_rotation', None)
-            or batch_extra.get("camera_rotation")
-            or getattr(pipeline_config, 'default_camera_rotation',
-                       'center_facing'))
+        trajectory_type = (getattr(batch, 'trajectory_type', None)
+                           or batch_extra.get("trajectory_type")
+                           or getattr(pipeline_config,
+                                      'default_trajectory_type', 'left'))
+        movement_distance = (getattr(batch, 'movement_distance', None)
+                             or batch_extra.get("movement_distance")
+                             or getattr(pipeline_config,
+                                        'default_movement_distance', 0.3))
+        camera_rotation = (getattr(batch, 'camera_rotation', None)
+                           or batch_extra.get("camera_rotation") or getattr(
+                               pipeline_config, 'default_camera_rotation',
+                               'center_facing'))
 
         frame_buffer_max = getattr(pipeline_config, 'frame_buffer_max', 2)
-        noise_aug_strength = getattr(pipeline_config, 'noise_aug_strength',
-                                     0.0)
+        noise_aug_strength = getattr(pipeline_config, 'noise_aug_strength', 0.0)
         filter_points_threshold = getattr(pipeline_config,
                                           'filter_points_threshold', 0.05)
 
@@ -194,7 +189,7 @@ class Gen3CConditioningStage(PipelineStage):
         )
 
         logger.info("3D cache initialized with %d frame buffer(s)",
-                     frame_buffer_max)
+                    frame_buffer_max)
 
         # Step 3: Generate camera trajectory
         from fastvideo.pipelines.basic.gen3c.camera_utils import (
@@ -238,7 +233,8 @@ class Gen3CConditioningStage(PipelineStage):
         batch.rendered_warp_masks = rendered_warp_masks.to(device)
         # Keep the original resized input image as the first-frame latent anchor.
         # Official GEN3C conditions on tokenizer latents from the source image.
-        batch.input_image_conditioning = image_b1chw[:, 0].unsqueeze(2).contiguous().to(device)
+        batch.input_image_conditioning = image_b1chw[:, 0].unsqueeze(
+            2).contiguous().to(device)
         batch.cache_3d = cache
 
         # Offload MoGe to free GPU memory before heavy stages.
@@ -279,11 +275,23 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
             batch_size = batch.prompt_embeds[0].shape[0]
         batch_size *= batch.num_videos_per_prompt
 
-        num_channels_latents = getattr(self.transformer,
-                                       'num_channels_latents', 16)
+        num_channels_latents = getattr(self.transformer, 'num_channels_latents',
+                                       16)
 
-        num_frames = getattr(batch, 'num_frames', None) or getattr(
-            pipeline_config, 'num_frames', 121)
+        fallback_num_frames = getattr(pipeline_config, 'num_frames', 121)
+        if not isinstance(fallback_num_frames, int):
+            fallback_num_frames = 121
+
+        num_frames_raw = getattr(batch, 'num_frames', None)
+        if num_frames_raw is None:
+            num_frames_raw = fallback_num_frames
+        if isinstance(num_frames_raw, list):
+            num_frames = int(num_frames_raw[0]) if len(
+                num_frames_raw) > 0 else fallback_num_frames
+        elif isinstance(num_frames_raw, int):
+            num_frames = num_frames_raw
+        else:
+            num_frames = fallback_num_frames
         if hasattr(self.vae, "get_latent_num_frames"):
             latent_frames = int(self.vae.get_latent_num_frames(num_frames))
         else:
@@ -307,8 +315,7 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
         generator = getattr(batch, "generator", None)
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
-                f"Expected {batch_size} generators, got {len(generator)}."
-            )
+                f"Expected {batch_size} generators, got {len(generator)}.")
 
         # Generate seeded initial noise latents for deterministic SSIM runs.
         latents = randn_tensor(
@@ -391,7 +398,8 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
                 device=device,
                 dtype=first_latent.dtype,
             )
-            conditioning_latents[:, :, :first_latent.shape[2], :, :] = first_latent
+            conditioning_latents[:, :, :first_latent.
+                                 shape[2], :, :] = first_latent
             batch.conditioning_latents = conditioning_latents
 
             if fastvideo_args.vae_cpu_offload:
@@ -410,8 +418,7 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
             # First latent frame = conditioned (reference image)
             batch.condition_video_input_mask[:, :, 0, :, :] = 1.0
         else:
-            logger.info(
-                "No rendered warps available — using zero conditioning")
+            logger.info("No rendered warps available — using zero conditioning")
             batch.condition_video_pose = torch.zeros(
                 batch_size,
                 buffer_channels,
@@ -461,7 +468,7 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
         return batch
 
     @staticmethod
-    def _retrieve_latents(encoder_output):
+    def _retrieve_latents(encoder_output: Any) -> torch.Tensor:
         if hasattr(encoder_output, "latent_dist"):
             latent_dist = encoder_output.latent_dist
             if hasattr(latent_dist, "mode"):
@@ -484,7 +491,7 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
         self,
         condition_state: torch.Tensor,
         condition_state_mask: torch.Tensor,
-        vae,
+        vae: Any,
         frame_buffer_max: int,
         dtype: torch.dtype,
     ) -> torch.Tensor:
@@ -515,8 +522,8 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
             mask_input = condition_state_mask[:, :, i].permute(0, 2, 1, 3,
                                                                4).to(dtype)
             batched_input = torch.cat([img_input, mask_input], dim=0)
-            batched_latent = self._retrieve_latents(vae.encode(
-                batched_input)).contiguous()
+            batched_latent = self._retrieve_latents(
+                vae.encode(batched_input)).contiguous()
             current_video_latent, current_mask_latent = batched_latent.chunk(
                 2, dim=0)
 
@@ -597,11 +604,12 @@ class Gen3CDenoisingStage(DenoisingStage):
         except TypeError:
             noise = torch.randn_like(latent)
 
-        augment_sigma = torch.tensor(
-            [condition_augment_sigma], device=latent.device, dtype=latent.dtype)
+        augment_sigma = torch.tensor([condition_augment_sigma],
+                                     device=latent.device,
+                                     dtype=latent.dtype)
         augment_latent = latent + noise * augment_sigma
-        augment_latent = self._precondition_inputs(
-            augment_latent, condition_augment_sigma)
+        augment_latent = self._precondition_inputs(augment_latent,
+                                                   condition_augment_sigma)
         if self._has_edm_preconditioning():
             augment_latent_unscaled = self._reverse_precondition_input(
                 augment_latent, sigma=sigma, sigma_data=sigma_data)
@@ -646,8 +654,8 @@ class Gen3CDenoisingStage(DenoisingStage):
         num_inference_steps = batch.num_inference_steps
         guidance_scale = batch.guidance_scale
         fps = getattr(fastvideo_args.pipeline_config, 'fps', 24)
-        sigma_data = float(getattr(fastvideo_args.pipeline_config, "sigma_data",
-                                   0.5))
+        sigma_data = float(
+            getattr(fastvideo_args.pipeline_config, "sigma_data", 0.5))
         condition_augment_sigma = float(
             getattr(fastvideo_args.pipeline_config, "sigma_conditional", 0.001))
 
@@ -864,8 +872,7 @@ class Gen3CPipeline(ComposedPipelineBase):
                        ))
 
         self.add_stage(stage_name="conditioning_stage",
-                       stage=Gen3CConditioningStage(
-                           vae=self.get_module("vae")))
+                       stage=Gen3CConditioningStage(vae=self.get_module("vae")))
 
         self.add_stage(stage_name="timestep_preparation_stage",
                        stage=TimestepPreparationStage(

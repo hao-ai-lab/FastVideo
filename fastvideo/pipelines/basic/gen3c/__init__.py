@@ -17,8 +17,7 @@ from fastvideo.pipelines.basic.gen3c.gen3c_pipeline import (
     Gen3CLatentPreparationStage,
 )
 from fastvideo.pipelines.basic.gen3c.camera_utils import (
-    generate_camera_trajectory,
-)
+    generate_camera_trajectory, )
 
 __all__ = [
     # 3D Cache

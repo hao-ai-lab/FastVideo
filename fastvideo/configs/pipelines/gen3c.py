@@ -111,8 +111,7 @@ class Gen3CConfig(PipelineConfig):
         "underexposed and overexposed scenes, poor color balance, washed out colors, choppy sequences, "
         "jerky movements, low frame rate, artifacting, color banding, unnatural transitions, outdated special "
         "effects, fake elements, unconvincing visuals, poorly edited content, jump cuts, visual noise, and "
-        "flickering. Overall, the video is of poor quality."
-    )
+        "flickering. Overall, the video is of poor quality.")
 
     # Autoregressive generation settings
     autoregressive_chunk_frames: int = 121  # Frames per chunk

@@ -50,13 +50,13 @@ def create_horizontal_trajectory(
     """Create a linear camera trajectory along a specified axis."""
     look_at_target = torch.tensor([0.0, 0.0, center_depth]).to(device)
     trajectory = []
-    initial_camera_pos = torch.tensor([0, 0, 0], device=device,
+    initial_camera_pos = torch.tensor([0, 0, 0],
+                                      device=device,
                                       dtype=torch.float32)
 
     translation_positions = []
     for i in range(n_steps):
-        offset = i * distance * center_depth / n_steps * (1 if positive else
-                                                           -1)
+        offset = i * distance * center_depth / n_steps * (1 if positive else -1)
         if axis == "x":
             pos = torch.tensor([offset, 0, 0], device=device)
         elif axis == "y":
@@ -102,7 +102,8 @@ def create_spiral_trajectory(
     """Create a spiral/circular camera trajectory."""
     look_at_target = torch.tensor([0.0, 0.0, center_depth]).to(device)
     trajectory = []
-    initial_camera_pos = torch.tensor([0, 0, 0], device=device,
+    initial_camera_pos = torch.tensor([0, 0, 0],
+                                      device=device,
                                       dtype=torch.float32)
 
     theta_max = 2 * math.pi * num_circles
@@ -111,8 +112,8 @@ def create_spiral_trajectory(
     for i in range(n_steps):
         theta = theta_max * i / (n_steps - 1)
         if start_from_zero:
-            x = radius_x * (math.cos(theta) - 1) * (
-                1 if positive else -1) * center_depth
+            x = radius_x * (math.cos(theta) -
+                            1) * (1 if positive else -1) * center_depth
         else:
             x = radius_x * math.cos(theta) * center_depth
         y = radius_y * math.sin(theta) * center_depth

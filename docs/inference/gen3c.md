@@ -54,7 +54,7 @@ python examples/inference/basic/basic_gen3c.py \
 huggingface-cli download nvidia/GEN3C-Cosmos-7B --local-dir official_weights/GEN3C-Cosmos-7B
 ```
 
-2. Convert:
+1. Convert:
 
 ```bash
 python scripts/checkpoint_conversion/convert_gen3c_to_fastvideo.py \
@@ -62,7 +62,7 @@ python scripts/checkpoint_conversion/convert_gen3c_to_fastvideo.py \
   --output converted_weights/GEN3C-Cosmos-7B
 ```
 
-3. Run:
+1. Run:
 
 ```bash
 python examples/inference/basic/basic_gen3c.py \
