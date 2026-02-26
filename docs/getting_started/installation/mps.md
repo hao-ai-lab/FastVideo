@@ -11,9 +11,20 @@ Instructions to install FastVideo for Apple Silicon.
 
 ### Create a new Python environment
 
-#### Conda
+#### uv
+Recommended default: use [uv](https://docs.astral.sh/uv/) for faster and more stable environment setup.
 
-You can create a new python environment using [Conda](https://docs.conda.io/projects/conda/en/stable/user-guide/getting-started.html)
+Please follow the [documentation](https://docs.astral.sh/uv/#getting-started) to install `uv`. After installing `uv`, create a new environment using:
+
+```console
+# (Recommended) Create a new uv environment. Use `--seed` to install `pip` and `setuptools`.
+uv venv --python 3.12 --seed
+source .venv/bin/activate
+```
+
+#### Conda (alternative)
+
+You can also create a Python environment using [Conda](https://docs.conda.io/projects/conda/en/stable/user-guide/getting-started.html).
 
 ##### 1. Install Miniconda (if not already installed)
 
@@ -26,19 +37,8 @@ source ~/.zshrc
 ##### 2. Create and activate a Conda environment for FastVideo
 
 ```bash
-# (Recommended) Create a new conda environment.
 conda create -n fastvideo python=3.12.4 -y
 conda activate fastvideo
-```
-
-#### uv
-
-Or you can create a new Python environment using [uv](https://docs.astral.sh/uv/), a very fast Python environment manager. Please follow the [documentation](https://docs.astral.sh/uv/#getting-started) to install `uv`. After installing `uv`, you can create a new Python environment using the following command:
-
-```console
-# (Recommended) Create a new uv environment. Use `--seed` to install `pip` and `setuptools` in the environment.
-uv venv --python 3.12 --seed
-source .venv/bin/activate
 ```
 
 ### Dependencies
@@ -49,11 +49,16 @@ brew install ffmpeg
 
 ### Installation
 
+#### With uv (recommended)
+
+```bash
+uv pip install fastvideo
+```
+
+#### With Conda environment (alternative)
+
 ```bash
 pip install fastvideo
-
-# or if you are using uv
-uv pip install fastvideo
 ```
 
 ### Installation from Source
@@ -69,10 +74,13 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 Basic installation:
 
 ```bash
-pip install -e .
-
-# or if you are using uv
 uv pip install -e .
+```
+
+Alternative with Conda environment:
+
+```bash
+pip install -e .
 ```
 
 ## Development Environment Setup

@@ -11,6 +11,8 @@ import torch
 
 logger = logging.getLogger(__name__)
 
+REQUIRED_GPUS = 1
+
 def _device_reference_folder() -> str:
     """Pick a reference folder name based on the current CUDA device."""
     suffix = "_reference_videos"

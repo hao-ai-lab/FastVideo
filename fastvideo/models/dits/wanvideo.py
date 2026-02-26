@@ -1,10 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from contextlib import nullcontext
 from typing import Any
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -12,12 +10,9 @@ import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
                                  LocalAttention)
 from fastvideo.configs.models.dits import WanVideoConfig
-from fastvideo.configs.sample.wan import WanTeaCacheParams
 from fastvideo.distributed.communication_op import (
-    sequence_model_parallel_all_gather,
     sequence_model_parallel_all_gather_with_unpad,
     sequence_model_parallel_shard)
-from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
                                         RMSNorm, ScaleResidual,
                                         ScaleResidualLayerNormScaleShift)
@@ -29,7 +24,7 @@ from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
                                                TimestepEmbedder)
 from fastvideo.logger import init_logger
-from fastvideo.models.dits.base import CachableDiT
+from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 from fastvideo.distributed.parallel_state import get_sp_world_size
@@ -548,7 +543,7 @@ class WanTransformerBlock_VSA(nn.Module):
         return hidden_states
 
 
-class WanTransformer3DModel(CachableDiT):
+class WanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
     _compile_conditions = WanVideoConfig()._compile_conditions
     _supported_attention_backends = WanVideoConfig(
@@ -616,18 +611,6 @@ class WanTransformer3DModel(CachableDiT):
 
         self.gradient_checkpointing = False
         self._logged_attention_mask = False
-
-        # For type checking
-        self.previous_e0_even = None
-        self.previous_e0_odd = None
-        self.previous_residual_even = None
-        self.previous_residual_odd = None
-        self.is_even = True
-        self.should_calc_even = True
-        self.should_calc_odd = True
-        self.accumulated_rel_l1_distance_even = 0
-        self.accumulated_rel_l1_distance_odd = 0
-        self.cnt = 0
         self.__post_init__()
 
     def forward(self,
@@ -638,9 +621,6 @@ class WanTransformer3DModel(CachableDiT):
                 | None = None,
                 guidance=None,
                 **kwargs) -> torch.Tensor:
-        forward_batch = get_forward_context().forward_batch
-        enable_teacache = forward_batch is not None and forward_batch.enable_teacache
-
         orig_dtype = hidden_states.dtype
         if encoder_hidden_states is not None and not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
@@ -728,31 +708,15 @@ class WanTransformer3DModel(CachableDiT):
         assert encoder_hidden_states.dtype == orig_dtype
 
         # 4. Transformer blocks
-        # if caching is enabled, we might be able to skip the forward pass
-        should_skip_forward = self.should_skip_forward_for_cached_states(
-            timestep_proj=timestep_proj, temb=temb)
-
-        if should_skip_forward:
-            print("skipping forward, cached")
-            hidden_states = self.retrieve_cached_states(hidden_states)
+        if torch.is_grad_enabled() and self.gradient_checkpointing:
+            for block in self.blocks:
+                hidden_states = self._gradient_checkpointing_func(
+                    block, hidden_states, encoder_hidden_states,
+                    timestep_proj, freqs_cis, attention_mask)
         else:
-            # if teacache is enabled, we need to cache the original hidden states
-            if enable_teacache:
-                original_hidden_states = hidden_states.clone()
-
-            if torch.is_grad_enabled() and self.gradient_checkpointing:
-                for block in self.blocks:
-                    hidden_states = self._gradient_checkpointing_func(
-                        block, hidden_states, encoder_hidden_states,
-                        timestep_proj, freqs_cis, attention_mask)
-            else:
-                for block in self.blocks:
-                    hidden_states = block(hidden_states, encoder_hidden_states,
-                                              timestep_proj, freqs_cis, attention_mask)
-            # if teacache is enabled, we need to cache the original hidden states
-
-            if enable_teacache:
-                self.maybe_cache_states(hidden_states, original_hidden_states)
+            for block in self.blocks:
+                hidden_states = block(hidden_states, encoder_hidden_states,
+                                      timestep_proj, freqs_cis, attention_mask)
         # 5. Output norm, projection & unpatchify
         if temb.dim() == 3:
             # batch_size, seq_len, inner_dim (wan 2.2 ti2v)
@@ -779,98 +743,6 @@ class WanTransformer3DModel(CachableDiT):
         output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 
         return output
-
-    def maybe_cache_states(self, hidden_states: torch.Tensor,
-                           original_hidden_states: torch.Tensor) -> None:
-        if self.is_even:
-            self.previous_residual_even = hidden_states.squeeze(
-                0) - original_hidden_states
-        else:
-            self.previous_residual_odd = hidden_states.squeeze(
-                0) - original_hidden_states
-
-    def should_skip_forward_for_cached_states(self, **kwargs) -> bool:
-
-        forward_context = get_forward_context()
-        forward_batch = forward_context.forward_batch
-        if forward_batch is None or not forward_batch.enable_teacache:
-            return False
-        teacache_params = forward_batch.teacache_params
-        assert teacache_params is not None, "teacache_params is not initialized"
-        assert isinstance(
-            teacache_params,
-            WanTeaCacheParams), "teacache_params is not a WanTeaCacheParams"
-        current_timestep = forward_context.current_timestep
-        num_inference_steps = forward_batch.num_inference_steps
-
-        # initialize the coefficients, cutoff_steps, and ret_steps
-        coefficients = teacache_params.coefficients
-        use_ret_steps = teacache_params.use_ret_steps
-        cutoff_steps = teacache_params.get_cutoff_steps(num_inference_steps)
-        ret_steps = teacache_params.ret_steps
-        teacache_thresh = teacache_params.teacache_thresh
-
-        if current_timestep == 0:
-            self.cnt = 0
-
-        timestep_proj = kwargs["timestep_proj"]
-        temb = kwargs["temb"]
-        modulated_inp = timestep_proj if use_ret_steps else temb
-
-        if self.cnt % 2 == 0:  # even -> condition
-            self.is_even = True
-            if self.cnt < ret_steps or self.cnt >= cutoff_steps:
-                self.should_calc_even = True
-                self.accumulated_rel_l1_distance_even = 0
-            else:
-                assert self.previous_e0_even is not None, "previous_e0_even is not initialized"
-                assert self.accumulated_rel_l1_distance_even is not None, "accumulated_rel_l1_distance_even is not initialized"
-                rescale_func = np.poly1d(coefficients)
-                self.accumulated_rel_l1_distance_even += rescale_func(
-                    ((modulated_inp - self.previous_e0_even).abs().mean() /
-                     self.previous_e0_even.abs().mean()).cpu().item())
-                if self.accumulated_rel_l1_distance_even < teacache_thresh:
-                    self.should_calc_even = False
-                else:
-                    self.should_calc_even = True
-                    self.accumulated_rel_l1_distance_even = 0
-            self.previous_e0_even = modulated_inp.clone()
-
-        else:  # odd -> unconditon
-            self.is_even = False
-            if self.cnt < ret_steps or self.cnt >= cutoff_steps:
-                self.should_calc_odd = True
-                self.accumulated_rel_l1_distance_odd = 0
-            else:
-                assert self.previous_e0_odd is not None, "previous_e0_odd is not initialized"
-                assert self.accumulated_rel_l1_distance_odd is not None, "accumulated_rel_l1_distance_odd is not initialized"
-                rescale_func = np.poly1d(coefficients)
-                self.accumulated_rel_l1_distance_odd += rescale_func(
-                    ((modulated_inp - self.previous_e0_odd).abs().mean() /
-                     self.previous_e0_odd.abs().mean()).cpu().item())
-                if self.accumulated_rel_l1_distance_odd < teacache_thresh:
-                    self.should_calc_odd = False
-                else:
-                    self.should_calc_odd = True
-                    self.accumulated_rel_l1_distance_odd = 0
-            self.previous_e0_odd = modulated_inp.clone()
-        self.cnt += 1
-        should_skip_forward = False
-        if self.is_even:
-            if not self.should_calc_even:
-                should_skip_forward = True
-        else:
-            if not self.should_calc_odd:
-                should_skip_forward = True
-
-        return should_skip_forward
-
-    def retrieve_cached_states(self,
-                               hidden_states: torch.Tensor) -> torch.Tensor:
-        if self.is_even:
-            return hidden_states + self.previous_residual_even
-        else:
-            return hidden_states + self.previous_residual_odd
 
 # Entry point for model registry
 EntryClass = WanTransformer3DModel
