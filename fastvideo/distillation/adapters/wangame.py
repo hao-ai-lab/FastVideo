@@ -1,0 +1,509 @@
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+import copy
+from typing import Any, Literal
+
+import torch
+
+import fastvideo.envs as envs
+from fastvideo.distributed import (
+    get_local_torch_device,
+    get_sp_group,
+    get_world_group,
+)
+from fastvideo.forward_context import set_forward_context
+from fastvideo.models.utils import pred_noise_to_pred_video
+from fastvideo.pipelines import TrainingBatch
+from fastvideo.training.training_utils import (
+    compute_density_for_timestep_sampling,
+    get_sigmas,
+    normalize_dit_input,
+    shift_timestep,
+)
+from fastvideo.utils import is_vmoba_available, is_vsa_available, set_random_seed
+
+from fastvideo.distillation.adapters.base import DistillAdapter
+from fastvideo.distillation.roles import RoleHandle
+
+try:
+    from fastvideo.attention.backends.video_sparse_attn import (
+        VideoSparseAttentionMetadataBuilder,
+    )
+    from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
+except Exception:
+    VideoSparseAttentionMetadataBuilder = None  # type: ignore[assignment]
+    VideoMobaAttentionMetadataBuilder = None  # type: ignore[assignment]
+
+
+class WanGameAdapter(DistillAdapter):
+    """WanGame adapter: exposes operation-centric primitives for methods.
+
+    This adapter is intentionally *not* method-specific:
+    - It knows how to turn a wangame parquet batch into forward primitives.
+    - It knows how to run a model role (handle) for predict_noise / predict_x0.
+    - It does not encode DMD2/SFT/etc semantics beyond required primitives.
+    """
+
+    def __init__(
+        self,
+        *,
+        training_args: Any,
+        noise_scheduler: Any,
+        vae: Any,
+    ) -> None:
+        self.training_args = training_args
+        self.noise_scheduler = noise_scheduler
+        self.vae = vae
+
+        self.world_group = get_world_group()
+        self.sp_group = get_sp_group()
+        self.device = get_local_torch_device()
+
+        self.noise_random_generator: torch.Generator | None = None
+        self.noise_gen_cuda: torch.Generator | None = None
+
+        self._init_timestep_mechanics()
+
+    def _get_training_dtype(self) -> torch.dtype:
+        return torch.bfloat16
+
+    def _init_timestep_mechanics(self) -> None:
+        self.timestep_shift = float(self.training_args.pipeline_config.flow_shift)
+        self.num_train_timestep = int(self.noise_scheduler.num_train_timesteps)
+        self.min_timestep = int(self.training_args.min_timestep_ratio * self.num_train_timestep)
+        self.max_timestep = int(self.training_args.max_timestep_ratio * self.num_train_timestep)
+
+        boundary_ratio = getattr(self.training_args, "boundary_ratio", None)
+        self.boundary_timestep: float | None = (
+            float(boundary_ratio) * float(self.num_train_timestep)
+            if boundary_ratio is not None
+            else None
+        )
+
+    @property
+    def num_train_timesteps(self) -> int:
+        return int(self.num_train_timestep)
+
+    def shift_and_clamp_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
+        timestep = shift_timestep(timestep, self.timestep_shift, self.num_train_timestep)
+        return timestep.clamp(self.min_timestep, self.max_timestep)
+
+    def on_train_start(self) -> None:
+        seed = getattr(self.training_args, "seed", None)
+        if seed is None:
+            raise ValueError("training_args.seed must be set for distillation")
+
+        global_rank = int(getattr(self.world_group, "rank", 0))
+        sp_world_size = int(getattr(self.training_args, "sp_size", 1) or 1)
+        if sp_world_size > 1:
+            sp_group_seed = int(seed) + (global_rank // sp_world_size)
+            set_random_seed(sp_group_seed)
+        else:
+            set_random_seed(int(seed) + global_rank)
+
+        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(int(seed))
+        self.noise_gen_cuda = torch.Generator(device=self.device).manual_seed(int(seed))
+
+    def get_rng_generators(self) -> dict[str, torch.Generator]:
+        """Return RNG generators that should be checkpointed for exact resume."""
+
+        generators: dict[str, torch.Generator] = {}
+        if self.noise_random_generator is not None:
+            generators["noise_cpu"] = self.noise_random_generator
+        if self.noise_gen_cuda is not None:
+            generators["noise_cuda"] = self.noise_gen_cuda
+        return generators
+
+    def _sample_timesteps(self, batch_size: int, device: torch.device) -> torch.Tensor:
+        if self.noise_random_generator is None:
+            raise RuntimeError("WanGameAdapter.on_train_start() must be called before prepare_batch()")
+
+        u = compute_density_for_timestep_sampling(
+            weighting_scheme=self.training_args.weighting_scheme,
+            batch_size=batch_size,
+            generator=self.noise_random_generator,
+            logit_mean=self.training_args.logit_mean,
+            logit_std=self.training_args.logit_std,
+            mode_scale=self.training_args.mode_scale,
+        )
+        indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
+        return self.noise_scheduler.timesteps[indices].to(device=device)
+
+    def _build_attention_metadata(self, training_batch: TrainingBatch) -> TrainingBatch:
+        latents_shape = training_batch.raw_latent_shape
+        patch_size = self.training_args.pipeline_config.dit_config.patch_size
+        current_vsa_sparsity = training_batch.current_vsa_sparsity
+        assert latents_shape is not None
+        assert training_batch.timesteps is not None
+
+        if envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+            if not is_vsa_available() or VideoSparseAttentionMetadataBuilder is None:
+                raise ImportError(
+                    "FASTVIDEO_ATTENTION_BACKEND is VIDEO_SPARSE_ATTN, but fastvideo_kernel "
+                    "is not correctly installed or detected."
+                )
+            training_batch.attn_metadata = VideoSparseAttentionMetadataBuilder().build(  # type: ignore[misc]
+                raw_latent_shape=latents_shape[2:5],
+                current_timestep=training_batch.timesteps,
+                patch_size=patch_size,
+                VSA_sparsity=current_vsa_sparsity,
+                device=self.device,
+            )
+        elif envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
+            if not is_vmoba_available() or VideoMobaAttentionMetadataBuilder is None:
+                raise ImportError(
+                    "FASTVIDEO_ATTENTION_BACKEND is VMOBA_ATTN, but fastvideo_kernel "
+                    "(or flash_attn>=2.7.4) is not correctly installed."
+                )
+            moba_params = self.training_args.moba_config.copy()
+            moba_params.update(
+                {
+                    "current_timestep": training_batch.timesteps,
+                    "raw_latent_shape": training_batch.raw_latent_shape[2:5],
+                    "patch_size": patch_size,
+                    "device": self.device,
+                }
+            )
+            training_batch.attn_metadata = VideoMobaAttentionMetadataBuilder().build(**moba_params)  # type: ignore[misc]
+        else:
+            training_batch.attn_metadata = None
+
+        return training_batch
+
+    def _prepare_dit_inputs(self, training_batch: TrainingBatch) -> TrainingBatch:
+        latents = training_batch.latents
+        assert isinstance(latents, torch.Tensor)
+        batch_size = latents.shape[0]
+
+        if self.noise_gen_cuda is None:
+            raise RuntimeError("WanGameAdapter.on_train_start() must be called before prepare_batch()")
+
+        noise = torch.randn(
+            latents.shape,
+            generator=self.noise_gen_cuda,
+            device=latents.device,
+            dtype=latents.dtype,
+        )
+        timesteps = self._sample_timesteps(batch_size, latents.device)
+        if int(getattr(self.training_args, "sp_size", 1) or 1) > 1:
+            self.sp_group.broadcast(timesteps, src=0)
+
+        sigmas = get_sigmas(
+            self.noise_scheduler,
+            latents.device,
+            timesteps,
+            n_dim=latents.ndim,
+            dtype=latents.dtype,
+        )
+        noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
+
+        training_batch.noisy_model_input = noisy_model_input
+        training_batch.timesteps = timesteps
+        training_batch.sigmas = sigmas
+        training_batch.noise = noise
+        training_batch.raw_latent_shape = latents.shape
+
+        training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
+        return training_batch
+
+    def _build_i2v_mask_latents(self, image_latents: torch.Tensor) -> torch.Tensor:
+        temporal_compression_ratio = (
+            self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        )
+        num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_ratio + 1
+
+        batch_size, _num_channels, _t, latent_height, latent_width = image_latents.shape
+        mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height, latent_width)
+        mask_lat_size[:, :, 1:] = 0
+
+        first_frame_mask = mask_lat_size[:, :, :1]
+        first_frame_mask = torch.repeat_interleave(
+            first_frame_mask,
+            dim=2,
+            repeats=temporal_compression_ratio,
+        )
+        mask_lat_size = torch.cat([first_frame_mask, mask_lat_size[:, :, 1:]], dim=2)
+        mask_lat_size = mask_lat_size.view(
+            batch_size,
+            -1,
+            temporal_compression_ratio,
+            latent_height,
+            latent_width,
+        )
+        mask_lat_size = mask_lat_size.transpose(1, 2)
+        return mask_lat_size.to(device=image_latents.device, dtype=image_latents.dtype)
+
+    def _process_actions(self, training_batch: TrainingBatch) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        keyboard_cond = getattr(training_batch, "keyboard_cond", None)
+        mouse_cond = getattr(training_batch, "mouse_cond", None)
+        if keyboard_cond is None or mouse_cond is None:
+            raise ValueError("WanGame batch must provide keyboard_cond and mouse_cond")
+
+        from fastvideo.models.dits.hyworld.pose import process_custom_actions
+
+        batch_size = int(training_batch.noisy_model_input.shape[0])  # type: ignore[union-attr]
+        viewmats_list: list[torch.Tensor] = []
+        intrinsics_list: list[torch.Tensor] = []
+        action_labels_list: list[torch.Tensor] = []
+        for b in range(batch_size):
+            v, i, a = process_custom_actions(keyboard_cond[b], mouse_cond[b])
+            viewmats_list.append(v)
+            intrinsics_list.append(i)
+            action_labels_list.append(a)
+
+        viewmats = torch.stack(viewmats_list, dim=0).to(device=self.device, dtype=torch.bfloat16)
+        intrinsics = torch.stack(intrinsics_list, dim=0).to(device=self.device, dtype=torch.bfloat16)
+        action_labels = torch.stack(action_labels_list, dim=0).to(device=self.device, dtype=torch.bfloat16)
+
+        num_latent_t = int(training_batch.noisy_model_input.shape[2])  # type: ignore[union-attr]
+        if int(action_labels.shape[1]) != num_latent_t:
+            raise ValueError(
+                "Action conditioning temporal dim mismatch: "
+                f"action={tuple(action_labels.shape)} vs latent_t={num_latent_t}"
+            )
+        if int(viewmats.shape[1]) != num_latent_t:
+            raise ValueError(
+                "Viewmats temporal dim mismatch: "
+                f"viewmats={tuple(viewmats.shape)} vs latent_t={num_latent_t}"
+            )
+
+        return viewmats, intrinsics, action_labels
+
+    def prepare_batch(
+        self,
+        raw_batch: dict[str, Any],
+        *,
+        current_vsa_sparsity: float = 0.0,
+        latents_source: Literal["data", "zeros"] = "data",
+    ) -> TrainingBatch:
+        dtype = self._get_training_dtype()
+        device = self.device
+
+        training_batch = TrainingBatch(current_vsa_sparsity=current_vsa_sparsity)
+        infos = raw_batch.get("info_list")
+
+        if latents_source == "zeros":
+            clip_feature = raw_batch["clip_feature"]
+            batch_size = int(clip_feature.shape[0])
+            vae_config = self.training_args.pipeline_config.vae_config.arch_config
+            num_channels = int(vae_config.z_dim)
+            spatial_compression_ratio = int(vae_config.spatial_compression_ratio)
+            latent_height = int(self.training_args.num_height) // spatial_compression_ratio
+            latent_width = int(self.training_args.num_width) // spatial_compression_ratio
+            latents = torch.zeros(
+                batch_size,
+                num_channels,
+                int(self.training_args.num_latent_t),
+                latent_height,
+                latent_width,
+                device=device,
+                dtype=dtype,
+            )
+        elif latents_source == "data":
+            if "vae_latent" not in raw_batch:
+                raise ValueError("vae_latent not found in batch and latents_source='data'")
+            latents = raw_batch["vae_latent"]
+            latents = latents[:, :, : self.training_args.num_latent_t]
+            latents = latents.to(device, dtype=dtype)
+        else:
+            raise ValueError(f"Unknown latents_source: {latents_source!r}")
+
+        if "clip_feature" not in raw_batch:
+            raise ValueError("clip_feature must be present for WanGame")
+        image_embeds = raw_batch["clip_feature"].to(device, dtype=dtype)
+
+        if "first_frame_latent" not in raw_batch:
+            raise ValueError("first_frame_latent must be present for WanGame")
+        image_latents = raw_batch["first_frame_latent"]
+        image_latents = image_latents[:, :, : self.training_args.num_latent_t]
+        image_latents = image_latents.to(device, dtype=dtype)
+
+        pil_image = raw_batch.get("pil_image")
+        if isinstance(pil_image, torch.Tensor):
+            training_batch.preprocessed_image = pil_image.to(device=device)
+        else:
+            training_batch.preprocessed_image = pil_image
+
+        keyboard_cond = raw_batch.get("keyboard_cond")
+        if isinstance(keyboard_cond, torch.Tensor) and keyboard_cond.numel() > 0:
+            training_batch.keyboard_cond = keyboard_cond.to(device, dtype=dtype)
+        else:
+            training_batch.keyboard_cond = None
+
+        mouse_cond = raw_batch.get("mouse_cond")
+        if isinstance(mouse_cond, torch.Tensor) and mouse_cond.numel() > 0:
+            training_batch.mouse_cond = mouse_cond.to(device, dtype=dtype)
+        else:
+            training_batch.mouse_cond = None
+
+        temporal_compression_ratio = (
+            self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        )
+        expected_num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_ratio + 1
+        if training_batch.keyboard_cond is not None and int(training_batch.keyboard_cond.shape[1]) != int(
+            expected_num_frames
+        ):
+            raise ValueError(
+                "keyboard_cond temporal dim mismatch: "
+                f"got {int(training_batch.keyboard_cond.shape[1])}, expected {int(expected_num_frames)}"
+            )
+        if training_batch.mouse_cond is not None and int(training_batch.mouse_cond.shape[1]) != int(
+            expected_num_frames
+        ):
+            raise ValueError(
+                "mouse_cond temporal dim mismatch: "
+                f"got {int(training_batch.mouse_cond.shape[1])}, expected {int(expected_num_frames)}"
+            )
+
+        training_batch.latents = latents
+        training_batch.encoder_hidden_states = None
+        training_batch.encoder_attention_mask = None
+        training_batch.image_embeds = image_embeds
+        training_batch.image_latents = image_latents
+        training_batch.infos = infos
+
+        training_batch.latents = normalize_dit_input("wan", training_batch.latents, self.vae)
+        training_batch = self._prepare_dit_inputs(training_batch)
+        training_batch = self._build_attention_metadata(training_batch)
+
+        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
+        if training_batch.attn_metadata is not None:
+            training_batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore[attr-defined]
+
+        training_batch.mask_lat_size = self._build_i2v_mask_latents(image_latents)
+        viewmats, intrinsics, action_labels = self._process_actions(training_batch)
+        training_batch.viewmats = viewmats
+        training_batch.Ks = intrinsics
+        training_batch.action = action_labels
+
+        return training_batch
+
+    def add_noise(
+        self,
+        clean_latents: torch.Tensor,
+        noise: torch.Tensor,
+        timestep: torch.Tensor,
+    ) -> torch.Tensor:
+        b, t = clean_latents.shape[:2]
+        noisy = self.noise_scheduler.add_noise(
+            clean_latents.flatten(0, 1),
+            noise.flatten(0, 1),
+            timestep,
+        ).unflatten(0, (b, t))
+        return noisy
+
+    def _build_distill_input_kwargs(
+        self,
+        noisy_video_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+    ) -> dict[str, Any]:
+        if batch.image_embeds is None:
+            raise RuntimeError("WanGameAdapter requires TrainingBatch.image_embeds")
+        if batch.image_latents is None:
+            raise RuntimeError("WanGameAdapter requires TrainingBatch.image_latents")
+        if batch.mask_lat_size is None:
+            raise RuntimeError("WanGameAdapter requires TrainingBatch.mask_lat_size")
+
+        hidden_states = torch.cat(
+            [
+                noisy_video_latents.permute(0, 2, 1, 3, 4),
+                batch.mask_lat_size,
+                batch.image_latents,
+            ],
+            dim=1,
+        )
+        return {
+            "hidden_states": hidden_states,
+            "encoder_hidden_states": None,
+            "timestep": timestep.to(device=self.device, dtype=torch.bfloat16),
+            "encoder_hidden_states_image": batch.image_embeds,
+            "viewmats": getattr(batch, "viewmats", None),
+            "Ks": getattr(batch, "Ks", None),
+            "action": getattr(batch, "action", None),
+            "return_dict": False,
+        }
+
+    def _get_transformer(self, handle: RoleHandle, timestep: torch.Tensor) -> torch.nn.Module:
+        transformer = handle.require_module("transformer")
+        transformer_2 = handle.modules.get("transformer_2")
+        if (
+            transformer_2 is not None
+            and self.boundary_timestep is not None
+            and float(timestep.item()) < float(self.boundary_timestep)
+        ):
+            return transformer_2
+        return transformer
+
+    def predict_x0(
+        self,
+        handle: RoleHandle,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> torch.Tensor:
+        del conditional
+        device_type = self.device.type
+        dtype = noisy_latents.dtype
+
+        if attn_kind == "dense":
+            attn_metadata = batch.attn_metadata
+        elif attn_kind == "vsa":
+            attn_metadata = batch.attn_metadata_vsa
+        else:
+            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
+
+        with torch.autocast(device_type, dtype=dtype), set_forward_context(
+            current_timestep=batch.timesteps,
+            attn_metadata=attn_metadata,
+        ):
+            input_kwargs = self._build_distill_input_kwargs(noisy_latents, timestep, batch)
+            transformer = self._get_transformer(handle, timestep)
+            pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
+            pred_x0 = pred_noise_to_pred_video(
+                pred_noise=pred_noise.flatten(0, 1),
+                noise_input_latent=noisy_latents.flatten(0, 1),
+                timestep=timestep,
+                scheduler=self.noise_scheduler,
+            ).unflatten(0, pred_noise.shape[:2])
+        return pred_x0
+
+    def predict_noise(
+        self,
+        handle: RoleHandle,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> torch.Tensor:
+        del conditional
+        device_type = self.device.type
+        dtype = noisy_latents.dtype
+
+        if attn_kind == "dense":
+            attn_metadata = batch.attn_metadata
+        elif attn_kind == "vsa":
+            attn_metadata = batch.attn_metadata_vsa
+        else:
+            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
+
+        with torch.autocast(device_type, dtype=dtype), set_forward_context(
+            current_timestep=batch.timesteps,
+            attn_metadata=attn_metadata,
+        ):
+            input_kwargs = self._build_distill_input_kwargs(noisy_latents, timestep, batch)
+            transformer = self._get_transformer(handle, timestep)
+            pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
+        return pred_noise
+
+    def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
+        timesteps, attn_metadata = ctx
+        with set_forward_context(current_timestep=timesteps, attn_metadata=attn_metadata):
+            (loss / max(1, int(grad_accum_rounds))).backward()

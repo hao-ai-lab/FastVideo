@@ -75,6 +75,7 @@ def ensure_builtin_registrations() -> None:
     # NOTE: keep these imports explicit (no wildcard scanning) so registration
     # order is stable and failures are debuggable.
     from fastvideo.distillation.models import wan as _wan  # noqa: F401
+    from fastvideo.distillation.models import wangame as _wangame  # noqa: F401
     from fastvideo.distillation.methods.distribution_matching import dmd2 as _dmd2  # noqa: F401
     from fastvideo.distillation.methods.fine_tuning import finetune as _finetune  # noqa: F401
 

@@ -8,6 +8,9 @@
 - `build_parquet_t2v_train_dataloader(training_args, parquet_schema=...)`
   - 复用 FastVideo 现有的 `build_parquet_map_style_dataloader(...)`
   - 仅做最小封装：从 `training_args` 读取必要参数（data_path/batch/workers/seed/cfg_rate/text_len 等）
+- `build_parquet_wangame_train_dataloader(training_args, parquet_schema=...)`
+  - 面向 wangame 的 parquet schema（I2V + action）
+  - 不依赖 `pipeline_config.text_encoder_configs`（schema 不含 text embedding）
 
 **边界**
 - 这里不包含 model/pipeline 语义（例如 Wan 的 forward/backward 细节）。

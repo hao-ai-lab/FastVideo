@@ -26,3 +26,28 @@ def build_parquet_t2v_train_dataloader(
         seed=int(training_args.seed or 0),
     )
     return dataloader
+
+
+def build_parquet_wangame_train_dataloader(
+    training_args: Any,
+    *,
+    parquet_schema: Any,
+) -> Any:
+    """Build a parquet map-style dataloader for WanGame (I2V+action) datasets."""
+
+    from fastvideo.dataset import build_parquet_map_style_dataloader
+
+    cfg_rate = float(getattr(training_args, "training_cfg_rate", 0.0) or 0.0)
+    _dataset, dataloader = build_parquet_map_style_dataloader(
+        training_args.data_path,
+        training_args.train_batch_size,
+        num_data_workers=training_args.dataloader_num_workers,
+        parquet_schema=parquet_schema,
+        cfg_rate=cfg_rate,
+        drop_last=True,
+        # WanGame parquet schema does not include text embeddings, but the
+        # parquet loader expects a padding length parameter.
+        text_padding_length=512,
+        seed=int(training_args.seed or 0),
+    )
+    return dataloader
