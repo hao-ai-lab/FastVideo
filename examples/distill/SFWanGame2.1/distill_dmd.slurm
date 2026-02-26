@@ -7,8 +7,8 @@
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=sf_train_output/ode_%j.out
-#SBATCH --error=sf_train_output/ode_%j.err
+#SBATCH --output=log/sf_train_output/ode_%j.out
+#SBATCH --error=log/sf_train_output/ode_%j.err
 #SBATCH --exclusive
 
 set -e -x
@@ -36,11 +36,13 @@ echo "RUN_NAME: $RUN_NAME"
 
 # Model paths for Self-Forcing DMD distillation:
 # GENERATOR_MODEL_PATH="../wg_models/WanGame-2.1-Student-VizDoom1k-1000steps-Diffusers"
-GENERATOR_MODEL_PATH="../wg_models/SFWanGame-2.1-0223-9000steps"
+# GENERATOR_MODEL_PATH="../wg_models/SFWanGame-2.1-0223-9000steps"
+GENERATOR_MODEL_PATH="../wg_models/SFWanGame-2.1-0224-4k5steps"
 REAL_SCORE_MODEL_PATH="../wg_models/WanGame-2.1-0223-9000steps"  # Teacher model
 FAKE_SCORE_MODEL_PATH="../wg_models/WanGame-2.1-0223-9000steps"  # Critic model
 
-DATA_DIR="../traindata_0222_0030/ode_init_mc_with_mouse/preprocessed_wangame"
+# DATA_DIR="../traindata_0222_0030/ode_init_mc_with_mouse/preprocessed_wangame"
+DATA_DIR="../traindata_0222_0030/ode_init_mc_Xonly_3k/preprocessed"
 VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_wangame_ode_init/validation.json"
 
 # Training arguments
@@ -139,7 +141,7 @@ self_forcing_args=(
   --context_noise 0  # Amount of noise to add during context caching (0 = no noise)
 )
 
-mkdir -p sf_train_output
+mkdir -p log/sf_train_output
 
 srun torchrun \
 --nnodes $SLURM_JOB_NUM_NODES \
