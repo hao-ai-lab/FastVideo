@@ -179,6 +179,9 @@ class ForwardBatch:
     eta: float = 0.0
     sigmas: list[float] | None = None
 
+    # TeaCache
+    enable_teacache: bool = False
+
     # LTX-2 multi-modal CFG parameters
     ltx2_cfg_scale_video: float = 1.0
     ltx2_cfg_scale_audio: float = 1.0

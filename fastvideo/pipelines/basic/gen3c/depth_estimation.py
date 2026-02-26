@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -12,11 +14,16 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
+if TYPE_CHECKING:
+    from moge.model.v1 import MoGeModel
+else:
+    MoGeModel = Any
+
 
 def load_moge_model(
     model_name: str = "Ruicheng/moge-vitl",
     device: str | torch.device = "cuda",
-) -> "MoGeModel":
+) -> MoGeModel:
     """Load MoGe depth estimation model from HuggingFace.
 
     Args:
@@ -48,7 +55,7 @@ def predict_depth_from_path(
     target_h: int,
     target_w: int,
     device: torch.device,
-    moge_model: "MoGeModel",
+    moge_model: MoGeModel,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
            torch.Tensor]:
     """
@@ -81,7 +88,7 @@ def predict_depth_from_path(
 
 def predict_depth_from_tensor(
     image_tensor: torch.Tensor,
-    moge_model: "MoGeModel",
+    moge_model: MoGeModel,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Predict depth and mask from an image tensor (for autoregressive generation).
@@ -103,8 +110,8 @@ def predict_depth_from_tensor(
     depth = torch.clamp(depth, min=0, max=1e4)
 
     mask = mask.unsqueeze(0).unsqueeze(0)
-    depth = torch.where(mask == 0,
-                        torch.tensor(1000.0, device=depth.device), depth)
+    depth = torch.where(mask == 0, torch.tensor(1000.0, device=depth.device),
+                        depth)
 
     return depth, mask
 
@@ -114,7 +121,7 @@ def _predict_depth_core(
     target_h: int,
     target_w: int,
     device: torch.device,
-    moge_model: "MoGeModel",
+    moge_model: MoGeModel,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
            torch.Tensor]:
     """Core depth prediction logic shared between path and tensor inputs."""
@@ -135,8 +142,9 @@ def _predict_depth_core(
     mask_hw = moge_output["mask"]
 
     # Replace invalid depth with large value
-    depth_hw = torch.where(
-        mask_hw == 0, torch.tensor(1000.0, device=depth_hw.device), depth_hw)
+    depth_hw = torch.where(mask_hw == 0,
+                           torch.tensor(1000.0, device=depth_hw.device),
+                           depth_hw)
 
     # Convert normalized intrinsics to pixel coordinates
     intrinsics_pixel = intrinsics_norm.clone()
@@ -154,11 +162,10 @@ def _predict_depth_core(
                                  mode='bilinear',
                                  align_corners=False).squeeze(0).squeeze(0)
 
-    mask_target = F.interpolate(mask_hw.unsqueeze(0).unsqueeze(0).to(
-        torch.float32),
-                                size=(target_h, target_w),
-                                mode='nearest').squeeze(0).squeeze(0).to(
-                                    torch.bool)
+    mask_target = F.interpolate(
+        mask_hw.unsqueeze(0).unsqueeze(0).to(torch.float32),
+        size=(target_h, target_w),
+        mode='nearest').squeeze(0).squeeze(0).to(torch.bool)
 
     img_target = F.interpolate(img_tensor.unsqueeze(0),
                                size=(target_h, target_w),
