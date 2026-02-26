@@ -17,7 +17,12 @@ from fastvideo.distillation.roles import RoleHandle
 from fastvideo.distillation.methods.base import DistillMethod, LogScalar
 from fastvideo.distillation.dispatch import register_method
 from fastvideo.distillation.validators.base import ValidationRequest
-from fastvideo.distillation.utils.config import DistillRunConfig
+from fastvideo.distillation.utils.config import (
+    DistillRunConfig,
+    get_optional_float,
+    get_optional_int,
+    parse_betas,
+)
 
 
 class _DMD2Adapter(Protocol):
@@ -168,46 +173,6 @@ class DMD2Method(DistillMethod):
             f"{raw!r}"
         )
 
-    def _get_method_int(self, key: str) -> int | None:
-        raw = self.method_config.get(key, None)
-        if raw is None:
-            return None
-        if isinstance(raw, bool):
-            raise ValueError(f"method_config.{key} must be an int, got bool")
-        if isinstance(raw, int):
-            return int(raw)
-        if isinstance(raw, float) and raw.is_integer():
-            return int(raw)
-        if isinstance(raw, str) and raw.strip():
-            return int(raw)
-        raise ValueError(f"method_config.{key} must be an int, got {type(raw).__name__}")
-
-    def _get_method_float(self, key: str) -> float | None:
-        raw = self.method_config.get(key, None)
-        if raw is None:
-            return None
-        if isinstance(raw, bool):
-            raise ValueError(f"method_config.{key} must be a float, got bool")
-        if isinstance(raw, (int, float)):
-            return float(raw)
-        if isinstance(raw, str) and raw.strip():
-            return float(raw)
-        raise ValueError(
-            f"method_config.{key} must be a float, got {type(raw).__name__}"
-        )
-
-    def _parse_betas(self, raw: Any, *, where: str) -> tuple[float, float]:
-        if raw is None:
-            raise ValueError(f"Missing betas for {where}")
-        if isinstance(raw, (tuple, list)) and len(raw) == 2:
-            return float(raw[0]), float(raw[1])
-        if isinstance(raw, str):
-            parts = [p.strip() for p in raw.split(",") if p.strip()]
-            if len(parts) != 2:
-                raise ValueError(f"Expected betas as 'b1,b2' at {where}, got {raw!r}")
-            return float(parts[0]), float(parts[1])
-        raise ValueError(f"Expected betas as 'b1,b2' at {where}, got {type(raw).__name__}")
-
     def _build_role_optimizer_and_scheduler(
         self,
         *,
@@ -251,7 +216,7 @@ class DMD2Method(DistillMethod):
 
         # Student optimizer/scheduler (default training hyperparams).
         student_lr = float(getattr(training_args, "learning_rate", 0.0) or 0.0)
-        student_betas = self._parse_betas(
+        student_betas = parse_betas(
             getattr(training_args, "betas", None),
             where="training.betas",
         )
@@ -272,7 +237,7 @@ class DMD2Method(DistillMethod):
         critic_betas_raw = getattr(training_args, "fake_score_betas", None)
         if critic_betas_raw is None:
             critic_betas_raw = getattr(training_args, "betas", None)
-        critic_betas = self._parse_betas(critic_betas_raw, where="training.fake_score_betas")
+        critic_betas = parse_betas(critic_betas_raw, where="training.fake_score_betas")
 
         critic_sched = str(getattr(training_args, "fake_score_lr_scheduler", None) or student_sched)
         self._build_role_optimizer_and_scheduler(
@@ -338,7 +303,11 @@ class DMD2Method(DistillMethod):
         return generators
 
     def _should_update_student(self, iteration: int) -> bool:
-        interval = self._get_method_int("generator_update_interval")
+        interval = get_optional_int(
+            self.method_config,
+            "generator_update_interval",
+            where="method_config.generator_update_interval",
+        )
         if interval is None:
             interval = int(getattr(self.training_args, "generator_update_interval", 1) or 1)
         if interval <= 0:
@@ -542,7 +511,11 @@ class DMD2Method(DistillMethod):
         return flow_matching_loss, (batch.timesteps, batch.attn_metadata), outputs
 
     def _dmd_loss(self, generator_pred_x0: torch.Tensor, batch: Any) -> torch.Tensor:
-        guidance_scale = self._get_method_float("real_score_guidance_scale")
+        guidance_scale = get_optional_float(
+            self.method_config,
+            "real_score_guidance_scale",
+            where="method_config.real_score_guidance_scale",
+        )
         if guidance_scale is None:
             guidance_scale = float(getattr(self.training_args, "real_score_guidance_scale", 1.0))
         device = generator_pred_x0.device

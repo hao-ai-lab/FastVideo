@@ -19,6 +19,7 @@
 - `build_runtime_from_config(cfg) -> DistillRuntime`
   - 选择 model plugin：`get_model(cfg.recipe.family)`
   - 选择 method：`get_method(cfg.recipe.method)`
+  - `DistillRuntime` 定义也在本文件中（谁创建谁声明）。
 
 **边界**
 - ✅ 这里只做“装配 + dispatch”，不包含训练 loop / loss / rollout / optimizer policy。

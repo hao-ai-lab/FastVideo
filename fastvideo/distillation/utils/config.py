@@ -11,7 +11,6 @@ import yaml
 
 if TYPE_CHECKING:
     from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.distillation.methods.base import DistillMethod
 
 RoleName = str
 
@@ -87,6 +86,47 @@ def _get_bool(raw: Any, *, where: str, default: bool) -> bool:
     if isinstance(raw, bool):
         return raw
     raise ValueError(f"Expected bool at {where}, got {type(raw).__name__}")
+
+
+def get_optional_int(mapping: dict[str, Any], key: str, *, where: str) -> int | None:
+    raw = mapping.get(key, None)
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        raise ValueError(f"Expected int at {where}, got bool")
+    if isinstance(raw, int):
+        return int(raw)
+    if isinstance(raw, float) and raw.is_integer():
+        return int(raw)
+    if isinstance(raw, str) and raw.strip():
+        return int(raw)
+    raise ValueError(f"Expected int at {where}, got {type(raw).__name__}")
+
+
+def get_optional_float(mapping: dict[str, Any], key: str, *, where: str) -> float | None:
+    raw = mapping.get(key, None)
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        raise ValueError(f"Expected float at {where}, got bool")
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    if isinstance(raw, str) and raw.strip():
+        return float(raw)
+    raise ValueError(f"Expected float at {where}, got {type(raw).__name__}")
+
+
+def parse_betas(raw: Any, *, where: str) -> tuple[float, float]:
+    if raw is None:
+        raise ValueError(f"Missing betas for {where}")
+    if isinstance(raw, (tuple, list)) and len(raw) == 2:
+        return float(raw[0]), float(raw[1])
+    if isinstance(raw, str):
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+        if len(parts) != 2:
+            raise ValueError(f"Expected betas as 'b1,b2' at {where}, got {raw!r}")
+        return float(parts[0]), float(parts[1])
+    raise ValueError(f"Expected betas as 'b1,b2' at {where}, got {type(raw).__name__}")
 
 
 def load_distill_run_config(path: str) -> DistillRunConfig:
@@ -197,13 +237,3 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
         method_config=method_config,
         raw=cfg,
     )
-
-
-@dataclass(slots=True)
-class DistillRuntime:
-    """Fully assembled runtime for `DistillTrainer.run()`."""
-
-    training_args: TrainingArgs
-    method: DistillMethod
-    dataloader: Any
-    start_step: int = 0

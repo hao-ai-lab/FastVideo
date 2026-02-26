@@ -61,12 +61,12 @@
     - `dataloader`
     - `validator`（可选；model-specific）
     - `start_step`（用于 resume / warm-start）
-- `DistillRuntime`
-  - `DistillTrainer.run()` 所需的最小集合：
-    - `training_args`
-    - `method`（`DistillMethod`）
-    - `dataloader`
-    - `start_step`
-
 备注：
+- `DistillRuntime` 由 `dispatch.build_runtime_from_config()` 创建并定义在
+  `fastvideo/distillation/dispatch.py`（谁创建谁声明）。
 - tracker 由 `DistillTrainer` 构建并持有（避免 model plugin 变成 infra owner）。
+
+## 4) 通用解析 helpers（method_config / optimizer 等）
+- `get_optional_int(mapping, key, where=...)`
+- `get_optional_float(mapping, key, where=...)`
+- `parse_betas(raw, where=...)`

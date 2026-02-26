@@ -16,7 +16,7 @@ from fastvideo.distillation.roles import RoleHandle, RoleManager
 from fastvideo.distillation.methods.base import DistillMethod, LogScalar
 from fastvideo.distillation.dispatch import register_method
 from fastvideo.distillation.validators.base import ValidationRequest
-from fastvideo.distillation.utils.config import DistillRunConfig
+from fastvideo.distillation.utils.config import DistillRunConfig, parse_betas
 
 
 class _FineTuneAdapter(Protocol):
@@ -118,18 +118,6 @@ class FineTuneMethod(DistillMethod):
             )
         return cast(Literal["dense", "vsa"], kind)
 
-    def _parse_betas(self, raw: Any, *, where: str) -> tuple[float, float]:
-        if raw is None:
-            raise ValueError(f"Missing betas for {where}")
-        if isinstance(raw, (tuple, list)) and len(raw) == 2:
-            return float(raw[0]), float(raw[1])
-        if isinstance(raw, str):
-            parts = [p.strip() for p in raw.split(",") if p.strip()]
-            if len(parts) != 2:
-                raise ValueError(f"Expected betas as 'b1,b2' at {where}, got {raw!r}")
-            return float(parts[0]), float(parts[1])
-        raise ValueError(f"Expected betas as 'b1,b2' at {where}, got {type(raw).__name__}")
-
     def _build_role_optimizer_and_scheduler(
         self,
         *,
@@ -175,7 +163,7 @@ class FineTuneMethod(DistillMethod):
         if student_lr <= 0.0:
             raise ValueError("training.learning_rate must be > 0 for finetune")
 
-        student_betas = self._parse_betas(
+        student_betas = parse_betas(
             getattr(training_args, "betas", None),
             where="training.betas",
         )

@@ -3,11 +3,26 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, TYPE_CHECKING
 from typing import Protocol
 
 from fastvideo.distillation.methods.base import DistillMethod
 from fastvideo.distillation.models.components import ModelComponents
-from fastvideo.distillation.utils.config import DistillRunConfig, DistillRuntime
+from fastvideo.distillation.utils.config import DistillRunConfig
+
+if TYPE_CHECKING:
+    from fastvideo.fastvideo_args import TrainingArgs
+
+
+@dataclass(slots=True)
+class DistillRuntime:
+    """Fully assembled runtime for `DistillTrainer.run()`."""
+
+    training_args: TrainingArgs
+    method: DistillMethod
+    dataloader: Any
+    start_step: int = 0
 
 
 class ModelBuilder(Protocol):
