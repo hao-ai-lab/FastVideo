@@ -32,6 +32,7 @@ env
 **.pyc
 **.txt
 *.log
+*.npy
 weights/
 
 # SSIM test outputs
