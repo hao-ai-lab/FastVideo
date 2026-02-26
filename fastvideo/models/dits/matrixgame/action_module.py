@@ -139,8 +139,16 @@ def _update_kv_cache_and_attend(
     kv_cache_size = kv_cache["k"].shape[1]
     num_new_tokens = k.shape[1] if use_k_for_num_tokens else q.shape[1]
 
-    original_global_end_index = kv_cache["global_end_index"]
-    original_local_end_index = kv_cache["local_end_index"]
+    original_global_end_index = (
+        int(kv_cache["global_end_index"].item())
+        if isinstance(kv_cache["global_end_index"], torch.Tensor)
+        else int(kv_cache["global_end_index"])
+    )
+    original_local_end_index = (
+        int(kv_cache["local_end_index"].item())
+        if isinstance(kv_cache["local_end_index"], torch.Tensor)
+        else int(kv_cache["local_end_index"])
+    )
 
     # Check if we need to evict tokens
     if (current_end > original_global_end_index) and (
@@ -209,8 +217,14 @@ def _update_kv_cache_and_attend(
     attn = attn_layer(q, cached_k, cached_v)
 
     # Update indices
-    kv_cache["global_end_index"] = current_end
-    kv_cache["local_end_index"] = local_end_index
+    if isinstance(kv_cache["global_end_index"], torch.Tensor):
+        kv_cache["global_end_index"].fill_(current_end)
+    else:
+        kv_cache["global_end_index"] = current_end
+    if isinstance(kv_cache["local_end_index"], torch.Tensor):
+        kv_cache["local_end_index"].fill_(local_end_index)
+    else:
+        kv_cache["local_end_index"] = local_end_index
 
     return attn
 
