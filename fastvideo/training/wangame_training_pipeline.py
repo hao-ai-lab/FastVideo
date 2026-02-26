@@ -31,6 +31,18 @@ class WanGameTrainingPipeline(TrainingPipeline):
     """
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
+    _FLOW_EVAL_SCALAR_KEYS = (
+        "mf_epe_mean",
+        "mf_angle_err_mean",
+        "mf_cosine_mean",
+        "mf_mag_ratio_mean",
+        "pixel_epe_mean_mean",
+        "px_angle_rmse_mean",
+        "fl_all_mean",
+        "foe_dist_mean",
+        "flow_kl_2d_mean",
+    )
+
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift)
@@ -296,7 +308,7 @@ class WanGameTrainingPipeline(TrainingPipeline):
             # "encoder_attention_mask":
             # training_batch.encoder_attention_mask,
             "encoder_hidden_states_image":
-            [encoder_hidden_states_image],
+            encoder_hidden_states_image,
             # Action conditioning
             "viewmats": viewmats,
             "Ks": intrinsics,
@@ -399,6 +411,100 @@ class WanGameTrainingPipeline(TrainingPipeline):
             processed_frames.append(frame)
         
         return processed_frames
+
+    def _init_flow_eval_module(self) -> None:
+        if getattr(self, "_flow_eval_init_done", False):
+            return
+        self._flow_eval_init_done = True
+        self._flow_eval_ready = False
+
+        ptlflow_dir = Path("/mnt/weka/home/hao.zhang/mhuo/FastVideo/benchmarks/ptlflow")
+
+        try:
+            ptlflow_dir_str = str(ptlflow_dir.resolve())
+            if ptlflow_dir_str not in sys.path:
+                sys.path.insert(0, ptlflow_dir_str)
+
+            from eval_flow_divergence import evaluate_pair_synthetic  # type: ignore
+
+            self._flow_eval_fn = evaluate_pair_synthetic
+            self._flow_eval_ckpt = str(ptlflow_dir / "dpflow-things-2012b5d6.ckpt")
+            self._flow_eval_calibration_path = str(ptlflow_dir /
+                                                   "calibration.json")
+            self._flow_eval_ready = True
+            logger.info("Initialized flow divergence evaluator: %s",
+                        ptlflow_dir)
+        except Exception as e:
+            logger.warning("Failed to initialize flow divergence evaluator: %s",
+                           e)
+
+    def _evaluate_validation_video(
+        self,
+        video_path: str,
+        caption: str,
+        action_path: str | None,
+        global_step: int,
+        num_inference_steps: int,
+    ) -> dict[str, float]:
+        del caption
+        self._init_flow_eval_module()
+        if not getattr(self, "_flow_eval_ready", False):
+            raise RuntimeError(
+                "ptlflow evaluator is not initialized; cannot compute flow metrics."
+            )
+
+        if not isinstance(action_path, str) or not os.path.isfile(action_path):
+            raise FileNotFoundError(
+                f"Validation sample is missing a valid action_path: {action_path}"
+            )
+
+        eval_output_dir = os.path.join(
+            self.training_args.output_dir,
+            "flow_eval",
+            f"step_{global_step}",
+            f"inference_steps_{num_inference_steps}",
+            Path(video_path).stem,
+        )
+
+        try:
+            summary = self._flow_eval_fn(
+                gen_video=video_path,
+                action_path=action_path,
+                calibration_path=self._flow_eval_calibration_path,
+                output_dir=eval_output_dir,
+                model_name="dpflow",
+                ckpt=self._flow_eval_ckpt,
+                no_viz=True,
+                use_depth=True,
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"ptlflow synthetic evaluation failed for {video_path}") from e
+
+        if not isinstance(summary, dict):
+            raise RuntimeError(
+                f"ptlflow returned invalid summary type: {type(summary)}"
+            )
+
+        metrics: dict[str, float] = {}
+        missing_or_invalid: list[str] = []
+        for key in self._FLOW_EVAL_SCALAR_KEYS:
+            val = summary.get(key)
+            if not isinstance(val, (float, int, np.floating, np.integer)):
+                missing_or_invalid.append(key)
+                continue
+            val_float = float(val)
+            if not np.isfinite(val_float):
+                missing_or_invalid.append(key)
+                continue
+            metrics[key] = val_float
+
+        if missing_or_invalid:
+            raise RuntimeError(
+                "ptlflow summary missing/invalid metrics: "
+                f"{', '.join(missing_or_invalid)}")
+
+        return metrics
 
 
 def main(args) -> None:
