@@ -250,10 +250,18 @@ def _prepare_ssim_workspace() -> tuple[str, list[SSIMTask]]:
     export HF_HOME='/root/data/.cache'
     hf auth login --token "$HF_API_KEY"
     """
-    subprocess.run(
+    result = subprocess.run(
         ["/bin/bash", "-lc", command],
-        check=True,
+        capture_output=True,
+        text=True,
     )
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        raise RuntimeError(
+            "Workspace setup failed with "
+            f"exit code {result.returncode}"
+        )
 
     ssim_dir = os.path.join(repo_root, "fastvideo", "tests", "ssim")
     tasks = _discover_ssim_tasks(ssim_dir)
