@@ -132,7 +132,6 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
         if "action_path" in valid_data and valid_data["action_path"]:
             keyboard_cond_list = []
             mouse_cond_list = []
-            num_bits = 6
             for action_path in valid_data["action_path"]:
                 if action_path:
                     action_data = np.load(action_path, allow_pickle=True)
@@ -141,66 +140,27 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
                             np.ndarray) and action_data.dtype == np.dtype('O'):
                         action_dict = action_data.item()
                         if "keyboard" in action_dict:
-                            keyboard_raw = action_dict["keyboard"]
-                            # Convert 1D bit-flag values to 2D multi-hot encoding
-                            if isinstance(keyboard_raw, np.ndarray):
-                                if keyboard_raw.ndim == 1:
-                                    # [T] -> [T, num_bits]
-                                    T = len(keyboard_raw)
-                                    multi_hot = np.zeros((T, num_bits),
-                                                         dtype=np.float32)
-                                    action_values = keyboard_raw.astype(int)
-                                    for bit_idx in range(num_bits):
-                                        target_idx = (
-                                            2 -
-                                            (bit_idx % 3)) + 3 * (bit_idx // 3)
-                                        if target_idx < num_bits:
-                                            multi_hot[:, target_idx] = (
-                                                (action_values >> bit_idx)
-                                                & 1).astype(np.float32)
-                                    keyboard_cond_list.append(multi_hot)
-                                else:
-                                    # If already 2D, pad to num_bits if necessary
-                                    k_data = keyboard_raw.astype(np.float32)
-                                    if k_data.ndim == 2 and k_data.shape[
-                                            -1] < num_bits:
-                                        padding = np.zeros(
-                                            (k_data.shape[0],
-                                             num_bits - k_data.shape[-1]),
-                                            dtype=np.float32)
-                                        k_data = np.concatenate(
-                                            [k_data, padding], axis=-1)
-                                    keyboard_cond_list.append(k_data)
-                            else:
-                                keyboard_cond_list.append(keyboard_raw)
+                            kb_length = len(action_dict["keyboard"])
+                            assert kb_length >= num_frames, (
+                                f"keyboard length {kb_length} is smaller than "
+                                f"num_frames {num_frames} for {action_path}.")
+                            keyboard_cond_list.append(
+                                action_dict["keyboard"][:num_frames].astype(
+                                    np.float32))
                         if "mouse" in action_dict:
-                            mouse_cond_list.append(action_dict["mouse"])
+                            ms_length = len(action_dict["mouse"])
+                            assert ms_length >= num_frames, (
+                                f"mouse length {ms_length} is smaller than "
+                                f"num_frames {num_frames} for {action_path}.")
+                            mouse_cond_list.append(
+                                action_dict["mouse"][:num_frames])
                     else:
-                        if isinstance(action_data,
-                                      np.ndarray) and action_data.ndim == 1:
-                            T = len(action_data)
-                            multi_hot = np.zeros((T, num_bits),
-                                                 dtype=np.float32)
-                            action_values = action_data.astype(int)
-                            for bit_idx in range(num_bits):
-                                target_idx = (
-                                    2 - (bit_idx % 3)) + 3 * (bit_idx // 3)
-                                if target_idx < num_bits:
-                                    multi_hot[:, target_idx] = (
-                                        (action_values >> bit_idx) & 1).astype(
-                                            np.float32)
-                            keyboard_cond_list.append(multi_hot)
-                        else:
-                            # If already 2D, pad to num_bits if necessary
-                            k_data = action_data.astype(np.float32)
-                            if k_data.ndim == 2 and k_data.shape[-1] < num_bits:
-                                padding = np.zeros(
-                                    (k_data.shape[0],
-                                     num_bits - k_data.shape[-1]),
-                                    dtype=np.float32)
-                                k_data = np.concatenate([k_data, padding],
-                                                        axis=-1)
-                            keyboard_cond_list.append(k_data)
+                        kb_length = len(action_data)
+                        assert kb_length >= num_frames, (
+                            f"keyboard length {kb_length} is smaller than "
+                            f"num_frames {num_frames} for {action_path}.")
+                        keyboard_cond_list.append(action_data.astype(
+                            np.float32)[:num_frames])
             if keyboard_cond_list:
                 features["keyboard_cond"] = keyboard_cond_list
             if mouse_cond_list:
