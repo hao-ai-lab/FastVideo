@@ -55,11 +55,73 @@ class KVCache:
     def batch_size(self) -> int:
         return self.k.shape[0]
 
-    def length_int(self) -> int:
+    def get_len(self) -> int:
         return int(self.length.item())
 
-    def set_length(self, value: int) -> None:
-        self.length.fill_(int(value))
+    def _preprocess_kv(self, new_k: torch.Tensor, new_v: torch.Tensor, num_new_tokens: int, store_first_only: bool):
+        target_batch = self.batch_size
+        if store_first_only:
+            # Expand first token to match required sequence length
+            write_k = new_k[:target_batch, :1].expand(-1, num_new_tokens, -1, -1)
+            write_v = new_v[:target_batch, :1].expand(-1, num_new_tokens, -1, -1)
+        else:
+            write_k = new_k[:target_batch]
+            write_v = new_v[:target_batch]
+        return write_k, write_v
+
+    def update(
+        self,
+        new_k: torch.Tensor,
+        new_v: torch.Tensor,
+        max_attn_size: int,
+        store_first_only: bool = False,
+        repeat_factor: int | None = None,
+        num_new_tokens: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        num_tokens = num_new_tokens if num_new_tokens is not None else new_k.shape[1]
+        write_k, write_v = self._preprocess_kv(new_k, new_v, num_tokens, store_first_only)
+        
+        cur_len = self.get_len()
+        
+        # Combine existing valid tokens with new ones
+        combined_k = torch.cat([self.k[:, :cur_len], write_k], dim=1)
+        combined_v = torch.cat([self.v[:, :cur_len], write_v], dim=1)
+        
+        # Keep only up to capacity
+        new_len = min(combined_k.shape[1], self.capacity)
+        self.k[:, :new_len] = combined_k[:, -new_len:]
+        self.v[:, :new_len] = combined_v[:, -new_len:]
+        self.length.fill_(new_len)
+        
+        return self._fetch_kv_slice(self.k, self.v, new_len, max_attn_size, repeat_factor)
+
+    def get_view(
+        self,
+        new_k: torch.Tensor,
+        new_v: torch.Tensor,
+        max_attn_size: int,
+        store_first_only: bool = False,
+        repeat_factor: int | None = None,
+        num_new_tokens: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        num_tokens = num_new_tokens if num_new_tokens is not None else new_k.shape[1]
+        write_k, write_v = self._preprocess_kv(new_k, new_v, num_tokens, store_first_only)
+        
+        cur_len = self.get_len()
+        combined_k = torch.cat([self.k[:, :cur_len], write_k], dim=1)
+        combined_v = torch.cat([self.v[:, :cur_len], write_v], dim=1)
+        
+        return self._fetch_kv_slice(combined_k, combined_v, combined_k.shape[1], max_attn_size, repeat_factor)
+
+    def _fetch_kv_slice(self, k, v, current_len, max_attn_size, repeat_factor):
+        start = max(0, current_len - max_attn_size)
+        out_k = k[:, start:current_len]
+        out_v = v[:, start:current_len]
+        
+        if repeat_factor is not None:
+            out_k = out_k.repeat(repeat_factor, 1, 1, 1)
+            out_v = out_v.repeat(repeat_factor, 1, 1, 1)
+        return out_k, out_v
 
 
 @dataclass
@@ -76,99 +138,6 @@ class KVCacheDict:
         }
 
 
-def _store_first_tokens(
-    new_tensor: torch.Tensor,
-    num_new_tokens: int,
-    target_batch: int,
-) -> torch.Tensor:
-    first = new_tensor[:1]
-    first = first.expand(target_batch, num_new_tokens, -1, -1)
-    return first
-
-
-def get_attended_kv_without_update(
-    kv_cache: KVCache,
-    new_k: torch.Tensor,
-    new_v: torch.Tensor,
-    num_new_tokens: int,
-    max_attn_size: int,
-    store_first_only: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    kv_capacity = kv_cache.capacity
-    target_batch = kv_cache.batch_size
-    cache_length = kv_cache.length_int()
-
-    if store_first_only:
-        write_k = _store_first_tokens(new_k, num_new_tokens, target_batch)
-        write_v = _store_first_tokens(new_v, num_new_tokens, target_batch)
-    else:
-        write_k = new_k
-        write_v = new_v
-
-    cache_k = kv_cache.k[:, :cache_length]
-    cache_v = kv_cache.v[:, :cache_length]
-
-    if num_new_tokens + cache_length > kv_capacity:
-        num_evicted_tokens = num_new_tokens + cache_length - kv_capacity
-        kept_k = cache_k[:, num_evicted_tokens:]
-        kept_v = cache_v[:, num_evicted_tokens:]
-        attend_k = torch.cat([kept_k, write_k], dim=1)
-        attend_v = torch.cat([kept_v, write_v], dim=1)
-    else:
-        attend_k = torch.cat([cache_k, write_k], dim=1)
-        attend_v = torch.cat([cache_v, write_v], dim=1)
-
-    attend_length = attend_k.shape[1]
-    attn_start = max(0, attend_length - max_attn_size)
-    cached_k = attend_k[:, attn_start:attend_length]
-    cached_v = attend_v[:, attn_start:attend_length]
-    return cached_k, cached_v
-
-
-def update_kv_cache_and_get_attended_kv(
-    kv_cache: KVCache,
-    new_k: torch.Tensor,
-    new_v: torch.Tensor,
-    num_new_tokens: int,
-    max_attn_size: int,
-    store_first_only: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    kv_capacity = kv_cache.capacity
-    cache_length = kv_cache.length_int()
-
-    cache_k = kv_cache.k[:, :cache_length]
-    cache_v = kv_cache.v[:, :cache_length]
-
-    if store_first_only:
-        write_k = _store_first_tokens(new_k, num_new_tokens, kv_cache.batch_size)
-        write_v = _store_first_tokens(new_v, num_new_tokens, kv_cache.batch_size)
-    else:
-        write_k = new_k
-        write_v = new_v
-
-    if num_new_tokens + cache_length > kv_capacity:
-        num_evicted_tokens = num_new_tokens + cache_length - kv_capacity
-        kept_k = cache_k[:, num_evicted_tokens:]
-        kept_v = cache_v[:, num_evicted_tokens:]
-        updated_k = torch.cat([kept_k, write_k], dim=1)
-        updated_v = torch.cat([kept_v, write_v], dim=1)
-    else:
-        updated_k = torch.cat([cache_k, write_k], dim=1)
-        updated_v = torch.cat([cache_v, write_v], dim=1)
-
-    updated_length = min(updated_k.shape[1], kv_capacity)
-    kv_cache.k[:, :updated_length] = updated_k[:, :updated_length]
-    kv_cache.v[:, :updated_length] = updated_v[:, :updated_length]
-
-    attn_start = max(0, updated_length - max_attn_size)
-    cached_k = kv_cache.k[:, attn_start:updated_length]
-    cached_v = kv_cache.v[:, attn_start:updated_length]
-
-    kv_cache.set_length(updated_length)
-
-    return cached_k, cached_v
-
-
 def attend_with_kv_cache(
     q: torch.Tensor,
     new_k: torch.Tensor,
@@ -183,29 +152,13 @@ def attend_with_kv_cache(
     num_new_tokens: int | None = None,
 ) -> torch.Tensor:
     """Unified KV-cache attention path"""
-    tokens_to_add = q.shape[1] if num_new_tokens is None else num_new_tokens
 
     if update_kv_cache:
-        cached_k, cached_v = update_kv_cache_and_get_attended_kv(
-            kv_cache=kv_cache,
-            new_k=new_k,
-            new_v=new_v,
-            num_new_tokens=tokens_to_add,
-            max_attn_size=max_attn_size,
-            store_first_only=store_first_only,
+        cached_k, cached_v = kv_cache.update(
+            new_k, new_v, max_attn_size, store_first_only, repeat_factor, num_new_tokens
         )
     else:
-        cached_k, cached_v = get_attended_kv_without_update(
-            kv_cache=kv_cache,
-            new_k=new_k,
-            new_v=new_v,
-            num_new_tokens=tokens_to_add,
-            max_attn_size=max_attn_size,
-            store_first_only=store_first_only,
+        cached_k, cached_v = kv_cache.get_view(
+            new_k, new_v, max_attn_size, store_first_only, repeat_factor, num_new_tokens
         )
-
-    if repeat_factor is not None:
-        cached_k = cached_k.repeat(repeat_factor, 1, 1, 1)
-        cached_v = cached_v.repeat(repeat_factor, 1, 1, 1)
-
     return attend_fn(q, cached_k, cached_v)
