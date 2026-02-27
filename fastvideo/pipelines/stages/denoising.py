@@ -1241,6 +1241,39 @@ class SdeDenoisingStage(DenoisingStage):
             },
         )
 
+        if batch.mouse_cond is not None and batch.keyboard_cond is not None:
+            from fastvideo.models.dits.hyworld.pose import process_custom_actions
+
+            viewmats, intrinsics, action_labels = process_custom_actions(
+                batch.keyboard_cond, batch.mouse_cond
+            )
+            camera_action_kwargs = self.prepare_extra_func_kwargs(
+                self.transformer.forward,
+                {
+                    "viewmats": viewmats.unsqueeze(0).to(
+                        get_local_torch_device(), dtype=target_dtype
+                    ),
+                    "Ks": intrinsics.unsqueeze(0).to(
+                        get_local_torch_device(), dtype=target_dtype
+                    ),
+                    "action": action_labels.unsqueeze(0).to(
+                        get_local_torch_device(), dtype=target_dtype
+                    ),
+                },
+            )
+        else:
+            camera_action_kwargs = {}
+
+        action_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "mouse_cond": batch.mouse_cond,
+                "keyboard_cond": batch.keyboard_cond,
+                "c2ws_plucker_emb": batch.c2ws_plucker_emb,
+            },
+        )
+
+
         # Get latents and embeddings
         assert batch.latents is not None, "latents must be provided"
         latents = batch.latents
@@ -1347,6 +1380,8 @@ class SdeDenoisingStage(DenoisingStage):
                             guidance=guidance_expand,
                             **image_kwargs,
                             **pos_cond_kwargs,
+                            **action_kwargs,
+                            **camera_action_kwargs,
                         ).permute(0, 2, 1, 3, 4)
 
                     pred_video = pred_noise_to_pred_video(

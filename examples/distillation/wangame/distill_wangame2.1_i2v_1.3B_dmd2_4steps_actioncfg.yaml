@@ -86,7 +86,7 @@ training:
   validation_guidance_scale: "1.0"
 
 pipeline_config:
-  flow_shift: 3
+  flow_shift: 5
   sampler_kind: sde
 
 method_config:
