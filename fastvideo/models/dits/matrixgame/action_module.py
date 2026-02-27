@@ -133,9 +133,7 @@ def _update_kv_cache_and_attend(
         k.shape[1] if use_k_for_num_tokens else q.shape[1]
     ) == num_frame_per_block
 
-    sink_size = 0
     max_attention_size = local_attn_size
-    sink_tokens = sink_size * 1
     kv_cache_size = kv_cache["k"].shape[1]
     num_new_tokens = k.shape[1] if use_k_for_num_tokens else q.shape[1]
 
@@ -157,29 +155,15 @@ def _update_kv_cache_and_attend(
         num_evicted_tokens = (
             num_new_tokens + original_local_end_index - kv_cache_size
         )
-        num_rolled_tokens = (
-            original_local_end_index
-            - num_evicted_tokens
-            - sink_tokens
-        )
+        num_rolled_tokens = original_local_end_index - num_evicted_tokens
         # Roll k cache
-        kv_cache["k"][:, sink_tokens : sink_tokens + num_rolled_tokens] = (
-            kv_cache["k"][
-                :,
-                sink_tokens + num_evicted_tokens : sink_tokens
-                + num_evicted_tokens
-                + num_rolled_tokens,
-            ].clone()
-        )
+        kv_cache["k"][:, :num_rolled_tokens] = kv_cache["k"][
+            :, num_evicted_tokens : num_evicted_tokens + num_rolled_tokens
+        ].clone()
         # Roll v cache
-        kv_cache["v"][:, sink_tokens : sink_tokens + num_rolled_tokens] = (
-            kv_cache["v"][
-                :,
-                sink_tokens + num_evicted_tokens : sink_tokens
-                + num_evicted_tokens
-                + num_rolled_tokens,
-            ].clone()
-        )
+        kv_cache["v"][:, :num_rolled_tokens] = kv_cache["v"][
+            :, num_evicted_tokens : num_evicted_tokens + num_rolled_tokens
+        ].clone()
         # Calculate indices with eviction adjustment
         local_end_index = (
             original_local_end_index

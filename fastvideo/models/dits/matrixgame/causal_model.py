@@ -144,7 +144,6 @@ class CausalMatrixGameSelfAttention(nn.Module):
         dim: int,
         num_heads: int,
         local_attn_size: int = -1,
-        sink_size: int = 0,
         qk_norm: bool = True,
         eps: float = 1e-6,
     ) -> None:
@@ -154,7 +153,6 @@ class CausalMatrixGameSelfAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.local_attn_size = local_attn_size
-        self.sink_size = sink_size
         self.qk_norm = qk_norm
         self.eps = eps
         self._freqs_cache = None
@@ -269,7 +267,6 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 )
 
             current_end = current_start + roped_query.shape[1]
-            sink_tokens = self.sink_size * frame_seqlen
 
             # Compute max_attention_size dynamically based on actual frame_seqlen
             max_attention_size = (
@@ -297,23 +294,15 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 num_evicted_tokens = (
                     num_new_tokens + local_end_index_prev - kv_cache_size
                 )
-                num_rolled_tokens = (
-                    local_end_index_prev - num_evicted_tokens - sink_tokens
-                )
-                kv_cache["k"][
-                    :, sink_tokens : sink_tokens + num_rolled_tokens
-                ] = kv_cache["k"][
+                num_rolled_tokens = local_end_index_prev - num_evicted_tokens
+                kv_cache["k"][:, :num_rolled_tokens] = kv_cache["k"][
                     :,
-                    sink_tokens + num_evicted_tokens : sink_tokens
-                    + num_evicted_tokens
+                    num_evicted_tokens : num_evicted_tokens
                     + num_rolled_tokens,
                 ].clone()
-                kv_cache["v"][
-                    :, sink_tokens : sink_tokens + num_rolled_tokens
-                ] = kv_cache["v"][
+                kv_cache["v"][:, :num_rolled_tokens] = kv_cache["v"][
                     :,
-                    sink_tokens + num_evicted_tokens : sink_tokens
-                    + num_evicted_tokens
+                    num_evicted_tokens : num_evicted_tokens
                     + num_rolled_tokens,
                 ].clone()
                 local_end_index = (
@@ -360,7 +349,6 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         ffn_dim: int,
         num_heads: int,
         local_attn_size: int = -1,
-        sink_size: int = 0,
         qk_norm: str = "rms_norm_across_heads",
         cross_attn_norm: bool = False,
         eps: float = 1e-6,
@@ -384,7 +372,6 @@ class CausalMatrixGameTransformerBlock(nn.Module):
             dim,
             num_heads,
             local_attn_size=local_attn_size,
-            sink_size=sink_size,
             qk_norm=qk_norm,
             eps=eps,
         )
@@ -630,11 +617,6 @@ class CausalMatrixGameWanModel(BaseDiT):
             if arch_cfg
             else getattr(config, "local_attn_size", -1)
         )
-        self.sink_size = (
-            getattr(arch_cfg, "sink_size", getattr(config, "sink_size", 0))
-            if arch_cfg
-            else getattr(config, "sink_size", 0)
-        )
 
         # 1. Patch & position embedding
         self.patch_embedding = PatchEmbed(
@@ -667,7 +649,6 @@ class CausalMatrixGameWanModel(BaseDiT):
                     config.ffn_dim,
                     config.num_attention_heads,
                     self.local_attn_size,
-                    self.sink_size,
                     config.qk_norm,
                     config.cross_attn_norm,
                     config.eps,
