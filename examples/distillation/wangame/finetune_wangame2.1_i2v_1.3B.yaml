@@ -5,7 +5,7 @@ recipe:
 roles:
   student:
     family: wangame
-    path: weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers
+    path: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
     trainable: true
 
 training:
@@ -65,7 +65,7 @@ training:
 
   # Tracking / validation
   tracker_project_name: distillation_wangame
-  wandb_run_name: wangame_finetune
+  wandb_run_name: wangame_finetune_from_pretrained
   log_validation: true
   validation_dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_8.json
   validation_steps: 100
