@@ -30,6 +30,7 @@ from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.distributed.utils import create_attention_mask_for_padding
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import RMSNorm
+from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import apply_rotary_emb
 from fastvideo.layers.visual_embedding import Timesteps
@@ -101,14 +102,18 @@ class Gen3CTimestepEmbedding(nn.Module):
     ) -> None:
         super().__init__()
         self.use_adaln_lora = use_adaln_lora
-        
-        self.linear_1 = nn.Linear(in_features, out_features, bias=False)
+
+        self.linear_1 = ReplicatedLinear(in_features, out_features, bias=False)
         self.activation = nn.SiLU()
-        
+
         if use_adaln_lora:
-            self.linear_2 = nn.Linear(out_features, 3 * out_features, bias=False)
+            self.linear_2 = ReplicatedLinear(out_features,
+                                             3 * out_features,
+                                             bias=False)
         else:
-            self.linear_2 = nn.Linear(out_features, out_features, bias=False)
+            self.linear_2 = ReplicatedLinear(out_features,
+                                             out_features,
+                                             bias=False)
 
     def forward(self, sample: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
@@ -121,9 +126,9 @@ class Gen3CTimestepEmbedding(nn.Module):
         output (linear_2) is used exclusively for AdaLN-LoRA parameters.
         This matches the official GEN3C implementation.
         """
-        emb = self.linear_1(sample)
+        emb, _ = self.linear_1(sample)
         emb = self.activation(emb)
-        emb = self.linear_2(emb)
+        emb, _ = self.linear_2(emb)
 
         if self.use_adaln_lora:
             adaln_lora = emb  # (B, 3D) - full processed embedding for LoRA
