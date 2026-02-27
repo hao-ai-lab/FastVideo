@@ -19,7 +19,6 @@ def get_attended_kv_without_update(
     new_v: torch.Tensor,
     num_new_tokens: int,
     max_attn_size: int,
-    sink_tokens: int = 0,
     store_first_only: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     kv_capacity = kv_cache["k"].shape[1]
@@ -42,24 +41,8 @@ def get_attended_kv_without_update(
 
     if num_new_tokens + cache_length > kv_capacity:
         num_evicted_tokens = num_new_tokens + cache_length - kv_capacity
-        if sink_tokens > 0:
-            kept_k = torch.cat(
-                [
-                    cache_k[:, :sink_tokens],
-                    cache_k[:, sink_tokens + num_evicted_tokens :],
-                ],
-                dim=1,
-            )
-            kept_v = torch.cat(
-                [
-                    cache_v[:, :sink_tokens],
-                    cache_v[:, sink_tokens + num_evicted_tokens :],
-                ],
-                dim=1,
-            )
-        else:
-            kept_k = cache_k[:, num_evicted_tokens:]
-            kept_v = cache_v[:, num_evicted_tokens:]
+        kept_k = cache_k[:, num_evicted_tokens:]
+        kept_v = cache_v[:, num_evicted_tokens:]
         attend_k = torch.cat([kept_k, write_k], dim=1)
         attend_v = torch.cat([kept_v, write_v], dim=1)
     else:
@@ -79,7 +62,6 @@ def update_kv_cache_and_get_attended_kv(
     new_v: torch.Tensor,
     num_new_tokens: int,
     max_attn_size: int,
-    sink_tokens: int = 0,
     store_first_only: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     kv_capacity = kv_cache["k"].shape[1]
@@ -101,24 +83,8 @@ def update_kv_cache_and_get_attended_kv(
 
     if num_new_tokens + cache_length > kv_capacity:
         num_evicted_tokens = num_new_tokens + cache_length - kv_capacity
-        if sink_tokens > 0:
-            kept_k = torch.cat(
-                [
-                    cache_k[:, :sink_tokens],
-                    cache_k[:, sink_tokens + num_evicted_tokens :],
-                ],
-                dim=1,
-            )
-            kept_v = torch.cat(
-                [
-                    cache_v[:, :sink_tokens],
-                    cache_v[:, sink_tokens + num_evicted_tokens :],
-                ],
-                dim=1,
-            )
-        else:
-            kept_k = cache_k[:, num_evicted_tokens:]
-            kept_v = cache_v[:, num_evicted_tokens:]
+        kept_k = cache_k[:, num_evicted_tokens:]
+        kept_v = cache_v[:, num_evicted_tokens:]
         updated_k = torch.cat([kept_k, write_k], dim=1)
         updated_v = torch.cat([kept_v, write_v], dim=1)
     else:
