@@ -16,8 +16,8 @@ from fastvideo.layers.rotary_embedding import (
 )
 from fastvideo.platforms import AttentionBackendEnum
 from .kv_cache import (
-    get_attended_kv_without_update,
-    update_kv_cache_and_get_attended_kv,
+    attend_with_kv_cache,
+    KVCache,
 )
 
 
@@ -99,7 +99,7 @@ def _update_kv_cache_and_attend(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
-    kv_cache: dict[str, torch.Tensor | int],
+    kv_cache: KVCache,
     attn_layer: LocalAttention,
     start_frame: int,
     num_frame_per_block: int,
@@ -115,30 +115,18 @@ def _update_kv_cache_and_attend(
         k.shape[1] if use_k_for_num_tokens else q.shape[1]
     ) == num_frame_per_block
     num_new_tokens = k.shape[1] if use_k_for_num_tokens else q.shape[1]
-    if update_kv_cache:
-        cached_k, cached_v = update_kv_cache_and_get_attended_kv(
-            kv_cache=kv_cache,
-            new_k=k,
-            new_v=v,
-            num_new_tokens=num_new_tokens,
-            max_attn_size=local_attn_size,
-            store_first_only=store_first_only,
-        )
-    else:
-        cached_k, cached_v = get_attended_kv_without_update(
-            kv_cache=kv_cache,
-            new_k=k,
-            new_v=v,
-            num_new_tokens=num_new_tokens,
-            max_attn_size=local_attn_size,
-            store_first_only=store_first_only,
-        )
-
-    if repeat_factor is not None:
-        cached_k = cached_k.repeat(repeat_factor, 1, 1, 1)
-        cached_v = cached_v.repeat(repeat_factor, 1, 1, 1)
-
-    return attn_layer(q, cached_k, cached_v)
+    return attend_with_kv_cache(
+        q=q,
+        new_k=k,
+        new_v=v,
+        kv_cache=kv_cache,
+        max_attn_size=local_attn_size,
+        attend_fn=attn_layer,
+        update_kv_cache=update_kv_cache,
+        store_first_only=store_first_only,
+        repeat_factor=repeat_factor,
+        num_new_tokens=num_new_tokens,
+    )
 
 
 class ActionModule(nn.Module):
@@ -371,7 +359,7 @@ class ActionModule(nn.Module):
         mouse_condition: torch.Tensor,
         *,
         is_causal: bool,
-        kv_cache_mouse: dict[str, torch.Tensor] | None,
+        kv_cache_mouse: KVCache | None,
         pad_t: int,
         num_frame_per_block: int,
         block_mask_mouse: BlockMask | None,
@@ -489,7 +477,7 @@ class ActionModule(nn.Module):
         *,
         is_causal: bool,
         use_rope_keyboard: bool,
-        kv_cache_keyboard: dict[str, torch.Tensor] | None,
+        kv_cache_keyboard: KVCache | None,
         pad_t: int,
         num_frame_per_block: int,
         block_mask_keyboard: BlockMask | None,
@@ -648,8 +636,8 @@ class ActionModule(nn.Module):
         block_mask_mouse: BlockMask | None = None,
         block_mask_keyboard: BlockMask | None = None,
         is_causal: bool = False,
-        kv_cache_mouse: dict[str, torch.Tensor] | None = None,
-        kv_cache_keyboard: dict[str, torch.Tensor] | None = None,
+        kv_cache_mouse: KVCache | None = None,
+        kv_cache_keyboard: KVCache | None = None,
         start_frame: int = 0,
         use_rope_keyboard: bool = True,
         num_frame_per_block: int = 3,

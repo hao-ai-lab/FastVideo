@@ -45,8 +45,8 @@ from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 from .action_module import ActionModule
 from .kv_cache import (
-    get_attended_kv_without_update,
-    update_kv_cache_and_get_attended_kv,
+    attend_with_kv_cache,
+    KVCache,
 )
 from .model import MatrixGameCrossAttention
 
@@ -181,7 +181,7 @@ class CausalMatrixGameSelfAttention(nn.Module):
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         block_mask: BlockMask,
         grid_sizes: tuple[int, int, int],
-        kv_cache: dict | None = None,
+        kv_cache: KVCache | None = None,
         current_start: int = 0,
         cache_start: int | None = None,
         update_kv_cache: bool = True,
@@ -277,28 +277,20 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 if self.local_attn_size == -1
                 else self.local_attn_size * frame_seqlen
             )
-            if update_kv_cache:
-                k_for_attn, v_for_attn = update_kv_cache_and_get_attended_kv(
-                    kv_cache=kv_cache,
-                    new_k=roped_key,
-                    new_v=v,
-                    num_new_tokens=roped_query.shape[1],
-                    max_attn_size=max_attention_size,
-                )
-            else:
-                k_for_attn, v_for_attn = get_attended_kv_without_update(
-                    kv_cache=kv_cache,
-                    new_k=roped_key,
-                    new_v=v,
-                    num_new_tokens=roped_query.shape[1],
-                    max_attn_size=max_attention_size,
-                )
-
-            x = torch.nn.functional.scaled_dot_product_attention(
-                roped_query.transpose(1, 2),
-                k_for_attn.transpose(1, 2),
-                v_for_attn.transpose(1, 2),
-            ).transpose(1, 2)
+            x = attend_with_kv_cache(
+                q=roped_query,
+                new_k=roped_key,
+                new_v=v,
+                kv_cache=kv_cache,
+                max_attn_size=max_attention_size,
+                attend_fn=lambda q_t, k_t, v_t: torch.nn.functional.scaled_dot_product_attention(
+                    q_t.transpose(1, 2),
+                    k_t.transpose(1, 2),
+                    v_t.transpose(1, 2),
+                ).transpose(1, 2),
+                update_kv_cache=update_kv_cache,
+                num_new_tokens=roped_query.shape[1],
+            )
 
         return x
 
@@ -423,9 +415,9 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         block_mask_keyboard: BlockMask | None = None,
         num_frame_per_block: int = 1,
         use_rope_keyboard: bool = True,
-        kv_cache: dict | None = None,
-        kv_cache_mouse: dict | None = None,
-        kv_cache_keyboard: dict | None = None,
+        kv_cache: KVCache | None = None,
+        kv_cache_mouse: KVCache | None = None,
+        kv_cache_keyboard: KVCache | None = None,
         crossattn_cache: dict | None = None,
         current_start: int = 0,
         cache_start: int | None = None,
@@ -827,10 +819,10 @@ class CausalMatrixGameWanModel(BaseDiT):
         | None = None,
         mouse_cond: torch.Tensor | None = None,
         keyboard_cond: torch.Tensor | None = None,
-        kv_cache: dict = None,
-        kv_cache_mouse: dict = None,
-        kv_cache_keyboard: dict = None,
-        crossattn_cache: dict = None,
+        kv_cache: list[KVCache] | None = None,
+        kv_cache_mouse: list[KVCache] | None = None,
+        kv_cache_keyboard: list[KVCache] | None = None,
+        crossattn_cache: list[dict] | None = None,
         current_start: int = 0,
         cache_start: int = 0,
         start_frame: int = 0,
