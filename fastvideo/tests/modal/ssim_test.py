@@ -175,6 +175,20 @@ def _discover_ssim_tasks(ssim_dir: str) -> list[SSIMTask]:
     return sorted(tasks, key=lambda task: task.sort_key)
 
 
+def _partition_tasks(
+    tasks: list[SSIMTask],
+    partition_index: int,
+) -> list[SSIMTask]:
+    """Split tasks into two groups via round-robin on sorted order.
+
+    Partition 0 gets even-indexed tasks, partition 1 gets odd-indexed.
+    """
+    return [
+        task for i, task in enumerate(tasks)
+        if i % 2 == partition_index
+    ]
+
+
 def _build_checkout_command(git_commit: str, pr_number: str | None) -> str:
     import shlex
 
@@ -526,18 +540,29 @@ def _print_ssim_task_results(
     return 1 if failed or terminated or skipped else 0
 
 
-@app.function(gpu="L40S:8", **SSIM_COMMON_KWARGS)
-def run_ssim_tests_single_instance() -> int:
+@app.function(gpu=f"L40S:{SSIM_NUM_GPUS}", **SSIM_COMMON_KWARGS)
+def run_ssim_partition(partition_index: int) -> int:
     repo_root, tasks = _prepare_ssim_workspace()
-    results = _schedule_ssim_tasks(repo_root, tasks)
-    return _print_ssim_task_results(tasks, results)
+    partition = _partition_tasks(tasks, partition_index)
+    if not partition:
+        print(f"Partition {partition_index}: no tasks assigned.")
+        return 0
+    print(
+        f"Partition {partition_index}: running "
+        f"{len(partition)}/{len(tasks)} tasks"
+    )
+    results = _schedule_ssim_tasks(repo_root, partition)
+    return _print_ssim_task_results(partition, results)
 
 
 @app.local_entrypoint()
 def run_ssim_tests():
     import sys
 
-    exit_code = run_ssim_tests_single_instance.remote()
-    if exit_code != 0:
-        sys.exit(exit_code)
+    future_0 = run_ssim_partition.spawn(partition_index=0)
+    future_1 = run_ssim_partition.spawn(partition_index=1)
+    exit_code_0 = future_0.get()
+    exit_code_1 = future_1.get()
+    if exit_code_0 != 0 or exit_code_1 != 0:
+        sys.exit(1)
     print("All SSIM tasks passed.")
