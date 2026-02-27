@@ -194,15 +194,10 @@ def _discover_ssim_tasks(ssim_dir: str) -> list[SSIMTask]:
 def _partition_tasks(
     tasks: list[SSIMTask],
     partition_index: int,
+    num_partitions: int = 2,
 ) -> list[SSIMTask]:
-    """Split tasks into two groups via round-robin on sorted order.
-
-    Partition 0 gets even-indexed tasks, partition 1 gets odd-indexed.
-    """
-    return [
-        task for i, task in enumerate(tasks)
-        if i % 2 == partition_index
-    ]
+    """Split tasks into N groups via round-robin on sorted order."""
+    return tasks[partition_index::num_partitions]
 
 
 def _build_checkout_command(git_commit: str, pr_number: str | None) -> str:
@@ -654,38 +649,13 @@ def run_ssim_partition(
 @app.local_entrypoint()
 def run_ssim_tests():
     import sys
-    from concurrent.futures import (
-        ThreadPoolExecutor,
-        as_completed,
-    )
 
-    calls = [
-        run_ssim_partition.spawn(partition_index=0),
-        run_ssim_partition.spawn(partition_index=1),
-    ]
+    future_0 = run_ssim_partition.spawn(partition_index=0)
+    future_1 = run_ssim_partition.spawn(partition_index=1)
     results: list[_PartitionResult | None] = [
-        None, None
+        future_0.get(),
+        future_1.get(),
     ]
-
-    def collect(
-        index: int,
-    ) -> tuple[int, _PartitionResult | None]:
-        try:
-            results[index] = calls[index].get()
-            return index, results[index]
-        except Exception:
-            return index, None
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        thread_futures = [
-            pool.submit(collect, i) for i in range(2)
-        ]
-        for done in as_completed(thread_futures):
-            idx, result = done.result()
-            if result is not None and result.exit_code != 0:
-                other = 1 - idx
-                calls[other].cancel()
-                break
 
     exit_code = _print_combined_results(results)
     if exit_code != 0:
