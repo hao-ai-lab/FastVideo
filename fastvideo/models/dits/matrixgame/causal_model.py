@@ -44,6 +44,7 @@ from fastvideo.models.dits.wanvideo import (
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 from .action_module import ActionModule
+from .kv_cache import update_kv_cache_and_get_attended_kv
 from .model import MatrixGameCrossAttention
 
 logger = init_logger(__name__)
@@ -266,78 +267,26 @@ class CausalMatrixGameSelfAttention(nn.Module):
                     "grid_sizes not provided, using q.shape[1] as frame_seqlen"
                 )
 
-            current_end = current_start + roped_query.shape[1]
-
             # Compute max_attention_size dynamically based on actual frame_seqlen
             max_attention_size = (
                 15 * frame_seqlen
                 if self.local_attn_size == -1
                 else self.local_attn_size * frame_seqlen
             )
-
-            kv_cache_size = kv_cache["k"].shape[1]
-            num_new_tokens = roped_query.shape[1]
-            global_end_index = (
-                int(kv_cache["global_end_index"].item())
-                if isinstance(kv_cache["global_end_index"], torch.Tensor)
-                else int(kv_cache["global_end_index"])
+            k_for_attn, v_for_attn = update_kv_cache_and_get_attended_kv(
+                kv_cache=kv_cache,
+                new_k=roped_key,
+                new_v=v,
+                current_start=current_start,
+                num_new_tokens=roped_query.shape[1],
+                max_attn_size=max_attention_size,
             )
-            local_end_index_prev = (
-                int(kv_cache["local_end_index"].item())
-                if isinstance(kv_cache["local_end_index"], torch.Tensor)
-                else int(kv_cache["local_end_index"])
-            )
-
-            if (current_end > global_end_index) and (
-                num_new_tokens + local_end_index_prev > kv_cache_size
-            ):
-                num_evicted_tokens = (
-                    num_new_tokens + local_end_index_prev - kv_cache_size
-                )
-                num_rolled_tokens = local_end_index_prev - num_evicted_tokens
-                kv_cache["k"][:, :num_rolled_tokens] = kv_cache["k"][
-                    :,
-                    num_evicted_tokens : num_evicted_tokens
-                    + num_rolled_tokens,
-                ].clone()
-                kv_cache["v"][:, :num_rolled_tokens] = kv_cache["v"][
-                    :,
-                    num_evicted_tokens : num_evicted_tokens
-                    + num_rolled_tokens,
-                ].clone()
-                local_end_index = (
-                    local_end_index_prev
-                    + current_end - global_end_index - num_evicted_tokens
-                )
-                local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
-            else:
-                local_end_index = (
-                    local_end_index_prev + current_end - global_end_index
-                )
-                local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
-
-            kv_start = max(0, local_end_index - max_attention_size)
-            k_for_attn = kv_cache["k"][:, kv_start:local_end_index]
-            v_for_attn = kv_cache["v"][:, kv_start:local_end_index]
 
             x = torch.nn.functional.scaled_dot_product_attention(
                 roped_query.transpose(1, 2),
                 k_for_attn.transpose(1, 2),
                 v_for_attn.transpose(1, 2),
             ).transpose(1, 2)
-
-            if isinstance(kv_cache["global_end_index"], torch.Tensor):
-                kv_cache["global_end_index"].fill_(current_end)
-            else:
-                kv_cache["global_end_index"] = current_end
-            if isinstance(kv_cache["local_end_index"], torch.Tensor):
-                kv_cache["local_end_index"].fill_(local_end_index)
-            else:
-                kv_cache["local_end_index"] = local_end_index
 
         return x
 
