@@ -72,7 +72,7 @@ def test_matrixgame_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     base_output_dir = os.path.join(script_dir, "generated_videos", model_id)
     output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
-    output_video_name = f"{prompt[:100].strip()}.mp4"
+    output_video_name = f"output.mp4"
 
     os.makedirs(output_dir, exist_ok=True)
 
