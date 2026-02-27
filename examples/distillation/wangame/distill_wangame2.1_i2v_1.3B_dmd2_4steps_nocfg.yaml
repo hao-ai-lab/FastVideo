@@ -78,7 +78,7 @@ training:
 
   # Tracking / validation
   tracker_project_name: distillation_wangame
-  wandb_run_name: wangame_dmd2_4steps_distill_actioncfg
+  wandb_run_name: wangame_dmd2_4steps_distill_nocfg
   log_validation: true
   validation_dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_8.json
   validation_steps: 50
@@ -106,7 +106,7 @@ method_config:
   cfg_uncond:
     on_missing: error
     # For I2V+action, a practical default is "no-action baseline".
-    action: zero
+    action: keep
     # Keep the reference image conditioning for I2V.
     image: keep
     # Text is unused in current wangame training batches, but kept for schema symmetry.
