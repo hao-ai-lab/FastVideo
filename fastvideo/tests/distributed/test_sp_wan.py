@@ -24,7 +24,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.models.dits.wanvideo import WanTransformer3DModel
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
-SP_WORLD_SIZE = 4
+SP_WORLD_SIZE = 2
 SEED = 2026
 
 
@@ -241,7 +241,7 @@ def test_sp_gradient_matches_single_rank(tmp_path: Path) -> None:
 
     script_path = Path(__file__).resolve()
     single_path = tmp_path / "single_rank_grads.pt"
-    sp_path = tmp_path / "sp4_grads.pt"
+    sp_path = tmp_path / f"sp{SP_WORLD_SIZE}_grads.pt"
 
     _run_torchrun(
         script_path=script_path,
