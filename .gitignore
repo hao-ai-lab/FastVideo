@@ -1,6 +1,5 @@
 __pycache__
 .ipynb_checkpoints
-id_ed25519
 *.pth
 UCF-101/
 results/
@@ -35,7 +34,6 @@ env
 *.log
 weights/
 logs/
-official_weights/
 
 # SSIM test outputs
 fastvideo/tests/ssim/generated_videos/
@@ -94,10 +92,3 @@ preprocess_output_text/
 .sisyphus/
 openspec/
 fastvideo/tests/ssim/reference_videos/**
-
-# Local temp/debug
-bundle_umt5.py
-diagnose_weights.py
-converted/
-*.bak
-video_samples_waypoint_runpod/
