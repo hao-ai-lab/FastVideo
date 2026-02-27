@@ -67,18 +67,12 @@ class VideoGenerator:
         self.executor = executor_class(fastvideo_args)
 
     @classmethod
-    def from_pretrained(cls,
-                        model_path: str,
-                        device: str | None = None,
-                        torch_dtype: torch.dtype | None = None,
-                        **kwargs) -> "VideoGenerator":
+    def from_pretrained(cls, model_path: str, **kwargs) -> "VideoGenerator":
         """
         Create a video generator from a pretrained model.
         
         Args:
             model_path: Path or identifier for the pretrained model
-            device: Device to load the model on (e.g., "cuda", "cuda:0", "cpu")
-            torch_dtype: Data type for model weights (e.g., torch.float16)
             pipeline_config: Pipeline config to use for inference
             **kwargs: Additional arguments to customize model loading, set any FastVideoArgs or PipelineConfig attributes here.
                 
@@ -310,7 +304,6 @@ class VideoGenerator:
         """Internal method for single video generation"""
         # Create a copy of inference args to avoid modifying the original
         fastvideo_args = self.fastvideo_args
-        pipeline_config = fastvideo_args.pipeline_config
 
         # Validate inputs
         if not isinstance(prompt, str):
@@ -332,28 +325,6 @@ class VideoGenerator:
                 f"Height, width, and num_frames must be positive integers, got "
                 f"height={sampling_param.height}, width={sampling_param.width}, "
                 f"num_frames={sampling_param.num_frames}")
-
-        temporal_scale_factor = pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        num_frames = sampling_param.num_frames
-        use_temporal_scaling_frames = pipeline_config.vae_config.use_temporal_scaling_frames
-
-        # Adjust number of frames based on number of GPUs
-        if not use_temporal_scaling_frames:
-            raise ValueError(
-                "Only temporal-scaling-frame VAE configs are supported.")
-        orig_latent_num_frames = (num_frames - 1) // temporal_scale_factor + 1
-
-        if orig_latent_num_frames % fastvideo_args.num_gpus != 0:
-            # Convert back to number of frames, ensuring num_frames-1 is a
-            # multiple of temporal_scale_factor.
-            new_num_frames = (orig_latent_num_frames -
-                              1) * temporal_scale_factor + 1
-
-            logger.info(
-                "Adjusting number of frames from %s to %s based on number of GPUs (%s)",
-                sampling_param.num_frames, new_num_frames,
-                fastvideo_args.num_gpus)
-            sampling_param.num_frames = new_num_frames
 
         # Calculate sizes
         target_height = align_to(sampling_param.height, 16)
