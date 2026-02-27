@@ -44,7 +44,10 @@ from fastvideo.models.dits.wanvideo import (
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 from .action_module import ActionModule
-from .kv_cache import update_kv_cache_and_get_attended_kv
+from .kv_cache import (
+    get_attended_kv_without_update,
+    update_kv_cache_and_get_attended_kv,
+)
 from .model import MatrixGameCrossAttention
 
 logger = init_logger(__name__)
@@ -181,6 +184,7 @@ class CausalMatrixGameSelfAttention(nn.Module):
         kv_cache: dict | None = None,
         current_start: int = 0,
         cache_start: int | None = None,
+        update_kv_cache: bool = True,
     ):
         if cache_start is None:
             cache_start = current_start
@@ -273,14 +277,22 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 if self.local_attn_size == -1
                 else self.local_attn_size * frame_seqlen
             )
-            k_for_attn, v_for_attn = update_kv_cache_and_get_attended_kv(
-                kv_cache=kv_cache,
-                new_k=roped_key,
-                new_v=v,
-                current_start=current_start,
-                num_new_tokens=roped_query.shape[1],
-                max_attn_size=max_attention_size,
-            )
+            if update_kv_cache:
+                k_for_attn, v_for_attn = update_kv_cache_and_get_attended_kv(
+                    kv_cache=kv_cache,
+                    new_k=roped_key,
+                    new_v=v,
+                    num_new_tokens=roped_query.shape[1],
+                    max_attn_size=max_attention_size,
+                )
+            else:
+                k_for_attn, v_for_attn = get_attended_kv_without_update(
+                    kv_cache=kv_cache,
+                    new_k=roped_key,
+                    new_v=v,
+                    num_new_tokens=roped_query.shape[1],
+                    max_attn_size=max_attention_size,
+                )
 
             x = torch.nn.functional.scaled_dot_product_attention(
                 roped_query.transpose(1, 2),
@@ -417,6 +429,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         crossattn_cache: dict | None = None,
         current_start: int = 0,
         cache_start: int | None = None,
+        update_kv_cache: bool = True,
     ) -> torch.Tensor:
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
@@ -464,6 +477,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
             kv_cache,
             current_start,
             cache_start,
+            update_kv_cache=update_kv_cache,
         )
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
@@ -503,6 +517,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
                     start_frame=start_frame,
                     use_rope_keyboard=use_rope_keyboard,
                     num_frame_per_block=num_frame_per_block,
+                    update_kv_cache=update_kv_cache,
                 )
 
         ff_output = self.ffn(
@@ -819,6 +834,7 @@ class CausalMatrixGameWanModel(BaseDiT):
         current_start: int = 0,
         cache_start: int = 0,
         start_frame: int = 0,
+        update_kv_cache: bool = True,
         **kwargs,
     ) -> torch.Tensor:
         # Extract num_frame_per_block from kwargs
@@ -1019,6 +1035,7 @@ class CausalMatrixGameWanModel(BaseDiT):
                         "current_start": current_start,
                         "cache_start": cache_start,
                         "num_frame_per_block": effective_num_frame_per_block,
+                        "update_kv_cache": update_kv_cache,
                     }
                 )
                 hidden_states = self._gradient_checkpointing_func(
@@ -1039,6 +1056,7 @@ class CausalMatrixGameWanModel(BaseDiT):
                         else None,
                         "current_start": current_start,
                         "cache_start": cache_start,
+                        "update_kv_cache": update_kv_cache,
                     }
                 )
                 hidden_states = block(

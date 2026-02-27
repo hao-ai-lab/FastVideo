@@ -323,9 +323,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 ],
                             dtype=dtype,
                             device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
+                "length":
                 torch.tensor([0], dtype=torch.long, device=device),
             })
 
@@ -361,9 +359,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 ],
                             dtype=dtype,
                             device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
+                "length":
                 torch.tensor([0], dtype=torch.long, device=device),
             })
             kv_cache_mouse.append({
@@ -381,9 +377,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 ],
                             dtype=dtype,
                             device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
+                "length":
                 torch.tensor([0], dtype=torch.long, device=device),
             })
 
@@ -495,6 +489,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     "crossattn_cache": ctx.crossattn_cache,
                     "current_start": start_index * self.frame_seq_length,
                     "start_frame": start_index,
+                    "update_kv_cache": False,
                 }
 
                 if self.use_action_module and current_model == self.transformer:
@@ -605,6 +600,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 "crossattn_cache": ctx.crossattn_cache,
                 "current_start": start_index * self.frame_seq_length,
                 "start_frame": start_index,
+                "update_kv_cache": True,
             }
 
             if self.use_action_module:
@@ -625,6 +621,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     crossattn_cache=ctx.crossattn_cache,
                     current_start=start_index * self.frame_seq_length,
                     start_frame=start_index,
+                    update_kv_cache=True,
                     **ctx.image_kwargs,
                     **ctx.pos_cond_kwargs,
                 )

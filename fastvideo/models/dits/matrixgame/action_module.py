@@ -15,7 +15,10 @@ from fastvideo.layers.rotary_embedding import (
     _apply_rotary_emb,
 )
 from fastvideo.platforms import AttentionBackendEnum
-from .kv_cache import update_kv_cache_and_get_attended_kv
+from .kv_cache import (
+    get_attended_kv_without_update,
+    update_kv_cache_and_get_attended_kv,
+)
 
 
 DISABLE_COMPILE = False
@@ -105,21 +108,31 @@ def _update_kv_cache_and_attend(
     use_k_for_num_tokens: bool = False,
     store_first_only: bool = False,
     repeat_factor: int | None = None,
+    update_kv_cache: bool = True,
 ) -> torch.Tensor:
     """Update KV cache."""
     assert (
         k.shape[1] if use_k_for_num_tokens else q.shape[1]
     ) == num_frame_per_block
     num_new_tokens = k.shape[1] if use_k_for_num_tokens else q.shape[1]
-    cached_k, cached_v = update_kv_cache_and_get_attended_kv(
-        kv_cache=kv_cache,
-        new_k=k,
-        new_v=v,
-        current_start=start_frame,
-        num_new_tokens=num_new_tokens,
-        max_attn_size=local_attn_size,
-        store_first_only=store_first_only,
-    )
+    if update_kv_cache:
+        cached_k, cached_v = update_kv_cache_and_get_attended_kv(
+            kv_cache=kv_cache,
+            new_k=k,
+            new_v=v,
+            num_new_tokens=num_new_tokens,
+            max_attn_size=local_attn_size,
+            store_first_only=store_first_only,
+        )
+    else:
+        cached_k, cached_v = get_attended_kv_without_update(
+            kv_cache=kv_cache,
+            new_k=k,
+            new_v=v,
+            num_new_tokens=num_new_tokens,
+            max_attn_size=local_attn_size,
+            store_first_only=store_first_only,
+        )
 
     if repeat_factor is not None:
         cached_k = cached_k.repeat(repeat_factor, 1, 1, 1)
@@ -363,6 +376,7 @@ class ActionModule(nn.Module):
         num_frame_per_block: int,
         block_mask_mouse: BlockMask | None,
         start_frame: int,
+        update_kv_cache: bool,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         N_feats: int,
         B: int,
@@ -458,6 +472,7 @@ class ActionModule(nn.Module):
                     num_frame_per_block,
                     self.local_attn_size,
                     use_k_for_num_tokens=False,
+                    update_kv_cache=update_kv_cache,
                 )
         else:
             attn = self.mouse_attn_layer(q, k, v)
@@ -479,6 +494,7 @@ class ActionModule(nn.Module):
         num_frame_per_block: int,
         block_mask_keyboard: BlockMask | None,
         start_frame: int,
+        update_kv_cache: bool,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         N_feats: int,
         B: int,
@@ -584,6 +600,7 @@ class ActionModule(nn.Module):
                         use_k_for_num_tokens=True,
                         store_first_only=True,
                         repeat_factor=S,
+                        update_kv_cache=update_kv_cache,
                     )
             else:
                 attn = self.keyboard_attn_layer(q, k, v)
@@ -612,6 +629,7 @@ class ActionModule(nn.Module):
                         num_frame_per_block,
                         self.local_attn_size,
                         use_k_for_num_tokens=True,
+                        update_kv_cache=update_kv_cache,
                     )
             else:
                 attn = self.keyboard_attn_layer(q, k, v)
@@ -635,6 +653,7 @@ class ActionModule(nn.Module):
         start_frame: int = 0,
         use_rope_keyboard: bool = True,
         num_frame_per_block: int = 3,
+        update_kv_cache: bool = True,
     ):
         """
         hidden_states: B, tt*th*tw, C
@@ -704,6 +723,7 @@ class ActionModule(nn.Module):
                 num_frame_per_block=num_frame_per_block,
                 block_mask_mouse=block_mask_mouse,
                 start_frame=start_frame,
+                update_kv_cache=update_kv_cache,
                 freqs_cis=freqs_cis,
                 N_feats=N_feats,
                 B=B,
@@ -727,6 +747,7 @@ class ActionModule(nn.Module):
                 num_frame_per_block=num_frame_per_block,
                 block_mask_keyboard=block_mask_keyboard,
                 start_frame=start_frame,
+                update_kv_cache=update_kv_cache,
                 freqs_cis=freqs_cis,
                 N_feats=N_feats,
                 B=B,
