@@ -6,11 +6,13 @@ Compares newly generated GEN3C videos against device-specific reference videos
 using MS-SSIM to detect quality regressions across code changes.
 
 Usage:
-    # Requires 1+ GPU, converted GEN3C weights, and reference videos.
+    # Requires 1+ GPU and reference videos.
     pytest fastvideo/tests/ssim/test_gen3c_similarity.py -v
 
 Environment variables:
-    GEN3C_MODEL_PATH  - Path to converted GEN3C weights (default: nvidia/GEN3C-Cosmos-7B)
+    GEN3C_MODEL_PATH  - Diffusers-format GEN3C model path/repo id.
+                        Default: vbharath/GEN3C-Cosmos-7B-Diffusers
+                        (local converted path also supported)
 """
 
 import os
@@ -26,23 +28,6 @@ from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_res
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
-
-
-def _resolve_gen3c_model_path() -> str:
-    """
-    Resolve a Diffusers-format GEN3C model path for SSIM tests.
-
-    Priority:
-    1) GEN3C_MODEL_PATH env var
-    2) Local converted checkpoint under repo root
-    """
-    env_model = os.getenv("GEN3C_MODEL_PATH")
-    if env_model:
-        return env_model
-
-    repo_root = Path(__file__).resolve().parents[3]
-    local_default = repo_root / "converted_weights" / "GEN3C-Cosmos-7B"
-    return str(local_default)
 
 
 def _resolve_gen3c_test_image_path() -> str:
@@ -82,7 +67,8 @@ else:
 
 GEN3C_T2V_PARAMS = {
     "num_gpus": 1,
-    "model_path": _resolve_gen3c_model_path(),
+    "model_path": os.getenv("GEN3C_MODEL_PATH",
+                            "vbharath/GEN3C-Cosmos-7B-Diffusers"),
     "height": 720,
     "width": 1280,
     "num_frames": 121,
@@ -138,18 +124,26 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
     model_path = BASE_PARAMS["model_path"]
 
-    # SSIM test requires a Diffusers-format model with model_index.json.
+    # Guard common misconfigurations to keep CI behavior explicit.
+    if model_path.lower() == "nvidia/gen3c-cosmos-7b":
+        pytest.skip(
+            "nvidia/GEN3C-Cosmos-7B is the official raw checkpoint repo, not Diffusers format. "
+            "Use GEN3C_MODEL_PATH=vbharath/GEN3C-Cosmos-7B-Diffusers or a local converted path."
+        )
+
+    local_like = model_path.startswith(("/", "./", "../"))
+    if local_like and not os.path.exists(model_path):
+        pytest.skip(
+            f"Local GEN3C model path not found: {model_path}. "
+            "Set GEN3C_MODEL_PATH to a valid local path or HF Diffusers repo id."
+        )
+
     if os.path.exists(model_path):
         model_index_path = os.path.join(model_path, "model_index.json")
         if not os.path.exists(model_index_path):
             pytest.skip(
                 f"GEN3C_MODEL_PATH is not Diffusers-format (missing model_index.json): {model_path}"
             )
-    elif model_path.lower() == "nvidia/gen3c-cosmos-7b":
-        pytest.skip(
-            "nvidia/GEN3C-Cosmos-7B is the official raw checkpoint repo, not Diffusers format. "
-            "Set GEN3C_MODEL_PATH to converted_weights/GEN3C-Cosmos-7B."
-        )
 
     init_kwargs = {
         "num_gpus": BASE_PARAMS["num_gpus"],
