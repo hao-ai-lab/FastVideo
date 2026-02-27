@@ -16,7 +16,6 @@ print(f"Using image: {image_tag}")
 
 image = (
     modal.Image.from_registry(image_tag, add_python="3.12")
-    .run_commands("rm -rf /FastVideo")
     .apt_install(
         "cmake",
         "pkg-config",
@@ -41,7 +40,7 @@ image = (
     })
 )
 
-SSIM_NUM_GPUS = 8
+SSIM_NUM_GPUS = 4
 SSIM_TERMINATE_TIMEOUT_S = 30
 SSIM_COMMON_KWARGS = dict(
     image=image,
@@ -211,8 +210,6 @@ def _prepare_ssim_workspace() -> tuple[str, list[SSIMTask]]:
     set -euo pipefail
     source $HOME/.local/bin/env
     source /opt/venv/bin/activate
-    rm -rf {shlex.quote(repo_root)}
-    git clone {shlex.quote(git_repo)} {shlex.quote(repo_root)}
     cd {shlex.quote(repo_root)}
     {checkout_command}
     git submodule update --init --recursive
