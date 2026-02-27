@@ -171,6 +171,23 @@ steps:
                   - TEST_TYPE=unit_test
                 agents:
                   queue: "default"
+            - path:
+                - "fastvideo/models/dits/**"
+                - "fastvideo/pipelines/**"
+                - "fastvideo/attention/**"
+                - "fastvideo/layers/**"
+                - "fastvideo/worker/**"
+                - "fastvideo/entrypoints/**"
+                - "fastvideo/tests/performance/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                label: "Performance Tests"
+                env:
+                  - TEST_TYPE=performance
+                agents:
+                  queue: "default"
             # - path:
             #     - "scripts/lora_extraction/**"
             #     - "pyproject.toml"
