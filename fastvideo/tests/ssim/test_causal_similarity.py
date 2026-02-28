@@ -6,7 +6,17 @@ import torch
 import pytest
 
 from fastvideo import VideoGenerator
+from fastvideo.configs.sample.wan import (
+    SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
+)
 from fastvideo.logger import init_logger
+from fastvideo.tests.ssim.reference_utils import (
+    build_generated_output_dir,
+    build_reference_folder_path,
+    get_cuda_device_name,
+    resolve_device_reference_folder,
+    select_ssim_params,
+)
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
@@ -14,17 +24,15 @@ logger = init_logger(__name__)
 
 REQUIRED_GPUS = 1
 
-device_name = torch.cuda.get_device_name()
-device_reference_folder_suffix = '_reference_videos'
-
-if "A40" in device_name:
-    device_reference_folder = "A40" + device_reference_folder_suffix
-elif "L40S" in device_name:
-    device_reference_folder = "L40S" + device_reference_folder_suffix
-else:
-    # device_reference_folder = "L40S" + device_reference_folder_suffix
-    logger.warning(f"Unsupported device for ssim tests: {device_name}")
-    # raise ValueError(f"Unsupported device for ssim tests: {device_name}")
+device_reference_folder = resolve_device_reference_folder(
+    (
+        ("A40", "A40"),
+        ("L40S", "L40S"),
+        ("H200", "H200"),
+    ),
+    device_name=get_cuda_device_name(),
+    logger=logger,
+)
 
 # Base parameters from the shell script
 
@@ -40,9 +48,29 @@ SF_WAN_T2V_PARAMS = {
     "tp_size": 1,
 }
 
+_SF_WAN_T2V_FULL_QUALITY_DEFAULTS = (
+    SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam()
+)
+SF_WAN_T2V_FULL_QUALITY_PARAMS = {
+    "num_gpus": SF_WAN_T2V_PARAMS["num_gpus"],
+    "model_path": SF_WAN_T2V_PARAMS["model_path"],
+    "height": _SF_WAN_T2V_FULL_QUALITY_DEFAULTS.height,
+    "width": _SF_WAN_T2V_FULL_QUALITY_DEFAULTS.width,
+    "num_frames": SF_WAN_T2V_PARAMS["num_frames"],  # default num_frames: 81
+    "num_inference_steps": _SF_WAN_T2V_FULL_QUALITY_DEFAULTS.num_inference_steps,
+    "guidance_scale": _SF_WAN_T2V_FULL_QUALITY_DEFAULTS.guidance_scale,
+    "seed": _SF_WAN_T2V_FULL_QUALITY_DEFAULTS.seed,
+    "sp_size": SF_WAN_T2V_PARAMS["sp_size"],
+    "tp_size": SF_WAN_T2V_PARAMS["tp_size"],
+    "neg_prompt": _SF_WAN_T2V_FULL_QUALITY_DEFAULTS.negative_prompt,
+}
+
 
 MODEL_TO_PARAMS = {
     "SFWan2.1-T2V-1.3B-Diffusers": SF_WAN_T2V_PARAMS,
+}
+FULL_QUALITY_MODEL_TO_PARAMS = {
+    "SFWan2.1-T2V-1.3B-Diffusers": SF_WAN_T2V_FULL_QUALITY_PARAMS,
 }
 
 I2V_MODEL_TO_PARAMS = {
@@ -73,13 +101,20 @@ def test_causal_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    base_output_dir = os.path.join(script_dir, 'generated_videos', model_id)
-    output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
+    output_dir = build_generated_output_dir(
+        script_dir,
+        model_id,
+        ATTENTION_BACKEND,
+    )
     output_video_name = f"{prompt[:100].strip()}.mp4"
 
     os.makedirs(output_dir, exist_ok=True)
 
-    BASE_PARAMS = MODEL_TO_PARAMS[model_id]
+    params_map = select_ssim_params(
+        MODEL_TO_PARAMS,
+        FULL_QUALITY_MODEL_TO_PARAMS,
+    )
+    BASE_PARAMS = params_map[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
 
     init_kwargs = {
@@ -114,7 +149,12 @@ def test_causal_similarity(prompt, ATTENTION_BACKEND, model_id):
     assert os.path.exists(
         output_dir), f"Output video was not generated at {output_dir}"
 
-    reference_folder = os.path.join(script_dir, device_reference_folder, model_id, ATTENTION_BACKEND)
+    reference_folder = build_reference_folder_path(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
+    )
 
     if not os.path.exists(reference_folder):
         logger.error("Reference folder missing")

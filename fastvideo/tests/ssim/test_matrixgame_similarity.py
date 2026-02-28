@@ -5,8 +5,16 @@ import torch
 import pytest
 
 from fastvideo import VideoGenerator
-from fastvideo.models.dits.matrixgame.utils import create_action_presets
+from fastvideo.configs.sample.wan import MatrixGame2_SamplingParam
 from fastvideo.logger import init_logger
+from fastvideo.models.dits.matrixgame.utils import create_action_presets
+from fastvideo.tests.ssim.reference_utils import (
+    build_generated_output_dir,
+    build_reference_folder_path,
+    get_cuda_device_name,
+    resolve_device_reference_folder,
+    select_ssim_params,
+)
 from fastvideo.tests.utils import (
     compute_video_ssim_torchvision,
     write_ssim_results,
@@ -17,17 +25,15 @@ logger = init_logger(__name__)
 
 REQUIRED_GPUS = 1
 
-device_name = torch.cuda.get_device_name()
-device_reference_folder_suffix = "_reference_videos"
-
-if "A40" in device_name:
-    device_reference_folder = "A40" + device_reference_folder_suffix
-elif "L40S" in device_name:
-    device_reference_folder = "L40S" + device_reference_folder_suffix
-else:
-    # device_reference_folder = "L40S" + device_reference_folder_suffix
-    logger.warning(f"Unsupported device for ssim tests: {device_name}")
-    # raise ValueError(f"Unsupported device for ssim tests: {device_name}")
+device_reference_folder = resolve_device_reference_folder(
+    (
+        ("A40", "A40"),
+        ("L40S", "L40S"),
+        ("H200", "H200"),
+    ),
+    device_name=get_cuda_device_name(),
+    logger=logger,
+)
 
 # Base parameters from the shell script
 
@@ -41,10 +47,25 @@ MATRIXGAME_PARAMS = {
     "seed": 1024,
     "keyboard_dim": 4,
 }
+_MATRIXGAME_FULL_QUALITY_DEFAULTS = MatrixGame2_SamplingParam()
+MATRIXGAME_FULL_QUALITY_PARAMS = {
+    "num_gpus": MATRIXGAME_PARAMS["num_gpus"],
+    "model_path": MATRIXGAME_PARAMS["model_path"],
+    "height": _MATRIXGAME_FULL_QUALITY_DEFAULTS.height,
+    "width": _MATRIXGAME_FULL_QUALITY_DEFAULTS.width,
+    "num_frames": MATRIXGAME_PARAMS["num_frames"],  # default num_frames: 57
+    "num_inference_steps": _MATRIXGAME_FULL_QUALITY_DEFAULTS.num_inference_steps,
+    "guidance_scale": _MATRIXGAME_FULL_QUALITY_DEFAULTS.guidance_scale,
+    "seed": _MATRIXGAME_FULL_QUALITY_DEFAULTS.seed,
+    "keyboard_dim": MATRIXGAME_PARAMS["keyboard_dim"],
+}
 
 
 MODEL_TO_PARAMS = {
     "Matrix-Game-2.0-Diffusers-Base": MATRIXGAME_PARAMS,
+}
+FULL_QUALITY_MODEL_TO_PARAMS = {
+    "Matrix-Game-2.0-Diffusers-Base": MATRIXGAME_FULL_QUALITY_PARAMS,
 }
 
 I2V_MODEL_TO_PARAMS = {}
@@ -70,13 +91,20 @@ def test_matrixgame_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    base_output_dir = os.path.join(script_dir, "generated_videos", model_id)
-    output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
+    output_dir = build_generated_output_dir(
+        script_dir,
+        model_id,
+        ATTENTION_BACKEND,
+    )
     output_video_name = "video.mp4"
 
     os.makedirs(output_dir, exist_ok=True)
 
-    BASE_PARAMS = MODEL_TO_PARAMS[model_id]
+    params_map = select_ssim_params(
+        MODEL_TO_PARAMS,
+        FULL_QUALITY_MODEL_TO_PARAMS,
+    )
+    BASE_PARAMS = params_map[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
 
     # Create action conditions for MatrixGame
@@ -121,8 +149,11 @@ def test_matrixgame_similarity(prompt, ATTENTION_BACKEND, model_id):
         f"Output video was not generated at {output_dir}"
     )
 
-    reference_folder = os.path.join(
-        script_dir, device_reference_folder, model_id, ATTENTION_BACKEND
+    reference_folder = build_reference_folder_path(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
     )
 
     if not os.path.exists(reference_folder):

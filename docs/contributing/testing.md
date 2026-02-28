@@ -23,13 +23,17 @@ SSIM tests are located in `fastvideo/tests/ssim`. These tests generate videos us
 
 ```
 fastvideo/tests/ssim/
-├── <GPU>_reference_videos/   # Reference videos organized by GPU type (e.g., L40S_reference_videos)
-│   ├── <Model_Name>/
-│   │   ├── <Backend>/        # e.g., FLASH_ATTN, TORCH_SDPA
-│   │   │   └── <Video_File>
+├── reference_videos/
+│   ├── default/
+│   │   └── <GPU>_reference_videos/
+│   │       ├── <Model_Name>/
+│   │       │   ├── <Backend>/        # e.g., FLASH_ATTN, TORCH_SDPA
+│   │       │   │   └── <Video_File>
+│   └── full_quality/
+│       └── <GPU>_reference_videos/
 ├── test_causal_similarity.py
 ├── test_inference_similarity.py
-├── update_reference_videos.sh
+├── reference_videos_cli.py
 └── ...
 ```
 
@@ -83,8 +87,13 @@ To add a new SSIM test, follow these steps:
 4. **Reference Videos**:
    * When running the test for the first time (or when updating the reference), the test will fail because the reference video is missing. The generated video will be saved in `fastvideo/tests/ssim/generated_videos`.
    * Inspect the generated video to ensure it meets quality expectations.
-   * Move the generated video to the appropriate reference folder: `fastvideo/tests/ssim/<GPU>_reference_videos/<Model>/<Backend>/`.
-   * You can use the helper script `update_reference_videos.sh` to automate copying videos from `generated_videos` to `L40S_reference_videos`. Note: Check the script to ensure paths match your environment (it defaults to `L40S_reference_videos`).
+   * Move the generated video to the appropriate quality/GPU reference folder:
+     `fastvideo/tests/ssim/reference_videos/<quality-tier>/<GPU>_reference_videos/<Model>/<Backend>/`.
+   * You can use the helper CLI to copy generated videos into a reference folder:
+     `python fastvideo/tests/ssim/reference_videos_cli.py copy-local --quality-tier default --reference-dir fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos`
+   * Upload/download can target both quality tiers and specific GPU folders:
+     `python fastvideo/tests/ssim/reference_videos_cli.py upload --quality-tier all`
+     `python fastvideo/tests/ssim/reference_videos_cli.py download --quality-tier full_quality --device-folder H200_reference_videos`
 
 ### Running Tests Locally
 

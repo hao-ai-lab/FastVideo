@@ -9,28 +9,17 @@ import logging
 import pytest
 import torch
 
+from fastvideo.configs.sample.sd35 import SD35SamplingParam
+from fastvideo.tests.ssim.reference_utils import (
+    build_generated_output_dir,
+    build_reference_folder_path,
+    resolve_device_reference_folder,
+    select_ssim_params,
+)
+
 logger = logging.getLogger(__name__)
 
 REQUIRED_GPUS = 1
-
-def _device_reference_folder() -> str:
-    """Pick a reference folder name based on the current CUDA device."""
-    suffix = "_reference_videos"
-    device_name = torch.cuda.get_device_name(0)
-
-    if "A40" in device_name:
-        return "A40" + suffix
-    if "L40S" in device_name:
-        return "L40S" + suffix
-    if "H100" in device_name:
-        return "H100" + suffix
-    if "RTX 4090" in device_name or "4090" in device_name:
-        return "RTX4090" + suffix
-
-    logger.warning(
-        "Unsupported device for ssim tests: %s; using L40S references", device_name
-    )
-    return "L40S" + suffix
 
 
 SD35_MODEL_PATH = os.getenv(
@@ -43,6 +32,28 @@ MODEL_ID = "stabilityai__stable-diffusion-3.5-medium"
 TEST_PROMPTS = [
     "a photo of a cat",
 ]
+
+SD35_PARAMS = {
+    "height": 256,
+    "width": 256,
+    "num_frames": 1,
+    "fps": 1,
+    "num_inference_steps": 8,
+    "guidance_scale": 6.0,
+    "seed": 0,
+    "negative_prompt": "lowres, blurry",
+}
+_SD35_FULL_QUALITY_DEFAULTS = SD35SamplingParam()
+SD35_FULL_QUALITY_PARAMS = {
+    "height": _SD35_FULL_QUALITY_DEFAULTS.height,
+    "width": _SD35_FULL_QUALITY_DEFAULTS.width,
+    "num_frames": SD35_PARAMS["num_frames"],  # default num_frames: 1
+    "fps": _SD35_FULL_QUALITY_DEFAULTS.fps,
+    "num_inference_steps": _SD35_FULL_QUALITY_DEFAULTS.num_inference_steps,
+    "guidance_scale": _SD35_FULL_QUALITY_DEFAULTS.guidance_scale,
+    "seed": _SD35_FULL_QUALITY_DEFAULTS.seed,
+    "negative_prompt": _SD35_FULL_QUALITY_DEFAULTS.negative_prompt,
+}
 
 pytestmark = pytest.mark.filterwarnings(
     "ignore:.*torch.jit.script_method.*:DeprecationWarning",
@@ -69,9 +80,13 @@ def test_sd35_similarity(prompt: str, ATTENTION_BACKEND: str) -> None:
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
     os.environ["TRANSFORMERS_VERBOSITY"] = "error"
     try:
+        params = select_ssim_params(SD35_PARAMS, SD35_FULL_QUALITY_PARAMS)
+
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        output_dir = os.path.join(
-            script_dir, "generated_videos", MODEL_ID, ATTENTION_BACKEND
+        output_dir = build_generated_output_dir(
+            script_dir,
+            MODEL_ID,
+            ATTENTION_BACKEND,
         )
         os.makedirs(output_dir, exist_ok=True)
 
@@ -101,17 +116,17 @@ def test_sd35_similarity(prompt: str, ATTENTION_BACKEND: str) -> None:
             "use_fsdp_inference": False,
         }
 
-        num_inference_steps = 8
+        num_inference_steps = params["num_inference_steps"]
         generation_kwargs = {
             "output_path": output_dir,
-            "height": 256,
-            "width": 256,
-            "num_frames": 1,
-            "fps": 1,
+            "height": params["height"],
+            "width": params["width"],
+            "num_frames": params["num_frames"],
+            "fps": params["fps"],
             "num_inference_steps": num_inference_steps,
-            "guidance_scale": 6.0,
-            "seed": 0,
-            "negative_prompt": "lowres, blurry",
+            "guidance_scale": params["guidance_scale"],
+            "seed": params["seed"],
+            "negative_prompt": params["negative_prompt"],
             "save_video": True,
         }
 
@@ -137,8 +152,24 @@ def test_sd35_similarity(prompt: str, ATTENTION_BACKEND: str) -> None:
             f"Output video was not generated under {output_dir} for prompt '{prompt}'"
         )
 
-        device_reference_folder = _device_reference_folder()
-        reference_folder = os.path.join(script_dir, device_reference_folder, MODEL_ID, ATTENTION_BACKEND)
+        device_reference_folder = resolve_device_reference_folder(
+            (
+                ("A40", "A40"),
+                ("L40S", "L40S"),
+                ("H100", "H100"),
+                ("H200", "H200"),
+                ("RTX 4090", "RTX4090"),
+                ("4090", "RTX4090"),
+            ),
+            fallback_device_prefix="L40S",
+            logger=logger,
+        )
+        reference_folder = build_reference_folder_path(
+            script_dir,
+            device_reference_folder,
+            MODEL_ID,
+            ATTENTION_BACKEND,
+        )
 
         if not os.path.exists(reference_folder):
             bless_cmd = (

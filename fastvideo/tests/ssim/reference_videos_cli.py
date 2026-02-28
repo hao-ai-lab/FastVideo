@@ -1,0 +1,584 @@
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+import argparse
+import getpass
+import os
+import shutil
+import sys
+from collections.abc import Iterable, Sequence
+from pathlib import Path
+
+
+VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv")
+HF_TOKEN_ENV_KEYS = ("HF_API_KEY", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
+HF_REPO_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO"
+HF_REPO_TYPE_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO_TYPE"
+
+DEFAULT_REPO_ID = "FastVideo/ssim-reference-videos"
+DEFAULT_REPO_TYPE = "dataset"
+DEFAULT_OUTPUT_QUALITY_TIER = "default"
+FULL_OUTPUT_QUALITY_TIER = "full_quality"
+ALL_OUTPUT_QUALITY_TIERS = "all"
+REFERENCE_VIDEOS_DIRNAME = "reference_videos"
+QUALITY_TIERS = (
+    DEFAULT_OUTPUT_QUALITY_TIER,
+    FULL_OUTPUT_QUALITY_TIER,
+)
+
+
+def _ssim_dir() -> Path:
+    return Path(__file__).resolve().parent
+
+
+def _default_repo_id() -> str:
+    return os.environ.get(HF_REPO_ENV_KEY, DEFAULT_REPO_ID)
+
+
+def _default_repo_type() -> str:
+    return os.environ.get(HF_REPO_TYPE_ENV_KEY, DEFAULT_REPO_TYPE)
+
+
+def _iter_video_files(root: Path) -> Iterable[Path]:
+    for path in root.rglob("*"):
+        if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS:
+            yield path
+
+
+def _discover_reference_dirs(base_dir: Path) -> list[Path]:
+    if not base_dir.exists():
+        return []
+    dirs = [
+        p
+        for p in base_dir.iterdir()
+        if p.is_dir() and p.name.endswith("_reference_videos")
+    ]
+    return sorted(dirs)
+
+
+def _reference_tier_root(base_dir: Path, quality_tier: str) -> Path:
+    return base_dir / REFERENCE_VIDEOS_DIRNAME / quality_tier
+
+
+def _resolve_quality_tiers(quality_tier: str) -> list[str]:
+    if quality_tier == ALL_OUTPUT_QUALITY_TIERS:
+        return list(QUALITY_TIERS)
+    if quality_tier not in QUALITY_TIERS:
+        raise ValueError(f"Unsupported quality tier: {quality_tier}")
+    return [quality_tier]
+
+
+def _discover_reference_dirs_for_tier(
+    base_dir: Path,
+    quality_tier: str,
+) -> list[Path]:
+    tier_root = _reference_tier_root(base_dir, quality_tier)
+    tier_dirs = _discover_reference_dirs(tier_root)
+    if tier_dirs:
+        return tier_dirs
+    if quality_tier == DEFAULT_OUTPUT_QUALITY_TIER:
+        # Keep supporting legacy default refs at <ssim_dir>/<GPU>_reference_videos.
+        return _discover_reference_dirs(base_dir)
+    return []
+
+
+def _has_local_reference_videos(base_dir: Path, quality_tier: str) -> bool:
+    for ref_dir in _discover_reference_dirs_for_tier(base_dir, quality_tier):
+        for _ in _iter_video_files(ref_dir):
+            return True
+    return False
+
+
+def _get_hf_token(*, prompt_if_missing: bool) -> str | None:
+    for key in HF_TOKEN_ENV_KEYS:
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+
+    if not prompt_if_missing:
+        return None
+
+    token = getpass.getpass(
+        "Hugging Face API key not found in env "
+        "(HF_API_KEY / HUGGINGFACE_HUB_TOKEN / HF_TOKEN).\n"
+        "Enter token: "
+    ).strip()
+    if not token:
+        raise RuntimeError("No Hugging Face API key provided.")
+    return token
+
+
+def _load_hf_sdk():
+    try:
+        from huggingface_hub import HfApi, snapshot_download
+    except ImportError as exc:
+        raise RuntimeError(
+            "huggingface_hub is required for download/upload.\n"
+            "Install with: pip install huggingface_hub"
+        ) from exc
+    return HfApi, snapshot_download
+
+
+def copy_generated_to_reference(
+    generated_dir: Path,
+    reference_dir: Path,
+    *,
+    dry_run: bool = False,
+) -> int:
+    if not generated_dir.exists():
+        raise FileNotFoundError(f"Generated directory not found: {generated_dir}")
+
+    copied = 0
+    for video_file in _iter_video_files(generated_dir):
+        rel = video_file.relative_to(generated_dir)
+        dst = reference_dir / rel
+        if dry_run:
+            print(f"[dry-run] {video_file} -> {dst}")
+        else:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(video_file, dst)
+            print(f"Copied: {rel}")
+        copied += 1
+    return copied
+
+
+def download_reference_videos(
+    *,
+    repo_id: str,
+    repo_type: str,
+    local_dir: Path,
+    quality_tiers: Sequence[str] | None = None,
+    device_folders: Sequence[str] | None = None,
+    token: str | None = None,
+) -> None:
+    _, snapshot_download = _load_hf_sdk()
+
+    local_dir.mkdir(parents=True, exist_ok=True)
+    tiers = tuple(quality_tiers or QUALITY_TIERS)
+    for quality_tier in tiers:
+        if quality_tier not in QUALITY_TIERS:
+            raise ValueError(f"Unsupported quality tier: {quality_tier}")
+    allow_patterns: list[str] = []
+    for quality_tier in tiers:
+        tier_prefix = f"{REFERENCE_VIDEOS_DIRNAME}/{quality_tier}"
+        if device_folders:
+            allow_patterns.extend(
+                f"{tier_prefix}/{folder}/**" for folder in device_folders
+            )
+        else:
+            allow_patterns.append(f"{tier_prefix}/*_reference_videos/**")
+
+        # Keep compatibility for older HF layout where default refs lived at
+        # repo root as <GPU>_reference_videos.
+        if quality_tier == DEFAULT_OUTPUT_QUALITY_TIER:
+            if device_folders:
+                allow_patterns.extend(f"{folder}/**" for folder in device_folders)
+            else:
+                allow_patterns.append("*_reference_videos/**")
+
+    snapshot_download(
+        repo_id=repo_id,
+        repo_type=repo_type,
+        local_dir=str(local_dir),
+        token=token,
+        allow_patterns=allow_patterns,
+    )
+
+
+def upload_reference_videos(
+    *,
+    repo_id: str,
+    repo_type: str,
+    reference_dirs_by_tier: Sequence[tuple[str, Path]],
+    token: str,
+    private: bool,
+) -> None:
+    HfApi, _ = _load_hf_sdk()
+    api = HfApi(token=token)
+    api.create_repo(
+        repo_id=repo_id,
+        repo_type=repo_type,
+        private=private,
+        exist_ok=True,
+    )
+
+    for quality_tier, reference_dir in reference_dirs_by_tier:
+        if not reference_dir.exists():
+            raise FileNotFoundError(
+                f"Reference directory not found: {reference_dir}"
+            )
+        path_in_repo = (
+            f"{REFERENCE_VIDEOS_DIRNAME}/{quality_tier}/{reference_dir.name}"
+        )
+        print(f"Uploading {reference_dir.name} ({quality_tier}) to {repo_id} ...")
+        api.upload_folder(
+            repo_id=repo_id,
+            repo_type=repo_type,
+            folder_path=str(reference_dir),
+            path_in_repo=path_in_repo,
+            token=token,
+        )
+
+
+def _resolve_upload_reference_dirs(
+    *,
+    base_dir: Path,
+    quality_tier: str,
+    explicit_reference_dirs: Sequence[str],
+    device_folders: Sequence[str] | None = None,
+) -> list[tuple[str, Path]]:
+    tiers = _resolve_quality_tiers(quality_tier)
+    selected_device_folders = set(device_folders or [])
+
+    if explicit_reference_dirs:
+        if len(tiers) != 1:
+            raise RuntimeError(
+                "--reference-dir requires a single --quality-tier "
+                "(default or full_quality)."
+            )
+        resolved_tier = tiers[0]
+        return [(resolved_tier, Path(p).resolve()) for p in explicit_reference_dirs]
+
+    resolved: list[tuple[str, Path]] = []
+    for tier in tiers:
+        for reference_dir in _discover_reference_dirs_for_tier(base_dir, tier):
+            if (
+                selected_device_folders
+                and reference_dir.name not in selected_device_folders
+            ):
+                continue
+            resolved.append((tier, reference_dir.resolve()))
+    return resolved
+
+
+def ensure_reference_videos_available(
+    *,
+    local_dir: Path | None = None,
+    repo_id: str | None = None,
+    repo_type: str | None = None,
+    quality_tier: str = DEFAULT_OUTPUT_QUALITY_TIER,
+) -> bool:
+    """Return True if downloaded from HF, False if already present locally."""
+    if quality_tier not in QUALITY_TIERS:
+        raise ValueError(f"Unsupported quality tier: {quality_tier}")
+    target_dir = local_dir or _ssim_dir()
+    if _has_local_reference_videos(target_dir, quality_tier):
+        return False
+
+    resolved_repo_id = repo_id or _default_repo_id()
+    resolved_repo_type = repo_type or _default_repo_type()
+    if not resolved_repo_id:
+        raise RuntimeError(
+            "No local reference videos found and no HF repo configured.\n"
+            f"Set {HF_REPO_ENV_KEY} or pass --repo-id."
+        )
+
+    print(
+        f"No local {quality_tier} reference videos found under {target_dir}. "
+        f"Downloading from HF repo {resolved_repo_id} ..."
+    )
+    download_reference_videos(
+        repo_id=resolved_repo_id,
+        repo_type=resolved_repo_type,
+        local_dir=target_dir,
+        quality_tiers=[quality_tier],
+    )
+
+    if not _has_local_reference_videos(target_dir, quality_tier):
+        raise RuntimeError(
+            f"HF download completed but no {quality_tier} *_reference_videos "
+            "content found."
+        )
+    return True
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="reference_videos_cli",
+        description=(
+            "Manage SSIM reference videos locally and on Hugging Face.\n"
+            "This tool can copy generated videos into reference folders,\n"
+            "download references from a public HF repo, and upload updates."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  # Copy default generated videos into local L40S refs\n"
+            "  python fastvideo/tests/ssim/reference_videos_cli.py copy-local \\\n"
+            "    --quality-tier default \\\n"
+            "    --reference-dir fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos\n\n"
+            "  # Download both default and full-quality references from HF\n"
+            "  python fastvideo/tests/ssim/reference_videos_cli.py download \\\n"
+            "    --repo-id FastVideo/ssim-reference-videos\n\n"
+            "  # Upload both tiers and all GPU folders (prompts for token if unset)\n"
+            "  python fastvideo/tests/ssim/reference_videos_cli.py upload \\\n"
+            "    --repo-id FastVideo/ssim-reference-videos"
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    copy_parser = subparsers.add_parser(
+        "copy-local",
+        help="Copy generated videos into a local reference folder.",
+    )
+    copy_parser.add_argument(
+        "--quality-tier",
+        choices=(DEFAULT_OUTPUT_QUALITY_TIER, FULL_OUTPUT_QUALITY_TIER),
+        default=DEFAULT_OUTPUT_QUALITY_TIER,
+        help="Generated quality tier to copy from.",
+    )
+    copy_parser.add_argument(
+        "--generated-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Source generated directory. "
+            "Default: <ssim_dir>/generated_videos/<quality-tier>"
+        ),
+    )
+    copy_parser.add_argument(
+        "--reference-dir",
+        type=Path,
+        default=None,
+        help="Destination reference directory.",
+    )
+    copy_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print copy operations without writing files.",
+    )
+
+    download_parser = subparsers.add_parser(
+        "download",
+        help="Download reference videos from Hugging Face.",
+    )
+    download_parser.add_argument(
+        "--repo-id",
+        default=_default_repo_id(),
+        help=f"HF repo id. Default: env {HF_REPO_ENV_KEY} or {DEFAULT_REPO_ID}",
+    )
+    download_parser.add_argument(
+        "--repo-type",
+        default=_default_repo_type(),
+        help=f"HF repo type. Default: env {HF_REPO_TYPE_ENV_KEY} or {DEFAULT_REPO_TYPE}",
+    )
+    download_parser.add_argument(
+        "--local-dir",
+        type=Path,
+        default=_ssim_dir(),
+        help=(
+            "Local SSIM directory where references are stored under "
+            "reference_videos/<quality-tier>/<GPU>_reference_videos."
+        ),
+    )
+    download_parser.add_argument(
+        "--quality-tier",
+        choices=(
+            DEFAULT_OUTPUT_QUALITY_TIER,
+            FULL_OUTPUT_QUALITY_TIER,
+            ALL_OUTPUT_QUALITY_TIERS,
+        ),
+        default=ALL_OUTPUT_QUALITY_TIERS,
+        help="Quality tier to download (default: all).",
+    )
+    download_parser.add_argument(
+        "--device-folder",
+        action="append",
+        default=[],
+        help="Specific reference folder to fetch (repeatable), e.g. L40S_reference_videos",
+    )
+
+    upload_parser = subparsers.add_parser(
+        "upload",
+        help="Upload local reference folders to Hugging Face.",
+    )
+    upload_parser.add_argument(
+        "--repo-id",
+        default=_default_repo_id(),
+        help=f"HF repo id. Default: env {HF_REPO_ENV_KEY} or {DEFAULT_REPO_ID}",
+    )
+    upload_parser.add_argument(
+        "--repo-type",
+        default=_default_repo_type(),
+        help=f"HF repo type. Default: env {HF_REPO_TYPE_ENV_KEY} or {DEFAULT_REPO_TYPE}",
+    )
+    upload_parser.add_argument(
+        "--reference-dir",
+        action="append",
+        default=[],
+        help=(
+            "Reference directory to upload (repeatable). "
+            "Requires single --quality-tier. "
+            "Default: discover folders under --base-dir for chosen tier(s)."
+        ),
+    )
+    upload_parser.add_argument(
+        "--quality-tier",
+        choices=(
+            DEFAULT_OUTPUT_QUALITY_TIER,
+            FULL_OUTPUT_QUALITY_TIER,
+            ALL_OUTPUT_QUALITY_TIERS,
+        ),
+        default=ALL_OUTPUT_QUALITY_TIERS,
+        help="Quality tier to upload (default: all).",
+    )
+    upload_parser.add_argument(
+        "--device-folder",
+        action="append",
+        default=[],
+        help=(
+            "Specific GPU reference folder to upload (repeatable), "
+            "e.g. H200_reference_videos."
+        ),
+    )
+    upload_parser.add_argument(
+        "--base-dir",
+        type=Path,
+        default=_ssim_dir(),
+        help=(
+            "Base SSIM directory that contains "
+            "reference_videos/<quality-tier>/<GPU>_reference_videos."
+        ),
+    )
+    upload_parser.add_argument(
+        "--private",
+        action="store_true",
+        help="Create/use a private repo instead of public.",
+    )
+
+    ensure_parser = subparsers.add_parser(
+        "ensure",
+        help="Download refs only when the selected local quality tier is missing.",
+    )
+    ensure_parser.add_argument(
+        "--repo-id",
+        default=_default_repo_id(),
+        help=f"HF repo id. Default: env {HF_REPO_ENV_KEY} or {DEFAULT_REPO_ID}",
+    )
+    ensure_parser.add_argument(
+        "--repo-type",
+        default=_default_repo_type(),
+        help=f"HF repo type. Default: env {HF_REPO_TYPE_ENV_KEY} or {DEFAULT_REPO_TYPE}",
+    )
+    ensure_parser.add_argument(
+        "--local-dir",
+        type=Path,
+        default=_ssim_dir(),
+        help=(
+            "Local SSIM directory that should contain "
+            "reference_videos/<quality-tier>/<GPU>_reference_videos."
+        ),
+    )
+    ensure_parser.add_argument(
+        "--quality-tier",
+        choices=(
+            DEFAULT_OUTPUT_QUALITY_TIER,
+            FULL_OUTPUT_QUALITY_TIER,
+        ),
+        default=DEFAULT_OUTPUT_QUALITY_TIER,
+        help="Quality tier to ensure locally.",
+    )
+
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command == "copy-local":
+        generated_dir = (
+            args.generated_dir
+            if args.generated_dir is not None
+            else _ssim_dir() / "generated_videos" / args.quality_tier
+        )
+        reference_dir = (
+            args.reference_dir
+            if args.reference_dir is not None
+            else (
+                _ssim_dir()
+                / REFERENCE_VIDEOS_DIRNAME
+                / args.quality_tier
+                / "L40S_reference_videos"
+            )
+        )
+        copied = copy_generated_to_reference(
+            generated_dir=generated_dir,
+            reference_dir=reference_dir,
+            dry_run=args.dry_run,
+        )
+        print(
+            f"Done. {'Would copy' if args.dry_run else 'Copied'} {copied} video files."
+        )
+        return 0
+
+    if args.command == "download":
+        quality_tiers = _resolve_quality_tiers(args.quality_tier)
+        download_reference_videos(
+            repo_id=args.repo_id,
+            repo_type=args.repo_type,
+            local_dir=args.local_dir,
+            quality_tiers=quality_tiers,
+            device_folders=args.device_folder or None,
+        )
+        print(
+            "Download complete for quality tier(s): "
+            + ", ".join(quality_tiers)
+            + "."
+        )
+        return 0
+
+    if args.command == "upload":
+        token = _get_hf_token(prompt_if_missing=True)
+        assert token is not None
+
+        reference_dirs_by_tier = _resolve_upload_reference_dirs(
+            base_dir=args.base_dir.resolve(),
+            quality_tier=args.quality_tier,
+            explicit_reference_dirs=args.reference_dir,
+            device_folders=args.device_folder or None,
+        )
+        if not reference_dirs_by_tier:
+            raise RuntimeError(
+                "No *_reference_videos directories found for the selected "
+                f"quality tier(s) under {args.base_dir}"
+            )
+
+        upload_reference_videos(
+            repo_id=args.repo_id,
+            repo_type=args.repo_type,
+            reference_dirs_by_tier=reference_dirs_by_tier,
+            token=token,
+            private=args.private,
+        )
+        print("Upload complete.")
+        return 0
+
+    if args.command == "ensure":
+        downloaded = ensure_reference_videos_available(
+            local_dir=args.local_dir,
+            repo_id=args.repo_id,
+            repo_type=args.repo_type,
+            quality_tier=args.quality_tier,
+        )
+        if downloaded:
+            print(
+                f"{args.quality_tier} reference videos were missing and "
+                "have been downloaded."
+            )
+        else:
+            print(f"{args.quality_tier} reference videos already exist locally.")
+        return 0
+
+    parser.error(f"Unknown command: {args.command}")
+    return 2
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        print("Interrupted.", file=sys.stderr)
+        raise SystemExit(130)

@@ -10,13 +10,16 @@ videos and compare them against device-specific reference videos.
 ## Key Files
 - `test_*.py`: SSIM regression tests by model/task.
 - `conftest.py`: optional filtering via `FASTVIDEO_SSIM_MODEL_ID`.
-- `*_reference_videos/`: committed reference outputs by GPU type.
+- `reference_videos/<quality-tier>/<GPU>_reference_videos/`: local cache of
+  references split by quality tier and GPU type.
 - `generated_videos/`: local outputs and `*_ssim.json` artifacts (git-ignored).
-- `update_reference_videos.sh`: copies generated outputs into a target
-  reference directory (defaults to `L40S_reference_videos`).
+- `reference_videos_cli.py`: copy/download/upload/ensure reference videos
+  (including HF sync).
 
 ## Run Commands
 - Full SSIM suite: `pytest fastvideo/tests/ssim/ -vs`
+- Full SSIM with full-quality params:
+  `pytest fastvideo/tests/ssim/ -vs --ssim-full-quality`
 - Single test file:
   `pytest fastvideo/tests/ssim/test_inference_similarity.py -vs`
 - Single model split:
@@ -38,9 +41,10 @@ videos and compare them against device-specific reference videos.
 ## Updating Reference Videos
 1. Run the target SSIM test and inspect generated outputs + scores.
 2. Update references only for intentional behavior changes.
-3. From this directory run `bash update_reference_videos.sh`.
-4. If needed, edit `REFERENCE_DIR` in `update_reference_videos.sh` first to
-   match the active GPU reference folder.
+3. Copy local generated outputs into the target reference folder:
+   `python fastvideo/tests/ssim/reference_videos_cli.py copy-local ...`
+4. Upload updated reference folders to HF:
+   `python fastvideo/tests/ssim/reference_videos_cli.py upload ...`
 5. In the PR, explain why references changed and which GPU type generated
    them.
 
