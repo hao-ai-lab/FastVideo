@@ -364,9 +364,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                0,
+                torch.zeros((), dtype=torch.long, device=device),
                 "local_end_index":
-                0,
+                torch.zeros((), dtype=torch.long, device=device),
             })
 
         return kv_cache
@@ -402,9 +402,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                0,
+                torch.zeros((), dtype=torch.long, device=device),
                 "local_end_index":
-                0,
+                torch.zeros((), dtype=torch.long, device=device),
             })
             kv_cache_mouse.append({
                 "k":
@@ -422,9 +422,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                0,
+                torch.zeros((), dtype=torch.long, device=device),
                 "local_end_index":
-                0,
+                torch.zeros((), dtype=torch.long, device=device),
             })
 
         return kv_cache_mouse, kv_cache_keyboard
@@ -878,6 +878,12 @@ class MatrixGameCausalOdeDenoisingStage(MatrixGameCausalDenoisingStage):
                 current_latents = latents[:, :, start_index:start_index +
                                           current_num_frames, :, :]
 
+                # The scheduler maintains an internal `step_index` (and potentially
+                # additional multistep state, e.g. UniPC). Since causal streaming runs
+                # a full denoising trajectory *per block*, reset that state before
+                # each block rollout.
+                self._reset_scheduler_state_for_new_rollout()
+
                 action_kwargs = self._prepare_action_kwargs(
                     batch, start_index, current_num_frames)
                 camera_action_kwargs = self._prepare_camera_action_kwargs(
@@ -919,6 +925,36 @@ class MatrixGameCausalOdeDenoisingStage(MatrixGameCausalDenoisingStage):
 
         batch.latents = latents
         return batch
+
+    def _reset_scheduler_state_for_new_rollout(self) -> None:
+        scheduler = self.scheduler
+
+        # Common diffusers-like state.
+        if hasattr(scheduler, "_step_index"):
+            scheduler._step_index = None  # type: ignore[attr-defined]
+        if hasattr(scheduler, "_begin_index"):
+            scheduler._begin_index = None  # type: ignore[attr-defined]
+
+        # UniPC multistep state (FlowUniPCMultistepScheduler) needs additional reset
+        # between independent trajectories.
+        if hasattr(scheduler, "model_outputs") and hasattr(scheduler, "config"):
+            try:
+                solver_order = int(getattr(scheduler.config, "solver_order", 0) or 0)
+            except Exception:
+                solver_order = 0
+            if solver_order > 0:
+                scheduler.model_outputs = [None] * solver_order  # type: ignore[attr-defined]
+        if hasattr(scheduler, "timestep_list") and hasattr(scheduler, "config"):
+            try:
+                solver_order = int(getattr(scheduler.config, "solver_order", 0) or 0)
+            except Exception:
+                solver_order = 0
+            if solver_order > 0:
+                scheduler.timestep_list = [None] * solver_order  # type: ignore[attr-defined]
+        if hasattr(scheduler, "lower_order_nums"):
+            scheduler.lower_order_nums = 0  # type: ignore[attr-defined]
+        if hasattr(scheduler, "last_sample"):
+            scheduler.last_sample = None  # type: ignore[attr-defined]
 
     def _process_single_block_ode(
         self,
