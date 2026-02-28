@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from fastvideo.utils import get_mp_context
+
 logger = logging.getLogger("fastvideo.ui.job_runner")
 
 # Regex patterns for parsing tqdm-style progress output.
@@ -451,7 +453,8 @@ class JobRunner:
         fastvideo_logger.addHandler(file_handler)
 
         # Queue for worker process logs (fsdp_load, cuda, etc.)
-        log_queue: mp.Queue | None = mp.get_context().Queue()
+        # Must use same context as multiproc workers (spawn) to avoid SemLock error
+        log_queue: mp.Queue | None = get_mp_context().Queue()
         queue_listener = logging.handlers.QueueListener(
             log_queue, buffer_handler, file_handler, respect_handler_level=True
         )
