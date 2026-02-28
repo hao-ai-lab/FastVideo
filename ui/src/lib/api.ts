@@ -140,3 +140,12 @@ export async function downloadJobLog(id: string): Promise<Blob> {
     }
     return response.blob();
 }
+
+export async function downloadJobVideo(id: string): Promise<Blob> {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/jobs/${id}/video`);
+    if (!response.ok) {
+        throw new Error("Failed to download video");
+    }
+    return response.blob();
+}

@@ -1,8 +1,7 @@
 'use client';
 
 import { Job } from "@/lib/types";
-import Link from "next/link";
-import { startJob, stopJob, deleteJob, getJobLogs, downloadJobLog } from "@/lib/api";
+import { startJob, stopJob, deleteJob, getJobLogs, downloadJobLog, downloadJobVideo } from "@/lib/api";
 import jobCardStyles from "@styles/JobCard.module.css";
 import badgeStyles from "@styles/Badge.module.css";
 import buttonStyles from "@styles/Button.module.css";
@@ -225,12 +224,12 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
     e.preventDefault();
     e.stopPropagation();
     if (isLoading) return;
-    
+
     setIsLoading(true);
     try {
       const blob = await downloadJobLog(job.id);
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = url;
       a.download = `job_${job.id}.log`;
       document.body.appendChild(a);
@@ -240,6 +239,31 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
     } catch (error) {
       console.error("Failed to download log:", error);
       alert(error instanceof Error ? error.message : "Failed to download log");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDownloadVideo = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isLoading || !job.output_path) return;
+
+    setIsLoading(true);
+    try {
+      const blob = await downloadJobVideo(job.id);
+      const ext = job.output_path.endsWith(".png") ? "png" : "mp4";
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `job_${job.id}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error("Failed to download video:", error);
+      alert(error instanceof Error ? error.message : "Failed to download video");
     } finally {
       setIsLoading(false);
     }
@@ -282,29 +306,34 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
 
   return (
     <div className={jobCardStyles.jobCard}>
-      <Link 
-        href={`/jobs/${job.id}`} 
-        style={{ textDecoration: "none", color: "inherit" }}
-      >
-        <div className={jobCardStyles.jobHeader}>
-          <span className={jobCardStyles.jobModel}>{job.model_id}</span>
-          <span className={`${badgeStyles.badge} ${badgeStyles[badgeClass as keyof typeof badgeStyles] || badgeStyles.badgePending}`}>
-            {job.status}
+      <div className={jobCardStyles.jobHeader}>
+        <span className={jobCardStyles.jobModel}>{job.model_id}</span>
+        <span className={`${badgeStyles.badge} ${badgeStyles[badgeClass as keyof typeof badgeStyles] || badgeStyles.badgePending}`}>
+          {job.status}
+        </span>
+      </div>
+      <p className={jobCardStyles.jobPrompt}>{job.prompt}</p>
+      <div className={jobCardStyles.jobMeta}>
+        <span>{job.num_frames} frames</span>
+        <span>{job.height}×{job.width}</span>
+        {getElapsedTime() && (
+          <span className={jobCardStyles.jobDuration}>
+            {"⏱ " + getElapsedTime()}
           </span>
-        </div>
-        <p className={jobCardStyles.jobPrompt}>{job.prompt}</p>
-        <div className={jobCardStyles.jobMeta}>
-          <span>{job.num_frames} frames</span>
-          <span>{job.height}×{job.width}</span>
-          {getElapsedTime() && (
-            <span className={jobCardStyles.jobDuration}>
-              {"⏱ " + getElapsedTime()}
-            </span>
-          )}
-        </div>
-      </Link>
+        )}
+      </div>
       <div className={jobCardStyles.jobActions}>
         {getActionButton()}
+        {job.status === "completed" && job.output_path && (
+          <button
+            className={`${buttonStyles.btn} ${buttonStyles.btnSmall}`}
+            onClick={handleDownloadVideo}
+            disabled={isLoading}
+            title="Download video"
+          >
+            Download Video
+          </button>
+        )}
         <button
           className={`${buttonStyles.btn} ${buttonStyles.btnDelete} ${buttonStyles.btnSmall}`}
           onClick={handleDelete}
