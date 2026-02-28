@@ -11,7 +11,18 @@ import torch
 import pytest
 
 from fastvideo import VideoGenerator
+from fastvideo.configs.sample.turbodiffusion import (
+    TurboDiffusionI2V_A14B_SamplingParam,
+    TurboDiffusionT2V_1_3B_SamplingParam,
+)
 from fastvideo.logger import init_logger
+from fastvideo.tests.ssim.reference_utils import (
+    build_generated_output_dir,
+    build_reference_folder_path,
+    get_cuda_device_name,
+    resolve_device_reference_folder,
+    select_ssim_params,
+)
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
@@ -19,16 +30,19 @@ logger = init_logger(__name__)
 
 REQUIRED_GPUS = 4
 
-device_name = torch.cuda.get_device_name()
-device_reference_folder_suffix = '_reference_videos'
-
-if "A40" in device_name:
-    device_reference_folder = "A40" + device_reference_folder_suffix
-elif "L40S" in device_name:
-    device_reference_folder = "L40S" + device_reference_folder_suffix
-else:
-    # device_reference_folder = "L40S" + device_reference_folder_suffix
-    logger.warning(f"Unsupported device for ssim tests: {device_name}, using L40S references")
+device_name = get_cuda_device_name()
+device_reference_folder = resolve_device_reference_folder(
+    (
+        ("A40", "A40"),
+        ("L40S", "L40S"),
+        ("H200", "H200"),
+    ),
+    device_name=device_name,
+)
+if device_reference_folder is None:
+    logger.warning(
+        f"Unsupported device for ssim tests: {device_name}, using L40S references"
+    )
     raise ValueError(f"Unsupported device for ssim tests: {device_name}")
 
 
@@ -46,9 +60,26 @@ TURBODIFFUSION_PARAMS = {
     "tp_size": 1,
     "fps": 24,
 }
+_TURBODIFFUSION_FULL_QUALITY_DEFAULTS = TurboDiffusionT2V_1_3B_SamplingParam()
+TURBODIFFUSION_FULL_QUALITY_PARAMS = {
+    "num_gpus": TURBODIFFUSION_PARAMS["num_gpus"],
+    "model_path": TURBODIFFUSION_PARAMS["model_path"],
+    "height": _TURBODIFFUSION_FULL_QUALITY_DEFAULTS.height,
+    "width": _TURBODIFFUSION_FULL_QUALITY_DEFAULTS.width,
+    "num_frames": TURBODIFFUSION_PARAMS["num_frames"],  # default num_frames: 81
+    "num_inference_steps": _TURBODIFFUSION_FULL_QUALITY_DEFAULTS.num_inference_steps,
+    "guidance_scale": _TURBODIFFUSION_FULL_QUALITY_DEFAULTS.guidance_scale,
+    "seed": _TURBODIFFUSION_FULL_QUALITY_DEFAULTS.seed,
+    "sp_size": TURBODIFFUSION_PARAMS["sp_size"],
+    "tp_size": TURBODIFFUSION_PARAMS["tp_size"],
+    "fps": _TURBODIFFUSION_FULL_QUALITY_DEFAULTS.fps,
+}
 
 TURBODIFFUSION_MODEL_TO_PARAMS = {
     "TurboWan2.1-T2V-1.3B-Diffusers": TURBODIFFUSION_PARAMS,
+}
+FULL_QUALITY_TURBODIFFUSION_MODEL_TO_PARAMS = {
+    "TurboWan2.1-T2V-1.3B-Diffusers": TURBODIFFUSION_FULL_QUALITY_PARAMS,
 }
 
 TURBODIFFUSION_TEST_PROMPTS = [
@@ -69,13 +100,20 @@ def test_turbodiffusion_inference_similarity(prompt, model_id):
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    base_output_dir = os.path.join(script_dir, 'generated_videos', model_id)
-    output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
+    output_dir = build_generated_output_dir(
+        script_dir,
+        model_id,
+        ATTENTION_BACKEND,
+    )
     output_video_name = f"{prompt[:100].strip()}.mp4"
 
     os.makedirs(output_dir, exist_ok=True)
 
-    BASE_PARAMS = TURBODIFFUSION_MODEL_TO_PARAMS[model_id]
+    params_map = select_ssim_params(
+        TURBODIFFUSION_MODEL_TO_PARAMS,
+        FULL_QUALITY_TURBODIFFUSION_MODEL_TO_PARAMS,
+    )
+    BASE_PARAMS = params_map[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
 
     init_kwargs = {
@@ -104,8 +142,11 @@ def test_turbodiffusion_inference_similarity(prompt, model_id):
 
     assert os.path.exists(output_dir), f"Output video was not generated at {output_dir}"
 
-    reference_folder = os.path.join(
-        script_dir, device_reference_folder, model_id, ATTENTION_BACKEND
+    reference_folder = build_reference_folder_path(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
     )
 
     if not os.path.exists(reference_folder):
@@ -172,9 +213,28 @@ TURBODIFFUSION_I2V_PARAMS = {
     "tp_size": 1,
     "fps": 24,
 }
+_TURBODIFFUSION_I2V_FULL_QUALITY_DEFAULTS = (
+    TurboDiffusionI2V_A14B_SamplingParam()
+)
+TURBODIFFUSION_I2V_FULL_QUALITY_PARAMS = {
+    "num_gpus": TURBODIFFUSION_I2V_PARAMS["num_gpus"],
+    "model_path": TURBODIFFUSION_I2V_PARAMS["model_path"],
+    "height": _TURBODIFFUSION_I2V_FULL_QUALITY_DEFAULTS.height,
+    "width": _TURBODIFFUSION_I2V_FULL_QUALITY_DEFAULTS.width,
+    "num_frames": TURBODIFFUSION_I2V_PARAMS["num_frames"],  # default num_frames: 81
+    "num_inference_steps": _TURBODIFFUSION_I2V_FULL_QUALITY_DEFAULTS.num_inference_steps,
+    "guidance_scale": _TURBODIFFUSION_I2V_FULL_QUALITY_DEFAULTS.guidance_scale,
+    "seed": _TURBODIFFUSION_I2V_FULL_QUALITY_DEFAULTS.seed,
+    "sp_size": TURBODIFFUSION_I2V_PARAMS["sp_size"],
+    "tp_size": TURBODIFFUSION_I2V_PARAMS["tp_size"],
+    "fps": _TURBODIFFUSION_I2V_FULL_QUALITY_DEFAULTS.fps,
+}
 
 TURBODIFFUSION_I2V_MODEL_TO_PARAMS = {
     "TurboWan2.2-I2V-A14B-Diffusers": TURBODIFFUSION_I2V_PARAMS,
+}
+FULL_QUALITY_TURBODIFFUSION_I2V_MODEL_TO_PARAMS = {
+    "TurboWan2.2-I2V-A14B-Diffusers": TURBODIFFUSION_I2V_FULL_QUALITY_PARAMS,
 }
 
 TURBODIFFUSION_I2V_TEST_PROMPTS = [
@@ -202,13 +262,20 @@ def test_turbodiffusion_i2v_inference_similarity(prompt, model_id):
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    base_output_dir = os.path.join(script_dir, 'generated_videos', model_id)
-    output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
+    output_dir = build_generated_output_dir(
+        script_dir,
+        model_id,
+        ATTENTION_BACKEND,
+    )
     output_video_name = f"{prompt[:100].strip()}.mp4"
 
     os.makedirs(output_dir, exist_ok=True)
 
-    BASE_PARAMS = TURBODIFFUSION_I2V_MODEL_TO_PARAMS[model_id]
+    params_map = select_ssim_params(
+        TURBODIFFUSION_I2V_MODEL_TO_PARAMS,
+        FULL_QUALITY_TURBODIFFUSION_I2V_MODEL_TO_PARAMS,
+    )
+    BASE_PARAMS = params_map[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
     image_path = TURBODIFFUSION_I2V_IMAGE_PATHS[TURBODIFFUSION_I2V_TEST_PROMPTS.index(prompt)]
 
@@ -246,8 +313,11 @@ def test_turbodiffusion_i2v_inference_similarity(prompt, model_id):
 
     assert os.path.exists(output_dir), f"Output video was not generated at {output_dir}"
 
-    reference_folder = os.path.join(
-        script_dir, device_reference_folder, model_id, ATTENTION_BACKEND
+    reference_folder = build_reference_folder_path(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
     )
 
     if not os.path.exists(reference_folder):

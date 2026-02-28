@@ -14,8 +14,16 @@ import pytest
 import torch
 
 from fastvideo import VideoGenerator
+from fastvideo.configs.sample.lingbotworld import LingBotWorld_SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.lingbotworld.cam_utils import prepare_camera_embedding
+from fastvideo.tests.ssim.reference_utils import (
+    build_generated_output_dir,
+    build_reference_folder_path,
+    get_cuda_device_name,
+    resolve_device_reference_folder,
+    select_ssim_params,
+)
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
 
 logger = init_logger(__name__)
@@ -40,18 +48,17 @@ def _find_lingbotworld_examples_root() -> str | None:
     return None
 
 
-device_name = torch.cuda.get_device_name()
-device_reference_folder_suffix = "_reference_videos"
-
-if "A40" in device_name:
-    device_reference_folder = "A40" + device_reference_folder_suffix
-elif "L40S" in device_name:
-    device_reference_folder = "L40S" + device_reference_folder_suffix
-elif "H100" in device_name:
-    device_reference_folder = "H100" + device_reference_folder_suffix
-else:
-    device_reference_folder = None
-    logger.warning("Unsupported device for ssim tests: %s", device_name)
+device_name = get_cuda_device_name()
+device_reference_folder = resolve_device_reference_folder(
+    (
+        ("A40", "A40"),
+        ("L40S", "L40S"),
+        ("H100", "H100"),
+        ("H200", "H200"),
+    ),
+    device_name=device_name,
+    logger=logger,
+)
 
 
 LINGBOT_PARAMS = {
@@ -83,6 +90,26 @@ LINGBOT_PARAMS = {
         "皮肤，肢体，面部特征，汽车，电线"
     ),
 }
+_LINGBOT_FULL_QUALITY_DEFAULTS = LingBotWorld_SamplingParam()
+LINGBOT_FULL_QUALITY_PARAMS = {
+    "model_path": LINGBOT_PARAMS["model_path"],
+    "num_gpus": LINGBOT_PARAMS["num_gpus"],
+    "height": _LINGBOT_FULL_QUALITY_DEFAULTS.height,
+    "width": _LINGBOT_FULL_QUALITY_DEFAULTS.width,
+    "num_frames": LINGBOT_PARAMS["num_frames"],  # default num_frames: 125
+    "num_inference_steps": _LINGBOT_FULL_QUALITY_DEFAULTS.num_inference_steps,
+    "guidance_scale": _LINGBOT_FULL_QUALITY_DEFAULTS.guidance_scale,
+    "guidance_scale_2": _LINGBOT_FULL_QUALITY_DEFAULTS.guidance_scale_2,
+    "embedded_cfg_scale": LINGBOT_PARAMS["embedded_cfg_scale"],
+    "flow_shift": LINGBOT_PARAMS["flow_shift"],
+    "boundary_ratio": _LINGBOT_FULL_QUALITY_DEFAULTS.boundary_ratio,
+    "seed": _LINGBOT_FULL_QUALITY_DEFAULTS.seed,
+    "fps": _LINGBOT_FULL_QUALITY_DEFAULTS.fps,
+    "spatial_scale": LINGBOT_PARAMS["spatial_scale"],
+    "example_case": LINGBOT_PARAMS["example_case"],
+    "image_path": LINGBOT_PARAMS["image_path"],
+    "negative_prompt": _LINGBOT_FULL_QUALITY_DEFAULTS.negative_prompt,
+}
 
 TEST_PROMPTS = [
     "The video presents a soaring journey through a fantasy jungle. The wind "
@@ -98,11 +125,13 @@ TEST_PROMPTS = [
 def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
+    params = select_ssim_params(LINGBOT_PARAMS, LINGBOT_FULL_QUALITY_PARAMS)
+
     if device_reference_folder is None:
         pytest.skip(f"Unsupported device for LingBot SSIM test: {device_name}")
-    if torch.cuda.device_count() < LINGBOT_PARAMS["num_gpus"]:
+    if torch.cuda.device_count() < params["num_gpus"]:
         pytest.skip(
-            f"LingBot SSIM test requires {LINGBOT_PARAMS['num_gpus']} GPUs, "
+            f"LingBot SSIM test requires {params['num_gpus']} GPUs, "
             f"but only {torch.cuda.device_count()} detected."
         )
 
@@ -111,30 +140,33 @@ def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
         pytest.skip(
             "lingbotworld_examples not found under examples/inference/basic.")
 
-    action_path = os.path.join(examples_root, LINGBOT_PARAMS["example_case"])
+    action_path = os.path.join(examples_root, params["example_case"])
     if not (os.path.exists(os.path.join(action_path, "poses.npy"))
             and os.path.exists(os.path.join(action_path, "intrinsics.npy"))):
         pytest.skip(f"Missing camera npy files under {action_path}")
 
     c2ws_plucker_emb, aligned_num_frames = prepare_camera_embedding(
         action_path=action_path,
-        num_frames=LINGBOT_PARAMS["num_frames"],
-        height=LINGBOT_PARAMS["height"],
-        width=LINGBOT_PARAMS["width"],
-        spatial_scale=LINGBOT_PARAMS["spatial_scale"],
+        num_frames=params["num_frames"],
+        height=params["height"],
+        width=params["width"],
+        spatial_scale=params["spatial_scale"],
     )
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_id = "LingBot-World-Base-Cam-Diffusers"
-    output_dir = os.path.join(script_dir, "generated_videos", model_id,
-                              ATTENTION_BACKEND)
+    output_dir = build_generated_output_dir(
+        script_dir,
+        model_id,
+        ATTENTION_BACKEND,
+    )
     output_video_name = f"{prompt[:100].strip()}.mp4"
     os.makedirs(output_dir, exist_ok=True)
 
     init_kwargs = {
-        "num_gpus": LINGBOT_PARAMS["num_gpus"],
-        "flow_shift": LINGBOT_PARAMS["flow_shift"],
-        "boundary_ratio": LINGBOT_PARAMS["boundary_ratio"],
+        "num_gpus": params["num_gpus"],
+        "flow_shift": params["flow_shift"],
+        "boundary_ratio": params["boundary_ratio"],
         "use_fsdp_inference": True,
         "dit_cpu_offload": True,
         "dit_layerwise_offload": False,
@@ -144,24 +176,24 @@ def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     }
     generation_kwargs = {
         "output_path": output_dir,
-        "image_path": LINGBOT_PARAMS["image_path"],
-        "height": LINGBOT_PARAMS["height"],
-        "width": LINGBOT_PARAMS["width"],
+        "image_path": params["image_path"],
+        "height": params["height"],
+        "width": params["width"],
         "num_frames": aligned_num_frames,
-        "num_inference_steps": LINGBOT_PARAMS["num_inference_steps"],
-        "guidance_scale": LINGBOT_PARAMS["guidance_scale"],
-        "guidance_scale_2": LINGBOT_PARAMS["guidance_scale_2"],
-        "embedded_cfg_scale": LINGBOT_PARAMS["embedded_cfg_scale"],
-        "seed": LINGBOT_PARAMS["seed"],
-        "fps": LINGBOT_PARAMS["fps"],
-        "negative_prompt": LINGBOT_PARAMS["negative_prompt"],
+        "num_inference_steps": params["num_inference_steps"],
+        "guidance_scale": params["guidance_scale"],
+        "guidance_scale_2": params["guidance_scale_2"],
+        "embedded_cfg_scale": params["embedded_cfg_scale"],
+        "seed": params["seed"],
+        "fps": params["fps"],
+        "negative_prompt": params["negative_prompt"],
         "c2ws_plucker_emb": c2ws_plucker_emb,
     }
 
     generator: VideoGenerator | None = None
     try:
         generator = VideoGenerator.from_pretrained(
-            model_path=LINGBOT_PARAMS["model_path"], **init_kwargs)
+            model_path=params["model_path"], **init_kwargs)
         generator.generate_video(prompt, **generation_kwargs)
     finally:
         if generator is not None:
@@ -171,8 +203,12 @@ def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     assert os.path.exists(generated_video_path), (
         f"Output video was not generated at {generated_video_path}")
 
-    reference_folder = os.path.join(script_dir, device_reference_folder, model_id,
-                                    ATTENTION_BACKEND)
+    reference_folder = build_reference_folder_path(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
+    )
     if not os.path.exists(reference_folder):
         raise FileNotFoundError(
             f"Reference video folder does not exist: {reference_folder}")
@@ -198,7 +234,7 @@ def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
 
     write_ssim_results(output_dir, ssim_values, reference_video_path,
                        generated_video_path,
-                       LINGBOT_PARAMS["num_inference_steps"], prompt)
+                       params["num_inference_steps"], prompt)
 
     min_acceptable_ssim = 0.90
     assert mean_ssim >= min_acceptable_ssim, (
