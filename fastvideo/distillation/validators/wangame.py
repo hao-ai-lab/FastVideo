@@ -243,6 +243,7 @@ class WanGameValidator:
         *,
         sampling_timesteps: list[int] | None = None,
         guidance_scale: float | None = None,
+        num_frames: int | None = None,
     ) -> ForwardBatch:
         training_args = self.training_args
 
@@ -259,8 +260,11 @@ class WanGameValidator:
         temporal_compression_factor = (
             training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
         )
-        num_frames = (training_args.num_latent_t - 1) * temporal_compression_factor + 1
-        sampling_param.num_frames = int(num_frames)
+        default_num_frames = (training_args.num_latent_t - 1) * temporal_compression_factor + 1
+        if num_frames is not None:
+            sampling_param.num_frames = int(num_frames)
+        else:
+            sampling_param.num_frames = int(default_num_frames)
 
         latents_size = [
             (sampling_param.num_frames - 1) // 4 + 1,
@@ -289,16 +293,48 @@ class WanGameValidator:
             batch.pil_image = validation_batch["image"]
 
         if "keyboard_cond" in validation_batch and validation_batch["keyboard_cond"] is not None:
-            keyboard_cond = validation_batch["keyboard_cond"]
-            keyboard_cond = torch.tensor(keyboard_cond, dtype=torch.bfloat16)
-            keyboard_cond = keyboard_cond.unsqueeze(0)
-            batch.keyboard_cond = keyboard_cond
+            keyboard_cond = torch.as_tensor(validation_batch["keyboard_cond"]).to(
+                dtype=torch.bfloat16
+            )
+            if keyboard_cond.ndim == 3 and keyboard_cond.shape[0] == 1:
+                keyboard_cond = keyboard_cond.squeeze(0)
+            if keyboard_cond.ndim != 2:
+                raise ValueError(
+                    "validation keyboard_cond must have shape (T, K) (or (1, T, K)), "
+                    f"got {tuple(keyboard_cond.shape)}"
+                )
+            target_len = int(sampling_param.num_frames)
+            if keyboard_cond.shape[0] > target_len:
+                keyboard_cond = keyboard_cond[:target_len]
+            elif keyboard_cond.shape[0] < target_len:
+                pad = torch.zeros(
+                    (target_len - keyboard_cond.shape[0], keyboard_cond.shape[1]),
+                    dtype=keyboard_cond.dtype,
+                    device=keyboard_cond.device,
+                )
+                keyboard_cond = torch.cat([keyboard_cond, pad], dim=0)
+            batch.keyboard_cond = keyboard_cond.unsqueeze(0)
 
         if "mouse_cond" in validation_batch and validation_batch["mouse_cond"] is not None:
-            mouse_cond = validation_batch["mouse_cond"]
-            mouse_cond = torch.tensor(mouse_cond, dtype=torch.bfloat16)
-            mouse_cond = mouse_cond.unsqueeze(0)
-            batch.mouse_cond = mouse_cond
+            mouse_cond = torch.as_tensor(validation_batch["mouse_cond"]).to(dtype=torch.bfloat16)
+            if mouse_cond.ndim == 3 and mouse_cond.shape[0] == 1:
+                mouse_cond = mouse_cond.squeeze(0)
+            if mouse_cond.ndim != 2:
+                raise ValueError(
+                    "validation mouse_cond must have shape (T, 2) (or (1, T, 2)), "
+                    f"got {tuple(mouse_cond.shape)}"
+                )
+            target_len = int(sampling_param.num_frames)
+            if mouse_cond.shape[0] > target_len:
+                mouse_cond = mouse_cond[:target_len]
+            elif mouse_cond.shape[0] < target_len:
+                pad = torch.zeros(
+                    (target_len - mouse_cond.shape[0], mouse_cond.shape[1]),
+                    dtype=mouse_cond.dtype,
+                    device=mouse_cond.device,
+                )
+                mouse_cond = torch.cat([mouse_cond, pad], dim=0)
+            batch.mouse_cond = mouse_cond.unsqueeze(0)
 
         return batch
 
@@ -313,6 +349,7 @@ class WanGameValidator:
         ode_solver: str | None,
         sampling_timesteps: list[int] | None = None,
         guidance_scale: float | None = None,
+        num_frames: int | None = None,
     ) -> _ValidationStepResult:
         training_args = self.training_args
         pipeline = self._get_pipeline(
@@ -336,6 +373,7 @@ class WanGameValidator:
                 num_inference_steps,
                 sampling_timesteps=sampling_timesteps,
                 guidance_scale=guidance_scale,
+                num_frames=num_frames,
             )
 
             assert batch.prompt is not None and isinstance(batch.prompt, str)
@@ -385,6 +423,20 @@ class WanGameValidator:
                 f"{rollout_mode_raw!r}"
             )
         ode_solver = getattr(request, "ode_solver", None)
+        num_frames_raw = getattr(request, "num_frames", None)
+        if num_frames_raw is None:
+            num_frames = None
+        elif isinstance(num_frames_raw, bool):
+            raise ValueError("ValidationRequest.num_frames must be an int when set")
+        elif isinstance(num_frames_raw, int):
+            num_frames = int(num_frames_raw)
+        else:
+            raise ValueError(
+                "ValidationRequest.num_frames must be an int when set, got "
+                f"{type(num_frames_raw).__name__}"
+            )
+        if num_frames is not None and num_frames <= 0:
+            raise ValueError("ValidationRequest.num_frames must be > 0 when set")
         if rollout_mode == "streaming":
             sampler_kind_norm = str(sampler_kind).strip().lower()
             if sampler_kind_norm not in {"ode", "sde"}:
@@ -450,6 +502,7 @@ class WanGameValidator:
                     ode_solver=str(ode_solver) if ode_solver is not None else None,
                     sampling_timesteps=sampling_timesteps,
                     guidance_scale=guidance_scale,
+                    num_frames=num_frames,
                 )
 
                 if self.rank_in_sp_group != 0:

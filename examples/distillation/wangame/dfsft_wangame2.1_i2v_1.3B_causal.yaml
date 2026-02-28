@@ -76,6 +76,7 @@ training:
     sampler_kind: ode
     ode_solver: euler
     guidance_scale: 1.0
+    num_frames: 81
 
 default_pipeline_config:
   flow_shift: 3

@@ -26,6 +26,9 @@ class ValidationRequest:
     ode_solver: str | None = None
     sampling_timesteps: list[int] | None = None
     guidance_scale: float | None = None
+    # Optional override for validation video length. When set, validators may
+    # truncate/pad auxiliary sequences (e.g. WanGame keyboard/mouse) to match.
+    num_frames: int | None = None
     output_dir: str | None = None
 
 

@@ -15,7 +15,11 @@ from fastvideo.training.training_utils import (
 from fastvideo.distillation.methods.base import DistillMethod, LogScalar
 from fastvideo.distillation.dispatch import register_method
 from fastvideo.distillation.roles import RoleHandle, RoleManager
-from fastvideo.distillation.utils.config import DistillRunConfig, parse_betas
+from fastvideo.distillation.utils.config import (
+    DistillRunConfig,
+    get_optional_int,
+    parse_betas,
+)
 from fastvideo.distillation.validators.base import ValidationRequest
 
 
@@ -412,6 +416,14 @@ class DiffusionForcingSFTMethod(DistillMethod):
                 f"{type(output_dir).__name__}"
             )
 
+        num_actions = get_optional_int(
+            self.validation_config,
+            "num_frames",
+            where="training.validation.num_frames",
+        )
+        if num_actions is not None and num_actions <= 0:
+            raise ValueError("training.validation.num_frames must be > 0 when set")
+
         request = ValidationRequest(
             sample_handle=self.student,
             dataset_file=dataset_file,
@@ -421,6 +433,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
             ode_solver=ode_solver,
             sampling_timesteps=None,
             guidance_scale=guidance_scale,
+            num_frames=num_actions,
             output_dir=output_dir,
         )
         validator.log_validation(iteration, request=request)
