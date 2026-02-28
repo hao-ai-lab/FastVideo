@@ -14,8 +14,14 @@ _R = TypeVar("_R")
 
 class Executor(ABC):
 
-    def __init__(self, fastvideo_args: FastVideoArgs):
+    def __init__(
+        self,
+        fastvideo_args: FastVideoArgs,
+        *,
+        log_queue=None,
+    ):
         self.fastvideo_args = fastvideo_args
+        self._log_queue = log_queue
 
         self._init_executor()
 

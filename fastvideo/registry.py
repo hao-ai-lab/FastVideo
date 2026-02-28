@@ -660,11 +660,21 @@ def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
 
 _register_configs()
 
+
+def get_registered_model_paths() -> list[str]:
+    """Return all registered HuggingFace model paths.
+
+    Useful for UIs and tooling that need to enumerate supported models.
+    """
+    return sorted(_MODEL_HF_PATH_TO_NAME.keys())
+
+
 __all__ = [
     "ConfigInfo",
     "ModelInfo",
     "get_model_info",
     "get_pipeline_config_cls_from_name",
+    "get_registered_model_paths",
     "get_sampling_param_cls_for_name",
     "get_pipeline_config_classes",
 ]

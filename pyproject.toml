@@ -79,6 +79,10 @@ dependencies = [
     "torchcodec",
     "ray>=2.49.1",
     "ftfy==6.3.1",
+
+    # Job Runner
+    "fastapi==0.129.0",
+    "uvicorn==0.41.0"
 ]
 
 [tool.uv]

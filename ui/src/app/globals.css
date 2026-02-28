@@ -1,0 +1,53 @@
+/* CSS Variables */
+:root {
+  --bg:        #0f1117;
+  --surface:   #1a1d27;
+  --border:    #2a2d3a;
+  --text:      #e4e4e7;
+  --text-dim:  #9ca3af;
+  --accent:    #6366f1;
+  --accent-h:  #818cf8;
+  --green:     #22c55e;
+  --red:       #ef4444;
+  --yellow:    #eab308;
+  --blue:      #3b82f6;
+  --radius:    8px;
+  --shadow:    0 2px 8px rgba(0, 0, 0, .35);
+}
+
+/* Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Base body styles */
+body {
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* Base form input styles (used globally) */
+select, input, textarea {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .55rem .75rem;
+  font-size: .9rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color .15s;
+}
+
+select:focus, input:focus, textarea:focus {
+  border-color: var(--accent);
+}
+
+textarea {
+  resize: vertical;
+}

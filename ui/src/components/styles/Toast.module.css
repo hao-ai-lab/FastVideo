@@ -1,0 +1,36 @@
+/* ── Toast ─────────────────────────────────────────────────── */
+.toastContainer {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: .5rem;
+  z-index: 2000;
+}
+
+.toast {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .6rem 1rem;
+  font-size: .85rem;
+  box-shadow: var(--shadow);
+  animation: toast-in .25s ease-out;
+  max-width: 360px;
+}
+
+.toast.error {
+  border-color: var(--red);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

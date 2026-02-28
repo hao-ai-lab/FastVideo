@@ -1,0 +1,20 @@
+/* ── Card ─────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  box-shadow: var(--shadow);
+}
+
+.card h2 {
+  font-size: 1.15rem;
+  margin-bottom: 1rem;
+}
+
+/* Responsive */
+@media (max-width: 520px) {
+  .card {
+    padding: 1rem;
+  }
+}

@@ -1,0 +1,30 @@
+/* ── Progress bar ─────────────────────────────────────────── */
+.progressContainer {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+
+.progressBarBg {
+  height: 6px;
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progressBarFill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width .4s ease;
+  min-width: 0;
+}
+
+.progressBarFillCompleted {
+  background: var(--green);
+}
+
+.progressLabel {
+  font-size: .72rem;
+  color: var(--text-dim);
+}

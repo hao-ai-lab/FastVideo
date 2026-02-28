@@ -3,6 +3,31 @@
 A lightweight web-based UI for creating and managing FastVideo video generation
 jobs.
 
+## Quick Start
+
+First run the API server:
+
+```bash
+python -m ui.api_server --output-dir /path/to/videos --log-dir /path/to/logs
+```
+
+The API server starts running at [http://localhost:8188](http://localhost:8188) by default. You can
+configure this using the `--api-url` parameter.
+
+Now you have to configure the environment file to include the API server path.
+
+```bash
+cd frontend
+cp .env.example .env.local
+# Edit the file to set the API server path
+```
+
+Run the web server:
+
+```bash
+npm i && npm run dev
+```
+
 ## Features
 
 - Select from supported FastVideo text-to-video models
@@ -12,21 +37,6 @@ jobs.
 - Live-polling job status updates
 - In-browser video preview for completed jobs
 - Generated videos are saved to a configurable output directory
-
-## Quick Start
-
-```bash
-# From the repository root
-pip install fastvideo fastapi uvicorn
-
-# Launch the server (defaults to http://0.0.0.0:8188)
-python -m ui.server
-
-# Or with a custom output directory
-python -m ui.server --output-dir /path/to/videos --port 8080
-```
-
-Then open [http://localhost:8188](http://localhost:8188) in your browser.
 
 ## API Endpoints
 
@@ -40,6 +50,7 @@ Then open [http://localhost:8188](http://localhost:8188) in your browser.
 | `POST`   | `/api/jobs/{id}/stop`        | Request a running job to stop      |
 | `DELETE` | `/api/jobs/{id}`             | Delete a job                       |
 | `GET`    | `/api/jobs/{id}/video`       | Stream the generated video/image   |
+| `GET`    | `/api/jobs/{id}/log`          | Download the job's log file       |
 
 ### Create Job Request Body
 
@@ -61,17 +72,30 @@ Then open [http://localhost:8188](http://localhost:8188) in your browser.
 
 ```
 ui/
-├── server.py            # FastAPI backend with job management
-├── requirements.txt     # Python dependencies (fastapi, uvicorn)
+├── server.py            # Combined FastAPI server (API + static files)
+├── api_server.py        # API-only server (REST endpoints)
+├── web_server.py        # Web-only server (static files + optional API proxy)
+├── requirements.txt     # Python dependencies (fastapi, uvicorn, httpx)
 └── static/
     ├── index.html       # Single-page application
     ├── style.css        # Dark-themed responsive styles
     └── app.js           # Frontend logic (fetch API, polling, rendering)
 ```
 
-- **Backend**: A FastAPI server manages an in-memory job store. Each job runs
+- **API Server** (`api_server.py`): A FastAPI server that manages an in-memory job store. Each job runs
   in a daemon thread that uses `fastvideo.VideoGenerator` to generate videos.
   Model instances are cached so switching between prompts on the same model
-  doesn't reload weights.
+  doesn't reload weights. Provides REST endpoints under `/api/*`.
+  - **Error Handling**: Jobs that crash are automatically marked as `FAILED` without
+    crashing the server. Error details are stored in the job's `error` field.
+  - **Log Files**: Each job maintains a persistent log file (`{job_id}.log`) in a
+    dedicated log directory (configurable via `--log-dir`), containing all logs from
+    model loading through completion or failure. Log files are named after the job ID
+    for easy identification.
+- **Web Server** (`web_server.py`): Serves static HTML/CSS/JS files. Optionally proxies API requests
+  to a separate API server or relies on CORS for cross-origin requests.
+- **Combined Server** (`server.py`): Legacy combined server that serves both API and static files
+  from a single process. Use this for simple deployments.
 - **Frontend**: A vanilla HTML/CSS/JS single-page app. Jobs are polled every
-  3 seconds and rendered as cards with status badges and action buttons.
+  2 seconds and rendered as cards with status badges and action buttons. The API
+  base URL can be configured via a meta tag injected by the web server.
