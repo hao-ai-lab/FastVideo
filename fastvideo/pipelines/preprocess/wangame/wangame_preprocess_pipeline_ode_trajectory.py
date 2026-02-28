@@ -25,9 +25,9 @@ from fastvideo.dataset import getdataset
 from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter,
                                                      records_to_table)
 from fastvideo.dataset.dataloader.record_schema import (
-    WanGame_ode_record_creator)
+    wangame_ode_record_creator)
 from fastvideo.dataset.dataloader.schema import (
-    pyarrow_schema_WanGame_ode_trajectory)
+    pyarrow_schema_ode_trajectory_wangame)
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -40,7 +40,7 @@ from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (
 from fastvideo.pipelines.stages import (DecodingStage, DenoisingStage,
                                         InputValidationStage,
                                         LatentPreparationStage,
-                                        WanGameImageEncodingStage,
+                                        ImageEncodingStage,
                                         TimestepPreparationStage)
 from fastvideo.utils import save_decoded_latents_as_video, shallow_asdict
 
@@ -61,7 +61,7 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
 
     def get_pyarrow_schema(self) -> pa.Schema:
         """Return the PyArrow schema for ODE Trajectory pipeline."""
-        return pyarrow_schema_WanGame_ode_trajectory
+        return pyarrow_schema_ode_trajectory_wangame
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
@@ -76,7 +76,7 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
         self.add_stage(stage_name="image_encoding_stage",
-                       stage=WanGameImageEncodingStage(
+                       stage=ImageEncodingStage(
                            image_encoder=self.get_module("image_encoder"),
                            image_processor=self.get_module("image_processor"),
                        ))
@@ -176,8 +176,8 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
             latent_condition = (latent_condition - latents_mean) / latents_std
         elif (hasattr(vae, "shift_factor") and vae.shift_factor is not None):
             if isinstance(vae.shift_factor, torch.Tensor):
-                latent_condition -= vae.shift_factor.to(
-                    latent_condition.device, latent_condition.dtype)
+                latent_condition -= vae.shift_factor.to(latent_condition.device,
+                                                        latent_condition.dtype)
             else:
                 latent_condition -= vae.shift_factor
 
@@ -216,26 +216,40 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
         features["first_frame_latent"] = cond_concat
 
         if "action_path" in valid_data and valid_data["action_path"]:
-            keyboard_cond_list = []
-            mouse_cond_list = []
-            keyboard_dim = self.get_module("transformer").config.arch_config.action_config["keyboard_dim_in"]
-            for action_path in valid_data["action_path"]:
+            keyboard_cond_list = [None] * len(valid_data["action_path"])
+            mouse_cond_list = [None] * len(valid_data["action_path"])
+            arch_cfg = self.get_module("transformer").config.arch_config
+            action_cfg = getattr(arch_cfg, "action_config", {}) or {}
+            keyboard_dim = action_cfg.get("keyboard_dim_in", None)
+            for idx, action_path in enumerate(valid_data["action_path"]):
                 if action_path:
                     action_data = np.load(action_path, allow_pickle=True)
-                    if isinstance(action_data,
-                                  np.ndarray) and action_data.dtype == np.dtype('O'):
+                    if isinstance(
+                            action_data,
+                            np.ndarray) and action_data.dtype == np.dtype('O'):
                         action_dict = action_data.item()
                         if "keyboard" in action_dict:
-                            keyboard_cond_list.append(
-                                action_dict["keyboard"][:keyboard_dim].astype(np.float32))
+                            keyboard = action_dict["keyboard"].astype(
+                                np.float32)
+                            if keyboard_dim is not None:
+                                if keyboard.ndim >= 2:
+                                    keyboard = keyboard[:, :keyboard_dim]
+                                else:
+                                    keyboard = keyboard[:keyboard_dim]
+                            keyboard_cond_list[idx] = keyboard
                         if "mouse" in action_dict:
-                            mouse_cond_list.append(action_dict["mouse"])
+                            mouse_cond_list[idx] = action_dict["mouse"].astype(
+                                np.float32)
                     else:
-                        keyboard_cond_list.append(action_data[:keyboard_dim].astype(np.float32))
-            if keyboard_cond_list:
-                features["keyboard_cond"] = keyboard_cond_list
-            if mouse_cond_list:
-                features["mouse_cond"] = mouse_cond_list
+                        keyboard = action_data.astype(np.float32)
+                        if keyboard_dim is not None:
+                            if keyboard.ndim >= 2:
+                                keyboard = keyboard[:, :keyboard_dim]
+                            else:
+                                keyboard = keyboard[:keyboard_dim]
+                        keyboard_cond_list[idx] = keyboard
+            features["keyboard_cond"] = keyboard_cond_list
+            features["mouse_cond"] = mouse_cond_list
         return features
 
     def preprocess_action_and_trajectory(self, fastvideo_args: FastVideoArgs,
@@ -279,8 +293,8 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
 
                 pixel_values = valid_data["pixel_values"]
                 if pixel_values.shape[2] == 1 and args.num_frames is not None:
-                    pixel_values = pixel_values.repeat(
-                        1, 1, args.num_frames, 1, 1)
+                    pixel_values = pixel_values.repeat(1, 1, args.num_frames, 1,
+                                                       1)
                     valid_data["pixel_values"] = pixel_values
 
                 # Get extra features if needed
@@ -312,12 +326,17 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
                     batch = ForwardBatch(**shallow_asdict(sampling_params), )
                     batch.image_embeds = [clip_features[i].unsqueeze(0)]
                     batch.image_latent = image_latents[i].unsqueeze(0)
-                    batch.keyboard_cond = (torch.from_numpy(
-                        keyboard_cond[i]).unsqueeze(0).to(device) if
-                                           keyboard_cond is not None else None)
-                    batch.mouse_cond = (torch.from_numpy(
-                        mouse_cond[i]).unsqueeze(0).to(device)
-                                        if mouse_cond is not None else None)
+                    sample_keyboard = keyboard_cond[
+                        i] if keyboard_cond is not None else None
+                    sample_mouse = mouse_cond[i] if mouse_cond is not None else None
+                    if sample_keyboard is not None and sample_mouse is not None:
+                        batch.keyboard_cond = torch.from_numpy(
+                            sample_keyboard).unsqueeze(0).to(device)
+                        batch.mouse_cond = torch.from_numpy(
+                            sample_mouse).unsqueeze(0).to(device)
+                    else:
+                        batch.keyboard_cond = None
+                        batch.mouse_cond = None
                     batch.num_inference_steps = 48
                     batch.return_trajectory_latents = True
                     # Enabling this will save the decoded trajectory videos.
@@ -330,11 +349,17 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
                     batch.guidance_scale = 6.0
                     batch.do_classifier_free_guidance = False
                     batch.prompt = ""
+                    batch.prompt_embeds = [
+                        torch.zeros(
+                            (1, 0, self.get_module("transformer").hidden_size),
+                            dtype=torch.bfloat16,
+                            device=device)
+                    ]
 
                     result_batch = self.input_validation_stage(
                         batch, fastvideo_args)
                     result_batch = self.timestep_preparation_stage(
-                        batch, fastvideo_args)
+                        result_batch, fastvideo_args)
                     result_batch.timesteps = result_batch.timesteps.to(device)
                     result_batch = self.latent_preparation_stage(
                         result_batch, fastvideo_args)
@@ -392,7 +417,7 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
                         traj_timesteps = traj_timesteps.cpu().float().numpy()
 
                     # Create record for Parquet dataset
-                    record: dict[str, Any] = WanGame_ode_record_creator(
+                    record: dict[str, Any] = wangame_ode_record_creator(
                         video_name=video_name,
                         clip_feature=clip_feature_np,
                         first_frame_latent=first_frame_latent_np,

@@ -84,3 +84,10 @@ docs/distillation/examples/
 
 dmd_t2v_output/
 preprocess_output_text/
+wangame_1.3b_overfit
+wangame_1.3b_overfit_output
+wangame_lingbot_test
+
+ode_train_output
+sf_train_output
+log

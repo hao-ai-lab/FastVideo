@@ -2,11 +2,11 @@ from fastvideo import VideoGenerator
 from fastvideo.configs.pipelines import WanGameI2V480PConfig
 from fastvideo.models.dits.matrixgame.utils import create_action_presets
 
-BASE_MODEL_PATH = "weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers"
-WEIGHTS_PATH = "wangame_1.3b_overfit/checkpoint-10000/transformer/diffusion_pytorch_model.safetensors"
+BASE_MODEL_PATH = "Wan2.1-Fun-1.3B-InP-Diffusers"
+# WEIGHTS_PATH = "wangame_1.3b_overfit/checkpoint-10000/transformer/diffusion_pytorch_model.safetensors"
 
 OUTPUT_PATH = "video_samples_wangame"
-IMAGE_PATH = "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/universal/0000.png"
+IMAGE_PATH = "/mnt/fast-disks/hao_lab/kaiqin/traindata_0209_1500/ode_init_mc/images/000000.jpg"
 
 
 def main():
@@ -21,7 +21,7 @@ def main():
         pin_cpu_memory=True,
         override_pipeline_cls_name="WanGameActionImageToVideoPipeline",
         override_transformer_cls_name="WanGameActionTransformer3DModel",
-        init_weights_from_safetensors=WEIGHTS_PATH,
+        # init_weights_from_safetensors=WEIGHTS_PATH,
     )
 
     num_frames = 77

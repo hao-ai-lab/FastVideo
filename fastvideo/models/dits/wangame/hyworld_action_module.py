@@ -64,7 +64,7 @@ class WanGameActionTimeImageEmbedding(nn.Module):
             temb: [B*T, dim] combined timestep + action embedding
             timestep_proj: [B*T, 6*dim] modulation projection
         """
-        # timestep: [B] -> temb: [B, dim]
+        # timestep may be [B] (one per sample) or [B*T] (one per frame, from causal training)
         temb = self.time_embedder(timestep, timestep_seq_len)
         
         # Handle action embedding for batch > 1
@@ -83,10 +83,16 @@ class WanGameActionTimeImageEmbedding(nn.Module):
             action_emb = action_emb.to(action_embedder_dtype)
         action_emb = self.action_embedder(action_emb).type_as(temb)  # [B*T, dim]
         
-        # Expand temb to match action_emb: [B, dim] -> [B, T, dim] -> [B*T, dim]
-        # Each batch's temb is repeated for all its frames
-        temb_expanded = temb.unsqueeze(1).expand(-1, num_frames, -1)  # [B, T, dim]
-        temb_expanded = temb_expanded.reshape(batch_size * num_frames, -1)  # [B*T, dim]
+        # temb is [B*T, dim] when timestep was already per-frame (causal training),
+        # or [B, dim] when timestep is per-sample (inference).
+        # Only expand if temb is per-sample [B, dim].
+        if temb.shape[0] == batch_size and num_frames > 1:
+            # Expand temb: [B, dim] -> [B, T, dim] -> [B*T, dim]
+            temb_expanded = temb.unsqueeze(1).expand(-1, num_frames, -1)  # [B, T, dim]
+            temb_expanded = temb_expanded.reshape(batch_size * num_frames, -1)  # [B*T, dim]
+        else:
+            # temb is already [B*T, dim] (per-frame timesteps)
+            temb_expanded = temb
         
         # Add action embedding to expanded temb
         temb = temb_expanded + action_emb  # [B*T, dim]

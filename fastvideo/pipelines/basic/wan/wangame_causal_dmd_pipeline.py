@@ -2,16 +2,16 @@
 """WanGame causal DMD pipeline implementation."""
 
 from fastvideo.fastvideo_args import FastVideoArgs
-import torch
 from fastvideo.logger import init_logger
-from fastvideo.pipelines import ComposedPipelineBase, ForwardBatch, LoRAPipeline
+from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
+                                        MatrixGameCausalDenoisingStage,
+                                        MatrixGameImageEncodingStage,
                                         InputValidationStage,
                                         LatentPreparationStage,
-                                        TextEncodingStage, ImageEncodingStage,
-                                        MatrixGameCausalDenoisingStage)
-from fastvideo.pipelines.stages.image_encoding import ImageVAEEncodingStage
+                                        TextEncodingStage)
+from fastvideo.pipelines.stages.image_encoding import (MatrixGameImageVAEEncodingStage)
 
 logger = init_logger(__name__)
 
@@ -37,7 +37,7 @@ class WanGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                 and self.get_module("image_processor", None) is not None):
             self.add_stage(
                 stage_name="image_encoding_stage",
-                stage=ImageEncodingStage(
+                stage=MatrixGameImageEncodingStage(
                     image_encoder=self.get_module("image_encoder"),
                     image_processor=self.get_module("image_processor"),
                 ))
@@ -50,9 +50,8 @@ class WanGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                            scheduler=self.get_module("scheduler"),
                            transformer=self.get_module("transformer", None)))
 
-        self.add_stage(
-            stage_name="image_latent_preparation_stage",
-            stage=ImageVAEEncodingStage(vae=self.get_module("vae")))
+        self.add_stage(stage_name="image_latent_preparation_stage",
+                       stage=MatrixGameImageVAEEncodingStage(vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=MatrixGameCausalDenoisingStage(
@@ -65,57 +64,7 @@ class WanGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
 
-        logger.info("WanGameCausalDMDPipeline initialized")
+        logger.info("WanGameCausalDMDPipeline initialized with action support")
 
-    @torch.no_grad()
-    def streaming_reset(self, batch: ForwardBatch,
-                        fastvideo_args: FastVideoArgs):
-        if not self.post_init_called:
-            self.post_init()
 
-        stages_to_run = [
-            "input_validation_stage", "prompt_encoding_stage",
-            "image_encoding_stage", "conditioning_stage",
-            "latent_preparation_stage", "image_latent_preparation_stage"
-        ]
-
-        for stage_name in stages_to_run:
-            if stage_name in self._stage_name_mapping:
-                batch = self._stage_name_mapping[stage_name].forward(
-                    batch, fastvideo_args)
-
-        denoiser = self._stage_name_mapping["denoising_stage"]
-        denoiser.streaming_reset(batch, fastvideo_args)
-        self._vae_cache = None
-
-    def streaming_step(self, keyboard_action, mouse_action) -> ForwardBatch:
-        denoiser = self._stage_name_mapping["denoising_stage"]
-        ctx = denoiser._streaming_ctx
-        assert ctx is not None, "streaming_ctx must be set"
-
-        start_idx = ctx.start_index
-        batch = denoiser.streaming_step(keyboard_action, mouse_action)
-        end_idx = ctx.start_index
-
-        if end_idx > start_idx:
-            current_latents = batch.latents[:, :, start_idx:end_idx, :, :]
-            args = ctx.fastvideo_args
-            decoder = self._stage_name_mapping["decoding_stage"]
-            decoded_frames, self._vae_cache = decoder.streaming_decode(
-                current_latents,
-                args,
-                cache=self._vae_cache,
-                is_first_chunk=(start_idx == 0))
-            batch.output = decoded_frames
-        else:
-            batch.output = None
-
-        return batch
-
-    def streaming_clear(self) -> None:
-        denoiser = self._stage_name_mapping.get("denoising_stage")
-        if denoiser is not None and hasattr(denoiser, "streaming_clear"):
-            denoiser.streaming_clear()
-        self._vae_cache = None
-
-EntryClass = [WanGameCausalDMDPipeline]
+EntryClass = WanGameCausalDMDPipeline

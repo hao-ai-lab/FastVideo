@@ -159,15 +159,30 @@ class DenoisingStage(PipelineStage):
 
         if batch.mouse_cond is not None and batch.keyboard_cond is not None:
             from fastvideo.models.dits.hyworld.pose import process_custom_actions
-            viewmats, intrinsics, action_labels = process_custom_actions(batch.keyboard_cond, batch.mouse_cond)
+            viewmats, intrinsics, action_labels = process_custom_actions(
+                batch.keyboard_cond, batch.mouse_cond)
             camera_action_kwargs = self.prepare_extra_func_kwargs(
                 self.transformer.forward,
                 {
-                    "viewmats": viewmats.unsqueeze(0).to(get_local_torch_device(), dtype=target_dtype),
-                    "Ks": intrinsics.unsqueeze(0).to(get_local_torch_device(), dtype=target_dtype),
-                    "action": action_labels.unsqueeze(0).to(get_local_torch_device(), dtype=target_dtype),
+                    "viewmats":
+                    viewmats.unsqueeze(0).to(get_local_torch_device(),
+                                             dtype=target_dtype),
+                    "Ks":
+                    intrinsics.unsqueeze(0).to(get_local_torch_device(),
+                                               dtype=target_dtype),
+                    "action":
+                    action_labels.unsqueeze(0).to(get_local_torch_device(),
+                                                  dtype=target_dtype),
                 },
             )
+            # from fastvideo.models.dits.wangame_lingbot.cam_utils import process_custom_actions as process_lingbot_actions
+            # num_frames = batch.num_frames
+            # latent_height = batch.height // 8
+            # latent_width = batch.width // 8
+            # c2ws_plucker_emb = process_lingbot_actions(
+            #     num_frames, batch.keyboard_cond, batch.mouse_cond,
+            #     latent_height=latent_height, latent_width=latent_width
+            # ).to(get_local_torch_device(), dtype=target_dtype)
         else:
             camera_action_kwargs = {}
 
@@ -431,8 +446,8 @@ class DenoisingStage(PipelineStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                             **action_kwargs,
-                            **camera_action_kwargs,
                             **timesteps_r_kwarg,
+                            **camera_action_kwargs,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -451,7 +466,6 @@ class DenoisingStage(PipelineStage):
                                 **neg_cond_kwargs,
                                 **action_kwargs,
                                 **camera_action_kwargs,
-                                **timesteps_r_kwarg,
                             )
 
                         noise_pred_text = noise_pred

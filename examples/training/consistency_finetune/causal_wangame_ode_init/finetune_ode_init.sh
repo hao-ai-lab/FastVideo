@@ -1,28 +1,28 @@
 #!/bin/bash
 
+export PYTHONPATH="/mnt/fast-disks/hao_lab/kaiqin/FastVideo_wangame:$PYTHONPATH"
 export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 
-# MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
-# MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"
-MODEL_PATH=""
-DATA_DIR="../vizdoom/preprocessed"
-VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_matrixgame_ode_init/validation_vizdoom.json"
-NUM_GPUS=8
-# export CUDA_VISIBLE_DEVICES=4,5,6,7
+MODEL_PATH="Wan2.1-Fun-1.3B-InP-Diffusers"
+DATA_DIR="../traindata_0209_1500/ode_init_mc/preprocessed/combined_parquet_dataset/worker_0"
+VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
+NUM_GPUS=1
+export CUDA_VISIBLE_DEVICES=4,5,6,7
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_ode_init_vizdoom_8gpu"
-  --output_dir "checkpoints/matrixgame_ode_init_vizdoom_8gpu"
-  --wandb_run_name "0202_2115_steps1000_bs_32"
-  --max_train_steps 1000
+  --tracker_project_name "wangame_ode_init"
+  --output_dir "checkpoints/wangame_ode_init"
+  --override_transformer_cls_name "CausalWanGameActionTransformer3DModel"
+  --wandb_run_name "0213_2100_test"
+  --max_train_steps 1
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 4
+  --gradient_accumulation_steps 1
   --num_latent_t 21
   --num_height 352
   --num_width 640
@@ -55,8 +55,10 @@ dataset_args=(
 # Validation arguments
 validation_args=(
   --log_validation
+  --log-visualization
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 100
+  --visualization-steps 100
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )
@@ -65,8 +67,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 6e-6
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 100
-  --training_state_checkpointing_steps 100
+  --weight_only_checkpointing_steps 200
+  --training_state_checkpointing_steps 200
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
@@ -87,7 +89,7 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/training/matrixgame_ode_causal_pipeline.py \
+    fastvideo/training/wangame_ode_causal_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

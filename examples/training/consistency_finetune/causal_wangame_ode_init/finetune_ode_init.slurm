@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=mg-ode-64g
+#SBATCH --job-name=wg-ode
 #SBATCH --partition=main
 #SBATCH --nodes=4
 #SBATCH --ntasks=4
@@ -14,13 +14,12 @@
 set -e -x
 
 # Environment Setup
-source ~/conda/miniconda/bin/activate
-conda activate mhuo-fv
+source ~/conda/miniconda/bin/activate /mnt/weka/home/hao.zhang/conda/miniconda/envs/mhuo-fv
 export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo:$PYTHONPATH"
 
 # Basic Info
 export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
-export WANDB_MODE="online"
+export WANDB_MODE=online
 export NCCL_P2P_DISABLE=1
 export MASTER_PORT=29500
 export NODE_RANK=$SLURM_PROCID
@@ -31,35 +30,43 @@ export TOKENIZERS_PARALLELISM=false
 echo "MASTER_ADDR: $MASTER_ADDR"
 echo "NODE_RANK: $NODE_RANK"
 
+RUN_NAME=$(date +"%m%d_%H%M")
+echo "RUN_NAME: $RUN_NAME"
+
 # Configs
-MODEL_PATH=""
-DATA_DIR="../vizdoom/preprocessed"
-VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_matrixgame_ode_init/validation_vizdoom.json"
+MODEL_PATH="weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers"
+# DATA_DIR="../traindata_0222_0030/ode_init_mc_Xonly_3k/preprocessed"
+DATA_DIR="../traindata_0222_0030/ode_init_mc_random/preprocessed_wangame"
+# VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_wangame_ode_init/validation.json"
+VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_wangame_ode_init/validation_same.json"
+CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_1action_rand_from_scratch/checkpoint-9000/transformer/diffusion_pytorch_model.safetensors"
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_ode_init_vizdoom"
-  --output_dir "checkpoints/matrixgame_ode_init_vizdoom"
-  --wandb_run_name "0202_2300_steps2000_bs_32"
-  --max_train_steps 2000
+  --tracker_project_name "wangame_ode_init"
+  --output_dir "checkpoints/wangame_ode_init_${RUN_NAME}"
+  --override_transformer_cls_name "CausalWanGameActionTransformer3DModel"
+  --wandb_run_name "${RUN_NAME}_bs64_random"
+  --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
+  --gradient_accumulation_steps 2
   --num_latent_t 21
   --num_height 352
   --num_width 640
   --num_frames 81
   --warp_denoising_step
   --enable_gradient_checkpointing_type "full"
+  --init_weights_from_safetensors $CKPT_SAFETENSOR
 )
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 64
+  --num_gpus 32
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 64
+  --hsdp_shard_dim 32
 )
 
 # Model arguments
@@ -77,8 +84,10 @@ dataset_args=(
 # Validation arguments
 validation_args=(
   --log_validation
+  --log-visualization
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 200
+  --validation_steps 100
+  --visualization-steps 100
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )
@@ -102,7 +111,6 @@ miscellaneous_args=(
   --not_apply_cfg_solver
   --dit_precision "fp32"
   --num_euler_timesteps 50
-  --ema_start_step 0
 )
 
 mkdir -p ode_train_output
@@ -113,7 +121,7 @@ srun torchrun \
 --node_rank $SLURM_PROCID \
 --rdzv_backend=c10d \
 --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-    fastvideo/training/matrixgame_ode_causal_pipeline.py \
+    fastvideo/training/wangame_ode_causal_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \
