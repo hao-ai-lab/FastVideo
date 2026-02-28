@@ -1,0 +1,40 @@
+/* ── Form ─────────────────────────────────────────────────── */
+.formRow {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  margin-bottom: .85rem;
+}
+
+.formRow label {
+  font-size: .8rem;
+  color: var(--text-dim);
+  padding-left: 3px;
+  letter-spacing: .04em;
+}
+
+/* ── Advanced settings ──────────────────────────────────── */
+.advancedSettings {
+  margin-bottom: 1rem;
+}
+
+.advancedSettings summary {
+  cursor: pointer;
+  font-size: .85rem;
+  color: var(--accent-h);
+  user-select: none;
+  margin-bottom: .5rem;
+}
+
+.settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: .5rem .75rem;
+}
+
+/* Responsive */
+@media (max-width: 520px) {
+  .settingsGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+}

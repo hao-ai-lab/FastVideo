@@ -54,17 +54,27 @@ class VideoGenerator:
     customization options, similar to popular frameworks like HF Diffusers.
     """
 
-    def __init__(self, fastvideo_args: FastVideoArgs,
-                 executor_class: type[Executor], log_stats: bool):
+    def __init__(
+        self,
+        fastvideo_args: FastVideoArgs,
+        executor_class: type[Executor],
+        log_stats: bool,
+        *,
+        log_queue=None,
+    ):
         """
         Initialize the video generator.
-        
+
         Args:
             fastvideo_args: The inference arguments
             executor_class: The executor class to use for inference
+            log_stats: Whether to log statistics
+            log_queue: Optional multiprocessing.Queue to forward worker logs to
         """
         self.fastvideo_args = fastvideo_args
-        self.executor = executor_class(fastvideo_args)
+        self.executor = executor_class(
+            fastvideo_args, log_queue=log_queue
+        )
 
     @classmethod
     def from_pretrained(cls, model_path: str, **kwargs) -> "VideoGenerator":
@@ -83,19 +93,25 @@ class VideoGenerator:
         """
         # If users also provide some kwargs, it will override the FastVideoArgs and PipelineConfig.
         kwargs['model_path'] = model_path
+        log_queue = kwargs.pop("log_queue", None)
         fastvideo_args = FastVideoArgs.from_kwargs(**kwargs)
 
-        return cls.from_fastvideo_args(fastvideo_args)
+        return cls.from_fastvideo_args(fastvideo_args, log_queue=log_queue)
 
     @classmethod
-    def from_fastvideo_args(cls,
-                            fastvideo_args: FastVideoArgs) -> "VideoGenerator":
+    def from_fastvideo_args(
+        cls,
+        fastvideo_args: FastVideoArgs,
+        *,
+        log_queue=None,
+    ) -> "VideoGenerator":
         """
         Create a video generator with the specified arguments.
-        
+
         Args:
             fastvideo_args: The inference arguments
-                
+            log_queue: Optional multiprocessing.Queue to forward worker logs to
+
         Returns:
             The created video generator
         """
@@ -107,6 +123,7 @@ class VideoGenerator:
             fastvideo_args=fastvideo_args,
             executor_class=executor_class,
             log_stats=False,  # TODO: implement
+            log_queue=log_queue,
         )
 
     def generate_video(
@@ -144,6 +161,37 @@ class VideoGenerator:
             A metadata dictionary for single-prompt generation, or a list of
             metadata dictionaries for prompt-file batch generation.
         """
+        log_queue = kwargs.pop("log_queue", None)
+        if log_queue is not None and hasattr(
+            self.executor, "set_log_queue"
+        ):
+            self.executor.set_log_queue(log_queue)
+        try:
+            return self._generate_video_impl(
+                prompt=prompt,
+                sampling_param=sampling_param,
+                mouse_cond=mouse_cond,
+                keyboard_cond=keyboard_cond,
+                grid_sizes=grid_sizes,
+                **kwargs,
+            )
+        finally:
+            if log_queue is not None and hasattr(
+                self.executor, "clear_log_queue"
+            ):
+                self.executor.clear_log_queue()
+
+    def _generate_video_impl(
+        self,
+        prompt: str | None = None,
+        sampling_param: SamplingParam | None = None,
+        mouse_cond: torch.Tensor | None = None,
+        keyboard_cond: torch.Tensor | None = None,
+        grid_sizes: tuple[int, int, int] | list[int] | torch.Tensor
+        | None = None,
+        **kwargs,
+    ) -> dict[str, Any] | list[np.ndarray] | list[dict[str, Any]]:
+        """Internal implementation of generate_video."""
         # Handle batch processing from text file
         if sampling_param is None:
             sampling_param = SamplingParam.from_pretrained(

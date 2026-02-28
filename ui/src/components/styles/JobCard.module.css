@@ -1,0 +1,174 @@
+/* ── Job Card ─────────────────────────────────────────────── */
+.jobCard {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.15rem;
+  margin-bottom: .75rem;
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+}
+
+.jobCard:last-child {
+  margin-bottom: 0;
+}
+
+.jobHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.jobModel {
+  font-weight: 600;
+  font-size: .95rem;
+}
+
+.jobPrompt {
+  font-size: .85rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.jobMeta {
+  font-size: .75rem;
+  color: var(--text-dim);
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.jobActions {
+  display: flex;
+  gap: .4rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.jobActions .btn {
+  font-size: .75rem;
+  padding: .3rem .7rem;
+}
+
+.toggleButton {
+  margin-left: auto;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: .3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  transition: transform 0.2s, color 0.15s;
+  width: 24px;
+  height: 24px;
+  transform: rotate(-90deg);
+}
+
+.toggleButton:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--border);
+}
+
+.toggleButton:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.toggleButtonOpen {
+  transform: rotate(0deg);
+}
+
+.jobError {
+  font-size: .8rem;
+  color: var(--red);
+  background: rgba(239, 68, 68, .08);
+  border-radius: var(--radius);
+  padding: .4rem .6rem;
+  word-break: break-word;
+}
+
+/* ── Console View ─────────────────────────────────────────────── */
+.consoleContainer {
+  margin-top: .75rem;
+  border-top: 1px solid var(--border);
+  padding-top: .75rem;
+}
+
+.consoleHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: .5rem;
+}
+
+.consoleHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+}
+
+.consoleTitle {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.consoleStatus {
+  font-size: .7rem;
+  color: var(--green);
+  font-weight: 500;
+}
+
+.consoleOutput {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .75rem;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
+  font-size: .75rem;
+  line-height: 1.5;
+  color: var(--text);
+  max-height: 300px;
+  overflow-y: auto;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+}
+
+.consoleEmpty {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* Scrollbar styling for console */
+.consoleOutput::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.consoleOutput::-webkit-scrollbar-track {
+  background: var(--bg);
+  border-radius: 4px;
+}
+
+.consoleOutput::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.consoleOutput::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
