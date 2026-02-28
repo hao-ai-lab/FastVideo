@@ -73,6 +73,7 @@ training:
     every_steps: 100
     sampling_steps: [40]
     sampler_kind: ode
+    ode_solver: euler
     guidance_scale: 1.0
 
 default_pipeline_config:
