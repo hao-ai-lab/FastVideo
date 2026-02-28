@@ -72,6 +72,7 @@ training:
     dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_8.json
     every_steps: 100
     sampling_steps: [40]
+    rollout_mode: streaming
     sampler_kind: ode
     ode_solver: euler
     guidance_scale: 1.0

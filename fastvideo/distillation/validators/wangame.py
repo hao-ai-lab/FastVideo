@@ -166,6 +166,46 @@ class WanGameValidator:
                 dit_cpu_offload=True,
             )
         elif rollout_mode == "streaming":
+            if sampler_kind not in {"ode", "sde"}:
+                raise ValueError(
+                    f"Unknown sampler_kind for WanGame streaming validation: {sampler_kind!r}"
+                )
+
+            flow_shift = getattr(self.training_args.pipeline_config, "flow_shift", None)
+            if flow_shift is None:
+                raise ValueError("pipeline_config.flow_shift must be set for WanGame validation")
+
+            if sampler_kind == "sde":
+                if ode_solver is not None:
+                    raise ValueError(
+                        "ode_solver is only valid when sampler_kind='ode', got "
+                        f"ode_solver={ode_solver!r}."
+                    )
+                from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
+                    FlowMatchEulerDiscreteScheduler,
+                )
+
+                scheduler = FlowMatchEulerDiscreteScheduler(shift=float(flow_shift))
+            else:
+                from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
+                    FlowMatchEulerDiscreteScheduler,
+                )
+                from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
+                    FlowUniPCMultistepScheduler,
+                )
+
+                ode_solver_norm = (str(ode_solver).strip().lower()
+                                   if ode_solver is not None else "unipc")
+                if ode_solver_norm in {"unipc", "unipc_multistep", "multistep"}:
+                    scheduler = FlowUniPCMultistepScheduler(shift=float(flow_shift))
+                elif ode_solver_norm in {"euler", "flowmatch", "flowmatch_euler"}:
+                    scheduler = FlowMatchEulerDiscreteScheduler(shift=float(flow_shift))
+                else:
+                    raise ValueError(
+                        "Unknown ode_solver for WanGame streaming validation: "
+                        f"{ode_solver!r} (expected 'unipc' or 'euler')."
+                    )
+
             from fastvideo.pipelines.basic.wan.wangame_causal_dmd_pipeline import (
                 WanGameCausalDMDPipeline,
             )
@@ -173,7 +213,13 @@ class WanGameValidator:
             self._pipeline = WanGameCausalDMDPipeline.from_pretrained(
                 self.training_args.model_path,
                 inference_mode=True,
-                loaded_modules={"transformer": transformer},
+                flow_shift=float(flow_shift) if flow_shift is not None else None,
+                sampler_kind=sampler_kind,
+                ode_solver=str(ode_solver) if ode_solver is not None else None,
+                loaded_modules={
+                    "transformer": transformer,
+                    "scheduler": scheduler,
+                },
                 tp_size=self.training_args.tp_size,
                 sp_size=self.training_args.sp_size,
                 num_gpus=self.training_args.num_gpus,
@@ -340,15 +386,17 @@ class WanGameValidator:
             )
         ode_solver = getattr(request, "ode_solver", None)
         if rollout_mode == "streaming":
-            if str(sampler_kind).strip().lower() != "sde":
+            sampler_kind_norm = str(sampler_kind).strip().lower()
+            if sampler_kind_norm not in {"ode", "sde"}:
                 raise ValueError(
                     "WanGame validation rollout_mode='streaming' requires "
-                    "sampler_kind='sde' (it uses the causal DMD-style rollout)."
+                    "sampler_kind to be one of {'ode', 'sde'}, got "
+                    f"{sampler_kind!r}."
                 )
-            if ode_solver is not None:
+            if sampler_kind_norm == "sde" and ode_solver is not None:
                 raise ValueError(
-                    "WanGame validation rollout_mode='streaming' does not support "
-                    f"ode_solver={ode_solver!r}."
+                    "WanGame validation rollout_mode='streaming' only supports "
+                    f"ode_solver when sampler_kind='ode', got ode_solver={ode_solver!r}."
                 )
         sampling_timesteps = getattr(request, "sampling_timesteps", None)
         if sampling_timesteps is not None:
@@ -384,7 +432,7 @@ class WanGameValidator:
             num_sp_groups = self.world_group.world_size // self.sp_group.world_size
 
             for num_inference_steps in validation_steps:
-                if rollout_mode == "streaming":
+                if rollout_mode == "streaming" and str(sampler_kind).strip().lower() == "sde":
                     if sampling_timesteps is not None:
                         training_args.pipeline_config.dmd_denoising_steps = list(sampling_timesteps)
                     else:

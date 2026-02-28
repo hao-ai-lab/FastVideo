@@ -4,13 +4,16 @@
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
+from fastvideo.pipelines.samplers.wan import get_wan_sampler_kind
 
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         MatrixGameCausalDenoisingStage,
+                                        MatrixGameCausalOdeDenoisingStage,
                                         MatrixGameImageEncodingStage,
                                         InputValidationStage,
                                         LatentPreparationStage,
-                                        TextEncodingStage)
+                                        TextEncodingStage,
+                                        TimestepPreparationStage)
 from fastvideo.pipelines.stages.image_encoding import (MatrixGameImageVAEEncodingStage)
 
 logger = init_logger(__name__)
@@ -22,6 +25,7 @@ class WanGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
     ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+        sampler_kind = get_wan_sampler_kind(fastvideo_args)
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
 
@@ -45,6 +49,11 @@ class WanGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="conditioning_stage",
                        stage=ConditioningStage())
 
+        if sampler_kind == "ode":
+            self.add_stage(stage_name="timestep_preparation_stage",
+                           stage=TimestepPreparationStage(
+                               scheduler=self.get_module("scheduler")))
+
         self.add_stage(stage_name="latent_preparation_stage",
                        stage=LatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
@@ -53,13 +62,24 @@ class WanGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="image_latent_preparation_stage",
                        stage=MatrixGameImageVAEEncodingStage(vae=self.get_module("vae")))
 
-        self.add_stage(stage_name="denoising_stage",
-                       stage=MatrixGameCausalDenoisingStage(
-                           transformer=self.get_module("transformer"),
-                           transformer_2=self.get_module("transformer_2", None),
-                           scheduler=self.get_module("scheduler"),
-                           pipeline=self,
-                           vae=self.get_module("vae")))
+        if sampler_kind == "ode":
+            denoising_stage = MatrixGameCausalOdeDenoisingStage(
+                transformer=self.get_module("transformer"),
+                transformer_2=self.get_module("transformer_2", None),
+                scheduler=self.get_module("scheduler"),
+                pipeline=self,
+                vae=self.get_module("vae"),
+            )
+        else:
+            denoising_stage = MatrixGameCausalDenoisingStage(
+                transformer=self.get_module("transformer"),
+                transformer_2=self.get_module("transformer_2", None),
+                scheduler=self.get_module("scheduler"),
+                pipeline=self,
+                vae=self.get_module("vae"),
+            )
+
+        self.add_stage(stage_name="denoising_stage", stage=denoising_stage)
 
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))

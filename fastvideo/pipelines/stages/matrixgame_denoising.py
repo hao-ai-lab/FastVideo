@@ -719,8 +719,332 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 **ctx.pos_cond_kwargs,
                 **context_model_kwargs,
             )
-            if isinstance(cache_update_ret, list) and len(cache_update_ret) > 0:
-                ctx.kv_cache1 = cache_update_ret
+        if isinstance(cache_update_ret, list) and len(cache_update_ret) > 0:
+            ctx.kv_cache1 = cache_update_ret
+
+
+class MatrixGameCausalOdeDenoisingStage(MatrixGameCausalDenoisingStage):
+    """Causal ODE denoising for WanGame/MatrixGame.
+
+    This is the deterministic counterpart of `MatrixGameCausalDenoisingStage`.
+    It performs block-by-block causal rollout, but uses the scheduler's ODE-style
+    `step()` update (no re-noising between steps).
+    """
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        timesteps = batch.timesteps
+        if timesteps is None:
+            raise ValueError(
+                "MatrixGameCausalOdeDenoisingStage requires batch.timesteps. "
+                "Make sure TimestepPreparationStage runs before this stage."
+            )
+
+        target_dtype = torch.bfloat16
+        autocast_enabled = (target_dtype != torch.float32
+                            ) and not fastvideo_args.disable_autocast
+
+        latent_seq_length = batch.latents.shape[-1] * batch.latents.shape[-2]
+        if hasattr(self.transformer, "patch_size"):
+            patch_size = self.transformer.patch_size
+        else:
+            patch_size = self.transformer.config.arch_config.patch_size
+        patch_ratio = patch_size[-1] * patch_size[-2]
+        self.frame_seq_length = latent_seq_length // patch_ratio
+
+        timesteps = timesteps.to(get_local_torch_device())
+
+        boundary_ratio = getattr(fastvideo_args.pipeline_config.dit_config,
+                                 "boundary_ratio", None)
+        if boundary_ratio is not None:
+            boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
+        else:
+            boundary_timestep = None
+
+        image_embeds = batch.image_embeds
+        if len(image_embeds) > 0:
+            assert torch.isnan(image_embeds[0]).sum() == 0
+            image_embeds = [
+                image_embed.to(target_dtype) for image_embed in image_embeds
+            ]
+
+        # directly set the kwarg.
+        image_kwargs = {"encoder_hidden_states_image": image_embeds}
+        pos_cond_kwargs: dict[str, Any] = {}
+
+        assert batch.latents is not None, "latents must be provided"
+        latents = batch.latents
+        b, c, t, h, w = latents.shape
+
+        prompt_embeds = batch.prompt_embeds
+        assert torch.isnan(prompt_embeds[0]).sum() == 0
+
+        viewmats_full = None
+        intrinsics_full = None
+        action_full = None
+        if batch.mouse_cond is not None and batch.keyboard_cond is not None:
+            from fastvideo.models.dits.hyworld.pose import process_custom_actions
+
+            viewmats_list = []
+            intrinsics_list = []
+            action_list = []
+            for bi in range(b):
+                vm, ks, action = process_custom_actions(batch.keyboard_cond[bi],
+                                                        batch.mouse_cond[bi])
+                viewmats_list.append(vm)
+                intrinsics_list.append(ks)
+                action_list.append(action)
+            viewmats_full = torch.stack(viewmats_list,
+                                        dim=0).to(device=latents.device,
+                                                  dtype=target_dtype)
+            intrinsics_full = torch.stack(intrinsics_list,
+                                          dim=0).to(device=latents.device,
+                                                    dtype=target_dtype)
+            action_full = torch.stack(action_list,
+                                      dim=0).to(device=latents.device,
+                                                dtype=target_dtype)
+
+        kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0],
+                                              dtype=target_dtype,
+                                              device=latents.device)
+        kv_cache2 = None
+        if boundary_timestep is not None:
+            kv_cache2 = self._initialize_kv_cache(batch_size=latents.shape[0],
+                                                  dtype=target_dtype,
+                                                  device=latents.device)
+
+        kv_cache_mouse = None
+        kv_cache_keyboard = None
+        if self.use_action_module:
+            kv_cache_mouse, kv_cache_keyboard = self._initialize_action_kv_cache(
+                batch_size=latents.shape[0],
+                dtype=target_dtype,
+                device=latents.device)
+
+        crossattn_cache = self._initialize_crossattn_cache(
+            batch_size=latents.shape[0],
+            max_text_len=257,  # 1 CLS + 256 patch tokens
+            dtype=target_dtype,
+            device=latents.device)
+
+        if t % self.num_frame_per_block != 0:
+            raise ValueError(
+                "num_frames must be divisible by num_frame_per_block for causal denoising"
+            )
+        num_blocks = t // self.num_frame_per_block
+        block_sizes = [self.num_frame_per_block] * num_blocks
+        start_index = 0
+
+        if boundary_timestep is not None:
+            block_sizes[0] = 1
+
+        ctx = BlockProcessingContext(
+            batch=batch,
+            block_idx=0,
+            start_index=0,
+            kv_cache1=kv_cache1,
+            kv_cache2=kv_cache2,
+            kv_cache_mouse=kv_cache_mouse,
+            kv_cache_keyboard=kv_cache_keyboard,
+            crossattn_cache=crossattn_cache,
+            timesteps=timesteps,
+            block_sizes=block_sizes,
+            noise_pool=None,
+            fastvideo_args=fastvideo_args,
+            target_dtype=target_dtype,
+            autocast_enabled=autocast_enabled,
+            boundary_timestep=boundary_timestep,
+            high_noise_timesteps=None,
+            context_noise=getattr(fastvideo_args.pipeline_config, "context_noise",
+                                  0),
+            image_kwargs=image_kwargs,
+            pos_cond_kwargs=pos_cond_kwargs,
+            viewmats_full=viewmats_full,
+            intrinsics_full=intrinsics_full,
+            action_full=action_full,
+        )
+
+        context_noise = getattr(fastvideo_args.pipeline_config, "context_noise",
+                                0)
+
+        with self.progress_bar(total=len(block_sizes) *
+                               len(timesteps)) as progress_bar:
+            for block_idx, current_num_frames in enumerate(block_sizes):
+                ctx.block_idx = block_idx
+                ctx.start_index = start_index
+                current_latents = latents[:, :, start_index:start_index +
+                                          current_num_frames, :, :]
+
+                action_kwargs = self._prepare_action_kwargs(
+                    batch, start_index, current_num_frames)
+                camera_action_kwargs = self._prepare_camera_action_kwargs(
+                    ctx, start_index, current_num_frames)
+
+                current_latents = self._process_single_block_ode(
+                    current_latents=current_latents,
+                    batch=batch,
+                    start_index=start_index,
+                    current_num_frames=current_num_frames,
+                    timesteps=timesteps,
+                    ctx=ctx,
+                    action_kwargs=action_kwargs,
+                    camera_action_kwargs=camera_action_kwargs,
+                    progress_bar=progress_bar,
+                )
+
+                latents[:, :, start_index:start_index +
+                        current_num_frames, :, :] = current_latents
+
+                # Update KV caches with clean context
+                self._update_context_cache(
+                    current_latents=current_latents,
+                    batch=batch,
+                    start_index=start_index,
+                    current_num_frames=current_num_frames,
+                    ctx=ctx,
+                    action_kwargs=action_kwargs,
+                    camera_action_kwargs=camera_action_kwargs,
+                    context_noise=context_noise,
+                )
+
+                start_index += current_num_frames
+
+        if boundary_timestep is not None:
+            num_frames_to_remove = self.num_frame_per_block - 1
+            if num_frames_to_remove > 0:
+                latents = latents[:, :, :-num_frames_to_remove, :, :]
+
+        batch.latents = latents
+        return batch
+
+    def _process_single_block_ode(
+        self,
+        *,
+        current_latents: torch.Tensor,
+        batch: ForwardBatch,
+        start_index: int,
+        current_num_frames: int,
+        timesteps: torch.Tensor,
+        ctx: BlockProcessingContext,
+        action_kwargs: dict[str, Any],
+        camera_action_kwargs: dict[str, Any],
+        progress_bar: Any | None = None,
+    ) -> torch.Tensor:
+        prompt_embeds = batch.prompt_embeds
+        extra_step_kwargs = self.prepare_extra_func_kwargs(
+            self.scheduler.step,
+            {
+                "generator": batch.generator,
+                "eta": batch.eta,
+            },
+        )
+
+        for i, t_cur in enumerate(timesteps):
+            if ctx.boundary_timestep is not None and t_cur < ctx.boundary_timestep:
+                current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
+            else:
+                current_model = self.transformer
+
+            latent_model_input = current_latents.to(ctx.target_dtype)
+
+            independent_first_frame = getattr(self.transformer,
+                                              "independent_first_frame",
+                                              False)
+            if batch.image_latent is not None and not independent_first_frame:
+                image_latent_chunk = batch.image_latent[:, :, start_index:
+                                                        start_index +
+                                                        current_num_frames, :, :]
+                latent_model_input = torch.cat([
+                    latent_model_input,
+                    image_latent_chunk.to(ctx.target_dtype)
+                ],
+                                               dim=1)
+            elif (
+                batch.image_latent is not None and independent_first_frame
+                and start_index == 0
+            ):
+                latent_model_input = torch.cat([
+                    latent_model_input,
+                    batch.image_latent.to(ctx.target_dtype)
+                ],
+                                               dim=2)
+
+            latent_model_input = self.scheduler.scale_model_input(
+                latent_model_input, t_cur)
+
+            # Build attention metadata if VSA is available
+            if vsa_available and self.attn_backend == VideoSparseAttentionBackend:
+                self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
+                )
+                if self.attn_metadata_builder_cls is not None:
+                    self.attn_metadata_builder = self.attn_metadata_builder_cls(
+                    )
+                    h, w = current_latents.shape[-2:]
+                    attn_metadata = self.attn_metadata_builder.build(
+                        current_timestep=i,
+                        raw_latent_shape=(current_num_frames, h, w),
+                        patch_size=ctx.fastvideo_args.pipeline_config.
+                        dit_config.patch_size,
+                        VSA_sparsity=ctx.fastvideo_args.VSA_sparsity,
+                        device=get_local_torch_device(),
+                    )
+                    assert attn_metadata is not None, "attn_metadata cannot be None"
+                else:
+                    attn_metadata = None
+            else:
+                attn_metadata = None
+
+            with torch.autocast(device_type="cuda",
+                                dtype=ctx.target_dtype,
+                                enabled=ctx.autocast_enabled), \
+                set_forward_context(current_timestep=i,
+                                    attn_metadata=attn_metadata,
+                                    forward_batch=batch):
+                t_expanded = t_cur * torch.ones(
+                    (latent_model_input.shape[0], current_num_frames),
+                    device=latent_model_input.device,
+                    dtype=t_cur.dtype)
+
+                model_kwargs = {
+                    "kv_cache": ctx.get_kv_cache(t_cur),
+                    "crossattn_cache": ctx.crossattn_cache,
+                    "current_start": start_index * self.frame_seq_length,
+                    "start_frame": start_index,
+                    "is_cache": False,
+                }
+
+                if self.use_action_module and current_model == self.transformer:
+                    model_kwargs.update({
+                        "kv_cache_mouse": ctx.kv_cache_mouse,
+                        "kv_cache_keyboard": ctx.kv_cache_keyboard,
+                    })
+                    model_kwargs.update(action_kwargs)
+
+                noise_pred = current_model(
+                    latent_model_input,
+                    prompt_embeds,
+                    t_expanded,
+                    **camera_action_kwargs,
+                    **ctx.image_kwargs,
+                    **ctx.pos_cond_kwargs,
+                    **model_kwargs,
+                )
+
+            current_latents = self.scheduler.step(
+                noise_pred,
+                t_cur,
+                current_latents,
+                **extra_step_kwargs,
+                return_dict=False,
+            )[0]
+
+            if progress_bar is not None:
+                progress_bar.update()
+
+        return current_latents
 
     def streaming_reset(self, batch: ForwardBatch,
                         fastvideo_args: FastVideoArgs) -> ForwardBatch:
