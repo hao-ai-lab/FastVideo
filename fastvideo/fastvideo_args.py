@@ -916,6 +916,9 @@ class TrainingArgs(FastVideoArgs):
     same_step_across_blocks: bool = False  # Use same exit timestep for all blocks
     last_step_only: bool = False  # Only use the last timestep for training
     context_noise: int = 0  # Context noise level for cache updates
+    
+    reinit_action_module: bool = False
+    override_keyboard_dim: int | None = None
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -1348,6 +1351,13 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=TrainingArgs.context_noise,
                             help="Context noise level for cache updates")
+        parser.add_argument("--reinit-action-module",
+                            action=StoreBoolean,
+                            help="Whether to reinitialize the action module during training")
+        parser.add_argument("--override-keyboard-dim",
+                            type=int,
+                            default=TrainingArgs.override_keyboard_dim,
+                            help="Override keyboard dimension")
 
         return parser
 

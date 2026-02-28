@@ -75,6 +75,7 @@ def maybe_load_fsdp_model(
     pin_cpu_memory: bool = True,
     enable_torch_compile: bool = False,
     torch_compile_kwargs: dict[str, Any] | None = None,
+    skip_param_loading: Callable[[str], bool] | None = None,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -146,6 +147,7 @@ def maybe_load_fsdp_model(
         strict=strict,
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
+        skip_param_loading=skip_param_loading,
     )
     for n, p in chain(model.named_parameters(), model.named_buffers()):
         if p.is_meta:
@@ -267,6 +269,7 @@ def load_model_from_full_model_state_dict(
     cpu_offload: bool = False,
     param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None = None,
     training_mode: bool = True,
+    skip_param_loading: Callable[[str], bool] | None = None,
 ) -> _IncompatibleKeys:
     """
     Converting full state dict into a sharded state dict
@@ -293,6 +296,11 @@ def load_model_from_full_model_state_dict(
     custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(
         full_sd_iterator, param_names_mapping)  # type: ignore
     for target_param_name, full_tensor in custom_param_sd.items():
+        if skip_param_loading is not None and skip_param_loading(
+                target_param_name):
+            logger.info("Skipping checkpoint parameter by loader policy: %s",
+                        target_param_name)
+            continue
         meta_sharded_param = meta_sd.get(target_param_name)
         if meta_sharded_param is None:
             # Some checkpoints include extra entries that are not part of the
@@ -340,10 +348,26 @@ def load_model_from_full_model_state_dict(
                        unused_keys)
 
     # List of allowed parameter name patterns
-    ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress", "proj_l"]  # Can be extended as needed
+    ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress", "proj_l", "action_model"]
+
+    def _init_action_param(param_name: str,
+                           tensor: torch.Tensor) -> torch.Tensor:
+        if param_name.endswith(".bias"):
+            nn.init.zeros_(tensor)
+            return tensor
+        if param_name.endswith(".weight"):
+            if ("proj_mouse.weight" in param_name
+                    or "proj_keyboard.weight" in param_name):
+                nn.init.zeros_(tensor)
+            elif tensor.dim() >= 2:
+                nn.init.xavier_uniform_(tensor)
+            elif tensor.dim() == 1:
+                nn.init.ones_(tensor)
+        return tensor
+
     for new_param_name in unused_keys:
         if not any(pattern in new_param_name
-                   for pattern in ALLOWED_NEW_PARAM_PATTERNS):
+                for pattern in ALLOWED_NEW_PARAM_PATTERNS):
             logger.error("Unsupported new parameter: %s. Allowed patterns: %s",
                          new_param_name, ALLOWED_NEW_PARAM_PATTERNS)
             raise ValueError(
@@ -352,15 +376,29 @@ def load_model_from_full_model_state_dict(
             )
         meta_sharded_param = meta_sd.get(new_param_name)
         if not hasattr(meta_sharded_param, "device_mesh"):
-            # Initialize with zeros
-            sharded_tensor = torch.zeros_like(meta_sharded_param,
-                                              device=device,
-                                              dtype=param_dtype)
+            if "action_model" in new_param_name:
+                sharded_tensor = _init_action_param(
+                    new_param_name,
+                    torch.empty_like(meta_sharded_param,
+                                     device=device,
+                                     dtype=param_dtype),
+                )
+            else:
+                sharded_tensor = torch.zeros_like(meta_sharded_param,
+                                                  device=device,
+                                                  dtype=param_dtype)
         else:
-            # Initialize with zeros and distribute
-            full_tensor = torch.zeros_like(meta_sharded_param,
-                                           device=device,
-                                           dtype=param_dtype)
+            if "action_model" in new_param_name:
+                full_tensor = _init_action_param(
+                    new_param_name,
+                    torch.empty_like(meta_sharded_param,
+                                     device=device,
+                                     dtype=param_dtype),
+                )
+            else:
+                full_tensor = torch.zeros_like(meta_sharded_param,
+                                               device=device,
+                                               dtype=param_dtype)
             sharded_tensor = distribute_tensor(
                 full_tensor,
                 meta_sharded_param.device_mesh,

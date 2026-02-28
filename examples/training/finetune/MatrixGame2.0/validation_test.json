@@ -1,0 +1,14 @@
+{
+    "data": [
+        {
+            "caption": "00",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000051_Bravo_instance_002.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000051_Bravo_instance_002.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        }
+    ]
+}
