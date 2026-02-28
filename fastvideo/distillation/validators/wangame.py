@@ -57,7 +57,7 @@ class WanGameValidator:
         self.validation_random_generator = torch.Generator(device="cpu").manual_seed(self.seed)
 
         self._pipeline: Any | None = None
-        self._pipeline_key: tuple[int, str] | None = None
+        self._pipeline_key: tuple[int, str, str] | None = None
         self._sampling_param: SamplingParam | None = None
 
     def set_tracker(self, tracker: Any) -> None:
@@ -126,9 +126,15 @@ class WanGameValidator:
             self._sampling_param = SamplingParam.from_pretrained(self.training_args.model_path)
         return self._sampling_param
 
-    def _get_pipeline(self, *, transformer: torch.nn.Module, sampler_kind: str) -> Any:
+    def _get_pipeline(
+        self,
+        *,
+        transformer: torch.nn.Module,
+        sampler_kind: str,
+        ode_solver: str | None,
+    ) -> Any:
         sampler_kind = str(sampler_kind).lower()
-        key = (id(transformer), sampler_kind)
+        key = (id(transformer), sampler_kind, str(ode_solver))
         if self._pipeline is not None and self._pipeline_key == key:
             return self._pipeline
 
@@ -148,6 +154,7 @@ class WanGameValidator:
             inference_mode=True,
             flow_shift=float(flow_shift) if flow_shift is not None else None,
             sampler_kind=sampler_kind,
+            ode_solver=str(ode_solver) if ode_solver is not None else None,
             loaded_modules={"transformer": transformer},
             tp_size=self.training_args.tp_size,
             sp_size=self.training_args.sp_size,
@@ -233,11 +240,16 @@ class WanGameValidator:
         dataset_file: str,
         transformer: torch.nn.Module,
         sampler_kind: str,
+        ode_solver: str | None,
         sampling_timesteps: list[int] | None = None,
         guidance_scale: float | None = None,
     ) -> _ValidationStepResult:
         training_args = self.training_args
-        pipeline = self._get_pipeline(transformer=transformer, sampler_kind=sampler_kind)
+        pipeline = self._get_pipeline(
+            transformer=transformer,
+            sampler_kind=sampler_kind,
+            ode_solver=ode_solver,
+        )
         sampling_param = self._get_sampling_param()
 
         dataset = ValidationDataset(dataset_file)
@@ -289,6 +301,7 @@ class WanGameValidator:
         if not validation_steps:
             raise ValueError("ValidationRequest.sampling_steps must be provided by the method")
         sampler_kind = getattr(request, "sampler_kind", None) or "ode"
+        ode_solver = getattr(request, "ode_solver", None)
         sampling_timesteps = getattr(request, "sampling_timesteps", None)
         if sampling_timesteps is not None:
             expected = int(len(sampling_timesteps))
@@ -327,6 +340,7 @@ class WanGameValidator:
                     dataset_file=str(dataset_file),
                     transformer=transformer,
                     sampler_kind=str(sampler_kind),
+                    ode_solver=str(ode_solver) if ode_solver is not None else None,
                     sampling_timesteps=sampling_timesteps,
                     guidance_scale=guidance_scale,
                 )

@@ -21,9 +21,19 @@ def build_wan_scheduler(fastvideo_args: FastVideoArgs, kind: SamplerKind):
     shift = fastvideo_args.pipeline_config.flow_shift
     if kind == "sde":
         return FlowMatchEulerDiscreteScheduler(shift=shift)
-    return FlowUniPCMultistepScheduler(shift=shift)
+
+    ode_solver_raw = getattr(fastvideo_args.pipeline_config, "ode_solver", "unipc")
+    ode_solver = str(ode_solver_raw).strip().lower() if ode_solver_raw is not None else "unipc"
+    if ode_solver in {"unipc", "unipc_multistep", "multistep"}:
+        return FlowUniPCMultistepScheduler(shift=shift)
+    if ode_solver in {"euler", "flowmatch", "flowmatch_euler"}:
+        return FlowMatchEulerDiscreteScheduler(shift=shift)
+
+    raise ValueError(
+        "Unknown pipeline_config.ode_solver for wan pipelines: "
+        f"{ode_solver_raw!r} (expected 'unipc' or 'euler')."
+    )
 
 
 def wan_use_btchw_layout(kind: SamplerKind) -> bool:
     return kind == "sde"
-

@@ -22,6 +22,7 @@ class ValidationRequest:
     dataset_file: str | None = None
     sampling_steps: list[int] | None = None
     sampler_kind: Literal["ode", "sde"] | None = None
+    ode_solver: str | None = None
     sampling_timesteps: list[int] | None = None
     guidance_scale: float | None = None
     output_dir: str | None = None

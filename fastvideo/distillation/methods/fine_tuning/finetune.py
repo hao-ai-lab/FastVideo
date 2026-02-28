@@ -264,6 +264,34 @@ class FineTuneMethod(DistillMethod):
             f"{type(raw).__name__}"
         )
 
+    def _parse_validation_ode_solver(
+        self,
+        *,
+        sampler_kind: Literal["ode", "sde"],
+    ) -> str | None:
+        raw = self.validation_config.get("ode_solver", None)
+        if raw in (None, ""):
+            return None
+        if sampler_kind != "ode":
+            raise ValueError(
+                "training.validation.ode_solver is only valid when "
+                "training.validation.sampler_kind='ode'"
+            )
+        if not isinstance(raw, str):
+            raise ValueError(
+                "training.validation.ode_solver must be a string when set, got "
+                f"{type(raw).__name__}"
+            )
+        solver = raw.strip().lower()
+        if solver in {"unipc", "unipc_multistep", "multistep"}:
+            return "unipc"
+        if solver in {"euler", "flowmatch", "flowmatch_euler"}:
+            return "euler"
+        raise ValueError(
+            "training.validation.ode_solver must be one of {unipc, euler}, got "
+            f"{raw!r}"
+        )
+
     def log_validation(self, iteration: int) -> None:
         validator = getattr(self, "validator", None)
         if validator is None:
@@ -294,6 +322,7 @@ class FineTuneMethod(DistillMethod):
                 f"{sampler_kind_raw!r}"
             )
         sampler_kind = cast(Literal["ode", "sde"], sampler_kind)
+        ode_solver = self._parse_validation_ode_solver(sampler_kind=sampler_kind)
 
         output_dir = self.validation_config.get("output_dir", None)
         if output_dir is not None and not isinstance(output_dir, str):
@@ -307,6 +336,7 @@ class FineTuneMethod(DistillMethod):
             dataset_file=dataset_file,
             sampling_steps=sampling_steps,
             sampler_kind=sampler_kind,
+            ode_solver=ode_solver,
             sampling_timesteps=None,
             guidance_scale=guidance_scale,
             output_dir=output_dir,

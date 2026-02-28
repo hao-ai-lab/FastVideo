@@ -74,6 +74,11 @@ class PipelineConfig:
     # - "sde": stochastic loop with noise injection
     sampler_kind: str = "ode"
 
+    # ODE solver selection when `sampler_kind="ode"`.
+    # - "unipc": FlowUniPCMultistepScheduler (default)
+    # - "euler": FlowMatchEulerDiscreteScheduler
+    ode_solver: str = "unipc"
+
     # Wan2.2 TI2V parameters
     ti2v_task: bool = False
     boundary_ratio: float | None = None
