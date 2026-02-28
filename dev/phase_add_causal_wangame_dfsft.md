@@ -31,8 +31,14 @@
 - [ ] **Model 侧**：Wangame 支持 `causal` 变体（通过 role 的 `extra` 参数触发）
 - [ ] **Method 侧**：新增 `dfsft`（diffusion-forcing SFT）方法
 - [ ] **Examples**：新增一份 DFSFT 的 YAML + temp.sh（端到端可跑）
-- [ ] **Validation**：沿用现有 validator，能够用 `validation_sampling_steps=40`
-  做验证（ODE 或 SDE 均可，默认用 ODE）
+- [ ] **Validation（关键变更）**：支持“**真正的 causal rollout**”验证，并支持
+  **context noise**：
+  - causal rollout 指 **streaming / chunk-wise** 生成（KV-cache + block processing），
+    而不是“用 causal transformer 但仍一次性 full-video forward”；
+  - **目标是 ODE-style 的 causal streaming**（用 `scheduler.step(...)` 做数值推进），
+    而不是 DMD/SDE-style 的 `pred_x0 -> add_noise(next_t, eps)` rollout；
+  - 若要同时保留 SDE-style（用于对照/legacy 对齐），应当由 config 显式选择，
+    而不是在 validator 里隐式“偷换语义”。
 
 ---
 
@@ -80,14 +86,68 @@ method_config:
   max_timestep_ratio: 0.98
 
   # 可选：更接近“history noisy cache”的效果（第一版可以先不做）
-  context_noise: 0.0
+  context_noise: 0
 ```
 
 说明：
 - `chunk_size`：决定 `t_inhom` 的 block 划分（FastGen 也用 chunk_size）。
   - 对 Wang/Wangame，建议默认 3（与 `num_frames_per_block` 一致）。
-- `context_noise`：未来如果我们实现“prefill cache 前对历史 x0 加噪”，
-  这个值将用于控制历史噪声强度。
+- `context_noise`：**context noise timestep**（整型）。用于 causal rollout 时
+  “更新 KV cache 的上下文噪声水平”（见第 4 节 Validation 设计）。
+
+### 2.3 Validation config（真正的 causal rollout + context noise）
+
+我们需要区分两种 validation 语义：
+
+1) **full-video rollout**（非 streaming）：`WanGameActionImageToVideoPipeline.forward(...)`
+2) **streaming causal rollout**（推荐用于 causal student 的验证）：`WanGameCausalDMDPipeline.streaming_*`
+
+建议把选择权交给 method（或 method_config），让 validator 只负责执行：
+
+```yaml
+method_config:
+  validation:
+    # full | streaming_causal
+    rollout_mode: streaming_causal
+
+    # 对 full rollout：ode/sde 选择 sampling loop
+    # 对 streaming_causal：同样允许 ode/sde，但这是一个“明确的语义选择”
+    sampler_kind: ode
+
+    # ODE: 直接用标准 `num_inference_steps`（与现有 ODE pipeline 对齐）
+    # （可以复用 training.validation_sampling_steps 的整数；这里单独列出来是为了更清晰）
+    num_inference_steps: 40
+
+    # SDE/DMD: 需要显式 step list（few-step schedule）
+    # sampling_timesteps: [1000,750,500,250]
+    # warp_denoising_step: true
+
+    # causal cache 的 context noise（timestep）
+    context_noise: 0
+```
+
+> 备注：
+> - 现阶段的 `WanGameCausalDMDPipeline / MatrixGameCausalDenoisingStage` 是 DMD/SDE-style；
+>   要实现 **ODE-style streaming**，需要新增一个 causal ODE denoising stage（见第 4 节）。
+> - 我们仍可以保留 SDE-style streaming（用于对照/legacy 对齐），但必须由 config 显式选择，
+>   避免 “training/validation 语义混用导致 reviewer 困惑”。
+
+### 2.4 pipeline_config：ODE solver 选择（可选）
+
+我们目前的 `pipeline_config.sampler_kind=ode` 默认会选择 `FlowUniPCMultistepScheduler`
+（见 `fastvideo/pipelines/samplers/wan.py`）。为了做对照实验/调试，建议增加一个可选字段：
+
+```yaml
+pipeline_config:
+  sampler_kind: ode
+  ode_solver: unipc   # unipc | euler
+```
+
+约束（推荐强校验）：
+- `sampler_kind=sde` 时不允许 `ode_solver=unipc`（因为 SDE/DMD-style rollout 需要
+  `add_noise(next_t, eps)`；UniPC 的 `add_noise` 对 “任意 timestep 值” 不鲁棒）。
+- `ode_solver=euler` 时应强制 deterministic（`stochastic_sampling=false`），否则就变成
+  “SDE-like Euler”。
 
 ---
 
@@ -154,6 +214,37 @@ method_config:
 - [ ] `examples/distillation/wangame/dfsft-temp.sh`（新增）
   - 跟现在 `run.sh` 一样只负责 export CONFIG + torchrun
 
+### 4.4 validation（真正的 causal rollout）
+
+> 这是本阶段新增的关键设计点：**不要**默认复用“full-video validator”来验证 causal 模型。
+
+- [ ] `fastvideo/distillation/validators/wangame.py`（或新增 `wangame_causal.py`）
+  - 支持 `rollout_mode: streaming_causal`：
+    - pipeline：**需要 ODE-style 的 causal streaming pipeline**
+      - 方案 A（推荐）：扩展/新增 `WanGameCausalPipeline`（同一条 pipeline），内部按
+        `sampler_kind={ode|sde}` 选择不同 denoising stage
+      - 方案 B（过渡）：保留 `WanGameCausalDMDPipeline`（仅 SDE），但这不满足本阶段目标
+  - ODE-style streaming 的调用方式（与现有 streaming API 对齐）：
+    1) `pipeline.streaming_reset(batch, fastvideo_args)`
+    2) 循环 `pipeline.streaming_step(...)` 直到生成完成
+    3) 聚合每个 chunk 的 frames，拼成完整 video 再落盘/上报 tracker
+  - 支持 `context_noise`（对齐 legacy self-forcing 语义）：
+    - cache update 前对 context latent 做一次显式 `scheduler.add_noise(x0, eps, t_context)`
+      再 forward 更新 KV cache（避免 “只改 timestep embedding，效果像没开”）
+
+- [ ] `fastvideo/pipelines/stages/`（新增 causal ODE denoising stage）
+  - `MatrixGameCausalOdeDenoisingStage`（或同等命名）
+    - block/chunk 框架与 `MatrixGameCausalDenoisingStage` 一致（KV-cache + action）
+    - block 内 loop 使用 `scheduler.step(...)`（ODE loop）
+    - **每个 block 必须 reset solver state**（见风险点：UniPC 多步历史不能跨 block 泄漏）
+
+- [ ] `fastvideo/distillation/validators/base.py`
+  - 若需要：扩展 `ValidationRequest` 以携带
+    - `rollout_mode`
+    - `context_noise`
+    - `sampling_timesteps`（已有）
+  - 目标：把“验证用什么 pipeline/rollout”的决策交给 method。
+
 ---
 
 ## 5. 验收标准（Definition of Done）
@@ -163,6 +254,7 @@ method_config:
 - [ ] 训练若干步后，validation 质量有可见提升
 - [ ] 同一份 wangame checkpoint：bidirectional finetune 和 causal dfsft
   都能启动（若 causal 需要不同 ckpt，要明确写在配置/README）
+- [ ] 支持用 streaming causal rollout 做验证（并能开启/关闭 context noise）
 
 ---
 
@@ -185,6 +277,36 @@ method_config:
    - DFSFT 训练的是基础模型；推理时可以设 `num_inference_steps=40`。
    - 但“few-step（4/8）”仍需要 distillation（DMD2/CM/CausVid）。
 
+5) **“真正 causal rollout” vs “full-video rollout”**（重要决策点）：
+   - 如果我们只用 `WanGameActionImageToVideoPipeline.forward(...)` 做验证，
+     这并不能覆盖 deployment 的 streaming/KV-cache 语义；
+   - 但 streaming rollout 目前依赖 `WanGameCausalDMDPipeline`（DMD/SDE-style step list），
+     因此需要明确：
+     - DFSFT baseline 先用 streaming + step list 验证（更贴近 causal 部署）；
+     - 或者额外实现一个 “streaming ODE” sampler（更大工程，建议后置）。
+
+6) **step list / context noise 的配置入口**（重要决策点）：
+   - 现有 streaming pipeline 读取 `pipeline_config.dmd_denoising_steps / warp_denoising_step / context_noise`；
+   - 我们的新框架更希望把 few-step schedule/rollout knobs 放到 `method_config`；
+   - 因此需要一个明确策略：
+     - 方案 A（最小改动）：validator 在构建 validation pipeline 时，把
+       `method_config.validation.*` 写入 `args_copy.pipeline_config.*`（validation-only）；
+     - 方案 B（更干净）：把 streaming pipeline 改为优先读 `ForwardBatch.sampling_timesteps`
+       + `ValidationRequest.context_noise`，彻底摆脱 pipeline_config 依赖（工程量更大）。
+
+7) **context noise 的“语义一致性”**（潜在坑）：
+   - legacy self-forcing 里 context noise 是：
+     `x0 -> add_noise(x0, eps, context_timestep)` 再更新 cache；
+   - 现有 `MatrixGameCausalDenoisingStage._update_context_cache` 只把 timestep 传给 transformer，
+     是否也应显式 add_noise（以匹配语义）需要确认，否则“开了 context noise 但效果像没开”。
+
+8) **ODE solver 的 state reset（新增风险点，必须明确）**：
+   - `FlowUniPCMultistepScheduler` 是 multistep solver，内部有历史状态；
+   - 在 streaming causal rollout 中，**每个 block/chunk** 都应当像独立的 ODE 求解过程：
+     - 要么每个 block 调用一次 `scheduler.set_timesteps(...)`（会清空 `_step_index` 和历史）
+     - 要么为每个 block 构建新的 scheduler 实例
+   - 否则会出现 solver 历史跨 block 泄漏，导致质量漂移且很难定位。
+
 ---
 
 ## 7. FastGen 对照（便于后续实现 CausVid）
@@ -195,4 +317,3 @@ method_config:
 
 - Diffusion-forcing distillation（未来）：
   - `fastgen/methods/distribution_matching/causvid.py::CausVidModel`
-
