@@ -217,6 +217,12 @@ class WanValidator:
         if not validation_steps:
             raise ValueError("ValidationRequest.sampling_steps must be provided by the method")
         sampler_kind = getattr(request, "sampler_kind", None) or "ode"
+        rollout_mode = getattr(request, "rollout_mode", None)
+        if rollout_mode not in {None, "parallel"}:
+            raise ValueError(
+                "WanValidator only supports rollout_mode='parallel'. "
+                f"Got rollout_mode={rollout_mode!r}."
+            )
         ode_solver = getattr(request, "ode_solver", None)
         sampling_timesteps = getattr(request, "sampling_timesteps", None)
         if sampling_timesteps is not None:

@@ -57,7 +57,7 @@ class WanGameValidator:
         self.validation_random_generator = torch.Generator(device="cpu").manual_seed(self.seed)
 
         self._pipeline: Any | None = None
-        self._pipeline_key: tuple[int, str, str] | None = None
+        self._pipeline_key: tuple[int, str, str, str] | None = None
         self._sampling_param: SamplingParam | None = None
 
     def set_tracker(self, tracker: Any) -> None:
@@ -130,38 +130,61 @@ class WanGameValidator:
         self,
         *,
         transformer: torch.nn.Module,
+        rollout_mode: str,
         sampler_kind: str,
         ode_solver: str | None,
     ) -> Any:
-        sampler_kind = str(sampler_kind).lower()
-        key = (id(transformer), sampler_kind, str(ode_solver))
+        rollout_mode = str(rollout_mode).strip().lower()
+        sampler_kind = str(sampler_kind).strip().lower()
+        key = (id(transformer), rollout_mode, sampler_kind, str(ode_solver))
         if self._pipeline is not None and self._pipeline_key == key:
             return self._pipeline
 
-        if sampler_kind not in {"ode", "sde"}:
-            raise ValueError(
-                f"Unknown sampler_kind for WanGame validation: {sampler_kind!r}"
+        if rollout_mode == "parallel":
+            if sampler_kind not in {"ode", "sde"}:
+                raise ValueError(
+                    f"Unknown sampler_kind for WanGame validation: {sampler_kind!r}"
+                )
+
+            flow_shift = getattr(self.training_args.pipeline_config, "flow_shift", None)
+
+            from fastvideo.pipelines.basic.wan.wangame_i2v_pipeline import (
+                WanGameActionImageToVideoPipeline,
             )
 
-        flow_shift = getattr(self.training_args.pipeline_config, "flow_shift", None)
+            self._pipeline = WanGameActionImageToVideoPipeline.from_pretrained(
+                self.training_args.model_path,
+                inference_mode=True,
+                flow_shift=float(flow_shift) if flow_shift is not None else None,
+                sampler_kind=sampler_kind,
+                ode_solver=str(ode_solver) if ode_solver is not None else None,
+                loaded_modules={"transformer": transformer},
+                tp_size=self.training_args.tp_size,
+                sp_size=self.training_args.sp_size,
+                num_gpus=self.training_args.num_gpus,
+                pin_cpu_memory=self.training_args.pin_cpu_memory,
+                dit_cpu_offload=True,
+            )
+        elif rollout_mode == "streaming":
+            from fastvideo.pipelines.basic.wan.wangame_causal_dmd_pipeline import (
+                WanGameCausalDMDPipeline,
+            )
 
-        from fastvideo.pipelines.basic.wan.wangame_i2v_pipeline import (
-            WanGameActionImageToVideoPipeline,
-        )
-
-        self._pipeline = WanGameActionImageToVideoPipeline.from_pretrained(
-            self.training_args.model_path,
-            inference_mode=True,
-            flow_shift=float(flow_shift) if flow_shift is not None else None,
-            sampler_kind=sampler_kind,
-            ode_solver=str(ode_solver) if ode_solver is not None else None,
-            loaded_modules={"transformer": transformer},
-            tp_size=self.training_args.tp_size,
-            sp_size=self.training_args.sp_size,
-            num_gpus=self.training_args.num_gpus,
-            pin_cpu_memory=self.training_args.pin_cpu_memory,
-            dit_cpu_offload=True,
-        )
+            self._pipeline = WanGameCausalDMDPipeline.from_pretrained(
+                self.training_args.model_path,
+                inference_mode=True,
+                loaded_modules={"transformer": transformer},
+                tp_size=self.training_args.tp_size,
+                sp_size=self.training_args.sp_size,
+                num_gpus=self.training_args.num_gpus,
+                pin_cpu_memory=self.training_args.pin_cpu_memory,
+                dit_cpu_offload=True,
+            )
+        else:
+            raise ValueError(
+                "Unknown rollout_mode for WanGame validation: "
+                f"{rollout_mode!r}. Expected 'parallel' or 'streaming'."
+            )
 
         self._pipeline_key = key
         return self._pipeline
@@ -239,6 +262,7 @@ class WanGameValidator:
         *,
         dataset_file: str,
         transformer: torch.nn.Module,
+        rollout_mode: str,
         sampler_kind: str,
         ode_solver: str | None,
         sampling_timesteps: list[int] | None = None,
@@ -247,6 +271,7 @@ class WanGameValidator:
         training_args = self.training_args
         pipeline = self._get_pipeline(
             transformer=transformer,
+            rollout_mode=rollout_mode,
             sampler_kind=sampler_kind,
             ode_solver=ode_solver,
         )
@@ -301,7 +326,30 @@ class WanGameValidator:
         if not validation_steps:
             raise ValueError("ValidationRequest.sampling_steps must be provided by the method")
         sampler_kind = getattr(request, "sampler_kind", None) or "ode"
+        rollout_mode_raw = getattr(request, "rollout_mode", None) or "parallel"
+        if not isinstance(rollout_mode_raw, str):
+            raise ValueError(
+                "ValidationRequest.rollout_mode must be a string when set, got "
+                f"{type(rollout_mode_raw).__name__}"
+            )
+        rollout_mode = rollout_mode_raw.strip().lower()
+        if rollout_mode not in {"parallel", "streaming"}:
+            raise ValueError(
+                "ValidationRequest.rollout_mode must be one of {parallel, streaming}, got "
+                f"{rollout_mode_raw!r}"
+            )
         ode_solver = getattr(request, "ode_solver", None)
+        if rollout_mode == "streaming":
+            if str(sampler_kind).strip().lower() != "sde":
+                raise ValueError(
+                    "WanGame validation rollout_mode='streaming' requires "
+                    "sampler_kind='sde' (it uses the causal DMD-style rollout)."
+                )
+            if ode_solver is not None:
+                raise ValueError(
+                    "WanGame validation rollout_mode='streaming' does not support "
+                    f"ode_solver={ode_solver!r}."
+                )
         sampling_timesteps = getattr(request, "sampling_timesteps", None)
         if sampling_timesteps is not None:
             expected = int(len(sampling_timesteps))
@@ -326,6 +374,7 @@ class WanGameValidator:
         old_inference_mode = training_args.inference_mode
         old_dit_cpu_offload = training_args.dit_cpu_offload
         old_mode = training_args.mode
+        old_dmd_denoising_steps = getattr(training_args.pipeline_config, "dmd_denoising_steps", None)
         try:
             training_args.inference_mode = True
             training_args.dit_cpu_offload = True
@@ -335,10 +384,20 @@ class WanGameValidator:
             num_sp_groups = self.world_group.world_size // self.sp_group.world_size
 
             for num_inference_steps in validation_steps:
+                if rollout_mode == "streaming":
+                    if sampling_timesteps is not None:
+                        training_args.pipeline_config.dmd_denoising_steps = list(sampling_timesteps)
+                    else:
+                        timesteps = np.linspace(1000, 0, int(num_inference_steps))
+                        training_args.pipeline_config.dmd_denoising_steps = [
+                            int(max(0, min(1000, round(t)))) for t in timesteps
+                        ]
+
                 result = self._run_validation_for_steps(
                     num_inference_steps,
                     dataset_file=str(dataset_file),
                     transformer=transformer,
+                    rollout_mode=rollout_mode,
                     sampler_kind=str(sampler_kind),
                     ode_solver=str(ode_solver) if ode_solver is not None else None,
                     sampling_timesteps=sampling_timesteps,
@@ -384,5 +443,6 @@ class WanGameValidator:
             training_args.inference_mode = old_inference_mode
             training_args.dit_cpu_offload = old_dit_cpu_offload
             training_args.mode = old_mode
+            training_args.pipeline_config.dmd_denoising_steps = old_dmd_denoising_steps
             if was_training:
                 transformer.train()

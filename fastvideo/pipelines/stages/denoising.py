@@ -553,10 +553,21 @@ class DenoisingStage(PipelineStage):
         Returns:
             The prepared kwargs.
         """
-        extra_step_kwargs = {}
+        signature = inspect.signature(func)
+        if any(
+            p.kind == inspect.Parameter.VAR_KEYWORD
+            for p in signature.parameters.values()
+        ):
+            # If the callee accepts `**kwargs`, do not filter by signature.
+            # This is important for models that route parameters internally via
+            # `forward(*args, **kwargs)` (e.g. causal Wangame), where filtering
+            # would incorrectly drop conditioning kwargs like `action`.
+            return dict(kwargs)
+
+        accepted = set(signature.parameters.keys())
+        extra_step_kwargs: dict[str, Any] = {}
         for k, v in kwargs.items():
-            accepts = k in set(inspect.signature(func).parameters.keys())
-            if accepts:
+            if k in accepted:
                 extra_step_kwargs[k] = v
         return extra_step_kwargs
 

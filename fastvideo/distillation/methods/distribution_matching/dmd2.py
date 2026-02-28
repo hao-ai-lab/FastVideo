@@ -469,6 +469,19 @@ class DMD2Method(DistillMethod):
                 "sampler_kind='sde'"
             )
 
+        rollout_mode_raw = self.validation_config.get("rollout_mode", "parallel")
+        if not isinstance(rollout_mode_raw, str):
+            raise ValueError(
+                "training.validation.rollout_mode must be a string when set, got "
+                f"{type(rollout_mode_raw).__name__}"
+            )
+        rollout_mode = rollout_mode_raw.strip().lower()
+        if rollout_mode not in {"parallel", "streaming"}:
+            raise ValueError(
+                "training.validation.rollout_mode must be one of {parallel, streaming}, "
+                f"got {rollout_mode_raw!r}"
+            )
+
         guidance_scale = self._parse_validation_guidance_scale()
         output_dir = self.validation_config.get("output_dir", None)
         if output_dir is not None and not isinstance(output_dir, str):
@@ -482,6 +495,7 @@ class DMD2Method(DistillMethod):
             dataset_file=dataset_file,
             sampling_steps=sampling_steps,
             sampler_kind=sampler_kind,
+            rollout_mode=cast(Literal["parallel", "streaming"], rollout_mode),
             ode_solver=ode_solver,
             sampling_timesteps=sampling_timesteps,
             guidance_scale=guidance_scale,
