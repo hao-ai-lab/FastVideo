@@ -7,6 +7,7 @@
 - **Method** 只做算法（loss + update policy + 需要哪些 roles）。
 - **Model plugin** 只做装配（build-time：加载 modules、构建 bundle/adapter/dataloader/validator；代码在 `models/`）。
 - **Adapter** 只做运行时 primitive（step-time：prepare_batch/forward_context/predict/backward 等），
+  并与对应 model plugin **共置于 `models/*.py`**（例如 `models/wan.py:WanAdapter`）。
   API 以 operation 为中心，不以 role 为中心（避免 role 爆炸）。
 
 快速入口（从运行到训练）：
@@ -31,14 +32,12 @@
 - `roles.md`
 - `trainer.md`
 
-### adapters/
-- `adapters/__init__.md`
-- `adapters/base.md`
-- `adapters/wan.md`
-
 ### models/
 - `models/__init__.md`
+- `models/adapter.md`
+- `models/components.md`
 - `models/wan.md`
+- `models/wangame.md`
 
 ### methods/
 - `methods/__init__.md`

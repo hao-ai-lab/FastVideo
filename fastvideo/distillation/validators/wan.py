@@ -1,5 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 
+"""Wan validator (model-family validation backend).
+
+Config keys used:
+- `training` (selected fields):
+  - `seed`, `model_path`
+  - `num_height`, `num_width`, `num_latent_t`
+  - `tp_size`, `sp_size`, `num_gpus`, `pin_cpu_memory`
+  - `pipeline_config.flow_shift`
+  - `pipeline_config.vae_config.arch_config.temporal_compression_ratio`
+  - `VSA_sparsity`
+- `training.validation.*` (typically parsed by a method into `ValidationRequest`):
+  - `dataset_file`, `sampling_steps`, `guidance_scale`
+  - `sampler_kind` (`ode`/`sde`), `ode_solver` (`euler`/`unipc`), `rollout_mode`
+"""
+
 from __future__ import annotations
 
 import os

@@ -1,5 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
 
+"""DMD2 distillation method (algorithm layer).
+
+Config keys used (YAML schema-v2):
+- `recipe.method`: must be `"dmd2"` for this method.
+- `roles`: requires `student`, `teacher`, `critic` (trainable critic).
+- `method_config`:
+  - `rollout_mode` (`simulate` or `data_latent`)
+  - `dmd_denoising_steps` (list[int])
+  - `cfg_uncond` (optional): `on_missing` + channel policies
+  - optional overrides: `generator_update_interval`, `warp_denoising_step`,
+    `real_score_guidance_scale`
+- `training` (selected fields used for optim/schedule):
+  - `learning_rate`, `betas`, `lr_scheduler`
+  - `fake_score_learning_rate`, `fake_score_betas`, `fake_score_lr_scheduler`
+  - `weight_decay`, `lr_warmup_steps`, `max_train_steps`, `lr_num_cycles`,
+    `lr_power`, `min_lr_ratio`
+  - `generator_update_interval`, `warp_denoising_step`, `real_score_guidance_scale`,
+    `max_grad_norm`
+- `training.validation.*` (parsed by method; executed via validator):
+  - `enabled`, `every_steps`, `dataset_file`, `sampling_steps`
+  - optional: `sampling_timesteps`, `guidance_scale`, `sampler_kind`, `ode_solver`,
+    `rollout_mode`, `output_dir`, `num_frames`
+"""
+
 from __future__ import annotations
 
 from typing import Any, cast, Literal, Protocol

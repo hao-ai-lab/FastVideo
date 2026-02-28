@@ -1,5 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 
+"""Diffusion-forcing SFT method (DFSFT; algorithm layer).
+
+Config keys used (YAML schema-v2):
+- `recipe.method`: must be `"dfsft"` for this method.
+- `roles`: requires `student` (and `roles.student.trainable=true`).
+- `method_config`:
+  - `attn_kind` (optional): `dense` or `vsa`
+  - `chunk_size` (optional; default=3)
+  - `min_timestep_ratio` / `max_timestep_ratio` (optional)
+- `training` (selected fields used for optim/schedule):
+  - `learning_rate`, `betas`, `lr_scheduler`
+  - `weight_decay`, `lr_warmup_steps`, `max_train_steps`, `lr_num_cycles`,
+    `lr_power`, `min_lr_ratio`, `max_grad_norm`
+- `training.validation.*` (parsed by method; executed via validator):
+  - `enabled`, `every_steps`, `dataset_file`, `sampling_steps`
+  - optional: `guidance_scale`, `sampler_kind`, `ode_solver`, `rollout_mode`,
+    `output_dir`, `num_frames`
+"""
+
 from __future__ import annotations
 
 from typing import Any, Literal, Protocol, cast
