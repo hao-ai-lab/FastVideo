@@ -36,7 +36,6 @@ from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.logger import init_logger
 
 from fastvideo.distributed.parallel_state import get_sp_world_size
-from fastvideo.distributed.utils import create_attention_mask_for_padding
 
 logger = init_logger(__name__)
 
@@ -290,7 +289,7 @@ class MMDoubleStreamBlock(nn.Module):
         txt: torch.Tensor,
         vec: torch.Tensor,
         freqs_cis: tuple,
-        seq_attention_mask: torch.Tensor,
+        original_seq_len: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # Process modulation vectors
         img_mod_outputs = self.img_mod(vec)
@@ -346,7 +345,7 @@ class MMDoubleStreamBlock(nn.Module):
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_k.dtype)
 
 
-        img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v, freqs_cis=freqs_cis, attention_mask=seq_attention_mask)
+        img_attn, txt_attn = self.attn(img_q, img_k, img_v, original_seq_len, txt_q, txt_k, txt_v, freqs_cis=freqs_cis)
         
         img_attn_out, _ = self.img_attn_proj(
             img_attn.view(batch_size, image_seq_len, -1))
@@ -485,16 +484,7 @@ class HunyuanVideo15Transformer3DModel(BaseDiT):
         padded_seq_len = current_seq_len * sp_world_size
         
                 
-        if padded_seq_len > original_seq_len:
-            seq_attention_mask = create_attention_mask_for_padding(
-                seq_len=original_seq_len,
-                padded_seq_len=padded_seq_len,
-                batch_size=batch_size,
-                device=hidden_states.device,
-            )
-        else:
-            seq_attention_mask = None
-        # qwen text embedding
+
         encoder_hidden_states = self.txt_in(encoder_hidden_states, timestep)
 
         encoder_hidden_states_cond_emb = self.cond_type_embed(
@@ -533,7 +523,7 @@ class HunyuanVideo15Transformer3DModel(BaseDiT):
                     encoder_hidden_states,
                     temb,
                     freqs_cis,
-                    seq_attention_mask
+                    original_seq_len
                 )
 
         else:
@@ -543,7 +533,7 @@ class HunyuanVideo15Transformer3DModel(BaseDiT):
                     encoder_hidden_states,
                     temb,
                     freqs_cis,
-                    seq_attention_mask
+                    original_seq_len
                 )
 
         # Final layer processing
