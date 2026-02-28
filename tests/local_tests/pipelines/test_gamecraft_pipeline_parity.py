@@ -340,9 +340,8 @@ def test_gamecraft_pipeline_latent_parity():
         camera_states=plucker_embedding,
     )
     
-    fastvideo_latents = result.get("latents")
-    if fastvideo_latents is None:
-        fastvideo_latents = result.get("samples")
+
+    fastvideo_latents = result.get("samples")
     
     _log_tensor_stats("FastVideo latents", fastvideo_latents)
     

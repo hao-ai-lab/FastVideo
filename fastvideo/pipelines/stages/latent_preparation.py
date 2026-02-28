@@ -55,10 +55,9 @@ class LatentPreparationStage(PipelineStage):
             The batch with prepared latent variables.
         """
 
-        latent_num_frames = None
-        # Adjust video length based on VAE version if needed
-        if hasattr(self, 'adjust_video_length'):
-            latent_num_frames = self.adjust_video_length(batch, fastvideo_args)
+        latent_num_frames = (
+            batch.num_frames - 1
+        ) // fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio + 1
         # Determine batch size; fall back to action/image inputs when no text encoder is present
         if not batch.prompt_embeds:
             if batch.keyboard_cond is not None:
@@ -163,28 +162,6 @@ class LatentPreparationStage(PipelineStage):
         batch.raw_latent_shape = bcthw_shape
 
         return batch
-
-    def adjust_video_length(self, batch: ForwardBatch,
-                            fastvideo_args: FastVideoArgs) -> int:
-        """
-        Adjust video length based on VAE version.
-        
-        Args:
-            batch: The current batch information.
-            fastvideo_args: The inference arguments.
-            
-        Returns:
-            The batch with adjusted video length.
-        """
-
-        video_length = batch.num_frames
-        use_temporal_scaling_frames = fastvideo_args.pipeline_config.vae_config.use_temporal_scaling_frames
-        if not use_temporal_scaling_frames:
-            raise ValueError(
-                "Only temporal-scaling-frame VAE configs are supported.")
-        temporal_scale_factor = fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        latent_num_frames = (video_length - 1) // temporal_scale_factor + 1
-        return int(latent_num_frames)
 
     def verify_input(self, batch: ForwardBatch,
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -671,28 +648,6 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
         batch.uncond_mask = uncond_mask
         batch.padding_mask = padding_mask
         return batch
-
-    def adjust_video_length(self, batch: ForwardBatch,
-                            fastvideo_args: FastVideoArgs) -> int:
-        """
-        Adjust video length based on VAE version.
-        
-        Args:
-            batch: The current batch information.
-            fastvideo_args: The inference arguments.
-            
-        Returns:
-            The batch with adjusted video length.
-        """
-
-        video_length = batch.num_frames
-        use_temporal_scaling_frames = fastvideo_args.pipeline_config.vae_config.use_temporal_scaling_frames
-        if not use_temporal_scaling_frames:
-            raise ValueError(
-                "Only temporal-scaling-frame VAE configs are supported.")
-        temporal_scale_factor = fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        latent_num_frames = (video_length - 1) // temporal_scale_factor + 1
-        return int(latent_num_frames)
 
     def verify_input(self, batch: ForwardBatch,
                      fastvideo_args: FastVideoArgs) -> VerificationResult:

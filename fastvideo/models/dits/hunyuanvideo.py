@@ -17,7 +17,7 @@ from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
                                                TimestepEmbedder, unpatchify)
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.distributed.communication_op import sequence_model_parallel_shard, sequence_model_parallel_all_gather
+from fastvideo.distributed.communication_op import sequence_model_parallel_shard, sequence_model_parallel_all_gather_with_unpad
 
 
 class HunyuanRMSNorm(nn.Module):
@@ -585,7 +585,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
             vec = vec + self.guidance_in(guidance)
         # Embed image and text
         img = self.img_in(img)
-        img, _ = sequence_model_parallel_shard(img, dim=1)
+        img, original_seq_len = sequence_model_parallel_shard(img, dim=1)
         txt = self.txt_in(txt, t)
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]
@@ -614,7 +614,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         img = x[:, :img_seq_len, ...]
 
         # Final layer processing
-        img = sequence_model_parallel_all_gather(img, dim=1)
+        img = sequence_model_parallel_all_gather_with_unpad(img, original_seq_len, dim=1)
         img = self.final_layer(img, vec)
         # Unpatchify to get original shape
         img = unpatchify(img, tt, th, tw, self.patch_size, self.out_channels)

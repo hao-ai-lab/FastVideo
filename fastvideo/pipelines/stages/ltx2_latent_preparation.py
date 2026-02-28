@@ -31,8 +31,9 @@ class LTX2LatentPreparationStage(PipelineStage):
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        latent_num_frames = self._adjust_video_length(batch, fastvideo_args)
-
+        latent_num_frames = (
+            batch.num_frames - 1
+        ) // fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio + 1
         if not batch.prompt_embeds:
             batch_size = 1
         elif isinstance(batch.prompt, list):
@@ -115,15 +116,6 @@ class LTX2LatentPreparationStage(PipelineStage):
         batch.latents = latents
         batch.raw_latent_shape = shape
         return batch
-
-    def _adjust_video_length(self, batch: ForwardBatch,
-                             fastvideo_args: FastVideoArgs) -> int | None:
-        if not fastvideo_args.pipeline_config.vae_config.use_temporal_scaling_frames:
-            return None
-        temporal_scale_factor = (fastvideo_args.pipeline_config.vae_config.
-                                 arch_config.temporal_compression_ratio)
-        video_length = batch.num_frames
-        return int((video_length - 1) // temporal_scale_factor + 1)
 
     def _load_initial_latent(
         self,
