@@ -28,9 +28,6 @@ def build_wangame_components(*, cfg: DistillRunConfig) -> ModelComponents:
     if not getattr(training_args, "data_path", ""):
         raise ValueError("training.data_path must be set for distillation")
 
-    # Ensure transformer class name is resolvable by PipelineComponentLoader.
-    training_args.override_transformer_cls_name = "WanGameActionTransformer3DModel"
-
     # Load shared components (student base path).
     vae = load_module_from_path(
         model_path=str(training_args.model_path),
@@ -49,6 +46,21 @@ def build_wangame_components(*, cfg: DistillRunConfig) -> ModelComponents:
                 f"got {role}={role_spec.family!r}"
             )
 
+        variant_raw = (role_spec.extra or {}).get("variant", None)
+        if variant_raw is None or variant_raw == "":
+            transformer_cls_name = "WanGameActionTransformer3DModel"
+        else:
+            variant = str(variant_raw).strip().lower()
+            if variant in {"bidirectional", "bidi"}:
+                transformer_cls_name = "WanGameActionTransformer3DModel"
+            elif variant == "causal":
+                transformer_cls_name = "CausalWanGameTransformer3DModel"
+            else:
+                raise ValueError(
+                    f"Unknown roles.{role}.variant for wangame: "
+                    f"{variant_raw!r}. Expected 'causal' or 'bidirectional'."
+                )
+
         disable_custom_init_weights = bool(
             getattr(role_spec, "disable_custom_init_weights", False)
         )
@@ -57,6 +69,7 @@ def build_wangame_components(*, cfg: DistillRunConfig) -> ModelComponents:
             module_type="transformer",
             training_args=training_args,
             disable_custom_init_weights=disable_custom_init_weights,
+            override_transformer_cls_name=transformer_cls_name,
         )
         modules: dict[str, torch.nn.Module] = {"transformer": transformer}
 

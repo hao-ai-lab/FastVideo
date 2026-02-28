@@ -20,6 +20,7 @@
   - `recipe: RecipeSpec`（选择 family + method）
   - `roles: dict[str, RoleSpec]`（来自 YAML 的 `roles:`）
   - `training_args: TrainingArgs`（来自 YAML 的 `training:`，并注入 entrypoint invariants）
+  - `validation: dict`（来自 `training.validation:`，由 method 解释并驱动验证）
   - `method_config: dict`（来自 YAML 的 `method_config:`，传给 method 解释）
   - `raw: dict`（原始 YAML，便于 tracker 记录/复现）
 
@@ -57,6 +58,8 @@
   - `path`: 模型权重路径（HF repo 或本地目录）
   - `trainable`: 是否训练该 role（只影响 `requires_grad`/模式；具体 optimizer 由 method 决定）
   - `disable_custom_init_weights`: 是否禁用 family 的“加载时自定义 init weights 逻辑”
+  - `extra: dict`：保留 `roles.<role>` 下除上述字段外的所有 key/value，
+    交给 model plugin 解释（例如 `roles.student.variant: causal`）
 
 ## 3) Builder 装配相关（build-time / run-time 边界）
 - `ModelComponents`

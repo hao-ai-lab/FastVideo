@@ -17,6 +17,7 @@ def load_module_from_path(
     module_type: str,
     training_args: Any,
     disable_custom_init_weights: bool = False,
+    override_transformer_cls_name: str | None = None,
 ) -> torch.nn.Module:
     """Load a single pipeline component module from a FastVideo model path.
 
@@ -39,6 +40,13 @@ def load_module_from_path(
     transformers_or_diffusers, _architecture = module_info
     component_path = os.path.join(local_model_path, module_type)
 
+    old_override_transformer_cls_name: str | None = None
+    if override_transformer_cls_name is not None:
+        old_override_transformer_cls_name = getattr(
+            training_args, "override_transformer_cls_name", None
+        )
+        training_args.override_transformer_cls_name = str(override_transformer_cls_name)
+
     if disable_custom_init_weights:
         # NOTE: This flag is used by PipelineComponentLoader to skip applying
         # `init_weights_from_safetensors*` overrides when loading auxiliary
@@ -54,8 +62,13 @@ def load_module_from_path(
     finally:
         if disable_custom_init_weights and hasattr(training_args, "_loading_teacher_critic_model"):
             del training_args._loading_teacher_critic_model
+        if override_transformer_cls_name is not None:
+            if old_override_transformer_cls_name is None:
+                if hasattr(training_args, "override_transformer_cls_name"):
+                    training_args.override_transformer_cls_name = None
+            else:
+                training_args.override_transformer_cls_name = old_override_transformer_cls_name
 
     if not isinstance(module, torch.nn.Module):
         raise TypeError(f"Loaded {module_type!r} is not a torch.nn.Module: {type(module)}")
     return module
-

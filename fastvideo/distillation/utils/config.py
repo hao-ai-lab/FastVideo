@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -35,6 +35,7 @@ class RoleSpec:
     path: str
     trainable: bool = True
     disable_custom_init_weights: bool = False
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -167,11 +168,23 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
             where=f"roles.{role_str}.disable_custom_init_weights",
             default=False,
         )
+        extra = {
+            key: value
+            for key, value in role_cfg.items()
+            if key
+            not in {
+                "family",
+                "path",
+                "trainable",
+                "disable_custom_init_weights",
+            }
+        }
         roles[role_str] = RoleSpec(
             family=family,
             path=model_path,
             trainable=trainable,
             disable_custom_init_weights=disable_custom_init_weights,
+            extra=extra,
         )
 
     training_raw = _require_mapping(cfg.get("training"), where="training")

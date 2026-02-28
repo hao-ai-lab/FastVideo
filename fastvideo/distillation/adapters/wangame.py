@@ -405,6 +405,8 @@ class WanGameAdapter(DistillAdapter):
         viewmats: torch.Tensor | None,
         Ks: torch.Tensor | None,
         action: torch.Tensor | None,
+        mouse_cond: torch.Tensor | None,
+        keyboard_cond: torch.Tensor | None,
     ) -> dict[str, Any]:
         hidden_states = torch.cat(
             [
@@ -422,6 +424,8 @@ class WanGameAdapter(DistillAdapter):
             "viewmats": viewmats,
             "Ks": Ks,
             "action": action,
+            "mouse_cond": mouse_cond,
+            "keyboard_cond": keyboard_cond,
             "return_dict": False,
         }
 
@@ -445,6 +449,8 @@ class WanGameAdapter(DistillAdapter):
         viewmats = getattr(batch, "viewmats", None)
         Ks = getattr(batch, "Ks", None)
         action = getattr(batch, "action", None)
+        mouse_cond = getattr(batch, "mouse_cond", None)
+        keyboard_cond = getattr(batch, "keyboard_cond", None)
 
         if conditional or cfg_uncond is None:
             return {
@@ -454,6 +460,8 @@ class WanGameAdapter(DistillAdapter):
                 "viewmats": viewmats,
                 "Ks": Ks,
                 "action": action,
+                "mouse_cond": mouse_cond,
+                "keyboard_cond": keyboard_cond,
             }
 
         on_missing_raw = cfg_uncond.get("on_missing", "error")
@@ -535,10 +543,16 @@ class WanGameAdapter(DistillAdapter):
                 viewmats = torch.zeros_like(viewmats)
                 Ks = torch.zeros_like(Ks)
                 action = torch.zeros_like(action)
+            if mouse_cond is not None:
+                mouse_cond = torch.zeros_like(mouse_cond)
+            if keyboard_cond is not None:
+                keyboard_cond = torch.zeros_like(keyboard_cond)
         elif action_policy == "drop":
             viewmats = None
             Ks = None
             action = None
+            mouse_cond = None
+            keyboard_cond = None
 
         return {
             "image_embeds": image_embeds,
@@ -547,17 +561,21 @@ class WanGameAdapter(DistillAdapter):
             "viewmats": viewmats,
             "Ks": Ks,
             "action": action,
+            "mouse_cond": mouse_cond,
+            "keyboard_cond": keyboard_cond,
         }
 
     def _get_transformer(self, handle: RoleHandle, timestep: torch.Tensor) -> torch.nn.Module:
         transformer = handle.require_module("transformer")
         transformer_2 = handle.modules.get("transformer_2")
-        if (
-            transformer_2 is not None
-            and self.boundary_timestep is not None
-            and float(timestep.item()) < float(self.boundary_timestep)
-        ):
-            return transformer_2
+        if transformer_2 is not None and self.boundary_timestep is not None:
+            if timestep.numel() != 1:
+                raise ValueError(
+                    "MoE boundary selection requires a scalar timestep, got "
+                    f"shape={tuple(timestep.shape)}"
+                )
+            if float(timestep.item()) < float(self.boundary_timestep):
+                return transformer_2
         return transformer
 
     def predict_x0(
@@ -599,6 +617,8 @@ class WanGameAdapter(DistillAdapter):
                 viewmats=cond_inputs["viewmats"],
                 Ks=cond_inputs["Ks"],
                 action=cond_inputs["action"],
+                mouse_cond=cond_inputs["mouse_cond"],
+                keyboard_cond=cond_inputs["keyboard_cond"],
             )
             transformer = self._get_transformer(handle, timestep)
             pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
@@ -649,6 +669,8 @@ class WanGameAdapter(DistillAdapter):
                 viewmats=cond_inputs["viewmats"],
                 Ks=cond_inputs["Ks"],
                 action=cond_inputs["action"],
+                mouse_cond=cond_inputs["mouse_cond"],
+                keyboard_cond=cond_inputs["keyboard_cond"],
             )
             transformer = self._get_transformer(handle, timestep)
             pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
