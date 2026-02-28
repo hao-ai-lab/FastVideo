@@ -159,8 +159,8 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
                         assert kb_length >= num_frames, (
                             f"keyboard length {kb_length} is smaller than "
                             f"num_frames {num_frames} for {action_path}.")
-                        keyboard_cond_list.append(action_data.astype(
-                            np.float32)[:num_frames])
+                        keyboard_cond_list.append(
+                            action_data.astype(np.float32)[:num_frames])
             if keyboard_cond_list:
                 features["keyboard_cond"] = keyboard_cond_list
             if mouse_cond_list:

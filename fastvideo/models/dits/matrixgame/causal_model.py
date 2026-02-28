@@ -487,7 +487,6 @@ class CausalMatrixGameTransformerBlock(nn.Module):
 
         assert temb.ndim == 4
         num_frames = temb.shape[1]
-
         frame_seqlen = hidden_states.shape[1] // num_frames
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
