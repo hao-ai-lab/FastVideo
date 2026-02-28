@@ -237,9 +237,9 @@ def _setup_signal_handlers():
         logger.info("Received SIGTERM. Shutting down gracefully...")
         raise SystemExit(0)
     
-    signal.signal(signal.SIGQUIT, handle_sigquit)
+    signal.signal(signal.SIGTERM, handle_sigterm)
     if hasattr(signal, "SIGQUIT"): # SIGQUIT might not be available on all platforms (e.g., Windows)
-        signal.signal(signal.SIGTERM, handle_sigterm)
+        signal.signal(signal.SIGQUIT, handle_sigquit)
 
 
 def create_local_env(host: str, port: int) -> None:

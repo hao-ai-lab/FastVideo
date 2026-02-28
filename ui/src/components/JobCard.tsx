@@ -173,9 +173,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
     // Initial fetch (always fetch once to show existing logs)
     pollLogs();
 
-    // Only set up polling interval for running/pending jobs
     if (shouldPoll) {
-      // Poll every 500ms when job is running, every 2s when pending
       const pollIntervalMs = 2000;
       pollInterval = setInterval(pollLogs, pollIntervalMs);
     }
