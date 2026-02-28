@@ -54,7 +54,7 @@ def build_wangame_components(*, cfg: DistillRunConfig) -> ModelComponents:
             if variant in {"bidirectional", "bidi"}:
                 transformer_cls_name = "WanGameActionTransformer3DModel"
             elif variant == "causal":
-                transformer_cls_name = "CausalWanGameTransformer3DModel"
+                transformer_cls_name = "CausalWanGameActionTransformer3DModel"
             else:
                 raise ValueError(
                     f"Unknown roles.{role}.variant for wangame: "

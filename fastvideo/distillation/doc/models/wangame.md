@@ -16,7 +16,7 @@
    - 对每个 role：加载 `transformer`（可选 `transformer_2`）
    - 支持 role-level transformer 变体（通过 `RoleSpec.extra`）：
      - `roles.<role>.variant: bidirectional` → `WanGameActionTransformer3DModel`
-     - `roles.<role>.variant: causal` → `CausalWanGameTransformer3DModel`
+     - `roles.<role>.variant: causal` → `CausalWanGameActionTransformer3DModel`
    - 根据 `RoleSpec.trainable` 设置 `requires_grad`
    - 可选开启 activation checkpoint（仅对 trainable role）
 3) **构建 bundle / adapter / dataloader / validator**
