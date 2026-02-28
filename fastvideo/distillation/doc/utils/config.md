@@ -30,6 +30,12 @@
 - `pipeline_config` 或 `pipeline_config_path`
 - `method_config: {...}`（算法/recipe 专属超参）
 
+**Validation 参数建议归属**
+- run/trainer 级（什么时候验证 / 用什么验证集）放 `training:`：
+  - `log_validation`, `validation_dataset_file`, `validation_steps`
+- method 级（怎么采样 / rollout 语义）放 `method_config.validation:`：
+  - `sampling_steps`, `guidance_scale`, `sampler_kind`, `sampling_timesteps`, ...
+
 **实现要点**
 - `_resolve_existing_file()`：要求传入真实存在的路径（不做 overlay/fallback）
 - 默认分布式 size：

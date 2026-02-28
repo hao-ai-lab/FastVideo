@@ -102,6 +102,13 @@ method_config:
 1) **full-video rollout**（非 streaming）：`WanGameActionImageToVideoPipeline.forward(...)`
 2) **streaming causal rollout**（推荐用于 causal student 的验证）：`WanGameCausalDMDPipeline.streaming_*`
 
+建议把 validation 的配置拆成两类：
+
+- **run/trainer 级（什么时候验证、用什么 validation dataset）**：放在 `training:` 下；
+- **method 级（怎么采样、走什么 rollout 语义）**：放在 `method_config.validation:` 下。
+
+这样 validator 不需要 “从 training_args 猜 method 语义”，而 method 也不会越权去管理 dataloader。
+
 建议把选择权交给 method（或 method_config），让 validator 只负责执行：
 
 ```yaml
@@ -114,9 +121,8 @@ method_config:
     # 对 streaming_causal：同样允许 ode/sde，但这是一个“明确的语义选择”
     sampler_kind: ode
 
-    # ODE: 直接用标准 `num_inference_steps`（与现有 ODE pipeline 对齐）
-    # （可以复用 training.validation_sampling_steps 的整数；这里单独列出来是为了更清晰）
-    num_inference_steps: 40
+    # 采样步数（对 ODE pipeline 即 num_inference_steps）
+    sampling_steps: [40]
 
     # SDE/DMD: 需要显式 step list（few-step schedule）
     # sampling_timesteps: [1000,750,500,250]
@@ -209,7 +215,8 @@ pipeline_config:
 - [ ] `examples/distillation/wangame/finetune_wangame2.1_i2v_1.3B_dfsft_causal.yaml`
   - `roles.student.variant: causal`
   - `recipe.method: dfsft`
-  - `training.validation_sampling_steps: "40"`
+  - `training.validation_dataset_file / training.validation_steps`（run 级）
+  - `method_config.validation.sampling_steps: [40]`（method 级）
 
 - [ ] `examples/distillation/wangame/dfsft-temp.sh`（新增）
   - 跟现在 `run.sh` 一样只负责 export CONFIG + torchrun

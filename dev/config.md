@@ -96,6 +96,20 @@ loader 会注入/补全的 invariants（见 `fastvideo/distillation/utils/config
 - 分布式尺寸默认值（`num_gpus/tp_size/sp_size/hsdp_*`）
 - `training.model_path` 若缺失，默认使用 `roles.student.path`（供 pipeline_config registry 使用）
 
+关于 validation 参数的归属（推荐约定）：
+- **run/trainer 级**（“什么时候验证/用什么验证集”）放在 `training:`：
+  - `training.log_validation`
+  - `training.validation_dataset_file`
+  - `training.validation_steps`
+- **method 级**（“怎么采样/走什么 rollout 语义”）放在 `method_config.validation:`：
+  - `sampling_steps`（ODE 下就是 `num_inference_steps`）
+  - `guidance_scale`
+  - `sampler_kind` / `sampling_timesteps` / `rollout_mode` / `context_noise`（按 method 需要）
+
+备注：
+- 目前仍允许从 `training.validation_sampling_steps / validation_guidance_scale` 读取默认值，
+  但更推荐写到 `method_config.validation`，避免把 method 语义塞到 `TrainingArgs` 里。
+
 ## 6) `pipeline_config` / `pipeline_config_path`
 
 两种写法（二选一）：

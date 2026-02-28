@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol
+from typing import Any, cast, Literal, Protocol
 
 import torch
 import torch.nn.functional as F
@@ -307,6 +307,61 @@ class DMD2Method(DistillMethod):
     def on_train_start(self) -> None:
         self.adapter.on_train_start()
 
+    def _parse_validation_cfg(self) -> dict[str, Any]:
+        raw = self.method_config.get("validation", None)
+        if raw is None:
+            return {}
+        if not isinstance(raw, dict):
+            raise ValueError(
+                "method_config.validation must be a dict when set, got "
+                f"{type(raw).__name__}"
+            )
+        return dict(raw)
+
+    def _parse_validation_sampling_steps(self, cfg: dict[str, Any]) -> list[int]:
+        raw = cfg.get("sampling_steps")
+        if raw is None:
+            raw = getattr(self.training_args, "validation_sampling_steps", "") or ""
+
+        steps: list[int] = []
+        if raw is None or raw == "":
+            return steps
+        if isinstance(raw, bool):
+            raise ValueError(
+                "validation sampling_steps must be an int/list/str, got bool"
+            )
+        if isinstance(raw, int) or (isinstance(raw, float) and raw.is_integer()):
+            steps = [int(raw)]
+        elif isinstance(raw, str):
+            steps = [int(s) for s in raw.split(",") if str(s).strip()]
+        elif isinstance(raw, list):
+            steps = [int(s) for s in raw]
+        else:
+            raise ValueError(
+                "validation sampling_steps must be an int/list/str, got "
+                f"{type(raw).__name__}"
+            )
+        return [s for s in steps if int(s) > 0]
+
+    def _parse_validation_guidance_scale(self, cfg: dict[str, Any]) -> float | None:
+        raw = cfg.get("guidance_scale")
+        if raw is None:
+            raw = getattr(self.training_args, "validation_guidance_scale", None)
+        if raw in (None, ""):
+            return None
+        if isinstance(raw, bool):
+            raise ValueError(
+                "validation guidance_scale must be a number/string, got bool"
+            )
+        if isinstance(raw, (int, float)):
+            return float(raw)
+        if isinstance(raw, str) and raw.strip():
+            return float(raw)
+        raise ValueError(
+            "validation guidance_scale must be a number/string, got "
+            f"{type(raw).__name__}"
+        )
+
     def log_validation(self, iteration: int) -> None:
         validator = getattr(self, "validator", None)
         if validator is None:
@@ -314,14 +369,16 @@ class DMD2Method(DistillMethod):
         if not getattr(self.training_args, "log_validation", False):
             return
 
-        raw_steps = str(getattr(self.training_args, "validation_sampling_steps", "") or "")
-        sampling_steps = [int(s) for s in raw_steps.split(",") if s.strip()]
-        sampling_steps = [s for s in sampling_steps if s > 0]
+        validation_cfg = self._parse_validation_cfg()
 
-        raw_rollout = self.method_config.get("dmd_denoising_steps", None)
+        sampling_steps = self._parse_validation_sampling_steps(validation_cfg)
+
         sampling_timesteps: list[int] | None = None
-        if isinstance(raw_rollout, list) and raw_rollout:
-            sampling_timesteps = [int(s) for s in raw_rollout]
+        raw_timesteps = validation_cfg.get("sampling_timesteps", None)
+        if raw_timesteps is None:
+            raw_timesteps = self.method_config.get("dmd_denoising_steps", None)
+        if isinstance(raw_timesteps, list) and raw_timesteps:
+            sampling_timesteps = [int(s) for s in raw_timesteps]
 
         if not sampling_steps:
             # Default to the few-step student rollout step count for DMD2.
@@ -329,13 +386,33 @@ class DMD2Method(DistillMethod):
                 return
             sampling_steps = [int(len(sampling_timesteps))]
 
-        raw_guidance = getattr(self.training_args, "validation_guidance_scale", None)
-        guidance_scale = float(str(raw_guidance)) if raw_guidance not in (None, "") else None
+        sampler_kind = validation_cfg.get("sampler_kind", "sde")
+        if sampler_kind is None:
+            sampler_kind = "sde"
+        if not isinstance(sampler_kind, str):
+            raise ValueError(
+                "method_config.validation.sampler_kind must be a string, got "
+                f"{type(sampler_kind).__name__}"
+            )
+        sampler_kind = sampler_kind.strip().lower()
+        if sampler_kind not in {"ode", "sde"}:
+            raise ValueError(
+                "method_config.validation.sampler_kind must be one of {ode, sde}, got "
+                f"{sampler_kind!r}"
+            )
+        sampler_kind = cast(Literal["ode", "sde"], sampler_kind)
+        if sampling_timesteps is not None and sampler_kind != "sde":
+            raise ValueError(
+                "method_config.validation.sampling_timesteps is only valid when "
+                "sampler_kind='sde'"
+            )
+
+        guidance_scale = self._parse_validation_guidance_scale(validation_cfg)
 
         request = ValidationRequest(
             sample_handle=self.student,
             sampling_steps=sampling_steps,
-            sampler_kind="sde",
+            sampler_kind=sampler_kind,
             sampling_timesteps=sampling_timesteps,
             guidance_scale=guidance_scale,
         )
