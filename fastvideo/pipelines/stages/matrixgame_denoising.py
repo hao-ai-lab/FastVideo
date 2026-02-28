@@ -23,6 +23,8 @@ except ImportError:
     vsa_available = False
     VideoSparseAttentionBackend = None  # type: ignore
 
+from fastvideo.models.dits.matrixgame.kv_cache import KVCache
+
 logger = init_logger(__name__)
 
 
@@ -35,10 +37,10 @@ class BlockProcessingContext:
     block_idx: int
     start_index: int
 
-    kv_cache1: list[dict[Any, Any]]
-    kv_cache2: list[dict[Any, Any]] | None
-    kv_cache_mouse: list[dict[Any, Any]] | None
-    kv_cache_keyboard: list[dict[Any, Any]] | None
+    kv_cache1: list[KVCache]
+    kv_cache2: list[KVCache] | None
+    kv_cache_mouse: list[KVCache] | None
+    kv_cache_keyboard: list[KVCache] | None
     crossattn_cache: list[dict[Any, Any]]
 
     timesteps: torch.Tensor
@@ -55,7 +57,7 @@ class BlockProcessingContext:
     image_kwargs: dict[str, Any]
     pos_cond_kwargs: dict[str, Any]
 
-    def get_kv_cache(self, timestep_val: float) -> list[dict[Any, Any]]:
+    def get_kv_cache(self, timestep_val: float) -> list[KVCache]:
         if self.boundary_timestep is not None:
             if timestep_val >= self.boundary_timestep:
                 return self.kv_cache1
@@ -296,7 +298,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         return action_kwargs
 
     def _initialize_kv_cache(self, batch_size: int, dtype: torch.dtype,
-                             device: torch.device) -> list[dict]:
+                             device: torch.device) -> list[KVCache]:
         kv_cache = []
         num_attention_heads = self.transformer.num_attention_heads
         attention_head_dim = getattr(
@@ -308,26 +310,15 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             kv_cache_size = self.frame_seq_length * self.sliding_window_num_frames
 
         for _ in range(self.num_transformer_blocks):
-            kv_cache.append({
-                "k":
-                torch.zeros([
-                    batch_size, kv_cache_size, num_attention_heads,
-                    attention_head_dim
-                ],
-                            dtype=dtype,
-                            device=device),
-                "v":
-                torch.zeros([
-                    batch_size, kv_cache_size, num_attention_heads,
-                    attention_head_dim
-                ],
-                            dtype=dtype,
-                            device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-            })
+            kv_cache.append(
+                KVCache.zeros(
+                    batch_size=batch_size,
+                    cache_size=kv_cache_size,
+                    num_heads=num_attention_heads,
+                    head_dim=attention_head_dim,
+                    dtype=dtype,
+                    device=device,
+                ))
 
         return kv_cache
 
@@ -348,44 +339,24 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             kv_cache_size = 15
 
         for _ in range(self.num_transformer_blocks):
-            kv_cache_keyboard.append({
-                "k":
-                torch.zeros([
-                    batch_size, kv_cache_size, action_heads, keyboard_head_dim
-                ],
-                            dtype=dtype,
-                            device=device),
-                "v":
-                torch.zeros([
-                    batch_size, kv_cache_size, action_heads, keyboard_head_dim
-                ],
-                            dtype=dtype,
-                            device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-            })
-            kv_cache_mouse.append({
-                "k":
-                torch.zeros([
-                    batch_size * self.frame_seq_length, kv_cache_size,
-                    action_heads, mouse_head_dim
-                ],
-                            dtype=dtype,
-                            device=device),
-                "v":
-                torch.zeros([
-                    batch_size * self.frame_seq_length, kv_cache_size,
-                    action_heads, mouse_head_dim
-                ],
-                            dtype=dtype,
-                            device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-            })
+            kv_cache_keyboard.append(
+                KVCache.zeros(
+                    batch_size=batch_size,
+                    cache_size=kv_cache_size,
+                    num_heads=action_heads,
+                    head_dim=keyboard_head_dim,
+                    dtype=dtype,
+                    device=device,
+                ))
+            kv_cache_mouse.append(
+                KVCache.zeros(
+                    batch_size=batch_size * self.frame_seq_length,
+                    cache_size=kv_cache_size,
+                    num_heads=action_heads,
+                    head_dim=mouse_head_dim,
+                    dtype=dtype,
+                    device=device,
+                ))
 
         return kv_cache_mouse, kv_cache_keyboard
 
@@ -495,6 +466,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     "crossattn_cache": ctx.crossattn_cache,
                     "current_start": start_index * self.frame_seq_length,
                     "start_frame": start_index,
+                    "update_kv_cache": False,
                 }
 
                 if self.use_action_module and current_model == self.transformer:
@@ -605,6 +577,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 "crossattn_cache": ctx.crossattn_cache,
                 "current_start": start_index * self.frame_seq_length,
                 "start_frame": start_index,
+                "update_kv_cache": True,
             }
 
             if self.use_action_module:
@@ -625,6 +598,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     crossattn_cache=ctx.crossattn_cache,
                     current_start=start_index * self.frame_seq_length,
                     start_frame=start_index,
+                    update_kv_cache=True,
                     **ctx.image_kwargs,
                     **ctx.pos_cond_kwargs,
                 )
