@@ -512,7 +512,7 @@ class HunyuanVideo15Transformer3DModel(BaseDiT):
         )
         encoder_hidden_states_3 = encoder_hidden_states_3 + encoder_hidden_states_3_cond_emb
 
-        encoder_hidden_states = torch.cat([encoder_hidden_states_2, encoder_hidden_states], dim=1) if is_t2v else torch.cat([image, encoder_hidden_states_2, encoder_hidden_states], dim=1)
+        encoder_hidden_states = torch.cat([encoder_hidden_states_2, encoder_hidden_states], dim=1) if is_t2v else torch.cat([encoder_hidden_states_3, encoder_hidden_states_2, encoder_hidden_states], dim=1)
 
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
