@@ -10,6 +10,8 @@ from __future__ import annotations
 import collections
 import enum
 import logging
+import logging.handlers
+import multiprocessing as mp
 import os
 import re
 import threading
@@ -90,21 +92,17 @@ class JobLogBuffer:
 
 
 class LogBufferHandler(logging.Handler):
-    """Logging handler that writes to a JobLogBuffer.
-    
-    Only processes log records from the thread that created this handler.
-    """
-    
+    """Logging handler that writes to a JobLogBuffer."""
+
     def __init__(self, buffer: JobLogBuffer):
         super().__init__()
         self.buffer = buffer
-        self.thread_id = threading.get_ident()
-        self.setFormatter(logging.Formatter("%(levelname)s %(asctime)s [%(name)s] %(message)s"))
-    
-    def filter(self, record):
-        """Only process logs from the thread that created this handler."""
-        return threading.get_ident() == self.thread_id
-    
+        self.setFormatter(
+            logging.Formatter(
+                "%(levelname)s %(asctime)s [%(name)s] %(message)s"
+            )
+        )
+
     def emit(self, record):
         try:
             msg = self.format(record)
@@ -391,10 +389,14 @@ class JobRunner:
         num_gpus: int,
         dit_cpu_offload: bool = False,
         text_encoder_cpu_offload: bool = False,
-        use_fsdp_inference: bool = False
+        use_fsdp_inference: bool = False,
+        log_queue: mp.Queue | None = None,
     ) -> Any:
-        cache_key = (model_id, num_gpus, dit_cpu_offload, text_encoder_cpu_offload, use_fsdp_inference)
-        
+        cache_key = (
+            model_id, num_gpus, dit_cpu_offload,
+            text_encoder_cpu_offload, use_fsdp_inference
+        )
+
         # Generators are cached by model_id and configuration parameters
         with self._generators_lock:
             if cache_key in self._generators:
@@ -406,14 +408,16 @@ class JobRunner:
         logger.info(
             "Loading model %s (num_gpus=%d, dit_cpu_offload=%s, "
             "text_encoder_cpu_offload=%s, use_fsdp_inference=%s) …",
-            model_id, num_gpus, dit_cpu_offload, text_encoder_cpu_offload, use_fsdp_inference
+            model_id, num_gpus, dit_cpu_offload, text_encoder_cpu_offload,
+            use_fsdp_inference
         )
-        
+
         gen = VideoGenerator.from_pretrained(
             model_id,
             dit_cpu_offload=dit_cpu_offload,
             text_encoder_cpu_offload=text_encoder_cpu_offload,
-            use_fsdp_inference=use_fsdp_inference
+            use_fsdp_inference=use_fsdp_inference,
+            log_queue=log_queue,
         )
         
         with self._generators_lock:
@@ -430,22 +434,33 @@ class JobRunner:
         job.log_file_path = os.path.join(self.log_dir, f"{job.id}.log")
 
         # Add file handler to persist logs
-        file_handler = logging.FileHandler(job.log_file_path, mode='w', encoding='utf-8')
+        file_handler = logging.FileHandler(
+            job.log_file_path, mode='w', encoding='utf-8'
+        )
         file_handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+            logging.Formatter(
+                "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+            )
         )
         job.log_file_handler = file_handler
 
-        # Hook logger output into job log buffer
+        # Hook logger output into job log buffer (main process logs)
         fastvideo_logger = logging.getLogger("fastvideo")
         buffer_handler = LogBufferHandler(buf)
         fastvideo_logger.addHandler(buffer_handler)
         fastvideo_logger.addHandler(file_handler)
 
+        # Queue for worker process logs (fsdp_load, cuda, etc.)
+        log_queue: mp.Queue | None = mp.get_context().Queue()
+        queue_listener = logging.handlers.QueueListener(
+            log_queue, buffer_handler, file_handler, respect_handler_level=True
+        )
+        queue_listener.start()
+
         # Set output directory, create if it doesn't exist
         job_output_dir = os.path.join(self.output_dir, job.id)
         os.makedirs(job_output_dir, exist_ok=True)
-        
+
         try:
             job.status = JobStatus.RUNNING
             job.started_at = time.time()
@@ -462,13 +477,14 @@ class JobRunner:
 
             buf.phase = "loading model"
             logger.info("Loading model...")
-            
+
             generator = self._get_or_create_generator(
                 job.model_id,
                 job.num_gpus,
                 dit_cpu_offload=job.dit_cpu_offload,
                 text_encoder_cpu_offload=job.text_encoder_cpu_offload,
                 use_fsdp_inference=job.use_fsdp_inference,
+                log_queue=log_queue,
             )
             buf.phase = "generating"
             logger.info(
@@ -485,6 +501,7 @@ class JobRunner:
                 width=job.width,
                 guidance_scale=job.guidance_scale,
                 seed=job.seed,
+                log_queue=log_queue,
             )
         
             buf.phase = "saving"
@@ -523,6 +540,7 @@ class JobRunner:
             buf.phase = "failed"
 
         finally:
+            queue_listener.stop()
             # Remove handlers and close file
             fastvideo_logger.removeHandler(buffer_handler)
             fastvideo_logger.removeHandler(file_handler)

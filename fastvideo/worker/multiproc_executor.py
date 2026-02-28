@@ -7,6 +7,8 @@ import contextlib
 from dataclasses import dataclass
 from enum import Enum
 import faulthandler
+import logging
+import logging.handlers
 import multiprocessing as mp
 from multiprocessing.connection import Connection
 from multiprocessing.queues import Queue
@@ -34,6 +36,11 @@ from fastvideo.worker.executor import Executor
 from fastvideo.worker.worker_base import WorkerWrapperBase
 
 logger = init_logger(__name__)
+
+
+def _make_queue_log_handler(log_queue: Queue) -> logging.Handler:
+    """Create a QueueHandler that forwards fastvideo logs to a multiprocessing queue."""
+    return logging.handlers.QueueHandler(log_queue)
 
 
 class StreamingTaskType(str, Enum):
@@ -100,6 +107,7 @@ class MultiprocExecutor(Executor):
                         distributed_init_method=distributed_init_method,
                         streaming_input_queue=self._streaming_input_queue,
                         streaming_output_queue=self._streaming_output_queue,
+                        log_queue=self._log_queue,
                     ))
 
             # Workers must be created before wait_for_ready to avoid
@@ -268,6 +276,14 @@ class MultiprocExecutor(Executor):
         for i, response in enumerate(responses):
             if response["status"] != "lora_adapter_merged":
                 raise RuntimeError(f"Worker {i} failed to merge LoRA weights")
+
+    def set_log_queue(self, log_queue: Queue | None) -> None:
+        """Forward worker logs to the given queue. Call before generate_video."""
+        self.collective_rpc("set_log_queue", kwargs={"log_queue": log_queue})
+
+    def clear_log_queue(self) -> None:
+        """Stop forwarding worker logs to the queue. Call after generate_video."""
+        self.collective_rpc("clear_log_queue")
 
     def collective_rpc(self,
                        method: str | Callable,
@@ -468,11 +484,14 @@ class WorkerMultiprocProc:
         pipe: Connection,
         streaming_input_queue: Queue | None = None,
         streaming_output_queue: Queue | None = None,
+        _initial_log_handler: logging.Handler | None = None,
+        **kwargs: Any,
     ):
         self.rank = rank
         self.pipe = pipe
         self.streaming_input_queue = streaming_input_queue
         self.streaming_output_queue = streaming_output_queue
+        self._initial_log_handler = _initial_log_handler
         wrapper = WorkerWrapperBase(fastvideo_args=fastvideo_args,
                                     rpc_rank=rank)
 
@@ -500,6 +519,7 @@ class WorkerMultiprocProc:
         distributed_init_method: str,
         streaming_input_queue: Queue | None = None,
         streaming_output_queue: Queue | None = None,
+        log_queue: Queue | None = None,
     ) -> UnreadyWorkerProcHandle:
         context = get_mp_context()
         executor_pipe, worker_pipe = context.Pipe(duplex=True)
@@ -514,6 +534,7 @@ class WorkerMultiprocProc:
             "ready_pipe": writer,
             "streaming_input_queue": streaming_input_queue,
             "streaming_output_queue": streaming_output_queue,
+            "log_queue": log_queue,
         }
         # Run EngineCore busy loop in background process.
         proc = context.Process(target=WorkerMultiprocProc.worker_main,
@@ -529,6 +550,13 @@ class WorkerMultiprocProc:
     def worker_main(*args, **kwargs):
         """ Worker initialization and execution loops.
         This runs a background process """
+
+        log_queue = kwargs.pop("log_queue", None)
+        # Add log handler before model loading so we capture fsdp_load, cuda, etc.
+        if log_queue is not None:
+            _handler = _make_queue_log_handler(log_queue)
+            logging.getLogger("fastvideo").addHandler(_handler)
+            kwargs["_initial_log_handler"] = _handler
 
         # Signal handler used for graceful termination.
         # SystemExit exception is only raised once to allow this and worker
@@ -679,6 +707,14 @@ class WorkerMultiprocProc:
                         with contextlib.suppress(Exception):
                             self.pipe.send(response)
                         break
+                    if method == "set_log_queue":
+                        self._set_log_queue(kwargs.get("log_queue"))
+                        self.pipe.send({"status": "ok"})
+                        continue
+                    if method == "clear_log_queue":
+                        self._clear_log_queue()
+                        self.pipe.send({"status": "ok"})
+                        continue
                     if method == "start_streaming_queue_loop":
                         self.pipe.send(
                             {"status": "streaming_queue_loop_started"})
@@ -763,6 +799,30 @@ class WorkerMultiprocProc:
                 logger.error("Worker %d queue loop error: %s", self.rank, e)
                 self.streaming_output_queue.put(
                     StreamingResult(task_type=StreamingTaskType.STEP, error=e))
+
+    _log_queue_handler: logging.Handler | None = None
+
+    def _set_log_queue(self, log_queue: Queue | None) -> None:
+        """Add a handler that forwards fastvideo logs to the given queue."""
+        self._clear_log_queue()
+        if log_queue is None:
+            return
+        # Remove initial handler if present (from worker_main) to avoid duplicates
+        if self._initial_log_handler is not None:
+            logging.getLogger("fastvideo").removeHandler(
+                self._initial_log_handler
+            )
+            self._initial_log_handler = None
+        self._log_queue_handler = _make_queue_log_handler(log_queue)
+        logging.getLogger("fastvideo").addHandler(self._log_queue_handler)
+
+    def _clear_log_queue(self) -> None:
+        """Remove the log queue handler."""
+        if self._log_queue_handler is not None:
+            logging.getLogger("fastvideo").removeHandler(
+                self._log_queue_handler
+            )
+            self._log_queue_handler = None
 
     @staticmethod
     def setup_proc_title_and_log_prefix() -> None:
