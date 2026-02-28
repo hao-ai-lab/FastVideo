@@ -5,27 +5,39 @@ jobs.
 
 ## Quick Start
 
-First run the API server:
+The easiest way to run the application is with a single command that starts both
+the API server and the Next.js frontend:
 
 ```bash
-python -m ui.api_server --output-dir /path/to/videos --log-dir /path/to/logs
+cd ui
+npm install
+npm run build
+npm run start
 ```
 
-The API server starts running at [http://localhost:8188](http://localhost:8188) by default. You can
-configure this using the `--api-url` parameter.
+This runs the API server at [http://localhost:8189](http://localhost:8189) and the Next.js app
+at [http://localhost:3000](http://localhost:3000) via `concurrently`.
 
-Now you have to configure the environment file to include the API server path.
+### Running API and Web Separately
+
+To run the API server only:
 
 ```bash
-cd frontend
+python -m ui.server --output-dir /path/to/videos --log-dir /path/to/logs
+```
+
+The API server defaults to port 8189. Configure the frontend to point to it:
+
+```bash
+cd ui
 cp .env.example .env.local
-# Edit the file to set the API server path
+# Set NEXT_PUBLIC_API_BASE_URL=http://localhost:8189/api in .env.local
 ```
 
-Run the web server:
+Then run the Next.js dev server (with hot reload):
 
 ```bash
-npm i && npm run dev
+npm install && npm run dev
 ```
 
 ## Features
@@ -35,7 +47,7 @@ npm i && npm run dev
   guidance scale, seed, GPU count)
 - Create, start, stop, and delete jobs via the UI
 - Live-polling job status updates
-- In-browser video preview for completed jobs
+- Download video for completed jobs
 - Generated videos are saved to a configurable output directory
 
 ## API Endpoints
@@ -50,7 +62,8 @@ npm i && npm run dev
 | `POST`   | `/api/jobs/{id}/stop`        | Request a running job to stop      |
 | `DELETE` | `/api/jobs/{id}`             | Delete a job                       |
 | `GET`    | `/api/jobs/{id}/video`       | Stream the generated video/image   |
-| `GET`    | `/api/jobs/{id}/log`          | Download the job's log file       |
+| `GET`    | `/api/jobs/{id}/logs`        | Get job logs (polling, supports `?after=`) |
+| `GET`    | `/api/jobs/{id}/download_log`| Download the job's log file        |
 
 ### Create Job Request Body
 
@@ -72,17 +85,16 @@ npm i && npm run dev
 
 ```
 ui/
-├── server.py            # Combined FastAPI server (API + static files)
-├── api_server.py        # API-only server (REST endpoints)
-├── web_server.py        # Web-only server (static files + optional API proxy)
-├── requirements.txt     # Python dependencies (fastapi, uvicorn, httpx)
-└── static/
-    ├── index.html       # Single-page application
-    ├── style.css        # Dark-themed responsive styles
-    └── app.js           # Frontend logic (fetch API, polling, rendering)
+├── server.py            # FastAPI server (REST endpoints for job management)
+├── job_runner.py        # Job lifecycle, execution, and generator caching
+├── package.json         # npm scripts (start, dev, build)
+└── src/
+    ├── app/             # Next.js app router (page.tsx, layout.tsx)
+    ├── components/      # React components (JobCard, CreateJobModal)
+    └── lib/             # API client and types
 ```
 
-- **API Server** (`api_server.py`): A FastAPI server that manages an in-memory job store. Each job runs
+- **API Server** (`server.py`): A FastAPI server that manages an in-memory job store. Each job runs
   in a daemon thread that uses `fastvideo.VideoGenerator` to generate videos.
   Model instances are cached so switching between prompts on the same model
   doesn't reload weights. Provides REST endpoints under `/api/*`.
@@ -92,10 +104,6 @@ ui/
     dedicated log directory (configurable via `--log-dir`), containing all logs from
     model loading through completion or failure. Log files are named after the job ID
     for easy identification.
-- **Web Server** (`web_server.py`): Serves static HTML/CSS/JS files. Optionally proxies API requests
-  to a separate API server or relies on CORS for cross-origin requests.
-- **Combined Server** (`server.py`): Legacy combined server that serves both API and static files
-  from a single process. Use this for simple deployments.
-- **Frontend**: A vanilla HTML/CSS/JS single-page app. Jobs are polled every
-  2 seconds and rendered as cards with status badges and action buttons. The API
-  base URL can be configured via a meta tag injected by the web server.
+- **Frontend**: A Next.js (React) application. Jobs are polled when running and
+  rendered as cards with status badges and action buttons. The API base URL is
+  configured via `NEXT_PUBLIC_API_BASE_URL` in `.env.local`.
