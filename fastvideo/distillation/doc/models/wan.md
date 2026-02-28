@@ -21,7 +21,7 @@
    - `adapter = WanAdapter(prompt_handle=student_handle, ...)`
    - dataloader：parquet + `pyarrow_schema_t2v`
 4) **tracker / validator（可选）**
-   - validator：`WanValidator`（当 `training_args.log_validation=true`）
+   - validator：`WanValidator`（当 `training.validation.enabled=true`，或 `training.validation` 非空）
      - model plugin 只负责构建并返回 `validator`
      - tracker 由 trainer 构建并注入到 method/validator（`method.set_tracker(...)`）
      - validator 本身不应 hardcode `bundle.role("student")` 等角色语义；

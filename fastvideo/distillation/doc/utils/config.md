@@ -27,14 +27,14 @@
 - `recipe: {family: ..., method: ...}`
 - `roles: {<role>: {family?, path, trainable?}, ...}`
 - `training: {...}`（大部分字段复用 `TrainingArgs.from_kwargs()`）
-- `pipeline_config` 或 `pipeline_config_path`
+- `training.validation: {...}`（validation 配置；method 也会读取）
+- `default_pipeline_config` 或 `default_pipeline_config_path`（默认 pipeline config）
 - `method_config: {...}`（算法/recipe 专属超参）
 
 **Validation 参数建议归属**
-- run/trainer 级（什么时候验证 / 用什么验证集）放 `training:`：
-  - `log_validation`, `validation_dataset_file`, `validation_steps`
-- method 级（怎么采样 / rollout 语义）放 `method_config.validation:`：
-  - `sampling_steps`, `guidance_scale`, `sampler_kind`, `sampling_timesteps`, ...
+- 统一放在 `training.validation:`（框架层固定字段 + method 按需字段）。
+- trainer 每步调用 `method.log_validation(step)`；是否真正执行由 method 基于
+  `training.validation.every_steps` 决定。
 
 **实现要点**
 - `_resolve_existing_file()`：要求传入真实存在的路径（不做 overlay/fallback）

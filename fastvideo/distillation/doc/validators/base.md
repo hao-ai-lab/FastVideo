@@ -6,7 +6,7 @@
 **接口**
 - `log_validation(step: int, request: ValidationRequest | None = None) -> None`
 
-`ValidationRequest` 用于 method 覆盖关键采样配置（steps/guidance/output_dir 等），让 validator
+`ValidationRequest` 用于 method 覆盖关键采样配置（dataset/steps/guidance/output_dir 等），让 validator
 保持 model-plugin-specific、但 method-agnostic。
 
 `ValidationRequest.sample_handle` 用于由 method 明确指定“本次 validation 要采样哪个模型/权重”

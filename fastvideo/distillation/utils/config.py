@@ -44,6 +44,7 @@ class DistillRunConfig:
     recipe: RecipeSpec
     roles: dict[RoleName, RoleSpec]
     training_args: TrainingArgs
+    validation: dict[str, Any]
     method_config: dict[str, Any]
     raw: dict[str, Any]
 
@@ -89,7 +90,7 @@ def _get_bool(raw: Any, *, where: str, default: bool) -> bool:
 
 
 def get_optional_int(mapping: dict[str, Any], key: str, *, where: str) -> int | None:
-    raw = mapping.get(key, None)
+    raw = mapping.get(key)
     if raw is None:
         return None
     if isinstance(raw, bool):
@@ -104,7 +105,7 @@ def get_optional_int(mapping: dict[str, Any], key: str, *, where: str) -> int | 
 
 
 def get_optional_float(mapping: dict[str, Any], key: str, *, where: str) -> float | None:
-    raw = mapping.get(key, None)
+    raw = mapping.get(key)
     if raw is None:
         return None
     if isinstance(raw, bool):
@@ -175,18 +176,40 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
 
     training_raw = _require_mapping(cfg.get("training"), where="training")
 
+    legacy_validation_keys = {
+        "log_validation",
+        "validation_dataset_file",
+        "validation_steps",
+        "validation_sampling_steps",
+        "validation_guidance_scale",
+    }
+    has_legacy_validation = any(key in training_raw for key in legacy_validation_keys)
+
+    training_validation_raw = training_raw.get("validation", None)
+    if training_validation_raw is None:
+        if has_legacy_validation:
+            raise ValueError(
+                "Validation config has moved under training.validation "
+                "(enabled/dataset_file/every_steps/sampling_steps/...). "
+                "Do not use legacy training.validation_* keys."
+            )
+        validation: dict[str, Any] = {}
+    else:
+        if has_legacy_validation:
+            raise ValueError(
+                "Do not mix training.validation with legacy training.validation_* keys. "
+                "Put all validation fields under training.validation."
+            )
+        validation = _require_mapping(training_validation_raw, where="training.validation")
+
     method_config_raw = cfg.get("method_config", None)
     if method_config_raw is None:
         method_config: dict[str, Any] = {}
     else:
         method_config = _require_mapping(method_config_raw, where="method_config")
 
-    pipeline_cfg_raw = cfg.get("pipeline_config", None)
-    pipeline_cfg_path = cfg.get("pipeline_config_path", None)
-    if pipeline_cfg_raw is not None and pipeline_cfg_path is not None:
-        raise ValueError("Provide either pipeline_config or pipeline_config_path, not both")
-
     training_kwargs: dict[str, Any] = dict(training_raw)
+    training_kwargs.pop("validation", None)
 
     # Entrypoint invariants.
     training_kwargs["mode"] = ExecutionMode.DISTILLATION
@@ -217,16 +240,43 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
     if "pretrained_model_name_or_path" not in training_kwargs:
         training_kwargs["pretrained_model_name_or_path"] = training_kwargs["model_path"]
 
-    if pipeline_cfg_path is not None:
-        pipeline_cfg_path = _require_str(pipeline_cfg_path, where="pipeline_config_path")
-        training_kwargs["pipeline_config"] = _resolve_existing_file(pipeline_cfg_path)
-    elif pipeline_cfg_raw is not None:
-        if isinstance(pipeline_cfg_raw, str):
-            training_kwargs["pipeline_config"] = _resolve_existing_file(pipeline_cfg_raw)
-        elif isinstance(pipeline_cfg_raw, dict):
-            training_kwargs["pipeline_config"] = pipeline_cfg_raw
+    default_pipeline_cfg_raw = cfg.get("default_pipeline_config", None)
+    default_pipeline_cfg_path = cfg.get("default_pipeline_config_path", None)
+    pipeline_cfg_raw = cfg.get("pipeline_config", None)
+    pipeline_cfg_path = cfg.get("pipeline_config_path", None)
+
+    if (default_pipeline_cfg_raw is not None or default_pipeline_cfg_path is not None) and (
+        pipeline_cfg_raw is not None or pipeline_cfg_path is not None
+    ):
+        raise ValueError(
+            "Provide either default_pipeline_config(_path) or the legacy "
+            "pipeline_config(_path), not both"
+        )
+
+    cfg_raw = default_pipeline_cfg_raw if default_pipeline_cfg_raw is not None else pipeline_cfg_raw
+    cfg_path = (
+        default_pipeline_cfg_path if default_pipeline_cfg_path is not None else pipeline_cfg_path
+    )
+
+    if cfg_path is not None:
+        cfg_path = _require_str(
+            cfg_path,
+            where=(
+                "default_pipeline_config_path"
+                if default_pipeline_cfg_path is not None
+                else "pipeline_config_path"
+            ),
+        )
+        training_kwargs["pipeline_config"] = _resolve_existing_file(cfg_path)
+    elif cfg_raw is not None:
+        if isinstance(cfg_raw, str):
+            training_kwargs["pipeline_config"] = _resolve_existing_file(cfg_raw)
+        elif isinstance(cfg_raw, dict):
+            training_kwargs["pipeline_config"] = cfg_raw
         else:
-            raise ValueError("pipeline_config must be a mapping or a path string")
+            raise ValueError(
+                "default_pipeline_config must be a mapping or a path string"
+            )
 
     training_args = TrainingArgs.from_kwargs(**training_kwargs)
 
@@ -234,6 +284,7 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
         recipe=recipe,
         roles=roles,
         training_args=training_args,
+        validation=validation,
         method_config=method_config,
         raw=cfg,
     )

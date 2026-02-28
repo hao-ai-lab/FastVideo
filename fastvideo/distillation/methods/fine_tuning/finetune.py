@@ -73,6 +73,7 @@ class FineTuneMethod(DistillMethod):
         bundle: RoleManager,
         adapter: _FineTuneAdapter,
         method_config: dict[str, Any] | None = None,
+        validation_config: dict[str, Any] | None = None,
         validator: Any | None = None,
     ) -> None:
         super().__init__(bundle)
@@ -85,6 +86,7 @@ class FineTuneMethod(DistillMethod):
         self.validator = validator
         self.training_args = adapter.training_args
         self.method_config: dict[str, Any] = dict(method_config or {})
+        self.validation_config: dict[str, Any] = dict(validation_config or {})
         self._attn_kind: Literal["dense", "vsa"] = self._parse_attn_kind(
             self.method_config.get("attn_kind", None)
         )
@@ -104,6 +106,7 @@ class FineTuneMethod(DistillMethod):
             bundle=bundle,
             adapter=adapter,
             method_config=cfg.method_config,
+            validation_config=cfg.validation,
             validator=validator,
         )
 
@@ -179,25 +182,54 @@ class FineTuneMethod(DistillMethod):
     def on_train_start(self) -> None:
         self.adapter.on_train_start()
 
-    def _parse_validation_cfg(self) -> dict[str, Any]:
-        raw = self.method_config.get("validation", None)
+    def _is_validation_enabled(self) -> bool:
+        cfg = self.validation_config
+        if not cfg:
+            return False
+        enabled = cfg.get("enabled", None)
+        if enabled is None:
+            return True
+        if isinstance(enabled, bool):
+            return bool(enabled)
+        raise ValueError(
+            "training.validation.enabled must be a bool when set, got "
+            f"{type(enabled).__name__}"
+        )
+
+    def _parse_validation_every_steps(self) -> int:
+        raw = self.validation_config.get("every_steps", None)
         if raw is None:
-            return {}
-        if not isinstance(raw, dict):
             raise ValueError(
-                "method_config.validation must be a dict when set, got "
-                f"{type(raw).__name__}"
+                "training.validation.every_steps must be set when validation is enabled"
             )
-        return dict(raw)
+        if isinstance(raw, bool):
+            raise ValueError("training.validation.every_steps must be an int, got bool")
+        if isinstance(raw, int):
+            return int(raw)
+        if isinstance(raw, float) and raw.is_integer():
+            return int(raw)
+        if isinstance(raw, str) and raw.strip():
+            return int(raw)
+        raise ValueError(
+            "training.validation.every_steps must be an int, got "
+            f"{type(raw).__name__}"
+        )
 
-    def _parse_validation_sampling_steps(self, cfg: dict[str, Any]) -> list[int]:
-        raw = cfg.get("sampling_steps")
-        if raw is None:
-            raw = getattr(self.training_args, "validation_sampling_steps", "") or ""
+    def _parse_validation_dataset_file(self) -> str:
+        raw = self.validation_config.get("dataset_file", None)
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError(
+                "training.validation.dataset_file must be set when validation is enabled"
+            )
+        return raw.strip()
 
+    def _parse_validation_sampling_steps(self) -> list[int]:
+        raw = self.validation_config.get("sampling_steps")
         steps: list[int] = []
         if raw is None or raw == "":
-            return steps
+            raise ValueError(
+                "training.validation.sampling_steps must be set for validation"
+            )
         if isinstance(raw, bool):
             raise ValueError(
                 "validation sampling_steps must be an int/list/str, got bool"
@@ -215,10 +247,8 @@ class FineTuneMethod(DistillMethod):
             )
         return [s for s in steps if int(s) > 0]
 
-    def _parse_validation_guidance_scale(self, cfg: dict[str, Any]) -> float | None:
-        raw = cfg.get("guidance_scale")
-        if raw is None:
-            raw = getattr(self.training_args, "validation_guidance_scale", None)
+    def _parse_validation_guidance_scale(self) -> float | None:
+        raw = self.validation_config.get("guidance_scale")
         if raw in (None, ""):
             return None
         if isinstance(raw, bool):
@@ -238,41 +268,48 @@ class FineTuneMethod(DistillMethod):
         validator = getattr(self, "validator", None)
         if validator is None:
             return
-        if not getattr(self.training_args, "log_validation", False):
+        if not self._is_validation_enabled():
             return
 
-        validation_cfg = self._parse_validation_cfg()
-        sampling_steps = self._parse_validation_sampling_steps(validation_cfg)
-        if not sampling_steps:
+        every_steps = self._parse_validation_every_steps()
+        if every_steps <= 0:
+            return
+        if iteration % every_steps != 0:
             return
 
-        guidance_scale = self._parse_validation_guidance_scale(validation_cfg)
+        dataset_file = self._parse_validation_dataset_file()
+        sampling_steps = self._parse_validation_sampling_steps()
+        guidance_scale = self._parse_validation_guidance_scale()
 
-        sampler_kind_raw = validation_cfg.get("sampler_kind", None)
-        if sampler_kind_raw is None:
-            pipeline_sampler_kind = getattr(
-                getattr(self.training_args, "pipeline_config", None), "sampler_kind", None
-            )
-            sampler_kind_raw = str(pipeline_sampler_kind) if pipeline_sampler_kind else "ode"
+        sampler_kind_raw = self.validation_config.get("sampler_kind", "ode")
         if not isinstance(sampler_kind_raw, str):
             raise ValueError(
-                "method_config.validation.sampler_kind must be a string when set, got "
+                "training.validation.sampler_kind must be a string when set, got "
                 f"{type(sampler_kind_raw).__name__}"
             )
         sampler_kind = sampler_kind_raw.strip().lower()
         if sampler_kind not in {"ode", "sde"}:
             raise ValueError(
-                "method_config.validation.sampler_kind must be one of {ode, sde}, got "
+                "training.validation.sampler_kind must be one of {ode, sde}, got "
                 f"{sampler_kind_raw!r}"
             )
         sampler_kind = cast(Literal["ode", "sde"], sampler_kind)
 
+        output_dir = self.validation_config.get("output_dir", None)
+        if output_dir is not None and not isinstance(output_dir, str):
+            raise ValueError(
+                "training.validation.output_dir must be a string when set, got "
+                f"{type(output_dir).__name__}"
+            )
+
         request = ValidationRequest(
             sample_handle=self.student,
+            dataset_file=dataset_file,
             sampling_steps=sampling_steps,
             sampler_kind=sampler_kind,
             sampling_timesteps=None,
             guidance_scale=guidance_scale,
+            output_dir=output_dir,
         )
         validator.log_validation(iteration, request=request)
 

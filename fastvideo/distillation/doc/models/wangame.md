@@ -20,9 +20,8 @@
    - `bundle = RoleManager(roles=role_handles)`
    - `adapter = WanGameAdapter(...)`
    - dataloader：parquet + `pyarrow_schema_wangame`
-   - validator（可选）：`WanGameValidator`（当 `training.log_validation=true`）
+   - validator（可选）：`WanGameValidator`（当 `training.validation.enabled=true`，或 `training.validation` 非空）
 
 **关于 roles.family**
 - 当前 `wangame` plugin 只支持 `family="wangame"` 的 role。
   这让 build-time 逻辑保持高内聚：模型加载、batch schema 与 adapter 能保持一致。
-

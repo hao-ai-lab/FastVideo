@@ -19,6 +19,7 @@ class ValidationRequest:
     """
 
     sample_handle: RoleHandle | None = None
+    dataset_file: str | None = None
     sampling_steps: list[int] | None = None
     sampler_kind: Literal["ode", "sde"] | None = None
     sampling_timesteps: list[int] | None = None

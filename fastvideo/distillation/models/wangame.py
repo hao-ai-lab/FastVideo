@@ -94,7 +94,9 @@ def build_wangame_components(*, cfg: DistillRunConfig) -> ModelComponents:
     bundle = RoleManager(roles=role_handles)
 
     validator = None
-    if getattr(training_args, "log_validation", False):
+    validation_cfg = getattr(cfg, "validation", {}) or {}
+    validation_enabled = bool(validation_cfg.get("enabled", bool(validation_cfg)))
+    if validation_enabled:
         from fastvideo.distillation.validators.wangame import WanGameValidator
 
         validator = WanGameValidator(training_args=training_args)

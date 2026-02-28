@@ -98,10 +98,7 @@ class DistillTrainer:
             if resumed_step is not None:
                 start_step = int(resumed_step)
 
-        validation_interval = int(self.training_args.validation_steps or 0)
-        if (getattr(self.training_args, "log_validation", False)
-                and validation_interval > 0 and hasattr(method,
-                                                       "log_validation")):
+        if hasattr(method, "log_validation"):
             method.log_validation(start_step)  # type: ignore[attr-defined]
 
         if hasattr(method, "optimizers_zero_grad"):
@@ -172,10 +169,7 @@ class DistillTrainer:
             if checkpoint_manager is not None:
                 checkpoint_manager.maybe_save(step)
 
-            if (getattr(self.training_args, "log_validation", False)
-                    and validation_interval > 0
-                    and step % validation_interval == 0
-                    and hasattr(method, "log_validation")):
+            if hasattr(method, "log_validation"):
                 method.log_validation(step)  # type: ignore[attr-defined]
 
         if checkpoint_manager is not None:

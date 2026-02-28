@@ -105,14 +105,14 @@ method_config:
 建议把 validation 的配置拆成两类：
 
 - **run/trainer 级（什么时候验证、用什么 validation dataset）**：放在 `training:` 下；
-- **method 级（怎么采样、走什么 rollout 语义）**：放在 `method_config.validation:` 下。
+- **method 级（怎么采样、走什么 rollout 语义）**：放在 `training.validation:` 下（method 读取）。
 
 这样 validator 不需要 “从 training_args 猜 method 语义”，而 method 也不会越权去管理 dataloader。
 
 建议把选择权交给 method（或 method_config），让 validator 只负责执行：
 
 ```yaml
-method_config:
+training:
   validation:
     # full | streaming_causal
     rollout_mode: streaming_causal
@@ -138,13 +138,13 @@ method_config:
 > - 我们仍可以保留 SDE-style streaming（用于对照/legacy 对齐），但必须由 config 显式选择，
 >   避免 “training/validation 语义混用导致 reviewer 困惑”。
 
-### 2.4 pipeline_config：ODE solver 选择（可选）
+### 2.4 default_pipeline_config：ODE solver 选择（可选）
 
 我们目前的 `pipeline_config.sampler_kind=ode` 默认会选择 `FlowUniPCMultistepScheduler`
 （见 `fastvideo/pipelines/samplers/wan.py`）。为了做对照实验/调试，建议增加一个可选字段：
 
 ```yaml
-pipeline_config:
+default_pipeline_config:
   sampler_kind: ode
   ode_solver: unipc   # unipc | euler
 ```
@@ -215,8 +215,8 @@ pipeline_config:
 - [ ] `examples/distillation/wangame/finetune_wangame2.1_i2v_1.3B_dfsft_causal.yaml`
   - `roles.student.variant: causal`
   - `recipe.method: dfsft`
-  - `training.validation_dataset_file / training.validation_steps`（run 级）
-  - `method_config.validation.sampling_steps: [40]`（method 级）
+  - `training.validation.dataset_file / training.validation.every_steps`
+  - `training.validation.sampling_steps: [40]`
 
 - [ ] `examples/distillation/wangame/dfsft-temp.sh`（新增）
   - 跟现在 `run.sh` 一样只负责 export CONFIG + torchrun
@@ -294,10 +294,10 @@ pipeline_config:
 
 6) **step list / context noise 的配置入口**（重要决策点）：
    - 现有 streaming pipeline 读取 `pipeline_config.dmd_denoising_steps / warp_denoising_step / context_noise`；
-   - 我们的新框架更希望把 few-step schedule/rollout knobs 放到 `method_config`；
+   - 我们的新框架更希望把 few-step schedule/rollout knobs 放到 `method_config` 或 `training.validation`；
    - 因此需要一个明确策略：
      - 方案 A（最小改动）：validator 在构建 validation pipeline 时，把
-       `method_config.validation.*` 写入 `args_copy.pipeline_config.*`（validation-only）；
+       `training.validation.*` 写入 `args_copy.pipeline_config.*`（validation-only）；
      - 方案 B（更干净）：把 streaming pipeline 改为优先读 `ForwardBatch.sampling_timesteps`
        + `ValidationRequest.context_noise`，彻底摆脱 pipeline_config 依赖（工程量更大）。
 

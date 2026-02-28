@@ -21,9 +21,8 @@
   - `ValidationRequest.sampling_timesteps` 提供 few-step schedule（写入 `ForwardBatch.sampling_timesteps`）
 - 这样 validator 不再依赖 `<Model><Method>Pipeline`（例如 `WanDMDPipeline`），保持 method-agnostic。
 
-**可演进方向（Phase 3+）**
-- 将 validation steps/guidance 等采样配置从 `TrainingArgs` 迁移到更明确的配置块（例如 `validation:`）。
-- 进一步抽象 validator API，使其更容易被不同 model plugin / method 复用。
+**输入约定**
+- dataset 由 method 通过 `ValidationRequest.dataset_file` 提供（validator 不再从 `TrainingArgs` 读取）。
 
 **Tracker 注入**
 - `WanValidator` 不再要求 build-time 传入 tracker；

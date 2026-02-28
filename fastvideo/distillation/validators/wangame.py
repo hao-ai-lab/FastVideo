@@ -159,11 +159,6 @@ class WanGameValidator:
         self._pipeline_key = key
         return self._pipeline
 
-    def _parse_validation_steps(self) -> list[int]:
-        raw = str(getattr(self.training_args, "validation_sampling_steps", "") or "")
-        steps = [int(s) for s in raw.split(",") if s.strip()]
-        return [s for s in steps if s > 0]
-
     def _prepare_validation_batch(
         self,
         sampling_param: SamplingParam,
@@ -183,8 +178,6 @@ class WanGameValidator:
         sampling_param.data_type = "video"
         if guidance_scale is not None:
             sampling_param.guidance_scale = float(guidance_scale)
-        elif getattr(training_args, "validation_guidance_scale", ""):
-            sampling_param.guidance_scale = float(training_args.validation_guidance_scale)
         sampling_param.seed = self.seed
 
         temporal_compression_factor = (
@@ -237,6 +230,7 @@ class WanGameValidator:
         self,
         num_inference_steps: int,
         *,
+        dataset_file: str,
         transformer: torch.nn.Module,
         sampler_kind: str,
         sampling_timesteps: list[int] | None = None,
@@ -246,7 +240,7 @@ class WanGameValidator:
         pipeline = self._get_pipeline(transformer=transformer, sampler_kind=sampler_kind)
         sampling_param = self._get_sampling_param()
 
-        dataset = ValidationDataset(training_args.validation_dataset_file)
+        dataset = ValidationDataset(dataset_file)
         dataloader = DataLoader(dataset, batch_size=None, num_workers=0)
 
         videos: list[list[np.ndarray]] = []
@@ -283,16 +277,17 @@ class WanGameValidator:
         return _ValidationStepResult(videos=videos, captions=captions)
 
     def log_validation(self, step: int, *, request: ValidationRequest | None = None) -> None:
-        training_args = self.training_args
-        if not getattr(training_args, "log_validation", False):
-            return
-        if not getattr(training_args, "validation_dataset_file", ""):
-            raise ValueError("validation_dataset_file must be set when log_validation is enabled")
+        if request is None:
+            raise ValueError("WanGameValidator.log_validation requires a ValidationRequest")
+
+        dataset_file = getattr(request, "dataset_file", None)
+        if not dataset_file:
+            raise ValueError("ValidationRequest.dataset_file must be provided by the method")
 
         guidance_scale = getattr(request, "guidance_scale", None)
-        validation_steps = getattr(request, "sampling_steps", None) or self._parse_validation_steps()
+        validation_steps = getattr(request, "sampling_steps", None)
         if not validation_steps:
-            return
+            raise ValueError("ValidationRequest.sampling_steps must be provided by the method")
         sampler_kind = getattr(request, "sampler_kind", None) or "ode"
         sampling_timesteps = getattr(request, "sampling_timesteps", None)
         if sampling_timesteps is not None:
@@ -312,6 +307,7 @@ class WanGameValidator:
         transformer = sample_handle.require_module("transformer")
         was_training = bool(getattr(transformer, "training", False))
 
+        training_args = self.training_args
         output_dir = getattr(request, "output_dir", None) or training_args.output_dir
 
         old_inference_mode = training_args.inference_mode
@@ -328,6 +324,7 @@ class WanGameValidator:
             for num_inference_steps in validation_steps:
                 result = self._run_validation_for_steps(
                     num_inference_steps,
+                    dataset_file=str(dataset_file),
                     transformer=transformer,
                     sampler_kind=str(sampler_kind),
                     sampling_timesteps=sampling_timesteps,

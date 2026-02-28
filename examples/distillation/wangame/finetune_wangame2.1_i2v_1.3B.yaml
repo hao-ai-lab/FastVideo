@@ -66,13 +66,15 @@ training:
   # Tracking / validation
   tracker_project_name: distillation_wangame
   wandb_run_name: wangame_finetune_from_pretrained
-  log_validation: true
-  validation_dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_8.json
-  validation_steps: 100
-  validation_sampling_steps: "40"
-  validation_guidance_scale: "1.0"
+  validation:
+    enabled: true
+    dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_8.json
+    every_steps: 100
+    sampling_steps: [40]
+    sampler_kind: ode
+    guidance_scale: 1.0
 
-pipeline_config:
+default_pipeline_config:
   flow_shift: 3
   sampler_kind: ode
 
