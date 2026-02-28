@@ -96,6 +96,52 @@ class DistributedAutograd:
 
             return None, grad_input, None, None
 
+    class Slice(torch.autograd.Function):
+        """Differentiable slice (shard) operation.
+
+        Forward selects this rank's chunk along `dim`.
+        Backward all-gathers local gradients to reconstruct full input grad.
+        """
+
+        @staticmethod
+        def forward(ctx: Any, group: ProcessGroup, input_: Tensor,
+                    world_size: int, dim: int, scale_grad: bool) -> Tensor:
+            ctx.group = group
+            ctx.world_size = world_size
+            ctx.dim = dim
+            ctx.scale_grad = scale_grad
+            ctx.rank = dist.get_rank(group)
+
+            if world_size == 1:
+                return input_.contiguous()
+
+            shard_size = input_.size(dim) // world_size
+            output = input_.movedim(dim, 0)
+            output = output[ctx.rank * shard_size:(ctx.rank + 1) * shard_size]
+            return output.movedim(0, dim).contiguous()
+
+        @staticmethod
+        def backward(
+                ctx: Any,
+                grad_output: Tensor) -> tuple[None, Tensor, None, None, None]:
+            if ctx.world_size == 1:
+                return None, grad_output, None, None, None
+
+            grad_output = grad_output.movedim(ctx.dim, 0).contiguous()
+            shard_size = grad_output.shape[0]
+            grad_input_shape = (shard_size * ctx.world_size, ) + tuple(
+                grad_output.shape[1:])
+            grad_input = torch.empty(grad_input_shape,
+                                     dtype=grad_output.dtype,
+                                     device=grad_output.device)
+            dist.all_gather_into_tensor(grad_input,
+                                        grad_output,
+                                        group=ctx.group)
+            if ctx.scale_grad:
+                grad_input = grad_input / ctx.world_size
+
+            return None, grad_input.movedim(0, ctx.dim), None, None, None
+
     class AllToAll4D(torch.autograd.Function):
         """Differentiable all_to_all operation specialized for 4D tensors.
         
@@ -220,6 +266,17 @@ class DeviceCommunicatorBase:
             dim += input_.dim()
         return DistributedAutograd.AllGather.apply(self.device_group, input_,
                                                    self.world_size, dim)
+
+    def slice(self,
+              input_: torch.Tensor,
+              dim: int = -1,
+              *,
+              scale_grad: bool) -> torch.Tensor:
+        """Performs rank-local slicing with all-gather backward."""
+        if dim < 0:
+            dim += input_.dim()
+        return DistributedAutograd.Slice.apply(self.device_group, input_,
+                                               self.world_size, dim, scale_grad)
 
     def all_to_all_4D(self,
                       input_: torch.Tensor,

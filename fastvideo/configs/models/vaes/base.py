@@ -37,7 +37,6 @@ class VAEConfig(ModelConfig):
     use_tiling: bool = True
     use_temporal_tiling: bool = True
     use_parallel_tiling: bool = True
-    use_temporal_scaling_frames: bool = True
 
     def __post_init__(self):
         self.blend_num_frames = self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames

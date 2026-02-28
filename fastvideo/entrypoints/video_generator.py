@@ -67,18 +67,12 @@ class VideoGenerator:
         self.executor = executor_class(fastvideo_args)
 
     @classmethod
-    def from_pretrained(cls,
-                        model_path: str,
-                        device: str | None = None,
-                        torch_dtype: torch.dtype | None = None,
-                        **kwargs) -> "VideoGenerator":
+    def from_pretrained(cls, model_path: str, **kwargs) -> "VideoGenerator":
         """
         Create a video generator from a pretrained model.
         
         Args:
             model_path: Path or identifier for the pretrained model
-            device: Device to load the model on (e.g., "cuda", "cuda:0", "cpu")
-            torch_dtype: Data type for model weights (e.g., torch.float16)
             pipeline_config: Pipeline config to use for inference
             **kwargs: Additional arguments to customize model loading, set any FastVideoArgs or PipelineConfig attributes here.
                 
@@ -125,7 +119,7 @@ class VideoGenerator:
         grid_sizes: tuple[int, int, int] | list[int] | torch.Tensor
         | None = None,
         **kwargs,
-    ) -> dict[str, Any] | list[np.ndarray] | list[dict[str, Any]]:
+    ) -> dict[str, Any] | list[dict[str, Any]]:
         """
         Generate a video based on the given prompt.
         
@@ -135,7 +129,7 @@ class VideoGenerator:
             output_path: Path to save the video (overrides the one in fastvideo_args)
             prompt_path: Path to prompt file
             save_video: Whether to save the video to disk
-            return_frames: Whether to return the raw frames
+            return_frames: Whether to include raw frames in the result dict
             num_inference_steps: Number of denoising steps (overrides fastvideo_args)
             guidance_scale: Classifier-free guidance scale (overrides fastvideo_args)
             num_frames: Number of frames to generate (overrides fastvideo_args)
@@ -147,7 +141,8 @@ class VideoGenerator:
             callback_steps: Number of steps between each callback
             
         Returns:
-            Either the output dictionary, list of frames, or list of results for batch processing
+            A metadata dictionary for single-prompt generation, or a list of
+            metadata dictionaries for prompt-file batch generation.
         """
         # Handle batch processing from text file
         if sampling_param is None:
@@ -194,9 +189,8 @@ class VideoGenerator:
                         **kwargs)
 
                     # Add prompt info to result
-                    if isinstance(result, dict):
-                        result["prompt_index"] = i
-                        result["prompt"] = batch_prompt
+                    result["prompt_index"] = i
+                    result["prompt"] = batch_prompt
 
                     results.append(result)
                     logger.info("Successfully generated video for prompt %d",
@@ -306,11 +300,10 @@ class VideoGenerator:
         prompt: str,
         sampling_param: SamplingParam | None = None,
         **kwargs,
-    ) -> dict[str, Any] | list[np.ndarray]:
+    ) -> dict[str, Any]:
         """Internal method for single video generation"""
         # Create a copy of inference args to avoid modifying the original
         fastvideo_args = self.fastvideo_args
-        pipeline_config = fastvideo_args.pipeline_config
 
         # Validate inputs
         if not isinstance(prompt, str):
@@ -332,28 +325,6 @@ class VideoGenerator:
                 f"Height, width, and num_frames must be positive integers, got "
                 f"height={sampling_param.height}, width={sampling_param.width}, "
                 f"num_frames={sampling_param.num_frames}")
-
-        temporal_scale_factor = pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        num_frames = sampling_param.num_frames
-        use_temporal_scaling_frames = pipeline_config.vae_config.use_temporal_scaling_frames
-
-        # Adjust number of frames based on number of GPUs
-        if not use_temporal_scaling_frames:
-            raise ValueError(
-                "Only temporal-scaling-frame VAE configs are supported.")
-        orig_latent_num_frames = (num_frames - 1) // temporal_scale_factor + 1
-
-        if orig_latent_num_frames % fastvideo_args.num_gpus != 0:
-            # Convert back to number of frames, ensuring num_frames-1 is a
-            # multiple of temporal_scale_factor.
-            new_num_frames = (orig_latent_num_frames -
-                              1) * temporal_scale_factor + 1
-
-            logger.info(
-                "Adjusting number of frames from %s to %s based on number of GPUs (%s)",
-                sampling_param.num_frames, new_num_frames,
-                fastvideo_args.num_gpus)
-            sampling_param.num_frames = new_num_frames
 
         # Calculate sizes
         target_height = align_to(sampling_param.height, 16)
@@ -475,21 +446,22 @@ class VideoGenerator:
                     logger.warning(
                         "Audio mux failed; saved video without audio.")
 
-        if batch.return_frames:
-            return frames
-        else:
-            return {
-                "samples": samples,
-                "frames": frames,
-                "audio": output_batch.extra.get("audio"),
-                "prompts": prompt,
-                "size": (target_height, target_width, batch.num_frames),
-                "generation_time": gen_time,
-                "logging_info": logging_info,
-                "trajectory": output_batch.trajectory_latents,
-                "trajectory_timesteps": output_batch.trajectory_timesteps,
-                "trajectory_decoded": output_batch.trajectory_decoded,
-            }
+        result: dict[str, Any] = {
+            "prompts": prompt,
+            "samples": samples if batch.return_frames else None,
+            "frames": frames if batch.return_frames else None,
+            "audio":
+            output_batch.extra.get("audio") if batch.return_frames else None,
+            "size": (target_height, target_width, batch.num_frames),
+            "generation_time": gen_time,
+            "logging_info": logging_info,
+            "trajectory": output_batch.trajectory_latents,
+            "trajectory_timesteps": output_batch.trajectory_timesteps,
+            "trajectory_decoded": output_batch.trajectory_decoded,
+            "video_path": output_path if batch.save_video else None,
+        }
+
+        return result
 
     @staticmethod
     def _mux_audio(
