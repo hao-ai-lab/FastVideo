@@ -231,12 +231,6 @@ class MatrixGameTransformerBlock(nn.Module):
         mouse_cond: torch.Tensor | None = None,
         keyboard_cond: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        num_frames = int(grid_sizes[0])
-        if mouse_cond is not None:
-            assert mouse_cond.shape[1] == num_frames, f"mouse_cond length ({mouse_cond.shape[1]}) must be exactly num_frames ({num_frames})"
-        if keyboard_cond is not None:
-            assert keyboard_cond.shape[1] == num_frames, f"keyboard_cond length ({keyboard_cond.shape[1]}) must be exactly num_frames ({num_frames})"
-
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
         orig_dtype = hidden_states.dtype

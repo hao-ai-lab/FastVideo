@@ -487,11 +487,6 @@ class CausalMatrixGameTransformerBlock(nn.Module):
 
         assert temb.ndim == 4
         num_frames = temb.shape[1]
-        
-        if mouse_cond is not None:
-            assert mouse_cond.shape[1] == num_frames, f"mouse_cond length ({mouse_cond.shape[1]}) must be exactly num_frames ({num_frames})"
-        if keyboard_cond is not None:
-            assert keyboard_cond.shape[1] == num_frames, f"keyboard_cond length ({keyboard_cond.shape[1]}) must be exactly num_frames ({num_frames})"
 
         frame_seqlen = hidden_states.shape[1] // num_frames
         bs, seq_length, _ = hidden_states.shape
