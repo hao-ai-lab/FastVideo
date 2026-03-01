@@ -256,6 +256,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             if batch is None:
                 self.current_epoch += 1
                 logger.info("Starting epoch %s", self.current_epoch)
+                # Reshuffle dataset for each epoch
+                self.train_dataloader.sampler.set_epoch(self.current_epoch)
                 # Reset iterator for next epoch
                 self.train_loader_iter = iter(self.train_dataloader)
                 # Get first batch of new epoch
