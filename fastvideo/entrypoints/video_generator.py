@@ -206,7 +206,7 @@ class VideoGenerator:
 
         if self.fastvideo_args.prompt_txt is not None or sampling_param.prompt_path is not None:
             prompt_txt_path = sampling_param.prompt_path or self.fastvideo_args.prompt_txt
-            if not os.path.exists(prompt_txt_path):
+            if not prompt_txt_path or not os.path.exists(prompt_txt_path):
                 raise FileNotFoundError(
                     f"Prompt text file not found: {prompt_txt_path}")
 
