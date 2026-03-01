@@ -638,6 +638,12 @@ class CausalMatrixGameWanModel(BaseDiT):
         self.block_mask = None
         self.block_mask_keyboard = None
         self.block_mask_mouse = None
+        self._inference_block_mask_cache: dict[tuple[str, int, int, int,
+                                                     int], BlockMask] = {}
+        self._inference_block_mask_keyboard_cache: dict[
+            tuple[str, int, int, int, int], BlockMask] = {}
+        self._inference_block_mask_mouse_cache: dict[tuple[str, int, int, int,
+                                                           int], BlockMask] = {}
         self.use_rope_keyboard = True
 
         self.num_frame_per_block = (
@@ -809,6 +815,84 @@ class CausalMatrixGameWanModel(BaseDiT):
 
         return block_mask2
 
+    @staticmethod
+    def _block_mask_cache_key(
+        device: torch.device | str,
+        num_frames: int,
+        frame_seqlen: int,
+        num_frame_per_block: int,
+        local_attn_size: int,
+    ) -> tuple[str, int, int, int, int]:
+        return (
+            str(device),
+            int(num_frames),
+            int(frame_seqlen),
+            int(num_frame_per_block),
+            int(local_attn_size),
+        )
+
+    def _get_inference_block_masks(
+        self,
+        *,
+        device: torch.device,
+        num_frames: int,
+        frame_seqlen: int,
+        num_frame_per_block: int,
+    ) -> tuple[BlockMask, BlockMask, BlockMask]:
+        key = self._block_mask_cache_key(
+            device=device,
+            num_frames=num_frames,
+            frame_seqlen=frame_seqlen,
+            num_frame_per_block=num_frame_per_block,
+            local_attn_size=self.local_attn_size,
+        )
+
+        if key not in self._inference_block_mask_cache:
+            self._inference_block_mask_cache[key] = (
+                self._prepare_blockwise_causal_attn_mask(
+                    device=device,
+                    num_frames=num_frames,
+                    frame_seqlen=frame_seqlen,
+                    num_frame_per_block=num_frame_per_block,
+                    local_attn_size=self.local_attn_size,
+                ))
+
+        if key not in self._inference_block_mask_keyboard_cache:
+            if not self.use_rope_keyboard:
+                self._inference_block_mask_keyboard_cache[key] = (
+                    self._prepare_blockwise_causal_attn_mask_keyboard(
+                        device=device,
+                        num_frames=num_frames,
+                        frame_seqlen=frame_seqlen,
+                        num_frame_per_block=num_frame_per_block,
+                        local_attn_size=self.local_attn_size,
+                    ))
+            else:
+                self._inference_block_mask_keyboard_cache[key] = (
+                    self._prepare_blockwise_causal_attn_mask_action(
+                        device=device,
+                        num_frames=num_frames,
+                        frame_seqlen=1,
+                        num_frame_per_block=num_frame_per_block,
+                        local_attn_size=self.local_attn_size,
+                    ))
+
+        if key not in self._inference_block_mask_mouse_cache:
+            self._inference_block_mask_mouse_cache[key] = (
+                self._prepare_blockwise_causal_attn_mask_action(
+                    device=device,
+                    num_frames=num_frames,
+                    frame_seqlen=1,
+                    num_frame_per_block=num_frame_per_block,
+                    local_attn_size=self.local_attn_size,
+                ))
+
+        return (
+            self._inference_block_mask_cache[key],
+            self._inference_block_mask_keyboard_cache[key],
+            self._inference_block_mask_mouse_cache[key],
+        )
+
     def _forward_inference(
         self,
         hidden_states: torch.Tensor,
@@ -962,45 +1046,13 @@ class CausalMatrixGameWanModel(BaseDiT):
             else:
                 encoder_hidden_states = encoder_hidden_states_image
 
-        if self.block_mask is None:
-            self.block_mask = self._prepare_blockwise_causal_attn_mask(
-                device=hidden_states.device,
-                num_frames=num_frames,
-                frame_seqlen=post_patch_height * post_patch_width,
-                num_frame_per_block=self.num_frame_per_block,
-                local_attn_size=self.local_attn_size,
-            )
-        if self.block_mask_keyboard is None:
-            if not self.use_rope_keyboard:
-                self.block_mask_keyboard = (
-                    self._prepare_blockwise_causal_attn_mask_keyboard(
-                        device=hidden_states.device,
-                        num_frames=num_frames,
-                        frame_seqlen=post_patch_height * post_patch_width,
-                        num_frame_per_block=self.num_frame_per_block,
-                        local_attn_size=self.local_attn_size,
-                    )
-                )
-            else:
-                self.block_mask_keyboard = (
-                    self._prepare_blockwise_causal_attn_mask_action(
-                        device=hidden_states.device,
-                        num_frames=num_frames,
-                        frame_seqlen=1,
-                        num_frame_per_block=self.num_frame_per_block,
-                        local_attn_size=self.local_attn_size,
-                    )
-                )
-        if self.block_mask_mouse is None:
-            self.block_mask_mouse = (
-                self._prepare_blockwise_causal_attn_mask_action(
-                    device=hidden_states.device,
-                    num_frames=num_frames,
-                    frame_seqlen=1,
-                    num_frame_per_block=self.num_frame_per_block,
-                    local_attn_size=self.local_attn_size,
-                )
-            )
+        (self.block_mask, self.block_mask_keyboard,
+         self.block_mask_mouse) = self._get_inference_block_masks(
+             device=hidden_states.device,
+             num_frames=num_frames,
+             frame_seqlen=post_patch_height * post_patch_width,
+             num_frame_per_block=effective_num_frame_per_block,
+         )
         if kv_cache is None:
             kv_cache = [None] * len(self.blocks)
         if kv_cache_mouse is None:
