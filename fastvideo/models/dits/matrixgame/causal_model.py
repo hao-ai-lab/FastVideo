@@ -932,7 +932,7 @@ class CausalMatrixGameWanModel(BaseDiT):
             and len(encoder_hidden_states_image) > 0
         ):
             encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
+        elif not isinstance(encoder_hidden_states_image, torch.Tensor):
             encoder_hidden_states_image = None
 
         ctx = get_forward_context()
@@ -1046,13 +1046,14 @@ class CausalMatrixGameWanModel(BaseDiT):
             else:
                 encoder_hidden_states = encoder_hidden_states_image
 
-        (self.block_mask, self.block_mask_keyboard,
-         self.block_mask_mouse) = self._get_inference_block_masks(
-             device=hidden_states.device,
-             num_frames=num_frames,
-             frame_seqlen=post_patch_height * post_patch_width,
-             num_frame_per_block=effective_num_frame_per_block,
-         )
+        inference_block_mask, inference_block_mask_keyboard, (
+            inference_block_mask_mouse
+        ) = self._get_inference_block_masks(
+            device=hidden_states.device,
+            num_frames=num_frames,
+            frame_seqlen=post_patch_height * post_patch_width,
+            num_frame_per_block=effective_num_frame_per_block,
+        )
         if kv_cache is None:
             kv_cache = [None] * len(self.blocks)
         if kv_cache_mouse is None:
@@ -1108,12 +1109,12 @@ class CausalMatrixGameWanModel(BaseDiT):
                     encoder_hidden_states,
                     timestep_proj,
                     freqs_cis,
-                    block_mask=self.block_mask,
+                    block_mask=inference_block_mask,
                     grid_sizes=grid_sizes,
                     mouse_cond=mouse_cond,
                     keyboard_cond=keyboard_cond,
-                    block_mask_mouse=self.block_mask_mouse,
-                    block_mask_keyboard=self.block_mask_keyboard,
+                    block_mask_mouse=inference_block_mask_mouse,
+                    block_mask_keyboard=inference_block_mask_keyboard,
                     num_frame_per_block=effective_num_frame_per_block,
                     use_rope_keyboard=self.use_rope_keyboard,
                     **kwargs,
@@ -1158,7 +1159,7 @@ class CausalMatrixGameWanModel(BaseDiT):
             and len(encoder_hidden_states_image) > 0
         ):
             encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
+        elif not isinstance(encoder_hidden_states_image, torch.Tensor):
             encoder_hidden_states_image = None
 
         ctx = get_forward_context()

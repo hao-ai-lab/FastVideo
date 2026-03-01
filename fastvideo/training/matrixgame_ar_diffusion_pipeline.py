@@ -201,10 +201,6 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
         if batch is None:
             self.current_epoch += 1
             logger.info("Starting epoch %s", self.current_epoch)
-            if hasattr(self, "train_dataset") and hasattr(
-                self.train_dataset, "sampler"
-            ):
-                self.train_dataset.sampler.set_epoch(self.current_epoch)
             self.train_loader_iter = iter(self.train_dataloader)
             batch = next(self.train_loader_iter)
 
@@ -397,7 +393,8 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
             attn_metadata=None,
             forward_batch=None,
         ):
-            model_pred = self.transformer(**input_kwargs)
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                model_pred = self.transformer(**input_kwargs)
             model_pred_btchw = model_pred.permute(0, 2, 1, 3, 4)
 
             training_target = training_batch._ar_training_target.to(
