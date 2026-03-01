@@ -37,13 +37,9 @@ export default function Home() {
       intervalRef.current = null;
     }
 
-    const hasRunningJobs = jobs.some(job => job.status === "running");
-    
-    if (hasRunningJobs) {
-      intervalRef.current = setInterval(() => {
-        fetchJobs();
-      }, 1000);
-    }
+    intervalRef.current = setInterval(() => {
+      fetchJobs();
+    }, 1000);
 
     return () => {
       if (intervalRef.current) {
