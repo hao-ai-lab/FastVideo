@@ -35,7 +35,6 @@ from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.logger import init_logger
 from fastvideo.forward_context import set_forward_context
 from fastvideo.distributed.parallel_state import get_sp_world_size
-from fastvideo.distributed.utils import create_attention_mask_for_padding
 
 from .camera_rope import prope_qkv
 
@@ -88,7 +87,7 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
         vec: torch.Tensor,
         vec_txt: torch.Tensor,
         freqs_cis: tuple,
-        seq_attention_mask: torch.Tensor,
+        original_seq_len: int,
         viewmats: torch.Tensor,
         Ks: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -101,7 +100,7 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
             encoder_attention_mask: Text attention mask
             vec: Modulation vector
             freqs_cis: Rotary embedding frequencies
-            seq_attention_mask: Sequence attention mask
+            original_seq_len: Original (unpadded) image sequence length
             viewmats: Camera view matrices for ProPE [B, T, 4, 4]
             Ks: Camera intrinsics for ProPE [B, T, 3, 3]
 
@@ -181,7 +180,16 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
         )
         # Run distributed attention
         with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
-            img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v, freqs_cis=freqs_cis, attention_mask=seq_attention_mask)
+            img_attn, txt_attn = self.attn(
+                img_q,
+                img_k,
+                img_v,
+                original_seq_len,
+                txt_q,
+                txt_k,
+                txt_v,
+                freqs_cis=freqs_cis,
+            )
         
         # begin hyworld
         # attention with prope
@@ -193,8 +201,14 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
         # NOTE: Do NOT pass freqs_cis to prope attention - HY-WorldPlay does not apply RoPE to prope
         with set_forward_context(current_timestep=0, attn_metadata=attn_metadata_prope):
             img_attn_prope, _ = self.attn(
-                img_q_prope, img_k_prope, img_v_prope, txt_q, txt_k, txt_v, 
-                freqs_cis=None, attention_mask=seq_attention_mask  # No RoPE for prope attention
+                img_q_prope,
+                img_k_prope,
+                img_v_prope,
+                original_seq_len,
+                txt_q,
+                txt_k,
+                txt_v,
+                freqs_cis=None,  # No RoPE for prope attention
             )
             img_attn_prope = img_attn_prope.reshape(batch_size, image_seq_len, -1)
             img_attn_prope = rearrange(
@@ -399,20 +413,7 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
 
         hidden_states = self.img_in(hidden_states)
         hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
-
-        current_seq_len = hidden_states.shape[1]
         sp_world_size = get_sp_world_size()
-        padded_seq_len = current_seq_len * sp_world_size
-
-        if padded_seq_len > original_seq_len:
-            seq_attention_mask = create_attention_mask_for_padding(
-                seq_len=original_seq_len,
-                padded_seq_len=padded_seq_len,
-                batch_size=batch_size,
-                device=hidden_states.device,
-            )
-        else:
-            seq_attention_mask = None
 
         viewmats_seq = repeat(
             viewmats, "B T M N->B (T H W) M N",
@@ -535,7 +536,7 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
                     temb,
                     temb_txt,
                     freqs_cis,
-                    seq_attention_mask,
+                    original_seq_len,
                     viewmats_seq,
                     Ks_seq,
                 )
@@ -548,7 +549,7 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
                     temb,
                     temb_txt,
                     freqs_cis,
-                    seq_attention_mask,
+                    original_seq_len,
                     viewmats_seq,
                     Ks_seq,
                 )

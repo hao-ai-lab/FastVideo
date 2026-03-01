@@ -230,11 +230,12 @@ class TextEncodingStage(PipelineStage):
                 if processed_text is not None:
                     processed_texts.append(processed_text)
                 else:
-                    # Assuming batch_size = 1
-                    prompt_embeds = torch.zeros((1, tok_kwargs["max_length"],
-                                                 encoder_config.hidden_size),
-                                                device=target_device)
-                    attention_mask = torch.zeros((1, tok_kwargs["max_length"]),
+                    # Assuming batch_size = 1, special case for hunyuanvideo1.5 where there is no glyph text
+                    assert len(texts) == 1
+                    prompt_embeds = torch.zeros(
+                        (1, 0, encoder_config.hidden_size),
+                        device=target_device)
+                    attention_mask = torch.zeros((1, 0),
                                                  device=target_device,
                                                  dtype=torch.int64)
                     embeds_list.append(prompt_embeds)
@@ -274,13 +275,11 @@ class TextEncodingStage(PipelineStage):
                 if dtype is not None:
                     audio_embed = audio_embed.to(dtype=dtype)
                 audio_embeds_list.append(audio_embed)
-
             if dtype is not None:
                 prompt_embeds = prompt_embeds.to(dtype=dtype)
             embeds_list.append(prompt_embeds)
             if return_attention_mask:
                 attn_masks_list.append(attention_mask)
-
         self._last_audio_embeds = audio_embeds_list if is_ltx2 else None
         return self.return_embeds(embeds_list, attn_masks_list, return_type,
                                   return_attention_mask, indices)

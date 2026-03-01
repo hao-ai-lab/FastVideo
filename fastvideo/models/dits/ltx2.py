@@ -27,7 +27,6 @@ from fastvideo.distributed.communication_op import (
     sequence_model_parallel_shard,
 )
 from fastvideo.distributed.parallel_state import get_sp_parallel_rank, get_sp_world_size
-from fastvideo.distributed.utils import create_attention_mask_for_padding
 from fastvideo.forward_context import ForwardContext, get_forward_context, set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
@@ -1020,11 +1019,11 @@ class LTXDistributedAttention(DistributedAttention):
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
+        original_seq_len: int,
         replicated_q: torch.Tensor | None = None,
         replicated_k: torch.Tensor | None = None,
         replicated_v: torch.Tensor | None = None,
         gate_compress: torch.Tensor | None = None,
-        attention_mask: torch.Tensor | None = None,
         ltx_freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass with LTX-2 style RoPE application.
@@ -1036,14 +1035,14 @@ class LTXDistributedAttention(DistributedAttention):
             replicated_q: Replicated query tensor for text tokens
             replicated_k: Replicated key tensor
             replicated_v: Replicated value tensor
-            attention_mask: Attention mask [batch_size, seq_len]
+            original_seq_len: Original (unpadded) full sequence length
             ltx_freqs_cis: LTX-2 style RoPE (cos, sin) with shape [B, H, T, D]
 
         Returns:
             Tuple of output tensor and optional replicated output
         """
         assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
-        batch_size, seq_len, num_heads, head_dim = q.shape
+        batch_size, _, num_heads, _ = q.shape
         local_rank = get_sp_parallel_rank()
         world_size = get_sp_world_size()
 
@@ -1067,19 +1066,16 @@ class LTXDistributedAttention(DistributedAttention):
             qkvg = sequence_model_parallel_all_to_all_4D(qkvg,
                                                          scatter_dim=2,
                                                          gather_dim=1)
-
-            valid_seq_len = None
-            if attention_mask is not None:
-                valid_seq_len = (attention_mask[0] == 1).sum().item()
-                qkvg = qkvg[:, :valid_seq_len, :, :]
+            pad_seq_len = qkvg.shape[1] - original_seq_len
+            qkvg = qkvg[:, :original_seq_len, :, :]
 
             if ltx_freqs_cis is not None:
                 cos, sin = ltx_freqs_cis
                 heads_per_rank = num_heads // world_size
                 head_start = local_rank * heads_per_rank
                 head_end = head_start + heads_per_rank
-                cos_local = cos[:, head_start:head_end, :valid_seq_len, :]
-                sin_local = sin[:, head_start:head_end, :valid_seq_len, :]
+                cos_local = cos[:, head_start:head_end, :original_seq_len, :]
+                sin_local = sin[:, head_start:head_end, :original_seq_len, :]
                 qk_part = qkvg[:batch_size * 2].transpose(1, 2)
                 qk_part = apply_ltx_rotary_emb_4d(
                     qk_part, (cos_local, sin_local), self.rope_type)
@@ -1090,10 +1086,7 @@ class LTXDistributedAttention(DistributedAttention):
             output = self.attn_impl.forward(  # type: ignore[call-arg]
                 q, k, v, gate_compress, ctx_attn_metadata)
             output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
-
-            if attention_mask is not None:
-                pad_len = (attention_mask[0] == 0).sum().item()
-                output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_len))
+            output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_seq_len))
 
             output = sequence_model_parallel_all_to_all_4D(output,
                                                            scatter_dim=1,
@@ -1107,10 +1100,8 @@ class LTXDistributedAttention(DistributedAttention):
         qkv = sequence_model_parallel_all_to_all_4D(qkv, scatter_dim=2, gather_dim=1)
 
         # After all-to-all, each rank has the full sequence but only a subset of heads
-        valid_seq_len = None
-        if attention_mask is not None:
-            valid_seq_len = (attention_mask[0] == 1).sum().item()
-            qkv = qkv[:, :valid_seq_len, :, :]
+        pad_seq_len = qkv.shape[1] - original_seq_len
+        qkv = qkv[:, :original_seq_len, :, :]
 
         # Apply LTX-2 style RoPE after all-to-all (when we have full sequence)
         if ltx_freqs_cis is not None:
@@ -1119,8 +1110,8 @@ class LTXDistributedAttention(DistributedAttention):
             head_start = local_rank * heads_per_rank
             head_end = head_start + heads_per_rank
             # Slice to this rank's heads: [B, H/SP, T, D]
-            cos_local = cos[:, head_start:head_end, :valid_seq_len, :]
-            sin_local = sin[:, head_start:head_end, :valid_seq_len, :]
+            cos_local = cos[:, head_start:head_end, :original_seq_len, :]
+            sin_local = sin[:, head_start:head_end, :original_seq_len, :]
 
             # Apply RoPE to Q and K together (first 2*batch_size in dim 0)
             qk_part = qkv[:batch_size * 2]
@@ -1152,7 +1143,7 @@ class LTXDistributedAttention(DistributedAttention):
         # Redistribute back if using sequence parallelism
         replicated_output = None
         if replicated_q is not None:
-            split_idx = seq_len * world_size if valid_seq_len is None else valid_seq_len
+            split_idx = original_seq_len
             replicated_output = output[:, split_idx:]
             output = output[:, :split_idx]
             replicated_output = sequence_model_parallel_all_gather(
@@ -1161,9 +1152,7 @@ class LTXDistributedAttention(DistributedAttention):
         # Apply backend-specific postprocess_output
         output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
 
-        if attention_mask is not None:
-            pad_len = (attention_mask[0] == 0).sum().item()
-            output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_len))
+        output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_seq_len))
 
         output = sequence_model_parallel_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
 
@@ -1407,7 +1396,7 @@ class LTXDistributedSelfAttention(nn.Module):
         context: torch.Tensor | None = None,
         pe: tuple[torch.Tensor, torch.Tensor] | None = None,
         k_pe: tuple[torch.Tensor, torch.Tensor] | None = None,
-        attention_mask: torch.Tensor | None = None,
+        original_seq_len: int | None = None,
     ) -> torch.Tensor:
         """Forward pass for distributed self-attention.
 
@@ -1417,7 +1406,7 @@ class LTXDistributedSelfAttention(nn.Module):
             pe: Rotary position embeddings for Q (cos, sin) with shape [B, H, T_full, D]
                 NOTE: For SP, this must be the FULL sequence RoPE, not sharded!
             k_pe: Rotary position embeddings for K (cos, sin), or None to use pe
-            attention_mask: Attention mask for padding [B, padded_seq_len]
+            original_seq_len: Original (unpadded) full sequence length
         """
         q = self.to_q(x)
         context = x if context is None else context
@@ -1442,10 +1431,14 @@ class LTXDistributedSelfAttention(nn.Module):
 
         # Pass full RoPE to distributed attention - it will apply after all-to-all
         # and slice to this rank's heads
+        if original_seq_len is None:
+            raise ValueError("original_seq_len must be provided for distributed attention")
         out, _ = self.attn(
-            q, k, v,
+            q,
+            k,
+            v,
+            original_seq_len,
             gate_compress=gate_compress,
-            attention_mask=attention_mask,
             ltx_freqs_cis=pe,
         )
 
@@ -1633,8 +1626,8 @@ class BasicAVTransformerBlock(torch.nn.Module):
         self,
         video: TransformerArgs | None,
         audio: TransformerArgs | None,
-        video_attention_mask: torch.Tensor | None = None,
-        audio_attention_mask: torch.Tensor | None = None,
+        video_original_seq_len: int | None = None,
+        audio_original_seq_len: int | None = None,
         skip_cross_modal_attn: bool = False,
         skip_video_self_attn: bool = False,
         skip_audio_self_attn: bool = False,
@@ -1644,8 +1637,8 @@ class BasicAVTransformerBlock(torch.nn.Module):
         Args:
             video: Video transformer args
             audio: Audio transformer args
-            video_attention_mask: SP padding attention mask for video [B, padded_seq_len]
-            audio_attention_mask: SP padding attention mask for audio [B, padded_seq_len]
+            video_original_seq_len: Original unpadded video sequence length
+            audio_original_seq_len: Original unpadded audio sequence length
             skip_cross_modal_attn: If True, skip A2V and V2A cross-modal
                 attention (used for the modality-isolated CFG pass).
             skip_video_self_attn: If True, skip video self-attention
@@ -1667,9 +1660,12 @@ class BasicAVTransformerBlock(torch.nn.Module):
             )
             if not skip_video_self_attn:
                 norm_vx = torch.nn.functional.rms_norm(vx, (vx.shape[-1],), eps=self.norm_eps) * (1 + vscale_msa) + vshift_msa
-                # Self-attention: pass SP attention mask for distributed attention
                 if self.use_distributed_attention:
-                    vx = vx + self.attn1(norm_vx, pe=video.positional_embeddings, attention_mask=video_attention_mask) * vgate_msa
+                    vx = vx + self.attn1(
+                        norm_vx,
+                        pe=video.positional_embeddings,
+                        original_seq_len=video_original_seq_len,
+                    ) * vgate_msa
                 else:
                     vx = vx + self.attn1(norm_vx, pe=video.positional_embeddings) * vgate_msa
             # Text cross-attention: no SP mask needed (text is replicated, uses local attention)
@@ -1685,9 +1681,12 @@ class BasicAVTransformerBlock(torch.nn.Module):
             )
             if not skip_audio_self_attn:
                 norm_ax = torch.nn.functional.rms_norm(ax, (ax.shape[-1],), eps=self.norm_eps) * (1 + ascale_msa) + ashift_msa
-                # Self-attention: pass SP attention mask for distributed attention
                 if self.use_distributed_attention:
-                    ax = ax + self.audio_attn1(norm_ax, pe=audio.positional_embeddings, attention_mask=audio_attention_mask) * agate_msa
+                    ax = ax + self.audio_attn1(
+                        norm_ax,
+                        pe=audio.positional_embeddings,
+                        original_seq_len=audio_original_seq_len,
+                    ) * agate_msa
                 else:
                     ax = ax + self.audio_attn1(norm_ax, pe=audio.positional_embeddings) * agate_msa
             # Text cross-attention: no SP mask needed (text is replicated, uses local attention)
@@ -2116,8 +2115,8 @@ class LTXModel(torch.nn.Module):
         self,
         video: TransformerArgs | None,
         audio: TransformerArgs | None,
-        video_attention_mask: torch.Tensor | None = None,
-        audio_attention_mask: torch.Tensor | None = None,
+        video_original_seq_len: int | None = None,
+        audio_original_seq_len: int | None = None,
         skip_cross_modal_attn: bool = False,
         skip_video_self_attn_blocks: list[int] | None = None,
         skip_audio_self_attn_blocks: list[int] | None = None,
@@ -2132,8 +2131,8 @@ class LTXModel(torch.nn.Module):
             video, audio = block(
                 video=video,
                 audio=audio,
-                video_attention_mask=video_attention_mask,
-                audio_attention_mask=audio_attention_mask,
+                video_original_seq_len=video_original_seq_len,
+                audio_original_seq_len=audio_original_seq_len,
                 skip_cross_modal_attn=skip_cross_modal_attn,
                 skip_video_self_attn=skip_v_sa,
                 skip_audio_self_attn=skip_a_sa,
@@ -2161,8 +2160,8 @@ class LTXModel(torch.nn.Module):
         self,
         video: Modality | None,
         audio: Modality | None,
-        video_attention_mask: torch.Tensor | None = None,
-        audio_attention_mask: torch.Tensor | None = None,
+        video_original_seq_len: int | None = None,
+        audio_original_seq_len: int | None = None,
         skip_cross_modal_attn: bool = False,
         skip_video_self_attn_blocks: list[int] | None = None,
         skip_audio_self_attn_blocks: list[int] | None = None,
@@ -2172,8 +2171,8 @@ class LTXModel(torch.nn.Module):
         Args:
             video: Video modality input
             audio: Audio modality input
-            video_attention_mask: SP padding attention mask for video [B, padded_seq_len]
-            audio_attention_mask: SP padding attention mask for audio [B, padded_seq_len]
+            video_original_seq_len: Original unpadded video sequence length
+            audio_original_seq_len: Original unpadded audio sequence length
             skip_cross_modal_attn: If True, skip A2V and V2A cross-modal
                 attention in all transformer blocks (modality-isolated
                 CFG pass).
@@ -2202,8 +2201,8 @@ class LTXModel(torch.nn.Module):
         video_out, audio_out = self._process_transformer_blocks(
             video_args,
             audio_args,
-            video_attention_mask=video_attention_mask,
-            audio_attention_mask=audio_attention_mask,
+            video_original_seq_len=video_original_seq_len,
+            audio_original_seq_len=audio_original_seq_len,
             skip_cross_modal_attn=skip_cross_modal_attn,
             skip_video_self_attn_blocks=skip_video_self_attn_blocks,
             skip_audio_self_attn_blocks=skip_audio_self_attn_blocks,
@@ -2310,7 +2309,6 @@ class LTX2Transformer3DModel(BaseDiT):
         self.hidden_size = arch.num_attention_heads * arch.attention_head_dim
         self.num_attention_heads = arch.num_attention_heads
         self.num_channels_latents = arch.num_channels_latents
-        self._logged_attention_mask = False
 
         if os.getenv("LTX2_DEBUG_DETAIL", "0") == "1":
             detail_path = os.getenv("LTX2_PIPELINE_DEBUG_DETAIL_PATH", "")
@@ -2388,11 +2386,8 @@ class LTX2Transformer3DModel(BaseDiT):
     ) -> torch.Tensor:
         if isinstance(encoder_hidden_states, list):
             encoder_hidden_states = encoder_hidden_states[0]
-
         # Get SP parameters
         sp_world_size = get_sp_world_size()
-        sp_rank = get_sp_parallel_rank()
-        batch_size = hidden_states.shape[0]
 
         # Get fps for position computation
         fps = None
@@ -2413,29 +2408,14 @@ class LTX2Transformer3DModel(BaseDiT):
 
         # Shard video latents and timestep across SP ranks
         video_original_seq_len = latents.shape[1]
-        video_attention_mask = None
+        video_padded_seq_len = video_original_seq_len
         video_timestep = timestep
         if sp_world_size > 1:
             latents, video_original_seq_len = sequence_model_parallel_shard(latents, dim=1)
             # Shard timestep along sequence dimension (timestep has shape [batch, seq_len])
             video_timestep, _ = sequence_model_parallel_shard(timestep, dim=1)
-            # Create attention mask for padded tokens
             current_seq_len = latents.shape[1]
-            padded_seq_len = current_seq_len * sp_world_size
-            if padded_seq_len > video_original_seq_len:
-                if not self._logged_attention_mask:
-                    logger.info(
-                        f"Video padding applied, original seq len: {video_original_seq_len}, "
-                        f"padded seq len: {padded_seq_len}"
-                    )
-                    self._logged_attention_mask = True
-                video_attention_mask = create_attention_mask_for_padding(
-                    seq_len=video_original_seq_len,
-                    padded_seq_len=padded_seq_len,
-                    batch_size=batch_size,
-                    device=hidden_states.device,
-                )
-
+            video_padded_seq_len = current_seq_len * sp_world_size
         # Compute RoPE positions for the FULL sequence (before sharding)
         # This is necessary because sequence sharding may not align to frame boundaries.
         # The full RoPE will be passed to DistributedAttention which applies it after
@@ -2451,8 +2431,8 @@ class LTX2Transformer3DModel(BaseDiT):
         ).to(hidden_states.dtype)
 
         # Pad positions to match padded sequence length for SP cross-attention
-        if sp_world_size > 1 and padded_seq_len > video_original_seq_len:
-            padding_needed = padded_seq_len - video_original_seq_len
+        if sp_world_size > 1 and video_padded_seq_len > video_original_seq_len:
+            padding_needed = video_padded_seq_len - video_original_seq_len
             last_pos = positions[:, :, -1:, :].expand(-1, -1, padding_needed, -1)
             positions = torch.cat([positions, last_pos], dim=2)
 
@@ -2482,7 +2462,6 @@ class LTX2Transformer3DModel(BaseDiT):
         audio_modality = None
         audio_shape = None
         audio_original_seq_len = 0
-        audio_attention_mask = None
 
         if audio_hidden_states is not None and audio_encoder_hidden_states is not None and audio_timestep is not None:
             audio_shape = AudioLatentShape.from_torch_shape(audio_hidden_states.shape)
@@ -2495,16 +2474,6 @@ class LTX2Transformer3DModel(BaseDiT):
                 audio_latents, audio_original_seq_len = sequence_model_parallel_shard(audio_latents, dim=1)
                 # Shard audio timestep along sequence dimension
                 sharded_audio_timestep, _ = sequence_model_parallel_shard(audio_timestep, dim=1)
-                # Create attention mask for padded tokens
-                audio_current_seq_len = audio_latents.shape[1]
-                audio_padded_seq_len = audio_current_seq_len * sp_world_size
-                if audio_padded_seq_len > audio_original_seq_len:
-                    audio_attention_mask = create_attention_mask_for_padding(
-                        seq_len=audio_original_seq_len,
-                        padded_seq_len=audio_padded_seq_len,
-                        batch_size=batch_size,
-                        device=audio_hidden_states.device,
-                    )
 
             # Compute audio RoPE positions for the FULL sequence (before sharding)
             # Same as video: full RoPE is applied after all-to-all in DistributedAttention
@@ -2534,12 +2503,12 @@ class LTX2Transformer3DModel(BaseDiT):
                     f"latent_checksum={audio_checksum:.6f}"
                 )
 
-        # Run transformer with attention masks
+        # Run transformer with original sequence lengths
         video_out, audio_out = self.model(
             video=video_modality,
             audio=audio_modality,
-            video_attention_mask=video_attention_mask,
-            audio_attention_mask=audio_attention_mask,
+            video_original_seq_len=video_original_seq_len,
+            audio_original_seq_len=audio_original_seq_len,
             skip_cross_modal_attn=skip_cross_modal_attn,
             skip_video_self_attn_blocks=skip_video_self_attn_blocks,
             skip_audio_self_attn_blocks=skip_audio_self_attn_blocks,

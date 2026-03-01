@@ -30,7 +30,6 @@ from fastvideo.models.dits.wanvideo import (
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 from fastvideo.distributed.parallel_state import get_sp_world_size
-from fastvideo.distributed.utils import create_attention_mask_for_padding
 
 logger = init_logger(__name__)
 
@@ -145,7 +144,7 @@ class LingBotWorldTransformerBlock(nn.Module):
         encoder_hidden_states: torch.Tensor,
         temb: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
-        attention_mask: torch.Tensor | None = None,
+        original_seq_len: int,
         c2ws_plucker_emb: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if hidden_states.dim() == 4:
@@ -189,7 +188,13 @@ class LingBotWorldTransformerBlock(nn.Module):
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
 
-        attn_output, _ = self.attn1(query, key, value, freqs_cis=freqs_cis, attention_mask=attention_mask)
+        attn_output, _ = self.attn1(
+            query,
+            key,
+            value,
+            original_seq_len,
+            freqs_cis=freqs_cis,
+        )
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
@@ -292,7 +297,6 @@ class LingBotWorldTransformer3DModel(BaseDiT):
             torch.randn(1, 2, inner_dim) / inner_dim**0.5)
 
         self.gradient_checkpointing = False
-        self._logged_attention_mask = False
         self.__post_init__()
 
     def forward(self,
@@ -350,26 +354,6 @@ class LingBotWorldTransformer3DModel(BaseDiT):
         if c2ws_plucker_emb is not None:
             c2ws_plucker_emb, _ = sequence_model_parallel_shard(c2ws_plucker_emb, dim=1)
         
-        # Create attention mask for padded tokens if padding was applied
-        current_seq_len = hidden_states.shape[1]
-        sp_world_size = get_sp_world_size()
-        padded_seq_len = current_seq_len * sp_world_size
-        
-        if padded_seq_len > original_seq_len:
-            if not self._logged_attention_mask:
-                logger.info(f"Padding applied, original seq len: {original_seq_len}, padded seq len: {padded_seq_len}")
-                self._logged_attention_mask = True
-            attention_mask = create_attention_mask_for_padding(
-                seq_len=original_seq_len,
-                padded_seq_len=padded_seq_len,
-                batch_size=batch_size,
-                device=hidden_states.device,
-            )
-        else:
-            if not self._logged_attention_mask:
-                logger.info(f"Padding not applied")
-                self._logged_attention_mask = True
-            attention_mask = None
 
         # timestep shape: batch_size, or batch_size, seq_len (wan 2.2 ti2v)
         if timestep.dim() == 2:
@@ -406,11 +390,11 @@ class LingBotWorldTransformer3DModel(BaseDiT):
             for block in self.blocks:
                 hidden_states = self._gradient_checkpointing_func(
                     block, hidden_states, encoder_hidden_states,
-                    timestep_proj, freqs_cis, attention_mask, c2ws_plucker_emb)
+                    timestep_proj, freqs_cis, original_seq_len, c2ws_plucker_emb)
         else:
             for block in self.blocks:
                 hidden_states = block(hidden_states, encoder_hidden_states,
-                                      timestep_proj, freqs_cis, attention_mask,
+                                      timestep_proj, freqs_cis, original_seq_len,
                                       c2ws_plucker_emb)
         # 5. Output norm, projection & unpatchify
         if temb.dim() == 3:

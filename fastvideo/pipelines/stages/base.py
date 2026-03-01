@@ -203,10 +203,3 @@ class PipelineStage(ABC):
             The updated batch information after this stage's processing.
         """
         raise NotImplementedError
-
-    def backward(
-        self,
-        batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
-    ) -> ForwardBatch:
-        raise NotImplementedError

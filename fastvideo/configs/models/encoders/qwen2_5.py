@@ -78,7 +78,6 @@ class Qwen2_5_VLArchConfig(TextEncoderArchConfig):
             "add_generation_prompt": True,
             "tokenize": True,
             "return_dict": True,
-            "padding": "max_length",
             "max_length": 1000 + 108,
             "truncation": True,
             "return_tensors": "pt",

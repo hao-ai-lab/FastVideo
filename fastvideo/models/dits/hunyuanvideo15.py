@@ -34,11 +34,8 @@ from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.logger import init_logger
-from fastvideo.forward_context import set_forward_context
-from fastvideo.attention.backends.abstract import AttentionMetadata
 
 from fastvideo.distributed.parallel_state import get_sp_world_size
-from fastvideo.distributed.utils import create_attention_mask_for_padding
 
 logger = init_logger(__name__)
 
@@ -290,10 +287,9 @@ class MMDoubleStreamBlock(nn.Module):
         self,
         img: torch.Tensor,
         txt: torch.Tensor,
-        encoder_attention_mask: torch.Tensor,
         vec: torch.Tensor,
         freqs_cis: tuple,
-        seq_attention_mask: torch.Tensor,
+        original_seq_len: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # Process modulation vectors
         img_mod_outputs = self.img_mod(vec)
@@ -348,21 +344,8 @@ class MMDoubleStreamBlock(nn.Module):
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_q.dtype)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_k.dtype)
 
-        # seq_len = txt_q.shape[1] + img_q.shape[1]
-        # attention_mask = F.pad(encoder_attention_mask, (seq_len - encoder_attention_mask.shape[1], 0), value=True)
-        # attention_mask = attention_mask.bool()
-        # self_attn_mask_1 = attention_mask.view(batch_size, 1, 1, seq_len).repeat(1, 1, seq_len, 1)
-        # self_attn_mask_2 = self_attn_mask_1.transpose(2, 3)
-        # attention_mask = (self_attn_mask_1 & self_attn_mask_2).bool()
 
-        from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
-        attn_metadata = FlashAttnMetadataBuilder().build(
-            current_timestep=0,
-            attn_mask=encoder_attention_mask,
-        )
-        # Run distributed attention
-        with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
-            img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v, freqs_cis=freqs_cis, attention_mask=seq_attention_mask)
+        img_attn, txt_attn = self.attn(img_q, img_k, img_v, original_seq_len, txt_q, txt_k, txt_v, freqs_cis=freqs_cis)
         
         img_attn_out, _ = self.img_attn_proj(
             img_attn.view(batch_size, image_seq_len, -1))
@@ -469,15 +452,12 @@ class HunyuanVideo15Transformer3DModel(BaseDiT):
         encoder_hidden_states: List[torch.Tensor],
         timestep: torch.LongTensor,
         encoder_hidden_states_image: List[torch.Tensor],
-        encoder_attention_mask: List[torch.Tensor],
         guidance: Optional[torch.Tensor] = None,
         timestep_r: Optional[torch.LongTensor] = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
     ):
         encoder_hidden_states_image = encoder_hidden_states_image[0]
         encoder_hidden_states, encoder_hidden_states_2 = encoder_hidden_states
-        encoder_attention_mask, encoder_attention_mask_2 = encoder_attention_mask
-
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.config.patch_size_t, self.config.patch_size, self.config.patch_size
         post_patch_num_frames = num_frames // p_t
@@ -503,18 +483,9 @@ class HunyuanVideo15Transformer3DModel(BaseDiT):
         sp_world_size = get_sp_world_size()
         padded_seq_len = current_seq_len * sp_world_size
         
-        if padded_seq_len > original_seq_len:
-            seq_attention_mask = create_attention_mask_for_padding(
-                seq_len=original_seq_len,
-                padded_seq_len=padded_seq_len,
-                batch_size=batch_size,
-                device=hidden_states.device,
-            )
-        else:
-            seq_attention_mask = None
+                
 
-        # qwen text embedding
-        encoder_hidden_states = self.txt_in(encoder_hidden_states, timestep, encoder_attention_mask)
+        encoder_hidden_states = self.txt_in(encoder_hidden_states, timestep)
 
         encoder_hidden_states_cond_emb = self.cond_type_embed(
             torch.zeros_like(encoder_hidden_states[:, :, 0], dtype=torch.long)
@@ -532,19 +503,6 @@ class HunyuanVideo15Transformer3DModel(BaseDiT):
         # image embed
         encoder_hidden_states_3 = self.image_embedder(encoder_hidden_states_image)
         is_t2v = torch.all(encoder_hidden_states_image == 0)
-        if is_t2v:
-            encoder_hidden_states_3 = encoder_hidden_states_3 * 0.0
-            encoder_attention_mask_3 = torch.zeros(
-                (batch_size, encoder_hidden_states_3.shape[1]),
-                dtype=encoder_attention_mask.dtype,
-                device=encoder_attention_mask.device,
-            )
-        else:
-            encoder_attention_mask_3 = torch.ones(
-                (batch_size, encoder_hidden_states_3.shape[1]),
-                dtype=encoder_attention_mask.dtype,
-                device=encoder_attention_mask.device,
-            )
         encoder_hidden_states_3_cond_emb = self.cond_type_embed(
             2
             * torch.ones_like(
@@ -554,52 +512,7 @@ class HunyuanVideo15Transformer3DModel(BaseDiT):
         )
         encoder_hidden_states_3 = encoder_hidden_states_3 + encoder_hidden_states_3_cond_emb
 
-        # reorder and combine text tokens: combine valid tokens first, then padding
-        encoder_attention_mask = encoder_attention_mask.bool()
-        encoder_attention_mask_2 = encoder_attention_mask_2.bool()
-        encoder_attention_mask_3 = encoder_attention_mask_3.bool()
-        new_encoder_hidden_states = []
-        new_encoder_attention_mask = []
-
-        for text, text_mask, text_2, text_mask_2, image, image_mask in zip(
-            encoder_hidden_states,
-            encoder_attention_mask,
-            encoder_hidden_states_2,
-            encoder_attention_mask_2,
-            encoder_hidden_states_3,
-            encoder_attention_mask_3,
-        ):
-            # Concatenate: [valid_image, valid_byt5, valid_mllm, invalid_image, invalid_byt5, invalid_mllm]
-            new_encoder_hidden_states.append(
-                torch.cat(
-                    [
-                        image[image_mask],  # valid image
-                        text_2[text_mask_2],  # valid byt5
-                        text[text_mask],  # valid mllm
-                        image[~image_mask],  # invalid image (zeroed)
-                        torch.zeros_like(text_2[~text_mask_2]),  # invalid byt5 (zeroed)
-                        torch.zeros_like(text[~text_mask]),  # invalid mllm (zeroed)
-                    ],
-                    dim=0,
-                )
-            )
-            # Apply same reordering to attention masks
-            new_encoder_attention_mask.append(
-                torch.cat(
-                    [
-                        image_mask[image_mask],
-                        text_mask_2[text_mask_2],
-                        text_mask[text_mask],
-                        image_mask[~image_mask],
-                        text_mask_2[~text_mask_2],
-                        text_mask[~text_mask],
-                    ],
-                    dim=0,
-                )
-            )
-
-        encoder_hidden_states = torch.stack(new_encoder_hidden_states)
-        encoder_attention_mask = torch.stack(new_encoder_attention_mask)
+        encoder_hidden_states = torch.cat([encoder_hidden_states_2, encoder_hidden_states], dim=1) if is_t2v else torch.cat([encoder_hidden_states_3, encoder_hidden_states_2, encoder_hidden_states], dim=1)
 
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
@@ -608,10 +521,9 @@ class HunyuanVideo15Transformer3DModel(BaseDiT):
                     block,
                     hidden_states,
                     encoder_hidden_states,
-                    encoder_attention_mask,
                     temb,
                     freqs_cis,
-                    seq_attention_mask
+                    original_seq_len
                 )
 
         else:
@@ -619,10 +531,9 @@ class HunyuanVideo15Transformer3DModel(BaseDiT):
                 hidden_states, encoder_hidden_states = block(
                     hidden_states,
                     encoder_hidden_states,
-                    encoder_attention_mask,
                     temb,
                     freqs_cis,
-                    seq_attention_mask
+                    original_seq_len
                 )
 
         # Final layer processing
@@ -687,17 +598,12 @@ class SingleTokenRefiner(nn.Module):
             ) for i in range(depth)
         ])
 
-    def forward(self, x, t, mask=None):
+    def forward(self, x, t):
         # Get timestep embeddings
         timestep_aware_representations = self.t_embedder(t)
 
-        # Get context-aware representations
-        original_dtype = x.dtype
-        if mask is None:
-            context_aware_representations = x.mean(dim=1)
-        else:
-            mask_float = mask.float().unsqueeze(-1)  # [B, L, 1]
-            context_aware_representations = (x * mask_float).sum(dim=1) / mask_float.sum(dim=1)
+        context_aware_representations = x.mean(dim=1)
+
 
         context_aware_representations = self.c_embedder(
             context_aware_representations)
@@ -706,7 +612,7 @@ class SingleTokenRefiner(nn.Module):
         x = self.input_embedder(x)
         # Process through refiner blocks
         for block in self.refiner_blocks:
-            x = block(x, c, mask)
+            x = block(x, c)
         return x
 
 class IndividualTokenRefinerBlock(nn.Module):
@@ -775,10 +681,7 @@ class IndividualTokenRefinerBlock(nn.Module):
                                           AttentionBackendEnum.TORCH_SDPA),
         )
 
-    def forward(self, x, c, mask=None):
-        if mask is not None:
-            mask = mask.clone().bool()
-            mask[:, 0] = True  # Prevent attention weights from becoming NaN
+    def forward(self, x, c):
 
         # Get modulation parameters
         gate_msa, gate_mlp = self.adaLN_modulation(c).chunk(2, dim=-1)
@@ -789,18 +692,9 @@ class IndividualTokenRefinerBlock(nn.Module):
         batch_size, seq_len = qkv.shape[0], qkv.shape[1]
         qkv = qkv.view(batch_size, seq_len, 3, self.num_attention_heads, -1)
         q, k, v = qkv[:, :, 0], qkv[:, :, 1], qkv[:, :, 2]
-
-        # Run scaled dot product attention
-        from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
-        attn_metadata = FlashAttnMetadataBuilder().build(
-            current_timestep=0,
-            attn_mask=mask,
-        )
-        # Run distributed attention
-        with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
-            attn_output = self.attn(q, k, v)  # [B, L, H, D]
+        attn_output = self.attn(q, k, v) 
         attn_output = attn_output.reshape(batch_size, seq_len,
-                                          -1)  # [B, L, H*D]
+                                          -1)
 
         # Project and apply residual connection with gating
         attn_out, _ = self.self_attn_proj(attn_output)
