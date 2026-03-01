@@ -352,14 +352,14 @@ class TextEncoderLoader(ComponentLoader):
         # Set quantization config if specified
         if (
             use_text_encoder_override
-            and fastvideo_args.override_text_encoder_quant is not None
+            and fastvideo_args.text_encoder_quantization is not None
         ):
             if fastvideo_args.override_text_encoder_safetensors is None:
                 raise ValueError(
-                    "override_text_encoder_quant is set but override_text_encoder_safetensors is None"
+                    "text_encoder_quantization is set but override_text_encoder_safetensors is None"
                 )
             quant_cls = get_quantization_config(
-                fastvideo_args.override_text_encoder_quant
+                fastvideo_args.text_encoder_quantization
             )
             model_config.quant_config = quant_cls()
 
@@ -785,6 +785,15 @@ class TransformerLoader(ComponentLoader):
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = deepcopy(fastvideo_args.pipeline_config.dit_config)
         dit_config.update_model_arch(config)
+        if fastvideo_args.dit_quantization is not None:
+            quant_cls = get_quantization_config(
+                fastvideo_args.dit_quantization
+            )
+            dit_config.quant_config = quant_cls()
+            logger.info(
+                "Applying quantization override for DiT: %s",
+                fastvideo_args.dit_quantization,
+            )
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
@@ -869,9 +878,23 @@ class TransformerLoader(ComponentLoader):
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
 
-        assert next(model.parameters()).dtype == default_dtype, (
-            "Model dtype does not match default dtype"
-        )
+        # For FP8-quantized models, some parameters will be float8_e4m3fn or
+        # float32 (scales).  Only check non-quantized parameters.
+        if dit_config.quant_config is not None:
+            non_quant_params = [
+                p for p in model.parameters()
+                if p.dtype not in (torch.float8_e4m3fn, torch.float8_e5m2,
+                                   torch.float32)
+            ]
+            if non_quant_params:
+                assert non_quant_params[0].dtype == default_dtype, (
+                    f"Model dtype {non_quant_params[0].dtype} does not match "
+                    f"default dtype {default_dtype}"
+                )
+        else:
+            assert next(model.parameters()).dtype == default_dtype, (
+                "Model dtype does not match default dtype"
+            )
 
         model = model.eval()
 
