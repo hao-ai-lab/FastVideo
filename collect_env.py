@@ -12,9 +12,9 @@ import re
 import shutil
 import subprocess
 import sys
-# Unlike the rest of the PyTorch this file must be python2 compliant.
-# This script outputs relevant system environment info
-# Run it with `python collect_env.py` or `python -m torch.utils.collect_env`
+# This script outputs relevant system environment info.
+# Run it with: python collect_env.py
+# Requires Python 3.10+ (matches fastvideo); uses shutil.which (Python 3.3+).
 from collections import namedtuple
 
 from fastvideo.envs import environment_variables
