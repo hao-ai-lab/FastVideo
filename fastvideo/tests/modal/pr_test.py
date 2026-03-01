@@ -141,3 +141,14 @@ def run_unit_test():
 @app.function(gpu="L40S:1", image=image, timeout=3600, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})])
 def run_lora_extraction_tests():
     run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/lora_extraction/test_lora_extraction.py")
+
+
+@app.function(gpu="L40S:2",
+              image=image,
+              timeout=1800,
+              secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})],
+              volumes={"/root/data": model_vol})
+def run_performance_tests():
+    run_test(
+        "export HF_HOME='/root/data/.cache' && export PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/performance -vs"
+    )
