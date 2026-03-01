@@ -31,15 +31,19 @@ export default function Home() {
 
   // Poll every second if there are running jobs
   useEffect(() => {
-    // Clear any existing interval
-    if (intervalRef.current) {
+
+    const hasActiveJobs = jobs.some(
+      (job) => job.status === "running" || job.status === "pending"
+    );
+
+    if (hasActiveJobs) {
+      intervalRef.current = setInterval(() => {
+        fetchJobs();
+      }, 1000);
+    } else if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-
-    intervalRef.current = setInterval(() => {
-      fetchJobs();
-    }, 1000);
 
     return () => {
       if (intervalRef.current) {
