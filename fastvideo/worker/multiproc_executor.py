@@ -654,7 +654,6 @@ class WorkerMultiprocProc:
                         # Continue to check other workers, but we'll fail at the end
                     elif response["status"] != "READY":
                         worker_errors.append(f"Worker returned unexpected status: {response.get('status', 'unknown')}")
-                        raise e
 
                     if response["status"] == "READY":
                         ready_proc_handles[unready_proc_handle.rank] = (
