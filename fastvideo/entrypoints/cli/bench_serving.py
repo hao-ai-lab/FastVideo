@@ -1,4 +1,5 @@
-# Adapted from SGLang (https://github.com/sgl-project/sglang)
+# Adapted from SGLang
+# (https://github.com/sgl-project/sglang/blob/main/python/sglang/multimodal_gen/benchmarks/bench_serving.py)
 """
 Benchmark online serving for diffusion models (Image/Video Generation).
 

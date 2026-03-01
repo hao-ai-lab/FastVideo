@@ -2,8 +2,6 @@
 # adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/entrypoints/cli/serve.py
 
 import argparse
-import dataclasses
-import os
 from typing import cast
 
 from fastvideo.entrypoints.cli.cli_types import CLISubcommand
@@ -23,7 +21,12 @@ class ServeSubcommand(CLISubcommand):
 
     def cmd(self, args: argparse.Namespace) -> None:
         excluded_args = {
-            "subparser", "config", "dispatch_function", "host", "port",
+            "subparser",
+            "config",
+            "dispatch_function",
+            "host",
+            "port",
+            "output_dir",
         }
 
         provided = getattr(args, '_provided', set())
@@ -42,43 +45,61 @@ class ServeSubcommand(CLISubcommand):
         if not cli_kwargs.get('model_path'):
             raise ValueError("model_path must be provided via --model-path")
 
-        host = getattr(args, "host", "0.0.0.0")
-        port = getattr(args, "port", 8000)
+        from fastvideo.entrypoints.openai.api_server import (
+            DEFAULT_HOST,
+            DEFAULT_OUTPUT_DIR,
+            DEFAULT_PORT,
+            run_server,
+        )
+
+        host = getattr(args, "host", DEFAULT_HOST)
+        port = getattr(args, "port", DEFAULT_PORT)
+        output_dir = getattr(args, "output_dir", DEFAULT_OUTPUT_DIR)
 
         logger.info("CLI serve args: %s", cli_kwargs)
         logger.info("Server will listen on %s:%d", host, port)
 
         fastvideo_args = FastVideoArgs.from_kwargs(**cli_kwargs)
+        run_server(fastvideo_args, host=host, port=port, output_dir=output_dir)
 
-        from fastvideo.entrypoints.openai.api_server import run_server
-        run_server(fastvideo_args, host=host, port=port)
     def validate(self, args: argparse.Namespace) -> None:
         if args.num_gpus is not None and args.num_gpus <= 0:
             raise ValueError("Number of gpus must be positive")
 
     def subparser_init(
-        self, subparsers: argparse._SubParsersAction
-    ) -> FlexibleArgumentParser:
+            self,
+            subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
+        from fastvideo.entrypoints.openai.api_server import (
+            DEFAULT_HOST,
+            DEFAULT_OUTPUT_DIR,
+            DEFAULT_PORT,
+        )
+
         serve_parser = subparsers.add_parser(
             "serve",
             help="Start an OpenAI-compatible HTTP server",
-            usage=(
-                "fastvideo serve --model-path MODEL_PATH_OR_ID "
-                "[--host HOST] [--port PORT] [OPTIONS]"
-            ),
+            usage=("fastvideo serve --model-path MODEL_PATH_OR_ID "
+                   "[--host HOST] [--port PORT] [OPTIONS]"),
         )
 
         serve_parser.add_argument(
             "--host",
             type=str,
-            default="0.0.0.0",
-            help="Host to bind the server to (default: 0.0.0.0)",
+            default=DEFAULT_HOST,
+            help=f"Host to bind the server to (default: {DEFAULT_HOST})",
         )
         serve_parser.add_argument(
             "--port",
             type=int,
-            default=8000,
-            help="Port to listen on (default: 8000)",
+            default=DEFAULT_PORT,
+            help=f"Port to listen on (default: {DEFAULT_PORT})",
+        )
+        serve_parser.add_argument(
+            "--output-dir",
+            type=str,
+            default=DEFAULT_OUTPUT_DIR,
+            help=("Directory for generated outputs "
+                  f"(default: {DEFAULT_OUTPUT_DIR})"),
         )
         serve_parser.add_argument(
             "--config",

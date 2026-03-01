@@ -1,4 +1,5 @@
-# Adapted from SGLang (https://github.com/sgl-project/sglang)
+# Adapted from SGLang
+# (https://github.com/sgl-project/sglang/blob/main/python/sglang/multimodal_gen/runtime/entrypoints/openai/video_api.py)
 
 import asyncio
 import json
@@ -18,7 +19,11 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse
 
-from fastvideo.entrypoints.openai.api_server import get_generator, get_server_args
+from fastvideo.entrypoints.openai.api_server import (
+    get_generator,
+    get_output_dir,
+    get_server_args,
+)
 from fastvideo.entrypoints.openai.protocol import (
     VideoGenerationsRequest,
     VideoListResponse,
@@ -36,12 +41,9 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 router = APIRouter(prefix="/v1/videos", tags=["videos"])
 
-OUTPUT_DIR = "outputs/videos"
 
-
-def _build_generation_kwargs(
-    request_id: str, req: VideoGenerationsRequest
-) -> Dict[str, Any]:
+def _build_generation_kwargs(request_id: str,
+                             req: VideoGenerationsRequest) -> Dict[str, Any]:
 
     kwargs: Dict[str, Any] = {}
     kwargs["prompt"] = req.prompt
@@ -83,7 +85,7 @@ def _build_generation_kwargs(
         kwargs["image_path"] = req.input_reference
 
     # Output path
-    output_dir = req.output_path or OUTPUT_DIR
+    output_dir = req.output_path or os.path.join(get_output_dir(), "videos")
     os.makedirs(output_dir, exist_ok=True)
     kwargs["output_path"] = os.path.join(output_dir, f"{request_id}.mp4")
     kwargs["save_video"] = True
@@ -150,38 +152,42 @@ async def _run_generation(request_id: str, kwargs: Dict[str, Any]) -> None:
                 update["peak_memory_mb"] = peak_mem
 
         await VIDEO_STORE.update_fields(request_id, update)
-        logger.info(
-            "Video %s completed in %.2fs", request_id, elapsed
-        )
+        logger.info("Video %s completed in %.2fs", request_id, elapsed)
 
     except Exception as e:
         logger.error("Video generation failed for %s: %s", request_id, e)
         await VIDEO_STORE.update_fields(
             request_id,
-            {"status": "failed", "error": {"message": str(e)}},
+            {
+                "status": "failed",
+                "error": {
+                    "message": str(e)
+                }
+            },
         )
 
 
 # Endpoints
 
+
 @router.post("", response_model=VideoResponse)
 async def create_video(
-    request: Request,
-    # multipart/form-data fields
-    prompt: Optional[str] = Form(None),
-    input_reference: Optional[UploadFile] = File(None),
-    reference_url: Optional[str] = Form(None),
-    model: Optional[str] = Form(None),
-    seconds: Optional[int] = Form(None),
-    size: Optional[str] = Form(None),
-    fps: Optional[int] = Form(None),
-    num_frames: Optional[int] = Form(None),
-    seed: Optional[int] = Form(1024),
-    negative_prompt: Optional[str] = Form(None),
-    guidance_scale: Optional[float] = Form(None),
-    num_inference_steps: Optional[int] = Form(None),
-    enable_teacache: Optional[bool] = Form(False),
-    extra_body: Optional[str] = Form(None),
+        request: Request,
+        # multipart/form-data fields
+        prompt: Optional[str] = Form(None),
+        input_reference: Optional[UploadFile] = File(None),
+        reference_url: Optional[str] = Form(None),
+        model: Optional[str] = Form(None),
+        seconds: Optional[int] = Form(None),
+        size: Optional[str] = Form(None),
+        fps: Optional[int] = Form(None),
+        num_frames: Optional[int] = Form(None),
+        seed: Optional[int] = Form(1024),
+        negative_prompt: Optional[str] = Form(None),
+        guidance_scale: Optional[float] = Form(None),
+        num_inference_steps: Optional[int] = Form(None),
+        enable_teacache: Optional[bool] = Form(False),
+        extra_body: Optional[str] = Form(None),
 ):
     content_type = request.headers.get("content-type", "").lower()
     request_id = generate_request_id()
@@ -194,16 +200,15 @@ async def create_video(
         image_list = merge_image_input_list(input_reference, reference_url)
         if image_list:
             image = image_list[0]
-            uploads_dir = os.path.join("outputs", "uploads")
+            uploads_dir = os.path.join(get_output_dir(), "uploads")
             os.makedirs(uploads_dir, exist_ok=True)
             filename = getattr(image, "filename", "url_image")
             input_path = os.path.join(uploads_dir, f"{request_id}_{filename}")
             try:
                 input_path = await save_image_to_path(image, input_path)
             except Exception as e:
-                raise HTTPException(
-                    status_code=400, detail=f"Failed to process image: {e}"
-                )
+                raise HTTPException(status_code=400,
+                                    detail=f"Failed to process image: {e}")
 
         extra: Dict[str, Any] = {}
         if extra_body:
@@ -219,12 +224,15 @@ async def create_video(
             seconds=seconds if seconds is not None else 4,
             size=size,
             fps=fps if fps is not None else extra.get("fps"),
-            num_frames=num_frames if num_frames is not None else extra.get("num_frames"),
+            num_frames=(num_frames
+                        if num_frames is not None else extra.get("num_frames")),
             seed=seed,
             negative_prompt=negative_prompt,
             num_inference_steps=num_inference_steps,
             enable_teacache=enable_teacache,
-            **({"guidance_scale": guidance_scale} if guidance_scale is not None else {}),
+            **({
+                "guidance_scale": guidance_scale
+            } if guidance_scale is not None else {}),
         )
     else:
         try:
@@ -242,23 +250,25 @@ async def create_video(
             image_list = merge_image_input_list(payload.get("reference_url"))
             if image_list:
                 image = image_list[0]
-                uploads_dir = os.path.join("outputs", "uploads")
+                uploads_dir = os.path.join(get_output_dir(), "uploads")
                 os.makedirs(uploads_dir, exist_ok=True)
-                input_path = os.path.join(uploads_dir, f"{request_id}_url_image")
+                input_path = os.path.join(uploads_dir,
+                                          f"{request_id}_url_image")
                 try:
                     input_path = await save_image_to_path(image, input_path)
                 except Exception as e:
-                    raise HTTPException(
-                        status_code=400, detail=f"Failed to process image: {e}"
-                    )
+                    raise HTTPException(status_code=400,
+                                        detail=f"Failed to process image: {e}")
                 payload["input_reference"] = input_path
 
         try:
             req = VideoGenerationsRequest(**payload)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid request body: {e}")
+            raise HTTPException(status_code=400,
+                                detail=f"Invalid request body: {e}")
 
-    logger.info("Video generation request %s: prompt=%s", request_id, req.prompt[:100])
+    logger.info("Video generation request %s: prompt=%s", request_id,
+                req.prompt[:100])
 
     gen_kwargs = _build_generation_kwargs(request_id, req)
     job = _make_video_job(request_id, req, gen_kwargs)
@@ -271,9 +281,9 @@ async def create_video(
 
 @router.get("", response_model=VideoListResponse)
 async def list_videos(
-    after: Optional[str] = Query(None),
-    limit: Optional[int] = Query(None, ge=1, le=100),
-    order: Optional[str] = Query("desc"),
+        after: Optional[str] = Query(None),
+        limit: Optional[int] = Query(None, ge=1, le=100),
+        order: Optional[str] = Query("desc"),
 ):
     order = (order or "desc").lower()
     if order not in ("asc", "desc"):
@@ -311,9 +321,8 @@ async def delete_video(video_id: str = Path(...)):
 
 
 @router.get("/{video_id}/content")
-async def download_video_content(
-    video_id: str = Path(...), variant: Optional[str] = Query(None)
-):
+async def download_video_content(video_id: str = Path(...),
+                                 variant: Optional[str] = Query(None)):
     job = await VIDEO_STORE.get(video_id)
     if not job:
         raise HTTPException(status_code=404, detail="Video not found")
@@ -321,8 +330,10 @@ async def download_video_content(
     file_path = job.get("file_path")
     if not file_path or not os.path.exists(file_path):
         if job.get("status") == "failed":
-            raise HTTPException(status_code=500, detail="Video generation failed")
-        raise HTTPException(status_code=404, detail="Video still being generated")
+            raise HTTPException(status_code=500,
+                                detail="Video generation failed")
+        raise HTTPException(status_code=404,
+                            detail="Video still being generated")
 
     return FileResponse(
         path=file_path,

@@ -1,4 +1,5 @@
-# Adapted from SGLang (https://github.com/sgl-project/sglang)
+# Adapted from SGLang
+# (https://github.com/sgl-project/sglang/blob/main/python/sglang/multimodal_gen/runtime/entrypoints/openai/common_api.py)
 
 import time
 from typing import Optional

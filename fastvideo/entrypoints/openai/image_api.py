@@ -1,4 +1,5 @@
-# Adapted from SGLang (https://github.com/sgl-project/sglang)
+# Adapted from SGLang
+# (https://github.com/sgl-project/sglang/blob/main/python/sglang/multimodal_gen/runtime/entrypoints/openai/image_api.py)
 
 import asyncio
 import base64
@@ -8,10 +9,14 @@ from typing import List, Optional
 
 import aiofiles
 
-from fastapi import APIRouter, File, Form, HTTPException, Path, Query, UploadFile
+from fastapi import (APIRouter, File, Form, HTTPException, Path, Query,
+                     UploadFile)
 from fastapi.responses import FileResponse
 
-from fastvideo.entrypoints.openai.api_server import get_generator, get_server_args
+from fastvideo.entrypoints.openai.api_server import (
+    get_generator,
+    get_output_dir,
+)
 from fastvideo.entrypoints.openai.protocol import (
     ImageGenerationsRequest,
     ImageResponse,
@@ -29,8 +34,6 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 router = APIRouter(prefix="/v1/images", tags=["images"])
-
-OUTPUT_DIR = "outputs/images"
 
 
 def _build_generation_kwargs(
@@ -58,7 +61,7 @@ def _build_generation_kwargs(
             kwargs["height"] = h
 
     ext = choose_image_ext(output_format, background)
-    output_dir = OUTPUT_DIR
+    output_dir = os.path.join(get_output_dir(), "images")
     os.makedirs(output_dir, exist_ok=True)
     kwargs["output_path"] = os.path.join(output_dir, f"{request_id}.{ext}")
 
@@ -80,7 +83,8 @@ def _build_generation_kwargs(
     if enable_teacache:
         kwargs["enable_teacache"] = True
     if image_path:
-        kwargs["image_path"] = image_path[0] if len(image_path) == 1 else image_path
+        kwargs["image_path"] = image_path[0] if len(
+            image_path) == 1 else image_path
 
     return kwargs
 
@@ -108,9 +112,8 @@ async def generations(request: ImageGenerationsRequest):
 
     start = time.perf_counter()
     try:
-        result = await loop.run_in_executor(
-            None, lambda: generator.generate_video(**gen_kwargs)
-        )
+        await loop.run_in_executor(
+            None, lambda: generator.generate_video(**gen_kwargs))
     except Exception as e:
         logger.error("Image generation failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -121,10 +124,13 @@ async def generations(request: ImageGenerationsRequest):
     resp_format = (request.response_format or "b64_json").lower()
     if resp_format == "b64_json":
         if not os.path.exists(save_file_path):
-            raise HTTPException(status_code=500, detail="Image was not saved to disk")
+            raise HTTPException(status_code=500,
+                                detail="Image was not saved to disk")
         async with aiofiles.open(save_file_path, "rb") as f:
             b64_data = base64.b64encode(await f.read()).decode("utf-8")
-        data = [ImageResponseData(b64_json=b64_data, revised_prompt=request.prompt)]
+        data = [
+            ImageResponseData(b64_json=b64_data, revised_prompt=request.prompt)
+        ]
     elif resp_format == "url":
         data = [
             ImageResponseData(
@@ -135,8 +141,8 @@ async def generations(request: ImageGenerationsRequest):
         ]
     else:
         raise HTTPException(
-            status_code=400, detail=f"response_format={resp_format} is not supported"
-        )
+            status_code=400,
+            detail=f"response_format={resp_format} is not supported")
 
     await IMAGE_STORE.upsert(
         request_id,
@@ -156,23 +162,23 @@ async def generations(request: ImageGenerationsRequest):
 
 @router.post("/edits", response_model=ImageResponse)
 async def edits(
-    image: Optional[List[UploadFile]] = File(None),
-    image_array: Optional[List[UploadFile]] = File(None, alias="image[]"),
-    url: Optional[List[str]] = Form(None),
-    url_array: Optional[List[str]] = Form(None, alias="url[]"),
-    prompt: str = Form(...),
-    model: Optional[str] = Form(None),
-    n: Optional[int] = Form(1),
-    response_format: Optional[str] = Form(None),
-    size: Optional[str] = Form(None),
-    output_format: Optional[str] = Form(None),
-    background: Optional[str] = Form("auto"),
-    seed: Optional[int] = Form(1024),
-    negative_prompt: Optional[str] = Form(None),
-    guidance_scale: Optional[float] = Form(None),
-    true_cfg_scale: Optional[float] = Form(None),
-    num_inference_steps: Optional[int] = Form(None),
-    enable_teacache: Optional[bool] = Form(False),
+        image: Optional[List[UploadFile]] = File(None),
+        image_array: Optional[List[UploadFile]] = File(None, alias="image[]"),
+        url: Optional[List[str]] = Form(None),
+        url_array: Optional[List[str]] = Form(None, alias="url[]"),
+        prompt: str = Form(...),
+        model: Optional[str] = Form(None),
+        n: Optional[int] = Form(1),
+        response_format: Optional[str] = Form(None),
+        size: Optional[str] = Form(None),
+        output_format: Optional[str] = Form(None),
+        background: Optional[str] = Form("auto"),
+        seed: Optional[int] = Form(1024),
+        negative_prompt: Optional[str] = Form(None),
+        guidance_scale: Optional[float] = Form(None),
+        true_cfg_scale: Optional[float] = Form(None),
+        num_inference_steps: Optional[int] = Form(None),
+        enable_teacache: Optional[bool] = Form(False),
 ):
     request_id = generate_request_id()
     generator = get_generator()
@@ -181,10 +187,11 @@ async def edits(
     images = image or image_array
     urls = url or url_array
     if (not images or len(images) == 0) and (not urls or len(urls) == 0):
-        raise HTTPException(status_code=422, detail="Field 'image' or 'url' is required")
+        raise HTTPException(status_code=422,
+                            detail="Field 'image' or 'url' is required")
 
     # Save input images
-    uploads_dir = os.path.join("outputs", "uploads")
+    uploads_dir = os.path.join(get_output_dir(), "uploads")
     os.makedirs(uploads_dir, exist_ok=True)
     image_list = merge_image_input_list(images, urls)
 
@@ -193,11 +200,12 @@ async def edits(
         for idx, img in enumerate(image_list):
             filename = getattr(img, "filename", f"image_{idx}")
             input_path = await save_image_to_path(
-                img, os.path.join(uploads_dir, f"{request_id}_{idx}_{filename}")
-            )
+                img, os.path.join(uploads_dir,
+                                  f"{request_id}_{idx}_{filename}"))
             input_paths.append(input_path)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to process image: {e}")
+        raise HTTPException(status_code=400,
+                            detail=f"Failed to process image: {e}")
 
     gen_kwargs = _build_generation_kwargs(
         request_id=request_id,
@@ -217,9 +225,8 @@ async def edits(
 
     start = time.perf_counter()
     try:
-        result = await loop.run_in_executor(
-            None, lambda: generator.generate_video(**gen_kwargs)
-        )
+        await loop.run_in_executor(
+            None, lambda: generator.generate_video(**gen_kwargs))
     except Exception as e:
         logger.error("Image edit failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -260,20 +267,23 @@ async def edits(
 
 
 @router.get("/{image_id}/content")
-async def download_image_content(
-    image_id: str = Path(...), variant: Optional[str] = Query(None)
-):
+async def download_image_content(image_id: str = Path(...),
+                                 variant: Optional[str] = Query(None)):
     item = await IMAGE_STORE.get(image_id)
     if not item:
         raise HTTPException(status_code=404, detail="Image not found")
 
     file_path = item.get("file_path")
     if not file_path or not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Image is still being generated")
+        raise HTTPException(status_code=404,
+                            detail="Image is still being generated")
 
     ext = os.path.splitext(file_path)[1].lower()
-    media_type = {".png": "image/png", ".webp": "image/webp"}.get(ext, "image/jpeg")
+    media_type = {
+        ".png": "image/png",
+        ".webp": "image/webp"
+    }.get(ext, "image/jpeg")
 
-    return FileResponse(
-        path=file_path, media_type=media_type, filename=os.path.basename(file_path)
-    )
+    return FileResponse(path=file_path,
+                        media_type=media_type,
+                        filename=os.path.basename(file_path))
