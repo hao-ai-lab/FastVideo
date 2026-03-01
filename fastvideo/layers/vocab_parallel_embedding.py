@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -136,8 +137,7 @@ class VocabParallelEmbeddingShardIndices:
         assert self.num_added_elements <= self.num_added_elements_padded
 
 
-@torch.compile(dynamic=True, backend=current_platform.simple_compile_backend)
-def get_masked_input_and_mask(
+def _get_masked_input_and_mask_impl(
         input_: torch.Tensor, org_vocab_start_index: int,
         org_vocab_end_index: int, num_org_vocab_padding: int,
         added_vocab_start_index: int,
@@ -155,6 +155,18 @@ def get_masked_input_and_mask(
     vocab_mask = org_vocab_mask | added_vocab_mask
     input_ = vocab_mask * (input_ - valid_offset)
     return input_, ~vocab_mask
+
+
+# Skip torch.compile when TORCH_COMPILE_DISABLE or TORCHDYNAMO_DISABLE is set
+# to avoid PyTorch 2.10 + Triton "duplicate template name" on some environments
+if os.environ.get("TORCH_COMPILE_DISABLE") == "1" or os.environ.get(
+        "TORCHDYNAMO_DISABLE") == "1":
+    get_masked_input_and_mask = _get_masked_input_and_mask_impl
+else:
+    get_masked_input_and_mask = torch.compile(
+        dynamic=True,
+        backend=current_platform.simple_compile_backend,
+    )(_get_masked_input_and_mask_impl)
 
 
 class VocabParallelEmbedding(torch.nn.Module):

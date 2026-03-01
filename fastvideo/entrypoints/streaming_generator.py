@@ -22,11 +22,22 @@ logger = init_logger(__name__)
 
 class IncrementalVideoWriter:
 
-    def __init__(self, path: str, fps: int = 24, block_dir: str | None = None):
+    def __init__(
+        self,
+        path: str,
+        fps: int = 24,
+        block_dir: str | None = None,
+        quality: int = 8,
+    ):
         self._executor = ThreadPoolExecutor(max_workers=2,
                                             thread_name_prefix="video_write_")
         self._path = path
-        self._writer = imageio.get_writer(path, fps=fps, format="mp4")
+        # quality 0-10: higher = sharper MP4 (default 5 is often blurry)
+        self._quality = min(10, max(0, quality))
+        self._writer = imageio.get_writer(path,
+                                          fps=fps,
+                                          format="mp4",
+                                          quality=self._quality)
         self._pending_main: Future | None = None
         self._block_dir = block_dir
         self._block_idx = 0
@@ -61,7 +72,11 @@ class IncrementalVideoWriter:
             self._writer.append_data(frame)
 
     def _write_block(self, frames: list[np.ndarray], path: str) -> str:
-        imageio.mimsave(path, frames, fps=self._fps)
+        imageio.mimsave(path,
+                        frames,
+                        fps=self._fps,
+                        format="mp4",
+                        quality=self._quality)
         return path
 
     def close(self) -> None:
@@ -130,16 +145,20 @@ class StreamingVideoGenerator(VideoGenerator):
             self.sampling_param.image_path = image_path
         self.sampling_param.num_frames = num_frames
 
-        if "output_path" in kwargs:
+        if kwargs.get("output_path"):
             output_path = self._prepare_output_path(kwargs["output_path"],
                                                     prompt)
             # Create block directory for individual block files
             block_dir = output_path.replace(".mp4", "")
             os.makedirs(block_dir, exist_ok=True)
             self.block_dir = block_dir
+            # Use model fps (e.g. 60 for Waypoint) and higher quality for less blur
+            fps = getattr(self.sampling_param, "fps", 24)
+            quality = getattr(self.sampling_param, "video_quality", 8)
             self.writer = IncrementalVideoWriter(output_path,
-                                                 fps=24,
-                                                 block_dir=block_dir)
+                                                 fps=fps,
+                                                 block_dir=block_dir,
+                                                 quality=quality)
 
         fastvideo_args = self.fastvideo_args
 
@@ -154,8 +173,12 @@ class StreamingVideoGenerator(VideoGenerator):
         self.sampling_param.return_frames = True
         self.sampling_param.save_video = False
 
+        batch_kw = shallow_asdict(self.sampling_param)
+        batch_kw.pop("video_quality",
+                     None)  # writer-only, not a ForwardBatch field
+        batch_kw.pop("max_kv_cache_frames", None)  # used by pipeline config
         self.batch = ForwardBatch(
-            **shallow_asdict(self.sampling_param),
+            **batch_kw,
             eta=0.0,
             n_tokens=n_tokens,
             VSA_sparsity=fastvideo_args.VSA_sparsity,
@@ -242,10 +265,13 @@ class StreamingVideoGenerator(VideoGenerator):
             self.writer = None
             logger.info("Saved video to %s", output_path)
         else:
-            imageio.mimsave(output_path,
-                            self.accumulated_frames,
-                            fps=fps,
-                            format="mp4")
+            imageio.mimsave(
+                output_path,
+                self.accumulated_frames,
+                fps=fps,
+                format="mp4",
+                quality=8,
+            )
             logger.info("Saved video to %s", output_path)
 
         if self._use_queue_mode and self.executor._streaming_enabled:
@@ -270,10 +296,28 @@ class StreamingVideoGenerator(VideoGenerator):
             return []
 
         frames = []
+        target_h = getattr(self.sampling_param, "height", None)
+        target_w = getattr(self.sampling_param, "width", None)
+        pad_for_writer = (self.writer is not None and target_h is not None
+                          and target_w is not None)
         for x in videos:
             x = torchvision.utils.make_grid(x, nrow=1)
             x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-            frames.append((x * 255).cpu().numpy().astype(np.uint8))
+            # Support both float [0, 1] and uint8 [0, 255] from pipelines
+            if x.dtype in (torch.uint8, torch.int8, torch.int16, torch.int32,
+                           torch.int64):
+                arr = x.cpu().numpy()
+            else:
+                arr = (x.float().clamp(0.0, 1.0).cpu().numpy() * 255.0)
+            arr = arr.astype(np.uint8)
+            # Pad to target size so imageio does not resize (avoids macro_block_size warning)
+            if pad_for_writer and (arr.shape[0] != target_h
+                                   or arr.shape[1] != target_w):
+                padded = np.zeros((target_h, target_w, arr.shape[2]),
+                                  dtype=arr.dtype)
+                padded[:arr.shape[0], :arr.shape[1], :] = arr
+                arr = padded
+            frames.append(arr)
 
         return frames
 

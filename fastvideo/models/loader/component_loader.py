@@ -4,7 +4,11 @@ import dataclasses
 import glob
 import json
 import os
+import sys
 import time
+import types
+import importlib.util
+import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 from copy import deepcopy
@@ -593,6 +597,7 @@ class VAELoader(ComponentLoader):
         config = get_diffusers_config(model=model_path)
         class_name = config.pop("_class_name")
         config.pop("_name_or_path", None)
+        has_auto_map = bool(config.pop("auto_map", None))
         assert class_name is not None, (
             "Model config does not contain a _class_name attribute. Only diffusers format is supported."
         )
@@ -649,7 +654,15 @@ class VAELoader(ComponentLoader):
                             "ltx2_temporal_tile_overlap_in_frames", 24),
                     )
             else:
-                config.pop("_class_name", None)
+                # Custom VAEs that ship local Python modules (via
+                # ``auto_map``) must be loaded dynamically — the standard
+                # FastVideo VAE registry does not know about them.
+                if has_auto_map:
+                    return self._load_dynamic_diffusers_vae(
+                        model_path=model_path,
+                        device=target_device,
+                    )
+                config.pop("_diffusers_version", None)
                 vae_config = fastvideo_args.pipeline_config.vae_config
                 vae_config.update_model_arch(config)
                 vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
@@ -694,6 +707,102 @@ class VAELoader(ComponentLoader):
         strict_load = class_name == "AutoencoderKL"
         vae.load_state_dict(loaded, strict=strict_load)
 
+        return vae.eval()
+
+    def _load_dynamic_diffusers_vae(self, model_path: str,
+                                    device: torch.device) -> nn.Module:
+        """Load a VAE defined by local python source in the model folder.
+
+        This supports repos that ship `auto_map` in their diffusers config, e.g.
+        Waypoint's `WorldEngineVAE` (`auto_map.AutoModel = "ae_model.WorldEngineVAE"`).
+        """
+        raw_config = get_diffusers_config(model=model_path)
+        class_name = raw_config.get("_class_name")
+        assert class_name is not None
+
+        auto_map = raw_config.get("auto_map") or {}
+        target = (auto_map.get("AutoModel") or auto_map.get("AutoencoderKL")
+                  or auto_map.get("Autoencoder"))
+        if not target or not isinstance(target, str) or "." not in target:
+            raise ValueError(
+                f"Unsupported dynamic VAE config in {model_path}: missing auto_map target"
+            )
+
+        module_name, cls_name = target.rsplit(".", 1)
+        py_path = os.path.join(model_path, f"{module_name}.py")
+        if not os.path.exists(py_path):
+            raise FileNotFoundError(f"Missing dynamic module: {py_path}")
+
+        # Set up a proper Python package so relative imports (e.g.
+        # ``from .dcae import ...``) work inside the dynamic module.
+        unique_pkg = f"fastvideo_dynamic_vae_{uuid.uuid4().hex}"
+        pkg = types.ModuleType(unique_pkg)
+        pkg.__path__ = [model_path]  # type: ignore[attr-defined]
+        pkg.__package__ = unique_pkg
+        sys.modules[unique_pkg] = pkg
+
+        # Pre-load sibling .py files (excluding the target) so that
+        # relative imports inside the target module can resolve them.
+        for sibling in glob.glob(os.path.join(model_path, "*.py")):
+            sibling_name = os.path.splitext(
+                os.path.basename(sibling))[0]
+            if sibling_name == module_name:
+                continue  # target is loaded below after deps
+            fqn = f"{unique_pkg}.{sibling_name}"
+            sub_spec = importlib.util.spec_from_file_location(
+                fqn, sibling,
+                submodule_search_locations=[])
+            if sub_spec is not None and sub_spec.loader is not None:
+                sub_mod = importlib.util.module_from_spec(sub_spec)
+                sub_mod.__package__ = unique_pkg
+                sys.modules[fqn] = sub_mod
+                try:
+                    sub_spec.loader.exec_module(  # type: ignore[attr-defined]
+                        sub_mod)
+                except Exception:
+                    pass  # non-critical; target will re-raise
+
+        # Now load the target module — all of its sibling
+        # dependencies (e.g. dcae) are already in sys.modules.
+        fqn_target = f"{unique_pkg}.{module_name}"
+        spec = importlib.util.spec_from_file_location(
+            fqn_target, py_path,
+            submodule_search_locations=[])
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        mod.__package__ = unique_pkg
+        sys.modules[fqn_target] = mod
+        spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+
+        cls = getattr(mod, cls_name, None)
+        if cls is None:
+            raise AttributeError(f"Class {cls_name} not found in {py_path}")
+
+        # Filter non-init kwargs.
+        cfg = dict(raw_config)
+        for k in ("_class_name", "_diffusers_version", "auto_map"):
+            cfg.pop(k, None)
+
+        # Instantiate (try common signatures).
+        try:
+            vae = cls(**cfg)
+        except Exception:
+            try:
+                vae = cls(cfg)
+            except Exception:
+                vae = cls()
+
+        # Load weights.
+        safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
+        if not safetensors_list:
+            raise ValueError(f"No safetensors files found in {model_path}")
+        loaded: dict[str, torch.Tensor] = {}
+        for sf_file in safetensors_list:
+            loaded.update(safetensors_load_file(sf_file))
+        if hasattr(vae, "load_state_dict"):
+            vae.load_state_dict(loaded, strict=False)
+
+        vae = vae.to(device=device, dtype=torch.get_default_dtype())
         return vae.eval()
 
 
@@ -769,6 +878,8 @@ class TransformerLoader(ComponentLoader):
         hf_config = deepcopy(config)
         cls_name = config.pop("_class_name")
         config.pop("_name_or_path", None)
+        config.pop("_diffusers_version", None)
+        config.pop("auto_map", None)
         if cls_name is None:
             raise ValueError(
                 "Model config does not contain a _class_name attribute. "
