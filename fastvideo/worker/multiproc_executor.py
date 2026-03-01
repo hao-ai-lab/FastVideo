@@ -277,14 +277,6 @@ class MultiprocExecutor(Executor):
             if response["status"] != "lora_adapter_merged":
                 raise RuntimeError(f"Worker {i} failed to merge LoRA weights")
 
-    def set_log_queue(self, log_queue: Queue | None) -> None:
-        """Forward worker logs to the given queue. Call before generate_video."""
-        self.collective_rpc("set_log_queue", kwargs={"log_queue": log_queue})
-
-    def clear_log_queue(self) -> None:
-        """Stop forwarding worker logs to the queue. Call after generate_video."""
-        self.collective_rpc("clear_log_queue")
-
     def collective_rpc(self,
                        method: str | Callable,
                        timeout: float | None = None,

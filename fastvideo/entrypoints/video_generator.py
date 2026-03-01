@@ -162,10 +162,9 @@ class VideoGenerator:
             metadata dictionaries for prompt-file batch generation.
         """
         log_queue = kwargs.pop("log_queue", None)
-        if log_queue is not None and hasattr(
-            self.executor, "set_log_queue"
-        ):
+        if log_queue:
             self.executor.set_log_queue(log_queue)
+            
         try:
             return self._generate_video_impl(
                 prompt=prompt,
@@ -176,9 +175,7 @@ class VideoGenerator:
                 **kwargs,
             )
         finally:
-            if log_queue is not None and hasattr(
-                self.executor, "clear_log_queue"
-            ):
+            if log_queue:
                 self.executor.clear_log_queue()
 
     def _generate_video_impl(

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from queue import Queue
 from typing import Any, TypeVar, cast
 
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -109,6 +110,16 @@ class Executor(ABC):
             and set up data-plane communication to pass data.
         """
         raise NotImplementedError
+
+    @abstractmethod
+    def set_log_queue(self, log_queue: Queue | None) -> None:
+        """Forward worker logs to the given queue. Call before generate_video."""
+        self.collective_rpc("set_log_queue", kwargs={"log_queue": log_queue})
+
+    @abstractmethod
+    def clear_log_queue(self) -> None:
+        """Stop forwarding worker logs to the queue. Call after generate_video."""
+        self.collective_rpc("clear_log_queue")
 
     @abstractmethod
     def shutdown(self) -> None:
