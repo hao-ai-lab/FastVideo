@@ -89,6 +89,22 @@ class _TaskResult:
     log_path: str | None = None
 
 
+@dataclass
+class _TaskSummary:
+    test_name: str
+    required_gpus: int
+    status: str
+    returncode: int
+    log_content: str | None = None
+
+
+@dataclass
+class _PartitionResult:
+    partition_index: int
+    task_summaries: list[_TaskSummary]
+    exit_code: int
+
+
 def _extract_required_gpus(filepath: str) -> int:
     """Read REQUIRED_GPUS from a test file. Defaults to 1."""
     with open(filepath, encoding="utf-8") as file:
@@ -175,6 +191,15 @@ def _discover_ssim_tasks(ssim_dir: str) -> list[SSIMTask]:
     return sorted(tasks, key=lambda task: task.sort_key)
 
 
+def _partition_tasks(
+    tasks: list[SSIMTask],
+    partition_index: int,
+    num_partitions: int = 2,
+) -> list[SSIMTask]:
+    """Split tasks into N groups via round-robin on sorted order."""
+    return tasks[partition_index::num_partitions]
+
+
 def _build_checkout_command(git_commit: str, pr_number: str | None) -> str:
     import shlex
 
@@ -220,10 +245,18 @@ def _prepare_ssim_workspace() -> tuple[str, list[SSIMTask]]:
     export HF_HOME='/root/data/.cache'
     hf auth login --token "$HF_API_KEY"
     """
-    subprocess.run(
+    result = subprocess.run(
         ["/bin/bash", "-lc", command],
-        check=True,
+        capture_output=True,
+        text=True,
     )
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        raise RuntimeError(
+            "Workspace setup failed with "
+            f"exit code {result.returncode}"
+        )
 
     ssim_dir = os.path.join(repo_root, "fastvideo", "tests", "ssim")
     tasks = _discover_ssim_tasks(ssim_dir)
@@ -475,69 +508,156 @@ def _schedule_ssim_tasks(
     return results
 
 
-def _print_ssim_task_results(
+def _collect_task_summaries(
     tasks: list[SSIMTask],
     results: dict[int, _TaskResult],
+) -> list[_TaskSummary]:
+    """Build serializable summaries, reading logs for failures."""
+    summaries = []
+    for task in tasks:
+        result = results[task.task_id]
+        log_content = None
+        if (
+            result.status == "failed"
+            and result.log_path
+            and os.path.exists(result.log_path)
+        ):
+            with open(
+                result.log_path, encoding="utf-8"
+            ) as f:
+                log_content = f.read()
+        summaries.append(_TaskSummary(
+            test_name=task.test_name,
+            required_gpus=task.required_gpus,
+            status=result.status,
+            returncode=result.returncode,
+            log_content=log_content,
+        ))
+    return summaries
+
+
+def _print_combined_results(
+    partition_results: list[_PartitionResult | None],
 ) -> int:
+    """Print a unified report across all partitions."""
+    passed = []
     failed = []
     terminated = []
     skipped = []
-    passed = []
-    failed_task_results = []
+    first_failure = None
 
-    for task in tasks:
-        result = results[task.task_id]
-        if result.status == "passed":
-            passed.append(task.test_name)
-        elif result.status == "failed":
-            failed.append(task.test_name)
-            failed_task_results.append((task, result))
-        elif result.status == "terminated":
-            terminated.append(task.test_name)
-        elif result.status == "skipped":
-            skipped.append(task.test_name)
+    for result in partition_results:
+        if result is None:
+            continue
+        for s in result.task_summaries:
+            label = (
+                f"[P{result.partition_index}] "
+                f"{s.test_name}"
+            )
+            if s.status == "passed":
+                passed.append(label)
+            elif s.status == "failed":
+                failed.append(label)
+                if first_failure is None:
+                    first_failure = (
+                        result.partition_index, s
+                    )
+            elif s.status == "terminated":
+                terminated.append(label)
+            elif s.status == "skipped":
+                skipped.append(label)
 
-    for task, result in failed_task_results:
+    if first_failure is not None:
+        pi, s = first_failure
         print(f"\n{'=' * 60}")
-        print(f"Task: {task.test_name}")
-        print(f"GPUs: {task.required_gpus}")
-        print(f"Status: {result.status}")
-        print(f"Exit code: {result.returncode}")
+        print(f"Partition: {pi}")
+        print(f"Task: {s.test_name}")
+        print(f"GPUs: {s.required_gpus}")
+        print(f"Status: {s.status}")
+        print(f"Exit code: {s.returncode}")
         print(f"{'=' * 60}")
-        if result.log_path and os.path.exists(result.log_path):
-            with open(result.log_path, encoding="utf-8") as log_file:
-                print(log_file.read())
-        else:
-            print("No log output.")
+        print(s.log_content or "No log output.")
 
     print("\nSSIM summary:")
+    for i, result in enumerate(partition_results):
+        if result is None:
+            count = 0
+            status = "cancelled"
+        else:
+            count = len(result.task_summaries)
+            status = (
+                "passed" if result.exit_code == 0
+                else "failed"
+            )
+        print(
+            f"  Partition {i}: {status} "
+            f"({count} tasks)"
+        )
     print(f"  passed: {len(passed)}")
     print(f"  failed: {len(failed)}")
     print(f"  terminated: {len(terminated)}")
     print(f"  skipped: {len(skipped)}")
 
     if failed:
-        print(f"Failed tasks: {', '.join(failed)}")
+        print(f"Failed: {', '.join(failed)}")
     if terminated:
-        print(f"Terminated tasks: {', '.join(terminated)}")
+        print(f"Terminated: {', '.join(terminated)}")
     if skipped:
-        print(f"Skipped tasks: {', '.join(skipped)}")
+        print(f"Skipped: {', '.join(skipped)}")
 
-    return 1 if failed or terminated or skipped else 0
+    has_failures = bool(
+        failed or terminated or skipped
+        or any(r is None for r in partition_results)
+    )
+    return 1 if has_failures else 0
 
 
-@app.function(gpu="L40S:8", **SSIM_COMMON_KWARGS)
-def run_ssim_tests_single_instance() -> int:
+@app.function(gpu=f"L40S:{SSIM_NUM_GPUS}", **SSIM_COMMON_KWARGS)
+def run_ssim_partition(
+    partition_index: int,
+) -> _PartitionResult:
     repo_root, tasks = _prepare_ssim_workspace()
-    results = _schedule_ssim_tasks(repo_root, tasks)
-    return _print_ssim_task_results(tasks, results)
+    partition = _partition_tasks(tasks, partition_index)
+    if not partition:
+        print(
+            f"Partition {partition_index}: "
+            "no tasks assigned."
+        )
+        return _PartitionResult(
+            partition_index=partition_index,
+            task_summaries=[],
+            exit_code=0,
+        )
+    print(
+        f"Partition {partition_index}: running "
+        f"{len(partition)}/{len(tasks)} tasks"
+    )
+    results = _schedule_ssim_tasks(repo_root, partition)
+    summaries = _collect_task_summaries(
+        partition, results
+    )
+    has_failures = any(
+        s.status != "passed" for s in summaries
+    )
+    return _PartitionResult(
+        partition_index=partition_index,
+        task_summaries=summaries,
+        exit_code=1 if has_failures else 0,
+    )
 
 
 @app.local_entrypoint()
 def run_ssim_tests():
     import sys
 
-    exit_code = run_ssim_tests_single_instance.remote()
+    future_0 = run_ssim_partition.spawn(partition_index=0)
+    future_1 = run_ssim_partition.spawn(partition_index=1)
+    results: list[_PartitionResult | None] = [
+        future_0.get(),
+        future_1.get(),
+    ]
+
+    exit_code = _print_combined_results(results)
     if exit_code != 0:
         sys.exit(exit_code)
     print("All SSIM tasks passed.")
