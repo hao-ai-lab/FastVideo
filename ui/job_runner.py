@@ -7,6 +7,7 @@ Manages job lifecycle, execution, logging, and generator caching.
 
 from __future__ import annotations
 
+import atexit
 import collections
 import enum
 import logging
@@ -205,11 +206,22 @@ class JobRunner:
         # model-loading cost once per model configuration.
         self._generators: dict[tuple[str, int, bool | None, bool | None, bool | None], Any] = {}
         self._generators_lock = threading.Lock()
-        
+
+        # Shared Manager for log queues (avoids spawning a new process per job)
+        self._mp_manager = get_mp_context().Manager()
+        atexit.register(self._shutdown_mp_manager)
+
         # Ensure directories exist
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.log_dir, exist_ok=True)
-    
+
+    def _shutdown_mp_manager(self) -> None:
+        """Shutdown the shared multiprocessing manager on exit."""
+        try:
+            self._mp_manager.shutdown()
+        except Exception as exc:
+            logger.warning("Failed to shutdown mp manager: %s", exc)
+
     def create_job(
         self,
         job_id: str,
@@ -455,8 +467,7 @@ class JobRunner:
         # Queue for worker process logs (fsdp_load, cuda, etc.)
         # Use Manager().Queue() so it can be shared with spawned workers (spawn
         # does not inherit memory; mp.Queue only works through inheritance).
-        mp_manager = get_mp_context().Manager()
-        log_queue = mp_manager.Queue()
+        log_queue = self._mp_manager.Queue()
         queue_listener = logging.handlers.QueueListener(
             log_queue, buffer_handler, file_handler, respect_handler_level=True
         )
@@ -546,7 +557,6 @@ class JobRunner:
 
         finally:
             queue_listener.stop()
-            mp_manager.shutdown()
             # Remove handlers and close file
             fastvideo_logger.removeHandler(buffer_handler)
             fastvideo_logger.removeHandler(file_handler)
