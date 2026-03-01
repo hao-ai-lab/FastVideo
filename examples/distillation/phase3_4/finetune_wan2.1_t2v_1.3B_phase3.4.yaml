@@ -1,0 +1,69 @@
+recipe:
+  family: wan
+  method: finetune
+
+roles:
+  student:
+    family: wan
+    path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+
+training:
+  # Distributed (mirror legacy Wan VSA finetune scripts)
+  num_gpus: 8
+  sp_size: 1
+  tp_size: 1
+  hsdp_replicate_dim: 8
+  hsdp_shard_dim: 1
+
+  # Data (parquet dataset folder)
+  data_path: data/Wan-Syn_77x448x832_600k
+  dataloader_num_workers: 4
+
+  # Batch / shape (matches Wan-Syn 77x448x832)
+  train_batch_size: 1
+  train_sp_batch_size: 1
+  gradient_accumulation_steps: 1
+  num_latent_t: 20
+  num_height: 448
+  num_width: 832
+  num_frames: 77
+
+  # Output / steps
+  output_dir: outputs/phase3.4_wan2.1_finetune_wansyn
+  max_train_steps: 4000
+  seed: 1000
+  checkpoints_total_limit: 3
+
+  # Optimizer
+  learning_rate: 1.0e-6
+  mixed_precision: bf16
+  betas: "0.9,0.999"
+  weight_decay: 0.01
+  lr_scheduler: constant
+  lr_warmup_steps: 0
+  max_grad_norm: 1.0
+
+  # Checkpointing
+  training_state_checkpointing_steps: 1000
+  weight_only_checkpointing_steps: 1000
+
+  # Method-agnostic knobs
+  training_cfg_rate: 0.1
+  enable_gradient_checkpointing_type: full
+
+
+  # Tracking / validation
+  tracker_project_name: distillation_phase3
+  wandb_run_name: phase3.4_wan_finetune
+  log_validation: true
+  validation_dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
+  validation_steps: 50
+  validation_sampling_steps: "50"
+  validation_guidance_scale: "5.0"
+
+pipeline_config:
+  flow_shift: 3
+  sampler_kind: ode
+
+method_config: {}

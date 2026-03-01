@@ -161,6 +161,10 @@ class ForwardBatch:
 
     # Timesteps
     timesteps: torch.Tensor | None = None
+    # Optional explicit denoising-loop timesteps (sampler-specific).
+    # When set, some samplers (e.g. SDE-style rollout) will iterate this list
+    # instead of `timesteps` produced by `TimestepPreparationStage`.
+    sampling_timesteps: torch.Tensor | None = None
     timestep: torch.Tensor | float | int | None = None
     step_index: int | None = None
     boundary_ratio: float | None = None
