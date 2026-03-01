@@ -46,6 +46,9 @@ dist/
 *.egg
 eggs/
 .eggs/
+node_modules/
+.vite
+vite.config.js.timestamp-*.mjs
 
 # MkDocs documentation
 site/
