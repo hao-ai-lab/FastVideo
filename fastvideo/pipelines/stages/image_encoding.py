@@ -451,7 +451,8 @@ class ImageVAEEncodingStage(PipelineStage):
         Returns:
             The batch with encoded outputs.
         """
-        assert batch.pil_image is not None
+        if batch.pil_image is None:
+            return batch
         if fastvideo_args.mode == ExecutionMode.INFERENCE:
             assert batch.pil_image is not None and isinstance(
                 batch.pil_image, PIL.Image.Image)
@@ -622,10 +623,10 @@ class ImageVAEEncodingStage(PipelineStage):
 
     def verify_output(self, batch: ForwardBatch,
                       fastvideo_args: FastVideoArgs) -> VerificationResult:
-        """Verify encoding stage outputs."""
+        """Verify encoding stage outputs. image_latent may be None for txt2img (no input image)."""
         result = VerificationResult()
         result.add_check("image_latent", batch.image_latent,
-                         [V.is_tensor, V.with_dims(5)])
+                         V.none_or_tensor_with_dims(5))
         return result
 
 
