@@ -9,6 +9,7 @@ import datetime
 import locale
 import os
 import re
+import shutil
 import subprocess
 import sys
 # Unlike the rest of the PyTorch this file must be python2 compliant.
@@ -495,8 +496,7 @@ def get_pip_packages(run_lambda, patterns=None):
 
         if pip_available:
             cmd = [sys.executable, '-mpip', 'list', '--format=freeze']
-        elif os.environ.get("UV") is not None:
-            print("uv is set")
+        elif shutil.which("uv") is not None:
             cmd = ["uv", "pip", "list", "--format=freeze"]
         else:
             raise RuntimeError(
