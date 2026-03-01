@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=mg-solaris
+#SBATCH --job-name=mg-df
 #SBATCH --partition=main
 #SBATCH --nodes=4
 #SBATCH --ntasks=4
@@ -7,8 +7,8 @@
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=finetune_i2v_output/i2v_%j.out
-#SBATCH --error=finetune_i2v_output/i2v_%j.err
+#SBATCH --output=finetune_df_output/df_%j.out
+#SBATCH --error=finetune_df_output/df_%j.err
 #SBATCH --exclusive
 
 set -e -x
@@ -41,20 +41,19 @@ VALIDATION_DATASET_FILE="examples/training/finetune/MatrixGame2.0/validation_mc.
 
 # Training arguments
 training_args=(
-  --tracker_project_name "mg_finetune_solaris"
-  --output_dir "checkpoints/matrixgame_finetune_${RUN_NAME}"
-  --wandb_run_name "${RUN_NAME}_bs64_more_steps"
-  --max_train_steps 150000
+  --tracker_project_name "mg_finetune_solaris_df"
+  --output_dir "checkpoints/matrixgame_df_${RUN_NAME}"
+  --wandb_run_name "${RUN_NAME}_df_bs32"
+  --max_train_steps 12000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 20
+  --num_latent_t 18
   --num_height 352
   --num_width 640
-  --num_frames 77
-  # --enable_gradient_checkpointing_type "full"
-  --reinit-action-module True
-  --override-keyboard-dim 23
+  --num_frames 69
+  --num_frame_per_block 3
+  --enable_gradient_checkpointing_type "full"
 )
 
 # Parallel arguments
@@ -70,6 +69,8 @@ parallel_args=(
 model_args=(
   --model_path $MODEL_PATH
   --pretrained_model_name_or_path $MODEL_PATH
+  --override-transformer-cls-name "CausalMatrixGameWanModel"
+  --flow_shift 5
 )
 
 # Dataset arguments
@@ -103,14 +104,10 @@ miscellaneous_args=(
   --inference_mode False
   --checkpoints_total_limit 3
   --training_cfg_rate 0.1
-  --multi_phased_distill_schedule "4000-1"
-  --not_apply_cfg_solver
   --dit_precision "fp32"
-  --num_euler_timesteps 50
-  --ema_start_step 0
 )
 
-mkdir -p finetune_i2v_output
+mkdir -p finetune_df_output
 
 srun torchrun \
 --nnodes $SLURM_JOB_NUM_NODES \
@@ -118,7 +115,7 @@ srun torchrun \
 --node_rank $SLURM_PROCID \
 --rdzv_backend=c10d \
 --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-    fastvideo/training/matrixgame_training_pipeline.py \
+    fastvideo/training/matrixgame_ar_diffusion_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \
