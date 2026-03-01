@@ -9,6 +9,7 @@ import argparse
 import os
 from abc import ABC, abstractmethod
 from typing import Any, cast
+import functools
 
 import torch
 
@@ -28,6 +29,30 @@ from fastvideo.utils import (maybe_download_model,
                              verify_model_config_and_directory)
 
 logger = init_logger(__name__)
+
+
+def pack_hook(tensor: torch.Tensor):
+    """
+    Moves activations from GPU to CPU memory during the forward pass.
+    """
+    original_device = tensor.device
+    return tensor.to("cpu", non_blocking=True), original_device
+
+
+def unpack_hook(packed_tensor_info):
+    """
+    Fetches activations back to the GPU from CPU memory during the backward pass.
+    """
+    packed_tensor, original_device = packed_tensor_info
+    return packed_tensor.to(original_device, non_blocking=True)
+
+
+def offloaded_forward(func, *args, **kwargs):
+    """
+    A wrapper for a module's forward pass that enables activation offloading.
+    """
+    with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+        return func(*args, **kwargs)
 
 
 class ComposedPipelineBase(ABC):
@@ -100,6 +125,29 @@ class ComposedPipelineBase(ABC):
                     continue
                 module.requires_grad_(True)
                 module.train()
+
+                if self.fastvideo_args.activation_offloading:
+                    # Iterate through the actual model components
+                    for module_name, model_obj in self.modules.items():
+                        if not isinstance(model_obj, torch.nn.Module):
+                            continue
+
+                        # Scan each submodule within the model (blocks or layers etc.)
+                        for name, submodule in model_obj.named_modules():
+                            for attr_name in [
+                                    "blocks", "layers", "transformer_blocks"
+                            ]:
+                                blocks = getattr(submodule, attr_name, None)
+
+                                if isinstance(blocks, torch.nn.ModuleList):
+                                    for layer in blocks:
+                                        original_forward = layer.forward
+                                        layer.forward = functools.partial(
+                                            offloaded_forward, original_forward)
+
+                                    logger.info(
+                                        "Successfully enabled activation offloading for %d layers in %s.%s.",
+                                        len(blocks), module_name, name)
 
     @staticmethod
     def _compile_with_conditions(
