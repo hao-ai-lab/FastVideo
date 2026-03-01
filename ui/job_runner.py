@@ -453,8 +453,10 @@ class JobRunner:
         fastvideo_logger.addHandler(file_handler)
 
         # Queue for worker process logs (fsdp_load, cuda, etc.)
-        # Must use same context as multiproc workers (spawn) to avoid SemLock error
-        log_queue: mp.Queue | None = get_mp_context().Queue()
+        # Use Manager().Queue() so it can be shared with spawned workers (spawn
+        # does not inherit memory; mp.Queue only works through inheritance).
+        mp_manager = get_mp_context().Manager()
+        log_queue = mp_manager.Queue()
         queue_listener = logging.handlers.QueueListener(
             log_queue, buffer_handler, file_handler, respect_handler_level=True
         )
@@ -544,6 +546,7 @@ class JobRunner:
 
         finally:
             queue_listener.stop()
+            mp_manager.shutdown()
             # Remove handlers and close file
             fastvideo_logger.removeHandler(buffer_handler)
             fastvideo_logger.removeHandler(file_handler)
