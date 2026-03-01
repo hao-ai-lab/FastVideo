@@ -4,6 +4,7 @@
 import argparse
 import dataclasses
 import json
+import warnings
 from contextlib import contextmanager
 from dataclasses import field
 from enum import Enum
@@ -113,6 +114,9 @@ class FastVideoArgs:
     hsdp_shard_dim: int = -1
     dist_timeout: int | None = None  # timeout for torch.distributed
 
+    ring_degree: int = 1  # Ring attention degree
+    ulysses_degree: int = 1  # Ulysses attention degree
+
     pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
     preprocess_config: PreprocessConfig | None = None
 
@@ -205,6 +209,17 @@ class FastVideoArgs:
                 raise
         self._apply_ltx2_vae_overrides()
         self.check_fastvideo_args()
+
+        # Handle deprecated sp_size
+        if self.sp_size != -1:
+            warnings.warn(
+                "WARNING: --sp-size is deprecated and will be removed in a future version. "
+                "Please use --ring-degree and --ulysses-degree instead.",
+                DeprecationWarning,
+                stacklevel=2)
+            # Map sp_size to ulysses_degree for backward compatibility
+            if self.ulysses_degree == 1 and self.ring_degree == 1:
+                self.ulysses_degree = self.sp_size
 
     def _apply_ltx2_vae_overrides(self) -> None:
         if self.pipeline_config is None:
@@ -314,10 +329,25 @@ class FastVideoArgs:
             help="The tensor parallelism size.",
         )
         parser.add_argument(
+            "--ring-degree",
+            type=int,
+            default=FastVideoArgs.ring_degree,
+            help="Ring attention degree (number of GPUs in ring topology). "
+            "Must satisfy: ring_degree * ulysses_degree == world_size.",
+        )
+        parser.add_argument(
+            "--ulysses-degree",
+            type=int,
+            default=FastVideoArgs.ulysses_degree,
+            help="Ulysses attention degree (number of GPUs for all-to-all). "
+            "Must satisfy: ring_degree * ulysses_degree == world_size.",
+        )
+        parser.add_argument(
             "--sp-size",
             type=int,
             default=FastVideoArgs.sp_size,
-            help="The sequence parallelism size.",
+            help="[DEPRECATED] Use --ring-degree and --ulysses-degree instead. "
+            "The sequence parallelism size.",
         )
         parser.add_argument(
             "--hsdp-replicate-dim",

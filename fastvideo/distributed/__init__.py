@@ -3,7 +3,7 @@
 from fastvideo.distributed.communication_op import *
 from fastvideo.distributed.parallel_state import (
     cleanup_dist_env_and_memory, get_dp_group, get_dp_rank, get_dp_world_size,
-    get_local_torch_device, get_sp_group, get_sp_parallel_rank,
+    get_local_torch_device, get_ring_group, get_sp_group, get_sp_parallel_rank,
     get_sp_world_size, get_tp_group, get_tp_rank, get_tp_world_size,
     get_world_group, get_world_rank, get_world_size,
     init_distributed_environment, initialize_model_parallel,
@@ -34,6 +34,9 @@ __all__ = [
     "get_sp_group",
     "get_sp_parallel_rank",
     "get_sp_world_size",
+
+    # Ring attention group
+    "get_ring_group",
 
     # Tensor parallel group
     "get_tp_group",
