@@ -171,6 +171,19 @@ steps:
                   - TEST_TYPE=unit_test
                 agents:
                   queue: "default"
+            - path:
+                - "fastvideo/entrypoints/openai/**"
+                - "fastvideo/entrypoints/cli/serve.py"
+                - "fastvideo/tests/entrypoints/test_openai_api_integration.py"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                label: "API Server Tests"
+                env:
+                  - TEST_TYPE=api_server
+                agents:
+                  queue: "default"
             # - path:
             #     - "scripts/lora_extraction/**"
             #     - "pyproject.toml"
