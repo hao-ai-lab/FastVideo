@@ -17,7 +17,7 @@ START_FILE=${1:-1}  # Starting file number for this node
 NODE_ID=${2:-0}     # Node identifier (0-7)
 
 MODEL_PATH="../mg_models/Matrix-Game-2.0-Foundation-Diffusers"
-OUTPUT_BASE="../solaris/datasets/train/preprocessed_0227"
+OUTPUT_BASE="../solaris/datasets/train/preprocessed_0228_81"
 
 # Port range calculation
 base_port=$((29500 + NODE_ID * 100))
@@ -47,7 +47,7 @@ for i in {1..8}; do
         --seed 42 \
         --max_height 352 \
         --max_width 640 \
-        --num_frames 77 \
+        --num_frames 81 \
         --dataloader_num_workers 0 \
         --output_dir=$OUTPUT_DIR \
         --samples_per_file 8 \

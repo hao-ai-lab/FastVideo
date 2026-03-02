@@ -11,7 +11,7 @@ for node_id in {0..3}; do
     
     echo "Launching node $node_id with files merge_${start_file}.txt to merge_$((start_file + 7)).txt"
     
-    sbatch --job-name=wg-pre-${node_id} \
+    sbatch --job-name=mg-pre-${node_id} \
            --output=preprocess_output/mg-node-${node_id}.out \
            --error=preprocess_output/mg-node-${node_id}.err \
            $(pwd)/examples/training/finetune/MatrixGame2.0/preprocess_worker.slurm $start_file $node_id
