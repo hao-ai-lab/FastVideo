@@ -98,19 +98,15 @@ def _shutdown_executor(generator):
 
 def _run_generation(generator, prompt, generation_kwargs):
     """Run a single generation and return (elapsed_seconds, peak_memory_mb)."""
-    for device_id in range(torch.cuda.device_count()):
-        torch.cuda.reset_peak_memory_stats(device_id)
-
     torch.cuda.synchronize()
     start = time.perf_counter()
-    generator.generate_video(prompt, **generation_kwargs)
+    result = generator.generate_video(prompt, **generation_kwargs)
     torch.cuda.synchronize()
     elapsed = time.perf_counter() - start
 
-    peak_memory_bytes = max(
-        torch.cuda.max_memory_allocated(i)
-        for i in range(torch.cuda.device_count()))
-    peak_memory_mb = peak_memory_bytes / (1024 * 1024)
+    # Peak memory is tracked inside the worker processes and returned
+    # via the result dict — reading from the main process returns 0.
+    peak_memory_mb = result.get("peak_memory_mb", 0.0) or 0.0
 
     return elapsed, peak_memory_mb
 
