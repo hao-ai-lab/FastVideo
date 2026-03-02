@@ -134,6 +134,8 @@ class MultiprocExecutor(Executor):
 
         # Get extra dict (contains audio, etc.)
         extra = responses[0].get("extra", {})
+        peak_memory_mb = responses[0].get("peak_memory_mb", 0.0)
+        extra["peak_memory_mb"] = peak_memory_mb
 
         result_batch = ForwardBatch(data_type=forward_batch.data_type,
                                     output=output,
@@ -652,10 +654,12 @@ class WorkerMultiprocProc:
                             logging_info = output_batch.logging_info
                         # result tensor shared by CUDA IPC to avoid serialization overhead
                         result = output_batch.output
+                        peak_memory_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)
                         self.pipe.send({
                             "output_batch": result,
                             "logging_info": logging_info,
                             "extra": output_batch.extra,
+                            "peak_memory_mb": peak_memory_mb,
                         })
                     else:
                         result = self.worker.execute_method(
