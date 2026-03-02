@@ -16,9 +16,9 @@ from typing import Any, Dict, Optional, List
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from fastvideo.attention import DistributedAttention, LocalAttention
+from fastvideo.forward_context import set_forward_context
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
     sequence_model_parallel_shard)
@@ -598,12 +598,16 @@ class SingleTokenRefiner(nn.Module):
             ) for i in range(depth)
         ])
 
-    def forward(self, x, t):
+    def forward(self, x, t, mask=None):
         # Get timestep embeddings
         timestep_aware_representations = self.t_embedder(t)
 
-        context_aware_representations = x.mean(dim=1)
-
+        original_dtype = x.dtype
+        if mask is None:
+            context_aware_representations = x.mean(dim=1)
+        else:
+            mask_float = mask.float().unsqueeze(-1)  # [B, L, 1]
+            context_aware_representations = (x * mask_float).sum(dim=1) / mask_float.sum(dim=1)
 
         context_aware_representations = self.c_embedder(
             context_aware_representations)
@@ -612,7 +616,7 @@ class SingleTokenRefiner(nn.Module):
         x = self.input_embedder(x)
         # Process through refiner blocks
         for block in self.refiner_blocks:
-            x = block(x, c)
+            x = block(x, c, mask=mask)
         return x
 
 class IndividualTokenRefinerBlock(nn.Module):
@@ -681,7 +685,7 @@ class IndividualTokenRefinerBlock(nn.Module):
                                           AttentionBackendEnum.TORCH_SDPA),
         )
 
-    def forward(self, x, c):
+    def forward(self, x, c, mask=None):
 
         # Get modulation parameters
         gate_msa, gate_mlp = self.adaLN_modulation(c).chunk(2, dim=-1)
@@ -692,7 +696,17 @@ class IndividualTokenRefinerBlock(nn.Module):
         batch_size, seq_len = qkv.shape[0], qkv.shape[1]
         qkv = qkv.view(batch_size, seq_len, 3, self.num_attention_heads, -1)
         q, k, v = qkv[:, :, 0], qkv[:, :, 1], qkv[:, :, 2]
-        attn_output = self.attn(q, k, v) 
+        if mask == None:
+            attn_output = self.attn(q, k, v) 
+        else:
+            from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
+            attn_metadata = FlashAttnMetadataBuilder().build(
+                current_timestep=0,
+                attn_mask=mask,
+            )
+            # Run distributed attention
+            with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
+                attn_output = self.attn(q, k, v)  # [B, L, H, D]
         attn_output = attn_output.reshape(batch_size, seq_len,
                                           -1)
 
