@@ -17,7 +17,7 @@ _Last updated: 2026-03-02_
 
 | Metric | Type | Location | Status | Notes |
 |--------|------|----------|--------|-------|
-| Caption consistency | LLM-based | `.agent/skills/evaluate-video-quality.md` | 🟡 Draft | Not yet calibrated against human judgments |
+| Caption consistency | LLM-based | `.agents/skills/evaluate-video-quality.md` | 🟡 Draft | Not yet calibrated against human judgments |
 
 ## Planned Metrics
 
@@ -43,6 +43,6 @@ skill accordingly.
 
 ## Adding a New Metric
 
-1. Follow the SOP in `.agent/workflows/evaluation-development.md`.
+1. Follow the SOP in `.agents/workflows/evaluation-development.md`.
 2. Update this registry with the new metric.
 3. Update the `evaluate-video-quality` skill.

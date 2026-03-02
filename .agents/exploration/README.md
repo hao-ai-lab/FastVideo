@@ -42,5 +42,5 @@ template.
 
 1. **Create** during exploration mode.
 2. **Update** as you make progress.
-3. **Promote**: If findings are solid, create a skill in `.agent/skills/` or an SOP in `.agent/workflows/`.
-4. **Archive mistakes**: Move failures into `.agent/lessons/`.
+3. **Promote**: If findings are solid, create a skill in `.agents/skills/` or an SOP in `.agents/workflows/`.
+4. **Archive mistakes**: Move failures into `.agents/lessons/`.

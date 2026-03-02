@@ -7,7 +7,7 @@ description: Ingest a paper or repository into the related work index
 
 ## Purpose
 Create a structured summary of a related paper, repository, or blog post and
-add it to `.agent/memory/related_work/` for future reference. This builds the
+add it to `.agents/memory/related_work/` for future reference. This builds the
 agent's knowledge base for making informed decisions about training, evaluation,
 and architecture choices.
 
@@ -37,7 +37,7 @@ Focus on:
 
 ### 2. Create the index entry
 
-Write to `.agent/memory/related_work/<slug>.md`:
+Write to `.agents/memory/related_work/<slug>.md`:
 
 ```markdown
 ---
@@ -60,7 +60,7 @@ tags: [world-model, distillation, evaluation, ...]
 
 ### 3. Update the catalog
 
-If `.agent/memory/related_work/_catalog.md` exists, append the new entry.
+If `.agents/memory/related_work/_catalog.md` exists, append the new entry.
 If not, create it:
 
 ```markdown
@@ -72,7 +72,7 @@ If not, create it:
 ```
 
 ## Outputs
-- New file in `.agent/memory/related_work/<slug>.md`.
+- New file in `.agents/memory/related_work/<slug>.md`.
 - Updated catalog.
 
 ## Example Usage
@@ -85,7 +85,7 @@ Index the Self-Forcing paper:
 ```
 
 ## References
-- `.agent/memory/related_work/README.md` — schema documentation
+- `.agents/memory/related_work/README.md` — schema documentation
 
 ## Changelog
 | Date | Change |

@@ -27,7 +27,7 @@ new metrics will be added as they are developed.
 
 ## Available Metrics
 
-Check `.agent/memory/evaluation_registry.md` for the current catalog.
+Check `.agents/memory/evaluation_registry.md` for the current catalog.
 
 ### SSIM (Active)
 
@@ -93,7 +93,7 @@ Each 1-5, total /20.
 
 ## Steps
 
-1. **Identify available metrics** — Check `.agent/memory/evaluation_registry.md`.
+1. **Identify available metrics** — Check `.agents/memory/evaluation_registry.md`.
 2. **Run each metric** — Collect scores.
 3. **Aggregate** — Produce a combined quality report.
 4. **Log** — Update the experiment journal with quality results.
@@ -119,7 +119,7 @@ Each 1-5, total /20.
 ## References
 - `fastvideo/tests/ssim/` — SSIM test infrastructure
 - `fastvideo/tests/training/Vanilla/test_training_loss.py` — loss comparison
-- `.agent/memory/evaluation_registry.md` — metric catalog
+- `.agents/memory/evaluation_registry.md` — metric catalog
 
 ## Changelog
 | Date | Change |

@@ -87,7 +87,7 @@ torchrun --nnodes 1 --nproc_per_node <num_gpus> \
 
 ### 5. Log to experiment journal
 
-After launching, append an entry to `.agent/memory/experiment_journal.md`:
+After launching, append an entry to `.agents/memory/experiment_journal.md`:
 ```markdown
 ## [YYYY-MM-DD] Experiment: <run_name>
 - **Hypothesis**: <user-provided or auto-generated>

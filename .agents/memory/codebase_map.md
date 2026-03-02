@@ -60,7 +60,7 @@ FastVideo-WorldModel/
 │   └── contributing/          #   Contributor guides + coding_agents.md
 ├── tests/                     # Top-level tests (local_tests/)
 ├── AGENTS.md                  # Agent coding guidelines
-└── .agent/                    # Agent infrastructure (you are here)
+└── .agents/                    # Agent infrastructure (you are here)
 ```
 
 ## Key Training Entrypoints

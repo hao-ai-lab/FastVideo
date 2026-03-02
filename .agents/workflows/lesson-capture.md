@@ -33,7 +33,7 @@ Read the experiment journal entry. Ask:
 
 ### 3. Create the Lesson File
 
-In `.agent/lessons/`, create `<YYYY-MM-DD>_<short-slug>.md`:
+In `.agents/lessons/`, create `<YYYY-MM-DD>_<short-slug>.md`:
 
 ```markdown
 ---

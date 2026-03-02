@@ -1,15 +1,15 @@
 ---
-description: Synchronize the STATUS.md dashboard by scanning .agent/ directories
+description: Synchronize the STATUS.md dashboard by scanning .agents/ directories
 ---
 
 # Sync Dashboard
 
-Updates `.agent/STATUS.md` by scanning the skills, workflows, memory, lessons,
+Updates `.agents/STATUS.md` by scanning the skills, workflows, memory, lessons,
 and exploration directories to reflect what actually exists on disk.
 
 ## When to Use
 
-- After adding, removing, or renaming any file in `.agent/`.
+- After adding, removing, or renaming any file in `.agents/`.
 - Periodically (e.g., at end of each conversation session).
 - When the dashboard feels out of date.
 
@@ -21,20 +21,20 @@ List all files in each directory:
 
 ```bash
 echo "=== Skills ==="
-ls -1 .agent/skills/*.md 2>/dev/null | grep -v SKILL_TEMPLATE
+ls -1 .agents/skills/*.md 2>/dev/null | grep -v SKILL_TEMPLATE
 
 echo "=== Workflows ==="
-ls -1 .agent/workflows/*.md 2>/dev/null
+ls -1 .agents/workflows/*.md 2>/dev/null
 
 echo "=== Memory ==="
-ls -1 .agent/memory/*.md 2>/dev/null
-ls -1 .agent/memory/related_work/*.md 2>/dev/null | grep -v README
+ls -1 .agents/memory/*.md 2>/dev/null
+ls -1 .agents/memory/related_work/*.md 2>/dev/null | grep -v README
 
 echo "=== Lessons ==="
-ls -1 .agent/lessons/*.md 2>/dev/null | grep -v README
+ls -1 .agents/lessons/*.md 2>/dev/null | grep -v README
 
 echo "=== Exploration ==="
-ls -1 .agent/exploration/*.md 2>/dev/null | grep -v README
+ls -1 .agents/exploration/*.md 2>/dev/null | grep -v README
 ```
 
 ### 2. Compare with STATUS.md

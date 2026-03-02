@@ -16,6 +16,6 @@ _No experiments logged yet. Use the `log-experiment` skill to add entries._
 - **Checkpoint**: <path>
 - **Insight**: <what was learned>
 - **Status**: running | completed | failed | abandoned
-- **Related lessons**: `.agent/lessons/<filename>.md`
+- **Related lessons**: `.agents/lessons/<filename>.md`
 
 -->

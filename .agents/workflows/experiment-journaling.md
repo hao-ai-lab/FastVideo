@@ -39,9 +39,9 @@ Update the entry with `status: completed`:
 Update the entry with `status: failed`:
 - What went wrong (OOM, NaN, crash, etc.).
 - At what step the failure occurred.
-- Create a lesson in `.agent/lessons/` for non-trivial failures.
+- Create a lesson in `.agents/lessons/` for non-trivial failures.
 
 ### 5. Cross-Reference
 
-- Link related lessons: `**Related lessons**: .agent/lessons/<filename>.md`
+- Link related lessons: `**Related lessons**: .agents/lessons/<filename>.md`
 - Link related experiments: if this is a follow-up, reference the prior entry.

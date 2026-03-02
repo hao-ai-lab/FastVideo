@@ -5,7 +5,7 @@ Use this to understand what exists, how complete it is, and how much to trust it
 
 _Last synced: 2026-03-02_
 
-> To resync this dashboard, use the workflow: `.agent/workflows/sync-dashboard.md`
+> To resync this dashboard, use the workflow: `.agents/workflows/sync-dashboard.md`
 
 ---
 
@@ -21,7 +21,7 @@ _Last synced: 2026-03-02_
 
 ---
 
-## Skills (`.agent/skills/`)
+## Skills (`.agents/skills/`)
 
 | Skill | File | Status | Trust | Tested | Notes |
 |-------|------|--------|-------|--------|-------|
@@ -42,7 +42,7 @@ _Last synced: 2026-03-02_
 
 ---
 
-## Workflows / SOPs (`.agent/workflows/`)
+## Workflows / SOPs (`.agents/workflows/`)
 
 | Workflow | File | Status | Trust | Tested | Notes |
 |----------|------|--------|-------|--------|-------|
@@ -54,7 +54,7 @@ _Last synced: 2026-03-02_
 
 ---
 
-## Memory (`.agent/memory/`)
+## Memory (`.agents/memory/`)
 
 | File | Status | Trust | Notes |
 |------|--------|-------|-------|
@@ -65,7 +65,7 @@ _Last synced: 2026-03-02_
 
 ---
 
-## Lessons (`.agent/lessons/`)
+## Lessons (`.agents/lessons/`)
 
 | File | Category | Severity | Notes |
 |------|----------|----------|-------|
@@ -74,7 +74,7 @@ _No lessons captured yet._
 
 ---
 
-## Exploration Logs (`.agent/exploration/`)
+## Exploration Logs (`.agents/exploration/`)
 
 | File | Status | Topic | Notes |
 |------|--------|-------|-------|
