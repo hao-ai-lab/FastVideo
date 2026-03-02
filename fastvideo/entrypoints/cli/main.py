@@ -7,6 +7,7 @@ from fastvideo.utils import FlexibleArgumentParser
 from fastvideo.entrypoints.cli.serve import cmd_init as serve_cmd_init
 from fastvideo.entrypoints.cli.bench import cmd_init as bench_cmd_init
 
+
 def cmd_init() -> list[CLISubcommand]:
     """Initialize all commands from separate modules"""
     commands = []

@@ -2,9 +2,8 @@
 # (https://github.com/sgl-project/sglang/blob/main/python/sglang/multimodal_gen/runtime/entrypoints/openai/common_api.py)
 
 import time
-from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import ORJSONResponse
 from pydantic import BaseModel, Field
 
@@ -22,7 +21,7 @@ class ModelCard(BaseModel):
     object: str = "model"
     created: int = Field(default_factory=lambda: int(time.time()))
     owned_by: str = "fastvideo"
-    root: Optional[str] = None
+    root: str | None = None
 
 
 @router.get("/models", response_class=ORJSONResponse)

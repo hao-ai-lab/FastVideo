@@ -29,7 +29,7 @@ class ServeSubcommand(CLISubcommand):
             "output_dir",
         }
 
-        provided = getattr(args, '_provided', set())
+        provided: set[str] = getattr(args, '_provided', set())
         cli_kwargs = {}
         for k, v in vars(args).items():
             if k in excluded_args:

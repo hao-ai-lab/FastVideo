@@ -5,7 +5,6 @@ import asyncio
 import base64
 import os
 import time
-from typing import List, Optional
 
 import aiofiles
 
@@ -40,16 +39,16 @@ def _build_generation_kwargs(
     request_id: str,
     prompt: str,
     n: int = 1,
-    size: Optional[str] = None,
-    output_format: Optional[str] = None,
-    background: Optional[str] = None,
-    image_path: Optional[list[str]] = None,
-    seed: Optional[int] = None,
-    num_inference_steps: Optional[int] = None,
-    guidance_scale: Optional[float] = None,
-    true_cfg_scale: Optional[float] = None,
-    negative_prompt: Optional[str] = None,
-    enable_teacache: Optional[bool] = None,
+    size: str | None = None,
+    output_format: str | None = None,
+    background: str | None = None,
+    image_path: list[str] | None = None,
+    seed: int | None = None,
+    num_inference_steps: int | None = None,
+    guidance_scale: float | None = None,
+    true_cfg_scale: float | None = None,
+    negative_prompt: str | None = None,
+    enable_teacache: bool | None = None,
 ) -> dict:
     """Convert API request params to VideoGenerator.generate_video kwargs"""
     kwargs: dict = {"prompt": prompt}
@@ -116,7 +115,7 @@ async def generations(request: ImageGenerationsRequest):
             None, lambda: generator.generate_video(**gen_kwargs))
     except Exception as e:
         logger.error("Image generation failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from None
     elapsed = time.perf_counter() - start
 
     save_file_path = gen_kwargs["output_path"]
@@ -162,23 +161,24 @@ async def generations(request: ImageGenerationsRequest):
 
 @router.post("/edits", response_model=ImageResponse)
 async def edits(
-        image: Optional[List[UploadFile]] = File(None),
-        image_array: Optional[List[UploadFile]] = File(None, alias="image[]"),
-        url: Optional[List[str]] = Form(None),
-        url_array: Optional[List[str]] = Form(None, alias="url[]"),
+        image: list[UploadFile] | None = File(None),  # noqa: B008
+        image_array: list[UploadFile] | None = File(  # noqa: B008
+            None, alias="image[]"),
+        url: list[str] | None = Form(None),  # noqa: B008
+        url_array: list[str] | None = Form(None, alias="url[]"),  # noqa: B008
         prompt: str = Form(...),
-        model: Optional[str] = Form(None),
-        n: Optional[int] = Form(1),
-        response_format: Optional[str] = Form(None),
-        size: Optional[str] = Form(None),
-        output_format: Optional[str] = Form(None),
-        background: Optional[str] = Form("auto"),
-        seed: Optional[int] = Form(1024),
-        negative_prompt: Optional[str] = Form(None),
-        guidance_scale: Optional[float] = Form(None),
-        true_cfg_scale: Optional[float] = Form(None),
-        num_inference_steps: Optional[int] = Form(None),
-        enable_teacache: Optional[bool] = Form(False),
+        model: str | None = Form(None),
+        n: int | None = Form(1),
+        response_format: str | None = Form(None),
+        size: str | None = Form(None),
+        output_format: str | None = Form(None),
+        background: str | None = Form("auto"),
+        seed: int | None = Form(1024),
+        negative_prompt: str | None = Form(None),
+        guidance_scale: float | None = Form(None),
+        true_cfg_scale: float | None = Form(None),
+        num_inference_steps: int | None = Form(None),
+        enable_teacache: bool | None = Form(False),
 ):
     request_id = generate_request_id()
     generator = get_generator()
@@ -205,7 +205,7 @@ async def edits(
             input_paths.append(input_path)
     except Exception as e:
         raise HTTPException(status_code=400,
-                            detail=f"Failed to process image: {e}")
+                            detail=f"Failed to process image: {e}") from None
 
     gen_kwargs = _build_generation_kwargs(
         request_id=request_id,
@@ -229,7 +229,7 @@ async def edits(
             None, lambda: generator.generate_video(**gen_kwargs))
     except Exception as e:
         logger.error("Image edit failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from None
     elapsed = time.perf_counter() - start
 
     save_file_path = gen_kwargs["output_path"]
@@ -268,7 +268,7 @@ async def edits(
 
 @router.get("/{image_id}/content")
 async def download_image_content(image_id: str = Path(...),
-                                 variant: Optional[str] = Query(None)):
+                                 variant: str | None = Query(None)):
     item = await IMAGE_STORE.get(image_id)
     if not item:
         raise HTTPException(status_code=404, detail="Image not found")

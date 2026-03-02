@@ -23,7 +23,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import aiofiles
 import aiohttp
@@ -36,7 +36,7 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 
-def is_dir_not_empty(path):
+def is_dir_not_empty(path: str) -> bool:
     return os.path.isdir(path) and bool(os.listdir(path))
 
 
@@ -45,12 +45,12 @@ class RequestFuncInput:
     prompt: str
     api_url: str
     model: str
-    width: Optional[int] = None
-    height: Optional[int] = None
-    num_frames: Optional[int] = None
-    fps: Optional[int] = None
-    extra_body: Dict[str, Any] = field(default_factory=dict)
-    image_paths: Optional[List[str]] = None
+    width: int | None = None
+    height: int | None = None
+    num_frames: int | None = None
+    fps: int | None = None
+    extra_body: dict[str, Any] = field(default_factory=dict)
+    image_paths: list[str] | None = None
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
@@ -60,11 +60,12 @@ class RequestFuncOutput:
     latency: float = 0.0
     error: str = ""
     start_time: float = 0.0
-    response_body: Dict[str, Any] = field(default_factory=dict)
+    response_body: dict[str, Any] = field(default_factory=dict)
     peak_memory_mb: float = 0.0
 
 
 class BaseDataset(ABC):
+
     def __init__(self, args, api_url: str, model: str):
         self.args = args
         self.api_url = api_url
@@ -79,7 +80,7 @@ class BaseDataset(ABC):
         pass
 
     @abstractmethod
-    def get_requests(self) -> List[RequestFuncInput]:
+    def get_requests(self) -> list[RequestFuncInput]:
         pass
 
 
@@ -94,11 +95,13 @@ class VBenchDataset(BaseDataset):
 
     def __init__(self, args, api_url: str, model: str):
         super().__init__(args, api_url, model)
-        self.cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "fastvideo")
+        self.cache_dir = os.path.join(os.path.expanduser("~"), ".cache",
+                                      "fastvideo")
         self.items = self._load_data()
 
-    def _load_data(self) -> List[Dict[str, Any]]:
-        if self.args.task_name in ("text-to-video", "text-to-image", "video-to-video"):
+    def _load_data(self) -> list[dict[str, Any]]:
+        if self.args.task_name in ("text-to-video", "text-to-image",
+                                   "video-to-video"):
             return self._load_t2v_prompts()
         elif self.args.task_name in ("image-to-video", "image-to-image"):
             return self._load_i2v_data()
@@ -115,21 +118,22 @@ class VBenchDataset(BaseDataset):
         with open(dest_path, "w") as f:
             f.write(resp.text)
 
-    def _load_t2v_prompts(self) -> List[Dict[str, Any]]:
+    def _load_t2v_prompts(self) -> list[dict[str, Any]]:
         path = self.args.dataset_path
 
         if not path:
-            path = os.path.join(self.cache_dir, "vbench_subject_consistency.txt")
+            path = os.path.join(self.cache_dir,
+                                "vbench_subject_consistency.txt")
             if not os.path.exists(path):
-                logger.info(f"Downloading VBench T2V prompts to {path}...")
+                logger.info("Downloading VBench T2V prompts to %s...", path)
                 try:
                     self._download_file(self.T2V_PROMPT_URL, path)
                 except Exception as e:
-                    logger.info(f"Failed to download VBench prompts: {e}")
+                    logger.info("Failed to download VBench prompts: %s", e)
                     return [{"prompt": "A cat sitting on a bench"}] * 50
 
         prompts = []
-        with open(path, "r") as f:
+        with open(path) as f:
             for line in f:
                 line = line.strip()
                 if line:
@@ -137,21 +141,20 @@ class VBenchDataset(BaseDataset):
 
         return self._resize_data(prompts)
 
-    def _auto_download_i2v_dataset(self) -> str:
+    def _auto_download_i2v_dataset(self) -> str | None:
         """Auto-download VBench I2V dataset and return the dataset directory."""
-        vbench_i2v_dir = os.path.join(self.cache_dir, "vbench_i2v", "vbench2_beta_i2v")
-        info_json_path = os.path.join(vbench_i2v_dir, "data", "i2v-bench-info.json")
+        vbench_i2v_dir = os.path.join(self.cache_dir, "vbench_i2v",
+                                      "vbench2_beta_i2v")
+        info_json_path = os.path.join(vbench_i2v_dir, "data",
+                                      "i2v-bench-info.json")
         crop_dir = os.path.join(vbench_i2v_dir, "data", "crop")
         origin_dir = os.path.join(vbench_i2v_dir, "data", "origin")
 
-        if (
-            os.path.exists(info_json_path)
-            and is_dir_not_empty(crop_dir)
-            and is_dir_not_empty(origin_dir)
-        ):
+        if (os.path.exists(info_json_path) and is_dir_not_empty(crop_dir)
+                and is_dir_not_empty(origin_dir)):
             return vbench_i2v_dir
 
-        logger.info(f"Downloading VBench I2V dataset to {vbench_i2v_dir}...")
+        logger.info("Downloading VBench I2V dataset to %s...", vbench_i2v_dir)
         try:
             cache_root = os.path.join(self.cache_dir, "vbench_i2v")
             script_path = os.path.join(cache_root, "download_data.sh")
@@ -170,7 +173,8 @@ class VBenchDataset(BaseDataset):
             )
             if result.returncode != 0:
                 raise RuntimeError(f"Download script failed: {result.stderr}")
-            missing_packages = re.findall(r"(\S+): command not found", result.stderr)
+            missing_packages = re.findall(r"(\S+): command not found",
+                                          result.stderr)
             if missing_packages:
                 missing_packages = list(set(missing_packages))
                 package_list = ", ".join(f"'{cmd}'" for cmd in missing_packages)
@@ -178,11 +182,10 @@ class VBenchDataset(BaseDataset):
                     f"Download script failed because the following commands are not installed: {package_list}.\n"
                     "Please install them (e.g., on Ubuntu: `sudo apt install ...`) and try again."
                 )
-            logger.info(
-                f"Successfully downloaded VBench I2V dataset to {vbench_i2v_dir}"
-            )
+            logger.info("Successfully downloaded VBench I2V dataset to %s",
+                        vbench_i2v_dir)
         except Exception as e:
-            logger.info(f"Failed to download VBench I2V dataset: {e}")
+            logger.info("Failed to download VBench I2V dataset: %s", e)
             logger.info("Please manually download following instructions at:")
             logger.info(
                 "https://github.com/Vchitect/VBench/tree/master/vbench2_beta_i2v#22-download"
@@ -191,28 +194,30 @@ class VBenchDataset(BaseDataset):
 
         return vbench_i2v_dir if os.path.exists(info_json_path) else None
 
-    def _load_from_i2v_json(self, json_path: str) -> List[Dict[str, Any]]:
+    def _load_from_i2v_json(self, json_path: str) -> list[dict[str, Any]]:
         """Load I2V data from i2v-bench-info.json format."""
-        with open(json_path, "r") as f:
+        with open(json_path) as f:
             items = json.load(f)
 
         base_dir = os.path.dirname(
-            os.path.dirname(json_path)
-        )  # Go up to vbench2_beta_i2v
+            os.path.dirname(json_path))  # Go up to vbench2_beta_i2v
         origin_dir = os.path.join(base_dir, "data", "origin")
 
         data = []
         for item in items:
             img_path = os.path.join(origin_dir, item.get("file_name", ""))
             if os.path.exists(img_path):
-                data.append({"prompt": item.get("caption", ""), "image_path": img_path})
+                data.append({
+                    "prompt": item.get("caption", ""),
+                    "image_path": img_path
+                })
             else:
-                logger.warning(f"Image not found: {img_path}")
+                logger.warning("Image not found: %s", img_path)
 
-        logger.info(f"Loaded {len(data)} I2V samples from VBench I2V dataset")
+        logger.info("Loaded %d I2V samples from VBench I2V dataset", len(data))
         return data
 
-    def _scan_directory_for_images(self, path: str) -> List[Dict[str, Any]]:
+    def _scan_directory_for_images(self, path: str) -> list[dict[str, Any]]:
         """Scan directory for image files."""
         exts = ["*.jpg", "*.jpeg", "*.png", "*.webp"]
         files = []
@@ -227,12 +232,12 @@ class VBenchDataset(BaseDataset):
                 files.extend(glob.glob(os.path.join(origin_dir, ext)))
                 files.extend(glob.glob(os.path.join(origin_dir, ext.upper())))
 
-        return [
-            {"prompt": os.path.splitext(os.path.basename(f))[0], "image_path": f}
-            for f in files
-        ]
+        return [{
+            "prompt": os.path.splitext(os.path.basename(f))[0],
+            "image_path": f
+        } for f in files]
 
-    def _create_dummy_data(self) -> List[Dict[str, Any]]:
+    def _create_dummy_data(self) -> list[dict[str, Any]]:
         """Create dummy data with a placeholder image in cache directory."""
         logger.info("No I2V data found. Using dummy placeholders.")
 
@@ -244,14 +249,14 @@ class VBenchDataset(BaseDataset):
                 os.makedirs(self.cache_dir, exist_ok=True)
                 img = Image.new("RGB", (100, 100), color="red")
                 img.save(dummy_image)
-                logger.info(f"Created dummy image at {dummy_image}")
+                logger.info("Created dummy image at %s", dummy_image)
             except ImportError:
                 logger.info("PIL not installed, cannot create dummy image.")
                 return []
 
         return [{"prompt": "A moving cat", "image_path": dummy_image}] * 10
 
-    def _load_i2v_data(self) -> List[Dict[str, Any]]:
+    def _load_i2v_data(self) -> list[dict[str, Any]]:
         """Load I2V data from VBench I2V dataset or user-provided path."""
         path = self.args.dataset_path
         # Auto-download if no path provided
@@ -269,9 +274,10 @@ class VBenchDataset(BaseDataset):
         for json_path in info_json_candidates:
             if json_path and os.path.exists(json_path):
                 try:
-                    return self._resize_data(self._load_from_i2v_json(json_path))
+                    return self._resize_data(
+                        self._load_from_i2v_json(json_path))
                 except Exception as e:
-                    logger.info(f"Failed to load {json_path}: {e}")
+                    logger.info("Failed to load %s: %s", json_path, e)
 
         # Fallback: scan directory for images
         if os.path.isdir(path):
@@ -282,7 +288,7 @@ class VBenchDataset(BaseDataset):
         # Last resort: dummy data
         return self._resize_data(self._create_dummy_data())
 
-    def _resize_data(self, data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _resize_data(self, data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Resize data to match num_prompts."""
         if not self.args.num_prompts:
             return data
@@ -291,7 +297,7 @@ class VBenchDataset(BaseDataset):
             factor = (self.args.num_prompts // len(data)) + 1
             data = data * factor
 
-        return data[: self.args.num_prompts]
+        return data[:self.args.num_prompts]
 
     def __len__(self) -> int:
         return len(self.items)
@@ -311,11 +317,12 @@ class VBenchDataset(BaseDataset):
             image_paths=image_paths,
         )
 
-    def get_requests(self) -> List[RequestFuncInput]:
+    def get_requests(self) -> list[RequestFuncInput]:
         return [self[i] for i in range(len(self))]
 
 
 class RandomDataset(BaseDataset):
+
     def __init__(self, args, api_url: str, model: str):
         self.args = args
         self.api_url = api_url
@@ -336,14 +343,14 @@ class RandomDataset(BaseDataset):
             fps=self.args.fps,
         )
 
-    def get_requests(self) -> List[RequestFuncInput]:
+    def get_requests(self) -> list[RequestFuncInput]:
         return [self[i] for i in range(len(self))]
 
 
 async def async_request_image_sglang(
     input: RequestFuncInput,
     session: aiohttp.ClientSession,
-    pbar: Optional[tqdm] = None,
+    pbar: tqdm | None = None,
 ) -> RequestFuncOutput:
     output = RequestFuncOutput()
     output.start_time = time.perf_counter()
@@ -435,7 +442,7 @@ async def async_request_image_sglang(
 async def async_request_video_sglang(
     input: RequestFuncInput,
     session: aiohttp.ClientSession,
-    pbar: Optional[tqdm] = None,
+    pbar: tqdm | None = None,
 ) -> RequestFuncOutput:
     output = RequestFuncOutput()
     output.start_time = time.perf_counter()
@@ -501,7 +508,7 @@ async def async_request_video_sglang(
 
     else:
         # Use JSON
-        payload = {
+        payload: dict[str, Any] = {
             "model": input.model,
             "prompt": input.prompt,
         }
@@ -554,7 +561,8 @@ async def async_request_video_sglang(
                         output.success = True
                         output.response_body = status_data
                         if "peak_memory_mb" in status_data:
-                            output.peak_memory_mb = status_data["peak_memory_mb"]
+                            output.peak_memory_mb = status_data[
+                                "peak_memory_mb"]
                         break
                     elif status == "failed":
                         output.success = False
@@ -581,40 +589,45 @@ async def async_request_video_sglang(
     return output
 
 
-def calculate_metrics(outputs: List[RequestFuncOutput], total_duration: float):
+def calculate_metrics(outputs: list[RequestFuncOutput], total_duration: float):
     success_outputs = [o for o in outputs if o.success]
     error_outputs = [o for o in outputs if not o.success]
 
     num_success = len(success_outputs)
     latencies = [o.latency for o in success_outputs]
-    peak_memories = [o.peak_memory_mb for o in success_outputs if o.peak_memory_mb is not None and o.peak_memory_mb > 0]
+    peak_memories = [
+        o.peak_memory_mb for o in success_outputs
+        if o.peak_memory_mb is not None and o.peak_memory_mb > 0
+    ]
 
     metrics = {
         "duration": total_duration,
         "completed_requests": num_success,
         "failed_requests": len(error_outputs),
-        "throughput_qps": num_success / total_duration if total_duration > 0 else 0,
+        "throughput_qps":
+        num_success / total_duration if total_duration > 0 else 0,
         "latency_mean": np.mean(latencies) if latencies else 0,
         "latency_median": np.median(latencies) if latencies else 0,
         "latency_p99": np.percentile(latencies, 99) if latencies else 0,
         "latency_p50": np.percentile(latencies, 50) if latencies else 0,
         "peak_memory_mb_max": max(peak_memories) if peak_memories else 0,
         "peak_memory_mb_mean": np.mean(peak_memories) if peak_memories else 0,
-        "peak_memory_mb_median": np.median(peak_memories) if peak_memories else 0,
+        "peak_memory_mb_median":
+        np.median(peak_memories) if peak_memories else 0,
     }
 
     return metrics
 
 
 async def wait_for_service(base_url: str, timeout: int = 1200) -> None:
-    logger.info(f"Waiting for service at {base_url}...")
+    logger.info("Waiting for service at %s...", base_url)
     start_time = time.time()
     async with aiohttp.ClientSession() as session:
         while True:
             try:
                 async with session.get(
-                    f"{base_url}/health",
-                    timeout=aiohttp.ClientTimeout(total=1),
+                        f"{base_url}/health",
+                        timeout=aiohttp.ClientTimeout(total=1),
                 ) as resp:
                     if resp.status == 200:
                         logger.info("Service is ready.")
@@ -630,7 +643,7 @@ async def wait_for_service(base_url: str, timeout: int = 1200) -> None:
             await asyncio.sleep(1)
 
 
-async def benchmark(args):
+async def benchmark(args: argparse.Namespace) -> None:
     from huggingface_hub import model_info
 
     # Construct base_url if not provided
@@ -642,25 +655,26 @@ async def benchmark(args):
 
     # Fetch model info
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
+        async with aiohttp.ClientSession() as session, session.get(
                 f"{args.base_url}/v1/model_info",
                 timeout=aiohttp.ClientTimeout(total=5),
-            ) as resp:
-                if resp.status == 200:
-                    info = await resp.json()
-                    if "model_path" in info and info["model_path"]:
-                        args.model = info["model_path"]
-                        logger.info(f"Updated model name from server: {args.model}")
+        ) as resp:
+            if resp.status == 200:
+                info = await resp.json()
+                if "model_path" in info and info["model_path"]:
+                    args.model = info["model_path"]
+                    logger.info("Updated model name from server: %s",
+                                args.model)
     except Exception as e:
-        logger.info(f"Failed to fetch model info: {e}. Using default: {args.model}")
+        logger.info("Failed to fetch model info: %s. Using default: %s", e,
+                    args.model)
 
     task_name = model_info(args.model).pipeline_tag
 
     if args.task != task_name:
         logger.warning(
-            f"Task from args {args.task} is different from huggingface pipeline_tag {task_name}, args.task will be ignored!"
-        )
+            "Task from args %s is different from huggingface pipeline_tag %s, args.task will be ignored!",
+            args.task, task_name)
 
     if task_name in ("text-to-video", "image-to-video", "video-to-video"):
         api_url = f"{args.base_url}/v1/videos"
@@ -676,8 +690,9 @@ async def benchmark(args):
             f"The task name {task_name} of model {args.model} is not a valid task name for multimodal generation. Please check the model path."
         )
 
-    setattr(args, "task_name", task_name)
+    args.task_name = task_name
 
+    dataset: BaseDataset
     if args.dataset == "vbench":
         dataset = VBenchDataset(args, api_url, args.model)
     elif args.dataset == "random":
@@ -685,9 +700,10 @@ async def benchmark(args):
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
-    logger.info(f"Loading requests...")
+    logger.info("Loading requests...")
     requests_list = dataset.get_requests()
-    logger.info(f"Prepared {len(requests_list)} requests from {args.dataset} dataset.")
+    logger.info("Prepared %d requests from %s dataset.", len(requests_list),
+                args.dataset)
 
     # Limit concurrency
     if args.max_concurrency is not None:
@@ -695,7 +711,11 @@ async def benchmark(args):
     else:
         semaphore = None
 
-    async def limited_request_func(req, session, pbar):
+    async def limited_request_func(
+        req: RequestFuncInput,
+        session: aiohttp.ClientSession,
+        pbar: tqdm | None,
+    ) -> RequestFuncOutput:
         if semaphore:
             async with semaphore:
                 return await request_func(req, session, pbar)
@@ -734,49 +754,36 @@ async def benchmark(args):
 
     # Section 2: Execution & Traffic
     print(f"{'-' * 50}")
-    print("{:<40} {:<15.2f}".format("Benchmark duration (s):", metrics["duration"]))
+    print("{:<40} {:<15.2f}".format("Benchmark duration (s):",
+                                    metrics["duration"]))
     print("{:<40} {:<15}".format("Request rate:", str(args.request_rate)))
-    print(
-        "{:<40} {:<15}".format(
-            "Max request concurrency:",
-            str(args.max_concurrency) if args.max_concurrency else "not set",
-        )
-    )
-    print(
-        "{:<40} {}/{:<15}".format(
-            "Successful requests:", metrics["completed_requests"], len(requests_list)
-        )
-    )
+    print("{:<40} {:<15}".format(
+        "Max request concurrency:",
+        str(args.max_concurrency) if args.max_concurrency else "not set",
+    ))
+    print("{:<40} {}/{:<15}".format("Successful requests:",
+                                    metrics["completed_requests"],
+                                    len(requests_list)))
 
     # Section 3: Performance Metrics
     print(f"{'-' * 50}")
 
-    print(
-        "{:<40} {:<15.2f}".format(
-            "Request throughput (req/s):", metrics["throughput_qps"]
-        )
-    )
-    print("{:<40} {:<15.4f}".format("Latency Mean (s):", metrics["latency_mean"]))
-    print("{:<40} {:<15.4f}".format("Latency Median (s):", metrics["latency_median"]))
+    print("{:<40} {:<15.2f}".format("Request throughput (req/s):",
+                                    metrics["throughput_qps"]))
+    print("{:<40} {:<15.4f}".format("Latency Mean (s):",
+                                    metrics["latency_mean"]))
+    print("{:<40} {:<15.4f}".format("Latency Median (s):",
+                                    metrics["latency_median"]))
     print("{:<40} {:<15.4f}".format("Latency P99 (s):", metrics["latency_p99"]))
 
     if metrics["peak_memory_mb_max"] > 0:
         print(f"{'-' * 50}")
-        print(
-            "{:<40} {:<15.2f}".format(
-                "Peak Memory Max (MB):", metrics["peak_memory_mb_max"]
-            )
-        )
-        print(
-            "{:<40} {:<15.2f}".format(
-                "Peak Memory Mean (MB):", metrics["peak_memory_mb_mean"]
-            )
-        )
-        print(
-            "{:<40} {:<15.2f}".format(
-                "Peak Memory Median (MB):", metrics["peak_memory_mb_median"]
-            )
-        )
+        print("{:<40} {:<15.2f}".format("Peak Memory Max (MB):",
+                                        metrics["peak_memory_mb_max"]))
+        print("{:<40} {:<15.2f}".format("Peak Memory Mean (MB):",
+                                        metrics["peak_memory_mb_mean"]))
+        print("{:<40} {:<15.2f}".format("Peak Memory Median (MB):",
+                                        metrics["peak_memory_mb_median"]))
 
     print("=" * 60)
 
@@ -786,10 +793,9 @@ async def benchmark(args):
         print(f"Metrics saved to {args.output_file}")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Benchmark serving for diffusion models."
-    )
+        description="Benchmark serving for diffusion models.")
     parser.add_argument(
         "--backend",
         type=str,
@@ -800,11 +806,18 @@ def main():
         "--base-url",
         type=str,
         default=None,
-        help="Base URL of the server (e.g., http://localhost:8000). Overrides host/port.",
+        help=
+        "Base URL of the server (e.g., http://localhost:8000). Overrides host/port.",
     )
-    parser.add_argument("--host", type=str, default="localhost", help="Server host.")
+    parser.add_argument("--host",
+                        type=str,
+                        default="localhost",
+                        help="Server host.")
     parser.add_argument("--port", type=int, default=8000, help="Server port.")
-    parser.add_argument("--model", type=str, default="default", help="Model name.")
+    parser.add_argument("--model",
+                        type=str,
+                        default="default",
+                        help="Model name.")
     parser.add_argument(
         "--dataset",
         type=str,
@@ -823,7 +836,8 @@ def main():
             "video-to-video",
         ],
         default=None,
-        help="The task will be inferred from huggingface pipeline_tag. When huggingface pipeline_tag is not provided, --task will be used.",
+        help=
+        "The task will be inferred from huggingface pipeline_tag. When huggingface pipeline_tag is not provided, --task will be used.",
     )
     parser.add_argument(
         "--dataset-path",
@@ -831,9 +845,10 @@ def main():
         default=None,
         help="Path to local dataset file (optional).",
     )
-    parser.add_argument(
-        "--num-prompts", type=int, default=10, help="Number of prompts to benchmark."
-    )
+    parser.add_argument("--num-prompts",
+                        type=int,
+                        default=10,
+                        help="Number of prompts to benchmark.")
     parser.add_argument(
         "--max-concurrency",
         type=int,
@@ -844,21 +859,33 @@ def main():
         "--request-rate",
         type=float,
         default=float("inf"),
-        help="Number of requests per second. If this is inf, then all the requests are sent at time 0. "
+        help=
+        "Number of requests per second. If this is inf, then all the requests are sent at time 0. "
         "Otherwise, we use Poisson process to synthesize the request arrival times. Default is inf.",
     )
-    parser.add_argument("--width", type=int, default=None, help="Image/Video width.")
-    parser.add_argument("--height", type=int, default=None, help="Image/Video height.")
-    parser.add_argument(
-        "--num-frames", type=int, default=None, help="Number of frames (for video)."
-    )
-    parser.add_argument("--fps", type=int, default=None, help="FPS (for video).")
-    parser.add_argument(
-        "--output-file", type=str, default=None, help="Output JSON file for metrics."
-    )
-    parser.add_argument(
-        "--disable-tqdm", action="store_true", help="Disable progress bar."
-    )
+    parser.add_argument("--width",
+                        type=int,
+                        default=None,
+                        help="Image/Video width.")
+    parser.add_argument("--height",
+                        type=int,
+                        default=None,
+                        help="Image/Video height.")
+    parser.add_argument("--num-frames",
+                        type=int,
+                        default=None,
+                        help="Number of frames (for video).")
+    parser.add_argument("--fps",
+                        type=int,
+                        default=None,
+                        help="FPS (for video).")
+    parser.add_argument("--output-file",
+                        type=str,
+                        default=None,
+                        help="Output JSON file for metrics.")
+    parser.add_argument("--disable-tqdm",
+                        action="store_true",
+                        help="Disable progress bar.")
     parser.add_argument(
         "--log-level",
         type=str,

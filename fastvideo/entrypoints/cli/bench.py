@@ -32,37 +32,52 @@ class BenchSubcommand(CLISubcommand):
         pass
 
     def subparser_init(
-        self, subparsers: argparse._SubParsersAction
-    ) -> FlexibleArgumentParser:
+            self,
+            subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
         bench_parser = subparsers.add_parser(
             "bench",
             help="Benchmark a running FastVideo server",
-            usage="fastvideo bench [--dataset vbench] [--num-prompts N] [--port PORT]",
+            usage=
+            "fastvideo bench [--dataset vbench] [--num-prompts N] [--port PORT]",
         )
 
         bench_parser.add_argument(
-            "--backend", type=str, default=None,
+            "--backend",
+            type=str,
+            default=None,
             help="DEPRECATED: will be ignored.",
         )
         bench_parser.add_argument(
-            "--base-url", type=str, default=None,
-            help="Base URL of the server (e.g., http://localhost:8000). Overrides host/port.",
+            "--base-url",
+            type=str,
+            default=None,
+            help=
+            "Base URL of the server (e.g., http://localhost:8000). Overrides host/port.",
         )
         bench_parser.add_argument("--host", type=str, default="localhost")
         bench_parser.add_argument("--port", type=int, default=8000)
         bench_parser.add_argument("--model", type=str, default="default")
         bench_parser.add_argument(
-            "--dataset", type=str, default="vbench",
+            "--dataset",
+            type=str,
+            default="vbench",
             choices=["vbench", "random"],
         )
         bench_parser.add_argument(
-            "--task", type=str, default=None,
-            choices=["text-to-video", "image-to-video", "text-to-image", "image-to-image", "video-to-video"],
+            "--task",
+            type=str,
+            default=None,
+            choices=[
+                "text-to-video", "image-to-video", "text-to-image",
+                "image-to-image", "video-to-video"
+            ],
         )
         bench_parser.add_argument("--dataset-path", type=str, default=None)
         bench_parser.add_argument("--num-prompts", type=int, default=10)
         bench_parser.add_argument("--max-concurrency", type=int, default=1)
-        bench_parser.add_argument("--request-rate", type=float, default=float("inf"))
+        bench_parser.add_argument("--request-rate",
+                                  type=float,
+                                  default=float("inf"))
         bench_parser.add_argument("--width", type=int, default=None)
         bench_parser.add_argument("--height", type=int, default=None)
         bench_parser.add_argument("--num-frames", type=int, default=None)
@@ -70,7 +85,9 @@ class BenchSubcommand(CLISubcommand):
         bench_parser.add_argument("--output-file", type=str, default=None)
         bench_parser.add_argument("--disable-tqdm", action="store_true")
         bench_parser.add_argument(
-            "--log-level", type=str, default="INFO",
+            "--log-level",
+            type=str,
+            default="INFO",
             choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         )
 

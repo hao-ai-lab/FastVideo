@@ -2,7 +2,7 @@
 # (https://github.com/sgl-project/sglang/blob/main/python/sglang/multimodal_gen/runtime/entrypoints/openai/stores.py)
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class AsyncDictStore:
@@ -14,16 +14,15 @@ class AsyncDictStore:
     """
 
     def __init__(self) -> None:
-        self._items: Dict[str, Dict[str, Any]] = {}
+        self._items: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
 
-    async def upsert(self, key: str, value: Dict[str, Any]) -> None:
+    async def upsert(self, key: str, value: dict[str, Any]) -> None:
         async with self._lock:
             self._items[key] = value
 
-    async def update_fields(
-        self, key: str, updates: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+    async def update_fields(self, key: str,
+                            updates: dict[str, Any]) -> dict[str, Any] | None:
         async with self._lock:
             item = self._items.get(key)
             if item is None:
@@ -31,15 +30,15 @@ class AsyncDictStore:
             item.update(updates)
             return item
 
-    async def get(self, key: str) -> Optional[Dict[str, Any]]:
+    async def get(self, key: str) -> dict[str, Any] | None:
         async with self._lock:
             return self._items.get(key)
 
-    async def pop(self, key: str) -> Optional[Dict[str, Any]]:
+    async def pop(self, key: str) -> dict[str, Any] | None:
         async with self._lock:
             return self._items.pop(key, None)
 
-    async def list_values(self) -> List[Dict[str, Any]]:
+    async def list_values(self) -> list[dict[str, Any]]:
         async with self._lock:
             return list(self._items.values())
 

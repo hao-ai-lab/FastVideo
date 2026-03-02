@@ -5,7 +5,7 @@ import asyncio
 import json
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -43,9 +43,9 @@ router = APIRouter(prefix="/v1/videos", tags=["videos"])
 
 
 def _build_generation_kwargs(request_id: str,
-                             req: VideoGenerationsRequest) -> Dict[str, Any]:
+                             req: VideoGenerationsRequest) -> dict[str, Any]:
 
-    kwargs: Dict[str, Any] = {}
+    kwargs: dict[str, Any] = {}
     kwargs["prompt"] = req.prompt
 
     # Resolution
@@ -96,8 +96,8 @@ def _build_generation_kwargs(request_id: str,
 def _make_video_job(
     request_id: str,
     req: VideoGenerationsRequest,
-    kwargs: Dict[str, Any],
-) -> Dict[str, Any]:
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
     """Build the initial job dict stored in VIDEO_STORE."""
     w = kwargs.get("width", 0)
     h = kwargs.get("height", 0)
@@ -119,7 +119,7 @@ def _make_video_job(
     }
 
 
-async def _run_generation(request_id: str, kwargs: Dict[str, Any]) -> None:
+async def _run_generation(request_id: str, kwargs: dict[str, Any]) -> None:
     """
     Run video generation in a background thread (VideoGenerator.generate_video
     is synchronous) and update the store on completion or failure.
@@ -136,7 +136,7 @@ async def _run_generation(request_id: str, kwargs: Dict[str, Any]) -> None:
         )
 
         elapsed = time.perf_counter() - start
-        update: Dict[str, Any] = {
+        update: dict[str, Any] = {
             "status": "completed",
             "progress": 100,
             "completed_at": int(time.time()),
@@ -174,20 +174,20 @@ async def _run_generation(request_id: str, kwargs: Dict[str, Any]) -> None:
 async def create_video(
         request: Request,
         # multipart/form-data fields
-        prompt: Optional[str] = Form(None),
-        input_reference: Optional[UploadFile] = File(None),
-        reference_url: Optional[str] = Form(None),
-        model: Optional[str] = Form(None),
-        seconds: Optional[int] = Form(None),
-        size: Optional[str] = Form(None),
-        fps: Optional[int] = Form(None),
-        num_frames: Optional[int] = Form(None),
-        seed: Optional[int] = Form(1024),
-        negative_prompt: Optional[str] = Form(None),
-        guidance_scale: Optional[float] = Form(None),
-        num_inference_steps: Optional[int] = Form(None),
-        enable_teacache: Optional[bool] = Form(False),
-        extra_body: Optional[str] = Form(None),
+        prompt: str | None = Form(None),
+        input_reference: UploadFile | None = File(None),  # noqa: B008
+        reference_url: str | None = Form(None),
+        model: str | None = Form(None),
+        seconds: int | None = Form(None),
+        size: str | None = Form(None),
+        fps: int | None = Form(None),
+        num_frames: int | None = Form(None),
+        seed: int | None = Form(1024),
+        negative_prompt: str | None = Form(None),
+        guidance_scale: float | None = Form(None),
+        num_inference_steps: int | None = Form(None),
+        enable_teacache: bool | None = Form(False),
+        extra_body: str | None = Form(None),
 ):
     content_type = request.headers.get("content-type", "").lower()
     request_id = generate_request_id()
@@ -207,10 +207,12 @@ async def create_video(
             try:
                 input_path = await save_image_to_path(image, input_path)
             except Exception as e:
-                raise HTTPException(status_code=400,
-                                    detail=f"Failed to process image: {e}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to process image: {e}",
+                ) from None
 
-        extra: Dict[str, Any] = {}
+        extra: dict[str, Any] = {}
         if extra_body:
             try:
                 extra = json.loads(extra_body)
@@ -240,7 +242,7 @@ async def create_video(
         except Exception:
             body = {}
 
-        payload: Dict[str, Any] = dict(body or {})
+        payload: dict[str, Any] = dict(body or {})
         for key in ("extra_body", "extra_json"):
             extra = payload.pop(key, None)
             if isinstance(extra, dict):
@@ -257,15 +259,19 @@ async def create_video(
                 try:
                     input_path = await save_image_to_path(image, input_path)
                 except Exception as e:
-                    raise HTTPException(status_code=400,
-                                        detail=f"Failed to process image: {e}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Failed to process image: {e}",
+                    ) from None
                 payload["input_reference"] = input_path
 
         try:
             req = VideoGenerationsRequest(**payload)
         except Exception as e:
-            raise HTTPException(status_code=400,
-                                detail=f"Invalid request body: {e}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid request body: {e}",
+            ) from None
 
     logger.info("Video generation request %s: prompt=%s", request_id,
                 req.prompt[:100])
@@ -281,9 +287,9 @@ async def create_video(
 
 @router.get("", response_model=VideoListResponse)
 async def list_videos(
-        after: Optional[str] = Query(None),
-        limit: Optional[int] = Query(None, ge=1, le=100),
-        order: Optional[str] = Query("desc"),
+        after: str | None = Query(None),
+        limit: int | None = Query(None, ge=1, le=100),
+        order: str | None = Query("desc"),
 ):
     order = (order or "desc").lower()
     if order not in ("asc", "desc"):
@@ -322,7 +328,7 @@ async def delete_video(video_id: str = Path(...)):
 
 @router.get("/{video_id}/content")
 async def download_video_content(video_id: str = Path(...),
-                                 variant: Optional[str] = Query(None)):
+                                 variant: str | None = Query(None)):
     job = await VIDEO_STORE.get(video_id)
     if not job:
         raise HTTPException(status_code=404, detail="Video not found")
