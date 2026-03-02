@@ -21,7 +21,7 @@ Config keys used (YAML schema-v2):
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, TYPE_CHECKING, cast
 
 import torch
 import torch.nn.functional as F
@@ -41,51 +41,8 @@ from fastvideo.distillation.utils.config import (
 )
 from fastvideo.distillation.validators.base import ValidationRequest
 
-
-class _DFSFTModel(Protocol):
-    """Model contract for diffusion-forcing SFT (DFSFT).
-
-    DFSFT is implemented purely at the method (algorithm) layer and relies only
-    on operation-centric primitives exposed by the model plugin.
-    """
-
-    training_args: Any
-    noise_scheduler: Any
-
-    def on_train_start(self) -> None:
-        ...
-
-    def prepare_batch(
-        self,
-        raw_batch: dict[str, Any],
-        *,
-        current_vsa_sparsity: float = 0.0,
-        latents_source: Literal["data", "zeros"] = "data",
-    ) -> Any:
-        ...
-
-    def add_noise(
-        self,
-        clean_latents: torch.Tensor,
-        noise: torch.Tensor,
-        timestep: torch.Tensor,
-    ) -> torch.Tensor:
-        ...
-
-    def predict_noise(
-        self,
-        handle: RoleHandle,
-        noisy_latents: torch.Tensor,
-        timestep: torch.Tensor,
-        batch: Any,
-        *,
-        conditional: bool,
-        attn_kind: Literal["dense", "vsa"] = "dense",
-    ) -> torch.Tensor:
-        ...
-
-    def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
-        ...
+if TYPE_CHECKING:
+    from fastvideo.distillation.models.base import ModelBase
 
 
 @register_method("dfsft")
@@ -101,7 +58,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
         self,
         *,
         bundle: RoleManager,
-        model: _DFSFTModel,
+        model: ModelBase,
         method_config: dict[str, Any] | None = None,
         validation_config: dict[str, Any] | None = None,
         validator: Any | None = None,

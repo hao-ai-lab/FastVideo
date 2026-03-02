@@ -26,7 +26,7 @@ Config keys used (YAML schema-v2):
 
 from __future__ import annotations
 
-from typing import Any, cast, Literal, Protocol
+from typing import Any, cast, Literal, TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
@@ -48,77 +48,8 @@ from fastvideo.distillation.utils.config import (
     parse_betas,
 )
 
-
-class _DMD2Model(Protocol):
-    """Algorithm-specific model contract for :class:`DMD2Method`.
-
-    The method layer is intentionally model-agnostic: it should not import or
-    depend on any concrete pipeline/model implementation. Instead, all
-    model-specific primitives (batch preparation, noise schedule helpers,
-    forward-context management, and role-specific backward behavior) are
-    provided by a model plugin (e.g. ``WanModel``).
-
-    This ``Protocol`` documents the required surface area and helps static type
-    checkers/IDE tooling; it is not enforced at runtime (duck typing).
-    """
-
-    training_args: Any
-
-    def on_train_start(self) -> None:
-        ...
-
-    def prepare_batch(
-        self,
-        raw_batch: dict[str, Any],
-        *,
-        current_vsa_sparsity: float = 0.0,
-        latents_source: Literal["data", "zeros"] = "data",
-    ) -> Any:
-        ...
-
-    @property
-    def num_train_timesteps(self) -> int:
-        ...
-
-    def shift_and_clamp_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
-        ...
-
-    def add_noise(
-        self,
-        clean_latents: torch.Tensor,
-        noise: torch.Tensor,
-        timestep: torch.Tensor,
-    ) -> torch.Tensor:
-        ...
-
-    def predict_x0(
-        self,
-        handle: RoleHandle,
-        noisy_latents: torch.Tensor,
-        timestep: torch.Tensor,
-        batch: Any,
-        *,
-        conditional: bool,
-        cfg_uncond: dict[str, Any] | None = None,
-        attn_kind: Literal["dense", "vsa"] = "dense",
-    ) -> torch.Tensor:
-        ...
-
-    def predict_noise(
-        self,
-        handle: RoleHandle,
-        noisy_latents: torch.Tensor,
-        timestep: torch.Tensor,
-        batch: Any,
-        *,
-        conditional: bool,
-        cfg_uncond: dict[str, Any] | None = None,
-        attn_kind: Literal["dense", "vsa"] = "dense",
-    ) -> torch.Tensor:
-        ...
-
-    def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
-        ...
+if TYPE_CHECKING:
+    from fastvideo.distillation.models.base import ModelBase
 
 
 @register_method("dmd2")
@@ -140,7 +71,7 @@ class DMD2Method(DistillMethod):
         self,
         *,
         bundle: RoleManager,
-        model: _DMD2Model,
+        model: ModelBase,
         method_config: dict[str, Any] | None = None,
         validation_config: dict[str, Any] | None = None,
         validator: Any | None = None,

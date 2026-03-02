@@ -19,7 +19,7 @@ Config keys used (YAML schema-v2):
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, TYPE_CHECKING, cast
 
 import torch
 import torch.nn.functional as F
@@ -39,44 +39,8 @@ from fastvideo.distillation.utils.config import (
     parse_betas,
 )
 
-
-class _FineTuneModel(Protocol):
-    """Model contract for :class:`FineTuneMethod`.
-
-    Finetuning is implemented as a method (algorithm layer) on top of the
-    model-plugin-provided model plugin. The method must remain model-plugin
-    agnostic, so it consumes only operation-centric primitives exposed by the
-    model.
-    """
-
-    training_args: Any
-
-    def on_train_start(self) -> None:
-        ...
-
-    def prepare_batch(
-        self,
-        raw_batch: dict[str, Any],
-        *,
-        current_vsa_sparsity: float = 0.0,
-        latents_source: Literal["data", "zeros"] = "data",
-    ) -> Any:
-        ...
-
-    def predict_noise(
-        self,
-        handle: RoleHandle,
-        noisy_latents: torch.Tensor,
-        timestep: torch.Tensor,
-        batch: Any,
-        *,
-        conditional: bool,
-        attn_kind: Literal["dense", "vsa"] = "dense",
-    ) -> torch.Tensor:
-        ...
-
-    def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
-        ...
+if TYPE_CHECKING:
+    from fastvideo.distillation.models.base import ModelBase
 
 
 @register_method("finetune")
@@ -93,7 +57,7 @@ class FineTuneMethod(DistillMethod):
         self,
         *,
         bundle: RoleManager,
-        model: _FineTuneModel,
+        model: ModelBase,
         method_config: dict[str, Any] | None = None,
         validation_config: dict[str, Any] | None = None,
         validator: Any | None = None,
