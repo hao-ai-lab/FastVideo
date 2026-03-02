@@ -14,31 +14,27 @@ Read these files to build your context:
 | 4 | `docs/training/finetune.md` | Training arguments, parallelism, LoRA, validation |
 | 5 | `docs/contributing/coding_agents.md` | How to add model pipelines with agent assistance |
 
-## Step 2: Load Agent Memory
+## Step 2: Discover Available Resources
 
-| File | Purpose |
-|------|---------|
-| `.agents/memory/codebase-map/README.md` | Structural index of the entire repo |
-| `.agents/memory/experiment-journal/README.md` | Log of all past experiments and insights |
-| `.agents/memory/evaluation-registry/README.md` | Available metrics and their status |
+Read these two index files to see what skills and memory modules exist:
+
+- **`.agents/skills/index.jsonl`** — catalog of all agent skills (name + description)
+- **`.agents/memory/index.jsonl`** — catalog of all memory modules (name + description)
+
+Each entry has a `path` field pointing to the full content. Only load the
+full README.md for modules relevant to your current task.
 
 ## Step 3: Check for Existing Skills & SOPs
 
 Before writing new code or procedures:
 
-1. **Skills**: Browse `.agents/skills/` — each `.md` file is a self-contained skill with instructions.
+1. **Skills**: Read `.agents/skills/index.jsonl` — find a matching skill by description.
 2. **Workflows/SOPs**: Browse `.agents/workflows/` — step-by-step procedures for common tasks.
 3. **Lessons**: Browse `.agents/lessons/` — known pitfalls and their fixes.
 
-If a skill or SOP exists for your task, **use it**. If not, you are in **exploration mode** — see Step 5.
+If a skill or SOP exists for your task, **use it**. If not, you are in **exploration mode** — see Step 4.
 
-## Step 4: Check Related Work
-
-If your task involves evaluation metrics, training techniques, or architecture decisions:
-- Browse `.agents/memory/related-work/` for indexed papers and repos.
-- Use the `search-related-work` skill if available.
-
-## Step 5: Exploration Mode
+## Step 4: Exploration Mode
 
 If no existing skill/SOP covers your task:
 
