@@ -7,6 +7,13 @@ CUDA kernels for FastVideo video generation.
 ### Standard Installation (Local Development)
 This will automatically detect your GPU architecture. If an NVIDIA Hopper (H100/sm_90a) GPU is detected, ThunderKittens kernels will be enabled. Otherwise, they will be skipped, and the package will use Triton fallbacks at runtime.
 
+Before installation, set CUDA toolchain paths:
+
+```bash
+export CUDA_HOME=/usr/local/cuda
+export CUDACXX=$CUDA_HOME/bin/nvcc
+```
+
 ```bash
 git submodule update --init --recursive
 cd fastvideo-kernel
@@ -62,6 +69,8 @@ This package also includes kernels from [TurboDiffusion](https://github.com/thu-
   - Any CUDA GPU for Triton-based fallbacks.
 - **Build**:
   - CUDA Toolkit 12.3+
+  - `CUDA_HOME` must be set (for example, `/usr/local/cuda`)
+  - `CUDACXX` must be set (for example, `$CUDA_HOME/bin/nvcc`)
   - C++20 compatible compiler (GCC 10+, Clang 11+)
 
 ## Acknowledgement

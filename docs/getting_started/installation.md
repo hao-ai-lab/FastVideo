@@ -8,17 +8,9 @@ FastVideo supports the following hardware platforms:
 
 ## Quick Installation
 
-### Using pip
+### Using uv (recommended)
 
-```bash
-# Create and activate a new conda environment
-conda create -n fastvideo python=3.12
-conda activate fastvideo
-
-pip install fastvideo
-```
-
-### Using uv
+Use uv as the default environment manager for faster and more stable installs.
 
 ```bash
 # Create and activate a new uv environment
@@ -28,21 +20,32 @@ source .venv/bin/activate
 uv pip install fastvideo
 ```
 
+### Using Conda (alternative)
+
+```bash
+# Create and activate a new conda environment
+conda create -n fastvideo python=3.12 -y
+conda activate fastvideo
+
+pip install fastvideo
+```
+
 ### From source
 
 ```bash
 git clone https://github.com/hao-ai-lab/FastVideo.git
 cd FastVideo
-pip install -e .
-
-# or if you are using uv
 uv pip install -e .
+
+# optional: install flash-attn
+uv pip install flash-attn --no-build-isolation -v
 ```
 
-Also optionally install flash-attn:
+Alternative with Conda environment:
 
 ```bash
-pip install flash-attn --no-build-isolation
+pip install -e .
+pip install flash-attn --no-build-isolation -v
 ```
 
 ## Hardware Requirements
