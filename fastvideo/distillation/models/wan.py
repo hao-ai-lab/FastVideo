@@ -184,30 +184,17 @@ class WanModel(ModelBase):
         )
         self.start_step = 0
 
-    def _get_training_dtype(self) -> torch.dtype:
-        return torch.bfloat16
-
-    def _init_timestep_mechanics(self) -> None:
-        self.timestep_shift = float(self.training_args.pipeline_config.flow_shift)
-        self.num_train_timestep = int(self.noise_scheduler.num_train_timesteps)
-        self.min_timestep = int(self.training_args.min_timestep_ratio * self.num_train_timestep)
-        self.max_timestep = int(self.training_args.max_timestep_ratio * self.num_train_timestep)
-
-        boundary_ratio = getattr(self.training_args, "boundary_ratio", None)
-        self.boundary_timestep: float | None = (
-            float(boundary_ratio) * float(self.num_train_timestep)
-            if boundary_ratio is not None
-            else None
-        )
-
+    # ModelBase override: num_train_timesteps
     @property
     def num_train_timesteps(self) -> int:
         return int(self.num_train_timestep)
 
+    # ModelBase override: shift_and_clamp_timestep
     def shift_and_clamp_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
         timestep = shift_timestep(timestep, self.timestep_shift, self.num_train_timestep)
         return timestep.clamp(self.min_timestep, self.max_timestep)
 
+    # ModelBase override: on_train_start
     def on_train_start(self) -> None:
         seed = self.training_args.seed
         if seed is None:
@@ -226,6 +213,7 @@ class WanModel(ModelBase):
 
         self.ensure_negative_conditioning()
 
+    # ModelBase override: get_rng_generators
     def get_rng_generators(self) -> dict[str, torch.Generator]:
         """Return RNG generators that should be checkpointed for exact resume."""
 
@@ -236,6 +224,185 @@ class WanModel(ModelBase):
             generators["noise_cuda"] = self.noise_gen_cuda
 
         return generators
+
+    # ModelBase override: prepare_batch
+    def prepare_batch(
+        self,
+        raw_batch: dict[str, Any],
+        *,
+        current_vsa_sparsity: float = 0.0,
+        latents_source: Literal["data", "zeros"] = "data",
+    ) -> TrainingBatch:
+        """Convert a dataloader batch into forward primitives for methods."""
+
+        self.ensure_negative_conditioning()
+
+        dtype = self._get_training_dtype()
+        device = self.device
+
+        training_batch = TrainingBatch(current_vsa_sparsity=current_vsa_sparsity)
+        encoder_hidden_states = raw_batch["text_embedding"]
+        encoder_attention_mask = raw_batch["text_attention_mask"]
+        infos = raw_batch.get("info_list")
+
+        if latents_source == "zeros":
+            batch_size = encoder_hidden_states.shape[0]
+            vae_config = self.training_args.pipeline_config.vae_config.arch_config
+            num_channels = vae_config.z_dim
+            spatial_compression_ratio = vae_config.spatial_compression_ratio
+            latent_height = self.training_args.num_height // spatial_compression_ratio
+            latent_width = self.training_args.num_width // spatial_compression_ratio
+            latents = torch.zeros(
+                batch_size,
+                num_channels,
+                self.training_args.num_latent_t,
+                latent_height,
+                latent_width,
+                device=device,
+                dtype=dtype,
+            )
+        elif latents_source == "data":
+            if "vae_latent" not in raw_batch:
+                raise ValueError("vae_latent not found in batch and latents_source='data'")
+            latents = raw_batch["vae_latent"]
+            latents = latents[:, :, : self.training_args.num_latent_t]
+            latents = latents.to(device, dtype=dtype)
+        else:
+            raise ValueError(f"Unknown latents_source: {latents_source!r}")
+
+        training_batch.latents = latents
+        training_batch.encoder_hidden_states = encoder_hidden_states.to(device, dtype=dtype)
+        training_batch.encoder_attention_mask = encoder_attention_mask.to(device, dtype=dtype)
+        training_batch.infos = infos
+
+        training_batch.latents = normalize_dit_input("wan", training_batch.latents, self.vae)
+        training_batch = self._prepare_dit_inputs(training_batch)
+        training_batch = self._build_attention_metadata(training_batch)
+
+        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
+        if training_batch.attn_metadata is not None:
+            training_batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore[attr-defined]
+
+        return training_batch
+
+    # ModelBase override: add_noise
+    def add_noise(
+        self,
+        clean_latents: torch.Tensor,
+        noise: torch.Tensor,
+        timestep: torch.Tensor,
+    ) -> torch.Tensor:
+        b, t = clean_latents.shape[:2]
+        noisy = self.noise_scheduler.add_noise(
+            clean_latents.flatten(0, 1),
+            noise.flatten(0, 1),
+            timestep,
+        ).unflatten(0, (b, t))
+        return noisy
+
+    # ModelBase override: predict_x0
+    def predict_x0(
+        self,
+        handle: RoleHandle,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> torch.Tensor:
+        device_type = self.device.type
+        dtype = noisy_latents.dtype
+        if conditional:
+            text_dict = batch.conditional_dict
+            if text_dict is None:
+                raise RuntimeError("Missing conditional_dict in TrainingBatch")
+        else:
+            text_dict = self._get_uncond_text_dict(batch, cfg_uncond=cfg_uncond)
+
+        if attn_kind == "dense":
+            attn_metadata = batch.attn_metadata
+        elif attn_kind == "vsa":
+            attn_metadata = batch.attn_metadata_vsa
+        else:
+            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
+
+        with torch.autocast(device_type, dtype=dtype), set_forward_context(
+            current_timestep=batch.timesteps,
+            attn_metadata=attn_metadata,
+        ):
+            input_kwargs = self._build_distill_input_kwargs(noisy_latents, timestep, text_dict)
+            transformer = self._get_transformer(handle, timestep)
+            pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
+            pred_x0 = pred_noise_to_pred_video(
+                pred_noise=pred_noise.flatten(0, 1),
+                noise_input_latent=noisy_latents.flatten(0, 1),
+                timestep=timestep,
+                scheduler=self.noise_scheduler,
+            ).unflatten(0, pred_noise.shape[:2])
+        return pred_x0
+
+    # ModelBase override: predict_noise
+    def predict_noise(
+        self,
+        handle: RoleHandle,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> torch.Tensor:
+        device_type = self.device.type
+        dtype = noisy_latents.dtype
+        if conditional:
+            text_dict = batch.conditional_dict
+            if text_dict is None:
+                raise RuntimeError("Missing conditional_dict in TrainingBatch")
+        else:
+            text_dict = self._get_uncond_text_dict(batch, cfg_uncond=cfg_uncond)
+
+        if attn_kind == "dense":
+            attn_metadata = batch.attn_metadata
+        elif attn_kind == "vsa":
+            attn_metadata = batch.attn_metadata_vsa
+        else:
+            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
+
+        with torch.autocast(device_type, dtype=dtype), set_forward_context(
+            current_timestep=batch.timesteps,
+            attn_metadata=attn_metadata,
+        ):
+            input_kwargs = self._build_distill_input_kwargs(noisy_latents, timestep, text_dict)
+            transformer = self._get_transformer(handle, timestep)
+            pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
+        return pred_noise
+
+    # ModelBase override: backward
+    def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
+        timesteps, attn_metadata = ctx
+        with set_forward_context(current_timestep=timesteps, attn_metadata=attn_metadata):
+            (loss / max(1, int(grad_accum_rounds))).backward()
+
+    # --- Wan-specific helpers below ---
+
+    def _get_training_dtype(self) -> torch.dtype:
+        return torch.bfloat16
+
+    def _init_timestep_mechanics(self) -> None:
+        self.timestep_shift = float(self.training_args.pipeline_config.flow_shift)
+        self.num_train_timestep = int(self.noise_scheduler.num_train_timesteps)
+        self.min_timestep = int(self.training_args.min_timestep_ratio * self.num_train_timestep)
+        self.max_timestep = int(self.training_args.max_timestep_ratio * self.num_train_timestep)
+
+        boundary_ratio = getattr(self.training_args, "boundary_ratio", None)
+        self.boundary_timestep: float | None = (
+            float(boundary_ratio) * float(self.num_train_timestep)
+            if boundary_ratio is not None
+            else None
+        )
 
     def ensure_negative_conditioning(self) -> None:
         if self.negative_prompt_embeds is not None:
@@ -439,77 +606,6 @@ class WanModel(ModelBase):
         training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         return training_batch
 
-    def prepare_batch(
-        self,
-        raw_batch: dict[str, Any],
-        *,
-        current_vsa_sparsity: float = 0.0,
-        latents_source: Literal["data", "zeros"] = "data",
-    ) -> TrainingBatch:
-        self.ensure_negative_conditioning()
-
-        dtype = self._get_training_dtype()
-        device = self.device
-
-        training_batch = TrainingBatch(current_vsa_sparsity=current_vsa_sparsity)
-        encoder_hidden_states = raw_batch["text_embedding"]
-        encoder_attention_mask = raw_batch["text_attention_mask"]
-        infos = raw_batch.get("info_list")
-
-        if latents_source == "zeros":
-            batch_size = encoder_hidden_states.shape[0]
-            vae_config = self.training_args.pipeline_config.vae_config.arch_config
-            num_channels = vae_config.z_dim
-            spatial_compression_ratio = vae_config.spatial_compression_ratio
-            latent_height = self.training_args.num_height // spatial_compression_ratio
-            latent_width = self.training_args.num_width // spatial_compression_ratio
-            latents = torch.zeros(
-                batch_size,
-                num_channels,
-                self.training_args.num_latent_t,
-                latent_height,
-                latent_width,
-                device=device,
-                dtype=dtype,
-            )
-        elif latents_source == "data":
-            if "vae_latent" not in raw_batch:
-                raise ValueError("vae_latent not found in batch and latents_source='data'")
-            latents = raw_batch["vae_latent"]
-            latents = latents[:, :, : self.training_args.num_latent_t]
-            latents = latents.to(device, dtype=dtype)
-        else:
-            raise ValueError(f"Unknown latents_source: {latents_source!r}")
-
-        training_batch.latents = latents
-        training_batch.encoder_hidden_states = encoder_hidden_states.to(device, dtype=dtype)
-        training_batch.encoder_attention_mask = encoder_attention_mask.to(device, dtype=dtype)
-        training_batch.infos = infos
-
-        training_batch.latents = normalize_dit_input("wan", training_batch.latents, self.vae)
-        training_batch = self._prepare_dit_inputs(training_batch)
-        training_batch = self._build_attention_metadata(training_batch)
-
-        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
-        if training_batch.attn_metadata is not None:
-            training_batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore[attr-defined]
-
-        return training_batch
-
-    def add_noise(
-        self,
-        clean_latents: torch.Tensor,
-        noise: torch.Tensor,
-        timestep: torch.Tensor,
-    ) -> torch.Tensor:
-        b, t = clean_latents.shape[:2]
-        noisy = self.noise_scheduler.add_noise(
-            clean_latents.flatten(0, 1),
-            noise.flatten(0, 1),
-            timestep,
-        ).unflatten(0, (b, t))
-        return noisy
-
     def _build_distill_input_kwargs(
         self,
         noise_input: torch.Tensor,
@@ -630,86 +726,3 @@ class WanModel(ModelBase):
             "cfg_uncond.text must be one of {negative_prompt, keep, zero, drop}, got "
             f"{text_policy_raw!r}"
         )
-
-    def predict_x0(
-        self,
-        handle: RoleHandle,
-        noisy_latents: torch.Tensor,
-        timestep: torch.Tensor,
-        batch: TrainingBatch,
-        *,
-        conditional: bool,
-        cfg_uncond: dict[str, Any] | None = None,
-        attn_kind: Literal["dense", "vsa"] = "dense",
-    ) -> torch.Tensor:
-        device_type = self.device.type
-        dtype = noisy_latents.dtype
-        if conditional:
-            text_dict = batch.conditional_dict
-            if text_dict is None:
-                raise RuntimeError("Missing conditional_dict in TrainingBatch")
-        else:
-            text_dict = self._get_uncond_text_dict(batch, cfg_uncond=cfg_uncond)
-
-        if attn_kind == "dense":
-            attn_metadata = batch.attn_metadata
-        elif attn_kind == "vsa":
-            attn_metadata = batch.attn_metadata_vsa
-        else:
-            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
-
-        with torch.autocast(device_type, dtype=dtype), set_forward_context(
-            current_timestep=batch.timesteps,
-            attn_metadata=attn_metadata,
-        ):
-            input_kwargs = self._build_distill_input_kwargs(noisy_latents, timestep, text_dict)
-            transformer = self._get_transformer(handle, timestep)
-            pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
-            pred_x0 = pred_noise_to_pred_video(
-                pred_noise=pred_noise.flatten(0, 1),
-                noise_input_latent=noisy_latents.flatten(0, 1),
-                timestep=timestep,
-                scheduler=self.noise_scheduler,
-            ).unflatten(0, pred_noise.shape[:2])
-        return pred_x0
-
-    def predict_noise(
-        self,
-        handle: RoleHandle,
-        noisy_latents: torch.Tensor,
-        timestep: torch.Tensor,
-        batch: TrainingBatch,
-        *,
-        conditional: bool,
-        cfg_uncond: dict[str, Any] | None = None,
-        attn_kind: Literal["dense", "vsa"] = "dense",
-    ) -> torch.Tensor:
-        device_type = self.device.type
-        dtype = noisy_latents.dtype
-        if conditional:
-            text_dict = batch.conditional_dict
-            if text_dict is None:
-                raise RuntimeError("Missing conditional_dict in TrainingBatch")
-        else:
-            text_dict = self._get_uncond_text_dict(batch, cfg_uncond=cfg_uncond)
-
-        if attn_kind == "dense":
-            attn_metadata = batch.attn_metadata
-        elif attn_kind == "vsa":
-            attn_metadata = batch.attn_metadata_vsa
-        else:
-            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
-
-        with torch.autocast(device_type, dtype=dtype), set_forward_context(
-            current_timestep=batch.timesteps,
-            attn_metadata=attn_metadata,
-        ):
-            input_kwargs = self._build_distill_input_kwargs(noisy_latents, timestep, text_dict)
-            transformer = self._get_transformer(handle, timestep)
-            pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
-        return pred_noise
-
-    def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
-        timesteps, attn_metadata = ctx
-        with set_forward_context(current_timestep=timesteps, attn_metadata=attn_metadata):
-            (loss / max(1, int(grad_accum_rounds))).backward()

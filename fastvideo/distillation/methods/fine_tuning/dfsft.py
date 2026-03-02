@@ -126,6 +126,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
 
         self._init_optimizers_and_schedulers()
 
+    # DistillMethod override: build
     @classmethod
     def build(
         cls,
@@ -142,6 +143,239 @@ class DiffusionForcingSFTMethod(DistillMethod):
             validation_config=cfg.validation,
             validator=validator,
         )
+
+    # DistillMethod override: single_train_step
+    def single_train_step(
+        self,
+        batch: dict[str, Any],
+        iteration: int,
+        *,
+        current_vsa_sparsity: float = 0.0,
+    ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
+        del iteration
+        training_batch = self.model.prepare_batch(
+            batch,
+            current_vsa_sparsity=current_vsa_sparsity,
+            latents_source="data",
+        )
+
+        if training_batch.latents is None:
+            raise RuntimeError("model.prepare_batch() must set TrainingBatch.latents")
+
+        clean_latents = training_batch.latents
+        if not torch.is_tensor(clean_latents):
+            raise TypeError("TrainingBatch.latents must be a torch.Tensor")
+        if clean_latents.ndim != 5:
+            raise ValueError(
+                "TrainingBatch.latents must be [B, T, C, H, W], got "
+                f"shape={tuple(clean_latents.shape)}"
+            )
+
+        batch_size, num_latents = int(clean_latents.shape[0]), int(clean_latents.shape[1])
+
+        transformer = self.student.require_module("transformer")
+        expected_chunk = getattr(transformer, "num_frame_per_block", None)
+        if expected_chunk is not None and int(expected_chunk) != int(self._chunk_size):
+            raise ValueError(
+                "DFSFT chunk_size must match transformer.num_frame_per_block for "
+                f"causal training (got {self._chunk_size}, expected {expected_chunk})."
+            )
+
+        timestep_indices = self._sample_t_inhom_indices(
+            batch_size=batch_size,
+            num_latents=num_latents,
+            device=clean_latents.device,
+        )
+        sp_size = int(getattr(self.training_args, "sp_size", 1) or 1)
+        sp_group = getattr(self.model, "sp_group", None)
+        if sp_size > 1 and sp_group is not None and hasattr(sp_group, "broadcast"):
+            sp_group.broadcast(timestep_indices, src=0)
+
+        scheduler = getattr(self.model, "noise_scheduler", None)
+        if scheduler is None:
+            raise ValueError("DFSFT requires model.noise_scheduler")
+
+        schedule_timesteps = scheduler.timesteps.to(
+            device=clean_latents.device, dtype=torch.float32
+        )
+        schedule_sigmas = scheduler.sigmas.to(
+            device=clean_latents.device, dtype=clean_latents.dtype
+        )
+        t_inhom = schedule_timesteps[timestep_indices]
+
+        noise = getattr(training_batch, "noise", None)
+        if noise is None:
+            noise = torch.randn_like(clean_latents)
+        else:
+            if not torch.is_tensor(noise):
+                raise TypeError("TrainingBatch.noise must be a torch.Tensor when set")
+            noise = noise.permute(0, 2, 1, 3, 4).to(dtype=clean_latents.dtype)
+
+        noisy_latents = self.model.add_noise(
+            clean_latents,
+            noise,
+            t_inhom.flatten(),
+        )
+
+        pred = self.model.predict_noise(
+            self.student,
+            noisy_latents,
+            t_inhom,
+            training_batch,
+            conditional=True,
+            attn_kind=self._attn_kind,
+        )
+
+        if bool(getattr(self.training_args, "precondition_outputs", False)):
+            sigmas = schedule_sigmas[timestep_indices]
+            sigmas = sigmas.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+            pred_x0 = noisy_latents - pred * sigmas
+            loss = F.mse_loss(pred_x0.float(), clean_latents.float())
+        else:
+            target = noise - clean_latents
+            loss = F.mse_loss(pred.float(), target.float())
+
+        if self._attn_kind == "vsa":
+            attn_metadata = training_batch.attn_metadata_vsa
+        else:
+            attn_metadata = training_batch.attn_metadata
+
+        loss_map = {"total_loss": loss, "dfsft_loss": loss}
+        outputs: dict[str, Any] = {"_fv_backward": (training_batch.timesteps, attn_metadata)}
+        metrics: dict[str, LogScalar] = {}
+        return loss_map, outputs, metrics
+
+    # DistillMethod override: backward
+    def backward(
+        self,
+        loss_map: dict[str, torch.Tensor],
+        outputs: dict[str, Any],
+        *,
+        grad_accum_rounds: int = 1,
+    ) -> None:
+        grad_accum_rounds = max(1, int(grad_accum_rounds))
+        ctx = outputs.get("_fv_backward")
+        if ctx is None:
+            super().backward(loss_map, outputs, grad_accum_rounds=grad_accum_rounds)
+            return
+        self.model.backward(
+            loss_map["total_loss"],
+            ctx,
+            grad_accum_rounds=grad_accum_rounds,
+        )
+
+    # DistillMethod override: get_optimizers
+    def get_optimizers(self, iteration: int) -> list[torch.optim.Optimizer]:
+        del iteration
+        return list(self.student.optimizers.values())
+
+    # DistillMethod override: get_lr_schedulers
+    def get_lr_schedulers(self, iteration: int) -> list[Any]:
+        del iteration
+        return list(self.student.lr_schedulers.values())
+
+    # DistillMethod override: optimizers_schedulers_step
+    def optimizers_schedulers_step(self, iteration: int) -> None:
+        for module in self.student.modules.values():
+            self._clip_grad_norm(module)
+        super().optimizers_schedulers_step(iteration)
+
+    # DistillTrainer hook: on_train_start
+    def on_train_start(self) -> None:
+        self.model.on_train_start()
+
+    # DistillTrainer hook: log_validation
+    def log_validation(self, iteration: int) -> None:
+        validator = getattr(self, "validator", None)
+        if validator is None:
+            return
+        if not self._is_validation_enabled():
+            return
+
+        every_steps = self._parse_validation_every_steps()
+        if every_steps <= 0:
+            return
+        if iteration % every_steps != 0:
+            return
+
+        dataset_file = self._parse_validation_dataset_file()
+        sampling_steps = self._parse_validation_sampling_steps()
+        guidance_scale = self._parse_validation_guidance_scale()
+
+        sampler_kind_raw = self.validation_config.get("sampler_kind", "ode")
+        if not isinstance(sampler_kind_raw, str):
+            raise ValueError(
+                "training.validation.sampler_kind must be a string when set, got "
+                f"{type(sampler_kind_raw).__name__}"
+            )
+        sampler_kind = sampler_kind_raw.strip().lower()
+        if sampler_kind not in {"ode", "sde"}:
+            raise ValueError(
+                "training.validation.sampler_kind must be one of {ode, sde}, got "
+                f"{sampler_kind_raw!r}"
+            )
+        sampler_kind = cast(Literal["ode", "sde"], sampler_kind)
+        ode_solver = self._parse_validation_ode_solver(sampler_kind=sampler_kind)
+
+        rollout_mode_raw = self.validation_config.get("rollout_mode", "parallel")
+        if not isinstance(rollout_mode_raw, str):
+            raise ValueError(
+                "training.validation.rollout_mode must be a string when set, got "
+                f"{type(rollout_mode_raw).__name__}"
+            )
+        rollout_mode = rollout_mode_raw.strip().lower()
+        if rollout_mode not in {"parallel", "streaming"}:
+            raise ValueError(
+                "training.validation.rollout_mode must be one of {parallel, streaming}, "
+                f"got {rollout_mode_raw!r}"
+            )
+
+        output_dir = self.validation_config.get("output_dir", None)
+        if output_dir is not None and not isinstance(output_dir, str):
+            raise ValueError(
+                "training.validation.output_dir must be a string when set, got "
+                f"{type(output_dir).__name__}"
+            )
+
+        num_actions = get_optional_int(
+            self.validation_config,
+            "num_frames",
+            where="training.validation.num_frames",
+        )
+        if num_actions is not None and num_actions <= 0:
+            raise ValueError("training.validation.num_frames must be > 0 when set")
+
+        request = ValidationRequest(
+            sample_handle=self.student,
+            dataset_file=dataset_file,
+            sampling_steps=sampling_steps,
+            sampler_kind=sampler_kind,
+            rollout_mode=cast(Literal["parallel", "streaming"], rollout_mode),
+            ode_solver=ode_solver,
+            sampling_timesteps=None,
+            guidance_scale=guidance_scale,
+            num_frames=num_actions,
+            output_dir=output_dir,
+        )
+        validator.log_validation(iteration, request=request)
+
+    # Checkpoint hook: get_rng_generators
+    def get_rng_generators(self) -> dict[str, torch.Generator]:
+        """Return RNG generators that should be checkpointed for exact resume."""
+
+        generators: dict[str, torch.Generator] = {}
+
+        model = getattr(self, "model", None)
+        get_model_generators = getattr(model, "get_rng_generators", None)
+        if callable(get_model_generators):
+            generators.update(get_model_generators())
+
+        validator = getattr(self, "validator", None)
+        validation_gen = getattr(validator, "validation_random_generator", None)
+        if isinstance(validation_gen, torch.Generator):
+            generators["validation_cpu"] = validation_gen
+
+        return generators
 
     def _parse_attn_kind(self, raw: Any) -> Literal["dense", "vsa"]:
         if raw in (None, ""):
@@ -278,9 +512,6 @@ class DiffusionForcingSFTMethod(DistillMethod):
             scheduler_name=student_sched,
         )
 
-    def on_train_start(self) -> None:
-        self.model.on_train_start()
-
     def _is_validation_enabled(self) -> bool:
         cfg = self.validation_config
         if not cfg:
@@ -385,95 +616,6 @@ class DiffusionForcingSFTMethod(DistillMethod):
             f"{raw!r}"
         )
 
-    def log_validation(self, iteration: int) -> None:
-        validator = getattr(self, "validator", None)
-        if validator is None:
-            return
-        if not self._is_validation_enabled():
-            return
-
-        every_steps = self._parse_validation_every_steps()
-        if every_steps <= 0:
-            return
-        if iteration % every_steps != 0:
-            return
-
-        dataset_file = self._parse_validation_dataset_file()
-        sampling_steps = self._parse_validation_sampling_steps()
-        guidance_scale = self._parse_validation_guidance_scale()
-
-        sampler_kind_raw = self.validation_config.get("sampler_kind", "ode")
-        if not isinstance(sampler_kind_raw, str):
-            raise ValueError(
-                "training.validation.sampler_kind must be a string when set, got "
-                f"{type(sampler_kind_raw).__name__}"
-            )
-        sampler_kind = sampler_kind_raw.strip().lower()
-        if sampler_kind not in {"ode", "sde"}:
-            raise ValueError(
-                "training.validation.sampler_kind must be one of {ode, sde}, got "
-                f"{sampler_kind_raw!r}"
-            )
-        sampler_kind = cast(Literal["ode", "sde"], sampler_kind)
-        ode_solver = self._parse_validation_ode_solver(sampler_kind=sampler_kind)
-
-        rollout_mode_raw = self.validation_config.get("rollout_mode", "parallel")
-        if not isinstance(rollout_mode_raw, str):
-            raise ValueError(
-                "training.validation.rollout_mode must be a string when set, got "
-                f"{type(rollout_mode_raw).__name__}"
-            )
-        rollout_mode = rollout_mode_raw.strip().lower()
-        if rollout_mode not in {"parallel", "streaming"}:
-            raise ValueError(
-                "training.validation.rollout_mode must be one of {parallel, streaming}, "
-                f"got {rollout_mode_raw!r}"
-            )
-
-        output_dir = self.validation_config.get("output_dir", None)
-        if output_dir is not None and not isinstance(output_dir, str):
-            raise ValueError(
-                "training.validation.output_dir must be a string when set, got "
-                f"{type(output_dir).__name__}"
-            )
-
-        num_actions = get_optional_int(
-            self.validation_config,
-            "num_frames",
-            where="training.validation.num_frames",
-        )
-        if num_actions is not None and num_actions <= 0:
-            raise ValueError("training.validation.num_frames must be > 0 when set")
-
-        request = ValidationRequest(
-            sample_handle=self.student,
-            dataset_file=dataset_file,
-            sampling_steps=sampling_steps,
-            sampler_kind=sampler_kind,
-            rollout_mode=cast(Literal["parallel", "streaming"], rollout_mode),
-            ode_solver=ode_solver,
-            sampling_timesteps=None,
-            guidance_scale=guidance_scale,
-            num_frames=num_actions,
-            output_dir=output_dir,
-        )
-        validator.log_validation(iteration, request=request)
-
-    def get_rng_generators(self) -> dict[str, torch.Generator]:
-        generators: dict[str, torch.Generator] = {}
-
-        model = getattr(self, "model", None)
-        get_model_generators = getattr(model, "get_rng_generators", None)
-        if callable(get_model_generators):
-            generators.update(get_model_generators())
-
-        validator = getattr(self, "validator", None)
-        validation_gen = getattr(validator, "validation_random_generator", None)
-        if isinstance(validation_gen, torch.Generator):
-            generators["validation_cpu"] = validation_gen
-
-        return generators
-
     def _sample_t_inhom_indices(self, *, batch_size: int, num_latents: int, device: torch.device) -> torch.Tensor:
         chunk_size = self._chunk_size
         num_chunks = (num_latents + chunk_size - 1) // chunk_size
@@ -487,132 +629,6 @@ class DiffusionForcingSFTMethod(DistillMethod):
         )
         expanded = chunk_indices.repeat_interleave(chunk_size, dim=1)
         return expanded[:, :num_latents]
-
-    def single_train_step(
-        self,
-        batch: dict[str, Any],
-        iteration: int,
-        *,
-        current_vsa_sparsity: float = 0.0,
-    ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
-        del iteration
-        training_batch = self.model.prepare_batch(
-            batch,
-            current_vsa_sparsity=current_vsa_sparsity,
-            latents_source="data",
-        )
-
-        if training_batch.latents is None:
-            raise RuntimeError("model.prepare_batch() must set TrainingBatch.latents")
-
-        clean_latents = training_batch.latents
-        if not torch.is_tensor(clean_latents):
-            raise TypeError("TrainingBatch.latents must be a torch.Tensor")
-        if clean_latents.ndim != 5:
-            raise ValueError(
-                "TrainingBatch.latents must be [B, T, C, H, W], got "
-                f"shape={tuple(clean_latents.shape)}"
-            )
-
-        batch_size, num_latents = int(clean_latents.shape[0]), int(clean_latents.shape[1])
-
-        transformer = self.student.require_module("transformer")
-        expected_chunk = getattr(transformer, "num_frame_per_block", None)
-        if expected_chunk is not None and int(expected_chunk) != int(self._chunk_size):
-            raise ValueError(
-                "DFSFT chunk_size must match transformer.num_frame_per_block for "
-                f"causal training (got {self._chunk_size}, expected {expected_chunk})."
-            )
-
-        timestep_indices = self._sample_t_inhom_indices(
-            batch_size=batch_size,
-            num_latents=num_latents,
-            device=clean_latents.device,
-        )
-        sp_size = int(getattr(self.training_args, "sp_size", 1) or 1)
-        sp_group = getattr(self.model, "sp_group", None)
-        if sp_size > 1 and sp_group is not None and hasattr(sp_group, "broadcast"):
-            sp_group.broadcast(timestep_indices, src=0)
-
-        scheduler = getattr(self.model, "noise_scheduler", None)
-        if scheduler is None:
-            raise ValueError("DFSFT requires model.noise_scheduler")
-
-        schedule_timesteps = scheduler.timesteps.to(
-            device=clean_latents.device, dtype=torch.float32
-        )
-        schedule_sigmas = scheduler.sigmas.to(
-            device=clean_latents.device, dtype=clean_latents.dtype
-        )
-        t_inhom = schedule_timesteps[timestep_indices]
-
-        noise = getattr(training_batch, "noise", None)
-        if noise is None:
-            noise = torch.randn_like(clean_latents)
-        else:
-            if not torch.is_tensor(noise):
-                raise TypeError("TrainingBatch.noise must be a torch.Tensor when set")
-            noise = noise.permute(0, 2, 1, 3, 4).to(dtype=clean_latents.dtype)
-
-        noisy_latents = self.model.add_noise(
-            clean_latents,
-            noise,
-            t_inhom.flatten(),
-        )
-
-        pred = self.model.predict_noise(
-            self.student,
-            noisy_latents,
-            t_inhom,
-            training_batch,
-            conditional=True,
-            attn_kind=self._attn_kind,
-        )
-
-        if bool(getattr(self.training_args, "precondition_outputs", False)):
-            sigmas = schedule_sigmas[timestep_indices]
-            sigmas = sigmas.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-            pred_x0 = noisy_latents - pred * sigmas
-            loss = F.mse_loss(pred_x0.float(), clean_latents.float())
-        else:
-            target = noise - clean_latents
-            loss = F.mse_loss(pred.float(), target.float())
-
-        if self._attn_kind == "vsa":
-            attn_metadata = training_batch.attn_metadata_vsa
-        else:
-            attn_metadata = training_batch.attn_metadata
-
-        loss_map = {"total_loss": loss, "dfsft_loss": loss}
-        outputs: dict[str, Any] = {"_fv_backward": (training_batch.timesteps, attn_metadata)}
-        metrics: dict[str, LogScalar] = {}
-        return loss_map, outputs, metrics
-
-    def backward(
-        self,
-        loss_map: dict[str, torch.Tensor],
-        outputs: dict[str, Any],
-        *,
-        grad_accum_rounds: int = 1,
-    ) -> None:
-        grad_accum_rounds = max(1, int(grad_accum_rounds))
-        ctx = outputs.get("_fv_backward")
-        if ctx is None:
-            super().backward(loss_map, outputs, grad_accum_rounds=grad_accum_rounds)
-            return
-        self.model.backward(
-            loss_map["total_loss"],
-            ctx,
-            grad_accum_rounds=grad_accum_rounds,
-        )
-
-    def get_optimizers(self, iteration: int) -> list[torch.optim.Optimizer]:
-        del iteration
-        return list(self.student.optimizers.values())
-
-    def get_lr_schedulers(self, iteration: int) -> list[Any]:
-        del iteration
-        return list(self.student.lr_schedulers.values())
 
     def _clip_grad_norm(self, module: torch.nn.Module) -> float:
         max_grad_norm_raw = getattr(self.training_args, "max_grad_norm", None)
@@ -633,8 +649,3 @@ class DiffusionForcingSFTMethod(DistillMethod):
             foreach=None,
         )
         return float(grad_norm.item()) if grad_norm is not None else 0.0
-
-    def optimizers_schedulers_step(self, iteration: int) -> None:
-        for module in self.student.modules.values():
-            self._clip_grad_norm(module)
-        super().optimizers_schedulers_step(iteration)

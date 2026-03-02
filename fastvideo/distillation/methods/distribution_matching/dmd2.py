@@ -166,6 +166,7 @@ class DMD2Method(DistillMethod):
         self._denoising_step_list: torch.Tensor | None = None
         self._init_optimizers_and_schedulers()
 
+    # DistillMethod override: build
     @classmethod
     def build(
         cls,
@@ -182,6 +183,234 @@ class DMD2Method(DistillMethod):
             validation_config=cfg.validation,
             validator=validator,
         )
+
+    # DistillMethod override: single_train_step
+    def single_train_step(
+        self,
+        batch: dict[str, Any],
+        iteration: int,
+        *,
+        current_vsa_sparsity: float = 0.0,
+    ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
+        latents_source: Literal["data", "zeros"] = "data"
+        if self._rollout_mode == "simulate":
+            latents_source = "zeros"
+
+        training_batch = self.model.prepare_batch(
+            batch,
+            current_vsa_sparsity=current_vsa_sparsity,
+            latents_source=latents_source,
+        )
+
+        update_student = self._should_update_student(iteration)
+
+        generator_loss = torch.zeros(
+            (),
+            device=training_batch.latents.device,
+            dtype=training_batch.latents.dtype,
+        )
+        student_ctx = None
+        if update_student:
+            generator_pred_x0 = self._student_rollout(training_batch, with_grad=True)
+            student_ctx = (training_batch.timesteps, training_batch.attn_metadata_vsa)
+            generator_loss = self._dmd_loss(generator_pred_x0, training_batch)
+
+        fake_score_loss, critic_ctx, critic_outputs = self._critic_flow_matching_loss(
+            training_batch
+        )
+
+        total_loss = generator_loss + fake_score_loss
+        loss_map = {
+            "total_loss": total_loss,
+            "generator_loss": generator_loss,
+            "fake_score_loss": fake_score_loss,
+        }
+
+        outputs: dict[str, Any] = dict(critic_outputs)
+        outputs["_fv_backward"] = {
+            "update_student": update_student,
+            "student_ctx": student_ctx,
+            "critic_ctx": critic_ctx,
+        }
+        metrics: dict[str, LogScalar] = {"update_student": float(update_student)}
+        return loss_map, outputs, metrics
+
+    # DistillMethod override: backward
+    def backward(
+        self,
+        loss_map: dict[str, torch.Tensor],
+        outputs: dict[str, Any],
+        *,
+        grad_accum_rounds: int = 1,
+    ) -> None:
+        grad_accum_rounds = max(1, int(grad_accum_rounds))
+        backward_ctx = outputs.get("_fv_backward")
+        if not isinstance(backward_ctx, dict):
+            super().backward(loss_map, outputs, grad_accum_rounds=grad_accum_rounds)
+            return
+
+        update_student = bool(backward_ctx.get("update_student", False))
+        if update_student:
+            student_ctx = backward_ctx.get("student_ctx")
+            if student_ctx is None:
+                raise RuntimeError("Missing student backward context")
+            self.model.backward(
+                loss_map["generator_loss"],
+                student_ctx,
+                grad_accum_rounds=grad_accum_rounds,
+            )
+
+        critic_ctx = backward_ctx.get("critic_ctx")
+        if critic_ctx is None:
+            raise RuntimeError("Missing critic backward context")
+        self.model.backward(
+            loss_map["fake_score_loss"],
+            critic_ctx,
+            grad_accum_rounds=grad_accum_rounds,
+        )
+
+    # DistillMethod override: get_optimizers
+    def get_optimizers(self, iteration: int) -> list[torch.optim.Optimizer]:
+        optimizers: list[torch.optim.Optimizer] = []
+        optimizers.extend(self.critic.optimizers.values())
+        if self._should_update_student(iteration):
+            optimizers.extend(self.student.optimizers.values())
+        return optimizers
+
+    # DistillMethod override: get_lr_schedulers
+    def get_lr_schedulers(self, iteration: int) -> list[Any]:
+        schedulers: list[Any] = []
+        schedulers.extend(self.bundle.role("critic").lr_schedulers.values())
+        if self._should_update_student(iteration):
+            schedulers.extend(self.bundle.role("student").lr_schedulers.values())
+        return schedulers
+
+    # DistillMethod override: optimizers_schedulers_step
+    def optimizers_schedulers_step(self, iteration: int) -> None:
+        if self._should_update_student(iteration):
+            for module in self.bundle.role("student").modules.values():
+                self._clip_grad_norm(module)
+        for module in self.bundle.role("critic").modules.values():
+            self._clip_grad_norm(module)
+
+        super().optimizers_schedulers_step(iteration)
+
+    # DistillTrainer hook: on_train_start
+    def on_train_start(self) -> None:
+        self.model.on_train_start()
+
+    # DistillTrainer hook: log_validation
+    def log_validation(self, iteration: int) -> None:
+        validator = getattr(self, "validator", None)
+        if validator is None:
+            return
+        if not self._is_validation_enabled():
+            return
+
+        every_steps = self._parse_validation_every_steps()
+        if every_steps <= 0:
+            return
+        if iteration % every_steps != 0:
+            return
+
+        dataset_file = self._parse_validation_dataset_file()
+        sampling_steps = self._parse_validation_sampling_steps()
+
+        sampling_timesteps: list[int] | None = None
+        raw_timesteps = self.validation_config.get("sampling_timesteps", None)
+        if raw_timesteps is None:
+            raw_timesteps = self.method_config.get("dmd_denoising_steps", None)
+        if isinstance(raw_timesteps, list) and raw_timesteps:
+            sampling_timesteps = [int(s) for s in raw_timesteps]
+
+        if not sampling_steps:
+            # Default to the few-step student rollout step count for DMD2.
+            if sampling_timesteps is None:
+                return
+            sampling_steps = [int(len(sampling_timesteps))]
+
+        sampler_kind = self.validation_config.get("sampler_kind", "sde")
+        if sampler_kind is None:
+            sampler_kind = "sde"
+        if not isinstance(sampler_kind, str):
+            raise ValueError(
+                "training.validation.sampler_kind must be a string, got "
+                f"{type(sampler_kind).__name__}"
+            )
+        sampler_kind = sampler_kind.strip().lower()
+        if sampler_kind not in {"ode", "sde"}:
+            raise ValueError(
+                "training.validation.sampler_kind must be one of {ode, sde}, got "
+                f"{sampler_kind!r}"
+            )
+        sampler_kind = cast(Literal["ode", "sde"], sampler_kind)
+        ode_solver = self._parse_validation_ode_solver(sampler_kind=sampler_kind)
+        if sampling_timesteps is not None and sampler_kind != "sde":
+            raise ValueError(
+                "method_config.validation.sampling_timesteps is only valid when "
+                "sampler_kind='sde'"
+            )
+
+        rollout_mode_raw = self.validation_config.get("rollout_mode", "parallel")
+        if not isinstance(rollout_mode_raw, str):
+            raise ValueError(
+                "training.validation.rollout_mode must be a string when set, got "
+                f"{type(rollout_mode_raw).__name__}"
+            )
+        rollout_mode = rollout_mode_raw.strip().lower()
+        if rollout_mode not in {"parallel", "streaming"}:
+            raise ValueError(
+                "training.validation.rollout_mode must be one of {parallel, streaming}, "
+                f"got {rollout_mode_raw!r}"
+            )
+
+        guidance_scale = self._parse_validation_guidance_scale()
+        output_dir = self.validation_config.get("output_dir", None)
+        if output_dir is not None and not isinstance(output_dir, str):
+            raise ValueError(
+                "training.validation.output_dir must be a string when set, got "
+                f"{type(output_dir).__name__}"
+            )
+
+        num_actions = get_optional_int(
+            self.validation_config,
+            "num_frames",
+            where="training.validation.num_frames",
+        )
+        if num_actions is not None and num_actions <= 0:
+            raise ValueError("training.validation.num_frames must be > 0 when set")
+
+        request = ValidationRequest(
+            sample_handle=self.student,
+            dataset_file=dataset_file,
+            sampling_steps=sampling_steps,
+            sampler_kind=sampler_kind,
+            rollout_mode=cast(Literal["parallel", "streaming"], rollout_mode),
+            ode_solver=ode_solver,
+            sampling_timesteps=sampling_timesteps,
+            guidance_scale=guidance_scale,
+            num_frames=num_actions,
+            output_dir=output_dir,
+        )
+        validator.log_validation(iteration, request=request)
+
+    # Checkpoint hook: get_rng_generators
+    def get_rng_generators(self) -> dict[str, torch.Generator]:
+        """Return RNG generators that should be checkpointed for exact resume."""
+
+        generators: dict[str, torch.Generator] = {}
+
+        model = getattr(self, "model", None)
+        get_model_generators = getattr(model, "get_rng_generators", None)
+        if callable(get_model_generators):
+            generators.update(get_model_generators())
+
+        validator = getattr(self, "validator", None)
+        validation_gen = getattr(validator, "validation_random_generator", None)
+        if isinstance(validation_gen, torch.Generator):
+            generators["validation_cpu"] = validation_gen
+
+        return generators
 
     def _parse_rollout_mode(self) -> Literal["simulate", "data_latent"]:
         raw = self.method_config.get("rollout_mode", None)
@@ -331,9 +560,6 @@ class DMD2Method(DistillMethod):
             scheduler_name=critic_sched,
         )
 
-    def on_train_start(self) -> None:
-        self.model.on_train_start()
-
     def _is_validation_enabled(self) -> bool:
         cfg = self.validation_config
         if not cfg:
@@ -441,117 +667,6 @@ class DMD2Method(DistillMethod):
             "training.validation.ode_solver must be one of {unipc, euler}, got "
             f"{raw!r}"
         )
-
-    def log_validation(self, iteration: int) -> None:
-        validator = getattr(self, "validator", None)
-        if validator is None:
-            return
-        if not self._is_validation_enabled():
-            return
-
-        every_steps = self._parse_validation_every_steps()
-        if every_steps <= 0:
-            return
-        if iteration % every_steps != 0:
-            return
-
-        dataset_file = self._parse_validation_dataset_file()
-        sampling_steps = self._parse_validation_sampling_steps()
-
-        sampling_timesteps: list[int] | None = None
-        raw_timesteps = self.validation_config.get("sampling_timesteps", None)
-        if raw_timesteps is None:
-            raw_timesteps = self.method_config.get("dmd_denoising_steps", None)
-        if isinstance(raw_timesteps, list) and raw_timesteps:
-            sampling_timesteps = [int(s) for s in raw_timesteps]
-
-        if not sampling_steps:
-            # Default to the few-step student rollout step count for DMD2.
-            if sampling_timesteps is None:
-                return
-            sampling_steps = [int(len(sampling_timesteps))]
-
-        sampler_kind = self.validation_config.get("sampler_kind", "sde")
-        if sampler_kind is None:
-            sampler_kind = "sde"
-        if not isinstance(sampler_kind, str):
-            raise ValueError(
-                "training.validation.sampler_kind must be a string, got "
-                f"{type(sampler_kind).__name__}"
-            )
-        sampler_kind = sampler_kind.strip().lower()
-        if sampler_kind not in {"ode", "sde"}:
-            raise ValueError(
-                "training.validation.sampler_kind must be one of {ode, sde}, got "
-                f"{sampler_kind!r}"
-            )
-        sampler_kind = cast(Literal["ode", "sde"], sampler_kind)
-        ode_solver = self._parse_validation_ode_solver(sampler_kind=sampler_kind)
-        if sampling_timesteps is not None and sampler_kind != "sde":
-            raise ValueError(
-                "method_config.validation.sampling_timesteps is only valid when "
-                "sampler_kind='sde'"
-            )
-
-        rollout_mode_raw = self.validation_config.get("rollout_mode", "parallel")
-        if not isinstance(rollout_mode_raw, str):
-            raise ValueError(
-                "training.validation.rollout_mode must be a string when set, got "
-                f"{type(rollout_mode_raw).__name__}"
-            )
-        rollout_mode = rollout_mode_raw.strip().lower()
-        if rollout_mode not in {"parallel", "streaming"}:
-            raise ValueError(
-                "training.validation.rollout_mode must be one of {parallel, streaming}, "
-                f"got {rollout_mode_raw!r}"
-            )
-
-        guidance_scale = self._parse_validation_guidance_scale()
-        output_dir = self.validation_config.get("output_dir", None)
-        if output_dir is not None and not isinstance(output_dir, str):
-            raise ValueError(
-                "training.validation.output_dir must be a string when set, got "
-                f"{type(output_dir).__name__}"
-            )
-
-        num_actions = get_optional_int(
-            self.validation_config,
-            "num_frames",
-            where="training.validation.num_frames",
-        )
-        if num_actions is not None and num_actions <= 0:
-            raise ValueError("training.validation.num_frames must be > 0 when set")
-
-        request = ValidationRequest(
-            sample_handle=self.student,
-            dataset_file=dataset_file,
-            sampling_steps=sampling_steps,
-            sampler_kind=sampler_kind,
-            rollout_mode=cast(Literal["parallel", "streaming"], rollout_mode),
-            ode_solver=ode_solver,
-            sampling_timesteps=sampling_timesteps,
-            guidance_scale=guidance_scale,
-            num_frames=num_actions,
-            output_dir=output_dir,
-        )
-        validator.log_validation(iteration, request=request)
-
-    def get_rng_generators(self) -> dict[str, torch.Generator]:
-        """Return RNG generators that should be checkpointed for exact resume."""
-
-        generators: dict[str, torch.Generator] = {}
-
-        model = getattr(self, "model", None)
-        get_model_generators = getattr(model, "get_rng_generators", None)
-        if callable(get_model_generators):
-            generators.update(get_model_generators())
-
-        validator = getattr(self, "validator", None)
-        validation_gen = getattr(validator, "validation_random_generator", None)
-        if isinstance(validation_gen, torch.Generator):
-            generators["validation_cpu"] = validation_gen
-
-        return generators
 
     def _should_update_student(self, iteration: int) -> bool:
         interval = get_optional_int(
@@ -831,107 +946,3 @@ class DMD2Method(DistillMethod):
             (generator_pred_x0.float() - grad.float()).detach(),
         )
         return loss
-
-    def single_train_step(
-        self,
-        batch: dict[str, Any],
-        iteration: int,
-        *,
-        current_vsa_sparsity: float = 0.0,
-    ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
-        latents_source: Literal["data", "zeros"] = "data"
-        if self._rollout_mode == "simulate":
-            latents_source = "zeros"
-
-        training_batch = self.model.prepare_batch(
-            batch,
-            current_vsa_sparsity=current_vsa_sparsity,
-            latents_source=latents_source,
-        )
-
-        update_student = self._should_update_student(iteration)
-
-        generator_loss = torch.zeros(
-            (),
-            device=training_batch.latents.device,
-            dtype=training_batch.latents.dtype,
-        )
-        student_ctx = None
-        if update_student:
-            generator_pred_x0 = self._student_rollout(training_batch, with_grad=True)
-            student_ctx = (training_batch.timesteps, training_batch.attn_metadata_vsa)
-            generator_loss = self._dmd_loss(generator_pred_x0, training_batch)
-
-        fake_score_loss, critic_ctx, critic_outputs = self._critic_flow_matching_loss(training_batch)
-
-        total_loss = generator_loss + fake_score_loss
-        loss_map = {
-            "total_loss": total_loss,
-            "generator_loss": generator_loss,
-            "fake_score_loss": fake_score_loss,
-        }
-
-        outputs: dict[str, Any] = dict(critic_outputs)
-        outputs["_fv_backward"] = {
-            "update_student": update_student,
-            "student_ctx": student_ctx,
-            "critic_ctx": critic_ctx,
-        }
-        metrics: dict[str, LogScalar] = {"update_student": float(update_student)}
-        return loss_map, outputs, metrics
-
-    def backward(
-        self,
-        loss_map: dict[str, torch.Tensor],
-        outputs: dict[str, Any],
-        *,
-        grad_accum_rounds: int = 1,
-    ) -> None:
-        grad_accum_rounds = max(1, int(grad_accum_rounds))
-        backward_ctx = outputs.get("_fv_backward")
-        if not isinstance(backward_ctx, dict):
-            super().backward(loss_map, outputs, grad_accum_rounds=grad_accum_rounds)
-            return
-
-        update_student = bool(backward_ctx.get("update_student", False))
-        if update_student:
-            student_ctx = backward_ctx.get("student_ctx")
-            if student_ctx is None:
-                raise RuntimeError("Missing student backward context")
-            self.model.backward(
-                loss_map["generator_loss"],
-                student_ctx,
-                grad_accum_rounds=grad_accum_rounds,
-            )
-
-        critic_ctx = backward_ctx.get("critic_ctx")
-        if critic_ctx is None:
-            raise RuntimeError("Missing critic backward context")
-        self.model.backward(
-            loss_map["fake_score_loss"],
-            critic_ctx,
-            grad_accum_rounds=grad_accum_rounds,
-        )
-
-    def get_optimizers(self, iteration: int) -> list[torch.optim.Optimizer]:
-        optimizers: list[torch.optim.Optimizer] = []
-        optimizers.extend(self.critic.optimizers.values())
-        if self._should_update_student(iteration):
-            optimizers.extend(self.student.optimizers.values())
-        return optimizers
-
-    def get_lr_schedulers(self, iteration: int) -> list[Any]:
-        schedulers: list[Any] = []
-        schedulers.extend(self.bundle.role("critic").lr_schedulers.values())
-        if self._should_update_student(iteration):
-            schedulers.extend(self.bundle.role("student").lr_schedulers.values())
-        return schedulers
-
-    def optimizers_schedulers_step(self, iteration: int) -> None:
-        if self._should_update_student(iteration):
-            for module in self.bundle.role("student").modules.values():
-                self._clip_grad_norm(module)
-        for module in self.bundle.role("critic").modules.values():
-            self._clip_grad_norm(module)
-
-        super().optimizers_schedulers_step(iteration)

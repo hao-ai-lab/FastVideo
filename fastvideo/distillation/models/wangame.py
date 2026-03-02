@@ -197,30 +197,17 @@ class WanGameModel(ModelBase):
         )
         self.start_step = 0
 
-    def _get_training_dtype(self) -> torch.dtype:
-        return torch.bfloat16
-
-    def _init_timestep_mechanics(self) -> None:
-        self.timestep_shift = float(self.training_args.pipeline_config.flow_shift)
-        self.num_train_timestep = int(self.noise_scheduler.num_train_timesteps)
-        self.min_timestep = int(self.training_args.min_timestep_ratio * self.num_train_timestep)
-        self.max_timestep = int(self.training_args.max_timestep_ratio * self.num_train_timestep)
-
-        boundary_ratio = getattr(self.training_args, "boundary_ratio", None)
-        self.boundary_timestep: float | None = (
-            float(boundary_ratio) * float(self.num_train_timestep)
-            if boundary_ratio is not None
-            else None
-        )
-
+    # ModelBase override: num_train_timesteps
     @property
     def num_train_timesteps(self) -> int:
         return int(self.num_train_timestep)
 
+    # ModelBase override: shift_and_clamp_timestep
     def shift_and_clamp_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
         timestep = shift_timestep(timestep, self.timestep_shift, self.num_train_timestep)
         return timestep.clamp(self.min_timestep, self.max_timestep)
 
+    # ModelBase override: on_train_start
     def on_train_start(self) -> None:
         seed = getattr(self.training_args, "seed", None)
         if seed is None:
@@ -237,6 +224,7 @@ class WanGameModel(ModelBase):
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(int(seed))
         self.noise_gen_cuda = torch.Generator(device=self.device).manual_seed(int(seed))
 
+    # ModelBase override: get_rng_generators
     def get_rng_generators(self) -> dict[str, torch.Generator]:
         """Return RNG generators that should be checkpointed for exact resume."""
 
@@ -246,6 +234,257 @@ class WanGameModel(ModelBase):
         if self.noise_gen_cuda is not None:
             generators["noise_cuda"] = self.noise_gen_cuda
         return generators
+
+    # ModelBase override: prepare_batch
+    def prepare_batch(
+        self,
+        raw_batch: dict[str, Any],
+        *,
+        current_vsa_sparsity: float = 0.0,
+        latents_source: Literal["data", "zeros"] = "data",
+    ) -> TrainingBatch:
+        """Convert a dataloader batch into forward primitives for methods."""
+
+        dtype = self._get_training_dtype()
+        device = self.device
+
+        training_batch = TrainingBatch(current_vsa_sparsity=current_vsa_sparsity)
+        infos = raw_batch.get("info_list")
+
+        if latents_source == "zeros":
+            clip_feature = raw_batch["clip_feature"]
+            batch_size = int(clip_feature.shape[0])
+            vae_config = self.training_args.pipeline_config.vae_config.arch_config
+            num_channels = int(vae_config.z_dim)
+            spatial_compression_ratio = int(vae_config.spatial_compression_ratio)
+            latent_height = int(self.training_args.num_height) // spatial_compression_ratio
+            latent_width = int(self.training_args.num_width) // spatial_compression_ratio
+            latents = torch.zeros(
+                batch_size,
+                num_channels,
+                int(self.training_args.num_latent_t),
+                latent_height,
+                latent_width,
+                device=device,
+                dtype=dtype,
+            )
+        elif latents_source == "data":
+            if "vae_latent" not in raw_batch:
+                raise ValueError("vae_latent not found in batch and latents_source='data'")
+            latents = raw_batch["vae_latent"]
+            latents = latents[:, :, : self.training_args.num_latent_t]
+            latents = latents.to(device, dtype=dtype)
+        else:
+            raise ValueError(f"Unknown latents_source: {latents_source!r}")
+
+        if "clip_feature" not in raw_batch:
+            raise ValueError("clip_feature must be present for WanGame")
+        image_embeds = raw_batch["clip_feature"].to(device, dtype=dtype)
+
+        if "first_frame_latent" not in raw_batch:
+            raise ValueError("first_frame_latent must be present for WanGame")
+        image_latents = raw_batch["first_frame_latent"]
+        image_latents = image_latents[:, :, : self.training_args.num_latent_t]
+        image_latents = image_latents.to(device, dtype=dtype)
+
+        pil_image = raw_batch.get("pil_image")
+        if isinstance(pil_image, torch.Tensor):
+            training_batch.preprocessed_image = pil_image.to(device=device)
+        else:
+            training_batch.preprocessed_image = pil_image
+
+        keyboard_cond = raw_batch.get("keyboard_cond")
+        if isinstance(keyboard_cond, torch.Tensor) and keyboard_cond.numel() > 0:
+            training_batch.keyboard_cond = keyboard_cond.to(device, dtype=dtype)
+        else:
+            training_batch.keyboard_cond = None
+
+        mouse_cond = raw_batch.get("mouse_cond")
+        if isinstance(mouse_cond, torch.Tensor) and mouse_cond.numel() > 0:
+            training_batch.mouse_cond = mouse_cond.to(device, dtype=dtype)
+        else:
+            training_batch.mouse_cond = None
+
+        temporal_compression_ratio = (
+            self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        )
+        expected_num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_ratio + 1
+        if training_batch.keyboard_cond is not None and int(
+            training_batch.keyboard_cond.shape[1]
+        ) != int(expected_num_frames):
+            raise ValueError(
+                "keyboard_cond temporal dim mismatch: "
+                f"got {int(training_batch.keyboard_cond.shape[1])}, expected {int(expected_num_frames)}"
+            )
+        if training_batch.mouse_cond is not None and int(training_batch.mouse_cond.shape[1]) != int(
+            expected_num_frames
+        ):
+            raise ValueError(
+                "mouse_cond temporal dim mismatch: "
+                f"got {int(training_batch.mouse_cond.shape[1])}, expected {int(expected_num_frames)}"
+            )
+
+        training_batch.latents = latents
+        training_batch.encoder_hidden_states = None
+        training_batch.encoder_attention_mask = None
+        training_batch.image_embeds = image_embeds
+        training_batch.image_latents = image_latents
+        training_batch.infos = infos
+
+        training_batch.latents = normalize_dit_input("wan", training_batch.latents, self.vae)
+        training_batch = self._prepare_dit_inputs(training_batch)
+        training_batch = self._build_attention_metadata(training_batch)
+
+        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
+        if training_batch.attn_metadata is not None:
+            training_batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore[attr-defined]
+
+        training_batch.mask_lat_size = self._build_i2v_mask_latents(image_latents)
+        viewmats, intrinsics, action_labels = self._process_actions(training_batch)
+        training_batch.viewmats = viewmats
+        training_batch.Ks = intrinsics
+        training_batch.action = action_labels
+
+        return training_batch
+
+    # ModelBase override: add_noise
+    def add_noise(
+        self,
+        clean_latents: torch.Tensor,
+        noise: torch.Tensor,
+        timestep: torch.Tensor,
+    ) -> torch.Tensor:
+        b, t = clean_latents.shape[:2]
+        noisy = self.noise_scheduler.add_noise(
+            clean_latents.flatten(0, 1),
+            noise.flatten(0, 1),
+            timestep,
+        ).unflatten(0, (b, t))
+        return noisy
+
+    # ModelBase override: predict_x0
+    def predict_x0(
+        self,
+        handle: RoleHandle,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> torch.Tensor:
+        device_type = self.device.type
+        dtype = noisy_latents.dtype
+
+        if attn_kind == "dense":
+            attn_metadata = batch.attn_metadata
+        elif attn_kind == "vsa":
+            attn_metadata = batch.attn_metadata_vsa
+        else:
+            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
+
+        with torch.autocast(device_type, dtype=dtype), set_forward_context(
+            current_timestep=batch.timesteps,
+            attn_metadata=attn_metadata,
+        ):
+            cond_inputs = self._select_cfg_condition_inputs(
+                batch,
+                conditional=conditional,
+                cfg_uncond=cfg_uncond,
+            )
+            input_kwargs = self._build_distill_input_kwargs(
+                noisy_latents,
+                timestep,
+                image_embeds=cond_inputs["image_embeds"],
+                image_latents=cond_inputs["image_latents"],
+                mask_lat_size=cond_inputs["mask_lat_size"],
+                viewmats=cond_inputs["viewmats"],
+                Ks=cond_inputs["Ks"],
+                action=cond_inputs["action"],
+                mouse_cond=cond_inputs["mouse_cond"],
+                keyboard_cond=cond_inputs["keyboard_cond"],
+            )
+            transformer = self._get_transformer(handle, timestep)
+            pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
+            pred_x0 = pred_noise_to_pred_video(
+                pred_noise=pred_noise.flatten(0, 1),
+                noise_input_latent=noisy_latents.flatten(0, 1),
+                timestep=timestep,
+                scheduler=self.noise_scheduler,
+            ).unflatten(0, pred_noise.shape[:2])
+        return pred_x0
+
+    # ModelBase override: predict_noise
+    def predict_noise(
+        self,
+        handle: RoleHandle,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> torch.Tensor:
+        device_type = self.device.type
+        dtype = noisy_latents.dtype
+
+        if attn_kind == "dense":
+            attn_metadata = batch.attn_metadata
+        elif attn_kind == "vsa":
+            attn_metadata = batch.attn_metadata_vsa
+        else:
+            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
+
+        with torch.autocast(device_type, dtype=dtype), set_forward_context(
+            current_timestep=batch.timesteps,
+            attn_metadata=attn_metadata,
+        ):
+            cond_inputs = self._select_cfg_condition_inputs(
+                batch,
+                conditional=conditional,
+                cfg_uncond=cfg_uncond,
+            )
+            input_kwargs = self._build_distill_input_kwargs(
+                noisy_latents,
+                timestep,
+                image_embeds=cond_inputs["image_embeds"],
+                image_latents=cond_inputs["image_latents"],
+                mask_lat_size=cond_inputs["mask_lat_size"],
+                viewmats=cond_inputs["viewmats"],
+                Ks=cond_inputs["Ks"],
+                action=cond_inputs["action"],
+                mouse_cond=cond_inputs["mouse_cond"],
+                keyboard_cond=cond_inputs["keyboard_cond"],
+            )
+            transformer = self._get_transformer(handle, timestep)
+            pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
+        return pred_noise
+
+    # ModelBase override: backward
+    def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
+        timesteps, attn_metadata = ctx
+        with set_forward_context(current_timestep=timesteps, attn_metadata=attn_metadata):
+            (loss / max(1, int(grad_accum_rounds))).backward()
+
+    # --- WanGame-specific helpers below ---
+
+    def _get_training_dtype(self) -> torch.dtype:
+        return torch.bfloat16
+
+    def _init_timestep_mechanics(self) -> None:
+        self.timestep_shift = float(self.training_args.pipeline_config.flow_shift)
+        self.num_train_timestep = int(self.noise_scheduler.num_train_timesteps)
+        self.min_timestep = int(self.training_args.min_timestep_ratio * self.num_train_timestep)
+        self.max_timestep = int(self.training_args.max_timestep_ratio * self.num_train_timestep)
+
+        boundary_ratio = getattr(self.training_args, "boundary_ratio", None)
+        self.boundary_timestep: float | None = (
+            float(boundary_ratio) * float(self.num_train_timestep)
+            if boundary_ratio is not None
+            else None
+        )
 
     def _sample_timesteps(self, batch_size: int, device: torch.device) -> torch.Tensor:
         if self.noise_random_generator is None:
@@ -411,129 +650,6 @@ class WanGameModel(ModelBase):
             )
 
         return viewmats, intrinsics, action_labels
-
-    def prepare_batch(
-        self,
-        raw_batch: dict[str, Any],
-        *,
-        current_vsa_sparsity: float = 0.0,
-        latents_source: Literal["data", "zeros"] = "data",
-    ) -> TrainingBatch:
-        dtype = self._get_training_dtype()
-        device = self.device
-
-        training_batch = TrainingBatch(current_vsa_sparsity=current_vsa_sparsity)
-        infos = raw_batch.get("info_list")
-
-        if latents_source == "zeros":
-            clip_feature = raw_batch["clip_feature"]
-            batch_size = int(clip_feature.shape[0])
-            vae_config = self.training_args.pipeline_config.vae_config.arch_config
-            num_channels = int(vae_config.z_dim)
-            spatial_compression_ratio = int(vae_config.spatial_compression_ratio)
-            latent_height = int(self.training_args.num_height) // spatial_compression_ratio
-            latent_width = int(self.training_args.num_width) // spatial_compression_ratio
-            latents = torch.zeros(
-                batch_size,
-                num_channels,
-                int(self.training_args.num_latent_t),
-                latent_height,
-                latent_width,
-                device=device,
-                dtype=dtype,
-            )
-        elif latents_source == "data":
-            if "vae_latent" not in raw_batch:
-                raise ValueError("vae_latent not found in batch and latents_source='data'")
-            latents = raw_batch["vae_latent"]
-            latents = latents[:, :, : self.training_args.num_latent_t]
-            latents = latents.to(device, dtype=dtype)
-        else:
-            raise ValueError(f"Unknown latents_source: {latents_source!r}")
-
-        if "clip_feature" not in raw_batch:
-            raise ValueError("clip_feature must be present for WanGame")
-        image_embeds = raw_batch["clip_feature"].to(device, dtype=dtype)
-
-        if "first_frame_latent" not in raw_batch:
-            raise ValueError("first_frame_latent must be present for WanGame")
-        image_latents = raw_batch["first_frame_latent"]
-        image_latents = image_latents[:, :, : self.training_args.num_latent_t]
-        image_latents = image_latents.to(device, dtype=dtype)
-
-        pil_image = raw_batch.get("pil_image")
-        if isinstance(pil_image, torch.Tensor):
-            training_batch.preprocessed_image = pil_image.to(device=device)
-        else:
-            training_batch.preprocessed_image = pil_image
-
-        keyboard_cond = raw_batch.get("keyboard_cond")
-        if isinstance(keyboard_cond, torch.Tensor) and keyboard_cond.numel() > 0:
-            training_batch.keyboard_cond = keyboard_cond.to(device, dtype=dtype)
-        else:
-            training_batch.keyboard_cond = None
-
-        mouse_cond = raw_batch.get("mouse_cond")
-        if isinstance(mouse_cond, torch.Tensor) and mouse_cond.numel() > 0:
-            training_batch.mouse_cond = mouse_cond.to(device, dtype=dtype)
-        else:
-            training_batch.mouse_cond = None
-
-        temporal_compression_ratio = (
-            self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        )
-        expected_num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_ratio + 1
-        if training_batch.keyboard_cond is not None and int(
-            training_batch.keyboard_cond.shape[1]
-        ) != int(expected_num_frames):
-            raise ValueError(
-                "keyboard_cond temporal dim mismatch: "
-                f"got {int(training_batch.keyboard_cond.shape[1])}, expected {int(expected_num_frames)}"
-            )
-        if training_batch.mouse_cond is not None and int(training_batch.mouse_cond.shape[1]) != int(
-            expected_num_frames
-        ):
-            raise ValueError(
-                "mouse_cond temporal dim mismatch: "
-                f"got {int(training_batch.mouse_cond.shape[1])}, expected {int(expected_num_frames)}"
-            )
-
-        training_batch.latents = latents
-        training_batch.encoder_hidden_states = None
-        training_batch.encoder_attention_mask = None
-        training_batch.image_embeds = image_embeds
-        training_batch.image_latents = image_latents
-        training_batch.infos = infos
-
-        training_batch.latents = normalize_dit_input("wan", training_batch.latents, self.vae)
-        training_batch = self._prepare_dit_inputs(training_batch)
-        training_batch = self._build_attention_metadata(training_batch)
-
-        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
-        if training_batch.attn_metadata is not None:
-            training_batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore[attr-defined]
-
-        training_batch.mask_lat_size = self._build_i2v_mask_latents(image_latents)
-        viewmats, intrinsics, action_labels = self._process_actions(training_batch)
-        training_batch.viewmats = viewmats
-        training_batch.Ks = intrinsics
-        training_batch.action = action_labels
-
-        return training_batch
-
-    def add_noise(
-        self,
-        clean_latents: torch.Tensor,
-        noise: torch.Tensor,
-        timestep: torch.Tensor,
-    ) -> torch.Tensor:
-        b, t = clean_latents.shape[:2]
-        noisy = self.noise_scheduler.add_noise(
-            clean_latents.flatten(0, 1),
-            noise.flatten(0, 1),
-            timestep,
-        ).unflatten(0, (b, t))
-        return noisy
 
     def _build_distill_input_kwargs(
         self,
@@ -718,106 +834,3 @@ class WanGameModel(ModelBase):
             if float(timestep.item()) < float(self.boundary_timestep):
                 return transformer_2
         return transformer
-
-    def predict_x0(
-        self,
-        handle: RoleHandle,
-        noisy_latents: torch.Tensor,
-        timestep: torch.Tensor,
-        batch: TrainingBatch,
-        *,
-        conditional: bool,
-        cfg_uncond: dict[str, Any] | None = None,
-        attn_kind: Literal["dense", "vsa"] = "dense",
-    ) -> torch.Tensor:
-        device_type = self.device.type
-        dtype = noisy_latents.dtype
-
-        if attn_kind == "dense":
-            attn_metadata = batch.attn_metadata
-        elif attn_kind == "vsa":
-            attn_metadata = batch.attn_metadata_vsa
-        else:
-            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
-
-        with torch.autocast(device_type, dtype=dtype), set_forward_context(
-            current_timestep=batch.timesteps,
-            attn_metadata=attn_metadata,
-        ):
-            cond_inputs = self._select_cfg_condition_inputs(
-                batch,
-                conditional=conditional,
-                cfg_uncond=cfg_uncond,
-            )
-            input_kwargs = self._build_distill_input_kwargs(
-                noisy_latents,
-                timestep,
-                image_embeds=cond_inputs["image_embeds"],
-                image_latents=cond_inputs["image_latents"],
-                mask_lat_size=cond_inputs["mask_lat_size"],
-                viewmats=cond_inputs["viewmats"],
-                Ks=cond_inputs["Ks"],
-                action=cond_inputs["action"],
-                mouse_cond=cond_inputs["mouse_cond"],
-                keyboard_cond=cond_inputs["keyboard_cond"],
-            )
-            transformer = self._get_transformer(handle, timestep)
-            pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
-            pred_x0 = pred_noise_to_pred_video(
-                pred_noise=pred_noise.flatten(0, 1),
-                noise_input_latent=noisy_latents.flatten(0, 1),
-                timestep=timestep,
-                scheduler=self.noise_scheduler,
-            ).unflatten(0, pred_noise.shape[:2])
-        return pred_x0
-
-    def predict_noise(
-        self,
-        handle: RoleHandle,
-        noisy_latents: torch.Tensor,
-        timestep: torch.Tensor,
-        batch: TrainingBatch,
-        *,
-        conditional: bool,
-        cfg_uncond: dict[str, Any] | None = None,
-        attn_kind: Literal["dense", "vsa"] = "dense",
-    ) -> torch.Tensor:
-        device_type = self.device.type
-        dtype = noisy_latents.dtype
-
-        if attn_kind == "dense":
-            attn_metadata = batch.attn_metadata
-        elif attn_kind == "vsa":
-            attn_metadata = batch.attn_metadata_vsa
-        else:
-            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
-
-        with torch.autocast(device_type, dtype=dtype), set_forward_context(
-            current_timestep=batch.timesteps,
-            attn_metadata=attn_metadata,
-        ):
-            cond_inputs = self._select_cfg_condition_inputs(
-                batch,
-                conditional=conditional,
-                cfg_uncond=cfg_uncond,
-            )
-            input_kwargs = self._build_distill_input_kwargs(
-                noisy_latents,
-                timestep,
-                image_embeds=cond_inputs["image_embeds"],
-                image_latents=cond_inputs["image_latents"],
-                mask_lat_size=cond_inputs["mask_lat_size"],
-                viewmats=cond_inputs["viewmats"],
-                Ks=cond_inputs["Ks"],
-                action=cond_inputs["action"],
-                mouse_cond=cond_inputs["mouse_cond"],
-                keyboard_cond=cond_inputs["keyboard_cond"],
-            )
-            transformer = self._get_transformer(handle, timestep)
-            pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
-        return pred_noise
-
-    def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
-        timesteps, attn_metadata = ctx
-        with set_forward_context(current_timestep=timesteps, attn_metadata=attn_metadata):
-            (loss / max(1, int(grad_accum_rounds))).backward()
