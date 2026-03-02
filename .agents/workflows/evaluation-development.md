@@ -9,7 +9,7 @@ FastVideo agent toolkit.
 
 ## When to Use
 
-- You need a metric that doesn't exist in `.agents/memory/evaluation_registry.md`.
+- You need a metric that doesn't exist in `.agents/memory/evaluation-registry/README.md`.
 - An existing metric needs significant changes to its methodology.
 - You're exploring a new evaluation approach.
 
@@ -17,7 +17,7 @@ FastVideo agent toolkit.
 
 ### 1. Research
 
-- Search `.agents/memory/related_work/` for existing evaluation approaches.
+- Search `.agents/memory/related-work/` for existing evaluation approaches.
 - Check the `evaluation_registry.md` for current metrics and their limitations.
 - Review literature: FVD, CLIP-Score, human preference, etc.
 
@@ -37,7 +37,7 @@ FastVideo agent toolkit.
 
 ### 4. Register
 
-Update `.agents/memory/evaluation_registry.md`:
+Update `.agents/memory/evaluation-registry/README.md`:
 - Add the metric with status `Active`.
 - Document location, thresholds, and trust level.
 

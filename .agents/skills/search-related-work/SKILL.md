@@ -6,13 +6,13 @@ description: Query the related work index for relevant papers, repos, or compari
 # Search Related Work
 
 ## Purpose
-Search through `.agents/memory/related_work/` to find indexed papers, repos,
+Search through `.agents/memory/related-work/` to find indexed papers, repos,
 or blog posts relevant to a query. Use this when you need to understand how
 other work compares to FastVideo's approach, or when looking for techniques
 to adopt.
 
 ## Prerequisites
-- The related work index has entries (`.agents/memory/related_work/*.md`).
+- The related work index has entries (`.agents/memory/related-work/*.md`).
 
 ## Inputs
 
@@ -26,14 +26,14 @@ to adopt.
 
 ### 1. Search the index
 
-Use grep-based search through `.agents/memory/related_work/`:
+Use grep-based search through `.agents/memory/related-work/`:
 
 ```bash
 # Search by content
-grep -rl "<query>" .agents/memory/related_work/
+grep -rl "<query>" .agents/memory/related-work/
 
 # Search by tags (in frontmatter)
-grep -l "tags:.*<tag>" .agents/memory/related_work/*.md
+grep -l "tags:.*<tag>" .agents/memory/related-work/*.md
 ```
 
 ### 2. Rank results
@@ -55,7 +55,7 @@ For each matching file:
 - **Source**: <URL>
 - **Tags**: <tags>
 - **Key insight**: <most relevant excerpt>
-- **File**: `.agents/memory/related_work/<slug>.md`
+- **File**: `.agents/memory/related-work/<slug>.md`
 
 ### 2. <Title> (relevance: medium)
 ...
@@ -73,7 +73,7 @@ Search for work related to video quality evaluation metrics:
 ```
 
 ## References
-- `.agents/memory/related_work/README.md` — index schema
+- `.agents/memory/related-work/README.md` — index schema
 
 ## Changelog
 | Date | Change |

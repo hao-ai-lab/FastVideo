@@ -18,9 +18,9 @@ Read these files to build your context:
 
 | File | Purpose |
 |------|---------|
-| `.agents/memory/codebase_map.md` | Structural index of the entire repo |
-| `.agents/memory/experiment_journal.md` | Log of all past experiments and insights |
-| `.agents/memory/evaluation_registry.md` | Available metrics and their status |
+| `.agents/memory/codebase-map/README.md` | Structural index of the entire repo |
+| `.agents/memory/experiment-journal/README.md` | Log of all past experiments and insights |
+| `.agents/memory/evaluation-registry/README.md` | Available metrics and their status |
 
 ## Step 3: Check for Existing Skills & SOPs
 
@@ -35,7 +35,7 @@ If a skill or SOP exists for your task, **use it**. If not, you are in **explora
 ## Step 4: Check Related Work
 
 If your task involves evaluation metrics, training techniques, or architecture decisions:
-- Browse `.agents/memory/related_work/` for indexed papers and repos.
+- Browse `.agents/memory/related-work/` for indexed papers and repos.
 - Use the `search-related-work` skill if available.
 
 ## Step 5: Exploration Mode
@@ -56,11 +56,12 @@ If no existing skill/SOP covers your task:
 ├── STATUS.md              ← dashboard: completeness & trust of all components
 ├── skills/                ← reusable agent skills
 ├── workflows/             ← SOPs and procedures
-├── memory/                ← persistent context
-│   ├── codebase_map.md
-│   ├── experiment_journal.md
-│   ├── evaluation_registry.md
-│   └── related_work/
+├── memory/                ← persistent context (folder per topic + index.jsonl)
+│   ├── index.jsonl
+│   ├── codebase-map/
+│   ├── experiment-journal/
+│   ├── evaluation-registry/
+│   └── related-work/
 ├── lessons/               ← mistakes and fixes
 └── exploration/           ← draft procedures
 ```

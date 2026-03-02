@@ -21,7 +21,7 @@ Before launching:
 - [ ] Define a clear **hypothesis** (what you expect to learn).
 - [ ] Select the **model** and **pipeline** type (finetune, distill, lora, etc.).
 - [ ] Prepare the **dataset** (preprocessed into parquet format).
-- [ ] Review existing experiments in `.agents/memory/experiment_journal.md` for related work.
+- [ ] Review existing experiments in `.agents/memory/experiment-journal/README.md` for related work.
 - [ ] Check `.agents/lessons/` for known pitfalls with this configuration.
 - [ ] Document the plan in the experiment journal as a draft entry.
 

@@ -106,7 +106,7 @@ for field in compare_fields:
 
 ### 5. Update experiment journal
 
-Append or update the experiment's entry in `.agents/memory/experiment_journal.md`
+Append or update the experiment's entry in `.agents/memory/experiment-journal/README.md`
 with the final metrics and status.
 
 ## Outputs

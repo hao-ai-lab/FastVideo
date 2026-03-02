@@ -6,11 +6,11 @@ description: Append or update an experiment entry in the experiment journal
 # Log Experiment
 
 ## Purpose
-Create or update an entry in `.agents/memory/experiment_journal.md` to maintain
+Create or update an entry in `.agents/memory/experiment-journal/README.md` to maintain
 a living record of all experiments and their outcomes.
 
 ## Prerequisites
-- `.agents/memory/experiment_journal.md` exists.
+- `.agents/memory/experiment-journal/README.md` exists.
 
 ## Inputs
 
@@ -31,7 +31,7 @@ a living record of all experiments and their outcomes.
 
 ### 1. Check for existing entry
 
-Search `.agents/memory/experiment_journal.md` for an entry with the same name.
+Search `.agents/memory/experiment-journal/README.md` for an entry with the same name.
 If found, update it instead of creating a duplicate.
 
 ### 2. Format the entry
@@ -60,7 +60,7 @@ If a similar experiment name exists with `status: completed`, warn that this
 may be a repeat. If it's `status: running`, assume this is an update.
 
 ## Outputs
-- Updated `.agents/memory/experiment_journal.md`.
+- Updated `.agents/memory/experiment-journal/README.md`.
 
 ## Example Usage
 ```
@@ -77,7 +77,7 @@ Log a completed experiment:
 ```
 
 ## References
-- `.agents/memory/experiment_journal.md` — journal file
+- `.agents/memory/experiment-journal/README.md` — journal file
 - `.agents/workflows/experiment-lifecycle.md` — when to log
 
 ## Changelog

@@ -28,7 +28,7 @@ ls -1 .agents/workflows/*.md 2>/dev/null
 
 echo "=== Memory ==="
 ls -1 .agents/memory/*.md 2>/dev/null
-ls -1 .agents/memory/related_work/*.md 2>/dev/null | grep -v README
+ls -1 .agents/memory/related-work/*.md 2>/dev/null | grep -v README
 
 echo "=== Lessons ==="
 ls -1 .agents/lessons/*.md 2>/dev/null | grep -v README
