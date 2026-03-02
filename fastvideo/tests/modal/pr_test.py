@@ -150,5 +150,5 @@ def run_lora_extraction_tests():
               volumes={"/root/data": model_vol})
 def run_performance_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/performance -vs"
+        "export HF_HOME='/root/data/.cache' && export PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/performance -vs"
     )

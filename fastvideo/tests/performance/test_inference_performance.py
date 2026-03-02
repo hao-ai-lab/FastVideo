@@ -64,11 +64,12 @@ TEST_PROMPT = (
     "Mid-shot framing, vibrant lighting.")
 
 # Device-aware thresholds: {gpu_name_substring: {metric: value}}
-# Initial values are generous placeholders — calibrate after first CI run.
+# Calibrated 2026-03-02 on L40S:2 — baseline: 28.3s avg, 8908MB peak.
+# 1.2x multiplier to absorb instance-to-instance variance.
 DEVICE_THRESHOLDS = {
     "L40S": {
-        "max_generation_time_s": 60.0,
-        "max_peak_memory_mb": 20000.0,
+        "max_generation_time_s": 34.0,
+        "max_peak_memory_mb": 11000.0,
     },
 }
 
