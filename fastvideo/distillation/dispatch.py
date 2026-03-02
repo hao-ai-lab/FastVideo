@@ -116,6 +116,22 @@ def build_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:
     model_builder = get_model(str(cfg.recipe.family))
     model = model_builder(cfg=cfg)
 
+    student_cfg = cfg.roles.get("student")
+    init_from_checkpoint = None
+    if student_cfg is not None:
+        init_from_checkpoint = (student_cfg.extra or {}).get(
+            "init_from_checkpoint",
+            None,
+        )
+    if init_from_checkpoint:
+        from fastvideo.distillation.utils.checkpoint import maybe_warmstart_role_modules
+
+        maybe_warmstart_role_modules(
+            bundle=model.bundle,
+            role="student",
+            init_from_checkpoint=str(init_from_checkpoint),
+        )
+
     method_cls = get_method(str(cfg.recipe.method))
     method = method_cls.build(
         cfg=cfg,

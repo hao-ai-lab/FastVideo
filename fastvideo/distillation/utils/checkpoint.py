@@ -5,13 +5,18 @@ from __future__ import annotations
 import os
 import re
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
+from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
+    get_model_state_dict,
+)
 
 from fastvideo.distillation.roles import RoleHandle, RoleManager
 from fastvideo.logger import init_logger
@@ -113,6 +118,183 @@ def _resolve_resume_checkpoint(resume_from_checkpoint: str, *, output_dir: str) 
         f"named 'checkpoint-<step>' (with 'dcp/' inside), or an output_dir "
         f"containing such checkpoints. Got: {path} (output_dir={out})."
     )
+
+
+def _get_dcp_role_module_names(dcp_dir: Path, role: str) -> set[str]:
+    """Inspect a DCP checkpoint and return module names present for `roles.<role>.*`."""
+
+    if _rank() == 0:
+        reader = dcp.FileSystemReader(str(dcp_dir))
+        metadata = reader.read_metadata()
+        module_names: set[str] = set()
+        prefix = f"roles.{role}."
+        for key in metadata.state_dict_metadata:
+            if not key.startswith(prefix):
+                continue
+            parts = key.split(".")
+            if len(parts) >= 3 and parts[2]:
+                module_names.add(parts[2])
+        packed: list[str] = sorted(module_names)
+    else:
+        packed = []
+
+    if dist.is_available() and dist.is_initialized():
+        obj_list: list[Any] = [packed]
+        dist.broadcast_object_list(obj_list, src=0)
+        packed = obj_list[0]
+
+    return set(str(name) for name in packed)
+
+
+def maybe_warmstart_role_modules(
+    *,
+    bundle: RoleManager,
+    role: str,
+    init_from_checkpoint: str | None,
+) -> None:
+    """Warmstart model modules for `role` from a Phase 2/3 DCP checkpoint.
+
+    This is **not** a training resume:
+    - only loads role modules (no optimizer/scheduler/dataloader/RNG state)
+    - does not advance `start_step`
+
+    The checkpoint directory is expected to be `checkpoint-<step>/dcp/*.distcp`.
+    """
+
+    if not init_from_checkpoint:
+        return
+
+    resolved = _resolve_resume_checkpoint(
+        str(init_from_checkpoint),
+        output_dir=str(init_from_checkpoint),
+    )
+    dcp_dir = resolved / "dcp"
+    if not dcp_dir.is_dir():
+        raise FileNotFoundError(f"Missing dcp dir under checkpoint: {dcp_dir}")
+
+    handle = bundle.role(str(role))
+    available_modules = _get_dcp_role_module_names(dcp_dir, role=str(role))
+
+    states: dict[str, Any] = {}
+    for module_name, module in handle.modules.items():
+        if module_name not in available_modules:
+            continue
+        states[f"roles.{role}.{module_name}"] = ModelWrapper(module)
+
+    if not states:
+        raise ValueError(
+            f"init_from_checkpoint={resolved} does not contain any saved modules for "
+            f"role={role!r}. Available modules in checkpoint: {sorted(available_modules)}"
+        )
+
+    if _rank() == 0:
+        logger.info(
+            "Warmstarting role=%s from checkpoint=%s (modules=%s)",
+            role,
+            resolved,
+            sorted(states.keys()),
+        )
+    dcp.load(states, checkpoint_id=str(dcp_dir))
+    _barrier()
+
+
+def save_role_pretrained(
+    *,
+    bundle: RoleManager,
+    role: str,
+    base_model_path: str,
+    output_dir: str,
+    module_names: list[str] | None = None,
+    overwrite: bool = False,
+) -> str:
+    """Export a role's modules into a diffusers-style model directory.
+
+    This is intended to produce a `model_path` that can be loaded by
+    `PipelineComponentLoader` (i.e., has `model_index.json`, `transformer/`,
+    `vae/`, and other pipeline components copied from `base_model_path`).
+
+    Notes:
+    - Only role modules are exported (e.g. `transformer`, optionally `transformer_2`).
+    - The output directory is based on `base_model_path`, then overwritten with
+      current in-memory module weights.
+    """
+
+    # Resolve HF IDs to local directories (same behavior as module loader).
+    from fastvideo.utils import maybe_download_model
+
+    local_base = Path(maybe_download_model(str(base_model_path))).resolve()
+    dst = Path(os.path.expanduser(str(output_dir))).resolve()
+
+    if _rank() == 0:
+        if dst.exists():
+            if overwrite:
+                shutil.rmtree(dst, ignore_errors=True)
+            else:
+                raise FileExistsError(
+                    f"Refusing to overwrite existing directory: {dst}. "
+                    "Pass overwrite=True to replace it."
+                )
+
+        def _copy_or_link(src: str, dest: str) -> None:
+            try:
+                os.link(src, dest)
+            except OSError:
+                shutil.copy2(src, dest)
+
+        logger.info("Creating pretrained export dir at %s (base=%s)", dst, local_base)
+        shutil.copytree(local_base, dst, symlinks=True, copy_function=_copy_or_link)
+
+    _barrier()
+
+    handle = bundle.role(str(role))
+    modules = dict(handle.modules)
+    if module_names is None:
+        module_names = sorted(modules.keys())
+
+    for module_name in module_names:
+        if module_name not in modules:
+            raise KeyError(
+                f"Role {role!r} does not have module {module_name!r}. "
+                f"Available: {sorted(modules.keys())}"
+            )
+
+        module_dir = dst / module_name
+        if not module_dir.is_dir():
+            raise FileNotFoundError(
+                f"Export directory missing component dir {module_name!r}: {module_dir}"
+            )
+
+        options = StateDictOptions(full_state_dict=True, cpu_offload=True)
+        state_dict = get_model_state_dict(modules[module_name], options=options)
+
+        if _rank() == 0:
+            # Remove existing *.safetensors to avoid loading duplicate weights.
+            for path in module_dir.glob("*.safetensors"):
+                path.unlink(missing_ok=True)
+
+            tensor_state: dict[str, torch.Tensor] = {}
+            for key, value in state_dict.items():
+                if not isinstance(value, torch.Tensor):
+                    raise TypeError(
+                        f"Expected tensor in state_dict for {module_name}.{key}, "
+                        f"got {type(value).__name__}"
+                    )
+                tensor_state[key] = value.detach().cpu()
+
+            from safetensors.torch import save_file
+
+            out_path = module_dir / "model.safetensors"
+            logger.info(
+                "Saving %s weights to %s (%s tensors)",
+                module_name,
+                out_path,
+                len(tensor_state),
+            )
+            save_file(tensor_state, str(out_path))
+
+        _barrier()
+
+    return str(dst)
 
 
 class _RoleModuleContainer(torch.nn.Module):
@@ -236,7 +418,10 @@ class DistillCheckpointManager:
         if not resume_from_checkpoint:
             return None
 
-        resolved = _resolve_resume_checkpoint(resume_from_checkpoint, output_dir=self.output_dir)
+        resolved = _resolve_resume_checkpoint(
+            resume_from_checkpoint,
+            output_dir=self.output_dir,
+        )
         step = _parse_step_from_dir(resolved)
 
         states = self._build_states()
