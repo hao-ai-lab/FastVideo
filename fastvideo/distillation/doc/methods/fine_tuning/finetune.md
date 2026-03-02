@@ -4,7 +4,7 @@
 - 将 “finetuning / SFT” 以 `DistillMethod` 的方式接入 Phase 2+ 架构：
   - 复用 `DistillTrainer`（infra loop / accum / step / ckpt / validate 调用）
   - 复用 `RoleManager`（角色容器，finetune 只需要 `student`）
-  - 复用 model plugin/adapter（加载与 primitives）
+  - 复用 model plugin（加载与 primitives）
 
 finetune 可以被视为一种特殊的 distillation recipe：**只有 student + dataset**。
 
@@ -17,8 +17,8 @@ finetune 可以被视为一种特殊的 distillation recipe：**只有 student +
 
 ## 核心训练逻辑
 `FineTuneMethod.single_train_step()`：
-1. `adapter.prepare_batch(..., latents_source="data")`
-2. 用 student 做 `adapter.predict_noise(student, noisy_latents, timesteps, batch, conditional=True)`
+1. `model.prepare_batch(..., latents_source="data")`
+2. 用 student 做 `model.predict_noise(student, noisy_latents, timesteps, batch, conditional=True)`
 3. 计算 loss（与 legacy `training_pipeline.py` 对齐）：
    - 默认（`training.precondition_outputs=false`）：
      - target = `noise - x0`
@@ -26,7 +26,7 @@ finetune 可以被视为一种特殊的 distillation recipe：**只有 student +
    - 若 `training.precondition_outputs=true`：
      - 先 precondition 到 `x0`：`pred_x0 = x_t - sigma * pred`
      - loss = `mse(pred_x0, x0)`
-4. backward 通过 `adapter.backward(loss, ctx, ...)` 执行（确保 forward-context/activation ckpt 兼容）
+4. backward 通过 `model.backward(loss, ctx, ...)` 执行（确保 forward-context/activation ckpt 兼容）
 
 ## Optimizer / Scheduler
 - 由 method 创建（而非 model plugin）：

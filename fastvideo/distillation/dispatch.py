@@ -8,11 +8,11 @@ from typing import Any, TYPE_CHECKING
 from typing import Protocol
 
 from fastvideo.distillation.methods.base import DistillMethod
-from fastvideo.distillation.models.components import ModelComponents
 from fastvideo.distillation.utils.config import DistillRunConfig
 
 if TYPE_CHECKING:
     from fastvideo.fastvideo_args import TrainingArgs
+    from fastvideo.distillation.models.base import ModelBase
 
 
 @dataclass(slots=True)
@@ -26,7 +26,7 @@ class DistillRuntime:
 
 
 class ModelBuilder(Protocol):
-    def __call__(self, *, cfg: DistillRunConfig) -> ModelComponents:
+    def __call__(self, *, cfg: DistillRunConfig) -> ModelBase:
         ...
 
 
@@ -114,19 +114,19 @@ def build_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:
     """
 
     model_builder = get_model(str(cfg.recipe.family))
-    components = model_builder(cfg=cfg)
+    model = model_builder(cfg=cfg)
 
     method_cls = get_method(str(cfg.recipe.method))
     method = method_cls.build(
         cfg=cfg,
-        bundle=components.bundle,
-        adapter=components.adapter,
-        validator=components.validator,
+        bundle=model.bundle,
+        model=model,
+        validator=model.validator,
     )
 
     return DistillRuntime(
-        training_args=components.training_args,
+        training_args=model.training_args,
         method=method,
-        dataloader=components.dataloader,
-        start_step=int(getattr(components, "start_step", 0) or 0),
+        dataloader=model.dataloader,
+        start_step=int(getattr(model, "start_step", 0) or 0),
     )

@@ -7,12 +7,13 @@
 - `finetune.py`：`FineTuneMethod`
   - 只要求 `roles.student`
   - loss/policy 在 method 层
-  - 复用同一套 trainer/roles/adapter/model plugin/validator/checkpoint 基础设施
+  - 复用同一套 trainer/roles/model plugin/validator/checkpoint 基础设施
 - `dfsft.py`：`DiffusionForcingSFTMethod`（`recipe.method: dfsft`）
   - 只要求 `roles.student`
   - 训练目标仍是 SFT/flow-matching loss，但使用 **chunk-wise inhomogeneous timesteps**
     （`t_inhom`）作为 diffusion forcing baseline
 
 **设计要点**
-- adapter 仍保持 operation-centric（`prepare_batch / predict_* / backward`），不内置 finetune 的 loss 语义。
+- model plugin 通过 `ModelBase` 提供 operation-centric primitives（`prepare_batch / predict_* / backward`），
+  不内置 finetune 的 loss 语义（由 method 管理）。
 - model plugin 负责 build-time：加载 student modules、shared components（VAE/scheduler）、dataloader、validator。

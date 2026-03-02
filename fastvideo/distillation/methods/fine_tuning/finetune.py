@@ -40,12 +40,13 @@ from fastvideo.distillation.utils.config import (
 )
 
 
-class _FineTuneAdapter(Protocol):
-    """Adapter contract for :class:`FineTuneMethod`.
+class _FineTuneModel(Protocol):
+    """Model contract for :class:`FineTuneMethod`.
 
     Finetuning is implemented as a method (algorithm layer) on top of the
-    model-plugin-provided adapter. The method must remain model-plugin agnostic, so
-    it consumes only operation-centric primitives exposed by the adapter.
+    model-plugin-provided model plugin. The method must remain model-plugin
+    agnostic, so it consumes only operation-centric primitives exposed by the
+    model.
     """
 
     training_args: Any
@@ -92,7 +93,7 @@ class FineTuneMethod(DistillMethod):
         self,
         *,
         bundle: RoleManager,
-        adapter: _FineTuneAdapter,
+        model: _FineTuneModel,
         method_config: dict[str, Any] | None = None,
         validation_config: dict[str, Any] | None = None,
         validator: Any | None = None,
@@ -103,9 +104,9 @@ class FineTuneMethod(DistillMethod):
         if not self.student.trainable:
             raise ValueError("FineTuneMethod requires roles.student.trainable=true")
 
-        self.adapter = adapter
+        self.model = model
         self.validator = validator
-        self.training_args = adapter.training_args
+        self.training_args = model.training_args
         self.method_config: dict[str, Any] = dict(method_config or {})
         self.validation_config: dict[str, Any] = dict(validation_config or {})
         self._attn_kind: Literal["dense", "vsa"] = self._parse_attn_kind(
@@ -120,12 +121,12 @@ class FineTuneMethod(DistillMethod):
         *,
         cfg: DistillRunConfig,
         bundle: RoleManager,
-        adapter: Any,
+        model: Any,
         validator: Any | None,
     ) -> DistillMethod:
         return cls(
             bundle=bundle,
-            adapter=adapter,
+            model=model,
             method_config=cfg.method_config,
             validation_config=cfg.validation,
             validator=validator,
@@ -201,7 +202,7 @@ class FineTuneMethod(DistillMethod):
         )
 
     def on_train_start(self) -> None:
-        self.adapter.on_train_start()
+        self.model.on_train_start()
 
     def _is_validation_enabled(self) -> bool:
         cfg = self.validation_config
@@ -392,10 +393,10 @@ class FineTuneMethod(DistillMethod):
 
         generators: dict[str, torch.Generator] = {}
 
-        adapter = getattr(self, "adapter", None)
-        get_adapter_generators = getattr(adapter, "get_rng_generators", None)
-        if callable(get_adapter_generators):
-            generators.update(get_adapter_generators())
+        model = getattr(self, "model", None)
+        get_model_generators = getattr(model, "get_rng_generators", None)
+        if callable(get_model_generators):
+            generators.update(get_model_generators())
 
         validator = getattr(self, "validator", None)
         validation_gen = getattr(validator, "validation_random_generator", None)
@@ -432,24 +433,24 @@ class FineTuneMethod(DistillMethod):
         current_vsa_sparsity: float = 0.0,
     ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
         del iteration
-        training_batch = self.adapter.prepare_batch(
+        training_batch = self.model.prepare_batch(
             batch,
             current_vsa_sparsity=current_vsa_sparsity,
             latents_source="data",
         )
 
         if training_batch.latents is None:
-            raise RuntimeError("adapter.prepare_batch() must set TrainingBatch.latents")
+            raise RuntimeError("model.prepare_batch() must set TrainingBatch.latents")
         if training_batch.noisy_model_input is None:
             raise RuntimeError(
-                "adapter.prepare_batch() must set TrainingBatch.noisy_model_input"
+                "model.prepare_batch() must set TrainingBatch.noisy_model_input"
             )
         if training_batch.noise is None:
-            raise RuntimeError("adapter.prepare_batch() must set TrainingBatch.noise")
+            raise RuntimeError("model.prepare_batch() must set TrainingBatch.noise")
         if training_batch.sigmas is None:
-            raise RuntimeError("adapter.prepare_batch() must set TrainingBatch.sigmas")
+            raise RuntimeError("model.prepare_batch() must set TrainingBatch.sigmas")
         if training_batch.timesteps is None:
-            raise RuntimeError("adapter.prepare_batch() must set TrainingBatch.timesteps")
+            raise RuntimeError("model.prepare_batch() must set TrainingBatch.timesteps")
 
         clean_latents = training_batch.latents
         noisy_latents = training_batch.noisy_model_input.permute(0, 2, 1, 3, 4)
@@ -457,7 +458,7 @@ class FineTuneMethod(DistillMethod):
         sigmas = training_batch.sigmas
         timesteps = training_batch.timesteps
 
-        pred = self.adapter.predict_noise(
+        pred = self.model.predict_noise(
             self.student,
             noisy_latents,
             timesteps,
@@ -497,7 +498,7 @@ class FineTuneMethod(DistillMethod):
         if ctx is None:
             super().backward(loss_map, outputs, grad_accum_rounds=grad_accum_rounds)
             return
-        self.adapter.backward(
+        self.model.backward(
             loss_map["total_loss"],
             ctx,
             grad_accum_rounds=grad_accum_rounds,

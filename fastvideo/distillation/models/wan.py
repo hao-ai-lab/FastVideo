@@ -16,7 +16,7 @@ Config keys used (YAML schema-v2):
   - `moba_config` (if `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`)
   - `enable_gradient_checkpointing_type` (optional)
 - `training.validation.*` (consumed by `WanValidator` when enabled)
-- `method_config.cfg_uncond.*` (consumed by `WanAdapter` for CFG-uncond policy)
+- `method_config.cfg_uncond.*` (consumed by `WanModel` for CFG-uncond policy)
 """
 
 from __future__ import annotations
@@ -52,8 +52,7 @@ from fastvideo.training.training_utils import (
 from fastvideo.utils import is_vmoba_available, is_vsa_available, set_random_seed
 
 from fastvideo.distillation.dispatch import register_model
-from fastvideo.distillation.models.adapter import ModelAdapter
-from fastvideo.distillation.models.components import ModelComponents
+from fastvideo.distillation.models.base import ModelBase
 from fastvideo.distillation.roles import RoleHandle, RoleManager
 from fastvideo.distillation.utils.config import DistillRunConfig
 from fastvideo.distillation.utils.dataloader import build_parquet_t2v_train_dataloader
@@ -70,17 +69,96 @@ except Exception:
     VideoMobaAttentionMetadataBuilder = None  # type: ignore[assignment]
 
 
-class WanAdapter(ModelAdapter):
-    """Wan runtime adapter: exposes operation-centric primitives to methods."""
+@register_model("wan")
+class WanModel(ModelBase):
+    """Wan model plugin: loads roles + shared components and exposes runtime primitives."""
 
-    def __init__(
-        self,
-        *,
-        prompt_handle: RoleHandle,
-        training_args: Any,
-        noise_scheduler: Any,
-        vae: Any,
-    ) -> None:
+    def __init__(self, *, cfg: DistillRunConfig) -> None:
+        training_args = cfg.training_args
+        roles_cfg = cfg.roles
+
+        if getattr(training_args, "seed", None) is None:
+            raise ValueError("training.seed must be set for distillation")
+        if not getattr(training_args, "data_path", ""):
+            raise ValueError("training.data_path must be set for distillation")
+
+        # Load shared components (student base path).
+        training_args.override_transformer_cls_name = "WanTransformer3DModel"
+        vae = load_module_from_path(
+            model_path=str(training_args.model_path),
+            module_type="vae",
+            training_args=training_args,
+        )
+        noise_scheduler = FlowMatchEulerDiscreteScheduler(
+            shift=float(training_args.pipeline_config.flow_shift or 0.0)
+        )
+
+        role_handles: dict[str, RoleHandle] = {}
+        for role, role_spec in roles_cfg.items():
+            if role_spec.family != "wan":
+                raise ValueError(
+                    "Wan model plugin only supports roles with family='wan'; "
+                    f"got {role}={role_spec.family!r}"
+                )
+
+            disable_custom_init_weights = bool(
+                getattr(role_spec, "disable_custom_init_weights", False)
+            )
+            transformer = load_module_from_path(
+                model_path=role_spec.path,
+                module_type="transformer",
+                training_args=training_args,
+                disable_custom_init_weights=disable_custom_init_weights,
+            )
+            modules: dict[str, torch.nn.Module] = {"transformer": transformer}
+
+            # Optional MoE support: load transformer_2 if present in the model.
+            try:
+                transformer_2 = load_module_from_path(
+                    model_path=role_spec.path,
+                    module_type="transformer_2",
+                    training_args=training_args,
+                    disable_custom_init_weights=disable_custom_init_weights,
+                )
+            except ValueError:
+                transformer_2 = None
+            if transformer_2 is not None:
+                modules["transformer_2"] = transformer_2
+
+            for name, module in list(modules.items()):
+                module = apply_trainable(module, trainable=bool(role_spec.trainable))
+                if role_spec.trainable and getattr(
+                    training_args, "enable_gradient_checkpointing_type", None
+                ):
+                    module = apply_activation_checkpointing(
+                        module,
+                        checkpointing_type=training_args.enable_gradient_checkpointing_type,
+                    )
+                modules[name] = module
+
+            role_handles[role] = RoleHandle(
+                modules=modules,
+                optimizers={},
+                lr_schedulers={},
+                trainable=bool(role_spec.trainable),
+            )
+
+        self.bundle = RoleManager(roles=role_handles)
+
+        # Optional validator.
+        self.validator = None
+        validation_cfg = getattr(cfg, "validation", {}) or {}
+        validation_enabled = bool(validation_cfg.get("enabled", bool(validation_cfg)))
+        if validation_enabled:
+            from fastvideo.distillation.validators.wan import WanValidator
+
+            self.validator = WanValidator(training_args=training_args)
+
+        # NOTE: runtime primitives need a prompt-encoding capable handle.
+        prompt_handle = role_handles.get("student")
+        if prompt_handle is None:
+            raise ValueError("Wan model plugin requires a 'student' role for prompt encoding")
+
         self.prompt_handle = prompt_handle
         self.training_args = training_args
         self.noise_scheduler = noise_scheduler
@@ -97,6 +175,14 @@ class WanAdapter(ModelAdapter):
         self.negative_prompt_attention_mask: torch.Tensor | None = None
 
         self._init_timestep_mechanics()
+
+        from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
+
+        self.dataloader = build_parquet_t2v_train_dataloader(
+            training_args,
+            parquet_schema=pyarrow_schema_t2v,
+        )
+        self.start_step = 0
 
     def _get_training_dtype(self) -> torch.dtype:
         return torch.bfloat16
@@ -627,113 +713,3 @@ class WanAdapter(ModelAdapter):
         timesteps, attn_metadata = ctx
         with set_forward_context(current_timestep=timesteps, attn_metadata=attn_metadata):
             (loss / max(1, int(grad_accum_rounds))).backward()
-
-
-@register_model("wan")
-def build_wan_components(*, cfg: DistillRunConfig) -> ModelComponents:
-    training_args = cfg.training_args
-    roles_cfg = cfg.roles
-
-    if getattr(training_args, "seed", None) is None:
-        raise ValueError("training.seed must be set for distillation")
-    if not getattr(training_args, "data_path", ""):
-        raise ValueError("training.data_path must be set for distillation")
-
-    # Load shared components (student base path).
-    training_args.override_transformer_cls_name = "WanTransformer3DModel"
-    vae = load_module_from_path(
-        model_path=str(training_args.model_path),
-        module_type="vae",
-        training_args=training_args,
-    )
-    noise_scheduler = FlowMatchEulerDiscreteScheduler(
-        shift=float(training_args.pipeline_config.flow_shift or 0.0)
-    )
-
-    role_handles: dict[str, RoleHandle] = {}
-    for role, role_spec in roles_cfg.items():
-        if role_spec.family != "wan":
-            raise ValueError(
-                "Wan model plugin only supports roles with family='wan'; "
-                f"got {role}={role_spec.family!r}"
-            )
-
-        disable_custom_init_weights = bool(getattr(role_spec, "disable_custom_init_weights", False))
-        transformer = load_module_from_path(
-            model_path=role_spec.path,
-            module_type="transformer",
-            training_args=training_args,
-            disable_custom_init_weights=disable_custom_init_weights,
-        )
-        modules: dict[str, torch.nn.Module] = {"transformer": transformer}
-
-        # Optional MoE support: load transformer_2 if present in the model.
-        try:
-            transformer_2 = load_module_from_path(
-                model_path=role_spec.path,
-                module_type="transformer_2",
-                training_args=training_args,
-                disable_custom_init_weights=disable_custom_init_weights,
-            )
-        except ValueError:
-            transformer_2 = None
-        if transformer_2 is not None:
-            modules["transformer_2"] = transformer_2
-
-        for name, module in list(modules.items()):
-            module = apply_trainable(module, trainable=bool(role_spec.trainable))
-            if role_spec.trainable and getattr(
-                training_args, "enable_gradient_checkpointing_type", None
-            ):
-                module = apply_activation_checkpointing(
-                    module,
-                    checkpointing_type=training_args.enable_gradient_checkpointing_type,
-                )
-            modules[name] = module
-
-        optimizers: dict[str, torch.optim.Optimizer] = {}
-        lr_schedulers: dict[str, Any] = {}
-
-        role_handles[role] = RoleHandle(
-            modules=modules,
-            optimizers=optimizers,
-            lr_schedulers=lr_schedulers,
-            trainable=bool(role_spec.trainable),
-        )
-
-    bundle = RoleManager(roles=role_handles)
-
-    validator = None
-    validation_cfg = getattr(cfg, "validation", {}) or {}
-    validation_enabled = bool(validation_cfg.get("enabled", bool(validation_cfg)))
-    if validation_enabled:
-        from fastvideo.distillation.validators.wan import WanValidator
-
-        validator = WanValidator(training_args=training_args)
-
-    # NOTE: adapter is the model runtime boundary; it may implement multiple
-    # method-specific protocols via duck typing.
-    prompt_handle = role_handles.get("student")
-    if prompt_handle is None:
-        raise ValueError("Wan model plugin requires a 'student' role for prompt encoding")
-    adapter = WanAdapter(
-        prompt_handle=prompt_handle,
-        training_args=training_args,
-        noise_scheduler=noise_scheduler,
-        vae=vae,
-    )
-    from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
-
-    dataloader = build_parquet_t2v_train_dataloader(
-        training_args,
-        parquet_schema=pyarrow_schema_t2v,
-    )
-
-    return ModelComponents(
-        training_args=training_args,
-        bundle=bundle,
-        adapter=adapter,
-        dataloader=dataloader,
-        validator=validator,
-        start_step=0,
-    )

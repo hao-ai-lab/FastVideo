@@ -5,8 +5,9 @@
   减少文件级概念数量。
 
 备注：
-- model plugin 的 build-time 产物结构体 `ModelComponents` 在
-  `fastvideo/distillation/models/components.py`（更贴近语义归属）。
+- `DistillRuntime` 由 `dispatch.build_runtime_from_config()` 创建并定义在
+  `fastvideo/distillation/dispatch.py`（谁创建谁声明）。
+- tracker 由 `DistillTrainer` 构建并持有（避免 model plugin 变成 infra owner）。
 
 这里包含：
 
@@ -62,18 +63,13 @@
     交给 model plugin 解释（例如 `roles.student.variant: causal`）
 
 ## 3) Builder 装配相关（build-time / run-time 边界）
-- `ModelComponents`
-  - model 插件 build-time 的产物集合：
-    - `training_args`
-    - `bundle`
-    - `adapter`
-    - `dataloader`
-    - `validator`（可选；model-specific）
-    - `start_step`（用于 resume / warm-start）
-备注：
-- `DistillRuntime` 由 `dispatch.build_runtime_from_config()` 创建并定义在
-  `fastvideo/distillation/dispatch.py`（谁创建谁声明）。
-- tracker 由 `DistillTrainer` 构建并持有（避免 model plugin 变成 infra owner）。
+- model plugin（`@register_model`）直接构建并返回一个 `ModelBase` 实例：
+  - `training_args`
+  - `bundle`
+  - `dataloader`
+  - `validator`（可选；model-specific）
+  - `start_step`（用于 resume / warm-start）
+- `dispatch.build_runtime_from_config()` 选择 model/method 并返回 `DistillRuntime`。
 
 ## 4) 通用解析 helpers（method_config / optimizer 等）
 - `get_optional_int(mapping, key, where=...)`

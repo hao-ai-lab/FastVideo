@@ -42,11 +42,11 @@ from fastvideo.distillation.utils.config import (
 from fastvideo.distillation.validators.base import ValidationRequest
 
 
-class _DFSFTAdapter(Protocol):
-    """Adapter contract for diffusion-forcing SFT (DFSFT).
+class _DFSFTModel(Protocol):
+    """Model contract for diffusion-forcing SFT (DFSFT).
 
     DFSFT is implemented purely at the method (algorithm) layer and relies only
-    on operation-centric primitives exposed by the model-family adapter.
+    on operation-centric primitives exposed by the model plugin.
     """
 
     training_args: Any
@@ -101,7 +101,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
         self,
         *,
         bundle: RoleManager,
-        adapter: _DFSFTAdapter,
+        model: _DFSFTModel,
         method_config: dict[str, Any] | None = None,
         validation_config: dict[str, Any] | None = None,
         validator: Any | None = None,
@@ -112,9 +112,9 @@ class DiffusionForcingSFTMethod(DistillMethod):
         if not self.student.trainable:
             raise ValueError("DFSFT requires roles.student.trainable=true")
 
-        self.adapter = adapter
+        self.model = model
         self.validator = validator
-        self.training_args = adapter.training_args
+        self.training_args = model.training_args
         self.method_config: dict[str, Any] = dict(method_config or {})
         self.validation_config: dict[str, Any] = dict(validation_config or {})
         self._attn_kind: Literal["dense", "vsa"] = self._parse_attn_kind(
@@ -132,12 +132,12 @@ class DiffusionForcingSFTMethod(DistillMethod):
         *,
         cfg: DistillRunConfig,
         bundle: RoleManager,
-        adapter: Any,
+        model: Any,
         validator: Any | None,
     ) -> DistillMethod:
         return cls(
             bundle=bundle,
-            adapter=adapter,
+            model=model,
             method_config=cfg.method_config,
             validation_config=cfg.validation,
             validator=validator,
@@ -186,7 +186,9 @@ class DiffusionForcingSFTMethod(DistillMethod):
         raise ValueError(f"{where} must be a number/string, got {type(raw).__name__}")
 
     def _parse_timestep_index_range(self) -> tuple[int, int]:
-        scheduler = self.adapter.noise_scheduler
+        scheduler = getattr(self.model, "noise_scheduler", None)
+        if scheduler is None:
+            raise ValueError("DFSFT requires model.noise_scheduler")
         num_steps = int(getattr(scheduler, "config", scheduler).num_train_timesteps)
 
         min_ratio = self._parse_ratio(
@@ -277,7 +279,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
         )
 
     def on_train_start(self) -> None:
-        self.adapter.on_train_start()
+        self.model.on_train_start()
 
     def _is_validation_enabled(self) -> bool:
         cfg = self.validation_config
@@ -460,10 +462,10 @@ class DiffusionForcingSFTMethod(DistillMethod):
     def get_rng_generators(self) -> dict[str, torch.Generator]:
         generators: dict[str, torch.Generator] = {}
 
-        adapter = getattr(self, "adapter", None)
-        get_adapter_generators = getattr(adapter, "get_rng_generators", None)
-        if callable(get_adapter_generators):
-            generators.update(get_adapter_generators())
+        model = getattr(self, "model", None)
+        get_model_generators = getattr(model, "get_rng_generators", None)
+        if callable(get_model_generators):
+            generators.update(get_model_generators())
 
         validator = getattr(self, "validator", None)
         validation_gen = getattr(validator, "validation_random_generator", None)
@@ -494,14 +496,14 @@ class DiffusionForcingSFTMethod(DistillMethod):
         current_vsa_sparsity: float = 0.0,
     ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
         del iteration
-        training_batch = self.adapter.prepare_batch(
+        training_batch = self.model.prepare_batch(
             batch,
             current_vsa_sparsity=current_vsa_sparsity,
             latents_source="data",
         )
 
         if training_batch.latents is None:
-            raise RuntimeError("adapter.prepare_batch() must set TrainingBatch.latents")
+            raise RuntimeError("model.prepare_batch() must set TrainingBatch.latents")
 
         clean_latents = training_batch.latents
         if not torch.is_tensor(clean_latents):
@@ -528,14 +530,18 @@ class DiffusionForcingSFTMethod(DistillMethod):
             device=clean_latents.device,
         )
         sp_size = int(getattr(self.training_args, "sp_size", 1) or 1)
-        sp_group = getattr(self.adapter, "sp_group", None)
+        sp_group = getattr(self.model, "sp_group", None)
         if sp_size > 1 and sp_group is not None and hasattr(sp_group, "broadcast"):
             sp_group.broadcast(timestep_indices, src=0)
 
-        schedule_timesteps = self.adapter.noise_scheduler.timesteps.to(
+        scheduler = getattr(self.model, "noise_scheduler", None)
+        if scheduler is None:
+            raise ValueError("DFSFT requires model.noise_scheduler")
+
+        schedule_timesteps = scheduler.timesteps.to(
             device=clean_latents.device, dtype=torch.float32
         )
-        schedule_sigmas = self.adapter.noise_scheduler.sigmas.to(
+        schedule_sigmas = scheduler.sigmas.to(
             device=clean_latents.device, dtype=clean_latents.dtype
         )
         t_inhom = schedule_timesteps[timestep_indices]
@@ -548,13 +554,13 @@ class DiffusionForcingSFTMethod(DistillMethod):
                 raise TypeError("TrainingBatch.noise must be a torch.Tensor when set")
             noise = noise.permute(0, 2, 1, 3, 4).to(dtype=clean_latents.dtype)
 
-        noisy_latents = self.adapter.add_noise(
+        noisy_latents = self.model.add_noise(
             clean_latents,
             noise,
             t_inhom.flatten(),
         )
 
-        pred = self.adapter.predict_noise(
+        pred = self.model.predict_noise(
             self.student,
             noisy_latents,
             t_inhom,
@@ -594,7 +600,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
         if ctx is None:
             super().backward(loss_map, outputs, grad_accum_rounds=grad_accum_rounds)
             return
-        self.adapter.backward(
+        self.model.backward(
             loss_map["total_loss"],
             ctx,
             grad_accum_rounds=grad_accum_rounds,

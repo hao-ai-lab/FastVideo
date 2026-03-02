@@ -33,9 +33,9 @@ class DistillMethod(torch.nn.Module, ABC):
         *,
         cfg: DistillRunConfig,
         bundle: RoleManager,
-        adapter: Any,
+        model: Any,
         validator: Any | None,
-    ) -> "DistillMethod":
+    ) -> DistillMethod:
         raise NotImplementedError
 
     def set_tracker(self, tracker: Any) -> None:

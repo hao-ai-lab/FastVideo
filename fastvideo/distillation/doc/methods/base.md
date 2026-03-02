@@ -11,7 +11,7 @@
   `self.role_modules: ModuleDict`，便于 DDP/FSDP/ckpt 系统统一发现参数。
 
 **需要子类实现的抽象方法**
-- `build(cfg, bundle, adapter, validator)`（classmethod）
+- `build(cfg, bundle, model, validator)`（classmethod）
 - `single_train_step(batch, iteration, current_vsa_sparsity=...)`
   - 返回：`(loss_map, outputs, metrics)`
     - `loss_map: dict[str, Tensor]`：必须包含 `total_loss`（用于 backward）

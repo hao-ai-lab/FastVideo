@@ -5,15 +5,14 @@
 设计原则（对应 Phase 2.9）：
 - **Trainer** 只做 infra（loop/accum/日志/ckpt/validate 调用），不包含算法策略。
 - **Method** 只做算法（loss + update policy + 需要哪些 roles）。
-- **Model plugin** 只做装配（build-time：加载 modules、构建 bundle/adapter/dataloader/validator；代码在 `models/`）。
-- **Adapter** 只做运行时 primitive（step-time：prepare_batch/forward_context/predict/backward 等），
-  并与对应 model plugin **共置于 `models/*.py`**（例如 `models/wan.py:WanAdapter`）。
+- **Model plugin** 负责装配 + primitives（build-time：加载 modules、构建 bundle/dataloader/validator；
+  step-time：实现 `ModelBase` 的 primitives，例如 `prepare_batch/predict_*/backward/...`）。
   API 以 operation 为中心，不以 role 为中心（避免 role 爆炸）。
 
 快速入口（从运行到训练）：
 `fastvideo/training/distillation.py` → `utils.config.load_distill_run_config()` →
 `dispatch.build_runtime_from_config()` →
-`ModelComponents + DistillMethod` → `DistillTrainer.run()`
+`ModelBase(model) + DistillMethod` → `DistillTrainer.run()`
 
 ---
 
@@ -34,8 +33,7 @@
 
 ### models/
 - `models/__init__.md`
-- `models/adapter.md`
-- `models/components.md`
+- `models/base.md`
 - `models/wan.md`
 - `models/wangame.md`
 

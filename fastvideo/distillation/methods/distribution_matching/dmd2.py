@@ -49,14 +49,14 @@ from fastvideo.distillation.utils.config import (
 )
 
 
-class _DMD2Adapter(Protocol):
-    """Algorithm-specific adapter contract for :class:`DMD2Method`.
+class _DMD2Model(Protocol):
+    """Algorithm-specific model contract for :class:`DMD2Method`.
 
     The method layer is intentionally model-agnostic: it should not import or
     depend on any concrete pipeline/model implementation. Instead, all
     model-specific primitives (batch preparation, noise schedule helpers,
     forward-context management, and role-specific backward behavior) are
-    provided by an adapter (e.g. ``WanAdapter``).
+    provided by a model plugin (e.g. ``WanModel``).
 
     This ``Protocol`` documents the required surface area and helps static type
     checkers/IDE tooling; it is not enforced at runtime (duck typing).
@@ -132,7 +132,7 @@ class DMD2Method(DistillMethod):
 
     All model-plugin details (how to run student rollout, teacher CFG
     prediction, critic loss, and how to safely run backward under activation
-    checkpointing/forward-context constraints) are delegated to the adapter
+    checkpointing/forward-context constraints) are delegated to the model plugin
     passed in at construction time.
     """
 
@@ -140,7 +140,7 @@ class DMD2Method(DistillMethod):
         self,
         *,
         bundle: RoleManager,
-        adapter: _DMD2Adapter,
+        model: _DMD2Model,
         method_config: dict[str, Any] | None = None,
         validation_config: dict[str, Any] | None = None,
         validator: Any | None = None,
@@ -156,9 +156,9 @@ class DMD2Method(DistillMethod):
             raise ValueError("DMD2Method requires roles.teacher.trainable=false")
         if not self.critic.trainable:
             raise ValueError("DMD2Method requires roles.critic.trainable=true")
-        self.adapter = adapter
+        self.model = model
         self.validator = validator
-        self.training_args = adapter.training_args
+        self.training_args = model.training_args
         self.method_config: dict[str, Any] = dict(method_config or {})
         self.validation_config: dict[str, Any] = dict(validation_config or {})
         self._cfg_uncond = self._parse_cfg_uncond()
@@ -172,12 +172,12 @@ class DMD2Method(DistillMethod):
         *,
         cfg: DistillRunConfig,
         bundle: RoleManager,
-        adapter: Any,
+        model: Any,
         validator: Any | None,
     ) -> DistillMethod:
         return cls(
             bundle=bundle,
-            adapter=adapter,
+            model=model,
             method_config=cfg.method_config,
             validation_config=cfg.validation,
             validator=validator,
@@ -332,7 +332,7 @@ class DMD2Method(DistillMethod):
         )
 
     def on_train_start(self) -> None:
-        self.adapter.on_train_start()
+        self.model.on_train_start()
 
     def _is_validation_enabled(self) -> bool:
         cfg = self.validation_config
@@ -541,10 +541,10 @@ class DMD2Method(DistillMethod):
 
         generators: dict[str, torch.Generator] = {}
 
-        adapter = getattr(self, "adapter", None)
-        get_adapter_generators = getattr(adapter, "get_rng_generators", None)
-        if callable(get_adapter_generators):
-            generators.update(get_adapter_generators())
+        model = getattr(self, "model", None)
+        get_model_generators = getattr(model, "get_rng_generators", None)
+        if callable(get_model_generators):
+            generators.update(get_model_generators())
 
         validator = getattr(self, "validator", None)
         validation_gen = getattr(validator, "validation_random_generator", None)
@@ -599,9 +599,9 @@ class DMD2Method(DistillMethod):
         if warp is None:
             warp = getattr(self.training_args, "warp_denoising_step", False)
         if bool(warp):
-            noise_scheduler = getattr(self.adapter, "noise_scheduler", None)
+            noise_scheduler = getattr(self.model, "noise_scheduler", None)
             if noise_scheduler is None:
-                raise ValueError("warp_denoising_step requires adapter.noise_scheduler.timesteps")
+                raise ValueError("warp_denoising_step requires model.noise_scheduler.timesteps")
 
             timesteps = torch.cat(
                 (
@@ -634,8 +634,8 @@ class DMD2Method(DistillMethod):
         if self._rollout_mode != "simulate":
             timestep = self._sample_rollout_timestep(device)
             noise = torch.randn(latents.shape, device=device, dtype=dtype)
-            noisy_latents = self.adapter.add_noise(latents, noise, timestep)
-            pred_x0 = self.adapter.predict_x0(
+            noisy_latents = self.model.add_noise(latents, noise, timestep)
+            pred_x0 = self.model.predict_x0(
                 self.student,
                 noisy_latents,
                 timestep,
@@ -672,7 +672,7 @@ class DMD2Method(DistillMethod):
                         1, device=device, dtype=torch.long
                     )
 
-                    pred_clean = self.adapter.predict_x0(
+                    pred_clean = self.model.predict_x0(
                         self.student,
                         current_noise_latents,
                         current_timestep_tensor,
@@ -687,7 +687,7 @@ class DMD2Method(DistillMethod):
                         1, device=device, dtype=torch.long
                     )
                     noise = torch.randn(latents.shape, device=device, dtype=pred_clean.dtype)
-                    current_noise_latents = self.adapter.add_noise(
+                    current_noise_latents = self.model.add_noise(
                         pred_clean,
                         noise,
                         next_timestep_tensor,
@@ -702,7 +702,7 @@ class DMD2Method(DistillMethod):
             noisy_input = current_noise_latents_copy
 
         if with_grad:
-            pred_x0 = self.adapter.predict_x0(
+            pred_x0 = self.model.predict_x0(
                 self.student,
                 noisy_input,
                 target_timestep,
@@ -713,7 +713,7 @@ class DMD2Method(DistillMethod):
             )
         else:
             with torch.no_grad():
-                pred_x0 = self.adapter.predict_x0(
+                pred_x0 = self.model.predict_x0(
                     self.student,
                     noisy_input,
                     target_timestep,
@@ -733,21 +733,21 @@ class DMD2Method(DistillMethod):
         device = generator_pred_x0.device
         fake_score_timestep = torch.randint(
             0,
-            int(self.adapter.num_train_timesteps),
+            int(self.model.num_train_timesteps),
             [1],
             device=device,
             dtype=torch.long,
         )
-        fake_score_timestep = self.adapter.shift_and_clamp_timestep(fake_score_timestep)
+        fake_score_timestep = self.model.shift_and_clamp_timestep(fake_score_timestep)
 
         noise = torch.randn(
             generator_pred_x0.shape,
             device=device,
             dtype=generator_pred_x0.dtype,
         )
-        noisy_x0 = self.adapter.add_noise(generator_pred_x0, noise, fake_score_timestep)
+        noisy_x0 = self.model.add_noise(generator_pred_x0, noise, fake_score_timestep)
 
-        pred_noise = self.adapter.predict_noise(
+        pred_noise = self.model.predict_noise(
             self.critic,
             noisy_x0,
             fake_score_timestep,
@@ -779,21 +779,21 @@ class DMD2Method(DistillMethod):
         with torch.no_grad():
             timestep = torch.randint(
                 0,
-                int(self.adapter.num_train_timesteps),
+                int(self.model.num_train_timesteps),
                 [1],
                 device=device,
                 dtype=torch.long,
             )
-            timestep = self.adapter.shift_and_clamp_timestep(timestep)
+            timestep = self.model.shift_and_clamp_timestep(timestep)
 
             noise = torch.randn(
                 generator_pred_x0.shape,
                 device=device,
                 dtype=generator_pred_x0.dtype,
             )
-            noisy_latents = self.adapter.add_noise(generator_pred_x0, noise, timestep)
+            noisy_latents = self.model.add_noise(generator_pred_x0, noise, timestep)
 
-            faker_x0 = self.adapter.predict_x0(
+            faker_x0 = self.model.predict_x0(
                 self.critic,
                 noisy_latents,
                 timestep,
@@ -802,7 +802,7 @@ class DMD2Method(DistillMethod):
                 cfg_uncond=self._cfg_uncond,
                 attn_kind="dense",
             )
-            real_cond_x0 = self.adapter.predict_x0(
+            real_cond_x0 = self.model.predict_x0(
                 self.teacher,
                 noisy_latents,
                 timestep,
@@ -811,7 +811,7 @@ class DMD2Method(DistillMethod):
                 cfg_uncond=self._cfg_uncond,
                 attn_kind="dense",
             )
-            real_uncond_x0 = self.adapter.predict_x0(
+            real_uncond_x0 = self.model.predict_x0(
                 self.teacher,
                 noisy_latents,
                 timestep,
@@ -843,7 +843,7 @@ class DMD2Method(DistillMethod):
         if self._rollout_mode == "simulate":
             latents_source = "zeros"
 
-        training_batch = self.adapter.prepare_batch(
+        training_batch = self.model.prepare_batch(
             batch,
             current_vsa_sparsity=current_vsa_sparsity,
             latents_source=latents_source,
@@ -898,7 +898,7 @@ class DMD2Method(DistillMethod):
             student_ctx = backward_ctx.get("student_ctx")
             if student_ctx is None:
                 raise RuntimeError("Missing student backward context")
-            self.adapter.backward(
+            self.model.backward(
                 loss_map["generator_loss"],
                 student_ctx,
                 grad_accum_rounds=grad_accum_rounds,
@@ -907,7 +907,7 @@ class DMD2Method(DistillMethod):
         critic_ctx = backward_ctx.get("critic_ctx")
         if critic_ctx is None:
             raise RuntimeError("Missing critic backward context")
-        self.adapter.backward(
+        self.model.backward(
             loss_map["fake_score_loss"],
             critic_ctx,
             grad_accum_rounds=grad_accum_rounds,

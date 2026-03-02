@@ -62,8 +62,8 @@ def run_distillation_from_config(
 
     get_rng_generators = getattr(runtime.method, "get_rng_generators", None)
     if not callable(get_rng_generators):
-        adapter = getattr(runtime.method, "adapter", None)
-        get_rng_generators = getattr(adapter, "get_rng_generators", None)
+        model = getattr(runtime.method, "model", None)
+        get_rng_generators = getattr(model, "get_rng_generators", None)
         if not callable(get_rng_generators):
             get_rng_generators = None
 

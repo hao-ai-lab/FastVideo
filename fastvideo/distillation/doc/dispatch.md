@@ -7,10 +7,10 @@
   - 不需要写 N×M 的 if/else 组合逻辑
 
 **关键概念**
-- `ModelBuilder(cfg) -> ModelComponents`
+- `ModelBuilder(cfg) -> ModelBase`（一个可运行的 model plugin 实例）
 - `DistillMethod` class（算法实现）
   - `@register_method("...")` 直接注册到 class
-  - class 需要实现 `DistillMethod.build(cfg, bundle, adapter, validator)`
+  - class 需要实现 `DistillMethod.build(cfg, bundle, model, validator)`
 
 **关键 API**
 - `register_model(name)` / `register_method(name)`：装饰器注册

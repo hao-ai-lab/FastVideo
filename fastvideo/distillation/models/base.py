@@ -13,20 +13,24 @@ if TYPE_CHECKING:
     from fastvideo.pipelines import TrainingBatch
 
 
-class ModelAdapter(ABC):
+class ModelBase(ABC):
     """Operation-centric runtime primitives implemented by a model plugin.
 
     This interface is intentionally *method-agnostic*:
     - A method selects roles (student/teacher/critic/...) and decides how to use
       them.
-    - The adapter implements how to run those roles against FastVideo pipelines,
-      forward-context requirements, and batch normalization quirks.
+    - The model plugin implements how to run those roles against FastVideo
+      pipelines, forward-context requirements, and batch normalization quirks.
 
     Implementations typically live next to the model plugin (e.g. `models/wan.py`)
     rather than in a global adapter registry.
     """
 
     training_args: Any
+    bundle: Any
+    dataloader: Any
+    validator: Any | None
+    start_step: int
 
     @property
     @abstractmethod
@@ -96,4 +100,3 @@ class ModelAdapter(ABC):
     @abstractmethod
     def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
         """Backward hook that may restore forward-context for checkpointed modules."""
-

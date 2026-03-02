@@ -1,12 +1,14 @@
 # `fastvideo/distillation/models/wan.py`
 
 **定位**
-- `@register_model("wan")` 的 build-time 插件（实现：`build_wan_components(...)`）：
-  - 负责把 YAML config 装配成 `ModelComponents`
+- `@register_model("wan")` 的 model plugin（实现：`WanModel(cfg)`）：
+  - 负责把 YAML config 装配成一个可运行的 `WanModel`（同时实现 `ModelBase` primitives）
   - 包含 Wan 特有的模块加载、shared components、dataloader schema 等逻辑
 
 **产物**
-- `ModelComponents(training_args, bundle, adapter, dataloader, validator, start_step)`
+- `WanModel` 实例（关键字段）：
+  - `training_args`, `bundle`, `dataloader`, `validator`, `start_step`
+  - 以及 `ModelBase` 的 primitives（`prepare_batch/add_noise/predict_*/backward/...`）
 
 **主要职责**
 1) **加载 shared components**
@@ -16,10 +18,10 @@
    - 对每个 role：加载 `transformer`（teacher 可选 `transformer_2`）
    - 根据 `RoleSpec.trainable` 设置 `requires_grad` + `train()/eval()`
    - 可选开启 activation checkpoint（仅对 trainable role）
-3) **构建 bundle / adapter / dataloader**
+3) **构建 bundle / dataloader**
    - `bundle = RoleManager(roles=role_handles)`
-   - `adapter = WanAdapter(prompt_handle=student_handle, ...)`
    - dataloader：parquet + `pyarrow_schema_t2v`
+   - runtime primitives 由 `WanModel` 直接实现（不再额外分一层 `*Adapter` 类/文件）
 4) **tracker / validator（可选）**
    - validator：`WanValidator`（当 `training.validation.enabled=true`，或 `training.validation` 非空）
      - model plugin 只负责构建并返回 `validator`

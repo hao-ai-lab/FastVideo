@@ -17,7 +17,7 @@ Config keys used (YAML schema-v2):
   - `moba_config` (if `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`)
   - `enable_gradient_checkpointing_type` (optional)
 - `training.validation.*` (consumed by `WanGameValidator` when enabled)
-- `method_config.cfg_uncond.*` (consumed by `WanGameAdapter` for CFG-uncond policy)
+- `method_config.cfg_uncond.*` (consumed by `WanGameModel` for CFG-uncond policy)
 """
 
 from __future__ import annotations
@@ -49,8 +49,7 @@ from fastvideo.training.training_utils import (
 from fastvideo.utils import is_vmoba_available, is_vsa_available, set_random_seed
 
 from fastvideo.distillation.dispatch import register_model
-from fastvideo.distillation.models.adapter import ModelAdapter
-from fastvideo.distillation.models.components import ModelComponents
+from fastvideo.distillation.models.base import ModelBase
 from fastvideo.distillation.roles import RoleHandle, RoleManager
 from fastvideo.distillation.utils.config import DistillRunConfig
 from fastvideo.distillation.utils.dataloader import build_parquet_wangame_train_dataloader
@@ -67,10 +66,11 @@ except Exception:
     VideoMobaAttentionMetadataBuilder = None  # type: ignore[assignment]
 
 
-class WanGameAdapter(ModelAdapter):
-    """WanGame adapter: exposes operation-centric primitives for methods.
+@register_model("wangame")
+class WanGameModel(ModelBase):
+    """WanGame model plugin: loads roles + shared components and exposes runtime primitives.
 
-    This adapter is intentionally *not* method-specific:
+    This model plugin is intentionally *not* method-specific:
     - It knows how to turn a wangame parquet batch into forward primitives.
     - It knows how to run a model role (handle) for predict_noise / predict_x0.
     - It does not encode DMD2/SFT/etc semantics beyond required primitives.
@@ -79,10 +79,103 @@ class WanGameAdapter(ModelAdapter):
     def __init__(
         self,
         *,
-        training_args: Any,
-        noise_scheduler: Any,
-        vae: Any,
+        cfg: DistillRunConfig,
     ) -> None:
+        training_args = cfg.training_args
+        roles_cfg = cfg.roles
+
+        if getattr(training_args, "seed", None) is None:
+            raise ValueError("training.seed must be set for distillation")
+        if not getattr(training_args, "data_path", ""):
+            raise ValueError("training.data_path must be set for distillation")
+
+        # Load shared components (student base path).
+        vae = load_module_from_path(
+            model_path=str(training_args.model_path),
+            module_type="vae",
+            training_args=training_args,
+        )
+        noise_scheduler = FlowMatchEulerDiscreteScheduler(
+            shift=float(training_args.pipeline_config.flow_shift or 0.0)
+        )
+
+        role_handles: dict[str, RoleHandle] = {}
+        for role, role_spec in roles_cfg.items():
+            if role_spec.family != "wangame":
+                raise ValueError(
+                    "Wangame model plugin only supports roles with family='wangame'; "
+                    f"got {role}={role_spec.family!r}"
+                )
+
+            variant_raw = (role_spec.extra or {}).get("variant", None)
+            if variant_raw is None or variant_raw == "":
+                transformer_cls_name = "WanGameActionTransformer3DModel"
+            else:
+                variant = str(variant_raw).strip().lower()
+                if variant in {"bidirectional", "bidi"}:
+                    transformer_cls_name = "WanGameActionTransformer3DModel"
+                elif variant == "causal":
+                    transformer_cls_name = "CausalWanGameActionTransformer3DModel"
+                else:
+                    raise ValueError(
+                        f"Unknown roles.{role}.variant for wangame: "
+                        f"{variant_raw!r}. Expected 'causal' or 'bidirectional'."
+                    )
+
+            disable_custom_init_weights = bool(
+                getattr(role_spec, "disable_custom_init_weights", False)
+            )
+            transformer = load_module_from_path(
+                model_path=role_spec.path,
+                module_type="transformer",
+                training_args=training_args,
+                disable_custom_init_weights=disable_custom_init_weights,
+                override_transformer_cls_name=transformer_cls_name,
+            )
+            modules: dict[str, torch.nn.Module] = {"transformer": transformer}
+
+            # Optional MoE support: load transformer_2 if present in the model.
+            try:
+                transformer_2 = load_module_from_path(
+                    model_path=role_spec.path,
+                    module_type="transformer_2",
+                    training_args=training_args,
+                    disable_custom_init_weights=disable_custom_init_weights,
+                )
+            except ValueError:
+                transformer_2 = None
+            if transformer_2 is not None:
+                modules["transformer_2"] = transformer_2
+
+            for name, module in list(modules.items()):
+                module = apply_trainable(module, trainable=bool(role_spec.trainable))
+                if role_spec.trainable and getattr(
+                    training_args, "enable_gradient_checkpointing_type", None
+                ):
+                    module = apply_activation_checkpointing(
+                        module,
+                        checkpointing_type=training_args.enable_gradient_checkpointing_type,
+                    )
+                modules[name] = module
+
+            role_handles[role] = RoleHandle(
+                modules=modules,
+                optimizers={},
+                lr_schedulers={},
+                trainable=bool(role_spec.trainable),
+            )
+
+        self.bundle = RoleManager(roles=role_handles)
+
+        # Optional validator.
+        self.validator = None
+        validation_cfg = getattr(cfg, "validation", {}) or {}
+        validation_enabled = bool(validation_cfg.get("enabled", bool(validation_cfg)))
+        if validation_enabled:
+            from fastvideo.distillation.validators.wangame import WanGameValidator
+
+            self.validator = WanGameValidator(training_args=training_args)
+
         self.training_args = training_args
         self.noise_scheduler = noise_scheduler
         self.vae = vae
@@ -95,6 +188,14 @@ class WanGameAdapter(ModelAdapter):
         self.noise_gen_cuda: torch.Generator | None = None
 
         self._init_timestep_mechanics()
+
+        from fastvideo.dataset.dataloader.schema import pyarrow_schema_wangame
+
+        self.dataloader = build_parquet_wangame_train_dataloader(
+            training_args,
+            parquet_schema=pyarrow_schema_wangame,
+        )
+        self.start_step = 0
 
     def _get_training_dtype(self) -> torch.dtype:
         return torch.bfloat16
@@ -149,7 +250,7 @@ class WanGameAdapter(ModelAdapter):
     def _sample_timesteps(self, batch_size: int, device: torch.device) -> torch.Tensor:
         if self.noise_random_generator is None:
             raise RuntimeError(
-                "WanGameAdapter.on_train_start() must be called before prepare_batch()"
+                "WanGameModel.on_train_start() must be called before prepare_batch()"
             )
 
         u = compute_density_for_timestep_sampling(
@@ -211,7 +312,7 @@ class WanGameAdapter(ModelAdapter):
 
         if self.noise_gen_cuda is None:
             raise RuntimeError(
-                "WanGameAdapter.on_train_start() must be called before prepare_batch()"
+                "WanGameModel.on_train_start() must be called before prepare_batch()"
             )
 
         noise = torch.randn(
@@ -480,11 +581,11 @@ class WanGameAdapter(ModelAdapter):
         image_latents = batch.image_latents
         mask_lat_size = batch.mask_lat_size
         if image_embeds is None:
-            raise RuntimeError("WanGameAdapter requires TrainingBatch.image_embeds")
+            raise RuntimeError("WanGameModel requires TrainingBatch.image_embeds")
         if image_latents is None:
-            raise RuntimeError("WanGameAdapter requires TrainingBatch.image_latents")
+            raise RuntimeError("WanGameModel requires TrainingBatch.image_latents")
         if mask_lat_size is None:
-            raise RuntimeError("WanGameAdapter requires TrainingBatch.mask_lat_size")
+            raise RuntimeError("WanGameModel requires TrainingBatch.mask_lat_size")
 
         viewmats = getattr(batch, "viewmats", None)
         Ks = getattr(batch, "Ks", None)
@@ -536,7 +637,7 @@ class WanGameAdapter(ModelAdapter):
             if on_missing == "ignore":
                 continue
             raise ValueError(
-                "WanGameAdapter does not support cfg_uncond channel "
+                "WanGameModel does not support cfg_uncond channel "
                 f"{channel!r} (policy={policy!r}). "
                 "Set cfg_uncond.on_missing=ignore or remove the channel."
             )
@@ -720,121 +821,3 @@ class WanGameAdapter(ModelAdapter):
         timesteps, attn_metadata = ctx
         with set_forward_context(current_timestep=timesteps, attn_metadata=attn_metadata):
             (loss / max(1, int(grad_accum_rounds))).backward()
-
-
-@register_model("wangame")
-def build_wangame_components(*, cfg: DistillRunConfig) -> ModelComponents:
-    training_args = cfg.training_args
-    roles_cfg = cfg.roles
-
-    if getattr(training_args, "seed", None) is None:
-        raise ValueError("training.seed must be set for distillation")
-    if not getattr(training_args, "data_path", ""):
-        raise ValueError("training.data_path must be set for distillation")
-
-    # Load shared components (student base path).
-    vae = load_module_from_path(
-        model_path=str(training_args.model_path),
-        module_type="vae",
-        training_args=training_args,
-    )
-    noise_scheduler = FlowMatchEulerDiscreteScheduler(
-        shift=float(training_args.pipeline_config.flow_shift or 0.0)
-    )
-
-    role_handles: dict[str, RoleHandle] = {}
-    for role, role_spec in roles_cfg.items():
-        if role_spec.family != "wangame":
-            raise ValueError(
-                "Wangame model plugin only supports roles with family='wangame'; "
-                f"got {role}={role_spec.family!r}"
-            )
-
-        variant_raw = (role_spec.extra or {}).get("variant", None)
-        if variant_raw is None or variant_raw == "":
-            transformer_cls_name = "WanGameActionTransformer3DModel"
-        else:
-            variant = str(variant_raw).strip().lower()
-            if variant in {"bidirectional", "bidi"}:
-                transformer_cls_name = "WanGameActionTransformer3DModel"
-            elif variant == "causal":
-                transformer_cls_name = "CausalWanGameActionTransformer3DModel"
-            else:
-                raise ValueError(
-                    f"Unknown roles.{role}.variant for wangame: "
-                    f"{variant_raw!r}. Expected 'causal' or 'bidirectional'."
-                )
-
-        disable_custom_init_weights = bool(getattr(role_spec, "disable_custom_init_weights", False))
-        transformer = load_module_from_path(
-            model_path=role_spec.path,
-            module_type="transformer",
-            training_args=training_args,
-            disable_custom_init_weights=disable_custom_init_weights,
-            override_transformer_cls_name=transformer_cls_name,
-        )
-        modules: dict[str, torch.nn.Module] = {"transformer": transformer}
-
-        # Optional MoE support: load transformer_2 if present in the model.
-        try:
-            transformer_2 = load_module_from_path(
-                model_path=role_spec.path,
-                module_type="transformer_2",
-                training_args=training_args,
-                disable_custom_init_weights=disable_custom_init_weights,
-            )
-        except ValueError:
-            transformer_2 = None
-        if transformer_2 is not None:
-            modules["transformer_2"] = transformer_2
-
-        for name, module in list(modules.items()):
-            module = apply_trainable(module, trainable=bool(role_spec.trainable))
-            if role_spec.trainable and getattr(
-                training_args, "enable_gradient_checkpointing_type", None
-            ):
-                module = apply_activation_checkpointing(
-                    module,
-                    checkpointing_type=training_args.enable_gradient_checkpointing_type,
-                )
-            modules[name] = module
-
-        role_handles[role] = RoleHandle(
-            modules=modules,
-            optimizers={},
-            lr_schedulers={},
-            trainable=bool(role_spec.trainable),
-        )
-
-    bundle = RoleManager(roles=role_handles)
-
-    validator = None
-    validation_cfg = getattr(cfg, "validation", {}) or {}
-    validation_enabled = bool(validation_cfg.get("enabled", bool(validation_cfg)))
-    if validation_enabled:
-        from fastvideo.distillation.validators.wangame import WanGameValidator
-
-        validator = WanGameValidator(training_args=training_args)
-
-    adapter = WanGameAdapter(
-        training_args=training_args,
-        noise_scheduler=noise_scheduler,
-        vae=vae,
-    )
-
-    from fastvideo.dataset.dataloader.schema import pyarrow_schema_wangame
-
-    dataloader = build_parquet_wangame_train_dataloader(
-        training_args,
-        parquet_schema=pyarrow_schema_wangame,
-    )
-
-    return ModelComponents(
-        training_args=training_args,
-        bundle=bundle,
-        adapter=adapter,
-        dataloader=dataloader,
-        validator=validator,
-        start_step=0,
-    )
-

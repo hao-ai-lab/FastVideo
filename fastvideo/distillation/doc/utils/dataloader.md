@@ -2,7 +2,7 @@
 
 **目的**
 - 把 “dataloader 构建” 从 model plugin（原 families/，现 `models/`）中抽离出来，
-  让插件更聚焦在加载模块与组装 adapter/bundle。
+  让插件更聚焦在加载模块与组装 `RoleManager` + `ModelBase` primitives。
 
 **当前包含**
 - `build_parquet_t2v_train_dataloader(training_args, parquet_schema=...)`
