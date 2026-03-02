@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
 from fastvideo.pipelines.stages.timestep_preparation import (
@@ -19,7 +20,7 @@ from fastvideo.pipelines.stages.sd35_conditioning import (
 logger = init_logger(__name__)
 
 
-class SD35Pipeline(ComposedPipelineBase):
+class SD35Pipeline(LoRAPipeline, ComposedPipelineBase):
     """Minimal SD3.5 Medium text-to-image pipeline (treat as num_frames=1)."""
 
     _required_config_modules = [

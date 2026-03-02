@@ -1149,25 +1149,25 @@ class TrainingArgs(FastVideoArgs):
                             help="FSDP sharding strategy")
 
         parser.add_argument(
-            "--weighting_scheme",
+            "--weighting-scheme",
             type=str,
             default="uniform",
             choices=["sigma_sqrt", "logit_normal", "mode", "cosmap", "uniform"],
         )
         parser.add_argument(
-            "--logit_mean",
+            "--logit-mean",
             type=float,
             default=0.0,
             help="mean to use when using the `'logit_normal'` weighting scheme.",
         )
         parser.add_argument(
-            "--logit_std",
+            "--logit-std",
             type=float,
             default=1.0,
             help="std to use when using the `'logit_normal'` weighting scheme.",
         )
         parser.add_argument(
-            "--mode_scale",
+            "--mode-scale",
             type=float,
             default=1.29,
             help=

@@ -147,13 +147,30 @@ def save_checkpoint(transformer,
                 local_main_process_only=False)
 
     begin_time = time.perf_counter()
-    dcp.save(states, checkpoint_id=dcp_dir)
+    
+    dcp_saved = False
+    try:
+        dcp.save(states, checkpoint_id=dcp_dir)
+        dcp_saved = True
+    except BaseException as e:
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise
+        if dist.is_initialized() and dist.get_world_size() == 1:
+            logger.warning(
+                "rank: %s, distributed checkpoint save failed in single-rank "
+                "mode; continuing with consolidated-only save: %s",
+                rank,
+                e,
+            )
+        else:
+            raise
     end_time = time.perf_counter()
 
-    logger.info("rank: %s, distributed checkpoint saved in %.2f seconds",
-                rank,
-                end_time - begin_time,
-                local_main_process_only=False)
+    if dcp_saved:
+        logger.info("rank: %s, distributed checkpoint saved in %.2f seconds",
+                    rank,
+                    end_time - begin_time,
+                    local_main_process_only=False)
 
     cpu_state = gather_state_dict_on_cpu_rank0(transformer, device=None)
     if rank == 0:
@@ -930,6 +947,10 @@ def normalize_dit_input(model_type, latents, vae) -> torch.Tensor:
         latents_std = latents_std.view(1, -1, 1, 1, 1).to(device=latents.device)
         latents = ((latents.float() - latents_mean) * latents_std).to(latents)
         return latents
+    elif model_type == "sd3":
+        shift_factor = vae.config.shift_factor
+        scaling_factor = vae.config.scaling_factor
+        return ((latents.float() - shift_factor) * scaling_factor).to(latents)
     else:
         raise NotImplementedError(f"model_type {model_type} not supported")
 
