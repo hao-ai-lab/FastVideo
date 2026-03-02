@@ -88,7 +88,6 @@ __all__ = [
     "GameCraftImageVAEEncodingStage",
     "TextEncodingStage",
     "Cosmos25TextEncodingStage",
-    "StepvideoPromptEncodingStage",
     "WaypointTextEncodingStage",
     # LongCat stages
     "LongCatVideoVAEEncodingStage",
