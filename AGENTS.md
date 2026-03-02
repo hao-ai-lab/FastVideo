@@ -45,7 +45,7 @@
 
 This repository is agent-friendly. Before doing any work, read:
 
-1. `.agents/ONBOARDING.md` — full onboarding guide with step-by-step instructions.
+1. `.agents/onboarding/README.md` — full onboarding guide with step-by-step instructions.
 2. `.agents/memory/codebase-map/README.md` — structural index of the entire repository.
 3. `.agents/skills/` — available agent skills (check if one exists before writing code).
 4. `.agents/workflows/` — SOPs for common procedures (experiment lifecycle, evaluation, etc.).

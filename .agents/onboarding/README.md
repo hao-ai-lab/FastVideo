@@ -1,6 +1,18 @@
 # Agent Onboarding — FastVideo-WorldModel
 
-Welcome, agent. Follow these steps **in order** before doing any work.
+Welcome, agent. This is the **master onboarding** guide. Follow the steps below,
+then check if a **domain-specific onboarding** exists for your task.
+
+## Domain-Specific Onboarding
+
+If your task falls into one of these areas, read the specialized guide **after**
+completing the general steps below:
+
+| Domain | Guide | When to Use |
+|--------|-------|-------------|
+| **WorldModel Training** | `worldmodel-training/README.md` | Training, finetuning, distillation, experiment management |
+
+---
 
 ## Step 1: Understand the Codebase
 
