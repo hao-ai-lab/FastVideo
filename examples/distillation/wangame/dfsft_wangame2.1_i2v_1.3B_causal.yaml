@@ -69,7 +69,7 @@ training:
   wandb_run_name: wangame_dfsft_causal
   validation:
     enabled: true
-    dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random.json
+    dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_8.json
     every_steps: 100
     sampling_steps: [40]
     rollout_mode: streaming

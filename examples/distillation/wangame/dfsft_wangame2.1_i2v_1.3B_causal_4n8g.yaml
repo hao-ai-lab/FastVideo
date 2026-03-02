@@ -43,15 +43,15 @@ training:
 
   # Output / steps
   output_dir: outputs/wangame_dfsft_causal_4n8g
-  max_train_steps: 20000
+  max_train_steps: 200000
   seed: 1000
   checkpoints_total_limit: 2
 
   # Optimizer
   learning_rate: 1.0e-5
   mixed_precision: bf16
-  betas: "0.9,0.999"
-  weight_decay: 1.0e-4
+  betas: "0.9,0.95"
+  weight_decay: 1.0e-5
   lr_scheduler: constant
   lr_warmup_steps: 0
   max_grad_norm: 1.0
@@ -69,14 +69,14 @@ training:
   wandb_run_name: wangame_dfsft_causal_4n8g
   validation:
     enabled: true
-    dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_8.json
+    dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random.json
     every_steps: 100
     sampling_steps: [40]
     rollout_mode: streaming
     sampler_kind: ode
     ode_solver: euler
     guidance_scale: 1.0
-    num_frames: 75
+    num_frames: 69
 
 default_pipeline_config:
   flow_shift: 3
@@ -87,4 +87,3 @@ method_config:
   chunk_size: 3
   min_timestep_ratio: 0.02
   max_timestep_ratio: 0.98
-

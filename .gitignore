@@ -34,6 +34,7 @@ env
 *.log
 *.npy
 weights/
+slurm_outputs/
 
 # SSIM test outputs
 fastvideo/tests/ssim/generated_videos/
