@@ -489,6 +489,7 @@ class VideoGenerator:
                 "trajectory": output_batch.trajectory_latents,
                 "trajectory_timesteps": output_batch.trajectory_timesteps,
                 "trajectory_decoded": output_batch.trajectory_decoded,
+                "peak_memory_mb": output_batch.extra.get("peak_memory_mb"),
             }
 
     @staticmethod
