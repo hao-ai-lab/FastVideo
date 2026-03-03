@@ -158,6 +158,11 @@ class WanGameCausalModel(WanGameModel, CausalModelBase):
                 conditional=conditional,
                 cfg_uncond=cfg_uncond,
             )
+            cond_inputs = self._slice_cond_inputs_for_streaming(
+                cond_inputs=cond_inputs,
+                cur_start_frame=cur_start_frame,
+                num_frames=num_frames,
+            )
             input_kwargs = self._build_distill_input_kwargs(
                 noisy_latents,
                 timestep_full,
@@ -330,6 +335,58 @@ class WanGameCausalModel(WanGameModel, CausalModelBase):
             "streaming timestep must be scalar, [B], or [B, T]; got "
             f"ndim={int(timestep.ndim)}"
         )
+
+    def _slice_cond_inputs_for_streaming(
+        self,
+        *,
+        cond_inputs: dict[str, Any],
+        cur_start_frame: int,
+        num_frames: int,
+    ) -> dict[str, Any]:
+        start = int(cur_start_frame)
+        num_frames = int(num_frames)
+        if num_frames <= 0:
+            raise ValueError("num_frames must be positive for streaming")
+        if start < 0:
+            raise ValueError("cur_start_frame must be >= 0 for streaming")
+        end = start + num_frames
+
+        sliced: dict[str, Any] = dict(cond_inputs)
+
+        image_latents = cond_inputs.get("image_latents")
+        if isinstance(image_latents, torch.Tensor):
+            sliced["image_latents"] = image_latents[:, :, start:end]
+
+        mask_lat_size = cond_inputs.get("mask_lat_size")
+        if isinstance(mask_lat_size, torch.Tensor):
+            sliced["mask_lat_size"] = mask_lat_size[:, :, start:end]
+
+        viewmats = cond_inputs.get("viewmats")
+        if isinstance(viewmats, torch.Tensor):
+            sliced["viewmats"] = viewmats[:, start:end]
+
+        Ks = cond_inputs.get("Ks")
+        if isinstance(Ks, torch.Tensor):
+            sliced["Ks"] = Ks[:, start:end]
+
+        action = cond_inputs.get("action")
+        if isinstance(action, torch.Tensor):
+            sliced["action"] = action[:, start:end]
+
+        temporal_compression_ratio = int(
+            self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        )
+        raw_end_frame_idx = 1 + temporal_compression_ratio * max(0, end - 1)
+
+        mouse_cond = cond_inputs.get("mouse_cond")
+        if isinstance(mouse_cond, torch.Tensor):
+            sliced["mouse_cond"] = mouse_cond[:, :raw_end_frame_idx]
+
+        keyboard_cond = cond_inputs.get("keyboard_cond")
+        if isinstance(keyboard_cond, torch.Tensor):
+            sliced["keyboard_cond"] = keyboard_cond[:, :raw_end_frame_idx]
+
+        return sliced
 
     def _get_or_init_streaming_caches(
         self,

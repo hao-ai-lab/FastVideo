@@ -33,9 +33,8 @@ Notes / limitations:
 - This method uses `SelfForcingFlowMatchScheduler` for simulate-rollout
   (matching legacy behavior). Teacher/critic losses also interpret noise under
   the same scheduler for consistency.
-- Context/no-grad KV cache updates are model-family specific in legacy. The new
-  framework keeps method/model decoupled, so this method implements a cache-free
-  rollout using the model plugin's `predict_noise` primitive.
+- This method requires a causal model plugin implementing `CausalModelBase` and
+  a causal student role. Cache-free rollout is intentionally unsupported.
 """
 
 from __future__ import annotations
@@ -46,6 +45,7 @@ import torch
 import torch.distributed as dist
 
 from fastvideo.distillation.dispatch import register_method
+from fastvideo.distillation.models.base import CausalModelBase
 from fastvideo.distillation.methods.distribution_matching.dmd2 import DMD2Method
 from fastvideo.distillation.utils.config import get_optional_float, get_optional_int
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
@@ -55,6 +55,8 @@ from fastvideo.models.utils import pred_noise_to_pred_video
 
 if TYPE_CHECKING:
     from fastvideo.pipelines import TrainingBatch
+    from fastvideo.distillation.roles import RoleManager
+    from fastvideo.distillation.utils.config import DistillRunConfig
 
 
 def _require_bool(raw: Any, *, where: str) -> bool:
@@ -186,6 +188,39 @@ class SelfForcingMethod(DMD2Method):
         # Cache for warped denoising step list (device specific).
         self._sf_denoising_step_list: torch.Tensor | None = None
 
+    # DistillMethod override: build
+    @classmethod
+    def build(
+        cls,
+        *,
+        cfg: DistillRunConfig,
+        bundle: RoleManager,
+        model: Any,
+        validator: Any | None,
+    ) -> DMD2Method:
+        student_spec = cfg.roles.get("student")
+        if student_spec is None:
+            raise ValueError("SelfForcingMethod requires roles.student")
+        student_variant = (student_spec.extra or {}).get("variant", None)
+        if str(student_variant).strip().lower() != "causal":
+            raise ValueError(
+                "SelfForcingMethod requires a causal student. "
+                "Set roles.student.variant: causal in the YAML config."
+            )
+        if not isinstance(model, CausalModelBase):
+            raise ValueError(
+                "SelfForcingMethod requires a causal model plugin implementing CausalModelBase. "
+                "Make sure you are using a causal-capable family/model plugin."
+            )
+
+        return cls(
+            bundle=bundle,
+            model=model,
+            method_config=cfg.method_config,
+            validation_config=cfg.validation,
+            validator=validator,
+        )
+
     def _get_denoising_step_list(self, device: torch.device) -> torch.Tensor:
         if (
             self._sf_denoising_step_list is not None
@@ -307,6 +342,210 @@ class SelfForcingMethod(DMD2Method):
         return [int(i) for i in indices.tolist()]
 
     def _student_rollout(self, batch: Any, *, with_grad: bool) -> torch.Tensor:
+        if not isinstance(self.model, CausalModelBase):
+            raise ValueError(
+                "SelfForcingMethod requires a causal model plugin implementing CausalModelBase."
+            )
+        return self._student_rollout_streaming(batch, with_grad=with_grad)
+
+    def _student_rollout_streaming(self, batch: Any, *, with_grad: bool) -> torch.Tensor:
+        latents = batch.latents
+        if latents is None:
+            raise RuntimeError("TrainingBatch.latents is required for self-forcing rollout")
+        if latents.ndim != 5:
+            raise ValueError(
+                "TrainingBatch.latents must be [B, T, C, H, W], got "
+                f"shape={tuple(latents.shape)}"
+            )
+
+        device = latents.device
+        dtype = latents.dtype
+        batch_size = int(latents.shape[0])
+        num_frames = int(latents.shape[1])
+
+        denoising_steps = self._get_denoising_step_list(device)
+        num_steps = int(denoising_steps.numel())
+
+        noise_full = torch.randn_like(latents, device=device, dtype=dtype)
+
+        chunk = int(self._chunk_size)
+        if chunk <= 0:
+            raise ValueError("chunk_size must be positive")
+
+        remaining = num_frames % chunk
+        num_blocks = num_frames // chunk
+        if num_blocks == 0:
+            num_blocks = 1
+            remaining = num_frames
+
+        exit_indices = self._sample_exit_indices(
+            num_blocks=num_blocks,
+            num_steps=num_steps,
+            device=device,
+        )
+
+        denoised_blocks: list[torch.Tensor] = []
+
+        cache_tag = "pos"
+        self.model.clear_caches(self.student, cache_tag=cache_tag)
+
+        for block_idx in range(num_blocks):
+            if block_idx == 0:
+                start = 0
+                end = remaining + chunk if remaining else chunk
+            else:
+                start = remaining + block_idx * chunk
+                end = remaining + (block_idx + 1) * chunk
+            start = int(start)
+            end = int(min(end, num_frames))
+            if start >= end:
+                break
+
+            noisy_block = noise_full[:, start:end]
+            exit_idx = int(exit_indices[block_idx])
+
+            for step_idx, current_timestep in enumerate(denoising_steps):
+                exit_flag = step_idx == exit_idx
+
+                timestep_block = current_timestep * torch.ones(
+                    (batch_size, end - start),
+                    device=device,
+                    dtype=torch.float32,
+                )
+
+                enable_grad = (
+                    bool(with_grad)
+                    and bool(self._enable_gradient_in_rollout)
+                    and torch.is_grad_enabled()
+                    and start >= int(self._start_gradient_frame)
+                )
+
+                if not exit_flag:
+                    with torch.no_grad():
+                        pred_noise = self.model.predict_noise_streaming(
+                            self.student,
+                            noisy_block,
+                            timestep_block,
+                            batch,
+                            conditional=True,
+                            cache_tag=cache_tag,
+                            store_kv=False,
+                            cur_start_frame=start,
+                            cfg_uncond=self._cfg_uncond,
+                            attn_kind="vsa",
+                        )
+                        if pred_noise is None:
+                            raise RuntimeError(
+                                "predict_noise_streaming returned None "
+                                "(store_kv=False)"
+                            )
+                        pred_x0_chunk = pred_noise_to_pred_video(
+                            pred_noise=pred_noise.flatten(0, 1),
+                            noise_input_latent=noisy_block.flatten(0, 1),
+                            timestep=timestep_block,
+                            scheduler=self._sf_scheduler,
+                        ).unflatten(0, pred_noise.shape[:2])
+
+                    if step_idx + 1 >= num_steps:
+                        break
+                    next_timestep = denoising_steps[step_idx + 1]
+                    if self._student_sample_type == "sde":
+                        noisy_block = self._sf_add_noise(
+                            pred_x0_chunk,
+                            torch.randn_like(pred_x0_chunk),
+                            next_timestep
+                            * torch.ones(
+                                (batch_size, end - start),
+                                device=device,
+                                dtype=torch.float32,
+                            ),
+                        )
+                    else:
+                        sigma_cur = self._timestep_to_sigma(timestep_block).view(
+                            batch_size, end - start, 1, 1, 1
+                        )
+                        sigma_next = self._timestep_to_sigma(
+                            next_timestep
+                            * torch.ones(
+                                (batch_size, end - start),
+                                device=device,
+                                dtype=torch.float32,
+                            )
+                        ).view(batch_size, end - start, 1, 1, 1)
+                        eps = (noisy_block - (1 - sigma_cur) * pred_x0_chunk) / sigma_cur.clamp_min(
+                            1e-8
+                        )
+                        noisy_block = (1 - sigma_next) * pred_x0_chunk + sigma_next * eps
+                    continue
+
+                with torch.set_grad_enabled(enable_grad):
+                    pred_noise = self.model.predict_noise_streaming(
+                        self.student,
+                        noisy_block,
+                        timestep_block,
+                        batch,
+                        conditional=True,
+                        cache_tag=cache_tag,
+                        store_kv=False,
+                        cur_start_frame=start,
+                        cfg_uncond=self._cfg_uncond,
+                        attn_kind="vsa",
+                    )
+                    if pred_noise is None:
+                        raise RuntimeError(
+                            "predict_noise_streaming returned None "
+                            "(store_kv=False)"
+                        )
+                    pred_x0_chunk = pred_noise_to_pred_video(
+                        pred_noise=pred_noise.flatten(0, 1),
+                        noise_input_latent=noisy_block.flatten(0, 1),
+                        timestep=timestep_block,
+                        scheduler=self._sf_scheduler,
+                    ).unflatten(0, pred_noise.shape[:2])
+                break
+
+            denoised_blocks.append(pred_x0_chunk)
+
+            with torch.no_grad():
+                if self._context_noise > 0.0:
+                    context_timestep = torch.ones(
+                        (batch_size, end - start),
+                        device=device,
+                        dtype=torch.float32,
+                    ) * float(self._context_noise)
+                    context_latents = self._sf_add_noise(
+                        pred_x0_chunk.detach(),
+                        torch.randn_like(pred_x0_chunk),
+                        context_timestep,
+                    )
+                else:
+                    context_timestep = torch.zeros(
+                        (batch_size, end - start),
+                        device=device,
+                        dtype=torch.float32,
+                    )
+                    context_latents = pred_x0_chunk.detach()
+
+                _ = self.model.predict_noise_streaming(
+                    self.student,
+                    context_latents,
+                    context_timestep,
+                    batch,
+                    conditional=True,
+                    cache_tag=cache_tag,
+                    store_kv=True,
+                    cur_start_frame=start,
+                    cfg_uncond=self._cfg_uncond,
+                    attn_kind="vsa",
+                )
+
+        if not denoised_blocks:
+            raise RuntimeError("Self-forcing rollout produced no blocks")
+
+        self.model.clear_caches(self.student, cache_tag=cache_tag)
+        return torch.cat(denoised_blocks, dim=1)
+
+    def _student_rollout_cache_free(self, batch: Any, *, with_grad: bool) -> torch.Tensor:
         latents = batch.latents
         if latents is None:
             raise RuntimeError("TrainingBatch.latents is required for self-forcing rollout")
