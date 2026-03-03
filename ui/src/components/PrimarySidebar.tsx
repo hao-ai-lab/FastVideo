@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import sidebarStyles from "./styles/Sidebar.module.css";
+import primarySidebarStyles from "./styles/PrimarySidebar.module.css";
 
 const SIDEBAR_MIN_WIDTH = 100;
 const SIDEBAR_MAX_WIDTH = 300;
@@ -9,7 +9,7 @@ const SIDEBAR_COLLAPSED_WIDTH = 0;
 
 export type SidebarTab = "job-queue" | "settings";
 
-interface SidebarProps {
+interface PrimarySidebarProps {
   activeTab: SidebarTab;
   onTabChange: (tab: SidebarTab) => void;
 }
@@ -30,7 +30,10 @@ function ExpandIcon() {
   );
 }
 
-export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
+export default function PrimarySidebar({
+  activeTab,
+  onTabChange,
+}: PrimarySidebarProps) {
   const [width, setWidth] = useState(220);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -83,16 +86,16 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
 
   return (
     <aside
-      className={`${sidebarStyles.sidebar} ${
-        isCollapsed ? sidebarStyles.collapsed : ""
+      className={`${primarySidebarStyles.sidebar} ${
+        isCollapsed ? primarySidebarStyles.collapsed : ""
       }`}
       style={{ width: effectiveWidth }}
     >
-      <nav className={sidebarStyles.tabs}>
+      <nav className={primarySidebarStyles.tabs}>
         <button
           type="button"
-          className={`${sidebarStyles.tab} ${
-            activeTab === "job-queue" ? sidebarStyles.tabActive : ""
+          className={`${primarySidebarStyles.tab} ${
+            activeTab === "job-queue" ? primarySidebarStyles.tabActive : ""
           }`}
           onClick={() => onTabChange("job-queue")}
         >
@@ -100,18 +103,18 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
         </button>
         <button
           type="button"
-          className={`${sidebarStyles.tab} ${
-            activeTab === "settings" ? sidebarStyles.tabActive : ""
+          className={`${primarySidebarStyles.tab} ${
+            activeTab === "settings" ? primarySidebarStyles.tabActive : ""
           }`}
           onClick={() => onTabChange("settings")}
         >
           Settings
         </button>
       </nav>
-      <div className={sidebarStyles.collapseFooter}>
+      <div className={primarySidebarStyles.collapseFooter}>
         <button
           type="button"
-          className={sidebarStyles.collapseBtn}
+          className={primarySidebarStyles.collapseBtn}
           onClick={toggleCollapse}
           title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
@@ -120,8 +123,8 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
       </div>
       {!isCollapsed && (
         <div
-          className={`${sidebarStyles.resizeHandle} ${
-            isDragging ? sidebarStyles.resizeHandleActive : ""
+          className={`${primarySidebarStyles.resizeHandle} ${
+            isDragging ? primarySidebarStyles.resizeHandleActive : ""
           }`}
           onMouseDown={handleMouseDown}
         />
