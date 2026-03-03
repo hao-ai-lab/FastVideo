@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""WanGame model plugin (components + runtime adapter).
+"""WanGame bidirectional model plugin (components + runtime adapter).
 
 Config keys used (YAML schema-v2):
 - `recipe.family`: must be `"wangame"` for this plugin.
 - `roles.<role>`:
   - `family`, `path`, `trainable`, `disable_custom_init_weights`
-  - extra: `variant` (optional; `"bidirectional"`/`"causal"`)
+  - extra: `variant` is **not used** by this bidirectional-only plugin.
 - `training` (selected fields):
   - `seed`, `data_path`, `model_path`
   - `num_height`, `num_width`, `num_latent_t`
@@ -23,6 +23,7 @@ Config keys used (YAML schema-v2):
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable
 from typing import Any, Literal
 
 import torch
@@ -48,7 +49,6 @@ from fastvideo.training.training_utils import (
 )
 from fastvideo.utils import is_vmoba_available, is_vsa_available, set_random_seed
 
-from fastvideo.distillation.dispatch import register_model
 from fastvideo.distillation.models.base import ModelBase
 from fastvideo.distillation.roles import RoleHandle, RoleManager
 from fastvideo.distillation.utils.config import DistillRunConfig
@@ -66,7 +66,63 @@ except Exception:
     VideoMobaAttentionMetadataBuilder = None  # type: ignore[assignment]
 
 
-@register_model("wangame")
+def         _build_wangame_role_handles(
+    *,
+    roles_cfg: dict[str, Any],
+    training_args: Any,
+    transformer_cls_name_for_role: Callable[[str, Any], str],
+) -> dict[str, RoleHandle]:
+    role_handles: dict[str, RoleHandle] = {}
+    for role, role_spec in roles_cfg.items():
+        if role_spec.family != "wangame":
+            raise ValueError(
+                "Wangame model plugin only supports roles with family='wangame'; "
+                f"got {role}={role_spec.family!r}"
+            )
+
+        transformer_cls_name = transformer_cls_name_for_role(str(role), role_spec)
+        disable_custom_init_weights = bool(getattr(role_spec, "disable_custom_init_weights", False))
+        transformer = load_module_from_path(
+            model_path=role_spec.path,
+            module_type="transformer",
+            training_args=training_args,
+            disable_custom_init_weights=disable_custom_init_weights,
+            override_transformer_cls_name=transformer_cls_name,
+        )
+        modules: dict[str, torch.nn.Module] = {"transformer": transformer}
+
+        # Optional MoE support: load transformer_2 if present in the model.
+        try:
+            transformer_2 = load_module_from_path(
+                model_path=role_spec.path,
+                module_type="transformer_2",
+                training_args=training_args,
+                disable_custom_init_weights=disable_custom_init_weights,
+            )
+        except ValueError:
+            transformer_2 = None
+        if transformer_2 is not None:
+            modules["transformer_2"] = transformer_2
+
+        for name, module in list(modules.items()):
+            module = apply_trainable(module, trainable=bool(role_spec.trainable))
+            if role_spec.trainable and getattr(training_args, "enable_gradient_checkpointing_type", None):
+                module = apply_activation_checkpointing(
+                    module,
+                    checkpointing_type=training_args.enable_gradient_checkpointing_type,
+                )
+            modules[name] = module
+
+        role_handles[str(role)] = RoleHandle(
+            modules=modules,
+            optimizers={},
+            lr_schedulers={},
+            trainable=bool(role_spec.trainable),
+        )
+
+    return role_handles
+
+
 class WanGameModel(ModelBase):
     """WanGame model plugin: loads roles + shared components and exposes runtime primitives.
 
@@ -99,71 +155,11 @@ class WanGameModel(ModelBase):
             shift=float(training_args.pipeline_config.flow_shift or 0.0)
         )
 
-        role_handles: dict[str, RoleHandle] = {}
-        for role, role_spec in roles_cfg.items():
-            if role_spec.family != "wangame":
-                raise ValueError(
-                    "Wangame model plugin only supports roles with family='wangame'; "
-                    f"got {role}={role_spec.family!r}"
-                )
-
-            variant_raw = (role_spec.extra or {}).get("variant", None)
-            if variant_raw is None or variant_raw == "":
-                transformer_cls_name = "WanGameActionTransformer3DModel"
-            else:
-                variant = str(variant_raw).strip().lower()
-                if variant in {"bidirectional", "bidi"}:
-                    transformer_cls_name = "WanGameActionTransformer3DModel"
-                elif variant == "causal":
-                    transformer_cls_name = "CausalWanGameActionTransformer3DModel"
-                else:
-                    raise ValueError(
-                        f"Unknown roles.{role}.variant for wangame: "
-                        f"{variant_raw!r}. Expected 'causal' or 'bidirectional'."
-                    )
-
-            disable_custom_init_weights = bool(
-                getattr(role_spec, "disable_custom_init_weights", False)
-            )
-            transformer = load_module_from_path(
-                model_path=role_spec.path,
-                module_type="transformer",
-                training_args=training_args,
-                disable_custom_init_weights=disable_custom_init_weights,
-                override_transformer_cls_name=transformer_cls_name,
-            )
-            modules: dict[str, torch.nn.Module] = {"transformer": transformer}
-
-            # Optional MoE support: load transformer_2 if present in the model.
-            try:
-                transformer_2 = load_module_from_path(
-                    model_path=role_spec.path,
-                    module_type="transformer_2",
-                    training_args=training_args,
-                    disable_custom_init_weights=disable_custom_init_weights,
-                )
-            except ValueError:
-                transformer_2 = None
-            if transformer_2 is not None:
-                modules["transformer_2"] = transformer_2
-
-            for name, module in list(modules.items()):
-                module = apply_trainable(module, trainable=bool(role_spec.trainable))
-                if role_spec.trainable and getattr(
-                    training_args, "enable_gradient_checkpointing_type", None
-                ):
-                    module = apply_activation_checkpointing(
-                        module,
-                        checkpointing_type=training_args.enable_gradient_checkpointing_type,
-                    )
-                modules[name] = module
-
-            role_handles[role] = RoleHandle(
-                modules=modules,
-                optimizers={},
-                lr_schedulers={},
-                trainable=bool(role_spec.trainable),
-            )
+        role_handles = _build_wangame_role_handles(
+            roles_cfg=roles_cfg,
+            training_args=training_args,
+            transformer_cls_name_for_role=lambda _role, _spec: "WanGameActionTransformer3DModel",
+        )
 
         self.bundle = RoleManager(roles=role_handles)
 

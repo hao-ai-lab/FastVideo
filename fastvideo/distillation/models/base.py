@@ -22,7 +22,8 @@ class ModelBase(ABC):
     - The model plugin implements how to run those roles against FastVideo
       pipelines, forward-context requirements, and batch normalization quirks.
 
-    Implementations typically live next to the model plugin (e.g. `models/wan.py`)
+    Implementations typically live next to the model plugin
+    (e.g. `models/wan/wan.py`)
     rather than in a global adapter registry.
     """
 
@@ -100,3 +101,53 @@ class ModelBase(ABC):
     @abstractmethod
     def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
         """Backward hook that may restore forward-context for checkpointed modules."""
+
+
+class CausalModelBase(ModelBase):
+    """Optional extension for causal / streaming model plugins.
+
+    This mirrors the FastGen design choice that *only* causal networks expose a
+    cache lifecycle API, while non-causal models stay on a clean `ModelBase`
+    interface.
+
+    Important: methods should not pass KV-cache tensors around. Cache state is
+    internal to the causal model plugin and keyed by `(role handle, cache_tag)`.
+    """
+
+    @abstractmethod
+    def clear_caches(self, handle: RoleHandle, *, cache_tag: str = "pos") -> None:
+        """Clear internal caches for a role before starting a new rollout."""
+
+    @abstractmethod
+    def predict_noise_streaming(
+        self,
+        handle: RoleHandle,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cache_tag: str = "pos",
+        store_kv: bool = False,
+        cur_start_frame: int = 0,
+        cfg_uncond: dict[str, Any] | None = None,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> torch.Tensor | None:
+        """Streaming predict-noise primitive that may update internal caches."""
+
+    @abstractmethod
+    def predict_x0_streaming(
+        self,
+        handle: RoleHandle,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cache_tag: str = "pos",
+        store_kv: bool = False,
+        cur_start_frame: int = 0,
+        cfg_uncond: dict[str, Any] | None = None,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> torch.Tensor | None:
+        """Streaming predict-x0 primitive that may update internal caches."""
