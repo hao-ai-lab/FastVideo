@@ -113,7 +113,6 @@ class DistributedAttention(nn.Module):
         pad_seq_len = qkv.shape[1] - original_seq_len
         qkv = qkv[:, :original_seq_len, :, :]
 
-
         if freqs_cis is not None:
             cos, sin = freqs_cis
             qkv[:batch_size * 2] = _apply_rotary_emb(qkv[:batch_size * 2],
