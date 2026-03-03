@@ -36,7 +36,47 @@ export interface Model {
     type: string;
 }
 
+export interface Settings {
+    defaultModelId: string;
+    numInferenceSteps: number;
+    numFrames: number;
+    height: number;
+    width: number;
+    guidanceScale: number;
+    seed: number;
+    numGpus: number;
+    ditCpuOffload: boolean;
+    textEncoderCpuOffload: boolean;
+    useFsdpInference: boolean;
+}
+
 // MARK: - API Functions
+
+export async function getSettings(): Promise<Settings> {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/settings`);
+    if (!response.ok) {
+        throw new Error("Failed to fetch settings");
+    }
+    return response.json();
+}
+
+export async function updateSettings(
+    updates: Partial<Settings>
+): Promise<Settings> {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/settings`, {
+        method: "PUT",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(updates),
+    });
+    if (!response.ok) {
+        throw new Error("Failed to update settings");
+    }
+    return response.json();
+}
 
 export async function getModels(): Promise<Model[]> {
     const baseApiUrl = getApiBaseUrl();

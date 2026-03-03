@@ -20,8 +20,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
 from fastvideo.utils import get_mp_context
+from ui.database import Database
 
 logger = logging.getLogger("fastvideo.ui.job_runner")
 
@@ -180,26 +180,30 @@ class Job:
 
 class JobRunner:
     """Manages video generation jobs, their execution, and generator caching."""
-    
+
     def __init__(
         self,
         output_dir: str,
         log_dir: str,
-        verbose: bool = False
+        database: Database,
+        verbose: bool = False,
     ):
         """Initialize the job runner.
-        
+
         Args:
             output_dir: Directory where generated videos are saved
             log_dir: Directory where job log files are saved
             verbose: Whether to print full tracebacks in error messages
+            database: Optional SQLite database for job persistence
         """
         self.output_dir = output_dir
         self.log_dir = log_dir
         self.verbose = verbose
-        
+        self._db = database
+
         self._jobs: dict[str, Job] = {}
         self._jobs_lock = threading.Lock()
+        self._load_jobs_from_db()
         
         # Cache of loaded generators keyed by (model_id, num_gpus, dit_cpu_offload, 
         # text_encoder_cpu_offload, use_fsdp_inference) so that we only pay the
@@ -209,13 +213,72 @@ class JobRunner:
 
         # Shared Manager for log queues (avoids spawning a new process per job)
         self._mp_manager = get_mp_context().Manager()
-        atexit.register(self._shutdown_mp_manager)
+        atexit.register(self._shutdown)
 
         # Ensure directories exist
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.log_dir, exist_ok=True)
 
-    def _shutdown_mp_manager(self) -> None:
+    def _load_jobs_from_db(self) -> None:
+        """Load jobs from database."""
+        try:
+            for row in self._db.get_all_jobs():
+                status = row["status"]
+                if status == "running":
+                    status = JobStatus.FAILED
+                    row["error"] = "Server restarted (job was running)"
+                    row["finished_at"] = time.time()
+                    self._db.update_job(row["id"], {
+                        "status": "failed",
+                        "error": row["error"],
+                        "finished_at": row["finished_at"],
+                    })
+                elif status == "pending":
+                    status = JobStatus.PENDING
+                job = Job(
+                    id=row["id"],
+                    model_id=row["model_id"],
+                    prompt=row["prompt"],
+                    status=JobStatus(status),
+                    created_at=row["created_at"],
+                    started_at=row.get("started_at"),
+                    finished_at=row.get("finished_at"),
+                    error=row.get("error"),
+                    output_path=row.get("output_path"),
+                    log_file_path=row.get("log_file_path"),
+                    num_inference_steps=row.get("num_inference_steps", 50),
+                    num_frames=row.get("num_frames", 81),
+                    height=row.get("height", 480),
+                    width=row.get("width", 832),
+                    guidance_scale=row.get("guidance_scale", 5.0),
+                    seed=row.get("seed", 1024),
+                    num_gpus=row.get("num_gpus", 1),
+                    dit_cpu_offload=row.get("dit_cpu_offload", False),
+                    text_encoder_cpu_offload=row.get("text_encoder_cpu_offload", False),
+                    use_fsdp_inference=row.get("use_fsdp_inference", False),
+                )
+                with self._jobs_lock:
+                    self._jobs[job.id] = job
+            if self._jobs:
+                logger.info("Loaded %d jobs from database", len(self._jobs))
+        except Exception as exc:
+            logger.warning("Failed to load jobs from database: %s", exc)
+
+    def _save_job(self, job: Job) -> None:
+        """Persist job to database."""
+        try:
+            self._db.update_job(job.id, {
+                "status": job.status.value,
+                "started_at": job.started_at,
+                "finished_at": job.finished_at,
+                "error": job.error,
+                "output_path": job.output_path,
+                "log_file_path": job.log_file_path,
+            })
+        except Exception as exc:
+            logger.warning("Failed to persist job %s: %s", job.id, exc)
+
+    def _shutdown(self) -> None:
         """Shutdown the shared multiprocessing manager on exit."""
         try:
             self._mp_manager.shutdown()
@@ -256,6 +319,10 @@ class JobRunner:
         )
         with self._jobs_lock:
             self._jobs[job.id] = job
+        try:
+            self._db.insert_job(job.to_dict())
+        except Exception as exc:
+            logger.warning("Failed to persist new job %s: %s", job.id, exc)
         logger.info(
             "Created job %s (model=%s, prompt=%s…)",
             job.id,
@@ -278,7 +345,7 @@ class JobRunner:
     
     def delete_job(self, job_id: str) -> bool:
         """Delete a job. Running jobs are stopped first.
-        
+
         Returns:
             True if job was found and deleted, False otherwise
         """
@@ -286,9 +353,13 @@ class JobRunner:
             job = self._jobs.pop(job_id, None)
         if job is None:
             return False
-        
+
         # Best-effort stop
         job._stop_event.set()
+        try:
+            self._db.delete_job(job_id)
+        except Exception as exc:
+            logger.warning("Failed to delete job %s from database: %s", job_id, exc)
         logger.info("Deleted job %s", job.id)
         return True
     
@@ -480,6 +551,7 @@ class JobRunner:
         try:
             job.status = JobStatus.RUNNING
             job.started_at = time.time()
+            self._save_job(job)
             buf.phase = "starting"
             logger.info(f"Job {job.id} started at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(job.started_at))}")
             logger.info(f"Model: {job.model_id}")
@@ -488,6 +560,7 @@ class JobRunner:
             if job._stop_event.is_set():
                 job.status = JobStatus.STOPPED
                 job.finished_at = time.time()
+                self._save_job(job)
                 logger.warning("Job stopped before execution started")
                 return
 
@@ -545,6 +618,7 @@ class JobRunner:
                 buf.progress = 100.0
                 logger.info("Job completed successfully")
             job.finished_at = time.time()
+            self._save_job(job)
             buf.phase = "done"
 
         except Exception as exception:
@@ -553,6 +627,7 @@ class JobRunner:
             job.status = JobStatus.FAILED
             job.error = f"Critical error ({type(exception).__name__}): {error_msg}"
             job.finished_at = time.time()
+            self._save_job(job)
             buf.phase = "failed"
 
         finally:

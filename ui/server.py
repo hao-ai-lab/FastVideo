@@ -19,6 +19,7 @@ import logging
 import os
 import signal
 import uuid
+from pathlib import Path
 import uvicorn
 from typing import Any
 
@@ -28,6 +29,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from fastvideo.registry import get_registered_model_paths
+from ui.database import Database, _get_db_path
 from ui.job_runner import JobRunner, JobStatus
 
 
@@ -50,6 +52,7 @@ _available_models: list[dict[str, str]] = [
 ]
 
 job_runner: JobRunner
+database: Database | None = None
 
 
 class CreateJobRequest(BaseModel):
@@ -79,6 +82,46 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/api/settings")
+def get_settings() -> dict[str, Any]:
+    """Return persisted default options (for new job creation)."""
+    if database is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Database not initialized (persistence disabled)",
+        )
+    return database.get_settings()
+
+
+class SettingsUpdate(BaseModel):
+    defaultModelId: str | None = None
+    numInferenceSteps: int | None = None
+    numFrames: int | None = None
+    height: int | None = None
+    width: int | None = None
+    guidanceScale: float | None = None
+    seed: int | None = None
+    numGpus: int | None = None
+    ditCpuOffload: bool | None = None
+    textEncoderCpuOffload: bool | None = None
+    useFsdpInference: bool | None = None
+
+
+@app.put("/api/settings")
+def update_settings(settings: SettingsUpdate) -> dict[str, Any]:
+    """Update persisted default options. Only provided fields are updated."""
+    if database is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Database not initialized (persistence disabled)",
+        )
+    updates = settings.model_dump(exclude_unset=True)
+    if not updates:
+        return database.get_settings()
+    database.save_settings(updates)
+    return database.get_settings()
 
 
 @app.get("/api/models")
@@ -260,13 +303,16 @@ def create_local_env(host: str, port: int) -> None:
 
 
 def main():
-    global job_runner  # noqa: PLW0603
+    global job_runner, database  # noqa: PLW0603
 
     # Set up signal handlers to prevent worker crashes from killing the server
     _setup_signal_handlers()
 
     default_log_dir = os.path.join(
         os.path.dirname(__file__), "..", "outputs", "ui_logs"
+    )
+    default_data_dir = Path(
+        os.path.dirname(__file__), "..", "outputs", "ui_data"
     )
 
     parser = argparse.ArgumentParser(
@@ -300,6 +346,14 @@ def main():
         ),
     )
     parser.add_argument(
+        "--data-dir",
+        default=str(default_data_dir),
+        help=(
+            "Directory for SQLite database (jobs + settings persistence) "
+            f"(default: {default_data_dir})"
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Print full tracebacks in error messages (default: False)",
@@ -308,14 +362,19 @@ def main():
 
     output_dir = os.path.abspath(args.output_dir)
     log_dir = os.path.abspath(args.log_dir)
-    
+    data_dir = Path(args.data_dir).resolve()
+
     create_local_env(args.host, args.port)
-    
-    # Initialize job runner
+
+    db_path = _get_db_path(data_dir)
+    database = Database(db_path)
+    logger.info("Database: %s", db_path)
+
     job_runner = JobRunner(
         output_dir=output_dir,
         log_dir=log_dir,
-        verbose=args.verbose
+        verbose=args.verbose,
+        database=database,
     )
     
     logger.info("Output directory: %s", output_dir)
