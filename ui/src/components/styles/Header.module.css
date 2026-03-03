@@ -1,7 +1,24 @@
 /* ── Header ───────────────────────────────────────────────── */
 .header {
-  text-align: center;
-  padding: 2rem 1rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0;
+  flex: 1;
+}
+
+.logo {
+  width: 100px;
+  height: 42px; /* 100 * (105/252) to preserve aspect ratio */
+  display: block;
 }
 
 .header h1 {
