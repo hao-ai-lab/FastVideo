@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useDefaultOptions } from "@/contexts/DefaultOptionsContext";
+import { useHeaderActions } from "@/contexts/ActiveTabContext";
 import { getModels, type Model } from "@/lib/api";
 import cardStyles from "@styles/Card.module.css";
 import formStyles from "@styles/Form.module.css";
@@ -9,6 +10,7 @@ import layoutStyles from "@/app/Layout.module.css";
 import buttonStyles from "@styles/Button.module.css";
 
 export default function SettingsPage() {
+  useHeaderActions([]);
   const { options, updateOption, resetToDefaults } = useDefaultOptions();
   const [models, setModels] = useState<Model[]>([]);
 

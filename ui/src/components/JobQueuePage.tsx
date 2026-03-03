@@ -3,11 +3,14 @@
 import { getJobsList } from "@/lib/api";
 import { useEffect, useState, useRef, useCallback } from "react";
 import JobCard from "@/components/JobCard";
+import CreateJobButton from "@/components/CreateJobButton";
 import { useJobsRefresh } from "@/contexts/JobsRefreshContext";
+import { useHeaderActions } from "@/contexts/ActiveTabContext";
 import cardStyles from "@styles/Card.module.css";
 import layoutStyles from "@/app/Layout.module.css";
 
 export default function JobQueuePage() {
+  useHeaderActions([<CreateJobButton key="create-job" />]);
   const [jobs, setJobs] = useState<Awaited<ReturnType<typeof getJobsList>>>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const { registerRefresh } = useJobsRefresh();
