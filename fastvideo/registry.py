@@ -413,7 +413,6 @@ def _register_configs() -> None:
         sampling_param_cls=Gen3C_Cosmos_7B_SamplingParam,
         pipeline_config_cls=Gen3CConfig,
         hf_model_paths=[
-            "vbharath/GEN3C-Cosmos-7B-Diffusers",
             "FastVideo/GEN3C-Cosmos-7B-Diffusers",
         ],
         model_detectors=[

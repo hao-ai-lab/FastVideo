@@ -11,7 +11,7 @@ Usage:
 
 Environment variables:
     GEN3C_MODEL_PATH  - Diffusers-format GEN3C model path/repo id.
-                        Default: vbharath/GEN3C-Cosmos-7B-Diffusers
+                        Default: FastVideo/GEN3C-Cosmos-7B-Diffusers
                         (local converted path also supported)
 """
 
@@ -68,7 +68,7 @@ else:
 GEN3C_T2V_PARAMS = {
     "num_gpus": 1,
     "model_path": os.getenv("GEN3C_MODEL_PATH",
-                            "vbharath/GEN3C-Cosmos-7B-Diffusers"),
+                            "FastVideo/GEN3C-Cosmos-7B-Diffusers"),
     "height": 720,
     "width": 1280,
     "num_frames": 121,
@@ -128,7 +128,7 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     if model_path.lower() == "nvidia/gen3c-cosmos-7b":
         pytest.skip(
             "nvidia/GEN3C-Cosmos-7B is the official raw checkpoint repo, not Diffusers format. "
-            "Use GEN3C_MODEL_PATH=vbharath/GEN3C-Cosmos-7B-Diffusers or a local converted path."
+            "Use GEN3C_MODEL_PATH=FastVideo/GEN3C-Cosmos-7B-Diffusers or a local converted path."
         )
 
     local_like = model_path.startswith(("/", "./", "../"))
