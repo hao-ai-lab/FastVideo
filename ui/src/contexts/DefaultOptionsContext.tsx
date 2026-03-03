@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -13,6 +14,7 @@ import {
   loadDefaultOptions,
   saveDefaultOptions,
 } from "@/lib/defaultOptions";
+import { getSettings, updateSettings } from "@/lib/api";
 
 interface DefaultOptionsContextValue {
   options: DefaultOptions;
@@ -32,13 +34,23 @@ export function DefaultOptionsProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const [options, setOptions] = useState(loadDefaultOptions);
+  const [options, setOptions] = useState<DefaultOptions>(loadDefaultOptions);
+
+  useEffect(() => {
+    getSettings()
+      .then(setOptions)
+      .catch(() => {
+        setOptions(loadDefaultOptions());
+      });
+  }, []);
 
   const updateOption = useCallback(
     <K extends keyof DefaultOptions>(key: K, value: DefaultOptions[K]) => {
       setOptions((prev) => {
         const next = { ...prev, [key]: value };
-        saveDefaultOptions(next);
+        updateSettings({ [key]: value }).catch(() => {
+          saveDefaultOptions(next);
+        });
         return next;
       });
     },
@@ -47,7 +59,9 @@ export function DefaultOptionsProvider({
 
   const resetToDefaults = useCallback(() => {
     setOptions(DEFAULT_OPTIONS);
-    saveDefaultOptions(DEFAULT_OPTIONS);
+    updateSettings(DEFAULT_OPTIONS).catch(() => {
+      saveDefaultOptions(DEFAULT_OPTIONS);
+    });
   }, []);
 
   const value = useMemo(
