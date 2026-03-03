@@ -16,6 +16,7 @@ import torch.distributed.checkpoint as dcp
 from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
     get_model_state_dict,
+    set_model_state_dict,
 )
 
 from fastvideo.distillation.roles import RoleHandle, RoleManager
@@ -146,6 +147,68 @@ def _get_dcp_role_module_names(dcp_dir: Path, role: str) -> set[str]:
     return set(str(name) for name in packed)
 
 
+def _get_dcp_role_module_param_keys(
+    dcp_dir: Path, *, role: str, module_name: str
+) -> set[str]:
+    """Return inner param keys present under `roles.<role>.<module_name>.*` in a DCP checkpoint.
+
+    Example checkpoint key:
+      roles.student.transformer.blocks.0.to_q.weight
+    Returned inner key:
+      blocks.0.to_q.weight
+
+    This is used for warmstart to avoid DCP planner failures when the target
+    module expects parameters that are not present in the checkpoint (e.g.,
+    older checkpoints produced under different wrapping/filtering).
+    """
+
+    if _rank() == 0:
+        reader = dcp.FileSystemReader(str(dcp_dir))
+        metadata = reader.read_metadata()
+        prefix = f"roles.{role}.{module_name}."
+        keys: set[str] = set()
+        for key in metadata.state_dict_metadata:
+            if not key.startswith(prefix):
+                continue
+            inner = key[len(prefix) :]
+            if inner:
+                keys.add(inner)
+        packed: list[str] = sorted(keys)
+    else:
+        packed = []
+
+    if dist.is_available() and dist.is_initialized():
+        obj_list: list[Any] = [packed]
+        dist.broadcast_object_list(obj_list, src=0)
+        packed = obj_list[0]
+
+    return set(str(name) for name in packed)
+
+
+class _WarmstartModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
+    """A StateDict wrapper used for warmstart (best-effort load).
+
+    Unlike training checkpoints, warmstart is not required to be an exact
+    resume. We therefore restrict the *expected* parameter keys to those
+    actually present in the checkpoint to prevent DCP load planning failures.
+    """
+
+    def __init__(self, model: torch.nn.Module, *, allowed_keys: set[str]) -> None:
+        self.model = model
+        self.allowed_keys = allowed_keys
+
+    def state_dict(self) -> dict[str, Any]:
+        state_dict = get_model_state_dict(self.model)  # type: ignore[no-any-return]
+        return {k: v for k, v in state_dict.items() if k in self.allowed_keys}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        set_model_state_dict(
+            self.model,
+            model_state_dict=state_dict,
+            options=StateDictOptions(strict=False),
+        )
+
+
 def maybe_warmstart_role_modules(
     *,
     bundle: RoleManager,
@@ -183,7 +246,17 @@ def maybe_warmstart_role_modules(
     for module_name, module in handle.modules.items():
         if module_name not in available_modules:
             continue
-        states[f"roles.{checkpoint_role}.{module_name}"] = ModelWrapper(module)
+        allowed_keys = _get_dcp_role_module_param_keys(
+            dcp_dir,
+            role=str(checkpoint_role),
+            module_name=str(module_name),
+        )
+        if not allowed_keys:
+            continue
+        states[f"roles.{checkpoint_role}.{module_name}"] = _WarmstartModelWrapper(
+            module,
+            allowed_keys=allowed_keys,
+        )
 
     if not states:
         raise ValueError(
