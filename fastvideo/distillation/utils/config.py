@@ -43,6 +43,7 @@ class DistillRunConfig:
     """Parsed distillation run config loaded from schema-v2 YAML."""
 
     recipe: RecipeSpec
+    shared_component_role: RoleName
     roles: dict[RoleName, RoleSpec]
     training_args: TrainingArgs
     validation: dict[str, Any]
@@ -150,9 +151,26 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
     recipe_method = _require_str(recipe_raw.get("method"), where="recipe.method")
     recipe = RecipeSpec(family=recipe_family, method=recipe_method)
 
+    models_raw = cfg.get("models", None)
+    if models_raw is not None:
+        raise ValueError(
+            "Top-level `models` is not supported in schema-v2. "
+            "Use `roles.shared_component_role` and `roles.<role>.*` instead."
+        )
+
     roles_raw = _require_mapping(cfg.get("roles"), where="roles")
+    shared_component_role_raw = roles_raw.get("shared_component_role", None)
+    if shared_component_role_raw is None:
+        shared_component_role = "student"
+    else:
+        shared_component_role = _require_str(
+            shared_component_role_raw,
+            where="roles.shared_component_role",
+        )
     roles: dict[RoleName, RoleSpec] = {}
     for role, role_cfg_raw in roles_raw.items():
+        if role == "shared_component_role":
+            continue
         role_str = _require_str(role, where="roles.<role>")
         role_cfg = _require_mapping(role_cfg_raw, where=f"roles.{role_str}")
         family = role_cfg.get("family") or recipe_family
@@ -185,6 +203,15 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
             trainable=trainable,
             disable_custom_init_weights=disable_custom_init_weights,
             extra=extra,
+        )
+
+    shared_component_role = str(shared_component_role).strip()
+    if not shared_component_role:
+        raise ValueError("roles.shared_component_role cannot be empty")
+    if shared_component_role not in roles:
+        raise ValueError(
+            "roles.shared_component_role must be a role name under roles.*, got "
+            f"{shared_component_role!r}"
         )
 
     training_raw = _require_mapping(cfg.get("training"), where="training")
@@ -242,13 +269,27 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
     training_kwargs.setdefault("hsdp_replicate_dim", 1)
     training_kwargs.setdefault("hsdp_shard_dim", num_gpus)
 
-    # Use student path as the default base model_path. This is needed for
-    # PipelineConfig registry lookup.
+    # Use the shared-component role path as the default base model_path. This
+    # is needed for PipelineConfig registry lookup and shared component loading.
+    shared_role_spec = roles.get(shared_component_role)
+    if shared_role_spec is None:
+        raise ValueError(
+            "roles.shared_component_role must reference an existing role under roles.*, got "
+            f"{shared_component_role!r}"
+        )
+
     if "model_path" not in training_kwargs:
-        student = roles.get("student")
-        if student is None:
-            raise ValueError("training.model_path is missing and roles.student is not provided")
-        training_kwargs["model_path"] = student.path
+        training_kwargs["model_path"] = shared_role_spec.path
+    else:
+        model_path_raw = training_kwargs.get("model_path")
+        model_path = _require_str(model_path_raw, where="training.model_path").rstrip("/")
+        expected = str(shared_role_spec.path).rstrip("/")
+        if model_path != expected:
+            raise ValueError(
+                "training.model_path must match roles.<shared_component_role>.path. "
+                f"Got training.model_path={model_path_raw!r}, "
+                f"roles.{shared_component_role}.path={shared_role_spec.path!r}"
+            )
 
     if "pretrained_model_name_or_path" not in training_kwargs:
         training_kwargs["pretrained_model_name_or_path"] = training_kwargs["model_path"]
@@ -295,6 +336,7 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
 
     return DistillRunConfig(
         recipe=recipe,
+        shared_component_role=shared_component_role,
         roles=roles,
         training_args=training_args,
         validation=validation,

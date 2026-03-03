@@ -35,9 +35,10 @@ def _build_wangame_role_handles(
 ) -> dict[str, RoleHandle]:
     role_handles: dict[str, RoleHandle] = {}
     for role, role_spec in roles_cfg.items():
-        if role_spec.family != "wangame":
+        if role_spec.family not in {"wangame", "wangame_causal"}:
             raise ValueError(
-                "Wangame model plugin only supports roles with family='wangame'; "
+                "Wangame model plugin only supports roles with family in "
+                "{'wangame', 'wangame_causal'}; "
                 f"got {role}={role_spec.family!r}"
             )
 
@@ -86,4 +87,3 @@ def _build_wangame_role_handles(
         )
 
     return role_handles
-

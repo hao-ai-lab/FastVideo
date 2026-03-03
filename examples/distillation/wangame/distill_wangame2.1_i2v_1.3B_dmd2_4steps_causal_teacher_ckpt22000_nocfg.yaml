@@ -7,30 +7,25 @@
 #   load configs/architectures); `init_from_checkpoint` overwrites weights.
 
 recipe:
-  family: wangame
+  family: wangame_causal
   method: dmd2
 
 roles:
+  shared_component_role: student
   student:
-    family: wangame
     path: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
     trainable: true
-    variant: causal
     init_from_checkpoint: outputs/wangame_dfsft_causal_4n8g/persistent/checkpoint-22000
   teacher:
-    family: wangame
     path: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
     trainable: false
     disable_custom_init_weights: true
-    variant: causal
     init_from_checkpoint: outputs/wangame_dfsft_causal_4n8g/persistent/checkpoint-22000
     init_from_checkpoint_role: student
   critic:
-    family: wangame
     path: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
     trainable: true
     disable_custom_init_weights: true
-    variant: causal
     init_from_checkpoint: outputs/wangame_dfsft_causal_4n8g/persistent/checkpoint-22000
     init_from_checkpoint_role: student
 
@@ -118,4 +113,3 @@ method_config:
     action: keep
     image: keep
     text: keep
-

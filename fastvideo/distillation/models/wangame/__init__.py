@@ -2,7 +2,9 @@
 
 """WanGame model plugin package.
 
-This package registers the `recipe.family: wangame` model builder.
+This package registers the WanGame model builders:
+- `recipe.family: wangame` (bidirectional by default; can opt into causal per-role)
+- `recipe.family: wangame_causal` (causal by default; can opt into bidirectional per-role)
 
 We support both bidirectional and causal transformers:
 - If any role declares `roles.<role>.variant: causal`, we build the causal-capable
@@ -38,3 +40,9 @@ def _build_wangame_model(*, cfg: DistillRunConfig):
 
     return WanGameModel(cfg=cfg)
 
+
+@register_model("wangame_causal")
+def _build_wangame_causal_model(*, cfg: DistillRunConfig):
+    from fastvideo.distillation.models.wangame.wangame_causal import WanGameCausalModel
+
+    return WanGameCausalModel(cfg=cfg)

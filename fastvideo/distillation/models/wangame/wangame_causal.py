@@ -2,12 +2,23 @@
 
 """WanGame causal model plugin (streaming/cache primitives).
 
-This module provides the *causal* extension for the WanGame model family.
+Config keys used (YAML schema-v2):
+- `recipe.family`: `"wangame_causal"` (causal by default) or `"wangame"` (when
+  at least one role requests `variant: causal`).
+- `roles.shared_component_role` (affects default `training.model_path`).
+- `roles.<role>`:
+  - `family`, `path`, `trainable`, `disable_custom_init_weights`
+  - extra: `variant` (`causal`/`bidirectional`); defaults depend on
+    `recipe.family`.
+- `training` (selected fields): same as `WanGameModel` (see
+  `models/wangame/wangame.py`).
+- `training.validation.*` (consumed by `WanGameValidator` when enabled)
+- `method_config.cfg_uncond.*` (consumed by base WanGame primitives for CFG)
 
 Key differences vs. `models/wangame/wangame.py`:
-- Supports `roles.<role>.variant: causal` by loading a causal transformer class.
-- Implements `CausalModelBase` APIs (`clear_caches`, `predict_*_streaming`) so
-  methods can drive streaming rollouts without passing KV-cache tensors around.
+- Supports causal transformers and streaming rollouts via `CausalModelBase`.
+- Exposes cache lifecycle + streaming primitives (`predict_*_streaming`), so
+  methods can drive causal rollouts without passing KV-cache tensors around.
 """
 
 from __future__ import annotations
@@ -52,16 +63,20 @@ class WanGameCausalModel(WanGameModel, CausalModelBase):
         if not getattr(training_args, "data_path", ""):
             raise ValueError("training.data_path must be set for distillation")
 
-        # Load shared components (student base path).
+        # Load shared components (training.model_path; defaults to
+        # roles.shared_component_role's path).
         vae = self._load_shared_vae(training_args)
         noise_scheduler = self._build_noise_scheduler(training_args)
+
+        recipe_family = str(getattr(cfg.recipe, "family", "")).strip().lower()
+        default_variant = "causal" if recipe_family == "wangame_causal" else "bidirectional"
 
         def _transformer_cls_name_for_role(role: str, role_spec: Any) -> str:
             variant_raw = (role_spec.extra or {}).get("variant", None)
             if variant_raw is None or str(variant_raw).strip() == "":
-                return "WanGameActionTransformer3DModel"
-
-            variant = str(variant_raw).strip().lower()
+                variant = default_variant
+            else:
+                variant = str(variant_raw).strip().lower()
             if variant in {"bidirectional", "bidi"}:
                 return "WanGameActionTransformer3DModel"
             if variant == "causal":

@@ -1,13 +1,12 @@
 recipe:
-  family: wangame
+  family: wangame_causal
   method: dfsft
 
 roles:
+  shared_component_role: student
   student:
-    family: wangame
     path: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
     trainable: true
-    variant: causal
 
 training:
   # Distributed (4 nodes × 8 GPUs = 32 ranks)

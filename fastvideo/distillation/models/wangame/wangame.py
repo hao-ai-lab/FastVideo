@@ -4,6 +4,7 @@
 
 Config keys used (YAML schema-v2):
 - `recipe.family`: must be `"wangame"` for this plugin.
+- `roles.shared_component_role` (affects default `training.model_path`)
 - `roles.<role>`:
   - `family`, `path`, `trainable`, `disable_custom_init_weights`
   - extra: `variant` is **not used** by this bidirectional-only plugin.
@@ -86,7 +87,8 @@ class WanGameModel(ModelBase):
         if not getattr(training_args, "data_path", ""):
             raise ValueError("training.data_path must be set for distillation")
 
-        # Load shared components (student base path).
+        # Load shared components (training.model_path; defaults to
+        # roles.shared_component_role's path).
         vae = load_module_from_path(
             model_path=str(training_args.model_path),
             module_type="vae",
