@@ -177,19 +177,29 @@ class WandbTracker(BaseTracker):
             logger.warning("W&B log_file skipped; file not found: %s", resolved)
             return
 
+        target_name = str(name).strip() if name is not None and str(name).strip() else None
+        if target_name is None:
+            target_name = os.path.basename(resolved)
+
+        # Prefer placing files directly under the W&B run directory to avoid
+        # symlink-based saves (which may not sync reliably on some clusters).
+        run_dir = getattr(self._run, "dir", None)
+        dest_root = self._log_dir if not isinstance(run_dir, str) else run_dir
+        dest_root = os.path.abspath(str(dest_root))
+
         save_path = resolved
-        if name is not None and str(name).strip():
-            dest_path = os.path.join(self._log_dir, str(name).strip())
-            try:
-                shutil.copyfile(resolved, dest_path)
-            except Exception:
-                logger.exception(
-                    "Failed to copy file for W&B upload: %s -> %s",
-                    resolved,
-                    dest_path,
-                )
-            else:
-                save_path = dest_path
+        dest_path = os.path.join(dest_root, target_name)
+        try:
+            pathlib.Path(dest_root).mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(resolved, dest_path)
+        except Exception:
+            logger.exception(
+                "Failed to copy file for W&B upload: %s -> %s",
+                resolved,
+                dest_path,
+            )
+        else:
+            save_path = dest_path
 
         try:
             self._run.save(

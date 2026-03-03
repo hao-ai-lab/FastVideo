@@ -105,7 +105,12 @@ training:
     every_steps: 100
     sampling_steps: [4]
     sampler_kind: sde
+    rollout_mode: streaming
     guidance_scale: 1.0
+    # Streaming causal denoising requires:
+    # - num_frames divisible by num_frame_per_block (default=3)
+    # - (num_frames - 1) divisible by 4 (action tensor convention)
+    num_frames: 69
 
 default_pipeline_config:
   flow_shift: 3
