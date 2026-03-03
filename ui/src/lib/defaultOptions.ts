@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export interface DefaultOptions {
+  defaultModelId: string;
   numInferenceSteps: number;
   numFrames: number;
   height: number;
@@ -14,6 +15,7 @@ export interface DefaultOptions {
 }
 
 export const DEFAULT_OPTIONS: DefaultOptions = {
+  defaultModelId: "",
   numInferenceSteps: 50,
   numFrames: 81,
   height: 480,

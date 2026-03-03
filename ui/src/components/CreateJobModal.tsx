@@ -60,6 +60,7 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
 
   useEffect(() => {
     if (isOpen) {
+      setModelId(defaultOptions.defaultModelId);
       setNumInferenceSteps(defaultOptions.numInferenceSteps);
       setNumFrames(defaultOptions.numFrames);
       setHeight(defaultOptions.height);
@@ -91,7 +92,7 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
         text_encoder_cpu_offload: textEncoderCpuOffload,
         use_fsdp_inference: useFsdpInference,
       });
-      setModelId("");
+      setModelId(defaultOptions.defaultModelId);
       setPrompt("");
       setNumInferenceSteps(defaultOptions.numInferenceSteps);
       setNumFrames(defaultOptions.numFrames);
@@ -115,7 +116,7 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
 
   const handleClose = () => {
     if (!isSubmitting) {
-      setModelId("");
+      setModelId(defaultOptions.defaultModelId);
       setPrompt("");
       setNumInferenceSteps(defaultOptions.numInferenceSteps);
       setNumFrames(defaultOptions.numFrames);
