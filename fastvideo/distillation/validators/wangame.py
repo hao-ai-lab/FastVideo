@@ -168,18 +168,24 @@ class WanGameValidator:
                 WanGameActionImageToVideoPipeline,
             )
 
+            kwargs: dict[str, Any] = {
+                "inference_mode": True,
+                "sampler_kind": sampler_kind,
+                "loaded_modules": {"transformer": transformer},
+                "tp_size": self.training_args.tp_size,
+                "sp_size": self.training_args.sp_size,
+                "num_gpus": self.training_args.num_gpus,
+                "pin_cpu_memory": self.training_args.pin_cpu_memory,
+                "dit_cpu_offload": True,
+            }
+            if flow_shift is not None:
+                kwargs["flow_shift"] = float(flow_shift)
+            if ode_solver is not None:
+                kwargs["ode_solver"] = str(ode_solver)
+
             self._pipeline = WanGameActionImageToVideoPipeline.from_pretrained(
                 self.training_args.model_path,
-                inference_mode=True,
-                flow_shift=float(flow_shift) if flow_shift is not None else None,
-                sampler_kind=sampler_kind,
-                ode_solver=str(ode_solver) if ode_solver is not None else None,
-                loaded_modules={"transformer": transformer},
-                tp_size=self.training_args.tp_size,
-                sp_size=self.training_args.sp_size,
-                num_gpus=self.training_args.num_gpus,
-                pin_cpu_memory=self.training_args.pin_cpu_memory,
-                dit_cpu_offload=True,
+                **kwargs,
             )
         elif rollout_mode == "streaming":
             if sampler_kind not in {"ode", "sde"}:
@@ -226,21 +232,28 @@ class WanGameValidator:
                 WanGameCausalDMDPipeline,
             )
 
-            self._pipeline = WanGameCausalDMDPipeline.from_pretrained(
-                self.training_args.model_path,
-                inference_mode=True,
-                flow_shift=float(flow_shift) if flow_shift is not None else None,
-                sampler_kind=sampler_kind,
-                ode_solver=str(ode_solver) if ode_solver is not None else None,
-                loaded_modules={
+            kwargs = {
+                "inference_mode": True,
+                "flow_shift": float(flow_shift) if flow_shift is not None else None,
+                "sampler_kind": sampler_kind,
+                "loaded_modules": {
                     "transformer": transformer,
                     "scheduler": scheduler,
                 },
-                tp_size=self.training_args.tp_size,
-                sp_size=self.training_args.sp_size,
-                num_gpus=self.training_args.num_gpus,
-                pin_cpu_memory=self.training_args.pin_cpu_memory,
-                dit_cpu_offload=True,
+                "tp_size": self.training_args.tp_size,
+                "sp_size": self.training_args.sp_size,
+                "num_gpus": self.training_args.num_gpus,
+                "pin_cpu_memory": self.training_args.pin_cpu_memory,
+                "dit_cpu_offload": True,
+            }
+            if kwargs["flow_shift"] is None:
+                kwargs.pop("flow_shift")
+            if ode_solver is not None:
+                kwargs["ode_solver"] = str(ode_solver)
+
+            self._pipeline = WanGameCausalDMDPipeline.from_pretrained(
+                self.training_args.model_path,
+                **kwargs,
             )
         else:
             raise ValueError(

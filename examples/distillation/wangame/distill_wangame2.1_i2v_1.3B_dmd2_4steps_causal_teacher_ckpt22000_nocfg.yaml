@@ -59,7 +59,7 @@ training:
 
   # Output / steps
   output_dir: outputs/wangame_dmd2_4steps_distill_causal_teacher22000
-  max_train_steps: 4000
+  max_train_steps: 400000
   seed: 1000
   checkpoints_total_limit: 3
 

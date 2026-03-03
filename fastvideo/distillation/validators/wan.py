@@ -99,19 +99,22 @@ class WanValidator:
         # `inference_mode=True`, so we must pass pipeline knobs via kwargs.
         flow_shift = getattr(self.training_args.pipeline_config, "flow_shift", None)
 
-        self._pipeline = WanPipeline.from_pretrained(
-            self.training_args.model_path,
-            inference_mode=True,
-            sampler_kind=str(sampler_kind),
-            flow_shift=float(flow_shift) if flow_shift is not None else None,
-            ode_solver=str(ode_solver) if ode_solver is not None else None,
-            loaded_modules={"transformer": transformer},
-            tp_size=self.training_args.tp_size,
-            sp_size=self.training_args.sp_size,
-            num_gpus=self.training_args.num_gpus,
-            pin_cpu_memory=self.training_args.pin_cpu_memory,
-            dit_cpu_offload=True,
-        )
+        kwargs: dict[str, Any] = {
+            "inference_mode": True,
+            "sampler_kind": str(sampler_kind),
+            "loaded_modules": {"transformer": transformer},
+            "tp_size": self.training_args.tp_size,
+            "sp_size": self.training_args.sp_size,
+            "num_gpus": self.training_args.num_gpus,
+            "pin_cpu_memory": self.training_args.pin_cpu_memory,
+            "dit_cpu_offload": True,
+        }
+        if flow_shift is not None:
+            kwargs["flow_shift"] = float(flow_shift)
+        if ode_solver is not None:
+            kwargs["ode_solver"] = str(ode_solver)
+
+        self._pipeline = WanPipeline.from_pretrained(self.training_args.model_path, **kwargs)
         self._pipeline_key = key
         return self._pipeline
 
