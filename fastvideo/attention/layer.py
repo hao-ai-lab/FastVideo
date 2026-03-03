@@ -66,7 +66,7 @@ class DistributedAttention(nn.Module):
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
-        original_seq_len: int,
+        original_seq_len: int | None = None,
         replicated_q: torch.Tensor | None = None,
         replicated_k: torch.Tensor | None = None,
         replicated_v: torch.Tensor | None = None,
@@ -109,9 +109,10 @@ class DistributedAttention(nn.Module):
 
         # After all-to-all, each rank has the full sequence but only a subset of heads.
         # Trim away SP padding for attention compute, then pad back before returning.
-
+        original_seq_len = original_seq_len or qkv.shape[1]
         pad_seq_len = qkv.shape[1] - original_seq_len
         qkv = qkv[:, :original_seq_len, :, :]
+
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
