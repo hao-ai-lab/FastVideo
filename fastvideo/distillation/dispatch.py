@@ -66,6 +66,9 @@ def ensure_builtin_registrations() -> None:
     from fastvideo.distillation.models import wan as _wan  # noqa: F401
     from fastvideo.distillation.models import wangame as _wangame  # noqa: F401
     from fastvideo.distillation.methods.distribution_matching import dmd2 as _dmd2  # noqa: F401
+    from fastvideo.distillation.methods.distribution_matching import (
+        self_forcing as _self_forcing,  # noqa: F401
+    )
     from fastvideo.distillation.methods.fine_tuning import finetune as _finetune  # noqa: F401
     from fastvideo.distillation.methods.fine_tuning import dfsft as _dfsft  # noqa: F401
 
