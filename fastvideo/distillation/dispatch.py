@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 from typing import Protocol
 
@@ -13,16 +12,6 @@ from fastvideo.distillation.utils.config import DistillRunConfig
 if TYPE_CHECKING:
     from fastvideo.fastvideo_args import TrainingArgs
     from fastvideo.distillation.models.base import ModelBase
-
-
-@dataclass(slots=True)
-class DistillRuntime:
-    """Fully assembled runtime for `DistillTrainer.run()`."""
-
-    training_args: TrainingArgs
-    method: DistillMethod
-    dataloader: Any
-    start_step: int = 0
 
 
 class ModelBuilder(Protocol):
@@ -105,8 +94,8 @@ def get_method(name: str) -> type[DistillMethod]:
     return _METHODS[name]
 
 
-def build_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:
-    """Build a distillation runtime from a YAML config.
+def build_from_config(cfg: DistillRunConfig) -> tuple[TrainingArgs, DistillMethod, Any, int]:
+    """Build method+dataloader from a YAML config.
 
     Assembles:
     - model components (bundle/adapter/dataloader/validator)
@@ -140,9 +129,5 @@ def build_runtime_from_config(cfg: DistillRunConfig) -> DistillRuntime:
         validator=model.validator,
     )
 
-    return DistillRuntime(
-        training_args=model.training_args,
-        method=method,
-        dataloader=model.dataloader,
-        start_step=int(getattr(model, "start_step", 0) or 0),
-    )
+    start_step = int(getattr(model, "start_step", 0) or 0)
+    return model.training_args, method, model.dataloader, start_step

@@ -16,10 +16,10 @@
 - `register_model(name)` / `register_method(name)`：装饰器注册
 - `get_model(name)` / `get_method(name)`：查询（会触发内置注册）
 - `available_models()` / `available_methods()`
-- `build_runtime_from_config(cfg) -> DistillRuntime`
+- `build_from_config(cfg) -> (training_args, method, dataloader, start_step)`
   - 选择 model plugin：`get_model(cfg.recipe.family)`
   - 选择 method：`get_method(cfg.recipe.method)`
-  - `DistillRuntime` 定义也在本文件中（谁创建谁声明）。
+  - 返回值是一个 tuple，避免额外引入 `Runtime` 概念。
 
 **边界**
 - ✅ 这里只做“装配 + dispatch”，不包含训练 loop / loss / rollout / optimizer policy。

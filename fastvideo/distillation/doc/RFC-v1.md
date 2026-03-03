@@ -4,7 +4,7 @@
 ```text
 fastvideo/distillation/
   trainer.py # 构建training loop 调用method提供的train_one_step接口
-  dispatch.py # 根据@register_method和@register_model自动识别类型，根据config构建DistillRuntime
+  dispatch.py # 根据@register_method和@register_model自动识别类型，根据config构建 (training_args, method, dataloader, start_step)
   roles.py # RoleHandle模型外面包一层role的字段，用于区分teacher/student/critic。
 
   models/
@@ -62,7 +62,7 @@ RoleManager:
   require_roles([...])                    # method 用它声明依赖（早失败、错误信息清晰）
 ```
 
-### 2.2 `dispatch.py`：registry + DistillRuntime
+### 2.2 `dispatch.py`：registry + build_from_config()
 
 ```py
 # 目标：新增一个 model plugin 或 method 的成本是 O(1)，而不是写 N×M 组合函数
@@ -73,7 +73,7 @@ def build_wan_components(cfg) -> ModelComponents: ...
 @register_method("dmd2")
 class DMD2Method(DistillMethod): ...
 
-build_runtime_from_config(cfg):
+build_from_config(cfg):
   components = model_builder(cfg)               # -> ModelComponents
   method = method_cls.build(                    # -> DistillMethod instance
     cfg=cfg,
@@ -81,7 +81,7 @@ build_runtime_from_config(cfg):
     adapter=components.adapter,
     validator=components.validator,
   )
-  return DistillRuntime(training_args, method, dataloader, start_step)
+  return (training_args, method, dataloader, start_step)
 ```
 
 ### 2.3 `trainer.py`：DistillTrainer（infra only）
@@ -291,4 +291,3 @@ tracker 是 infra 资源（日志/文件/媒体记录），生命周期属于训
 - 新增一个 family → 加一个 model plugin 并注册
 - 新增一个 method → 加一个 method 文件并注册
 - 不需要写 25 个 build 函数或 if/else 分支
-

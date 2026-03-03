@@ -11,7 +11,7 @@
 
 快速入口（从运行到训练）：
 `fastvideo/training/distillation.py` → `utils.config.load_distill_run_config()` →
-`dispatch.build_runtime_from_config()` →
+`dispatch.build_from_config()` →
 `ModelBase(model) + DistillMethod` → `DistillTrainer.run()`
 
 ---

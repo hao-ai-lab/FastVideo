@@ -3,7 +3,7 @@
 ```text
 fastvideo/distillation/
   trainer.py # Builds the training loop; calls method-provided train_one_step
-  dispatch.py # Auto-dispatch via @register_method/@register_model; builds DistillRuntime from config
+  dispatch.py # Auto-dispatch via @register_method/@register_model; builds (training_args, method, dataloader, start_step) from config
   roles.py # Wraps model resources in RoleHandle to tag roles (teacher/student/critic/...)
   models/
       components.py # intermediate variable during dispatch-time model construction; records all components

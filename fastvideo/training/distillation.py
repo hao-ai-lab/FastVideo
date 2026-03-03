@@ -27,7 +27,7 @@ def run_distillation_from_config(
         DistillCheckpointConfig,
         DistillCheckpointManager,
     )
-    from fastvideo.distillation.dispatch import build_runtime_from_config
+    from fastvideo.distillation.dispatch import build_from_config
     from fastvideo.distillation.utils.config import load_distill_run_config
 
     cfg = load_distill_run_config(config_path)
@@ -43,10 +43,10 @@ def run_distillation_from_config(
         training_args.sp_size,
     )
 
-    runtime = build_runtime_from_config(cfg)
+    _, method, dataloader, start_step = build_from_config(cfg)
 
     if dry_run:
-        logger.info("Dry-run: config parsed and runtime built successfully.")
+        logger.info("Dry-run: config parsed and build_from_config succeeded.")
         return
 
     trainer = DistillTrainer(training_args, config=cfg.raw)
@@ -60,26 +60,26 @@ def run_distillation_from_config(
         keep_last=int(getattr(training_args, "checkpoints_total_limit", 0) or 0),
     )
 
-    get_rng_generators = getattr(runtime.method, "get_rng_generators", None)
+    get_rng_generators = getattr(method, "get_rng_generators", None)
     if not callable(get_rng_generators):
-        model = getattr(runtime.method, "model", None)
+        model = getattr(method, "model", None)
         get_rng_generators = getattr(model, "get_rng_generators", None)
         if not callable(get_rng_generators):
             get_rng_generators = None
 
     checkpoint_manager = DistillCheckpointManager(
-        bundle=runtime.method.bundle,
-        dataloader=runtime.dataloader,
+        bundle=method.bundle,
+        dataloader=dataloader,
         output_dir=training_args.output_dir,
         config=ckpt_config,
         get_rng_generators=get_rng_generators,
     )
 
     trainer.run(
-        runtime.method,
-        dataloader=runtime.dataloader,
+        method,
+        dataloader=dataloader,
         max_steps=training_args.max_train_steps,
-        start_step=runtime.start_step,
+        start_step=start_step,
         checkpoint_manager=checkpoint_manager,
     )
 
