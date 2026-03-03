@@ -219,10 +219,9 @@ def run_unit_test():
               ],
               volumes={"/root/data": model_vol})
 def run_preprocessing_tests():
-    run_test(
-        "export HF_HOME='/root/data/.cache' && "
-        "hf auth login --token $HF_API_KEY && "
-        "pytest ./fastvideo/tests/preprocessing/ -vs")
+    run_test("export HF_HOME='/root/data/.cache' && "
+             "hf auth login --token $HF_API_KEY && "
+             "pytest ./fastvideo/tests/preprocessing/ -vs")
 
 
 @app.function(gpu="L40S:1",
