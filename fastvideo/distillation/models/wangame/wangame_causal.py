@@ -24,10 +24,8 @@ from fastvideo.distillation.models.base import CausalModelBase
 from fastvideo.distillation.roles import RoleHandle
 from fastvideo.distillation.utils.config import DistillRunConfig
 
-from fastvideo.distillation.models.wangame.wangame import (
-    WanGameModel,
-    _build_wangame_role_handles,
-)
+from fastvideo.distillation.models.wangame.common import _build_wangame_role_handles
+from fastvideo.distillation.models.wangame.wangame import WanGameModel
 
 
 @dataclass(slots=True)
