@@ -1,4 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
+"""Config-driven inference performance tests.
+
+Benchmark configs live in .buildkite/performance-benchmarks/tests/*.json.
+Each JSON file defines model params, generation kwargs, run config, and
+per-device thresholds.  This test module auto-discovers all configs and
+parametrizes a single test function over them.
+"""
+import glob
 import json
 import os
 import time
@@ -13,81 +21,49 @@ from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
 
-REQUIRED_GPUS = 2
+# -- Config discovery -------------------------------------------------------
 
-NUM_WARMUP_RUNS = 1
-NUM_MEASUREMENT_RUNS = 3
-
-WAN_T2V_PARAMS = {
-    "num_gpus":
-    2,
-    "model_path":
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-    "height":
-    480,
-    "width":
-    832,
-    "num_frames":
-    45,
-    "num_inference_steps":
-    4,
-    "guidance_scale":
-    3,
-    "embedded_cfg_scale":
-    6,
-    "flow_shift":
-    7.0,
-    "seed":
-    1024,
-    "sp_size":
-    2,
-    "tp_size":
-    1,
-    "vae_sp":
-    True,
-    "fps":
-    24,
-    "neg_prompt":
-    "Bright tones, overexposed, static, blurred details, subtitles, "
-    "style, works, paintings, images, static, overall gray, worst quality, "
-    "low quality, JPEG compression residue, ugly, incomplete, extra fingers, "
-    "poorly drawn hands, poorly drawn faces, deformed, disfigured, "
-    "misshapen limbs, fused fingers, still picture, messy background, "
-    "three legs, many people in the background, walking backwards",
-    "text-encoder-precision": ("fp32", ),
-}
-
-TEST_PROMPT = (
-    "Will Smith casually eats noodles, his relaxed demeanor contrasting "
-    "with the energetic background of a bustling street food market. "
-    "The scene captures a mix of humor and authenticity. "
-    "Mid-shot framing, vibrant lighting.")
-
-# Device-aware thresholds: {gpu_name_substring: {metric: value}}
-# Calibrated 2026-03-02 on L40S:2 — baseline: 28.3s avg, 8908MB peak.
-# 1.2x multiplier to absorb instance-to-instance variance.
-DEVICE_THRESHOLDS = {
-    "L40S": {
-        "max_generation_time_s": 34.0,
-        "max_peak_memory_mb": 11000.0,
-    },
-}
-
-# Fallback for unknown GPUs (very generous so test still runs)
-DEFAULT_THRESHOLDS = {
-    "max_generation_time_s": 120.0,
-    "max_peak_memory_mb": 30000.0,
-}
+_BENCHMARKS_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..",
+    "..",
+    "..",
+    ".buildkite",
+    "performance-benchmarks",
+    "tests",
+)
 
 
-def _get_thresholds() -> dict:
+def _discover_benchmarks():
+    """Glob benchmark JSON configs and return list of (id, config) tuples."""
+    pattern = os.path.join(_BENCHMARKS_DIR, "*.json")
+    configs = []
+    for path in sorted(glob.glob(pattern)):
+        with open(path) as f:
+            cfg = json.load(f)
+        configs.append(cfg)
+    return configs
+
+
+_BENCHMARK_CONFIGS = _discover_benchmarks()
+
+# -- Helpers ----------------------------------------------------------------
+
+
+def _get_thresholds(cfg):
+    """Return thresholds dict for the current GPU from config."""
     device_name = torch.cuda.get_device_name()
-    for gpu_key, thresholds in DEVICE_THRESHOLDS.items():
+    thresholds = cfg.get("thresholds", {})
+    for gpu_key, thresh in thresholds.items():
         if gpu_key in device_name:
-            logger.info("Using thresholds for %s: %s", gpu_key, thresholds)
-            return thresholds
+            logger.info("Using thresholds for %s: %s", gpu_key, thresh)
+            return thresh
+    default = thresholds.get("default", {
+        "max_generation_time_s": 120.0,
+        "max_peak_memory_mb": 30000.0,
+    })
     logger.warning("No thresholds for device '%s', using defaults", device_name)
-    return DEFAULT_THRESHOLDS
+    return default
 
 
 def _shutdown_executor(generator):
@@ -98,28 +74,25 @@ def _shutdown_executor(generator):
 
 
 def _run_generation(generator, prompt, generation_kwargs):
-    """Run a single generation and return (elapsed_seconds, peak_memory_mb)."""
+    """Run a single generation, return (elapsed_s, peak_memory_mb)."""
     torch.cuda.synchronize()
     start = time.perf_counter()
     result = generator.generate_video(prompt, **generation_kwargs)
     torch.cuda.synchronize()
     elapsed = time.perf_counter() - start
-
-    # Peak memory is tracked inside the worker processes and returned
-    # via the result dict — reading from the main process returns 0.
     peak_memory_mb = result.get("peak_memory_mb", 0.0) or 0.0
-
     return elapsed, peak_memory_mb
 
 
-def _write_results(results: dict) -> None:
+def _write_results(results):
     """Write JSON results to the results directory."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     results_dir = os.path.join(script_dir, "results")
     os.makedirs(results_dir, exist_ok=True)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    filename = f"perf_{timestamp}.json"
+    bid = results.get("benchmark_id", "unknown")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    filename = f"perf_{bid}_{ts}.json"
     filepath = os.path.join(results_dir, filename)
 
     with open(filepath, "w") as f:
@@ -127,65 +100,64 @@ def _write_results(results: dict) -> None:
     logger.info("Performance results written to %s", filepath)
 
 
-@pytest.mark.parametrize("model_id", ["Wan2.1-T2V-1.3B-Diffusers"])
-def test_inference_performance(model_id):
-    """Measure generation latency and peak GPU memory, assert against
-    device-aware thresholds."""
-    params = WAN_T2V_PARAMS
-    thresholds = _get_thresholds()
+# -- Test -------------------------------------------------------------------
 
+
+@pytest.mark.parametrize(
+    "cfg",
+    _BENCHMARK_CONFIGS,
+    ids=[c["benchmark_id"] for c in _BENCHMARK_CONFIGS],
+)
+def test_inference_performance(cfg):
+    """Measure generation latency and peak GPU memory,
+    assert against device-aware thresholds."""
+    run_config = cfg.get("run_config", {})
+    required_gpus = run_config.get("required_gpus", 1)
+    available = torch.cuda.device_count()
+    if available < required_gpus:
+        pytest.skip(f"Need {required_gpus} GPUs, only {available} available")
+
+    model_info = cfg["model"]
+    init_kwargs = dict(cfg.get("init_kwargs", {}))
+    gen_kwargs = dict(cfg.get("generation_kwargs", {}))
+    prompts = cfg.get("test_prompts", ["A cinematic video."])
+    prompt = prompts[0]
+
+    num_warmup = run_config.get("num_warmup_runs", 1)
+    num_measure = run_config.get("num_measurement_runs", 3)
+    thresholds = _get_thresholds(cfg)
+
+    # Remap JSON keys to VideoGenerator kwargs
+    text_enc_prec = init_kwargs.pop("text_encoder_precisions", None)
+    if text_enc_prec is not None:
+        init_kwargs["text_encoder_precisions"] = tuple(text_enc_prec)
+
+    # Output directory for generated videos
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(script_dir, "generated_videos", model_id)
+    output_dir = os.path.join(script_dir, "generated_videos",
+                              cfg["benchmark_id"])
     os.makedirs(output_dir, exist_ok=True)
-
-    init_kwargs = {
-        "num_gpus": params["num_gpus"],
-        "flow_shift": params["flow_shift"],
-        "sp_size": params["sp_size"],
-        "tp_size": params["tp_size"],
-    }
-    if params.get("vae_sp"):
-        init_kwargs["vae_sp"] = True
-        init_kwargs["vae_tiling"] = True
-    if "text-encoder-precision" in params:
-        init_kwargs["text_encoder_precisions"] = params[
-            "text-encoder-precision"]
-
-    generation_kwargs = {
-        "num_inference_steps": params["num_inference_steps"],
-        "output_path": output_dir,
-        "height": params["height"],
-        "width": params["width"],
-        "num_frames": params["num_frames"],
-        "guidance_scale": params["guidance_scale"],
-        "embedded_cfg_scale": params["embedded_cfg_scale"],
-        "seed": params["seed"],
-        "fps": params["fps"],
-    }
-    if "neg_prompt" in params:
-        generation_kwargs["neg_prompt"] = params["neg_prompt"]
+    gen_kwargs["output_path"] = output_dir
 
     generator = None
     try:
         generator = VideoGenerator.from_pretrained(
-            model_path=params["model_path"], **init_kwargs)
+            model_path=model_info["model_path"],
+            **init_kwargs,
+        )
 
-        # Warmup runs (discard results, primes CUDA kernels)
-        for i in range(NUM_WARMUP_RUNS):
-            logger.info("Warmup run %d/%d", i + 1, NUM_WARMUP_RUNS)
-            _run_generation(generator, TEST_PROMPT, generation_kwargs)
+        for i in range(num_warmup):
+            logger.info("Warmup run %d/%d", i + 1, num_warmup)
+            _run_generation(generator, prompt, gen_kwargs)
 
-        # Measurement runs
         times = []
         peak_memories = []
-        for i in range(NUM_MEASUREMENT_RUNS):
-            logger.info("Measurement run %d/%d", i + 1, NUM_MEASUREMENT_RUNS)
-            elapsed, peak_mb = _run_generation(generator, TEST_PROMPT,
-                                               generation_kwargs)
+        for i in range(num_measure):
+            logger.info("Measurement run %d/%d", i + 1, num_measure)
+            elapsed, peak_mb = _run_generation(generator, prompt, gen_kwargs)
             logger.info("  Time: %.2fs, Peak memory: %.0fMB", elapsed, peak_mb)
             times.append(elapsed)
             peak_memories.append(peak_mb)
-
     finally:
         _shutdown_executor(generator)
 
@@ -194,16 +166,19 @@ def test_inference_performance(model_id):
     device_name = torch.cuda.get_device_name()
 
     results = {
-        "model_id": model_id,
+        "benchmark_id": cfg["benchmark_id"],
+        "model_short_name": model_info.get("model_short_name", ""),
         "device": device_name,
-        "num_gpus": params["num_gpus"],
-        "num_warmup_runs": NUM_WARMUP_RUNS,
-        "num_measurement_runs": NUM_MEASUREMENT_RUNS,
+        "num_gpus": init_kwargs.get("num_gpus", 1),
+        "num_warmup_runs": num_warmup,
+        "num_measurement_runs": num_measure,
         "avg_generation_time_s": round(avg_time, 3),
         "individual_times_s": [round(t, 3) for t in times],
         "max_peak_memory_mb": round(max_peak_memory, 1),
         "individual_peak_memories_mb": [round(m, 1) for m in peak_memories],
         "thresholds": thresholds,
+        "commit": os.environ.get("BUILDKITE_COMMIT", ""),
+        "pr_number": os.environ.get("BUILDKITE_PULL_REQUEST", ""),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -212,14 +187,13 @@ def test_inference_performance(model_id):
         "max_peak_memory=%.0fMB", avg_time, max_peak_memory)
     _write_results(results)
 
-    # Assert against thresholds
     max_time = thresholds["max_generation_time_s"]
     max_mem = thresholds["max_peak_memory_mb"]
 
     assert avg_time <= max_time, (
-        f"Average generation time {avg_time:.2f}s exceeds threshold "
-        f"{max_time:.1f}s for {device_name}")
+        f"Average generation time {avg_time:.2f}s exceeds "
+        f"threshold {max_time:.1f}s for {device_name}")
 
     assert max_peak_memory <= max_mem, (
-        f"Peak memory {max_peak_memory:.0f}MB exceeds threshold "
-        f"{max_mem:.0f}MB for {device_name}")
+        f"Peak memory {max_peak_memory:.0f}MB exceeds "
+        f"threshold {max_mem:.0f}MB for {device_name}")

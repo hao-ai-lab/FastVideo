@@ -223,6 +223,9 @@ def run_lora_extraction_tests():
     )
 
 
+perf_vol = modal.Volume.from_name("perf-results", create_if_missing=True)
+
+
 @app.function(gpu="L40S:2",
               image=image,
               timeout=1800,
@@ -230,11 +233,17 @@ def run_lora_extraction_tests():
                   modal.Secret.from_dict(
                       {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
               ],
-              volumes={"/root/data": model_vol})
+              volumes={
+                  "/root/data": model_vol,
+                  "/root/perf-results": perf_vol,
+              })
 def run_performance_tests():
-    run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/performance -vs"
-    )
+    run_test("export HF_HOME='/root/data/.cache' && "
+             "hf auth login --token $HF_API_KEY && "
+             "pytest ./fastvideo/tests/performance -vs && "
+             "PERF_RESULTS_VOLUME=/root/perf-results "
+             "python .buildkite/performance-benchmarks/scripts/"
+             "upload_results.py")
 
 
 @app.function(gpu="L40S:1",

@@ -179,6 +179,7 @@ steps:
                 - "fastvideo/worker/**"
                 - "fastvideo/entrypoints/**"
                 - "fastvideo/tests/performance/**"
+                - ".buildkite/performance-benchmarks/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
