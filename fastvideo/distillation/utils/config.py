@@ -173,6 +173,12 @@ def load_distill_run_config(path: str) -> DistillRunConfig:
             continue
         role_str = _require_str(role, where="roles.<role>")
         role_cfg = _require_mapping(role_cfg_raw, where=f"roles.{role_str}")
+        if "variant" in role_cfg:
+            raise ValueError(
+                f"roles.{role_str}.variant is not supported in schema-v2. "
+                "Use roles.<role>.family to select the model family instead "
+                "(e.g. family: wangame_causal)."
+            )
         family = role_cfg.get("family") or recipe_family
         family = _require_str(family, where=f"roles.{role_str}.family")
         model_path = _require_str(role_cfg.get("path"), where=f"roles.{role_str}.path")

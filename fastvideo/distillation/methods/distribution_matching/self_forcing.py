@@ -201,20 +201,17 @@ class SelfForcingMethod(DMD2Method):
         student_spec = cfg.roles.get("student")
         if student_spec is None:
             raise ValueError("SelfForcingMethod requires roles.student")
-        student_variant = (student_spec.extra or {}).get("variant", None)
-        if student_variant is None or str(student_variant).strip() == "":
-            recipe_family = str(getattr(cfg.recipe, "family", "")).strip().lower()
-            student_family = str(getattr(student_spec, "family", "")).strip().lower()
-            if not (recipe_family.endswith("_causal") or student_family.endswith("_causal")):
-                raise ValueError(
-                    "SelfForcingMethod requires a causal student. "
-                    "Set roles.student.variant: causal, or use a causal family "
-                    "(e.g. recipe.family: wangame_causal)."
-                )
-        elif str(student_variant).strip().lower() != "causal":
+        recipe_family = str(getattr(cfg.recipe, "family", "")).strip().lower()
+        if not recipe_family.endswith("_causal"):
             raise ValueError(
                 "SelfForcingMethod requires a causal student. "
-                "Set roles.student.variant: causal in the YAML config."
+                f"Got recipe.family={recipe_family!r}."
+            )
+        student_family = str(getattr(student_spec, "family", "")).strip().lower()
+        if not student_family.endswith("_causal"):
+            raise ValueError(
+                "SelfForcingMethod requires roles.student.family to be a causal "
+                f"family (suffix '_causal'). Got roles.student.family={student_family!r}."
             )
         if not isinstance(model, CausalModelBase):
             raise ValueError(

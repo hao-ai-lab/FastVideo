@@ -13,7 +13,6 @@ roles:
     family: wangame
     path: weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers
     trainable: true
-    variant: bidirectional
 
 training:
   # Distributed (4 nodes × 8 GPUs = 32 ranks)
@@ -87,4 +86,3 @@ default_pipeline_config:
 
 method_config:
   attn_kind: dense
-

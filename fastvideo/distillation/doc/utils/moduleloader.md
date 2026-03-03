@@ -11,7 +11,8 @@
   - 调用 `PipelineComponentLoader.load_module(...)`
   - 可选跳过自定义 init weights（legacy flag：`_loading_teacher_critic_model`）
   - 可选临时覆盖 `training_args.override_transformer_cls_name`
-    - 用于 **同一 family** 内按 role 选择 transformer 变体（例如 `roles.student.variant: causal`）
+    - 用于 model plugin 按 role 选择 transformer 类（例如根据 `roles.<role>.family`
+      选择 `WanGameActionTransformer3DModel` / `CausalWanGameActionTransformer3DModel`）
 
 **边界**
 - ✅ 这里只做 “单模块加载”，不做 role 语义、也不做 optimizer/scheduler。

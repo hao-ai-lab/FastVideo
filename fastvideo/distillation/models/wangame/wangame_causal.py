@@ -3,13 +3,10 @@
 """WanGame causal model plugin (streaming/cache primitives).
 
 Config keys used (YAML schema-v2):
-- `recipe.family`: `"wangame_causal"` (causal by default) or `"wangame"` (when
-  at least one role requests `variant: causal`).
+- `recipe.family`: must be `"wangame_causal"` for this plugin.
 - `roles.shared_component_role` (affects default `training.model_path`).
 - `roles.<role>`:
   - `family`, `path`, `trainable`, `disable_custom_init_weights`
-  - extra: `variant` (`causal`/`bidirectional`); defaults depend on
-    `recipe.family`.
 - `training` (selected fields): same as `WanGameModel` (see
   `models/wangame/wangame.py`).
 - `training.validation.*` (consumed by `WanGameValidator` when enabled)
@@ -68,22 +65,15 @@ class WanGameCausalModel(WanGameModel, CausalModelBase):
         vae = self._load_shared_vae(training_args)
         noise_scheduler = self._build_noise_scheduler(training_args)
 
-        recipe_family = str(getattr(cfg.recipe, "family", "")).strip().lower()
-        default_variant = "causal" if recipe_family == "wangame_causal" else "bidirectional"
-
         def _transformer_cls_name_for_role(role: str, role_spec: Any) -> str:
-            variant_raw = (role_spec.extra or {}).get("variant", None)
-            if variant_raw is None or str(variant_raw).strip() == "":
-                variant = default_variant
-            else:
-                variant = str(variant_raw).strip().lower()
-            if variant in {"bidirectional", "bidi"}:
+            family = str(getattr(role_spec, "family", "")).strip().lower()
+            if family == "wangame":
                 return "WanGameActionTransformer3DModel"
-            if variant == "causal":
+            if family == "wangame_causal":
                 return "CausalWanGameActionTransformer3DModel"
             raise ValueError(
-                f"Unknown roles.{role}.variant for wangame: {variant_raw!r}. "
-                "Expected 'causal' or 'bidirectional'."
+                f"Unknown roles.{role}.family for wangame_causal: {family!r}. "
+                "Expected 'wangame' or 'wangame_causal'."
             )
 
         role_handles = _build_wangame_role_handles(

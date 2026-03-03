@@ -9,7 +9,7 @@ The goal is to avoid duplicated logic across:
 - `fastvideo/distillation/models/wangame/wangame.py`
 - `fastvideo/distillation/models/wangame/wangame_causal.py`
 
-Keep this file free of imports of the variant-specific model classes to prevent
+Keep this file free of imports of the family-specific model classes to prevent
 circular dependencies.
 """
 

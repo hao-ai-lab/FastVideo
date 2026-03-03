@@ -7,7 +7,6 @@ Config keys used (YAML schema-v2):
 - `roles.shared_component_role` (affects default `training.model_path`)
 - `roles.<role>`:
   - `family`, `path`, `trainable`, `disable_custom_init_weights`
-  - extra: `variant` is **not used** by this bidirectional-only plugin.
 - `training` (selected fields):
   - `seed`, `data_path`, `model_path`
   - `num_height`, `num_width`, `num_latent_t`
@@ -81,6 +80,18 @@ class WanGameModel(ModelBase):
     ) -> None:
         training_args = cfg.training_args
         roles_cfg = cfg.roles
+
+        non_wangame_roles = [
+            role
+            for role, spec in roles_cfg.items()
+            if str(spec.family).strip().lower() != "wangame"
+        ]
+        if non_wangame_roles:
+            raise ValueError(
+                "recipe.family=wangame only supports roles.<role>.family=wangame "
+                f"(got non-wangame roles: {non_wangame_roles}). "
+                "If you need causal roles, use recipe.family: wangame_causal."
+            )
 
         if getattr(training_args, "seed", None) is None:
             raise ValueError("training.seed must be set for distillation")

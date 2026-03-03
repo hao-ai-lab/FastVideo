@@ -16,9 +16,9 @@
    - `noise_scheduler`：`FlowMatchEulerDiscreteScheduler(shift=flow_shift)`
 2) **按 roles 加载 transformer 模块**
    - 对每个 role：加载 `transformer`（可选 `transformer_2`）
-   - 支持 role-level transformer 变体（通过 `RoleSpec.extra`）：
-     - `roles.<role>.variant: bidirectional` → `WanGameActionTransformer3DModel`
-     - `roles.<role>.variant: causal` → `CausalWanGameActionTransformer3DModel`
+   - role-level transformer 类型由 `roles.<role>.family` 决定（而不是 `variant`）：
+     - `roles.<role>.family: wangame` → `WanGameActionTransformer3DModel`
+     - `roles.<role>.family: wangame_causal` → `CausalWanGameActionTransformer3DModel`
    - 根据 `RoleSpec.trainable` 设置 `requires_grad`
    - 可选开启 activation checkpoint（仅对 trainable role）
 3) **构建 bundle / dataloader / validator**
@@ -28,5 +28,8 @@
    - runtime primitives 由 `WanGameModel` 直接实现（不再额外分一层 `*Adapter` 类/文件）
 
 **关于 roles.family**
-- 当前 `wangame` plugin 只支持 `family="wangame"` 的 role。
-  这让 build-time 逻辑保持高内聚：模型加载、batch schema 与 primitives 能保持一致。
+- `recipe.family: wangame`（bidirectional）：
+  - 只支持 `roles.<role>.family="wangame"`，否则直接报错。
+- `recipe.family: wangame_causal`（causal-capable）：
+  - 支持 `roles.<role>.family in {"wangame","wangame_causal"}`，用于 self-forcing
+    等场景下的 “student causal + teacher/critic bidirectional” 组合。
