@@ -38,6 +38,15 @@ from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 
 
+def _run_linear_stack(layers: nn.ModuleList, x: torch.Tensor) -> torch.Tensor:
+    """Run ModuleList stack and unwrap ReplicatedLinear outputs."""
+    for layer in layers:
+        x = layer(x)
+        if isinstance(x, tuple):
+            x = x[0]
+    return x
+
+
 class Gen3CPatchEmbed(nn.Module):
     """
     GEN3C patch embedding - converts video (B, C, T, H, W) to patches (B, T', H', W', D).
@@ -60,7 +69,7 @@ class Gen3CPatchEmbed(nn.Module):
         self.patch_size = patch_size
         self.dim = in_channels * patch_size[0] * patch_size[1] * patch_size[2]
 
-        self.proj = nn.Linear(self.dim, out_channels, bias=False)
+        self.proj = ReplicatedLinear(self.dim, out_channels, bias=False)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """
@@ -83,7 +92,7 @@ class Gen3CPatchEmbed(nn.Module):
         hidden_states = hidden_states.flatten(4, 7)  # Flatten patch dimensions
         
         # Project to model dimension
-        hidden_states = self.proj(hidden_states)
+        hidden_states, _ = self.proj(hidden_states)
         return hidden_states
 
 
@@ -238,10 +247,10 @@ class Gen3CSelfAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
 
-        self.to_q = nn.Linear(dim, dim, bias=False)
-        self.to_k = nn.Linear(dim, dim, bias=False)
-        self.to_v = nn.Linear(dim, dim, bias=False)
-        self.to_out = nn.Linear(dim, dim, bias=False)
+        self.to_q = ReplicatedLinear(dim, dim, bias=False)
+        self.to_k = ReplicatedLinear(dim, dim, bias=False)
+        self.to_v = ReplicatedLinear(dim, dim, bias=False)
+        self.to_out = ReplicatedLinear(dim, dim, bias=False)
 
         self.norm_q = RMSNorm(self.head_dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = RMSNorm(self.head_dim, eps=eps) if qk_norm else nn.Identity()
@@ -269,9 +278,9 @@ class Gen3CSelfAttention(nn.Module):
             rope_emb: Tuple of (cos, sin) for RoPE
         """
         # Get QKV
-        query = self.to_q(hidden_states)
-        key = self.to_k(hidden_states)
-        value = self.to_v(hidden_states)
+        query, _ = self.to_q(hidden_states)
+        key, _ = self.to_k(hidden_states)
+        value, _ = self.to_v(hidden_states)
 
         # Reshape for multi-head attention: (B, S, D) -> (B, S, H, D_h) -> (B, H, S, D_h)
         query = query.unflatten(-1, (self.num_heads, self.head_dim)).transpose(1, 2)
@@ -297,7 +306,7 @@ class Gen3CSelfAttention(nn.Module):
         attn_output = attn_output.flatten(-2, -1)  # (B, S, H*D_h)
 
         # Output projection
-        attn_output = self.to_out(attn_output)
+        attn_output, _ = self.to_out(attn_output)
         return attn_output
 
 
@@ -322,10 +331,10 @@ class Gen3CCrossAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
 
-        self.to_q = nn.Linear(dim, dim, bias=False)
-        self.to_k = nn.Linear(cross_attention_dim, dim, bias=False)
-        self.to_v = nn.Linear(cross_attention_dim, dim, bias=False)
-        self.to_out = nn.Linear(dim, dim, bias=False)
+        self.to_q = ReplicatedLinear(dim, dim, bias=False)
+        self.to_k = ReplicatedLinear(cross_attention_dim, dim, bias=False)
+        self.to_v = ReplicatedLinear(cross_attention_dim, dim, bias=False)
+        self.to_out = ReplicatedLinear(dim, dim, bias=False)
 
         self.norm_q = RMSNorm(self.head_dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = RMSNorm(self.head_dim, eps=eps) if qk_norm else nn.Identity()
@@ -352,9 +361,9 @@ class Gen3CCrossAttention(nn.Module):
             encoder_hidden_states: (B, N, D_text)
         """
         # Get QKV
-        query = self.to_q(hidden_states)
-        key = self.to_k(encoder_hidden_states)
-        value = self.to_v(encoder_hidden_states)
+        query, _ = self.to_q(hidden_states)
+        key, _ = self.to_k(encoder_hidden_states)
+        value, _ = self.to_v(encoder_hidden_states)
 
         # Reshape for multi-head attention
         query = query.unflatten(-1, (self.num_heads, self.head_dim))
@@ -369,7 +378,7 @@ class Gen3CCrossAttention(nn.Module):
         attn_output = attn_output.flatten(-2, -1)
 
         # Output projection
-        attn_output = self.to_out(attn_output)
+        attn_output, _ = self.to_out(attn_output)
         return attn_output
 
 
@@ -418,31 +427,34 @@ class Gen3CTransformerBlock(nn.Module):
 
         # AdaLN modulation layers
         if use_adaln_lora:
-            self.adaln_modulation_self_attn = nn.Sequential(
+            self.adaln_modulation_self_attn = nn.ModuleList([
                 nn.SiLU(),
-                nn.Linear(hidden_size, adaln_lora_dim, bias=False),
-                nn.Linear(adaln_lora_dim, 3 * hidden_size, bias=False),
-            )
-            self.adaln_modulation_cross_attn = nn.Sequential(
+                ReplicatedLinear(hidden_size, adaln_lora_dim, bias=False),
+                ReplicatedLinear(adaln_lora_dim, 3 * hidden_size, bias=False),
+            ])
+            self.adaln_modulation_cross_attn = nn.ModuleList([
                 nn.SiLU(),
-                nn.Linear(hidden_size, adaln_lora_dim, bias=False),
-                nn.Linear(adaln_lora_dim, 3 * hidden_size, bias=False),
-            )
-            self.adaln_modulation_mlp = nn.Sequential(
+                ReplicatedLinear(hidden_size, adaln_lora_dim, bias=False),
+                ReplicatedLinear(adaln_lora_dim, 3 * hidden_size, bias=False),
+            ])
+            self.adaln_modulation_mlp = nn.ModuleList([
                 nn.SiLU(),
-                nn.Linear(hidden_size, adaln_lora_dim, bias=False),
-                nn.Linear(adaln_lora_dim, 3 * hidden_size, bias=False),
-            )
+                ReplicatedLinear(hidden_size, adaln_lora_dim, bias=False),
+                ReplicatedLinear(adaln_lora_dim, 3 * hidden_size, bias=False),
+            ])
         else:
-            self.adaln_modulation_self_attn = nn.Sequential(
-                nn.SiLU(), nn.Linear(hidden_size, 3 * hidden_size, bias=False)
-            )
-            self.adaln_modulation_cross_attn = nn.Sequential(
-                nn.SiLU(), nn.Linear(hidden_size, 3 * hidden_size, bias=False)
-            )
-            self.adaln_modulation_mlp = nn.Sequential(
-                nn.SiLU(), nn.Linear(hidden_size, 3 * hidden_size, bias=False)
-            )
+            self.adaln_modulation_self_attn = nn.ModuleList([
+                nn.SiLU(),
+                ReplicatedLinear(hidden_size, 3 * hidden_size, bias=False)
+            ])
+            self.adaln_modulation_cross_attn = nn.ModuleList([
+                nn.SiLU(),
+                ReplicatedLinear(hidden_size, 3 * hidden_size, bias=False)
+            ])
+            self.adaln_modulation_mlp = nn.ModuleList([
+                nn.SiLU(),
+                ReplicatedLinear(hidden_size, 3 * hidden_size, bias=False)
+            ])
 
     def forward(
         self,
@@ -472,22 +484,24 @@ class Gen3CTransformerBlock(nn.Module):
         # Compute modulation parameters
         if self.use_adaln_lora and adaln_lora is not None:
             shift_self_attn, scale_self_attn, gate_self_attn = (
-                self.adaln_modulation_self_attn(affine_emb) + adaln_lora
+                _run_linear_stack(self.adaln_modulation_self_attn, affine_emb)
+                + adaln_lora
             ).chunk(3, dim=-1)
             shift_cross_attn, scale_cross_attn, gate_cross_attn = (
-                self.adaln_modulation_cross_attn(affine_emb) + adaln_lora
+                _run_linear_stack(self.adaln_modulation_cross_attn, affine_emb)
+                + adaln_lora
             ).chunk(3, dim=-1)
             shift_mlp, scale_mlp, gate_mlp = (
-                self.adaln_modulation_mlp(affine_emb) + adaln_lora
+                _run_linear_stack(self.adaln_modulation_mlp, affine_emb)
+                + adaln_lora
             ).chunk(3, dim=-1)
         else:
-            shift_self_attn, scale_self_attn, gate_self_attn = self.adaln_modulation_self_attn(
-                affine_emb
-            ).chunk(3, dim=-1)
-            shift_cross_attn, scale_cross_attn, gate_cross_attn = self.adaln_modulation_cross_attn(
-                affine_emb
-            ).chunk(3, dim=-1)
-            shift_mlp, scale_mlp, gate_mlp = self.adaln_modulation_mlp(affine_emb).chunk(3, dim=-1)
+            shift_self_attn, scale_self_attn, gate_self_attn = _run_linear_stack(
+                self.adaln_modulation_self_attn, affine_emb).chunk(3, dim=-1)
+            shift_cross_attn, scale_cross_attn, gate_cross_attn = _run_linear_stack(
+                self.adaln_modulation_cross_attn, affine_emb).chunk(3, dim=-1)
+            shift_mlp, scale_mlp, gate_mlp = _run_linear_stack(
+                self.adaln_modulation_mlp, affine_emb).chunk(3, dim=-1)
 
         # Reshape modulation parameters for broadcasting: (B, D) -> (B, 1, D)
         shift_self_attn = shift_self_attn.unsqueeze(1).type_as(hidden_states)
@@ -674,20 +688,22 @@ class Gen3CFinalLayer(nn.Module):
 
         # AdaLN modulation
         if use_adaln_lora:
-            self.adaln_modulation = nn.Sequential(
+            self.adaln_modulation = nn.ModuleList([
                 nn.SiLU(),
-                nn.Linear(hidden_size, adaln_lora_dim, bias=False),
-                nn.Linear(adaln_lora_dim, 2 * hidden_size, bias=False),
-            )
+                ReplicatedLinear(hidden_size, adaln_lora_dim, bias=False),
+                ReplicatedLinear(adaln_lora_dim, 2 * hidden_size, bias=False),
+            ])
         else:
-            self.adaln_modulation = nn.Sequential(
+            self.adaln_modulation = nn.ModuleList([
                 nn.SiLU(),
-                nn.Linear(hidden_size, 2 * hidden_size, bias=False),
-            )
+                ReplicatedLinear(hidden_size, 2 * hidden_size, bias=False),
+            ])
 
         # Output projection
         output_dim = out_channels * patch_size[0] * patch_size[1] * patch_size[2]
-        self.proj_out = nn.Linear(hidden_size, output_dim, bias=False)
+        self.proj_out = ReplicatedLinear(hidden_size,
+                                         output_dim,
+                                         bias=False)
 
     def forward(
         self,
@@ -702,7 +718,7 @@ class Gen3CFinalLayer(nn.Module):
             adaln_lora: (B, 3D) or None
         """
         # Generate modulation parameters
-        modulation = self.adaln_modulation(affine_emb)
+        modulation = _run_linear_stack(self.adaln_modulation, affine_emb)
 
         if self.use_adaln_lora and adaln_lora is not None:
             modulation = modulation + adaln_lora[..., : 2 * self.hidden_size]
@@ -722,7 +738,7 @@ class Gen3CFinalLayer(nn.Module):
         hidden_states = hidden_states * (1 + scale) + shift
 
         # Project to output
-        hidden_states = self.proj_out(hidden_states)
+        hidden_states, _ = self.proj_out(hidden_states)
 
         return hidden_states
 
