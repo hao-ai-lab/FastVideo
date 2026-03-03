@@ -49,7 +49,7 @@ def _download_data():
         local_dir=str(RAW_DATA_DIR),
         repo_type="dataset",
         resume_download=True,
-        token=os.environ.get("HF_TOKEN"),
+        token=os.environ.get("HF_API_KEY"),
     )
     assert RAW_DATA_DIR.exists(), (
         f"Download failed: {RAW_DATA_DIR} does not exist")
@@ -70,7 +70,7 @@ def _run_old_preprocessing():
         "--model_path",
         MODEL_PATH,
         "--data_merge_path",
-        os.path.join(RAW_DATA_DIR, "merge_1_sample.txt"),
+        str(RAW_DATA_DIR / "merge_1_sample.txt"),
         "--preprocess_video_batch_size",
         "1",
         "--max_height",
