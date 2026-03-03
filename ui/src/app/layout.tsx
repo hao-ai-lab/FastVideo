@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { DefaultOptionsProvider } from "@/contexts/DefaultOptionsContext";
 import { JobsRefreshProvider } from "@/contexts/JobsRefreshContext";
+import { ActiveTabProvider } from "@/contexts/ActiveTabContext";
 import Header from "@/components/Header";
 
 export const metadata: Metadata = {
@@ -19,8 +20,10 @@ export default function RootLayout({
       <body className="antialiased">
         <DefaultOptionsProvider>
           <JobsRefreshProvider>
-            <Header />
-            {children}
+            <ActiveTabProvider>
+              <Header />
+              {children}
+            </ActiveTabProvider>
           </JobsRefreshProvider>
         </DefaultOptionsProvider>
       </body>

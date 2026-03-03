@@ -1,13 +1,13 @@
 'use client';
 
-import { useState } from "react";
 import Sidebar, { type SidebarTab } from "@/components/Sidebar";
 import JobQueuePage from "@/components/JobQueuePage";
 import SettingsPage from "@/components/SettingsPage";
+import { useActiveTab } from "@/contexts/ActiveTabContext";
 import sidebarStyles from "@/components/styles/Sidebar.module.css";
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<SidebarTab>("job-queue");
+  const { activeTab, setActiveTab } = useActiveTab();
 
   return (
     <div className={sidebarStyles.layout}>

@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect, useState } from "react";
 import { useDefaultOptions } from "@/contexts/DefaultOptionsContext";
+import { getModels, type Model } from "@/lib/api";
 import cardStyles from "@styles/Card.module.css";
 import formStyles from "@styles/Form.module.css";
 import layoutStyles from "@/app/Layout.module.css";
@@ -8,6 +10,13 @@ import buttonStyles from "@styles/Button.module.css";
 
 export default function SettingsPage() {
   const { options, updateOption, resetToDefaults } = useDefaultOptions();
+  const [models, setModels] = useState<Model[]>([]);
+
+  useEffect(() => {
+    getModels()
+      .then(setModels)
+      .catch((error) => console.error("Failed to load models:", error));
+  }, []);
 
   return (
     <main className={layoutStyles.main}>
@@ -33,6 +42,23 @@ export default function SettingsPage() {
           below to match your typical workflow.
         </p>
         <div className={formStyles.settingsGrid}>
+          <div className={formStyles.formRow}>
+            <label htmlFor="settings-default-model">Default Model</label>
+            <select
+              id="settings-default-model"
+              value={options.defaultModelId}
+              onChange={(e) =>
+                updateOption("defaultModelId", e.target.value)
+              }
+            >
+              <option value="">None (select when creating job)</option>
+              {models.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label} ({model.id})
+                </option>
+              ))}
+            </select>
+          </div>
           <div className={formStyles.formRow}>
             <label htmlFor="settings-num-steps">Inference Steps</label>
             <input
