@@ -90,7 +90,7 @@ training:
   training_cfg_rate: 0.0
   min_timestep_ratio: 0.02
   max_timestep_ratio: 0.98
-  enable_gradient_checkpointing_type: full
+  enable_gradient_checkpointing_type: null
 
   # Checkpointing
   training_state_checkpointing_steps: 1000
