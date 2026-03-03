@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import CreateJobModal from "./CreateJobModal";
+import { useJobsRefresh } from "@/contexts/JobsRefreshContext";
 import buttonStyles from "./styles/Button.module.css";
 
 interface CreateJobButtonProps {
@@ -10,8 +11,10 @@ interface CreateJobButtonProps {
 
 export default function CreateJobButton({ onJobCreated }: CreateJobButtonProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const { triggerRefresh } = useJobsRefresh();
 
   const handleSuccess = () => {
+    triggerRefresh();
     onJobCreated?.();
   };
 

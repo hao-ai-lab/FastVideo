@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import "./globals.css";
-import headerStyles from "@styles/Header.module.css";
+import { DefaultOptionsProvider } from "@/contexts/DefaultOptionsContext";
+import { JobsRefreshProvider } from "@/contexts/JobsRefreshContext";
+import Header from "@/components/Header";
 
 export const metadata: Metadata = {
   title: "FastVideo",
@@ -16,10 +17,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
-        <header className={headerStyles.header}>
-          <Image src="/logo.svg" alt="FastVideo Logo" width={252} height={105} />
-        </header>
-        {children}
+        <DefaultOptionsProvider>
+          <JobsRefreshProvider>
+            <Header />
+            {children}
+          </JobsRefreshProvider>
+        </DefaultOptionsProvider>
       </body>
     </html>
   );

@@ -1,0 +1,54 @@
+/* ── Sidebar layout ───────────────────────────────────────── */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  width: 220px;
+  flex-shrink: 0;
+}
+
+.tabs {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0;
+}
+
+.tab {
+  display: block;
+  padding: 0.65rem 1.25rem;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  text-decoration: none;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: color 0.15s, background 0.15s;
+}
+
+.tab:hover {
+  color: var(--text);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.tabActive {
+  color: var(--accent);
+  font-weight: 500;
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}

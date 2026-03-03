@@ -1,6 +1,7 @@
 'use client';
 
 import { createJob, getModels, type Model } from "@/lib/api";
+import { useDefaultOptions } from "@/contexts/DefaultOptionsContext";
 import { useEffect, useState } from "react";
 import modalStyles from "./styles/Modal.module.css";
 import formStyles from "./styles/Form.module.css";
@@ -14,19 +15,20 @@ interface CreateJobModalProps {
 }
 
 export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJobModalProps) {
+  const { options: defaultOptions } = useDefaultOptions();
   const [models, setModels] = useState<Model[]>([]);
   const [modelId, setModelId] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [numInferenceSteps, setNumInferenceSteps] = useState(50);
-  const [numFrames, setNumFrames] = useState(81);
-  const [height, setHeight] = useState(480);
-  const [width, setWidth] = useState(832);
-  const [guidanceScale, setGuidanceScale] = useState(5.0);
-  const [seed, setSeed] = useState(1024);
-  const [numGpus, setNumGpus] = useState(1);
-  const [ditCpuOffload, setDitCpuOffload] = useState<boolean>(false);
-  const [textEncoderCpuOffload, setTextEncoderCpuOffload] = useState<boolean>(false);
-  const [useFsdpInference, setUseFsdpInference] = useState<boolean>(false);
+  const [numInferenceSteps, setNumInferenceSteps] = useState(defaultOptions.numInferenceSteps);
+  const [numFrames, setNumFrames] = useState(defaultOptions.numFrames);
+  const [height, setHeight] = useState(defaultOptions.height);
+  const [width, setWidth] = useState(defaultOptions.width);
+  const [guidanceScale, setGuidanceScale] = useState(defaultOptions.guidanceScale);
+  const [seed, setSeed] = useState(defaultOptions.seed);
+  const [numGpus, setNumGpus] = useState(defaultOptions.numGpus);
+  const [ditCpuOffload, setDitCpuOffload] = useState<boolean>(defaultOptions.ditCpuOffload);
+  const [textEncoderCpuOffload, setTextEncoderCpuOffload] = useState<boolean>(defaultOptions.textEncoderCpuOffload);
+  const [useFsdpInference, setUseFsdpInference] = useState<boolean>(defaultOptions.useFsdpInference);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
 
@@ -56,6 +58,21 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
     }
   }, [isOpen, models.length]);
 
+  useEffect(() => {
+    if (isOpen) {
+      setNumInferenceSteps(defaultOptions.numInferenceSteps);
+      setNumFrames(defaultOptions.numFrames);
+      setHeight(defaultOptions.height);
+      setWidth(defaultOptions.width);
+      setGuidanceScale(defaultOptions.guidanceScale);
+      setSeed(defaultOptions.seed);
+      setNumGpus(defaultOptions.numGpus);
+      setDitCpuOffload(defaultOptions.ditCpuOffload);
+      setTextEncoderCpuOffload(defaultOptions.textEncoderCpuOffload);
+      setUseFsdpInference(defaultOptions.useFsdpInference);
+    }
+  }, [isOpen, defaultOptions]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -76,16 +93,16 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
       });
       setModelId("");
       setPrompt("");
-      setNumInferenceSteps(50);
-      setNumFrames(81);
-      setHeight(480);
-      setWidth(832);
-      setGuidanceScale(5.0);
-      setSeed(1024);
-      setNumGpus(1);
-      setDitCpuOffload(false);
-      setTextEncoderCpuOffload(false);
-      setUseFsdpInference(false);
+      setNumInferenceSteps(defaultOptions.numInferenceSteps);
+      setNumFrames(defaultOptions.numFrames);
+      setHeight(defaultOptions.height);
+      setWidth(defaultOptions.width);
+      setGuidanceScale(defaultOptions.guidanceScale);
+      setSeed(defaultOptions.seed);
+      setNumGpus(defaultOptions.numGpus);
+      setDitCpuOffload(defaultOptions.ditCpuOffload);
+      setTextEncoderCpuOffload(defaultOptions.textEncoderCpuOffload);
+      setUseFsdpInference(defaultOptions.useFsdpInference);
       onSuccess();
       onClose();
     } catch (error) {
@@ -100,16 +117,16 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
     if (!isSubmitting) {
       setModelId("");
       setPrompt("");
-      setNumInferenceSteps(50);
-      setNumFrames(81);
-      setHeight(480);
-      setWidth(832);
-      setGuidanceScale(5.0);
-      setSeed(1024);
-      setNumGpus(1);
-      setDitCpuOffload(false);
-      setTextEncoderCpuOffload(false);
-      setUseFsdpInference(false);
+      setNumInferenceSteps(defaultOptions.numInferenceSteps);
+      setNumFrames(defaultOptions.numFrames);
+      setHeight(defaultOptions.height);
+      setWidth(defaultOptions.width);
+      setGuidanceScale(defaultOptions.guidanceScale);
+      setSeed(defaultOptions.seed);
+      setNumGpus(defaultOptions.numGpus);
+      setDitCpuOffload(defaultOptions.ditCpuOffload);
+      setTextEncoderCpuOffload(defaultOptions.textEncoderCpuOffload);
+      setUseFsdpInference(defaultOptions.useFsdpInference);
       onClose();
     }
   };
