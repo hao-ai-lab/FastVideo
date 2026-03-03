@@ -73,7 +73,7 @@ pipeline initialization and sampling.
 | Matrix Game 2.0 Base | `FastVideo/Matrix-Game-2.0-Base-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Matrix Game 2.0 GTA | `FastVideo/Matrix-Game-2.0-GTA-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Matrix Game 2.0 TempleRun | `FastVideo/Matrix-Game-2.0-TempleRun-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
-| GEN3C Cosmos 7B | `vbharath/GEN3C-Cosmos-7B-Diffusers` | 704px1280p | ❌ | ❌ | ❌ | ⭕ | ⭕ |
+| GEN3C Cosmos 7B | `FastVideo/GEN3C-Cosmos-7B-Diffusers` | 704px1280p | ❌ | ❌ | ❌ | ⭕ | ⭕ |
 
 **Note**: Wan2.2 TI2V 5B has some quality issues when performing I2V generation. We are working on fixing this issue.
 
@@ -88,7 +88,7 @@ resolve default pipeline and sampling configuration for it.
 
 **Note (GEN3C)**: The official `nvidia/GEN3C-Cosmos-7B` repo provides a raw
 `model.pt` checkpoint. Use a Diffusers-format repo (for example,
-`vbharath/GEN3C-Cosmos-7B-Diffusers`) or convert locally with
+`FastVideo/GEN3C-Cosmos-7B-Diffusers`) or convert locally with
 `scripts/checkpoint_conversion/convert_gen3c_to_fastvideo.py`.
 
 ## Special requirements

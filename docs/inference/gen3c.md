@@ -12,7 +12,7 @@
 ## Model Sources
 
 - Official raw checkpoint (not Diffusers): `nvidia/GEN3C-Cosmos-7B`
-- Diffusers-format checkpoint: `vbharath/GEN3C-Cosmos-7B-Diffusers`
+- Diffusers-format checkpoint: `FastVideo/GEN3C-Cosmos-7B-Diffusers`
 
 ## Prerequisites
 
@@ -35,7 +35,7 @@ sudo apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender1
 
 ```bash
 python examples/inference/basic/basic_gen3c.py \
-  --model_path vbharath/GEN3C-Cosmos-7B-Diffusers \
+  --model_path FastVideo/GEN3C-Cosmos-7B-Diffusers \
   --image_path /path/to/input.png \
   --prompt "" \
   --trajectory left \
