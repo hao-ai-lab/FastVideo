@@ -4,6 +4,22 @@
 > 同时把 **预处理器（preprocessors：VAE / text encoder / image encoder / …）** 的管理收敛到
 > **student**，避免 teacher/critic 重复加载与显存浪费，并减少跨 role 的耦合。
 
+## 0. 当前进度（Snapshot）
+
+截至目前（实现/验证以 WangGame causal 为主）：
+
+- ✅ `ModelBase` / `CausalModelBase`：cache 语义不进入 `ModelBase`，只存在于 causal 扩展接口中。
+- ✅ `models/` 层级结构：按 family + variant 拆分（`wan/`、`wangame/`、`wangame_causal.py`）。
+- ✅ preprocessors 收敛：VAE 等 shared components 只在 model plugin 内加载一次；
+  teacher/critic 仅加载各自 transformer，不重复加载 preprocessors。
+- ✅ WangGame causal streaming primitives：cache 由 causal model 内部持有，method 不传 KV 张量。
+- ✅ Self-Forcing 要求 student 为 causal（不允许 cache-free rollout）。
+- ✅ 方案 A（Activation Checkpointing × Streaming KV-cache 的一致性修复）：
+  - grad-enabled streaming forward 会对 `kv_cache[*].{global_end_index, local_end_index}` 做 snapshot，
+    避免 backward recompute 读到被后续 `store_kv=True` 更新后的 index 导致 `CheckpointError`；
+  - checkpoint-safe 模式会把 KV-cache capacity 扩到 `training.num_frames * frame_seq_length`，
+    避免 forward→backward 生命周期内发生 rolling/eviction 破坏重算一致性。
+
 ## 1. 背景与动机
 
 在 FastVideo 的 distillation 框架里，我们会遇到典型组合：
@@ -127,6 +143,16 @@ causal cache 的更新通常应在 `torch.no_grad()` 下进行，以避免历史
 - cache 初始化/重置的时机（每个 rollout / 每个 validation request）
 - cache 的 dtype/device 与 FSDP/activation checkpoint 的交互
 
+补充（已落地）：
+
+- 在 self-forcing 的 streaming rollout 中，`store_kv=True` 会在 forward 过程中更新 cache；
+  但当 `training.enable_gradient_checkpointing_type: full` 开启时，torch 会在 backward 对
+  checkpointed blocks 进行 recompute，这要求 forward→backward 生命周期内“cache 可观测状态”
+  必须稳定（至少对同一 forward 调用而言）。
+- 我们采用“方案 A”在 `models/wangame/wangame_causal.py` 内部做了两点保证：
+  - **index snapshot**：对每次 grad-enabled 的 streaming forward，快照 cache 的 end-index 张量；
+  - **capacity 扩容**：checkpoint-safe 时扩大 cache，保证 cache append-only（不触发 rolling/eviction）。
+
 ### 5.3 验证策略
 
 最小验证集合：
@@ -137,8 +163,10 @@ causal cache 的更新通常应在 `torch.no_grad()` 下进行，以避免历史
 
 ## 6. TODO（实施时的文件清单）
 
-- [ ] `fastvideo/distillation/models/` 目录结构调整（新增子目录、移动文件、更新 imports）
-- [ ] preprocessors 收敛到 student：移除 teacher/critic 侧的 preprocessor 初始化与依赖
-- [ ] `wangame_causal.py`：封装 cache/streaming primitives（仅 causal 需要）
-- [ ] 更新 `dispatch.py` / `register_model` 的 import 路径（保持注册行为不变）
+- [x] `fastvideo/distillation/models/` 目录结构调整（新增子目录、移动文件、更新 imports）
+- [x] preprocessors 收敛到 student：移除 teacher/critic 侧的 preprocessor 初始化与依赖
+- [x] `wangame_causal.py`：封装 cache/streaming primitives（仅 causal 需要）
+- [x] 更新 `dispatch.py` / `register_model` 的 import 路径（保持注册行为不变）
+- [x] 方案 A：支持 activation checkpointing 下的 streaming rollout（index snapshot + capacity 扩容）
+- [ ] 进一步工程化：把“checkpoint-safe cache”做成可显式开关（必要时打印内存提示/风险）
 - [ ] 更新必要的 doc（只更新本 phase 相关文档）

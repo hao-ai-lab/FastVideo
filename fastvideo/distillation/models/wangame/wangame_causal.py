@@ -139,9 +139,22 @@ class WanGameCausalModel(WanGameModel, CausalModelBase):
         )
 
         frame_seq_length = int(caches.frame_seq_length)
+        kv_cache = caches.kv_cache
+        crossattn_cache = caches.crossattn_cache
+
+        # When activation checkpointing is enabled, torch will recompute
+        # transformer blocks during backward. Self-forcing streaming rollout
+        # mutates KV-cache *between* forward and backward (store_kv=True), which
+        # can break checkpoint recompute with metadata mismatches.
+        #
+        # Scheme A: snapshot the cache end-index tensors per call, so backward
+        # recompute sees the same "effective cache length" as forward.
+        if self._should_snapshot_streaming_cache(handle) and torch.is_grad_enabled():
+            kv_cache = self._snapshot_kv_cache_indices(kv_cache)
+
         model_kwargs: dict[str, Any] = {
-            "kv_cache": caches.kv_cache,
-            "crossattn_cache": caches.crossattn_cache,
+            "kv_cache": kv_cache,
+            "crossattn_cache": crossattn_cache,
             "current_start": cur_start_frame * frame_seq_length,
             "start_frame": cur_start_frame,
             "is_cache": bool(store_kv),
@@ -436,6 +449,7 @@ class WanGameCausalModel(WanGameModel, CausalModelBase):
             frame_seq_length=frame_seq_length,
             local_attn_size=local_attn_size,
             sliding_window_num_frames=sliding_window_num_frames,
+            checkpoint_safe=self._should_use_checkpoint_safe_kv_cache(handle),
         )
         crossattn_cache = self._initialize_crossattn_cache(transformer=transformer, device=device)
 
@@ -492,6 +506,7 @@ class WanGameCausalModel(WanGameModel, CausalModelBase):
         frame_seq_length: int,
         local_attn_size: int,
         sliding_window_num_frames: int,
+        checkpoint_safe: bool,
     ) -> list[dict[str, Any]]:
         num_blocks = len(getattr(transformer, "blocks", []))
         if num_blocks <= 0:
@@ -516,6 +531,19 @@ class WanGameCausalModel(WanGameModel, CausalModelBase):
         else:
             kv_cache_size = int(frame_seq_length) * int(sliding_window_num_frames)
 
+        # Checkpoint-safe mode: allocate enough cache capacity to avoid rolling
+        # / eviction during a forward->backward lifetime. This keeps the KV
+        # cache append-only, which is required for correct activation
+        # checkpoint recompute in streaming methods (e.g., self-forcing).
+        if checkpoint_safe:
+            total_frames = int(getattr(self.training_args, "num_frames", 0) or 0)
+            if total_frames <= 0:
+                raise ValueError(
+                    "training.num_frames must be set to enable checkpoint-safe "
+                    f"streaming KV cache; got {total_frames}"
+                )
+            kv_cache_size = max(kv_cache_size, int(frame_seq_length) * total_frames)
+
         kv_cache: list[dict[str, Any]] = []
         for _ in range(num_blocks):
             kv_cache.append(
@@ -536,6 +564,35 @@ class WanGameCausalModel(WanGameModel, CausalModelBase):
             )
 
         return kv_cache
+
+    def _should_use_checkpoint_safe_kv_cache(self, handle: RoleHandle) -> bool:
+        checkpointing_type = getattr(self.training_args, "enable_gradient_checkpointing_type", None)
+        return bool(checkpointing_type) and bool(getattr(handle, "trainable", False))
+
+    def _should_snapshot_streaming_cache(self, handle: RoleHandle) -> bool:
+        # Snapshotting indices is only needed when recompute may happen.
+        return self._should_use_checkpoint_safe_kv_cache(handle)
+
+    def _snapshot_kv_cache_indices(
+        self, kv_cache: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        snapshot: list[dict[str, Any]] = []
+        for block_cache in kv_cache:
+            global_end_index = block_cache.get("global_end_index")
+            local_end_index = block_cache.get("local_end_index")
+            if not isinstance(global_end_index, torch.Tensor) or not isinstance(
+                local_end_index, torch.Tensor
+            ):
+                raise ValueError(
+                    "Unexpected kv_cache index tensors; expected tensors at "
+                    "kv_cache[*].{global_end_index, local_end_index}"
+                )
+
+            copied = dict(block_cache)
+            copied["global_end_index"] = global_end_index.detach().clone()
+            copied["local_end_index"] = local_end_index.detach().clone()
+            snapshot.append(copied)
+        return snapshot
 
     def _initialize_crossattn_cache(
         self,
