@@ -1,12 +1,20 @@
 'use client';
 
-import { createContext, useContext, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 
 export type ActiveTab = "job-queue" | "settings";
 
 interface ActiveTabContextValue {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
+  headerActions: React.ReactNode[];
+  setHeaderActions: (actions: React.ReactNode[]) => void;
 }
 
 const ActiveTabContext = createContext<ActiveTabContextValue | undefined>(
@@ -20,10 +28,19 @@ const TAB_TITLES: Record<ActiveTab, string> = {
 
 export function ActiveTabProvider({ children }: { children: React.ReactNode }) {
   const [activeTab, setActiveTab] = useState<ActiveTab>("job-queue");
+  const [headerActions, setHeaderActionsState] = useState<React.ReactNode[]>(
+    []
+  );
+
+  const setHeaderActions = useCallback((actions: React.ReactNode[]) => {
+    setHeaderActionsState(actions);
+  }, []);
 
   const value: ActiveTabContextValue = {
     activeTab,
     setActiveTab,
+    headerActions,
+    setHeaderActions,
   };
 
   return (
@@ -44,4 +61,17 @@ export function useActiveTab(): ActiveTabContextValue {
 export function useHeaderTitle(): string {
   const { activeTab } = useActiveTab();
   return TAB_TITLES[activeTab];
+}
+
+/**
+ * Registers header action components for the current view. Actions are
+ * displayed in the Header and cleared when the view unmounts.
+ */
+export function useHeaderActions(actions: React.ReactNode[]): void {
+  const { setHeaderActions } = useActiveTab();
+
+  useEffect(() => {
+    setHeaderActions(actions);
+    return () => setHeaderActions([]);
+  }, [actions, setHeaderActions]);
 }
