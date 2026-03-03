@@ -1,7 +1,13 @@
 'use client';
 
 import { Job } from "@/lib/types";
-import { startJob, stopJob, deleteJob, getJobLogs, downloadJobLog, downloadJobVideo } from "@/lib/api";
+import {
+  startJob,
+  stopJob,
+  deleteJob,
+  downloadJobVideo,
+} from "@/lib/api";
+import { useActiveJob } from "@/contexts/ActiveJobContext";
 import jobCardStyles from "@styles/JobCard.module.css";
 import badgeStyles from "@styles/Badge.module.css";
 import buttonStyles from "@styles/Button.module.css";
@@ -13,16 +19,11 @@ interface JobCardProps {
 }
 
 export default function JobCard({ job, onJobUpdated }: JobCardProps) {
+  const { activeJobId, setActiveJobId } = useActiveJob();
   const [isLoading, setIsLoading] = useState(false);
-  const [showConsole, setShowConsole] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
   const [currentTime, setCurrentTime] = useState(Date.now());
-  const logAfterRef = useRef(0);
-  const isPollingRef = useRef(false);
-  const consoleRef = useRef<HTMLPreElement>(null);
-  const previousJobIdRef = useRef<string | null>(null);
-  const previousStatusRef = useRef<string | null>(null);
   const badgeClass = `badge${job.status.charAt(0).toUpperCase() + job.status.slice(1)}`;
+  const isSelected = activeJobId === job.id;
   
   // Format duration in a human-readable way
   const formatDuration = (seconds: number): string => {
@@ -135,111 +136,9 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
     }
   };
 
-  // Poll for logs when console is open
-  useEffect(() => {
-    if (!showConsole) {
-      // Reset when console is closed
-      logAfterRef.current = 0;
-      return;
-    }
-
-    // Only poll for running or pending jobs
-    const shouldPoll = job.status === "running" || job.status === "pending";
-    
-    let pollInterval: NodeJS.Timeout | null = null;
-    let isMounted = true;
-
-    const pollLogs = async () => {
-      if (!isMounted || isPollingRef.current) return;
-      isPollingRef.current = true;
-      try {
-        const logData = await getJobLogs(job.id, logAfterRef.current);
-        if (isMounted && logData.lines.length > 0) {
-          setLogs(prev => [...prev, ...logData.lines]);
-          logAfterRef.current = logData.total;
-          // Auto-scroll to bottom
-          if (consoleRef.current) {
-            consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
-          }
-        }
-      } catch (error) {
-        // Silently ignore fetch errors for logs
-        console.error("Failed to fetch logs:", error);
-      } finally {
-        isPollingRef.current = false;
-      }
-    };
-
-    // Initial fetch (always fetch once to show existing logs)
-    pollLogs();
-
-    if (shouldPoll) {
-      const pollIntervalMs = 2000;
-      pollInterval = setInterval(pollLogs, pollIntervalMs);
-    }
-
-    return () => {
-      isMounted = false;
-      if (pollInterval) {
-        clearInterval(pollInterval);
-      }
-    };
-  }, [showConsole, job.id, job.status]);
-
-  // Reset logs when console is closed, job changes, or job is restarted
-  useEffect(() => {
-    const previousJobId = previousJobIdRef.current;
-    const previousStatus = previousStatusRef.current;
-    const currentJobId = job.id;
-    const currentStatus = job.status;
-    
-    // Detect job restart: same job ID, but status changed from terminal state to pending/running
-    const wasTerminal = previousStatus === "failed" || previousStatus === "stopped" || previousStatus === "completed";
-    const isRestarting = previousJobId === currentJobId && wasTerminal && (currentStatus === "pending" || currentStatus === "running");
-    
-    // Reset logs when:
-    // 1. Console is closed
-    // 2. Switching to a different job
-    // 3. Job is restarted (same job, but transitioned from terminal to pending/running)
-    if (!showConsole) {
-      setLogs([]);
-      logAfterRef.current = 0;
-    } else if (showConsole && (previousJobId !== currentJobId || isRestarting)) {
-      setLogs([]);
-      logAfterRef.current = 0;
-    }
-    
-    // Update refs for next comparison
-    previousJobIdRef.current = currentJobId;
-    previousStatusRef.current = currentStatus;
-  }, [showConsole, job.id, job.status]);
-
-  const toggleConsole = () => {
-    setShowConsole(!showConsole);
-  };
-
-  const handleDownloadLog = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (isLoading) return;
-
-    setIsLoading(true);
-    try {
-      const blob = await downloadJobLog(job.id);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `job_${job.id}.log`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (error) {
-      console.error("Failed to download log:", error);
-      alert(error instanceof Error ? error.message : "Failed to download log");
-    } finally {
-      setIsLoading(false);
-    }
+  const handleSelectJob = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    setActiveJobId(isSelected ? null : job.id);
   };
 
   const handleDownloadVideo = async (e: React.MouseEvent) => {
@@ -303,7 +202,18 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
   };
 
   return (
-    <div className={jobCardStyles.jobCard}>
+    <div
+      className={`${jobCardStyles.jobCard} ${isSelected ? jobCardStyles.jobCardSelected : ""}`}
+      onClick={handleSelectJob}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          handleSelectJob(e as unknown as React.MouseEvent);
+        }
+      }}
+    >
       <div className={jobCardStyles.jobHeader}>
         <span className={jobCardStyles.jobModel}>{job.model_id}</span>
         <span className={`${badgeStyles.badge} ${badgeStyles[badgeClass as keyof typeof badgeStyles] || badgeStyles.badgePending}`}>
@@ -339,58 +249,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
         >
           Delete
         </button>
-        <button
-          className={`${jobCardStyles.toggleButton} ${showConsole ? jobCardStyles.toggleButtonOpen : ''}`}
-          onClick={toggleConsole}
-          disabled={isLoading}
-          title={showConsole ? "Hide logs" : "Show logs"}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path
-              d="M4 6L8 10L12 6"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
       </div>
-      {showConsole && (
-        <div className={jobCardStyles.consoleContainer}>
-          <div className={jobCardStyles.consoleHeader}>
-            <span className={jobCardStyles.consoleTitle}>Console Output</span>
-            <div className={jobCardStyles.consoleHeaderRight}>
-              {job.status === "running" && (
-                <span className={jobCardStyles.consoleStatus}>● Live</span>
-              )}
-              <button
-                className={`${buttonStyles.btn} ${buttonStyles.btnSmall}`}
-                onClick={handleDownloadLog}
-                disabled={isLoading || !job.log_file_path}
-                title="Download log file"
-              >
-                Download Log
-              </button>
-            </div>
-          </div>
-          <pre ref={consoleRef} className={jobCardStyles.consoleOutput}>
-            {logs.length === 0 ? (
-              <span className={jobCardStyles.consoleEmpty}>
-                {job.status === "running" ? "Waiting for logs..." : "No logs available"}
-              </span>
-            ) : (
-              logs.join("\n")
-            )}
-          </pre>
-        </div>
-      )}
     </div>
   );
 }
