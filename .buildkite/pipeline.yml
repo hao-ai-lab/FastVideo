@@ -171,6 +171,21 @@ steps:
                   - TEST_TYPE=unit_test
                 agents:
                   queue: "default"
+            - path:
+                - "fastvideo/pipelines/preprocess/**"
+                - "fastvideo/workflow/preprocess/**"
+                - "fastvideo/dataset/preprocessing_datasets.py"
+                - "fastvideo/dataset/dataloader/schema.py"
+                - "fastvideo/tests/preprocessing/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 20m .buildkite/scripts/pr_test.sh"
+                label: "Preprocessing Tests"
+                env:
+                  - TEST_TYPE=preprocessing
+                agents:
+                  queue: "default"
             # - path:
             #     - "scripts/lora_extraction/**"
             #     - "pyproject.toml"
