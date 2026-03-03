@@ -3,6 +3,7 @@ import "./globals.css";
 import { DefaultOptionsProvider } from "@/contexts/DefaultOptionsContext";
 import { JobsRefreshProvider } from "@/contexts/JobsRefreshContext";
 import { ActiveTabProvider } from "@/contexts/ActiveTabContext";
+import { ActiveJobProvider } from "@/contexts/ActiveJobContext";
 import Header from "@/components/Header";
 
 export const metadata: Metadata = {
@@ -21,8 +22,10 @@ export default function RootLayout({
         <DefaultOptionsProvider>
           <JobsRefreshProvider>
             <ActiveTabProvider>
-              <Header />
-              {children}
+              <ActiveJobProvider>
+                <Header />
+                {children}
+              </ActiveJobProvider>
             </ActiveTabProvider>
           </JobsRefreshProvider>
         </DefaultOptionsProvider>
