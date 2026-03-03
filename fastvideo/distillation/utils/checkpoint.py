@@ -151,6 +151,7 @@ def maybe_warmstart_role_modules(
     bundle: RoleManager,
     role: str,
     init_from_checkpoint: str | None,
+    checkpoint_role: str | None = None,
 ) -> None:
     """Warmstart model modules for `role` from a Phase 2/3 DCP checkpoint.
 
@@ -164,6 +165,9 @@ def maybe_warmstart_role_modules(
     if not init_from_checkpoint:
         return
 
+    if checkpoint_role is None:
+        checkpoint_role = role
+
     resolved = _resolve_resume_checkpoint(
         str(init_from_checkpoint),
         output_dir=str(init_from_checkpoint),
@@ -173,25 +177,27 @@ def maybe_warmstart_role_modules(
         raise FileNotFoundError(f"Missing dcp dir under checkpoint: {dcp_dir}")
 
     handle = bundle.role(str(role))
-    available_modules = _get_dcp_role_module_names(dcp_dir, role=str(role))
+    available_modules = _get_dcp_role_module_names(dcp_dir, role=str(checkpoint_role))
 
     states: dict[str, Any] = {}
     for module_name, module in handle.modules.items():
         if module_name not in available_modules:
             continue
-        states[f"roles.{role}.{module_name}"] = ModelWrapper(module)
+        states[f"roles.{checkpoint_role}.{module_name}"] = ModelWrapper(module)
 
     if not states:
         raise ValueError(
             f"init_from_checkpoint={resolved} does not contain any saved modules for "
-            f"role={role!r}. Available modules in checkpoint: {sorted(available_modules)}"
+            f"checkpoint_role={checkpoint_role!r}. Available modules in checkpoint: "
+            f"{sorted(available_modules)}"
         )
 
     if _rank() == 0:
         logger.info(
-            "Warmstarting role=%s from checkpoint=%s (modules=%s)",
+            "Warmstarting role=%s from checkpoint=%s (checkpoint_role=%s, modules=%s)",
             role,
             resolved,
+            checkpoint_role,
             sorted(states.keys()),
         )
     dcp.load(states, checkpoint_id=str(dcp_dir))

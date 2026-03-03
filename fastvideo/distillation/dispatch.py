@@ -105,20 +105,25 @@ def build_from_config(cfg: DistillRunConfig) -> tuple[TrainingArgs, DistillMetho
     model_builder = get_model(str(cfg.recipe.family))
     model = model_builder(cfg=cfg)
 
-    student_cfg = cfg.roles.get("student")
-    init_from_checkpoint = None
-    if student_cfg is not None:
-        init_from_checkpoint = (student_cfg.extra or {}).get(
-            "init_from_checkpoint",
-            None,
-        )
-    if init_from_checkpoint:
-        from fastvideo.distillation.utils.checkpoint import maybe_warmstart_role_modules
+    from fastvideo.distillation.utils.checkpoint import maybe_warmstart_role_modules
+
+    for role, role_cfg in cfg.roles.items():
+        init_from_checkpoint = (role_cfg.extra or {}).get("init_from_checkpoint", None)
+        if not init_from_checkpoint:
+            continue
+
+        checkpoint_role = (role_cfg.extra or {}).get("init_from_checkpoint_role", None)
+        if checkpoint_role is not None and not isinstance(checkpoint_role, str):
+            raise ValueError(
+                f"roles.{role}.init_from_checkpoint_role must be a string when set, "
+                f"got {type(checkpoint_role).__name__}"
+            )
 
         maybe_warmstart_role_modules(
             bundle=model.bundle,
-            role="student",
+            role=str(role),
             init_from_checkpoint=str(init_from_checkpoint),
+            checkpoint_role=str(checkpoint_role) if checkpoint_role else None,
         )
 
     method_cls = get_method(str(cfg.recipe.method))
