@@ -137,6 +137,9 @@ class MultiprocExecutor(Executor):
         peak_memory_mb = responses[0].get("peak_memory_mb", 0.0)
         extra["peak_memory_mb"] = peak_memory_mb
 
+        peak_memory_mb = responses[0].get("peak_memory_mb", 0.0)
+        extra["peak_memory_mb"] = peak_memory_mb
+
         result_batch = ForwardBatch(data_type=forward_batch.data_type,
                                     output=output,
                                     logging_info=logging_info,
@@ -649,6 +652,8 @@ class WorkerMultiprocProc:
                         fastvideo_args = kwargs['fastvideo_args']
                         output_batch = self.worker.execute_forward(
                             forward_batch, fastvideo_args)
+                        peak_memory_mb = torch.cuda.max_memory_allocated() / (
+                            1024 * 1024)
                         logging_info = None
                         if envs.FASTVIDEO_STAGE_LOGGING:
                             logging_info = output_batch.logging_info

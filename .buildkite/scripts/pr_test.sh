@@ -123,6 +123,10 @@ case "$TEST_TYPE" in
         log "Running performance tests..."
         MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_performance_tests"
         ;;
+    "api_server")
+        log "Running API server integration tests..."
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_api_server_tests"
+        ;;
     *)
         log "Error: Unknown test type: $TEST_TYPE"
         exit 1
