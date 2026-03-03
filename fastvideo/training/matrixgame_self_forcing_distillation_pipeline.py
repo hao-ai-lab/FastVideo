@@ -1,16 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 import sys
+from contextlib import contextmanager
 from copy import deepcopy
-from typing import Any
+from typing import Any, Iterator, cast
 
 import numpy as np
 import torch
-import torch.distributed as dist
 import torch.nn.functional as F
 from einops import rearrange
 
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset.dataloader.schema import (
+    pyarrow_schema_matrixgame,
     pyarrow_schema_matrixgame_ode_trajectory)
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
@@ -20,6 +21,7 @@ from fastvideo.models.dits.matrixgame.kv_cache import KVCache
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
     SelfForcingFlowMatchScheduler)
 from fastvideo.models.utils import pred_noise_to_pred_video
+from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.basic.matrixgame.matrixgame_causal_dmd_pipeline import (
     MatrixGameCausalDMDPipeline)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
@@ -48,26 +50,107 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
     ]
 
     def set_schemas(self):
-        self.train_dataset_schema = pyarrow_schema_matrixgame_ode_trajectory
+        self.train_dataset_schema = pyarrow_schema_matrixgame
+        # self.train_dataset_schema = pyarrow_schema_matrixgame_ode_trajectory
+
+    @contextmanager
+    def _temporary_teacher_transformer_override(
+        self,
+        training_args: TrainingArgs,
+        cls_name: str = "MatrixGameWanModel",
+    ) -> Iterator[None]:
+        old_override = training_args.override_transformer_cls_name
+        training_args.override_transformer_cls_name = cls_name
+        try:
+            yield
+        finally:
+            training_args.override_transformer_cls_name = old_override
+
+    def _load_non_causal_score_transformer(
+        self,
+        model_path: str,
+        module_key: str,
+        training_args: TrainingArgs,
+    ) -> torch.nn.Module:
+        with self._temporary_teacher_transformer_override(training_args):
+            module = self.load_module_from_path(
+                model_path, "transformer", training_args
+            )
+        logger.info(
+            "Loaded %s as %s",
+            module_key,
+            module.__class__.__name__,
+        )
+        return module
+
+    def load_modules(
+        self,
+        fastvideo_args: FastVideoArgs,
+        loaded_modules: dict[str, torch.nn.Module] | None = None,
+    ) -> dict[str, Any]:
+        modules = ComposedPipelineBase.load_modules(
+            self, fastvideo_args, loaded_modules
+        )
+        training_args = cast(TrainingArgs, fastvideo_args)
+
+        if loaded_modules is not None and "real_score_transformer" in loaded_modules:
+            self.real_score_transformer = loaded_modules["real_score_transformer"]
+        elif training_args.real_score_model_path:
+            logger.info(
+                "Loading real score transformer from: %s",
+                training_args.real_score_model_path,
+            )
+            self.real_score_transformer = self._load_non_causal_score_transformer(
+                training_args.real_score_model_path,
+                "real_score_transformer",
+                training_args,
+            )
+        else:
+            raise ValueError(
+                "real_score_model_path is required for DMD distillation pipeline"
+            )
+        modules["real_score_transformer"] = self.real_score_transformer
+
+        if loaded_modules is not None and "fake_score_transformer" in loaded_modules:
+            self.fake_score_transformer = loaded_modules["fake_score_transformer"]
+        elif training_args.fake_score_model_path:
+            logger.info(
+                "Loading fake score transformer from: %s",
+                training_args.fake_score_model_path,
+            )
+            self.fake_score_transformer = self._load_non_causal_score_transformer(
+                training_args.fake_score_model_path,
+                "fake_score_transformer",
+                training_args,
+            )
+        else:
+            raise ValueError(
+                "fake_score_model_path is required for DMD distillation pipeline"
+            )
+        modules["fake_score_transformer"] = self.fake_score_transformer
+
+        self.real_score_transformer_2 = None
+        self.fake_score_transformer_2 = None
+        return modules
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         super().initialize_training_pipeline(training_args)
 
-        if self.transformer_2 is not None or self.boundary_timestep is not None:
-            raise NotImplementedError(
-                "MatrixGame self-forcing phase 1 only supports a single "
-                "causal expert. Disable transformer_2 / boundary_ratio."
-            )
-        if getattr(self, "real_score_transformer_2", None) is not None:
-            raise NotImplementedError(
-                "MatrixGame self-forcing phase 1 does not support "
-                "real_score_transformer_2."
-            )
-        if getattr(self, "fake_score_transformer_2", None) is not None:
-            raise NotImplementedError(
-                "MatrixGame self-forcing phase 1 does not support "
-                "fake_score_transformer_2."
-            )
+        self.denoising_step_list = torch.tensor(
+            training_args.pipeline_config.dmd_denoising_steps,
+            dtype=torch.long,
+            device=get_local_torch_device(),
+        )
+        if training_args.warp_denoising_step:
+            timesteps = torch.cat(
+                (
+                    self.noise_scheduler.timesteps.cpu(),
+                    torch.tensor([0], dtype=torch.float32),
+                )
+            ).to(get_local_torch_device())
+            self.denoising_step_list = timesteps[
+                1000 - self.denoising_step_list
+            ]
 
         self.action_config = getattr(self.transformer, "action_config", {}) or {}
         self.use_action_module = len(self.action_config) > 0
@@ -216,6 +299,233 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             raise ValueError(
                 f"{name} must be constant within each chunk for chunkwise rollout"
             )
+
+    def _get_self_forcing_timestep_bounds(
+        self, exit_flag: int
+    ) -> tuple[int | None, int | None]:
+        scheduler_timesteps = self.noise_scheduler.timesteps.to(self.device)
+        denoising_timestep = torch.as_tensor(
+            self.denoising_step_list[exit_flag],
+            device=self.device,
+            dtype=scheduler_timesteps.dtype,
+        )
+        denoised_timestep_from = self.num_train_timestep - torch.argmin(
+            (scheduler_timesteps - denoising_timestep).abs(), dim=0
+        ).item()
+        if exit_flag == len(self.denoising_step_list) - 1:
+            return denoised_timestep_from, 0
+
+        next_denoising_timestep = torch.as_tensor(
+            self.denoising_step_list[exit_flag + 1],
+            device=self.device,
+            dtype=scheduler_timesteps.dtype,
+        )
+        denoised_timestep_to = self.num_train_timestep - torch.argmin(
+            (scheduler_timesteps - next_denoising_timestep).abs(), dim=0
+        ).item()
+        return denoised_timestep_from, denoised_timestep_to
+
+    def _sample_restricted_batch_timesteps(
+        self,
+        batch_size: int,
+        *,
+        denoised_timestep_from: int | None,
+        denoised_timestep_to: int | None,
+    ) -> torch.Tensor:
+        min_timestep = (
+            denoised_timestep_to
+            if denoised_timestep_to is not None
+            else 0
+        )
+        max_timestep = (
+            denoised_timestep_from
+            if denoised_timestep_from is not None
+            else self.num_train_timestep
+        )
+        if max_timestep <= min_timestep:
+            max_timestep = min_timestep + 1
+
+        timestep = torch.randint(
+            min_timestep,
+            max_timestep,
+            [batch_size],
+            device=self.device,
+            dtype=torch.long,
+        )
+        timestep = shift_timestep(
+            timestep, self.timestep_shift, self.num_train_timestep
+        )
+        return timestep.clamp(self.min_timestep, self.max_timestep)
+
+    def _get_image_embeds(self, training_batch: TrainingBatch) -> torch.Tensor:
+        image_embeds = training_batch.image_embeds
+        if image_embeds is None:
+            raise ValueError("training_batch.image_embeds must be set")
+        if torch.isnan(image_embeds).any():
+            raise ValueError("training_batch.image_embeds contains NaN values")
+        return image_embeds.to(get_local_torch_device(), dtype=torch.bfloat16)
+
+    def _concat_matrixgame_hidden_states(
+        self,
+        noise_input: torch.Tensor,
+        image_latents: torch.Tensor,
+    ) -> torch.Tensor:
+        noisy_model_input = torch.cat(
+            [noise_input, image_latents.permute(0, 2, 1, 3, 4)], dim=2
+        )
+        expected_channels = noise_input.shape[2] + image_latents.shape[1]
+        if noisy_model_input.shape[2] != expected_channels:
+            raise ValueError(
+                "Unexpected MatrixGame noisy_model_input channel count: "
+                f"got {noisy_model_input.shape[2]}, expected {expected_channels}"
+            )
+        return noisy_model_input.permute(0, 2, 1, 3, 4)
+
+    def _build_matrixgame_cond_concat(
+        self,
+        image_latents: torch.Tensor,
+    ) -> torch.Tensor:
+        if image_latents.ndim != 5:
+            raise ValueError(
+                "first_frame_latent must have shape [B, C, T, H, W], got "
+                f"{tuple(image_latents.shape)}"
+            )
+        if image_latents.shape[1] != 16:
+            raise ValueError(
+                "MatrixGame cond conversion expects a 16-channel "
+                f"first_frame_latent, got {image_latents.shape[1]} channels."
+            )
+
+        temporal_compression_ratio = (
+            self.training_args.pipeline_config.vae_config.arch_config
+            .temporal_compression_ratio
+        )
+        num_latent_t = image_latents.shape[2]
+        num_frames = (
+            (num_latent_t - 1) * temporal_compression_ratio + 1
+        )
+        batch_size, _, _, latent_height, latent_width = image_latents.shape
+
+        mask_lat_size = torch.ones(
+            batch_size,
+            1,
+            num_frames,
+            latent_height,
+            latent_width,
+            device=image_latents.device,
+            dtype=image_latents.dtype,
+        )
+        mask_lat_size[:, :, 1:] = 0
+
+        first_frame_mask = mask_lat_size[:, :, :1]
+        first_frame_mask = torch.repeat_interleave(
+            first_frame_mask,
+            dim=2,
+            repeats=temporal_compression_ratio,
+        )
+        mask_lat_size = torch.cat(
+            [first_frame_mask, mask_lat_size[:, :, 1:]],
+            dim=2,
+        )
+        mask_lat_size = mask_lat_size.view(
+            batch_size,
+            -1,
+            temporal_compression_ratio,
+            latent_height,
+            latent_width,
+        )
+        mask_lat_size = mask_lat_size.transpose(1, 2).to(
+            image_latents.device,
+            dtype=image_latents.dtype,
+        )
+
+        return torch.cat([mask_lat_size, image_latents], dim=1)
+
+    def _build_generator_input_kwargs(
+        self,
+        noise_input: torch.Tensor,
+        timestep: torch.Tensor,
+        training_batch: TrainingBatch,
+        *,
+        frame_start: int,
+        frame_end: int,
+        num_frame_per_block: int,
+    ) -> dict[str, torch.Tensor | None | int]:
+        self._assert_matrixgame_i2v_inputs(
+            training_batch,
+            frame_start=frame_start,
+            frame_end=frame_end,
+            noise_input=noise_input,
+        )
+        self._assert_action_inputs(training_batch, frame_end=frame_end)
+        self._assert_causal_timestep(
+            timestep,
+            batch_size=noise_input.shape[0],
+            num_frames=noise_input.shape[1],
+            name="generator_timestep",
+        )
+
+        image_embeds = self._get_image_embeds(training_batch)
+        assert training_batch.image_latents is not None
+        image_latents = training_batch.image_latents[
+            :, :, frame_start:frame_end, :, :
+        ]
+        action_frame_end = (
+            (frame_end - 1) * self.vae_time_compression_ratio + 1
+        )
+        keyboard_cond = (
+            training_batch.keyboard_cond[:, :action_frame_end, :]
+            if training_batch.keyboard_cond is not None
+            else None
+        )
+        mouse_cond = (
+            training_batch.mouse_cond[:, :action_frame_end, :]
+            if training_batch.mouse_cond is not None
+            else None
+        )
+        return {
+            "hidden_states": self._concat_matrixgame_hidden_states(
+                noise_input, image_latents
+            ),
+            "encoder_hidden_states": None,
+            "timestep": timestep,
+            "encoder_hidden_states_image": image_embeds,
+            "keyboard_cond": keyboard_cond,
+            "mouse_cond": mouse_cond,
+            "num_frame_per_block": num_frame_per_block,
+        }
+
+    def _build_score_model_input_kwargs(
+        self,
+        noise_input: torch.Tensor,
+        timestep: torch.Tensor,
+        training_batch: TrainingBatch,
+    ) -> dict[str, torch.Tensor | None]:
+        self._assert_matrixgame_i2v_inputs(
+            training_batch,
+            noise_input=noise_input,
+        )
+        self._assert_action_inputs(
+            training_batch, frame_end=noise_input.shape[1]
+        )
+        if timestep.ndim != 1 or timestep.shape[0] != noise_input.shape[0]:
+            raise ValueError(
+                "MatrixGame score-model timestep must have shape [B], got "
+                f"{tuple(timestep.shape)}"
+            )
+
+        image_embeds = self._get_image_embeds(training_batch)
+        assert training_batch.image_latents is not None
+        return {
+            "hidden_states": self._concat_matrixgame_hidden_states(
+                noise_input, training_batch.image_latents
+            ),
+            "encoder_hidden_states": None,
+            "timestep": timestep,
+            "encoder_hidden_states_image": image_embeds,
+            "keyboard_cond": training_batch.keyboard_cond,
+            "mouse_cond": training_batch.mouse_cond,
+        }
 
     def _initialize_simulation_caches(
         self,
@@ -371,8 +681,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
     def _generator_multi_step_simulation_forward(
             self,
-            training_batch: TrainingBatch,
-            return_sim_steps: bool = False) -> torch.Tensor:
+            training_batch: TrainingBatch) -> torch.Tensor:
         """Forward pass through student transformer matching inference procedure with KV cache management.
         
         This function is adapted from the reference self-forcing implementation's inference_with_trajectory
@@ -383,51 +692,23 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             raise ValueError("training_batch.latents must be set")
         dtype = latents.dtype
         batch_size = latents.shape[0]
-        initial_latent = training_batch.image_latents
         self._assert_matrixgame_i2v_inputs(training_batch)
         self._assert_action_inputs(
             training_batch, frame_end=training_batch.image_latents.shape[2]
         )
 
-        # Dynamic frame generation logic (adapted from _run_generator)
         num_training_frames = getattr(self.training_args, 'num_latent_t', 21)
-
-        # During training, the number of generated frames should be uniformly sampled from
-        # [21, self.num_training_frames], but still being a multiple of self.num_frame_per_block
-        min_num_frames = 20 if self.independent_first_frame else 21
-        max_num_frames = num_training_frames - 1 if self.independent_first_frame else num_training_frames
-        assert max_num_frames % self.num_frame_per_block == 0
-        assert min_num_frames % self.num_frame_per_block == 0
-        max_num_blocks = max_num_frames // self.num_frame_per_block
-        min_num_blocks = min_num_frames // self.num_frame_per_block
-
-        # Sample number of blocks and sync across processes
-        num_generated_blocks = torch.randint(min_num_blocks,
-                                             max_num_blocks + 1, (1, ),
-                                             device=self.device)
-        if dist.is_initialized():
-            dist.broadcast(num_generated_blocks, src=0)
-        num_generated_blocks = num_generated_blocks.item()
-        num_generated_frames = num_generated_blocks * self.num_frame_per_block
-        if self.independent_first_frame and initial_latent is None:
-            num_generated_frames += 1
-            min_num_frames += 1
-        if initial_latent is not None and initial_latent.shape[2] < num_generated_frames:
+        if num_training_frames % self.num_frame_per_block != 0:
             raise ValueError(
-                "image_latents must cover generated latent frames: "
-                f"available={initial_latent.shape[2]}, required={num_generated_frames}"
+                "num_latent_t must be divisible by num_frame_per_block for "
+                "MatrixGame self-forcing"
             )
+        num_generated_frames = num_training_frames
 
         # Create noise with dynamic shape
-        if initial_latent is not None:
-            noise_shape = [
-                batch_size, num_generated_frames - 1,
-                *self.video_latent_shape[2:]
-            ]
-        else:
-            noise_shape = [
-                batch_size, num_generated_frames, *self.video_latent_shape[2:]
-            ]
+        noise_shape = [
+            batch_size, num_generated_frames, *self.video_latent_shape[2:]
+        ]
 
         noise = torch.randn(noise_shape, device=self.device, dtype=dtype)
         if self.sp_world_size > 1:
@@ -437,75 +718,29 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             noise = noise[:, self.rank_in_sp_group, :, :, :, :]
 
         batch_size, num_frames, num_channels, height, width = noise.shape
+        if training_batch.image_latents.shape[2] < num_frames:
+            raise ValueError(
+                "image_latents must cover generated latent frames: "
+                f"available={training_batch.image_latents.shape[2]}, "
+                f"required={num_frames}"
+            )
 
-        # Block size calculation
-        if not self.independent_first_frame or (self.independent_first_frame
-                                                and initial_latent is not None):
-            assert num_frames % self.num_frame_per_block == 0
-            num_blocks = num_frames // self.num_frame_per_block
-        else:
-            assert (num_frames - 1) % self.num_frame_per_block == 0
-            num_blocks = (num_frames - 1) // self.num_frame_per_block
-
-        num_input_frames = initial_latent.shape[
-            1] if initial_latent is not None else 0
-        num_output_frames = num_frames + num_input_frames
+        num_blocks = num_frames // self.num_frame_per_block
+        num_output_frames = num_frames
         output = torch.zeros(
-            [batch_size, num_output_frames, num_channels, height, width],
+            [batch_size, num_frames, num_channels, height, width],
             device=noise.device,
             dtype=noise.dtype)
 
-        def get_model_device(model):
-            if model is None:
-                return "None"
-            try:
-                return next(model.parameters()).device
-            except (StopIteration, AttributeError):
-                return "Unknown"
-
         # Step 1: Initialize KV cache to all zeros
-        cache_frames = num_generated_frames + num_input_frames
+        cache_frames = num_generated_frames
         (self.kv_cache1, self.crossattn_cache, self.kv_cache_mouse,
          self.kv_cache_keyboard) = self._initialize_simulation_caches(
              batch_size, dtype, self.device, max_num_frames=cache_frames)
 
-        # Step 2: Cache context feature
+        # Step 2: Temporal denoising loop
         current_start_frame = 0
-        if initial_latent is not None:
-            timestep = torch.ones(
-                [batch_size, 1], device=noise.device, dtype=torch.int64) * 0
-            self._assert_causal_timestep(
-                timestep,
-                batch_size=batch_size,
-                num_frames=1,
-                name="initial_context_timestep",
-            )
-            output[:, :1] = initial_latent
-            with torch.no_grad():
-                # Build input kwargs for initial latent
-                training_batch_temp = self._build_distill_input_kwargs(
-                    initial_latent,
-                    timestep * 0,
-                    training_batch.conditional_dict,
-                    training_batch,
-                    frame_start=0,
-                    frame_end=1,
-                    num_frame_per_block=1)
-                
-                self.transformer(
-                    **training_batch_temp.input_kwargs,
-                    kv_cache=self.kv_cache1,
-                    kv_cache_mouse=self.kv_cache_mouse,
-                    kv_cache_keyboard=self.kv_cache_keyboard,
-                    crossattn_cache=self.crossattn_cache,
-                    current_start=current_start_frame * self.frame_seq_length,
-                    start_frame=current_start_frame)
-            current_start_frame += 1
-
-        # Step 3: Temporal denoising loop
         all_num_frames = [self.num_frame_per_block] * num_blocks
-        if self.independent_first_frame and initial_latent is None:
-            all_num_frames = [1] + all_num_frames
         num_denoising_steps = len(self.denoising_step_list)
         exit_flags = self.generate_and_sync_list(len(all_num_frames),
                                                  num_denoising_steps,
@@ -513,17 +748,13 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         start_gradient_frame_index = max(0, num_output_frames - 21)
 
         for block_index, current_num_frames in enumerate(all_num_frames):
-            noisy_input = noise[:, current_start_frame -
-                                num_input_frames:current_start_frame +
-                                current_num_frames - num_input_frames]
+            noisy_input = noise[
+                :, current_start_frame:current_start_frame + current_num_frames
+            ]
 
-            # Step 3.1: Spatial denoising loop
+            # Step 2.1: Spatial denoising loop
             for index, current_timestep in enumerate(self.denoising_step_list):
-                if self.same_step_across_blocks:
-                    exit_flag = (index == exit_flags[0])
-                else:
-                    exit_flag = (index == exit_flags[block_index])
-
+                exit_flag = (index == exit_flags[0])
                 timestep = torch.ones([batch_size, current_num_frames],
                                       device=noise.device,
                                       dtype=torch.int64) * current_timestep
@@ -538,86 +769,93 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
                 if not exit_flag:
                     with torch.no_grad():
-                        # Build input kwargs
-                        training_batch_temp = self._build_distill_input_kwargs(
+                        input_kwargs = self._build_generator_input_kwargs(
                             noisy_input,
                             timestep,
-                            training_batch.conditional_dict,
                             training_batch,
                             frame_start=current_start_frame,
                             frame_end=current_start_frame + current_num_frames,
-                            num_frame_per_block=current_num_frames)
+                            num_frame_per_block=current_num_frames,
+                        )
+                        training_batch.noise_latents = noisy_input
 
                         pred_flow = current_model(
-                            **training_batch_temp.input_kwargs,
+                            **input_kwargs,
                             kv_cache=self.kv_cache1,
                             kv_cache_mouse=self.kv_cache_mouse,
                             kv_cache_keyboard=self.kv_cache_keyboard,
                             crossattn_cache=self.crossattn_cache,
                             current_start=current_start_frame *
                             self.frame_seq_length,
-                            start_frame=current_start_frame).permute(
+                            start_frame=current_start_frame,
+                            update_kv_cache=False).permute(
                                 0, 2, 1, 3, 4)
 
-                        denoised_pred = pred_noise_to_pred_video(
-                            pred_noise=pred_flow.flatten(0, 1),
-                            noise_input_latent=noisy_input.flatten(0, 1),
-                            timestep=timestep,
-                            scheduler=self.noise_scheduler).unflatten(
-                                0, pred_flow.shape[:2])
+                    denoised_pred = pred_noise_to_pred_video(
+                        pred_noise=pred_flow.flatten(0, 1),
+                        noise_input_latent=noisy_input.flatten(0, 1),
+                        timestep=timestep,
+                        scheduler=self.noise_scheduler,
+                    ).unflatten(0, pred_flow.shape[:2])
 
-                        next_timestep = self.denoising_step_list[index + 1]
-                        noisy_input = self.noise_scheduler.add_noise(
-                            denoised_pred.flatten(0, 1),
-                            torch.randn_like(denoised_pred.flatten(0, 1)),
-                            next_timestep *
-                            torch.ones([batch_size * current_num_frames],
-                                       device=noise.device,
-                                       dtype=torch.long)).unflatten(
-                                           0, denoised_pred.shape[:2])
+                    next_timestep = self.denoising_step_list[index + 1]
+                    noisy_input = self.noise_scheduler.add_noise(
+                        denoised_pred.flatten(0, 1),
+                        torch.randn_like(denoised_pred.flatten(0, 1)),
+                        next_timestep
+                        * torch.ones(
+                            [batch_size * current_num_frames],
+                            device=noise.device,
+                            dtype=torch.long,
+                        ),
+                    ).unflatten(0, denoised_pred.shape[:2])
                 else:
                     # Final prediction with gradient control
                     if current_start_frame < start_gradient_frame_index:
                         with torch.no_grad():
-                            training_batch_temp = self._build_distill_input_kwargs(
+                            input_kwargs = self._build_generator_input_kwargs(
                                 noisy_input,
                                 timestep,
-                                training_batch.conditional_dict,
                                 training_batch,
                                 frame_start=current_start_frame,
                                 frame_end=current_start_frame +
                                 current_num_frames,
-                                num_frame_per_block=current_num_frames)
+                                num_frame_per_block=current_num_frames,
+                            )
+                            training_batch.noise_latents = noisy_input
 
                             pred_flow = current_model(
-                                **training_batch_temp.input_kwargs,
+                                **input_kwargs,
                                 kv_cache=self.kv_cache1,
                                 kv_cache_mouse=self.kv_cache_mouse,
                                 kv_cache_keyboard=self.kv_cache_keyboard,
                                 crossattn_cache=self.crossattn_cache,
                                 current_start=current_start_frame *
                                 self.frame_seq_length,
-                                start_frame=current_start_frame).permute(
+                                start_frame=current_start_frame,
+                                update_kv_cache=False).permute(
                                     0, 2, 1, 3, 4)
                     else:
-                        training_batch_temp = self._build_distill_input_kwargs(
+                        input_kwargs = self._build_generator_input_kwargs(
                             noisy_input,
                             timestep,
-                            training_batch.conditional_dict,
                             training_batch,
                             frame_start=current_start_frame,
                             frame_end=current_start_frame + current_num_frames,
-                            num_frame_per_block=current_num_frames)
+                            num_frame_per_block=current_num_frames,
+                        )
+                        training_batch.noise_latents = noisy_input
 
                         pred_flow = current_model(
-                            **training_batch_temp.input_kwargs,
+                            **input_kwargs,
                             kv_cache=self.kv_cache1,
                             kv_cache_mouse=self.kv_cache_mouse,
                             kv_cache_keyboard=self.kv_cache_keyboard,
                             crossattn_cache=self.crossattn_cache,
                             current_start=current_start_frame *
                             self.frame_seq_length,
-                            start_frame=current_start_frame).permute(
+                            start_frame=current_start_frame,
+                            update_kv_cache=False).permute(
                                 0, 2, 1, 3, 4)
 
                     denoised_pred = pred_noise_to_pred_video(
@@ -646,110 +884,42 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 context_timestep).unflatten(0, denoised_pred.shape[:2])
 
             with torch.no_grad():
-                training_batch_temp = self._build_distill_input_kwargs(
+                input_kwargs = self._build_generator_input_kwargs(
                     denoised_pred,
                     context_timestep,
-                    training_batch.conditional_dict,
                     training_batch,
                     frame_start=current_start_frame,
                     frame_end=current_start_frame + current_num_frames,
-                    num_frame_per_block=current_num_frames)
+                    num_frame_per_block=current_num_frames,
+                )
+                training_batch.noise_latents = denoised_pred
 
                 self.transformer(
-                    **training_batch_temp.input_kwargs,
+                    **input_kwargs,
                     kv_cache=self.kv_cache1,
                     kv_cache_mouse=self.kv_cache_mouse,
                     kv_cache_keyboard=self.kv_cache_keyboard,
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
-                    start_frame=current_start_frame)
+                    start_frame=current_start_frame,
+                    update_kv_cache=True)
 
-            # Step 3.4: update the start and end frame indices
+            # Step 2.4: update the start and end frame indices
             current_start_frame += current_num_frames
 
-        # Handle last 21 frames logic
-        pred_image_or_video = output
-        if num_input_frames > 0:
-            pred_image_or_video = output[:, num_input_frames:]
+        denoised_timestep_from, denoised_timestep_to = (
+            self._get_self_forcing_timestep_bounds(exit_flags[0])
+        )
+        training_batch.denoised_timestep_from = denoised_timestep_from
+        training_batch.denoised_timestep_to = denoised_timestep_to
 
-        # Slice last 21 frames if we generated more
-        gradient_mask = None
-        if pred_image_or_video.shape[1] > 21:
-            with torch.no_grad():
-                # Re-encode to get image latent
-                latent_to_decode = pred_image_or_video[:, :-20, ...]
-                # Decode to video
-                latent_to_decode = latent_to_decode.permute(
-                    0, 2, 1, 3, 4)  # [B, C, F, H, W]
-
-                # Apply VAE scaling and shift factors
-                if isinstance(self.vae.scaling_factor, torch.Tensor):
-                    latent_to_decode = latent_to_decode / self.vae.scaling_factor.to(
-                        latent_to_decode.device, latent_to_decode.dtype)
-                else:
-                    latent_to_decode = latent_to_decode / self.vae.scaling_factor
-
-                if hasattr(
-                        self.vae,
-                        "shift_factor") and self.vae.shift_factor is not None:
-                    if isinstance(self.vae.shift_factor, torch.Tensor):
-                        latent_to_decode += self.vae.shift_factor.to(
-                            latent_to_decode.device, latent_to_decode.dtype)
-                    else:
-                        latent_to_decode += self.vae.shift_factor
-
-                # Decode to pixels
-                pixels = self.vae.decode(latent_to_decode)
-                frame = pixels[:, :, -1:, :, :].to(
-                    dtype)  # Last frame [B, C, 1, H, W]
-
-                # Encode frame back to get image latent
-                image_latent = self.vae.encode(frame).to(dtype)
-                image_latent = image_latent.permute(0, 2, 1, 3,
-                                                    4)  # [B, F, C, H, W]
-
-            pred_image_or_video_last_21 = torch.cat(
-                [image_latent, pred_image_or_video[:, -20:, ...]], dim=1)
-        else:
-            pred_image_or_video_last_21 = pred_image_or_video
-
-        # Set up gradient mask if we generated more than minimum frames
-        if num_generated_frames != min_num_frames:
-            # Currently, we do not use gradient for the first chunk, since it contains image latents
-            gradient_mask = torch.ones_like(pred_image_or_video_last_21,
-                                            dtype=torch.bool)
-            if self.independent_first_frame:
-                gradient_mask[:, :1] = False
-            else:
-                gradient_mask[:, :self.num_frame_per_block] = False
-
-        # Apply gradient masking if needed
-        final_output = pred_image_or_video_last_21.to(dtype)
-        if gradient_mask is not None:
-            # Apply gradient masking: detach frames that shouldn't contribute gradients
-            final_output = torch.where(
-                gradient_mask,
-                pred_image_or_video_last_21,  # Keep original values where gradient_mask is True
-                pred_image_or_video_last_21.detach(
-                )  # Detach where gradient_mask is False
-            )
+        final_output = output.to(dtype)
 
         # Store visualization data
         training_batch.dmd_latent_vis_dict["generator_timestep"] = torch.tensor(
             self.denoising_step_list[exit_flags[0]],
             dtype=torch.float32,
             device=self.device)
-
-        # Store gradient mask information for debugging
-        if gradient_mask is not None:
-            training_batch.dmd_latent_vis_dict[
-                "gradient_mask"] = gradient_mask.float()
-            training_batch.dmd_latent_vis_dict[
-                "num_generated_frames"] = torch.tensor(num_generated_frames,
-                                                       dtype=torch.float32,
-                                                       device=self.device)
-            training_batch.dmd_latent_vis_dict["min_num_frames"] = torch.tensor(
-                min_num_frames, dtype=torch.float32, device=self.device)
 
         # Clean up caches
         assert self.kv_cache1 is not None
@@ -758,7 +928,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                                       self.kv_cache_mouse,
                                       self.kv_cache_keyboard)
 
-        return final_output if gradient_mask is not None else pred_image_or_video
+        return final_output
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing validation pipeline...")
@@ -831,6 +1001,10 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         training_batch.encoder_attention_mask = None
         training_batch.image_embeds = clip_feature.to(get_local_torch_device(),
                                                       dtype=torch.bfloat16)
+        # Normal MatrixGame parquet stores the raw 16-channel first-frame
+        # latent. `_prepare_dit_inputs` upgrades it to cond_concat [mask(4),
+        # image_latent(16)] for both causal student rollout and non-causal
+        # teacher/critic forwards.
         training_batch.image_latents = first_frame_latent.to(
             get_local_torch_device(), dtype=torch.bfloat16)
         if training_batch.image_latents.ndim != 5:
@@ -863,13 +1037,14 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         image_latents = training_batch.image_latents.to(
             get_local_torch_device(), dtype=torch.bfloat16)
 
-        # cond_concat = [mask(4), image_latent(16)] with 20 channels.
-        expected_cond_channels = 20
-        if image_latents.shape[1] != expected_cond_channels:
+        if image_latents.shape[1] == 16:
+            image_latents = self._build_matrixgame_cond_concat(image_latents)
+        elif image_latents.shape[1] != 20:
             raise ValueError(
-                "Unexpected first_frame_latent channels, "
-                f"expected {expected_cond_channels} (cond_concat), "
-                f"got {image_latents.shape[1]}."
+                "MatrixGame self-forcing expects either a 16-channel "
+                "first_frame_latent from pyarrow_schema_matrixgame or a "
+                "20-channel MatrixGame cond_concat tensor, got "
+                f"{image_latents.shape[1]} channels."
             )
 
         if self.sp_world_size > 1:
@@ -896,81 +1071,28 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             self,
             noise_input: torch.Tensor,
             timestep: torch.Tensor,
-            text_dict: dict[str, torch.Tensor] | None,
             training_batch: TrainingBatch,
             frame_start: int | None = None,
             frame_end: int | None = None,
             num_frame_per_block: int | None = None) -> TrainingBatch:
-        # Image Embeds for conditioning
-        image_embeds = training_batch.image_embeds
-        if image_embeds is None:
-            raise ValueError("training_batch.image_embeds must be set")
-        assert torch.isnan(image_embeds).sum() == 0
-        image_embeds = image_embeds.to(get_local_torch_device(),
-                                       dtype=torch.bfloat16)
-
-        image_latents = training_batch.image_latents
-        if image_latents is None:
-            raise ValueError("training_batch.image_latents must be set")
         if frame_start is not None and frame_end is not None:
-            self._assert_matrixgame_i2v_inputs(
+            if num_frame_per_block is None:
+                num_frame_per_block = frame_end - frame_start
+            input_kwargs = self._build_generator_input_kwargs(
+                noise_input,
+                timestep,
                 training_batch,
                 frame_start=frame_start,
                 frame_end=frame_end,
-                noise_input=noise_input,
+                num_frame_per_block=num_frame_per_block,
             )
-            self._assert_action_inputs(training_batch, frame_end=frame_end)
-            image_latents = image_latents[:, :, frame_start:frame_end, :, :]
         else:
-            self._assert_matrixgame_i2v_inputs(
-                training_batch,
-                noise_input=noise_input,
-            )
-
-        vae_temporal_compression_ratio = self.vae_time_compression_ratio
-        if frame_end is not None:
-            action_frame_end = (frame_end -
-                                1) * vae_temporal_compression_ratio + 1
-            keyboard_cond_sliced = training_batch.keyboard_cond[:, :
-                                                                action_frame_end, :] if training_batch.keyboard_cond is not None else None
-            mouse_cond_sliced = training_batch.mouse_cond[:, :
-                                                          action_frame_end, :] if training_batch.mouse_cond is not None else None
-        else:
-            keyboard_cond_sliced = training_batch.keyboard_cond
-            mouse_cond_sliced = training_batch.mouse_cond
-
-        noisy_model_input = torch.cat(
-            [noise_input, image_latents.permute(0, 2, 1, 3, 4)], dim=2)
-        expected_channels = noise_input.shape[2] + image_latents.shape[1]
-        if noisy_model_input.shape[2] != expected_channels:
-            raise ValueError(
-                "Unexpected MatrixGame noisy_model_input channel count: "
-                f"got {noisy_model_input.shape[2]}, expected {expected_channels}"
-            )
-        if timestep.ndim == 1:
-            if timestep.shape[0] != noise_input.shape[0]:
-                raise ValueError(
-                    "1D timestep for MatrixGame critic path must have shape [B], "
-                    f"got {tuple(timestep.shape)}"
-                )
-        else:
-            self._assert_causal_timestep(
+            input_kwargs = self._build_score_model_input_kwargs(
+                noise_input,
                 timestep,
-                batch_size=noise_input.shape[0],
-                num_frames=noise_input.shape[1],
-                name="distill_timestep",
+                training_batch,
             )
-
-        training_batch.input_kwargs = {
-            "hidden_states": noisy_model_input.permute(0, 2, 1, 3,
-                                                       4),  # bs, c, t, h, w
-            "encoder_hidden_states": None,
-            "timestep": timestep,
-            "encoder_hidden_states_image": image_embeds,
-            "keyboard_cond": keyboard_cond_sliced,
-            "mouse_cond": mouse_cond_sliced,
-            "num_frame_per_block": num_frame_per_block if num_frame_per_block is not None else self.num_frame_per_block,
-        }
+        training_batch.input_kwargs = input_kwargs
         training_batch.noise_latents = noise_input
 
         return training_batch
@@ -979,66 +1101,54 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                      training_batch: TrainingBatch) -> torch.Tensor:
         """Compute DMD (Diffusion Model Distillation) loss for MatrixGame."""
         original_latent = generator_pred_video
+        batch_size, num_frames = generator_pred_video.shape[:2]
+        denoised_timestep_from = training_batch.denoised_timestep_from
+        denoised_timestep_to = training_batch.denoised_timestep_to
         with torch.no_grad():
-            timestep = torch.randint(0,
-                                     self.num_train_timestep, [1],
-                                     device=self.device,
-                                     dtype=torch.long)
-
-            timestep = shift_timestep(timestep, self.timestep_shift,
-                                      self.num_train_timestep)
-
-            timestep = timestep.clamp(self.min_timestep, self.max_timestep)
-
-            noise = torch.randn(self.video_latent_shape,
-                                device=self.device,
-                                dtype=generator_pred_video.dtype)
-            if tuple(self.video_latent_shape[:2]) != tuple(
-                    generator_pred_video.shape[:2]):
-                raise ValueError(
-                    "video_latent_shape and generator_pred_video disagree on "
-                    "batch/frame dimensions: "
-                    f"{tuple(self.video_latent_shape[:2])} vs "
-                    f"{tuple(generator_pred_video.shape[:2])}"
-                )
+            critic_timestep = self._sample_restricted_batch_timesteps(
+                batch_size,
+                denoised_timestep_from=denoised_timestep_from,
+                denoised_timestep_to=denoised_timestep_to,
+            )
+            scheduler_timestep = critic_timestep.repeat_interleave(num_frames)
+            noise = torch.randn_like(generator_pred_video)
 
             noisy_latent = self.noise_scheduler.add_noise(
-                generator_pred_video.flatten(0, 1), noise.flatten(0, 1),
-                timestep).detach().unflatten(0, (generator_pred_video.shape[0],
-                                                 generator_pred_video.shape[1]))
+                generator_pred_video.flatten(0, 1),
+                noise.flatten(0, 1),
+                scheduler_timestep,
+            ).detach().unflatten(0, (batch_size, num_frames))
 
-            # Non-causal models expect 1D timestep (batch_size,)
-            critic_timestep = timestep.expand(noisy_latent.shape[0])
-
-            self._build_distill_input_kwargs(
-                noisy_latent, critic_timestep, None, training_batch
+            score_input_kwargs = self._build_score_model_input_kwargs(
+                noisy_latent, critic_timestep, training_batch
             )
+            training_batch.noise_latents = noisy_latent
 
             # fake_score_transformer forward
             current_fake_score_transformer = self._get_fake_score_transformer(
-                timestep)
+                critic_timestep[:1])
             fake_score_pred_noise = current_fake_score_transformer(
-                **training_batch.input_kwargs
+                **score_input_kwargs
             ).permute(0, 2, 1, 3, 4)
 
             faker_score_pred_video = pred_noise_to_pred_video(
                 pred_noise=fake_score_pred_noise.flatten(0, 1),
                 noise_input_latent=noisy_latent.flatten(0, 1),
-                timestep=timestep,
+                timestep=scheduler_timestep,
                 scheduler=self.noise_scheduler).unflatten(
                     0, fake_score_pred_noise.shape[:2])
 
             # real_score_transformer forward
             current_real_score_transformer = self._get_real_score_transformer(
-                timestep)
+                critic_timestep[:1])
             real_score_pred_noise = current_real_score_transformer(
-                **training_batch.input_kwargs
+                **score_input_kwargs
             ).permute(0, 2, 1, 3, 4)
 
             real_score_pred_video = pred_noise_to_pred_video(
                 pred_noise=real_score_pred_noise.flatten(0, 1),
                 noise_input_latent=noisy_latent.flatten(0, 1),
-                timestep=timestep,
+                timestep=scheduler_timestep,
                 scheduler=self.noise_scheduler).unflatten(
                     0, real_score_pred_noise.shape[:2])
 
@@ -1047,9 +1157,10 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 original_latent - real_score_pred_video).mean()
             grad = torch.nan_to_num(grad)
 
+        dmd_target = (original_latent.float() - grad.float()).detach()
         dmd_loss = 0.5 * F.mse_loss(
-            original_latent.float(),
-            (original_latent.float() - grad.float()).detach())
+            original_latent.float(), dmd_target, reduction="mean"
+        )
 
         training_batch.dmd_latent_vis_dict.update({
             "training_batch_dmd_fwd_clean_latent":
@@ -1061,7 +1172,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             "faker_score_pred_video":
             faker_score_pred_video.detach(),
             "dmd_timestep":
-            timestep.detach(),
+            critic_timestep.detach(),
         })
 
         return dmd_loss
@@ -1073,55 +1184,38 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         with torch.no_grad(), set_forward_context(
                 current_timestep=training_batch.timesteps,
                 attn_metadata=training_batch.attn_metadata_vsa):
-            if self.training_args.simulate_generator_forward:
-                generator_pred_video = self._generator_multi_step_simulation_forward(
-                    training_batch)
-            else:
-                generator_pred_video = self._generator_forward(training_batch)
+            generator_pred_video = self._generator_multi_step_simulation_forward(
+                training_batch)
 
-        fake_score_timestep = torch.randint(0,
-                                            self.num_train_timestep, [1],
-                                            device=self.device,
-                                            dtype=torch.long)
-
-        fake_score_timestep = shift_timestep(fake_score_timestep,
-                                             self.timestep_shift,
-                                             self.num_train_timestep)
-
-        fake_score_timestep = fake_score_timestep.clamp(self.min_timestep,
-                                                        self.max_timestep)
-
-        fake_score_noise = torch.randn(self.video_latent_shape,
-                                       device=self.device,
-                                       dtype=generator_pred_video.dtype)
-        if tuple(self.video_latent_shape[:2]) != tuple(
-                generator_pred_video.shape[:2]):
-            raise ValueError(
-                "video_latent_shape and generator_pred_video disagree on "
-                "batch/frame dimensions: "
-                f"{tuple(self.video_latent_shape[:2])} vs "
-                f"{tuple(generator_pred_video.shape[:2])}"
-            )
+        batch_size, num_frames = generator_pred_video.shape[:2]
+        fake_score_timestep = self._sample_restricted_batch_timesteps(
+            batch_size,
+            denoised_timestep_from=training_batch.denoised_timestep_from,
+            denoised_timestep_to=training_batch.denoised_timestep_to,
+        )
+        scheduler_timestep = fake_score_timestep.repeat_interleave(num_frames)
+        fake_score_noise = torch.randn_like(generator_pred_video)
 
         noisy_generator_pred_video = self.noise_scheduler.add_noise(
             generator_pred_video.flatten(0, 1),
-            fake_score_noise.flatten(0, 1), fake_score_timestep).unflatten(
-                0,
-                (generator_pred_video.shape[0], generator_pred_video.shape[1]))
+            fake_score_noise.flatten(0, 1),
+            scheduler_timestep,
+        ).unflatten(0, (batch_size, num_frames))
 
-        # Non-causal critic expects 1D timestep (batch_size,), not 2D (batch_size, num_frames).
-        expanded_fake_score_timestep = fake_score_timestep.expand(
-            noisy_generator_pred_video.shape[0])
-
-        self._build_distill_input_kwargs(
-            noisy_generator_pred_video, expanded_fake_score_timestep, None, training_batch
+        score_input_kwargs = self._build_score_model_input_kwargs(
+            noisy_generator_pred_video,
+            fake_score_timestep,
+            training_batch,
         )
+        training_batch.noise_latents = noisy_generator_pred_video
 
         with set_forward_context(current_timestep=training_batch.timesteps,
                                  attn_metadata=training_batch.attn_metadata):
-            current_fake_score_transformer = self._get_fake_score_transformer(fake_score_timestep)
+            current_fake_score_transformer = self._get_fake_score_transformer(
+                fake_score_timestep[:1]
+            )
             fake_score_pred_noise = current_fake_score_transformer(
-                **training_batch.input_kwargs
+                **score_input_kwargs
             ).permute(0, 2, 1, 3, 4)
 
         target = fake_score_noise - generator_pred_video
@@ -1140,7 +1234,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                                   training_args: TrainingArgs,
                                   validation_batch: dict[str, Any],
                                   num_inference_steps: int) -> ForwardBatch:
-        sampling_param.prompt = validation_batch['prompt']
+        sampling_param.prompt = ""
         sampling_param.height = training_args.num_height
         sampling_param.width = training_args.num_width
         sampling_param.image_path = validation_batch.get(

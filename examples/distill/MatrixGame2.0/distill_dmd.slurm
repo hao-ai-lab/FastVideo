@@ -36,8 +36,10 @@ echo "RUN_NAME: $RUN_NAME"
 
 # Model paths for Self-Forcing DMD distillation:
 GENERATOR_MODEL_PATH="../mg_models/Solaris-6Ksteps-Causal-0228"
-REAL_SCORE_MODEL_PATH="../mg_models/Solaris-20Ksteps-0301"  # Teacher model
-FAKE_SCORE_MODEL_PATH="../mg_models/Solaris-20Ksteps-0301"  # Critic model
+# REAL_SCORE_MODEL_PATH="../mg_models/Solaris-20Ksteps-0301"  # Teacher mode
+# FAKE_SCORE_MODEL_PATH="../mg_models/Solaris-20Ksteps-0301"  # Critic model
+REAL_SCORE_MODEL_PATH="../mg_models/Solaris-10Ksteps-0301"  # Teacher mode
+FAKE_SCORE_MODEL_PATH="../mg_models/Solaris-10Ksteps-0301"  # Critic model
 
 DATA_DIR="../solaris/datasets/train/preprocessed_0228_81"
 VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation.json"
@@ -47,7 +49,7 @@ training_args=(
   --tracker_project_name "matrixgame_sf"
   --output_dir "checkpoints/matrixgame_sf_${RUN_NAME}"
   --wandb_run_name "${RUN_NAME}_test"
-  --max_train_steps 1000
+  --max_train_steps 1200
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1

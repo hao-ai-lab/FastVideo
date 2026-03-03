@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=mg-df
 #SBATCH --partition=main
-#SBATCH --nodes=2
-#SBATCH --ntasks=2
+#SBATCH --nodes=4
+#SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -35,9 +35,8 @@ RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
 # Configs
-MODEL_PATH="../mg_models/Solaris-6Ksteps-0228"
-CKPT_PATH="checkpoints/matrixgame_finetune_0228_2257/checkpoint-6000/transformer/diffusion_pytorch_model.safetensors"
-DATA_DIR="../solaris/datasets/train/preprocessed_0227"
+MODEL_PATH="../mg_models/Solaris-20Ksteps-0301"
+DATA_DIR="../solaris/datasets/train/preprocessed_0228_81"
 VALIDATION_DATASET_FILE="examples/training/finetune/MatrixGame2.0/validation_df.json"
 
 # Training arguments
@@ -45,14 +44,14 @@ training_args=(
   --tracker_project_name "mg_finetune_solaris_df"
   --output_dir "checkpoints/matrixgame_df_${RUN_NAME}"
   --wandb_run_name "${RUN_NAME}_df_test"
-  --max_train_steps 2000
+  --max_train_steps 10000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 18
+  --num_latent_t 21
   --num_height 352
   --num_width 640
-  --num_frames 69
+  --num_frames 81
   --num_frame_per_block 3
   # --enable_gradient_checkpointing_type "full"
   # --init_weights_from_safetensors $CKPT_PATH
@@ -60,11 +59,11 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 16
+  --num_gpus 32
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 16
+  --hsdp_shard_dim 32
 )
 
 # Model arguments
