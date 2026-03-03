@@ -3,8 +3,11 @@
 import Image from "next/image";
 import headerStyles from "@styles/Header.module.css";
 import CreateJobButton from "./CreateJobButton";
+import { useHeaderTitle } from "@/contexts/ActiveTabContext";
 
 export default function Header() {
+  const title = useHeaderTitle();
+
   return (
     <header className={headerStyles.header}>
       <Image
@@ -14,7 +17,7 @@ export default function Header() {
         height={105}
         className={headerStyles.logo}
       />
-      <h1 className={headerStyles.title}>Jobs</h1>
+      <h1 className={headerStyles.title}>{title}</h1>
       <CreateJobButton />
     </header>
   );
