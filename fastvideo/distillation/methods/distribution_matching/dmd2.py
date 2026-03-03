@@ -26,20 +26,30 @@ Config keys used (YAML schema-v2):
 
 from __future__ import annotations
 
-from typing import Any, cast, Literal, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
 
-from fastvideo.training.training_utils import (
-    clip_grad_norm_while_handling_failing_dtensor_cases,
-    get_scheduler,
-)
-
-from fastvideo.distillation.roles import RoleManager
-from fastvideo.distillation.roles import RoleHandle
 from fastvideo.distillation.methods.base import DistillMethod, LogScalar
 from fastvideo.distillation.dispatch import register_method
+from fastvideo.distillation.roles import RoleManager
+from fastvideo.distillation.utils.optimizer import (
+    build_role_optimizer_and_scheduler,
+    clip_grad_norm_if_needed,
+)
+from fastvideo.distillation.utils.validation import (
+    is_validation_enabled,
+    parse_validation_dataset_file,
+    parse_validation_every_steps,
+    parse_validation_guidance_scale,
+    parse_validation_num_frames,
+    parse_validation_ode_solver,
+    parse_validation_output_dir,
+    parse_validation_rollout_mode,
+    parse_validation_sampler_kind,
+    parse_validation_sampling_steps,
+)
 from fastvideo.distillation.validators.base import ValidationRequest
 from fastvideo.distillation.utils.config import (
     DistillRunConfig,
@@ -220,9 +230,9 @@ class DMD2Method(DistillMethod):
     def optimizers_schedulers_step(self, iteration: int) -> None:
         if self._should_update_student(iteration):
             for module in self.bundle.role("student").modules.values():
-                self._clip_grad_norm(module)
+                clip_grad_norm_if_needed(module, self.training_args)
         for module in self.bundle.role("critic").modules.values():
-            self._clip_grad_norm(module)
+            clip_grad_norm_if_needed(module, self.training_args)
 
         super().optimizers_schedulers_step(iteration)
 
@@ -235,17 +245,17 @@ class DMD2Method(DistillMethod):
         validator = getattr(self, "validator", None)
         if validator is None:
             return
-        if not self._is_validation_enabled():
+        if not is_validation_enabled(self.validation_config):
             return
 
-        every_steps = self._parse_validation_every_steps()
+        every_steps = parse_validation_every_steps(self.validation_config)
         if every_steps <= 0:
             return
         if iteration % every_steps != 0:
             return
 
-        dataset_file = self._parse_validation_dataset_file()
-        sampling_steps = self._parse_validation_sampling_steps()
+        dataset_file = parse_validation_dataset_file(self.validation_config)
+        sampling_steps = parse_validation_sampling_steps(self.validation_config)
 
         sampling_timesteps: list[int] | None = None
         raw_timesteps = self.validation_config.get("sampling_timesteps", None)
@@ -260,63 +270,27 @@ class DMD2Method(DistillMethod):
                 return
             sampling_steps = [int(len(sampling_timesteps))]
 
-        sampler_kind = self.validation_config.get("sampler_kind", "sde")
-        if sampler_kind is None:
-            sampler_kind = "sde"
-        if not isinstance(sampler_kind, str):
-            raise ValueError(
-                "training.validation.sampler_kind must be a string, got "
-                f"{type(sampler_kind).__name__}"
-            )
-        sampler_kind = sampler_kind.strip().lower()
-        if sampler_kind not in {"ode", "sde"}:
-            raise ValueError(
-                "training.validation.sampler_kind must be one of {ode, sde}, got "
-                f"{sampler_kind!r}"
-            )
-        sampler_kind = cast(Literal["ode", "sde"], sampler_kind)
-        ode_solver = self._parse_validation_ode_solver(sampler_kind=sampler_kind)
+        sampler_kind = parse_validation_sampler_kind(self.validation_config, default="sde")
+        ode_solver = parse_validation_ode_solver(
+            self.validation_config, sampler_kind=sampler_kind
+        )
         if sampling_timesteps is not None and sampler_kind != "sde":
             raise ValueError(
                 "method_config.validation.sampling_timesteps is only valid when "
                 "sampler_kind='sde'"
             )
 
-        rollout_mode_raw = self.validation_config.get("rollout_mode", "parallel")
-        if not isinstance(rollout_mode_raw, str):
-            raise ValueError(
-                "training.validation.rollout_mode must be a string when set, got "
-                f"{type(rollout_mode_raw).__name__}"
-            )
-        rollout_mode = rollout_mode_raw.strip().lower()
-        if rollout_mode not in {"parallel", "streaming"}:
-            raise ValueError(
-                "training.validation.rollout_mode must be one of {parallel, streaming}, "
-                f"got {rollout_mode_raw!r}"
-            )
-
-        guidance_scale = self._parse_validation_guidance_scale()
-        output_dir = self.validation_config.get("output_dir", None)
-        if output_dir is not None and not isinstance(output_dir, str):
-            raise ValueError(
-                "training.validation.output_dir must be a string when set, got "
-                f"{type(output_dir).__name__}"
-            )
-
-        num_actions = get_optional_int(
-            self.validation_config,
-            "num_frames",
-            where="training.validation.num_frames",
-        )
-        if num_actions is not None and num_actions <= 0:
-            raise ValueError("training.validation.num_frames must be > 0 when set")
+        rollout_mode = parse_validation_rollout_mode(self.validation_config)
+        guidance_scale = parse_validation_guidance_scale(self.validation_config)
+        output_dir = parse_validation_output_dir(self.validation_config)
+        num_actions = parse_validation_num_frames(self.validation_config)
 
         request = ValidationRequest(
             sample_handle=self.student,
             dataset_file=dataset_file,
             sampling_steps=sampling_steps,
             sampler_kind=sampler_kind,
-            rollout_mode=cast(Literal["parallel", "streaming"], rollout_mode),
+            rollout_mode=rollout_mode,
             ode_solver=ode_solver,
             sampling_timesteps=sampling_timesteps,
             guidance_scale=guidance_scale,
@@ -416,44 +390,6 @@ class DMD2Method(DistillMethod):
 
         return cfg
 
-    def _build_role_optimizer_and_scheduler(
-        self,
-        *,
-        role: str,
-        handle: RoleHandle,
-        learning_rate: float,
-        betas: tuple[float, float],
-        scheduler_name: str,
-    ) -> None:
-        modules = handle.modules
-        params: list[torch.nn.Parameter] = []
-        for module in modules.values():
-            params.extend([p for p in module.parameters() if p.requires_grad])
-        if not params:
-            raise ValueError(f"Role {role!r} is trainable but has no trainable parameters")
-
-        optimizer = torch.optim.AdamW(
-            params,
-            lr=float(learning_rate),
-            betas=betas,
-            weight_decay=float(getattr(self.training_args, "weight_decay", 0.0) or 0.0),
-            eps=1e-8,
-        )
-
-        scheduler = get_scheduler(
-            str(scheduler_name),
-            optimizer=optimizer,
-            num_warmup_steps=int(getattr(self.training_args, "lr_warmup_steps", 0) or 0),
-            num_training_steps=int(getattr(self.training_args, "max_train_steps", 0) or 0),
-            num_cycles=int(getattr(self.training_args, "lr_num_cycles", 0) or 0),
-            power=float(getattr(self.training_args, "lr_power", 0.0) or 0.0),
-            min_lr_ratio=float(getattr(self.training_args, "min_lr_ratio", 0.5) or 0.5),
-            last_epoch=-1,
-        )
-
-        handle.optimizers = {"main": optimizer}
-        handle.lr_schedulers = {"main": scheduler}
-
     def _init_optimizers_and_schedulers(self) -> None:
         training_args = self.training_args
 
@@ -464,9 +400,10 @@ class DMD2Method(DistillMethod):
             where="training.betas",
         )
         student_sched = str(getattr(training_args, "lr_scheduler", "constant"))
-        self._build_role_optimizer_and_scheduler(
+        build_role_optimizer_and_scheduler(
             role="student",
             handle=self.student,
+            training_args=self.training_args,
             learning_rate=student_lr,
             betas=student_betas,
             scheduler_name=student_sched,
@@ -483,120 +420,13 @@ class DMD2Method(DistillMethod):
         critic_betas = parse_betas(critic_betas_raw, where="training.fake_score_betas")
 
         critic_sched = str(getattr(training_args, "fake_score_lr_scheduler", None) or student_sched)
-        self._build_role_optimizer_and_scheduler(
+        build_role_optimizer_and_scheduler(
             role="critic",
             handle=self.critic,
+            training_args=self.training_args,
             learning_rate=critic_lr,
             betas=critic_betas,
             scheduler_name=critic_sched,
-        )
-
-    def _is_validation_enabled(self) -> bool:
-        cfg = self.validation_config
-        if not cfg:
-            return False
-        enabled = cfg.get("enabled", None)
-        if enabled is None:
-            return True
-        if isinstance(enabled, bool):
-            return bool(enabled)
-        raise ValueError(
-            "training.validation.enabled must be a bool when set, got "
-            f"{type(enabled).__name__}"
-        )
-
-    def _parse_validation_every_steps(self) -> int:
-        raw = self.validation_config.get("every_steps", None)
-        if raw is None:
-            raise ValueError("training.validation.every_steps must be set when validation is enabled")
-        if isinstance(raw, bool):
-            raise ValueError("training.validation.every_steps must be an int, got bool")
-        if isinstance(raw, int):
-            return int(raw)
-        if isinstance(raw, float) and raw.is_integer():
-            return int(raw)
-        if isinstance(raw, str) and raw.strip():
-            return int(raw)
-        raise ValueError(
-            "training.validation.every_steps must be an int, got "
-            f"{type(raw).__name__}"
-        )
-
-    def _parse_validation_dataset_file(self) -> str:
-        raw = self.validation_config.get("dataset_file", None)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(
-                "training.validation.dataset_file must be set when validation is enabled"
-            )
-        return raw.strip()
-
-    def _parse_validation_sampling_steps(self) -> list[int]:
-        raw = self.validation_config.get("sampling_steps")
-        steps: list[int] = []
-        if raw is None or raw == "":
-            raise ValueError(
-                "training.validation.sampling_steps must be set for validation"
-            )
-        if isinstance(raw, bool):
-            raise ValueError(
-                "validation sampling_steps must be an int/list/str, got bool"
-            )
-        if isinstance(raw, int) or (isinstance(raw, float) and raw.is_integer()):
-            steps = [int(raw)]
-        elif isinstance(raw, str):
-            steps = [int(s) for s in raw.split(",") if str(s).strip()]
-        elif isinstance(raw, list):
-            steps = [int(s) for s in raw]
-        else:
-            raise ValueError(
-                "validation sampling_steps must be an int/list/str, got "
-                f"{type(raw).__name__}"
-            )
-        return [s for s in steps if int(s) > 0]
-
-    def _parse_validation_guidance_scale(self) -> float | None:
-        raw = self.validation_config.get("guidance_scale")
-        if raw in (None, ""):
-            return None
-        if isinstance(raw, bool):
-            raise ValueError(
-                "validation guidance_scale must be a number/string, got bool"
-            )
-        if isinstance(raw, (int, float)):
-            return float(raw)
-        if isinstance(raw, str) and raw.strip():
-            return float(raw)
-        raise ValueError(
-            "validation guidance_scale must be a number/string, got "
-            f"{type(raw).__name__}"
-        )
-
-    def _parse_validation_ode_solver(
-        self,
-        *,
-        sampler_kind: Literal["ode", "sde"],
-    ) -> str | None:
-        raw = self.validation_config.get("ode_solver", None)
-        if raw in (None, ""):
-            return None
-        if sampler_kind != "ode":
-            raise ValueError(
-                "training.validation.ode_solver is only valid when "
-                "training.validation.sampler_kind='ode'"
-            )
-        if not isinstance(raw, str):
-            raise ValueError(
-                "training.validation.ode_solver must be a string when set, got "
-                f"{type(raw).__name__}"
-            )
-        solver = raw.strip().lower()
-        if solver in {"unipc", "unipc_multistep", "multistep"}:
-            return "unipc"
-        if solver in {"euler", "flowmatch", "flowmatch_euler"}:
-            return "euler"
-        raise ValueError(
-            "training.validation.ode_solver must be one of {unipc, euler}, got "
-            f"{raw!r}"
         )
 
     def _should_update_student(self, iteration: int) -> bool:
@@ -610,26 +440,6 @@ class DMD2Method(DistillMethod):
         if interval <= 0:
             return True
         return iteration % interval == 0
-
-    def _clip_grad_norm(self, module: torch.nn.Module) -> float:
-        max_grad_norm_raw = getattr(self.training_args, "max_grad_norm", None)
-        if max_grad_norm_raw is None:
-            return 0.0
-        try:
-            max_grad_norm = float(max_grad_norm_raw)
-        except (TypeError, ValueError) as e:
-            raise ValueError(
-                "training.max_grad_norm must be a number when set, got "
-                f"{max_grad_norm_raw!r}"
-            ) from e
-        if max_grad_norm <= 0.0:
-            return 0.0
-        grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
-            [p for p in module.parameters()],
-            max_grad_norm,
-            foreach=None,
-        )
-        return float(grad_norm.item()) if grad_norm is not None else 0.0
 
     def _get_denoising_step_list(self, device: torch.device) -> torch.Tensor:
         if self._denoising_step_list is not None and self._denoising_step_list.device == device:
