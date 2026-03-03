@@ -1,11 +1,12 @@
 'use client';
 
+import { Fragment } from "react";
 import Image from "next/image";
 import headerStyles from "@styles/Header.module.css";
-import CreateJobButton from "./CreateJobButton";
-import { useHeaderTitle } from "@/contexts/ActiveTabContext";
+import { useActiveTab, useHeaderTitle } from "@/contexts/ActiveTabContext";
 
 export default function Header() {
+  const { headerActions } = useActiveTab();
   const title = useHeaderTitle();
 
   return (
@@ -18,7 +19,13 @@ export default function Header() {
         className={headerStyles.logo}
       />
       <h1 className={headerStyles.title}>{title}</h1>
-      <CreateJobButton />
+      {headerActions.length > 0 && (
+        <div className={headerStyles.actions}>
+          {headerActions.map((action, i) => (
+            <Fragment key={i}>{action}</Fragment>
+          ))}
+        </div>
+      )}
     </header>
   );
 }
