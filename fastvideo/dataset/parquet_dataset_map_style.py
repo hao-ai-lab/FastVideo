@@ -36,6 +36,7 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
         global_rank: int,
         drop_last: bool = True,
         drop_first_row: bool = False,
+        reshuffle_each_epoch: bool = True,
         seed: int = 0,
     ):
         self.batch_size = batch_size
@@ -45,34 +46,41 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
         self.num_sp_groups = num_sp_groups
         self.global_rank = global_rank
         self.sp_world_size = sp_world_size
+        self.drop_first_row = drop_first_row
+        self.reshuffle_each_epoch = reshuffle_each_epoch
+        self.epoch = 0
 
+        self._build_indices(self.epoch)
+
+    def _build_indices(self, epoch: int) -> None:
         # ── epoch-level RNG ────────────────────────────────────────────────
-        rng = torch.Generator().manual_seed(self.seed)
+        rng = torch.Generator().manual_seed(self.seed + epoch)
         # Create a random permutation of all indices
         global_indices = torch.randperm(self.dataset_size, generator=rng)
 
-        if drop_first_row:
+        dataset_size = self.dataset_size
+        if self.drop_first_row:
             # drop 0 in global_indices
             global_indices = global_indices[global_indices != 0]
-            self.dataset_size = self.dataset_size - 1
+            dataset_size = dataset_size - 1
 
         if self.drop_last:
             # For drop_last=True, we:
             # 1. Ensure total samples is divisible by (batch_size * num_sp_groups)
             # 2. This guarantees each SP group gets same number of complete batches
             # 3. Prevents uneven batch sizes across SP groups at end of epoch
-            num_batches = self.dataset_size // self.batch_size
+            num_batches = dataset_size // self.batch_size
             num_global_batches = num_batches // self.num_sp_groups
             global_indices = global_indices[:num_global_batches *
                                             self.num_sp_groups *
                                             self.batch_size]
         else:
-            if self.dataset_size % (self.num_sp_groups * self.batch_size) != 0:
+            if dataset_size % (self.num_sp_groups * self.batch_size) != 0:
                 # add more indices to make it divisible by (batch_size * num_sp_groups)
                 padding_size = self.num_sp_groups * self.batch_size - (
-                    self.dataset_size % (self.num_sp_groups * self.batch_size))
+                    dataset_size % (self.num_sp_groups * self.batch_size))
                 logger.info("Padding the dataset from %d to %d",
-                            self.dataset_size, self.dataset_size + padding_size)
+                            dataset_size, dataset_size + padding_size)
                 global_indices = torch.cat(
                     [global_indices, global_indices[:padding_size]])
 
@@ -83,6 +91,12 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
         self.sp_group_local_indices = sp_group_local_indices
         logger.info("Dataset size for each sp group: %d",
                     len(sp_group_local_indices))
+
+    def set_epoch(self, epoch: int) -> None:
+        if not self.reshuffle_each_epoch:
+            return
+        self.epoch = epoch
+        self._build_indices(epoch)
 
     def __iter__(self):
         indices = self.sp_group_local_indices
@@ -275,6 +289,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         seed: int = 42,
         drop_last: bool = True,
         drop_first_row: bool = False,
+        reshuffle_each_epoch: bool = True,
         text_padding_length: int = 512,
     ):
         super().__init__()
@@ -297,6 +312,7 @@ class LatentsParquetMapStyleDataset(Dataset):
             global_rank=get_world_rank(),
             drop_last=drop_last,
             drop_first_row=drop_first_row,
+            reshuffle_each_epoch=reshuffle_each_epoch,
             seed=seed,
         )
         logger.info("Dataset initialized with %d parquet files and %d rows",
@@ -369,6 +385,7 @@ def build_parquet_map_style_dataloader(
         cfg_rate=0.0,
         drop_last=True,
         drop_first_row=False,
+        reshuffle_each_epoch=True,
         text_padding_length=512,
         seed=42) -> tuple[LatentsParquetMapStyleDataset, StatefulDataLoader]:
     dataset = LatentsParquetMapStyleDataset(
@@ -377,6 +394,7 @@ def build_parquet_map_style_dataloader(
         cfg_rate=cfg_rate,
         drop_last=drop_last,
         drop_first_row=drop_first_row,
+        reshuffle_each_epoch=reshuffle_each_epoch,
         text_padding_length=text_padding_length,
         parquet_schema=parquet_schema,
         seed=seed)

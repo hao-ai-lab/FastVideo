@@ -798,6 +798,7 @@ class TrainingArgs(FastVideoArgs):
     """
     data_path: str = ""
     dataloader_num_workers: int = 0
+    reshuffle_each_epoch: bool = True
     num_height: int = 0
     num_width: int = 0
     num_frames: int = 0
@@ -971,6 +972,10 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             required=True,
                             help="Number of workers for dataloader")
+        parser.add_argument("--reshuffle-each-epoch",
+                            action=StoreBoolean,
+                            default=TrainingArgs.reshuffle_each_epoch,
+                            help="Whether to reshuffle dataset order each epoch")
         parser.add_argument("--num-height",
                             type=int,
                             required=True,
