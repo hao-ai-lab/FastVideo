@@ -12,6 +12,7 @@ const SIDEBAR_MAX_WIDTH = 750;
 interface SecondarySidebarProps {
   job: Job;
   onClose: () => void;
+  onWidthChange?: (width: number) => void;
 }
 
 function CloseIcon() {
@@ -22,8 +23,16 @@ function CloseIcon() {
   );
 }
 
-export default function SecondarySidebar({ job, onClose }: SecondarySidebarProps) {
+export default function SecondarySidebar({
+  job,
+  onClose,
+  onWidthChange,
+}: SecondarySidebarProps) {
   const [width, setWidth] = useState(360);
+
+  useEffect(() => {
+    onWidthChange?.(width);
+  }, [width, onWidthChange]);
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ x: 0, width: 0 });
   const [isLoading, setIsLoading] = useState(false);
