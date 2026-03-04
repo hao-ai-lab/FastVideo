@@ -3,8 +3,8 @@
 ## 0) FastGen hierarchy (the reference)
 
 ```
-FastGenNetwork (ABC, nn.Module)       ← per-role backbone; owns transformer + noise_scheduler
-CausalFastGenNetwork (ABC, nn.Module) ← parallel root, NOT a subclass of FastGenNetwork
+FastGenNetwork (ABC, nn.Module)              ← per-role backbone; owns transformer + noise_scheduler
+    CausalFastGenNetwork (FastGenNetwork)    ← extends with chunked processing + KV caches
 
 FastGenModel (nn.Module)              ← base method; owns self.net, self.teacher, optimizers
     DMD2Model                         ← adds self.fake_score, self.discriminator
@@ -14,7 +14,8 @@ FastGenModel (nn.Module)              ← base method; owns self.net, self.teach
 
 **Key lessons:**
 
-1. **`CausalFastGenNetwork` is parallel to `FastGenNetwork`**, not a subclass.
+1. **`CausalFastGenNetwork` extends `FastGenNetwork`** — it inherits the shared contract
+   (noise_scheduler, init_preprocessors, forward) and adds streaming/chunked methods.
 
 2. **Every role instance owns its own `noise_scheduler`** — student and teacher each get
    an independent instance of the same schedule. No sharing needed. This is because
@@ -45,7 +46,7 @@ FastGenModel (nn.Module)              ← base method; owns self.net, self.teach
 ```
 fastvideo/distillation/
 ├── models/
-│   ├── base.py                        ModelBase, CausalModelBase (parallel roots, no mixin)
+│   ├── base.py                        ModelBase; CausalModelBase(ModelBase) adds streaming
 │   ├── wan/
 │   │   └── model.py                   WanModel(ModelBase)
 │   └── wangame/
@@ -62,7 +63,7 @@ fastvideo/distillation/
 
 **Every model instance has its own `noise_scheduler`** (constructed in `__init__`).
 VAE and `prepare_batch` are initialized via `init_preprocessors()`, called only on
-the student by `DistillMethod.build()`. No mixin. No flag.
+the student by `DistillMethod.__init__()`. No mixin. No flag.
 
 **DistillMethod** owns role model objects (`self.student`, `self.teacher`, …) and
 all optimizers as attributes. `RoleManager` is retired.
@@ -73,18 +74,17 @@ all optimizers as attributes. `RoleManager` is retired.
 
 ### 2.1 ModelBase and CausalModelBase
 
-`CausalModelBase` is a **parallel root** to `ModelBase`, mirroring FastGen's design.
-Each concrete method slot accepts exactly one expected type — there is no legitimate
-use-case where a `fake_score` or `teacher` slot would accept either kind
-interchangeably. Parallel roots keep the contracts clean: `ModelBase` for
-bidirectional models, `CausalModelBase` for streaming/causal models.
+`CausalModelBase` **extends** `ModelBase`, mirroring FastGen's design where
+`CausalFastGenNetwork(FastGenNetwork)` inherits the shared contract and adds
+streaming methods. This avoids duplicating the entire bidirectional interface.
+Methods that require a causal student type-check with `isinstance(student, CausalModelBase)`.
 
 ```python
 # fastvideo/distillation/models/base.py
 
 class ModelBase(ABC):
     """Per-role model. Every instance owns its own noise_scheduler.
-    init_preprocessors() is only called on the student by DistillMethod.build().
+    init_preprocessors() is only called on the student by DistillMethod.__init__().
     """
     transformer: nn.Module
     noise_scheduler: Any  # always set in __init__
@@ -135,46 +135,11 @@ class ModelBase(ABC):
         (loss / max(1, grad_accum_rounds)).backward()
 
 
-class CausalModelBase(ABC):
-    """Parallel root for causal/streaming models. NOT a subclass of ModelBase.
-    Mirrors FastGen's design: CausalFastGenNetwork is parallel to FastGenNetwork.
-    Concrete method slots that need a causal model declare CausalModelBase explicitly.
+class CausalModelBase(ModelBase):
+    """Extends ModelBase with streaming/causal methods.
+    Mirrors FastGen: CausalFastGenNetwork(FastGenNetwork) adds chunked processing + KV caches.
+    Inherits all bidirectional methods; adds streaming variants.
     """
-    transformer: nn.Module
-    noise_scheduler: Any  # always set in __init__
-
-    def init_preprocessors(self, training_args: Any) -> None:
-        pass
-
-    def on_train_start(self) -> None:
-        pass
-
-    def get_rng_generators(self) -> dict[str, torch.Generator]:
-        return {}
-
-    def prepare_batch(
-        self,
-        raw_batch: dict[str, Any],
-        *,
-        current_vsa_sparsity: float = 0.0,
-        latents_source: str = "data",
-    ) -> TrainingBatch:
-        raise NotImplementedError(
-            f"{type(self).__name__}.prepare_batch() requires init_preprocessors() "
-            "(student only)."
-        )
-
-    def add_noise(self, clean: Tensor, noise: Tensor, timestep: Tensor) -> Tensor:
-        raise NotImplementedError
-
-    @abstractmethod
-    def predict_noise(self, noisy_latents: Tensor, timestep: Tensor, batch: TrainingBatch, *, conditional: bool, cfg_uncond: dict | None = None, attn_kind: str = "dense") -> Tensor: ...
-
-    @abstractmethod
-    def predict_x0(self, ...) -> Tensor: ...
-
-    def backward(self, loss: Tensor, ctx: Any, *, grad_accum_rounds: int = 1) -> None:
-        (loss / max(1, grad_accum_rounds)).backward()
 
     @abstractmethod
     def predict_noise_streaming(
@@ -205,18 +170,24 @@ no `attrs` configs). Instead, each `_target_` class declares its own schema via 
 `__init__` type annotations. The `instantiate()` utility:
 
 1. Pops `_target_` and resolves the class.
-2. Passes the **entire remaining dict** into the constructor — each class takes what
-   it needs via `**kwargs` and ignores the rest.
+2. Inspects the constructor signature to find accepted parameters.
+3. Warns on any unexpected keys (catches typos like `trainabel` instead of `trainable`).
+4. Passes only recognized keys to the constructor.
 
 This is the "whole config dict flows through" model: callers don't need to know which
 keys a constructor cares about, and adding a field to a class means adding it to
-`__init__` — no schema file to maintain in parallel.
+`__init__` — no schema file to maintain in parallel. But unlike a blind `**kwargs`
+pass-through, we catch silent misconfiguration at startup.
 
 ```python
 # fastvideo/distillation/utils/instantiate.py
 
 import importlib
+import inspect
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_target(target: str) -> type:
@@ -225,18 +196,47 @@ def resolve_target(target: str) -> type:
 
 
 def instantiate(cfg: dict[str, Any], /, **extra: Any) -> Any:
-    """_target_ instantiation: pop _target_, resolve class, pass everything else through.
+    """_target_ instantiation with signature-based validation.
 
-    Each constructor accepts what it needs via explicit params + **kwargs for the rest.
-    No signature inspection — simplicity over strict validation.
+    1. Pops _target_, resolves the class.
+    2. Inspects __init__ signature — if it accepts **kwargs, all keys pass through.
+       Otherwise, warns on unrecognized keys and filters them out.
+    3. Catches typos at startup instead of silently applying defaults.
     """
     cfg = dict(cfg)
     target_str = cfg.pop("_target_")
     cls = resolve_target(target_str)
-    return cls(**{**cfg, **extra})
+    merged = {**cfg, **extra}
+
+    sig = inspect.signature(cls.__init__)
+    params = sig.parameters
+    has_var_keyword = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+    if not has_var_keyword:
+        # Strict mode: only pass recognized params, warn on extras.
+        accepted = {
+            name for name, p in params.items()
+            if p.kind in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            ) and name != "self"
+        }
+        unexpected = set(merged) - accepted
+        if unexpected:
+            logger.warning(
+                "%s.__init__ does not accept: %s  (accepted: %s). "
+                "Check for typos in YAML.",
+                cls.__name__, sorted(unexpected), sorted(accepted),
+            )
+        merged = {k: v for k, v in merged.items() if k in accepted}
+
+    return cls(**merged)
 ```
 
-**Each class is self-documenting via its explicit params.** Example:
+**Each class is self-documenting via its explicit params.** Constructors that want
+to be strict omit `**kwargs`; those that legitimately need pass-through keep it.
 
 ```python
 class WanGameModel(ModelBase):
@@ -245,7 +245,7 @@ class WanGameModel(ModelBase):
         *,
         init_from: str,           # required — TypeError at startup if missing from YAML
         trainable: bool = True,   # optional with default
-        **kwargs,                 # absorbs any other keys in the config dict
+        # No **kwargs — instantiate() will warn on unrecognized keys
     ) -> None: ...
 ```
 
@@ -260,7 +260,7 @@ class WanGameModel(ModelBase):
     VAE and prepare_batch are activated by init_preprocessors() — only for student.
     """
 
-    def __init__(self, *, init_from: str, trainable: bool = True, **kwargs) -> None:
+    def __init__(self, *, init_from: str, trainable: bool = True) -> None:
         self.transformer = load_transformer(init_from, cls="WanGameActionTransformer3DModel")
         apply_trainable(self.transformer, trainable=trainable)
         # noise_scheduler always built — same as FastGenNetwork.__init__ calling set_noise_schedule()
@@ -308,10 +308,10 @@ class WanGameModel(ModelBase):
 # fastvideo/distillation/models/wangame/model_causal.py
 
 class WanGameCausalModel(CausalModelBase):
-    """Causal WanGame. Parallel root to WanGameModel (not a subclass).
+    """Causal WanGame. Extends CausalModelBase with streaming ops.
     Same init_preprocessors() pattern — called only on student.
     """
-    def __init__(self, *, init_from: str, trainable: bool = True, **kwargs) -> None:
+    def __init__(self, *, init_from: str, trainable: bool = True) -> None:
         self.transformer = load_transformer(init_from, cls="CausalWanGameTransformer")
         apply_trainable(self.transformer, trainable=trainable)
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(...)
@@ -329,24 +329,29 @@ class WanGameCausalModel(CausalModelBase):
 
 ### 2.5 DistillMethod (analogous to FastGenModel)
 
+Like FastGen's `FastGenModel.__init__` which calls `build_model()` → `init_preprocessors()`
+internally, our `DistillMethod.__init__` is the single entry point. Each subclass's
+`__init__` validates roles, calls `init_preprocessors()` on the student, and calls
+`init_optimizers()`. No separate `build()` classmethod — one construction path, no
+risk of someone calling `__init__` directly and skipping validation.
+
 ```python
 class DistillMethod(nn.Module, ABC):
 
-    @classmethod
-    @abstractmethod
-    def build(
-        cls,
+    def __init__(
+        self,
         *,
         cfg: RunConfig,
-        role_models: dict[str, ModelBase | CausalModelBase],
+        role_models: dict[str, ModelBase],
         validator: Any | None,
-    ) -> "DistillMethod":
-        """Assemble the method. Calls init_preprocessors() on the student,
-        then calls init_optimizers().
-        Analogous to FastGenModel.__init__ → build_model() → init_preprocessors().
-        Dataloader is NOT passed here — it is owned by the trainer.
+    ) -> None:
+        """Subclasses override __init__, call super().__init__(), then:
+        1. Validate and assign role models (self.student, self.teacher, ...).
+        2. Call self.student.init_preprocessors(cfg.training_args).
+        3. Call self.init_optimizers().
+        Dataloader is NOT passed — trainer owns it.
         """
-        ...
+        super().__init__()
 
     @abstractmethod
     def init_optimizers(self) -> None: ...
@@ -378,8 +383,10 @@ class DistillMethod(nn.Module, ABC):
 ```python
 class SelfForcingMethod(DistillMethod):
 
-    @classmethod
-    def build(cls, *, cfg, role_models, validator):
+    def __init__(self, *, cfg, role_models, validator):
+        super().__init__(cfg=cfg, role_models=role_models, validator=validator)
+
+        # 1. Validate and assign roles
         student = role_models["student"]
         teacher = role_models["teacher"]
         critic  = role_models["critic"]
@@ -390,22 +397,16 @@ class SelfForcingMethod(DistillMethod):
                 f"got {type(student).__name__}"
             )
 
-        # Call init_preprocessors only on student — identical to FastGen's build_model()
-        # calling init_preprocessors() only on self.net, not self.teacher.
-        student.init_preprocessors(cfg.training_args)
-
-        return cls(
-            student=student, teacher=teacher, critic=critic,
-            validator=validator, cfg=cfg.method,
-        )
-
-    def __init__(self, student, teacher, critic, validator, cfg):
-        super().__init__()
         self.student = student
         self.teacher = teacher
         self.critic = critic
-        # No self.dataloader — trainer owns it and passes raw_batch into single_train_step.
         self.validator = validator
+        self.cfg = cfg.method
+
+        # 2. Init preprocessors on student only — same as FastGen's build_model()
+        self.student.init_preprocessors(cfg.training_args)
+
+        # 3. Init optimizers (after preprocessors, before FSDP wrapping)
         self.init_optimizers()
 
     def init_optimizers(self) -> None:
@@ -533,20 +534,61 @@ role_models = {
 dataloader = instantiate(cfg.data, training_args=training_args)
 validator   = build_validator(cfg.validation) if cfg.validation.enabled else None
 
-# 3. Method build() calls init_preprocessors() on student, then init_optimizers().
-#    No dataloader passed — trainer passes raw_batch into single_train_step each step.
+# 3. Method __init__ validates roles, calls init_preprocessors() on student,
+#    then calls init_optimizers(). Single construction path — no separate build().
 #    Analogous to FastGenModel.__init__ → build_model() → init_preprocessors().
 method_cls = resolve_target(cfg.method["_target_"])
-method = method_cls.build(
+method = method_cls(
     cfg=cfg,
     role_models=role_models,
     validator=validator,
 )
 
-# 4. Trainer runs the loop. Trainer is the sole owner of the dataloader.
+# 4. FSDP wrapping — trainer wraps models after construction, before training.
+#    See §4.1 for details.
 trainer = DistillTrainer(training_args)
+trainer.setup_fsdp(method)
+
+# 5. Trainer runs the loop. Trainer is the sole owner of the dataloader.
 trainer.run(method, dataloader=dataloader, max_steps=cfg.trainer.max_train_steps, ...)
 ```
+
+### 4.1 FSDP integration
+
+FSDP wrapping happens **after method construction, before training**. The trainer
+is responsible for wrapping — the method and models don't know about FSDP.
+
+```python
+# In DistillTrainer.setup_fsdp(method):
+
+# 1. Wrap trainable models in FSDP using method.model_dict.
+for name, module in method.model_dict.items():
+    wrapped = FSDP(module, ...)
+    # Replace the transformer on the owning model object.
+    # method.student.transformer = wrapped, etc.
+
+# 2. Non-trainable models (teacher) are cast to precision and moved to device,
+#    but NOT wrapped in FSDP (no gradients needed).
+
+# 3. Preprocessors (VAE, text encoders) on the student are moved to device/dtype.
+#    They live outside FSDP — they are frozen inference-only modules.
+
+# 4. After FSDP wrapping, optimizers reference the wrapped parameters.
+#    This means init_optimizers() must run BEFORE FSDP wrapping, and the
+#    optimizer param groups automatically track the FSDP-wrapped params
+#    (PyTorch FSDP handles this transparently for params created pre-wrap).
+```
+
+**Key FSDP decisions:**
+
+| Concern | Approach |
+|---|---|
+| Which models get wrapped? | `method.model_dict` — only trainable models |
+| Who owns wrapping? | Trainer, not method or model |
+| Teacher FSDP? | Configurable: `cfg.trainer.add_teacher_to_fsdp` (default false for frozen teacher) |
+| Meta-device init? | `cfg.trainer.fsdp_meta_init` — load weights on meta device, broadcast after wrap |
+| Precision? | `cfg.trainer.fsdp_precision` — FSDP MixedPrecision policy applied at wrap time |
+| Optimizer creation order? | `init_optimizers()` in `__init__` → FSDP wrap → optimizer params auto-track |
 
 ---
 
@@ -556,10 +598,10 @@ trainer.run(method, dataloader=dataloader, max_steps=cfg.trainer.max_train_steps
 |---|---|
 | `dispatch.py` string registry | Deleted; `_target_` + `instantiate()` |
 | `ModelBase` — dispatches via `RoleHandle` arg | Retired; per-role instance owns one transformer |
-| `CausalModelBase(ModelBase)` subclass | `CausalModelBase(ABC)` parallel root — mirrors FastGen |
+| `CausalModelBase(ModelBase)` subclass (broken contract) | `CausalModelBase(ModelBase)` clean inheritance — mirrors FastGen |
 | `RoleHandle` / `RoleManager` | Retired; method owns `self.student`, `self.teacher`, etc. |
 | Optimizers on `RoleHandle.optimizers` | On method: `self.student_optimizer`, etc. |
-| `DistillMethod.build(cfg, bundle, model, validator)` | `DistillMethod.build(cfg, role_models, validator)` — no dataloader |
+| `DistillMethod.build(cfg, bundle, model, validator)` | `DistillMethod.__init__(cfg, role_models, validator)` — no dataloader, no build() |
 | `recipe.family` / `recipe.method` YAML | Deleted; `models.<role>._target_` + `method._target_` |
 | `roles.*` YAML section | `models.*` with `_target_`, `init_from`, `trainable` |
 | `is_student` / mixin / SharedContext | None of these. `build()` calls `init_preprocessors()` on student. |
@@ -581,7 +623,7 @@ trainer.run(method, dataloader=dataloader, max_steps=cfg.trainer.max_train_steps
 - [ ] `fastvideo/distillation/utils/instantiate.py`
   - `resolve_target(target: str) -> type`
   - `instantiate(cfg: dict, **extra) -> Any`
-  - Uses `inspect.signature()` for field validation and filtering (see §2.5)
+  - Uses `inspect.signature()` for kwargs validation and warning on unrecognized keys (see §2.2)
 
 - [ ] `fastvideo/distillation/utils/config.py`
   - New `RunConfig` dataclass
@@ -592,19 +634,20 @@ trainer.run(method, dataloader=dataloader, max_steps=cfg.trainer.max_train_steps
 
 - [ ] `fastvideo/distillation/models/base.py`
   - New `ModelBase` ABC with `init_preprocessors` (no-op default), `prepare_batch` (raises), `add_noise` (raises)
-  - New `CausalModelBase` ABC (parallel root, same pattern + streaming methods)
+  - New `CausalModelBase(ModelBase)` — inherits shared contract, adds streaming methods
   - Retire old `ModelBase` / `CausalModelBase`
 
 - [ ] `fastvideo/distillation/roles.py` — retire `RoleHandle` / `RoleManager`
 
 - [ ] `fastvideo/distillation/methods/base.py`
-  - New `DistillMethod.build(cfg, role_models, dataloader, validator)` signature
+  - New `DistillMethod.__init__(cfg, role_models, validator)` — single construction path, no build()
   - Add abstract `init_optimizers`, `model_dict`, `optimizer_dict`, `scheduler_dict`
 
 **WanGame**
 
 - [ ] `fastvideo/distillation/models/wangame/model.py`
   - `WanGameModel(ModelBase)`: always builds `noise_scheduler`; `init_preprocessors()` loads VAE
+  - No `**kwargs` — let `instantiate()` catch typos
 
 - [ ] `fastvideo/distillation/models/wangame/model_causal.py`
   - `WanGameCausalModel(CausalModelBase)`: same pattern + streaming ops
@@ -616,8 +659,15 @@ trainer.run(method, dataloader=dataloader, max_steps=cfg.trainer.max_train_steps
 
 **Methods**
 
-- [ ] Update all `build()` signatures: `SelfForcingMethod`, `DMD2Method`, `FinetuneMethod`, `DFSFTMethod`
-- [ ] `DMD2Method.build()`: calls `init_preprocessors()` on student; `init_optimizers()` adds `fake_score_optimizer`
+- [ ] Update all `__init__` signatures: `SelfForcingMethod`, `DMD2Method`, `FinetuneMethod`, `DFSFTMethod`
+- [ ] `DMD2Method.__init__()`: calls `init_preprocessors()` on student; `init_optimizers()` adds `fake_score_optimizer`
+
+**FSDP**
+
+- [ ] `DistillTrainer.setup_fsdp(method)` — wraps `method.model_dict` modules in FSDP
+- [ ] Configurable teacher FSDP: `cfg.trainer.add_teacher_to_fsdp` (default false)
+- [ ] Meta-device init support: `cfg.trainer.fsdp_meta_init`
+- [ ] FSDP MixedPrecision policy: `cfg.trainer.fsdp_precision`
 
 **Dispatch & configs**
 
