@@ -353,18 +353,6 @@ export default function CreateJobModal({
             <details className={formStyles.advancedSettings}>
               <summary>Advanced Settings</summary>
               <div className={formStyles.settingsGrid}>
-                <div className={formStyles.formRow}>
-                  <label htmlFor="modal-num-steps">Inference Steps</label>
-                  <Slider
-                    id="modal-num-steps"
-                    min={1}
-                    max={200}
-                    step={1}
-                    value={numInferenceSteps}
-                    onChange={setNumInferenceSteps}
-                    disabled={isSubmitting}
-                  />
-                </div>
                 {workloadType !== "t2i" && (
                   <div className={formStyles.formRow}>
                     <label htmlFor="modal-num-frames">Frames</label>
@@ -404,6 +392,36 @@ export default function CreateJobModal({
                   />
                 </div>
                 <div className={formStyles.formRow}>
+                  <label htmlFor="modal-num-steps">Inference Steps</label>
+                  <Slider
+                    id="modal-num-steps"
+                    min={1}
+                    max={200}
+                    step={1}
+                    value={numInferenceSteps}
+                    onChange={setNumInferenceSteps}
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div className={formStyles.formRow}>
+                  <label
+                    htmlFor="modal-vsa-sparsity"
+                    title="Video Sparse Attention sparsity (0–1, higher = sparser)"
+                  >
+                    VSA Sparsity
+                  </label>
+                  <Slider
+                    id="modal-vsa-sparsity"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={vsaSparsity}
+                    onChange={setVsaSparsity}
+                    disabled={isSubmitting}
+                    formatValue={(v) => v.toFixed(2)}
+                  />
+                </div>
+                <div className={formStyles.formRow}>
                   <label htmlFor="modal-guidance">Guidance Scale</label>
                   <Slider
                     id="modal-guidance"
@@ -434,6 +452,42 @@ export default function CreateJobModal({
                     formatValue={(v) => v.toFixed(2)}
                   />
                 </div>
+                <div className={formStyles.formRow}>
+                  <label
+                    htmlFor="modal-tp-size"
+                    title="Tensor parallelism size (-1 = auto)"
+                  >
+                    TP Size
+                  </label>
+                  <Slider
+                    id="modal-tp-size"
+                    min={-1}
+                    max={8}
+                    step={1}
+                    value={tpSize}
+                    onChange={setTpSize}
+                    disabled={isSubmitting}
+                    formatValue={(v) => (v === -1 ? "Auto" : String(v))}
+                  />
+                </div>
+                <div className={formStyles.formRow}>
+                  <label
+                    htmlFor="modal-sp-size"
+                    title="Sequence parallelism size (-1 = auto)"
+                  >
+                    SP Size
+                  </label>
+                  <Slider
+                    id="modal-sp-size"
+                    min={-1}
+                    max={8}
+                    step={1}
+                    value={spSize}
+                    onChange={setSpSize}
+                    disabled={isSubmitting}
+                    formatValue={(v) => (v === -1 ? "Auto" : String(v))}
+                  />
+                </div>
                 {workloadType !== "t2i" && (
                   <div className={formStyles.formRow}>
                     <label htmlFor="modal-fps">FPS</label>
@@ -448,29 +502,6 @@ export default function CreateJobModal({
                     />
                   </div>
                 )}
-                <div className={formStyles.formRow}>
-                  <label htmlFor="modal-seed">Seed</label>
-                  <input
-                    id="modal-seed"
-                    type="number"
-                    value={seed}
-                    onChange={(e) => setSeed(parseInt(e.target.value, 10))}
-                    min={0}
-                    disabled={isSubmitting}
-                  />
-                </div>
-                <div className={formStyles.formRow}>
-                  <label htmlFor="modal-num-gpus">GPUs</label>
-                  <Slider
-                    id="modal-num-gpus"
-                    min={1}
-                    max={8}
-                    step={1}
-                    value={numGpus}
-                    onChange={setNumGpus}
-                    disabled={isSubmitting}
-                  />
-                </div>
                 <div className={formStyles.formRow}>
                   <label htmlFor="modal-dit-cpu-offload">DiT CPU Offload</label>
                   <Toggle
@@ -530,57 +561,26 @@ export default function CreateJobModal({
                   />
                 </div>
                 <div className={formStyles.formRow}>
-                  <label
-                    htmlFor="modal-vsa-sparsity"
-                    title="Video Sparse Attention sparsity (0–1, higher = sparser)"
-                  >
-                    VSA Sparsity
-                  </label>
+                  <label htmlFor="modal-num-gpus">GPUs</label>
                   <Slider
-                    id="modal-vsa-sparsity"
+                    id="modal-num-gpus"
+                    min={1}
+                    max={8}
+                    step={1}
+                    value={numGpus}
+                    onChange={setNumGpus}
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-seed">Seed</label>
+                  <input
+                    id="modal-seed"
+                    type="number"
+                    value={seed}
+                    onChange={(e) => setSeed(parseInt(e.target.value, 10))}
                     min={0}
-                    max={1}
-                    step={0.05}
-                    value={vsaSparsity}
-                    onChange={setVsaSparsity}
                     disabled={isSubmitting}
-                    formatValue={(v) => v.toFixed(2)}
-                  />
-                </div>
-                <div className={formStyles.formRow}>
-                  <label
-                    htmlFor="modal-tp-size"
-                    title="Tensor parallelism size (-1 = auto)"
-                  >
-                    TP Size
-                  </label>
-                  <Slider
-                    id="modal-tp-size"
-                    min={-1}
-                    max={8}
-                    step={1}
-                    value={tpSize}
-                    onChange={setTpSize}
-                    disabled={isSubmitting}
-                    formatValue={(v) => (v === -1 ? "Auto" : String(v))}
-                  />
-                </div>
-                <div className={formStyles.formRow}>
-                  <label
-                    htmlFor="modal-sp-size"
-                    title="Sequence parallelism size (-1 = auto)"
-                  >
-                    SP Size
-                  </label>
-                  <Slider
-                    id="modal-sp-size"
-                    min={-1}
-                    max={8}
-                    step={1}
-                    value={spSize}
-                    onChange={setSpSize}
-                    disabled={isSubmitting}
-                    formatValue={(v) => (v === -1 ? "Auto" : String(v))}
                   />
                 </div>
               </div>

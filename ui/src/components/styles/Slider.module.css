@@ -2,7 +2,6 @@
 .sliderWrapper {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
   min-width: 0;
 }
 
