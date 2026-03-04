@@ -15,7 +15,7 @@ from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 from fastvideo.pipelines.stages import (
     ImageEncodingStage, ConditioningStage, DecodingStage, DmdDenoisingStage,
     ImageVAEEncodingStage, InputValidationStage, LatentPreparationStage,
-    TextEncodingStage, TimestepPreparationStage)
+    TextEncodingStage)
 # isort: on
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
@@ -54,10 +54,6 @@ class WanImageToVideoDmdPipeline(LoRAPipeline, ComposedPipelineBase):
 
         self.add_stage(stage_name="conditioning_stage",
                        stage=ConditioningStage())
-
-        self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(
-                           scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="latent_preparation_stage",
                        stage=LatentPreparationStage(

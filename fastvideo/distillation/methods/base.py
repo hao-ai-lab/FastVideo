@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from typing import Any, TYPE_CHECKING
+
+import torch
+
+from fastvideo.distillation.roles import RoleManager
+
+if TYPE_CHECKING:
+    from fastvideo.distillation.utils.config import DistillRunConfig
+
+LogScalar = float | int | torch.Tensor
+
+
+class DistillMethod(torch.nn.Module, ABC):
+    def __init__(self, bundle: RoleManager) -> None:
+        super().__init__()
+        self.bundle = bundle
+        self.tracker: Any | None = None
+        self.role_modules = torch.nn.ModuleDict()
+        for role, handle in bundle.roles.items():
+            if handle.modules:
+                self.role_modules[role] = torch.nn.ModuleDict(handle.modules)
+
+    @classmethod
+    @abstractmethod
+    def build(
+        cls,
+        *,
+        cfg: DistillRunConfig,
+        bundle: RoleManager,
+        adapter: Any,
+        validator: Any | None,
+    ) -> "DistillMethod":
+        raise NotImplementedError
+
+    def set_tracker(self, tracker: Any) -> None:
+        """Attach a tracker (infra) to this method.
+
+        Trainer constructs/owns the tracker, but method-managed validation may
+        need it to log artifacts (videos/images/files). This is a best-effort
+        bridge that keeps model plugins free of tracker ownership.
+        """
+
+        self.tracker = tracker
+        validator = getattr(self, "validator", None)
+        if validator is None:
+            return
+        set_tracker = getattr(validator, "set_tracker", None)
+        if callable(set_tracker):
+            set_tracker(tracker)
+            return
+        if hasattr(validator, "tracker"):
+            validator.tracker = tracker  # type: ignore[attr-defined]
+
+    @abstractmethod
+    def single_train_step(
+        self,
+        batch: dict[str, Any],
+        iteration: int,
+        *,
+        current_vsa_sparsity: float = 0.0,
+    ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_optimizers(self, iteration: int) -> Sequence[torch.optim.Optimizer]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_lr_schedulers(self, iteration: int) -> Sequence[Any]:
+        raise NotImplementedError
+
+    def backward(
+        self,
+        loss_map: dict[str, torch.Tensor],
+        outputs: dict[str, Any],
+        *,
+        grad_accum_rounds: int = 1,
+    ) -> None:
+        del outputs
+        grad_accum_rounds = max(1, int(grad_accum_rounds))
+        (loss_map["total_loss"] / grad_accum_rounds).backward()
+
+    def optimizers_schedulers_step(self, iteration: int) -> None:
+        for optimizer in self.get_optimizers(iteration):
+            optimizer.step()
+        for scheduler in self.get_lr_schedulers(iteration):
+            scheduler.step()
+
+    def optimizers_zero_grad(self, iteration: int) -> None:
+        for optimizer in self.get_optimizers(iteration):
+            try:
+                optimizer.zero_grad(set_to_none=True)
+            except TypeError:
+                optimizer.zero_grad()

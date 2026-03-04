@@ -8,12 +8,16 @@ using the modular pipeline architecture.
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-    FlowUniPCMultistepScheduler)
+from fastvideo.pipelines.samplers.wan import (
+    build_wan_scheduler,
+    get_wan_sampler_kind,
+    wan_use_btchw_layout,
+)
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         DenoisingStage, InputValidationStage,
                                         LatentPreparationStage,
+                                        SdeDenoisingStage,
                                         TextEncodingStage,
                                         TimestepPreparationStage)
 
@@ -30,12 +34,13 @@ class WanPipeline(LoRAPipeline, ComposedPipelineBase):
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        # We use UniPCMScheduler from Wan2.1 official repo, not the one in diffusers.
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift)
+        sampler_kind = get_wan_sampler_kind(fastvideo_args)
+        self.modules["scheduler"] = build_wan_scheduler(fastvideo_args, sampler_kind)
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
+        sampler_kind = get_wan_sampler_kind(fastvideo_args)
+        use_btchw_layout = wan_use_btchw_layout(sampler_kind)
 
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
@@ -49,22 +54,31 @@ class WanPipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="conditioning_stage",
                        stage=ConditioningStage())
 
-        self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(
-                           scheduler=self.get_module("scheduler")))
+        if sampler_kind == "ode":
+            self.add_stage(stage_name="timestep_preparation_stage",
+                           stage=TimestepPreparationStage(
+                               scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="latent_preparation_stage",
                        stage=LatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer", None)))
+                           transformer=self.get_module("transformer", None),
+                           use_btchw_layout=use_btchw_layout))
 
-        self.add_stage(stage_name="denoising_stage",
-                       stage=DenoisingStage(
-                           transformer=self.get_module("transformer"),
-                           transformer_2=self.get_module("transformer_2", None),
-                           scheduler=self.get_module("scheduler"),
-                           vae=self.get_module("vae"),
-                           pipeline=self))
+        if sampler_kind == "sde":
+            self.add_stage(stage_name="denoising_stage",
+                           stage=SdeDenoisingStage(
+                               transformer=self.get_module("transformer"),
+                               scheduler=self.get_module("scheduler"),
+                           ))
+        else:
+            self.add_stage(stage_name="denoising_stage",
+                           stage=DenoisingStage(
+                               transformer=self.get_module("transformer"),
+                               transformer_2=self.get_module("transformer_2", None),
+                               scheduler=self.get_module("scheduler"),
+                               vae=self.get_module("vae"),
+                               pipeline=self))
 
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae"),
