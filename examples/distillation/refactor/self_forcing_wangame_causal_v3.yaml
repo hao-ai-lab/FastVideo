@@ -56,54 +56,49 @@ method:
     text: keep
 
 training:
-  # Distributed (4 nodes x 8 GPUs = 32 ranks)
-  num_gpus: 32
-  sp_size: 1
-  tp_size: 1
-  hsdp_replicate_dim: 1
-  hsdp_shard_dim: 32
+  distributed:
+    num_gpus: 32
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 32
 
-  # Data
-  data_path: >-
-    /mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:1,
-    /mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed:1
-  dataloader_num_workers: 4
+  data:
+    data_path: >-
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:1,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed:1
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 20
+    num_height: 352
+    num_width: 640
+    num_frames: 77
 
-  # Batch / shape
-  train_batch_size: 1
-  train_sp_batch_size: 1
-  gradient_accumulation_steps: 1
-  num_latent_t: 20
-  num_height: 352
-  num_width: 640
-  num_frames: 77
+  optimizer:
+    learning_rate: 2.0e-6
+    betas: [0.0, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+    max_grad_norm: 1.0
 
-  # Output / steps
-  output_dir: outputs/wangame_self_forcing_4steps_v3
-  max_train_steps: 4000
-  seed: 1000
-  checkpoints_total_limit: 3
+  loop:
+    max_train_steps: 4000
+    gradient_accumulation_steps: 1
 
-  # Optimizer (student)
-  learning_rate: 2.0e-6
-  mixed_precision: bf16
-  betas: [0.0, 0.999]
-  weight_decay: 0.01
-  lr_scheduler: constant
-  lr_warmup_steps: 0
-  max_grad_norm: 1.0
+  checkpoint:
+    output_dir: outputs/wangame_self_forcing_4steps_v3
+    training_state_checkpointing_steps: 1000
+    checkpoints_total_limit: 3
 
-  # Distillation knobs
-  training_cfg_rate: 0.0
-  enable_gradient_checkpointing_type: null
+  tracker:
+    project_name: distillation_wangame_r
+    run_name: wangame_self_forcing_4steps_v3
 
-  # Checkpointing
-  training_state_checkpointing_steps: 1000
-  weight_only_checkpointing_steps: 1000
-
-  # Tracking
-  tracker_project_name: distillation_wangame_r
-  wandb_run_name: wangame_self_forcing_4steps_v3
+  model:
+    enable_gradient_checkpointing_type: null
 
 validation:
   enabled: true

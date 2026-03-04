@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import copy
 import gc
-from typing import Any, Literal
+from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 
@@ -23,8 +23,12 @@ from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
 )
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines import TrainingBatch
-from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
-from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.basic.wan.wan_pipeline import (
+    WanPipeline,
+)
+from fastvideo.pipelines.pipeline_batch_info import (
+    ForwardBatch,
+)
 from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing,
 )
@@ -48,6 +52,11 @@ from fastvideo.distillation.utils.moduleloader import (
     load_module_from_path,
 )
 
+if TYPE_CHECKING:
+    from fastvideo.distillation.utils.distill_config import (
+        DistillTrainingConfig,
+    )
+
 try:
     from fastvideo.attention.backends.video_sparse_attn import (
         VideoSparseAttentionMetadataBuilder,
@@ -70,7 +79,8 @@ class WanModel(ModelBase):
         trainable: bool = True,
         disable_custom_init_weights: bool = False,
         flow_shift: float = 3.0,
-        enable_gradient_checkpointing_type: str | None = None,
+        enable_gradient_checkpointing_type: str
+        | None = None,
     ) -> None:
         self._init_from = str(init_from)
         self._trainable = bool(trainable)
@@ -78,9 +88,13 @@ class WanModel(ModelBase):
         transformer = load_module_from_path(
             model_path=self._init_from,
             module_type="transformer",
-            training_args=None,
-            disable_custom_init_weights=disable_custom_init_weights,
-            override_transformer_cls_name="WanTransformer3DModel",
+            loader_args=None,
+            disable_custom_init_weights=(
+                disable_custom_init_weights
+            ),
+            override_transformer_cls_name=(
+                "WanTransformer3DModel"
+            ),
         )
         transformer = apply_trainable(
             transformer, trainable=self._trainable
@@ -97,13 +111,17 @@ class WanModel(ModelBase):
             )
         self.transformer = transformer
 
-        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
-            shift=float(flow_shift)
+        self.noise_scheduler = (
+            FlowMatchEulerDiscreteScheduler(
+                shift=float(flow_shift)
+            )
         )
 
         # Filled by init_preprocessors (student only).
         self.vae: Any = None
-        self.training_args: Any = None
+        self.training_config: DistillTrainingConfig | None = (
+            None
+        )
         self.dataloader: Any = None
         self.validator: Any = None
         self.start_step: int = 0
@@ -112,10 +130,14 @@ class WanModel(ModelBase):
         self.sp_group: Any = None
         self.device: Any = None
 
-        self.noise_random_generator: torch.Generator | None = None
+        self.noise_random_generator: (
+            torch.Generator | None
+        ) = None
         self.noise_gen_cuda: torch.Generator | None = None
 
-        self.negative_prompt_embeds: torch.Tensor | None = None
+        self.negative_prompt_embeds: (
+            torch.Tensor | None
+        ) = None
         self.negative_prompt_attention_mask: (
             torch.Tensor | None
         ) = None
@@ -132,13 +154,24 @@ class WanModel(ModelBase):
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def init_preprocessors(self, training_args: Any) -> None:
-        self.training_args = training_args
+    def init_preprocessors(
+        self, training_config: DistillTrainingConfig
+    ) -> None:
+        self.training_config = training_config
+
+        from fastvideo.distillation.utils.loader_args import (
+            DistillLoaderArgs,
+        )
+
+        loader_args = DistillLoaderArgs.from_training_config(
+            training_config,
+            model_path=training_config.model_path,
+        )
 
         self.vae = load_module_from_path(
-            model_path=str(training_args.model_path),
+            model_path=str(training_config.model_path),
             module_type="vae",
-            training_args=training_args,
+            loader_args=loader_args,
         )
 
         self.world_group = get_world_group()
@@ -149,7 +182,7 @@ class WanModel(ModelBase):
 
         # Optional validator.
         validation_cfg = getattr(
-            training_args, "_validation_cfg", None
+            training_config, "_validation_cfg", None
         )
         if validation_cfg:
             validation_enabled = bool(
@@ -161,8 +194,9 @@ class WanModel(ModelBase):
                 from fastvideo.distillation.validators.wan import (
                     WanValidator,
                 )
+
                 self.validator = WanValidator(
-                    training_args=training_args
+                    training_config=training_config
                 )
 
         from fastvideo.dataset.dataloader.schema import (
@@ -172,8 +206,14 @@ class WanModel(ModelBase):
             build_parquet_t2v_train_dataloader,
         )
 
+        text_len = (
+            training_config.pipeline_config.text_encoder_configs[  # type: ignore[union-attr]
+                0
+            ].arch_config.text_len
+        )
         self.dataloader = build_parquet_t2v_train_dataloader(
-            training_args,
+            training_config.data,
+            text_len=int(text_len),
             parquet_schema=pyarrow_schema_t2v,
         )
         self.start_step = 0
@@ -186,20 +226,28 @@ class WanModel(ModelBase):
         self, timestep: torch.Tensor
     ) -> torch.Tensor:
         timestep = shift_timestep(
-            timestep, self.timestep_shift, self.num_train_timestep
+            timestep,
+            self.timestep_shift,
+            self.num_train_timestep,
         )
-        return timestep.clamp(self.min_timestep, self.max_timestep)
+        return timestep.clamp(
+            self.min_timestep, self.max_timestep
+        )
 
     def on_train_start(self) -> None:
-        seed = getattr(self.training_args, "seed", None)
+        assert self.training_config is not None
+        seed = self.training_config.data.seed
         if seed is None:
             raise ValueError(
-                "training_args.seed must be set for distillation"
+                "training.data.seed must be set "
+                "for distillation"
             )
 
-        global_rank = int(getattr(self.world_group, "rank", 0))
+        global_rank = int(
+            getattr(self.world_group, "rank", 0)
+        )
         sp_world_size = int(
-            getattr(self.training_args, "sp_size", 1) or 1
+            self.training_config.distributed.sp_size or 1
         )
         if sp_world_size > 1:
             sp_group_seed = int(seed) + (
@@ -218,10 +266,14 @@ class WanModel(ModelBase):
 
         self.ensure_negative_conditioning()
 
-    def get_rng_generators(self) -> dict[str, torch.Generator]:
+    def get_rng_generators(
+        self,
+    ) -> dict[str, torch.Generator]:
         generators: dict[str, torch.Generator] = {}
         if self.noise_random_generator is not None:
-            generators["noise_cpu"] = self.noise_random_generator
+            generators["noise_cpu"] = (
+                self.noise_random_generator
+            )
         if self.noise_gen_cuda is not None:
             generators["noise_cuda"] = self.noise_gen_cuda
         return generators
@@ -238,6 +290,8 @@ class WanModel(ModelBase):
         latents_source: Literal["data", "zeros"] = "data",
     ) -> TrainingBatch:
         self.ensure_negative_conditioning()
+        assert self.training_config is not None
+        tc = self.training_config
 
         dtype = self._get_training_dtype()
         device = self.device
@@ -245,32 +299,35 @@ class WanModel(ModelBase):
         training_batch = TrainingBatch(
             current_vsa_sparsity=current_vsa_sparsity
         )
-        encoder_hidden_states = raw_batch["text_embedding"]
-        encoder_attention_mask = raw_batch["text_attention_mask"]
+        encoder_hidden_states = raw_batch[
+            "text_embedding"
+        ]
+        encoder_attention_mask = raw_batch[
+            "text_attention_mask"
+        ]
         infos = raw_batch.get("info_list")
 
         if latents_source == "zeros":
             batch_size = encoder_hidden_states.shape[0]
             vae_config = (
-                self.training_args.pipeline_config
-                .vae_config.arch_config
+                tc.pipeline_config.vae_config.arch_config  # type: ignore[union-attr]
             )
             num_channels = vae_config.z_dim
             spatial_compression_ratio = (
                 vae_config.spatial_compression_ratio
             )
             latent_height = (
-                self.training_args.num_height
+                tc.data.num_height
                 // spatial_compression_ratio
             )
             latent_width = (
-                self.training_args.num_width
+                tc.data.num_width
                 // spatial_compression_ratio
             )
             latents = torch.zeros(
                 batch_size,
                 num_channels,
-                self.training_args.num_latent_t,
+                tc.data.num_latent_t,
                 latent_height,
                 latent_width,
                 device=device,
@@ -284,12 +341,13 @@ class WanModel(ModelBase):
                 )
             latents = raw_batch["vae_latent"]
             latents = latents[
-                :, :, : self.training_args.num_latent_t
+                :, :, : tc.data.num_latent_t
             ]
             latents = latents.to(device, dtype=dtype)
         else:
             raise ValueError(
-                f"Unknown latents_source: {latents_source!r}"
+                f"Unknown latents_source: "
+                f"{latents_source!r}"
             )
 
         training_batch.latents = latents
@@ -304,7 +362,9 @@ class WanModel(ModelBase):
         training_batch.latents = normalize_dit_input(
             "wan", training_batch.latents, self.vae
         )
-        training_batch = self._prepare_dit_inputs(training_batch)
+        training_batch = self._prepare_dit_inputs(
+            training_batch
+        )
         training_batch = self._build_attention_metadata(
             training_batch
         )
@@ -347,7 +407,8 @@ class WanModel(ModelBase):
             text_dict = batch.conditional_dict
             if text_dict is None:
                 raise RuntimeError(
-                    "Missing conditional_dict in TrainingBatch"
+                    "Missing conditional_dict in "
+                    "TrainingBatch"
                 )
         else:
             text_dict = self._get_uncond_text_dict(
@@ -359,7 +420,9 @@ class WanModel(ModelBase):
         elif attn_kind == "vsa":
             attn_metadata = batch.attn_metadata_vsa
         else:
-            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
+            raise ValueError(
+                f"Unknown attn_kind: {attn_kind!r}"
+            )
 
         with torch.autocast(
             device_type, dtype=dtype
@@ -367,16 +430,20 @@ class WanModel(ModelBase):
             current_timestep=batch.timesteps,
             attn_metadata=attn_metadata,
         ):
-            input_kwargs = self._build_distill_input_kwargs(
-                noisy_latents, timestep, text_dict
+            input_kwargs = (
+                self._build_distill_input_kwargs(
+                    noisy_latents, timestep, text_dict
+                )
             )
             transformer = self._get_transformer(timestep)
-            pred_noise = transformer(**input_kwargs).permute(
-                0, 2, 1, 3, 4
-            )
+            pred_noise = transformer(
+                **input_kwargs
+            ).permute(0, 2, 1, 3, 4)
             pred_x0 = pred_noise_to_pred_video(
                 pred_noise=pred_noise.flatten(0, 1),
-                noise_input_latent=noisy_latents.flatten(0, 1),
+                noise_input_latent=noisy_latents.flatten(
+                    0, 1
+                ),
                 timestep=timestep,
                 scheduler=self.noise_scheduler,
             ).unflatten(0, pred_noise.shape[:2])
@@ -398,7 +465,8 @@ class WanModel(ModelBase):
             text_dict = batch.conditional_dict
             if text_dict is None:
                 raise RuntimeError(
-                    "Missing conditional_dict in TrainingBatch"
+                    "Missing conditional_dict in "
+                    "TrainingBatch"
                 )
         else:
             text_dict = self._get_uncond_text_dict(
@@ -410,7 +478,9 @@ class WanModel(ModelBase):
         elif attn_kind == "vsa":
             attn_metadata = batch.attn_metadata_vsa
         else:
-            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
+            raise ValueError(
+                f"Unknown attn_kind: {attn_kind!r}"
+            )
 
         with torch.autocast(
             device_type, dtype=dtype
@@ -418,13 +488,15 @@ class WanModel(ModelBase):
             current_timestep=batch.timesteps,
             attn_metadata=attn_metadata,
         ):
-            input_kwargs = self._build_distill_input_kwargs(
-                noisy_latents, timestep, text_dict
+            input_kwargs = (
+                self._build_distill_input_kwargs(
+                    noisy_latents, timestep, text_dict
+                )
             )
             transformer = self._get_transformer(timestep)
-            pred_noise = transformer(**input_kwargs).permute(
-                0, 2, 1, 3, 4
-            )
+            pred_noise = transformer(
+                **input_kwargs
+            ).permute(0, 2, 1, 3, 4)
         return pred_noise
 
     def backward(
@@ -439,7 +511,9 @@ class WanModel(ModelBase):
             current_timestep=timesteps,
             attn_metadata=attn_metadata,
         ):
-            (loss / max(1, int(grad_accum_rounds))).backward()
+            (
+                loss / max(1, int(grad_accum_rounds))
+            ).backward()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -449,53 +523,61 @@ class WanModel(ModelBase):
         return torch.bfloat16
 
     def _init_timestep_mechanics(self) -> None:
+        assert self.training_config is not None
+        tc = self.training_config
         self.timestep_shift = float(
-            self.training_args.pipeline_config.flow_shift
+            tc.pipeline_config.flow_shift  # type: ignore[union-attr]
         )
         self.num_train_timestep = int(
             self.noise_scheduler.num_train_timesteps
         )
-        self.min_timestep = int(
-            self.training_args.min_timestep_ratio
-            * self.num_train_timestep
-        )
-        self.max_timestep = int(
-            self.training_args.max_timestep_ratio
-            * self.num_train_timestep
-        )
+        # min/max timestep ratios now come from method_config;
+        # default to full range.
+        self.min_timestep = 0
+        self.max_timestep = self.num_train_timestep
 
     def ensure_negative_conditioning(self) -> None:
         if self.negative_prompt_embeds is not None:
             return
 
-        training_args = self.training_args
+        assert self.training_config is not None
+        tc = self.training_config
         world_group = self.world_group
         device = self.device
         dtype = self._get_training_dtype()
+
+        from fastvideo.distillation.utils.loader_args import (
+            DistillLoaderArgs,
+        )
 
         neg_embeds: torch.Tensor | None = None
         neg_mask: torch.Tensor | None = None
 
         if world_group.rank_in_group == 0:
             sampling_param = SamplingParam.from_pretrained(
-                training_args.model_path
+                tc.model_path
             )
             negative_prompt = sampling_param.negative_prompt
 
-            args_copy = copy.deepcopy(training_args)
-            args_copy.inference_mode = True
+            inference_args = (
+                DistillLoaderArgs.for_inference(
+                    tc, model_path=tc.model_path
+                )
+            )
 
             prompt_pipeline = WanPipeline.from_pretrained(
-                training_args.model_path,
-                args=args_copy,
+                tc.model_path,
+                args=inference_args,
                 inference_mode=True,
                 loaded_modules={
                     "transformer": self.transformer
                 },
-                tp_size=training_args.tp_size,
-                sp_size=training_args.sp_size,
-                num_gpus=training_args.num_gpus,
-                pin_cpu_memory=training_args.pin_cpu_memory,
+                tp_size=tc.distributed.tp_size,
+                sp_size=tc.distributed.sp_size,
+                num_gpus=tc.distributed.num_gpus,
+                pin_cpu_memory=(
+                    tc.distributed.pin_cpu_memory
+                ),
                 dit_cpu_offload=True,
             )
 
@@ -507,14 +589,16 @@ class WanModel(ModelBase):
             )
             result_batch = prompt_pipeline.prompt_encoding_stage(  # type: ignore[attr-defined]
                 batch_negative,
-                training_args,
+                inference_args,
             )
 
             neg_embeds = result_batch.prompt_embeds[0].to(
                 device=device, dtype=dtype
             )
-            neg_mask = result_batch.prompt_attention_mask[0].to(
-                device=device, dtype=dtype
+            neg_mask = (
+                result_batch.prompt_attention_mask[0].to(
+                    device=device, dtype=dtype
+                )
             )
 
             del prompt_pipeline
@@ -522,7 +606,9 @@ class WanModel(ModelBase):
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-        meta = torch.zeros((2,), device=device, dtype=torch.int64)
+        meta = torch.zeros(
+            (2,), device=device, dtype=torch.int64
+        )
         if world_group.rank_in_group == 0:
             assert neg_embeds is not None
             assert neg_mask is not None
@@ -558,10 +644,12 @@ class WanModel(ModelBase):
         world_group.broadcast(mask_shape, src=0)
 
         embed_sizes = tuple(
-            int(x) for x in embed_shape[:embed_ndim].tolist()
+            int(x)
+            for x in embed_shape[:embed_ndim].tolist()
         )
         mask_sizes = tuple(
-            int(x) for x in mask_shape[:mask_ndim].tolist()
+            int(x)
+            for x in mask_shape[:mask_ndim].tolist()
         )
 
         if world_group.rank_in_group != 0:
@@ -588,17 +676,20 @@ class WanModel(ModelBase):
                 "on_train_start() must be called before "
                 "prepare_batch()"
             )
+        assert self.training_config is not None
+        tc = self.training_config
 
         u = compute_density_for_timestep_sampling(
-            weighting_scheme=self.training_args.weighting_scheme,
+            weighting_scheme=tc.model.weighting_scheme,
             batch_size=batch_size,
             generator=self.noise_random_generator,
-            logit_mean=self.training_args.logit_mean,
-            logit_std=self.training_args.logit_std,
-            mode_scale=self.training_args.mode_scale,
+            logit_mean=tc.model.logit_mean,
+            logit_std=tc.model.logit_std,
+            mode_scale=tc.model.mode_scale,
         )
         indices = (
-            u * self.noise_scheduler.config.num_train_timesteps
+            u
+            * self.noise_scheduler.config.num_train_timesteps
         ).long()
         return self.noise_scheduler.timesteps[indices].to(
             device=device
@@ -607,48 +698,67 @@ class WanModel(ModelBase):
     def _build_attention_metadata(
         self, training_batch: TrainingBatch
     ) -> TrainingBatch:
+        assert self.training_config is not None
+        tc = self.training_config
         latents_shape = training_batch.raw_latent_shape
         patch_size = (
-            self.training_args.pipeline_config.dit_config
-            .patch_size
+            tc.pipeline_config.dit_config.patch_size  # type: ignore[union-attr]
         )
-        current_vsa_sparsity = training_batch.current_vsa_sparsity
+        current_vsa_sparsity = (
+            training_batch.current_vsa_sparsity
+        )
         assert latents_shape is not None
         assert training_batch.timesteps is not None
 
-        if envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+        if (
+            envs.FASTVIDEO_ATTENTION_BACKEND
+            == "VIDEO_SPARSE_ATTN"
+        ):
             if (
                 not is_vsa_available()
-                or VideoSparseAttentionMetadataBuilder is None
+                or VideoSparseAttentionMetadataBuilder
+                is None
             ):
                 raise ImportError(
                     "FASTVIDEO_ATTENTION_BACKEND is "
-                    "VIDEO_SPARSE_ATTN, but fastvideo_kernel "
-                    "is not correctly installed or detected."
+                    "VIDEO_SPARSE_ATTN, but "
+                    "fastvideo_kernel is not correctly "
+                    "installed or detected."
                 )
             training_batch.attn_metadata = VideoSparseAttentionMetadataBuilder().build(  # type: ignore[misc]
                 raw_latent_shape=latents_shape[2:5],
-                current_timestep=training_batch.timesteps,
+                current_timestep=(
+                    training_batch.timesteps
+                ),
                 patch_size=patch_size,
                 VSA_sparsity=current_vsa_sparsity,
                 device=self.device,
             )
-        elif envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
+        elif (
+            envs.FASTVIDEO_ATTENTION_BACKEND
+            == "VMOBA_ATTN"
+        ):
             if (
                 not is_vmoba_available()
-                or VideoMobaAttentionMetadataBuilder is None
+                or VideoMobaAttentionMetadataBuilder
+                is None
             ):
                 raise ImportError(
-                    "FASTVIDEO_ATTENTION_BACKEND is VMOBA_ATTN, "
-                    "but fastvideo_kernel (or flash_attn>=2.7.4) "
-                    "is not correctly installed."
+                    "FASTVIDEO_ATTENTION_BACKEND is "
+                    "VMOBA_ATTN, but fastvideo_kernel "
+                    "(or flash_attn>=2.7.4) is not "
+                    "correctly installed."
                 )
-            moba_params = self.training_args.moba_config.copy()
+            moba_params = tc.model.moba_config.copy()
             moba_params.update(
                 {
-                    "current_timestep": training_batch.timesteps,
+                    "current_timestep": (
+                        training_batch.timesteps
+                    ),
                     "raw_latent_shape": (
-                        training_batch.raw_latent_shape[2:5]
+                        training_batch.raw_latent_shape[
+                            2:5
+                        ]
                     ),
                     "patch_size": patch_size,
                     "device": self.device,
@@ -663,6 +773,8 @@ class WanModel(ModelBase):
     def _prepare_dit_inputs(
         self, training_batch: TrainingBatch
     ) -> TrainingBatch:
+        assert self.training_config is not None
+        tc = self.training_config
         latents = training_batch.latents
         assert isinstance(latents, torch.Tensor)
         batch_size = latents.shape[0]
@@ -682,10 +794,7 @@ class WanModel(ModelBase):
         timesteps = self._sample_timesteps(
             batch_size, latents.device
         )
-        if (
-            int(getattr(self.training_args, "sp_size", 1) or 1)
-            > 1
-        ):
+        if int(tc.distributed.sp_size or 1) > 1:
             self.sp_group.broadcast(timesteps, src=0)
 
         sigmas = get_sigmas(
@@ -699,7 +808,9 @@ class WanModel(ModelBase):
             (1.0 - sigmas) * latents + sigmas * noise
         )
 
-        training_batch.noisy_model_input = noisy_model_input
+        training_batch.noisy_model_input = (
+            noisy_model_input
+        )
         training_batch.timesteps = timesteps
         training_batch.sigmas = sigmas
         training_batch.noise = noise
@@ -716,15 +827,24 @@ class WanModel(ModelBase):
 
         if (
             self.negative_prompt_embeds is not None
-            and self.negative_prompt_attention_mask is not None
+            and self.negative_prompt_attention_mask
+            is not None
         ):
             neg_embeds = self.negative_prompt_embeds
-            neg_mask = self.negative_prompt_attention_mask
-            if neg_embeds.shape[0] == 1 and batch_size > 1:
+            neg_mask = (
+                self.negative_prompt_attention_mask
+            )
+            if (
+                neg_embeds.shape[0] == 1
+                and batch_size > 1
+            ):
                 neg_embeds = neg_embeds.expand(
                     batch_size, *neg_embeds.shape[1:]
                 ).contiguous()
-            if neg_mask.shape[0] == 1 and batch_size > 1:
+            if (
+                neg_mask.shape[0] == 1
+                and batch_size > 1
+            ):
                 neg_mask = neg_mask.expand(
                     batch_size, *neg_mask.shape[1:]
                 ).contiguous()
@@ -733,8 +853,8 @@ class WanModel(ModelBase):
                 "encoder_attention_mask": neg_mask,
             }
 
-        training_batch.latents = training_batch.latents.permute(
-            0, 2, 1, 3, 4
+        training_batch.latents = (
+            training_batch.latents.permute(0, 2, 1, 3, 4)
         )
         return training_batch
 
@@ -746,7 +866,8 @@ class WanModel(ModelBase):
     ) -> dict[str, Any]:
         if text_dict is None:
             raise ValueError(
-                "text_dict cannot be None for Wan distillation"
+                "text_dict cannot be None for "
+                "Wan distillation"
             )
         return {
             "hidden_states": noise_input.permute(
@@ -785,18 +906,20 @@ class WanModel(ModelBase):
                 )
             return text_dict
 
-        on_missing_raw = cfg_uncond.get("on_missing", "error")
+        on_missing_raw = cfg_uncond.get(
+            "on_missing", "error"
+        )
         if not isinstance(on_missing_raw, str):
             raise ValueError(
-                "method_config.cfg_uncond.on_missing must be "
-                "a string, got "
+                "method_config.cfg_uncond.on_missing "
+                "must be a string, got "
                 f"{type(on_missing_raw).__name__}"
             )
         on_missing = on_missing_raw.strip().lower()
         if on_missing not in {"error", "ignore"}:
             raise ValueError(
-                "method_config.cfg_uncond.on_missing must be "
-                "one of {error, ignore}, got "
+                "method_config.cfg_uncond.on_missing "
+                "must be one of {error, ignore}, got "
                 f"{on_missing_raw!r}"
             )
 
@@ -807,9 +930,10 @@ class WanModel(ModelBase):
                 continue
             if not isinstance(policy_raw, str):
                 raise ValueError(
-                    "method_config.cfg_uncond values must be "
-                    "strings, got "
-                    f"{channel}={type(policy_raw).__name__}"
+                    "method_config.cfg_uncond values "
+                    "must be strings, got "
+                    f"{channel}="
+                    f"{type(policy_raw).__name__}"
                 )
             policy = policy_raw.strip().lower()
             if policy == "keep":
@@ -817,10 +941,11 @@ class WanModel(ModelBase):
             if on_missing == "ignore":
                 continue
             raise ValueError(
-                "WanModel does not support cfg_uncond channel "
+                "WanModel does not support "
+                "cfg_uncond channel "
                 f"{channel!r} (policy={policy!r}). "
-                "Set cfg_uncond.on_missing=ignore or remove "
-                "the channel."
+                "Set cfg_uncond.on_missing=ignore or "
+                "remove the channel."
             )
 
         text_policy_raw = cfg_uncond.get("text", None)
@@ -828,12 +953,14 @@ class WanModel(ModelBase):
             text_policy = "negative_prompt"
         elif not isinstance(text_policy_raw, str):
             raise ValueError(
-                "method_config.cfg_uncond.text must be a "
-                "string, got "
+                "method_config.cfg_uncond.text must be "
+                "a string, got "
                 f"{type(text_policy_raw).__name__}"
             )
         else:
-            text_policy = text_policy_raw.strip().lower()
+            text_policy = (
+                text_policy_raw.strip().lower()
+            )
 
         if text_policy in {"negative_prompt"}:
             text_dict = getattr(
@@ -849,32 +976,39 @@ class WanModel(ModelBase):
         if text_policy == "keep":
             if batch.conditional_dict is None:
                 raise RuntimeError(
-                    "Missing conditional_dict in TrainingBatch"
+                    "Missing conditional_dict in "
+                    "TrainingBatch"
                 )
             return batch.conditional_dict
         if text_policy == "zero":
             if batch.conditional_dict is None:
                 raise RuntimeError(
-                    "Missing conditional_dict in TrainingBatch"
+                    "Missing conditional_dict in "
+                    "TrainingBatch"
                 )
             cond = batch.conditional_dict
             enc = cond["encoder_hidden_states"]
             mask = cond["encoder_attention_mask"]
-            if not torch.is_tensor(enc) or not torch.is_tensor(
-                mask
-            ):
+            if not torch.is_tensor(
+                enc
+            ) or not torch.is_tensor(mask):
                 raise TypeError(
                     "conditional_dict must contain "
                     "tensor text inputs"
                 )
             return {
-                "encoder_hidden_states": torch.zeros_like(enc),
-                "encoder_attention_mask": torch.zeros_like(mask),
+                "encoder_hidden_states": (
+                    torch.zeros_like(enc)
+                ),
+                "encoder_attention_mask": (
+                    torch.zeros_like(mask)
+                ),
             }
         if text_policy == "drop":
             raise ValueError(
-                "cfg_uncond.text=drop is not supported for Wan."
-                " Use {negative_prompt, keep, zero}."
+                "cfg_uncond.text=drop is not supported "
+                "for Wan. Use "
+                "{negative_prompt, keep, zero}."
             )
         raise ValueError(
             "cfg_uncond.text must be one of "

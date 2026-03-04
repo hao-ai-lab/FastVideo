@@ -74,7 +74,7 @@ class DMD2Method(DistillMethod):
             raise ValueError("DMD2Method requires critic to be trainable")
 
         self.validator = validator
-        self.training_args = cfg.training_args
+        self.training_config = cfg.training
         self.method_config: dict[str, Any] = dict(cfg.method)
         self.validation_config: dict[str, Any] = dict(getattr(cfg, "validation", {}) or {})
         self._cfg_uncond = self._parse_cfg_uncond()
@@ -82,7 +82,7 @@ class DMD2Method(DistillMethod):
         self._denoising_step_list: torch.Tensor | None = None
 
         # Initialize preprocessors on student.
-        self.student.init_preprocessors(self.training_args)
+        self.student.init_preprocessors(self.training_config)
 
         self._init_optimizers_and_schedulers()
 
@@ -216,9 +216,10 @@ class DMD2Method(DistillMethod):
 
     # DistillMethod override: optimizers_schedulers_step
     def optimizers_schedulers_step(self, iteration: int) -> None:
+        max_grad_norm = self.training_config.optimizer.max_grad_norm
         if self._should_update_student(iteration):
-            clip_grad_norm_if_needed(self.student.transformer, self.training_args)
-        clip_grad_norm_if_needed(self.critic.transformer, self.training_args)
+            clip_grad_norm_if_needed(self.student.transformer, max_grad_norm)
+        clip_grad_norm_if_needed(self.critic.transformer, max_grad_norm)
         super().optimizers_schedulers_step(iteration)
 
     # DistillTrainer hook: on_train_start
@@ -354,22 +355,20 @@ class DMD2Method(DistillMethod):
         return cfg
 
     def _init_optimizers_and_schedulers(self) -> None:
-        training_args = self.training_args
+        tc = self.training_config
 
         # Student optimizer/scheduler.
-        student_lr = float(getattr(training_args, "learning_rate", 0.0) or 0.0)
-        student_betas = parse_betas(
-            getattr(training_args, "betas", None),
-            where="training.betas",
-        )
-        student_sched = str(getattr(training_args, "lr_scheduler", "constant"))
+        student_lr = float(tc.optimizer.learning_rate)
+        student_betas = tc.optimizer.betas
+        student_sched = str(tc.optimizer.lr_scheduler)
         student_params = [p for p in self.student.transformer.parameters() if p.requires_grad]
         (
             self._student_optimizer,
             self._student_lr_scheduler,
         ) = build_optimizer_and_scheduler(
             params=student_params,
-            training_args=self.training_args,
+            optimizer_config=tc.optimizer,
+            loop_config=tc.loop,
             learning_rate=student_lr,
             betas=student_betas,
             scheduler_name=student_sched,
@@ -387,7 +386,7 @@ class DMD2Method(DistillMethod):
 
         critic_betas_raw = self.method_config.get("fake_score_betas", None)
         if critic_betas_raw is None:
-            critic_betas_raw = getattr(training_args, "betas", None)
+            critic_betas_raw = tc.optimizer.betas
         critic_betas = parse_betas(critic_betas_raw, where="method.fake_score_betas")
 
         critic_sched_raw = self.method_config.get("fake_score_lr_scheduler", None)
@@ -398,7 +397,8 @@ class DMD2Method(DistillMethod):
             self._critic_lr_scheduler,
         ) = build_optimizer_and_scheduler(
             params=critic_params,
-            training_args=self.training_args,
+            optimizer_config=tc.optimizer,
+            loop_config=tc.loop,
             learning_rate=critic_lr,
             betas=critic_betas,
             scheduler_name=critic_sched,
@@ -433,7 +433,7 @@ class DMD2Method(DistillMethod):
 
         warp = self.method_config.get("warp_denoising_step", None)
         if warp is None:
-            warp = getattr(self.training_args, "warp_denoising_step", False)
+            warp = False
         if bool(warp):
             timesteps = torch.cat((
                 self.student.noise_scheduler.timesteps.to("cpu"),

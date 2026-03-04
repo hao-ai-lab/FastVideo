@@ -1,26 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
-
 """WanGame validator (model-family validation backend).
 
 Config keys used:
-- `training` (selected fields):
-  - `seed`, `model_path`
-  - `num_height`, `num_width`, `num_latent_t`
-  - `tp_size`, `sp_size`, `num_gpus`, `pin_cpu_memory`
+- `training` (DistillTrainingConfig):
+  - `data.seed`, `model_path`
+  - `data.num_height`, `data.num_width`, `data.num_latent_t`
+  - `distributed.tp_size`, `distributed.sp_size`,
+    `distributed.num_gpus`, `distributed.pin_cpu_memory`
   - `pipeline_config.flow_shift`
-  - `pipeline_config.vae_config.arch_config.temporal_compression_ratio`
-  - `VSA_sparsity`, `VSA_decay_rate`, `VSA_decay_interval_steps` (when applicable)
-- `training.validation.*` (typically parsed by a method into `ValidationRequest`):
+  - `pipeline_config.vae_config.arch_config
+     .temporal_compression_ratio`
+  - `vsa.sparsity`
+- `training.validation.*` (typically parsed by a method into
+  `ValidationRequest`):
   - `dataset_file`, `sampling_steps`, `guidance_scale`
-  - `sampler_kind` (`ode`/`sde`), `ode_solver` (`euler`/`unipc`)
-  - `rollout_mode` (`parallel`/`streaming`), `num_frames` (action length)
+  - `sampler_kind` (`ode`/`sde`), `ode_solver`
+    (`euler`/`unipc`)
+  - `rollout_mode` (`parallel`/`streaming`), `num_frames`
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import imageio
 import numpy as np
@@ -30,14 +33,21 @@ from einops import rearrange
 from torch.utils.data import DataLoader
 
 from fastvideo.configs.sample import SamplingParam
-from fastvideo.dataset.validation_dataset import ValidationDataset
+from fastvideo.dataset.validation_dataset import (
+    ValidationDataset, )
 from fastvideo.distributed import get_sp_group, get_world_group
-from fastvideo.fastvideo_args import ExecutionMode
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
-from fastvideo.distillation.validators.base import ValidationRequest
+from fastvideo.distillation.utils.loader_args import (
+    DistillLoaderArgs, )
+from fastvideo.distillation.validators.base import (
+    ValidationRequest, )
 from fastvideo.training.trackers import DummyTracker
 from fastvideo.utils import shallow_asdict
+
+if TYPE_CHECKING:
+    from fastvideo.distillation.utils.distill_config import (
+        DistillTrainingConfig, )
 
 logger = init_logger(__name__)
 
@@ -49,15 +59,15 @@ class _ValidationStepResult:
 
 
 class WanGameValidator:
-    """Standalone validator for WanGame distillation/finetuning."""
+    """Standalone validator for WanGame distillation."""
 
     def __init__(
         self,
         *,
-        training_args: Any,
+        training_config: DistillTrainingConfig,
         tracker: Any | None = None,
     ) -> None:
-        self.training_args = training_args
+        self.training_config = training_config
         self.tracker = tracker or DummyTracker()
 
         self.world_group = get_world_group()
@@ -66,14 +76,15 @@ class WanGameValidator:
         self.rank_in_sp_group = self.sp_group.rank_in_group
         self.sp_world_size = self.sp_group.world_size
 
-        seed = getattr(training_args, "seed", None)
+        seed = training_config.data.seed
         if seed is None:
-            raise ValueError("training_args.seed must be set for validation")
+            raise ValueError("training.data.seed must be set for "
+                             "validation")
         self.seed = int(seed)
-        self.validation_random_generator = torch.Generator(device="cpu").manual_seed(self.seed)
+        self.validation_random_generator = (torch.Generator(device="cpu").manual_seed(self.seed))
 
         self._pipeline: Any | None = None
-        self._pipeline_key: tuple[int, str, str, str] | None = None
+        self._pipeline_key: (tuple[int, str, str, str] | None) = None
         self._sampling_param: SamplingParam | None = None
 
     def set_tracker(self, tracker: Any) -> None:
@@ -84,10 +95,7 @@ class WanGameValidator:
         frames: list[np.ndarray],
         batch: ForwardBatch,
     ) -> list[np.ndarray]:
-        """Optionally overlay action indicators on validation frames.
-
-        Mirrors legacy `WanGameTrainingPipeline._post_process_validation_frames()`.
-        """
+        """Optionally overlay action indicators."""
 
         keyboard_cond = getattr(batch, "keyboard_cond", None)
         mouse_cond = getattr(batch, "mouse_cond", None)
@@ -100,35 +108,39 @@ class WanGameValidator:
                 draw_mouse_on_frame,
             )
         except Exception as e:
-            logger.warning("WanGame action overlay is unavailable: %s", e)
+            logger.warning(
+                "WanGame action overlay is unavailable: %s",
+                e,
+            )
             return frames
 
-        if keyboard_cond is not None and torch.is_tensor(keyboard_cond):
-            keyboard_np = keyboard_cond.squeeze(0).detach().cpu().float().numpy()
+        if (keyboard_cond is not None and torch.is_tensor(keyboard_cond)):
+            keyboard_np = (keyboard_cond.squeeze(0).detach().cpu().float().numpy())
         else:
             keyboard_np = None
 
-        if mouse_cond is not None and torch.is_tensor(mouse_cond):
-            mouse_np = mouse_cond.squeeze(0).detach().cpu().float().numpy()
+        if (mouse_cond is not None and torch.is_tensor(mouse_cond)):
+            mouse_np = (mouse_cond.squeeze(0).detach().cpu().float().numpy())
         else:
             mouse_np = None
 
-        # MatrixGame convention: keyboard [W, S, A, D, left, right],
-        # mouse [Pitch, Yaw].
         key_names = ["W", "S", "A", "D", "left", "right"]
 
         processed_frames: list[np.ndarray] = []
         for frame_idx, frame in enumerate(frames):
             frame = np.ascontiguousarray(frame.copy())
 
-            if keyboard_np is not None and frame_idx < len(keyboard_np):
+            if (keyboard_np is not None and frame_idx < len(keyboard_np)):
                 keys = {
                     key_names[i]: bool(keyboard_np[frame_idx, i])
-                    for i in range(min(len(key_names), int(keyboard_np.shape[1])))
+                    for i in range(min(
+                        len(key_names),
+                        int(keyboard_np.shape[1]),
+                    ))
                 }
                 draw_keys_on_frame(frame, keys, mode="universal")
 
-            if mouse_np is not None and frame_idx < len(mouse_np):
+            if (mouse_np is not None and frame_idx < len(mouse_np)):
                 pitch = float(mouse_np[frame_idx, 0])
                 yaw = float(mouse_np[frame_idx, 1])
                 draw_mouse_on_frame(frame, pitch, yaw)
@@ -139,7 +151,7 @@ class WanGameValidator:
 
     def _get_sampling_param(self) -> SamplingParam:
         if self._sampling_param is None:
-            self._sampling_param = SamplingParam.from_pretrained(self.training_args.model_path)
+            self._sampling_param = (SamplingParam.from_pretrained(self.training_config.model_path))
         return self._sampling_param
 
     def _get_pipeline(
@@ -152,30 +164,37 @@ class WanGameValidator:
     ) -> Any:
         rollout_mode = str(rollout_mode).strip().lower()
         sampler_kind = str(sampler_kind).strip().lower()
-        key = (id(transformer), rollout_mode, sampler_kind, str(ode_solver))
-        if self._pipeline is not None and self._pipeline_key == key:
+        key = (
+            id(transformer),
+            rollout_mode,
+            sampler_kind,
+            str(ode_solver),
+        )
+        if (self._pipeline is not None and self._pipeline_key == key):
             return self._pipeline
+
+        tc = self.training_config
 
         if rollout_mode == "parallel":
             if sampler_kind not in {"ode", "sde"}:
-                raise ValueError(
-                    f"Unknown sampler_kind for WanGame validation: {sampler_kind!r}"
-                )
+                raise ValueError("Unknown sampler_kind for WanGame "
+                                 f"validation: {sampler_kind!r}")
 
-            flow_shift = getattr(self.training_args.pipeline_config, "flow_shift", None)
+            flow_shift = getattr(tc.pipeline_config, "flow_shift", None)
 
             from fastvideo.pipelines.basic.wan.wangame_i2v_pipeline import (
-                WanGameActionImageToVideoPipeline,
-            )
+                WanGameActionImageToVideoPipeline, )
 
             kwargs: dict[str, Any] = {
                 "inference_mode": True,
                 "sampler_kind": sampler_kind,
-                "loaded_modules": {"transformer": transformer},
-                "tp_size": self.training_args.tp_size,
-                "sp_size": self.training_args.sp_size,
-                "num_gpus": self.training_args.num_gpus,
-                "pin_cpu_memory": self.training_args.pin_cpu_memory,
+                "loaded_modules": {
+                    "transformer": transformer,
+                },
+                "tp_size": tc.distributed.tp_size,
+                "sp_size": tc.distributed.sp_size,
+                "num_gpus": tc.distributed.num_gpus,
+                "pin_cpu_memory": (tc.distributed.pin_cpu_memory),
                 "dit_cpu_offload": True,
             }
             if flow_shift is not None:
@@ -183,67 +202,70 @@ class WanGameValidator:
             if ode_solver is not None:
                 kwargs["ode_solver"] = str(ode_solver)
 
-            self._pipeline = WanGameActionImageToVideoPipeline.from_pretrained(
-                self.training_args.model_path,
+            self._pipeline = (WanGameActionImageToVideoPipeline.from_pretrained(
+                tc.model_path,
                 **kwargs,
-            )
+            ))
         elif rollout_mode == "streaming":
             if sampler_kind not in {"ode", "sde"}:
-                raise ValueError(
-                    f"Unknown sampler_kind for WanGame streaming validation: {sampler_kind!r}"
-                )
+                raise ValueError("Unknown sampler_kind for WanGame "
+                                 "streaming validation: "
+                                 f"{sampler_kind!r}")
 
-            flow_shift = getattr(self.training_args.pipeline_config, "flow_shift", None)
+            flow_shift = getattr(tc.pipeline_config, "flow_shift", None)
             if flow_shift is None:
-                raise ValueError("pipeline_config.flow_shift must be set for WanGame validation")
+                raise ValueError("pipeline_config.flow_shift must be set "
+                                 "for WanGame validation")
 
             if sampler_kind == "sde":
                 if ode_solver is not None:
-                    raise ValueError(
-                        "ode_solver is only valid when sampler_kind='ode', got "
-                        f"ode_solver={ode_solver!r}."
-                    )
+                    raise ValueError("ode_solver is only valid when "
+                                     "sampler_kind='ode', got "
+                                     f"ode_solver={ode_solver!r}.")
                 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-                    FlowMatchEulerDiscreteScheduler,
-                )
+                    FlowMatchEulerDiscreteScheduler, )
 
-                scheduler = FlowMatchEulerDiscreteScheduler(shift=float(flow_shift))
+                scheduler = (FlowMatchEulerDiscreteScheduler(shift=float(flow_shift)))
             else:
                 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-                    FlowMatchEulerDiscreteScheduler,
-                )
+                    FlowMatchEulerDiscreteScheduler, )
                 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-                    FlowUniPCMultistepScheduler,
-                )
+                    FlowUniPCMultistepScheduler, )
 
-                ode_solver_norm = (str(ode_solver).strip().lower()
-                                   if ode_solver is not None else "unipc")
-                if ode_solver_norm in {"unipc", "unipc_multistep", "multistep"}:
-                    scheduler = FlowUniPCMultistepScheduler(shift=float(flow_shift))
-                elif ode_solver_norm in {"euler", "flowmatch", "flowmatch_euler"}:
-                    scheduler = FlowMatchEulerDiscreteScheduler(shift=float(flow_shift))
+                ode_solver_norm = (str(ode_solver).strip().lower() if ode_solver is not None else "unipc")
+                if ode_solver_norm in {
+                        "unipc",
+                        "unipc_multistep",
+                        "multistep",
+                }:
+                    scheduler = (FlowUniPCMultistepScheduler(shift=float(flow_shift)))
+                elif ode_solver_norm in {
+                        "euler",
+                        "flowmatch",
+                        "flowmatch_euler",
+                }:
+                    scheduler = (FlowMatchEulerDiscreteScheduler(shift=float(flow_shift)))
                 else:
-                    raise ValueError(
-                        "Unknown ode_solver for WanGame streaming validation: "
-                        f"{ode_solver!r} (expected 'unipc' or 'euler')."
-                    )
+                    raise ValueError("Unknown ode_solver for WanGame "
+                                     "streaming validation: "
+                                     f"{ode_solver!r} (expected 'unipc'"
+                                     " or 'euler').")
 
             from fastvideo.pipelines.basic.wan.wangame_causal_dmd_pipeline import (
-                WanGameCausalDMDPipeline,
-            )
+                WanGameCausalDMDPipeline, )
 
             kwargs = {
                 "inference_mode": True,
-                "flow_shift": float(flow_shift) if flow_shift is not None else None,
+                "flow_shift": (float(flow_shift) if flow_shift is not None else None),
                 "sampler_kind": sampler_kind,
                 "loaded_modules": {
                     "transformer": transformer,
                     "scheduler": scheduler,
                 },
-                "tp_size": self.training_args.tp_size,
-                "sp_size": self.training_args.sp_size,
-                "num_gpus": self.training_args.num_gpus,
-                "pin_cpu_memory": self.training_args.pin_cpu_memory,
+                "tp_size": tc.distributed.tp_size,
+                "sp_size": tc.distributed.sp_size,
+                "num_gpus": tc.distributed.num_gpus,
+                "pin_cpu_memory": (tc.distributed.pin_cpu_memory),
                 "dit_cpu_offload": True,
             }
             if kwargs["flow_shift"] is None:
@@ -251,15 +273,14 @@ class WanGameValidator:
             if ode_solver is not None:
                 kwargs["ode_solver"] = str(ode_solver)
 
-            self._pipeline = WanGameCausalDMDPipeline.from_pretrained(
-                self.training_args.model_path,
+            self._pipeline = (WanGameCausalDMDPipeline.from_pretrained(
+                tc.model_path,
                 **kwargs,
-            )
+            ))
         else:
-            raise ValueError(
-                "Unknown rollout_mode for WanGame validation: "
-                f"{rollout_mode!r}. Expected 'parallel' or 'streaming'."
-            )
+            raise ValueError("Unknown rollout_mode for WanGame "
+                             f"validation: {rollout_mode!r}. Expected "
+                             "'parallel' or 'streaming'.")
 
         self._pipeline_key = key
         return self._pipeline
@@ -274,22 +295,20 @@ class WanGameValidator:
         guidance_scale: float | None = None,
         num_frames: int | None = None,
     ) -> ForwardBatch:
-        training_args = self.training_args
+        tc = self.training_config
 
         sampling_param.prompt = validation_batch["prompt"]
-        sampling_param.height = training_args.num_height
-        sampling_param.width = training_args.num_width
-        sampling_param.image_path = validation_batch.get("image_path") or validation_batch.get("video_path")
+        sampling_param.height = tc.data.num_height
+        sampling_param.width = tc.data.num_width
+        sampling_param.image_path = (validation_batch.get("image_path") or validation_batch.get("video_path"))
         sampling_param.num_inference_steps = int(num_inference_steps)
         sampling_param.data_type = "video"
         if guidance_scale is not None:
             sampling_param.guidance_scale = float(guidance_scale)
         sampling_param.seed = self.seed
 
-        temporal_compression_factor = (
-            training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        )
-        default_num_frames = (training_args.num_latent_t - 1) * temporal_compression_factor + 1
+        temporal_compression_factor = int(tc.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
+        default_num_frames = ((tc.data.num_latent_t - 1) * temporal_compression_factor + 1)
         if num_frames is not None:
             sampling_param.num_frames = int(num_frames)
         else:
@@ -300,13 +319,12 @@ class WanGameValidator:
             sampling_param.height // 8,
             sampling_param.width // 8,
         ]
-        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+        n_tokens = (latents_size[0] * latents_size[1] * latents_size[2])
 
-        sampling_timesteps_tensor = (
-            torch.tensor([int(s) for s in sampling_timesteps], dtype=torch.long)
-            if sampling_timesteps is not None
-            else None
-        )
+        sampling_timesteps_tensor = (torch.tensor(
+            [int(s) for s in sampling_timesteps],
+            dtype=torch.long,
+        ) if sampling_timesteps is not None else None)
 
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
@@ -314,51 +332,53 @@ class WanGameValidator:
             generator=self.validation_random_generator,
             n_tokens=n_tokens,
             eta=0.0,
-            VSA_sparsity=training_args.VSA_sparsity,
+            VSA_sparsity=tc.vsa.sparsity,
             timesteps=sampling_timesteps_tensor,
             sampling_timesteps=sampling_timesteps_tensor,
         )
-        if "image" in validation_batch and validation_batch["image"] is not None:
+        if ("image" in validation_batch and validation_batch["image"] is not None):
             batch.pil_image = validation_batch["image"]
 
-        if "keyboard_cond" in validation_batch and validation_batch["keyboard_cond"] is not None:
-            keyboard_cond = torch.as_tensor(validation_batch["keyboard_cond"]).to(
-                dtype=torch.bfloat16
-            )
-            if keyboard_cond.ndim == 3 and keyboard_cond.shape[0] == 1:
+        if ("keyboard_cond" in validation_batch and validation_batch["keyboard_cond"] is not None):
+            keyboard_cond = torch.as_tensor(validation_batch["keyboard_cond"]).to(dtype=torch.bfloat16)
+            if (keyboard_cond.ndim == 3 and keyboard_cond.shape[0] == 1):
                 keyboard_cond = keyboard_cond.squeeze(0)
             if keyboard_cond.ndim != 2:
-                raise ValueError(
-                    "validation keyboard_cond must have shape (T, K) (or (1, T, K)), "
-                    f"got {tuple(keyboard_cond.shape)}"
-                )
+                raise ValueError("validation keyboard_cond must have "
+                                 "shape (T, K) (or (1, T, K)), "
+                                 f"got {tuple(keyboard_cond.shape)}")
             target_len = int(sampling_param.num_frames)
             if keyboard_cond.shape[0] > target_len:
                 keyboard_cond = keyboard_cond[:target_len]
             elif keyboard_cond.shape[0] < target_len:
                 pad = torch.zeros(
-                    (target_len - keyboard_cond.shape[0], keyboard_cond.shape[1]),
+                    (
+                        target_len - keyboard_cond.shape[0],
+                        keyboard_cond.shape[1],
+                    ),
                     dtype=keyboard_cond.dtype,
                     device=keyboard_cond.device,
                 )
                 keyboard_cond = torch.cat([keyboard_cond, pad], dim=0)
             batch.keyboard_cond = keyboard_cond.unsqueeze(0)
 
-        if "mouse_cond" in validation_batch and validation_batch["mouse_cond"] is not None:
+        if ("mouse_cond" in validation_batch and validation_batch["mouse_cond"] is not None):
             mouse_cond = torch.as_tensor(validation_batch["mouse_cond"]).to(dtype=torch.bfloat16)
-            if mouse_cond.ndim == 3 and mouse_cond.shape[0] == 1:
+            if (mouse_cond.ndim == 3 and mouse_cond.shape[0] == 1):
                 mouse_cond = mouse_cond.squeeze(0)
             if mouse_cond.ndim != 2:
-                raise ValueError(
-                    "validation mouse_cond must have shape (T, 2) (or (1, T, 2)), "
-                    f"got {tuple(mouse_cond.shape)}"
-                )
+                raise ValueError("validation mouse_cond must have shape"
+                                 " (T, 2) (or (1, T, 2)), "
+                                 f"got {tuple(mouse_cond.shape)}")
             target_len = int(sampling_param.num_frames)
             if mouse_cond.shape[0] > target_len:
                 mouse_cond = mouse_cond[:target_len]
             elif mouse_cond.shape[0] < target_len:
                 pad = torch.zeros(
-                    (target_len - mouse_cond.shape[0], mouse_cond.shape[1]),
+                    (
+                        target_len - mouse_cond.shape[0],
+                        mouse_cond.shape[1],
+                    ),
                     dtype=mouse_cond.dtype,
                     device=mouse_cond.device,
                 )
@@ -380,7 +400,7 @@ class WanGameValidator:
         guidance_scale: float | None = None,
         num_frames: int | None = None,
     ) -> _ValidationStepResult:
-        training_args = self.training_args
+        tc = self.training_config
         pipeline = self._get_pipeline(
             transformer=transformer,
             rollout_mode=rollout_mode,
@@ -391,6 +411,9 @@ class WanGameValidator:
 
         dataset = ValidationDataset(dataset_file)
         dataloader = DataLoader(dataset, batch_size=None, num_workers=0)
+
+        # Build inference args once for this validation run.
+        inference_args = DistillLoaderArgs.for_inference(tc, model_path=tc.model_path)
 
         videos: list[list[np.ndarray]] = []
         captions: list[str] = []
@@ -405,11 +428,11 @@ class WanGameValidator:
                 num_frames=num_frames,
             )
 
-            assert batch.prompt is not None and isinstance(batch.prompt, str)
+            assert (batch.prompt is not None and isinstance(batch.prompt, str))
             captions.append(batch.prompt)
 
             with torch.no_grad():
-                output_batch = pipeline.forward(batch, training_args)
+                output_batch = pipeline.forward(batch, inference_args)
 
             samples = output_batch.output.cpu()
             if self.rank_in_sp_group != 0:
@@ -421,106 +444,119 @@ class WanGameValidator:
                 x = torchvision.utils.make_grid(x, nrow=6)
                 x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                 frames.append((x * 255).numpy().astype(np.uint8))
-            frames = self._post_process_validation_frames(frames, batch)
+            frames = (self._post_process_validation_frames(frames, batch))
             videos.append(frames)
 
         return _ValidationStepResult(videos=videos, captions=captions)
 
-    def log_validation(self, step: int, *, request: ValidationRequest | None = None) -> None:
+    def log_validation(
+        self,
+        step: int,
+        *,
+        request: ValidationRequest | None = None,
+    ) -> None:
         if request is None:
-            raise ValueError("WanGameValidator.log_validation requires a ValidationRequest")
+            raise ValueError("WanGameValidator.log_validation requires "
+                             "a ValidationRequest")
 
         dataset_file = getattr(request, "dataset_file", None)
         if not dataset_file:
-            raise ValueError("ValidationRequest.dataset_file must be provided by the method")
+            raise ValueError("ValidationRequest.dataset_file must be "
+                             "provided by the method")
 
         guidance_scale = getattr(request, "guidance_scale", None)
         validation_steps = getattr(request, "sampling_steps", None)
         if not validation_steps:
-            raise ValueError("ValidationRequest.sampling_steps must be provided by the method")
-        sampler_kind = getattr(request, "sampler_kind", None) or "ode"
-        rollout_mode_raw = getattr(request, "rollout_mode", None) or "parallel"
+            raise ValueError("ValidationRequest.sampling_steps must be "
+                             "provided by the method")
+        sampler_kind = (getattr(request, "sampler_kind", None) or "ode")
+        rollout_mode_raw = (getattr(request, "rollout_mode", None) or "parallel")
         if not isinstance(rollout_mode_raw, str):
-            raise ValueError(
-                "ValidationRequest.rollout_mode must be a string when set, got "
-                f"{type(rollout_mode_raw).__name__}"
-            )
+            raise ValueError("ValidationRequest.rollout_mode must be a "
+                             "string when set, got "
+                             f"{type(rollout_mode_raw).__name__}")
         rollout_mode = rollout_mode_raw.strip().lower()
         if rollout_mode not in {"parallel", "streaming"}:
-            raise ValueError(
-                "ValidationRequest.rollout_mode must be one of {parallel, streaming}, got "
-                f"{rollout_mode_raw!r}"
-            )
+            raise ValueError("ValidationRequest.rollout_mode must be "
+                             "one of {parallel, streaming}, got "
+                             f"{rollout_mode_raw!r}")
         ode_solver = getattr(request, "ode_solver", None)
         num_frames_raw = getattr(request, "num_frames", None)
         if num_frames_raw is None:
             num_frames = None
         elif isinstance(num_frames_raw, bool):
-            raise ValueError("ValidationRequest.num_frames must be an int when set")
+            raise ValueError("ValidationRequest.num_frames must be an "
+                             "int when set")
         elif isinstance(num_frames_raw, int):
             num_frames = int(num_frames_raw)
         else:
-            raise ValueError(
-                "ValidationRequest.num_frames must be an int when set, got "
-                f"{type(num_frames_raw).__name__}"
-            )
+            raise ValueError("ValidationRequest.num_frames must be an "
+                             "int when set, got "
+                             f"{type(num_frames_raw).__name__}")
         if num_frames is not None and num_frames <= 0:
-            raise ValueError("ValidationRequest.num_frames must be > 0 when set")
+            raise ValueError("ValidationRequest.num_frames must be > 0 "
+                             "when set")
         if rollout_mode == "streaming":
-            sampler_kind_norm = str(sampler_kind).strip().lower()
+            sampler_kind_norm = (str(sampler_kind).strip().lower())
             if sampler_kind_norm not in {"ode", "sde"}:
-                raise ValueError(
-                    "WanGame validation rollout_mode='streaming' requires "
-                    "sampler_kind to be one of {'ode', 'sde'}, got "
-                    f"{sampler_kind!r}."
-                )
-            if sampler_kind_norm == "sde" and ode_solver is not None:
-                raise ValueError(
-                    "WanGame validation rollout_mode='streaming' only supports "
-                    f"ode_solver when sampler_kind='ode', got ode_solver={ode_solver!r}."
-                )
+                raise ValueError("WanGame validation "
+                                 "rollout_mode='streaming' requires "
+                                 "sampler_kind to be one of "
+                                 "{'ode', 'sde'}, got "
+                                 f"{sampler_kind!r}.")
+            if (sampler_kind_norm == "sde" and ode_solver is not None):
+                raise ValueError("WanGame validation "
+                                 "rollout_mode='streaming' only "
+                                 "supports ode_solver when "
+                                 "sampler_kind='ode', got "
+                                 f"ode_solver={ode_solver!r}.")
         sampling_timesteps = getattr(request, "sampling_timesteps", None)
         if sampling_timesteps is not None:
             expected = int(len(sampling_timesteps))
             for steps in validation_steps:
                 if int(steps) != expected:
-                    raise ValueError(
-                        "validation_sampling_steps must match "
-                        f"len(request.sampling_timesteps)={expected} when "
-                        "sampling_timesteps is provided, got "
-                        f"{validation_steps!r}."
-                    )
+                    raise ValueError("validation_sampling_steps must "
+                                     "match "
+                                     "len(request.sampling_timesteps)="
+                                     f"{expected} when "
+                                     "sampling_timesteps is provided, "
+                                     f"got {validation_steps!r}.")
 
         sample_handle = getattr(request, "sample_handle", None)
         if sample_handle is None:
-            raise ValueError("ValidationRequest.sample_handle must be provided by the method")
+            raise ValueError("ValidationRequest.sample_handle must be "
+                             "provided by the method")
         transformer = sample_handle.require_module("transformer")
         was_training = bool(getattr(transformer, "training", False))
 
-        training_args = self.training_args
-        output_dir = getattr(request, "output_dir", None) or training_args.output_dir
+        tc = self.training_config
+        output_dir = (getattr(request, "output_dir", None) or tc.checkpoint.output_dir)
 
-        old_inference_mode = training_args.inference_mode
-        old_dit_cpu_offload = training_args.dit_cpu_offload
-        old_mode = training_args.mode
-        old_dmd_denoising_steps = getattr(training_args.pipeline_config, "dmd_denoising_steps", None)
+        # For streaming SDE, we need to set
+        # dmd_denoising_steps on pipeline_config.
+        old_dmd_denoising_steps = getattr(
+            tc.pipeline_config,
+            "dmd_denoising_steps",
+            None,
+        )
         try:
-            training_args.inference_mode = True
-            training_args.dit_cpu_offload = True
-            training_args.mode = ExecutionMode.INFERENCE
             transformer.eval()
 
-            num_sp_groups = self.world_group.world_size // self.sp_group.world_size
+            num_sp_groups = (self.world_group.world_size // self.sp_group.world_size)
 
             for num_inference_steps in validation_steps:
-                if rollout_mode == "streaming" and str(sampler_kind).strip().lower() == "sde":
+                if (rollout_mode == "streaming" and str(sampler_kind).strip().lower() == "sde"):
                     if sampling_timesteps is not None:
-                        training_args.pipeline_config.dmd_denoising_steps = list(sampling_timesteps)
+                        tc.pipeline_config.dmd_denoising_steps = list(sampling_timesteps)
                     else:
-                        timesteps = np.linspace(1000, 0, int(num_inference_steps))
-                        training_args.pipeline_config.dmd_denoising_steps = [
-                            int(max(0, min(1000, round(t)))) for t in timesteps
-                        ]
+                        import numpy as np
+
+                        timesteps = np.linspace(
+                            1000,
+                            0,
+                            int(num_inference_steps),
+                        )
+                        tc.pipeline_config.dmd_denoising_steps = [int(max(0, min(1000, round(t)))) for t in timesteps]
 
                 result = self._run_validation_for_steps(
                     num_inference_steps,
@@ -528,7 +564,7 @@ class WanGameValidator:
                     transformer=transformer,
                     rollout_mode=rollout_mode,
                     sampler_kind=str(sampler_kind),
-                    ode_solver=str(ode_solver) if ode_solver is not None else None,
+                    ode_solver=(str(ode_solver) if ode_solver is not None else None),
                     sampling_timesteps=sampling_timesteps,
                     guidance_scale=guidance_scale,
                     num_frames=num_frames,
@@ -541,38 +577,50 @@ class WanGameValidator:
                     all_videos = list(result.videos)
                     all_captions = list(result.captions)
                     for sp_group_idx in range(1, num_sp_groups):
-                        src_rank = sp_group_idx * self.sp_world_size
-                        recv_videos = self.world_group.recv_object(src=src_rank)
-                        recv_captions = self.world_group.recv_object(src=src_rank)
+                        src_rank = (sp_group_idx * self.sp_world_size)
+                        recv_videos = (self.world_group.recv_object(src=src_rank))
+                        recv_captions = (self.world_group.recv_object(src=src_rank))
                         all_videos.extend(recv_videos)
                         all_captions.extend(recv_captions)
 
                     os.makedirs(output_dir, exist_ok=True)
                     video_filenames: list[str] = []
-                    sampling_param = self._get_sampling_param()
+                    sampling_param = (self._get_sampling_param())
                     for i, video in enumerate(all_videos):
                         filename = os.path.join(
                             output_dir,
-                            f"validation_step_{step}_inference_steps_{num_inference_steps}_video_{i}.mp4",
+                            f"validation_step_{step}"
+                            f"_inference_steps_"
+                            f"{num_inference_steps}"
+                            f"_video_{i}.mp4",
                         )
-                        imageio.mimsave(filename, video, fps=sampling_param.fps)
+                        imageio.mimsave(
+                            filename,
+                            video,
+                            fps=sampling_param.fps,
+                        )
                         video_filenames.append(filename)
 
                     video_logs = []
-                    for filename, caption in zip(video_filenames, all_captions, strict=True):
+                    for filename, caption in zip(
+                            video_filenames,
+                            all_captions,
+                            strict=True,
+                    ):
                         video_artifact = self.tracker.video(filename, caption=caption)
                         if video_artifact is not None:
                             video_logs.append(video_artifact)
                     if video_logs:
-                        logs = {f"validation_videos_{num_inference_steps}_steps": video_logs}
+                        logs = {
+                            f"validation_videos_"
+                            f"{num_inference_steps}"
+                            f"_steps": video_logs
+                        }
                         self.tracker.log_artifacts(logs, step)
                 else:
                     self.world_group.send_object(result.videos, dst=0)
                     self.world_group.send_object(result.captions, dst=0)
         finally:
-            training_args.inference_mode = old_inference_mode
-            training_args.dit_cpu_offload = old_dit_cpu_offload
-            training_args.mode = old_mode
-            training_args.pipeline_config.dmd_denoising_steps = old_dmd_denoising_steps
+            tc.pipeline_config.dmd_denoising_steps = (old_dmd_denoising_steps)
             if was_training:
                 transformer.train()

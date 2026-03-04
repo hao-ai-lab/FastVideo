@@ -12,11 +12,12 @@ from fastvideo.distillation.utils.instantiate import (
 from fastvideo.distillation.utils.config import RunConfig
 
 if TYPE_CHECKING:
-    from fastvideo.fastvideo_args import TrainingArgs
+    from fastvideo.distillation.utils.distill_config import (
+        DistillTrainingConfig, )
     from fastvideo.distillation.methods.base import DistillMethod
 
 
-def build_from_config(cfg: RunConfig, ) -> tuple[TrainingArgs, DistillMethod, Any, int]:
+def build_from_config(cfg: RunConfig, ) -> tuple[DistillTrainingConfig, DistillMethod, Any, int]:
     """Build method + dataloader from a v3 run config.
 
     1. Instantiate each model in ``cfg.models`` via ``_target_``.
@@ -78,4 +79,4 @@ def build_from_config(cfg: RunConfig, ) -> tuple[TrainingArgs, DistillMethod, An
     dataloader = (getattr(student, "dataloader", None) if student is not None else None)
     start_step = int(getattr(student, "start_step", 0) if student is not None else 0)
 
-    return cfg.training_args, method, dataloader, start_step
+    return cfg.training, method, dataloader, start_step

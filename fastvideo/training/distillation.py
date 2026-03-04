@@ -21,43 +21,50 @@ def run_distillation_from_config(
 ) -> None:
     """YAML-only distillation entrypoint (schema v2)."""
 
-    from fastvideo.distributed import maybe_init_distributed_environment_and_model_parallel
+    from fastvideo.distributed import (
+        maybe_init_distributed_environment_and_model_parallel, )
     from fastvideo.distillation import DistillTrainer
     from fastvideo.distillation.utils.checkpoint import (
         DistillCheckpointConfig,
         DistillCheckpointManager,
     )
-    from fastvideo.distillation.dispatch import build_from_config
-    from fastvideo.distillation.utils.config import load_run_config
+    from fastvideo.distillation.dispatch import (
+        build_from_config, )
+    from fastvideo.distillation.utils.config import (
+        load_run_config, )
 
     cfg = load_run_config(config_path)
-    training_args = cfg.training_args
+    tc = cfg.training
 
     if resume_from_checkpoint is not None:
-        training_args.resume_from_checkpoint = str(resume_from_checkpoint)
+        tc.checkpoint.resume_from_checkpoint = str(resume_from_checkpoint)
     if override_output_dir is not None:
-        training_args.output_dir = str(override_output_dir)
+        tc.checkpoint.output_dir = str(override_output_dir)
 
     maybe_init_distributed_environment_and_model_parallel(
-        training_args.tp_size,
-        training_args.sp_size,
+        tc.distributed.tp_size,
+        tc.distributed.sp_size,
     )
 
     _, method, dataloader, start_step = build_from_config(cfg)
 
     if dry_run:
-        logger.info("Dry-run: config parsed and build_from_config succeeded.")
+        logger.info("Dry-run: config parsed and "
+                    "build_from_config succeeded.")
         return
 
-    trainer = DistillTrainer(training_args, config=cfg.raw)
+    trainer = DistillTrainer(tc, config=cfg.raw)
 
-    # Attach the exact YAML used for this run to the tracker (e.g., W&B Files).
-    # This helps reproducibility and makes runs easy to inspect later.
-    trainer.tracker.log_file(os.path.abspath(os.path.expanduser(config_path)), name="run.yaml")
+    # Attach the exact YAML used for this run to the
+    # tracker (e.g., W&B Files).
+    trainer.tracker.log_file(
+        os.path.abspath(os.path.expanduser(config_path)),
+        name="run.yaml",
+    )
 
     ckpt_config = DistillCheckpointConfig(
-        save_steps=int(getattr(training_args, "training_state_checkpointing_steps", 0) or 0),
-        keep_last=int(getattr(training_args, "checkpoints_total_limit", 0) or 0),
+        save_steps=int(tc.checkpoint.training_state_checkpointing_steps or 0),
+        keep_last=int(tc.checkpoint.checkpoints_total_limit or 0),
     )
 
     get_rng_generators = getattr(method, "get_rng_generators", None)
@@ -68,13 +75,11 @@ def run_distillation_from_config(
             get_rng_generators = None
 
     checkpoint_manager = DistillCheckpointManager(
-        role_models=getattr(method, '_role_models', None) or {},
-        optimizers=getattr(method, '_optimizer_dict', None) or {},
-        lr_schedulers=getattr(
-            method, '_lr_scheduler_dict', None
-        ) or {},
+        role_models=(getattr(method, '_role_models', None) or {}),
+        optimizers=(getattr(method, '_optimizer_dict', None) or {}),
+        lr_schedulers=(getattr(method, '_lr_scheduler_dict', None) or {}),
         dataloader=dataloader,
-        output_dir=training_args.output_dir,
+        output_dir=tc.checkpoint.output_dir,
         config=ckpt_config,
         get_rng_generators=get_rng_generators,
     )
@@ -82,7 +87,7 @@ def run_distillation_from_config(
     trainer.run(
         method,
         dataloader=dataloader,
-        max_steps=training_args.max_train_steps,
+        max_steps=tc.loop.max_train_steps,
         start_step=start_step,
         checkpoint_manager=checkpoint_manager,
     )
@@ -93,7 +98,10 @@ def main(args: Any) -> None:
     dry_run = bool(args.dry_run)
     resume_from_checkpoint = getattr(args, "resume_from_checkpoint", None)
     override_output_dir = getattr(args, "override_output_dir", None)
-    logger.info("Starting distillation from config=%s", config_path)
+    logger.info(
+        "Starting distillation from config=%s",
+        config_path,
+    )
     run_distillation_from_config(
         config_path,
         dry_run=dry_run,
@@ -105,36 +113,35 @@ def main(args: Any) -> None:
 
 if __name__ == "__main__":
     argv = sys.argv
-    # NOTE: do not use `FlexibleArgumentParser` here.
-    # It treats `--config` specially (loads and inlines CLI args from YAML),
-    # which conflicts with Phase 2 distillation where `--config` points to the
-    # distillation run YAML itself.
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
         type=str,
         required=True,
-        help="Path to distillation YAML config (schema v2).",
+        help=("Path to distillation YAML config "
+              "(schema v2)."),
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Parse config and build runtime, but do not start training.",
+        help=("Parse config and build runtime, but do not "
+              "start training."),
     )
     parser.add_argument(
         "--resume-from-checkpoint",
         type=str,
         default=None,
-        help=(
-            "Path to a checkpoint directory (checkpoint-<step>), its 'dcp/' subdir, "
-            "or an output_dir containing checkpoints (auto-picks latest)."
-        ),
+        help=("Path to a checkpoint directory "
+              "(checkpoint-<step>), its 'dcp/' subdir, "
+              "or an output_dir containing checkpoints "
+              "(auto-picks latest)."),
     )
     parser.add_argument(
         "--override-output-dir",
         type=str,
         default=None,
-        help="Override training.output_dir from YAML (useful for repeated runs).",
+        help=("Override training.output_dir from YAML "
+              "(useful for repeated runs)."),
     )
     args = parser.parse_args(argv[1:])
     main(args)

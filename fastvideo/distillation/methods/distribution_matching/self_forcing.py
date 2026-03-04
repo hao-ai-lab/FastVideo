@@ -142,7 +142,7 @@ class SelfForcingMethod(DMD2Method):
         self._start_gradient_frame = int(start_grad_frame)
 
         shift = float(getattr(
-            self.training_args.pipeline_config,
+            self.training_config.pipeline_config,
             "flow_shift",
             0.0,
         ) or 0.0)
@@ -173,7 +173,7 @@ class SelfForcingMethod(DMD2Method):
 
         warp = self.method_config.get("warp_denoising_step", None)
         if warp is None:
-            warp = getattr(self.training_args, "warp_denoising_step", False)
+            warp = False
         if bool(warp):
             timesteps = torch.cat((
                 self._sf_scheduler.timesteps.to("cpu"),

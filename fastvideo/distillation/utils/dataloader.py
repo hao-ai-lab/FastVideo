@@ -2,52 +2,55 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fastvideo.distillation.utils.distill_config import (
+        DataConfig, )
 
 
 def build_parquet_t2v_train_dataloader(
-    training_args: Any,
+    data_config: DataConfig,
     *,
+    text_len: int,
     parquet_schema: Any,
 ) -> Any:
-    """Build a parquet map-style dataloader for T2V-style latent datasets."""
+    """Build a parquet dataloader for T2V-style datasets."""
 
-    from fastvideo.dataset import build_parquet_map_style_dataloader
+    from fastvideo.dataset import (
+        build_parquet_map_style_dataloader, )
 
-    text_len = training_args.pipeline_config.text_encoder_configs[0].arch_config.text_len  # type: ignore[attr-defined]
-    _dataset, dataloader = build_parquet_map_style_dataloader(
-        training_args.data_path,
-        training_args.train_batch_size,
-        num_data_workers=training_args.dataloader_num_workers,
+    _dataset, dataloader = (build_parquet_map_style_dataloader(
+        data_config.data_path,
+        data_config.train_batch_size,
+        num_data_workers=(data_config.dataloader_num_workers),
         parquet_schema=parquet_schema,
-        cfg_rate=training_args.training_cfg_rate,
+        cfg_rate=data_config.training_cfg_rate,
         drop_last=True,
         text_padding_length=int(text_len),
-        seed=int(training_args.seed or 0),
-    )
+        seed=int(data_config.seed or 0),
+    ))
     return dataloader
 
 
 def build_parquet_wangame_train_dataloader(
-    training_args: Any,
+    data_config: DataConfig,
     *,
     parquet_schema: Any,
 ) -> Any:
-    """Build a parquet map-style dataloader for WanGame (I2V+action) datasets."""
+    """Build a parquet dataloader for WanGame datasets."""
 
-    from fastvideo.dataset import build_parquet_map_style_dataloader
+    from fastvideo.dataset import (
+        build_parquet_map_style_dataloader, )
 
-    cfg_rate = float(getattr(training_args, "training_cfg_rate", 0.0) or 0.0)
-    _dataset, dataloader = build_parquet_map_style_dataloader(
-        training_args.data_path,
-        training_args.train_batch_size,
-        num_data_workers=training_args.dataloader_num_workers,
+    _dataset, dataloader = (build_parquet_map_style_dataloader(
+        data_config.data_path,
+        data_config.train_batch_size,
+        num_data_workers=(data_config.dataloader_num_workers),
         parquet_schema=parquet_schema,
-        cfg_rate=cfg_rate,
+        cfg_rate=float(data_config.training_cfg_rate or 0.0),
         drop_last=True,
-        # WanGame parquet schema does not include text embeddings, but the
-        # parquet loader expects a padding length parameter.
         text_padding_length=512,
-        seed=int(training_args.seed or 0),
-    )
+        seed=int(data_config.seed or 0),
+    ))
     return dataloader

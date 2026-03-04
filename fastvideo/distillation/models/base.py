@@ -8,6 +8,8 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 
 if TYPE_CHECKING:
+    from fastvideo.distillation.utils.distill_config import (
+        DistillTrainingConfig, )
     from fastvideo.pipelines import TrainingBatch
 
 
@@ -28,7 +30,7 @@ class ModelBase(ABC):
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def init_preprocessors(self, training_args: Any) -> None:
+    def init_preprocessors(self, training_config: DistillTrainingConfig) -> None:
         """Load VAE, build dataloader, seed RNGs.
 
         Called only on the student by the method's ``__init__``.
@@ -51,9 +53,7 @@ class ModelBase(ABC):
         """Return the scheduler's training timestep horizon."""
         return int(self.noise_scheduler.num_train_timesteps)
 
-    def shift_and_clamp_timestep(
-        self, timestep: torch.Tensor
-    ) -> torch.Tensor:
+    def shift_and_clamp_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
         """Apply model/pipeline timestep shifting and clamp."""
         return timestep
 

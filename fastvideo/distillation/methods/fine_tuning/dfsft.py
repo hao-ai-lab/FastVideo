@@ -10,7 +10,6 @@ import torch.nn.functional as F
 
 from fastvideo.distillation.methods.base import DistillMethod, LogScalar
 from fastvideo.distillation.models.base import ModelBase
-from fastvideo.distillation.utils.config import parse_betas
 from fastvideo.distillation.utils.optimizer import (
     build_optimizer_and_scheduler,
     clip_grad_norm_if_needed,
@@ -54,7 +53,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
             raise ValueError("DFSFT requires student to be trainable")
 
         self.validator = validator
-        self.training_args = cfg.training_args
+        self.training_config = cfg.training
         self.method_config: dict[str, Any] = dict(cfg.method)
         self.validation_config: dict[str, Any] = dict(getattr(cfg, "validation", {}) or {})
         self._attn_kind: Literal["dense", "vsa"] = (self._parse_attn_kind(self.method_config.get("attn_kind", None)))
@@ -63,7 +62,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
         self._timestep_index_range = (self._parse_timestep_index_range())
 
         # Initialize preprocessors on student.
-        self.student.init_preprocessors(self.training_args)
+        self.student.init_preprocessors(self.training_config)
 
         self._init_optimizers_and_schedulers()
 
@@ -123,7 +122,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
             num_latents=num_latents,
             device=clean_latents.device,
         )
-        sp_size = int(getattr(self.training_args, "sp_size", 1) or 1)
+        sp_size = int(self.training_config.distributed.sp_size)
         sp_group = getattr(self.student, "sp_group", None)
         if (sp_size > 1 and sp_group is not None and hasattr(sp_group, "broadcast")):
             sp_group.broadcast(timestep_indices, src=0)
@@ -162,11 +161,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
             attn_kind=self._attn_kind,
         )
 
-        if bool(getattr(
-                self.training_args,
-                "precondition_outputs",
-                False,
-        )):
+        if bool(self.training_config.model.precondition_outputs):
             sigmas = schedule_sigmas[timestep_indices]
             sigmas = sigmas.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
             pred_x0 = noisy_latents - pred * sigmas
@@ -225,7 +220,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
 
     # DistillMethod override: optimizers_schedulers_step
     def optimizers_schedulers_step(self, iteration: int) -> None:
-        clip_grad_norm_if_needed(self.student.transformer, self.training_args)
+        clip_grad_norm_if_needed(self.student.transformer, self.training_config.optimizer.max_grad_norm)
         super().optimizers_schedulers_step(iteration)
 
     # DistillTrainer hook: on_train_start
@@ -360,22 +355,21 @@ class DiffusionForcingSFTMethod(DistillMethod):
         return min_index, max_index + 1
 
     def _init_optimizers_and_schedulers(self) -> None:
-        student_lr = float(getattr(self.training_args, "learning_rate", 0.0) or 0.0)
+        tc = self.training_config
+        student_lr = float(tc.optimizer.learning_rate)
         if student_lr <= 0.0:
             raise ValueError("training.learning_rate must be > 0 for dfsft")
 
-        student_betas = parse_betas(
-            getattr(self.training_args, "betas", None),
-            where="training.betas",
-        )
-        student_sched = str(getattr(self.training_args, "lr_scheduler", "constant"))
+        student_betas = tc.optimizer.betas
+        student_sched = str(tc.optimizer.lr_scheduler)
         student_params = [p for p in self.student.transformer.parameters() if p.requires_grad]
         (
             self._student_optimizer,
             self._student_lr_scheduler,
         ) = build_optimizer_and_scheduler(
             params=student_params,
-            training_args=self.training_args,
+            optimizer_config=tc.optimizer,
+            loop_config=tc.loop,
             learning_rate=student_lr,
             betas=student_betas,
             scheduler_name=student_sched,

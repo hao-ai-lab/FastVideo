@@ -17,60 +17,55 @@ method:
   max_timestep_ratio: 0.98
 
 training:
-  # Distributed
-  num_gpus: 8
-  sp_size: 1
-  tp_size: 1
-  hsdp_replicate_dim: 8
-  hsdp_shard_dim: 1
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 8
+    hsdp_shard_dim: 1
 
-  # Data (parquet dataset folder)
-  data_path: >-
-    /mnt/weka/home/hao.zhang/mhuo/traindata_0204_2130/preprocessed:0,
-    /mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed:0,
-    /mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:1,
-    /mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed:1,
-    /mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed:1,
-    /mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/camera/preprocessed:1,
-    /mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/camera4hold_alpha1/preprocessed:1,
-    /mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed:1
-  dataloader_num_workers: 4
+  data:
+    data_path: >-
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0204_2130/preprocessed:0,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed:0,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:1,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed:1,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed:1,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/camera/preprocessed:1,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/camera4hold_alpha1/preprocessed:1,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed:1
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 20
+    num_height: 352
+    num_width: 640
+    num_frames: 77
 
-  # Batch / shape
-  train_batch_size: 1
-  train_sp_batch_size: 1
-  gradient_accumulation_steps: 1
-  num_latent_t: 20
-  num_height: 352
-  num_width: 640
-  num_frames: 77
+  optimizer:
+    learning_rate: 1.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 1.0e-4
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+    max_grad_norm: 1.0
 
-  # Output / steps
-  output_dir: outputs/wangame_dfsft_causal_v3
-  max_train_steps: 20000
-  seed: 1000
-  checkpoints_total_limit: 2
+  loop:
+    max_train_steps: 20000
+    gradient_accumulation_steps: 1
 
-  # Optimizer
-  learning_rate: 1.0e-5
-  mixed_precision: bf16
-  betas: [0.9, 0.999]
-  weight_decay: 1.0e-4
-  lr_scheduler: constant
-  lr_warmup_steps: 0
-  max_grad_norm: 1.0
+  checkpoint:
+    output_dir: outputs/wangame_dfsft_causal_v3
+    training_state_checkpointing_steps: 1000
+    checkpoints_total_limit: 2
 
-  # Checkpointing
-  training_state_checkpointing_steps: 1000
-  weight_only_checkpointing_steps: 1000
+  tracker:
+    project_name: distillation_wangame_r
+    run_name: wangame_dfsft_causal_v3
 
-  # Method-agnostic knobs
-  training_cfg_rate: 0.0
-  enable_gradient_checkpointing_type: full
-
-  # Tracking
-  tracker_project_name: distillation_wangame_r
-  wandb_run_name: wangame_dfsft_causal_v3
+  model:
+    enable_gradient_checkpointing_type: full
 
 validation:
   enabled: true

@@ -7,76 +7,89 @@ from typing import Any
 
 import torch
 
-from fastvideo.models.loader.component_loader import PipelineComponentLoader
-from fastvideo.utils import maybe_download_model, verify_model_config_and_directory
+from fastvideo.models.loader.component_loader import (
+    PipelineComponentLoader, )
+from fastvideo.utils import (
+    maybe_download_model,
+    verify_model_config_and_directory,
+)
 
 
 def load_module_from_path(
     *,
     model_path: str,
     module_type: str,
-    training_args: Any,
+    loader_args: Any = None,
     disable_custom_init_weights: bool = False,
     override_transformer_cls_name: str | None = None,
+    # Legacy alias kept so callers that still pass
+    # ``training_args=`` don't break during migration.
+    training_args: Any = None,
 ) -> torch.nn.Module:
-    """Load a single pipeline component module from a FastVideo model path.
+    """Load a single pipeline component module.
 
-    This is a thin wrapper over :func:`PipelineComponentLoader.load_module`:
-    - resolves/downloads ``model_path`` if needed
-    - reads the per-module config entry to determine transformers/diffusers
-    - optionally disables custom init weights overrides (legacy flag)
+    *loader_args* should be a ``DistillLoaderArgs`` or
+    ``FastVideoArgs``-like object for the
+    ``PipelineComponentLoader``.  When ``None`` a lightweight
+    stand-in is used.
     """
+
+    # Support the legacy ``training_args`` kwarg.
+    if loader_args is None and training_args is not None:
+        loader_args = training_args
 
     local_model_path = maybe_download_model(model_path)
     config = verify_model_config_and_directory(local_model_path)
 
     if module_type not in config:
-        raise ValueError(f"Module {module_type!r} not found in config at {local_model_path}")
+        raise ValueError(f"Module {module_type!r} not found in "
+                         f"config at {local_model_path}")
 
     module_info = config[module_type]
     if module_info is None:
-        raise ValueError(f"Module {module_type!r} has null value in config at {local_model_path}")
+        raise ValueError(f"Module {module_type!r} has null value in "
+                         f"config at {local_model_path}")
 
     transformers_or_diffusers, _architecture = module_info
     component_path = os.path.join(local_model_path, module_type)
 
-    # When training_args is None (e.g. during model-only loading in
-    # distillation role construction), create a lightweight stand-in so
-    # that override_transformer_cls_name and disable_custom_init_weights
-    # flags can still be forwarded to PipelineComponentLoader.
-    if training_args is None:
+    if loader_args is None:
         from types import SimpleNamespace
-        training_args = SimpleNamespace()
 
-    old_override_transformer_cls_name: str | None = None
+        loader_args = SimpleNamespace()
+
+    old_override: str | None = None
     if override_transformer_cls_name is not None:
-        old_override_transformer_cls_name = getattr(
-            training_args, "override_transformer_cls_name", None
+        old_override = getattr(
+            loader_args,
+            "override_transformer_cls_name",
+            None,
         )
-        training_args.override_transformer_cls_name = str(override_transformer_cls_name)
+        loader_args.override_transformer_cls_name = str(override_transformer_cls_name)
 
     if disable_custom_init_weights:
-        # NOTE: This flag is used by PipelineComponentLoader to skip applying
-        # `init_weights_from_safetensors*` overrides when loading auxiliary
-        # roles (teacher/critic/etc). The attribute name is legacy.
-        training_args._loading_teacher_critic_model = True
+        loader_args._loading_teacher_critic_model = True
     try:
         module = PipelineComponentLoader.load_module(
             module_name=module_type,
             component_model_path=component_path,
-            transformers_or_diffusers=transformers_or_diffusers,
-            fastvideo_args=training_args,
+            transformers_or_diffusers=(transformers_or_diffusers),
+            fastvideo_args=loader_args,
         )
     finally:
-        if disable_custom_init_weights and hasattr(training_args, "_loading_teacher_critic_model"):
-            del training_args._loading_teacher_critic_model
+        if disable_custom_init_weights and hasattr(loader_args, "_loading_teacher_critic_model"):
+            del loader_args._loading_teacher_critic_model
         if override_transformer_cls_name is not None:
-            if old_override_transformer_cls_name is None:
-                if hasattr(training_args, "override_transformer_cls_name"):
-                    training_args.override_transformer_cls_name = None
+            if old_override is None:
+                if hasattr(
+                        loader_args,
+                        "override_transformer_cls_name",
+                ):
+                    loader_args.override_transformer_cls_name = (None)
             else:
-                training_args.override_transformer_cls_name = old_override_transformer_cls_name
+                loader_args.override_transformer_cls_name = (old_override)
 
     if not isinstance(module, torch.nn.Module):
-        raise TypeError(f"Loaded {module_type!r} is not a torch.nn.Module: {type(module)}")
+        raise TypeError(f"Loaded {module_type!r} is not a "
+                        f"torch.nn.Module: {type(module)}")
     return module
