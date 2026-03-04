@@ -45,14 +45,15 @@ class TrainingMethod(torch.nn.Module, ABC):
 
     def set_tracker(self, tracker: Any) -> None:
         self.tracker = tracker
-        validator = getattr(self, "validator", None)
+        student = self._role_models.get("student")
+        if student is None:
+            return
+        validator = getattr(student, "validator", None)
         if validator is None:
             return
-        set_tracker = getattr(validator, "set_tracker", None)
-        if callable(set_tracker):
-            set_tracker(tracker)
-            return
-        if hasattr(validator, "tracker"):
+        if hasattr(validator, "set_tracker"):
+            validator.set_tracker(tracker)
+        elif hasattr(validator, "tracker"):
             validator.tracker = tracker  # type: ignore[attr-defined]
 
     @abstractmethod

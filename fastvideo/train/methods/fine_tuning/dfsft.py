@@ -42,7 +42,6 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         *,
         cfg: Any,
         role_models: dict[str, ModelBase],
-        validator: Any | None = None,
     ) -> None:
         super().__init__(role_models=role_models)
 
@@ -51,8 +50,6 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         self.student = role_models["student"]
         if not getattr(self.student, "_trainable", True):
             raise ValueError("DFSFT requires student to be trainable")
-
-        self.validator = validator
         self.training_config = cfg.training
         self.method_config: dict[str, Any] = dict(cfg.method)
         self.validation_config: dict[str, Any] = dict(getattr(cfg, "validation", {}) or {})
@@ -229,9 +226,6 @@ class DiffusionForcingSFTMethod(TrainingMethod):
 
     # Trainer hook: log_validation
     def log_validation(self, iteration: int) -> None:
-        validator = getattr(self, "validator", None)
-        if validator is None:
-            return
         if not is_validation_enabled(self.validation_config):
             return
 
@@ -262,7 +256,7 @@ class DiffusionForcingSFTMethod(TrainingMethod):
             num_frames=num_actions,
             output_dir=output_dir,
         )
-        validator.log_validation(iteration, request=request)
+        self.student.validator.log_validation(iteration, request=request)
 
     # Checkpoint hook: get_rng_generators
     def get_rng_generators(self) -> dict[str, torch.Generator]:
@@ -271,10 +265,10 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         student_gens = self.student.get_rng_generators()
         generators.update(student_gens)
 
-        validator = getattr(self, "validator", None)
-        validation_gen = getattr(validator, "validation_random_generator", None)
-        if isinstance(validation_gen, torch.Generator):
-            generators["validation_cpu"] = validation_gen
+        if is_validation_enabled(self.validation_config):
+            validation_gen = self.student.validator.validation_random_generator
+            if isinstance(validation_gen, torch.Generator):
+                generators["validation_cpu"] = validation_gen
 
         return generators
 

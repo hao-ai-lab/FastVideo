@@ -66,14 +66,12 @@ def build_from_config(cfg: RunConfig, ) -> tuple[TrainingConfig, TrainingMethod,
     method_target = str(method_cfg.pop("_target_"))
     method_cls = resolve_target(method_target)
 
-    # The student model provides the validator and dataloader.
+    # The student model provides the dataloader.
     student = role_models.get("student")
-    validator = (getattr(student, "validator", None) if student is not None else None)
 
     method = method_cls(
         cfg=cfg,
         role_models=role_models,
-        validator=validator,
     )
 
     # --- 4. Gather dataloader and start_step ---

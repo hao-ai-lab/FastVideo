@@ -49,12 +49,10 @@ class SelfForcingMethod(DMD2Method):
         *,
         cfg: Any,
         role_models: dict[str, ModelBase],
-        validator: Any | None = None,
     ) -> None:
         super().__init__(
             cfg=cfg,
             role_models=role_models,
-            validator=validator,
         )
 
         # Validate causal student.
