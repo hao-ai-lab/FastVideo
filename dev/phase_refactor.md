@@ -47,9 +47,10 @@ fastvideo/distillation/
 ├── models/
 │   ├── base.py                        ModelBase, CausalModelBase (parallel roots, no mixin)
 │   ├── wan/
-│   │   └── model.py                   WanModel(ModelBase), WanCausalModel(CausalModelBase)
+│   │   └── model.py                   WanModel(ModelBase)
 │   └── wangame/
-│       └── model.py                   WanGameModel(ModelBase), WanGameCausalModel(CausalModelBase)
+│       ├── model.py                   WanGameModel(ModelBase)
+│       └── model_causal.py            WanGameCausalModel(CausalModelBase)
 ├── methods/
 │   ├── base.py                        DistillMethod (analogous to FastGenModel)
 │   └── distribution_matching/
@@ -70,29 +71,31 @@ all optimizers as attributes. `RoleManager` is retired.
 
 ## 2) Class interfaces
 
-### 2.1 ModelBase and CausalModelBase (parallel roots)
+### 2.1 ModelBase and CausalModelBase
+
+`CausalModelBase` **inherits** `ModelBase` (unlike FastGen where they are parallel).
+Reason: `predict_noise`/`predict_x0` have the same signature on both — causal only
+adds streaming methods. Inheritance means `isinstance(causal_student, ModelBase)` is
+`True`, which is useful when a method slot (e.g. `fake_score` in DMD2) can accept
+either kind.
 
 ```python
 # fastvideo/distillation/models/base.py
 
 class ModelBase(ABC):
-    """Per-role bidirectional model. Analogous to FastGenNetwork.
-    Every instance owns its own noise_scheduler.
+    """Per-role model. Every instance owns its own noise_scheduler.
     init_preprocessors() is only called on the student by DistillMethod.build().
     """
     transformer: nn.Module
     noise_scheduler: Any  # always set in __init__
 
     def init_preprocessors(self, training_args: Any) -> None:
-        """Load VAE, seed RNGs, build prepare_batch machinery.
-        Analogous to FastGenNetwork.init_preprocessors().
-        Only called on the student role. Default: no-op (for teacher/critic).
-        Subclasses override when they are capable of being the student.
+        """Load VAE, seed RNGs. Analogous to FastGenNetwork.init_preprocessors().
+        Only called on the student. Default: no-op (teacher/critic skip this).
         """
         pass
 
     def on_train_start(self) -> None:
-        """Called by trainer before training loop. Default: no-op."""
         pass
 
     def get_rng_generators(self) -> dict[str, torch.Generator]:
@@ -105,17 +108,12 @@ class ModelBase(ABC):
         current_vsa_sparsity: float = 0.0,
         latents_source: str = "data",
     ) -> TrainingBatch:
-        """Build TrainingBatch from raw dataloader output.
-        Raises NotImplementedError unless init_preprocessors() was called.
-        """
         raise NotImplementedError(
             f"{type(self).__name__}.prepare_batch() requires init_preprocessors() "
-            "to have been called (student only)."
+            "(student only)."
         )
 
-    def add_noise(
-        self, clean: Tensor, noise: Tensor, timestep: Tensor
-    ) -> Tensor:
+    def add_noise(self, clean: Tensor, noise: Tensor, timestep: Tensor) -> Tensor:
         raise NotImplementedError
 
     @abstractmethod
@@ -133,40 +131,14 @@ class ModelBase(ABC):
     @abstractmethod
     def predict_x0(self, ...) -> Tensor: ...
 
-    def backward(
-        self, loss: Tensor, ctx: Any, *, grad_accum_rounds: int = 1
-    ) -> None:
+    def backward(self, loss: Tensor, ctx: Any, *, grad_accum_rounds: int = 1) -> None:
         (loss / max(1, grad_accum_rounds)).backward()
 
 
-class CausalModelBase(ABC):
-    """Per-role causal model. Parallel root to ModelBase, NOT a subclass.
-    Analogous to CausalFastGenNetwork.
-    Same interface as ModelBase plus streaming ops.
+class CausalModelBase(ModelBase):
+    """Causal/streaming extension. Subclass of ModelBase (same predict signatures,
+    adds streaming ops). isinstance(causal_model, ModelBase) == True.
     """
-    transformer: nn.Module
-    noise_scheduler: Any  # always set in __init__
-
-    def init_preprocessors(self, training_args: Any) -> None:
-        pass
-
-    def on_train_start(self) -> None:
-        pass
-
-    def get_rng_generators(self) -> dict[str, torch.Generator]:
-        return {}
-
-    def prepare_batch(self, ...) -> TrainingBatch:
-        raise NotImplementedError
-
-    def add_noise(self, ...) -> Tensor:
-        raise NotImplementedError
-
-    @abstractmethod
-    def predict_noise(self, ...) -> Tensor: ...
-
-    @abstractmethod
-    def predict_x0(self, ...) -> Tensor: ...
 
     @abstractmethod
     def predict_noise_streaming(
@@ -188,12 +160,95 @@ class CausalModelBase(ABC):
 
     @abstractmethod
     def clear_caches(self, *, cache_tag: str = "pos") -> None: ...
-
-    def backward(self, loss: Tensor, ctx: Any, *, grad_accum_rounds: int = 1) -> None:
-        (loss / max(1, grad_accum_rounds)).backward()
 ```
 
-### 2.2 Concrete model classes (WanGame example)
+### 2.2 Dynamic config — `__init__` signature as schema
+
+We abandon structured config dataclasses (no `DistillRunConfig`, no `RecipeSpec`,
+no `attrs` configs). Instead, each `_target_` class declares its own schema via its
+`__init__` type annotations. The `instantiate()` utility introspects
+`inspect.signature()` to:
+
+1. **Validate**: detect missing required args (no default) and unknown keys early.
+2. **Filter**: only pass kwargs the constructor accepts, ignoring extras.
+3. **Document**: `help(WanGameModel)` and IDE hover shows the exact fields.
+
+```python
+# fastvideo/distillation/utils/instantiate.py
+
+import importlib, inspect
+from typing import Any
+
+
+def resolve_target(target: str) -> type:
+    module_path, cls_name = target.rsplit(".", 1)
+    return getattr(importlib.import_module(module_path), cls_name)
+
+
+def instantiate(cfg: dict[str, Any], /, **extra: Any) -> Any:
+    """Hydra-style _target_ instantiation with signature-based validation.
+
+    - Pops '_target_', resolves the class.
+    - Merges cfg fields with extra kwargs.
+    - Inspects __init__ signature:
+        * Raises if a required parameter is missing.
+        * Raises if an unrecognised key is passed (no **kwargs on target).
+        * Passes only accepted kwargs otherwise.
+    """
+    cfg = dict(cfg)
+    target_str = cfg.pop("_target_")
+    cls = resolve_target(target_str)
+    kwargs = {**cfg, **extra}
+
+    sig = inspect.signature(cls.__init__)
+    params = {
+        name: p
+        for name, p in sig.parameters.items()
+        if name != "self"
+    }
+    has_var_keyword = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+    # Validate required params are present
+    for name, p in params.items():
+        if (
+            p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+            and p.default is inspect.Parameter.empty
+            and name not in kwargs
+        ):
+            raise TypeError(
+                f"instantiate({target_str!r}): missing required argument {name!r}"
+            )
+
+    # Validate no unexpected keys (unless class accepts **kwargs)
+    if not has_var_keyword:
+        unexpected = set(kwargs) - set(params)
+        if unexpected:
+            raise TypeError(
+                f"instantiate({target_str!r}): unexpected config keys {sorted(unexpected)}"
+            )
+
+    return cls(**kwargs)
+```
+
+**Each class is self-documenting.** Example:
+
+```python
+class WanGameModel(ModelBase):
+    def __init__(
+        self,
+        *,
+        init_from: str,           # required — instantiate() raises if missing
+        trainable: bool = True,   # optional with default
+    ) -> None: ...
+```
+
+YAML validation is thus free — no separate schema file, no config dataclass to
+maintain in parallel. Adding a new field to a class means adding it to `__init__`.
+Removing a field and forgetting to update YAML → `TypeError` at startup.
+
+### 2.4 Concrete model classes (WanGame example)
 
 ```python
 # fastvideo/distillation/models/wangame/model.py
@@ -248,8 +303,11 @@ class WanGameModel(ModelBase):
         return pred_noise_to_pred_video(pred_noise, noisy_latents, timestep, self.noise_scheduler)
 
 
+
+# fastvideo/distillation/models/wangame/model_causal.py
+
 class WanGameCausalModel(CausalModelBase):
-    """Causal WanGame. Parallel root to WanGameModel.
+    """Causal WanGame. Parallel root to WanGameModel (not a subclass).
     Same init_preprocessors() pattern — called only on student.
     """
     def __init__(self, *, init_from: str, trainable: bool = True, **kwargs) -> None:
@@ -268,7 +326,7 @@ class WanGameCausalModel(CausalModelBase):
     def clear_caches(self, *, cache_tag: str = "pos") -> None: ...
 ```
 
-### 2.3 DistillMethod (analogous to FastGenModel)
+### 2.5 DistillMethod (analogous to FastGenModel)
 
 ```python
 class DistillMethod(nn.Module, ABC):
@@ -314,7 +372,7 @@ class DistillMethod(nn.Module, ABC):
     def scheduler_dict(self) -> dict[str, Any]: ...
 ```
 
-### 2.4 SelfForcingMethod (example)
+### 2.6 SelfForcingMethod (example)
 
 ```python
 class SelfForcingMethod(DistillMethod):
@@ -522,6 +580,7 @@ trainer.run(method, dataloader=dataloader, max_steps=cfg.trainer.max_train_steps
 - [ ] `fastvideo/distillation/utils/instantiate.py`
   - `resolve_target(target: str) -> type`
   - `instantiate(cfg: dict, **extra) -> Any`
+  - Uses `inspect.signature()` for field validation and filtering (see §2.5)
 
 - [ ] `fastvideo/distillation/utils/config.py`
   - New `RunConfig` dataclass
@@ -545,13 +604,14 @@ trainer.run(method, dataloader=dataloader, max_steps=cfg.trainer.max_train_steps
 
 - [ ] `fastvideo/distillation/models/wangame/model.py`
   - `WanGameModel(ModelBase)`: always builds `noise_scheduler`; `init_preprocessors()` loads VAE
-  - `WanGameCausalModel(CausalModelBase)`: same pattern + streaming
+
+- [ ] `fastvideo/distillation/models/wangame/model_causal.py`
+  - `WanGameCausalModel(CausalModelBase)`: same pattern + streaming ops
 
 **Wan**
 
 - [ ] `fastvideo/distillation/models/wan/model.py`
   - `WanModel(ModelBase)`: always builds `noise_scheduler`; `init_preprocessors()` loads VAE + negative prompt
-  - `WanCausalModel(CausalModelBase)`: same + streaming
 
 **Methods**
 
