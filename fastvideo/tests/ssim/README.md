@@ -16,7 +16,8 @@ public HF repo (configured by `FASTVIDEO_SSIM_REFERENCE_HF_REPO`, default:
 Use the CLI:
 - `python fastvideo/tests/ssim/reference_videos_cli.py --help`
 - `python fastvideo/tests/ssim/reference_videos_cli.py copy-local --help`
-- `python fastvideo/tests/ssim/reference_videos_cli.py copy-local --quality-tier full_quality`
+- `python fastvideo/tests/ssim/reference_videos_cli.py copy-local --quality-tier default --device-folder H200_reference_videos`
+- `python fastvideo/tests/ssim/reference_videos_cli.py copy-local --quality-tier full_quality --device-folder H200_reference_videos`
 - `python fastvideo/tests/ssim/reference_videos_cli.py download --help`
 - `python fastvideo/tests/ssim/reference_videos_cli.py upload --help`
 - `python fastvideo/tests/ssim/reference_videos_cli.py download --quality-tier all`
@@ -38,8 +39,8 @@ to skip auto-download of missing refs:
 `pytest fastvideo/tests/ssim/ -vs --skip-ssim-reference-download`
 
 generated videos are written under:
-- default params: `generated_videos/default/<model_id>/<ATTENTION_BACKEND>/`
-- full-quality params: `generated_videos/full_quality/<model_id>/<ATTENTION_BACKEND>/`
+- default params: `generated_videos/default/<GPU>_reference_videos/<model_id>/<ATTENTION_BACKEND>/`
+- full-quality params: `generated_videos/full_quality/<GPU>_reference_videos/<model_id>/<ATTENTION_BACKEND>/`
 
 HF repo layout mirrors quality + GPU split:
 - `reference_videos/default/<GPU>_reference_videos/...`

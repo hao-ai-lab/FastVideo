@@ -1,7 +1,12 @@
 import ast
+import datetime
 import glob
+import getpass
 import os
 import re
+import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,7 +15,7 @@ import modal
 app = modal.App()
 
 model_vol = modal.Volume.from_name("hf-model-weights")
-image_version = os.getenv("IMAGE_VERSION")
+image_version = os.getenv("IMAGE_VERSION", "latest")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
 print(f"Using image: {image_tag}")
 
@@ -42,12 +47,11 @@ image = (
 
 SSIM_NUM_GPUS = 4
 SSIM_TERMINATE_TIMEOUT_S = 30
+HF_TOKEN_ENV_KEYS = ("HF_API_KEY", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
+RAW_GENERATED_VOLUME_ROOT = "ssim_generated_videos"
 SSIM_COMMON_KWARGS = dict(
     image=image,
     timeout=5400,
-    secrets=[modal.Secret.from_dict(
-        {"HF_API_KEY": os.environ.get("HF_API_KEY", "")}
-    )],
     volumes={"/root/data": model_vol},
 )
 
@@ -87,6 +91,181 @@ class _TaskResult:
     returncode: int
     gpu_ids: list[str]
     log_path: str | None = None
+
+
+def _split_csv_values(csv_values: str) -> set[str]:
+    return {value.strip() for value in csv_values.split(",") if value.strip()}
+
+
+def _run_git_command(args: list[str]) -> str:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        stderr = (error.stderr or "").strip()
+        raise RuntimeError(
+            f"Failed to run git {' '.join(args)}: {stderr or error}"
+        ) from error
+    return result.stdout.strip()
+
+
+def _normalize_git_repo_url(git_repo: str) -> str:
+    if git_repo.startswith("git@github.com:"):
+        return "https://github.com/" + git_repo[len("git@github.com:"):]
+    if git_repo.startswith("ssh://git@github.com/"):
+        return "https://github.com/" + git_repo[
+            len("ssh://git@github.com/"):
+        ]
+    return git_repo
+
+
+def _resolve_git_repo(git_repo: str) -> str:
+    if git_repo.strip():
+        return _normalize_git_repo_url(git_repo.strip())
+
+    env_repo = os.environ.get("BUILDKITE_REPO", "").strip()
+    if env_repo:
+        return _normalize_git_repo_url(env_repo)
+
+    discovered_repo = _run_git_command(["config", "--get", "remote.origin.url"])
+    if discovered_repo:
+        return _normalize_git_repo_url(discovered_repo)
+
+    raise RuntimeError(
+        "Could not resolve git repo URL. Pass --git-repo or set BUILDKITE_REPO."
+    )
+
+
+def _resolve_git_commit(git_commit: str) -> str:
+    if git_commit.strip():
+        return git_commit.strip()
+
+    env_commit = os.environ.get("BUILDKITE_COMMIT", "").strip()
+    if env_commit:
+        return env_commit
+
+    discovered_commit = _run_git_command(["rev-parse", "HEAD"])
+    if discovered_commit:
+        return discovered_commit
+
+    raise RuntimeError(
+        "Could not resolve git commit. Pass --git-commit or set "
+        "BUILDKITE_COMMIT."
+    )
+
+
+def _resolve_pull_request(pr_number: str) -> str:
+    if pr_number.strip():
+        return pr_number.strip()
+    env_pr = os.environ.get("BUILDKITE_PULL_REQUEST", "").strip()
+    if env_pr:
+        return env_pr
+    return "false"
+
+
+def _resolve_hf_api_key(
+    hf_api_key: str,
+    *,
+    prompt_if_missing: bool,
+) -> str:
+    if hf_api_key.strip():
+        return hf_api_key.strip()
+
+    for key in HF_TOKEN_ENV_KEYS:
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+
+    if prompt_if_missing and sys.stdin.isatty():
+        prompted = getpass.getpass(
+            "HF token not found in HF_API_KEY/HUGGINGFACE_HUB_TOKEN/HF_TOKEN.\n"
+            "Enter Hugging Face token: "
+        ).strip()
+        if prompted:
+            return prompted
+
+    raise RuntimeError(
+        "Hugging Face token is required. Set HF_API_KEY, "
+        "HUGGINGFACE_HUB_TOKEN, or HF_TOKEN; or pass --hf-api-key."
+    )
+
+
+def _sanitize_path_fragment(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
+    return cleaned.strip("._-")
+
+
+def _resolve_generated_volume_subdir(
+    requested_subdir: str,
+    git_commit: str,
+) -> str:
+    if requested_subdir.strip():
+        normalized = requested_subdir.strip().strip("/")
+        if not normalized:
+            raise RuntimeError("generated_volume_subdir must not be empty.")
+        return normalized
+
+    short_commit = _sanitize_path_fragment(git_commit[:12]) or "unknown"
+    timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    return f"{timestamp}_{short_commit}"
+
+
+def _count_video_files(root: str) -> int:
+    count = 0
+    for current_root, _, filenames in os.walk(root):
+        for filename in filenames:
+            if filename.lower().endswith(
+                (".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv")
+            ):
+                count += 1
+    return count
+
+
+def _sync_generated_videos_to_volume(
+    repo_root: str,
+    generated_volume_subdir: str,
+) -> str | None:
+    generated_root = os.path.join(
+        repo_root,
+        "fastvideo",
+        "tests",
+        "ssim",
+        "generated_videos",
+    )
+    if not os.path.isdir(generated_root):
+        print(
+            "No generated_videos directory found; skipping raw generated "
+            "video export."
+        )
+        return None
+
+    relative_dst = os.path.join(
+        RAW_GENERATED_VOLUME_ROOT,
+        generated_volume_subdir,
+        "generated_videos",
+    )
+    absolute_dst = os.path.join("/root/data", relative_dst)
+    if os.path.exists(absolute_dst):
+        shutil.rmtree(absolute_dst)
+    os.makedirs(os.path.dirname(absolute_dst), exist_ok=True)
+    shutil.copytree(generated_root, absolute_dst)
+    model_vol.commit()
+
+    num_videos = _count_video_files(absolute_dst)
+    print(
+        "Raw generated videos exported to Modal volume path: "
+        f"{relative_dst} ({num_videos} video files)."
+    )
+    print(
+        "Download command:\n"
+        f"  modal volume get hf-model-weights {relative_dst} "
+        "./generated_videos_modal"
+    )
+    return relative_dst
 
 
 def _extract_required_gpus(filepath: str) -> int:
@@ -143,21 +322,46 @@ def _extract_model_ids(filepath: str) -> list[str]:
     return unique_model_ids
 
 
-def _discover_ssim_tasks(ssim_dir: str) -> list[SSIMTask]:
+def _discover_ssim_tasks(
+    ssim_dir: str,
+    *,
+    selected_test_files: set[str] | None = None,
+    selected_model_ids: set[str] | None = None,
+) -> list[SSIMTask]:
     tasks = []
     task_id = 0
+    selected_test_files = selected_test_files or set()
+    selected_test_file_names = {
+        os.path.basename(test_file) for test_file in selected_test_files
+    }
+    selected_model_ids = selected_model_ids or set()
+
     test_files = sorted(glob.glob(os.path.join(ssim_dir, "test_*.py")))
+    matched_test_files = set()
+    matched_model_ids = set()
     for filepath in test_files:
+        file_name = os.path.basename(filepath)
+        rel_path = f"./fastvideo/tests/ssim/{file_name}"
+        if selected_test_files and (
+            filepath not in selected_test_files
+            and rel_path not in selected_test_files
+            and file_name not in selected_test_file_names
+        ):
+            continue
+
+        matched_test_files.add(file_name)
         required_gpus = _extract_required_gpus(filepath)
         if required_gpus < 1 or required_gpus > SSIM_NUM_GPUS:
             raise ValueError(
                 f"{filepath} requires {required_gpus} GPUs, "
                 f"but scheduler supports up to {SSIM_NUM_GPUS}."
             )
-        rel_path = f"./fastvideo/tests/ssim/{os.path.basename(filepath)}"
         model_ids = _extract_model_ids(filepath)
         if model_ids:
             for model_id in model_ids:
+                if selected_model_ids and model_id not in selected_model_ids:
+                    continue
+                matched_model_ids.add(model_id)
                 tasks.append(SSIMTask(
                     task_id=task_id,
                     test_file=rel_path,
@@ -166,12 +370,29 @@ def _discover_ssim_tasks(ssim_dir: str) -> list[SSIMTask]:
                 ))
                 task_id += 1
         else:
+            if selected_model_ids:
+                continue
             tasks.append(SSIMTask(
                 task_id=task_id,
                 test_file=rel_path,
                 required_gpus=required_gpus,
             ))
             task_id += 1
+
+    if selected_test_files:
+        unmatched_files = sorted(selected_test_file_names - matched_test_files)
+        if unmatched_files:
+            raise RuntimeError(
+                "Requested SSIM test file(s) not found: "
+                + ", ".join(unmatched_files)
+            )
+    if selected_model_ids:
+        unmatched_model_ids = sorted(selected_model_ids - matched_model_ids)
+        if unmatched_model_ids:
+            raise RuntimeError(
+                "Requested SSIM model_id(s) not found: "
+                + ", ".join(unmatched_model_ids)
+            )
     return sorted(tasks, key=lambda task: task.sort_key)
 
 
@@ -193,15 +414,19 @@ def _build_checkout_command(git_commit: str, pr_number: str | None) -> str:
     return f"git checkout {shlex.quote(git_commit)}"
 
 
-def _prepare_ssim_workspace() -> tuple[str, list[SSIMTask]]:
+def _prepare_ssim_workspace(
+    *,
+    git_repo: str,
+    git_commit: str,
+    pr_number: str,
+    hf_api_key: str,
+    selected_test_files: set[str] | None = None,
+    selected_model_ids: set[str] | None = None,
+) -> tuple[str, list[SSIMTask]]:
     import shlex
-    import subprocess
 
-    git_repo = os.environ.get("BUILDKITE_REPO")
-    git_commit = os.environ.get("BUILDKITE_COMMIT")
-    pr_number = os.environ.get("BUILDKITE_PULL_REQUEST")
-    if not git_repo or not git_commit:
-        raise RuntimeError("BUILDKITE_REPO and BUILDKITE_COMMIT must be set.")
+    if not hf_api_key.strip():
+        raise RuntimeError("HF API key is required to prepare SSIM workspace.")
 
     checkout_command = _build_checkout_command(git_commit, pr_number)
     repo_root = "/FastVideo"
@@ -210,7 +435,14 @@ def _prepare_ssim_workspace() -> tuple[str, list[SSIMTask]]:
     set -euo pipefail
     source $HOME/.local/bin/env
     source /opt/venv/bin/activate
-    cd {shlex.quote(repo_root)}
+    if [ -d {shlex.quote(repo_root)}/.git ]; then
+      cd {shlex.quote(repo_root)}
+      git remote set-url origin {shlex.quote(git_repo)} || true
+      git fetch --prune origin
+    else
+      git clone {shlex.quote(git_repo)} {shlex.quote(repo_root)}
+      cd {shlex.quote(repo_root)}
+    fi
     {checkout_command}
     git submodule update --init --recursive
     cd fastvideo-kernel
@@ -223,10 +455,18 @@ def _prepare_ssim_workspace() -> tuple[str, list[SSIMTask]]:
     subprocess.run(
         ["/bin/bash", "-lc", command],
         check=True,
+        env={
+            **os.environ,
+            "HF_API_KEY": hf_api_key,
+        },
     )
 
     ssim_dir = os.path.join(repo_root, "fastvideo", "tests", "ssim")
-    tasks = _discover_ssim_tasks(ssim_dir)
+    tasks = _discover_ssim_tasks(
+        ssim_dir,
+        selected_test_files=selected_test_files,
+        selected_model_ids=selected_model_ids,
+    )
     if not tasks:
         raise RuntimeError("No SSIM test files found.")
     return repo_root, tasks
@@ -238,9 +478,9 @@ def _spawn_ssim_task(
     assigned_gpu_ids: list[str],
     log_dir: str,
     task_index: int,
+    pytest_extra_args: list[str],
 ) -> _RunningTask:
     import shlex
-    import subprocess
 
     safe_test_name = re.sub(
         r"[^A-Za-z0-9_.-]+", "_", task.test_name
@@ -248,11 +488,14 @@ def _spawn_ssim_task(
     log_path = os.path.join(
         log_dir, f"{task_index:03d}_{safe_test_name}.log"
     )
+    pytest_command = shlex.join(
+        ["pytest", task.test_file, "-vs", *pytest_extra_args]
+    )
     command = (
         "set -euo pipefail && "
         "source $HOME/.local/bin/env && "
         "source /opt/venv/bin/activate && "
-        f"pytest {shlex.quote(task.test_file)} -vs"
+        f"{pytest_command}"
     )
     env = os.environ.copy()
     env["HF_HOME"] = "/root/data/.cache"
@@ -369,9 +612,29 @@ def _get_visible_gpu_ids() -> list[str]:
     return gpu_ids
 
 
+def _build_pytest_extra_args(
+    *,
+    ssim_full_quality: bool,
+    ssim_reference_repo: str,
+    skip_ssim_reference_download: bool,
+    pytest_k: str,
+) -> list[str]:
+    args = []
+    if ssim_full_quality:
+        args.append("--ssim-full-quality")
+    if ssim_reference_repo.strip():
+        args.extend(["--ssim-reference-repo", ssim_reference_repo.strip()])
+    if skip_ssim_reference_download:
+        args.append("--skip-ssim-reference-download")
+    if pytest_k.strip():
+        args.extend(["-k", pytest_k.strip()])
+    return args
+
+
 def _schedule_ssim_tasks(
     repo_root: str,
     tasks: list[SSIMTask],
+    pytest_extra_args: list[str],
 ) -> dict[int, _TaskResult]:
     import tempfile
     import time
@@ -418,6 +681,7 @@ def _schedule_ssim_tasks(
                 assigned_gpu_ids=assigned_gpu_ids,
                 log_dir=log_dir,
                 task_index=task.task_id,
+                pytest_extra_args=pytest_extra_args,
             )
             print(
                 f"Started {task.test_name} on GPUs "
@@ -527,17 +791,123 @@ def _print_ssim_task_results(
 
 
 @app.function(gpu="L40S:8", **SSIM_COMMON_KWARGS)
-def run_ssim_tests_single_instance() -> int:
-    repo_root, tasks = _prepare_ssim_workspace()
-    results = _schedule_ssim_tasks(repo_root, tasks)
-    return _print_ssim_task_results(tasks, results)
+def run_ssim_tests_single_instance(
+    git_repo: str,
+    git_commit: str,
+    pr_number: str = "false",
+    hf_api_key: str = "",
+    test_files_csv: str = "",
+    model_ids_csv: str = "",
+    ssim_full_quality: bool = False,
+    ssim_reference_repo: str = "",
+    skip_ssim_reference_download: bool = False,
+    pytest_k: str = "",
+    sync_generated_to_volume: bool = False,
+    generated_volume_subdir: str = "",
+) -> int:
+    selected_test_files = _split_csv_values(test_files_csv)
+    selected_model_ids = _split_csv_values(model_ids_csv)
+    repo_root, tasks = _prepare_ssim_workspace(
+        git_repo=git_repo,
+        git_commit=git_commit,
+        pr_number=pr_number,
+        hf_api_key=hf_api_key,
+        selected_test_files=selected_test_files,
+        selected_model_ids=selected_model_ids,
+    )
+    pytest_extra_args = _build_pytest_extra_args(
+        ssim_full_quality=ssim_full_quality,
+        ssim_reference_repo=ssim_reference_repo,
+        skip_ssim_reference_download=skip_ssim_reference_download,
+        pytest_k=pytest_k,
+    )
+    results = _schedule_ssim_tasks(
+        repo_root,
+        tasks,
+        pytest_extra_args=pytest_extra_args,
+    )
+    exit_code = _print_ssim_task_results(tasks, results)
+    if sync_generated_to_volume:
+        resolved_subdir = _resolve_generated_volume_subdir(
+            generated_volume_subdir,
+            git_commit,
+        )
+        _sync_generated_videos_to_volume(
+            repo_root,
+            resolved_subdir,
+        )
+    return exit_code
 
 
 @app.local_entrypoint()
-def run_ssim_tests():
-    import sys
+def run_ssim_tests(
+    git_repo: str = "",
+    git_commit: str = "",
+    pr_number: str = "",
+    hf_api_key: str = "",
+    test_files: str = "",
+    model_ids: str = "",
+    full_quality: bool = False,
+    reference_repo: str = "",
+    skip_reference_download: bool = False,
+    pytest_k: str = "",
+    no_prompt: bool = False,
+    sync_generated_to_volume: bool = False,
+    generated_volume_subdir: str = "",
+):
+    resolved_git_repo = _resolve_git_repo(git_repo)
+    resolved_git_commit = _resolve_git_commit(git_commit)
+    resolved_pr_number = _resolve_pull_request(pr_number)
+    resolved_hf_api_key = _resolve_hf_api_key(
+        hf_api_key,
+        prompt_if_missing=not no_prompt,
+    )
 
-    exit_code = run_ssim_tests_single_instance.remote()
+    print(f"Running SSIM on repo: {resolved_git_repo}")
+    print(f"Using commit: {resolved_git_commit}")
+    if resolved_pr_number and resolved_pr_number != "false":
+        print(f"Using PR ref: {resolved_pr_number}")
+    if test_files.strip():
+        print(f"Selected test files: {test_files}")
+    if model_ids.strip():
+        print(f"Selected model ids: {model_ids}")
+    if pytest_k.strip():
+        print(f"Using pytest -k filter: {pytest_k}")
+    if sync_generated_to_volume:
+        resolved_subdir = _resolve_generated_volume_subdir(
+            generated_volume_subdir,
+            resolved_git_commit,
+        )
+        print(
+            "Raw generated videos will be saved to Modal volume path: "
+            f"{RAW_GENERATED_VOLUME_ROOT}/{resolved_subdir}/generated_videos"
+        )
+    else:
+        resolved_subdir = ""
+
+    exit_code = run_ssim_tests_single_instance.remote(
+        git_repo=resolved_git_repo,
+        git_commit=resolved_git_commit,
+        pr_number=resolved_pr_number,
+        hf_api_key=resolved_hf_api_key,
+        test_files_csv=test_files,
+        model_ids_csv=model_ids,
+        ssim_full_quality=full_quality,
+        ssim_reference_repo=reference_repo,
+        skip_ssim_reference_download=skip_reference_download,
+        pytest_k=pytest_k,
+        sync_generated_to_volume=sync_generated_to_volume,
+        generated_volume_subdir=resolved_subdir,
+    )
+    if sync_generated_to_volume:
+        download_src = (
+            f"{RAW_GENERATED_VOLUME_ROOT}/{resolved_subdir}/generated_videos"
+        )
+        print(
+            "To download raw generated videos locally, run:\n"
+            f"  modal volume get hf-model-weights {download_src} "
+            "./generated_videos_modal"
+        )
     if exit_code != 0:
         sys.exit(exit_code)
     print("All SSIM tasks passed.")

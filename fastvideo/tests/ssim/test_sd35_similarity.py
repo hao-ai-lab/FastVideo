@@ -85,6 +85,7 @@ def test_sd35_similarity(prompt: str, ATTENTION_BACKEND: str) -> None:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         output_dir = build_generated_output_dir(
             script_dir,
+            device_reference_folder,
             MODEL_ID,
             ATTENTION_BACKEND,
         )
