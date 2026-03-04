@@ -17,7 +17,10 @@ logger = logging.getLogger("fastvideo.ui.database")
 
 # Default options schema - used for settings table defaults
 DEFAULT_SETTINGS = {
-    "default_model_id": "",
+    "default_model_id": "",  # legacy; migrated to default_model_id_t2v
+    "default_model_id_t2v": "",
+    "default_model_id_i2v": "",
+    "default_model_id_t2i": "",
     "num_inference_steps": 50,
     "num_frames": 81,
     "height": 480,
@@ -123,6 +126,24 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(
         conn, "settings", "fps", "INTEGER", "24"
     )
+    _add_column_if_missing(
+        conn, "settings", "default_model_id_t2v", "TEXT", "''"
+    )
+    _add_column_if_missing(
+        conn, "settings", "default_model_id_i2v", "TEXT", "''"
+    )
+    _add_column_if_missing(
+        conn, "settings", "default_model_id_t2i", "TEXT", "''"
+    )
+    # Migrate legacy default_model_id to default_model_id_t2v
+    if "default_model_id_t2v" in _get_table_columns(conn, "settings"):
+        conn.execute(
+            """
+            UPDATE settings SET default_model_id_t2v = default_model_id
+            WHERE id = 1 AND default_model_id != ''
+            AND (default_model_id_t2v IS NULL OR default_model_id_t2v = '')
+            """
+        )
 
 
 def init_db(db_path: Path) -> None:
@@ -163,6 +184,9 @@ def init_db(db_path: Path) -> None:
             CREATE TABLE IF NOT EXISTS settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 default_model_id TEXT NOT NULL DEFAULT '',
+                default_model_id_t2v TEXT NOT NULL DEFAULT '',
+                default_model_id_i2v TEXT NOT NULL DEFAULT '',
+                default_model_id_t2i TEXT NOT NULL DEFAULT '',
                 num_inference_steps INTEGER NOT NULL DEFAULT 50,
                 num_frames INTEGER NOT NULL DEFAULT 81,
                 height INTEGER NOT NULL DEFAULT 480,
@@ -310,8 +334,26 @@ class Database:
         row = cur.fetchone()
         if not row:
             return _default_settings_dict()
+        t2v = (
+            (row["default_model_id_t2v"] or row["default_model_id"] or "")
+            if "default_model_id_t2v" in row.keys()
+            else (row["default_model_id"] or "")
+        )
+        i2v = (
+            (row["default_model_id_i2v"] or "")
+            if "default_model_id_i2v" in row.keys()
+            else ""
+        )
+        t2i = (
+            (row["default_model_id_t2i"] or "")
+            if "default_model_id_t2i" in row.keys()
+            else ""
+        )
         result = {
             "defaultModelId": row["default_model_id"] or "",
+            "defaultModelIdT2v": t2v,
+            "defaultModelIdI2v": i2v,
+            "defaultModelIdT2i": t2i,
             "numInferenceSteps": int(row["num_inference_steps"]),
             "numFrames": int(row["num_frames"]),
             "height": int(row["height"]),
@@ -349,6 +391,9 @@ class Database:
         # Map camelCase -> snake_case
         mapping = {
             "defaultModelId": "default_model_id",
+            "defaultModelIdT2v": "default_model_id_t2v",
+            "defaultModelIdI2v": "default_model_id_i2v",
+            "defaultModelIdT2i": "default_model_id_t2i",
             "numInferenceSteps": "num_inference_steps",
             "numFrames": "num_frames",
             "height": "height",
@@ -444,6 +489,9 @@ def _default_settings_dict() -> dict[str, Any]:
     """Return default settings as API-style dict."""
     return {
         "defaultModelId": DEFAULT_SETTINGS["default_model_id"],
+        "defaultModelIdT2v": DEFAULT_SETTINGS["default_model_id_t2v"],
+        "defaultModelIdI2v": DEFAULT_SETTINGS["default_model_id_i2v"],
+        "defaultModelIdT2i": DEFAULT_SETTINGS["default_model_id_t2i"],
         "numInferenceSteps": DEFAULT_SETTINGS["num_inference_steps"],
         "numFrames": DEFAULT_SETTINGS["num_frames"],
         "height": DEFAULT_SETTINGS["height"],
