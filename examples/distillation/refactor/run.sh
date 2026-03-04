@@ -23,7 +23,7 @@ NUM_GPUS="${NUM_GPUS:-1}"
 NNODES="${NNODES:-1}"
 NODE_RANK="${NODE_RANK:-0}"
 MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
-MASTER_PORT="${MASTER_PORT:-29500}"
+MASTER_PORT="${MASTER_PORT:-29501}"
 
 # ── W&B ──────────────────────────────────────────────────────────────
 export WANDB_API_KEY="${WANDB_API_KEY:-}"

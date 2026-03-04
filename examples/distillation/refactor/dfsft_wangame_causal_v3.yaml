@@ -76,7 +76,7 @@ validation:
   sampler_kind: ode
   ode_solver: euler
   guidance_scale: 1.0
-  num_frames: 75
+  num_frames: 69
 
 pipeline:
   flow_shift: 3

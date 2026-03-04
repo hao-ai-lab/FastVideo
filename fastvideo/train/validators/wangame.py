@@ -526,7 +526,7 @@ class WanGameValidator:
         if sample_handle is None:
             raise ValueError("ValidationRequest.sample_handle must be "
                              "provided by the method")
-        transformer = sample_handle.require_module("transformer")
+        transformer = sample_handle.transformer
         was_training = bool(getattr(transformer, "training", False))
 
         tc = self.training_config
