@@ -2,9 +2,12 @@
 
 import { Job } from "@/lib/types";
 import { getJobLogs, downloadJobLog } from "@/lib/api";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import secondaryStyles from "./styles/SecondarySidebar.module.css";
 import buttonStyles from "@styles/Button.module.css";
+
+const SIDEBAR_MIN_WIDTH = 280;
+const SIDEBAR_MAX_WIDTH = 750;
 
 interface SecondarySidebarProps {
   job: Job;
@@ -20,6 +23,9 @@ function CloseIcon() {
 }
 
 export default function SecondarySidebar({ job, onClose }: SecondarySidebarProps) {
+  const [width, setWidth] = useState(360);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef({ x: 0, width: 0 });
   const [isLoading, setIsLoading] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const logAfterRef = useRef(0);
@@ -91,6 +97,46 @@ export default function SecondarySidebar({ job, onClose }: SecondarySidebarProps
     previousStatusRef.current = currentStatus;
   }, [job.id, job.status]);
 
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      dragStartRef.current = { x: e.clientX, width };
+      setIsDragging(true);
+    },
+    [width]
+  );
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const { x, width: startWidth } = dragStartRef.current;
+      const delta = e.clientX - x;
+      // Right sidebar: drag left (negative delta) = wider
+      const newWidth = Math.min(
+        SIDEBAR_MAX_WIDTH,
+        Math.max(SIDEBAR_MIN_WIDTH, startWidth - delta)
+      );
+      setWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDragging]);
+
   const handleDownloadLog = async (e: React.MouseEvent) => {
     e.preventDefault();
     if (isLoading) return;
@@ -115,7 +161,10 @@ export default function SecondarySidebar({ job, onClose }: SecondarySidebarProps
   };
 
   return (
-    <aside className={secondaryStyles.sidebar}>
+    <aside
+      className={secondaryStyles.sidebar}
+      style={{ width, maxWidth: SIDEBAR_MAX_WIDTH }}
+    >
       <div className={secondaryStyles.header}>
         <h2 className={secondaryStyles.title}>Job Details</h2>
         <div className={secondaryStyles.headerActions}>
@@ -156,6 +205,12 @@ export default function SecondarySidebar({ job, onClose }: SecondarySidebarProps
           )}
         </pre>
       </div>
+      <div
+        className={`${secondaryStyles.resizeHandle} ${
+          isDragging ? secondaryStyles.resizeHandleActive : ""
+        }`}
+        onMouseDown={handleMouseDown}
+      />
     </aside>
   );
 }
