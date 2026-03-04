@@ -9,6 +9,8 @@ import cardStyles from "@styles/Card.module.css";
 import formStyles from "@styles/Form.module.css";
 import layoutStyles from "@/app/Layout.module.css";
 import buttonStyles from "@styles/Button.module.css";
+import Toggle from "@/components/Toggle";
+import Slider from "@/components/Slider";
 
 export default function SettingsPage() {
   useHeaderActions([]);
@@ -69,16 +71,11 @@ export default function SettingsPage() {
           <label htmlFor="settings-auto-start-job">
             Auto Start Job on Create
           </label>
-          <select
+          <Toggle
             id="settings-auto-start-job"
-            value={options.autoStartJob ? "enabled" : "disabled"}
-            onChange={(e) =>
-              updateOption("autoStartJob", e.target.value === "enabled")
-            }
-          >
-            <option value="disabled">Disabled</option>
-            <option value="enabled">Enabled</option>
-          </select>
+            checked={options.autoStartJob}
+            onChange={(v) => updateOption("autoStartJob", v)}
+          />
         </div>
         <hr style={{ margin: "1rem 0", border: "none", borderTop: "1px solid var(--border)" }} />
         <div className={layoutStyles.sectionHeader}>
@@ -125,67 +122,58 @@ export default function SettingsPage() {
           />
           <div className={formStyles.formRow}>
             <label htmlFor="settings-num-steps">Inference Steps</label>
-            <input
+            <Slider
               id="settings-num-steps"
-              type="number"
-              value={options.numInferenceSteps}
-              onChange={(e) =>
-                updateOption("numInferenceSteps", parseInt(e.target.value, 10))
-              }
               min={1}
               max={200}
+              step={1}
+              value={options.numInferenceSteps}
+              onChange={(v) => updateOption("numInferenceSteps", v)}
             />
           </div>
           <div className={formStyles.formRow}>
             <label htmlFor="settings-num-frames">Frames</label>
-            <input
+            <Slider
               id="settings-num-frames"
-              type="number"
-              value={options.numFrames}
-              onChange={(e) =>
-                updateOption("numFrames", parseInt(e.target.value, 10))
-              }
               min={1}
               max={500}
+              step={1}
+              value={options.numFrames}
+              onChange={(v) => updateOption("numFrames", v)}
             />
           </div>
           <div className={formStyles.formRow}>
             <label htmlFor="settings-height">Height</label>
-            <input
+            <Slider
               id="settings-height"
-              type="number"
-              value={options.height}
-              onChange={(e) =>
-                updateOption("height", parseInt(e.target.value, 10))
-              }
               min={64}
+              max={1080}
               step={16}
+              value={options.height}
+              onChange={(v) => updateOption("height", v)}
             />
           </div>
           <div className={formStyles.formRow}>
             <label htmlFor="settings-width">Width</label>
-            <input
+            <Slider
               id="settings-width"
-              type="number"
-              value={options.width}
-              onChange={(e) =>
-                updateOption("width", parseInt(e.target.value, 10))
-              }
               min={64}
+              max={1920}
               step={16}
+              value={options.width}
+              onChange={(v) => updateOption("width", v)}
             />
           </div>
           <div className={formStyles.formRow}>
             <label htmlFor="settings-guidance">Guidance Scale</label>
-            <input
+            <Slider
               id="settings-guidance"
-              type="number"
-              value={options.guidanceScale}
-              onChange={(e) =>
-                updateOption("guidanceScale", parseFloat(e.target.value))
-              }
               min={0}
+              max={20}
               step={0.1}
+              value={options.guidanceScale}
+              onChange={(v) => updateOption("guidanceScale", v)}
+              formatValue={(v) => v.toFixed(1)}
             />
           </div>
           <div className={formStyles.formRow}>
@@ -195,29 +183,25 @@ export default function SettingsPage() {
             >
               Guidance Rescale
             </label>
-            <input
+            <Slider
               id="settings-guidance-rescale"
-              type="number"
-              value={options.guidanceRescale ?? 0}
-              onChange={(e) =>
-                updateOption("guidanceRescale", parseFloat(e.target.value))
-              }
               min={0}
               max={1}
               step={0.05}
+              value={options.guidanceRescale ?? 0}
+              onChange={(v) => updateOption("guidanceRescale", v)}
+              formatValue={(v) => v.toFixed(2)}
             />
           </div>
           <div className={formStyles.formRow}>
             <label htmlFor="settings-fps">FPS</label>
-            <input
+            <Slider
               id="settings-fps"
-              type="number"
-              value={options.fps ?? 24}
-              onChange={(e) =>
-                updateOption("fps", parseInt(e.target.value, 10))
-              }
               min={1}
               max={60}
+              step={1}
+              value={options.fps ?? 24}
+              onChange={(v) => updateOption("fps", v)}
             />
           </div>
           <div className={formStyles.formRow}>
@@ -234,111 +218,70 @@ export default function SettingsPage() {
           </div>
           <div className={formStyles.formRow}>
             <label htmlFor="settings-num-gpus">GPUs</label>
-            <input
+            <Slider
               id="settings-num-gpus"
-              type="number"
-              value={options.numGpus}
-              onChange={(e) =>
-                updateOption("numGpus", parseInt(e.target.value, 10))
-              }
               min={1}
               max={8}
+              step={1}
+              value={options.numGpus}
+              onChange={(v) => updateOption("numGpus", v)}
             />
           </div>
           <div className={formStyles.formRow}>
             <label htmlFor="settings-dit-cpu-offload">DiT CPU Offload</label>
-            <select
+            <Toggle
               id="settings-dit-cpu-offload"
-              value={options.ditCpuOffload ? "enabled" : "disabled"}
-              onChange={(e) =>
-                updateOption("ditCpuOffload", e.target.value === "enabled")
-              }
-            >
-              <option value="disabled">Disabled</option>
-              <option value="enabled">Enabled</option>
-            </select>
+              checked={options.ditCpuOffload}
+              onChange={(v) => updateOption("ditCpuOffload", v)}
+            />
           </div>
           <div className={formStyles.formRow}>
             <label htmlFor="settings-text-encoder-cpu-offload">
               Text Encoder CPU Offload
             </label>
-            <select
+            <Toggle
               id="settings-text-encoder-cpu-offload"
-              value={options.textEncoderCpuOffload ? "enabled" : "disabled"}
-              onChange={(e) =>
-                updateOption(
-                  "textEncoderCpuOffload",
-                  e.target.value === "enabled"
-                )
-              }
-            >
-              <option value="disabled">Disabled</option>
-              <option value="enabled">Enabled</option>
-            </select>
+              checked={options.textEncoderCpuOffload}
+              onChange={(v) => updateOption("textEncoderCpuOffload", v)}
+            />
           </div>
           <div className={formStyles.formRow}>
             <label htmlFor="settings-use-fsdp-inference">
               Use FSDP Inference
             </label>
-            <select
+            <Toggle
               id="settings-use-fsdp-inference"
-              value={options.useFsdpInference ? "enabled" : "disabled"}
-              onChange={(e) =>
-                updateOption("useFsdpInference", e.target.value === "enabled")
-              }
-            >
-              <option value="disabled">Disabled</option>
-              <option value="enabled">Enabled</option>
-            </select>
+              checked={options.useFsdpInference}
+              onChange={(v) => updateOption("useFsdpInference", v)}
+            />
           </div>
           <div className={formStyles.formRow}>
             <label htmlFor="settings-vae-cpu-offload">VAE CPU Offload</label>
-            <select
+            <Toggle
               id="settings-vae-cpu-offload"
-              value={options.vaeCpuOffload ? "enabled" : "disabled"}
-              onChange={(e) =>
-                updateOption("vaeCpuOffload", e.target.value === "enabled")
-              }
-            >
-              <option value="disabled">Disabled</option>
-              <option value="enabled">Enabled</option>
-            </select>
+              checked={options.vaeCpuOffload}
+              onChange={(v) => updateOption("vaeCpuOffload", v)}
+            />
           </div>
           <div className={formStyles.formRow}>
             <label htmlFor="settings-image-encoder-cpu-offload">
               Image Encoder CPU Offload
             </label>
-            <select
+            <Toggle
               id="settings-image-encoder-cpu-offload"
-              value={options.imageEncoderCpuOffload ? "enabled" : "disabled"}
-              onChange={(e) =>
-                updateOption(
-                  "imageEncoderCpuOffload",
-                  e.target.value === "enabled"
-                )
-              }
-            >
-              <option value="disabled">Disabled</option>
-              <option value="enabled">Enabled</option>
-            </select>
+              checked={options.imageEncoderCpuOffload}
+              onChange={(v) => updateOption("imageEncoderCpuOffload", v)}
+            />
           </div>
           <div className={formStyles.formRow}>
             <label htmlFor="settings-enable-torch-compile">
               Torch Compile
             </label>
-            <select
+            <Toggle
               id="settings-enable-torch-compile"
-              value={options.enableTorchCompile ? "enabled" : "disabled"}
-              onChange={(e) =>
-                updateOption(
-                  "enableTorchCompile",
-                  e.target.value === "enabled"
-                )
-              }
-            >
-              <option value="disabled">Disabled</option>
-              <option value="enabled">Enabled</option>
-            </select>
+              checked={options.enableTorchCompile}
+              onChange={(v) => updateOption("enableTorchCompile", v)}
+            />
           </div>
           <div className={formStyles.formRow}>
             <label
@@ -347,16 +290,14 @@ export default function SettingsPage() {
             >
               VSA Sparsity
             </label>
-            <input
+            <Slider
               id="settings-vsa-sparsity"
-              type="number"
-              value={options.vsaSparsity}
-              onChange={(e) =>
-                updateOption("vsaSparsity", parseFloat(e.target.value))
-              }
               min={0}
               max={1}
               step={0.05}
+              value={options.vsaSparsity}
+              onChange={(v) => updateOption("vsaSparsity", v)}
+              formatValue={(v) => v.toFixed(2)}
             />
           </div>
           <div className={formStyles.formRow}>
@@ -366,15 +307,14 @@ export default function SettingsPage() {
             >
               TP Size
             </label>
-            <input
+            <Slider
               id="settings-tp-size"
-              type="number"
-              value={options.tpSize}
-              onChange={(e) =>
-                updateOption("tpSize", parseInt(e.target.value, 10) || -1)
-              }
               min={-1}
               max={8}
+              step={1}
+              value={options.tpSize}
+              onChange={(v) => updateOption("tpSize", v)}
+              formatValue={(v) => (v === -1 ? "Auto" : String(v))}
             />
           </div>
           <div className={formStyles.formRow}>
@@ -384,15 +324,14 @@ export default function SettingsPage() {
             >
               SP Size
             </label>
-            <input
+            <Slider
               id="settings-sp-size"
-              type="number"
-              value={options.spSize}
-              onChange={(e) =>
-                updateOption("spSize", parseInt(e.target.value, 10) || -1)
-              }
               min={-1}
               max={8}
+              step={1}
+              value={options.spSize}
+              onChange={(v) => updateOption("spSize", v)}
+              formatValue={(v) => (v === -1 ? "Auto" : String(v))}
             />
           </div>
         </div>
