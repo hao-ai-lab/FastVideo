@@ -203,7 +203,7 @@ class JobRunner:
 
         self._jobs: dict[str, Job] = {}
         self._jobs_lock = threading.Lock()
-        self._load_jobs_from_db()
+        self._load_jobs()
         
         # Cache of loaded generators keyed by (model_id, num_gpus, dit_cpu_offload, 
         # text_encoder_cpu_offload, use_fsdp_inference) so that we only pay the
@@ -219,7 +219,28 @@ class JobRunner:
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.log_dir, exist_ok=True)
 
-    def _load_jobs_from_db(self) -> None:
+    def _load_logs(self, job: Job) -> None:
+        """Populate job's log buffer from its log file if it exists."""
+        path = job.log_file_path
+        if not path:
+            path = os.path.join(self.log_dir, f"{job.id}.log")
+        if not os.path.isfile(path):
+            return
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    stripped = line.rstrip("\n\r")
+                    if stripped:
+                        job._log_buf.write(stripped)
+            if not job.log_file_path:
+                job.log_file_path = path
+        except Exception as exc:
+            logger.warning(
+                "Failed to load logs from %s for job %s: %s",
+                path, job.id, exc,
+            )
+
+    def _load_jobs(self) -> None:
         """Load jobs from database."""
         try:
             for row in self._db.get_all_jobs():
@@ -257,6 +278,7 @@ class JobRunner:
                     text_encoder_cpu_offload=row.get("text_encoder_cpu_offload", False),
                     use_fsdp_inference=row.get("use_fsdp_inference", False),
                 )
+                self._load_logs(job)
                 with self._jobs_lock:
                     self._jobs[job.id] = job
             if self._jobs:
