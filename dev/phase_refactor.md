@@ -73,11 +73,11 @@ all optimizers as attributes. `RoleManager` is retired.
 
 ### 2.1 ModelBase and CausalModelBase
 
-`CausalModelBase` **inherits** `ModelBase` (unlike FastGen where they are parallel).
-Reason: `predict_noise`/`predict_x0` have the same signature on both — causal only
-adds streaming methods. Inheritance means `isinstance(causal_student, ModelBase)` is
-`True`, which is useful when a method slot (e.g. `fake_score` in DMD2) can accept
-either kind.
+`CausalModelBase` is a **parallel root** to `ModelBase`, mirroring FastGen's design.
+Each concrete method slot accepts exactly one expected type — there is no legitimate
+use-case where a `fake_score` or `teacher` slot would accept either kind
+interchangeably. Parallel roots keep the contracts clean: `ModelBase` for
+bidirectional models, `CausalModelBase` for streaming/causal models.
 
 ```python
 # fastvideo/distillation/models/base.py
@@ -135,10 +135,46 @@ class ModelBase(ABC):
         (loss / max(1, grad_accum_rounds)).backward()
 
 
-class CausalModelBase(ModelBase):
-    """Causal/streaming extension. Subclass of ModelBase (same predict signatures,
-    adds streaming ops). isinstance(causal_model, ModelBase) == True.
+class CausalModelBase(ABC):
+    """Parallel root for causal/streaming models. NOT a subclass of ModelBase.
+    Mirrors FastGen's design: CausalFastGenNetwork is parallel to FastGenNetwork.
+    Concrete method slots that need a causal model declare CausalModelBase explicitly.
     """
+    transformer: nn.Module
+    noise_scheduler: Any  # always set in __init__
+
+    def init_preprocessors(self, training_args: Any) -> None:
+        pass
+
+    def on_train_start(self) -> None:
+        pass
+
+    def get_rng_generators(self) -> dict[str, torch.Generator]:
+        return {}
+
+    def prepare_batch(
+        self,
+        raw_batch: dict[str, Any],
+        *,
+        current_vsa_sparsity: float = 0.0,
+        latents_source: str = "data",
+    ) -> TrainingBatch:
+        raise NotImplementedError(
+            f"{type(self).__name__}.prepare_batch() requires init_preprocessors() "
+            "(student only)."
+        )
+
+    def add_noise(self, clean: Tensor, noise: Tensor, timestep: Tensor) -> Tensor:
+        raise NotImplementedError
+
+    @abstractmethod
+    def predict_noise(self, noisy_latents: Tensor, timestep: Tensor, batch: TrainingBatch, *, conditional: bool, cfg_uncond: dict | None = None, attn_kind: str = "dense") -> Tensor: ...
+
+    @abstractmethod
+    def predict_x0(self, ...) -> Tensor: ...
+
+    def backward(self, loss: Tensor, ctx: Any, *, grad_accum_rounds: int = 1) -> None:
+        (loss / max(1, grad_accum_rounds)).backward()
 
     @abstractmethod
     def predict_noise_streaming(
@@ -166,17 +202,20 @@ class CausalModelBase(ModelBase):
 
 We abandon structured config dataclasses (no `DistillRunConfig`, no `RecipeSpec`,
 no `attrs` configs). Instead, each `_target_` class declares its own schema via its
-`__init__` type annotations. The `instantiate()` utility introspects
-`inspect.signature()` to:
+`__init__` type annotations. The `instantiate()` utility:
 
-1. **Validate**: detect missing required args (no default) and unknown keys early.
-2. **Filter**: only pass kwargs the constructor accepts, ignoring extras.
-3. **Document**: `help(WanGameModel)` and IDE hover shows the exact fields.
+1. Pops `_target_` and resolves the class.
+2. Passes the **entire remaining dict** into the constructor — each class takes what
+   it needs via `**kwargs` and ignores the rest.
+
+This is the "whole config dict flows through" model: callers don't need to know which
+keys a constructor cares about, and adding a field to a class means adding it to
+`__init__` — no schema file to maintain in parallel.
 
 ```python
 # fastvideo/distillation/utils/instantiate.py
 
-import importlib, inspect
+import importlib
 from typing import Any
 
 
@@ -186,67 +225,29 @@ def resolve_target(target: str) -> type:
 
 
 def instantiate(cfg: dict[str, Any], /, **extra: Any) -> Any:
-    """Hydra-style _target_ instantiation with signature-based validation.
+    """_target_ instantiation: pop _target_, resolve class, pass everything else through.
 
-    - Pops '_target_', resolves the class.
-    - Merges cfg fields with extra kwargs.
-    - Inspects __init__ signature:
-        * Raises if a required parameter is missing.
-        * Raises if an unrecognised key is passed (no **kwargs on target).
-        * Passes only accepted kwargs otherwise.
+    Each constructor accepts what it needs via explicit params + **kwargs for the rest.
+    No signature inspection — simplicity over strict validation.
     """
     cfg = dict(cfg)
     target_str = cfg.pop("_target_")
     cls = resolve_target(target_str)
-    kwargs = {**cfg, **extra}
-
-    sig = inspect.signature(cls.__init__)
-    params = {
-        name: p
-        for name, p in sig.parameters.items()
-        if name != "self"
-    }
-    has_var_keyword = any(
-        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
-    )
-
-    # Validate required params are present
-    for name, p in params.items():
-        if (
-            p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
-            and p.default is inspect.Parameter.empty
-            and name not in kwargs
-        ):
-            raise TypeError(
-                f"instantiate({target_str!r}): missing required argument {name!r}"
-            )
-
-    # Validate no unexpected keys (unless class accepts **kwargs)
-    if not has_var_keyword:
-        unexpected = set(kwargs) - set(params)
-        if unexpected:
-            raise TypeError(
-                f"instantiate({target_str!r}): unexpected config keys {sorted(unexpected)}"
-            )
-
-    return cls(**kwargs)
+    return cls(**{**cfg, **extra})
 ```
 
-**Each class is self-documenting.** Example:
+**Each class is self-documenting via its explicit params.** Example:
 
 ```python
 class WanGameModel(ModelBase):
     def __init__(
         self,
         *,
-        init_from: str,           # required — instantiate() raises if missing
+        init_from: str,           # required — TypeError at startup if missing from YAML
         trainable: bool = True,   # optional with default
+        **kwargs,                 # absorbs any other keys in the config dict
     ) -> None: ...
 ```
-
-YAML validation is thus free — no separate schema file, no config dataclass to
-maintain in parallel. Adding a new field to a class means adding it to `__init__`.
-Removing a field and forgetting to update YAML → `TypeError` at startup.
 
 ### 2.4 Concrete model classes (WanGame example)
 
@@ -338,12 +339,12 @@ class DistillMethod(nn.Module, ABC):
         *,
         cfg: RunConfig,
         role_models: dict[str, ModelBase | CausalModelBase],
-        dataloader: Any,
         validator: Any | None,
     ) -> "DistillMethod":
         """Assemble the method. Calls init_preprocessors() on the student,
         then calls init_optimizers().
         Analogous to FastGenModel.__init__ → build_model() → init_preprocessors().
+        Dataloader is NOT passed here — it is owned by the trainer.
         """
         ...
 
@@ -378,7 +379,7 @@ class DistillMethod(nn.Module, ABC):
 class SelfForcingMethod(DistillMethod):
 
     @classmethod
-    def build(cls, *, cfg, role_models, dataloader, validator):
+    def build(cls, *, cfg, role_models, validator):
         student = role_models["student"]
         teacher = role_models["teacher"]
         critic  = role_models["critic"]
@@ -395,15 +396,15 @@ class SelfForcingMethod(DistillMethod):
 
         return cls(
             student=student, teacher=teacher, critic=critic,
-            dataloader=dataloader, validator=validator, cfg=cfg.method,
+            validator=validator, cfg=cfg.method,
         )
 
-    def __init__(self, student, teacher, critic, dataloader, validator, cfg):
+    def __init__(self, student, teacher, critic, validator, cfg):
         super().__init__()
         self.student = student
         self.teacher = teacher
         self.critic = critic
-        self.dataloader = dataloader
+        # No self.dataloader — trainer owns it and passes raw_batch into single_train_step.
         self.validator = validator
         self.init_optimizers()
 
@@ -528,21 +529,21 @@ role_models = {
     for role, model_cfg in cfg.models.items()
 }
 
-# 2. Dataloader and validator are external (trainer already takes dataloader separately).
+# 2. Dataloader is owned by the trainer. Build it here for trainer use only.
 dataloader = instantiate(cfg.data, training_args=training_args)
 validator   = build_validator(cfg.validation) if cfg.validation.enabled else None
 
 # 3. Method build() calls init_preprocessors() on student, then init_optimizers().
+#    No dataloader passed — trainer passes raw_batch into single_train_step each step.
 #    Analogous to FastGenModel.__init__ → build_model() → init_preprocessors().
 method_cls = resolve_target(cfg.method["_target_"])
 method = method_cls.build(
     cfg=cfg,
     role_models=role_models,
-    dataloader=dataloader,
     validator=validator,
 )
 
-# 4. Trainer runs the loop.
+# 4. Trainer runs the loop. Trainer is the sole owner of the dataloader.
 trainer = DistillTrainer(training_args)
 trainer.run(method, dataloader=dataloader, max_steps=cfg.trainer.max_train_steps, ...)
 ```
@@ -555,10 +556,10 @@ trainer.run(method, dataloader=dataloader, max_steps=cfg.trainer.max_train_steps
 |---|---|
 | `dispatch.py` string registry | Deleted; `_target_` + `instantiate()` |
 | `ModelBase` — dispatches via `RoleHandle` arg | Retired; per-role instance owns one transformer |
-| `CausalModelBase(ModelBase)` subclass | `CausalModelBase` parallel root (not a subclass) |
+| `CausalModelBase(ModelBase)` subclass | `CausalModelBase(ABC)` parallel root — mirrors FastGen |
 | `RoleHandle` / `RoleManager` | Retired; method owns `self.student`, `self.teacher`, etc. |
 | Optimizers on `RoleHandle.optimizers` | On method: `self.student_optimizer`, etc. |
-| `DistillMethod.build(cfg, bundle, model, validator)` | `DistillMethod.build(cfg, role_models, dataloader, validator)` |
+| `DistillMethod.build(cfg, bundle, model, validator)` | `DistillMethod.build(cfg, role_models, validator)` — no dataloader |
 | `recipe.family` / `recipe.method` YAML | Deleted; `models.<role>._target_` + `method._target_` |
 | `roles.*` YAML section | `models.*` with `_target_`, `init_from`, `trainable` |
 | `is_student` / mixin / SharedContext | None of these. `build()` calls `init_preprocessors()` on student. |
