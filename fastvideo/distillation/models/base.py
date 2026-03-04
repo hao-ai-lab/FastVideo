@@ -7,49 +7,59 @@ from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 
-from fastvideo.distillation.roles import RoleHandle
-
 if TYPE_CHECKING:
     from fastvideo.pipelines import TrainingBatch
 
 
 class ModelBase(ABC):
-    """Operation-centric runtime primitives implemented by a model plugin.
+    """Per-role model instance.
 
-    This interface is intentionally *method-agnostic*:
-    - A method selects roles (student/teacher/critic/...) and decides how to use
-      them.
-    - The model plugin implements how to run those roles against FastVideo
-      pipelines, forward-context requirements, and batch normalization quirks.
-
-    Implementations typically live next to the model plugin
-    (e.g. `models/wan/wan.py`)
-    rather than in a global adapter registry.
+    Every role (student, teacher, critic, …) gets its own ``ModelBase``
+    instance.  Each instance owns its own ``transformer`` and
+    ``noise_scheduler``.  Heavyweight resources (VAE, dataloader, RNG
+    seeds) are loaded lazily via :meth:`init_preprocessors`, which the
+    method calls **only on the student**.
     """
 
-    training_args: Any
-    bundle: Any
-    dataloader: Any
-    validator: Any | None
-    start_step: int
+    transformer: torch.nn.Module
+    noise_scheduler: Any
 
-    @property
-    @abstractmethod
-    def num_train_timesteps(self) -> int:
-        """Return the scheduler's training timestep horizon (usually 1000)."""
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
-    @abstractmethod
-    def shift_and_clamp_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
-        """Apply model/pipeline timestep shifting and clamp into valid range."""
+    def init_preprocessors(self, training_args: Any) -> None:
+        """Load VAE, build dataloader, seed RNGs.
 
-    @abstractmethod
+        Called only on the student by the method's ``__init__``.
+        Default is a no-op so teacher/critic instances skip this.
+        """
+
     def on_train_start(self) -> None:
-        """Initialize RNG seeds and any cached conditioning needed for training."""
+        """Called once before the training loop begins."""
 
     def get_rng_generators(self) -> dict[str, torch.Generator]:
-        """Return RNG generators that should be checkpointed for exact resume."""
-
+        """Return RNG generators for checkpoint resume."""
         return {}
+
+    # ------------------------------------------------------------------
+    # Timestep helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def num_train_timesteps(self) -> int:
+        """Return the scheduler's training timestep horizon."""
+        return int(self.noise_scheduler.num_train_timesteps)
+
+    def shift_and_clamp_timestep(
+        self, timestep: torch.Tensor
+    ) -> torch.Tensor:
+        """Apply model/pipeline timestep shifting and clamp."""
+        return timestep
+
+    # ------------------------------------------------------------------
+    # Runtime primitives
+    # ------------------------------------------------------------------
 
     @abstractmethod
     def prepare_batch(
@@ -59,7 +69,7 @@ class ModelBase(ABC):
         current_vsa_sparsity: float = 0.0,
         latents_source: Literal["data", "zeros"] = "data",
     ) -> TrainingBatch:
-        """Convert a dataloader batch into forward primitives for methods."""
+        """Convert a dataloader batch into forward primitives."""
 
     @abstractmethod
     def add_noise(
@@ -68,12 +78,11 @@ class ModelBase(ABC):
         noise: torch.Tensor,
         timestep: torch.Tensor,
     ) -> torch.Tensor:
-        """Apply forward-process noise at `timestep` for a given scheduler."""
+        """Apply forward-process noise at *timestep*."""
 
     @abstractmethod
     def predict_noise(
         self,
-        handle: RoleHandle,
         noisy_latents: torch.Tensor,
         timestep: torch.Tensor,
         batch: TrainingBatch,
@@ -82,12 +91,11 @@ class ModelBase(ABC):
         cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
-        """Run a role to predict noise/flow for the given noisy latents."""
+        """Predict noise/flow for the given noisy latents."""
 
     @abstractmethod
     def predict_x0(
         self,
-        handle: RoleHandle,
         noisy_latents: torch.Tensor,
         timestep: torch.Tensor,
         batch: TrainingBatch,
@@ -96,32 +104,33 @@ class ModelBase(ABC):
         cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
-        """Run a role to predict x0 for the given noisy latents."""
+        """Predict x0 for the given noisy latents."""
 
     @abstractmethod
-    def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
-        """Backward hook that may restore forward-context for checkpointed modules."""
+    def backward(
+        self,
+        loss: torch.Tensor,
+        ctx: Any,
+        *,
+        grad_accum_rounds: int,
+    ) -> None:
+        """Backward that may restore forward-context."""
 
 
 class CausalModelBase(ModelBase):
-    """Optional extension for causal / streaming model plugins.
+    """Extension for causal / streaming model plugins.
 
-    This mirrors the FastGen design choice that *only* causal networks expose a
-    cache lifecycle API, while non-causal models stay on a clean `ModelBase`
-    interface.
-
-    Important: methods should not pass KV-cache tensors around. Cache state is
-    internal to the causal model plugin and keyed by `(role handle, cache_tag)`.
+    Cache state is internal to the model instance and keyed by
+    *cache_tag* (no role handle needed).
     """
 
     @abstractmethod
-    def clear_caches(self, handle: RoleHandle, *, cache_tag: str = "pos") -> None:
-        """Clear internal caches for a role before starting a new rollout."""
+    def clear_caches(self, *, cache_tag: str = "pos") -> None:
+        """Clear internal caches before starting a new rollout."""
 
     @abstractmethod
     def predict_noise_streaming(
         self,
-        handle: RoleHandle,
         noisy_latents: torch.Tensor,
         timestep: torch.Tensor,
         batch: TrainingBatch,
@@ -133,12 +142,11 @@ class CausalModelBase(ModelBase):
         cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor | None:
-        """Streaming predict-noise primitive that may update internal caches."""
+        """Streaming predict-noise that may update internal caches."""
 
     @abstractmethod
     def predict_x0_streaming(
         self,
-        handle: RoleHandle,
         noisy_latents: torch.Tensor,
         timestep: torch.Tensor,
         batch: TrainingBatch,
@@ -150,4 +158,4 @@ class CausalModelBase(ModelBase):
         cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor | None:
-        """Streaming predict-x0 primitive that may update internal caches."""
+        """Streaming predict-x0 that may update internal caches."""

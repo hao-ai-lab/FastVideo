@@ -1,141 +1,112 @@
 # SPDX-License-Identifier: Apache-2.0
 
+"""Assembly: build method + dataloader from a ``_target_``-based config."""
+
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
-from typing import Protocol
 
-from fastvideo.distillation.methods.base import DistillMethod
-from fastvideo.distillation.utils.config import DistillRunConfig
+from fastvideo.distillation.utils.instantiate import (
+    instantiate,
+    resolve_target,
+)
+from fastvideo.distillation.utils.config import RunConfig
 
 if TYPE_CHECKING:
     from fastvideo.fastvideo_args import TrainingArgs
+    from fastvideo.distillation.methods.base import DistillMethod
+
+
+def build_from_config(
+    cfg: RunConfig,
+) -> tuple[TrainingArgs, DistillMethod, Any, int]:
+    """Build method + dataloader from a v3 run config.
+
+    1. Instantiate each model in ``cfg.models`` via ``_target_``.
+    2. Resolve the method class from ``cfg.method["_target_"]``.
+    3. Construct the method with ``(cfg=cfg, role_models=...,
+       validator=...)``.
+    4. Return ``(training_args, method, dataloader, start_step)``.
+    """
     from fastvideo.distillation.models.base import ModelBase
 
+    # --- 1. Build role model instances ---
+    role_models: dict[str, ModelBase] = {}
+    for role, model_cfg in cfg.models.items():
+        model = instantiate(model_cfg)
+        if not isinstance(model, ModelBase):
+            raise TypeError(
+                f"models.{role}._target_ must resolve to a "
+                f"ModelBase subclass, got {type(model).__name__}"
+            )
+        role_models[role] = model
 
-class ModelBuilder(Protocol):
-    def __call__(self, *, cfg: DistillRunConfig) -> ModelBase:
-        ...
-
-
-_MODELS: dict[str, ModelBuilder] = {}
-_METHODS: dict[str, type[DistillMethod]] = {}
-_BUILTINS_REGISTERED = False
-
-
-def register_model(name: str) -> Callable[[ModelBuilder], ModelBuilder]:
-    name = str(name).strip()
-    if not name:
-        raise ValueError("model name cannot be empty")
-
-    def decorator(builder: ModelBuilder) -> ModelBuilder:
-        if name in _MODELS:
-            raise KeyError(f"Model already registered: {name!r}")
-        _MODELS[name] = builder
-        return builder
-
-    return decorator
-
-
-def register_method(
-    name: str,
-) -> Callable[[type[DistillMethod]], type[DistillMethod]]:
-    name = str(name).strip()
-    if not name:
-        raise ValueError("method name cannot be empty")
-
-    def decorator(method_cls: type[DistillMethod]) -> type[DistillMethod]:
-        if name in _METHODS:
-            raise KeyError(f"Method already registered: {name!r}")
-        if not issubclass(method_cls, DistillMethod):
-            raise TypeError(f"Registered method must subclass DistillMethod: {method_cls}")
-        _METHODS[name] = method_cls
-        return method_cls
-
-    return decorator
-
-
-def ensure_builtin_registrations() -> None:
-    global _BUILTINS_REGISTERED
-    if _BUILTINS_REGISTERED:
-        return
-
-    # NOTE: keep these imports explicit (no wildcard scanning) so registration
-    # order is stable and failures are debuggable.
-    from fastvideo.distillation.models import wan as _wan  # noqa: F401
-    from fastvideo.distillation.models import wangame as _wangame  # noqa: F401
-    from fastvideo.distillation.methods.distribution_matching import dmd2 as _dmd2  # noqa: F401
-    from fastvideo.distillation.methods.distribution_matching import (
-        self_forcing as _self_forcing,  # noqa: F401
+    # --- 2. Warm-start from checkpoint if needed ---
+    from fastvideo.distillation.utils.checkpoint import (
+        maybe_warmstart_role_modules,
     )
-    from fastvideo.distillation.methods.fine_tuning import finetune as _finetune  # noqa: F401
-    from fastvideo.distillation.methods.fine_tuning import dfsft as _dfsft  # noqa: F401
 
-    _BUILTINS_REGISTERED = True
-
-
-def available_models() -> list[str]:
-    return sorted(_MODELS.keys())
-
-
-def available_methods() -> list[str]:
-    return sorted(_METHODS.keys())
-
-
-def get_model(name: str) -> ModelBuilder:
-    ensure_builtin_registrations()
-    if name not in _MODELS:
-        raise KeyError(f"Unknown model {name!r}. Available: {available_models()}")
-    return _MODELS[name]
-
-
-def get_method(name: str) -> type[DistillMethod]:
-    ensure_builtin_registrations()
-    if name not in _METHODS:
-        raise KeyError(f"Unknown method {name!r}. Available: {available_methods()}")
-    return _METHODS[name]
-
-
-def build_from_config(cfg: DistillRunConfig) -> tuple[TrainingArgs, DistillMethod, Any, int]:
-    """Build method+dataloader from a YAML config.
-
-    Assembles:
-    - model components (bundle/adapter/dataloader/validator)
-    - method implementation (algorithm) on top of those components
-    """
-
-    model_builder = get_model(str(cfg.recipe.family))
-    model = model_builder(cfg=cfg)
-
-    from fastvideo.distillation.utils.checkpoint import maybe_warmstart_role_modules
-
-    for role, role_cfg in cfg.roles.items():
-        init_from_checkpoint = (role_cfg.extra or {}).get("init_from_checkpoint", None)
+    for role, model_cfg in cfg.models.items():
+        init_from_checkpoint = model_cfg.get(
+            "init_from_checkpoint", None
+        )
         if not init_from_checkpoint:
             continue
-
-        checkpoint_role = (role_cfg.extra or {}).get("init_from_checkpoint_role", None)
-        if checkpoint_role is not None and not isinstance(checkpoint_role, str):
+        checkpoint_role = model_cfg.get(
+            "init_from_checkpoint_role", None
+        )
+        if (
+            checkpoint_role is not None
+            and not isinstance(checkpoint_role, str)
+        ):
             raise ValueError(
-                f"roles.{role}.init_from_checkpoint_role must be a string when set, "
-                f"got {type(checkpoint_role).__name__}"
+                f"models.{role}.init_from_checkpoint_role "
+                "must be a string when set, got "
+                f"{type(checkpoint_role).__name__}"
             )
-
+        # Warmstart uses the model's transformer directly.
+        model = role_models[role]
         maybe_warmstart_role_modules(
-            bundle=model.bundle,
+            bundle=None,
             role=str(role),
             init_from_checkpoint=str(init_from_checkpoint),
-            checkpoint_role=str(checkpoint_role) if checkpoint_role else None,
+            checkpoint_role=(
+                str(checkpoint_role)
+                if checkpoint_role
+                else None
+            ),
+            model=model,
         )
 
-    method_cls = get_method(str(cfg.recipe.method))
-    method = method_cls.build(
-        cfg=cfg,
-        bundle=model.bundle,
-        model=model,
-        validator=model.validator,
+    # --- 3. Build method ---
+    method_cfg = dict(cfg.method)
+    method_target = str(method_cfg.pop("_target_"))
+    method_cls = resolve_target(method_target)
+
+    # The student model provides the validator and dataloader.
+    student = role_models.get("student")
+    validator = (
+        getattr(student, "validator", None)
+        if student is not None
+        else None
     )
 
-    start_step = int(getattr(model, "start_step", 0) or 0)
-    return model.training_args, method, model.dataloader, start_step
+    method = method_cls(
+        cfg=cfg,
+        role_models=role_models,
+        validator=validator,
+    )
+
+    # --- 4. Gather dataloader and start_step ---
+    dataloader = (
+        getattr(student, "dataloader", None)
+        if student is not None
+        else None
+    )
+    start_step = int(
+        getattr(student, "start_step", 0)
+        if student is not None
+        else 0
+    )
+
+    return cfg.training_args, method, dataloader, start_step

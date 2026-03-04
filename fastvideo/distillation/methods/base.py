@@ -4,48 +4,48 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 import torch
 
-from fastvideo.distillation.roles import RoleManager
-
-if TYPE_CHECKING:
-    from fastvideo.distillation.utils.config import DistillRunConfig
+from fastvideo.distillation.models.base import ModelBase
 
 LogScalar = float | int | torch.Tensor
 
 
 class DistillMethod(torch.nn.Module, ABC):
-    def __init__(self, bundle: RoleManager) -> None:
-        super().__init__()
-        self.bundle = bundle
-        self.tracker: Any | None = None
-        self.role_modules = torch.nn.ModuleDict()
-        for role, handle in bundle.roles.items():
-            if handle.modules:
-                self.role_modules[role] = torch.nn.ModuleDict(handle.modules)
+    """Base distillation method (algorithm layer).
 
-    @classmethod
-    @abstractmethod
-    def build(
-        cls,
+    Subclasses own their role models (student, teacher, critic, …) as
+    plain attributes and manage optimizers directly — no ``RoleManager``
+    or ``RoleHandle``.
+
+    The constructor receives *role_models* (a ``dict[str, ModelBase]``)
+    and a *cfg* object.  It calls ``init_preprocessors`` on the student
+    and builds ``self.role_modules`` for FSDP wrapping.
+    """
+
+    def __init__(
+        self,
         *,
-        cfg: DistillRunConfig,
-        bundle: RoleManager,
-        model: Any,
-        validator: Any | None,
-    ) -> DistillMethod:
-        raise NotImplementedError
+        role_models: dict[str, ModelBase],
+    ) -> None:
+        super().__init__()
+        self.tracker: Any | None = None
+        # Build nn.ModuleDict for FSDP / checkpoint visibility.
+        self.role_modules = torch.nn.ModuleDict()
+        for role, model in role_models.items():
+            mods: dict[str, torch.nn.Module] = {}
+            transformer = getattr(model, "transformer", None)
+            if isinstance(transformer, torch.nn.Module):
+                mods["transformer"] = transformer
+            transformer_2 = getattr(model, "transformer_2", None)
+            if isinstance(transformer_2, torch.nn.Module):
+                mods["transformer_2"] = transformer_2
+            if mods:
+                self.role_modules[role] = torch.nn.ModuleDict(mods)
 
     def set_tracker(self, tracker: Any) -> None:
-        """Attach a tracker (infra) to this method.
-
-        Trainer constructs/owns the tracker, but method-managed validation may
-        need it to log artifacts (videos/images/files). This is a best-effort
-        bridge that keeps model plugins free of tracker ownership.
-        """
-
         self.tracker = tracker
         validator = getattr(self, "validator", None)
         if validator is None:
@@ -64,11 +64,17 @@ class DistillMethod(torch.nn.Module, ABC):
         iteration: int,
         *,
         current_vsa_sparsity: float = 0.0,
-    ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
+    ) -> tuple[
+        dict[str, torch.Tensor],
+        dict[str, Any],
+        dict[str, LogScalar],
+    ]:
         raise NotImplementedError
 
     @abstractmethod
-    def get_optimizers(self, iteration: int) -> Sequence[torch.optim.Optimizer]:
+    def get_optimizers(
+        self, iteration: int
+    ) -> Sequence[torch.optim.Optimizer]:
         raise NotImplementedError
 
     @abstractmethod

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from typing import Literal
 
-from fastvideo.distillation.roles import RoleHandle
+from fastvideo.distillation.models.base import ModelBase
 
 
 @dataclass(slots=True)
@@ -18,7 +18,7 @@ class ValidationRequest:
     request object here.
     """
 
-    sample_handle: RoleHandle | None = None
+    sample_handle: ModelBase | None = None
     dataset_file: str | None = None
     sampling_steps: list[int] | None = None
     sampler_kind: Literal["ode", "sde"] | None = None

@@ -1,23 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""WanGame bidirectional model plugin (components + runtime adapter).
+"""WanGame bidirectional model plugin (per-role instance).
 
-Config keys used (YAML schema-v2):
-- `recipe.family`: must be `"wangame"` for this plugin.
-- `roles.shared_component_role` (affects default `training.model_path`)
-- `roles.<role>`:
-  - `family`, `path`, `trainable`, `disable_custom_init_weights`
-- `training` (selected fields):
-  - `seed`, `data_path`, `model_path`
-  - `num_height`, `num_width`, `num_latent_t`
-  - `min_timestep_ratio`, `max_timestep_ratio`, `boundary_ratio` (optional)
-  - `weighting_scheme`, `logit_mean`, `logit_std`, `mode_scale`
-  - `sp_size`, `tp_size`, `num_gpus`
-  - `pipeline_config.flow_shift`, `pipeline_config.dit_config.patch_size`
-  - `moba_config` (if `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`)
-  - `enable_gradient_checkpointing_type` (optional)
-- `training.validation.*` (consumed by `WanGameValidator` when enabled)
-- `method_config.cfg_uncond.*` (consumed by `WanGameModel` for CFG-uncond policy)
+Each role (student, teacher, critic) gets its own ``WanGameModel`` instance.
+The constructor loads the transformer and noise scheduler.  Heavyweight
+resources (VAE, dataloader, RNG seeds) are loaded via
+:meth:`init_preprocessors`, which the method calls only on the student.
 """
 
 from __future__ import annotations
@@ -39,107 +27,182 @@ from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
 )
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines import TrainingBatch
+from fastvideo.training.activation_checkpoint import (
+    apply_activation_checkpointing,
+)
 from fastvideo.training.training_utils import (
     compute_density_for_timestep_sampling,
     get_sigmas,
     normalize_dit_input,
     shift_timestep,
 )
-from fastvideo.utils import is_vmoba_available, is_vsa_available, set_random_seed
+from fastvideo.utils import (
+    is_vmoba_available,
+    is_vsa_available,
+    set_random_seed,
+)
 
-from fastvideo.distillation.models.wangame.common import _build_wangame_role_handles
 from fastvideo.distillation.models.base import ModelBase
-from fastvideo.distillation.roles import RoleHandle, RoleManager
-from fastvideo.distillation.utils.config import DistillRunConfig
-from fastvideo.distillation.utils.dataloader import build_parquet_wangame_train_dataloader
+from fastvideo.distillation.utils.module_state import apply_trainable
 from fastvideo.distillation.utils.moduleloader import load_module_from_path
 
 try:
     from fastvideo.attention.backends.video_sparse_attn import (
         VideoSparseAttentionMetadataBuilder,
     )
-    from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
+    from fastvideo.attention.backends.vmoba import (
+        VideoMobaAttentionMetadataBuilder,
+    )
 except Exception:
     VideoSparseAttentionMetadataBuilder = None  # type: ignore[assignment]
     VideoMobaAttentionMetadataBuilder = None  # type: ignore[assignment]
 
 
 class WanGameModel(ModelBase):
-    """WanGame model plugin: loads roles + shared components and exposes runtime primitives.
+    """WanGame per-role model: owns transformer + noise_scheduler.
 
-    This model plugin is intentionally *not* method-specific:
-    - It knows how to turn a wangame parquet batch into forward primitives.
-    - It knows how to run a model role (handle) for predict_noise / predict_x0.
-    - It does not encode DMD2/SFT/etc semantics beyond required primitives.
+    Constructor loads the transformer from *init_from*.  VAE, dataloader,
+    and RNG are deferred to :meth:`init_preprocessors`.
     """
+
+    # Name of the transformer class to load.  Subclasses may override.
+    _transformer_cls_name: str = "WanGameActionTransformer3DModel"
 
     def __init__(
         self,
         *,
-        cfg: DistillRunConfig,
+        init_from: str,
+        trainable: bool = True,
+        disable_custom_init_weights: bool = False,
+        flow_shift: float = 3.0,
+        enable_gradient_checkpointing_type: str | None = None,
     ) -> None:
-        training_args = cfg.training_args
-        roles_cfg = cfg.roles
+        self._init_from = str(init_from)
+        self._trainable = bool(trainable)
 
-        non_wangame_roles = [
-            role
-            for role, spec in roles_cfg.items()
-            if str(spec.family).strip().lower() != "wangame"
-        ]
-        if non_wangame_roles:
-            raise ValueError(
-                "recipe.family=wangame only supports roles.<role>.family=wangame "
-                f"(got non-wangame roles: {non_wangame_roles}). "
-                "If you need causal roles, use recipe.family: wangame_causal."
+        # We need a minimal TrainingArgs-like object just for loading.
+        # The full training_args arrives via init_preprocessors().
+        self.transformer = self._load_transformer(
+            init_from=self._init_from,
+            trainable=self._trainable,
+            disable_custom_init_weights=disable_custom_init_weights,
+            enable_gradient_checkpointing_type=(
+                enable_gradient_checkpointing_type
+            ),
+        )
+
+        # Optional MoE transformer_2.
+        self.transformer_2: torch.nn.Module | None = None
+        try:
+            t2 = load_module_from_path(
+                model_path=self._init_from,
+                module_type="transformer_2",
+                training_args=None,
+                disable_custom_init_weights=disable_custom_init_weights,
             )
+        except (ValueError, FileNotFoundError):
+            t2 = None
+        if t2 is not None:
+            t2 = apply_trainable(t2, trainable=self._trainable)
+            if self._trainable and enable_gradient_checkpointing_type:
+                t2 = apply_activation_checkpointing(
+                    t2,
+                    checkpointing_type=enable_gradient_checkpointing_type,
+                )
+            self.transformer_2 = t2
 
-        if getattr(training_args, "seed", None) is None:
-            raise ValueError("training.seed must be set for distillation")
-        if not getattr(training_args, "data_path", ""):
-            raise ValueError("training.data_path must be set for distillation")
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
+            shift=float(flow_shift)
+        )
 
-        # Load shared components (training.model_path; defaults to
-        # roles.shared_component_role's path).
-        vae = load_module_from_path(
+        # Filled by init_preprocessors (student only).
+        self.vae: Any = None
+        self.training_args: Any = None
+        self.dataloader: Any = None
+        self.validator: Any = None
+        self.start_step: int = 0
+
+        self.world_group: Any = None
+        self.sp_group: Any = None
+        self.device: Any = None
+
+        self.noise_random_generator: torch.Generator | None = None
+        self.noise_gen_cuda: torch.Generator | None = None
+
+        # Timestep mechanics (set after init_preprocessors or eagerly).
+        self.timestep_shift: float = float(flow_shift)
+        self.num_train_timestep: int = int(
+            self.noise_scheduler.num_train_timesteps
+        )
+        self.min_timestep: int = 0
+        self.max_timestep: int = self.num_train_timestep
+        self.boundary_timestep: float | None = None
+
+    def _load_transformer(
+        self,
+        *,
+        init_from: str,
+        trainable: bool,
+        disable_custom_init_weights: bool,
+        enable_gradient_checkpointing_type: str | None,
+    ) -> torch.nn.Module:
+        transformer = load_module_from_path(
+            model_path=init_from,
+            module_type="transformer",
+            training_args=None,
+            disable_custom_init_weights=disable_custom_init_weights,
+            override_transformer_cls_name=self._transformer_cls_name,
+        )
+        transformer = apply_trainable(transformer, trainable=trainable)
+        if trainable and enable_gradient_checkpointing_type:
+            transformer = apply_activation_checkpointing(
+                transformer,
+                checkpointing_type=enable_gradient_checkpointing_type,
+            )
+        return transformer
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def init_preprocessors(self, training_args: Any) -> None:
+        """Load VAE, build dataloader, seed RNGs.  Student only."""
+        self.training_args = training_args
+
+        self.vae = load_module_from_path(
             model_path=str(training_args.model_path),
             module_type="vae",
             training_args=training_args,
         )
-        noise_scheduler = FlowMatchEulerDiscreteScheduler(
-            shift=float(training_args.pipeline_config.flow_shift or 0.0)
-        )
-
-        role_handles = _build_wangame_role_handles(
-            roles_cfg=roles_cfg,
-            training_args=training_args,
-            transformer_cls_name_for_role=lambda _role, _spec: "WanGameActionTransformer3DModel",
-        )
-
-        self.bundle = RoleManager(roles=role_handles)
-
-        # Optional validator.
-        self.validator = None
-        validation_cfg = getattr(cfg, "validation", {}) or {}
-        validation_enabled = bool(validation_cfg.get("enabled", bool(validation_cfg)))
-        if validation_enabled:
-            from fastvideo.distillation.validators.wangame import WanGameValidator
-
-            self.validator = WanGameValidator(training_args=training_args)
-
-        self.training_args = training_args
-        self.noise_scheduler = noise_scheduler
-        self.vae = vae
 
         self.world_group = get_world_group()
         self.sp_group = get_sp_group()
         self.device = get_local_torch_device()
 
-        self.noise_random_generator: torch.Generator | None = None
-        self.noise_gen_cuda: torch.Generator | None = None
-
         self._init_timestep_mechanics()
 
-        from fastvideo.dataset.dataloader.schema import pyarrow_schema_wangame
+        # Optional validator.
+        validation_cfg = getattr(training_args, "_validation_cfg", None)
+        if validation_cfg:
+            validation_enabled = bool(
+                validation_cfg.get(
+                    "enabled", bool(validation_cfg)
+                )
+            )
+            if validation_enabled:
+                from fastvideo.distillation.validators.wangame import (
+                    WanGameValidator,
+                )
+                self.validator = WanGameValidator(
+                    training_args=training_args
+                )
+
+        from fastvideo.dataset.dataloader.schema import (
+            pyarrow_schema_wangame,
+        )
+        from fastvideo.distillation.utils.dataloader import (
+            build_parquet_wangame_train_dataloader,
+        )
 
         self.dataloader = build_parquet_wangame_train_dataloader(
             training_args,
@@ -147,37 +210,51 @@ class WanGameModel(ModelBase):
         )
         self.start_step = 0
 
-    # ModelBase override: num_train_timesteps
+    # ------------------------------------------------------------------
+    # ModelBase overrides: timestep helpers
+    # ------------------------------------------------------------------
+
     @property
     def num_train_timesteps(self) -> int:
         return int(self.num_train_timestep)
 
-    # ModelBase override: shift_and_clamp_timestep
-    def shift_and_clamp_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
-        timestep = shift_timestep(timestep, self.timestep_shift, self.num_train_timestep)
+    def shift_and_clamp_timestep(
+        self, timestep: torch.Tensor
+    ) -> torch.Tensor:
+        timestep = shift_timestep(
+            timestep, self.timestep_shift, self.num_train_timestep
+        )
         return timestep.clamp(self.min_timestep, self.max_timestep)
 
-    # ModelBase override: on_train_start
+    # ------------------------------------------------------------------
+    # ModelBase overrides: lifecycle hooks
+    # ------------------------------------------------------------------
+
     def on_train_start(self) -> None:
         seed = getattr(self.training_args, "seed", None)
         if seed is None:
-            raise ValueError("training_args.seed must be set for distillation")
+            raise ValueError(
+                "training_args.seed must be set for distillation"
+            )
 
         global_rank = int(getattr(self.world_group, "rank", 0))
-        sp_world_size = int(getattr(self.training_args, "sp_size", 1) or 1)
+        sp_world_size = int(
+            getattr(self.training_args, "sp_size", 1) or 1
+        )
         if sp_world_size > 1:
             sp_group_seed = int(seed) + (global_rank // sp_world_size)
             set_random_seed(sp_group_seed)
         else:
             set_random_seed(int(seed) + global_rank)
 
-        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(int(seed))
-        self.noise_gen_cuda = torch.Generator(device=self.device).manual_seed(int(seed))
+        self.noise_random_generator = torch.Generator(
+            device="cpu"
+        ).manual_seed(int(seed))
+        self.noise_gen_cuda = torch.Generator(
+            device=self.device
+        ).manual_seed(int(seed))
 
-    # ModelBase override: get_rng_generators
     def get_rng_generators(self) -> dict[str, torch.Generator]:
-        """Return RNG generators that should be checkpointed for exact resume."""
-
         generators: dict[str, torch.Generator] = {}
         if self.noise_random_generator is not None:
             generators["noise_cpu"] = self.noise_random_generator
@@ -185,7 +262,10 @@ class WanGameModel(ModelBase):
             generators["noise_cuda"] = self.noise_gen_cuda
         return generators
 
-    # ModelBase override: prepare_batch
+    # ------------------------------------------------------------------
+    # ModelBase overrides: runtime primitives
+    # ------------------------------------------------------------------
+
     def prepare_batch(
         self,
         raw_batch: dict[str, Any],
@@ -193,22 +273,33 @@ class WanGameModel(ModelBase):
         current_vsa_sparsity: float = 0.0,
         latents_source: Literal["data", "zeros"] = "data",
     ) -> TrainingBatch:
-        """Convert a dataloader batch into forward primitives for methods."""
-
         dtype = self._get_training_dtype()
         device = self.device
 
-        training_batch = TrainingBatch(current_vsa_sparsity=current_vsa_sparsity)
+        training_batch = TrainingBatch(
+            current_vsa_sparsity=current_vsa_sparsity
+        )
         infos = raw_batch.get("info_list")
 
         if latents_source == "zeros":
             clip_feature = raw_batch["clip_feature"]
             batch_size = int(clip_feature.shape[0])
-            vae_config = self.training_args.pipeline_config.vae_config.arch_config
+            vae_config = (
+                self.training_args.pipeline_config
+                .vae_config.arch_config
+            )
             num_channels = int(vae_config.z_dim)
-            spatial_compression_ratio = int(vae_config.spatial_compression_ratio)
-            latent_height = int(self.training_args.num_height) // spatial_compression_ratio
-            latent_width = int(self.training_args.num_width) // spatial_compression_ratio
+            spatial_compression_ratio = int(
+                vae_config.spatial_compression_ratio
+            )
+            latent_height = (
+                int(self.training_args.num_height)
+                // spatial_compression_ratio
+            )
+            latent_width = (
+                int(self.training_args.num_width)
+                // spatial_compression_ratio
+            )
             latents = torch.zeros(
                 batch_size,
                 num_channels,
@@ -220,58 +311,96 @@ class WanGameModel(ModelBase):
             )
         elif latents_source == "data":
             if "vae_latent" not in raw_batch:
-                raise ValueError("vae_latent not found in batch and latents_source='data'")
+                raise ValueError(
+                    "vae_latent not found in batch "
+                    "and latents_source='data'"
+                )
             latents = raw_batch["vae_latent"]
-            latents = latents[:, :, : self.training_args.num_latent_t]
+            latents = latents[
+                :, :, : self.training_args.num_latent_t
+            ]
             latents = latents.to(device, dtype=dtype)
         else:
-            raise ValueError(f"Unknown latents_source: {latents_source!r}")
+            raise ValueError(
+                f"Unknown latents_source: {latents_source!r}"
+            )
 
         if "clip_feature" not in raw_batch:
-            raise ValueError("clip_feature must be present for WanGame")
-        image_embeds = raw_batch["clip_feature"].to(device, dtype=dtype)
+            raise ValueError(
+                "clip_feature must be present for WanGame"
+            )
+        image_embeds = raw_batch["clip_feature"].to(
+            device, dtype=dtype
+        )
 
         if "first_frame_latent" not in raw_batch:
-            raise ValueError("first_frame_latent must be present for WanGame")
+            raise ValueError(
+                "first_frame_latent must be present for WanGame"
+            )
         image_latents = raw_batch["first_frame_latent"]
-        image_latents = image_latents[:, :, : self.training_args.num_latent_t]
+        image_latents = image_latents[
+            :, :, : self.training_args.num_latent_t
+        ]
         image_latents = image_latents.to(device, dtype=dtype)
 
         pil_image = raw_batch.get("pil_image")
         if isinstance(pil_image, torch.Tensor):
-            training_batch.preprocessed_image = pil_image.to(device=device)
+            training_batch.preprocessed_image = pil_image.to(
+                device=device
+            )
         else:
             training_batch.preprocessed_image = pil_image
 
         keyboard_cond = raw_batch.get("keyboard_cond")
-        if isinstance(keyboard_cond, torch.Tensor) and keyboard_cond.numel() > 0:
-            training_batch.keyboard_cond = keyboard_cond.to(device, dtype=dtype)
+        if (
+            isinstance(keyboard_cond, torch.Tensor)
+            and keyboard_cond.numel() > 0
+        ):
+            training_batch.keyboard_cond = keyboard_cond.to(
+                device, dtype=dtype
+            )
         else:
             training_batch.keyboard_cond = None
 
         mouse_cond = raw_batch.get("mouse_cond")
-        if isinstance(mouse_cond, torch.Tensor) and mouse_cond.numel() > 0:
-            training_batch.mouse_cond = mouse_cond.to(device, dtype=dtype)
+        if (
+            isinstance(mouse_cond, torch.Tensor)
+            and mouse_cond.numel() > 0
+        ):
+            training_batch.mouse_cond = mouse_cond.to(
+                device, dtype=dtype
+            )
         else:
             training_batch.mouse_cond = None
 
         temporal_compression_ratio = (
-            self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+            self.training_args.pipeline_config
+            .vae_config.arch_config.temporal_compression_ratio
         )
-        expected_num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_ratio + 1
-        if training_batch.keyboard_cond is not None and int(
-            training_batch.keyboard_cond.shape[1]
-        ) != int(expected_num_frames):
+        expected_num_frames = (
+            (self.training_args.num_latent_t - 1)
+            * temporal_compression_ratio
+            + 1
+        )
+        if (
+            training_batch.keyboard_cond is not None
+            and int(training_batch.keyboard_cond.shape[1])
+            != int(expected_num_frames)
+        ):
             raise ValueError(
                 "keyboard_cond temporal dim mismatch: "
-                f"got {int(training_batch.keyboard_cond.shape[1])}, expected {int(expected_num_frames)}"
+                f"got {int(training_batch.keyboard_cond.shape[1])}, "
+                f"expected {int(expected_num_frames)}"
             )
-        if training_batch.mouse_cond is not None and int(training_batch.mouse_cond.shape[1]) != int(
-            expected_num_frames
+        if (
+            training_batch.mouse_cond is not None
+            and int(training_batch.mouse_cond.shape[1])
+            != int(expected_num_frames)
         ):
             raise ValueError(
                 "mouse_cond temporal dim mismatch: "
-                f"got {int(training_batch.mouse_cond.shape[1])}, expected {int(expected_num_frames)}"
+                f"got {int(training_batch.mouse_cond.shape[1])}, "
+                f"expected {int(expected_num_frames)}"
             )
 
         training_batch.latents = latents
@@ -281,23 +410,30 @@ class WanGameModel(ModelBase):
         training_batch.image_latents = image_latents
         training_batch.infos = infos
 
-        training_batch.latents = normalize_dit_input("wan", training_batch.latents, self.vae)
+        training_batch.latents = normalize_dit_input(
+            "wan", training_batch.latents, self.vae
+        )
         training_batch = self._prepare_dit_inputs(training_batch)
         training_batch = self._build_attention_metadata(training_batch)
 
-        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
+        training_batch.attn_metadata_vsa = copy.deepcopy(
+            training_batch.attn_metadata
+        )
         if training_batch.attn_metadata is not None:
             training_batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore[attr-defined]
 
-        training_batch.mask_lat_size = self._build_i2v_mask_latents(image_latents)
-        viewmats, intrinsics, action_labels = self._process_actions(training_batch)
+        training_batch.mask_lat_size = self._build_i2v_mask_latents(
+            image_latents
+        )
+        viewmats, intrinsics, action_labels = self._process_actions(
+            training_batch
+        )
         training_batch.viewmats = viewmats
         training_batch.Ks = intrinsics
         training_batch.action = action_labels
 
         return training_batch
 
-    # ModelBase override: add_noise
     def add_noise(
         self,
         clean_latents: torch.Tensor,
@@ -312,10 +448,8 @@ class WanGameModel(ModelBase):
         ).unflatten(0, (b, t))
         return noisy
 
-    # ModelBase override: predict_x0
     def predict_x0(
         self,
-        handle: RoleHandle,
         noisy_latents: torch.Tensor,
         timestep: torch.Tensor,
         batch: TrainingBatch,
@@ -334,7 +468,9 @@ class WanGameModel(ModelBase):
         else:
             raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
 
-        with torch.autocast(device_type, dtype=dtype), set_forward_context(
+        with torch.autocast(
+            device_type, dtype=dtype
+        ), set_forward_context(
             current_timestep=batch.timesteps,
             attn_metadata=attn_metadata,
         ):
@@ -355,8 +491,10 @@ class WanGameModel(ModelBase):
                 mouse_cond=cond_inputs["mouse_cond"],
                 keyboard_cond=cond_inputs["keyboard_cond"],
             )
-            transformer = self._get_transformer(handle, timestep)
-            pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
+            transformer = self._get_transformer(timestep)
+            pred_noise = transformer(**input_kwargs).permute(
+                0, 2, 1, 3, 4
+            )
             pred_x0 = pred_noise_to_pred_video(
                 pred_noise=pred_noise.flatten(0, 1),
                 noise_input_latent=noisy_latents.flatten(0, 1),
@@ -365,10 +503,8 @@ class WanGameModel(ModelBase):
             ).unflatten(0, pred_noise.shape[:2])
         return pred_x0
 
-    # ModelBase override: predict_noise
     def predict_noise(
         self,
-        handle: RoleHandle,
         noisy_latents: torch.Tensor,
         timestep: torch.Tensor,
         batch: TrainingBatch,
@@ -387,7 +523,9 @@ class WanGameModel(ModelBase):
         else:
             raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
 
-        with torch.autocast(device_type, dtype=dtype), set_forward_context(
+        with torch.autocast(
+            device_type, dtype=dtype
+        ), set_forward_context(
             current_timestep=batch.timesteps,
             attn_metadata=attn_metadata,
         ):
@@ -408,38 +546,64 @@ class WanGameModel(ModelBase):
                 mouse_cond=cond_inputs["mouse_cond"],
                 keyboard_cond=cond_inputs["keyboard_cond"],
             )
-            transformer = self._get_transformer(handle, timestep)
-            pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
+            transformer = self._get_transformer(timestep)
+            pred_noise = transformer(**input_kwargs).permute(
+                0, 2, 1, 3, 4
+            )
         return pred_noise
 
-    # ModelBase override: backward
-    def backward(self, loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
+    def backward(
+        self,
+        loss: torch.Tensor,
+        ctx: Any,
+        *,
+        grad_accum_rounds: int,
+    ) -> None:
         timesteps, attn_metadata = ctx
-        with set_forward_context(current_timestep=timesteps, attn_metadata=attn_metadata):
+        with set_forward_context(
+            current_timestep=timesteps, attn_metadata=attn_metadata
+        ):
             (loss / max(1, int(grad_accum_rounds))).backward()
 
-    # --- WanGame-specific helpers below ---
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
     def _get_training_dtype(self) -> torch.dtype:
         return torch.bfloat16
 
     def _init_timestep_mechanics(self) -> None:
-        self.timestep_shift = float(self.training_args.pipeline_config.flow_shift)
-        self.num_train_timestep = int(self.noise_scheduler.num_train_timesteps)
-        self.min_timestep = int(self.training_args.min_timestep_ratio * self.num_train_timestep)
-        self.max_timestep = int(self.training_args.max_timestep_ratio * self.num_train_timestep)
+        self.timestep_shift = float(
+            self.training_args.pipeline_config.flow_shift
+        )
+        self.num_train_timestep = int(
+            self.noise_scheduler.num_train_timesteps
+        )
+        self.min_timestep = int(
+            self.training_args.min_timestep_ratio
+            * self.num_train_timestep
+        )
+        self.max_timestep = int(
+            self.training_args.max_timestep_ratio
+            * self.num_train_timestep
+        )
 
-        boundary_ratio = getattr(self.training_args, "boundary_ratio", None)
-        self.boundary_timestep: float | None = (
+        boundary_ratio = getattr(
+            self.training_args, "boundary_ratio", None
+        )
+        self.boundary_timestep = (
             float(boundary_ratio) * float(self.num_train_timestep)
             if boundary_ratio is not None
             else None
         )
 
-    def _sample_timesteps(self, batch_size: int, device: torch.device) -> torch.Tensor:
+    def _sample_timesteps(
+        self, batch_size: int, device: torch.device
+    ) -> torch.Tensor:
         if self.noise_random_generator is None:
             raise RuntimeError(
-                "WanGameModel.on_train_start() must be called before prepare_batch()"
+                "on_train_start() must be called before "
+                "prepare_batch()"
             )
 
         u = compute_density_for_timestep_sampling(
@@ -450,20 +614,32 @@ class WanGameModel(ModelBase):
             logit_std=self.training_args.logit_std,
             mode_scale=self.training_args.mode_scale,
         )
-        indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
-        return self.noise_scheduler.timesteps[indices].to(device=device)
+        indices = (
+            u * self.noise_scheduler.config.num_train_timesteps
+        ).long()
+        return self.noise_scheduler.timesteps[indices].to(
+            device=device
+        )
 
-    def _build_attention_metadata(self, training_batch: TrainingBatch) -> TrainingBatch:
+    def _build_attention_metadata(
+        self, training_batch: TrainingBatch
+    ) -> TrainingBatch:
         latents_shape = training_batch.raw_latent_shape
-        patch_size = self.training_args.pipeline_config.dit_config.patch_size
+        patch_size = (
+            self.training_args.pipeline_config.dit_config.patch_size
+        )
         current_vsa_sparsity = training_batch.current_vsa_sparsity
         assert latents_shape is not None
         assert training_batch.timesteps is not None
 
         if envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
-            if not is_vsa_available() or VideoSparseAttentionMetadataBuilder is None:
+            if (
+                not is_vsa_available()
+                or VideoSparseAttentionMetadataBuilder is None
+            ):
                 raise ImportError(
-                    "FASTVIDEO_ATTENTION_BACKEND is VIDEO_SPARSE_ATTN, but fastvideo_kernel "
+                    "FASTVIDEO_ATTENTION_BACKEND is "
+                    "VIDEO_SPARSE_ATTN, but fastvideo_kernel "
                     "is not correctly installed or detected."
                 )
             training_batch.attn_metadata = VideoSparseAttentionMetadataBuilder().build(  # type: ignore[misc]
@@ -474,16 +650,22 @@ class WanGameModel(ModelBase):
                 device=self.device,
             )
         elif envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
-            if not is_vmoba_available() or VideoMobaAttentionMetadataBuilder is None:
+            if (
+                not is_vmoba_available()
+                or VideoMobaAttentionMetadataBuilder is None
+            ):
                 raise ImportError(
-                    "FASTVIDEO_ATTENTION_BACKEND is VMOBA_ATTN, but fastvideo_kernel "
-                    "(or flash_attn>=2.7.4) is not correctly installed."
+                    "FASTVIDEO_ATTENTION_BACKEND is VMOBA_ATTN, "
+                    "but fastvideo_kernel (or flash_attn>=2.7.4) "
+                    "is not correctly installed."
                 )
             moba_params = self.training_args.moba_config.copy()
             moba_params.update(
                 {
                     "current_timestep": training_batch.timesteps,
-                    "raw_latent_shape": training_batch.raw_latent_shape[2:5],
+                    "raw_latent_shape": (
+                        training_batch.raw_latent_shape[2:5]
+                    ),
                     "patch_size": patch_size,
                     "device": self.device,
                 }
@@ -494,14 +676,17 @@ class WanGameModel(ModelBase):
 
         return training_batch
 
-    def _prepare_dit_inputs(self, training_batch: TrainingBatch) -> TrainingBatch:
+    def _prepare_dit_inputs(
+        self, training_batch: TrainingBatch
+    ) -> TrainingBatch:
         latents = training_batch.latents
         assert isinstance(latents, torch.Tensor)
         batch_size = latents.shape[0]
 
         if self.noise_gen_cuda is None:
             raise RuntimeError(
-                "WanGameModel.on_train_start() must be called before prepare_batch()"
+                "on_train_start() must be called before "
+                "prepare_batch()"
             )
 
         noise = torch.randn(
@@ -510,8 +695,12 @@ class WanGameModel(ModelBase):
             device=latents.device,
             dtype=latents.dtype,
         )
-        timesteps = self._sample_timesteps(batch_size, latents.device)
-        if int(getattr(self.training_args, "sp_size", 1) or 1) > 1:
+        timesteps = self._sample_timesteps(
+            batch_size, latents.device
+        )
+        if (
+            int(getattr(self.training_args, "sp_size", 1) or 1) > 1
+        ):
             self.sp_group.broadcast(timesteps, src=0)
 
         sigmas = get_sigmas(
@@ -529,17 +718,30 @@ class WanGameModel(ModelBase):
         training_batch.noise = noise
         training_batch.raw_latent_shape = latents.shape
 
-        training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
+        training_batch.latents = training_batch.latents.permute(
+            0, 2, 1, 3, 4
+        )
         return training_batch
 
-    def _build_i2v_mask_latents(self, image_latents: torch.Tensor) -> torch.Tensor:
+    def _build_i2v_mask_latents(
+        self, image_latents: torch.Tensor
+    ) -> torch.Tensor:
         temporal_compression_ratio = (
-            self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+            self.training_args.pipeline_config
+            .vae_config.arch_config.temporal_compression_ratio
         )
-        num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_ratio + 1
+        num_frames = (
+            (self.training_args.num_latent_t - 1)
+            * temporal_compression_ratio
+            + 1
+        )
 
-        batch_size, _num_channels, _t, latent_height, latent_width = image_latents.shape
-        mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height, latent_width)
+        batch_size, _num_channels, _t, latent_height, latent_width = (
+            image_latents.shape
+        )
+        mask_lat_size = torch.ones(
+            batch_size, 1, num_frames, latent_height, latent_width
+        )
         mask_lat_size[:, :, 1:] = 0
 
         first_frame_mask = mask_lat_size[:, :, :1]
@@ -548,7 +750,9 @@ class WanGameModel(ModelBase):
             dim=2,
             repeats=temporal_compression_ratio,
         )
-        mask_lat_size = torch.cat([first_frame_mask, mask_lat_size[:, :, 1:]], dim=2)
+        mask_lat_size = torch.cat(
+            [first_frame_mask, mask_lat_size[:, :, 1:]], dim=2
+        )
         mask_lat_size = mask_lat_size.view(
             batch_size,
             -1,
@@ -557,7 +761,9 @@ class WanGameModel(ModelBase):
             latent_width,
         )
         mask_lat_size = mask_lat_size.transpose(1, 2)
-        return mask_lat_size.to(device=image_latents.device, dtype=image_latents.dtype)
+        return mask_lat_size.to(
+            device=image_latents.device, dtype=image_latents.dtype
+        )
 
     def _process_actions(
         self, training_batch: TrainingBatch
@@ -565,21 +771,32 @@ class WanGameModel(ModelBase):
         keyboard_cond = getattr(training_batch, "keyboard_cond", None)
         mouse_cond = getattr(training_batch, "mouse_cond", None)
         if keyboard_cond is None or mouse_cond is None:
-            raise ValueError("WanGame batch must provide keyboard_cond and mouse_cond")
+            raise ValueError(
+                "WanGame batch must provide keyboard_cond "
+                "and mouse_cond"
+            )
 
-        from fastvideo.models.dits.hyworld.pose import process_custom_actions
+        from fastvideo.models.dits.hyworld.pose import (
+            process_custom_actions,
+        )
 
-        batch_size = int(training_batch.noisy_model_input.shape[0])  # type: ignore[union-attr]
+        batch_size = int(
+            training_batch.noisy_model_input.shape[0]  # type: ignore[union-attr]
+        )
         viewmats_list: list[torch.Tensor] = []
         intrinsics_list: list[torch.Tensor] = []
         action_labels_list: list[torch.Tensor] = []
         for b in range(batch_size):
-            v, i, a = process_custom_actions(keyboard_cond[b], mouse_cond[b])
+            v, i, a = process_custom_actions(
+                keyboard_cond[b], mouse_cond[b]
+            )
             viewmats_list.append(v)
             intrinsics_list.append(i)
             action_labels_list.append(a)
 
-        viewmats = torch.stack(viewmats_list, dim=0).to(device=self.device, dtype=torch.bfloat16)
+        viewmats = torch.stack(viewmats_list, dim=0).to(
+            device=self.device, dtype=torch.bfloat16
+        )
         intrinsics = torch.stack(intrinsics_list, dim=0).to(
             device=self.device, dtype=torch.bfloat16
         )
@@ -587,16 +804,20 @@ class WanGameModel(ModelBase):
             device=self.device, dtype=torch.bfloat16
         )
 
-        num_latent_t = int(training_batch.noisy_model_input.shape[2])  # type: ignore[union-attr]
+        num_latent_t = int(
+            training_batch.noisy_model_input.shape[2]  # type: ignore[union-attr]
+        )
         if int(action_labels.shape[1]) != num_latent_t:
             raise ValueError(
                 "Action conditioning temporal dim mismatch: "
-                f"action={tuple(action_labels.shape)} vs latent_t={num_latent_t}"
+                f"action={tuple(action_labels.shape)} "
+                f"vs latent_t={num_latent_t}"
             )
         if int(viewmats.shape[1]) != num_latent_t:
             raise ValueError(
                 "Viewmats temporal dim mismatch: "
-                f"viewmats={tuple(viewmats.shape)} vs latent_t={num_latent_t}"
+                f"viewmats={tuple(viewmats.shape)} "
+                f"vs latent_t={num_latent_t}"
             )
 
         return viewmats, intrinsics, action_labels
@@ -626,7 +847,9 @@ class WanGameModel(ModelBase):
         return {
             "hidden_states": hidden_states,
             "encoder_hidden_states": None,
-            "timestep": timestep.to(device=self.device, dtype=torch.bfloat16),
+            "timestep": timestep.to(
+                device=self.device, dtype=torch.bfloat16
+            ),
             "encoder_hidden_states_image": image_embeds,
             "viewmats": viewmats,
             "Ks": Ks,
@@ -647,11 +870,17 @@ class WanGameModel(ModelBase):
         image_latents = batch.image_latents
         mask_lat_size = batch.mask_lat_size
         if image_embeds is None:
-            raise RuntimeError("WanGameModel requires TrainingBatch.image_embeds")
+            raise RuntimeError(
+                "WanGameModel requires TrainingBatch.image_embeds"
+            )
         if image_latents is None:
-            raise RuntimeError("WanGameModel requires TrainingBatch.image_latents")
+            raise RuntimeError(
+                "WanGameModel requires TrainingBatch.image_latents"
+            )
         if mask_lat_size is None:
-            raise RuntimeError("WanGameModel requires TrainingBatch.mask_lat_size")
+            raise RuntimeError(
+                "WanGameModel requires TrainingBatch.mask_lat_size"
+            )
 
         viewmats = getattr(batch, "viewmats", None)
         Ks = getattr(batch, "Ks", None)
@@ -674,13 +903,15 @@ class WanGameModel(ModelBase):
         on_missing_raw = cfg_uncond.get("on_missing", "error")
         if not isinstance(on_missing_raw, str):
             raise ValueError(
-                "method_config.cfg_uncond.on_missing must be a string, got "
+                "method_config.cfg_uncond.on_missing must be "
+                "a string, got "
                 f"{type(on_missing_raw).__name__}"
             )
         on_missing = on_missing_raw.strip().lower()
         if on_missing not in {"error", "ignore"}:
             raise ValueError(
-                "method_config.cfg_uncond.on_missing must be one of {error, ignore}, got "
+                "method_config.cfg_uncond.on_missing must be "
+                "one of {error, ignore}, got "
                 f"{on_missing_raw!r}"
             )
 
@@ -694,7 +925,8 @@ class WanGameModel(ModelBase):
                 continue
             if not isinstance(policy_raw, str):
                 raise ValueError(
-                    "method_config.cfg_uncond values must be strings, got "
+                    "method_config.cfg_uncond values must be "
+                    "strings, got "
                     f"{channel}={type(policy_raw).__name__}"
                 )
             policy = policy_raw.strip().lower()
@@ -703,9 +935,10 @@ class WanGameModel(ModelBase):
             if on_missing == "ignore":
                 continue
             raise ValueError(
-                "WanGameModel does not support cfg_uncond channel "
-                f"{channel!r} (policy={policy!r}). "
-                "Set cfg_uncond.on_missing=ignore or remove the channel."
+                "WanGameModel does not support cfg_uncond "
+                f"channel {channel!r} (policy={policy!r}). "
+                "Set cfg_uncond.on_missing=ignore or remove "
+                "the channel."
             )
 
         def _get_policy(channel: str) -> str:
@@ -714,13 +947,15 @@ class WanGameModel(ModelBase):
                 return "keep"
             if not isinstance(raw, str):
                 raise ValueError(
-                    "method_config.cfg_uncond values must be strings, got "
+                    "method_config.cfg_uncond values must be "
+                    "strings, got "
                     f"{channel}={type(raw).__name__}"
                 )
             policy = raw.strip().lower()
             if policy not in {"keep", "zero", "drop"}:
                 raise ValueError(
-                    "method_config.cfg_uncond values must be one of {keep, zero, drop}, got "
+                    "method_config.cfg_uncond values must be "
+                    "one of {keep, zero, drop}, got "
                     f"{channel}={raw!r}"
                 )
             return policy
@@ -732,19 +967,24 @@ class WanGameModel(ModelBase):
             mask_lat_size = torch.zeros_like(mask_lat_size)
         elif image_policy == "drop":
             raise ValueError(
-                "cfg_uncond.image=drop is not supported for WanGame I2V; "
-                "use cfg_uncond.image=zero or keep."
+                "cfg_uncond.image=drop is not supported for "
+                "WanGame I2V; use cfg_uncond.image=zero or keep."
             )
 
         action_policy = _get_policy("action")
         if action_policy == "zero":
-            if viewmats is None or Ks is None or action is None:
+            if (
+                viewmats is None
+                or Ks is None
+                or action is None
+            ):
                 if on_missing == "ignore":
                     pass
                 else:
                     raise ValueError(
-                        "cfg_uncond.action=zero requires action conditioning tensors, "
-                        "but TrainingBatch is missing {viewmats, Ks, action}."
+                        "cfg_uncond.action=zero requires action "
+                        "conditioning tensors, but TrainingBatch "
+                        "is missing {viewmats, Ks, action}."
                     )
             else:
                 viewmats = torch.zeros_like(viewmats)
@@ -772,15 +1012,21 @@ class WanGameModel(ModelBase):
             "keyboard_cond": keyboard_cond,
         }
 
-    def _get_transformer(self, handle: RoleHandle, timestep: torch.Tensor) -> torch.nn.Module:
-        transformer = handle.require_module("transformer")
-        transformer_2 = handle.modules.get("transformer_2")
-        if transformer_2 is not None and self.boundary_timestep is not None:
+    def _get_transformer(
+        self, timestep: torch.Tensor
+    ) -> torch.nn.Module:
+        if (
+            self.transformer_2 is not None
+            and self.boundary_timestep is not None
+        ):
             if timestep.numel() != 1:
                 raise ValueError(
-                    "MoE boundary selection requires a scalar timestep, got "
+                    "MoE boundary selection requires a scalar "
+                    "timestep, got "
                     f"shape={tuple(timestep.shape)}"
                 )
-            if float(timestep.item()) < float(self.boundary_timestep):
-                return transformer_2
-        return transformer
+            if float(timestep.item()) < float(
+                self.boundary_timestep
+            ):
+                return self.transformer_2
+        return self.transformer
