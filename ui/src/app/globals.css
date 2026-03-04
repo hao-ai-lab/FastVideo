@@ -1,5 +1,6 @@
 /* CSS Variables */
 :root {
+  --header-height: 74px;
   --bg:        #0f1117;
   --surface:   #1a1d27;
   --border:    #2a2d3a;
@@ -29,6 +30,8 @@ body {
   color: var(--text);
   line-height: 1.6;
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Base form input styles (used globally) */

@@ -6,12 +6,14 @@ import primarySidebarStyles from "./styles/PrimarySidebar.module.css";
 const SIDEBAR_MIN_WIDTH = 100;
 const SIDEBAR_MAX_WIDTH = 300;
 const SIDEBAR_COLLAPSED_WIDTH = 0;
+const SIDEBAR_COLLAPSED_VISIBLE_WIDTH = 60; /* collapse button width */
 
 export type SidebarTab = "job-queue" | "settings";
 
 interface PrimarySidebarProps {
   activeTab: SidebarTab;
   onTabChange: (tab: SidebarTab) => void;
+  onWidthChange?: (width: number) => void;
 }
 
 function CollapseIcon() {
@@ -33,6 +35,7 @@ function ExpandIcon() {
 export default function PrimarySidebar({
   activeTab,
   onTabChange,
+  onWidthChange,
 }: PrimarySidebarProps) {
   const [width, setWidth] = useState(220);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -40,6 +43,11 @@ export default function PrimarySidebar({
   const dragStartRef = useRef({ x: 0, width: 0 });
 
   const effectiveWidth = isCollapsed ? SIDEBAR_COLLAPSED_WIDTH : width;
+  const layoutWidth = isCollapsed ? SIDEBAR_COLLAPSED_VISIBLE_WIDTH : width;
+
+  useEffect(() => {
+    onWidthChange?.(layoutWidth);
+  }, [layoutWidth, onWidthChange]);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
