@@ -131,7 +131,10 @@ class Job:
     height: int = 480
     width: int = 832
     guidance_scale: float = 5.0
+    guidance_rescale: float = 0.0
+    fps: int = 24
     seed: int = 1024
+    negative_prompt: str = ""
     num_gpus: int = 1
     dit_cpu_offload: bool = False
     text_encoder_cpu_offload: bool = False
@@ -173,7 +176,10 @@ class Job:
             "height": self.height,
             "width": self.width,
             "guidance_scale": self.guidance_scale,
+            "guidance_rescale": self.guidance_rescale,
+            "fps": self.fps,
             "seed": self.seed,
+            "negative_prompt": self.negative_prompt,
             "num_gpus": self.num_gpus,
             "dit_cpu_offload": self.dit_cpu_offload,
             "text_encoder_cpu_offload": self.text_encoder_cpu_offload,
@@ -283,7 +289,10 @@ class JobRunner:
                     height=row.get("height", 480),
                     width=row.get("width", 832),
                     guidance_scale=row.get("guidance_scale", 5.0),
+                    guidance_rescale=row.get("guidance_rescale", 0.0),
+                    fps=row.get("fps", 24),
                     seed=row.get("seed", 1024),
+                    negative_prompt=row.get("negative_prompt", "") or "",
                     num_gpus=row.get("num_gpus", 1),
                     dit_cpu_offload=row.get("dit_cpu_offload", False),
                     text_encoder_cpu_offload=row.get("text_encoder_cpu_offload", False),
@@ -334,8 +343,11 @@ class JobRunner:
         height: int = 480,
         width: int = 832,
         guidance_scale: float = 5.0,
+        guidance_rescale: float = 0.0,
+        fps: int = 24,
         seed: int = 1024,
         num_gpus: int = 1,
+        negative_prompt: str = "",
         dit_cpu_offload: bool = False,
         text_encoder_cpu_offload: bool = False,
         vae_cpu_offload: bool = False,
@@ -356,7 +368,10 @@ class JobRunner:
             height=height,
             width=width,
             guidance_scale=guidance_scale,
+            guidance_rescale=guidance_rescale,
+            fps=fps,
             seed=seed,
+            negative_prompt=negative_prompt or "",
             num_gpus=num_gpus,
             dit_cpu_offload=dit_cpu_offload,
             text_encoder_cpu_offload=text_encoder_cpu_offload,
@@ -660,7 +675,10 @@ class JobRunner:
                 height=job.height,
                 width=job.width,
                 guidance_scale=job.guidance_scale,
+                guidance_rescale=job.guidance_rescale,
+                fps=job.fps,
                 seed=job.seed,
+                negative_prompt=job.negative_prompt or "",
                 log_queue=log_queue,
             )
         
