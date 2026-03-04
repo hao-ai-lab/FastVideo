@@ -70,6 +70,7 @@ export interface Settings {
     vsaSparsity: number;
     tpSize: number;
     spSize: number;
+    autoStartJob: boolean;
 }
 
 // MARK: - API Functions

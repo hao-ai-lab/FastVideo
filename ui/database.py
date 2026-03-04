@@ -39,6 +39,7 @@ DEFAULT_SETTINGS = {
     "vsa_sparsity": 0.0,
     "tp_size": -1,
     "sp_size": -1,
+    "auto_start_job": 0,
 }
 
 
@@ -135,6 +136,9 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(
         conn, "settings", "default_model_id_t2i", "TEXT", "''"
     )
+    _add_column_if_missing(
+        conn, "settings", "auto_start_job", "INTEGER", "0"
+    )
     # Migrate legacy default_model_id to default_model_id_t2v
     if "default_model_id_t2v" in _get_table_columns(conn, "settings"):
         conn.execute(
@@ -202,7 +206,8 @@ def init_db(db_path: Path) -> None:
                 enable_torch_compile INTEGER NOT NULL DEFAULT 0,
                 vsa_sparsity REAL NOT NULL DEFAULT 0.0,
                 tp_size INTEGER NOT NULL DEFAULT -1,
-                sp_size INTEGER NOT NULL DEFAULT -1
+                sp_size INTEGER NOT NULL DEFAULT -1,
+                auto_start_job INTEGER NOT NULL DEFAULT 0
             );
 
             INSERT OR IGNORE INTO settings (id) VALUES (1);
@@ -375,13 +380,16 @@ class Database:
             ("sp_size", "spSize", -1),
             ("guidance_rescale", "guidanceRescale", 0.0),
             ("fps", "fps", 24),
+            ("auto_start_job", "autoStartJob", False),
         ]:
             if col in row.keys():
                 v = row[col]
-                result[key] = (
-                    bool(v) if col.endswith("_offload") or col == "enable_torch_compile"
-                    else (float(v) if col in ("vsa_sparsity", "guidance_rescale") else int(v))
-                )
+                if isinstance(default, bool):
+                    result[key] = bool(v)
+                elif isinstance(default, float):
+                    result[key] = float(v)
+                else:
+                    result[key] = int(v)
             else:
                 result[key] = default
         return result
@@ -412,6 +420,7 @@ class Database:
             "vsaSparsity": "vsa_sparsity",
             "tpSize": "tp_size",
             "spSize": "sp_size",
+            "autoStartJob": "auto_start_job",
         }
         updates = []
         params = []
@@ -510,4 +519,5 @@ def _default_settings_dict() -> dict[str, Any]:
         "spSize": int(DEFAULT_SETTINGS["sp_size"]),
         "guidanceRescale": float(DEFAULT_SETTINGS["guidance_rescale"]),
         "fps": int(DEFAULT_SETTINGS["fps"]),
+        "autoStartJob": bool(DEFAULT_SETTINGS["auto_start_job"]),
     }
