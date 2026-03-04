@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import PrimarySidebar, { type SidebarTab } from "@/components/PrimarySidebar";
 import SecondarySidebar from "@/components/SecondarySidebar";
 import JobQueuePage from "@/components/JobQueuePage";
+import DatasetsPage from "@/components/DatasetsPage";
 import SettingsPage from "@/components/SettingsPage";
 import {
   useActiveTab,
@@ -55,6 +56,7 @@ export default function Home() {
         {activeTab === "finetuning" && <JobQueuePage jobType="finetuning" />}
         {activeTab === "distillation" && <JobQueuePage jobType="distillation" />}
         {activeTab === "lora" && <JobQueuePage jobType="lora" />}
+        {activeTab === "datasets" && <DatasetsPage />}
         {activeTab === "settings" && <SettingsPage />}
       </div>
       {secondaryOpen && activeJob && (

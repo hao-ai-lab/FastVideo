@@ -33,3 +33,13 @@
   background: rgba(156, 163, 175, .2);
   color: var(--text-dim);
 }
+
+.badgePreprocessing {
+  background: rgba(99, 102, 241, .2);
+  color: var(--accent);
+}
+
+.badgeReady {
+  background: rgba(34, 197, 94, .2);
+  color: var(--green);
+}

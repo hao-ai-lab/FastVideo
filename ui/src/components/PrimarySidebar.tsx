@@ -13,6 +13,7 @@ export type SidebarTab =
   | "finetuning"
   | "distillation"
   | "lora"
+  | "datasets"
   | "settings";
 
 interface PrimarySidebarProps {
@@ -140,6 +141,15 @@ export default function PrimarySidebar({
           onClick={() => onTabChange("lora")}
         >
           LoRA
+        </button>
+        <button
+          type="button"
+          className={`${primarySidebarStyles.tab} ${
+            activeTab === "datasets" ? primarySidebarStyles.tabActive : ""
+          }`}
+          onClick={() => onTabChange("datasets")}
+        >
+          Datasets
         </button>
         <button
           type="button"

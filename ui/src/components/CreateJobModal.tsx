@@ -1,6 +1,12 @@
 'use client';
 
-import { createJob, getModels, uploadImage, type Model } from "@/lib/api";
+import {
+  createJob,
+  getModels,
+  getDatasets,
+  uploadImage,
+  type Model,
+} from "@/lib/api";
 import { getDefaultModelForWorkload } from "@/lib/defaultOptions";
 import { useDefaultOptions } from "@/contexts/DefaultOptionsContext";
 import { WORKLOAD_OPTIONS } from "@/lib/jobConfig";
@@ -72,6 +78,8 @@ export default function CreateJobModal({
   const [tpSize, setTpSize] = useState<number>(defaultOptions.tpSize);
   const [spSize, setSpSize] = useState<number>(defaultOptions.spSize);
   const [dataPath, setDataPath] = useState("");
+  const [selectedDatasetId, setSelectedDatasetId] = useState("");
+  const [readyDatasets, setReadyDatasets] = useState<Awaited<ReturnType<typeof getDatasets>>>([]);
   const [maxTrainSteps, setMaxTrainSteps] = useState(1000);
   const [trainBatchSize, setTrainBatchSize] = useState(1);
   const [learningRate, setLearningRate] = useState(5e-5);
@@ -130,6 +138,19 @@ export default function CreateJobModal({
   ]);
 
   useEffect(() => {
+    if (isOpen && !isInference) {
+      getDatasets("ready")
+        .then(setReadyDatasets)
+        .catch((err) => {
+          console.error("Failed to load datasets:", err);
+          setReadyDatasets([]);
+        });
+    } else {
+      setReadyDatasets([]);
+    }
+  }, [isOpen, isInference]);
+
+  useEffect(() => {
     if (isOpen) {
       const modelFilter =
         isInference ? workloadType : getModelWorkloadForTraining(workloadType);
@@ -142,6 +163,7 @@ export default function CreateJobModal({
       setImagePath("");
       setImageFileName("");
       setDataPath("");
+      setSelectedDatasetId("");
       setMaxTrainSteps(1000);
       setTrainBatchSize(1);
       setLearningRate(5e-5);
@@ -197,7 +219,12 @@ export default function CreateJobModal({
     if (isInference && workloadType === "i2v" && !imagePath) {
       return;
     }
-    if (!isInference && !dataPath.trim()) {
+    const effectiveDataPath =
+      !isInference && selectedDatasetId
+        ? readyDatasets.find((d) => d.id === selectedDatasetId)?.output_path ??
+          dataPath
+        : dataPath;
+    if (!isInference && !effectiveDataPath.trim()) {
       return;
     }
     setIsSubmitting(true);
@@ -208,7 +235,7 @@ export default function CreateJobModal({
         workload_type: workloadType,
         job_type: jobType,
         ...(!isInference && {
-          data_path: dataPath,
+          data_path: effectiveDataPath,
           max_train_steps: maxTrainSteps,
           train_batch_size: trainBatchSize,
           learning_rate: learningRate,
@@ -436,18 +463,50 @@ export default function CreateJobModal({
             {!isInference && (
               <>
                 <div className={formStyles.formRow}>
-                  <label htmlFor="modal-data-path">Data Path *</label>
-                  <input
-                    id="modal-data-path"
-                    type="text"
-                    value={dataPath}
-                    onChange={(e) => setDataPath(e.target.value)}
-                    placeholder="/path/to/preprocessed/combined_parquet_dataset/"
-                    required={!isInference}
+                  <label htmlFor="modal-dataset">Dataset *</label>
+                  <select
+                    id="modal-dataset"
+                    value={selectedDatasetId}
+                    onChange={(e) => {
+                      setSelectedDatasetId(e.target.value);
+                      if (!e.target.value) setDataPath("");
+                    }}
                     disabled={isSubmitting}
-                  />
+                  >
+                    <option value="">
+                      {readyDatasets.length === 0
+                        ? "No ready datasets (add & preprocess in Datasets tab)"
+                        : "Select a dataset…"}
+                    </option>
+                    {readyDatasets.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} ({d.workload_type})
+                      </option>
+                    ))}
+                  </select>
+                  {selectedDatasetId ? null : (
+                    <>
+                      <label
+                        htmlFor="modal-data-path"
+                        className={formStyles.helperText}
+                        style={{ marginTop: "0.5rem" }}
+                      >
+                        Or enter custom path:
+                      </label>
+                      <input
+                        id="modal-data-path"
+                        type="text"
+                        value={dataPath}
+                        onChange={(e) => setDataPath(e.target.value)}
+                        placeholder="/path/to/preprocessed/parquet/"
+                        disabled={isSubmitting}
+                        style={{ marginTop: "0.25rem" }}
+                      />
+                    </>
+                  )}
                   <span className={formStyles.helperText}>
-                    Path to preprocessed Parquet dataset (run preprocessing first)
+                    Use a preprocessed dataset from the Datasets tab, or enter a
+                    custom path
                   </span>
                 </div>
                 <div className={formStyles.formRow}>
