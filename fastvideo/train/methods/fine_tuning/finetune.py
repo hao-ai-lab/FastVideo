@@ -31,7 +31,7 @@ class FineTuneMethod(TrainingMethod):
             raise ValueError(
                 "FineTuneMethod requires role 'student'"
             )
-        if not getattr(self.student, "_trainable", True):
+        if not self.student._trainable:
             raise ValueError(
                 "FineTuneMethod requires student to be "
                 "trainable"

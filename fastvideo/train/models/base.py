@@ -25,6 +25,7 @@ class ModelBase(ABC):
 
     transformer: torch.nn.Module
     noise_scheduler: Any
+    _trainable: bool
 
     # ------------------------------------------------------------------
     # Lifecycle

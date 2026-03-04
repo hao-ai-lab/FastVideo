@@ -31,7 +31,7 @@ class DiffusionForcingSFTMethod(TrainingMethod):
 
         if "student" not in role_models:
             raise ValueError("DFSFT requires role 'student'")
-        if not getattr(self.student, "_trainable", True):
+        if not self.student._trainable:
             raise ValueError(
                 "DFSFT requires student to be trainable"
             )

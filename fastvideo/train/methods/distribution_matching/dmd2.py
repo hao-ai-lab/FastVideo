@@ -65,16 +65,16 @@ class DMD2Method(TrainingMethod):
         self.teacher = role_models["teacher"]
         self.critic = role_models["critic"]
 
-        if not getattr(self.student, "_trainable", True):
+        if not self.student._trainable:
             raise ValueError(
                 "DMD2Method requires student to be trainable"
             )
-        if getattr(self.teacher, "_trainable", True):
+        if self.teacher._trainable:
             raise ValueError(
                 "DMD2Method requires teacher to be "
                 "non-trainable"
             )
-        if not getattr(self.critic, "_trainable", True):
+        if not self.critic._trainable:
             raise ValueError(
                 "DMD2Method requires critic to be trainable"
             )
