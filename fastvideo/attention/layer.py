@@ -3,19 +3,18 @@
 import torch
 import torch.nn as nn
 
-from yunchang import ring_flash_attn_func
-
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather, sequence_model_parallel_all_to_all_4D)
-from fastvideo.distributed.parallel_state import (get_ring_group,
-                                                  get_sp_parallel_rank,
+from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
                                                   get_sp_world_size)
 from fastvideo.forward_context import ForwardContext, get_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb
 from fastvideo.fastvideo_args import get_current_fastvideo_args
+from fastvideo.attention.yunchang.ring.ring_flash_attn import ring_flash_attn_func
+from fastvideo.distributed.parallel_state import get_sp_group
 
 
 class DistributedAttention(nn.Module):
@@ -107,17 +106,21 @@ class DistributedAttention(nn.Module):
         except ValueError:
             fastvideo_args = None
 
-        # Ring attention requires sequence-sharded QKV
-        sp_world_size = get_sp_world_size()
+        try:
+            sp_coordinator = get_sp_group()
+            sp_group = sp_coordinator.device_group
+            sp_world_size = sp_coordinator.world_size
+        except (AssertionError, AttributeError):
+            sp_group = None
+            sp_world_size = 1
+
         use_ring_attention = (fastvideo_args is not None
-                              and fastvideo_args.ring_degree > 1
+                              and getattr(fastvideo_args, 'ring_size', 1) > 1
                               and replicated_q is None and not self.training
                               and sp_world_size > 1)
 
         # Get ring group and use ring attention
-        if use_ring_attention:
-            ring_group = get_ring_group()
-
+        if use_ring_attention and sp_group is not None:
             # Apply RoPE locally before calling ring attention
             if freqs_cis is not None:
                 cos, sin = freqs_cis
@@ -131,7 +134,7 @@ class DistributedAttention(nn.Module):
 
             causal = getattr(self.attn_impl, 'causal', False)
 
-            # Call ring attention
+            # Call ring attention function from yunchang
             output = ring_flash_attn_func(
                 q,
                 k,
@@ -140,10 +143,9 @@ class DistributedAttention(nn.Module):
                 softmax_scale=self.softmax_scale,
                 causal=causal,
                 window_size=(-1, -1),
-                group=ring_group,
+                group=sp_group,
             )
 
-            # Ring attention output is already correctly shaped per rank
             return output, None
 
         # Stack QKV

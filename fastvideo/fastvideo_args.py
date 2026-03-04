@@ -114,7 +114,7 @@ class FastVideoArgs:
     hsdp_shard_dim: int = -1
     dist_timeout: int | None = None  # timeout for torch.distributed
 
-    ring_degree: int = 1  # Ring attention degree
+    ring_size: int = 1  # Ring attention size
     ulysses_degree: int = 1  # Ulysses attention degree
 
     pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
@@ -218,7 +218,7 @@ class FastVideoArgs:
                 DeprecationWarning,
                 stacklevel=2)
             # Map sp_size to ulysses_degree for backward compatibility
-            if self.ulysses_degree == 1 and self.ring_degree == 1:
+            if self.ulysses_degree == 1 and self.ring_size == 1:
                 self.ulysses_degree = self.sp_size
 
     def _apply_ltx2_vae_overrides(self) -> None:
@@ -329,24 +329,24 @@ class FastVideoArgs:
             help="The tensor parallelism size.",
         )
         parser.add_argument(
-            "--ring-degree",
+            "--ring-size",
             type=int,
-            default=FastVideoArgs.ring_degree,
-            help="Ring attention degree (number of GPUs in ring topology). "
-            "Must satisfy: ring_degree * ulysses_degree == world_size.",
+            default=FastVideoArgs.ring_size,
+            help="Ring attention size (number of GPUs in ring topology). "
+            "Must satisfy: ring_size * ulysses_degree == world_size.",
         )
         parser.add_argument(
             "--ulysses-degree",
             type=int,
             default=FastVideoArgs.ulysses_degree,
             help="Ulysses attention degree (number of GPUs for all-to-all). "
-            "Must satisfy: ring_degree * ulysses_degree == world_size.",
+            "Must satisfy: ring_size * ulysses_degree == world_size.",
         )
         parser.add_argument(
             "--sp-size",
             type=int,
             default=FastVideoArgs.sp_size,
-            help="[DEPRECATED] Use --ring-degree and --ulysses-degree instead. "
+            help="[DEPRECATED] Use --ring-size and --ulysses-degree instead. "
             "The sequence parallelism size.",
         )
         parser.add_argument(
@@ -738,8 +738,17 @@ class FastVideoArgs:
 
         if self.tp_size == -1:
             self.tp_size = 1
-        if self.sp_size == -1:
-            self.sp_size = self.num_gpus
+        if self.sp_size != -1 or self.ring_size > 1:
+            # If provided ring_size but not sp_size, infer it
+            if self.sp_size == -1:
+                self.sp_size = self.num_gpus // self.ring_size
+
+            assert self.sp_size * self.ring_size == self.num_gpus, \
+                f"The product of sp_size ({self.sp_size}) and ring_size ({self.ring_size}) must equal the total number of GPUs ({self.num_gpus})."
+        else:
+            # Fallback to default behavior if neither is explicitly set
+            if self.sp_size == -1:
+                self.sp_size = self.num_gpus
         if self.hsdp_shard_dim == -1:
             self.hsdp_shard_dim = self.num_gpus
 

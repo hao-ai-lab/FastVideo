@@ -851,19 +851,6 @@ def get_sp_group() -> GroupCoordinator:
     return _SP
 
 
-def get_ring_group() -> ProcessGroup:
-    """Return the raw torch ProcessGroup for ring attention.
-    
-    Yunchang expects a raw torch ProcessGroup, not our GroupCoordinator wrapper.
-    This unwraps the SP group's device_group.
-    
-    Returns:
-        The raw torch.distributed.ProcessGroup for sequence parallelism.
-    """
-    assert _SP is not None, ("sequence model parallel group is not initialized")
-    return get_sp_group().device_group
-
-
 _DP: GroupCoordinator | None = None
 
 
@@ -950,19 +937,23 @@ def initialize_model_parallel(
     try:
         fastvideo_args = get_current_fastvideo_args()
 
-        # Validate ring_degree * ulysses_degree == world_size
-        if fastvideo_args.ring_degree > 1 or fastvideo_args.ulysses_degree > 1:
+        # Fetch the attributes
+        ring_size = getattr(fastvideo_args, 'ring_size', 1)
+        ulysses_degree = getattr(fastvideo_args, 'ulysses_degree', 1)
+
+        # Validate ring_size * ulysses_degree == world_size
+        if ring_size > 1 or ulysses_degree > 1:
             world_size = get_world_size()
-            expected_size = fastvideo_args.ring_degree * fastvideo_args.ulysses_degree
+            expected_size = ring_size * ulysses_degree
 
             if expected_size != world_size:
                 raise ValueError(
                     f"Invalid parallelism configuration: "
-                    f"ring_degree ({fastvideo_args.ring_degree}) * "
-                    f"ulysses_degree ({fastvideo_args.ulysses_degree}) = {expected_size}, "
+                    f"ring_size ({ring_size}) * "
+                    f"ulysses_degree ({ulysses_degree}) = {expected_size}, "
                     f"but world_size = {world_size}. "
                     f"These must be equal.")
-    except (ValueError, ImportError):
+    except (ValueError, ImportError, AttributeError):
         # skip validation
         pass
 
