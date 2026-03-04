@@ -6,7 +6,7 @@
 # Run v1_inference_longcat_distill.sh first to generate the 480p video.
 #
 # Usage:
-#   bash scripts/inference/v1_inference_longcat_refine_fromvideo.sh
+#   bash examples/inference/cli/v1_inference_longcat_refine_fromvideo.sh
 #
 # Prerequisites:
 #   - Install fastvideo: pip install -e .

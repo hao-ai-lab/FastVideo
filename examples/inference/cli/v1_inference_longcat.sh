@@ -5,7 +5,7 @@
 # This script runs LongCat T2V inference using the fastvideo CLI.
 #
 # Usage:
-#   bash scripts/inference/v1_inference_longcat.sh
+#   bash examples/inference/cli/v1_inference_longcat.sh
 #
 # Prerequisites:
 #   - Install fastvideo: pip install -e .
@@ -21,7 +21,7 @@ export MODEL_BASE=FastVideo/LongCat-Video-T2V-Diffusers
 
 # Option 2: Local weights (uncomment if you have local weights)
 # For local weights, convert the official weights to FastVideo native format
-# conversion method: python scripts/checkpoint_conversion/longcat_to_fastvideo.py
+# conversion method: python examples/checkpoint_conversion/longcat_to_fastvideo.py
 # --source /path/to/LongCat-Video/weights/LongCat-Video
 # --output weights/longcat-native
 # export MODEL_BASE=weights/longcat-native

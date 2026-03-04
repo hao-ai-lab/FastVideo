@@ -12,7 +12,7 @@ to FastVideo native implementation in a single step:
 4. Updates config files to point to native model
 
 Usage:
-    python scripts/checkpoint_conversion/longcat_to_fastvideo.py \
+    python examples/checkpoint_conversion/longcat_to_fastvideo.py \
         --source /path/to/LongCat-Video/weights/LongCat-Video \
         --output weights/longcat-native \
         --validate

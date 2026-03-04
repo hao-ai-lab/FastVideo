@@ -8,7 +8,7 @@ Download the sample dataset and run preprocessing:
 
 ```bash
 # Download the crush-smol dataset
-python scripts/huggingface/download_hf.py \
+python examples/huggingface/download_hf.py \
     --repo_id "wlsaidhi/crush-smol-merged" \
     --local_dir "data/crush-smol" \
     --repo_type "dataset"
@@ -93,7 +93,7 @@ Use `--preprocess.dataset_type hf` and point `--preprocess.dataset_path` to a Hu
 If you have raw videos and captions in separate files, generate the `videos2caption.json`:
 
 ```bash
-python scripts/dataset_preparation/prepare_json_file.py \
+python examples/data/preprocessing/prepare_json_file.py \
     --data_folder path/to/your_raw_data/ \
     --output path/to/output_folder
 ```

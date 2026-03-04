@@ -16,7 +16,7 @@ Both models are trained on **61×448×832** resolution but support generating vi
 First install [VSA](../attention/vsa/index.md). Set `MODEL_BASE` to your own model path and run:
 
 ```bash
-bash scripts/inference/v1_inference_wan_dmd.sh
+bash examples/inference/cli/v1_inference_wan_dmd.sh
 ```
 
 ## 🗂️ Dataset
@@ -27,7 +27,7 @@ We use the **FastVideo 480P Synthetic Wan dataset** ([FastVideo/Wan-Syn_77x448x8
 
 ```bash
 # Download the preprocessed dataset
-python scripts/huggingface/download_hf.py \
+python examples/huggingface/download_hf.py \
     --repo_id "FastVideo/Wan-Syn_77x448x832_600k" \
     --local_dir "FastVideo/Wan-Syn_77x448x832_600k" \
     --repo_type "dataset"
