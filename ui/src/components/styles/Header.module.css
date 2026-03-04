@@ -1,10 +1,16 @@
 /* ── Header ───────────────────────────────────────────────── */
 .header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
   display: flex;
   align-items: center;
   gap: 1.5rem;
   padding: 1rem 1.5rem;
   border-bottom: 1px solid var(--border);
+  background: var(--bg);
 }
 
 .title {

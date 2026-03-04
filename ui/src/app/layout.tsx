@@ -24,7 +24,17 @@ export default function RootLayout({
             <ActiveTabProvider>
               <ActiveJobProvider>
                 <Header />
-                {children}
+                <main
+                  style={{
+                    flex: 1,
+                    marginTop: "var(--header-height)",
+                    display: "flex",
+                    flexDirection: "column",
+                    minHeight: 0,
+                  }}
+                >
+                  {children}
+                </main>
               </ActiveJobProvider>
             </ActiveTabProvider>
           </JobsRefreshProvider>
