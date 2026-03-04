@@ -28,7 +28,13 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
   const [numGpus, setNumGpus] = useState(defaultOptions.numGpus);
   const [ditCpuOffload, setDitCpuOffload] = useState<boolean>(defaultOptions.ditCpuOffload);
   const [textEncoderCpuOffload, setTextEncoderCpuOffload] = useState<boolean>(defaultOptions.textEncoderCpuOffload);
+  const [vaeCpuOffload, setVaeCpuOffload] = useState<boolean>(defaultOptions.vaeCpuOffload);
+  const [imageEncoderCpuOffload, setImageEncoderCpuOffload] = useState<boolean>(defaultOptions.imageEncoderCpuOffload);
   const [useFsdpInference, setUseFsdpInference] = useState<boolean>(defaultOptions.useFsdpInference);
+  const [enableTorchCompile, setEnableTorchCompile] = useState<boolean>(defaultOptions.enableTorchCompile);
+  const [vsaSparsity, setVsaSparsity] = useState<number>(defaultOptions.vsaSparsity);
+  const [tpSize, setTpSize] = useState<number>(defaultOptions.tpSize);
+  const [spSize, setSpSize] = useState<number>(defaultOptions.spSize);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
 
@@ -70,7 +76,13 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
       setNumGpus(defaultOptions.numGpus);
       setDitCpuOffload(defaultOptions.ditCpuOffload);
       setTextEncoderCpuOffload(defaultOptions.textEncoderCpuOffload);
+      setVaeCpuOffload(defaultOptions.vaeCpuOffload);
+      setImageEncoderCpuOffload(defaultOptions.imageEncoderCpuOffload);
       setUseFsdpInference(defaultOptions.useFsdpInference);
+      setEnableTorchCompile(defaultOptions.enableTorchCompile);
+      setVsaSparsity(defaultOptions.vsaSparsity);
+      setTpSize(defaultOptions.tpSize);
+      setSpSize(defaultOptions.spSize);
     }
   }, [isOpen, defaultOptions]);
 
@@ -90,7 +102,13 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
         num_gpus: numGpus,
         dit_cpu_offload: ditCpuOffload,
         text_encoder_cpu_offload: textEncoderCpuOffload,
+        vae_cpu_offload: vaeCpuOffload,
+        image_encoder_cpu_offload: imageEncoderCpuOffload,
         use_fsdp_inference: useFsdpInference,
+        enable_torch_compile: enableTorchCompile,
+        vsa_sparsity: vsaSparsity,
+        tp_size: tpSize,
+        sp_size: spSize,
       });
       setModelId(defaultOptions.defaultModelId);
       setPrompt("");
@@ -103,7 +121,13 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
       setNumGpus(defaultOptions.numGpus);
       setDitCpuOffload(defaultOptions.ditCpuOffload);
       setTextEncoderCpuOffload(defaultOptions.textEncoderCpuOffload);
+      setVaeCpuOffload(defaultOptions.vaeCpuOffload);
+      setImageEncoderCpuOffload(defaultOptions.imageEncoderCpuOffload);
       setUseFsdpInference(defaultOptions.useFsdpInference);
+      setEnableTorchCompile(defaultOptions.enableTorchCompile);
+      setVsaSparsity(defaultOptions.vsaSparsity);
+      setTpSize(defaultOptions.tpSize);
+      setSpSize(defaultOptions.spSize);
       onSuccess();
       onClose();
     } catch (error) {
@@ -127,7 +151,13 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
       setNumGpus(defaultOptions.numGpus);
       setDitCpuOffload(defaultOptions.ditCpuOffload);
       setTextEncoderCpuOffload(defaultOptions.textEncoderCpuOffload);
+      setVaeCpuOffload(defaultOptions.vaeCpuOffload);
+      setImageEncoderCpuOffload(defaultOptions.imageEncoderCpuOffload);
       setUseFsdpInference(defaultOptions.useFsdpInference);
+      setEnableTorchCompile(defaultOptions.enableTorchCompile);
+      setVsaSparsity(defaultOptions.vsaSparsity);
+      setTpSize(defaultOptions.tpSize);
+      setSpSize(defaultOptions.spSize);
       onClose();
     }
   };
@@ -305,6 +335,85 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
                     <option value="disabled">Disabled</option>
                     <option value="enabled">Enabled</option>
                   </select>
+                </div>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-vae-cpu-offload">VAE CPU Offload</label>
+                  <select
+                    id="modal-vae-cpu-offload"
+                    value={vaeCpuOffload ? 'enabled' : 'disabled'}
+                    onChange={(e) => setVaeCpuOffload(e.target.value === 'enabled')}
+                    disabled={isSubmitting}
+                  >
+                    <option value="disabled">Disabled</option>
+                    <option value="enabled">Enabled</option>
+                  </select>
+                </div>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-image-encoder-cpu-offload">Image Encoder CPU Offload</label>
+                  <select
+                    id="modal-image-encoder-cpu-offload"
+                    value={imageEncoderCpuOffload ? 'enabled' : 'disabled'}
+                    onChange={(e) => setImageEncoderCpuOffload(e.target.value === 'enabled')}
+                    disabled={isSubmitting}
+                  >
+                    <option value="disabled">Disabled</option>
+                    <option value="enabled">Enabled</option>
+                  </select>
+                </div>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-enable-torch-compile">Torch Compile</label>
+                  <select
+                    id="modal-enable-torch-compile"
+                    value={enableTorchCompile ? 'enabled' : 'disabled'}
+                    onChange={(e) => setEnableTorchCompile(e.target.value === 'enabled')}
+                    disabled={isSubmitting}
+                  >
+                    <option value="disabled">Disabled</option>
+                    <option value="enabled">Enabled</option>
+                  </select>
+                </div>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-vsa-sparsity" title="Video Sparse Attention sparsity (0–1, higher = sparser)">
+                    VSA Sparsity
+                  </label>
+                  <input
+                    id="modal-vsa-sparsity"
+                    type="number"
+                    value={vsaSparsity}
+                    onChange={(e) => setVsaSparsity(parseFloat(e.target.value))}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-tp-size" title="Tensor parallelism size (-1 = auto)">
+                    TP Size
+                  </label>
+                  <input
+                    id="modal-tp-size"
+                    type="number"
+                    value={tpSize}
+                    onChange={(e) => setTpSize(parseInt(e.target.value, 10) || -1)}
+                    min={-1}
+                    max={8}
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-sp-size" title="Sequence parallelism size (-1 = auto)">
+                    SP Size
+                  </label>
+                  <input
+                    id="modal-sp-size"
+                    type="number"
+                    value={spSize}
+                    onChange={(e) => setSpSize(parseInt(e.target.value, 10) || -1)}
+                    min={-1}
+                    max={8}
+                    disabled={isSubmitting}
+                  />
                 </div>
               </div>
             </details>

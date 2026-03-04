@@ -67,7 +67,13 @@ class CreateJobRequest(BaseModel):
     num_gpus: int = 1
     dit_cpu_offload: bool = False
     text_encoder_cpu_offload: bool = False
+    vae_cpu_offload: bool = False
+    image_encoder_cpu_offload: bool = False
     use_fsdp_inference: bool = False
+    enable_torch_compile: bool = False
+    vsa_sparsity: float = 0.0
+    tp_size: int = -1
+    sp_size: int = -1
 
 
 app = FastAPI(
@@ -106,7 +112,13 @@ class SettingsUpdate(BaseModel):
     numGpus: int | None = None
     ditCpuOffload: bool | None = None
     textEncoderCpuOffload: bool | None = None
+    vaeCpuOffload: bool | None = None
+    imageEncoderCpuOffload: bool | None = None
     useFsdpInference: bool | None = None
+    enableTorchCompile: bool | None = None
+    vsaSparsity: float | None = None
+    tpSize: int | None = None
+    spSize: int | None = None
 
 
 @app.put("/api/settings")
@@ -171,7 +183,13 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         num_gpus=req.num_gpus,
         dit_cpu_offload=req.dit_cpu_offload,
         text_encoder_cpu_offload=req.text_encoder_cpu_offload,
+        vae_cpu_offload=req.vae_cpu_offload,
+        image_encoder_cpu_offload=req.image_encoder_cpu_offload,
         use_fsdp_inference=req.use_fsdp_inference,
+        enable_torch_compile=req.enable_torch_compile,
+        vsa_sparsity=req.vsa_sparsity,
+        tp_size=req.tp_size,
+        sp_size=req.sp_size,
     )
     return job.to_dict()
 

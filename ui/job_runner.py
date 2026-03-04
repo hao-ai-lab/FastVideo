@@ -135,7 +135,13 @@ class Job:
     num_gpus: int = 1
     dit_cpu_offload: bool = False
     text_encoder_cpu_offload: bool = False
+    vae_cpu_offload: bool = False
+    image_encoder_cpu_offload: bool = False
     use_fsdp_inference: bool = False
+    enable_torch_compile: bool = False
+    vsa_sparsity: float = 0.0
+    tp_size: int = -1
+    sp_size: int = -1
     # Internal
     _thread: threading.Thread | None = field(
         default=None, repr=False
@@ -171,7 +177,13 @@ class Job:
             "num_gpus": self.num_gpus,
             "dit_cpu_offload": self.dit_cpu_offload,
             "text_encoder_cpu_offload": self.text_encoder_cpu_offload,
+            "vae_cpu_offload": self.vae_cpu_offload,
+            "image_encoder_cpu_offload": self.image_encoder_cpu_offload,
             "use_fsdp_inference": self.use_fsdp_inference,
+            "enable_torch_compile": self.enable_torch_compile,
+            "vsa_sparsity": self.vsa_sparsity,
+            "tp_size": self.tp_size,
+            "sp_size": self.sp_size,
             "progress": self._log_buf.progress,
             "progress_msg": self._log_buf.progress_msg,
             "phase": self._log_buf.phase,
@@ -205,10 +217,9 @@ class JobRunner:
         self._jobs_lock = threading.Lock()
         self._load_jobs()
         
-        # Cache of loaded generators keyed by (model_id, num_gpus, dit_cpu_offload, 
-        # text_encoder_cpu_offload, use_fsdp_inference) so that we only pay the
-        # model-loading cost once per model configuration.
-        self._generators: dict[tuple[str, int, bool | None, bool | None, bool | None], Any] = {}
+        # Cache of loaded generators keyed by model config so that we only pay
+        # the model-loading cost once per model configuration.
+        self._generators: dict[tuple, Any] = {}
         self._generators_lock = threading.Lock()
 
         # Shared Manager for log queues (avoids spawning a new process per job)
@@ -276,7 +287,13 @@ class JobRunner:
                     num_gpus=row.get("num_gpus", 1),
                     dit_cpu_offload=row.get("dit_cpu_offload", False),
                     text_encoder_cpu_offload=row.get("text_encoder_cpu_offload", False),
+                    vae_cpu_offload=row.get("vae_cpu_offload", False),
+                    image_encoder_cpu_offload=row.get("image_encoder_cpu_offload", False),
                     use_fsdp_inference=row.get("use_fsdp_inference", False),
+                    enable_torch_compile=row.get("enable_torch_compile", False),
+                    vsa_sparsity=row.get("vsa_sparsity", 0.0),
+                    tp_size=row.get("tp_size", -1),
+                    sp_size=row.get("sp_size", -1),
                 )
                 self._load_logs(job)
                 with self._jobs_lock:
@@ -321,7 +338,13 @@ class JobRunner:
         num_gpus: int = 1,
         dit_cpu_offload: bool = False,
         text_encoder_cpu_offload: bool = False,
+        vae_cpu_offload: bool = False,
+        image_encoder_cpu_offload: bool = False,
         use_fsdp_inference: bool = False,
+        enable_torch_compile: bool = False,
+        vsa_sparsity: float = 0.0,
+        tp_size: int = -1,
+        sp_size: int = -1,
     ) -> Job:
         """Create a new job (does not start it automatically)."""
         job = Job(
@@ -337,7 +360,13 @@ class JobRunner:
             num_gpus=num_gpus,
             dit_cpu_offload=dit_cpu_offload,
             text_encoder_cpu_offload=text_encoder_cpu_offload,
+            vae_cpu_offload=vae_cpu_offload,
+            image_encoder_cpu_offload=image_encoder_cpu_offload,
             use_fsdp_inference=use_fsdp_inference,
+            enable_torch_compile=enable_torch_compile,
+            vsa_sparsity=vsa_sparsity,
+            tp_size=tp_size,
+            sp_size=sp_size,
         )
         with self._jobs_lock:
             self._jobs[job.id] = job
@@ -496,12 +525,19 @@ class JobRunner:
         num_gpus: int,
         dit_cpu_offload: bool = False,
         text_encoder_cpu_offload: bool = False,
+        vae_cpu_offload: bool = False,
+        image_encoder_cpu_offload: bool = False,
         use_fsdp_inference: bool = False,
+        enable_torch_compile: bool = False,
+        vsa_sparsity: float = 0.0,
+        tp_size: int = -1,
+        sp_size: int = -1,
         log_queue: mp.Queue | None = None,
     ) -> Any:
         cache_key = (
-            model_id, num_gpus, dit_cpu_offload,
-            text_encoder_cpu_offload, use_fsdp_inference
+            model_id, num_gpus, dit_cpu_offload, text_encoder_cpu_offload,
+            vae_cpu_offload, image_encoder_cpu_offload, use_fsdp_inference,
+            enable_torch_compile, vsa_sparsity, tp_size, sp_size,
         )
 
         # Generators are cached by model_id and configuration parameters
@@ -513,17 +549,24 @@ class JobRunner:
         from fastvideo import VideoGenerator
 
         logger.info(
-            "Loading model %s (num_gpus=%d, dit_cpu_offload=%s, "
-            "text_encoder_cpu_offload=%s, use_fsdp_inference=%s) …",
+            "Loading model %s (num_gpus=%d, offloads: dit=%s te=%s vae=%s ie=%s, "
+            "fsdp=%s, torch_compile=%s, vsa_sparsity=%.2f, tp=%d sp=%d) …",
             model_id, num_gpus, dit_cpu_offload, text_encoder_cpu_offload,
-            use_fsdp_inference
+            vae_cpu_offload, image_encoder_cpu_offload, use_fsdp_inference,
+            enable_torch_compile, vsa_sparsity, tp_size, sp_size,
         )
 
         gen = VideoGenerator.from_pretrained(
             model_id,
             dit_cpu_offload=dit_cpu_offload,
             text_encoder_cpu_offload=text_encoder_cpu_offload,
+            vae_cpu_offload=vae_cpu_offload,
+            image_encoder_cpu_offload=image_encoder_cpu_offload,
             use_fsdp_inference=use_fsdp_inference,
+            enable_torch_compile=enable_torch_compile,
+            VSA_sparsity=vsa_sparsity,
+            tp_size=tp_size,
+            sp_size=sp_size,
             log_queue=log_queue,
         )
         
@@ -594,7 +637,13 @@ class JobRunner:
                 job.num_gpus,
                 dit_cpu_offload=job.dit_cpu_offload,
                 text_encoder_cpu_offload=job.text_encoder_cpu_offload,
+                vae_cpu_offload=job.vae_cpu_offload,
+                image_encoder_cpu_offload=job.image_encoder_cpu_offload,
                 use_fsdp_inference=job.use_fsdp_inference,
+                enable_torch_compile=job.enable_torch_compile,
+                vsa_sparsity=job.vsa_sparsity,
+                tp_size=job.tp_size,
+                sp_size=job.sp_size,
                 log_queue=log_queue,
             )
             buf.phase = "generating"
