@@ -662,21 +662,61 @@ class JobRunner:
             buf.phase = "loading model"
             logger.info("Loading model...")
 
-            generator = self._get_or_create_generator(
-                job.model_id,
-                job.workload_type,
-                job.num_gpus,
-                dit_cpu_offload=job.dit_cpu_offload,
-                text_encoder_cpu_offload=job.text_encoder_cpu_offload,
-                vae_cpu_offload=job.vae_cpu_offload,
-                image_encoder_cpu_offload=job.image_encoder_cpu_offload,
-                use_fsdp_inference=job.use_fsdp_inference,
-                enable_torch_compile=job.enable_torch_compile,
-                vsa_sparsity=job.vsa_sparsity,
-                tp_size=job.tp_size,
-                sp_size=job.sp_size,
-                log_queue=log_queue,
+            # Run generator creation in a background thread so we
+            # can poll _stop_event while the (potentially slow)
+            # model download / load is in progress.
+            _gen_result: list[Any] = []
+            _gen_error: list[BaseException] = []
+
+            def _load_generator() -> None:
+                try:
+                    gen = self._get_or_create_generator(
+                        job.model_id,
+                        job.workload_type,
+                        job.num_gpus,
+                        dit_cpu_offload=job.dit_cpu_offload,
+                        text_encoder_cpu_offload=(
+                            job.text_encoder_cpu_offload
+                        ),
+                        vae_cpu_offload=job.vae_cpu_offload,
+                        image_encoder_cpu_offload=(
+                            job.image_encoder_cpu_offload
+                        ),
+                        use_fsdp_inference=job.use_fsdp_inference,
+                        enable_torch_compile=(
+                            job.enable_torch_compile
+                        ),
+                        vsa_sparsity=job.vsa_sparsity,
+                        tp_size=job.tp_size,
+                        sp_size=job.sp_size,
+                        log_queue=log_queue,
+                    )
+                    _gen_result.append(gen)
+                except BaseException as exc:
+                    _gen_error.append(exc)
+
+            loader = threading.Thread(
+                target=_load_generator, daemon=True,
             )
+            loader.start()
+
+            while loader.is_alive():
+                if job._stop_event.is_set():
+                    job.status = JobStatus.STOPPED
+                    job.finished_at = time.time()
+                    self._save_job(job)
+                    logger.warning(
+                        "Job %s stopped during model loading",
+                        job.id,
+                    )
+                    buf.phase = "stopped"
+                    return
+                loader.join(timeout=0.5)
+
+            if _gen_error:
+                raise _gen_error[0]
+
+            generator = _gen_result[0]
             buf.phase = "generating"
             logger.info(
                 "Starting generation for job %s (model=%s)", job.id, job.model_id
