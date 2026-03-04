@@ -5,7 +5,10 @@ import PrimarySidebar, { type SidebarTab } from "@/components/PrimarySidebar";
 import SecondarySidebar from "@/components/SecondarySidebar";
 import JobQueuePage from "@/components/JobQueuePage";
 import SettingsPage from "@/components/SettingsPage";
-import { useActiveTab } from "@/contexts/ActiveTabContext";
+import {
+  useActiveTab,
+  type ActiveTab,
+} from "@/contexts/ActiveTabContext";
 import { useActiveJob } from "@/contexts/ActiveJobContext";
 import primarySidebarStyles from "@/components/styles/PrimarySidebar.module.css";
 
@@ -25,7 +28,14 @@ export default function Home() {
   const [primaryWidth, setPrimaryWidth] = useState(220);
   const [secondaryWidth, setSecondaryWidth] = useState(0);
 
-  const secondaryOpen = activeTab === "job-queue" && !!activeJob;
+  const jobTabs: ActiveTab[] = [
+    "inference",
+    "finetuning",
+    "distillation",
+    "lora",
+  ];
+  const secondaryOpen =
+    jobTabs.includes(activeTab) && !!activeJob;
 
   return (
     <div className={primarySidebarStyles.layout}>
@@ -41,7 +51,10 @@ export default function Home() {
           marginRight: secondaryOpen ? secondaryWidth : 0,
         }}
       >
-        {activeTab === "job-queue" && <JobQueuePage />}
+        {activeTab === "inference" && <JobQueuePage jobType="inference" />}
+        {activeTab === "finetuning" && <JobQueuePage jobType="finetuning" />}
+        {activeTab === "distillation" && <JobQueuePage jobType="distillation" />}
+        {activeTab === "lora" && <JobQueuePage jobType="lora" />}
         {activeTab === "settings" && <SettingsPage />}
       </div>
       {secondaryOpen && activeJob && (

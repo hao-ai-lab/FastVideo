@@ -8,7 +8,12 @@ import {
   useState,
 } from "react";
 
-export type ActiveTab = "job-queue" | "settings";
+export type ActiveTab =
+  | "inference"
+  | "finetuning"
+  | "distillation"
+  | "lora"
+  | "settings";
 
 interface ActiveTabContextValue {
   activeTab: ActiveTab;
@@ -22,12 +27,15 @@ const ActiveTabContext = createContext<ActiveTabContextValue | undefined>(
 );
 
 const TAB_TITLES: Record<ActiveTab, string> = {
-  "job-queue": "Jobs",
+  inference: "Inference",
+  finetuning: "Finetuning",
+  distillation: "Distillation",
+  lora: "LoRA",
   settings: "Settings",
 };
 
 export function ActiveTabProvider({ children }: { children: React.ReactNode }) {
-  const [activeTab, setActiveTab] = useState<ActiveTab>("job-queue");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("inference");
   const [headerActions, setHeaderActionsState] = useState<React.ReactNode[]>(
     []
   );

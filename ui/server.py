@@ -61,7 +61,15 @@ class CreateJobRequest(BaseModel):
     model_id: str
     prompt: str
     workload_type: str = "t2v"
+    job_type: str = "inference"
     image_path: str = ""
+    data_path: str = ""
+    max_train_steps: int = 1000
+    train_batch_size: int = 1
+    learning_rate: float = 5e-5
+    num_latent_t: int = 20
+    validation_dataset_file: str = ""
+    lora_rank: int = 32
     negative_prompt: str = ""
     num_inference_steps: int = 50
     num_frames: int = 81
@@ -200,9 +208,9 @@ async def upload_image(file: UploadFile = File(...)) -> dict[str, str]:
 
 
 @app.get("/api/jobs")
-def list_jobs() -> list[dict[str, Any]]:
-    """Return every job (newest first)."""
-    return [j.to_dict() for j in job_runner.list_jobs()]
+def list_jobs(job_type: str | None = None) -> list[dict[str, Any]]:
+    """Return jobs (newest first). Optionally filter by job_type."""
+    return [j.to_dict() for j in job_runner.list_jobs(job_type=job_type)]
 
 
 @app.get("/api/jobs/{job_id}")
@@ -217,22 +225,32 @@ def get_job(job_id: str) -> dict[str, Any]:
 @app.post("/api/jobs", status_code=201)
 def create_job(req: CreateJobRequest) -> dict[str, Any]:
     """Create a new job (does **not** start it automatically)."""
-    valid_ids = {m["id"] for m in _available_models}
-    if req.model_id not in valid_ids:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Unknown model_id '{req.model_id}'. "
-                f"Valid options: {sorted(valid_ids)}"
-            ),
-        )
+    job_type = req.job_type or "inference"
+    if job_type == "inference":
+        valid_ids = {m["id"] for m in _available_models}
+        if req.model_id not in valid_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unknown model_id '{req.model_id}'. "
+                    f"Valid options: {sorted(valid_ids)}"
+                ),
+            )
 
     job = job_runner.create_job(
         job_id=str(uuid.uuid4()),
         model_id=req.model_id,
         prompt=req.prompt,
         workload_type=req.workload_type or "t2v",
+        job_type=job_type,
         image_path=req.image_path or "",
+        data_path=req.data_path or "",
+        max_train_steps=req.max_train_steps,
+        train_batch_size=req.train_batch_size,
+        learning_rate=req.learning_rate,
+        num_latent_t=req.num_latent_t,
+        validation_dataset_file=req.validation_dataset_file or "",
+        lora_rank=req.lora_rank,
         negative_prompt=req.negative_prompt,
         num_inference_steps=req.num_inference_steps,
         num_frames=req.num_frames,
