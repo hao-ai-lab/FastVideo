@@ -58,11 +58,14 @@ database: Database | None = None
 class CreateJobRequest(BaseModel):
     model_id: str
     prompt: str
+    negative_prompt: str = ""
     num_inference_steps: int = 50
     num_frames: int = 81
     height: int = 480
     width: int = 832
     guidance_scale: float = 5.0
+    guidance_rescale: float = 0.0
+    fps: int = 24
     seed: int = 1024
     num_gpus: int = 1
     dit_cpu_offload: bool = False
@@ -108,6 +111,8 @@ class SettingsUpdate(BaseModel):
     height: int | None = None
     width: int | None = None
     guidanceScale: float | None = None
+    guidanceRescale: float | None = None
+    fps: int | None = None
     seed: int | None = None
     numGpus: int | None = None
     ditCpuOffload: bool | None = None
@@ -174,11 +179,14 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         job_id=str(uuid.uuid4()),
         model_id=req.model_id,
         prompt=req.prompt,
+        negative_prompt=req.negative_prompt,
         num_inference_steps=req.num_inference_steps,
         num_frames=req.num_frames,
         height=req.height,
         width=req.width,
         guidance_scale=req.guidance_scale,
+        guidance_rescale=req.guidance_rescale,
+        fps=req.fps,
         seed=req.seed,
         num_gpus=req.num_gpus,
         dit_cpu_offload=req.dit_cpu_offload,

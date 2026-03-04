@@ -127,6 +127,38 @@ export default function SettingsPage() {
             />
           </div>
           <div className={formStyles.formRow}>
+            <label
+              htmlFor="settings-guidance-rescale"
+              title="Guidance rescale factor (0 = disabled)"
+            >
+              Guidance Rescale
+            </label>
+            <input
+              id="settings-guidance-rescale"
+              type="number"
+              value={options.guidanceRescale ?? 0}
+              onChange={(e) =>
+                updateOption("guidanceRescale", parseFloat(e.target.value))
+              }
+              min={0}
+              max={1}
+              step={0.05}
+            />
+          </div>
+          <div className={formStyles.formRow}>
+            <label htmlFor="settings-fps">FPS</label>
+            <input
+              id="settings-fps"
+              type="number"
+              value={options.fps ?? 24}
+              onChange={(e) =>
+                updateOption("fps", parseInt(e.target.value, 10))
+              }
+              min={1}
+              max={60}
+            />
+          </div>
+          <div className={formStyles.formRow}>
             <label htmlFor="settings-seed">Seed</label>
             <input
               id="settings-seed"
