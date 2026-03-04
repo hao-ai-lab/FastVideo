@@ -86,6 +86,20 @@ class DMD2Method(DistillMethod):
 
         self._init_optimizers_and_schedulers()
 
+    @property
+    def _optimizer_dict(self) -> dict[str, torch.optim.Optimizer]:
+        return {
+            "student": self._student_optimizer,
+            "critic": self._critic_optimizer,
+        }
+
+    @property
+    def _lr_scheduler_dict(self) -> dict[str, Any]:
+        return {
+            "student": self._student_lr_scheduler,
+            "critic": self._critic_lr_scheduler,
+        }
+
     # DistillMethod override: single_train_step
     def single_train_step(
         self,
@@ -178,7 +192,7 @@ class DMD2Method(DistillMethod):
         critic_ctx = backward_ctx.get("critic_ctx")
         if critic_ctx is None:
             raise RuntimeError("Missing critic backward context")
-        self.student.backward(
+        self.critic.backward(
             loss_map["fake_score_loss"],
             critic_ctx,
             grad_accum_rounds=grad_accum_rounds,
@@ -636,7 +650,7 @@ class DMD2Method(DistillMethod):
                 cfg_uncond=self._cfg_uncond,
                 attn_kind="dense",
             )
-            real_cfg_x0 = real_cond_x0 + (real_cond_x0 - real_uncond_x0) * guidance_scale
+            real_cfg_x0 = real_cond_x0 + (real_cond_x0 - real_uncond_x0) * (guidance_scale - 1)
 
             denom = torch.abs(generator_pred_x0 - real_cfg_x0).mean()
             grad = (faker_x0 - real_cfg_x0) / denom

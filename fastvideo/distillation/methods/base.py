@@ -32,6 +32,7 @@ class DistillMethod(torch.nn.Module, ABC):
     ) -> None:
         super().__init__()
         self.tracker: Any | None = None
+        self._role_models: dict[str, ModelBase] = dict(role_models)
         # Build nn.ModuleDict for FSDP / checkpoint visibility.
         self.role_modules = torch.nn.ModuleDict()
         for role, model in role_models.items():

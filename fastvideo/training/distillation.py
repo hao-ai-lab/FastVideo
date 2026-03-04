@@ -28,9 +28,9 @@ def run_distillation_from_config(
         DistillCheckpointManager,
     )
     from fastvideo.distillation.dispatch import build_from_config
-    from fastvideo.distillation.utils.config import load_distill_run_config
+    from fastvideo.distillation.utils.config import load_run_config
 
-    cfg = load_distill_run_config(config_path)
+    cfg = load_run_config(config_path)
     training_args = cfg.training_args
 
     if resume_from_checkpoint is not None:
@@ -68,7 +68,11 @@ def run_distillation_from_config(
             get_rng_generators = None
 
     checkpoint_manager = DistillCheckpointManager(
-        bundle=method.bundle,
+        role_models=getattr(method, '_role_models', None) or {},
+        optimizers=getattr(method, '_optimizer_dict', None) or {},
+        lr_schedulers=getattr(
+            method, '_lr_scheduler_dict', None
+        ) or {},
         dataloader=dataloader,
         output_dir=training_args.output_dir,
         config=ckpt_config,

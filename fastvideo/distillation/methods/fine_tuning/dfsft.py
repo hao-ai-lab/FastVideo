@@ -67,6 +67,14 @@ class DiffusionForcingSFTMethod(DistillMethod):
 
         self._init_optimizers_and_schedulers()
 
+    @property
+    def _optimizer_dict(self) -> dict[str, Any]:
+        return {"student": self._student_optimizer}
+
+    @property
+    def _lr_scheduler_dict(self) -> dict[str, Any]:
+        return {"student": self._student_lr_scheduler}
+
     # DistillMethod override: single_train_step
     def single_train_step(
         self,

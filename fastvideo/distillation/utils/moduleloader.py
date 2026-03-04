@@ -40,6 +40,14 @@ def load_module_from_path(
     transformers_or_diffusers, _architecture = module_info
     component_path = os.path.join(local_model_path, module_type)
 
+    # When training_args is None (e.g. during model-only loading in
+    # distillation role construction), create a lightweight stand-in so
+    # that override_transformer_cls_name and disable_custom_init_weights
+    # flags can still be forwarded to PipelineComponentLoader.
+    if training_args is None:
+        from types import SimpleNamespace
+        training_args = SimpleNamespace()
+
     old_override_transformer_cls_name: str | None = None
     if override_transformer_cls_name is not None:
         old_override_transformer_cls_name = getattr(
