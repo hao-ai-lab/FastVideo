@@ -221,6 +221,21 @@ def init_db(db_path: Path) -> None:
             );
 
             INSERT OR IGNORE INTO settings (id) VALUES (1);
+
+            CREATE TABLE IF NOT EXISTS datasets (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                raw_path TEXT NOT NULL,
+                output_path TEXT,
+                workload_type TEXT NOT NULL DEFAULT 't2v',
+                model_path TEXT NOT NULL,
+                dataset_type TEXT NOT NULL DEFAULT 'merged',
+                status TEXT NOT NULL DEFAULT 'pending',
+                error TEXT,
+                created_at REAL NOT NULL,
+                num_gpus INTEGER NOT NULL DEFAULT 1,
+                log_file_path TEXT
+            );
         """)
         conn.commit()
         _migrate_db(conn)
@@ -359,6 +374,85 @@ class Database:
         row = cur.fetchone()
         return _row_to_job(row) if row else None
 
+    # --- Datasets ---
+
+    def insert_dataset(self, dataset: dict[str, Any]) -> None:
+        """Insert a new dataset."""
+        self._execute(
+            """
+            INSERT INTO datasets (
+                id, name, raw_path, output_path, workload_type, model_path,
+                dataset_type, status, error, created_at, num_gpus, log_file_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                dataset["id"],
+                dataset["name"],
+                dataset["raw_path"],
+                dataset.get("output_path"),
+                dataset.get("workload_type", "t2v"),
+                dataset["model_path"],
+                dataset.get("dataset_type", "merged"),
+                dataset.get("status", "pending"),
+                dataset.get("error"),
+                dataset["created_at"],
+                dataset.get("num_gpus", 1),
+                dataset.get("log_file_path"),
+            ),
+        )
+        self._commit()
+
+    def update_dataset(
+        self, dataset_id: str, updates: dict[str, Any]
+    ) -> None:
+        """Update dataset fields. Only provided keys are updated."""
+        if not updates:
+            return
+        allowed = {
+            "status", "error", "output_path", "log_file_path",
+        }
+        cols = []
+        vals = []
+        for k, v in updates.items():
+            if k in allowed:
+                cols.append(f"{k} = ?")
+                vals.append(v)
+        if not cols:
+            return
+        vals.append(dataset_id)
+        sql = f"UPDATE datasets SET {', '.join(cols)} WHERE id = ?"
+        self._execute(sql, tuple(vals))
+        self._commit()
+
+    def delete_dataset(self, dataset_id: str) -> bool:
+        """Delete a dataset. Returns True if a row was deleted."""
+        cur = self._execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
+        self._commit()
+        return cur.rowcount > 0
+
+    def get_all_datasets(
+        self, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return all datasets, newest first. Optionally filter by status."""
+        if status:
+            cur = self._execute(
+                "SELECT * FROM datasets WHERE status = ? ORDER BY created_at DESC",
+                (status,),
+            )
+        else:
+            cur = self._execute(
+                "SELECT * FROM datasets ORDER BY created_at DESC"
+            )
+        return [_row_to_dataset(row) for row in cur.fetchall()]
+
+    def get_dataset(self, dataset_id: str) -> dict[str, Any] | None:
+        """Get a single dataset by ID."""
+        cur = self._execute(
+            "SELECT * FROM datasets WHERE id = ?", (dataset_id,)
+        )
+        row = cur.fetchone()
+        return _row_to_dataset(row) if row else None
+
     # --- Settings ---
 
     def get_settings(self) -> dict[str, Any]:
@@ -465,6 +559,24 @@ class Database:
         sql = f"UPDATE settings SET {', '.join(updates)} WHERE id = ?"
         self._execute(sql, tuple(params))
         self._commit()
+
+
+def _row_to_dataset(row: sqlite3.Row) -> dict[str, Any]:
+    """Convert a DB row to dataset dict."""
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "raw_path": row["raw_path"],
+        "output_path": row["output_path"] or "",
+        "workload_type": row["workload_type"] or "t2v",
+        "model_path": row["model_path"],
+        "dataset_type": row["dataset_type"] or "merged",
+        "status": row["status"] or "pending",
+        "error": row["error"],
+        "created_at": row["created_at"],
+        "num_gpus": row["num_gpus"] or 1,
+        "log_file_path": row["log_file_path"] or "",
+    }
 
 
 def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:

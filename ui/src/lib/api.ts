@@ -124,6 +124,63 @@ export async function uploadImage(file: File): Promise<{ path: string }> {
     return response.json();
 }
 
+export async function uploadDatasetCaptions(
+    file: File
+): Promise<{ path: string; upload_id: string }> {
+    const baseApiUrl = getApiBaseUrl();
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch(`${baseApiUrl}/upload-dataset-captions`, {
+        method: "POST",
+        body: formData,
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({ detail: "Upload failed" }));
+        throw new Error(err.detail || "Upload failed");
+    }
+    return response.json();
+}
+
+export async function uploadDatasetVideos(
+    uploadId: string,
+    files: File[]
+): Promise<{ path: string }> {
+    const baseApiUrl = getApiBaseUrl();
+    const formData = new FormData();
+    formData.append("upload_id", uploadId);
+    for (const f of files) {
+        formData.append("files", f);
+    }
+    const response = await fetch(`${baseApiUrl}/upload-dataset-videos`, {
+        method: "POST",
+        body: formData,
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({ detail: "Upload failed" }));
+        throw new Error(err.detail || "Upload failed");
+    }
+    return response.json();
+}
+
+export async function uploadDatasetParquet(
+    files: File[]
+): Promise<{ path: string }> {
+    const baseApiUrl = getApiBaseUrl();
+    const formData = new FormData();
+    for (const f of files) {
+        formData.append("files", f);
+    }
+    const response = await fetch(`${baseApiUrl}/upload-dataset-parquet`, {
+        method: "POST",
+        body: formData,
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({ detail: "Upload failed" }));
+        throw new Error(err.detail || "Upload failed");
+    }
+    return response.json();
+}
+
 export async function getModels(workloadType?: string): Promise<Model[]> {
     const baseApiUrl = getApiBaseUrl();
     const url = workloadType
@@ -240,4 +297,118 @@ export async function downloadJobVideo(id: string): Promise<Blob> {
         throw new Error("Failed to download video");
     }
     return response.blob();
+}
+
+// --- Datasets ---
+
+export interface Dataset {
+    id: string;
+    name: string;
+    raw_path: string;
+    output_path: string;
+    workload_type: string;
+    model_path: string;
+    dataset_type: string;
+    status: "pending" | "preprocessing" | "ready" | "failed" | "stopped";
+    error: string | null;
+    created_at: number;
+    num_gpus: number;
+    log_file_path: string;
+}
+
+export interface CreateDatasetRequest {
+    name: string;
+    raw_path?: string;
+    output_path?: string;
+    workload_type?: string;
+    model_path: string;
+    dataset_type?: string;
+    num_gpus?: number;
+}
+
+export async function getDatasets(status?: string): Promise<Dataset[]> {
+    const baseApiUrl = getApiBaseUrl();
+    const url = status
+        ? `${baseApiUrl}/datasets?status=${encodeURIComponent(status)}`
+        : `${baseApiUrl}/datasets`;
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error("Failed to fetch datasets");
+    }
+    return response.json();
+}
+
+export async function getDataset(id: string): Promise<Dataset> {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/datasets/${id}`);
+    if (!response.ok) {
+        throw new Error("Failed to fetch dataset");
+    }
+    return response.json();
+}
+
+export async function createDataset(
+    data: CreateDatasetRequest
+): Promise<Dataset> {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/datasets`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({ detail: "Failed to create dataset" }));
+        throw new Error(err.detail || "Failed to create dataset");
+    }
+    return response.json();
+}
+
+export async function deleteDataset(id: string): Promise<void> {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/datasets/${id}`, {
+        method: "DELETE",
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({ detail: "Failed to delete dataset" }));
+        throw new Error(err.detail || "Failed to delete dataset");
+    }
+}
+
+export async function startDatasetPreprocess(id: string): Promise<Dataset> {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/datasets/${id}/preprocess`, {
+        method: "POST",
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({ detail: "Failed to start preprocessing" }));
+        throw new Error(err.detail || "Failed to start preprocessing");
+    }
+    return response.json();
+}
+
+export async function stopDatasetPreprocess(id: string): Promise<void> {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/datasets/${id}/stop-preprocess`, {
+        method: "POST",
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({ detail: "Failed to stop preprocessing" }));
+        throw new Error(err.detail || "Failed to stop preprocessing");
+    }
+}
+
+export interface DatasetLogs {
+    lines: string[];
+    total: number;
+}
+
+export async function getDatasetLogs(id: string, after: number = 0): Promise<DatasetLogs> {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/datasets/${id}/logs?after=${after}`);
+    if (!response.ok) {
+        throw new Error("Failed to fetch dataset logs");
+    }
+    return response.json();
 }

@@ -18,12 +18,14 @@ import argparse
 import logging
 import os
 import signal
+import threading
+import time
 import uuid
 from pathlib import Path
 import uvicorn
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -32,6 +34,7 @@ from fastvideo.registry import (get_registered_model_paths,
                                 get_registered_models_with_workloads)
 from ui.database import Database, _get_db_path
 from ui.job_runner import JobRunner, JobStatus
+from ui.preprocess_runner import run_preprocess
 
 
 logging.basicConfig(
@@ -55,6 +58,9 @@ _available_models: list[dict[str, str]] = [
 job_runner: JobRunner
 database: Database | None = None
 upload_dir: str = ""
+datasets_upload_dir: str = ""
+datasets_output_dir: str = ""
+_preprocess_tasks: dict[str, tuple[threading.Thread, threading.Event]] = {}
 
 
 class CreateJobRequest(BaseModel):
@@ -207,6 +213,119 @@ async def upload_image(file: UploadFile = File(...)) -> dict[str, str]:
     return {"path": os.path.abspath(dest_path)}
 
 
+ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".avi", ".mov"}
+ALLOWED_PARQUET_EXTENSIONS = {".parquet"}
+
+
+@app.post("/api/upload-dataset-captions")
+async def upload_dataset_captions(
+    file: UploadFile = File(...),
+) -> dict[str, str]:
+    """Upload captions JSON for raw dataset. Returns folder path."""
+    global datasets_upload_dir  # noqa: PLW0603
+    if not datasets_upload_dir:
+        raise HTTPException(
+            status_code=503,
+            detail="Upload directory not configured",
+        )
+    ext = Path(file.filename or "").suffix.lower()
+    if ext != ".json":
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file type. Allowed: .json",
+        )
+    upload_id = uuid.uuid4().hex
+    folder = os.path.join(datasets_upload_dir, upload_id)
+    os.makedirs(folder, exist_ok=True)
+    os.makedirs(os.path.join(folder, "videos"), exist_ok=True)
+    dest_path = os.path.join(folder, "videos2caption.json")
+    try:
+        contents = await file.read()
+        with open(dest_path, "wb") as f:
+            f.write(contents)
+    except OSError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save upload: {e}",
+        ) from e
+    return {"path": os.path.abspath(folder), "upload_id": upload_id}
+
+
+@app.post("/api/upload-dataset-videos")
+async def upload_dataset_videos(
+    upload_id: str = Form(...),
+    files: list[UploadFile] = File(...),
+) -> dict[str, str]:
+    """Upload video files to existing raw dataset folder."""
+    global datasets_upload_dir  # noqa: PLW0603
+    if not datasets_upload_dir:
+        raise HTTPException(
+            status_code=503,
+            detail="Upload directory not configured",
+        )
+    folder = os.path.join(datasets_upload_dir, upload_id, "videos")
+    if not os.path.isdir(os.path.dirname(folder)):
+        raise HTTPException(
+            status_code=400,
+            detail="Upload captions first to create dataset folder",
+        )
+    os.makedirs(folder, exist_ok=True)
+    for uf in files:
+        ext = Path(uf.filename or "").suffix.lower()
+        if ext not in ALLOWED_VIDEO_EXTENSIONS:
+            continue
+        dest = os.path.join(folder, uf.filename or f"{uuid.uuid4().hex}{ext}")
+        try:
+            contents = await uf.read()
+            with open(dest, "wb") as f:
+                f.write(contents)
+        except OSError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to save {uf.filename}: {e}",
+            ) from e
+    return {"path": os.path.abspath(os.path.dirname(folder))}
+
+
+@app.post("/api/upload-dataset-parquet")
+async def upload_dataset_parquet(
+    files: list[UploadFile] = File(...),
+) -> dict[str, str]:
+    """Upload parquet files for preprocessed dataset. Returns folder path."""
+    global datasets_upload_dir  # noqa: PLW0603
+    if not datasets_upload_dir:
+        raise HTTPException(
+            status_code=503,
+            detail="Upload directory not configured",
+        )
+    parquet_files = [
+        f for f in files
+        if Path(f.filename or "").suffix.lower() in ALLOWED_PARQUET_EXTENSIONS
+    ]
+    if not parquet_files:
+        raise HTTPException(
+            status_code=400,
+            detail="No .parquet files provided",
+        )
+    upload_id = uuid.uuid4().hex
+    folder = os.path.join(
+        datasets_upload_dir, upload_id, "combined_parquet_dataset"
+    )
+    os.makedirs(folder, exist_ok=True)
+    for uf in parquet_files:
+        dest = os.path.join(folder, uf.filename or f"{uuid.uuid4().hex}.parquet")
+        try:
+            contents = await uf.read()
+            with open(dest, "wb") as f:
+                f.write(contents)
+        except OSError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to save {uf.filename}: {e}",
+            ) from e
+    return {"path": os.path.abspath(os.path.dirname(folder))}
+
+
 @app.get("/api/jobs")
 def list_jobs(job_type: str | None = None) -> list[dict[str, Any]]:
     """Return jobs (newest first). Optionally filter by job_type."""
@@ -321,6 +440,195 @@ def delete_job(job_id: str) -> dict[str, str]:
     return {"detail": f"Job {job_id} deleted"}
 
 
+# --- Datasets ---
+
+
+class CreateDatasetRequest(BaseModel):
+    name: str
+    raw_path: str = ""
+    output_path: str | None = None  # For parquet: preprocessed path, status=ready
+    workload_type: str = "t2v"
+    model_path: str
+    dataset_type: str = "merged"
+    num_gpus: int = 1
+
+
+@app.get("/api/datasets")
+def list_datasets(status: str | None = None) -> list[dict[str, Any]]:
+    """Return datasets. Optionally filter by status (e.g. 'ready')."""
+    if database is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Database not initialized",
+        )
+    return database.get_all_datasets(status=status)
+
+
+@app.get("/api/datasets/{dataset_id}")
+def get_dataset(dataset_id: str) -> dict[str, Any]:
+    """Get a single dataset by ID."""
+    if database is None:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    ds = database.get_dataset(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return ds
+
+
+@app.post("/api/datasets", status_code=201)
+def create_dataset(req: CreateDatasetRequest) -> dict[str, Any]:
+    """Create a new dataset. Parquet: status=ready. Raw/HF: status=pending."""
+    if database is None:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    dataset_id = str(uuid.uuid4())
+    created_at = time.time()
+    if req.output_path:
+        output_path = req.output_path
+        status = "ready"
+    else:
+        output_path = os.path.join(
+            datasets_output_dir, dataset_id, "output"
+        )
+        status = "pending"
+    dataset = {
+        "id": dataset_id,
+        "name": req.name,
+        "raw_path": req.raw_path,
+        "output_path": output_path,
+        "workload_type": req.workload_type,
+        "model_path": req.model_path,
+        "dataset_type": req.dataset_type,
+        "status": status,
+        "error": None,
+        "created_at": created_at,
+        "num_gpus": req.num_gpus,
+        "log_file_path": "",
+    }
+    database.insert_dataset(dataset)
+    return dataset
+
+
+@app.delete("/api/datasets/{dataset_id}")
+def delete_dataset(dataset_id: str) -> dict[str, str]:
+    """Delete a dataset. Stops preprocessing if running."""
+    if database is None:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    if dataset_id in _preprocess_tasks:
+        _, stop_ev = _preprocess_tasks[dataset_id]
+        stop_ev.set()
+        del _preprocess_tasks[dataset_id]
+    if not database.delete_dataset(dataset_id):
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return {"detail": f"Dataset {dataset_id} deleted"}
+
+
+@app.post("/api/datasets/{dataset_id}/preprocess")
+def start_preprocess(dataset_id: str) -> dict[str, Any]:
+    """Start preprocessing for a dataset."""
+    if database is None:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    ds = database.get_dataset(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    if not ds.get("raw_path"):
+        raise HTTPException(
+            status_code=400,
+            detail="Dataset has no raw path (e.g. Parquet datasets are already preprocessed)",
+        )
+    if dataset_id in _preprocess_tasks:
+        raise HTTPException(
+            status_code=409,
+            detail="Preprocessing already running for this dataset",
+        )
+    if ds["status"] == "ready":
+        raise HTTPException(
+            status_code=409,
+            detail="Dataset is already preprocessed",
+        )
+
+    log_dir = os.path.join(
+        os.path.dirname(__file__), "..", "outputs", "ui_logs"
+    )
+    os.makedirs(log_dir, exist_ok=True)
+    log_file_path = os.path.join(log_dir, f"preprocess_{dataset_id}.log")
+
+    output_dir = ds["output_path"]
+    os.makedirs(output_dir, exist_ok=True)
+
+    stop_event = threading.Event()
+
+    def on_status_change(status: str, error: str | None) -> None:
+        if database is None:
+            return
+        updates: dict[str, Any] = {"status": status}
+        if error:
+            updates["error"] = error
+        if status == "ready":
+            updates["output_path"] = output_dir
+        database.update_dataset(dataset_id, updates)
+        if status in ("ready", "failed", "stopped"):
+            _preprocess_tasks.pop(dataset_id, None)
+
+    def run() -> None:
+        run_preprocess(
+            dataset_id=dataset_id,
+            raw_path=ds["raw_path"],
+            output_dir=output_dir,
+            workload_type=ds["workload_type"],
+            model_path=ds["model_path"],
+            dataset_type=ds["dataset_type"],
+            num_gpus=ds["num_gpus"],
+            log_file_path=log_file_path,
+            on_status_change=on_status_change,
+            stop_event=stop_event,
+        )
+
+    database.update_dataset(
+        dataset_id,
+        {"status": "preprocessing", "error": None, "log_file_path": log_file_path},
+    )
+    thread = threading.Thread(target=run, daemon=True)
+    _preprocess_tasks[dataset_id] = (thread, stop_event)
+    thread.start()
+
+    return database.get_dataset(dataset_id) or ds
+
+
+@app.post("/api/datasets/{dataset_id}/stop-preprocess")
+def stop_preprocess(dataset_id: str) -> dict[str, Any]:
+    """Stop preprocessing for a dataset."""
+    if dataset_id not in _preprocess_tasks:
+        raise HTTPException(
+            status_code=404,
+            detail="No preprocessing running for this dataset",
+        )
+    _, stop_event = _preprocess_tasks[dataset_id]
+    stop_event.set()
+    if database is not None:
+        ds = database.get_dataset(dataset_id)
+        if ds:
+            return ds
+    return {"detail": "Stop requested"}
+
+
+@app.get("/api/datasets/{dataset_id}/logs")
+def get_dataset_logs(dataset_id: str, after: int = 0) -> dict[str, Any]:
+    """Return preprocessing log lines for a dataset."""
+    if database is None:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    ds = database.get_dataset(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    log_path = ds.get("log_file_path") or ""
+    if not log_path or not os.path.isfile(log_path):
+        return {"lines": [], "total": 0}
+    with open(log_path, encoding="utf-8") as f:
+        lines = f.readlines()
+    total = len(lines)
+    lines = [ln.rstrip() for ln in lines[after:] if ln]
+    return {"lines": lines, "total": total}
+
+
 @app.get("/api/jobs/{job_id}/logs")
 def get_job_logs(job_id: str, after: int = 0) -> dict[str, Any]:
     """Return log lines for a job.
@@ -413,7 +721,7 @@ def create_local_env(host: str, port: int) -> None:
 
 
 def main():
-    global job_runner, database, upload_dir  # noqa: PLW0603
+    global job_runner, database, upload_dir, datasets_upload_dir, datasets_output_dir  # noqa: PLW0603
 
     # Set up signal handlers to prevent worker crashes from killing the server
     _setup_signal_handlers()
@@ -474,6 +782,8 @@ def main():
     log_dir = os.path.abspath(args.log_dir)
     data_dir = Path(args.data_dir).resolve()
     upload_dir = str(data_dir / "uploads")
+    datasets_upload_dir = str(data_dir / "uploads" / "datasets")
+    datasets_output_dir = str(data_dir / "datasets")
 
     create_local_env(args.host, args.port)
 

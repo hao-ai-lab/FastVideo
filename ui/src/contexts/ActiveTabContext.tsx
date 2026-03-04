@@ -13,6 +13,7 @@ export type ActiveTab =
   | "finetuning"
   | "distillation"
   | "lora"
+  | "datasets"
   | "settings";
 
 interface ActiveTabContextValue {
@@ -31,6 +32,7 @@ const TAB_TITLES: Record<ActiveTab, string> = {
   finetuning: "Finetuning",
   distillation: "Distillation",
   lora: "LoRA",
+  datasets: "Datasets",
   settings: "Settings",
 };
 
