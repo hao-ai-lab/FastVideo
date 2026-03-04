@@ -328,7 +328,8 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
                     batch.image_latent = image_latents[i].unsqueeze(0)
                     sample_keyboard = keyboard_cond[
                         i] if keyboard_cond is not None else None
-                    sample_mouse = mouse_cond[i] if mouse_cond is not None else None
+                    sample_mouse = mouse_cond[
+                        i] if mouse_cond is not None else None
                     if sample_keyboard is not None and sample_mouse is not None:
                         batch.keyboard_cond = torch.from_numpy(
                             sample_keyboard).unsqueeze(0).to(device)

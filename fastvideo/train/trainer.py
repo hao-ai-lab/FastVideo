@@ -11,11 +11,11 @@ import torch
 from tqdm.auto import tqdm
 
 from fastvideo.distributed import get_sp_group, get_world_group
-from fastvideo.distillation.utils.tracking import build_tracker
+from fastvideo.train.utils.tracking import build_tracker
 
 if TYPE_CHECKING:
-    from fastvideo.distillation.utils.distill_config import (
-        DistillTrainingConfig, )
+    from fastvideo.train.utils.training_config import (
+        TrainingConfig, )
 
 
 def _coerce_log_scalar(value: Any, *, where: str) -> float:
@@ -37,11 +37,11 @@ class TrainLoopState:
     current_vsa_sparsity: float
 
 
-class DistillTrainer:
+class Trainer:
 
     def __init__(
         self,
-        training_config: DistillTrainingConfig,
+        training_config: TrainingConfig,
         *,
         config: dict[str, Any] | None = None,
     ) -> None:

@@ -12,7 +12,7 @@ from fastvideo.training.trackers import (
 )
 
 if TYPE_CHECKING:
-    from fastvideo.distillation.utils.distill_config import (
+    from fastvideo.train.utils.training_config import (
         CheckpointConfig,
         TrackerConfig,
     )

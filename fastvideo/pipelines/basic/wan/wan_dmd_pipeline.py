@@ -25,4 +25,3 @@ class WanDMDPipeline(WanPipeline):
 
 
 EntryClass = WanDMDPipeline
-

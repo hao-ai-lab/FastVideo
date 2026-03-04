@@ -23,14 +23,14 @@ def run_distillation_from_config(
 
     from fastvideo.distributed import (
         maybe_init_distributed_environment_and_model_parallel, )
-    from fastvideo.distillation import DistillTrainer
-    from fastvideo.distillation.utils.checkpoint import (
-        DistillCheckpointConfig,
-        DistillCheckpointManager,
+    from fastvideo.train import Trainer
+    from fastvideo.train.utils.checkpoint import (
+        CheckpointConfig,
+        CheckpointManager,
     )
-    from fastvideo.distillation.dispatch import (
+    from fastvideo.train.dispatch import (
         build_from_config, )
-    from fastvideo.distillation.utils.config import (
+    from fastvideo.train.utils.config import (
         load_run_config, )
 
     cfg = load_run_config(config_path)
@@ -53,7 +53,7 @@ def run_distillation_from_config(
                     "build_from_config succeeded.")
         return
 
-    trainer = DistillTrainer(tc, config=cfg.raw)
+    trainer = Trainer(tc, config=cfg.raw)
 
     # Attach the exact YAML used for this run to the
     # tracker (e.g., W&B Files).
@@ -62,7 +62,7 @@ def run_distillation_from_config(
         name="run.yaml",
     )
 
-    ckpt_config = DistillCheckpointConfig(
+    ckpt_config = CheckpointConfig(
         save_steps=int(tc.checkpoint.training_state_checkpointing_steps or 0),
         keep_last=int(tc.checkpoint.checkpoints_total_limit or 0),
     )
@@ -74,7 +74,7 @@ def run_distillation_from_config(
         if not callable(get_rng_generators):
             get_rng_generators = None
 
-    checkpoint_manager = DistillCheckpointManager(
+    checkpoint_manager = CheckpointManager(
         role_models=(getattr(method, '_role_models', None) or {}),
         optimizers=(getattr(method, '_optimizer_dict', None) or {}),
         lr_schedulers=(getattr(method, '_lr_scheduler_dict', None) or {}),

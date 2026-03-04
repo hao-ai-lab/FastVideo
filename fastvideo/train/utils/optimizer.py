@@ -12,7 +12,7 @@ from fastvideo.training.training_utils import (
 )
 
 if TYPE_CHECKING:
-    from fastvideo.distillation.utils.distill_config import (
+    from fastvideo.train.utils.training_config import (
         OptimizerConfig,
         TrainingLoopConfig,
     )

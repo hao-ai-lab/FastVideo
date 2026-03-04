@@ -5,12 +5,12 @@
 
 models:
   student:
-    _target_: fastvideo.distillation.models.wangame.WanGameCausalModel
+    _target_: fastvideo.train.models.wangame.WanGameCausalModel
     init_from: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
     trainable: true
 
 method:
-  _target_: fastvideo.distillation.methods.fine_tuning.dfsft.DiffusionForcingSFTMethod
+  _target_: fastvideo.train.methods.fine_tuning.dfsft.DiffusionForcingSFTMethod
   attn_kind: dense
   chunk_size: 3
   min_timestep_ratio: 0.02

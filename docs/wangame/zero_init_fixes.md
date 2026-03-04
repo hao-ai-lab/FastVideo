@@ -25,7 +25,7 @@ for new_param_name in unused_keys:
         torch.zeros_like(...)  # Zero for output projections (residual behavior)
 ```
 
-**Why:** 
+**Why:**
 - Input projections (`fc_in.weight`) need non-zero weights for gradients to flow
 - Output projections (`fc_out.weight`) should be zero-initialized for stable residual learning (ControlNet/adapter pattern)
 
@@ -36,6 +36,7 @@ for new_param_name in unused_keys:
 **Problem:** Attention mask had shape `[B, L]` but query tensor had shape `[2*B, L, ...]` (rope + prope concatenated). The prope batch (second half) had no mask coverage → output was zeros.
 
 **Fix:**
+
 ```python
 # Before (wrong):
 attention_mask = torch.ones(batch_size, seq_len, ...)  # [B, L]

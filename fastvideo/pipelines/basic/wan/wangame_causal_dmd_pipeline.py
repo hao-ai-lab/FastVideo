@@ -6,15 +6,13 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.samplers.wan import get_wan_sampler_kind
 
-from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
-                                        MatrixGameCausalDenoisingStage,
-                                        MatrixGameCausalOdeDenoisingStage,
-                                        MatrixGameImageEncodingStage,
-                                        InputValidationStage,
-                                        LatentPreparationStage,
-                                        TextEncodingStage,
-                                        TimestepPreparationStage)
-from fastvideo.pipelines.stages.image_encoding import (MatrixGameImageVAEEncodingStage)
+from fastvideo.pipelines.stages import (
+    ConditioningStage, DecodingStage, MatrixGameCausalDenoisingStage,
+    MatrixGameCausalOdeDenoisingStage, MatrixGameImageEncodingStage,
+    InputValidationStage, LatentPreparationStage, TextEncodingStage,
+    TimestepPreparationStage)
+from fastvideo.pipelines.stages.image_encoding import (
+    MatrixGameImageVAEEncodingStage)
 
 logger = init_logger(__name__)
 
@@ -59,8 +57,9 @@ class WanGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                            scheduler=self.get_module("scheduler"),
                            transformer=self.get_module("transformer", None)))
 
-        self.add_stage(stage_name="image_latent_preparation_stage",
-                       stage=MatrixGameImageVAEEncodingStage(vae=self.get_module("vae")))
+        self.add_stage(
+            stage_name="image_latent_preparation_stage",
+            stage=MatrixGameImageVAEEncodingStage(vae=self.get_module("vae")))
 
         if sampler_kind == "ode":
             denoising_stage = MatrixGameCausalOdeDenoisingStage(

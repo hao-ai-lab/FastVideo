@@ -373,6 +373,7 @@ def gan_loss_discriminator(real_logits, fake_logits):
 ### Three-level config hierarchy
 
 1. **Base config** (`fastgen/configs/config.py`):
+
    ```python
    @attrs.define
    class BaseModelConfig:

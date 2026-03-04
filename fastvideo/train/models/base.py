@@ -8,8 +8,8 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 
 if TYPE_CHECKING:
-    from fastvideo.distillation.utils.distill_config import (
-        DistillTrainingConfig, )
+    from fastvideo.train.utils.training_config import (
+        TrainingConfig, )
     from fastvideo.pipelines import TrainingBatch
 
 
@@ -30,7 +30,7 @@ class ModelBase(ABC):
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def init_preprocessors(self, training_config: DistillTrainingConfig) -> None:
+    def init_preprocessors(self, training_config: TrainingConfig) -> None:
         """Load VAE, build dataloader, seed RNGs.
 
         Called only on the student by the method's ``__init__``.

@@ -8,19 +8,19 @@
 
 models:
   student:
-    _target_: fastvideo.distillation.models.wangame.WanGameCausalModel
+    _target_: fastvideo.train.models.wangame.WanGameCausalModel
     init_from: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
     trainable: true
     init_from_checkpoint: outputs/wangame_dfsft_causal_v3/persistent/checkpoint-22000
   teacher:
-    _target_: fastvideo.distillation.models.wangame.WanGameCausalModel
+    _target_: fastvideo.train.models.wangame.WanGameCausalModel
     init_from: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
     trainable: false
     disable_custom_init_weights: true
     init_from_checkpoint: outputs/wangame_dfsft_causal_v3/persistent/checkpoint-22000
     init_from_checkpoint_role: student
   critic:
-    _target_: fastvideo.distillation.models.wangame.WanGameCausalModel
+    _target_: fastvideo.train.models.wangame.WanGameCausalModel
     init_from: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
     trainable: true
     disable_custom_init_weights: true
@@ -28,7 +28,7 @@ models:
     init_from_checkpoint_role: student
 
 method:
-  _target_: fastvideo.distillation.methods.distribution_matching.self_forcing.SelfForcingMethod
+  _target_: fastvideo.train.methods.distribution_matching.self_forcing.SelfForcingMethod
   rollout_mode: simulate
   generator_update_interval: 5
   real_score_guidance_scale: 3.5

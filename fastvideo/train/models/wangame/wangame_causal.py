@@ -11,8 +11,8 @@ import torch
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.utils import pred_noise_to_pred_video
 
-from fastvideo.distillation.models.base import CausalModelBase
-from fastvideo.distillation.models.wangame.wangame import WanGameModel
+from fastvideo.train.models.base import CausalModelBase
+from fastvideo.train.models.wangame.wangame import WanGameModel
 
 
 @dataclass(slots=True)

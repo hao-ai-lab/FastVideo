@@ -2,7 +2,7 @@
 """Wan validator (model-family validation backend).
 
 Config keys used:
-- `training` (DistillTrainingConfig):
+- `training` (TrainingConfig):
   - `data.seed`, `model_path`
   - `data.num_height`, `data.num_width`, `data.num_latent_t`
   - `distributed.tp_size`, `distributed.sp_size`,
@@ -37,17 +37,17 @@ from fastvideo.dataset.validation_dataset import (
 from fastvideo.distributed import get_sp_group, get_world_group
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
-from fastvideo.distillation.utils.moduleloader import (
+from fastvideo.train.utils.moduleloader import (
     make_inference_args, )
-from fastvideo.distillation.validators.base import (
+from fastvideo.train.validators.base import (
     ValidationRequest, )
 from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
 from fastvideo.training.trackers import DummyTracker
 from fastvideo.utils import shallow_asdict
 
 if TYPE_CHECKING:
-    from fastvideo.distillation.utils.distill_config import (
-        DistillTrainingConfig, )
+    from fastvideo.train.utils.training_config import (
+        TrainingConfig, )
 
 logger = init_logger(__name__)
 
@@ -64,7 +64,7 @@ class WanValidator:
     def __init__(
         self,
         *,
-        training_config: DistillTrainingConfig,
+        training_config: TrainingConfig,
         tracker: Any | None = None,
     ) -> None:
         self.training_config = training_config

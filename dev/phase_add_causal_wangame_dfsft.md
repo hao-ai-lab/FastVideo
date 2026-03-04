@@ -299,7 +299,7 @@ default_pipeline_config:
      - 方案 A（最小改动）：validator 在构建 validation pipeline 时，把
        `training.validation.*` 写入 `args_copy.pipeline_config.*`（validation-only）；
      - 方案 B（更干净）：把 streaming pipeline 改为优先读 `ForwardBatch.sampling_timesteps`
-       + `ValidationRequest.context_noise`，彻底摆脱 pipeline_config 依赖（工程量更大）。
+       - `ValidationRequest.context_noise`，彻底摆脱 pipeline_config 依赖（工程量更大）。
 
 7) **context noise 的“语义一致性”**（潜在坑）：
    - legacy self-forcing 里 context noise 是：

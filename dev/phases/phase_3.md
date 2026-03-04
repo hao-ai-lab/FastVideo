@@ -28,6 +28,7 @@ Phase 2.9 已完成三件关键事情（为 Phase 3 铺路）：
   - `WanAdapter.prepare_batch()` 不再读取 `training_args.simulate_generator_forward`。
 
 ### Schema v2（示意）
+
 ```yaml
 recipe:
   family: wan
@@ -186,16 +187,16 @@ Phase 3.1~3.3 已经把训练端到端跑通；但目前 `fastvideo/distillation
 - `fastvideo/distillation/families/` → `fastvideo/distillation/models/`
   - 语义：这里的 “models” 指 **模型家族/管线 contract 的集成插件**（不是 YAML 的 `roles:`）。
 
-2) **roles 容器命名统一**
+1) **roles 容器命名统一**
 - `fastvideo/distillation/bundle.py` → `fastvideo/distillation/roles.py`
 - `ModelBundle` → `RoleManager`
 
-3) **把 infra 从 models(原 families) 中解耦合**
+1) **把 infra 从 models(原 families) 中解耦合**
 - dataloader 构建逻辑从 `models/*` 抽到 `fastvideo/distillation/utils/`（或 `infra/`）
 - tracker 初始化从 `models/*` 抽到 `trainer/entrypoint`（更符合“infra 归 infra”）
 - checkpointing 相关（`fastvideo/distillation/utils/checkpoint.py`）统一放在 `utils/`（或 `infra/`）
 
-4) **减少“文件级概念数量”**
+1) **减少“文件级概念数量”**
 - 已将纯 dataclass（原 `specs.py/runtime.py`）合并到 `utils/config.py`，减少“文件级概念数量”
 - 已将 YAML loader（原 `yaml_config.py`）合并到 `utils/config.py`（schema+解析逻辑同处）
 - `registry.py + builder.py` 可以合并/重命名为更直觉的 `dispatch.py`（保留注册表与 build_runtime 的入口）

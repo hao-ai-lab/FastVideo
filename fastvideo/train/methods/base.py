@@ -8,12 +8,12 @@ from typing import Any
 
 import torch
 
-from fastvideo.distillation.models.base import ModelBase
+from fastvideo.train.models.base import ModelBase
 
 LogScalar = float | int | torch.Tensor
 
 
-class DistillMethod(torch.nn.Module, ABC):
+class TrainingMethod(torch.nn.Module, ABC):
     """Base distillation method (algorithm layer).
 
     Subclasses own their role models (student, teacher, critic, …) as
@@ -63,16 +63,14 @@ class DistillMethod(torch.nn.Module, ABC):
         *,
         current_vsa_sparsity: float = 0.0,
     ) -> tuple[
-        dict[str, torch.Tensor],
-        dict[str, Any],
-        dict[str, LogScalar],
+            dict[str, torch.Tensor],
+            dict[str, Any],
+            dict[str, LogScalar],
     ]:
         raise NotImplementedError
 
     @abstractmethod
-    def get_optimizers(
-        self, iteration: int
-    ) -> Sequence[torch.optim.Optimizer]:
+    def get_optimizers(self, iteration: int) -> Sequence[torch.optim.Optimizer]:
         raise NotImplementedError
 
     @abstractmethod

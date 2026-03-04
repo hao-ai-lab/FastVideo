@@ -22,5 +22,5 @@ def normalize_sampler_kind(
     if kind == "sde":
         return "sde"
 
-    raise ValueError(f"Unknown sampler kind at {where}: {raw!r} (expected ode|sde)")
-
+    raise ValueError(
+        f"Unknown sampler kind at {where}: {raw!r} (expected ode|sde)")

@@ -11,10 +11,10 @@ from typing import Any, TYPE_CHECKING
 
 import yaml
 
-from fastvideo.distillation.utils.distill_config import (
+from fastvideo.train.utils.training_config import (
     CheckpointConfig,
     DataConfig,
-    DistillTrainingConfig,
+    TrainingConfig,
     DistributedConfig,
     ModelTrainingConfig,
     OptimizerConfig,
@@ -33,7 +33,7 @@ class RunConfig:
 
     models: dict[str, dict[str, Any]]
     method: dict[str, Any]
-    training: DistillTrainingConfig
+    training: TrainingConfig
     validation: dict[str, Any]
     raw: dict[str, Any]
 
@@ -276,9 +276,7 @@ def _parse_pipeline_config(cfg: dict[str, Any], ) -> Any:
     return None
 
 
-def _is_nested_training_format(
-    t: dict[str, Any],
-) -> bool:
+def _is_nested_training_format(t: dict[str, Any], ) -> bool:
     """Detect whether training: uses nested sub-groups."""
     _nested_keys = {
         "distributed",
@@ -298,8 +296,8 @@ def _build_training_config_nested(
     *,
     models: dict[str, dict[str, Any]],
     pipeline_config: Any,
-) -> DistillTrainingConfig:
-    """Build DistillTrainingConfig from nested training: YAML."""
+) -> TrainingConfig:
+    """Build TrainingConfig from nested training: YAML."""
     d = dict(t.get("distributed", {}) or {})
     da = dict(t.get("data", {}) or {})
     o = dict(t.get("optimizer", {}) or {})
@@ -322,7 +320,7 @@ def _build_training_config_nested(
             if init_from is not None:
                 model_path = str(init_from)
 
-    return DistillTrainingConfig(
+    return TrainingConfig(
         distributed=DistributedConfig(
             num_gpus=num_gpus,
             tp_size=int(d.get("tp_size", 1) or 1),
@@ -393,8 +391,8 @@ def _build_training_config_flat(
     *,
     models: dict[str, dict[str, Any]],
     pipeline_config: Any,
-) -> DistillTrainingConfig:
-    """Build DistillTrainingConfig from flat training: YAML."""
+) -> TrainingConfig:
+    """Build TrainingConfig from flat training: YAML."""
     num_gpus = int(t.get("num_gpus", 1) or 1)
 
     betas_raw = t.get("betas", "0.9,0.999")
@@ -409,7 +407,7 @@ def _build_training_config_flat(
             if init_from is not None:
                 model_path = str(init_from)
 
-    return DistillTrainingConfig(
+    return TrainingConfig(
         distributed=DistributedConfig(
             num_gpus=num_gpus,
             tp_size=int(t.get("tp_size", 1) or 1),
@@ -480,8 +478,8 @@ def _build_training_config(
     *,
     models: dict[str, dict[str, Any]],
     pipeline_config: Any,
-) -> DistillTrainingConfig:
-    """Build DistillTrainingConfig from training: YAML.
+) -> TrainingConfig:
+    """Build TrainingConfig from training: YAML.
 
     Supports both nested (new) and flat (legacy) formats.
     """
@@ -489,10 +487,8 @@ def _build_training_config(
     t.pop("validation", None)
 
     if _is_nested_training_format(t):
-        return _build_training_config_nested(
-            t, models=models, pipeline_config=pipeline_config)
-    return _build_training_config_flat(
-        t, models=models, pipeline_config=pipeline_config)
+        return _build_training_config_nested(t, models=models, pipeline_config=pipeline_config)
+    return _build_training_config_flat(t, models=models, pipeline_config=pipeline_config)
 
 
 def load_run_config(path: str) -> RunConfig:

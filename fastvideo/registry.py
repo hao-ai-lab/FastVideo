@@ -32,22 +32,11 @@ from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionT2V_1_3B_Config,
 )
 from fastvideo.configs.pipelines.wan import (
-    FastWan2_1_T2V_480P_Config,
-    FastWan2_2_TI2V_5B_Config,
-    MatrixGameI2V480PConfig,
-    SelfForcingWan2_2_T2V480PConfig,
-    SelfForcingWanT2V480PConfig,
-    WANV2VConfig,
-    Wan2_2_I2V_A14B_Config,
-    Wan2_2_T2V_A14B_Config,
-    Wan2_2_TI2V_5B_Config,
-    WanI2V480PConfig,
-    WanI2V720PConfig,
-    WanT2V480PConfig,
-    WanT2V720PConfig,
-    WanGameI2V480PConfig, 
-    WanLingBotI2V480PConfig
-)
+    FastWan2_1_T2V_480P_Config, FastWan2_2_TI2V_5B_Config,
+    MatrixGameI2V480PConfig, SelfForcingWan2_2_T2V480PConfig,
+    SelfForcingWanT2V480PConfig, WANV2VConfig, Wan2_2_I2V_A14B_Config,
+    Wan2_2_T2V_A14B_Config, Wan2_2_TI2V_5B_Config, WanI2V480PConfig,
+    WanI2V720PConfig, WanT2V480PConfig, WanT2V720PConfig, WanGameI2V480PConfig)
 from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.configs.sample.cosmos import (

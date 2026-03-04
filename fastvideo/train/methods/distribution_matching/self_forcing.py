@@ -8,13 +8,13 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 import torch.distributed as dist
 
-from fastvideo.distillation.models.base import (
+from fastvideo.train.models.base import (
     CausalModelBase,
     ModelBase,
 )
-from fastvideo.distillation.methods.distribution_matching.dmd2 import (
+from fastvideo.train.methods.distribution_matching.dmd2 import (
     DMD2Method, )
-from fastvideo.distillation.utils.config import (
+from fastvideo.train.utils.config import (
     get_optional_float,
     get_optional_int,
 )

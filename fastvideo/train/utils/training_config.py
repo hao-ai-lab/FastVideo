@@ -86,7 +86,7 @@ class ModelTrainingConfig:
 
 
 @dataclass(slots=True)
-class DistillTrainingConfig:
+class TrainingConfig:
     distributed: DistributedConfig = field(default_factory=DistributedConfig)
     data: DataConfig = field(default_factory=DataConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)

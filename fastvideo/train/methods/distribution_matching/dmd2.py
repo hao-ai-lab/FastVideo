@@ -8,13 +8,13 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 import torch.nn.functional as F
 
-from fastvideo.distillation.methods.base import DistillMethod, LogScalar
-from fastvideo.distillation.models.base import ModelBase
-from fastvideo.distillation.utils.optimizer import (
+from fastvideo.train.methods.base import TrainingMethod, LogScalar
+from fastvideo.train.models.base import ModelBase
+from fastvideo.train.utils.optimizer import (
     build_optimizer_and_scheduler,
     clip_grad_norm_if_needed,
 )
-from fastvideo.distillation.utils.validation import (
+from fastvideo.train.utils.validation import (
     is_validation_enabled,
     parse_validation_dataset_file,
     parse_validation_every_steps,
@@ -26,8 +26,8 @@ from fastvideo.distillation.utils.validation import (
     parse_validation_sampler_kind,
     parse_validation_sampling_steps,
 )
-from fastvideo.distillation.validators.base import ValidationRequest
-from fastvideo.distillation.utils.config import (
+from fastvideo.train.validators.base import ValidationRequest
+from fastvideo.train.utils.config import (
     get_optional_float,
     get_optional_int,
     parse_betas,
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     pass
 
 
-class DMD2Method(DistillMethod):
+class DMD2Method(TrainingMethod):
     """DMD2 distillation algorithm (method layer).
 
     Owns role model instances directly:
@@ -100,7 +100,7 @@ class DMD2Method(DistillMethod):
             "critic": self._critic_lr_scheduler,
         }
 
-    # DistillMethod override: single_train_step
+    # TrainingMethod override: single_train_step
     def single_train_step(
         self,
         batch: dict[str, Any],
@@ -160,7 +160,7 @@ class DMD2Method(DistillMethod):
         metrics: dict[str, LogScalar] = {"update_student": float(update_student)}
         return loss_map, outputs, metrics
 
-    # DistillMethod override: backward
+    # TrainingMethod override: backward
     def backward(
         self,
         loss_map: dict[str, torch.Tensor],
@@ -198,7 +198,7 @@ class DMD2Method(DistillMethod):
             grad_accum_rounds=grad_accum_rounds,
         )
 
-    # DistillMethod override: get_optimizers
+    # TrainingMethod override: get_optimizers
     def get_optimizers(self, iteration: int) -> list[torch.optim.Optimizer]:
         optimizers: list[torch.optim.Optimizer] = []
         optimizers.append(self._critic_optimizer)
@@ -206,7 +206,7 @@ class DMD2Method(DistillMethod):
             optimizers.append(self._student_optimizer)
         return optimizers
 
-    # DistillMethod override: get_lr_schedulers
+    # TrainingMethod override: get_lr_schedulers
     def get_lr_schedulers(self, iteration: int) -> list[Any]:
         schedulers: list[Any] = []
         schedulers.append(self._critic_lr_scheduler)
@@ -214,7 +214,7 @@ class DMD2Method(DistillMethod):
             schedulers.append(self._student_lr_scheduler)
         return schedulers
 
-    # DistillMethod override: optimizers_schedulers_step
+    # TrainingMethod override: optimizers_schedulers_step
     def optimizers_schedulers_step(self, iteration: int) -> None:
         max_grad_norm = self.training_config.optimizer.max_grad_norm
         if self._should_update_student(iteration):
@@ -222,11 +222,11 @@ class DMD2Method(DistillMethod):
         clip_grad_norm_if_needed(self.critic.transformer, max_grad_norm)
         super().optimizers_schedulers_step(iteration)
 
-    # DistillTrainer hook: on_train_start
+    # Trainer hook: on_train_start
     def on_train_start(self) -> None:
         self.student.on_train_start()
 
-    # DistillTrainer hook: log_validation
+    # Trainer hook: log_validation
     def log_validation(self, iteration: int) -> None:
         validator = getattr(self, "validator", None)
         if validator is None:

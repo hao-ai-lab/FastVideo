@@ -224,11 +224,11 @@ return DistillRuntime(
 - 先在 models 内部把 `WanAdapter` 改名 `WanModel`（类名、注释、引用）
 - `ModelAdapter` 改名 `ModelBase`
 
-2) **去掉 ModelComponents**
+1) **去掉 ModelComponents**
 - model plugin 不再返回 dataclass，而是返回模型对象本身
 - dispatch 改为实例化模型对象
 
-3) **methods 参数名收敛**
+1) **methods 参数名收敛**
 - `adapter` 全部改为 `model`
 
 做到这一步就能得到一个更直觉的结构：
@@ -236,4 +236,3 @@ return DistillRuntime(
 - `models/` 里就是“模型插件对象”
 - `methods/` 只看 `model`（operation-centric）+ `bundle`（role-centric）
 - dispatch 就是 “cfg -> model -> method -> trainer”
-

@@ -1,6 +1,6 @@
 import torch
 
-from fastvideo.distillation.methods.base import DistillMethod
+from fastvideo.train.methods.base import TrainingMethod
 
 
 class _FakeScheduler:
@@ -26,7 +26,7 @@ class _FakeOptimizer(torch.optim.Optimizer):
         self.zero_grad_calls += 1
 
 
-class _ScheduleMethod(DistillMethod):
+class _ScheduleMethod(TrainingMethod):
     def __init__(self, interval: int) -> None:
         self.student_opt = _FakeOptimizer()
         self.critic_opt = _FakeOptimizer()

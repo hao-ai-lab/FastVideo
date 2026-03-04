@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from typing import Literal
 
-from fastvideo.distillation.models.base import ModelBase
+from fastvideo.train.models.base import ModelBase
 
 
 @dataclass(slots=True)
@@ -32,7 +32,8 @@ class ValidationRequest:
     output_dir: str | None = None
 
 
-class DistillValidator(ABC):
+class Validator(ABC):
+
     @abstractmethod
     def log_validation(self, step: int, *, request: ValidationRequest | None = None) -> None:
         raise NotImplementedError

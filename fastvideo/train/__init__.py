@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from fastvideo.distillation.trainer import DistillTrainer
+from fastvideo.train.trainer import Trainer
 
 __all__ = [
-    "DistillTrainer",
+    "Trainer",
 ]

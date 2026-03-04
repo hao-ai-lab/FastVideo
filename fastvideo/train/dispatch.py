@@ -5,19 +5,19 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-from fastvideo.distillation.utils.instantiate import (
+from fastvideo.train.utils.instantiate import (
     instantiate,
     resolve_target,
 )
-from fastvideo.distillation.utils.config import RunConfig
+from fastvideo.train.utils.config import RunConfig
 
 if TYPE_CHECKING:
-    from fastvideo.distillation.utils.distill_config import (
-        DistillTrainingConfig, )
-    from fastvideo.distillation.methods.base import DistillMethod
+    from fastvideo.train.utils.training_config import (
+        TrainingConfig, )
+    from fastvideo.train.methods.base import TrainingMethod
 
 
-def build_from_config(cfg: RunConfig, ) -> tuple[DistillTrainingConfig, DistillMethod, Any, int]:
+def build_from_config(cfg: RunConfig, ) -> tuple[TrainingConfig, TrainingMethod, Any, int]:
     """Build method + dataloader from a v3 run config.
 
     1. Instantiate each model in ``cfg.models`` via ``_target_``.
@@ -26,7 +26,7 @@ def build_from_config(cfg: RunConfig, ) -> tuple[DistillTrainingConfig, DistillM
        validator=...)``.
     4. Return ``(training_args, method, dataloader, start_step)``.
     """
-    from fastvideo.distillation.models.base import ModelBase
+    from fastvideo.train.models.base import ModelBase
 
     # --- 1. Build role model instances ---
     role_models: dict[str, ModelBase] = {}
@@ -38,7 +38,7 @@ def build_from_config(cfg: RunConfig, ) -> tuple[DistillTrainingConfig, DistillM
         role_models[role] = model
 
     # --- 2. Warm-start from checkpoint if needed ---
-    from fastvideo.distillation.utils.checkpoint import (
+    from fastvideo.train.utils.checkpoint import (
         maybe_warmstart_role_modules, )
 
     for role, model_cfg in cfg.models.items():

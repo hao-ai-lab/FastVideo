@@ -14,6 +14,7 @@ distillation 入口 **只接受一个真实存在的 YAML 文件路径**（不 m
 也不做路径补全/overlay）。YAML 是 single source of truth。
 
 运行方式（示意）：
+
 ```bash
 python fastvideo/training/distillation.py \
   --config /abs/path/to/examples/distillation/<phase>/xxx.yaml
@@ -117,12 +118,14 @@ loader 会注入/补全的 invariants（见 `fastvideo/distillation/utils/config
 两种写法（二选一）：
 
 1) inline（适合少量 override）：
+
 ```yaml
 default_pipeline_config:
   flow_shift: 8
 ```
 
-2) path（适合复用大型 config 文件）：
+1) path（适合复用大型 config 文件）：
+
 ```yaml
 default_pipeline_config_path: /abs/path/to/wan_1.3B_t2v_pipeline.json
 ```
@@ -139,6 +142,7 @@ default_pipeline_config_path: /abs/path/to/wan_1.3B_t2v_pipeline.json
 ## 7) `method_config`: method/algorithm 专属超参
 
 `method_config` 由 method 自己解释。以 DMD2 为例：
+
 ```yaml
 method_config:
   rollout_mode: simulate            # {simulate|data_latent}

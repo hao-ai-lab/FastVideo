@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, cast
 
-from fastvideo.distillation.utils.config import get_optional_int
+from fastvideo.train.utils.config import get_optional_int
 
 
 def is_validation_enabled(cfg: dict[str, Any]) -> bool:
@@ -15,10 +15,8 @@ def is_validation_enabled(cfg: dict[str, Any]) -> bool:
         return True
     if isinstance(enabled, bool):
         return bool(enabled)
-    raise ValueError(
-        "training.validation.enabled must be a bool when set, got "
-        f"{type(enabled).__name__}"
-    )
+    raise ValueError("training.validation.enabled must be a bool when set, got "
+                     f"{type(enabled).__name__}")
 
 
 def parse_validation_every_steps(cfg: dict[str, Any]) -> int:
@@ -33,10 +31,8 @@ def parse_validation_every_steps(cfg: dict[str, Any]) -> int:
         return int(raw)
     if isinstance(raw, str) and raw.strip():
         return int(raw)
-    raise ValueError(
-        "training.validation.every_steps must be an int, got "
-        f"{type(raw).__name__}"
-    )
+    raise ValueError("training.validation.every_steps must be an int, got "
+                     f"{type(raw).__name__}")
 
 
 def parse_validation_dataset_file(cfg: dict[str, Any]) -> str:
@@ -60,10 +56,8 @@ def parse_validation_sampling_steps(cfg: dict[str, Any]) -> list[int]:
     elif isinstance(raw, list):
         steps = [int(s) for s in raw]
     else:
-        raise ValueError(
-            "validation sampling_steps must be an int/list/str, got "
-            f"{type(raw).__name__}"
-        )
+        raise ValueError("validation sampling_steps must be an int/list/str, got "
+                         f"{type(raw).__name__}")
     return [s for s in steps if int(s) > 0]
 
 
@@ -77,10 +71,8 @@ def parse_validation_guidance_scale(cfg: dict[str, Any]) -> float | None:
         return float(raw)
     if isinstance(raw, str) and raw.strip():
         return float(raw)
-    raise ValueError(
-        "validation guidance_scale must be a number/string, got "
-        f"{type(raw).__name__}"
-    )
+    raise ValueError("validation guidance_scale must be a number/string, got "
+                     f"{type(raw).__name__}")
 
 
 def parse_validation_sampler_kind(
@@ -92,16 +84,12 @@ def parse_validation_sampler_kind(
     if raw is None:
         raw = default
     if not isinstance(raw, str):
-        raise ValueError(
-            "training.validation.sampler_kind must be a string when set, got "
-            f"{type(raw).__name__}"
-        )
+        raise ValueError("training.validation.sampler_kind must be a string when set, got "
+                         f"{type(raw).__name__}")
     kind = raw.strip().lower()
     if kind not in {"ode", "sde"}:
-        raise ValueError(
-            "training.validation.sampler_kind must be one of {ode, sde}, got "
-            f"{raw!r}"
-        )
+        raise ValueError("training.validation.sampler_kind must be one of {ode, sde}, got "
+                         f"{raw!r}")
     return cast(Literal["ode", "sde"], kind)
 
 
@@ -114,16 +102,12 @@ def parse_validation_rollout_mode(
     if raw is None:
         raw = default
     if not isinstance(raw, str):
-        raise ValueError(
-            "training.validation.rollout_mode must be a string when set, got "
-            f"{type(raw).__name__}"
-        )
+        raise ValueError("training.validation.rollout_mode must be a string when set, got "
+                         f"{type(raw).__name__}")
     mode = raw.strip().lower()
     if mode not in {"parallel", "streaming"}:
-        raise ValueError(
-            "training.validation.rollout_mode must be one of {parallel, streaming}, "
-            f"got {raw!r}"
-        )
+        raise ValueError("training.validation.rollout_mode must be one of {parallel, streaming}, "
+                         f"got {raw!r}")
     return cast(Literal["parallel", "streaming"], mode)
 
 
@@ -136,24 +120,18 @@ def parse_validation_ode_solver(
     if raw in (None, ""):
         return None
     if sampler_kind != "ode":
-        raise ValueError(
-            "training.validation.ode_solver is only valid when "
-            "training.validation.sampler_kind='ode'"
-        )
+        raise ValueError("training.validation.ode_solver is only valid when "
+                         "training.validation.sampler_kind='ode'")
     if not isinstance(raw, str):
-        raise ValueError(
-            "training.validation.ode_solver must be a string when set, got "
-            f"{type(raw).__name__}"
-        )
+        raise ValueError("training.validation.ode_solver must be a string when set, got "
+                         f"{type(raw).__name__}")
     solver = raw.strip().lower()
     if solver in {"unipc", "unipc_multistep", "multistep"}:
         return "unipc"
     if solver in {"euler", "flowmatch", "flowmatch_euler"}:
         return "euler"
-    raise ValueError(
-        "training.validation.ode_solver must be one of {unipc, euler}, got "
-        f"{raw!r}"
-    )
+    raise ValueError("training.validation.ode_solver must be one of {unipc, euler}, got "
+                     f"{raw!r}")
 
 
 def parse_validation_output_dir(cfg: dict[str, Any]) -> str | None:
@@ -161,10 +139,8 @@ def parse_validation_output_dir(cfg: dict[str, Any]) -> str | None:
     if raw is None:
         return None
     if not isinstance(raw, str):
-        raise ValueError(
-            "training.validation.output_dir must be a string when set, got "
-            f"{type(raw).__name__}"
-        )
+        raise ValueError("training.validation.output_dir must be a string when set, got "
+                         f"{type(raw).__name__}")
     return raw
 
 

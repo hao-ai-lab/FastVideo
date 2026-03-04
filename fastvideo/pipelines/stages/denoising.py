@@ -554,10 +554,8 @@ class DenoisingStage(PipelineStage):
             The prepared kwargs.
         """
         signature = inspect.signature(func)
-        if any(
-            p.kind == inspect.Parameter.VAR_KEYWORD
-            for p in signature.parameters.values()
-        ):
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD
+               for p in signature.parameters.values()):
             # If the callee accepts `**kwargs`, do not filter by signature.
             # This is important for models that route parameters internally via
             # `forward(*args, **kwargs)` (e.g. causal Wangame), where filtering
@@ -1270,20 +1268,19 @@ class SdeDenoisingStage(DenoisingStage):
             from fastvideo.models.dits.hyworld.pose import process_custom_actions
 
             viewmats, intrinsics, action_labels = process_custom_actions(
-                batch.keyboard_cond, batch.mouse_cond
-            )
+                batch.keyboard_cond, batch.mouse_cond)
             camera_action_kwargs = self.prepare_extra_func_kwargs(
                 self.transformer.forward,
                 {
-                    "viewmats": viewmats.unsqueeze(0).to(
-                        get_local_torch_device(), dtype=target_dtype
-                    ),
-                    "Ks": intrinsics.unsqueeze(0).to(
-                        get_local_torch_device(), dtype=target_dtype
-                    ),
-                    "action": action_labels.unsqueeze(0).to(
-                        get_local_torch_device(), dtype=target_dtype
-                    ),
+                    "viewmats":
+                    viewmats.unsqueeze(0).to(get_local_torch_device(),
+                                             dtype=target_dtype),
+                    "Ks":
+                    intrinsics.unsqueeze(0).to(get_local_torch_device(),
+                                               dtype=target_dtype),
+                    "action":
+                    action_labels.unsqueeze(0).to(get_local_torch_device(),
+                                                  dtype=target_dtype),
                 },
             )
         else:
@@ -1298,7 +1295,6 @@ class SdeDenoisingStage(DenoisingStage):
             },
         )
 
-
         # Get latents and embeddings
         assert batch.latents is not None, "latents must be provided"
         latents = batch.latents
@@ -1309,7 +1305,8 @@ class SdeDenoisingStage(DenoisingStage):
             prompt_embeds[0]).any(), "prompt_embeds contains nan"
         loop_timesteps = batch.sampling_timesteps
         if loop_timesteps is None:
-            legacy = getattr(fastvideo_args.pipeline_config, "dmd_denoising_steps", None)
+            legacy = getattr(fastvideo_args.pipeline_config,
+                             "dmd_denoising_steps", None)
             if legacy is not None:
                 loop_timesteps = torch.tensor(legacy, dtype=torch.long)
             else:
@@ -1318,15 +1315,12 @@ class SdeDenoisingStage(DenoisingStage):
         if loop_timesteps is None:
             raise ValueError(
                 "SDE sampling requires `batch.sampling_timesteps` (preferred) "
-                "or `pipeline_config.dmd_denoising_steps`."
-            )
+                "or `pipeline_config.dmd_denoising_steps`.")
         if not isinstance(loop_timesteps, torch.Tensor):
             loop_timesteps = torch.tensor(loop_timesteps, dtype=torch.long)
         if loop_timesteps.ndim != 1:
-            raise ValueError(
-                "Expected 1D `sampling_timesteps`, got shape "
-                f"{tuple(loop_timesteps.shape)}"
-            )
+            raise ValueError("Expected 1D `sampling_timesteps`, got shape "
+                             f"{tuple(loop_timesteps.shape)}")
         loop_timesteps = loop_timesteps.to(get_local_torch_device())
 
         # Run denoising loop
@@ -1419,11 +1413,12 @@ class SdeDenoisingStage(DenoisingStage):
                     if i < len(loop_timesteps) - 1:
                         next_timestep = loop_timesteps[i + 1] * torch.ones(
                             [1], dtype=torch.long, device=pred_video.device)
-                        noise = torch.randn(video_raw_latent_shape,
-                                            dtype=pred_video.dtype,
-                                            generator=batch.generator[0]
-                                            if isinstance(batch.generator, list)
-                                            else batch.generator).to(self.device)
+                        noise = torch.randn(
+                            video_raw_latent_shape,
+                            dtype=pred_video.dtype,
+                            generator=batch.generator[0] if isinstance(
+                                batch.generator, list) else batch.generator).to(
+                                    self.device)
                         latents = self.scheduler.add_noise(
                             pred_video.flatten(0, 1), noise.flatten(0, 1),
                             next_timestep).unflatten(0, pred_video.shape[:2])

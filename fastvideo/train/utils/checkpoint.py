@@ -19,7 +19,7 @@ from torch.distributed.checkpoint.state_dict import (
     set_model_state_dict,
 )
 
-from fastvideo.distillation.models.base import ModelBase
+from fastvideo.train.models.base import ModelBase
 from fastvideo.logger import init_logger
 from fastvideo.training.checkpointing_utils import (
     ModelWrapper,
@@ -30,14 +30,11 @@ from fastvideo.training.checkpointing_utils import (
 
 logger = init_logger(__name__)
 
-
 _CHECKPOINT_DIR_RE = re.compile(r"^checkpoint-(\d+)$")
 
 
 def _is_stateful(obj: Any) -> bool:
-    return callable(getattr(obj, "state_dict", None)) and callable(
-        getattr(obj, "load_state_dict", None)
-    )
+    return callable(getattr(obj, "state_dict", None)) and callable(getattr(obj, "load_state_dict", None))
 
 
 def _rank() -> int:
@@ -54,10 +51,8 @@ def _barrier() -> None:
 def _parse_step_from_dir(checkpoint_dir: Path) -> int:
     match = _CHECKPOINT_DIR_RE.match(checkpoint_dir.name)
     if not match:
-        raise ValueError(
-            f"Invalid checkpoint directory name {checkpoint_dir.name!r}; "
-            "expected 'checkpoint-<step>'"
-        )
+        raise ValueError(f"Invalid checkpoint directory name {checkpoint_dir.name!r}; "
+                         "expected 'checkpoint-<step>'")
     return int(match.group(1))
 
 
@@ -114,11 +109,9 @@ def _resolve_resume_checkpoint(resume_from_checkpoint: str, *, output_dir: str) 
 
     # Give a clearer error message.
     out = Path(os.path.expanduser(str(output_dir))).resolve()
-    raise ValueError(
-        "Could not resolve resume checkpoint. Expected a checkpoint directory "
-        f"named 'checkpoint-<step>' (with 'dcp/' inside), or an output_dir "
-        f"containing such checkpoints. Got: {path} (output_dir={out})."
-    )
+    raise ValueError("Could not resolve resume checkpoint. Expected a checkpoint directory "
+                     f"named 'checkpoint-<step>' (with 'dcp/' inside), or an output_dir "
+                     f"containing such checkpoints. Got: {path} (output_dir={out}).")
 
 
 def _get_dcp_role_module_names(dcp_dir: Path, role: str) -> set[str]:
@@ -147,9 +140,7 @@ def _get_dcp_role_module_names(dcp_dir: Path, role: str) -> set[str]:
     return set(str(name) for name in packed)
 
 
-def _get_dcp_role_module_param_keys(
-    dcp_dir: Path, *, role: str, module_name: str
-) -> set[str]:
+def _get_dcp_role_module_param_keys(dcp_dir: Path, *, role: str, module_name: str) -> set[str]:
     """Return inner param keys present under `roles.<role>.<module_name>.*` in a DCP checkpoint.
 
     Example checkpoint key:
@@ -170,7 +161,7 @@ def _get_dcp_role_module_param_keys(
         for key in metadata.state_dict_metadata:
             if not key.startswith(prefix):
                 continue
-            inner = key[len(prefix) :]
+            inner = key[len(prefix):]
             if inner:
                 keys.add(inner)
         packed: list[str] = sorted(keys)
@@ -253,10 +244,8 @@ def maybe_warmstart_role_modules(
         handle = bundle.role(str(role))
         modules = dict(handle.modules)
     else:
-        raise ValueError(
-            "maybe_warmstart_role_modules requires either "
-            "'model' or 'bundle'"
-        )
+        raise ValueError("maybe_warmstart_role_modules requires either "
+                         "'model' or 'bundle'")
 
     available_modules = _get_dcp_role_module_names(dcp_dir, role=str(checkpoint_role))
 
@@ -277,11 +266,9 @@ def maybe_warmstart_role_modules(
         )
 
     if not states:
-        raise ValueError(
-            f"init_from_checkpoint={resolved} does not contain any saved modules for "
-            f"checkpoint_role={checkpoint_role!r}. Available modules in checkpoint: "
-            f"{sorted(available_modules)}"
-        )
+        raise ValueError(f"init_from_checkpoint={resolved} does not contain any saved modules for "
+                         f"checkpoint_role={checkpoint_role!r}. Available modules in checkpoint: "
+                         f"{sorted(available_modules)}")
 
     if _rank() == 0:
         logger.info(
@@ -327,10 +314,8 @@ def save_role_pretrained(
             if overwrite:
                 shutil.rmtree(dst, ignore_errors=True)
             else:
-                raise FileExistsError(
-                    f"Refusing to overwrite existing directory: {dst}. "
-                    "Pass overwrite=True to replace it."
-                )
+                raise FileExistsError(f"Refusing to overwrite existing directory: {dst}. "
+                                      "Pass overwrite=True to replace it.")
 
         def _copy_or_link(src: str, dest: str) -> None:
             try:
@@ -352,26 +337,20 @@ def save_role_pretrained(
         handle = bundle.role(str(role))
         modules = dict(handle.modules)
     else:
-        raise ValueError(
-            "save_role_pretrained requires either "
-            "'model' or 'bundle'"
-        )
+        raise ValueError("save_role_pretrained requires either "
+                         "'model' or 'bundle'")
 
     if module_names is None:
         module_names = sorted(modules.keys())
 
     for module_name in module_names:
         if module_name not in modules:
-            raise KeyError(
-                f"Role {role!r} does not have module {module_name!r}. "
-                f"Available: {sorted(modules.keys())}"
-            )
+            raise KeyError(f"Role {role!r} does not have module {module_name!r}. "
+                           f"Available: {sorted(modules.keys())}")
 
         module_dir = dst / module_name
         if not module_dir.is_dir():
-            raise FileNotFoundError(
-                f"Export directory missing component dir {module_name!r}: {module_dir}"
-            )
+            raise FileNotFoundError(f"Export directory missing component dir {module_name!r}: {module_dir}")
 
         options = StateDictOptions(full_state_dict=True, cpu_offload=True)
         state_dict = get_model_state_dict(modules[module_name], options=options)
@@ -384,10 +363,8 @@ def save_role_pretrained(
             tensor_state: dict[str, torch.Tensor] = {}
             for key, value in state_dict.items():
                 if not isinstance(value, torch.Tensor):
-                    raise TypeError(
-                        f"Expected tensor in state_dict for {module_name}.{key}, "
-                        f"got {type(value).__name__}"
-                    )
+                    raise TypeError(f"Expected tensor in state_dict for {module_name}.{key}, "
+                                    f"got {type(value).__name__}")
                 tensor_state[key] = value.detach().cpu()
 
             from safetensors.torch import save_file
@@ -420,12 +397,12 @@ class _RoleModuleContainer(torch.nn.Module):
 
 
 @dataclass(slots=True)
-class DistillCheckpointConfig:
+class CheckpointConfig:
     save_steps: int
     keep_last: int
 
 
-class DistillCheckpointManager:
+class CheckpointManager:
     """Role-based checkpoint manager for distillation runtime.
 
     - Checkpoint policy lives in YAML (via TrainingArgs fields).
@@ -444,7 +421,7 @@ class DistillCheckpointManager:
         lr_schedulers: dict[str, Any] | None = None,
         dataloader: Any,
         output_dir: str,
-        config: DistillCheckpointConfig,
+        config: CheckpointConfig,
         get_rng_generators: Callable[[], dict[str, torch.Generator]] | None = None,
     ) -> None:
         self.bundle = bundle
@@ -458,7 +435,9 @@ class DistillCheckpointManager:
         self._last_saved_step: int | None = None
 
     def _build_role_states_from_model(
-        self, role: str, model: ModelBase,
+        self,
+        role: str,
+        model: ModelBase,
     ) -> dict[str, Any]:
         if not getattr(model, "_trainable", False):
             return {}
@@ -477,7 +456,8 @@ class DistillCheckpointManager:
         for name, optimizer in self.optimizers.items():
             if name.startswith(f"{role}.") or name == role:
                 states[f"optimizers.{name}"] = OptimizerWrapper(
-                    container, optimizer,
+                    container,
+                    optimizer,
                 )
 
         for name, scheduler in self.lr_schedulers.items():
@@ -487,7 +467,9 @@ class DistillCheckpointManager:
         return states
 
     def _build_role_states_from_handle(
-        self, role: str, handle: Any,
+        self,
+        role: str,
+        handle: Any,
     ) -> dict[str, Any]:
         if not handle.trainable:
             return {}
@@ -500,7 +482,8 @@ class DistillCheckpointManager:
 
         for name, optimizer in handle.optimizers.items():
             states[f"optimizers.{role}.{name}"] = OptimizerWrapper(
-                container, optimizer,
+                container,
+                optimizer,
             )
 
         for name, scheduler in handle.lr_schedulers.items():
@@ -514,14 +497,10 @@ class DistillCheckpointManager:
         # Models/opts/schedulers are role-scoped.
         if self.role_models:
             for role, model in self.role_models.items():
-                states.update(
-                    self._build_role_states_from_model(role, model)
-                )
+                states.update(self._build_role_states_from_model(role, model))
         elif self.bundle is not None:
             for role, handle in self.bundle.roles.items():
-                states.update(
-                    self._build_role_states_from_handle(role, handle)
-                )
+                states.update(self._build_role_states_from_handle(role, handle))
 
         # Dataloader (optional but recommended for exact resume).
         if _is_stateful(self.dataloader):

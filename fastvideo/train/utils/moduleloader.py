@@ -17,9 +17,8 @@ from fastvideo.utils import (
 )
 
 if TYPE_CHECKING:
-    from fastvideo.distillation.utils.distill_config import (
-        DistillTrainingConfig, )
-
+    from fastvideo.train.utils.training_config import (
+        TrainingConfig, )
 
 # ------------------------------------------------------------------
 # TrainingArgs builders (only place that creates FastVideoArgs)
@@ -27,7 +26,7 @@ if TYPE_CHECKING:
 
 
 def _make_training_args(
-    tc: DistillTrainingConfig,
+    tc: TrainingConfig,
     *,
     model_path: str,
 ) -> TrainingArgs:
@@ -54,7 +53,7 @@ def _make_training_args(
 
 
 def make_inference_args(
-    tc: DistillTrainingConfig,
+    tc: TrainingConfig,
     *,
     model_path: str,
 ) -> TrainingArgs:
@@ -75,18 +74,17 @@ def load_module_from_path(
     *,
     model_path: str,
     module_type: str,
-    training_config: DistillTrainingConfig | None = None,
+    training_config: TrainingConfig | None = None,
     disable_custom_init_weights: bool = False,
     override_transformer_cls_name: str | None = None,
 ) -> torch.nn.Module:
     """Load a single pipeline component module.
 
-    Accepts a ``DistillTrainingConfig`` and internally builds the
+    Accepts a ``TrainingConfig`` and internally builds the
     ``TrainingArgs`` needed by ``PipelineComponentLoader``.
     """
     if training_config is not None:
-        fastvideo_args: Any = _make_training_args(
-            training_config, model_path=model_path)
+        fastvideo_args: Any = _make_training_args(training_config, model_path=model_path)
     else:
         from types import SimpleNamespace
         fastvideo_args = SimpleNamespace()
@@ -113,8 +111,7 @@ def load_module_from_path(
             "override_transformer_cls_name",
             None,
         )
-        fastvideo_args.override_transformer_cls_name = str(
-            override_transformer_cls_name)
+        fastvideo_args.override_transformer_cls_name = str(override_transformer_cls_name)
 
     if disable_custom_init_weights:
         fastvideo_args._loading_teacher_critic_model = True
@@ -126,9 +123,7 @@ def load_module_from_path(
             fastvideo_args=fastvideo_args,
         )
     finally:
-        if disable_custom_init_weights and hasattr(
-                fastvideo_args,
-                "_loading_teacher_critic_model"):
+        if disable_custom_init_weights and hasattr(fastvideo_args, "_loading_teacher_critic_model"):
             del fastvideo_args._loading_teacher_critic_model
         if override_transformer_cls_name is not None:
             if old_override is None:
@@ -136,11 +131,9 @@ def load_module_from_path(
                         fastvideo_args,
                         "override_transformer_cls_name",
                 ):
-                    fastvideo_args.override_transformer_cls_name = (
-                        None)
+                    fastvideo_args.override_transformer_cls_name = (None)
             else:
-                fastvideo_args.override_transformer_cls_name = (
-                    old_override)
+                fastvideo_args.override_transformer_cls_name = (old_override)
 
     if not isinstance(module, torch.nn.Module):
         raise TypeError(f"Loaded {module_type!r} is not a "

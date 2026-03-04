@@ -20,7 +20,7 @@ __all__ = [
     "WanT2V480PConfig", "WanI2V480PConfig", "WanT2V720PConfig",
     "WanI2V720PConfig", "StepVideoT2VConfig", "SelfForcingWanT2V480PConfig",
     "CosmosConfig", "Cosmos25Config", "LTX2T2VConfig", "HYWorldConfig",
-    "SD35Config", "LingBotWorldI2V480PConfig",
-    "WanGameI2V480PConfig", "WanLingBotI2V480PConfig", "SelfForcingWanGameI2V480PConfig",
+    "SD35Config", "LingBotWorldI2V480PConfig", "WanGameI2V480PConfig",
+    "WanLingBotI2V480PConfig", "SelfForcingWanGameI2V480PConfig",
     "get_pipeline_config_cls_from_name"
 ]

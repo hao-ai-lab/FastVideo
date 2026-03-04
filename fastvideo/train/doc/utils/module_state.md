@@ -11,4 +11,3 @@
 **边界**
 - ✅ 不涉及 optimizer/scheduler（由 method 管理）。
 - ✅ 不涉及激活检查点策略（由 model plugin 在加载后按需启用）。
-

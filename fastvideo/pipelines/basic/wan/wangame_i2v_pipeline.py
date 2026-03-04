@@ -45,7 +45,8 @@ class WanGameActionImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         sampler_kind = get_wan_sampler_kind(fastvideo_args)
-        self.modules["scheduler"] = build_wan_scheduler(fastvideo_args, sampler_kind)
+        self.modules["scheduler"] = build_wan_scheduler(fastvideo_args,
+                                                        sampler_kind)
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""

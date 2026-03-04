@@ -661,8 +661,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         independent_first_frame = getattr(self.transformer,
                                           "independent_first_frame", False)
         if batch.image_latent is not None and not independent_first_frame:
-            image_context_chunk = batch.image_latent[:, :, start_index:
-                                                     start_index +
+            image_context_chunk = batch.image_latent[:, :,
+                                                     start_index:start_index +
                                                      current_num_frames, :, :]
             context_input = torch.cat(
                 [context_input,
@@ -707,7 +707,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     **ctx.image_kwargs,
                     **ctx.pos_cond_kwargs,
                 )
-                if isinstance(cache_update_ret_2, list) and len(cache_update_ret_2) > 0:
+                if isinstance(cache_update_ret_2,
+                              list) and len(cache_update_ret_2) > 0:
                     ctx.kv_cache2 = cache_update_ret_2
 
             cache_update_ret = self.transformer(
@@ -740,8 +741,7 @@ class MatrixGameCausalOdeDenoisingStage(MatrixGameCausalDenoisingStage):
         if timesteps is None:
             raise ValueError(
                 "MatrixGameCausalOdeDenoisingStage requires batch.timesteps. "
-                "Make sure TimestepPreparationStage runs before this stage."
-            )
+                "Make sure TimestepPreparationStage runs before this stage.")
 
         target_dtype = torch.bfloat16
         autocast_enabled = (target_dtype != torch.float32
@@ -858,8 +858,8 @@ class MatrixGameCausalOdeDenoisingStage(MatrixGameCausalDenoisingStage):
             autocast_enabled=autocast_enabled,
             boundary_timestep=boundary_timestep,
             high_noise_timesteps=None,
-            context_noise=getattr(fastvideo_args.pipeline_config, "context_noise",
-                                  0),
+            context_noise=getattr(fastvideo_args.pipeline_config,
+                                  "context_noise", 0),
             image_kwargs=image_kwargs,
             pos_cond_kwargs=pos_cond_kwargs,
             viewmats_full=viewmats_full,
@@ -939,18 +939,24 @@ class MatrixGameCausalOdeDenoisingStage(MatrixGameCausalDenoisingStage):
         # between independent trajectories.
         if hasattr(scheduler, "model_outputs") and hasattr(scheduler, "config"):
             try:
-                solver_order = int(getattr(scheduler.config, "solver_order", 0) or 0)
+                solver_order = int(
+                    getattr(scheduler.config, "solver_order", 0) or 0)
             except Exception:
                 solver_order = 0
             if solver_order > 0:
-                scheduler.model_outputs = [None] * solver_order  # type: ignore[attr-defined]
+                scheduler.model_outputs = [
+                    None
+                ] * solver_order  # type: ignore[attr-defined]
         if hasattr(scheduler, "timestep_list") and hasattr(scheduler, "config"):
             try:
-                solver_order = int(getattr(scheduler.config, "solver_order", 0) or 0)
+                solver_order = int(
+                    getattr(scheduler.config, "solver_order", 0) or 0)
             except Exception:
                 solver_order = 0
             if solver_order > 0:
-                scheduler.timestep_list = [None] * solver_order  # type: ignore[attr-defined]
+                scheduler.timestep_list = [
+                    None
+                ] * solver_order  # type: ignore[attr-defined]
         if hasattr(scheduler, "lower_order_nums"):
             scheduler.lower_order_nums = 0  # type: ignore[attr-defined]
         if hasattr(scheduler, "last_sample"):
@@ -987,8 +993,7 @@ class MatrixGameCausalOdeDenoisingStage(MatrixGameCausalDenoisingStage):
             latent_model_input = current_latents.to(ctx.target_dtype)
 
             independent_first_frame = getattr(self.transformer,
-                                              "independent_first_frame",
-                                              False)
+                                              "independent_first_frame", False)
             if batch.image_latent is not None and not independent_first_frame:
                 image_latent_chunk = batch.image_latent[:, :, start_index:
                                                         start_index +
@@ -998,10 +1003,8 @@ class MatrixGameCausalOdeDenoisingStage(MatrixGameCausalDenoisingStage):
                     image_latent_chunk.to(ctx.target_dtype)
                 ],
                                                dim=1)
-            elif (
-                batch.image_latent is not None and independent_first_frame
-                and start_index == 0
-            ):
+            elif (batch.image_latent is not None and independent_first_frame
+                  and start_index == 0):
                 latent_model_input = torch.cat([
                     latent_model_input,
                     batch.image_latent.to(ctx.target_dtype)
@@ -1054,8 +1057,10 @@ class MatrixGameCausalOdeDenoisingStage(MatrixGameCausalDenoisingStage):
 
                 if self.use_action_module and current_model == self.transformer:
                     model_kwargs.update({
-                        "kv_cache_mouse": ctx.kv_cache_mouse,
-                        "kv_cache_keyboard": ctx.kv_cache_keyboard,
+                        "kv_cache_mouse":
+                        ctx.kv_cache_mouse,
+                        "kv_cache_keyboard":
+                        ctx.kv_cache_keyboard,
                     })
                     model_kwargs.update(action_kwargs)
 

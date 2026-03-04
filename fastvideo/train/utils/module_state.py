@@ -14,4 +14,3 @@ def apply_trainable(module: torch.nn.Module, *, trainable: bool) -> torch.nn.Mod
     else:
         module.eval()
     return module
-

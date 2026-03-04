@@ -664,6 +664,7 @@ Phase 3.1 的 `recipe/method_config` 对齐。
   - Wan 侧由 `WanAdapter` 实现该 contract；若未来出现 family-specific 分支，优先在 adapter 内部消化而不是膨胀 method
 
 Finetune 的 config（示意，schema v2）：
+
 ```yaml
 recipe: {family: wan, method: finetune}
 roles:
