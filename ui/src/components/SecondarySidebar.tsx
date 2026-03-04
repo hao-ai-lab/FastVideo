@@ -61,6 +61,7 @@ export default function SecondarySidebar({ job, onClose }: SecondarySidebarProps
 
     return () => {
       isMounted = false;
+      isPollingRef.current = false;  // Allow re-run after Strict Mode cleanup
       if (pollInterval) clearInterval(pollInterval);
     };
   }, [job.id, job.status]);
