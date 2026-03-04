@@ -33,6 +33,11 @@ method:
   generator_update_interval: 5
   real_score_guidance_scale: 3.5
 
+  # Critic / fake-score optimizer
+  fake_score_learning_rate: 8.0e-6
+  fake_score_betas: [0.0, 0.999]
+  fake_score_lr_scheduler: constant
+
   warp_denoising_step: true
   dmd_denoising_steps: [1000,750,500,250]
 
@@ -87,11 +92,6 @@ training:
   lr_scheduler: constant
   lr_warmup_steps: 0
   max_grad_norm: 1.0
-
-  # Optimizer (critic / fake-score)
-  fake_score_learning_rate: 8.0e-6
-  fake_score_betas: [0.0, 0.999]
-  fake_score_lr_scheduler: constant
 
   # Distillation knobs
   training_cfg_rate: 0.0

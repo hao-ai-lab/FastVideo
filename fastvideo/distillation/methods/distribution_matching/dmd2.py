@@ -370,21 +370,25 @@ class DMD2Method(DistillMethod):
             scheduler_name=student_sched,
         )
 
-        # Critic optimizer/scheduler.
-        critic_lr = float(
-            getattr(training_args, "fake_score_learning_rate", 0.0) or 0.0)
+        # Critic optimizer/scheduler — read from method config.
+        critic_lr_raw = get_optional_float(
+            self.method_config,
+            "fake_score_learning_rate",
+            where="method.fake_score_learning_rate",
+        )
+        critic_lr = float(critic_lr_raw or 0.0)
         if critic_lr == 0.0:
             critic_lr = student_lr
 
-        critic_betas_raw = getattr(training_args, "fake_score_betas", None)
+        critic_betas_raw = self.method_config.get("fake_score_betas", None)
         if critic_betas_raw is None:
             critic_betas_raw = getattr(training_args, "betas", None)
         critic_betas = parse_betas(critic_betas_raw,
-                                   where="training.fake_score_betas")
+                                   where="method.fake_score_betas")
 
-        critic_sched = str(
-            getattr(training_args, "fake_score_lr_scheduler", None)
-            or student_sched)
+        critic_sched_raw = self.method_config.get("fake_score_lr_scheduler",
+                                                  None)
+        critic_sched = str(critic_sched_raw or student_sched)
         critic_params = [
             p for p in self.critic.transformer.parameters() if p.requires_grad
         ]
