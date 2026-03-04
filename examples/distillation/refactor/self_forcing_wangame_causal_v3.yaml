@@ -102,7 +102,7 @@ training:
   weight_only_checkpointing_steps: 1000
 
   # Tracking
-  tracker_project_name: distillation_wangame
+  tracker_project_name: distillation_wangame_r
   wandb_run_name: wangame_self_forcing_4steps_v3
 
 validation:
