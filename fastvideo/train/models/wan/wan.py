@@ -66,6 +66,7 @@ class WanModel(ModelBase):
         self,
         *,
         init_from: str,
+        training_config: TrainingConfig,
         trainable: bool = True,
         disable_custom_init_weights: bool = False,
         flow_shift: float = 3.0,
@@ -78,6 +79,7 @@ class WanModel(ModelBase):
         transformer = load_module_from_path(
             model_path=self._init_from,
             module_type="transformer",
+            training_config=training_config,
             disable_custom_init_weights=(disable_custom_init_weights),
             override_transformer_cls_name=("WanTransformer3DModel"),
         )
@@ -93,7 +95,7 @@ class WanModel(ModelBase):
 
         # Filled by init_preprocessors (student only).
         self.vae: Any = None
-        self.training_config: TrainingConfig | None = (None)
+        self.training_config: TrainingConfig = training_config
         self.dataloader: Any = None
         self.validator: Any = None
         self.start_step: int = 0
@@ -119,8 +121,6 @@ class WanModel(ModelBase):
     # ------------------------------------------------------------------
 
     def init_preprocessors(self, training_config: TrainingConfig) -> None:
-        self.training_config = training_config
-
         self.vae = load_module_from_path(
             model_path=str(training_config.model_path),
             module_type="vae",

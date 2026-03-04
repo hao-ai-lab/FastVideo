@@ -31,7 +31,8 @@ def build_from_config(cfg: RunConfig, ) -> tuple[TrainingConfig, TrainingMethod,
     # --- 1. Build role model instances ---
     role_models: dict[str, ModelBase] = {}
     for role, model_cfg in cfg.models.items():
-        model = instantiate(model_cfg)
+        model = instantiate(
+            model_cfg, training_config=cfg.training)
         if not isinstance(model, ModelBase):
             raise TypeError(f"models.{role}._target_ must resolve to a "
                             f"ModelBase subclass, got {type(model).__name__}")

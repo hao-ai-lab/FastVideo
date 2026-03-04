@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 
@@ -13,6 +13,10 @@ from fastvideo.models.utils import pred_noise_to_pred_video
 
 from fastvideo.train.models.base import CausalModelBase
 from fastvideo.train.models.wangame.wangame import WanGameModel
+
+if TYPE_CHECKING:
+    from fastvideo.train.utils.training_config import (
+        TrainingConfig, )
 
 
 @dataclass(slots=True)
@@ -36,6 +40,7 @@ class WanGameCausalModel(WanGameModel, CausalModelBase):
         self,
         *,
         init_from: str,
+        training_config: TrainingConfig,
         trainable: bool = True,
         disable_custom_init_weights: bool = False,
         flow_shift: float = 3.0,
@@ -47,6 +52,7 @@ class WanGameCausalModel(WanGameModel, CausalModelBase):
             disable_custom_init_weights=disable_custom_init_weights,
             flow_shift=flow_shift,
             enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
+            training_config=training_config,
         )
         self._streaming_caches: dict[tuple[int, str], _StreamingCaches] = {}
 

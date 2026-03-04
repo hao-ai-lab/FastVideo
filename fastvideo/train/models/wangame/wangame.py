@@ -62,11 +62,11 @@ class WanGameModel(ModelBase):
         self,
         *,
         init_from: str,
+        training_config: TrainingConfig,
         trainable: bool = True,
         disable_custom_init_weights: bool = False,
         flow_shift: float = 3.0,
-        enable_gradient_checkpointing_type: str
-        | None = None,
+        enable_gradient_checkpointing_type: str | None = None,
     ) -> None:
         self._init_from = str(init_from)
         self._trainable = bool(trainable)
@@ -76,13 +76,14 @@ class WanGameModel(ModelBase):
             trainable=self._trainable,
             disable_custom_init_weights=(disable_custom_init_weights),
             enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
+            training_config=training_config,
         )
 
         self.noise_scheduler = (FlowMatchEulerDiscreteScheduler(shift=float(flow_shift)))
 
         # Filled by init_preprocessors (student only).
         self.vae: Any = None
-        self.training_config: TrainingConfig | None = (None)
+        self.training_config: TrainingConfig = training_config
         self.dataloader: Any = None
         self.validator: Any = None
         self.start_step: int = 0
@@ -106,10 +107,12 @@ class WanGameModel(ModelBase):
         trainable: bool,
         disable_custom_init_weights: bool,
         enable_gradient_checkpointing_type: str | None,
+        training_config: TrainingConfig,
     ) -> torch.nn.Module:
         transformer = load_module_from_path(
             model_path=init_from,
             module_type="transformer",
+            training_config=training_config,
             disable_custom_init_weights=(disable_custom_init_weights),
             override_transformer_cls_name=(self._transformer_cls_name),
         )
@@ -127,8 +130,6 @@ class WanGameModel(ModelBase):
 
     def init_preprocessors(self, training_config: TrainingConfig) -> None:
         """Load VAE, build dataloader, seed RNGs."""
-        self.training_config = training_config
-
         self.vae = load_module_from_path(
             model_path=str(training_config.model_path),
             module_type="vae",

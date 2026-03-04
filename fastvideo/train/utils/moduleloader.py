@@ -74,7 +74,7 @@ def load_module_from_path(
     *,
     model_path: str,
     module_type: str,
-    training_config: TrainingConfig | None = None,
+    training_config: TrainingConfig,
     disable_custom_init_weights: bool = False,
     override_transformer_cls_name: str | None = None,
 ) -> torch.nn.Module:
@@ -83,11 +83,8 @@ def load_module_from_path(
     Accepts a ``TrainingConfig`` and internally builds the
     ``TrainingArgs`` needed by ``PipelineComponentLoader``.
     """
-    if training_config is not None:
-        fastvideo_args: Any = _make_training_args(training_config, model_path=model_path)
-    else:
-        from types import SimpleNamespace
-        fastvideo_args = SimpleNamespace()
+    fastvideo_args: Any = _make_training_args(
+        training_config, model_path=model_path)
 
     local_model_path = maybe_download_model(model_path)
     config = verify_model_config_and_directory(local_model_path)
