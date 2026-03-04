@@ -26,14 +26,44 @@ class _FakeOptimizer(torch.optim.Optimizer):
         self.zero_grad_calls += 1
 
 
+class _FakeModel:
+    transformer = None
+
+    def on_train_start(self) -> None:
+        pass
+
+    def get_rng_generators(self) -> dict:
+        return {}
+
+
+class _FakeCfg:
+    class training:
+        pass
+
+    method: dict = {}
+    validation: dict = {}
+
+
 class _ScheduleMethod(TrainingMethod):
     def __init__(self, interval: int) -> None:
         self.student_opt = _FakeOptimizer()
         self.critic_opt = _FakeOptimizer()
         self.student_sched = _FakeScheduler()
         self.critic_sched = _FakeScheduler()
-        super().__init__(role_models={})
+        cfg = _FakeCfg()
+        cfg.method = {}
+        cfg.validation = {}
+        role_models = {"student": _FakeModel()}  # type: ignore[dict-item]
+        super().__init__(cfg=cfg, role_models=role_models)
         self.interval = interval
+
+    @property
+    def _optimizer_dict(self):  # noqa: ANN201
+        return {"student": self.student_opt, "critic": self.critic_opt}
+
+    @property
+    def _lr_scheduler_dict(self):  # noqa: ANN201
+        return {"student": self.student_sched, "critic": self.critic_sched}
 
     def _update_student(self, iteration: int) -> bool:
         return iteration % self.interval == 0

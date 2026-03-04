@@ -59,7 +59,7 @@ class _ValidationStepResult:
 
 
 class WanGameValidator:
-    """Standalone validator for WanGame distillation."""
+    """Standalone validator for WanGame training."""
 
     def __init__(
         self,

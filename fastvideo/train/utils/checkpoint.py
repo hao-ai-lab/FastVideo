@@ -403,7 +403,7 @@ class CheckpointConfig:
 
 
 class CheckpointManager:
-    """Role-based checkpoint manager for distillation runtime.
+    """Role-based checkpoint manager for training runtime.
 
     - Checkpoint policy lives in YAML (via TrainingArgs fields).
     - Resume path is typically provided via CLI (``--resume-from-checkpoint``).

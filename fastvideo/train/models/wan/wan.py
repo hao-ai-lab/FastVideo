@@ -175,7 +175,7 @@ class WanModel(ModelBase):
         seed = self.training_config.data.seed
         if seed is None:
             raise ValueError("training.data.seed must be set "
-                             "for distillation")
+                             "for training")
 
         global_rank = int(getattr(self.world_group, "rank", 0))
         sp_world_size = int(self.training_config.distributed.sp_size or 1)

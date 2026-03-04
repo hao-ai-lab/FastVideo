@@ -11,6 +11,7 @@ import torch
 from tqdm.auto import tqdm
 
 from fastvideo.distributed import get_sp_group, get_world_group
+from fastvideo.train.methods.base import TrainingMethod
 from fastvideo.train.utils.tracking import build_tracker
 
 if TYPE_CHECKING:
@@ -80,7 +81,7 @@ class Trainer:
 
     def run(
         self,
-        method: torch.nn.Module,
+        method: TrainingMethod,
         *,
         dataloader: Any,
         max_steps: int,
@@ -93,11 +94,8 @@ class Trainer:
             int(tc.loop.gradient_accumulation_steps or 1),
         )
 
-        if hasattr(method, "set_tracker"):
-            method.set_tracker(self.tracker)  # type: ignore[attr-defined]
-
-        if hasattr(method, "on_train_start"):
-            method.on_train_start()  # type: ignore[attr-defined]
+        method.set_tracker(self.tracker)
+        method.on_train_start()
 
         resume_from_checkpoint = (tc.checkpoint.resume_from_checkpoint or "")
         if checkpoint_manager is not None:
@@ -105,11 +103,8 @@ class Trainer:
             if resumed_step is not None:
                 start_step = int(resumed_step)
 
-        if hasattr(method, "log_validation"):
-            method.log_validation(start_step)  # type: ignore[attr-defined]
-
-        if hasattr(method, "optimizers_zero_grad"):
-            method.optimizers_zero_grad(start_step)  # type: ignore[attr-defined]
+        method.log_validation(start_step)
+        method.optimizers_zero_grad(start_step)
 
         data_stream = self._iter_dataloader(dataloader)
         progress = tqdm(
@@ -126,25 +121,17 @@ class Trainer:
             metric_sums: dict[str, float] = {}
             for accum_iter in range(grad_accum):
                 batch = next(data_stream)
-                if hasattr(method, "single_train_step"):
-                    loss_map, outputs, step_metrics = method.single_train_step(  # type: ignore[attr-defined]
-                        batch,
-                        step,
-                        current_vsa_sparsity=(current_vsa_sparsity),
-                    )
-                else:
-                    raise AttributeError("method must implement "
-                                         "single_train_step()")
+                loss_map, outputs, step_metrics = method.single_train_step(
+                    batch,
+                    step,
+                    current_vsa_sparsity=(current_vsa_sparsity),
+                )
 
-                if hasattr(method, "backward"):
-                    method.backward(  # type: ignore[attr-defined]
-                        loss_map,
-                        outputs,
-                        grad_accum_rounds=grad_accum,
-                    )
-                else:
-                    total_loss = (loss_map["total_loss"] / grad_accum)
-                    total_loss.backward()
+                method.backward(
+                    loss_map,
+                    outputs,
+                    grad_accum_rounds=grad_accum,
+                )
 
                 for k, v in loss_map.items():
                     if isinstance(v, torch.Tensor):
@@ -161,10 +148,8 @@ class Trainer:
                                f".metrics[{k!r}]"),
                     )
 
-            if hasattr(method, "optimizers_schedulers_step"):
-                method.optimizers_schedulers_step(step)  # type: ignore[attr-defined]
-            if hasattr(method, "optimizers_zero_grad"):
-                method.optimizers_zero_grad(step)  # type: ignore[attr-defined]
+            method.optimizers_schedulers_step(step)
+            method.optimizers_zero_grad(step)
 
             metrics = {k: v / grad_accum for k, v in loss_sums.items()}
             metrics.update({k: v / grad_accum for k, v in metric_sums.items()})
@@ -176,8 +161,7 @@ class Trainer:
             if checkpoint_manager is not None:
                 checkpoint_manager.maybe_save(step)
 
-            if hasattr(method, "log_validation"):
-                method.log_validation(step)  # type: ignore[attr-defined]
+            method.log_validation(step)
 
         if checkpoint_manager is not None:
             checkpoint_manager.save_final(max_steps)

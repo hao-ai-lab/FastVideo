@@ -59,7 +59,7 @@ class _ValidationStepResult:
 
 
 class WanValidator:
-    """Phase 2 standalone validator for Wan distillation."""
+    """Phase 2 standalone validator for Wan training."""
 
     def __init__(
         self,

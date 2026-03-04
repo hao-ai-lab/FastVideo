@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Typed distillation training config — replaces TrainingArgs."""
+"""Typed training config — replaces TrainingArgs."""
 
 from __future__ import annotations
 

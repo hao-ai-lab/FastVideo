@@ -12,14 +12,14 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 
-def run_distillation_from_config(
+def run_training_from_config(
     config_path: str,
     *,
     dry_run: bool = False,
     resume_from_checkpoint: str | None = None,
     override_output_dir: str | None = None,
 ) -> None:
-    """YAML-only distillation entrypoint (schema v2)."""
+    """YAML-only training entrypoint (schema v2)."""
 
     from fastvideo.distributed import (
         maybe_init_distributed_environment_and_model_parallel, )
@@ -67,21 +67,14 @@ def run_distillation_from_config(
         keep_last=int(tc.checkpoint.checkpoints_total_limit or 0),
     )
 
-    get_rng_generators = getattr(method, "get_rng_generators", None)
-    if not callable(get_rng_generators):
-        model = getattr(method, "model", None)
-        get_rng_generators = getattr(model, "get_rng_generators", None)
-        if not callable(get_rng_generators):
-            get_rng_generators = None
-
     checkpoint_manager = CheckpointManager(
-        role_models=(getattr(method, '_role_models', None) or {}),
-        optimizers=(getattr(method, '_optimizer_dict', None) or {}),
-        lr_schedulers=(getattr(method, '_lr_scheduler_dict', None) or {}),
+        role_models=method._role_models,
+        optimizers=method._optimizer_dict,
+        lr_schedulers=method._lr_scheduler_dict,
         dataloader=dataloader,
         output_dir=tc.checkpoint.output_dir,
         config=ckpt_config,
-        get_rng_generators=get_rng_generators,
+        get_rng_generators=method.get_rng_generators,
     )
 
     trainer.run(
@@ -99,16 +92,16 @@ def main(args: Any) -> None:
     resume_from_checkpoint = getattr(args, "resume_from_checkpoint", None)
     override_output_dir = getattr(args, "override_output_dir", None)
     logger.info(
-        "Starting distillation from config=%s",
+        "Starting training from config=%s",
         config_path,
     )
-    run_distillation_from_config(
+    run_training_from_config(
         config_path,
         dry_run=dry_run,
         resume_from_checkpoint=resume_from_checkpoint,
         override_output_dir=override_output_dir,
     )
-    logger.info("Distillation completed")
+    logger.info("Training completed")
 
 
 if __name__ == "__main__":
@@ -118,7 +111,7 @@ if __name__ == "__main__":
         "--config",
         type=str,
         required=True,
-        help=("Path to distillation YAML config "
+        help=("Path to training YAML config "
               "(schema v2)."),
     )
     parser.add_argument(
