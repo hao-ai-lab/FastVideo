@@ -7,6 +7,8 @@ export interface DefaultOptions {
   height: number;
   width: number;
   guidanceScale: number;
+  guidanceRescale: number;
+  fps: number;
   seed: number;
   numGpus: number;
   ditCpuOffload: boolean;
@@ -27,6 +29,8 @@ export const DEFAULT_OPTIONS: DefaultOptions = {
   height: 480,
   width: 832,
   guidanceScale: 5.0,
+  guidanceRescale: 0,
+  fps: 24,
   seed: 1024,
   numGpus: 1,
   ditCpuOffload: false,

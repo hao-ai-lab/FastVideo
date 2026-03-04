@@ -19,11 +19,14 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
   const [models, setModels] = useState<Model[]>([]);
   const [modelId, setModelId] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [negativePrompt, setNegativePrompt] = useState("");
   const [numInferenceSteps, setNumInferenceSteps] = useState(defaultOptions.numInferenceSteps);
   const [numFrames, setNumFrames] = useState(defaultOptions.numFrames);
   const [height, setHeight] = useState(defaultOptions.height);
   const [width, setWidth] = useState(defaultOptions.width);
   const [guidanceScale, setGuidanceScale] = useState(defaultOptions.guidanceScale);
+  const [guidanceRescale, setGuidanceRescale] = useState(defaultOptions.guidanceRescale);
+  const [fps, setFps] = useState(defaultOptions.fps);
   const [seed, setSeed] = useState(defaultOptions.seed);
   const [numGpus, setNumGpus] = useState(defaultOptions.numGpus);
   const [ditCpuOffload, setDitCpuOffload] = useState<boolean>(defaultOptions.ditCpuOffload);
@@ -72,6 +75,8 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
       setHeight(defaultOptions.height);
       setWidth(defaultOptions.width);
       setGuidanceScale(defaultOptions.guidanceScale);
+      setGuidanceRescale(defaultOptions.guidanceRescale);
+      setFps(defaultOptions.fps);
       setSeed(defaultOptions.seed);
       setNumGpus(defaultOptions.numGpus);
       setDitCpuOffload(defaultOptions.ditCpuOffload);
@@ -93,11 +98,14 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
       await createJob({
         model_id: modelId,
         prompt,
+        negative_prompt: negativePrompt,
         num_inference_steps: numInferenceSteps,
         num_frames: numFrames,
         height,
         width,
         guidance_scale: guidanceScale,
+        guidance_rescale: guidanceRescale,
+        fps,
         seed,
         num_gpus: numGpus,
         dit_cpu_offload: ditCpuOffload,
@@ -112,11 +120,14 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
       });
       setModelId(defaultOptions.defaultModelId);
       setPrompt("");
+      setNegativePrompt("");
       setNumInferenceSteps(defaultOptions.numInferenceSteps);
       setNumFrames(defaultOptions.numFrames);
       setHeight(defaultOptions.height);
       setWidth(defaultOptions.width);
       setGuidanceScale(defaultOptions.guidanceScale);
+      setGuidanceRescale(defaultOptions.guidanceRescale);
+      setFps(defaultOptions.fps);
       setSeed(defaultOptions.seed);
       setNumGpus(defaultOptions.numGpus);
       setDitCpuOffload(defaultOptions.ditCpuOffload);
@@ -142,11 +153,14 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
     if (!isSubmitting) {
       setModelId(defaultOptions.defaultModelId);
       setPrompt("");
+      setNegativePrompt("");
       setNumInferenceSteps(defaultOptions.numInferenceSteps);
       setNumFrames(defaultOptions.numFrames);
       setHeight(defaultOptions.height);
       setWidth(defaultOptions.width);
       setGuidanceScale(defaultOptions.guidanceScale);
+      setGuidanceRescale(defaultOptions.guidanceRescale);
+      setFps(defaultOptions.fps);
       setSeed(defaultOptions.seed);
       setNumGpus(defaultOptions.numGpus);
       setDitCpuOffload(defaultOptions.ditCpuOffload);
@@ -212,6 +226,18 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
                 disabled={isSubmitting}
               />
             </div>
+            <div className={formStyles.formRow}>
+              <label htmlFor="modal-negative-prompt">Negative Prompt</label>
+              <textarea
+                name="negativePrompt"
+                id="modal-negative-prompt"
+                rows={2}
+                value={negativePrompt}
+                onChange={(e) => setNegativePrompt(e.target.value)}
+                placeholder="Optional: things to avoid in the output…"
+                disabled={isSubmitting}
+              />
+            </div>
 
             {/* Advanced settings (collapsed by default) */}
             <details className={formStyles.advancedSettings}>
@@ -274,6 +300,33 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
                     onChange={(e) => setGuidanceScale(parseFloat(e.target.value))}
                     min={0}
                     step={0.1}
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-guidance-rescale" title="Guidance rescale factor (0 = disabled)">
+                    Guidance Rescale
+                  </label>
+                  <input
+                    id="modal-guidance-rescale"
+                    type="number"
+                    value={guidanceRescale}
+                    onChange={(e) => setGuidanceRescale(parseFloat(e.target.value))}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-fps">FPS</label>
+                  <input
+                    id="modal-fps"
+                    type="number"
+                    value={fps}
+                    onChange={(e) => setFps(parseInt(e.target.value, 10))}
+                    min={1}
+                    max={60}
                     disabled={isSubmitting}
                   />
                 </div>

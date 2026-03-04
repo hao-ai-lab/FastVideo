@@ -18,11 +18,14 @@ function getApiBaseUrl(): string {
 export interface CreateJobRequest {
     model_id: string;
     prompt: string;
+    negative_prompt?: string;
     num_inference_steps?: number;
     num_frames?: number;
     height?: number;
     width?: number;
     guidance_scale?: number;
+    guidance_rescale?: number;
+    fps?: number;
     seed?: number;
     num_gpus?: number;
     dit_cpu_offload?: boolean | null;
@@ -49,6 +52,8 @@ export interface Settings {
     height: number;
     width: number;
     guidanceScale: number;
+    guidanceRescale: number;
+    fps: number;
     seed: number;
     numGpus: number;
     ditCpuOffload: boolean;

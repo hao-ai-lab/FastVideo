@@ -23,6 +23,8 @@ DEFAULT_SETTINGS = {
     "height": 480,
     "width": 832,
     "guidance_scale": 5.0,
+    "guidance_rescale": 0.0,
+    "fps": 24,
     "seed": 1024,
     "num_gpus": 1,
     "dit_cpu_offload": 0,
@@ -81,6 +83,15 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(
         conn, "jobs", "sp_size", "INTEGER", "-1"
     )
+    _add_column_if_missing(
+        conn, "jobs", "negative_prompt", "TEXT", "''"
+    )
+    _add_column_if_missing(
+        conn, "jobs", "guidance_rescale", "REAL", "0.0"
+    )
+    _add_column_if_missing(
+        conn, "jobs", "fps", "INTEGER", "24"
+    )
     # Settings table
     _add_column_if_missing(
         conn, "settings", "vae_cpu_offload", "INTEGER", "0"
@@ -99,6 +110,12 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     )
     _add_column_if_missing(
         conn, "settings", "sp_size", "INTEGER", "-1"
+    )
+    _add_column_if_missing(
+        conn, "settings", "guidance_rescale", "REAL", "0.0"
+    )
+    _add_column_if_missing(
+        conn, "settings", "fps", "INTEGER", "24"
     )
 
 
@@ -196,11 +213,11 @@ class Database:
             INSERT INTO jobs (
                 id, model_id, prompt, status, created_at, started_at, finished_at,
                 error, output_path, log_file_path, num_inference_steps, num_frames,
-                height, width, guidance_scale, seed, num_gpus,
+                height, width, guidance_scale, guidance_rescale, fps, seed, num_gpus,
                 dit_cpu_offload, text_encoder_cpu_offload, vae_cpu_offload,
                 image_encoder_cpu_offload, use_fsdp_inference, enable_torch_compile,
-                vsa_sparsity, tp_size, sp_size
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                vsa_sparsity, tp_size, sp_size, negative_prompt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job["id"],
@@ -218,6 +235,8 @@ class Database:
                 job.get("height", 480),
                 job.get("width", 832),
                 job.get("guidance_scale", 5.0),
+                job.get("guidance_rescale", 0.0),
+                job.get("fps", 24),
                 job.get("seed", 1024),
                 job.get("num_gpus", 1),
                 1 if job.get("dit_cpu_offload") else 0,
@@ -229,6 +248,7 @@ class Database:
                 job.get("vsa_sparsity", 0.0),
                 job.get("tp_size", -1),
                 job.get("sp_size", -1),
+                job.get("negative_prompt", ""),
             ),
         )
         self._commit()
@@ -302,12 +322,14 @@ class Database:
             ("vsa_sparsity", "vsaSparsity", 0.0),
             ("tp_size", "tpSize", -1),
             ("sp_size", "spSize", -1),
+            ("guidance_rescale", "guidanceRescale", 0.0),
+            ("fps", "fps", 24),
         ]:
             if col in row.keys():
                 v = row[col]
                 result[key] = (
                     bool(v) if col.endswith("_offload") or col == "enable_torch_compile"
-                    else (float(v) if col == "vsa_sparsity" else int(v))
+                    else (float(v) if col in ("vsa_sparsity", "guidance_rescale") else int(v))
                 )
             else:
                 result[key] = default
@@ -323,6 +345,8 @@ class Database:
             "height": "height",
             "width": "width",
             "guidanceScale": "guidance_scale",
+            "guidanceRescale": "guidance_rescale",
+            "fps": "fps",
             "seed": "seed",
             "numGpus": "num_gpus",
             "ditCpuOffload": "dit_cpu_offload",
@@ -370,11 +394,21 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "height": row["height"],
         "width": row["width"],
         "guidance_scale": row["guidance_scale"],
+        "guidance_rescale": (
+            float(row["guidance_rescale"])
+            if "guidance_rescale" in row.keys()
+            else 0.0
+        ),
+        "fps": int(row["fps"]) if "fps" in row.keys() else 24,
         "seed": row["seed"],
         "num_gpus": row["num_gpus"],
         "dit_cpu_offload": bool(row["dit_cpu_offload"]),
         "text_encoder_cpu_offload": bool(row["text_encoder_cpu_offload"]),
         "use_fsdp_inference": bool(row["use_fsdp_inference"]),
+        "negative_prompt": (
+            (row["negative_prompt"] or "") if "negative_prompt" in row.keys()
+            else ""
+        ),
         "progress": 0.0,
         "progress_msg": "",
         "phase": "initializing",
@@ -411,4 +445,6 @@ def _default_settings_dict() -> dict[str, Any]:
         "vsaSparsity": float(DEFAULT_SETTINGS["vsa_sparsity"]),
         "tpSize": int(DEFAULT_SETTINGS["tp_size"]),
         "spSize": int(DEFAULT_SETTINGS["sp_size"]),
+        "guidanceRescale": float(DEFAULT_SETTINGS["guidance_rescale"]),
+        "fps": int(DEFAULT_SETTINGS["fps"]),
     }
