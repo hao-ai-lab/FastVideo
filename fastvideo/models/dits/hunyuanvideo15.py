@@ -696,7 +696,7 @@ class IndividualTokenRefinerBlock(nn.Module):
         batch_size, seq_len = qkv.shape[0], qkv.shape[1]
         qkv = qkv.view(batch_size, seq_len, 3, self.num_attention_heads, -1)
         q, k, v = qkv[:, :, 0], qkv[:, :, 1], qkv[:, :, 2]
-        if mask == None:
+        if mask is None:
             attn_output = self.attn(q, k, v) 
         else:
             from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
