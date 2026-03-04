@@ -9,6 +9,9 @@ import Header from "@/components/Header";
 export const metadata: Metadata = {
   title: "FastVideo",
   description: "A lightweight UI for running video-generation jobs.",
+  icons: {
+    icon: "/fastvideo.ico",
+  },
 };
 
 export default function RootLayout({
