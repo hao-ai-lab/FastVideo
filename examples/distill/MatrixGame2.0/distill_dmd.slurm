@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=mg-test
 #SBATCH --partition=main
-#SBATCH --nodes=2
-#SBATCH --ntasks=2
+#SBATCH --nodes=4
+#SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -35,11 +35,13 @@ RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
 # Model paths for Self-Forcing DMD distillation:
-GENERATOR_MODEL_PATH="../mg_models/Solaris-6Ksteps-Causal-0228"
-# REAL_SCORE_MODEL_PATH="../mg_models/Solaris-20Ksteps-0301"  # Teacher mode
-# FAKE_SCORE_MODEL_PATH="../mg_models/Solaris-20Ksteps-0301"  # Critic model
-REAL_SCORE_MODEL_PATH="../mg_models/Solaris-10Ksteps-0301"  # Teacher mode
-FAKE_SCORE_MODEL_PATH="../mg_models/Solaris-10Ksteps-0301"  # Critic model
+GENERATOR_MODEL_PATH="../mg_models/Solaris-10Ksteps-Causal-0302"
+REAL_SCORE_MODEL_PATH="../mg_models/Solaris-20Ksteps-0301"  # Teacher mode
+FAKE_SCORE_MODEL_PATH="../mg_models/Solaris-20Ksteps-0301"  # Critic model
+
+# GENERATOR_MODEL_PATH="../mg_models/Solaris-6Ksteps-Causal-0228"
+# REAL_SCORE_MODEL_PATH="../mg_models/Solaris-10Ksteps-0301"  # Teacher mode
+# FAKE_SCORE_MODEL_PATH="../mg_models/Solaris-10Ksteps-0301"  # Critic model
 
 DATA_DIR="../solaris/datasets/train/preprocessed_0228_81"
 VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation.json"
@@ -67,11 +69,11 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 16
+  --num_gpus 32
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 16
+  --hsdp_shard_dim 32
 )
 
 model_args=(
@@ -90,9 +92,9 @@ dataset_args=(
 validation_args=(
   --log_validation
   --log_visualization
-  --visualization-steps 100
+  --visualization-steps 200
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 100
+  --validation_steps 200
   --validation_sampling_steps "4"
   --validation_guidance_scale "6.0"
 )
@@ -101,8 +103,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 3e-6
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 200
-  --training_state_checkpointing_steps 200
+  --weight_only_checkpointing_steps 400
+  --training_state_checkpointing_steps 400
   --weight_decay 0
   --betas "0.9,0.95"
   --max_grad_norm 1.0

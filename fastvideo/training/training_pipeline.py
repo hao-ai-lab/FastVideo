@@ -90,6 +90,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         super().__init__(model_path, fastvideo_args, required_config_modules,
                          loaded_modules)  # type: ignore
         self.tracker = DummyTracker()
+        self.validation_ref_videos_logged = False
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(
@@ -836,6 +837,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         local_main_process_only=False)
             step_videos: list[np.ndarray] = []
             step_captions: list[str] = []
+            step_ref_videos: list[str | None] = []
 
             step_audio: list[np.ndarray | None] = []
             step_sample_rates: list[int | None] = []
@@ -854,6 +856,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 assert batch.prompt is not None and isinstance(
                     batch.prompt, str)
                 step_captions.append(batch.prompt)
+                step_ref_videos.append(validation_batch.get("ref_video"))
 
                 # Run validation inference
                 output_batch = self.validation_pipeline.forward(
@@ -888,6 +891,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 # Global rank 0 collects results from all sp_group leaders
                 all_videos = step_videos  # Start with own results
                 all_captions = step_captions
+                all_ref_videos = step_ref_videos
                 all_audios = step_audio
                 all_sample_rates = step_sample_rates
 
@@ -896,11 +900,13 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
                     recv_videos = world_group.recv_object(src=src_rank)
                     recv_captions = world_group.recv_object(src=src_rank)
+                    recv_ref_videos = world_group.recv_object(src=src_rank)
                     recv_audios = world_group.recv_object(src=src_rank)
                     recv_sample_rates = world_group.recv_object(src=src_rank)
 
                     all_videos.extend(recv_videos)
                     all_captions.extend(recv_captions)
+                    all_ref_videos.extend(recv_ref_videos)
                     all_audios.extend(recv_audios)
                     all_sample_rates.extend(recv_sample_rates)
 
@@ -943,10 +949,28 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         artifacts
                     }
                     self.tracker.log_artifacts(logs, global_step)
+                if not self.validation_ref_videos_logged:
+                    ref_artifacts = []
+                    for filename, caption in zip(all_ref_videos,
+                                                 all_captions,
+                                                 strict=True):
+                        if filename is None:
+                            continue
+                        video_artifact = self.tracker.video(filename,
+                                                            caption=caption,
+                                                            fps=sampling_param.fps)
+                        if video_artifact is not None:
+                            ref_artifacts.append(video_artifact)
+                    if ref_artifacts:
+                        self.tracker.log_artifacts(
+                            {"validation_ref_videos": ref_artifacts},
+                            global_step)
+                        self.validation_ref_videos_logged = True
             elif self.rank_in_sp_group == 0:
                 # Other sp_group leaders send their results to global rank 0
                 world_group.send_object(step_videos, dst=0)
                 world_group.send_object(step_captions, dst=0)
+                world_group.send_object(step_ref_videos, dst=0)
                 world_group.send_object(step_audio, dst=0)
                 world_group.send_object(step_sample_rates, dst=0)
 

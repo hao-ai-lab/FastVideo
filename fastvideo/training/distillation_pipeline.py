@@ -1257,13 +1257,16 @@ class DistillationPipeline(TrainingPipeline):
                         local_main_process_only=False)
             step_videos: list[np.ndarray] = []
             step_captions: list[str] = []
+            step_ref_videos: list[str | None] = []
 
             # Helper function to run validation with optional EMA contexts
             def run_validation_with_ema(
                 steps: int
-            ) -> tuple[list[np.ndarray], list[str], list[Any], list[Any]]:
+            ) -> tuple[list[np.ndarray], list[str], list[str | None],
+                       list[Any], list[Any]]:
                 videos: list[np.ndarray] = []
                 captions: list[str] = []
+                ref_videos: list[str | None] = []
                 audios: list[Any] = []
                 audio_sample_rates: list[Any] = []
                 for validation_batch in validation_dataloader:
@@ -1297,6 +1300,7 @@ class DistillationPipeline(TrainingPipeline):
                     assert batch.prompt is not None and isinstance(
                         batch.prompt, str)
                     captions.append(batch.prompt)
+                    ref_videos.append(validation_batch.get("ref_video"))
 
                     # Run validation inference
                     with torch.no_grad():
@@ -1318,26 +1322,26 @@ class DistillationPipeline(TrainingPipeline):
                     audio_sample_rates.append(
                         output_batch.extra.get("audio_sample_rate"))
 
-                return videos, captions, audios, audio_sample_rates
+                return videos, captions, ref_videos, audios, audio_sample_rates
 
             # Apply EMA contexts if available (nested context managers)
             if ema_context is not None and ema_2_context is not None:
                 with ema_context, ema_2_context:
-                    (step_videos, step_captions, step_audios,
+                    (step_videos, step_captions, step_ref_videos, step_audios,
                      step_audio_sample_rates
                      ) = run_validation_with_ema(num_inference_steps)
             elif ema_context is not None:
                 with ema_context:
-                    (step_videos, step_captions, step_audios,
+                    (step_videos, step_captions, step_ref_videos, step_audios,
                      step_audio_sample_rates
                      ) = run_validation_with_ema(num_inference_steps)
             elif ema_2_context is not None:
                 with ema_2_context:
-                    (step_videos, step_captions, step_audios,
+                    (step_videos, step_captions, step_ref_videos, step_audios,
                      step_audio_sample_rates
                      ) = run_validation_with_ema(num_inference_steps)
             else:
-                (step_videos, step_captions, step_audios,
+                (step_videos, step_captions, step_ref_videos, step_audios,
                  step_audio_sample_rates
                  ) = run_validation_with_ema(num_inference_steps)
 
@@ -1352,6 +1356,7 @@ class DistillationPipeline(TrainingPipeline):
                     # Global rank 0 collects results from all sp_group leaders
                     all_videos = step_videos  # Start with own results
                     all_captions = step_captions
+                    all_ref_videos = step_ref_videos
                     all_audios = step_audios
                     all_audio_sample_rates = step_audio_sample_rates
 
@@ -1360,11 +1365,13 @@ class DistillationPipeline(TrainingPipeline):
                         src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
                         recv_videos = world_group.recv_object(src=src_rank)
                         recv_captions = world_group.recv_object(src=src_rank)
+                        recv_ref_videos = world_group.recv_object(src=src_rank)
                         recv_audios = world_group.recv_object(src=src_rank)
                         recv_audio_sample_rates = world_group.recv_object(
                             src=src_rank)
                         all_videos.extend(recv_videos)
                         all_captions.extend(recv_captions)
+                        all_ref_videos.extend(recv_ref_videos)
                         all_audios.extend(recv_audios)
                         all_audio_sample_rates.extend(recv_audio_sample_rates)
 
@@ -1404,10 +1411,29 @@ class DistillationPipeline(TrainingPipeline):
                             artifacts
                         }
                         self.tracker.log_artifacts(logs, global_step)
+                    if not self.validation_ref_videos_logged:
+                        ref_artifacts = []
+                        for filename, caption in zip(all_ref_videos,
+                                                     all_captions,
+                                                     strict=True):
+                            if filename is None:
+                                continue
+                            video_artifact = self.tracker.video(
+                                filename,
+                                caption=caption,
+                                fps=sampling_param.fps)
+                            if video_artifact is not None:
+                                ref_artifacts.append(video_artifact)
+                        if ref_artifacts:
+                            self.tracker.log_artifacts(
+                                {"validation_ref_videos": ref_artifacts},
+                                global_step)
+                            self.validation_ref_videos_logged = True
                 else:
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
+                    world_group.send_object(step_ref_videos, dst=0)
                     world_group.send_object(step_audios, dst=0)
                     world_group.send_object(step_audio_sample_rates, dst=0)
 
