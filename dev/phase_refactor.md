@@ -1,74 +1,387 @@
 # Phase: Refactor — `_target_` instantiate-first, drop the string registry
 
-## 0) FastGen's hierarchy (the reference we follow)
+## 0) FastGen hierarchy (the reference)
 
 ```
-FastGenNetwork (ABC, nn.Module)       ← backbone: owns transformer + noise_scheduler + VAE
-    ├── WanNetwork                    ← Wan-specific forward, text conditioning
-    └── CausalFastGenNetwork          ← adds chunk_size, clear_caches()
-        └── CausalWanNetwork
+FastGenNetwork (ABC, nn.Module)       ← per-role backbone; owns transformer + noise_scheduler
+CausalFastGenNetwork (ABC, nn.Module) ← parallel root, NOT a subclass of FastGenNetwork
 
-FastGenModel (nn.Module)              ← base: owns self.net + self.teacher + optimizers
-    ├── DMD2Model                     ← adds self.fake_score, self.discriminator, DMD2 loss
-    ├── SelfForcingModel              ← adds causal rollout logic
-    └── SFTModel                      ← vanilla finetuning
+FastGenModel (nn.Module)              ← base method; owns self.net, self.teacher, optimizers
+    DMD2Model                         ← adds self.fake_score, self.discriminator
+    SelfForcingModel                  ← causal rollout
+    SFTModel
 ```
 
-**Key lessons from FastGen:**
+**Key lessons:**
 
-1. `FastGenNetwork.forward(x_t, t, condition, fwd_pred_type)` is the standardized per-role
-   interface. Each role is an independent network instance. No shared dispatcher.
-2. `FastGenModel` **IS the method** — it owns `self.net` (student) and `self.teacher` directly
-   as attributes, just like `DMD2Model.self.fake_score`. No RoleManager.
-3. Optimizers live on `FastGenModel`, not on the network: `self.net_optimizer`,
-   `self.fake_score_optimizer`, etc. Method subclasses add their own via `init_optimizers()`.
-4. VAE/text encoder live on `self.net` via `net.init_preprocessors()`. For us, this
-   concept maps to `SharedContext` (explained below).
+1. **`CausalFastGenNetwork` is parallel to `FastGenNetwork`**, not a subclass.
+
+2. **Every role instance owns its own `noise_scheduler`** — student and teacher each get
+   an independent instance of the same schedule. No sharing needed. This is because
+   `FastGenNetwork.__init__` always calls `self.set_noise_schedule()`.
+   The teacher's `forward(x_t, t, fwd_pred_type="x0")` uses its own scheduler internally
+   for `pred_noise → x0` conversion. No "who owns the scheduler" problem.
+
+3. **No mixin class.** FastGen doesn't need one because student and teacher are the
+   **same class** (`WanNetwork`). The only construction-time difference is that
+   `FastGenModel.build_model()` calls `self.net.init_preprocessors()` on the student,
+   but NOT on the teacher. The class itself is neutral — it has `init_preprocessors()`
+   as a method, but whether it's called is the caller's decision.
+   For us: same principle. Every `ModelBase` has `init_preprocessors()`. The method's
+   `build()` calls it only on the student. No mixin. No `is_student` flag.
+
+4. **Method owns all optimizers** (`self.net_optimizer`, `self.fake_score_optimizer`, …)
+   via `init_optimizers()`. Subclasses extend with `super().init_optimizers()`.
+
+5. **`model_dict` / `optimizer_dict` / `scheduler_dict`** are properties on the method,
+   used by the trainer for checkpointing.
+
+6. **Dataloader is external** — passed into trainer separately, not owned by the model.
 
 ---
 
 ## 1) Our hierarchy
 
-We cannot directly subclass `FastGenNetwork` because our transformers are raw
-`nn.Module` objects from diffusers (not `FastGenNetwork`). But we follow the same
-**structural shape**:
-
 ```
-SharedContextBase (ABC)               ← VAE, scheduler, prepare_batch, dataloader, validator
-    ├── WanSharedContext              ← Wan T2V: text conditioning, timestep mechanics
-    └── WanGameSharedContext          ← WanGame I2V+action: image/action conditioning
-
-ModelBase (ABC)                       ← per-role: owns ONE transformer, predict_{noise,x0}
-    ├── WanModelBase                  ← shared bidi Wan forward logic
-    │   ├── WanModel                  ← T2V (text conditioning)
-    │   └── WanGameModel              ← I2V+action conditioning
-    └── CausalModelBase               ← adds streaming ops, clear_caches
-        ├── WanCausalModel            ← causal T2V
-        └── WanGameCausalModel        ← causal I2V+action
-
-DistillMethod (nn.Module, ABC)        ← base: generic optimizer loop, checkpoint props
-    ├── DMD2Method                    ← self.student, self.teacher, self.fake_score
-    ├── SelfForcingMethod             ← self.student (must be CausalModelBase), self.teacher, self.critic
-    └── FinetuneMethod / DFSFTMethod  ← self.student only
+fastvideo/distillation/
+├── models/
+│   ├── base.py                        ModelBase, CausalModelBase (parallel roots, no mixin)
+│   ├── wan/
+│   │   └── model.py                   WanModel(ModelBase), WanCausalModel(CausalModelBase)
+│   └── wangame/
+│       └── model.py                   WanGameModel(ModelBase), WanGameCausalModel(CausalModelBase)
+├── methods/
+│   ├── base.py                        DistillMethod (analogous to FastGenModel)
+│   └── distribution_matching/
+│       ├── dmd2.py                    DMD2Method
+│       └── self_forcing.py            SelfForcingMethod
+└── utils/
+    └── instantiate.py                 resolve_target, instantiate
 ```
 
-**SharedContext** is analogous to `FastGenNetwork.init_preprocessors()` — it holds
-what is truly shared across all roles. `prepare_batch` lives here because it is
-pure preprocessing: it samples timesteps, normalizes latents, builds attn metadata,
-and populates `batch.conditional_dict` / `batch.unconditional_dict`. It does not
-touch any transformer.
+**Every model instance has its own `noise_scheduler`** (constructed in `__init__`).
+VAE and `prepare_batch` are initialized via `init_preprocessors()`, called only on
+the student by `DistillMethod.build()`. No mixin. No flag.
 
-**ModelBase** is analogous to `FastGenNetwork`. Each role is an independent instance
-(like FastGen's `self.net`, `self.teacher`). It owns one transformer and implements
-`predict_noise`/`predict_x0` by calling that transformer + reading precomputed
-fields from `TrainingBatch`.
-
-**DistillMethod** is analogous to `FastGenModel`. It owns the role model objects,
-all optimizers, and implements `single_train_step`. RoleManager is retired.
+**DistillMethod** owns role model objects (`self.student`, `self.teacher`, …) and
+all optimizers as attributes. `RoleManager` is retired.
 
 ---
 
-## 2) Final YAML
+## 2) Class interfaces
+
+### 2.1 ModelBase and CausalModelBase (parallel roots)
+
+```python
+# fastvideo/distillation/models/base.py
+
+class ModelBase(ABC):
+    """Per-role bidirectional model. Analogous to FastGenNetwork.
+    Every instance owns its own noise_scheduler.
+    init_preprocessors() is only called on the student by DistillMethod.build().
+    """
+    transformer: nn.Module
+    noise_scheduler: Any  # always set in __init__
+
+    def init_preprocessors(self, training_args: Any) -> None:
+        """Load VAE, seed RNGs, build prepare_batch machinery.
+        Analogous to FastGenNetwork.init_preprocessors().
+        Only called on the student role. Default: no-op (for teacher/critic).
+        Subclasses override when they are capable of being the student.
+        """
+        pass
+
+    def on_train_start(self) -> None:
+        """Called by trainer before training loop. Default: no-op."""
+        pass
+
+    def get_rng_generators(self) -> dict[str, torch.Generator]:
+        return {}
+
+    def prepare_batch(
+        self,
+        raw_batch: dict[str, Any],
+        *,
+        current_vsa_sparsity: float = 0.0,
+        latents_source: str = "data",
+    ) -> TrainingBatch:
+        """Build TrainingBatch from raw dataloader output.
+        Raises NotImplementedError unless init_preprocessors() was called.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__}.prepare_batch() requires init_preprocessors() "
+            "to have been called (student only)."
+        )
+
+    def add_noise(
+        self, clean: Tensor, noise: Tensor, timestep: Tensor
+    ) -> Tensor:
+        raise NotImplementedError
+
+    @abstractmethod
+    def predict_noise(
+        self,
+        noisy_latents: Tensor,
+        timestep: Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cfg_uncond: dict | None = None,
+        attn_kind: str = "dense",
+    ) -> Tensor: ...
+
+    @abstractmethod
+    def predict_x0(self, ...) -> Tensor: ...
+
+    def backward(
+        self, loss: Tensor, ctx: Any, *, grad_accum_rounds: int = 1
+    ) -> None:
+        (loss / max(1, grad_accum_rounds)).backward()
+
+
+class CausalModelBase(ABC):
+    """Per-role causal model. Parallel root to ModelBase, NOT a subclass.
+    Analogous to CausalFastGenNetwork.
+    Same interface as ModelBase plus streaming ops.
+    """
+    transformer: nn.Module
+    noise_scheduler: Any  # always set in __init__
+
+    def init_preprocessors(self, training_args: Any) -> None:
+        pass
+
+    def on_train_start(self) -> None:
+        pass
+
+    def get_rng_generators(self) -> dict[str, torch.Generator]:
+        return {}
+
+    def prepare_batch(self, ...) -> TrainingBatch:
+        raise NotImplementedError
+
+    def add_noise(self, ...) -> Tensor:
+        raise NotImplementedError
+
+    @abstractmethod
+    def predict_noise(self, ...) -> Tensor: ...
+
+    @abstractmethod
+    def predict_x0(self, ...) -> Tensor: ...
+
+    @abstractmethod
+    def predict_noise_streaming(
+        self,
+        noisy_latents: Tensor,
+        timestep: Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cache_tag: str = "pos",
+        store_kv: bool = False,
+        cur_start_frame: int = 0,
+        cfg_uncond: dict | None = None,
+        attn_kind: str = "dense",
+    ) -> Tensor | None: ...
+
+    @abstractmethod
+    def predict_x0_streaming(self, ...) -> Tensor | None: ...
+
+    @abstractmethod
+    def clear_caches(self, *, cache_tag: str = "pos") -> None: ...
+
+    def backward(self, loss: Tensor, ctx: Any, *, grad_accum_rounds: int = 1) -> None:
+        (loss / max(1, grad_accum_rounds)).backward()
+```
+
+### 2.2 Concrete model classes (WanGame example)
+
+```python
+# fastvideo/distillation/models/wangame/model.py
+
+class WanGameModel(ModelBase):
+    """Bidirectional WanGame model. Can be student or teacher/critic.
+    Always builds noise_scheduler in __init__.
+    VAE and prepare_batch are activated by init_preprocessors() — only for student.
+    """
+
+    def __init__(self, *, init_from: str, trainable: bool = True, **kwargs) -> None:
+        self.transformer = load_transformer(init_from, cls="WanGameActionTransformer3DModel")
+        apply_trainable(self.transformer, trainable=trainable)
+        # noise_scheduler always built — same as FastGenNetwork.__init__ calling set_noise_schedule()
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(...)
+        # preprocessor state — inactive until init_preprocessors() is called
+        self.vae: Any | None = None
+        self._noise_gen_cpu: torch.Generator | None = None
+        self._noise_gen_cuda: torch.Generator | None = None
+        self._init_from = init_from
+
+    def init_preprocessors(self, training_args: Any) -> None:
+        """Activate as student. Analogous to FastGenNetwork.init_preprocessors()."""
+        self.training_args = training_args
+        self.vae = load_module_from_path(self._init_from, module_type="vae", ...)
+        self.device = get_local_torch_device()
+        self._init_timestep_mechanics()
+
+    def on_train_start(self) -> None:
+        seed = self.training_args.seed
+        self._noise_gen_cpu = torch.Generator(device="cpu").manual_seed(seed)
+        self._noise_gen_cuda = torch.Generator(device=self.device).manual_seed(seed)
+
+    def prepare_batch(self, raw_batch, *, ...) -> TrainingBatch:
+        if self.vae is None:
+            raise RuntimeError("prepare_batch requires init_preprocessors() (student only)")
+        # ... full WanGame batch preparation
+        return training_batch
+
+    def add_noise(self, clean, noise, timestep) -> Tensor:
+        return self.noise_scheduler.add_noise(...)
+
+    def predict_noise(self, noisy_latents, timestep, batch, *, conditional, ...) -> Tensor:
+        # Uses self.noise_scheduler (always available) and self.transformer
+        with autocast(...), set_forward_context(...):
+            kwargs = self._build_input_kwargs(noisy_latents, timestep, batch, conditional=conditional, ...)
+            return self.transformer(**kwargs).permute(0, 2, 1, 3, 4)
+
+    def predict_x0(self, noisy_latents, timestep, batch, *, conditional, ...) -> Tensor:
+        pred_noise = self.predict_noise(noisy_latents, timestep, batch, conditional=conditional, ...)
+        # Uses self.noise_scheduler — always available, no dependency on student
+        return pred_noise_to_pred_video(pred_noise, noisy_latents, timestep, self.noise_scheduler)
+
+
+class WanGameCausalModel(CausalModelBase):
+    """Causal WanGame. Parallel root to WanGameModel.
+    Same init_preprocessors() pattern — called only on student.
+    """
+    def __init__(self, *, init_from: str, trainable: bool = True, **kwargs) -> None:
+        self.transformer = load_transformer(init_from, cls="CausalWanGameTransformer")
+        apply_trainable(self.transformer, trainable=trainable)
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(...)
+        self.vae = None
+        ...
+
+    def init_preprocessors(self, training_args: Any) -> None:
+        # Same pattern as WanGameModel.init_preprocessors()
+        ...
+
+    def predict_noise_streaming(self, ...) -> Tensor | None: ...
+    def predict_x0_streaming(self, ...) -> Tensor | None: ...
+    def clear_caches(self, *, cache_tag: str = "pos") -> None: ...
+```
+
+### 2.3 DistillMethod (analogous to FastGenModel)
+
+```python
+class DistillMethod(nn.Module, ABC):
+
+    @classmethod
+    @abstractmethod
+    def build(
+        cls,
+        *,
+        cfg: RunConfig,
+        role_models: dict[str, ModelBase | CausalModelBase],
+        dataloader: Any,
+        validator: Any | None,
+    ) -> "DistillMethod":
+        """Assemble the method. Calls init_preprocessors() on the student,
+        then calls init_optimizers().
+        Analogous to FastGenModel.__init__ → build_model() → init_preprocessors().
+        """
+        ...
+
+    @abstractmethod
+    def init_optimizers(self) -> None: ...
+
+    @abstractmethod
+    def single_train_step(self, raw_batch, iteration, **kwargs) -> ...: ...
+
+    @abstractmethod
+    def get_optimizers(self, iteration: int) -> list[Optimizer]: ...
+
+    @abstractmethod
+    def get_lr_schedulers(self, iteration: int) -> list[Any]: ...
+
+    @property
+    @abstractmethod
+    def model_dict(self) -> dict[str, nn.Module]: ...
+
+    @property
+    @abstractmethod
+    def optimizer_dict(self) -> dict[str, Optimizer]: ...
+
+    @property
+    @abstractmethod
+    def scheduler_dict(self) -> dict[str, Any]: ...
+```
+
+### 2.4 SelfForcingMethod (example)
+
+```python
+class SelfForcingMethod(DistillMethod):
+
+    @classmethod
+    def build(cls, *, cfg, role_models, dataloader, validator):
+        student = role_models["student"]
+        teacher = role_models["teacher"]
+        critic  = role_models["critic"]
+
+        if not isinstance(student, CausalModelBase):
+            raise TypeError(
+                f"SelfForcingMethod requires CausalModelBase student, "
+                f"got {type(student).__name__}"
+            )
+
+        # Call init_preprocessors only on student — identical to FastGen's build_model()
+        # calling init_preprocessors() only on self.net, not self.teacher.
+        student.init_preprocessors(cfg.training_args)
+
+        return cls(
+            student=student, teacher=teacher, critic=critic,
+            dataloader=dataloader, validator=validator, cfg=cfg.method,
+        )
+
+    def __init__(self, student, teacher, critic, dataloader, validator, cfg):
+        super().__init__()
+        self.student = student
+        self.teacher = teacher
+        self.critic = critic
+        self.dataloader = dataloader
+        self.validator = validator
+        self.init_optimizers()
+
+    def init_optimizers(self) -> None:
+        self.student_optimizer = build_optimizer(self.student.transformer, ...)
+        self.student_lr_scheduler = build_scheduler(self.student_optimizer, ...)
+        self.critic_optimizer = build_optimizer(self.critic.transformer, ...)
+        self.critic_lr_scheduler = build_scheduler(self.critic_optimizer, ...)
+
+    def single_train_step(self, raw_batch, iteration, **kwargs):
+        batch = self.student.prepare_batch(raw_batch, ...)           # student owns this
+        noisy = self.student.add_noise(batch.latents, batch.noise, batch.timesteps)
+
+        student_x0 = self.student.predict_x0(noisy, batch.timesteps, batch, ...)
+        teacher_x0 = self.teacher.predict_x0(noisy, batch.timesteps, batch, ...)
+        # teacher uses its OWN noise_scheduler for pred_noise→x0 — no sharing needed
+        ...
+
+    @property
+    def model_dict(self):
+        return {"student": self.student.transformer, "critic": self.critic.transformer}
+
+    @property
+    def optimizer_dict(self):
+        return {"student": self.student_optimizer, "critic": self.critic_optimizer}
+
+    @property
+    def scheduler_dict(self):
+        return {"student": self.student_lr_scheduler, "critic": self.critic_lr_scheduler}
+```
+
+---
+
+## 3) Final YAML
+
+### WanGame Self-Forcing
 
 ```yaml
 log:
@@ -94,15 +407,6 @@ validation:
   dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random.json
   every_steps: 100
   sampling_steps: [4]
-  pipeline:
-    sampler_kind: sde
-    scheduler:
-      _target_: fastvideo.models.schedulers.scheduling_flow_match_euler_discrete.FlowMatchEulerDiscreteScheduler
-      flow_shift: 3
-
-shared_context:
-  _target_: fastvideo.distillation.models.wangame.WanGameSharedContext
-  model_path: outputs/wangame_dfsft_causal_4n8g/persistent/checkpoint-22000
 
 models:
   student:
@@ -126,13 +430,12 @@ method:
   context_noise: 0.0
 ```
 
-For a Wan T2V DMD2 run, only the `_target_` paths change:
+No `is_student` flag in YAML. The method's `build()` decides which role gets
+`init_preprocessors()`.
+
+### Wan DMD2
 
 ```yaml
-shared_context:
-  _target_: fastvideo.distillation.models.wan.WanSharedContext
-  model_path: /path/to/wan_14b
-
 models:
   student:
     _target_: fastvideo.distillation.models.wan.WanModel
@@ -155,237 +458,35 @@ method:
 
 ---
 
-## 3) Class interfaces
-
-### 3.1 SharedContextBase
-
-```python
-class SharedContextBase(ABC):
-    """Holds preprocessing primitives and shared components (VAE, scheduler).
-    Analogous to FastGenNetwork.init_preprocessors() — owns what all roles share.
-    Does NOT own any transformer or implement predict_x0/predict_noise.
-    """
-
-    dataloader: Any
-    validator: Any | None
-    training_args: Any
-    noise_scheduler: Any
-    vae: Any
-
-    @abstractmethod
-    def prepare_batch(
-        self,
-        raw_batch: dict[str, Any],
-        *,
-        current_vsa_sparsity: float = 0.0,
-        latents_source: Literal["data", "zeros"] = "data",
-    ) -> TrainingBatch:
-        """Normalize latents, sample timesteps, build attn_metadata, populate
-        batch.conditional_dict / batch.unconditional_dict. No transformer calls."""
-        ...
-
-    @abstractmethod
-    def add_noise(
-        self, clean: Tensor, noise: Tensor, timestep: Tensor
-    ) -> Tensor: ...
-
-    @abstractmethod
-    def on_train_start(self) -> None: ...
-
-    def get_rng_generators(self) -> dict[str, torch.Generator]:
-        return {}
-```
-
-### 3.2 ModelBase (per-role, analogous to FastGenNetwork)
-
-```python
-class ModelBase(ABC):
-    """Per-role model. Analogous to FastGenNetwork in FastGen.
-    Owns ONE transformer and implements forward ops on top of shared context.
-    """
-
-    transformer: nn.Module
-    ctx: SharedContextBase  # injected at construction
-    trainable: bool
-
-    @abstractmethod
-    def predict_noise(
-        self,
-        noisy_latents: Tensor,
-        timestep: Tensor,
-        batch: TrainingBatch,
-        *,
-        conditional: bool,
-        cfg_uncond: dict | None = None,
-        attn_kind: str = "dense",
-    ) -> Tensor: ...
-
-    @abstractmethod
-    def predict_x0(self, ...) -> Tensor: ...
-
-    def backward(
-        self, loss: Tensor, ctx: Any, *, grad_accum_rounds: int
-    ) -> None:
-        """Default backward. Causal subclass may need forward-context restore."""
-        (loss / max(1, grad_accum_rounds)).backward()
-
-
-class CausalModelBase(ModelBase):
-    """Causal/streaming extension. Analogous to CausalFastGenNetwork."""
-
-    @abstractmethod
-    def predict_noise_streaming(self, ...) -> Tensor | None: ...
-
-    @abstractmethod
-    def predict_x0_streaming(self, ...) -> Tensor | None: ...
-
-    @abstractmethod
-    def clear_caches(self, *, cache_tag: str = "pos") -> None: ...
-```
-
-### 3.3 DistillMethod (analogous to FastGenModel)
-
-```python
-class DistillMethod(nn.Module, ABC):
-    """Base training method. Analogous to FastGenModel.
-    Owns role model objects and ALL optimizers directly as attributes.
-    RoleManager is retired.
-    """
-
-    @classmethod
-    @abstractmethod
-    def build(
-        cls,
-        *,
-        cfg: RunConfig,
-        shared_context: SharedContextBase,
-        role_models: dict[str, ModelBase],
-    ) -> "DistillMethod":
-        """Assemble the method. Analogous to FastGenModel.__init__ → build_model().
-        The classmethod reads role_models, stores them as self.student / self.teacher /
-        etc., then calls init_optimizers().
-        """
-        ...
-
-    @abstractmethod
-    def init_optimizers(self) -> None:
-        """Build self.student_optimizer, self.teacher_optimizer, etc.
-        Analogous to FastGenModel.init_optimizers() + DMD2Model.init_optimizers().
-        Subclasses call super().init_optimizers() then add their own.
-        """
-        ...
-
-    @abstractmethod
-    def single_train_step(
-        self, batch: TrainingBatch, iteration: int, **kwargs
-    ) -> tuple[dict[str, Tensor], dict[str, Any], dict[str, float]]: ...
-
-    @abstractmethod
-    def get_optimizers(self, iteration: int) -> list[Optimizer]: ...
-
-    @abstractmethod
-    def get_lr_schedulers(self, iteration: int) -> list[Any]: ...
-
-    # Checkpoint helpers (mirror FastGen's model_dict / optimizer_dict / scheduler_dict)
-    @property
-    @abstractmethod
-    def model_dict(self) -> dict[str, nn.Module]: ...
-
-    @property
-    @abstractmethod
-    def optimizer_dict(self) -> dict[str, Optimizer]: ...
-
-    @property
-    @abstractmethod
-    def scheduler_dict(self) -> dict[str, Any]: ...
-```
-
-### 3.4 SelfForcingMethod (concrete example)
-
-```python
-class SelfForcingMethod(DistillMethod):
-    def __init__(
-        self,
-        student: CausalModelBase,
-        teacher: ModelBase,
-        critic: ModelBase,
-        shared_context: SharedContextBase,
-        cfg: dict,
-    ) -> None:
-        super().__init__()
-        if not isinstance(student, CausalModelBase):
-            raise TypeError(
-                f"SelfForcingMethod requires CausalModelBase student, got {type(student).__name__}"
-            )
-        self.student = student
-        self.teacher = teacher
-        self.critic = critic
-        self.ctx = shared_context
-        self.init_optimizers()
-
-    @classmethod
-    def build(cls, *, cfg, shared_context, role_models):
-        return cls(
-            student=role_models["student"],
-            teacher=role_models["teacher"],
-            critic=role_models["critic"],
-            shared_context=shared_context,
-            cfg=cfg.method,
-        )
-
-    def init_optimizers(self) -> None:
-        self.student_optimizer = build_optimizer(self.student.transformer, ...)
-        self.student_lr_scheduler = build_lr_scheduler(self.student_optimizer, ...)
-        self.critic_optimizer = build_optimizer(self.critic.transformer, ...)
-        self.critic_lr_scheduler = build_lr_scheduler(self.critic_optimizer, ...)
-
-    @property
-    def model_dict(self):
-        return {"student": self.student.transformer, "critic": self.critic.transformer}
-
-    @property
-    def optimizer_dict(self):
-        return {"student": self.student_optimizer, "critic": self.critic_optimizer}
-
-    @property
-    def scheduler_dict(self):
-        return {"student": self.student_lr_scheduler, "critic": self.critic_lr_scheduler}
-
-    def get_optimizers(self, iteration: int) -> list:
-        return [self.student_optimizer, self.critic_optimizer]
-
-    def get_lr_schedulers(self, iteration: int) -> list:
-        return [self.student_lr_scheduler, self.critic_lr_scheduler]
-```
-
----
-
-## 4) Assembly flow (dispatch / entrypoint)
+## 4) Assembly flow
 
 ```python
 cfg = load_run_config(path)
 
-# 1. SharedContext — VAE, scheduler, dataloader, validator
-shared_context = instantiate(cfg.shared_context)
-
-# 2. Per-role models — each owns one transformer + forward ops
-#    shared_context is injected so each model can read batch fields it needs
+# 1. Build per-role models. No init_preprocessors() here — that is the method's job.
+#    Analogous to FastGenModel instantiating self.net and self.teacher as raw networks.
 role_models = {
-    role: instantiate(model_cfg, shared_context=shared_context)
+    role: instantiate(model_cfg)  # just transformer + noise_scheduler
     for role, model_cfg in cfg.models.items()
 }
 
-# 3. Method class assembles itself from role models (analogous to FastGenModel.__init__)
+# 2. Dataloader and validator are external (trainer already takes dataloader separately).
+dataloader = instantiate(cfg.data, training_args=training_args)
+validator   = build_validator(cfg.validation) if cfg.validation.enabled else None
+
+# 3. Method build() calls init_preprocessors() on student, then init_optimizers().
+#    Analogous to FastGenModel.__init__ → build_model() → init_preprocessors().
 method_cls = resolve_target(cfg.method["_target_"])
 method = method_cls.build(
     cfg=cfg,
-    shared_context=shared_context,
     role_models=role_models,
+    dataloader=dataloader,
+    validator=validator,
 )
 
-# 4. Generic trainer loop, not method-aware beyond the DistillMethod interface
-trainer = Trainer(cfg.trainer)
-trainer.run(method, shared_context=shared_context)
+# 4. Trainer runs the loop.
+trainer = DistillTrainer(training_args)
+trainer.run(method, dataloader=dataloader, max_steps=cfg.trainer.max_train_steps, ...)
 ```
 
 ---
@@ -394,28 +495,27 @@ trainer.run(method, shared_context=shared_context)
 
 | Current | New |
 |---|---|
-| `dispatch.py` string registry (`_MODELS`, `_METHODS`, `@register_*`) | Deleted; `_target_` + `instantiate()` |
-| `ModelBase` — one class handles ALL roles via `RoleHandle` arg | Retired; replaced by per-role `ModelBase` (one instance per role) |
-| `CausalModelBase` | Becomes proper ABC for streaming, same concept |
-| `RoleHandle` / `RoleManager` | Retired; method owns role objects directly |
-| `DistillMethod.build(cfg, bundle, model, validator)` | `DistillMethod.build(cfg, shared_context, role_models)` |
+| `dispatch.py` string registry | Deleted; `_target_` + `instantiate()` |
+| `ModelBase` — dispatches via `RoleHandle` arg | Retired; per-role instance owns one transformer |
+| `CausalModelBase(ModelBase)` subclass | `CausalModelBase` parallel root (not a subclass) |
+| `RoleHandle` / `RoleManager` | Retired; method owns `self.student`, `self.teacher`, etc. |
 | Optimizers on `RoleHandle.optimizers` | On method: `self.student_optimizer`, etc. |
-| `recipe.family` / `recipe.method` YAML keys | Deleted; `shared_context._target_` + `method._target_` |
-| `roles.*` YAML section | Replaced by `models.*` with `_target_`, `init_from`, `trainable` |
-| Method checkpoint uses `bundle.roles` dict | Uses `model_dict`, `optimizer_dict`, `scheduler_dict` properties |
+| `DistillMethod.build(cfg, bundle, model, validator)` | `DistillMethod.build(cfg, role_models, dataloader, validator)` |
+| `recipe.family` / `recipe.method` YAML | Deleted; `models.<role>._target_` + `method._target_` |
+| `roles.*` YAML section | `models.*` with `_target_`, `init_from`, `trainable` |
+| `is_student` / mixin / SharedContext | None of these. `build()` calls `init_preprocessors()` on student. |
 
 ---
 
-## 6) Naming cleanup (separate PR, do NOT mix in)
+## 6) Naming cleanup (separate PR)
 
 - `DistillMethod` → `Method`
 - `DistillRunConfig` → `RunConfig`
-- `load_distill_run_config` → `load_run_config`
 - Entrypoint `distillation.py` → `training.py` (optional)
 
 ---
 
-## 7) TODO (this phase — wangame first, then extend to wan)
+## 7) TODO (wangame first, then wan)
 
 **Infrastructure**
 
@@ -424,56 +524,42 @@ trainer.run(method, shared_context=shared_context)
   - `instantiate(cfg: dict, **extra) -> Any`
 
 - [ ] `fastvideo/distillation/utils/config.py`
-  - New `RunConfig` dataclass (no `RecipeSpec`, no `RoleSpec`)
-  - New `load_run_config(path)` parser for new YAML schema
+  - New `RunConfig` dataclass
+  - New `load_run_config(path)` parser
   - Keep `load_distill_run_config` as deprecated shim
 
 **Base classes**
 
 - [ ] `fastvideo/distillation/models/base.py`
-  - New `SharedContextBase` ABC
-  - New `ModelBase` ABC (per-role; `self.transformer`, `self.ctx`, `predict_noise`, `predict_x0`)
-  - New `CausalModelBase(ModelBase)` ABC (streaming ops, `clear_caches`)
-  - Retire old `ModelBase` once migration is done
+  - New `ModelBase` ABC with `init_preprocessors` (no-op default), `prepare_batch` (raises), `add_noise` (raises)
+  - New `CausalModelBase` ABC (parallel root, same pattern + streaming methods)
+  - Retire old `ModelBase` / `CausalModelBase`
 
-- [ ] `fastvideo/distillation/roles.py`
-  - Retire `RoleHandle` / `RoleManager` (keep temporarily if trainer checkpoint code needs it, then remove)
+- [ ] `fastvideo/distillation/roles.py` — retire `RoleHandle` / `RoleManager`
 
 - [ ] `fastvideo/distillation/methods/base.py`
-  - New `DistillMethod.build(cfg, shared_context, role_models)` signature
+  - New `DistillMethod.build(cfg, role_models, dataloader, validator)` signature
   - Add abstract `init_optimizers`, `model_dict`, `optimizer_dict`, `scheduler_dict`
-  - Remove `bundle`, `model`, `validator` parameters
 
-**WanGame models**
+**WanGame**
 
-- [ ] `fastvideo/distillation/models/wangame/shared_context.py`
-  - `WanGameSharedContext(SharedContextBase)`: extracts VAE, scheduler, `prepare_batch`,
-    `add_noise`, `on_train_start`, dataloader, validator from current `WanGameModel.__init__`
+- [ ] `fastvideo/distillation/models/wangame/model.py`
+  - `WanGameModel(ModelBase)`: always builds `noise_scheduler`; `init_preprocessors()` loads VAE
+  - `WanGameCausalModel(CausalModelBase)`: same pattern + streaming
 
-- [ ] `fastvideo/distillation/models/wangame/models.py`
-  - `WanGameModelBase(ModelBase)`: shared bidi forward logic (input_kwargs, CFG, action cond)
-  - `WanGameModel(WanGameModelBase)`: bidi transformer
-  - `WanGameCausalModel(CausalModelBase, WanGameModelBase)`: causal transformer + streaming ops
-  - Transformer loading moves into each class `__init__` (replaces `common._build_wangame_role_handles`)
+**Wan**
 
-**Wan models**
-
-- [ ] `fastvideo/distillation/models/wan/shared_context.py`
-  - `WanSharedContext(SharedContextBase)`: same extraction from current `WanModel`
-
-- [ ] `fastvideo/distillation/models/wan/models.py`
-  - `WanModelBase(ModelBase)`: shared bidi forward logic (text conditioning, CFG)
-  - `WanModel(WanModelBase)`: bidi transformer
-  - `WanCausalModel(CausalModelBase, WanModelBase)`: causal transformer + streaming ops
+- [ ] `fastvideo/distillation/models/wan/model.py`
+  - `WanModel(ModelBase)`: always builds `noise_scheduler`; `init_preprocessors()` loads VAE + negative prompt
+  - `WanCausalModel(CausalModelBase)`: same + streaming
 
 **Methods**
 
-- [ ] Update all method `build()` signatures to new interface:
-  - `SelfForcingMethod`, `DMD2Method`, `FinetuneMethod`, `DFSFTMethod`
+- [ ] Update all `build()` signatures: `SelfForcingMethod`, `DMD2Method`, `FinetuneMethod`, `DFSFTMethod`
+- [ ] `DMD2Method.build()`: calls `init_preprocessors()` on student; `init_optimizers()` adds `fake_score_optimizer`
 
 **Dispatch & configs**
 
-- [ ] `fastvideo/distillation/dispatch.py`: replace body with new assembly flow (or delete)
-- [ ] New YAML configs for wangame self-forcing (validate end-to-end)
-- [ ] Update existing wangame YAML configs to new schema
-- [ ] Update wan YAML configs
+- [ ] `fastvideo/distillation/dispatch.py`: replace with new assembly flow (or delete)
+- [ ] New YAML for wangame self-forcing; validate end-to-end
+- [ ] Migrate existing wangame and wan YAML configs
