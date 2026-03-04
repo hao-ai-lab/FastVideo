@@ -91,26 +91,6 @@ class WanGameModel(ModelBase):
             ),
         )
 
-        # Optional MoE transformer_2.
-        self.transformer_2: torch.nn.Module | None = None
-        try:
-            t2 = load_module_from_path(
-                model_path=self._init_from,
-                module_type="transformer_2",
-                training_args=None,
-                disable_custom_init_weights=disable_custom_init_weights,
-            )
-        except (ValueError, FileNotFoundError):
-            t2 = None
-        if t2 is not None:
-            t2 = apply_trainable(t2, trainable=self._trainable)
-            if self._trainable and enable_gradient_checkpointing_type:
-                t2 = apply_activation_checkpointing(
-                    t2,
-                    checkpointing_type=enable_gradient_checkpointing_type,
-                )
-            self.transformer_2 = t2
-
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
             shift=float(flow_shift)
         )
@@ -136,8 +116,6 @@ class WanGameModel(ModelBase):
         )
         self.min_timestep: int = 0
         self.max_timestep: int = self.num_train_timestep
-        self.boundary_timestep: float | None = None
-
     def _load_transformer(
         self,
         *,
@@ -588,15 +566,6 @@ class WanGameModel(ModelBase):
             * self.num_train_timestep
         )
 
-        boundary_ratio = getattr(
-            self.training_args, "boundary_ratio", None
-        )
-        self.boundary_timestep = (
-            float(boundary_ratio) * float(self.num_train_timestep)
-            if boundary_ratio is not None
-            else None
-        )
-
     def _sample_timesteps(
         self, batch_size: int, device: torch.device
     ) -> torch.Tensor:
@@ -1015,18 +984,4 @@ class WanGameModel(ModelBase):
     def _get_transformer(
         self, timestep: torch.Tensor
     ) -> torch.nn.Module:
-        if (
-            self.transformer_2 is not None
-            and self.boundary_timestep is not None
-        ):
-            if timestep.numel() != 1:
-                raise ValueError(
-                    "MoE boundary selection requires a scalar "
-                    "timestep, got "
-                    f"shape={tuple(timestep.shape)}"
-                )
-            if float(timestep.item()) < float(
-                self.boundary_timestep
-            ):
-                return self.transformer_2
         return self.transformer

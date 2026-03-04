@@ -249,9 +249,6 @@ def maybe_warmstart_role_modules(
     if model is not None:
         if model.transformer is not None:
             modules["transformer"] = model.transformer
-        transformer_2 = getattr(model, "transformer_2", None)
-        if transformer_2 is not None:
-            modules["transformer_2"] = transformer_2
     elif bundle is not None:
         handle = bundle.role(str(role))
         modules = dict(handle.modules)
@@ -351,9 +348,6 @@ def save_role_pretrained(
     if model is not None:
         if model.transformer is not None:
             modules["transformer"] = model.transformer
-        transformer_2 = getattr(model, "transformer_2", None)
-        if transformer_2 is not None:
-            modules["transformer_2"] = transformer_2
     elif bundle is not None:
         handle = bundle.role(str(role))
         modules = dict(handle.modules)
@@ -473,9 +467,6 @@ class DistillCheckpointManager:
         modules: dict[str, torch.nn.Module] = {}
         if model.transformer is not None:
             modules["transformer"] = model.transformer
-        transformer_2 = getattr(model, "transformer_2", None)
-        if transformer_2 is not None:
-            modules["transformer_2"] = transformer_2
 
         container = _RoleModuleContainer(modules)
 

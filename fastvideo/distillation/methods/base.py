@@ -39,9 +39,6 @@ class DistillMethod(torch.nn.Module, ABC):
             transformer = getattr(model, "transformer", None)
             if isinstance(transformer, torch.nn.Module):
                 mods["transformer"] = transformer
-            transformer_2 = getattr(model, "transformer_2", None)
-            if isinstance(transformer_2, torch.nn.Module):
-                mods["transformer_2"] = transformer_2
             if mods:
                 self.role_modules[role] = torch.nn.ModuleDict(mods)
 

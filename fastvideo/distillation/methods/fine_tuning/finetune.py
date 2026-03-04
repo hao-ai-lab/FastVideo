@@ -316,12 +316,6 @@ class FineTuneMethod(DistillMethod):
             for p in self.student.transformer.parameters()
             if p.requires_grad
         ]
-        if getattr(self.student, "transformer_2", None) is not None:
-            student_params.extend(
-                p
-                for p in self.student.transformer_2.parameters()
-                if p.requires_grad
-            )
         (
             self._student_optimizer,
             self._student_lr_scheduler,
