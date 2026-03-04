@@ -64,6 +64,23 @@ export default function SettingsPage() {
   return (
     <main className={layoutStyles.main}>
       <section className={cardStyles.card}>
+        <h2>Behavior</h2>
+        <div className={formStyles.settingsRow}>
+          <label htmlFor="settings-auto-start-job">
+            Auto Start Job on Create
+          </label>
+          <select
+            id="settings-auto-start-job"
+            value={options.autoStartJob ? "enabled" : "disabled"}
+            onChange={(e) =>
+              updateOption("autoStartJob", e.target.value === "enabled")
+            }
+          >
+            <option value="disabled">Disabled</option>
+            <option value="enabled">Enabled</option>
+          </select>
+        </div>
+        <hr style={{ margin: "1rem 0", border: "none", borderTop: "1px solid var(--border)" }} />
         <div className={layoutStyles.sectionHeader}>
           <h2>Default Options</h2>
           <button

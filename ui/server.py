@@ -131,6 +131,7 @@ class SettingsUpdate(BaseModel):
     vsaSparsity: float | None = None
     tpSize: int | None = None
     spSize: int | None = None
+    autoStartJob: bool | None = None
 
 
 @app.put("/api/settings")
@@ -252,6 +253,18 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         tp_size=req.tp_size,
         sp_size=req.sp_size,
     )
+
+    if database is not None:
+        settings = database.get_settings()
+        if settings.get("autoStartJob"):
+            try:
+                job = job_runner.start_job(job.id)
+            except ValueError as exc:
+                logger.warning(
+                    "Auto-start failed for job %s: %s",
+                    job.id, exc,
+                )
+
     return job.to_dict()
 
 
