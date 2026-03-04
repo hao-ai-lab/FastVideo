@@ -27,7 +27,13 @@ DEFAULT_SETTINGS = {
     "num_gpus": 1,
     "dit_cpu_offload": 0,
     "text_encoder_cpu_offload": 0,
+    "vae_cpu_offload": 0,
+    "image_encoder_cpu_offload": 0,
     "use_fsdp_inference": 0,
+    "enable_torch_compile": 0,
+    "vsa_sparsity": 0.0,
+    "tp_size": -1,
+    "sp_size": -1,
 }
 
 
@@ -35,6 +41,65 @@ def _get_db_path(data_dir: Path) -> Path:
     """Return path to SQLite database file."""
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir / "fastvideo_ui.db"
+
+
+def _get_table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    """Return set of column names for a table."""
+    cur = conn.execute(f"PRAGMA table_info({table})")
+    return {row[1] for row in cur.fetchall()}
+
+
+def _add_column_if_missing(
+    conn: sqlite3.Connection, table: str, col: str, sql_type: str, default: str
+) -> None:
+    """Add a column to the table if it does not exist."""
+    cols = _get_table_columns(conn, table)
+    if col not in cols:
+        conn.execute(
+            f"ALTER TABLE {table} ADD COLUMN {col} {sql_type} DEFAULT {default}"
+        )
+
+
+def _migrate_db(conn: sqlite3.Connection) -> None:
+    """Add new columns to existing tables for schema migrations."""
+    # Jobs table
+    _add_column_if_missing(
+        conn, "jobs", "vae_cpu_offload", "INTEGER", "0"
+    )
+    _add_column_if_missing(
+        conn, "jobs", "image_encoder_cpu_offload", "INTEGER", "0"
+    )
+    _add_column_if_missing(
+        conn, "jobs", "enable_torch_compile", "INTEGER", "0"
+    )
+    _add_column_if_missing(
+        conn, "jobs", "vsa_sparsity", "REAL", "0.0"
+    )
+    _add_column_if_missing(
+        conn, "jobs", "tp_size", "INTEGER", "-1"
+    )
+    _add_column_if_missing(
+        conn, "jobs", "sp_size", "INTEGER", "-1"
+    )
+    # Settings table
+    _add_column_if_missing(
+        conn, "settings", "vae_cpu_offload", "INTEGER", "0"
+    )
+    _add_column_if_missing(
+        conn, "settings", "image_encoder_cpu_offload", "INTEGER", "0"
+    )
+    _add_column_if_missing(
+        conn, "settings", "enable_torch_compile", "INTEGER", "0"
+    )
+    _add_column_if_missing(
+        conn, "settings", "vsa_sparsity", "REAL", "0.0"
+    )
+    _add_column_if_missing(
+        conn, "settings", "tp_size", "INTEGER", "-1"
+    )
+    _add_column_if_missing(
+        conn, "settings", "sp_size", "INTEGER", "-1"
+    )
 
 
 def init_db(db_path: Path) -> None:
@@ -63,7 +128,13 @@ def init_db(db_path: Path) -> None:
                 num_gpus INTEGER NOT NULL DEFAULT 1,
                 dit_cpu_offload INTEGER NOT NULL DEFAULT 0,
                 text_encoder_cpu_offload INTEGER NOT NULL DEFAULT 0,
-                use_fsdp_inference INTEGER NOT NULL DEFAULT 0
+                vae_cpu_offload INTEGER NOT NULL DEFAULT 0,
+                image_encoder_cpu_offload INTEGER NOT NULL DEFAULT 0,
+                use_fsdp_inference INTEGER NOT NULL DEFAULT 0,
+                enable_torch_compile INTEGER NOT NULL DEFAULT 0,
+                vsa_sparsity REAL NOT NULL DEFAULT 0.0,
+                tp_size INTEGER NOT NULL DEFAULT -1,
+                sp_size INTEGER NOT NULL DEFAULT -1
             );
 
             CREATE TABLE IF NOT EXISTS settings (
@@ -78,11 +149,19 @@ def init_db(db_path: Path) -> None:
                 num_gpus INTEGER NOT NULL DEFAULT 1,
                 dit_cpu_offload INTEGER NOT NULL DEFAULT 0,
                 text_encoder_cpu_offload INTEGER NOT NULL DEFAULT 0,
-                use_fsdp_inference INTEGER NOT NULL DEFAULT 0
+                vae_cpu_offload INTEGER NOT NULL DEFAULT 0,
+                image_encoder_cpu_offload INTEGER NOT NULL DEFAULT 0,
+                use_fsdp_inference INTEGER NOT NULL DEFAULT 0,
+                enable_torch_compile INTEGER NOT NULL DEFAULT 0,
+                vsa_sparsity REAL NOT NULL DEFAULT 0.0,
+                tp_size INTEGER NOT NULL DEFAULT -1,
+                sp_size INTEGER NOT NULL DEFAULT -1
             );
 
             INSERT OR IGNORE INTO settings (id) VALUES (1);
         """)
+        conn.commit()
+        _migrate_db(conn)
         conn.commit()
     finally:
         conn.close()
@@ -118,8 +197,10 @@ class Database:
                 id, model_id, prompt, status, created_at, started_at, finished_at,
                 error, output_path, log_file_path, num_inference_steps, num_frames,
                 height, width, guidance_scale, seed, num_gpus,
-                dit_cpu_offload, text_encoder_cpu_offload, use_fsdp_inference
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                dit_cpu_offload, text_encoder_cpu_offload, vae_cpu_offload,
+                image_encoder_cpu_offload, use_fsdp_inference, enable_torch_compile,
+                vsa_sparsity, tp_size, sp_size
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job["id"],
@@ -141,7 +222,13 @@ class Database:
                 job.get("num_gpus", 1),
                 1 if job.get("dit_cpu_offload") else 0,
                 1 if job.get("text_encoder_cpu_offload") else 0,
+                1 if job.get("vae_cpu_offload") else 0,
+                1 if job.get("image_encoder_cpu_offload") else 0,
                 1 if job.get("use_fsdp_inference") else 0,
+                1 if job.get("enable_torch_compile") else 0,
+                job.get("vsa_sparsity", 0.0),
+                job.get("tp_size", -1),
+                job.get("sp_size", -1),
             ),
         )
         self._commit()
@@ -194,7 +281,7 @@ class Database:
         row = cur.fetchone()
         if not row:
             return _default_settings_dict()
-        return {
+        result = {
             "defaultModelId": row["default_model_id"] or "",
             "numInferenceSteps": int(row["num_inference_steps"]),
             "numFrames": int(row["num_frames"]),
@@ -207,6 +294,24 @@ class Database:
             "textEncoderCpuOffload": bool(row["text_encoder_cpu_offload"]),
             "useFsdpInference": bool(row["use_fsdp_inference"]),
         }
+        # New columns (may not exist in older DBs)
+        for col, key, default in [
+            ("vae_cpu_offload", "vaeCpuOffload", False),
+            ("image_encoder_cpu_offload", "imageEncoderCpuOffload", False),
+            ("enable_torch_compile", "enableTorchCompile", False),
+            ("vsa_sparsity", "vsaSparsity", 0.0),
+            ("tp_size", "tpSize", -1),
+            ("sp_size", "spSize", -1),
+        ]:
+            if col in row.keys():
+                v = row[col]
+                result[key] = (
+                    bool(v) if col.endswith("_offload") or col == "enable_torch_compile"
+                    else (float(v) if col == "vsa_sparsity" else int(v))
+                )
+            else:
+                result[key] = default
+        return result
 
     def save_settings(self, settings: dict[str, Any]) -> None:
         """Save settings. Accepts camelCase keys from API."""
@@ -222,7 +327,13 @@ class Database:
             "numGpus": "num_gpus",
             "ditCpuOffload": "dit_cpu_offload",
             "textEncoderCpuOffload": "text_encoder_cpu_offload",
+            "vaeCpuOffload": "vae_cpu_offload",
+            "imageEncoderCpuOffload": "image_encoder_cpu_offload",
             "useFsdpInference": "use_fsdp_inference",
+            "enableTorchCompile": "enable_torch_compile",
+            "vsaSparsity": "vsa_sparsity",
+            "tpSize": "tp_size",
+            "spSize": "sp_size",
         }
         updates = []
         params = []
@@ -243,7 +354,7 @@ class Database:
 
 def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     """Convert a DB row to job dict (snake_case, matching Job.to_dict)."""
-    return {
+    result = {
         "id": row["id"],
         "model_id": row["model_id"],
         "prompt": row["prompt"],
@@ -268,6 +379,16 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "progress_msg": "",
         "phase": "initializing",
     }
+    for col in ("vae_cpu_offload", "image_encoder_cpu_offload", "enable_torch_compile"):
+        if col in row.keys():
+            result[col] = bool(row[col])
+    for col in ("vsa_sparsity",):
+        if col in row.keys():
+            result[col] = float(row[col])
+    for col in ("tp_size", "sp_size"):
+        if col in row.keys():
+            result[col] = int(row[col])
+    return result
 
 
 def _default_settings_dict() -> dict[str, Any]:
@@ -283,5 +404,11 @@ def _default_settings_dict() -> dict[str, Any]:
         "numGpus": DEFAULT_SETTINGS["num_gpus"],
         "ditCpuOffload": bool(DEFAULT_SETTINGS["dit_cpu_offload"]),
         "textEncoderCpuOffload": bool(DEFAULT_SETTINGS["text_encoder_cpu_offload"]),
+        "vaeCpuOffload": bool(DEFAULT_SETTINGS["vae_cpu_offload"]),
+        "imageEncoderCpuOffload": bool(DEFAULT_SETTINGS["image_encoder_cpu_offload"]),
         "useFsdpInference": bool(DEFAULT_SETTINGS["use_fsdp_inference"]),
+        "enableTorchCompile": bool(DEFAULT_SETTINGS["enable_torch_compile"]),
+        "vsaSparsity": float(DEFAULT_SETTINGS["vsa_sparsity"]),
+        "tpSize": int(DEFAULT_SETTINGS["tp_size"]),
+        "spSize": int(DEFAULT_SETTINGS["sp_size"]),
     }

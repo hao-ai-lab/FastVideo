@@ -197,6 +197,110 @@ export default function SettingsPage() {
               <option value="enabled">Enabled</option>
             </select>
           </div>
+          <div className={formStyles.formRow}>
+            <label htmlFor="settings-vae-cpu-offload">VAE CPU Offload</label>
+            <select
+              id="settings-vae-cpu-offload"
+              value={options.vaeCpuOffload ? "enabled" : "disabled"}
+              onChange={(e) =>
+                updateOption("vaeCpuOffload", e.target.value === "enabled")
+              }
+            >
+              <option value="disabled">Disabled</option>
+              <option value="enabled">Enabled</option>
+            </select>
+          </div>
+          <div className={formStyles.formRow}>
+            <label htmlFor="settings-image-encoder-cpu-offload">
+              Image Encoder CPU Offload
+            </label>
+            <select
+              id="settings-image-encoder-cpu-offload"
+              value={options.imageEncoderCpuOffload ? "enabled" : "disabled"}
+              onChange={(e) =>
+                updateOption(
+                  "imageEncoderCpuOffload",
+                  e.target.value === "enabled"
+                )
+              }
+            >
+              <option value="disabled">Disabled</option>
+              <option value="enabled">Enabled</option>
+            </select>
+          </div>
+          <div className={formStyles.formRow}>
+            <label htmlFor="settings-enable-torch-compile">
+              Torch Compile
+            </label>
+            <select
+              id="settings-enable-torch-compile"
+              value={options.enableTorchCompile ? "enabled" : "disabled"}
+              onChange={(e) =>
+                updateOption(
+                  "enableTorchCompile",
+                  e.target.value === "enabled"
+                )
+              }
+            >
+              <option value="disabled">Disabled</option>
+              <option value="enabled">Enabled</option>
+            </select>
+          </div>
+          <div className={formStyles.formRow}>
+            <label
+              htmlFor="settings-vsa-sparsity"
+              title="Video Sparse Attention sparsity (0–1, higher = sparser)"
+            >
+              VSA Sparsity
+            </label>
+            <input
+              id="settings-vsa-sparsity"
+              type="number"
+              value={options.vsaSparsity}
+              onChange={(e) =>
+                updateOption("vsaSparsity", parseFloat(e.target.value))
+              }
+              min={0}
+              max={1}
+              step={0.05}
+            />
+          </div>
+          <div className={formStyles.formRow}>
+            <label
+              htmlFor="settings-tp-size"
+              title="Tensor parallelism size (-1 = auto)"
+            >
+              TP Size
+            </label>
+            <input
+              id="settings-tp-size"
+              type="number"
+              value={options.tpSize}
+              onChange={(e) =>
+                updateOption("tpSize", parseInt(e.target.value, 10) || -1)
+              }
+              min={-1}
+              max={8}
+            />
+          </div>
+          <div className={formStyles.formRow}>
+            <label
+              htmlFor="settings-sp-size"
+              title="Sequence parallelism size (-1 = auto)"
+            >
+              SP Size
+            </label>
+            <input
+              id="settings-sp-size"
+              type="number"
+              value={options.spSize}
+              onChange={(e) =>
+                updateOption("spSize", parseInt(e.target.value, 10) || -1)
+              }
+              min={-1}
+              max={8}
+            />
+          </div>
         </div>
       </section>
     </main>
