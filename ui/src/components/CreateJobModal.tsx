@@ -1,8 +1,9 @@
 'use client';
 
-import { createJob, getModels, type Model } from "@/lib/api";
+import { createJob, getModels, uploadImage, type Model } from "@/lib/api";
 import { useDefaultOptions } from "@/contexts/DefaultOptionsContext";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { WorkloadType } from "./CreateJobButton";
 import modalStyles from "./styles/Modal.module.css";
 import formStyles from "./styles/Form.module.css";
 import cardStyles from "./styles/Card.module.css";
@@ -12,13 +13,22 @@ interface CreateJobModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  workloadType?: WorkloadType;
 }
 
-export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJobModalProps) {
+export default function CreateJobModal({
+  isOpen,
+  onClose,
+  onSuccess,
+  workloadType = "t2v",
+}: CreateJobModalProps) {
   const { options: defaultOptions } = useDefaultOptions();
   const [models, setModels] = useState<Model[]>([]);
   const [modelId, setModelId] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [imagePath, setImagePath] = useState("");
+  const [imageFileName, setImageFileName] = useState("");
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [negativePrompt, setNegativePrompt] = useState("");
   const [numInferenceSteps, setNumInferenceSteps] = useState(defaultOptions.numInferenceSteps);
   const [numFrames, setNumFrames] = useState(defaultOptions.numFrames);
@@ -40,6 +50,7 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
   const [spSize, setSpSize] = useState<number>(defaultOptions.spSize);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -70,8 +81,12 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
   useEffect(() => {
     if (isOpen) {
       setModelId(defaultOptions.defaultModelId);
+      setImagePath("");
+      setImageFileName("");
       setNumInferenceSteps(defaultOptions.numInferenceSteps);
-      setNumFrames(defaultOptions.numFrames);
+      setNumFrames(
+        workloadType === "t2i" ? 1 : defaultOptions.numFrames
+      );
       setHeight(defaultOptions.height);
       setWidth(defaultOptions.width);
       setGuidanceScale(defaultOptions.guidanceScale);
@@ -89,15 +104,43 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
       setTpSize(defaultOptions.tpSize);
       setSpSize(defaultOptions.spSize);
     }
-  }, [isOpen, defaultOptions]);
+  }, [isOpen, defaultOptions, workloadType]);
+
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      setImagePath("");
+      setImageFileName("");
+      return;
+    }
+    setIsUploadingImage(true);
+    setImageFileName(file.name);
+    try {
+      const { path } = await uploadImage(file);
+      setImagePath(path);
+    } catch (err) {
+      console.error("Image upload failed:", err);
+      setImagePath("");
+      setImageFileName("");
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (workloadType === "i2v" && !imagePath) {
+      return;
+    }
     setIsSubmitting(true);
     try {
       await createJob({
         model_id: modelId,
         prompt,
+        workload_type: workloadType,
+        ...(workloadType === "i2v" && imagePath
+          ? { image_path: imagePath }
+          : {}),
         negative_prompt: negativePrompt,
         num_inference_steps: numInferenceSteps,
         num_frames: numFrames,
@@ -120,9 +163,13 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
       });
       setModelId(defaultOptions.defaultModelId);
       setPrompt("");
+      setImagePath("");
+      setImageFileName("");
       setNegativePrompt("");
       setNumInferenceSteps(defaultOptions.numInferenceSteps);
-      setNumFrames(defaultOptions.numFrames);
+      setNumFrames(
+        workloadType === "t2i" ? 1 : defaultOptions.numFrames
+      );
       setHeight(defaultOptions.height);
       setWidth(defaultOptions.width);
       setGuidanceScale(defaultOptions.guidanceScale);
@@ -153,6 +200,8 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
     if (!isSubmitting) {
       setModelId(defaultOptions.defaultModelId);
       setPrompt("");
+      setImagePath("");
+      setImageFileName("");
       setNegativePrompt("");
       setNumInferenceSteps(defaultOptions.numInferenceSteps);
       setNumFrames(defaultOptions.numFrames);
@@ -191,7 +240,12 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
           ×
         </button>
         <div className={cardStyles.card} style={{ margin: 0, border: 'none' }}>
-          <h2>New Job</h2>
+          <h2>
+            New Job
+            {workloadType === "t2v" && " (T2V)"}
+            {workloadType === "i2v" && " (I2V)"}
+            {workloadType === "t2i" && " (T2I)"}
+          </h2>
           <form onSubmit={handleSubmit} autoComplete="off">
             <div className={formStyles.formRow}>
               <label htmlFor="modal-modelId">Model</label>
@@ -213,6 +267,40 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
                 ))}
               </select>
             </div>
+            {workloadType === "i2v" && (
+              <div className={formStyles.formRow}>
+                <label htmlFor="modal-image">Image</label>
+                <input
+                  ref={imageInputRef}
+                  id="modal-image"
+                  type="file"
+                  accept=".png,.jpg,.jpeg,.webp,.bmp"
+                  onChange={handleImageChange}
+                  disabled={isSubmitting || isUploadingImage}
+                  required
+                />
+                {imageFileName && (
+                  <span className={formStyles.helperText}>
+                    {isUploadingImage ? "Uploading…" : imageFileName}
+                    {" · "}
+                    <button
+                      type="button"
+                      className={formStyles.clearLink}
+                      onClick={() => {
+                        setImagePath("");
+                        setImageFileName("");
+                        if (imageInputRef.current) {
+                          imageInputRef.current.value = "";
+                        }
+                      }}
+                      disabled={isSubmitting || isUploadingImage}
+                    >
+                      Clear
+                    </button>
+                  </span>
+                )}
+              </div>
+            )}
             <div className={formStyles.formRow}>
               <label htmlFor="modal-prompt">Prompt</label>
               <textarea
@@ -255,18 +343,22 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
                     disabled={isSubmitting}
                   />
                 </div>
-                <div className={formStyles.formRow}>
-                  <label htmlFor="modal-num-frames">Frames</label>
-                  <input
-                    id="modal-num-frames"
-                    type="number"
-                    value={numFrames}
-                    onChange={(e) => setNumFrames(parseInt(e.target.value, 10))}
-                    min={1}
-                    max={500}
-                    disabled={isSubmitting}
-                  />
-                </div>
+                {workloadType !== "t2i" && (
+                  <div className={formStyles.formRow}>
+                    <label htmlFor="modal-num-frames">Frames</label>
+                    <input
+                      id="modal-num-frames"
+                      type="number"
+                      value={numFrames}
+                      onChange={(e) =>
+                        setNumFrames(parseInt(e.target.value, 10))
+                      }
+                      min={1}
+                      max={500}
+                      disabled={isSubmitting}
+                    />
+                  </div>
+                )}
                 <div className={formStyles.formRow}>
                   <label htmlFor="modal-height">Height</label>
                   <input
@@ -318,18 +410,22 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
                     disabled={isSubmitting}
                   />
                 </div>
-                <div className={formStyles.formRow}>
-                  <label htmlFor="modal-fps">FPS</label>
-                  <input
-                    id="modal-fps"
-                    type="number"
-                    value={fps}
-                    onChange={(e) => setFps(parseInt(e.target.value, 10))}
-                    min={1}
-                    max={60}
-                    disabled={isSubmitting}
-                  />
-                </div>
+                {workloadType !== "t2i" && (
+                  <div className={formStyles.formRow}>
+                    <label htmlFor="modal-fps">FPS</label>
+                    <input
+                      id="modal-fps"
+                      type="number"
+                      value={fps}
+                      onChange={(e) =>
+                        setFps(parseInt(e.target.value, 10))
+                      }
+                      min={1}
+                      max={60}
+                      disabled={isSubmitting}
+                    />
+                  </div>
+                )}
                 <div className={formStyles.formRow}>
                   <label htmlFor="modal-seed">Seed</label>
                   <input

@@ -23,7 +23,7 @@ from pathlib import Path
 import uvicorn
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -53,11 +53,14 @@ _available_models: list[dict[str, str]] = [
 
 job_runner: JobRunner
 database: Database | None = None
+upload_dir: str = ""
 
 
 class CreateJobRequest(BaseModel):
     model_id: str
     prompt: str
+    workload_type: str = "t2v"
+    image_path: str = ""
     negative_prompt: str = ""
     num_inference_steps: int = 50
     num_frames: int = 81
@@ -147,6 +150,42 @@ def list_models() -> list[dict[str, str]]:
     return _available_models
 
 
+ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+
+@app.post("/api/upload-image")
+async def upload_image(file: UploadFile = File(...)) -> dict[str, str]:
+    """Upload an image file for I2V jobs. Returns the absolute path."""
+    global upload_dir  # noqa: PLW0603
+    if not upload_dir:
+        raise HTTPException(
+            status_code=503,
+            detail="Upload directory not configured",
+        )
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_IMAGE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid file type. Allowed: "
+                f"{', '.join(ALLOWED_IMAGE_EXTENSIONS)}"
+            ),
+        )
+    os.makedirs(upload_dir, exist_ok=True)
+    unique_name = f"{uuid.uuid4().hex}{ext}"
+    dest_path = os.path.join(upload_dir, unique_name)
+    try:
+        contents = await file.read()
+        with open(dest_path, "wb") as f:
+            f.write(contents)
+    except OSError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save upload: {e}",
+        ) from e
+    return {"path": os.path.abspath(dest_path)}
+
+
 @app.get("/api/jobs")
 def list_jobs() -> list[dict[str, Any]]:
     """Return every job (newest first)."""
@@ -179,6 +218,8 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         job_id=str(uuid.uuid4()),
         model_id=req.model_id,
         prompt=req.prompt,
+        workload_type=req.workload_type or "t2v",
+        image_path=req.image_path or "",
         negative_prompt=req.negative_prompt,
         num_inference_steps=req.num_inference_steps,
         num_frames=req.num_frames,
@@ -329,7 +370,7 @@ def create_local_env(host: str, port: int) -> None:
 
 
 def main():
-    global job_runner, database  # noqa: PLW0603
+    global job_runner, database, upload_dir  # noqa: PLW0603
 
     # Set up signal handlers to prevent worker crashes from killing the server
     _setup_signal_handlers()
@@ -389,6 +430,7 @@ def main():
     output_dir = os.path.abspath(args.output_dir)
     log_dir = os.path.abspath(args.log_dir)
     data_dir = Path(args.data_dir).resolve()
+    upload_dir = str(data_dir / "uploads")
 
     create_local_env(args.host, args.port)
 
