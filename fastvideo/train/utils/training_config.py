@@ -95,6 +95,7 @@ class TrainingConfig:
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     vsa: VSAConfig = field(default_factory=VSAConfig)
     model: ModelTrainingConfig = field(default_factory=ModelTrainingConfig)
+    validation: dict = field(default_factory=dict)
     pipeline_config: PipelineConfig | None = None
     model_path: str = ""
     dit_precision: str = "fp32"

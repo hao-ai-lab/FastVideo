@@ -256,6 +256,7 @@ def _build_training_config(
     *,
     models: dict[str, dict[str, Any]],
     pipeline_config: Any,
+    validation: dict[str, Any],
 ) -> TrainingConfig:
     """Build TrainingConfig from nested training: YAML."""
     d = dict(t.get("distributed", {}) or {})
@@ -388,6 +389,7 @@ def _build_training_config(
                     "enable_gradient_checkpointing_type"
                 )),
         ),
+        validation=validation,
         pipeline_config=pipeline_config,
         model_path=model_path,
         dit_precision=str(
@@ -448,7 +450,8 @@ def load_run_config(path: str) -> RunConfig:
     t = dict(training_raw)
     t.pop("validation", None)
     training = _build_training_config(
-        t, models=models, pipeline_config=pipeline_config)
+        t, models=models, pipeline_config=pipeline_config,
+        validation=validation)
 
     return RunConfig(
         models=models,

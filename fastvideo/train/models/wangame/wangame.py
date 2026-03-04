@@ -143,7 +143,7 @@ class WanGameModel(ModelBase):
         self._init_timestep_mechanics()
 
         # Optional validator.
-        validation_cfg = getattr(training_config, "_validation_cfg", None)
+        validation_cfg = training_config.validation
         if validation_cfg:
             validation_enabled = bool(validation_cfg.get("enabled", bool(validation_cfg)))
             if validation_enabled:
