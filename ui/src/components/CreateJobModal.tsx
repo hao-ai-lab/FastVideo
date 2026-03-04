@@ -1,6 +1,7 @@
 'use client';
 
 import { createJob, getModels, uploadImage, type Model } from "@/lib/api";
+import { getDefaultModelForWorkload } from "@/lib/defaultOptions";
 import { useDefaultOptions } from "@/contexts/DefaultOptionsContext";
 import { useEffect, useRef, useState } from "react";
 import type { WorkloadType } from "./CreateJobButton";
@@ -65,22 +66,37 @@ export default function CreateJobModal({
   }, [isOpen, isSubmitting, onClose]);
 
   useEffect(() => {
-    if (isOpen && models.length === 0) {
+    if (isOpen) {
       setIsLoadingModels(true);
-      getModels()
-        .then(setModels)
+      getModels(workloadType)
+        .then((fetchedModels) => {
+          setModels(fetchedModels);
+          const ids = fetchedModels.map((m) => m.id);
+          const defaultId = getDefaultModelForWorkload(defaultOptions, workloadType);
+          setModelId(
+            ids.includes(defaultId) ? defaultId : fetchedModels[0]?.id ?? ""
+          );
+        })
         .catch((error) => {
           console.error("Failed to load models:", error);
         })
         .finally(() => {
           setIsLoadingModels(false);
         });
+    } else {
+      setModels([]);
     }
-  }, [isOpen, models.length]);
+  }, [
+    isOpen,
+    workloadType,
+    defaultOptions.defaultModelIdT2v,
+    defaultOptions.defaultModelIdI2v,
+    defaultOptions.defaultModelIdT2i,
+  ]);
 
   useEffect(() => {
     if (isOpen) {
-      setModelId(defaultOptions.defaultModelId);
+      setModelId(getDefaultModelForWorkload(defaultOptions, workloadType));
       setImagePath("");
       setImageFileName("");
       setNumInferenceSteps(defaultOptions.numInferenceSteps);
@@ -161,7 +177,7 @@ export default function CreateJobModal({
         tp_size: tpSize,
         sp_size: spSize,
       });
-      setModelId(defaultOptions.defaultModelId);
+      setModelId(getDefaultModelForWorkload(defaultOptions, workloadType));
       setPrompt("");
       setImagePath("");
       setImageFileName("");
@@ -198,7 +214,7 @@ export default function CreateJobModal({
 
   const handleClose = () => {
     if (!isSubmitting) {
-      setModelId(defaultOptions.defaultModelId);
+      setModelId(getDefaultModelForWorkload(defaultOptions, workloadType));
       setPrompt("");
       setImagePath("");
       setImageFileName("");
@@ -258,7 +274,11 @@ export default function CreateJobModal({
                 disabled={isSubmitting || isLoadingModels}
               >
                 <option value="" disabled>
-                  {isLoadingModels ? "Loading models…" : "Select a model…"}
+                  {isLoadingModels
+                    ? "Loading models…"
+                    : models.length === 0
+                      ? "No models available for this workload"
+                      : "Select a model…"}
                 </option>
                 {models.map((model) => (
                   <option key={model.id} value={model.id}>

@@ -28,7 +28,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from fastvideo.registry import get_registered_model_paths
+from fastvideo.registry import (get_registered_model_paths,
+                                get_registered_models_with_workloads)
 from ui.database import Database, _get_db_path
 from ui.job_runner import JobRunner, JobStatus
 
@@ -109,6 +110,9 @@ def get_settings() -> dict[str, Any]:
 
 class SettingsUpdate(BaseModel):
     defaultModelId: str | None = None
+    defaultModelIdT2v: str | None = None
+    defaultModelIdI2v: str | None = None
+    defaultModelIdT2i: str | None = None
     numInferenceSteps: int | None = None
     numFrames: int | None = None
     height: int | None = None
@@ -145,8 +149,16 @@ def update_settings(settings: SettingsUpdate) -> dict[str, Any]:
 
 
 @app.get("/api/models")
-def list_models() -> list[dict[str, str]]:
-    """Return the catalogue of available video-generation models."""
+def list_models(workload_type: str | None = None) -> list[dict[str, Any]]:
+    """Return the catalogue of available video-generation models.
+
+    Query params:
+        workload_type: If set (t2v, i2v, t2i), only return models that
+            support this workload. Otherwise return all models.
+    """
+    if workload_type:
+        models = get_registered_models_with_workloads(workload_type=workload_type)
+        return [{"id": m["id"], "label": m["label"]} for m in models]
     return _available_models
 
 
