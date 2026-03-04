@@ -165,7 +165,7 @@ export default function CreateJobModal({ isOpen, onClose, onSuccess }: CreateJob
   if (!isOpen) return null;
 
   return (
-    <div className={modalStyles.modal}>
+    <div className={modalStyles.modal} data-modal>
       <div className={modalStyles.modalBackdrop} onClick={handleClose} />
       <div className={`${modalStyles.modalContent} ${modalStyles.modalForm}`}>
         <button
