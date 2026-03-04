@@ -23,6 +23,7 @@ export interface DefaultOptions {
   vsaSparsity: number;
   tpSize: number;
   spSize: number;
+  autoStartJob: boolean;
 }
 
 export const DEFAULT_OPTIONS: DefaultOptions = {
@@ -48,6 +49,7 @@ export const DEFAULT_OPTIONS: DefaultOptions = {
   vsaSparsity: 0,
   tpSize: -1,
   spSize: -1,
+  autoStartJob: false,
 };
 
 const STORAGE_KEY = "fastvideo-default-options";

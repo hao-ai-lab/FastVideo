@@ -6,6 +6,22 @@
   margin-bottom: .85rem;
 }
 
+.settingsRow {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: .85rem;
+}
+
+.settingsRow label {
+  font-size: .8rem;
+  color: var(--text-dim);
+  padding-left: 3px;
+  letter-spacing: .04em;
+  margin-bottom: 0;
+}
+
 .formRow label {
   font-size: .8rem;
   color: var(--text-dim);
