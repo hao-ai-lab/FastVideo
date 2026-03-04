@@ -9,6 +9,8 @@ import modalStyles from "./styles/Modal.module.css";
 import formStyles from "./styles/Form.module.css";
 import cardStyles from "./styles/Card.module.css";
 import buttonStyles from "./styles/Button.module.css";
+import Toggle from "./Toggle";
+import Slider from "./Slider";
 
 interface CreateJobModalProps {
   isOpen: boolean;
@@ -353,95 +355,95 @@ export default function CreateJobModal({
               <div className={formStyles.settingsGrid}>
                 <div className={formStyles.formRow}>
                   <label htmlFor="modal-num-steps">Inference Steps</label>
-                  <input
+                  <Slider
                     id="modal-num-steps"
-                    type="number"
-                    value={numInferenceSteps}
-                    onChange={(e) => setNumInferenceSteps(parseInt(e.target.value, 10))}
                     min={1}
                     max={200}
+                    step={1}
+                    value={numInferenceSteps}
+                    onChange={setNumInferenceSteps}
                     disabled={isSubmitting}
                   />
                 </div>
                 {workloadType !== "t2i" && (
                   <div className={formStyles.formRow}>
                     <label htmlFor="modal-num-frames">Frames</label>
-                    <input
+                    <Slider
                       id="modal-num-frames"
-                      type="number"
-                      value={numFrames}
-                      onChange={(e) =>
-                        setNumFrames(parseInt(e.target.value, 10))
-                      }
                       min={1}
                       max={500}
+                      step={1}
+                      value={numFrames}
+                      onChange={setNumFrames}
                       disabled={isSubmitting}
                     />
                   </div>
                 )}
                 <div className={formStyles.formRow}>
                   <label htmlFor="modal-height">Height</label>
-                  <input
+                  <Slider
                     id="modal-height"
-                    type="number"
-                    value={height}
-                    onChange={(e) => setHeight(parseInt(e.target.value, 10))}
                     min={64}
+                    max={1080}
                     step={16}
+                    value={height}
+                    onChange={setHeight}
                     disabled={isSubmitting}
                   />
                 </div>
                 <div className={formStyles.formRow}>
                   <label htmlFor="modal-width">Width</label>
-                  <input
+                  <Slider
                     id="modal-width"
-                    type="number"
-                    value={width}
-                    onChange={(e) => setWidth(parseInt(e.target.value, 10))}
                     min={64}
+                    max={1920}
                     step={16}
+                    value={width}
+                    onChange={setWidth}
                     disabled={isSubmitting}
                   />
                 </div>
                 <div className={formStyles.formRow}>
                   <label htmlFor="modal-guidance">Guidance Scale</label>
-                  <input
+                  <Slider
                     id="modal-guidance"
-                    type="number"
-                    value={guidanceScale}
-                    onChange={(e) => setGuidanceScale(parseFloat(e.target.value))}
                     min={0}
+                    max={20}
                     step={0.1}
+                    value={guidanceScale}
+                    onChange={setGuidanceScale}
                     disabled={isSubmitting}
+                    formatValue={(v) => v.toFixed(1)}
                   />
                 </div>
                 <div className={formStyles.formRow}>
-                  <label htmlFor="modal-guidance-rescale" title="Guidance rescale factor (0 = disabled)">
+                  <label
+                    htmlFor="modal-guidance-rescale"
+                    title="Guidance rescale factor (0 = disabled)"
+                  >
                     Guidance Rescale
                   </label>
-                  <input
+                  <Slider
                     id="modal-guidance-rescale"
-                    type="number"
-                    value={guidanceRescale}
-                    onChange={(e) => setGuidanceRescale(parseFloat(e.target.value))}
                     min={0}
                     max={1}
                     step={0.05}
+                    value={guidanceRescale}
+                    onChange={setGuidanceRescale}
                     disabled={isSubmitting}
+                    formatValue={(v) => v.toFixed(2)}
                   />
                 </div>
                 {workloadType !== "t2i" && (
                   <div className={formStyles.formRow}>
                     <label htmlFor="modal-fps">FPS</label>
-                    <input
+                    <Slider
                       id="modal-fps"
-                      type="number"
-                      value={fps}
-                      onChange={(e) =>
-                        setFps(parseInt(e.target.value, 10))
-                      }
                       min={1}
                       max={60}
+                      step={1}
+                      value={fps}
+                      onChange={setFps}
                       disabled={isSubmitting}
                     />
                   </div>
@@ -459,129 +461,126 @@ export default function CreateJobModal({
                 </div>
                 <div className={formStyles.formRow}>
                   <label htmlFor="modal-num-gpus">GPUs</label>
-                  <input
+                  <Slider
                     id="modal-num-gpus"
-                    type="number"
-                    value={numGpus}
-                    onChange={(e) => setNumGpus(parseInt(e.target.value, 10))}
                     min={1}
                     max={8}
+                    step={1}
+                    value={numGpus}
+                    onChange={setNumGpus}
                     disabled={isSubmitting}
                   />
                 </div>
                 <div className={formStyles.formRow}>
                   <label htmlFor="modal-dit-cpu-offload">DiT CPU Offload</label>
-                  <select
+                  <Toggle
                     id="modal-dit-cpu-offload"
-                    value={ditCpuOffload ? 'enabled' : 'disabled'}
-                    onChange={(e) => setDitCpuOffload(e.target.value === 'enabled')}
+                    checked={ditCpuOffload}
+                    onChange={setDitCpuOffload}
                     disabled={isSubmitting}
-                  >
-                    <option value="disabled">Disabled</option>
-                    <option value="enabled">Enabled</option>
-                  </select>
+                  />
                 </div>
                 <div className={formStyles.formRow}>
-                  <label htmlFor="modal-text-encoder-cpu-offload">Text Encoder CPU Offload</label>
-                  <select
+                  <label htmlFor="modal-text-encoder-cpu-offload">
+                    Text Encoder CPU Offload
+                  </label>
+                  <Toggle
                     id="modal-text-encoder-cpu-offload"
-                    value={textEncoderCpuOffload ? 'enabled' : 'disabled'}
-                    onChange={(e) => setTextEncoderCpuOffload(e.target.value === 'enabled')}
+                    checked={textEncoderCpuOffload}
+                    onChange={setTextEncoderCpuOffload}
                     disabled={isSubmitting}
-                  >
-                    <option value="disabled">Disabled</option>
-                    <option value="enabled">Enabled</option>
-                  </select>
+                  />
                 </div>
                 <div className={formStyles.formRow}>
                   <label htmlFor="modal-use-fsdp-inference">Use FSDP Inference</label>
-                  <select
+                  <Toggle
                     id="modal-use-fsdp-inference"
-                    value={useFsdpInference ? 'enabled' : 'disabled'}
-                    onChange={(e) => setUseFsdpInference(e.target.value === 'enabled')}
+                    checked={useFsdpInference}
+                    onChange={setUseFsdpInference}
                     disabled={isSubmitting}
-                  >
-                    <option value="disabled">Disabled</option>
-                    <option value="enabled">Enabled</option>
-                  </select>
+                  />
                 </div>
                 <div className={formStyles.formRow}>
                   <label htmlFor="modal-vae-cpu-offload">VAE CPU Offload</label>
-                  <select
+                  <Toggle
                     id="modal-vae-cpu-offload"
-                    value={vaeCpuOffload ? 'enabled' : 'disabled'}
-                    onChange={(e) => setVaeCpuOffload(e.target.value === 'enabled')}
+                    checked={vaeCpuOffload}
+                    onChange={setVaeCpuOffload}
                     disabled={isSubmitting}
-                  >
-                    <option value="disabled">Disabled</option>
-                    <option value="enabled">Enabled</option>
-                  </select>
+                  />
                 </div>
                 <div className={formStyles.formRow}>
-                  <label htmlFor="modal-image-encoder-cpu-offload">Image Encoder CPU Offload</label>
-                  <select
+                  <label htmlFor="modal-image-encoder-cpu-offload">
+                    Image Encoder CPU Offload
+                  </label>
+                  <Toggle
                     id="modal-image-encoder-cpu-offload"
-                    value={imageEncoderCpuOffload ? 'enabled' : 'disabled'}
-                    onChange={(e) => setImageEncoderCpuOffload(e.target.value === 'enabled')}
+                    checked={imageEncoderCpuOffload}
+                    onChange={setImageEncoderCpuOffload}
                     disabled={isSubmitting}
-                  >
-                    <option value="disabled">Disabled</option>
-                    <option value="enabled">Enabled</option>
-                  </select>
+                  />
                 </div>
                 <div className={formStyles.formRow}>
                   <label htmlFor="modal-enable-torch-compile">Torch Compile</label>
-                  <select
+                  <Toggle
                     id="modal-enable-torch-compile"
-                    value={enableTorchCompile ? 'enabled' : 'disabled'}
-                    onChange={(e) => setEnableTorchCompile(e.target.value === 'enabled')}
+                    checked={enableTorchCompile}
+                    onChange={setEnableTorchCompile}
                     disabled={isSubmitting}
-                  >
-                    <option value="disabled">Disabled</option>
-                    <option value="enabled">Enabled</option>
-                  </select>
+                  />
                 </div>
                 <div className={formStyles.formRow}>
-                  <label htmlFor="modal-vsa-sparsity" title="Video Sparse Attention sparsity (0–1, higher = sparser)">
+                  <label
+                    htmlFor="modal-vsa-sparsity"
+                    title="Video Sparse Attention sparsity (0–1, higher = sparser)"
+                  >
                     VSA Sparsity
                   </label>
-                  <input
+                  <Slider
                     id="modal-vsa-sparsity"
-                    type="number"
-                    value={vsaSparsity}
-                    onChange={(e) => setVsaSparsity(parseFloat(e.target.value))}
                     min={0}
                     max={1}
                     step={0.05}
+                    value={vsaSparsity}
+                    onChange={setVsaSparsity}
                     disabled={isSubmitting}
+                    formatValue={(v) => v.toFixed(2)}
                   />
                 </div>
                 <div className={formStyles.formRow}>
-                  <label htmlFor="modal-tp-size" title="Tensor parallelism size (-1 = auto)">
+                  <label
+                    htmlFor="modal-tp-size"
+                    title="Tensor parallelism size (-1 = auto)"
+                  >
                     TP Size
                   </label>
-                  <input
+                  <Slider
                     id="modal-tp-size"
-                    type="number"
-                    value={tpSize}
-                    onChange={(e) => setTpSize(parseInt(e.target.value, 10) || -1)}
                     min={-1}
                     max={8}
+                    step={1}
+                    value={tpSize}
+                    onChange={setTpSize}
                     disabled={isSubmitting}
+                    formatValue={(v) => (v === -1 ? "Auto" : String(v))}
                   />
                 </div>
                 <div className={formStyles.formRow}>
-                  <label htmlFor="modal-sp-size" title="Sequence parallelism size (-1 = auto)">
+                  <label
+                    htmlFor="modal-sp-size"
+                    title="Sequence parallelism size (-1 = auto)"
+                  >
                     SP Size
                   </label>
-                  <input
+                  <Slider
                     id="modal-sp-size"
-                    type="number"
-                    value={spSize}
-                    onChange={(e) => setSpSize(parseInt(e.target.value, 10) || -1)}
                     min={-1}
                     max={8}
+                    step={1}
+                    value={spSize}
+                    onChange={setSpSize}
                     disabled={isSubmitting}
+                    formatValue={(v) => (v === -1 ? "Auto" : String(v))}
                   />
                 </div>
               </div>
