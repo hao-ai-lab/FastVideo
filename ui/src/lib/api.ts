@@ -49,6 +49,9 @@ export interface Model {
 
 export interface Settings {
     defaultModelId: string;
+    defaultModelIdT2v: string;
+    defaultModelIdI2v: string;
+    defaultModelIdT2i: string;
     numInferenceSteps: number;
     numFrames: number;
     height: number;
@@ -112,9 +115,12 @@ export async function uploadImage(file: File): Promise<{ path: string }> {
     return response.json();
 }
 
-export async function getModels(): Promise<Model[]> {
+export async function getModels(workloadType?: string): Promise<Model[]> {
     const baseApiUrl = getApiBaseUrl();
-    const response = await fetch(`${baseApiUrl}/models`);
+    const url = workloadType
+        ? `${baseApiUrl}/models?workload_type=${encodeURIComponent(workloadType)}`
+        : `${baseApiUrl}/models`;
+    const response = await fetch(url);
     if (!response.ok) {
         throw new Error("Failed to fetch models");
     }

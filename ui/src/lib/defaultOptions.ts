@@ -2,6 +2,9 @@
 
 export interface DefaultOptions {
   defaultModelId: string;
+  defaultModelIdT2v: string;
+  defaultModelIdI2v: string;
+  defaultModelIdT2i: string;
   numInferenceSteps: number;
   numFrames: number;
   height: number;
@@ -24,6 +27,9 @@ export interface DefaultOptions {
 
 export const DEFAULT_OPTIONS: DefaultOptions = {
   defaultModelId: "",
+  defaultModelIdT2v: "",
+  defaultModelIdI2v: "",
+  defaultModelIdT2i: "",
   numInferenceSteps: 50,
   numFrames: 81,
   height: 480,
@@ -45,6 +51,24 @@ export const DEFAULT_OPTIONS: DefaultOptions = {
 };
 
 const STORAGE_KEY = "fastvideo-default-options";
+
+export type WorkloadType = "t2v" | "i2v" | "t2i";
+
+export function getDefaultModelForWorkload(
+  options: DefaultOptions,
+  workloadType: WorkloadType
+): string {
+  switch (workloadType) {
+    case "t2v":
+      return options.defaultModelIdT2v || options.defaultModelId || "";
+    case "i2v":
+      return options.defaultModelIdI2v || "";
+    case "t2i":
+      return options.defaultModelIdT2i || "";
+    default:
+      return options.defaultModelId || "";
+  }
+}
 
 export function loadDefaultOptions(): DefaultOptions {
   if (typeof window === "undefined") {

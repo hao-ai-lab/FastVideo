@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useDefaultOptions } from "@/contexts/DefaultOptionsContext";
 import { useHeaderActions } from "@/contexts/ActiveTabContext";
 import { getModels, type Model } from "@/lib/api";
+import type { WorkloadType } from "@/lib/defaultOptions";
 import cardStyles from "@styles/Card.module.css";
 import formStyles from "@styles/Form.module.css";
 import layoutStyles from "@/app/Layout.module.css";
@@ -12,13 +13,53 @@ import buttonStyles from "@styles/Button.module.css";
 export default function SettingsPage() {
   useHeaderActions([]);
   const { options, updateOption, resetToDefaults } = useDefaultOptions();
-  const [models, setModels] = useState<Model[]>([]);
+  const [modelsT2v, setModelsT2v] = useState<Model[]>([]);
+  const [modelsI2v, setModelsI2v] = useState<Model[]>([]);
+  const [modelsT2i, setModelsT2i] = useState<Model[]>([]);
 
   useEffect(() => {
-    getModels()
-      .then(setModels)
+    Promise.all([
+      getModels("t2v"),
+      getModels("i2v"),
+      getModels("t2i"),
+    ])
+      .then(([t2v, i2v, t2i]) => {
+        setModelsT2v(t2v);
+        setModelsI2v(i2v);
+        setModelsT2i(t2i);
+      })
       .catch((error) => console.error("Failed to load models:", error));
   }, []);
+
+  const DefaultModelSelect = ({
+    workloadType,
+    label,
+    models,
+    value,
+    onUpdate,
+  }: {
+    workloadType: WorkloadType;
+    label: string;
+    models: Model[];
+    value: string;
+    onUpdate: (modelId: string) => void;
+  }) => (
+    <div className={formStyles.formRow}>
+      <label htmlFor={`settings-default-model-${workloadType}`}>{label}</label>
+      <select
+        id={`settings-default-model-${workloadType}`}
+        value={value}
+        onChange={(e) => onUpdate(e.target.value)}
+      >
+        <option value="">None (select when creating job)</option>
+        {models.map((model) => (
+          <option key={model.id} value={model.id}>
+            {model.label} ({model.id})
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 
   return (
     <main className={layoutStyles.main}>
@@ -44,23 +85,27 @@ export default function SettingsPage() {
           below to match your typical workflow.
         </p>
         <div className={formStyles.settingsGrid}>
-          <div className={formStyles.formRow}>
-            <label htmlFor="settings-default-model">Default Model</label>
-            <select
-              id="settings-default-model"
-              value={options.defaultModelId}
-              onChange={(e) =>
-                updateOption("defaultModelId", e.target.value)
-              }
-            >
-              <option value="">None (select when creating job)</option>
-              {models.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.label} ({model.id})
-                </option>
-              ))}
-            </select>
-          </div>
+          <DefaultModelSelect
+            workloadType="t2v"
+            label="Default Model (T2V)"
+            models={modelsT2v}
+            value={options.defaultModelIdT2v}
+            onUpdate={(v) => updateOption("defaultModelIdT2v", v)}
+          />
+          <DefaultModelSelect
+            workloadType="i2v"
+            label="Default Model (I2V)"
+            models={modelsI2v}
+            value={options.defaultModelIdI2v}
+            onUpdate={(v) => updateOption("defaultModelIdI2v", v)}
+          />
+          <DefaultModelSelect
+            workloadType="t2i"
+            label="Default Model (T2I)"
+            models={modelsT2i}
+            value={options.defaultModelIdT2i}
+            onUpdate={(v) => updateOption("defaultModelIdT2i", v)}
+          />
           <div className={formStyles.formRow}>
             <label htmlFor="settings-num-steps">Inference Steps</label>
             <input
