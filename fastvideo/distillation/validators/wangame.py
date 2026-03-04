@@ -38,8 +38,8 @@ from fastvideo.dataset.validation_dataset import (
 from fastvideo.distributed import get_sp_group, get_world_group
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
-from fastvideo.distillation.utils.loader_args import (
-    DistillLoaderArgs, )
+from fastvideo.distillation.utils.moduleloader import (
+    make_inference_args, )
 from fastvideo.distillation.validators.base import (
     ValidationRequest, )
 from fastvideo.training.trackers import DummyTracker
@@ -413,7 +413,7 @@ class WanGameValidator:
         dataloader = DataLoader(dataset, batch_size=None, num_workers=0)
 
         # Build inference args once for this validation run.
-        inference_args = DistillLoaderArgs.for_inference(tc, model_path=tc.model_path)
+        inference_args = make_inference_args(tc, model_path=tc.model_path)
 
         videos: list[list[np.ndarray]] = []
         captions: list[str] = []

@@ -134,7 +134,6 @@ class WanGameModel(ModelBase):
         transformer = load_module_from_path(
             model_path=init_from,
             module_type="transformer",
-            loader_args=None,
             disable_custom_init_weights=(
                 disable_custom_init_weights
             ),
@@ -167,19 +166,10 @@ class WanGameModel(ModelBase):
         """Load VAE, build dataloader, seed RNGs."""
         self.training_config = training_config
 
-        from fastvideo.distillation.utils.loader_args import (
-            DistillLoaderArgs,
-        )
-
-        loader_args = DistillLoaderArgs.from_training_config(
-            training_config,
-            model_path=training_config.model_path,
-        )
-
         self.vae = load_module_from_path(
             model_path=str(training_config.model_path),
             module_type="vae",
-            loader_args=loader_args,
+            training_config=training_config,
         )
 
         self.world_group = get_world_group()
