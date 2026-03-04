@@ -284,6 +284,7 @@ def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
         output_dir = build_generated_output_dir(
             script_dir,
+            device_reference_folder,
             model_id,
             ATTENTION_BACKEND,
         )
@@ -399,6 +400,7 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
         output_dir = build_generated_output_dir(
             script_dir,
+            device_reference_folder,
             model_id,
             ATTENTION_BACKEND,
         )

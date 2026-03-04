@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import getpass
 import os
 import shutil
 import sys
+import tempfile
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
@@ -22,6 +24,7 @@ DEFAULT_OUTPUT_QUALITY_TIER = "default"
 FULL_OUTPUT_QUALITY_TIER = "full_quality"
 ALL_OUTPUT_QUALITY_TIERS = "all"
 REFERENCE_VIDEOS_DIRNAME = "reference_videos"
+DEFAULT_DEVICE_REFERENCE_FOLDER = "L40S_reference_videos"
 QUALITY_TIERS = (
     DEFAULT_OUTPUT_QUALITY_TIER,
     FULL_OUTPUT_QUALITY_TIER,
@@ -55,6 +58,61 @@ def _discover_reference_dirs(base_dir: Path) -> list[Path]:
         if p.is_dir() and p.name.endswith("_reference_videos")
     ]
     return sorted(dirs)
+
+
+@contextlib.contextmanager
+def _exclusive_download_lock(lock_path: Path):
+    """Best-effort cross-process lock for reference video download/copy."""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a", encoding="utf-8") as lock_file:
+        if os.name == "posix":
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == "posix":
+                import fcntl
+
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _merge_downloaded_reference_content(
+    staging_dir: Path,
+    local_dir: Path,
+) -> int:
+    copied_roots = 0
+
+    tier_root = staging_dir / REFERENCE_VIDEOS_DIRNAME
+    if tier_root.exists():
+        dst_tier_root = local_dir / REFERENCE_VIDEOS_DIRNAME
+        shutil.copytree(tier_root, dst_tier_root, dirs_exist_ok=True)
+        copied_roots += 1
+
+    # Legacy default layout support: <staging>/<GPU>_reference_videos/...
+    legacy_reference_dirs = _discover_reference_dirs(staging_dir)
+    for legacy_dir in legacy_reference_dirs:
+        dst_legacy_dir = local_dir / legacy_dir.name
+        shutil.copytree(legacy_dir, dst_legacy_dir, dirs_exist_ok=True)
+        copied_roots += 1
+
+    return copied_roots
+
+
+def _resolve_device_reference_folder(
+    *,
+    explicit_device_folder: str | None,
+    reference_dir: Path | None,
+) -> str:
+    if explicit_device_folder and explicit_device_folder.strip():
+        return explicit_device_folder.strip()
+    if (
+        reference_dir is not None
+        and reference_dir.name.endswith("_reference_videos")
+    ):
+        return reference_dir.name
+    return DEFAULT_DEVICE_REFERENCE_FOLDER
 
 
 def _reference_tier_root(base_dir: Path, quality_tier: str) -> Path:
@@ -177,13 +235,27 @@ def download_reference_videos(
             else:
                 allow_patterns.append("*_reference_videos/**")
 
-    snapshot_download(
-        repo_id=repo_id,
-        repo_type=repo_type,
-        local_dir=str(local_dir),
-        token=token,
-        allow_patterns=allow_patterns,
-    )
+    # Work around long-path issues in some huggingface_hub versions:
+    # avoid `local_dir` mode and download into a short cache dir instead,
+    # then merge files into local_dir.
+    with tempfile.TemporaryDirectory(prefix="fv2-ssim-cache-") as tmp_cache_dir:
+        snapshot_path = snapshot_download(
+            repo_id=repo_id,
+            repo_type=repo_type,
+            cache_dir=tmp_cache_dir,
+            token=token,
+            allow_patterns=allow_patterns,
+        )
+        staging_dir = Path(snapshot_path)
+        copied_roots = _merge_downloaded_reference_content(
+            staging_dir=staging_dir,
+            local_dir=local_dir,
+        )
+        if copied_roots == 0:
+            raise RuntimeError(
+                "HF download completed but no reference_videos content "
+                "was found in downloaded artifacts."
+            )
 
 
 def upload_reference_videos(
@@ -263,34 +335,36 @@ def ensure_reference_videos_available(
     if quality_tier not in QUALITY_TIERS:
         raise ValueError(f"Unsupported quality tier: {quality_tier}")
     target_dir = local_dir or _ssim_dir()
-    if _has_local_reference_videos(target_dir, quality_tier):
-        return False
+    lock_path = target_dir / ".reference_videos_download.lock"
+    with _exclusive_download_lock(lock_path):
+        if _has_local_reference_videos(target_dir, quality_tier):
+            return False
 
-    resolved_repo_id = repo_id or _default_repo_id()
-    resolved_repo_type = repo_type or _default_repo_type()
-    if not resolved_repo_id:
-        raise RuntimeError(
-            "No local reference videos found and no HF repo configured.\n"
-            f"Set {HF_REPO_ENV_KEY} or pass --repo-id."
+        resolved_repo_id = repo_id or _default_repo_id()
+        resolved_repo_type = repo_type or _default_repo_type()
+        if not resolved_repo_id:
+            raise RuntimeError(
+                "No local reference videos found and no HF repo configured.\n"
+                f"Set {HF_REPO_ENV_KEY} or pass --repo-id."
+            )
+
+        print(
+            f"No local {quality_tier} reference videos found under {target_dir}. "
+            f"Downloading from HF repo {resolved_repo_id} ..."
+        )
+        download_reference_videos(
+            repo_id=resolved_repo_id,
+            repo_type=resolved_repo_type,
+            local_dir=target_dir,
+            quality_tiers=[quality_tier],
         )
 
-    print(
-        f"No local {quality_tier} reference videos found under {target_dir}. "
-        f"Downloading from HF repo {resolved_repo_id} ..."
-    )
-    download_reference_videos(
-        repo_id=resolved_repo_id,
-        repo_type=resolved_repo_type,
-        local_dir=target_dir,
-        quality_tiers=[quality_tier],
-    )
-
-    if not _has_local_reference_videos(target_dir, quality_tier):
-        raise RuntimeError(
-            f"HF download completed but no {quality_tier} *_reference_videos "
-            "content found."
-        )
-    return True
+        if not _has_local_reference_videos(target_dir, quality_tier):
+            raise RuntimeError(
+                f"HF download completed but no {quality_tier} *_reference_videos "
+                "content found."
+            )
+        return True
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -306,6 +380,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "  # Copy default generated videos into local L40S refs\n"
             "  python fastvideo/tests/ssim/reference_videos_cli.py copy-local \\\n"
             "    --quality-tier default \\\n"
+            "    --device-folder L40S_reference_videos \\\n"
             "    --reference-dir fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos\n\n"
             "  # Download both default and full-quality references from HF\n"
             "  python fastvideo/tests/ssim/reference_videos_cli.py download \\\n"
@@ -335,7 +410,15 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Source generated directory. "
-            "Default: <ssim_dir>/generated_videos/<quality-tier>"
+            "Default: <ssim_dir>/generated_videos/<quality-tier>/<device-folder>"
+        ),
+    )
+    copy_parser.add_argument(
+        "--device-folder",
+        default=None,
+        help=(
+            "GPU folder name (e.g., H200_reference_videos) used to build "
+            "default generated/reference paths."
         ),
     )
     copy_parser.add_argument(
@@ -489,11 +572,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "copy-local":
-        generated_dir = (
-            args.generated_dir
-            if args.generated_dir is not None
-            else _ssim_dir() / "generated_videos" / args.quality_tier
+        device_folder = _resolve_device_reference_folder(
+            explicit_device_folder=args.device_folder,
+            reference_dir=args.reference_dir,
         )
+        generated_dir = args.generated_dir
+        if generated_dir is None:
+            tier_root = _ssim_dir() / "generated_videos" / args.quality_tier
+            tier_device_dir = tier_root / device_folder
+            if tier_device_dir.exists():
+                generated_dir = tier_device_dir
+            else:
+                # Backward compatibility for pre-device-folder layout.
+                generated_dir = tier_root
         reference_dir = (
             args.reference_dir
             if args.reference_dir is not None
@@ -501,7 +592,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _ssim_dir()
                 / REFERENCE_VIDEOS_DIRNAME
                 / args.quality_tier
-                / "L40S_reference_videos"
+                / device_folder
             )
         )
         copied = copy_generated_to_reference(

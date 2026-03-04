@@ -157,6 +157,7 @@ def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     model_id = "LingBot-World-Base-Cam-Diffusers"
     output_dir = build_generated_output_dir(
         script_dir,
+        device_reference_folder,
         model_id,
         ATTENTION_BACKEND,
     )

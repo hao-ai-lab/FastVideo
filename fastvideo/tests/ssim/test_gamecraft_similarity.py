@@ -155,6 +155,7 @@ def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_dir = build_generated_output_dir(
         script_dir,
+        device_reference_folder,
         model_id,
         ATTENTION_BACKEND,
     )
@@ -290,6 +291,7 @@ def test_gamecraft_i2v_similarity(prompt, ATTENTION_BACKEND, model_id):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_dir = build_generated_output_dir(
         script_dir,
+        device_reference_folder,
         model_id,
         ATTENTION_BACKEND,
     )

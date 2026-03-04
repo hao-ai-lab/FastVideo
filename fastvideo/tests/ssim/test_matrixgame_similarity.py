@@ -93,6 +93,7 @@ def test_matrixgame_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     output_dir = build_generated_output_dir(
         script_dir,
+        device_reference_folder,
         model_id,
         ATTENTION_BACKEND,
     )

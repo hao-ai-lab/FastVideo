@@ -12,7 +12,8 @@ videos and compare them against device-specific reference videos.
 - `conftest.py`: optional filtering via `FASTVIDEO_SSIM_MODEL_ID`.
 - `reference_videos/<quality-tier>/<GPU>_reference_videos/`: local cache of
   references split by quality tier and GPU type.
-- `generated_videos/`: local outputs and `*_ssim.json` artifacts (git-ignored).
+- `generated_videos/<quality-tier>/<GPU>_reference_videos/`: local outputs and
+  `*_ssim.json` artifacts (git-ignored).
 - `reference_videos_cli.py`: copy/download/upload/ensure reference videos
   (including HF sync).
 

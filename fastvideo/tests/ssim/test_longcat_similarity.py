@@ -213,6 +213,7 @@ def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     
     output_dir = build_generated_output_dir(
         script_dir,
+        device_reference_folder,
         model_id,
         ATTENTION_BACKEND,
     )
@@ -313,6 +314,7 @@ def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     
     output_dir = build_generated_output_dir(
         script_dir,
+        device_reference_folder,
         model_id,
         ATTENTION_BACKEND,
     )
@@ -418,6 +420,7 @@ def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str):
     
     output_dir = build_generated_output_dir(
         script_dir,
+        device_reference_folder,
         model_id,
         ATTENTION_BACKEND,
     )

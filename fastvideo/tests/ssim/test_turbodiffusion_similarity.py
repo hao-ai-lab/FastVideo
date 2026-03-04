@@ -102,6 +102,7 @@ def test_turbodiffusion_inference_similarity(prompt, model_id):
 
     output_dir = build_generated_output_dir(
         script_dir,
+        device_reference_folder,
         model_id,
         ATTENTION_BACKEND,
     )
@@ -264,6 +265,7 @@ def test_turbodiffusion_i2v_inference_similarity(prompt, model_id):
 
     output_dir = build_generated_output_dir(
         script_dir,
+        device_reference_folder,
         model_id,
         ATTENTION_BACKEND,
     )

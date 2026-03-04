@@ -110,6 +110,7 @@ def get_output_quality_tier() -> str:
 
 def build_generated_output_dir(
     script_dir: str,
+    device_reference_folder: str,
     model_id: str,
     attention_backend: str,
 ) -> str:
@@ -117,6 +118,7 @@ def build_generated_output_dir(
         script_dir,
         "generated_videos",
         get_output_quality_tier(),
+        device_reference_folder,
         model_id,
         attention_backend,
     )
