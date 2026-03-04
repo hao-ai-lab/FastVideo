@@ -121,17 +121,6 @@ export default function SettingsPage() {
             onUpdate={(v) => updateOption("defaultModelIdT2i", v)}
           />
           <div className={formStyles.formRow}>
-            <label htmlFor="settings-num-steps">Inference Steps</label>
-            <Slider
-              id="settings-num-steps"
-              min={1}
-              max={200}
-              step={1}
-              value={options.numInferenceSteps}
-              onChange={(v) => updateOption("numInferenceSteps", v)}
-            />
-          </div>
-          <div className={formStyles.formRow}>
             <label htmlFor="settings-num-frames">Frames</label>
             <Slider
               id="settings-num-frames"
@@ -165,6 +154,34 @@ export default function SettingsPage() {
             />
           </div>
           <div className={formStyles.formRow}>
+            <label htmlFor="settings-num-steps">Inference Steps</label>
+            <Slider
+              id="settings-num-steps"
+              min={1}
+              max={200}
+              step={1}
+              value={options.numInferenceSteps}
+              onChange={(v) => updateOption("numInferenceSteps", v)}
+            />
+          </div>
+          <div className={formStyles.formRow}>
+            <label
+              htmlFor="settings-vsa-sparsity"
+              title="Video Sparse Attention sparsity (0–1, higher = sparser)"
+            >
+              VSA Sparsity
+            </label>
+            <Slider
+              id="settings-vsa-sparsity"
+              min={0}
+              max={1}
+              step={0.05}
+              value={options.vsaSparsity}
+              onChange={(v) => updateOption("vsaSparsity", v)}
+              formatValue={(v) => v.toFixed(2)}
+            />
+          </div>
+          <div className={formStyles.formRow}>
             <label htmlFor="settings-guidance">Guidance Scale</label>
             <Slider
               id="settings-guidance"
@@ -194,6 +211,40 @@ export default function SettingsPage() {
             />
           </div>
           <div className={formStyles.formRow}>
+            <label
+              htmlFor="settings-tp-size"
+              title="Tensor parallelism size (-1 = auto)"
+            >
+              TP Size
+            </label>
+            <Slider
+              id="settings-tp-size"
+              min={-1}
+              max={8}
+              step={1}
+              value={options.tpSize}
+              onChange={(v) => updateOption("tpSize", v)}
+              formatValue={(v) => (v === -1 ? "Auto" : String(v))}
+            />
+          </div>
+          <div className={formStyles.formRow}>
+            <label
+              htmlFor="settings-sp-size"
+              title="Sequence parallelism size (-1 = auto)"
+            >
+              SP Size
+            </label>
+            <Slider
+              id="settings-sp-size"
+              min={-1}
+              max={8}
+              step={1}
+              value={options.spSize}
+              onChange={(v) => updateOption("spSize", v)}
+              formatValue={(v) => (v === -1 ? "Auto" : String(v))}
+            />
+          </div>
+          <div className={formStyles.formRow}>
             <label htmlFor="settings-fps">FPS</label>
             <Slider
               id="settings-fps"
@@ -202,29 +253,6 @@ export default function SettingsPage() {
               step={1}
               value={options.fps ?? 24}
               onChange={(v) => updateOption("fps", v)}
-            />
-          </div>
-          <div className={formStyles.formRow}>
-            <label htmlFor="settings-seed">Seed</label>
-            <input
-              id="settings-seed"
-              type="number"
-              value={options.seed}
-              onChange={(e) =>
-                updateOption("seed", parseInt(e.target.value, 10))
-              }
-              min={0}
-            />
-          </div>
-          <div className={formStyles.formRow}>
-            <label htmlFor="settings-num-gpus">GPUs</label>
-            <Slider
-              id="settings-num-gpus"
-              min={1}
-              max={8}
-              step={1}
-              value={options.numGpus}
-              onChange={(v) => updateOption("numGpus", v)}
             />
           </div>
           <div className={formStyles.formRow}>
@@ -284,54 +312,26 @@ export default function SettingsPage() {
             />
           </div>
           <div className={formStyles.formRow}>
-            <label
-              htmlFor="settings-vsa-sparsity"
-              title="Video Sparse Attention sparsity (0–1, higher = sparser)"
-            >
-              VSA Sparsity
-            </label>
+            <label htmlFor="settings-num-gpus">GPUs</label>
             <Slider
-              id="settings-vsa-sparsity"
+              id="settings-num-gpus"
+              min={1}
+              max={8}
+              step={1}
+              value={options.numGpus}
+              onChange={(v) => updateOption("numGpus", v)}
+            />
+          </div>
+          <div className={formStyles.formRow}>
+            <label htmlFor="settings-seed">Seed</label>
+            <input
+              id="settings-seed"
+              type="number"
+              value={options.seed}
+              onChange={(e) =>
+                updateOption("seed", parseInt(e.target.value, 10))
+              }
               min={0}
-              max={1}
-              step={0.05}
-              value={options.vsaSparsity}
-              onChange={(v) => updateOption("vsaSparsity", v)}
-              formatValue={(v) => v.toFixed(2)}
-            />
-          </div>
-          <div className={formStyles.formRow}>
-            <label
-              htmlFor="settings-tp-size"
-              title="Tensor parallelism size (-1 = auto)"
-            >
-              TP Size
-            </label>
-            <Slider
-              id="settings-tp-size"
-              min={-1}
-              max={8}
-              step={1}
-              value={options.tpSize}
-              onChange={(v) => updateOption("tpSize", v)}
-              formatValue={(v) => (v === -1 ? "Auto" : String(v))}
-            />
-          </div>
-          <div className={formStyles.formRow}>
-            <label
-              htmlFor="settings-sp-size"
-              title="Sequence parallelism size (-1 = auto)"
-            >
-              SP Size
-            </label>
-            <Slider
-              id="settings-sp-size"
-              min={-1}
-              max={8}
-              step={1}
-              value={options.spSize}
-              onChange={(v) => updateOption("spSize", v)}
-              formatValue={(v) => (v === -1 ? "Auto" : String(v))}
             />
           </div>
         </div>
