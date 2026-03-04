@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-
 """Diffusion-forcing SFT method (DFSFT; algorithm layer)."""
 
 from __future__ import annotations
@@ -52,30 +51,19 @@ class DiffusionForcingSFTMethod(DistillMethod):
             raise ValueError("DFSFT requires role 'student'")
         self.student = role_models["student"]
         if not getattr(self.student, "_trainable", True):
-            raise ValueError(
-                "DFSFT requires student to be trainable"
-            )
+            raise ValueError("DFSFT requires student to be trainable")
 
         self.validator = validator
         self.training_args = cfg.training_args
-        self.method_config: dict[str, Any] = dict(
-            getattr(cfg, "method_config", {}) or {}
-        )
+        self.method_config: dict[str, Any] = dict(cfg.method)
         self.validation_config: dict[str, Any] = dict(
-            getattr(cfg, "validation", {}) or {}
-        )
-        self._attn_kind: Literal["dense", "vsa"] = (
-            self._parse_attn_kind(
-                self.method_config.get("attn_kind", None)
-            )
-        )
+            getattr(cfg, "validation", {}) or {})
+        self._attn_kind: Literal["dense", "vsa"] = (self._parse_attn_kind(
+            self.method_config.get("attn_kind", None)))
 
         self._chunk_size = self._parse_chunk_size(
-            self.method_config.get("chunk_size", None)
-        )
-        self._timestep_index_range = (
-            self._parse_timestep_index_range()
-        )
+            self.method_config.get("chunk_size", None))
+        self._timestep_index_range = (self._parse_timestep_index_range())
 
         # Initialize preprocessors on student.
         self.student.init_preprocessors(self.training_args)
@@ -90,9 +78,9 @@ class DiffusionForcingSFTMethod(DistillMethod):
         *,
         current_vsa_sparsity: float = 0.0,
     ) -> tuple[
-        dict[str, torch.Tensor],
-        dict[str, Any],
-        dict[str, LogScalar],
+            dict[str, torch.Tensor],
+            dict[str, Any],
+            dict[str, LogScalar],
     ]:
         del iteration
         training_batch = self.student.prepare_batch(
@@ -102,67 +90,48 @@ class DiffusionForcingSFTMethod(DistillMethod):
         )
 
         if training_batch.latents is None:
-            raise RuntimeError(
-                "prepare_batch() must set TrainingBatch.latents"
-            )
+            raise RuntimeError("prepare_batch() must set TrainingBatch.latents")
 
         clean_latents = training_batch.latents
         if not torch.is_tensor(clean_latents):
-            raise TypeError(
-                "TrainingBatch.latents must be a torch.Tensor"
-            )
+            raise TypeError("TrainingBatch.latents must be a torch.Tensor")
         if clean_latents.ndim != 5:
-            raise ValueError(
-                "TrainingBatch.latents must be "
-                "[B, T, C, H, W], got "
-                f"shape={tuple(clean_latents.shape)}"
-            )
+            raise ValueError("TrainingBatch.latents must be "
+                             "[B, T, C, H, W], got "
+                             f"shape={tuple(clean_latents.shape)}")
 
-        batch_size, num_latents = int(
-            clean_latents.shape[0]
-        ), int(clean_latents.shape[1])
+        batch_size, num_latents = int(clean_latents.shape[0]), int(
+            clean_latents.shape[1])
 
         expected_chunk = getattr(
             self.student.transformer,
             "num_frame_per_block",
             None,
         )
-        if (
-            expected_chunk is not None
-            and int(expected_chunk) != int(self._chunk_size)
-        ):
-            raise ValueError(
-                "DFSFT chunk_size must match "
-                "transformer.num_frame_per_block for "
-                f"causal training (got {self._chunk_size}, "
-                f"expected {expected_chunk})."
-            )
+        if (expected_chunk is not None
+                and int(expected_chunk) != int(self._chunk_size)):
+            raise ValueError("DFSFT chunk_size must match "
+                             "transformer.num_frame_per_block for "
+                             f"causal training (got {self._chunk_size}, "
+                             f"expected {expected_chunk}).")
 
         timestep_indices = self._sample_t_inhom_indices(
             batch_size=batch_size,
             num_latents=num_latents,
             device=clean_latents.device,
         )
-        sp_size = int(
-            getattr(self.training_args, "sp_size", 1) or 1
-        )
+        sp_size = int(getattr(self.training_args, "sp_size", 1) or 1)
         sp_group = getattr(self.student, "sp_group", None)
-        if (
-            sp_size > 1
-            and sp_group is not None
-            and hasattr(sp_group, "broadcast")
-        ):
+        if (sp_size > 1 and sp_group is not None
+                and hasattr(sp_group, "broadcast")):
             sp_group.broadcast(timestep_indices, src=0)
 
         scheduler = self.student.noise_scheduler
         if scheduler is None:
-            raise ValueError(
-                "DFSFT requires student.noise_scheduler"
-            )
+            raise ValueError("DFSFT requires student.noise_scheduler")
 
-        schedule_timesteps = scheduler.timesteps.to(
-            device=clean_latents.device, dtype=torch.float32
-        )
+        schedule_timesteps = scheduler.timesteps.to(device=clean_latents.device,
+                                                    dtype=torch.float32)
         schedule_sigmas = scheduler.sigmas.to(
             device=clean_latents.device,
             dtype=clean_latents.dtype,
@@ -174,13 +143,9 @@ class DiffusionForcingSFTMethod(DistillMethod):
             noise = torch.randn_like(clean_latents)
         else:
             if not torch.is_tensor(noise):
-                raise TypeError(
-                    "TrainingBatch.noise must be a "
-                    "torch.Tensor when set"
-                )
-            noise = noise.permute(0, 2, 1, 3, 4).to(
-                dtype=clean_latents.dtype
-            )
+                raise TypeError("TrainingBatch.noise must be a "
+                                "torch.Tensor when set")
+            noise = noise.permute(0, 2, 1, 3, 4).to(dtype=clean_latents.dtype)
 
         noisy_latents = self.student.add_noise(
             clean_latents,
@@ -196,21 +161,15 @@ class DiffusionForcingSFTMethod(DistillMethod):
             attn_kind=self._attn_kind,
         )
 
-        if bool(
-            getattr(
+        if bool(getattr(
                 self.training_args,
                 "precondition_outputs",
                 False,
-            )
-        ):
+        )):
             sigmas = schedule_sigmas[timestep_indices]
-            sigmas = sigmas.unsqueeze(-1).unsqueeze(
-                -1
-            ).unsqueeze(-1)
+            sigmas = sigmas.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
             pred_x0 = noisy_latents - pred * sigmas
-            loss = F.mse_loss(
-                pred_x0.float(), clean_latents.float()
-            )
+            loss = F.mse_loss(pred_x0.float(), clean_latents.float())
         else:
             target = noise - clean_latents
             loss = F.mse_loss(pred.float(), target.float())
@@ -254,9 +213,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
         )
 
     # DistillMethod override: get_optimizers
-    def get_optimizers(
-        self, iteration: int
-    ) -> list[torch.optim.Optimizer]:
+    def get_optimizers(self, iteration: int) -> list[torch.optim.Optimizer]:
         del iteration
         return [self._student_optimizer]
 
@@ -267,9 +224,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
 
     # DistillMethod override: optimizers_schedulers_step
     def optimizers_schedulers_step(self, iteration: int) -> None:
-        clip_grad_norm_if_needed(
-            self.student.transformer, self.training_args
-        )
+        clip_grad_norm_if_needed(self.student.transformer, self.training_args)
         super().optimizers_schedulers_step(iteration)
 
     # DistillTrainer hook: on_train_start
@@ -284,38 +239,22 @@ class DiffusionForcingSFTMethod(DistillMethod):
         if not is_validation_enabled(self.validation_config):
             return
 
-        every_steps = parse_validation_every_steps(
-            self.validation_config
-        )
+        every_steps = parse_validation_every_steps(self.validation_config)
         if every_steps <= 0:
             return
         if iteration % every_steps != 0:
             return
 
-        dataset_file = parse_validation_dataset_file(
-            self.validation_config
-        )
-        sampling_steps = parse_validation_sampling_steps(
-            self.validation_config
-        )
-        guidance_scale = parse_validation_guidance_scale(
-            self.validation_config
-        )
-        sampler_kind = parse_validation_sampler_kind(
-            self.validation_config, default="ode"
-        )
-        rollout_mode = parse_validation_rollout_mode(
-            self.validation_config
-        )
-        output_dir = parse_validation_output_dir(
-            self.validation_config
-        )
-        num_actions = parse_validation_num_frames(
-            self.validation_config
-        )
-        ode_solver = parse_validation_ode_solver(
-            self.validation_config, sampler_kind=sampler_kind
-        )
+        dataset_file = parse_validation_dataset_file(self.validation_config)
+        sampling_steps = parse_validation_sampling_steps(self.validation_config)
+        guidance_scale = parse_validation_guidance_scale(self.validation_config)
+        sampler_kind = parse_validation_sampler_kind(self.validation_config,
+                                                     default="ode")
+        rollout_mode = parse_validation_rollout_mode(self.validation_config)
+        output_dir = parse_validation_output_dir(self.validation_config)
+        num_actions = parse_validation_num_frames(self.validation_config)
+        ode_solver = parse_validation_ode_solver(self.validation_config,
+                                                 sampler_kind=sampler_kind)
 
         request = ValidationRequest(
             sample_handle=self.student,
@@ -339,124 +278,78 @@ class DiffusionForcingSFTMethod(DistillMethod):
         generators.update(student_gens)
 
         validator = getattr(self, "validator", None)
-        validation_gen = getattr(
-            validator, "validation_random_generator", None
-        )
+        validation_gen = getattr(validator, "validation_random_generator", None)
         if isinstance(validation_gen, torch.Generator):
             generators["validation_cpu"] = validation_gen
 
         return generators
 
-    def _parse_attn_kind(
-        self, raw: Any
-    ) -> Literal["dense", "vsa"]:
+    def _parse_attn_kind(self, raw: Any) -> Literal["dense", "vsa"]:
         if raw in (None, ""):
             return "dense"
         kind = str(raw).strip().lower()
         if kind not in {"dense", "vsa"}:
-            raise ValueError(
-                "method_config.attn_kind must be one of "
-                f"{{'dense', 'vsa'}}, got {raw!r}."
-            )
+            raise ValueError("method_config.attn_kind must be one of "
+                             f"{{'dense', 'vsa'}}, got {raw!r}.")
         return cast(Literal["dense", "vsa"], kind)
 
     def _parse_chunk_size(self, raw: Any) -> int:
         if raw in (None, ""):
             return 3
         if isinstance(raw, bool):
-            raise ValueError(
-                "method_config.chunk_size must be an int, "
-                "got bool"
-            )
+            raise ValueError("method_config.chunk_size must be an int, "
+                             "got bool")
         if isinstance(raw, float) and not raw.is_integer():
-            raise ValueError(
-                "method_config.chunk_size must be an int, "
-                "got float"
-            )
+            raise ValueError("method_config.chunk_size must be an int, "
+                             "got float")
         if isinstance(raw, str) and not raw.strip():
-            raise ValueError(
-                "method_config.chunk_size must be an int, "
-                "got empty string"
-            )
+            raise ValueError("method_config.chunk_size must be an int, "
+                             "got empty string")
         try:
             value = int(raw)
         except (TypeError, ValueError) as e:
-            raise ValueError(
-                "method_config.chunk_size must be an int, "
-                f"got {type(raw).__name__}"
-            ) from e
+            raise ValueError("method_config.chunk_size must be an int, "
+                             f"got {type(raw).__name__}") from e
         if value <= 0:
-            raise ValueError(
-                "method_config.chunk_size must be > 0"
-            )
+            raise ValueError("method_config.chunk_size must be > 0")
         return value
 
-    def _parse_ratio(
-        self, raw: Any, *, where: str, default: float
-    ) -> float:
+    def _parse_ratio(self, raw: Any, *, where: str, default: float) -> float:
         if raw in (None, ""):
             return float(default)
         if isinstance(raw, bool):
-            raise ValueError(
-                f"{where} must be a number/string, got bool"
-            )
-        if isinstance(raw, (int, float)):
+            raise ValueError(f"{where} must be a number/string, got bool")
+        if isinstance(raw, int | float):
             return float(raw)
         if isinstance(raw, str) and raw.strip():
             return float(raw)
-        raise ValueError(
-            f"{where} must be a number/string, "
-            f"got {type(raw).__name__}"
-        )
+        raise ValueError(f"{where} must be a number/string, "
+                         f"got {type(raw).__name__}")
 
     def _parse_timestep_index_range(self) -> tuple[int, int]:
         scheduler = self.student.noise_scheduler
         if scheduler is None:
-            raise ValueError(
-                "DFSFT requires student.noise_scheduler"
-            )
+            raise ValueError("DFSFT requires student.noise_scheduler")
         num_steps = int(
-            getattr(scheduler, "config", scheduler)
-            .num_train_timesteps
-        )
+            getattr(scheduler, "config", scheduler).num_train_timesteps)
 
         min_ratio = self._parse_ratio(
             self.method_config.get("min_timestep_ratio", None),
-            where="method_config.min_timestep_ratio",
-            default=float(
-                getattr(
-                    self.training_args,
-                    "min_timestep_ratio",
-                    0.0,
-                )
-                or 0.0
-            ),
+            where="method.min_timestep_ratio",
+            default=0.0,
         )
         max_ratio = self._parse_ratio(
             self.method_config.get("max_timestep_ratio", None),
-            where="method_config.max_timestep_ratio",
-            default=float(
-                getattr(
-                    self.training_args,
-                    "max_timestep_ratio",
-                    1.0,
-                )
-                or 1.0
-            ),
+            where="method.max_timestep_ratio",
+            default=1.0,
         )
 
-        if not (
-            0.0 <= min_ratio <= 1.0 and 0.0 <= max_ratio <= 1.0
-        ):
-            raise ValueError(
-                "DFSFT timestep ratios must be in [0,1], "
-                f"got min={min_ratio}, max={max_ratio}"
-            )
+        if not (0.0 <= min_ratio <= 1.0 and 0.0 <= max_ratio <= 1.0):
+            raise ValueError("DFSFT timestep ratios must be in [0,1], "
+                             f"got min={min_ratio}, max={max_ratio}")
         if max_ratio < min_ratio:
-            raise ValueError(
-                "method_config.max_timestep_ratio must be "
-                ">= min_timestep_ratio"
-            )
+            raise ValueError("method_config.max_timestep_ratio must be "
+                             ">= min_timestep_ratio")
 
         min_index = int(min_ratio * num_steps)
         max_index = int(max_ratio * num_steps)
@@ -470,27 +363,18 @@ class DiffusionForcingSFTMethod(DistillMethod):
 
     def _init_optimizers_and_schedulers(self) -> None:
         student_lr = float(
-            getattr(self.training_args, "learning_rate", 0.0)
-            or 0.0
-        )
+            getattr(self.training_args, "learning_rate", 0.0) or 0.0)
         if student_lr <= 0.0:
-            raise ValueError(
-                "training.learning_rate must be > 0 for dfsft"
-            )
+            raise ValueError("training.learning_rate must be > 0 for dfsft")
 
         student_betas = parse_betas(
             getattr(self.training_args, "betas", None),
             where="training.betas",
         )
         student_sched = str(
-            getattr(
-                self.training_args, "lr_scheduler", "constant"
-            )
-        )
+            getattr(self.training_args, "lr_scheduler", "constant"))
         student_params = [
-            p
-            for p in self.student.transformer.parameters()
-            if p.requires_grad
+            p for p in self.student.transformer.parameters() if p.requires_grad
         ]
         (
             self._student_optimizer,
@@ -511,9 +395,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
         device: torch.device,
     ) -> torch.Tensor:
         chunk_size = self._chunk_size
-        num_chunks = (
-            num_latents + chunk_size - 1
-        ) // chunk_size
+        num_chunks = (num_latents + chunk_size - 1) // chunk_size
         low, high = self._timestep_index_range
         chunk_indices = torch.randint(
             low=low,
@@ -522,7 +404,5 @@ class DiffusionForcingSFTMethod(DistillMethod):
             device=device,
             dtype=torch.long,
         )
-        expanded = chunk_indices.repeat_interleave(
-            chunk_size, dim=1
-        )
+        expanded = chunk_indices.repeat_interleave(chunk_size, dim=1)
         return expanded[:, :num_latents]

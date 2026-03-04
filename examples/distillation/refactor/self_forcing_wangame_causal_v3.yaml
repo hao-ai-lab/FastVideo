@@ -29,6 +29,26 @@ models:
 
 method:
   _target_: fastvideo.distillation.methods.distribution_matching.self_forcing.SelfForcingMethod
+  rollout_mode: simulate
+  generator_update_interval: 5
+  real_score_guidance_scale: 3.5
+
+  warp_denoising_step: true
+  dmd_denoising_steps: [1000,750,500,250]
+
+  chunk_size: 3
+  student_sample_type: sde
+  same_step_across_blocks: false
+  last_step_only: false
+  context_noise: 0.0
+  enable_gradient_in_rollout: true
+  start_gradient_frame: 0
+
+  cfg_uncond:
+    on_missing: error
+    action: keep
+    image: keep
+    text: keep
 
 training:
   # Distributed (4 nodes x 8 GPUs = 32 ranks)
@@ -62,7 +82,7 @@ training:
   # Optimizer (student)
   learning_rate: 2.0e-6
   mixed_precision: bf16
-  betas: "0.0,0.999"
+  betas: [0.0, 0.999]
   weight_decay: 0.01
   lr_scheduler: constant
   lr_warmup_steps: 0
@@ -70,54 +90,31 @@ training:
 
   # Optimizer (critic / fake-score)
   fake_score_learning_rate: 8.0e-6
-  fake_score_betas: "0.0,0.999"
+  fake_score_betas: [0.0, 0.999]
   fake_score_lr_scheduler: constant
 
   # Distillation knobs
   training_cfg_rate: 0.0
-  min_timestep_ratio: 0.02
-  max_timestep_ratio: 0.98
   enable_gradient_checkpointing_type: null
 
   # Checkpointing
   training_state_checkpointing_steps: 1000
   weight_only_checkpointing_steps: 1000
 
-  # Tracking / validation
+  # Tracking
   tracker_project_name: distillation_wangame
   wandb_run_name: wangame_self_forcing_4steps_v3
-  validation:
-    enabled: true
-    dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_8.json
-    every_steps: 100
-    sampling_steps: [4]
-    sampler_kind: sde
-    rollout_mode: streaming
-    guidance_scale: 1.0
-    num_frames: 69
 
-default_pipeline_config:
+validation:
+  enabled: true
+  dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_8.json
+  every_steps: 100
+  sampling_steps: [4]
+  sampler_kind: sde
+  rollout_mode: streaming
+  guidance_scale: 1.0
+  num_frames: 69
+
+pipeline:
   flow_shift: 3
   sampler_kind: sde
-
-method_config:
-  rollout_mode: simulate
-  generator_update_interval: 5
-  real_score_guidance_scale: 3.5
-
-  warp_denoising_step: true
-  dmd_denoising_steps: [1000,750,500,250]
-
-  chunk_size: 3
-  student_sample_type: sde
-  same_step_across_blocks: false
-  last_step_only: false
-  context_noise: 0.0
-  enable_gradient_in_rollout: true
-  start_gradient_frame: 0
-
-  cfg_uncond:
-    on_missing: error
-    action: keep
-    image: keep
-    text: keep

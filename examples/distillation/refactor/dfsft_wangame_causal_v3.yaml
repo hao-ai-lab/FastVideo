@@ -11,6 +11,10 @@ models:
 
 method:
   _target_: fastvideo.distillation.methods.fine_tuning.dfsft.DiffusionForcingSFTMethod
+  attn_kind: dense
+  chunk_size: 3
+  min_timestep_ratio: 0.02
+  max_timestep_ratio: 0.98
 
 training:
   # Distributed
@@ -44,7 +48,7 @@ training:
   # Optimizer
   learning_rate: 1.0e-5
   mixed_precision: bf16
-  betas: "0.9,0.999"
+  betas: [0.9, 0.999]
   weight_decay: 1.0e-4
   lr_scheduler: constant
   lr_warmup_steps: 0
@@ -58,26 +62,21 @@ training:
   training_cfg_rate: 0.0
   enable_gradient_checkpointing_type: full
 
-  # Tracking / validation
+  # Tracking
   tracker_project_name: distillation_wangame
   wandb_run_name: wangame_dfsft_causal_v3
-  validation:
-    enabled: true
-    dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_8.json
-    every_steps: 100
-    sampling_steps: [40]
-    rollout_mode: streaming
-    sampler_kind: ode
-    ode_solver: euler
-    guidance_scale: 1.0
-    num_frames: 75
 
-default_pipeline_config:
+validation:
+  enabled: true
+  dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_8.json
+  every_steps: 100
+  sampling_steps: [40]
+  rollout_mode: streaming
+  sampler_kind: ode
+  ode_solver: euler
+  guidance_scale: 1.0
+  num_frames: 75
+
+pipeline:
   flow_shift: 3
   sampler_kind: ode
-
-method_config:
-  attn_kind: dense
-  chunk_size: 3
-  min_timestep_ratio: 0.02
-  max_timestep_ratio: 0.98

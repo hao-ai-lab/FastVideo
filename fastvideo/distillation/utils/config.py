@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-
 """Distillation run config (v3 — ``_target_`` based)."""
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -23,7 +23,6 @@ class RunConfig:
     method: dict[str, Any]
     training_args: TrainingArgs
     validation: dict[str, Any]
-    method_config: dict[str, Any]
     raw: dict[str, Any]
 
 
@@ -36,109 +35,191 @@ def _resolve_existing_file(path: str) -> str:
     expanded = os.path.expanduser(path)
     resolved = Path(expanded).resolve()
     if not resolved.exists():
-        raise FileNotFoundError(
-            f"Config file not found: {resolved}"
-        )
+        raise FileNotFoundError(f"Config file not found: {resolved}")
     if not resolved.is_file():
-        raise ValueError(
-            f"Expected a file path, got: {resolved}"
-        )
+        raise ValueError(f"Expected a file path, got: {resolved}")
     return str(resolved)
 
 
 def _require_mapping(raw: Any, *, where: str) -> dict[str, Any]:
     if not isinstance(raw, dict):
-        raise ValueError(
-            f"Expected mapping at {where}, "
-            f"got {type(raw).__name__}"
-        )
+        raise ValueError(f"Expected mapping at {where}, "
+                         f"got {type(raw).__name__}")
     return raw
 
 
 def _require_str(raw: Any, *, where: str) -> str:
     if not isinstance(raw, str) or not raw.strip():
-        raise ValueError(
-            f"Expected non-empty string at {where}"
-        )
+        raise ValueError(f"Expected non-empty string at {where}")
     return raw
 
 
-def _get_bool(
-    raw: Any, *, where: str, default: bool
-) -> bool:
+def _get_bool(raw: Any, *, where: str, default: bool) -> bool:
     if raw is None:
         return default
     if isinstance(raw, bool):
         return raw
-    raise ValueError(
-        f"Expected bool at {where}, "
-        f"got {type(raw).__name__}"
-    )
+    raise ValueError(f"Expected bool at {where}, "
+                     f"got {type(raw).__name__}")
 
 
-def get_optional_int(
-    mapping: dict[str, Any], key: str, *, where: str
-) -> int | None:
+def get_optional_int(mapping: dict[str, Any], key: str, *,
+                     where: str) -> int | None:
     raw = mapping.get(key)
     if raw is None:
         return None
     if isinstance(raw, bool):
-        raise ValueError(
-            f"Expected int at {where}, got bool"
-        )
+        raise ValueError(f"Expected int at {where}, got bool")
     if isinstance(raw, int):
         return int(raw)
     if isinstance(raw, float) and raw.is_integer():
         return int(raw)
     if isinstance(raw, str) and raw.strip():
         return int(raw)
-    raise ValueError(
-        f"Expected int at {where}, "
-        f"got {type(raw).__name__}"
-    )
+    raise ValueError(f"Expected int at {where}, "
+                     f"got {type(raw).__name__}")
 
 
-def get_optional_float(
-    mapping: dict[str, Any], key: str, *, where: str
-) -> float | None:
+def get_optional_float(mapping: dict[str, Any], key: str, *,
+                       where: str) -> float | None:
     raw = mapping.get(key)
     if raw is None:
         return None
     if isinstance(raw, bool):
-        raise ValueError(
-            f"Expected float at {where}, got bool"
-        )
-    if isinstance(raw, (int, float)):
+        raise ValueError(f"Expected float at {where}, got bool")
+    if isinstance(raw, int | float):
         return float(raw)
     if isinstance(raw, str) and raw.strip():
         return float(raw)
-    raise ValueError(
-        f"Expected float at {where}, "
-        f"got {type(raw).__name__}"
-    )
+    raise ValueError(f"Expected float at {where}, "
+                     f"got {type(raw).__name__}")
 
 
-def parse_betas(
-    raw: Any, *, where: str
-) -> tuple[float, float]:
+def parse_betas(raw: Any, *, where: str) -> tuple[float, float]:
     if raw is None:
         raise ValueError(f"Missing betas for {where}")
-    if isinstance(raw, (tuple, list)) and len(raw) == 2:
+    if isinstance(raw, tuple | list) and len(raw) == 2:
         return float(raw[0]), float(raw[1])
     if isinstance(raw, str):
-        parts = [
-            p.strip() for p in raw.split(",") if p.strip()
-        ]
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
         if len(parts) != 2:
-            raise ValueError(
-                f"Expected betas as 'b1,b2' at {where}, "
-                f"got {raw!r}"
-            )
+            raise ValueError(f"Expected betas as 'b1,b2' at {where}, "
+                             f"got {raw!r}")
         return float(parts[0]), float(parts[1])
-    raise ValueError(
-        f"Expected betas as 'b1,b2' at {where}, "
-        f"got {type(raw).__name__}"
-    )
+    raise ValueError(f"Expected betas as 'b1,b2' at {where}, "
+                     f"got {type(raw).__name__}")
+
+
+# ---- config convenience helpers ----
+
+
+def require_positive_int(
+    mapping: dict[str, Any],
+    key: str,
+    *,
+    default: int | None = None,
+    where: str | None = None,
+) -> int:
+    """Read an int that must be > 0."""
+    loc = where or key
+    raw = mapping.get(key)
+    if raw is None:
+        if default is not None:
+            return default
+        raise ValueError(f"Missing required key {loc!r}")
+    val = get_optional_int(mapping, key, where=loc)
+    if val is None or val <= 0:
+        raise ValueError(f"{loc} must be a positive integer, got {raw!r}")
+    return val
+
+
+def require_non_negative_int(
+    mapping: dict[str, Any],
+    key: str,
+    *,
+    default: int | None = None,
+    where: str | None = None,
+) -> int:
+    """Read an int that must be >= 0."""
+    loc = where or key
+    raw = mapping.get(key)
+    if raw is None:
+        if default is not None:
+            return default
+        raise ValueError(f"Missing required key {loc!r}")
+    val = get_optional_int(mapping, key, where=loc)
+    if val is None or val < 0:
+        raise ValueError(f"{loc} must be a non-negative integer, "
+                         f"got {raw!r}")
+    return val
+
+
+def require_non_negative_float(
+    mapping: dict[str, Any],
+    key: str,
+    *,
+    default: float | None = None,
+    where: str | None = None,
+) -> float:
+    """Read a float that must be >= 0."""
+    loc = where or key
+    raw = mapping.get(key)
+    if raw is None:
+        if default is not None:
+            return default
+        raise ValueError(f"Missing required key {loc!r}")
+    val = get_optional_float(mapping, key, where=loc)
+    if val is None or val < 0.0:
+        raise ValueError(f"{loc} must be a non-negative float, "
+                         f"got {raw!r}")
+    return val
+
+
+def require_choice(
+    mapping: dict[str, Any],
+    key: str,
+    choices: set[str] | frozenset[str],
+    *,
+    default: str | None = None,
+    where: str | None = None,
+) -> str:
+    """Read a string that must be one of *choices*."""
+    loc = where or key
+    raw = mapping.get(key)
+    if raw is None:
+        if default is not None:
+            if default not in choices:
+                raise ValueError(f"Default {default!r} not in {choices}")
+            return default
+        raise ValueError(f"Missing required key {loc!r}")
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError(f"{loc} must be a non-empty string, "
+                         f"got {type(raw).__name__}")
+    val = raw.strip().lower()
+    if val not in choices:
+        raise ValueError(f"{loc} must be one of {sorted(choices)}, "
+                         f"got {raw!r}")
+    return val
+
+
+def require_bool(
+    mapping: dict[str, Any],
+    key: str,
+    *,
+    default: bool | None = None,
+    where: str | None = None,
+) -> bool:
+    """Read a bool value."""
+    loc = where or key
+    raw = mapping.get(key)
+    if raw is None:
+        if default is not None:
+            return default
+        raise ValueError(f"Missing required key {loc!r}")
+    if not isinstance(raw, bool):
+        raise ValueError(f"{loc} must be a bool, "
+                         f"got {type(raw).__name__}")
+    return raw
 
 
 def load_run_config(path: str) -> RunConfig:
@@ -158,53 +239,69 @@ def load_run_config(path: str) -> RunConfig:
     cfg = _require_mapping(raw, where=path)
 
     # --- models section ---
-    models_raw = _require_mapping(
-        cfg.get("models"), where="models"
-    )
+    models_raw = _require_mapping(cfg.get("models"), where="models")
     models: dict[str, dict[str, Any]] = {}
     for role, model_cfg_raw in models_raw.items():
         role_str = _require_str(role, where="models.<role>")
-        model_cfg = _require_mapping(
-            model_cfg_raw, where=f"models.{role_str}"
-        )
+        model_cfg = _require_mapping(model_cfg_raw, where=f"models.{role_str}")
         if "_target_" not in model_cfg:
-            raise ValueError(
-                f"models.{role_str} must have a '_target_' key"
-            )
+            raise ValueError(f"models.{role_str} must have a '_target_' key")
         models[role_str] = dict(model_cfg)
 
     # --- method section ---
-    method_raw = _require_mapping(
-        cfg.get("method"), where="method"
-    )
+    method_raw = _require_mapping(cfg.get("method"), where="method")
     if "_target_" not in method_raw:
         raise ValueError("method must have a '_target_' key")
     method = dict(method_raw)
 
-    # --- method_config section ---
+    # --- backward compat: merge method_config into method ---
     method_config_raw = cfg.get("method_config", None)
-    if method_config_raw is None:
-        method_config: dict[str, Any] = {}
-    else:
-        method_config = _require_mapping(
-            method_config_raw, where="method_config"
+    if method_config_raw is not None:
+        warnings.warn(
+            "The top-level 'method_config:' section is "
+            "deprecated.  Move its keys into 'method:' "
+            "directly.",
+            DeprecationWarning,
+            stacklevel=2,
         )
+        mc = _require_mapping(method_config_raw, where="method_config")
+        for k, v in mc.items():
+            if k in method and k != "_target_":
+                warnings.warn(
+                    f"method_config.{k} overrides "
+                    f"method.{k} — prefer using "
+                    "method: only",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            method.setdefault(k, v)
+
+    # --- validation section (top-level or under training) ---
+    validation_raw = cfg.get("validation", None)
 
     # --- training section ---
-    training_raw = _require_mapping(
-        cfg.get("training"), where="training"
-    )
+    training_raw = _require_mapping(cfg.get("training"), where="training")
 
-    # Validation sub-section.
-    training_validation_raw = training_raw.get(
-        "validation", None
-    )
-    if training_validation_raw is None:
+    # Support validation under training: for backward compat.
+    training_validation_raw = training_raw.get("validation", None)
+    if training_validation_raw is not None:
+        if validation_raw is not None:
+            raise ValueError("Provide 'validation:' at top-level or under "
+                             "'training:', not both")
+        warnings.warn(
+            "Nesting 'validation:' under 'training:' is "
+            "deprecated.  Move it to the top level.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        validation_raw = training_validation_raw
+
+    if validation_raw is None:
         validation: dict[str, Any] = {}
     else:
         validation = _require_mapping(
-            training_validation_raw,
-            where="training.validation",
+            validation_raw,
+            where="validation",
         )
 
     training_kwargs: dict[str, Any] = dict(training_raw)
@@ -216,9 +313,7 @@ def load_run_config(path: str) -> RunConfig:
     training_kwargs.setdefault("dit_precision", "fp32")
     training_kwargs["dit_cpu_offload"] = False
 
-    num_gpus = int(
-        training_kwargs.get("num_gpus", 1) or 1
-    )
+    num_gpus = int(training_kwargs.get("num_gpus", 1) or 1)
     training_kwargs.setdefault("num_gpus", num_gpus)
     training_kwargs.setdefault("tp_size", 1)
     training_kwargs.setdefault("sp_size", num_gpus)
@@ -233,72 +328,58 @@ def load_run_config(path: str) -> RunConfig:
             training_kwargs["model_path"] = str(init_from)
 
     if "pretrained_model_name_or_path" not in training_kwargs:
-        training_kwargs["pretrained_model_name_or_path"] = (
-            training_kwargs.get("model_path", "")
-        )
+        training_kwargs["pretrained_model_name_or_path"] = (training_kwargs.get(
+            "model_path", ""))
 
-    # Pipeline config.
-    default_pipeline_cfg_raw = cfg.get(
-        "default_pipeline_config", None
-    )
-    default_pipeline_cfg_path = cfg.get(
-        "default_pipeline_config_path", None
-    )
+    # Pipeline config — support both ``pipeline:`` (new) and
+    # ``default_pipeline_config:`` / ``pipeline_config:``
+    # (legacy).
+    pipeline_raw = cfg.get("pipeline", None)
+    default_pipeline_cfg_raw = cfg.get("default_pipeline_config", None)
+    default_pipeline_cfg_path = cfg.get("default_pipeline_config_path", None)
     pipeline_cfg_raw = cfg.get("pipeline_config", None)
     pipeline_cfg_path = cfg.get("pipeline_config_path", None)
 
-    if (
-        default_pipeline_cfg_raw is not None
-        or default_pipeline_cfg_path is not None
-    ) and (
-        pipeline_cfg_raw is not None
-        or pipeline_cfg_path is not None
-    ):
-        raise ValueError(
-            "Provide either default_pipeline_config(_path) or "
-            "the legacy pipeline_config(_path), not both"
-        )
+    # Merge pipeline: into default_pipeline_config: for compat.
+    if pipeline_raw is not None:
+        if default_pipeline_cfg_raw is not None:
+            raise ValueError("Provide either 'pipeline:' or "
+                             "'default_pipeline_config:', not both")
+        default_pipeline_cfg_raw = pipeline_raw
 
-    cfg_raw = (
-        default_pipeline_cfg_raw
-        if default_pipeline_cfg_raw is not None
-        else pipeline_cfg_raw
-    )
-    cfg_path = (
-        default_pipeline_cfg_path
-        if default_pipeline_cfg_path is not None
-        else pipeline_cfg_path
-    )
+    if (default_pipeline_cfg_raw is not None or default_pipeline_cfg_path
+            is not None) and (pipeline_cfg_raw is not None
+                              or pipeline_cfg_path is not None):
+        raise ValueError("Provide either default_pipeline_config(_path) or "
+                         "the legacy pipeline_config(_path), not both")
+
+    cfg_raw = (default_pipeline_cfg_raw
+               if default_pipeline_cfg_raw is not None else pipeline_cfg_raw)
+    cfg_path = (default_pipeline_cfg_path
+                if default_pipeline_cfg_path is not None else pipeline_cfg_path)
 
     if cfg_path is not None:
         cfg_path = _require_str(
             cfg_path,
-            where=(
-                "default_pipeline_config_path"
-                if default_pipeline_cfg_path is not None
-                else "pipeline_config_path"
-            ),
+            where=("default_pipeline_config_path" if default_pipeline_cfg_path
+                   is not None else "pipeline_config_path"),
         )
-        training_kwargs["pipeline_config"] = (
-            _resolve_existing_file(cfg_path)
-        )
+        training_kwargs["pipeline_config"] = (_resolve_existing_file(cfg_path))
     elif cfg_raw is not None:
         if isinstance(cfg_raw, str):
             training_kwargs["pipeline_config"] = (
-                _resolve_existing_file(cfg_raw)
-            )
+                _resolve_existing_file(cfg_raw))
         elif isinstance(cfg_raw, dict):
             training_kwargs["pipeline_config"] = cfg_raw
         else:
-            raise ValueError(
-                "default_pipeline_config must be a mapping "
-                "or a path string"
-            )
+            raise ValueError("default_pipeline_config must be a mapping "
+                             "or a path string")
 
     training_args = TrainingArgs.from_kwargs(**training_kwargs)
 
-    # Stash validation config on training_args for
-    # init_preprocessors to pick up.
+    # Legacy: models read _validation_cfg from training_args
+    # during their __init__.  Remove once models are updated to
+    # receive validation config through a different mechanism.
     training_args._validation_cfg = validation  # type: ignore[attr-defined]
 
     return RunConfig(
@@ -306,6 +387,5 @@ def load_run_config(path: str) -> RunConfig:
         method=method,
         training_args=training_args,
         validation=validation,
-        method_config=method_config,
         raw=cfg,
     )
