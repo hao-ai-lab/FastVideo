@@ -92,6 +92,12 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(
         conn, "jobs", "fps", "INTEGER", "24"
     )
+    _add_column_if_missing(
+        conn, "jobs", "workload_type", "TEXT", "'t2v'"
+    )
+    _add_column_if_missing(
+        conn, "jobs", "image_path", "TEXT", "''"
+    )
     # Settings table
     _add_column_if_missing(
         conn, "settings", "vae_cpu_offload", "INTEGER", "0"
@@ -211,18 +217,21 @@ class Database:
         self._execute(
             """
             INSERT INTO jobs (
-                id, model_id, prompt, status, created_at, started_at, finished_at,
-                error, output_path, log_file_path, num_inference_steps, num_frames,
-                height, width, guidance_scale, guidance_rescale, fps, seed, num_gpus,
-                dit_cpu_offload, text_encoder_cpu_offload, vae_cpu_offload,
-                image_encoder_cpu_offload, use_fsdp_inference, enable_torch_compile,
-                vsa_sparsity, tp_size, sp_size, negative_prompt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, model_id, prompt, workload_type, image_path, status, created_at,
+                started_at, finished_at, error, output_path, log_file_path,
+                num_inference_steps, num_frames, height, width, guidance_scale,
+                guidance_rescale, fps, seed, num_gpus, dit_cpu_offload,
+                text_encoder_cpu_offload, vae_cpu_offload, image_encoder_cpu_offload,
+                use_fsdp_inference, enable_torch_compile, vsa_sparsity, tp_size,
+                sp_size, negative_prompt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job["id"],
                 job["model_id"],
                 job["prompt"],
+                job.get("workload_type", "t2v"),
+                job.get("image_path", ""),
                 job["status"],
                 job["created_at"],
                 job.get("started_at"),
@@ -382,6 +391,12 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "id": row["id"],
         "model_id": row["model_id"],
         "prompt": row["prompt"],
+        "workload_type": (
+            row["workload_type"] if "workload_type" in row.keys() else "t2v"
+        ),
+        "image_path": (
+            (row["image_path"] or "") if "image_path" in row.keys() else ""
+        ),
         "status": row["status"],
         "created_at": row["created_at"],
         "started_at": row["started_at"],

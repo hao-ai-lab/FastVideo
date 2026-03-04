@@ -119,6 +119,8 @@ class Job:
     id: str
     model_id: str
     prompt: str
+    workload_type: str = "t2v"
+    image_path: str = ""
     status: JobStatus = JobStatus.PENDING
     created_at: float = field(default_factory=time.time)
     started_at: float | None = None
@@ -164,6 +166,8 @@ class Job:
             "id": self.id,
             "model_id": self.model_id,
             "prompt": self.prompt,
+            "workload_type": self.workload_type,
+            "image_path": self.image_path,
             "status": self.status.value,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -277,6 +281,8 @@ class JobRunner:
                     id=row["id"],
                     model_id=row["model_id"],
                     prompt=row["prompt"],
+                    workload_type=row.get("workload_type", "t2v"),
+                    image_path=row.get("image_path", "") or "",
                     status=JobStatus(status),
                     created_at=row["created_at"],
                     started_at=row.get("started_at"),
@@ -338,6 +344,8 @@ class JobRunner:
         job_id: str,
         model_id: str,
         prompt: str,
+        workload_type: str = "t2v",
+        image_path: str = "",
         num_inference_steps: int = 50,
         num_frames: int = 81,
         height: int = 480,
@@ -363,6 +371,8 @@ class JobRunner:
             id=job_id,
             model_id=model_id,
             prompt=prompt.strip(),
+            workload_type=workload_type or "t2v",
+            image_path=image_path or "",
             num_inference_steps=num_inference_steps,
             num_frames=num_frames,
             height=height,
@@ -537,6 +547,7 @@ class JobRunner:
     def _get_or_create_generator(
         self,
         model_id: str,
+        workload_type: str,
         num_gpus: int,
         dit_cpu_offload: bool = False,
         text_encoder_cpu_offload: bool = False,
@@ -550,9 +561,10 @@ class JobRunner:
         log_queue: mp.Queue | None = None,
     ) -> Any:
         cache_key = (
-            model_id, num_gpus, dit_cpu_offload, text_encoder_cpu_offload,
-            vae_cpu_offload, image_encoder_cpu_offload, use_fsdp_inference,
-            enable_torch_compile, vsa_sparsity, tp_size, sp_size,
+            model_id, workload_type, num_gpus, dit_cpu_offload,
+            text_encoder_cpu_offload, vae_cpu_offload, image_encoder_cpu_offload,
+            use_fsdp_inference, enable_torch_compile, vsa_sparsity, tp_size,
+            sp_size,
         )
 
         # Generators are cached by model_id and configuration parameters
@@ -564,15 +576,18 @@ class JobRunner:
         from fastvideo import VideoGenerator
 
         logger.info(
-            "Loading model %s (num_gpus=%d, offloads: dit=%s te=%s vae=%s ie=%s, "
-            "fsdp=%s, torch_compile=%s, vsa_sparsity=%.2f, tp=%d sp=%d) …",
-            model_id, num_gpus, dit_cpu_offload, text_encoder_cpu_offload,
+            "Loading model %s (workload=%s, num_gpus=%d, offloads: dit=%s te=%s "
+            "vae=%s ie=%s, fsdp=%s, torch_compile=%s, vsa_sparsity=%.2f, tp=%d "
+            "sp=%d) …",
+            model_id, workload_type, num_gpus, dit_cpu_offload,
+            text_encoder_cpu_offload,
             vae_cpu_offload, image_encoder_cpu_offload, use_fsdp_inference,
             enable_torch_compile, vsa_sparsity, tp_size, sp_size,
         )
 
         gen = VideoGenerator.from_pretrained(
             model_id,
+            workload_type=workload_type,
             dit_cpu_offload=dit_cpu_offload,
             text_encoder_cpu_offload=text_encoder_cpu_offload,
             vae_cpu_offload=vae_cpu_offload,
@@ -649,6 +664,7 @@ class JobRunner:
 
             generator = self._get_or_create_generator(
                 job.model_id,
+                job.workload_type,
                 job.num_gpus,
                 dit_cpu_offload=job.dit_cpu_offload,
                 text_encoder_cpu_offload=job.text_encoder_cpu_offload,
@@ -666,21 +682,24 @@ class JobRunner:
                 "Starting generation for job %s (model=%s)", job.id, job.model_id
             )
 
-            generator.generate_video(
-                prompt=job.prompt,
-                output_path=job_output_dir,
-                save_video=True,
-                num_inference_steps=job.num_inference_steps,
-                num_frames=job.num_frames,
-                height=job.height,
-                width=job.width,
-                guidance_scale=job.guidance_scale,
-                guidance_rescale=job.guidance_rescale,
-                fps=job.fps,
-                seed=job.seed,
-                negative_prompt=job.negative_prompt or "",
-                log_queue=log_queue,
-            )
+            gen_kwargs: dict[str, Any] = {
+                "prompt": job.prompt,
+                "output_path": job_output_dir,
+                "save_video": True,
+                "num_inference_steps": job.num_inference_steps,
+                "num_frames": job.num_frames,
+                "height": job.height,
+                "width": job.width,
+                "guidance_scale": job.guidance_scale,
+                "guidance_rescale": job.guidance_rescale,
+                "fps": job.fps,
+                "seed": job.seed,
+                "negative_prompt": job.negative_prompt or "",
+                "log_queue": log_queue,
+            }
+            if job.image_path:
+                gen_kwargs["image_path"] = job.image_path
+            generator.generate_video(**gen_kwargs)
         
             buf.phase = "saving"
             logger.info("Generation completed, searching for output file...")

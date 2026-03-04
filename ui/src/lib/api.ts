@@ -18,6 +18,8 @@ function getApiBaseUrl(): string {
 export interface CreateJobRequest {
     model_id: string;
     prompt: string;
+    workload_type?: "t2v" | "i2v" | "t2i";
+    image_path?: string;
     negative_prompt?: string;
     num_inference_steps?: number;
     num_frames?: number;
@@ -91,6 +93,21 @@ export async function updateSettings(
     });
     if (!response.ok) {
         throw new Error("Failed to update settings");
+    }
+    return response.json();
+}
+
+export async function uploadImage(file: File): Promise<{ path: string }> {
+    const baseApiUrl = getApiBaseUrl();
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch(`${baseApiUrl}/upload-image`, {
+        method: "POST",
+        body: formData,
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({ detail: "Upload failed" }));
+        throw new Error(err.detail || "Upload failed");
     }
     return response.json();
 }
