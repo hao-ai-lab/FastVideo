@@ -54,10 +54,8 @@ class FineTuneMethod(DistillMethod):
         self.validator = validator
         self.training_args = cfg.training_args
         self.method_config: dict[str, Any] = dict(cfg.method)
-        self.validation_config: dict[str, Any] = dict(
-            getattr(cfg, "validation", {}) or {})
-        self._attn_kind: Literal["dense", "vsa"] = (self._parse_attn_kind(
-            self.method_config.get("attn_kind", None)))
+        self.validation_config: dict[str, Any] = dict(getattr(cfg, "validation", {}) or {})
+        self._attn_kind: Literal["dense", "vsa"] = (self._parse_attn_kind(self.method_config.get("attn_kind", None)))
 
         # Initialize preprocessors on student.
         self.student.init_preprocessors(self.training_args)
@@ -195,13 +193,11 @@ class FineTuneMethod(DistillMethod):
         dataset_file = parse_validation_dataset_file(self.validation_config)
         sampling_steps = parse_validation_sampling_steps(self.validation_config)
         guidance_scale = parse_validation_guidance_scale(self.validation_config)
-        sampler_kind = parse_validation_sampler_kind(self.validation_config,
-                                                     default="ode")
+        sampler_kind = parse_validation_sampler_kind(self.validation_config, default="ode")
         rollout_mode = parse_validation_rollout_mode(self.validation_config)
         output_dir = parse_validation_output_dir(self.validation_config)
         num_actions = parse_validation_num_frames(self.validation_config)
-        ode_solver = parse_validation_ode_solver(self.validation_config,
-                                                 sampler_kind=sampler_kind)
+        ode_solver = parse_validation_ode_solver(self.validation_config, sampler_kind=sampler_kind)
 
         request = ValidationRequest(
             sample_handle=self.student,
@@ -252,9 +248,7 @@ class FineTuneMethod(DistillMethod):
             where="training.betas",
         )
         student_sched = str(getattr(training_args, "lr_scheduler", "constant"))
-        student_params = [
-            p for p in self.student.transformer.parameters() if p.requires_grad
-        ]
+        student_params = [p for p in self.student.transformer.parameters() if p.requires_grad]
         (
             self._student_optimizer,
             self._student_lr_scheduler,

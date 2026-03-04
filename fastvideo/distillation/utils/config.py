@@ -63,8 +63,7 @@ def _get_bool(raw: Any, *, where: str, default: bool) -> bool:
                      f"got {type(raw).__name__}")
 
 
-def get_optional_int(mapping: dict[str, Any], key: str, *,
-                     where: str) -> int | None:
+def get_optional_int(mapping: dict[str, Any], key: str, *, where: str) -> int | None:
     raw = mapping.get(key)
     if raw is None:
         return None
@@ -80,8 +79,7 @@ def get_optional_int(mapping: dict[str, Any], key: str, *,
                      f"got {type(raw).__name__}")
 
 
-def get_optional_float(mapping: dict[str, Any], key: str, *,
-                       where: str) -> float | None:
+def get_optional_float(mapping: dict[str, Any], key: str, *, where: str) -> float | None:
     raw = mapping.get(key)
     if raw is None:
         return None
@@ -328,8 +326,7 @@ def load_run_config(path: str) -> RunConfig:
             training_kwargs["model_path"] = str(init_from)
 
     if "pretrained_model_name_or_path" not in training_kwargs:
-        training_kwargs["pretrained_model_name_or_path"] = (training_kwargs.get(
-            "model_path", ""))
+        training_kwargs["pretrained_model_name_or_path"] = (training_kwargs.get("model_path", ""))
 
     # Pipeline config — support both ``pipeline:`` (new) and
     # ``default_pipeline_config:`` / ``pipeline_config:``
@@ -348,27 +345,22 @@ def load_run_config(path: str) -> RunConfig:
         default_pipeline_cfg_raw = pipeline_raw
 
     if (default_pipeline_cfg_raw is not None or default_pipeline_cfg_path
-            is not None) and (pipeline_cfg_raw is not None
-                              or pipeline_cfg_path is not None):
+            is not None) and (pipeline_cfg_raw is not None or pipeline_cfg_path is not None):
         raise ValueError("Provide either default_pipeline_config(_path) or "
                          "the legacy pipeline_config(_path), not both")
 
-    cfg_raw = (default_pipeline_cfg_raw
-               if default_pipeline_cfg_raw is not None else pipeline_cfg_raw)
-    cfg_path = (default_pipeline_cfg_path
-                if default_pipeline_cfg_path is not None else pipeline_cfg_path)
+    cfg_raw = (default_pipeline_cfg_raw if default_pipeline_cfg_raw is not None else pipeline_cfg_raw)
+    cfg_path = (default_pipeline_cfg_path if default_pipeline_cfg_path is not None else pipeline_cfg_path)
 
     if cfg_path is not None:
         cfg_path = _require_str(
             cfg_path,
-            where=("default_pipeline_config_path" if default_pipeline_cfg_path
-                   is not None else "pipeline_config_path"),
+            where=("default_pipeline_config_path" if default_pipeline_cfg_path is not None else "pipeline_config_path"),
         )
         training_kwargs["pipeline_config"] = (_resolve_existing_file(cfg_path))
     elif cfg_raw is not None:
         if isinstance(cfg_raw, str):
-            training_kwargs["pipeline_config"] = (
-                _resolve_existing_file(cfg_raw))
+            training_kwargs["pipeline_config"] = (_resolve_existing_file(cfg_raw))
         elif isinstance(cfg_raw, dict):
             training_kwargs["pipeline_config"] = cfg_raw
         else:

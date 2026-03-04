@@ -141,12 +141,11 @@ class SelfForcingMethod(DMD2Method):
                              f">= 0, got {start_grad_frame}")
         self._start_gradient_frame = int(start_grad_frame)
 
-        shift = float(
-            getattr(
-                self.training_args.pipeline_config,
-                "flow_shift",
-                0.0,
-            ) or 0.0)
+        shift = float(getattr(
+            self.training_args.pipeline_config,
+            "flow_shift",
+            0.0,
+        ) or 0.0)
         self._sf_scheduler = SelfForcingFlowMatchScheduler(
             num_inference_steps=1000,
             num_train_timesteps=int(self.student.num_train_timesteps),
@@ -159,8 +158,7 @@ class SelfForcingMethod(DMD2Method):
         self._sf_denoising_step_list: torch.Tensor | None = None
 
     def _get_denoising_step_list(self, device: torch.device) -> torch.Tensor:
-        if (self._sf_denoising_step_list is not None
-                and self._sf_denoising_step_list.device == device):
+        if (self._sf_denoising_step_list is not None and self._sf_denoising_step_list.device == device):
             return self._sf_denoising_step_list
 
         raw = self.method_config.get("dmd_denoising_steps", None)
@@ -227,10 +225,8 @@ class SelfForcingMethod(DMD2Method):
         return noisy
 
     def _timestep_to_sigma(self, timestep: torch.Tensor) -> torch.Tensor:
-        sigmas = self._sf_scheduler.sigmas.to(device=timestep.device,
-                                              dtype=torch.float32)
-        timesteps = self._sf_scheduler.timesteps.to(device=timestep.device,
-                                                    dtype=torch.float32)
+        sigmas = self._sf_scheduler.sigmas.to(device=timestep.device, dtype=torch.float32)
+        timesteps = self._sf_scheduler.timesteps.to(device=timestep.device, dtype=torch.float32)
         t = timestep.to(device=timestep.device, dtype=torch.float32)
         if t.ndim == 2:
             t = t.flatten(0, 1)
@@ -290,8 +286,7 @@ class SelfForcingMethod(DMD2Method):
                              "implementing CausalModelBase.")
         return self._student_rollout_streaming(batch, with_grad=with_grad)
 
-    def _student_rollout_streaming(self, batch: Any, *,
-                                   with_grad: bool) -> torch.Tensor:
+    def _student_rollout_streaming(self, batch: Any, *, with_grad: bool) -> torch.Tensor:
         assert isinstance(self.student, CausalModelBase)
         latents = batch.latents
         if latents is None:
@@ -356,9 +351,7 @@ class SelfForcingMethod(DMD2Method):
                     dtype=torch.float32,
                 ))
 
-                enable_grad = (bool(with_grad)
-                               and bool(self._enable_gradient_in_rollout)
-                               and torch.is_grad_enabled()
+                enable_grad = (bool(with_grad) and bool(self._enable_gradient_in_rollout) and torch.is_grad_enabled()
                                and start >= int(self._start_gradient_frame))
 
                 if not exit_flag:
@@ -399,19 +392,14 @@ class SelfForcingMethod(DMD2Method):
                             ),
                         )
                     else:
-                        sigma_cur = self._timestep_to_sigma(
-                            timestep_block).view(batch_size, end - start, 1, 1,
-                                                 1)
-                        sigma_next = self._timestep_to_sigma(
-                            next_timestep * torch.ones(
-                                (batch_size, end - start),
-                                device=device,
-                                dtype=torch.float32,
-                            )).view(batch_size, end - start, 1, 1, 1)
-                        eps = (noisy_block - (1 - sigma_cur) *
-                               pred_x0_chunk) / sigma_cur.clamp_min(1e-8)
-                        noisy_block = ((1 - sigma_next) * pred_x0_chunk +
-                                       sigma_next * eps)
+                        sigma_cur = self._timestep_to_sigma(timestep_block).view(batch_size, end - start, 1, 1, 1)
+                        sigma_next = self._timestep_to_sigma(next_timestep * torch.ones(
+                            (batch_size, end - start),
+                            device=device,
+                            dtype=torch.float32,
+                        )).view(batch_size, end - start, 1, 1, 1)
+                        eps = (noisy_block - (1 - sigma_cur) * pred_x0_chunk) / sigma_cur.clamp_min(1e-8)
+                        noisy_block = ((1 - sigma_next) * pred_x0_chunk + sigma_next * eps)
                     continue
 
                 with torch.set_grad_enabled(enable_grad):
@@ -477,8 +465,7 @@ class SelfForcingMethod(DMD2Method):
         self.student.clear_caches(cache_tag=cache_tag)
         return torch.cat(denoised_blocks, dim=1)
 
-    def _critic_flow_matching_loss(
-            self, batch: Any) -> tuple[torch.Tensor, Any, dict[str, Any]]:
+    def _critic_flow_matching_loss(self, batch: Any) -> tuple[torch.Tensor, Any, dict[str, Any]]:
         with torch.no_grad():
             generator_pred_x0 = self._student_rollout(batch, with_grad=False)
 
@@ -490,16 +477,14 @@ class SelfForcingMethod(DMD2Method):
             device=device,
             dtype=torch.long,
         )
-        fake_score_timestep = (
-            self.student.shift_and_clamp_timestep(fake_score_timestep))
+        fake_score_timestep = (self.student.shift_and_clamp_timestep(fake_score_timestep))
 
         noise = torch.randn(
             generator_pred_x0.shape,
             device=device,
             dtype=generator_pred_x0.dtype,
         )
-        noisy_x0 = self._sf_add_noise(generator_pred_x0, noise,
-                                      fake_score_timestep)
+        noisy_x0 = self._sf_add_noise(generator_pred_x0, noise, fake_score_timestep)
 
         pred_noise = self.critic.predict_noise(
             noisy_x0,
@@ -516,9 +501,7 @@ class SelfForcingMethod(DMD2Method):
             "generator_pred_video": generator_pred_x0,
             "fake_score_timestep": fake_score_timestep,
         }
-        outputs = {
-            "fake_score_latent_vis_dict": (batch.fake_score_latent_vis_dict)
-        }
+        outputs = {"fake_score_latent_vis_dict": (batch.fake_score_latent_vis_dict)}
         return (
             flow_matching_loss,
             (batch.timesteps, batch.attn_metadata),
@@ -554,8 +537,7 @@ class SelfForcingMethod(DMD2Method):
                 device=device,
                 dtype=generator_pred_x0.dtype,
             )
-            noisy_latents = self._sf_add_noise(generator_pred_x0, noise,
-                                               timestep)
+            noisy_latents = self._sf_add_noise(generator_pred_x0, noise, timestep)
 
             faker_x0 = self._predict_x0_with_scheduler(
                 self.critic,
@@ -581,14 +563,11 @@ class SelfForcingMethod(DMD2Method):
                 conditional=False,
                 attn_kind="dense",
             )
-            real_cfg_x0 = real_cond_x0 + (real_cond_x0 -
-                                          real_uncond_x0) * guidance_scale
+            real_cfg_x0 = real_cond_x0 + (real_cond_x0 - real_uncond_x0) * guidance_scale
 
             denom = torch.abs(generator_pred_x0 - real_cfg_x0).mean()
             grad = (faker_x0 - real_cfg_x0) / denom
             grad = torch.nan_to_num(grad)
 
-        loss = 0.5 * torch.mean(
-            (generator_pred_x0.float() -
-             (generator_pred_x0.float() - grad.float()).detach())**2)
+        loss = 0.5 * torch.mean((generator_pred_x0.float() - (generator_pred_x0.float() - grad.float()).detach())**2)
         return loss

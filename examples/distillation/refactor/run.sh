@@ -32,7 +32,7 @@ export WANDB_MODE="${WANDB_MODE:-online}"
 # ── Log file ─────────────────────────────────────────────────────────
 CONFIG_NAME="$(basename "${CONFIG}" .yaml)"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-LOG_DIR="${LOG_DIR:-logs}"
+LOG_DIR="${LOG_DIR:-examples/distillation/refactor}"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/${CONFIG_NAME}_${TIMESTAMP}.log"
 

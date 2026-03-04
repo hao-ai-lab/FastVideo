@@ -76,8 +76,7 @@ class DMD2Method(DistillMethod):
         self.validator = validator
         self.training_args = cfg.training_args
         self.method_config: dict[str, Any] = dict(cfg.method)
-        self.validation_config: dict[str, Any] = dict(
-            getattr(cfg, "validation", {}) or {})
+        self.validation_config: dict[str, Any] = dict(getattr(cfg, "validation", {}) or {})
         self._cfg_uncond = self._parse_cfg_uncond()
         self._rollout_mode = self._parse_rollout_mode()
         self._denoising_step_list: torch.Tensor | None = None
@@ -118,8 +117,7 @@ class DMD2Method(DistillMethod):
         )
         student_ctx = None
         if update_student:
-            generator_pred_x0 = self._student_rollout(training_batch,
-                                                      with_grad=True)
+            generator_pred_x0 = self._student_rollout(training_batch, with_grad=True)
             student_ctx = (
                 training_batch.timesteps,
                 training_batch.attn_metadata_vsa,
@@ -145,9 +143,7 @@ class DMD2Method(DistillMethod):
             "student_ctx": student_ctx,
             "critic_ctx": critic_ctx,
         }
-        metrics: dict[str, LogScalar] = {
-            "update_student": float(update_student)
-        }
+        metrics: dict[str, LogScalar] = {"update_student": float(update_student)}
         return loss_map, outputs, metrics
 
     # DistillMethod override: backward
@@ -207,8 +203,7 @@ class DMD2Method(DistillMethod):
     # DistillMethod override: optimizers_schedulers_step
     def optimizers_schedulers_step(self, iteration: int) -> None:
         if self._should_update_student(iteration):
-            clip_grad_norm_if_needed(self.student.transformer,
-                                     self.training_args)
+            clip_grad_norm_if_needed(self.student.transformer, self.training_args)
         clip_grad_norm_if_needed(self.critic.transformer, self.training_args)
         super().optimizers_schedulers_step(iteration)
 
@@ -245,10 +240,8 @@ class DMD2Method(DistillMethod):
                 return
             sampling_steps = [int(len(sampling_timesteps))]
 
-        sampler_kind = parse_validation_sampler_kind(self.validation_config,
-                                                     default="sde")
-        ode_solver = parse_validation_ode_solver(self.validation_config,
-                                                 sampler_kind=sampler_kind)
+        sampler_kind = parse_validation_sampler_kind(self.validation_config, default="sde")
+        ode_solver = parse_validation_ode_solver(self.validation_config, sampler_kind=sampler_kind)
         if (sampling_timesteps is not None and sampler_kind != "sde"):
             raise ValueError("method_config.validation.sampling_timesteps is "
                              "only valid when sampler_kind='sde'")
@@ -356,9 +349,7 @@ class DMD2Method(DistillMethod):
             where="training.betas",
         )
         student_sched = str(getattr(training_args, "lr_scheduler", "constant"))
-        student_params = [
-            p for p in self.student.transformer.parameters() if p.requires_grad
-        ]
+        student_params = [p for p in self.student.transformer.parameters() if p.requires_grad]
         (
             self._student_optimizer,
             self._student_lr_scheduler,
@@ -383,15 +374,11 @@ class DMD2Method(DistillMethod):
         critic_betas_raw = self.method_config.get("fake_score_betas", None)
         if critic_betas_raw is None:
             critic_betas_raw = getattr(training_args, "betas", None)
-        critic_betas = parse_betas(critic_betas_raw,
-                                   where="method.fake_score_betas")
+        critic_betas = parse_betas(critic_betas_raw, where="method.fake_score_betas")
 
-        critic_sched_raw = self.method_config.get("fake_score_lr_scheduler",
-                                                  None)
+        critic_sched_raw = self.method_config.get("fake_score_lr_scheduler", None)
         critic_sched = str(critic_sched_raw or student_sched)
-        critic_params = [
-            p for p in self.critic.transformer.parameters() if p.requires_grad
-        ]
+        critic_params = [p for p in self.critic.transformer.parameters() if p.requires_grad]
         (
             self._critic_optimizer,
             self._critic_lr_scheduler,
@@ -416,8 +403,7 @@ class DMD2Method(DistillMethod):
         return iteration % interval == 0
 
     def _get_denoising_step_list(self, device: torch.device) -> torch.Tensor:
-        if (self._denoising_step_list is not None
-                and self._denoising_step_list.device == device):
+        if (self._denoising_step_list is not None and self._denoising_step_list.device == device):
             return self._denoising_step_list
 
         raw = self.method_config.get("dmd_denoising_steps", None)
@@ -486,9 +472,7 @@ class DMD2Method(DistillMethod):
         target_timestep_idx_int = int(target_timestep_idx.item())
         target_timestep = step_list[target_timestep_idx]
 
-        current_noise_latents = torch.randn(latents.shape,
-                                            device=device,
-                                            dtype=dtype)
+        current_noise_latents = torch.randn(latents.shape, device=device, dtype=dtype)
         current_noise_latents_copy = current_noise_latents.clone()
 
         max_target_idx = len(step_list) - 1
@@ -499,9 +483,7 @@ class DMD2Method(DistillMethod):
             with torch.no_grad():
                 for step_idx in range(max_target_idx):
                     current_timestep = step_list[step_idx]
-                    current_timestep_tensor = (
-                        current_timestep *
-                        torch.ones(1, device=device, dtype=torch.long))
+                    current_timestep_tensor = (current_timestep * torch.ones(1, device=device, dtype=torch.long))
 
                     pred_clean = self.student.predict_x0(
                         current_noise_latents,
@@ -513,9 +495,7 @@ class DMD2Method(DistillMethod):
                     )
 
                     next_timestep = step_list[step_idx + 1]
-                    next_timestep_tensor = (
-                        next_timestep *
-                        torch.ones(1, device=device, dtype=torch.long))
+                    next_timestep_tensor = (next_timestep * torch.ones(1, device=device, dtype=torch.long))
                     noise = torch.randn(
                         latents.shape,
                         device=device,
@@ -555,12 +535,10 @@ class DMD2Method(DistillMethod):
                     attn_kind="vsa",
                 )
 
-        batch.dmd_latent_vis_dict["generator_timestep"] = target_timestep.float(
-        ).detach()
+        batch.dmd_latent_vis_dict["generator_timestep"] = target_timestep.float().detach()
         return pred_x0
 
-    def _critic_flow_matching_loss(
-            self, batch: Any) -> tuple[torch.Tensor, Any, dict[str, Any]]:
+    def _critic_flow_matching_loss(self, batch: Any) -> tuple[torch.Tensor, Any, dict[str, Any]]:
         with torch.no_grad():
             generator_pred_x0 = self._student_rollout(batch, with_grad=False)
 
@@ -572,16 +550,14 @@ class DMD2Method(DistillMethod):
             device=device,
             dtype=torch.long,
         )
-        fake_score_timestep = (
-            self.student.shift_and_clamp_timestep(fake_score_timestep))
+        fake_score_timestep = (self.student.shift_and_clamp_timestep(fake_score_timestep))
 
         noise = torch.randn(
             generator_pred_x0.shape,
             device=device,
             dtype=generator_pred_x0.dtype,
         )
-        noisy_x0 = self.student.add_noise(generator_pred_x0, noise,
-                                          fake_score_timestep)
+        noisy_x0 = self.student.add_noise(generator_pred_x0, noise, fake_score_timestep)
 
         pred_noise = self.critic.predict_noise(
             noisy_x0,
@@ -598,9 +574,7 @@ class DMD2Method(DistillMethod):
             "generator_pred_video": generator_pred_x0,
             "fake_score_timestep": fake_score_timestep,
         }
-        outputs = {
-            "fake_score_latent_vis_dict": (batch.fake_score_latent_vis_dict)
-        }
+        outputs = {"fake_score_latent_vis_dict": (batch.fake_score_latent_vis_dict)}
         return (
             flow_matching_loss,
             (batch.timesteps, batch.attn_metadata),
@@ -636,8 +610,7 @@ class DMD2Method(DistillMethod):
                 device=device,
                 dtype=generator_pred_x0.dtype,
             )
-            noisy_latents = self.student.add_noise(generator_pred_x0, noise,
-                                                   timestep)
+            noisy_latents = self.student.add_noise(generator_pred_x0, noise, timestep)
 
             faker_x0 = self.critic.predict_x0(
                 noisy_latents,
@@ -663,8 +636,7 @@ class DMD2Method(DistillMethod):
                 cfg_uncond=self._cfg_uncond,
                 attn_kind="dense",
             )
-            real_cfg_x0 = real_cond_x0 + (real_cond_x0 -
-                                          real_uncond_x0) * guidance_scale
+            real_cfg_x0 = real_cond_x0 + (real_cond_x0 - real_uncond_x0) * guidance_scale
 
             denom = torch.abs(generator_pred_x0 - real_cfg_x0).mean()
             grad = (faker_x0 - real_cfg_x0) / denom

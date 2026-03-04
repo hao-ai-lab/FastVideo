@@ -56,13 +56,10 @@ class DiffusionForcingSFTMethod(DistillMethod):
         self.validator = validator
         self.training_args = cfg.training_args
         self.method_config: dict[str, Any] = dict(cfg.method)
-        self.validation_config: dict[str, Any] = dict(
-            getattr(cfg, "validation", {}) or {})
-        self._attn_kind: Literal["dense", "vsa"] = (self._parse_attn_kind(
-            self.method_config.get("attn_kind", None)))
+        self.validation_config: dict[str, Any] = dict(getattr(cfg, "validation", {}) or {})
+        self._attn_kind: Literal["dense", "vsa"] = (self._parse_attn_kind(self.method_config.get("attn_kind", None)))
 
-        self._chunk_size = self._parse_chunk_size(
-            self.method_config.get("chunk_size", None))
+        self._chunk_size = self._parse_chunk_size(self.method_config.get("chunk_size", None))
         self._timestep_index_range = (self._parse_timestep_index_range())
 
         # Initialize preprocessors on student.
@@ -100,16 +97,14 @@ class DiffusionForcingSFTMethod(DistillMethod):
                              "[B, T, C, H, W], got "
                              f"shape={tuple(clean_latents.shape)}")
 
-        batch_size, num_latents = int(clean_latents.shape[0]), int(
-            clean_latents.shape[1])
+        batch_size, num_latents = int(clean_latents.shape[0]), int(clean_latents.shape[1])
 
         expected_chunk = getattr(
             self.student.transformer,
             "num_frame_per_block",
             None,
         )
-        if (expected_chunk is not None
-                and int(expected_chunk) != int(self._chunk_size)):
+        if (expected_chunk is not None and int(expected_chunk) != int(self._chunk_size)):
             raise ValueError("DFSFT chunk_size must match "
                              "transformer.num_frame_per_block for "
                              f"causal training (got {self._chunk_size}, "
@@ -122,16 +117,14 @@ class DiffusionForcingSFTMethod(DistillMethod):
         )
         sp_size = int(getattr(self.training_args, "sp_size", 1) or 1)
         sp_group = getattr(self.student, "sp_group", None)
-        if (sp_size > 1 and sp_group is not None
-                and hasattr(sp_group, "broadcast")):
+        if (sp_size > 1 and sp_group is not None and hasattr(sp_group, "broadcast")):
             sp_group.broadcast(timestep_indices, src=0)
 
         scheduler = self.student.noise_scheduler
         if scheduler is None:
             raise ValueError("DFSFT requires student.noise_scheduler")
 
-        schedule_timesteps = scheduler.timesteps.to(device=clean_latents.device,
-                                                    dtype=torch.float32)
+        schedule_timesteps = scheduler.timesteps.to(device=clean_latents.device, dtype=torch.float32)
         schedule_sigmas = scheduler.sigmas.to(
             device=clean_latents.device,
             dtype=clean_latents.dtype,
@@ -248,13 +241,11 @@ class DiffusionForcingSFTMethod(DistillMethod):
         dataset_file = parse_validation_dataset_file(self.validation_config)
         sampling_steps = parse_validation_sampling_steps(self.validation_config)
         guidance_scale = parse_validation_guidance_scale(self.validation_config)
-        sampler_kind = parse_validation_sampler_kind(self.validation_config,
-                                                     default="ode")
+        sampler_kind = parse_validation_sampler_kind(self.validation_config, default="ode")
         rollout_mode = parse_validation_rollout_mode(self.validation_config)
         output_dir = parse_validation_output_dir(self.validation_config)
         num_actions = parse_validation_num_frames(self.validation_config)
-        ode_solver = parse_validation_ode_solver(self.validation_config,
-                                                 sampler_kind=sampler_kind)
+        ode_solver = parse_validation_ode_solver(self.validation_config, sampler_kind=sampler_kind)
 
         request = ValidationRequest(
             sample_handle=self.student,
@@ -330,8 +321,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
         scheduler = self.student.noise_scheduler
         if scheduler is None:
             raise ValueError("DFSFT requires student.noise_scheduler")
-        num_steps = int(
-            getattr(scheduler, "config", scheduler).num_train_timesteps)
+        num_steps = int(getattr(scheduler, "config", scheduler).num_train_timesteps)
 
         min_ratio = self._parse_ratio(
             self.method_config.get("min_timestep_ratio", None),
@@ -362,8 +352,7 @@ class DiffusionForcingSFTMethod(DistillMethod):
         return min_index, max_index + 1
 
     def _init_optimizers_and_schedulers(self) -> None:
-        student_lr = float(
-            getattr(self.training_args, "learning_rate", 0.0) or 0.0)
+        student_lr = float(getattr(self.training_args, "learning_rate", 0.0) or 0.0)
         if student_lr <= 0.0:
             raise ValueError("training.learning_rate must be > 0 for dfsft")
 
@@ -371,11 +360,8 @@ class DiffusionForcingSFTMethod(DistillMethod):
             getattr(self.training_args, "betas", None),
             where="training.betas",
         )
-        student_sched = str(
-            getattr(self.training_args, "lr_scheduler", "constant"))
-        student_params = [
-            p for p in self.student.transformer.parameters() if p.requires_grad
-        ]
+        student_sched = str(getattr(self.training_args, "lr_scheduler", "constant"))
+        student_params = [p for p in self.student.transformer.parameters() if p.requires_grad]
         (
             self._student_optimizer,
             self._student_lr_scheduler,
