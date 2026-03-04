@@ -102,6 +102,16 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(
         conn, "jobs", "image_path", "TEXT", "''"
     )
+    _add_column_if_missing(
+        conn, "jobs", "job_type", "TEXT", "'inference'"
+    )
+    _add_column_if_missing(conn, "jobs", "data_path", "TEXT", "''")
+    _add_column_if_missing(conn, "jobs", "max_train_steps", "INTEGER", "1000")
+    _add_column_if_missing(conn, "jobs", "train_batch_size", "INTEGER", "1")
+    _add_column_if_missing(conn, "jobs", "learning_rate", "REAL", "5e-5")
+    _add_column_if_missing(conn, "jobs", "num_latent_t", "INTEGER", "20")
+    _add_column_if_missing(conn, "jobs", "validation_dataset_file", "TEXT", "''")
+    _add_column_if_missing(conn, "jobs", "lora_rank", "INTEGER", "32")
     # Settings table
     _add_column_if_missing(
         conn, "settings", "vae_cpu_offload", "INTEGER", "0"
@@ -246,14 +256,16 @@ class Database:
         self._execute(
             """
             INSERT INTO jobs (
-                id, model_id, prompt, workload_type, image_path, status, created_at,
-                started_at, finished_at, error, output_path, log_file_path,
+                id, model_id, prompt, workload_type, image_path, job_type, status,
+                created_at, started_at, finished_at, error, output_path, log_file_path,
                 num_inference_steps, num_frames, height, width, guidance_scale,
                 guidance_rescale, fps, seed, num_gpus, dit_cpu_offload,
                 text_encoder_cpu_offload, vae_cpu_offload, image_encoder_cpu_offload,
                 use_fsdp_inference, enable_torch_compile, vsa_sparsity, tp_size,
-                sp_size, negative_prompt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                sp_size, negative_prompt,
+                data_path, max_train_steps, train_batch_size, learning_rate,
+                num_latent_t, validation_dataset_file, lora_rank
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job["id"],
@@ -261,6 +273,7 @@ class Database:
                 job["prompt"],
                 job.get("workload_type", "t2v"),
                 job.get("image_path", ""),
+                job.get("job_type", "inference"),
                 job["status"],
                 job["created_at"],
                 job.get("started_at"),
@@ -287,6 +300,13 @@ class Database:
                 job.get("tp_size", -1),
                 job.get("sp_size", -1),
                 job.get("negative_prompt", ""),
+                job.get("data_path", ""),
+                job.get("max_train_steps", 1000),
+                job.get("train_batch_size", 1),
+                job.get("learning_rate", 5e-5),
+                job.get("num_latent_t", 20),
+                job.get("validation_dataset_file", ""),
+                job.get("lora_rank", 32),
             ),
         )
         self._commit()
@@ -318,11 +338,19 @@ class Database:
         self._commit()
         return cur.rowcount > 0
 
-    def get_all_jobs(self) -> list[dict[str, Any]]:
-        """Return all jobs, newest first."""
-        cur = self._execute(
-            "SELECT * FROM jobs ORDER BY created_at DESC"
-        )
+    def get_all_jobs(
+        self, job_type: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return all jobs, newest first. Optionally filter by job_type."""
+        if job_type:
+            cur = self._execute(
+                "SELECT * FROM jobs WHERE job_type = ? ORDER BY created_at DESC",
+                (job_type,),
+            )
+        else:
+            cur = self._execute(
+                "SELECT * FROM jobs ORDER BY created_at DESC"
+            )
         return [_row_to_job(row) for row in cur.fetchall()]
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
@@ -451,6 +479,9 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "image_path": (
             (row["image_path"] or "") if "image_path" in row.keys() else ""
         ),
+        "job_type": (
+            row["job_type"] if "job_type" in row.keys() else "inference"
+        ),
         "status": row["status"],
         "created_at": row["created_at"],
         "started_at": row["started_at"],
@@ -491,6 +522,26 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     for col in ("tp_size", "sp_size"):
         if col in row.keys():
             result[col] = int(row[col])
+    for col in (
+        "data_path",
+        "validation_dataset_file",
+    ):
+        if col in row.keys():
+            result[col] = (row[col] or "") or ""
+    for col in (
+        "max_train_steps",
+        "train_batch_size",
+        "num_latent_t",
+        "lora_rank",
+    ):
+        if col in row.keys():
+            result[col] = int(row[col]) if row[col] is not None else (
+                1000 if col == "max_train_steps" else
+                1 if col == "train_batch_size" else
+                20 if col == "num_latent_t" else 32
+            )
+    if "learning_rate" in row.keys():
+        result["learning_rate"] = float(row["learning_rate"] or 5e-5)
     return result
 
 

@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
+export type JobType = "inference" | "finetuning" | "distillation" | "lora";
+
 export interface Job {
     id: string;
     model_id: string;
     prompt: string;
+    job_type?: JobType;
+    workload_type?: string;
     status: string;
     created_at: number;
     started_at: number | null;

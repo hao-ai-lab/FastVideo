@@ -15,6 +15,8 @@ import logging.handlers
 import multiprocessing as mp
 import os
 import re
+import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -22,6 +24,11 @@ from pathlib import Path
 from typing import Any
 from fastvideo.utils import get_mp_context
 from ui.database import Database
+from ui.training_config import (
+    WORKLOAD_TO_MODULE,
+    build_training_args,
+    get_training_env,
+)
 
 logger = logging.getLogger("fastvideo.ui.job_runner")
 
@@ -88,10 +95,12 @@ class JobLogBuffer:
             self.phase = "loading model"
         elif "denoising" in low or "timestep" in low:
             self.phase = "denoising"
-        elif "saving" in low or "saved" in low:
+        elif "saving" in low or "saved" in low or "checkpoint" in low:
             self.phase = "saving"
         elif "encoding" in low or "vae" in low:
             self.phase = "VAE encoding"
+        elif "training" in low or "step" in low or "loss" in low:
+            self.phase = "training"
 
 
 class LogBufferHandler(logging.Handler):
@@ -120,6 +129,7 @@ class Job:
     model_id: str
     prompt: str
     workload_type: str = "t2v"
+    job_type: str = "inference"
     image_path: str = ""
     status: JobStatus = JobStatus.PENDING
     created_at: float = field(default_factory=time.time)
@@ -147,6 +157,14 @@ class Job:
     vsa_sparsity: float = 0.0
     tp_size: int = -1
     sp_size: int = -1
+    # Training-specific (for finetuning, distillation, LoRA)
+    data_path: str = ""
+    max_train_steps: int = 1000
+    train_batch_size: int = 1
+    learning_rate: float = 5e-5
+    num_latent_t: int = 20
+    validation_dataset_file: str = ""
+    lora_rank: int = 32
     # Internal
     _thread: threading.Thread | None = field(
         default=None, repr=False
@@ -160,6 +178,7 @@ class Job:
     log_file_handler: logging.FileHandler | None = field(
         default=None, repr=False
     )
+    _process: subprocess.Popen | None = field(default=None, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -167,6 +186,7 @@ class Job:
             "model_id": self.model_id,
             "prompt": self.prompt,
             "workload_type": self.workload_type,
+            "job_type": self.job_type,
             "image_path": self.image_path,
             "status": self.status.value,
             "created_at": self.created_at,
@@ -194,6 +214,16 @@ class Job:
             "vsa_sparsity": self.vsa_sparsity,
             "tp_size": self.tp_size,
             "sp_size": self.sp_size,
+            "data_path": self.data_path,
+            "max_train_steps": self.max_train_steps,
+            "train_batch_size": self.train_batch_size,
+            "learning_rate": self.learning_rate,
+            "num_latent_t": self.num_latent_t,
+            "num_height": self.height,
+            "num_width": self.width,
+            "num_frames": self.num_frames,
+            "validation_dataset_file": self.validation_dataset_file,
+            "lora_rank": self.lora_rank,
             "progress": self._log_buf.progress,
             "progress_msg": self._log_buf.progress_msg,
             "phase": self._log_buf.phase,
@@ -282,7 +312,15 @@ class JobRunner:
                     model_id=row["model_id"],
                     prompt=row["prompt"],
                     workload_type=row.get("workload_type", "t2v"),
+                    job_type=row.get("job_type", "inference"),
                     image_path=row.get("image_path", "") or "",
+                    data_path=row.get("data_path", "") or "",
+                    max_train_steps=row.get("max_train_steps", 1000),
+                    train_batch_size=row.get("train_batch_size", 1),
+                    learning_rate=float(row.get("learning_rate", 5e-5)),
+                    num_latent_t=row.get("num_latent_t", 20),
+                    validation_dataset_file=row.get("validation_dataset_file", "") or "",
+                    lora_rank=row.get("lora_rank", 32),
                     status=JobStatus(status),
                     created_at=row["created_at"],
                     started_at=row.get("started_at"),
@@ -345,7 +383,15 @@ class JobRunner:
         model_id: str,
         prompt: str,
         workload_type: str = "t2v",
+        job_type: str = "inference",
         image_path: str = "",
+        data_path: str = "",
+        max_train_steps: int = 1000,
+        train_batch_size: int = 1,
+        learning_rate: float = 5e-5,
+        num_latent_t: int = 20,
+        validation_dataset_file: str = "",
+        lora_rank: int = 32,
         num_inference_steps: int = 50,
         num_frames: int = 81,
         height: int = 480,
@@ -372,7 +418,15 @@ class JobRunner:
             model_id=model_id,
             prompt=prompt.strip(),
             workload_type=workload_type or "t2v",
+            job_type=job_type or "inference",
             image_path=image_path or "",
+            data_path=data_path or "",
+            max_train_steps=max_train_steps,
+            train_batch_size=train_batch_size,
+            learning_rate=learning_rate,
+            num_latent_t=num_latent_t,
+            validation_dataset_file=validation_dataset_file or "",
+            lora_rank=lora_rank,
             num_inference_steps=num_inference_steps,
             num_frames=num_frames,
             height=height,
@@ -412,12 +466,14 @@ class JobRunner:
         with self._jobs_lock:
             return self._jobs.get(job_id)
     
-    def list_jobs(self) -> list[Job]:
-        """Return all jobs, sorted by creation time (newest first)."""
+    def list_jobs(self, job_type: str | None = None) -> list[Job]:
+        """Return jobs, sorted by creation time (newest first).
+        If job_type is set, filter to that type only."""
         with self._jobs_lock:
-            return sorted(
-                self._jobs.values(), key=lambda j: j.created_at, reverse=True
-            )
+            jobs = list(self._jobs.values())
+            if job_type:
+                jobs = [j for j in jobs if j.job_type == job_type]
+            return sorted(jobs, key=lambda j: j.created_at, reverse=True)
     
     def delete_job(self, job_id: str) -> bool:
         """Delete a job. Running jobs are stopped first.
@@ -455,7 +511,6 @@ class JobRunner:
             raise ValueError(
                 "Job already completed. Delete and re-create to run again."
             )
-
         # Reset state for re-run
         job.status = JobStatus.PENDING
         job.error = None
@@ -466,6 +521,7 @@ class JobRunner:
         job._stop_event.clear()
         job._log_buf = JobLogBuffer()  # fresh log buffer
         job.log_file_handler = None  # Reset file handler
+        job._process = None  # Reset subprocess handle
 
         # Wrap _run_job in an additional safety layer to catch any exceptions
         # that might escape (though they shouldn't with our comprehensive handling)
@@ -497,11 +553,8 @@ class JobRunner:
     def stop_job(self, job_id: str) -> Job:
         """Request a running job to stop.
         
-        Because video generation is a single atomic call to the FastVideo
-        library, the stop is *cooperative*: the flag is checked between major
-        phases (model loading ↔ generation ↔ saving).  If the model is
-        already mid-forward-pass, it will complete before the stop takes
-        effect.
+        For inference: cooperative stop between phases.
+        For training: terminates the subprocess.
         
         Raises:
             ValueError: If job not found or not running
@@ -514,6 +567,11 @@ class JobRunner:
             raise ValueError(f"Job is not running (status={job.status.value})")
 
         job._stop_event.set()
+        if job._process is not None:
+            try:
+                job._process.terminate()
+            except Exception:
+                pass
         logger.info("Stop requested for job %s", job.id)
         return job
     
@@ -609,6 +667,131 @@ class JobRunner:
         return gen
 
     def _run_job(self, job: Job):
+        if job.job_type == "inference":
+            self._run_inference_job(job)
+        else:
+            self._run_training_job(job)
+
+    def _run_training_job(self, job: Job):
+        """Run a finetuning, distillation, or LoRA job via subprocess."""
+        buf = job._log_buf
+        os.makedirs(self.log_dir, exist_ok=True)
+        job.log_file_path = os.path.join(self.log_dir, f"{job.id}.log")
+        job_output_dir = os.path.join(self.output_dir, job.id)
+        os.makedirs(job_output_dir, exist_ok=True)
+
+        if not job.data_path or not os.path.isdir(job.data_path):
+            job.status = JobStatus.FAILED
+            job.error = (
+                f"Data path '{job.data_path}' is required and must be an "
+                "existing directory. Preprocess your dataset first."
+            )
+            job.finished_at = time.time()
+            self._save_job(job)
+            return
+
+        module_info = WORKLOAD_TO_MODULE.get(job.workload_type)
+        if not module_info:
+            job.status = JobStatus.FAILED
+            job.error = f"Unknown workload type: {job.workload_type}"
+            job.finished_at = time.time()
+            self._save_job(job)
+            return
+
+        module_path, _pipeline_workload, use_vsa, _is_lora = module_info
+        env = os.environ.copy()
+        env.update(get_training_env(use_vsa))
+
+        job_dict = {
+            "model_id": job.model_id,
+            "data_path": job.data_path,
+            "workload_type": job.workload_type,
+            "num_gpus": job.num_gpus,
+            "max_train_steps": job.max_train_steps,
+            "train_batch_size": job.train_batch_size,
+            "learning_rate": job.learning_rate,
+            "num_latent_t": job.num_latent_t,
+            "num_height": job.height,
+            "num_width": job.width,
+            "num_frames": job.num_frames,
+            "validation_dataset_file": job.validation_dataset_file,
+            "lora_rank": job.lora_rank,
+        }
+        train_args = build_training_args(job_dict, job_output_dir)
+
+        repo_root = Path(__file__).resolve().parent.parent
+        torchrun_cmd = [
+            sys.executable, "-m", "torch.distributed.run",
+            "--nproc_per_node", str(job.num_gpus),
+            "--nnodes", "1",
+            str(repo_root / module_path),
+        ] + train_args
+        buf.write(f"Starting training: {' '.join(torchrun_cmd[:12])}...")
+        buf.phase = "starting"
+
+        try:
+            job.status = JobStatus.RUNNING
+            job.started_at = time.time()
+            self._save_job(job)
+
+            with open(job.log_file_path, "w", encoding="utf-8") as log_file:
+                job._process = subprocess.Popen(
+                    torchrun_cmd,
+                    cwd=str(repo_root),
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+                assert job._process.stdout is not None
+                for line in iter(job._process.stdout.readline, ""):
+                    if job._stop_event.is_set():
+                        job._process.terminate()
+                        try:
+                            job._process.wait(timeout=30)
+                        except subprocess.TimeoutExpired:
+                            job._process.kill()
+                        job.status = JobStatus.STOPPED
+                        job.finished_at = time.time()
+                        self._save_job(job)
+                        buf.phase = "stopped"
+                        return
+                    line = line.rstrip()
+                    if line:
+                        buf.write(line)
+                        log_file.write(line + "\n")
+                        log_file.flush()
+
+                job._process.wait()
+                exit_code = job._process.returncode or 0
+
+            if exit_code == 0:
+                job.status = JobStatus.COMPLETED
+                buf.progress = 100.0
+                buf.phase = "done"
+                # Training outputs checkpoints, not video
+                ckpt_dirs = sorted(Path(job_output_dir).glob("checkpoint-*"))
+                if ckpt_dirs:
+                    job.output_path = str(ckpt_dirs[-1])
+            else:
+                job.status = JobStatus.FAILED
+                job.error = f"Training exited with code {exit_code}"
+                buf.phase = "failed"
+            job.finished_at = time.time()
+            self._save_job(job)
+
+        except Exception as exc:
+            job.status = JobStatus.FAILED
+            job.error = f"{type(exc).__name__}: {exc}"
+            job.finished_at = time.time()
+            self._save_job(job)
+            buf.phase = "failed"
+            logger.exception("Training job %s failed", job.id)
+        finally:
+            job._process = None
+
+    def _run_inference_job(self, job: Job):
         buf = job._log_buf
         os.makedirs(self.log_dir, exist_ok=True)
         job.log_file_path = os.path.join(self.log_dir, f"{job.id}.log")

@@ -3,8 +3,9 @@
 import { createJob, getModels, uploadImage, type Model } from "@/lib/api";
 import { getDefaultModelForWorkload } from "@/lib/defaultOptions";
 import { useDefaultOptions } from "@/contexts/DefaultOptionsContext";
+import { WORKLOAD_OPTIONS } from "@/lib/jobConfig";
+import type { JobType } from "@/lib/types";
 import { useEffect, useRef, useState } from "react";
-import type { WorkloadType } from "./CreateJobButton";
 import modalStyles from "./styles/Modal.module.css";
 import formStyles from "./styles/Form.module.css";
 import cardStyles from "./styles/Card.module.css";
@@ -12,19 +13,38 @@ import buttonStyles from "./styles/Button.module.css";
 import Toggle from "./Toggle";
 import Slider from "./Slider";
 
+/** Map training workload types to model filter (t2v/i2v) for getModels. */
+function getModelWorkloadForTraining(workloadType: string): string {
+  if (
+    workloadType.includes("i2v") ||
+    workloadType === "matrixgame_i2v" ||
+    workloadType === "lora_i2v" ||
+    workloadType === "self_forcing_i2v" ||
+    workloadType === "dmd_i2v"
+  ) {
+    return "i2v";
+  }
+  return "t2v";
+}
+
 interface CreateJobModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
-  workloadType?: WorkloadType;
+  jobType: JobType;
+  workloadType: string;
 }
 
 export default function CreateJobModal({
   isOpen,
   onClose,
   onSuccess,
-  workloadType = "t2v",
+  jobType,
+  workloadType,
 }: CreateJobModalProps) {
+  const isInference = jobType === "inference";
+  const inferenceWorkload =
+    isInference ? workloadType : getModelWorkloadForTraining(workloadType);
   const { options: defaultOptions } = useDefaultOptions();
   const [models, setModels] = useState<Model[]>([]);
   const [modelId, setModelId] = useState("");
@@ -51,6 +71,13 @@ export default function CreateJobModal({
   const [vsaSparsity, setVsaSparsity] = useState<number>(defaultOptions.vsaSparsity);
   const [tpSize, setTpSize] = useState<number>(defaultOptions.tpSize);
   const [spSize, setSpSize] = useState<number>(defaultOptions.spSize);
+  const [dataPath, setDataPath] = useState("");
+  const [maxTrainSteps, setMaxTrainSteps] = useState(1000);
+  const [trainBatchSize, setTrainBatchSize] = useState(1);
+  const [learningRate, setLearningRate] = useState(5e-5);
+  const [numLatentT, setNumLatentT] = useState(20);
+  const [validationDatasetFile, setValidationDatasetFile] = useState("");
+  const [loraRank, setLoraRank] = useState(32);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -70,11 +97,16 @@ export default function CreateJobModal({
   useEffect(() => {
     if (isOpen) {
       setIsLoadingModels(true);
-      getModels(workloadType)
+      const modelFilter =
+        isInference ? workloadType : getModelWorkloadForTraining(workloadType);
+      getModels(modelFilter)
         .then((fetchedModels) => {
           setModels(fetchedModels);
           const ids = fetchedModels.map((m) => m.id);
-          const defaultId = getDefaultModelForWorkload(defaultOptions, workloadType);
+          const defaultId = getDefaultModelForWorkload(
+            defaultOptions,
+            modelFilter as "t2v" | "i2v" | "t2i"
+          );
           setModelId(
             ids.includes(defaultId) ? defaultId : fetchedModels[0]?.id ?? ""
           );
@@ -91,6 +123,7 @@ export default function CreateJobModal({
   }, [
     isOpen,
     workloadType,
+    isInference,
     defaultOptions.defaultModelIdT2v,
     defaultOptions.defaultModelIdI2v,
     defaultOptions.defaultModelIdT2i,
@@ -98,9 +131,23 @@ export default function CreateJobModal({
 
   useEffect(() => {
     if (isOpen) {
-      setModelId(getDefaultModelForWorkload(defaultOptions, workloadType));
+      const modelFilter =
+        isInference ? workloadType : getModelWorkloadForTraining(workloadType);
+      setModelId(
+        getDefaultModelForWorkload(
+          defaultOptions,
+          modelFilter as "t2v" | "i2v" | "t2i"
+        )
+      );
       setImagePath("");
       setImageFileName("");
+      setDataPath("");
+      setMaxTrainSteps(1000);
+      setTrainBatchSize(1);
+      setLearningRate(5e-5);
+      setNumLatentT(20);
+      setValidationDatasetFile("");
+      setLoraRank(32);
       setNumInferenceSteps(defaultOptions.numInferenceSteps);
       setNumFrames(
         workloadType === "t2i" ? 1 : defaultOptions.numFrames
@@ -122,7 +169,7 @@ export default function CreateJobModal({
       setTpSize(defaultOptions.tpSize);
       setSpSize(defaultOptions.spSize);
     }
-  }, [isOpen, defaultOptions, workloadType]);
+  }, [isOpen, defaultOptions, workloadType, isInference]);
 
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -147,39 +194,62 @@ export default function CreateJobModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (workloadType === "i2v" && !imagePath) {
+    if (isInference && workloadType === "i2v" && !imagePath) {
+      return;
+    }
+    if (!isInference && !dataPath.trim()) {
       return;
     }
     setIsSubmitting(true);
     try {
-      await createJob({
+      const basePayload = {
         model_id: modelId,
         prompt,
         workload_type: workloadType,
-        ...(workloadType === "i2v" && imagePath
-          ? { image_path: imagePath }
-          : {}),
-        negative_prompt: negativePrompt,
-        num_inference_steps: numInferenceSteps,
-        num_frames: numFrames,
-        height,
-        width,
-        guidance_scale: guidanceScale,
-        guidance_rescale: guidanceRescale,
-        fps,
-        seed,
-        num_gpus: numGpus,
-        dit_cpu_offload: ditCpuOffload,
-        text_encoder_cpu_offload: textEncoderCpuOffload,
-        vae_cpu_offload: vaeCpuOffload,
-        image_encoder_cpu_offload: imageEncoderCpuOffload,
-        use_fsdp_inference: useFsdpInference,
-        enable_torch_compile: enableTorchCompile,
-        vsa_sparsity: vsaSparsity,
-        tp_size: tpSize,
-        sp_size: spSize,
-      });
-      setModelId(getDefaultModelForWorkload(defaultOptions, workloadType));
+        job_type: jobType,
+        ...(!isInference && {
+          data_path: dataPath,
+          max_train_steps: maxTrainSteps,
+          train_batch_size: trainBatchSize,
+          learning_rate: learningRate,
+          num_latent_t: numLatentT,
+          validation_dataset_file: validationDatasetFile || undefined,
+          lora_rank: loraRank,
+        }),
+      };
+      const inferencePayload = isInference
+        ? {
+            ...(workloadType === "i2v" && imagePath
+              ? { image_path: imagePath }
+              : {}),
+            negative_prompt: negativePrompt,
+            num_inference_steps: numInferenceSteps,
+            num_frames: numFrames,
+            height,
+            width,
+            guidance_scale: guidanceScale,
+            guidance_rescale: guidanceRescale,
+            fps,
+            seed,
+            num_gpus: numGpus,
+            dit_cpu_offload: ditCpuOffload,
+            text_encoder_cpu_offload: textEncoderCpuOffload,
+            vae_cpu_offload: vaeCpuOffload,
+            image_encoder_cpu_offload: imageEncoderCpuOffload,
+            use_fsdp_inference: useFsdpInference,
+            enable_torch_compile: enableTorchCompile,
+            vsa_sparsity: vsaSparsity,
+            tp_size: tpSize,
+            sp_size: spSize,
+          }
+        : {};
+      await createJob({ ...basePayload, ...inferencePayload });
+      setModelId(
+        getDefaultModelForWorkload(
+          defaultOptions,
+          inferenceWorkload as "t2v" | "i2v" | "t2i"
+        )
+      );
       setPrompt("");
       setImagePath("");
       setImageFileName("");
@@ -216,7 +286,12 @@ export default function CreateJobModal({
 
   const handleClose = () => {
     if (!isSubmitting) {
-      setModelId(getDefaultModelForWorkload(defaultOptions, workloadType));
+      setModelId(
+        getDefaultModelForWorkload(
+          defaultOptions,
+          inferenceWorkload as "t2v" | "i2v" | "t2i"
+        )
+      );
       setPrompt("");
       setImagePath("");
       setImageFileName("");
@@ -259,10 +334,10 @@ export default function CreateJobModal({
         </button>
         <div className={cardStyles.card} style={{ margin: 0, border: 'none' }}>
           <h2>
-            New Job
-            {workloadType === "t2v" && " (T2V)"}
-            {workloadType === "i2v" && " (I2V)"}
-            {workloadType === "t2i" && " (T2I)"}
+            New {jobType.charAt(0).toUpperCase() + jobType.slice(1)} Job
+            {WORKLOAD_OPTIONS[jobType]?.find((o) => o.type === workloadType)
+              ? ` (${WORKLOAD_OPTIONS[jobType].find((o) => o.type === workloadType)?.label})`
+              : ""}
           </h2>
           <form onSubmit={handleSubmit} autoComplete="off">
             <div className={formStyles.formRow}>
@@ -289,7 +364,7 @@ export default function CreateJobModal({
                 ))}
               </select>
             </div>
-            {workloadType === "i2v" && (
+            {isInference && workloadType === "i2v" && (
               <div className={formStyles.formRow}>
                 <label htmlFor="modal-image">Image</label>
                 <input
@@ -324,32 +399,138 @@ export default function CreateJobModal({
               </div>
             )}
             <div className={formStyles.formRow}>
-              <label htmlFor="modal-prompt">Prompt</label>
+              <label htmlFor="modal-prompt">
+                {isInference ? "Prompt" : "Description"}
+              </label>
               <textarea
                 name="prompt"
                 id="modal-prompt"
-                rows={3}
+                rows={isInference ? 3 : 2}
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="A curious raccoon peers through a vibrant field of yellow sunflowers…"
+                placeholder={
+                  isInference
+                    ? "A curious raccoon peers through a vibrant field of yellow sunflowers…"
+                    : "Brief description of this training job…"
+                }
                 required
                 disabled={isSubmitting}
               />
             </div>
-            <div className={formStyles.formRow}>
-              <label htmlFor="modal-negative-prompt">Negative Prompt</label>
-              <textarea
-                name="negativePrompt"
-                id="modal-negative-prompt"
-                rows={2}
-                value={negativePrompt}
-                onChange={(e) => setNegativePrompt(e.target.value)}
-                placeholder="Optional: things to avoid in the output…"
-                disabled={isSubmitting}
-              />
-            </div>
+            {isInference && (
+              <div className={formStyles.formRow}>
+                <label htmlFor="modal-negative-prompt">Negative Prompt</label>
+                <textarea
+                  name="negativePrompt"
+                  id="modal-negative-prompt"
+                  rows={2}
+                  value={negativePrompt}
+                  onChange={(e) => setNegativePrompt(e.target.value)}
+                  placeholder="Optional: things to avoid in the output…"
+                  disabled={isSubmitting}
+                />
+              </div>
+            )}
 
-            {/* Advanced settings (collapsed by default) */}
+            {/* Advanced settings (inference only, collapsed by default) */}
+            {!isInference && (
+              <>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-data-path">Data Path *</label>
+                  <input
+                    id="modal-data-path"
+                    type="text"
+                    value={dataPath}
+                    onChange={(e) => setDataPath(e.target.value)}
+                    placeholder="/path/to/preprocessed/combined_parquet_dataset/"
+                    required={!isInference}
+                    disabled={isSubmitting}
+                  />
+                  <span className={formStyles.helperText}>
+                    Path to preprocessed Parquet dataset (run preprocessing first)
+                  </span>
+                </div>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-max-train-steps">Max Train Steps</label>
+                  <Slider
+                    id="modal-max-train-steps"
+                    min={100}
+                    max={50000}
+                    step={100}
+                    value={maxTrainSteps}
+                    onChange={setMaxTrainSteps}
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-train-batch-size">Train Batch Size</label>
+                  <Slider
+                    id="modal-train-batch-size"
+                    min={1}
+                    max={8}
+                    step={1}
+                    value={trainBatchSize}
+                    onChange={setTrainBatchSize}
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-learning-rate">Learning Rate</label>
+                  <input
+                    id="modal-learning-rate"
+                    type="number"
+                    step="1e-6"
+                    min={1e-6}
+                    max={1}
+                    value={learningRate}
+                    onChange={(e) =>
+                      setLearningRate(parseFloat(e.target.value) || 5e-5)
+                    }
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-num-latent-t">Num Latent T</label>
+                  <Slider
+                    id="modal-num-latent-t"
+                    min={8}
+                    max={40}
+                    step={1}
+                    value={numLatentT}
+                    onChange={setNumLatentT}
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div className={formStyles.formRow}>
+                  <label htmlFor="modal-validation-dataset">
+                    Validation Dataset (optional)
+                  </label>
+                  <input
+                    id="modal-validation-dataset"
+                    type="text"
+                    value={validationDatasetFile}
+                    onChange={(e) => setValidationDatasetFile(e.target.value)}
+                    placeholder="/path/to/validation.json"
+                    disabled={isSubmitting}
+                  />
+                </div>
+                {(workloadType === "lora_t2v" || workloadType === "lora_i2v") && (
+                  <div className={formStyles.formRow}>
+                    <label htmlFor="modal-lora-rank">LoRA Rank</label>
+                    <Slider
+                      id="modal-lora-rank"
+                      min={8}
+                      max={128}
+                      step={8}
+                      value={loraRank}
+                      onChange={setLoraRank}
+                      disabled={isSubmitting}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+            {isInference && (
             <details className={formStyles.advancedSettings}>
               <summary>Advanced Settings</summary>
               <div className={formStyles.settingsGrid}>
@@ -585,6 +766,7 @@ export default function CreateJobModal({
                 </div>
               </div>
             </details>
+            )}
 
             <button type="submit" className={`${buttonStyles.btn} ${buttonStyles.btnPrimary}`} disabled={isSubmitting}>
               {isSubmitting ? "Creating..." : "Create Job"}

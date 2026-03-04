@@ -7,11 +7,18 @@ import CreateJobButton from "@/components/CreateJobButton";
 import { useJobsRefresh } from "@/contexts/JobsRefreshContext";
 import { useHeaderActions } from "@/contexts/ActiveTabContext";
 import { useActiveJob } from "@/contexts/ActiveJobContext";
+import type { JobType } from "@/lib/types";
 import cardStyles from "@styles/Card.module.css";
 import layoutStyles from "@/app/Layout.module.css";
 
-export default function JobQueuePage() {
-  useHeaderActions([<CreateJobButton key="create-job" />]);
+interface JobQueuePageProps {
+  jobType: JobType;
+}
+
+export default function JobQueuePage({ jobType }: JobQueuePageProps) {
+  useHeaderActions([
+    <CreateJobButton key="create-job" jobType={jobType} />,
+  ]);
   const { activeJobId, setActiveJobId, setActiveJob } = useActiveJob();
   const [jobs, setJobs] = useState<Awaited<ReturnType<typeof getJobsList>>>([]);
   const activeJob = activeJobId
@@ -34,20 +41,20 @@ export default function JobQueuePage() {
 
   const fetchJobs = useCallback(async () => {
     try {
-      const jobsList = await getJobsList();
+      const jobsList = await getJobsList(jobType);
       setJobs(jobsList);
     } catch (error) {
       console.error("Failed to fetch jobs:", error);
     }
-  }, []);
+  }, [jobType]);
 
   useEffect(() => {
-    getJobsList()
+    getJobsList(jobType)
       .then(setJobs)
       .catch((error) => {
         console.error("Failed to fetch jobs:", error);
       });
-  }, []);
+  }, [jobType]);
 
   useEffect(() => {
     return registerRefresh(fetchJobs);
@@ -81,7 +88,7 @@ export default function JobQueuePage() {
         <div id="jobs-container">
           {jobs.length === 0 ? (
             <p className={layoutStyles.placeholder}>
-              No jobs yet. Create one above.
+              No {jobType} jobs yet. Create one above.
             </p>
           ) : (
             jobs.map((job) => (

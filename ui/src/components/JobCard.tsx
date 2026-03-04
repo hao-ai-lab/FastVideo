@@ -222,8 +222,14 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
       </div>
       <p className={jobCardStyles.jobPrompt}>{job.prompt}</p>
       <div className={jobCardStyles.jobMeta}>
-        <span>{job.num_frames} frames</span>
-        <span>{job.height}×{job.width}</span>
+        {job.job_type === "inference" ? (
+          <>
+            <span>{job.num_frames} frames</span>
+            <span>{job.height}×{job.width}</span>
+          </>
+        ) : (
+          <span>{job.workload_type?.replace(/_/g, " ") ?? job.job_type}</span>
+        )}
         {getElapsedTime() && (
           <span className={jobCardStyles.jobDuration}>
             {"⏱ " + getElapsedTime()}
@@ -232,16 +238,18 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
       </div>
       <div className={jobCardStyles.jobActions}>
         {getActionButton()}
-        {job.status === "completed" && job.output_path && (
-          <button
-            className={`${buttonStyles.btn} ${buttonStyles.btnSmall}`}
-            onClick={handleDownloadVideo}
-            disabled={isLoading}
-            title="Download video"
-          >
-            Download Video
-          </button>
-        )}
+        {job.status === "completed" &&
+          job.output_path &&
+          job.job_type === "inference" && (
+            <button
+              className={`${buttonStyles.btn} ${buttonStyles.btnSmall}`}
+              onClick={handleDownloadVideo}
+              disabled={isLoading}
+              title="Download video"
+            >
+              Download Video
+            </button>
+          )}
         <button
           className={`${buttonStyles.btn} ${buttonStyles.btnDelete} ${buttonStyles.btnSmall}`}
           onClick={handleDelete}

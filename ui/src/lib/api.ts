@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Job } from "./types";
+import { Job, type JobType } from "./types";
 
 function getApiBaseUrl(): string {
   const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -18,8 +18,16 @@ function getApiBaseUrl(): string {
 export interface CreateJobRequest {
     model_id: string;
     prompt: string;
-    workload_type?: "t2v" | "i2v" | "t2i";
+    workload_type?: string;
+    job_type?: JobType;
     image_path?: string;
+    data_path?: string;
+    max_train_steps?: number;
+    train_batch_size?: number;
+    learning_rate?: number;
+    num_latent_t?: number;
+    validation_dataset_file?: string;
+    lora_rank?: number;
     negative_prompt?: string;
     num_inference_steps?: number;
     num_frames?: number;
@@ -128,9 +136,12 @@ export async function getModels(workloadType?: string): Promise<Model[]> {
     return response.json();
 }
 
-export async function getJobsList(): Promise<Job[]> {
+export async function getJobsList(jobType?: JobType): Promise<Job[]> {
     const baseApiUrl = getApiBaseUrl();
-    const response = await fetch(`${baseApiUrl}/jobs`);
+    const url = jobType
+        ? `${baseApiUrl}/jobs?job_type=${encodeURIComponent(jobType)}`
+        : `${baseApiUrl}/jobs`;
+    const response = await fetch(url);
     if (!response.ok) {
         throw new Error("Failed to fetch jobs");
     }

@@ -3,24 +3,23 @@
 import { useState } from "react";
 import CreateJobModal from "./CreateJobModal";
 import { useJobsRefresh } from "@/contexts/JobsRefreshContext";
+import { WORKLOAD_OPTIONS } from "@/lib/jobConfig";
+import type { JobType } from "@/lib/types";
 import buttonStyles from "./styles/Button.module.css";
 import dropdownStyles from "./styles/Dropdown.module.css";
 
-export type WorkloadType = "t2v" | "i2v" | "t2i";
-
 interface CreateJobButtonProps {
+  jobType: JobType;
   onJobCreated?: () => void;
 }
 
-const WORKLOAD_OPTIONS: { type: WorkloadType; label: string; desc: string }[] = [
-  { type: "t2v", label: "T2V", desc: "Text to Video" },
-  { type: "i2v", label: "I2V", desc: "Image to Video" },
-  { type: "t2i", label: "T2I", desc: "Text to Image" },
-];
-
-export default function CreateJobButton({ onJobCreated }: CreateJobButtonProps) {
+export default function CreateJobButton({
+  jobType,
+  onJobCreated,
+}: CreateJobButtonProps) {
+  const options = WORKLOAD_OPTIONS[jobType];
   const [modalOpen, setModalOpen] = useState(false);
-  const [workloadType, setWorkloadType] = useState<WorkloadType>("t2v");
+  const [workloadType, setWorkloadType] = useState(options[0]?.type ?? "t2v");
   const { triggerRefresh } = useJobsRefresh();
 
   const handleSuccess = () => {
@@ -28,7 +27,7 @@ export default function CreateJobButton({ onJobCreated }: CreateJobButtonProps) 
     onJobCreated?.();
   };
 
-  const openModal = (type: WorkloadType) => {
+  const openModal = (type: string) => {
     setWorkloadType(type);
     setModalOpen(true);
   };
@@ -42,7 +41,7 @@ export default function CreateJobButton({ onJobCreated }: CreateJobButtonProps) 
           Create Job
         </button>
         <div className={dropdownStyles.menu} role="menu">
-          {WORKLOAD_OPTIONS.map((opt) => (
+          {options.map((opt) => (
             <button
               key={opt.type}
               className={dropdownStyles.menuItem}
@@ -59,6 +58,7 @@ export default function CreateJobButton({ onJobCreated }: CreateJobButtonProps) 
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onSuccess={handleSuccess}
+        jobType={jobType}
         workloadType={workloadType}
       />
     </>

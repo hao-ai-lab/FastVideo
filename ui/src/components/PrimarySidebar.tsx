@@ -8,7 +8,12 @@ const SIDEBAR_MAX_WIDTH = 300;
 const SIDEBAR_COLLAPSED_WIDTH = 0;
 const SIDEBAR_COLLAPSED_VISIBLE_WIDTH = 60; /* collapse button width */
 
-export type SidebarTab = "job-queue" | "settings";
+export type SidebarTab =
+  | "inference"
+  | "finetuning"
+  | "distillation"
+  | "lora"
+  | "settings";
 
 interface PrimarySidebarProps {
   activeTab: SidebarTab;
@@ -103,11 +108,38 @@ export default function PrimarySidebar({
         <button
           type="button"
           className={`${primarySidebarStyles.tab} ${
-            activeTab === "job-queue" ? primarySidebarStyles.tabActive : ""
+            activeTab === "inference" ? primarySidebarStyles.tabActive : ""
           }`}
-          onClick={() => onTabChange("job-queue")}
+          onClick={() => onTabChange("inference")}
         >
-          Job Queue
+          Inference
+        </button>
+        <button
+          type="button"
+          className={`${primarySidebarStyles.tab} ${
+            activeTab === "finetuning" ? primarySidebarStyles.tabActive : ""
+          }`}
+          onClick={() => onTabChange("finetuning")}
+        >
+          Finetuning
+        </button>
+        <button
+          type="button"
+          className={`${primarySidebarStyles.tab} ${
+            activeTab === "distillation" ? primarySidebarStyles.tabActive : ""
+          }`}
+          onClick={() => onTabChange("distillation")}
+        >
+          Distillation
+        </button>
+        <button
+          type="button"
+          className={`${primarySidebarStyles.tab} ${
+            activeTab === "lora" ? primarySidebarStyles.tabActive : ""
+          }`}
+          onClick={() => onTabChange("lora")}
+        >
+          LoRA
         </button>
         <button
           type="button"
