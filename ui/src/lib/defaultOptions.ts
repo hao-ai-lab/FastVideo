@@ -11,7 +11,13 @@ export interface DefaultOptions {
   numGpus: number;
   ditCpuOffload: boolean;
   textEncoderCpuOffload: boolean;
+  vaeCpuOffload: boolean;
+  imageEncoderCpuOffload: boolean;
   useFsdpInference: boolean;
+  enableTorchCompile: boolean;
+  vsaSparsity: number;
+  tpSize: number;
+  spSize: number;
 }
 
 export const DEFAULT_OPTIONS: DefaultOptions = {
@@ -25,7 +31,13 @@ export const DEFAULT_OPTIONS: DefaultOptions = {
   numGpus: 1,
   ditCpuOffload: false,
   textEncoderCpuOffload: false,
+  vaeCpuOffload: false,
+  imageEncoderCpuOffload: false,
   useFsdpInference: false,
+  enableTorchCompile: false,
+  vsaSparsity: 0,
+  tpSize: -1,
+  spSize: -1,
 };
 
 const STORAGE_KEY = "fastvideo-default-options";

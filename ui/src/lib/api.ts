@@ -27,7 +27,13 @@ export interface CreateJobRequest {
     num_gpus?: number;
     dit_cpu_offload?: boolean | null;
     text_encoder_cpu_offload?: boolean | null;
+    vae_cpu_offload?: boolean | null;
+    image_encoder_cpu_offload?: boolean | null;
     use_fsdp_inference?: boolean | null;
+    enable_torch_compile?: boolean | null;
+    vsa_sparsity?: number;
+    tp_size?: number;
+    sp_size?: number;
 }
 
 export interface Model {
@@ -47,7 +53,13 @@ export interface Settings {
     numGpus: number;
     ditCpuOffload: boolean;
     textEncoderCpuOffload: boolean;
+    vaeCpuOffload: boolean;
+    imageEncoderCpuOffload: boolean;
     useFsdpInference: boolean;
+    enableTorchCompile: boolean;
+    vsaSparsity: number;
+    tpSize: number;
+    spSize: number;
 }
 
 // MARK: - API Functions
