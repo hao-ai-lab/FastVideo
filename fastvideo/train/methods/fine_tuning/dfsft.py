@@ -149,6 +149,11 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         )
         t_inhom = schedule_timesteps[timestep_indices]
 
+        # Override the homogeneous timesteps from prepare_batch
+        # so that set_forward_context (in predict_noise and
+        # backward) receives the correct per-chunk timesteps.
+        training_batch.timesteps = t_inhom
+
         noise = getattr(training_batch, "noise", None)
         if noise is None:
             noise = torch.randn_like(clean_latents)
