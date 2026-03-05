@@ -29,12 +29,13 @@ from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
 
 from fastvideo.registry import (get_registered_model_paths,
                                 get_registered_models_with_workloads)
 from ui.database import Database, _get_db_path
 from ui.job_runner import JobRunner, JobStatus
+from ui.models import (CreateDatasetRequest, CreateJobRequest,
+                       SettingsUpdate, UpdateCaptionRequest)
 
 
 logging.basicConfig(
@@ -59,41 +60,7 @@ job_runner: JobRunner
 database: Database | None = None
 upload_dir: str = ""
 datasets_upload_dir: str = ""
-
-
-class CreateJobRequest(BaseModel):
-    model_id: str
-    prompt: str
-    workload_type: str = "t2v"
-    job_type: str = "inference"
-    image_path: str = ""
-    data_path: str = ""
-    max_train_steps: int = 1000
-    train_batch_size: int = 1
-    learning_rate: float = 5e-5
-    num_latent_t: int = 20
-    validation_dataset_file: str = ""
-    lora_rank: int = 32
-    negative_prompt: str = ""
-    num_inference_steps: int = 50
-    num_frames: int = 81
-    height: int = 480
-    width: int = 832
-    guidance_scale: float = 5.0
-    guidance_rescale: float = 0.0
-    fps: int = 24
-    seed: int = 1024
-    num_gpus: int = 1
-    dit_cpu_offload: bool = False
-    text_encoder_cpu_offload: bool = False
-    vae_cpu_offload: bool = False
-    image_encoder_cpu_offload: bool = False
-    use_fsdp_inference: bool = False
-    enable_torch_compile: bool = False
-    vsa_sparsity: float = 0.0
-    tp_size: int = -1
-    sp_size: int = -1
-
+verbose = 0
 
 app = FastAPI(
     title="FastVideo Job Runner API",
@@ -118,33 +85,6 @@ def get_settings() -> dict[str, Any]:
             detail="Database not initialized (persistence disabled)",
         )
     return database.get_settings()
-
-
-class SettingsUpdate(BaseModel):
-    defaultModelId: str | None = None
-    defaultModelIdT2v: str | None = None
-    defaultModelIdI2v: str | None = None
-    defaultModelIdT2i: str | None = None
-    numInferenceSteps: int | None = None
-    numFrames: int | None = None
-    height: int | None = None
-    width: int | None = None
-    guidanceScale: float | None = None
-    guidanceRescale: float | None = None
-    fps: int | None = None
-    seed: int | None = None
-    numGpus: int | None = None
-    ditCpuOffload: bool | None = None
-    textEncoderCpuOffload: bool | None = None
-    vaeCpuOffload: bool | None = None
-    imageEncoderCpuOffload: bool | None = None
-    useFsdpInference: bool | None = None
-    enableTorchCompile: bool | None = None
-    vsaSparsity: float | None = None
-    tpSize: int | None = None
-    spSize: int | None = None
-    autoStartJob: bool | None = None
-    datasetUploadPath: str | None = None
 
 
 @app.put("/api/settings")
@@ -238,8 +178,14 @@ async def upload_raw_dataset(
         )
     settings = database.get_settings()
     base_path = (
-        settings.get("datasetUploadPath", "") or ""
-    ).strip()
+        settings.get("datasetUploadPath")
+        or settings.get("dataset_upload_path")
+        or ""
+    )
+    if base_path and isinstance(base_path, str):
+        base_path = base_path.strip()
+    else:
+        base_path = ""
     if not base_path:
         base_path = datasets_upload_dir
     else:
@@ -295,7 +241,7 @@ async def upload_raw_dataset(
                 detail=f"Failed to save {uf.filename}: {e}",
             ) from e
     return {
-        "path": os.path.abspath(os.path.dirname(media_folder)),
+        "path": os.path.abspath(media_folder),
         "upload_id": upload_id,
         "file_names": file_names,
     }
@@ -418,17 +364,6 @@ def delete_job(job_id: str) -> dict[str, str]:
 # --- Datasets ---
 
 
-class CreateDatasetRequest(BaseModel):
-    name: str
-    upload_path: str = ""  # One-time path from upload; moved to datasets_upload_dir/{id}
-    file_names: list[str] = []
-
-
-class UpdateCaptionRequest(BaseModel):
-    file_name: str
-    caption: str
-
-
 @app.get("/api/datasets")
 def list_datasets() -> list[dict[str, Any]]:
     """Return all datasets, newest first, with file_count and size_bytes."""
@@ -495,6 +430,8 @@ def create_dataset(req: CreateDatasetRequest) -> dict[str, Any]:
             status_code=400,
             detail="No media files found. Ensure at least one image or video.",
         )
+    if(verbose):
+        print(req)
     dataset_id = str(uuid.uuid4())
     created_at = time.time()
     dest_dir = os.path.join(datasets_upload_dir, dataset_id)
@@ -687,7 +624,7 @@ def create_local_env(host: str, port: int) -> None:
 
 
 def main():
-    global job_runner, database, upload_dir, datasets_upload_dir  # noqa: PLW0603
+    global job_runner, database, upload_dir, verbose, datasets_upload_dir  # noqa: PLW0603
 
     # Set up signal handlers to prevent worker crashes from killing the server
     _setup_signal_handlers()
@@ -754,6 +691,7 @@ def main():
 
     db_path = _get_db_path(data_dir)
     database = Database(db_path)
+    verbose = args.verbose
     logger.info("Database: %s", db_path)
 
     job_runner = JobRunner(
