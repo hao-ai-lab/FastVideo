@@ -97,6 +97,7 @@
 .galleryItem {
   display: flex;
   flex-direction: column;
+  position: relative;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -129,6 +130,31 @@
 .galleryCaption textarea:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+.thumbLoading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, rgba(15, 17, 23, 0.6), rgba(15, 17, 23, 0.9));
+  pointer-events: none;
+}
+
+.thumbSpinner {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 2px solid rgba(148, 163, 184, 0.4);
+  border-top-color: var(--accent);
+  animation: thumb-spin 0.7s linear infinite;
+}
+
+@keyframes thumb-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .galleryEmpty {
