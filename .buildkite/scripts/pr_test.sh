@@ -119,6 +119,10 @@ case "$TEST_TYPE" in
         log "Running LoRA extraction tests..."
         MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_lora_extraction_tests"
         ;;
+    "preprocessing")
+        log "Running preprocessing tests..."
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_preprocessing_tests"
+        ;;
     "api_server")
         log "Running API server integration tests..."
         MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_api_server_tests"
