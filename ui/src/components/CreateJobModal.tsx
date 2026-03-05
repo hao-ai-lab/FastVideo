@@ -139,7 +139,7 @@ export default function CreateJobModal({
 
   useEffect(() => {
     if (isOpen && !isInference) {
-      getDatasets("ready")
+      getDatasets()
         .then(setReadyDatasets)
         .catch((err) => {
           console.error("Failed to load datasets:", err);
@@ -219,11 +219,7 @@ export default function CreateJobModal({
     if (isInference && workloadType === "i2v" && !imagePath) {
       return;
     }
-    const effectiveDataPath =
-      !isInference && selectedDatasetId
-        ? readyDatasets.find((d) => d.id === selectedDatasetId)?.output_path ??
-          dataPath
-        : dataPath;
+    const effectiveDataPath = dataPath;
     if (!isInference && !effectiveDataPath.trim()) {
       return;
     }
@@ -475,12 +471,12 @@ export default function CreateJobModal({
                   >
                     <option value="">
                       {readyDatasets.length === 0
-                        ? "No ready datasets (add & preprocess in Datasets tab)"
+                        ? "No datasets (add in Datasets tab)"
                         : "Select a dataset…"}
                     </option>
                     {readyDatasets.map((d) => (
                       <option key={d.id} value={d.id}>
-                        {d.name} ({d.workload_type})
+                        {d.name}
                       </option>
                     ))}
                   </select>
@@ -505,8 +501,8 @@ export default function CreateJobModal({
                     </>
                   )}
                   <span className={formStyles.helperText}>
-                    Use a preprocessed dataset from the Datasets tab, or enter a
-                    custom path
+                    Enter the path to your preprocessed data (e.g. parquet output
+                    directory)
                   </span>
                 </div>
                 <div className={formStyles.formRow}>

@@ -8,7 +8,7 @@ import cardStyles from "./styles/Card.module.css";
 import buttonStyles from "./styles/Button.module.css";
 import UploadZone from "./UploadZone";
 
-const ALLOWED_VIDEO_EXT = ".mp4,.webm,.avi,.mov";
+const ALLOWED_VIDEO_EXT = ".mp4,.webm,.avi,.mov,.mkv";
 
 interface CreateDatasetModalProps {
   isOpen: boolean;
@@ -62,8 +62,7 @@ export default function CreateDatasetModal({
       setFileNames(res.file_names);
       if (res.file_names.length === 0) {
         setValidationError(
-          "No video files found. When uploading a folder, only videos are " +
-            `added. Allowed: ${ALLOWED_VIDEO_EXT}`
+          `No video files found. Allowed: ${ALLOWED_VIDEO_EXT}`
         );
       }
     } catch (err) {
@@ -92,9 +91,7 @@ export default function CreateDatasetModal({
     try {
       await createDataset({
         name: name.trim(),
-        raw_path: rawPath,
-        dataset_type: "raw",
-        media_type: "video",
+        upload_path: rawPath,
         file_names: fileNames,
       });
       onSuccess();
@@ -141,11 +138,10 @@ export default function CreateDatasetModal({
             <div className={formStyles.formRow}>
               <label>Videos</label>
               <UploadZone
-                label="Upload video files or folder"
-                hint="Add videos. Folder: only .mp4, .webm, .avi, .mov"
+                label="Upload video files"
+                hint="Click or drop one or more videos (.mp4, .webm, .avi, .mov, .mkv)"
                 accept={ALLOWED_VIDEO_EXT}
                 multiple
-                directory
                 value={rawPath}
                 fileName={
                   fileNames.length > 0
