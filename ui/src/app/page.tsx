@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from "react";
-import PrimarySidebar, { type SidebarTab } from "@/components/PrimarySidebar";
+import PrimarySidebar from "@/components/PrimarySidebar";
 import SecondarySidebar from "@/components/SecondarySidebar";
+import DatasetSidebar from "@/components/DatasetSidebar";
 import JobQueuePage from "@/components/JobQueuePage";
 import DatasetsPage from "@/components/DatasetsPage";
 import SettingsPage from "@/components/SettingsPage";
@@ -11,21 +12,25 @@ import {
   type ActiveTab,
 } from "@/contexts/ActiveTabContext";
 import { useActiveJob } from "@/contexts/ActiveJobContext";
+import { useActiveDataset } from "@/contexts/ActiveDatasetContext";
 import primarySidebarStyles from "@/components/styles/PrimarySidebar.module.css";
 
 export default function Home() {
   const { activeTab, setActiveTab } = useActiveTab();
   const { activeJob, setActiveJobId } = useActiveJob();
+  const { activeDataset, setActiveDatasetId } = useActiveDataset();
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && activeJob && !document.querySelector("[data-modal]")) {
-        setActiveJobId(null);
+      if (e.key === "Escape" && !document.querySelector("[data-modal]")) {
+        if (activeJob) setActiveJobId(null);
+        if (activeDataset) setActiveDatasetId(null);
       }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [activeJob, setActiveJobId]);
+  }, [activeJob, activeDataset, setActiveJobId, setActiveDatasetId]);
+
   const [primaryWidth, setPrimaryWidth] = useState(220);
   const [secondaryWidth, setSecondaryWidth] = useState(0);
 
@@ -35,8 +40,10 @@ export default function Home() {
     "distillation",
     "lora",
   ];
-  const secondaryOpen =
-    jobTabs.includes(activeTab) && !!activeJob;
+  const jobSidebarOpen = jobTabs.includes(activeTab) && !!activeJob;
+  const datasetSidebarOpen = activeTab === "datasets" && !!activeDataset;
+
+  const secondaryOpen = jobSidebarOpen || datasetSidebarOpen;
 
   return (
     <div className={primarySidebarStyles.layout}>
@@ -59,11 +66,19 @@ export default function Home() {
         {activeTab === "datasets" && <DatasetsPage />}
         {activeTab === "settings" && <SettingsPage />}
       </div>
-      {secondaryOpen && activeJob && (
+      {jobSidebarOpen && activeJob && (
         <SecondarySidebar
           job={activeJob}
           onClose={() => setActiveJobId(null)}
           onWidthChange={setSecondaryWidth}
+        />
+      )}
+      {datasetSidebarOpen && activeDataset && (
+        <DatasetSidebar
+          dataset={activeDataset}
+          onClose={() => setActiveDatasetId(null)}
+          onWidthChange={setSecondaryWidth}
+          onUpdated={() => {}}
         />
       )}
     </div>

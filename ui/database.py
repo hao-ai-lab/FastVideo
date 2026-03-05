@@ -40,6 +40,7 @@ DEFAULT_SETTINGS = {
     "tp_size": -1,
     "sp_size": -1,
     "auto_start_job": 0,
+    "dataset_upload_path": "",
 }
 
 
@@ -149,6 +150,13 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(
         conn, "settings", "auto_start_job", "INTEGER", "0"
     )
+    _add_column_if_missing(
+        conn, "settings", "dataset_upload_path", "TEXT", "''"
+    )
+    # Datasets table
+    _add_column_if_missing(
+        conn, "datasets", "media_type", "TEXT", "'video'"
+    )
     # Migrate legacy default_model_id to default_model_id_t2v
     if "default_model_id_t2v" in _get_table_columns(conn, "settings"):
         conn.execute(
@@ -229,12 +237,21 @@ def init_db(db_path: Path) -> None:
                 output_path TEXT,
                 workload_type TEXT NOT NULL DEFAULT 't2v',
                 model_path TEXT NOT NULL,
-                dataset_type TEXT NOT NULL DEFAULT 'merged',
+                dataset_type TEXT NOT NULL DEFAULT 'raw',
+                media_type TEXT NOT NULL DEFAULT 'video',
                 status TEXT NOT NULL DEFAULT 'pending',
                 error TEXT,
                 created_at REAL NOT NULL,
                 num_gpus INTEGER NOT NULL DEFAULT 1,
                 log_file_path TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS dataset_captions (
+                dataset_id TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                caption TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (dataset_id, file_name),
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
             );
         """)
         conn.commit()
@@ -382,8 +399,9 @@ class Database:
             """
             INSERT INTO datasets (
                 id, name, raw_path, output_path, workload_type, model_path,
-                dataset_type, status, error, created_at, num_gpus, log_file_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                dataset_type, media_type, status, error, created_at, num_gpus,
+                log_file_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 dataset["id"],
@@ -392,7 +410,8 @@ class Database:
                 dataset.get("output_path"),
                 dataset.get("workload_type", "t2v"),
                 dataset["model_path"],
-                dataset.get("dataset_type", "merged"),
+                dataset.get("dataset_type", "raw"),
+                dataset.get("media_type", "video"),
                 dataset.get("status", "pending"),
                 dataset.get("error"),
                 dataset["created_at"],
@@ -401,6 +420,37 @@ class Database:
             ),
         )
         self._commit()
+
+    def get_dataset_captions(
+        self, dataset_id: str
+    ) -> dict[str, str]:
+        """Return caption map: file_name -> caption."""
+        cur = self._execute(
+            "SELECT file_name, caption FROM dataset_captions WHERE dataset_id = ?",
+            (dataset_id,),
+        )
+        return {row["file_name"]: row["caption"] or "" for row in cur.fetchall()}
+
+    def upsert_dataset_caption(
+        self, dataset_id: str, file_name: str, caption: str
+    ) -> None:
+        """Insert or update a caption for a file in a dataset."""
+        self._execute(
+            """
+            INSERT INTO dataset_captions (dataset_id, file_name, caption)
+            VALUES (?, ?, ?)
+            ON CONFLICT(dataset_id, file_name) DO UPDATE SET caption = ?
+            """,
+            (dataset_id, file_name, caption, caption),
+        )
+        self._commit()
+
+    def upsert_dataset_captions(
+        self, dataset_id: str, captions: dict[str, str]
+    ) -> None:
+        """Insert or update multiple captions for a dataset."""
+        for file_name, caption in captions.items():
+            self.upsert_dataset_caption(dataset_id, file_name, caption)
 
     def update_dataset(
         self, dataset_id: str, updates: dict[str, Any]
@@ -503,6 +553,7 @@ class Database:
             ("guidance_rescale", "guidanceRescale", 0.0),
             ("fps", "fps", 24),
             ("auto_start_job", "autoStartJob", False),
+            ("dataset_upload_path", "datasetUploadPath", ""),
         ]:
             if col in row.keys():
                 v = row[col]
@@ -510,6 +561,8 @@ class Database:
                     result[key] = bool(v)
                 elif isinstance(default, float):
                     result[key] = float(v)
+                elif isinstance(default, str):
+                    result[key] = v or ""
                 else:
                     result[key] = int(v)
             else:
@@ -543,6 +596,7 @@ class Database:
             "tpSize": "tp_size",
             "spSize": "sp_size",
             "autoStartJob": "auto_start_job",
+            "datasetUploadPath": "dataset_upload_path",
         }
         updates = []
         params = []
@@ -563,20 +617,23 @@ class Database:
 
 def _row_to_dataset(row: sqlite3.Row) -> dict[str, Any]:
     """Convert a DB row to dataset dict."""
-    return {
+    result = {
         "id": row["id"],
         "name": row["name"],
         "raw_path": row["raw_path"],
         "output_path": row["output_path"] or "",
         "workload_type": row["workload_type"] or "t2v",
         "model_path": row["model_path"],
-        "dataset_type": row["dataset_type"] or "merged",
+        "dataset_type": row["dataset_type"] or "raw",
         "status": row["status"] or "pending",
         "error": row["error"],
         "created_at": row["created_at"],
         "num_gpus": row["num_gpus"] or 1,
         "log_file_path": row["log_file_path"] or "",
     }
+    if "media_type" in row.keys():
+        result["media_type"] = row["media_type"] or "video"
+    return result
 
 
 def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
@@ -683,4 +740,5 @@ def _default_settings_dict() -> dict[str, Any]:
         "guidanceRescale": float(DEFAULT_SETTINGS["guidance_rescale"]),
         "fps": int(DEFAULT_SETTINGS["fps"]),
         "autoStartJob": bool(DEFAULT_SETTINGS["auto_start_job"]),
+        "datasetUploadPath": DEFAULT_SETTINGS["dataset_upload_path"] or "",
     }

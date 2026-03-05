@@ -4,6 +4,7 @@ import { DefaultOptionsProvider } from "@/contexts/DefaultOptionsContext";
 import { JobsRefreshProvider } from "@/contexts/JobsRefreshContext";
 import { ActiveTabProvider } from "@/contexts/ActiveTabContext";
 import { ActiveJobProvider } from "@/contexts/ActiveJobContext";
+import { ActiveDatasetProvider } from "@/contexts/ActiveDatasetContext";
 import Header from "@/components/Header";
 
 export const metadata: Metadata = {
@@ -26,6 +27,7 @@ export default function RootLayout({
           <JobsRefreshProvider>
             <ActiveTabProvider>
               <ActiveJobProvider>
+                <ActiveDatasetProvider>
                 <Header />
                 <main
                   style={{
@@ -38,6 +40,7 @@ export default function RootLayout({
                 >
                   {children}
                 </main>
+                </ActiveDatasetProvider>
               </ActiveJobProvider>
             </ActiveTabProvider>
           </JobsRefreshProvider>

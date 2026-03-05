@@ -24,6 +24,7 @@ export interface DefaultOptions {
   tpSize: number;
   spSize: number;
   autoStartJob: boolean;
+  datasetUploadPath: string;
 }
 
 export const DEFAULT_OPTIONS: DefaultOptions = {
@@ -50,6 +51,7 @@ export const DEFAULT_OPTIONS: DefaultOptions = {
   tpSize: -1,
   spSize: -1,
   autoStartJob: false,
+  datasetUploadPath: "",
 };
 
 const STORAGE_KEY = "fastvideo-default-options";
