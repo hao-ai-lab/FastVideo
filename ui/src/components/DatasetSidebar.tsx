@@ -41,6 +41,7 @@ export default function DatasetSidebar({
   const [captions, setCaptions] = useState<Record<string, string>>({});
   const [visibleCount, setVisibleCount] = useState(INITIAL_PAGE_SIZE);
   const [isLoading, setIsLoading] = useState(true);
+  const [thumbLoaded, setThumbLoaded] = useState<Record<string, boolean>>({});
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -57,6 +58,7 @@ export default function DatasetSidebar({
           setFileNames(data.file_names);
           setCaptions(data.captions);
           setVisibleCount(INITIAL_PAGE_SIZE);
+          setThumbLoaded({});
         }
       })
       .catch((err) => console.error("Failed to load dataset files:", err))
@@ -176,6 +178,11 @@ export default function DatasetSidebar({
               <div className={datasetStyles.galleryGrid}>
                 {visibleFiles.map((fileName) => (
                   <div key={fileName} className={datasetStyles.galleryItem}>
+                    {!thumbLoaded[fileName] && (
+                      <div className={datasetStyles.thumbLoading}>
+                        <div className={datasetStyles.thumbSpinner} />
+                      </div>
+                    )}
                     <video
                       src={getDatasetMediaUrl(dataset.id, fileName)}
                       className={datasetStyles.galleryThumb}
@@ -183,6 +190,12 @@ export default function DatasetSidebar({
                       autoPlay
                       loop
                       playsInline
+                      onLoadedData={() =>
+                        setThumbLoaded((prev) => ({ ...prev, [fileName]: true }))
+                      }
+                      onError={() =>
+                        setThumbLoaded((prev) => ({ ...prev, [fileName]: true }))
+                      }
                     />
                     <div className={datasetStyles.galleryCaption}>
                       <textarea
