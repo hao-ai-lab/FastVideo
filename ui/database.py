@@ -230,7 +230,8 @@ def init_db(db_path: Path) -> None:
                 vsa_sparsity REAL NOT NULL DEFAULT 0.0,
                 tp_size INTEGER NOT NULL DEFAULT -1,
                 sp_size INTEGER NOT NULL DEFAULT -1,
-                auto_start_job INTEGER NOT NULL DEFAULT 0
+                auto_start_job INTEGER NOT NULL DEFAULT 0,
+                dataset_upload_path TEXT NOT NULL DEFAULT ''
             );
 
             INSERT OR IGNORE INTO settings (id) VALUES (1);
