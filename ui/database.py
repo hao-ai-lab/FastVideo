@@ -153,10 +153,15 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(
         conn, "settings", "dataset_upload_path", "TEXT", "''"
     )
-    # Datasets table
-    _add_column_if_missing(
-        conn, "datasets", "media_type", "TEXT", "'video'"
-    )
+    # Drop removed columns from datasets (SQLite 3.35+)
+    for col in ("workload_type", "output_path", "model_path", "raw_path",
+                "dataset_type", "num_gpus", "media_type", "status", "error",
+                "log_file_path"):
+        if col in _get_table_columns(conn, "datasets"):
+            try:
+                conn.execute(f"ALTER TABLE datasets DROP COLUMN {col}")
+            except sqlite3.OperationalError:
+                pass  # SQLite < 3.35 or column already dropped
     # Migrate legacy default_model_id to default_model_id_t2v
     if "default_model_id_t2v" in _get_table_columns(conn, "settings"):
         conn.execute(
@@ -233,17 +238,7 @@ def init_db(db_path: Path) -> None:
             CREATE TABLE IF NOT EXISTS datasets (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
-                raw_path TEXT NOT NULL,
-                output_path TEXT,
-                workload_type TEXT NOT NULL DEFAULT 't2v',
-                model_path TEXT NOT NULL,
-                dataset_type TEXT NOT NULL DEFAULT 'raw',
-                media_type TEXT NOT NULL DEFAULT 'video',
-                status TEXT NOT NULL DEFAULT 'pending',
-                error TEXT,
-                created_at REAL NOT NULL,
-                num_gpus INTEGER NOT NULL DEFAULT 1,
-                log_file_path TEXT
+                created_at REAL NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS dataset_captions (
@@ -397,26 +392,13 @@ class Database:
         """Insert a new dataset."""
         self._execute(
             """
-            INSERT INTO datasets (
-                id, name, raw_path, output_path, workload_type, model_path,
-                dataset_type, media_type, status, error, created_at, num_gpus,
-                log_file_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO datasets (id, name, created_at)
+            VALUES (?, ?, ?)
             """,
             (
                 dataset["id"],
                 dataset["name"],
-                dataset["raw_path"],
-                dataset.get("output_path"),
-                dataset.get("workload_type", "t2v"),
-                dataset["model_path"],
-                dataset.get("dataset_type", "raw"),
-                dataset.get("media_type", "video"),
-                dataset.get("status", "pending"),
-                dataset.get("error"),
                 dataset["created_at"],
-                dataset.get("num_gpus", 1),
-                dataset.get("log_file_path"),
             ),
         )
         self._commit()
@@ -458,9 +440,7 @@ class Database:
         """Update dataset fields. Only provided keys are updated."""
         if not updates:
             return
-        allowed = {
-            "status", "error", "output_path", "log_file_path",
-        }
+        allowed: set[str] = set()
         cols = []
         vals = []
         for k, v in updates.items():
@@ -480,19 +460,11 @@ class Database:
         self._commit()
         return cur.rowcount > 0
 
-    def get_all_datasets(
-        self, status: str | None = None
-    ) -> list[dict[str, Any]]:
-        """Return all datasets, newest first. Optionally filter by status."""
-        if status:
-            cur = self._execute(
-                "SELECT * FROM datasets WHERE status = ? ORDER BY created_at DESC",
-                (status,),
-            )
-        else:
-            cur = self._execute(
-                "SELECT * FROM datasets ORDER BY created_at DESC"
-            )
+    def get_all_datasets(self) -> list[dict[str, Any]]:
+        """Return all datasets, newest first."""
+        cur = self._execute(
+            "SELECT * FROM datasets ORDER BY created_at DESC"
+        )
         return [_row_to_dataset(row) for row in cur.fetchall()]
 
     def get_dataset(self, dataset_id: str) -> dict[str, Any] | None:
@@ -617,23 +589,11 @@ class Database:
 
 def _row_to_dataset(row: sqlite3.Row) -> dict[str, Any]:
     """Convert a DB row to dataset dict."""
-    result = {
+    return {
         "id": row["id"],
         "name": row["name"],
-        "raw_path": row["raw_path"],
-        "output_path": row["output_path"] or "",
-        "workload_type": row["workload_type"] or "t2v",
-        "model_path": row["model_path"],
-        "dataset_type": row["dataset_type"] or "raw",
-        "status": row["status"] or "pending",
-        "error": row["error"],
         "created_at": row["created_at"],
-        "num_gpus": row["num_gpus"] or 1,
-        "log_file_path": row["log_file_path"] or "",
     }
-    if "media_type" in row.keys():
-        result["media_type"] = row["media_type"] or "video"
-    return result
 
 
 def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:

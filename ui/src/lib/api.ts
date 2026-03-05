@@ -265,30 +265,17 @@ export async function downloadJobVideo(id: string): Promise<Blob> {
 // --- Datasets ---
 
 export interface Dataset {
-    id: string;
-    name: string;
-    raw_path: string;
-    output_path: string;
-    workload_type: string;
-    model_path: string;
-    dataset_type: string;
-    media_type?: "image" | "video";
-    status: "pending" | "preprocessing" | "ready" | "failed" | "stopped";
-    error: string | null;
-    created_at: number;
-    num_gpus: number;
-    log_file_path: string;
+  id: string;
+  name: string;
+  created_at: number;
+  file_count?: number;
+  size_bytes?: number;
 }
 
 export interface CreateDatasetRequest {
     name: string;
-    raw_path: string;
-    workload_type?: string;
-    model_path?: string;
-    dataset_type?: string;
-    media_type?: "video";
+    upload_path: string;
     file_names: string[];
-    num_gpus?: number;
 }
 
 export interface DatasetFilesResponse {
@@ -296,12 +283,9 @@ export interface DatasetFilesResponse {
     captions: Record<string, string>;
 }
 
-export async function getDatasets(status?: string): Promise<Dataset[]> {
+export async function getDatasets(): Promise<Dataset[]> {
     const baseApiUrl = getApiBaseUrl();
-    const url = status
-        ? `${baseApiUrl}/datasets?status=${encodeURIComponent(status)}`
-        : `${baseApiUrl}/datasets`;
-    const response = await fetch(url);
+    const response = await fetch(`${baseApiUrl}/datasets`);
     if (!response.ok) {
         throw new Error("Failed to fetch datasets");
     }
@@ -344,43 +328,6 @@ export async function deleteDataset(id: string): Promise<void> {
         const err = await response.json().catch(() => ({ detail: "Failed to delete dataset" }));
         throw new Error(err.detail || "Failed to delete dataset");
     }
-}
-
-export async function startDatasetPreprocess(id: string): Promise<Dataset> {
-    const baseApiUrl = getApiBaseUrl();
-    const response = await fetch(`${baseApiUrl}/datasets/${id}/preprocess`, {
-        method: "POST",
-    });
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({ detail: "Failed to start preprocessing" }));
-        throw new Error(err.detail || "Failed to start preprocessing");
-    }
-    return response.json();
-}
-
-export async function stopDatasetPreprocess(id: string): Promise<void> {
-    const baseApiUrl = getApiBaseUrl();
-    const response = await fetch(`${baseApiUrl}/datasets/${id}/stop-preprocess`, {
-        method: "POST",
-    });
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({ detail: "Failed to stop preprocessing" }));
-        throw new Error(err.detail || "Failed to stop preprocessing");
-    }
-}
-
-export interface DatasetLogs {
-    lines: string[];
-    total: number;
-}
-
-export async function getDatasetLogs(id: string, after: number = 0): Promise<DatasetLogs> {
-    const baseApiUrl = getApiBaseUrl();
-    const response = await fetch(`${baseApiUrl}/datasets/${id}/logs?after=${after}`);
-    if (!response.ok) {
-        throw new Error("Failed to fetch dataset logs");
-    }
-    return response.json();
 }
 
 export async function getDatasetFiles(id: string): Promise<DatasetFilesResponse> {
