@@ -304,6 +304,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 # Make sure that the timesteps are the same across all sp processes.
                 sp_group = get_sp_group()
                 sp_group.broadcast(timesteps, src=0)
+                sp_group.broadcast(noise, src=0)
             sigmas = get_sigmas(
                 self.noise_scheduler,
                 latents.device,

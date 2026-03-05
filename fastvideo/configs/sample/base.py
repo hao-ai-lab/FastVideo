@@ -58,7 +58,6 @@ class SamplingParam:
 
     # Original dimensions (before VAE scaling)
     num_frames: int = 125
-    num_frames_round_down: bool = False  # Whether to round down num_frames if it's not divisible by num_gpus
     height: int = 720
     width: int = 1280
     height_sr: int = 1072
