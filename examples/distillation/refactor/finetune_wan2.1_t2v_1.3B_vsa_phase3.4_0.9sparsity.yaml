@@ -1,0 +1,72 @@
+# V3 config: Wan 2.1 T2V 1.3B finetune with VSA (phase 3.4, 0.9 sparsity).
+#
+# Uses _target_-based instantiation — each model role is an independent
+# class instance; the method class is resolved directly from the YAML.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+  attn_kind: vsa
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 8
+    hsdp_shard_dim: 1
+
+  data:
+    data_path: data/Wan-Syn_77x448x832_600k
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.1
+    seed: 1000
+    num_latent_t: 20
+    num_height: 448
+    num_width: 832
+    num_frames: 77
+
+  optimizer:
+    learning_rate: 1.0e-6
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+    max_grad_norm: 1.0
+
+  loop:
+    max_train_steps: 4000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/phase3.4_wan2.1_finetune_vsa_0.9_v3
+    training_state_checkpointing_steps: 1000
+    weight_only_checkpointing_steps: 1000
+    checkpoints_total_limit: 3
+
+  tracker:
+    project_name: distillation_phase3_r
+    run_name: phase3.4_wan_finetune_vsa_0.9_v3
+
+  model:
+    enable_gradient_checkpointing_type: full
+    VSA_sparsity: 0.9
+    VSA_decay_rate: 0.03
+    VSA_decay_interval_steps: 1
+
+validation:
+  enabled: true
+  dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
+  every_steps: 50
+  sampling_steps: [50]
+  guidance_scale: 5.0
+
+pipeline:
+  flow_shift: 3
+  sampler_kind: ode
