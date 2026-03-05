@@ -659,7 +659,8 @@ class WorkerMultiprocProc:
                             logging_info = output_batch.logging_info
                         # result tensor shared by CUDA IPC to avoid serialization overhead
                         result = output_batch.output
-                        peak_memory_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)
+                        peak_memory_mb = torch.cuda.max_memory_allocated() / (
+                            1024 * 1024)
                         self.pipe.send({
                             "output_batch": result,
                             "logging_info": logging_info,
