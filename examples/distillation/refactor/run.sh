@@ -36,6 +36,9 @@ LOG_DIR="${LOG_DIR:-examples/distillation/refactor}"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/${CONFIG_NAME}_${TIMESTAMP}.log"
 
+source ~/conda/miniconda/bin/activate
+conda activate alexfv
+
 echo "=== Distillation Training ==="
 echo "Config:      ${CONFIG}"
 echo "Num GPUs:    ${NUM_GPUS}"

@@ -62,6 +62,7 @@ def make_inference_args(
     args.inference_mode = True
     args.mode = ExecutionMode.INFERENCE
     args.dit_cpu_offload = True
+    args.VSA_sparsity = tc.vsa.sparsity
     return args
 
 

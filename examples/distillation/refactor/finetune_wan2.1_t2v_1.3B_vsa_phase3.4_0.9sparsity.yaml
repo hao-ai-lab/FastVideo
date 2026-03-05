@@ -51,14 +51,16 @@ training:
     checkpoints_total_limit: 3
 
   tracker:
-    project_name: distillation_phase3_r
+    project_name: distillation_wangame_r
     run_name: phase3.4_wan_finetune_vsa_0.9_v3
 
   model:
     enable_gradient_checkpointing_type: full
-    VSA_sparsity: 0.9
-    VSA_decay_rate: 0.03
-    VSA_decay_interval_steps: 1
+
+  vsa:
+    sparsity: 0.9
+    decay_rate: 0.03
+    decay_interval_steps: 1
 
 validation:
   enabled: true
