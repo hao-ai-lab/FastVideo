@@ -12,6 +12,7 @@ models:
 method:
   _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
   attn_kind: vsa
+  # use_ema: true
 
 training:
   distributed:
@@ -65,6 +66,9 @@ training:
 callbacks:
   grad_clip:
     _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+  # ema:
+  #   _target_: fastvideo.train.callbacks.ema.EMACallback
+  #   beta: 0.9999
   validation:
     _target_: fastvideo.train.callbacks.validation.ValidationCallback
     pipeline_target: fastvideo.pipelines.basic.wan.wan_pipeline.WanPipeline

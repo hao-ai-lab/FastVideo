@@ -24,8 +24,8 @@ logger = init_logger(__name__)
 class EMACallback(Callback):
     """Update EMA parameters after each optimizer step.
 
-    The EMA network lives on the model (``method.student.<ema_name>``).
-    If the model was created with ``use_ema=false``, the callback
+    The EMA network lives on the method (``method.ema``).
+    If the method was created with ``use_ema: false``, the callback
     detects this at train start and disables itself gracefully.
 
     Supports three beta strategies:
@@ -43,7 +43,6 @@ class EMACallback(Callback):
         ema_halflife_kimg: float = 500.0,
         ema_rampup_ratio: float | None = 0.05,
         start_iter: int = 0,
-        ema_name: str = "ema",
         batch_size: int = 1,
     ) -> None:
         self._type = str(type)
@@ -56,7 +55,6 @@ class EMACallback(Callback):
             else None
         )
         self._start_iter = int(start_iter)
-        self._ema_name = str(ema_name)
         self._batch_size = int(batch_size)
         self._enabled = True
 
@@ -69,19 +67,17 @@ class EMACallback(Callback):
         method: TrainingMethod,
         iteration: int = 0,
     ) -> None:
-        student = method.student
-        ema = getattr(student, self._ema_name, None)
+        ema = getattr(method, "ema", None)
         if ema is None:
             self._enabled = False
             logger.info(
-                "EMA %r not found on student model; "
+                "EMA not found on method; "
                 "EMA callback disabled.",
-                self._ema_name,
             )
             return
 
         assert not ema.training, (
-            f"EMA {self._ema_name} should be in eval mode"
+            "EMA should be in eval mode"
         )
         for name, p in ema.named_parameters():
             assert not p.requires_grad, (
@@ -103,18 +99,17 @@ class EMACallback(Callback):
         if iteration == self._start_iter:
             logger.info(
                 "Starting EMA %r updates at iteration %d.",
-                self._ema_name,
+                "ema",
                 iteration,
             )
 
         beta = self._compute_beta(iteration)
-        student = method.student
-        ema = getattr(student, self._ema_name)
+        ema = method.ema
         ema_state = ema.state_dict()
 
         with torch.no_grad():
             for name, p_net in (
-                student.transformer.named_parameters()
+                method.student.transformer.named_parameters()
             ):
                 full = self._gather_full(p_net)
                 ema_key = name.replace(
@@ -139,7 +134,7 @@ class EMACallback(Callback):
                     ema_p.lerp_(val, 1.0 - beta)
 
             for name, buf in (
-                student.transformer.named_buffers()
+                method.student.transformer.named_buffers()
             ):
                 if name in ema_state:
                     ema_state[name].copy_(
@@ -152,7 +147,7 @@ class EMACallback(Callback):
         tracker = getattr(method, "tracker", None)
         if tracker is not None:
             tracker.log(
-                {f"ema/{self._ema_name}_beta": beta},
+                {"ema/beta": beta},
                 iteration,
             )
 

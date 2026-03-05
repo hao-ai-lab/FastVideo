@@ -178,7 +178,8 @@ class ValidationCallback(Callback):
         step: int,
     ) -> None:
         tc = self.training_config
-        transformer = method.student.transformer
+        # Use EMA transformer for validation when available.
+        transformer = method.transformer_inference
         was_training = bool(
             getattr(transformer, "training", False)
         )

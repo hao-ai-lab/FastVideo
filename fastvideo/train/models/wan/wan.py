@@ -72,15 +72,9 @@ class WanModel(ModelBase):
         flow_shift: float = 3.0,
         enable_gradient_checkpointing_type: str
         | None = None,
-        use_ema: list[str] | bool = False,
     ) -> None:
         self._init_from = str(init_from)
         self._trainable = bool(trainable)
-
-        if isinstance(use_ema, bool):
-            self._use_ema = ["ema"] if use_ema else []
-        else:
-            self._use_ema = list(use_ema)
 
         transformer = load_module_from_path(
             model_path=self._init_from,
@@ -96,7 +90,6 @@ class WanModel(ModelBase):
                 checkpointing_type=(enable_gradient_checkpointing_type),
             )
         self.transformer = transformer
-        self._setup_ema()
 
         self.noise_scheduler = (FlowMatchEulerDiscreteScheduler(shift=float(flow_shift)))
 

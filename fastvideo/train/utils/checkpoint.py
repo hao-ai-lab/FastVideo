@@ -240,8 +240,6 @@ def maybe_warmstart_role_modules(
     if model is not None:
         if model.transformer is not None:
             modules["transformer"] = model.transformer
-        for ema_name, ema_module in model.ema_dict.items():
-            modules[ema_name] = ema_module
     elif bundle is not None:
         handle = bundle.role(str(role))
         modules = dict(handle.modules)
@@ -335,8 +333,6 @@ def save_role_pretrained(
     if model is not None:
         if model.transformer is not None:
             modules["transformer"] = model.transformer
-        for ema_name, ema_module in model.ema_dict.items():
-            modules[ema_name] = ema_module
     elif bundle is not None:
         handle = bundle.role(str(role))
         modules = dict(handle.modules)
@@ -436,6 +432,7 @@ class CheckpointManager:
         *,
         bundle: Any = None,
         role_models: dict[str, ModelBase] | None = None,
+        extra_role_modules: dict[str, dict[str, torch.nn.Module]] | None = None,
         optimizers: dict[str, torch.optim.Optimizer] | None = None,
         lr_schedulers: dict[str, Any] | None = None,
         dataloader: Any,
@@ -446,6 +443,7 @@ class CheckpointManager:
     ) -> None:
         self.bundle = bundle
         self.role_models = role_models or {}
+        self.extra_role_modules = extra_role_modules or {}
         self.optimizers = optimizers or {}
         self.lr_schedulers = lr_schedulers or {}
         self.dataloader = dataloader
@@ -468,9 +466,9 @@ class CheckpointManager:
         if model.transformer is not None:
             modules["transformer"] = model.transformer
 
-        # Include EMA networks in checkpoint.
-        for ema_name, ema_module in model.ema_dict.items():
-            modules[ema_name] = ema_module
+        # Include extra modules (e.g. EMA) owned by the method.
+        for name, mod in self.extra_role_modules.get(role, {}).items():
+            modules[name] = mod
 
         container = _RoleModuleContainer(modules)
 

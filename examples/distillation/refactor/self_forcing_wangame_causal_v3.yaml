@@ -29,6 +29,7 @@ models:
 
 method:
   _target_: fastvideo.train.methods.distribution_matching.self_forcing.SelfForcingMethod
+  # use_ema: true
   rollout_mode: simulate
   generator_update_interval: 5
   real_score_guidance_scale: 3.5
@@ -103,6 +104,9 @@ training:
 callbacks:
   grad_clip:
     _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+  # ema:
+  #   _target_: fastvideo.train.callbacks.ema.EMACallback
+  #   beta: 0.9999
   validation:
     _target_: fastvideo.train.callbacks.validation.ValidationCallback
     pipeline_target: fastvideo.pipelines.basic.wan.wangame_causal_dmd_pipeline.WanGameCausalDMDPipeline

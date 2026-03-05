@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import copy
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Any, Literal, cast
 
 import torch
 
+from fastvideo.logger import init_logger
 from fastvideo.train.models.base import ModelBase
+
+logger = init_logger(__name__)
 
 LogScalar = float | int | torch.Tensor
 
@@ -41,6 +45,9 @@ class TrainingMethod(torch.nn.Module, ABC):
         self.validation_config: dict[str, Any] = dict(
             getattr(cfg, "validation", {}) or {}
         )
+        self._use_ema: bool = bool(
+            self.method_config.get("use_ema", False)
+        )
 
         # Build nn.ModuleDict for FSDP / checkpoint visibility.
         self.role_modules = torch.nn.ModuleDict()
@@ -51,6 +58,44 @@ class TrainingMethod(torch.nn.Module, ABC):
                 mods["transformer"] = transformer
             if mods:
                 self.role_modules[role] = torch.nn.ModuleDict(mods)
+
+        self._setup_ema()
+
+    # ------------------------------------------------------------------
+    # EMA
+    # ------------------------------------------------------------------
+
+    def _setup_ema(self) -> None:
+        """Create EMA copy of student transformer.
+
+        Called at the end of ``__init__``, before FSDP wrapping.
+        Only acts when ``use_ema: true`` is set in method config.
+        """
+        if not self._use_ema:
+            return
+        logger.info(
+            "Initializing EMA from student transformer",
+        )
+        ema = copy.deepcopy(self.student.transformer)
+        ema.eval().requires_grad_(False)
+        self.ema = ema
+        # Register in role_modules for FSDP / checkpoint.
+        if "student" not in self.role_modules:
+            self.role_modules["student"] = (
+                torch.nn.ModuleDict()
+            )
+        self.role_modules["student"]["ema"] = ema  # type: ignore[index]
+
+    @property
+    def transformer_inference(self) -> torch.nn.Module:
+        """Return EMA transformer for inference if available."""
+        if self._use_ema:
+            ema = getattr(self, "ema", None)
+            if ema is not None:
+                return ema
+        return self.student.transformer
+
+    # ------------------------------------------------------------------
 
     def set_tracker(self, tracker: Any) -> None:
         self.tracker = tracker
