@@ -27,6 +27,8 @@ function DatasetCard({
   onSelect: () => void;
 }) {
   const [isLoading, setIsLoading] = useState(false);
+  const { activeDatasetId } = useActiveDataset();
+  const isSelected = activeDatasetId === dataset.id;
 
   const datasetType = dataset.dataset_type || "raw";
 
@@ -89,7 +91,9 @@ function DatasetCard({
 
   return (
     <div
-      className={jobCardStyles.jobCard}
+      className={`${jobCardStyles.jobCard} ${
+        isSelected ? jobCardStyles.jobCardSelected : ""
+      }`}
       onClick={onSelect}
       role="button"
       tabIndex={0}
