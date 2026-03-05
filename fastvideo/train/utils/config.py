@@ -31,6 +31,7 @@ class RunConfig:
     method: dict[str, Any]
     training: TrainingConfig
     validation: dict[str, Any]
+    callbacks: dict[str, dict[str, Any]]
     raw: dict[str, Any]
 
 
@@ -440,6 +441,14 @@ def load_run_config(path: str) -> RunConfig:
         validation = _require_mapping(
             validation_raw, where="validation")
 
+    # --- callbacks ---
+    callbacks_raw = cfg.get("callbacks", None)
+    if callbacks_raw is None:
+        callbacks: dict[str, dict[str, Any]] = {}
+    else:
+        callbacks = _require_mapping(
+            callbacks_raw, where="callbacks")
+
     # --- pipeline config ---
     pipeline_config = _parse_pipeline_config(
         cfg, models=models)
@@ -458,5 +467,6 @@ def load_run_config(path: str) -> RunConfig:
         method=method,
         training=training,
         validation=validation,
+        callbacks=callbacks,
         raw=cfg,
     )

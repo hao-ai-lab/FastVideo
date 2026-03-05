@@ -9,19 +9,6 @@ from typing import Any, Literal, cast
 import torch
 
 from fastvideo.train.models.base import ModelBase
-from fastvideo.train.utils.validation import (
-    is_validation_enabled,
-    parse_validation_dataset_file,
-    parse_validation_every_steps,
-    parse_validation_guidance_scale,
-    parse_validation_num_frames,
-    parse_validation_ode_solver,
-    parse_validation_output_dir,
-    parse_validation_rollout_mode,
-    parse_validation_sampler_kind,
-    parse_validation_sampling_steps,
-)
-from fastvideo.train.validators.base import ValidationRequest
 
 LogScalar = float | int | torch.Tensor
 
@@ -67,16 +54,6 @@ class TrainingMethod(torch.nn.Module, ABC):
 
     def set_tracker(self, tracker: Any) -> None:
         self.tracker = tracker
-        student = self._role_models.get("student")
-        if student is None:
-            return
-        validator = getattr(student, "validator", None)
-        if validator is None:
-            return
-        if hasattr(validator, "set_tracker"):
-            validator.set_tracker(tracker)
-        elif hasattr(validator, "tracker"):
-            validator.tracker = tracker  # type: ignore[attr-defined]
 
     @abstractmethod
     def single_train_step(
@@ -155,59 +132,7 @@ class TrainingMethod(torch.nn.Module, ABC):
         student_gens = self.student.get_rng_generators()
         generators.update(student_gens)
 
-        if is_validation_enabled(self.validation_config):
-            validation_gen = (
-                self.student.validator.validation_random_generator
-            )
-            if isinstance(validation_gen, torch.Generator):
-                generators["validation_cpu"] = validation_gen
-
         return generators
-
-    def log_validation(self, iteration: int) -> None:
-        if not is_validation_enabled(self.validation_config):
-            return
-
-        every_steps = parse_validation_every_steps(
-            self.validation_config,
-        )
-        if every_steps <= 0:
-            return
-        if iteration % every_steps != 0:
-            return
-
-        request = self._build_validation_request()
-        self.student.validator.log_validation(
-            iteration, request=request,
-        )
-
-    def _build_validation_request(self) -> ValidationRequest:
-        """Build the ``ValidationRequest`` for validation.
-
-        Override in subclasses that need custom parameters (e.g.
-        ``sampling_timesteps`` for DMD2).
-        """
-        vc = self.validation_config
-        sampling_steps = parse_validation_sampling_steps(vc)
-        guidance_scale = parse_validation_guidance_scale(vc)
-        sampler_kind = parse_validation_sampler_kind(
-            vc, default="ode",
-        )
-        ode_solver = parse_validation_ode_solver(
-            vc, sampler_kind=sampler_kind,
-        )
-        return ValidationRequest(
-            sample_handle=self.student,
-            dataset_file=parse_validation_dataset_file(vc),
-            sampling_steps=sampling_steps,
-            sampler_kind=sampler_kind,
-            rollout_mode=parse_validation_rollout_mode(vc),
-            ode_solver=ode_solver,
-            sampling_timesteps=None,
-            guidance_scale=guidance_scale,
-            num_frames=parse_validation_num_frames(vc),
-            output_dir=parse_validation_output_dir(vc),
-        )
 
     @staticmethod
     def _parse_attn_kind(

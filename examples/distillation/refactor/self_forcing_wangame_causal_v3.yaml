@@ -100,15 +100,18 @@ training:
   model:
     enable_gradient_checkpointing_type: null
 
-validation:
-  enabled: true
-  dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_8.json
-  every_steps: 100
-  sampling_steps: [4]
-  sampler_kind: sde
-  rollout_mode: streaming
-  guidance_scale: 1.0
-  num_frames: 69
+callbacks:
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.wan.wangame_causal_dmd_pipeline.WanGameCausalDMDPipeline
+    dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_8.json
+    every_steps: 100
+    sampling_steps: [4]
+    sampler_kind: sde
+    rollout_mode: streaming
+    guidance_scale: 1.0
+    num_frames: 69
+    dmd_denoising_steps: [1000, 750, 500, 250]
 
 pipeline:
   flow_shift: 3

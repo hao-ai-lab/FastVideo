@@ -53,7 +53,11 @@ def run_training_from_config(
                     "build_from_config succeeded.")
         return
 
-    trainer = Trainer(tc, config=cfg.raw)
+    trainer = Trainer(
+        tc,
+        config=cfg.raw,
+        callback_configs=cfg.callbacks,
+    )
 
     # Attach the exact YAML used for this run to the
     # tracker (e.g., W&B Files).

@@ -62,12 +62,14 @@ training:
     decay_rate: 0.03
     decay_interval_steps: 1
 
-validation:
-  enabled: true
-  dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
-  every_steps: 50
-  sampling_steps: [50]
-  guidance_scale: 5.0
+callbacks:
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.wan.wan_pipeline.WanPipeline
+    dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
+    every_steps: 50
+    sampling_steps: [50]
+    guidance_scale: 5.0
 
 pipeline:
   flow_shift: 3

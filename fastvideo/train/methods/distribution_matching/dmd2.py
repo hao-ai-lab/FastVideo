@@ -14,17 +14,6 @@ from fastvideo.train.utils.optimizer import (
     build_optimizer_and_scheduler,
     clip_grad_norm_if_needed,
 )
-from fastvideo.train.utils.validation import (
-    parse_validation_dataset_file,
-    parse_validation_guidance_scale,
-    parse_validation_num_frames,
-    parse_validation_ode_solver,
-    parse_validation_output_dir,
-    parse_validation_rollout_mode,
-    parse_validation_sampler_kind,
-    parse_validation_sampling_steps,
-)
-from fastvideo.train.validators.base import ValidationRequest
 from fastvideo.train.utils.config import (
     get_optional_float,
     get_optional_int,
@@ -252,65 +241,6 @@ class DMD2Method(TrainingMethod):
             self.critic.transformer, max_grad_norm
         )
         super().optimizers_schedulers_step(iteration)
-
-    # Override: DMD2-specific validation request with
-    # sampling_timesteps and default="sde".
-    def _build_validation_request(
-        self,
-    ) -> ValidationRequest:
-        vc = self.validation_config
-        sampling_steps = parse_validation_sampling_steps(vc)
-
-        sampling_timesteps: list[int] | None = None
-        raw_timesteps = vc.get(
-            "sampling_timesteps", None
-        )
-        if raw_timesteps is None:
-            raw_timesteps = self.method_config.get(
-                "dmd_denoising_steps", None
-            )
-        if isinstance(raw_timesteps, list) and raw_timesteps:
-            sampling_timesteps = [
-                int(s) for s in raw_timesteps
-            ]
-
-        if not sampling_steps:
-            if sampling_timesteps is None:
-                return ValidationRequest(
-                    sample_handle=self.student
-                )
-            sampling_steps = [int(len(sampling_timesteps))]
-
-        sampler_kind = parse_validation_sampler_kind(
-            vc, default="sde"
-        )
-        ode_solver = parse_validation_ode_solver(
-            vc, sampler_kind=sampler_kind
-        )
-        if (
-            sampling_timesteps is not None
-            and sampler_kind != "sde"
-        ):
-            raise ValueError(
-                "method_config.validation."
-                "sampling_timesteps is "
-                "only valid when sampler_kind='sde'"
-            )
-
-        return ValidationRequest(
-            sample_handle=self.student,
-            dataset_file=parse_validation_dataset_file(vc),
-            sampling_steps=sampling_steps,
-            sampler_kind=sampler_kind,
-            rollout_mode=parse_validation_rollout_mode(vc),
-            ode_solver=ode_solver,
-            sampling_timesteps=sampling_timesteps,
-            guidance_scale=parse_validation_guidance_scale(
-                vc
-            ),
-            num_frames=parse_validation_num_frames(vc),
-            output_dir=parse_validation_output_dir(vc),
-        )
 
     def _parse_rollout_mode(
         self,

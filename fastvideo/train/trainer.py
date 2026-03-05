@@ -11,6 +11,7 @@ import torch
 from tqdm.auto import tqdm
 
 from fastvideo.distributed import get_sp_group, get_world_group
+from fastvideo.train.callbacks.callback import CallbackDict
 from fastvideo.train.methods.base import TrainingMethod
 from fastvideo.train.utils.tracking import build_tracker
 
@@ -45,6 +46,8 @@ class Trainer:
         training_config: TrainingConfig,
         *,
         config: dict[str, Any] | None = None,
+        callback_configs: dict[str, dict[str, Any]]
+        | None = None,
     ) -> None:
         self.training_config = training_config
         self.world_group = get_world_group()
@@ -55,6 +58,10 @@ class Trainer:
             training_config.tracker,
             training_config.checkpoint,
             config=config,
+        )
+        self.callbacks = CallbackDict(
+            callback_configs or {},
+            training_config,
         )
 
     def _iter_dataloader(self, dataloader: Any) -> Iterator[dict[str, Any]]:
@@ -103,7 +110,12 @@ class Trainer:
             if resumed_step is not None:
                 start_step = int(resumed_step)
 
-        method.log_validation(start_step)
+        self.callbacks.on_train_start(
+            method, iteration=start_step,
+        )
+        self.callbacks.on_validation_begin(
+            method, iteration=start_step,
+        )
         method.optimizers_zero_grad(start_step)
 
         data_stream = self._iter_dataloader(dataloader)
@@ -161,7 +173,13 @@ class Trainer:
             if checkpoint_manager is not None:
                 checkpoint_manager.maybe_save(step)
 
-            method.log_validation(step)
+            self.callbacks.on_validation_begin(
+                method, iteration=step,
+            )
+
+        self.callbacks.on_train_end(
+            method, iteration=max_steps,
+        )
 
         if checkpoint_manager is not None:
             checkpoint_manager.save_final(max_steps)

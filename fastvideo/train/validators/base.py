@@ -1,39 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
+"""Deprecated — use fastvideo.train.callbacks instead.
+
+Kept as import shims for backwards compatibility.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from abc import ABC, abstractmethod
-from typing import Literal
+import warnings
 
-from fastvideo.train.models.base import ModelBase
+from fastvideo.train.callbacks.callback import Callback
 
+warnings.warn(
+    "fastvideo.train.validators.base is deprecated. "
+    "Use fastvideo.train.callbacks instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-@dataclass(slots=True)
-class ValidationRequest:
-    """Method-provided validation configuration overrides.
-
-    Validators are model-plugin-specific (e.g. Wan sampling), but should remain
-    method-agnostic. A method may override key sampling parameters by passing a
-    request object here.
-    """
-
-    sample_handle: ModelBase | None = None
-    dataset_file: str | None = None
-    sampling_steps: list[int] | None = None
-    sampler_kind: Literal["ode", "sde"] | None = None
-    rollout_mode: Literal["parallel", "streaming"] | None = None
-    ode_solver: str | None = None
-    sampling_timesteps: list[int] | None = None
-    guidance_scale: float | None = None
-    # Optional override for validation video length. When set, validators may
-    # truncate/pad auxiliary sequences (e.g. WanGame keyboard/mouse) to match.
-    num_frames: int | None = None
-    output_dir: str | None = None
-
-
-class Validator(ABC):
-
-    @abstractmethod
-    def log_validation(self, step: int, *, request: ValidationRequest | None = None) -> None:
-        raise NotImplementedError
+# Provide the old names as aliases so that existing
+# imports do not break immediately.
+Validator = Callback
+ValidationRequest = None  # type: ignore[assignment]

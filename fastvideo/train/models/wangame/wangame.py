@@ -142,16 +142,6 @@ class WanGameModel(ModelBase):
 
         self._init_timestep_mechanics()
 
-        # Optional validator.
-        validation_cfg = training_config.validation
-        if validation_cfg:
-            validation_enabled = bool(validation_cfg.get("enabled", bool(validation_cfg)))
-            if validation_enabled:
-                from fastvideo.train.validators.wangame import (
-                    WanGameValidator, )
-
-                self.validator = WanGameValidator(training_config=training_config)
-
         from fastvideo.dataset.dataloader.schema import (
             pyarrow_schema_wangame, )
         from fastvideo.train.utils.dataloader import (
