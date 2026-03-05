@@ -46,6 +46,13 @@ class Callback:
     ) -> None:
         pass
 
+    def on_before_optimizer_step(
+        self,
+        method: TrainingMethod,
+        iteration: int = 0,
+    ) -> None:
+        pass
+
     def on_validation_begin(
         self,
         method: TrainingMethod,

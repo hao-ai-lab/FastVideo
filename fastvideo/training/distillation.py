@@ -79,6 +79,7 @@ def run_training_from_config(
         output_dir=tc.checkpoint.output_dir,
         config=ckpt_config,
         get_rng_generators=method.get_rng_generators,
+        callbacks=trainer.callbacks,
     )
 
     trainer.run(

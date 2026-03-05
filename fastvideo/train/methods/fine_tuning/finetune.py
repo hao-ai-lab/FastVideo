@@ -12,7 +12,6 @@ from fastvideo.train.methods.base import TrainingMethod, LogScalar
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.optimizer import (
     build_optimizer_and_scheduler,
-    clip_grad_norm_if_needed,
 )
 
 
@@ -187,16 +186,6 @@ class FineTuneMethod(TrainingMethod):
     ) -> list[Any]:
         del iteration
         return [self._student_lr_scheduler]
-
-    # TrainingMethod override: optimizers_schedulers_step
-    def optimizers_schedulers_step(
-        self, iteration: int,
-    ) -> None:
-        clip_grad_norm_if_needed(
-            self.student.transformer,
-            self.training_config.optimizer.max_grad_norm,
-        )
-        super().optimizers_schedulers_step(iteration)
 
     def _init_optimizers_and_schedulers(self) -> None:
         tc = self.training_config

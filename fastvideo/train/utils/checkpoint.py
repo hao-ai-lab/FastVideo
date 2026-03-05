@@ -396,6 +396,21 @@ class _RoleModuleContainer(torch.nn.Module):
             self.add_module(name, module)
 
 
+class _CallbackStateWrapper:
+    """Wraps a CallbackDict for DCP save/load."""
+
+    def __init__(self, callbacks: Any) -> None:
+        self._callbacks = callbacks
+
+    def state_dict(self) -> dict[str, Any]:
+        return self._callbacks.state_dict()
+
+    def load_state_dict(
+        self, state_dict: dict[str, Any],
+    ) -> None:
+        self._callbacks.load_state_dict(state_dict)
+
+
 @dataclass(slots=True)
 class CheckpointConfig:
     save_steps: int
@@ -423,6 +438,7 @@ class CheckpointManager:
         output_dir: str,
         config: CheckpointConfig,
         get_rng_generators: Callable[[], dict[str, torch.Generator]] | None = None,
+        callbacks: Any | None = None,
     ) -> None:
         self.bundle = bundle
         self.role_models = role_models or {}
@@ -432,6 +448,7 @@ class CheckpointManager:
         self.output_dir = str(output_dir)
         self.config = config
         self._get_rng_generators = get_rng_generators
+        self._callbacks = callbacks
         self._last_saved_step: int | None = None
 
     def _build_role_states_from_model(
@@ -513,6 +530,10 @@ class CheckpointManager:
                 if gen is None:
                     continue
                 states[f"random_state.{name}"] = RandomStateWrapper(gen)
+
+        # Callback state (e.g. EMA shadow weights, validation RNG).
+        if self._callbacks is not None and _is_stateful(self._callbacks):
+            states["callbacks"] = _CallbackStateWrapper(self._callbacks)
 
         return states
 

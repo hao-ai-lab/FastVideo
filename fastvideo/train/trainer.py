@@ -160,6 +160,9 @@ class Trainer:
                                f".metrics[{k!r}]"),
                     )
 
+            self.callbacks.on_before_optimizer_step(
+                method, iteration=step,
+            )
             method.optimizers_schedulers_step(step)
             method.optimizers_zero_grad(step)
 
@@ -170,10 +173,17 @@ class Trainer:
             if self.global_rank == 0 and metrics:
                 self.tracker.log(metrics, step)
 
+            self.callbacks.on_training_step_end(
+                method, metrics, iteration=step,
+            )
+
             if checkpoint_manager is not None:
                 checkpoint_manager.maybe_save(step)
 
             self.callbacks.on_validation_begin(
+                method, iteration=step,
+            )
+            self.callbacks.on_validation_end(
                 method, iteration=step,
             )
 

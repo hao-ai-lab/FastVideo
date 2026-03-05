@@ -121,6 +121,17 @@ class TrainingMethod(torch.nn.Module, ABC):
 
     # -- Shared hooks (override in subclasses as needed) --
 
+    def get_grad_clip_targets(
+        self, iteration: int,
+    ) -> dict[str, torch.nn.Module]:
+        """Return modules whose gradients should be clipped.
+
+        Override in subclasses to add/conditionally include
+        modules (e.g. critic, conditionally student).
+        Default: student transformer.
+        """
+        return {"student": self.student.transformer}
+
     def on_train_start(self) -> None:
         self.student.on_train_start()
 

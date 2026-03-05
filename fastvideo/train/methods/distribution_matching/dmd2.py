@@ -12,7 +12,6 @@ from fastvideo.train.methods.base import TrainingMethod, LogScalar
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.optimizer import (
     build_optimizer_and_scheduler,
-    clip_grad_norm_if_needed,
 )
 from fastvideo.train.utils.config import (
     get_optional_float,
@@ -226,21 +225,17 @@ class DMD2Method(TrainingMethod):
             schedulers.append(self._student_lr_scheduler)
         return schedulers
 
-    # TrainingMethod override: optimizers_schedulers_step
-    def optimizers_schedulers_step(
+    # TrainingMethod override: get_grad_clip_targets
+    def get_grad_clip_targets(
         self, iteration: int,
-    ) -> None:
-        max_grad_norm = (
-            self.training_config.optimizer.max_grad_norm
-        )
+    ) -> dict[str, torch.nn.Module]:
+        targets: dict[str, torch.nn.Module] = {}
         if self._should_update_student(iteration):
-            clip_grad_norm_if_needed(
-                self.student.transformer, max_grad_norm
+            targets["student"] = (
+                self.student.transformer
             )
-        clip_grad_norm_if_needed(
-            self.critic.transformer, max_grad_norm
-        )
-        super().optimizers_schedulers_step(iteration)
+        targets["critic"] = self.critic.transformer
+        return targets
 
     def _parse_rollout_mode(
         self,

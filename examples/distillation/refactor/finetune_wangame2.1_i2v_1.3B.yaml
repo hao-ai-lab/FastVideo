@@ -66,6 +66,8 @@ training:
     enable_gradient_checkpointing_type: full
 
 callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
   validation:
     _target_: fastvideo.train.callbacks.validation.ValidationCallback
     pipeline_target: fastvideo.pipelines.basic.wan.wangame_i2v_pipeline.WanGameActionImageToVideoPipeline
