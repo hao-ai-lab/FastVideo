@@ -146,6 +146,7 @@ class SettingsUpdate(BaseModel):
     tpSize: int | None = None
     spSize: int | None = None
     autoStartJob: bool | None = None
+    datasetUploadPath: str | None = None
 
 
 @app.put("/api/settings")
@@ -214,116 +215,92 @@ async def upload_image(file: UploadFile = File(...)) -> dict[str, str]:
 
 
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".avi", ".mov"}
-ALLOWED_PARQUET_EXTENSIONS = {".parquet"}
 
 
-@app.post("/api/upload-dataset-captions")
-async def upload_dataset_captions(
-    file: UploadFile = File(...),
-) -> dict[str, str]:
-    """Upload captions JSON for raw dataset. Returns folder path."""
-    global datasets_upload_dir  # noqa: PLW0603
-    if not datasets_upload_dir:
-        raise HTTPException(
-            status_code=503,
-            detail="Upload directory not configured",
-        )
-    ext = Path(file.filename or "").suffix.lower()
-    if ext != ".json":
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid file type. Allowed: .json",
-        )
-    upload_id = uuid.uuid4().hex
-    folder = os.path.join(datasets_upload_dir, upload_id)
-    os.makedirs(folder, exist_ok=True)
-    os.makedirs(os.path.join(folder, "videos"), exist_ok=True)
-    dest_path = os.path.join(folder, "videos2caption.json")
-    try:
-        contents = await file.read()
-        with open(dest_path, "wb") as f:
-            f.write(contents)
-    except OSError as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to save upload: {e}",
-        ) from e
-    return {"path": os.path.abspath(folder), "upload_id": upload_id}
-
-
-@app.post("/api/upload-dataset-videos")
-async def upload_dataset_videos(
-    upload_id: str = Form(...),
-    files: list[UploadFile] = File(...),
-) -> dict[str, str]:
-    """Upload video files to existing raw dataset folder."""
-    global datasets_upload_dir  # noqa: PLW0603
-    if not datasets_upload_dir:
-        raise HTTPException(
-            status_code=503,
-            detail="Upload directory not configured",
-        )
-    folder = os.path.join(datasets_upload_dir, upload_id, "videos")
-    if not os.path.isdir(os.path.dirname(folder)):
-        raise HTTPException(
-            status_code=400,
-            detail="Upload captions first to create dataset folder",
-        )
-    os.makedirs(folder, exist_ok=True)
-    for uf in files:
-        ext = Path(uf.filename or "").suffix.lower()
-        if ext not in ALLOWED_VIDEO_EXTENSIONS:
-            continue
-        dest = os.path.join(folder, uf.filename or f"{uuid.uuid4().hex}{ext}")
-        try:
-            contents = await uf.read()
-            with open(dest, "wb") as f:
-                f.write(contents)
-        except OSError as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to save {uf.filename}: {e}",
-            ) from e
-    return {"path": os.path.abspath(os.path.dirname(folder))}
-
-
-@app.post("/api/upload-dataset-parquet")
-async def upload_dataset_parquet(
-    files: list[UploadFile] = File(...),
-) -> dict[str, str]:
-    """Upload parquet files for preprocessed dataset. Returns folder path."""
-    global datasets_upload_dir  # noqa: PLW0603
-    if not datasets_upload_dir:
-        raise HTTPException(
-            status_code=503,
-            detail="Upload directory not configured",
-        )
-    parquet_files = [
+def _filter_video_files(files: list[UploadFile]) -> list[UploadFile]:
+    """Filter uploaded files to only include videos."""
+    return [
         f for f in files
-        if Path(f.filename or "").suffix.lower() in ALLOWED_PARQUET_EXTENSIONS
+        if Path(f.filename or "").suffix.lower() in ALLOWED_VIDEO_EXTENSIONS
     ]
-    if not parquet_files:
+
+
+@app.post("/api/upload-raw-dataset")
+async def upload_raw_dataset(
+    files: list[UploadFile] = File(...),
+) -> dict[str, Any]:
+    """
+    Upload raw video dataset. Returns path and file list.
+    Filters files to only include videos. For folder upload, only adds videos.
+    """
+    if database is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Database not initialized",
+        )
+    settings = database.get_settings()
+    base_path = (
+        settings.get("datasetUploadPath", "") or ""
+    ).strip()
+    if not base_path:
+        base_path = datasets_upload_dir
+    else:
+        base_path = os.path.abspath(base_path)
+    if not base_path:
+        raise HTTPException(
+            status_code=503,
+            detail="Dataset upload directory not configured. Set it in Settings.",
+        )
+    filtered = _filter_video_files(files)
+    if not filtered:
         raise HTTPException(
             status_code=400,
-            detail="No .parquet files provided",
+            detail=(
+                "No video files found. "
+                f"Allowed: {', '.join(ALLOWED_VIDEO_EXTENSIONS)}"
+            ),
         )
     upload_id = uuid.uuid4().hex
-    folder = os.path.join(
-        datasets_upload_dir, upload_id, "combined_parquet_dataset"
-    )
-    os.makedirs(folder, exist_ok=True)
-    for uf in parquet_files:
-        dest = os.path.join(folder, uf.filename or f"{uuid.uuid4().hex}.parquet")
+    media_folder = os.path.join(base_path, upload_id, "videos")
+    os.makedirs(media_folder, exist_ok=True)
+    file_names = []
+    for uf in filtered:
+        name = uf.filename or f"{uuid.uuid4().hex}"
+        if "/" in name or "\\" in name:
+            name = os.path.basename(name)
+        if not Path(name).suffix:
+            name += ".mp4"
+        dest = os.path.join(media_folder, name)
         try:
             contents = await uf.read()
+            # Detect Git LFS pointer files (they look like tiny text files, not real videos)
+            if contents.startswith(
+                b"version https://git-lfs.github.com/spec/v1"
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"File {uf.filename} appears to be a Git LFS pointer, not an actual video. "
+                        "Please run `git lfs pull` (or otherwise download the real video files) "
+                        "and upload the resolved videos instead."
+                    ),
+                )
             with open(dest, "wb") as f:
                 f.write(contents)
+            file_names.append(name)
+        except HTTPException:
+            # Re-raise HTTPExceptions (e.g. LFS pointer detection) as-is
+            raise
         except OSError as e:
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to save {uf.filename}: {e}",
             ) from e
-    return {"path": os.path.abspath(os.path.dirname(folder))}
+    return {
+        "path": os.path.abspath(os.path.dirname(media_folder)),
+        "upload_id": upload_id,
+        "file_names": file_names,
+    }
 
 
 @app.get("/api/jobs")
@@ -446,11 +423,18 @@ def delete_job(job_id: str) -> dict[str, str]:
 class CreateDatasetRequest(BaseModel):
     name: str
     raw_path: str = ""
-    output_path: str | None = None  # For parquet: preprocessed path, status=ready
+    output_path: str | None = None
     workload_type: str = "t2v"
-    model_path: str
-    dataset_type: str = "merged"
+    model_path: str = "default"
+    dataset_type: str = "raw"
+    media_type: str = "video"
+    file_names: list[str] = []
     num_gpus: int = 1
+
+
+class UpdateCaptionRequest(BaseModel):
+    file_name: str
+    caption: str
 
 
 @app.get("/api/datasets")
@@ -477,19 +461,24 @@ def get_dataset(dataset_id: str) -> dict[str, Any]:
 
 @app.post("/api/datasets", status_code=201)
 def create_dataset(req: CreateDatasetRequest) -> dict[str, Any]:
-    """Create a new dataset. Parquet: status=ready. Raw/HF: status=pending."""
+    """Create a new raw dataset. Persists dataset and initial caption entries."""
     if database is None:
         raise HTTPException(status_code=503, detail="Database not initialized")
+    if not req.raw_path:
+        raise HTTPException(
+            status_code=400,
+            detail="raw_path is required. Upload media files first.",
+        )
+    if not req.file_names:
+        raise HTTPException(
+            status_code=400,
+            detail="No media files found. Ensure at least one image or video.",
+        )
     dataset_id = str(uuid.uuid4())
     created_at = time.time()
-    if req.output_path:
-        output_path = req.output_path
-        status = "ready"
-    else:
-        output_path = os.path.join(
-            datasets_output_dir, dataset_id, "output"
-        )
-        status = "pending"
+    output_path = os.path.join(
+        datasets_output_dir, dataset_id, "output"
+    )
     dataset = {
         "id": dataset_id,
         "name": req.name,
@@ -498,14 +487,89 @@ def create_dataset(req: CreateDatasetRequest) -> dict[str, Any]:
         "workload_type": req.workload_type,
         "model_path": req.model_path,
         "dataset_type": req.dataset_type,
-        "status": status,
+        "media_type": req.media_type,
+        "status": "pending",
         "error": None,
         "created_at": created_at,
         "num_gpus": req.num_gpus,
         "log_file_path": "",
     }
     database.insert_dataset(dataset)
-    return dataset
+    for fn in req.file_names:
+        database.upsert_dataset_caption(dataset_id, fn, "")
+    return database.get_dataset(dataset_id) or dataset
+
+
+@app.get("/api/datasets/{dataset_id}/files")
+def get_dataset_files(dataset_id: str) -> dict[str, Any]:
+    """List media files in dataset with their captions."""
+    if database is None:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    ds = database.get_dataset(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    captions = database.get_dataset_captions(dataset_id)
+    media_dir = os.path.join(ds["raw_path"], "videos")
+    video_exts = {".mp4", ".webm", ".mov", ".avi", ".mkv"}
+    file_names = []
+    if os.path.isdir(media_dir):
+        for name in sorted(os.listdir(media_dir)):
+            ext = os.path.splitext(name)[1].lower()
+            path = os.path.join(media_dir, name)
+            if os.path.isfile(path) and ext in video_exts:
+                file_names.append(name)
+    return {
+        "file_names": file_names,
+        "captions": captions,
+    }
+
+
+@app.put("/api/datasets/{dataset_id}/captions")
+def update_dataset_caption(
+    dataset_id: str, req: UpdateCaptionRequest
+) -> dict[str, str]:
+    """Update a single caption for a file. Persists to database."""
+    if database is None:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    ds = database.get_dataset(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    database.upsert_dataset_caption(dataset_id, req.file_name, req.caption)
+    return {"detail": "Caption updated"}
+
+
+@app.get("/api/datasets/{dataset_id}/media/{file_name:path}")
+def serve_dataset_media(dataset_id: str, file_name: str) -> FileResponse:
+    """Serve a media file from a dataset."""
+    if database is None:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    ds = database.get_dataset(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    media_path = os.path.join(ds["raw_path"], "videos", file_name)
+    if not os.path.isfile(media_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    import mimetypes
+    mime, _ = mimetypes.guess_type(media_path)
+    return FileResponse(media_path, media_type=mime or "video/mp4")
+
+
+def _write_videos2caption_json(raw_path: str, captions: dict[str, str]) -> None:
+    """Write videos2caption.json for preprocessing."""
+    import json as json_mod
+
+    media_dir = os.path.join(raw_path, "videos")
+    if not os.path.isdir(media_dir):
+        return
+    items = []
+    for name in sorted(os.listdir(media_dir)):
+        path = os.path.join(media_dir, name)
+        if os.path.isfile(path):
+            cap = captions.get(name, "")
+            items.append({"path": name, "cap": cap})
+    json_path = os.path.join(raw_path, "videos2caption.json")
+    with open(json_path, "w", encoding="utf-8") as f:
+        json_mod.dump(items, f, indent=2)
 
 
 @app.delete("/api/datasets/{dataset_id}")
@@ -524,7 +588,7 @@ def delete_dataset(dataset_id: str) -> dict[str, str]:
 
 @app.post("/api/datasets/{dataset_id}/preprocess")
 def start_preprocess(dataset_id: str) -> dict[str, Any]:
-    """Start preprocessing for a dataset."""
+    """Start preprocessing for a dataset. For raw datasets, generates videos2caption.json first."""
     if database is None:
         raise HTTPException(status_code=503, detail="Database not initialized")
     ds = database.get_dataset(dataset_id)
@@ -533,7 +597,7 @@ def start_preprocess(dataset_id: str) -> dict[str, Any]:
     if not ds.get("raw_path"):
         raise HTTPException(
             status_code=400,
-            detail="Dataset has no raw path (e.g. Parquet datasets are already preprocessed)",
+            detail="Dataset has no raw path",
         )
     if dataset_id in _preprocess_tasks:
         raise HTTPException(
@@ -545,6 +609,9 @@ def start_preprocess(dataset_id: str) -> dict[str, Any]:
             status_code=409,
             detail="Dataset is already preprocessed",
         )
+    if ds.get("dataset_type") == "raw":
+        captions = database.get_dataset_captions(dataset_id)
+        _write_videos2caption_json(ds["raw_path"], captions)
 
     log_dir = os.path.join(
         os.path.dirname(__file__), "..", "outputs", "ui_logs"

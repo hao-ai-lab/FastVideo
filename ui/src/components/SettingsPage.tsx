@@ -78,6 +78,23 @@ export default function SettingsPage() {
           />
         </div>
         <hr style={{ margin: "1rem 0", border: "none", borderTop: "1px solid var(--border)" }} />
+        <h2>Paths</h2>
+        <div className={formStyles.settingsRow}>
+          <label htmlFor="settings-dataset-upload-path">
+            Dataset Upload Path
+          </label>
+          <input
+            id="settings-dataset-upload-path"
+            type="text"
+            value={options.datasetUploadPath ?? ""}
+            onChange={(e) =>
+              updateOption("datasetUploadPath", e.target.value)
+            }
+            placeholder="outputs/ui_data/uploads/datasets"
+            style={{ fontFamily: "monospace", fontSize: "0.9rem" }}
+          />
+        </div>
+        <hr style={{ margin: "1rem 0", border: "none", borderTop: "1px solid var(--border)" }} />
         <div className={layoutStyles.sectionHeader}>
           <h2>Default Options</h2>
           <button

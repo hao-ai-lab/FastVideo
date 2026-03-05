@@ -82,7 +82,7 @@ export default function UploadZone({
         type="file"
         accept={accept}
         multiple={multiple}
-        {...(directory && { webkitdirectory: true })}
+        {...(directory && { webkitdirectory: "" })}
         onChange={handleChange}
         disabled={disabled}
       />

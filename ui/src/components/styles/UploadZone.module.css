@@ -1,7 +1,12 @@
 .uploadZone {
   border: 2px dashed var(--border);
   border-radius: var(--radius);
-  padding: 1rem 1.25rem;
+  padding: 1.5rem 1.25rem;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   background: var(--bg-subtle, rgba(255, 255, 255, 0.02));
   cursor: pointer;

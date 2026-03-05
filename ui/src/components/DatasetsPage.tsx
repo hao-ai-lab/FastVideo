@@ -8,23 +8,27 @@ import {
   type Dataset,
 } from "@/lib/api";
 import { useEffect, useState, useRef, useCallback } from "react";
-import AddDatasetModal, { type DatasetSourceType } from "./AddDatasetModal";
+import CreateDatasetModal from "./CreateDatasetModal";
 import { useHeaderActions } from "@/contexts/ActiveTabContext";
+import { useActiveDataset } from "@/contexts/ActiveDatasetContext";
 import cardStyles from "@styles/Card.module.css";
 import layoutStyles from "@/app/Layout.module.css";
 import jobCardStyles from "@styles/JobCard.module.css";
 import badgeStyles from "@styles/Badge.module.css";
 import buttonStyles from "@styles/Button.module.css";
-import dropdownStyles from "@styles/Dropdown.module.css";
 
 function DatasetCard({
   dataset,
   onUpdated,
+  onSelect,
 }: {
   dataset: Dataset;
   onUpdated: () => void;
+  onSelect: () => void;
 }) {
   const [isLoading, setIsLoading] = useState(false);
+
+  const datasetType = dataset.dataset_type || "raw";
 
   const badgeClass =
     `badge${dataset.status.charAt(0).toUpperCase() + dataset.status.slice(1)}`;
@@ -84,28 +88,41 @@ function DatasetCard({
   };
 
   return (
-    <div className={jobCardStyles.jobCard}>
+    <div
+      className={jobCardStyles.jobCard}
+      onClick={onSelect}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+    >
       <div className={jobCardStyles.jobHeader}>
         <span className={jobCardStyles.jobModel}>{dataset.name}</span>
-        <span className={badgeStyles[badgeClass] || badgeStyles.badge}>
-          {dataset.status}
+        <span style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+          <span className={badgeStyles.badgePending}>
+            {datasetType.charAt(0).toUpperCase() + datasetType.slice(1)}
+          </span>
+          <span className={badgeStyles[badgeClass] || badgeStyles.badge}>
+            {dataset.status}
+          </span>
         </span>
       </div>
       <div className={jobCardStyles.jobPrompt}>
-        {dataset.raw_path
-          ? `Raw: ${dataset.raw_path}`
-          : `Path: ${dataset.output_path}`}
+        {dataset.raw_path ? `Raw: ${dataset.raw_path}` : `Path: ${dataset.output_path}`}
       </div>
       <div className={jobCardStyles.jobMeta}>
         <span>{dataset.workload_type}</span>
-        <span>{dataset.dataset_type}</span>
         <span>{dataset.model_path.split("/").pop()}</span>
       </div>
       {dataset.error && (
         <div className={jobCardStyles.jobError}>{dataset.error}</div>
       )}
       <div className={jobCardStyles.jobActions}>
-        {dataset.status === "pending" && (
+        {dataset.status === "pending" && dataset.dataset_type === "raw" && (
           <button
             type="button"
             className={`${buttonStyles.btn} ${buttonStyles.btnPrimary}`}
@@ -127,7 +144,7 @@ function DatasetCard({
         )}
         <button
           type="button"
-            className={`${buttonStyles.btn} ${buttonStyles.btnDelete}`}
+          className={`${buttonStyles.btn} ${buttonStyles.btnDelete}`}
           onClick={handleDelete}
           disabled={isLoading}
         >
@@ -141,49 +158,18 @@ function DatasetCard({
 export default function DatasetsPage() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalSourceType, setModalSourceType] = useState<DatasetSourceType>("raw");
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  const openModal = (sourceType: DatasetSourceType) => {
-    setModalSourceType(sourceType);
-    setModalOpen(true);
-  };
+  const { setActiveDataset, setActiveDatasetId } = useActiveDataset();
 
   useHeaderActions([
-    <div key="add-dataset" className={dropdownStyles.wrapper}>
-      <button
-        type="button"
-        className={`${buttonStyles.btn} ${buttonStyles.btnPrimary} ${dropdownStyles.trigger}`}
-      >
-        Add Dataset
-      </button>
-      <div className={dropdownStyles.menu} role="menu">
-        <button
-          type="button"
-          className={dropdownStyles.menuItem}
-          role="menuitem"
-          onClick={() => openModal("raw")}
-        >
-          Raw
-        </button>
-        <button
-          type="button"
-          className={dropdownStyles.menuItem}
-          role="menuitem"
-          onClick={() => openModal("parquet")}
-        >
-          Parquet
-        </button>
-        <button
-          type="button"
-          className={dropdownStyles.menuItem}
-          role="menuitem"
-          onClick={() => openModal("hf")}
-        >
-          HuggingFace
-        </button>
-      </div>
-    </div>,
+    <button
+      key="add-dataset"
+      type="button"
+      className={`${buttonStyles.btn} ${buttonStyles.btnPrimary}`}
+      onClick={() => setModalOpen(true)}
+    >
+      Add Dataset
+    </button>,
   ]);
 
   const fetchDatasets = useCallback(async () => {
@@ -217,13 +203,22 @@ export default function DatasetsPage() {
     };
   }, [datasets, fetchDatasets]);
 
+  const handleSelectDataset = useCallback(
+    (ds: Dataset) => {
+      setActiveDataset(ds);
+      setActiveDatasetId(ds.id);
+    },
+    [setActiveDataset, setActiveDatasetId]
+  );
+
   return (
     <main className={layoutStyles.main}>
       <section className={cardStyles.card}>
         <div id="datasets-container">
           {datasets.length === 0 ? (
             <p className={layoutStyles.placeholder}>
-              No datasets yet. Add one to preprocess and use in training jobs.
+              No datasets yet. Add a raw video dataset to use in
+              training.
             </p>
           ) : (
             datasets.map((ds) => (
@@ -231,19 +226,19 @@ export default function DatasetsPage() {
                 key={ds.id}
                 dataset={ds}
                 onUpdated={fetchDatasets}
+                onSelect={() => handleSelectDataset(ds)}
               />
             ))
           )}
         </div>
       </section>
-      <AddDatasetModal
+      <CreateDatasetModal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onSuccess={() => {
           fetchDatasets();
           setModalOpen(false);
         }}
-        sourceType={modalSourceType}
       />
     </main>
   );

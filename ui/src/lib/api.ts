@@ -79,6 +79,7 @@ export interface Settings {
     tpSize: number;
     spSize: number;
     autoStartJob: boolean;
+    datasetUploadPath: string;
 }
 
 // MARK: - API Functions
@@ -124,53 +125,15 @@ export async function uploadImage(file: File): Promise<{ path: string }> {
     return response.json();
 }
 
-export async function uploadDatasetCaptions(
-    file: File
-): Promise<{ path: string; upload_id: string }> {
-    const baseApiUrl = getApiBaseUrl();
-    const formData = new FormData();
-    formData.append("file", file);
-    const response = await fetch(`${baseApiUrl}/upload-dataset-captions`, {
-        method: "POST",
-        body: formData,
-    });
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({ detail: "Upload failed" }));
-        throw new Error(err.detail || "Upload failed");
-    }
-    return response.json();
-}
-
-export async function uploadDatasetVideos(
-    uploadId: string,
+export async function uploadRawDataset(
     files: File[]
-): Promise<{ path: string }> {
-    const baseApiUrl = getApiBaseUrl();
-    const formData = new FormData();
-    formData.append("upload_id", uploadId);
-    for (const f of files) {
-        formData.append("files", f);
-    }
-    const response = await fetch(`${baseApiUrl}/upload-dataset-videos`, {
-        method: "POST",
-        body: formData,
-    });
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({ detail: "Upload failed" }));
-        throw new Error(err.detail || "Upload failed");
-    }
-    return response.json();
-}
-
-export async function uploadDatasetParquet(
-    files: File[]
-): Promise<{ path: string }> {
+): Promise<{ path: string; upload_id: string; file_names: string[] }> {
     const baseApiUrl = getApiBaseUrl();
     const formData = new FormData();
     for (const f of files) {
         formData.append("files", f);
     }
-    const response = await fetch(`${baseApiUrl}/upload-dataset-parquet`, {
+    const response = await fetch(`${baseApiUrl}/upload-raw-dataset`, {
         method: "POST",
         body: formData,
     });
@@ -309,6 +272,7 @@ export interface Dataset {
     workload_type: string;
     model_path: string;
     dataset_type: string;
+    media_type?: "image" | "video";
     status: "pending" | "preprocessing" | "ready" | "failed" | "stopped";
     error: string | null;
     created_at: number;
@@ -318,12 +282,18 @@ export interface Dataset {
 
 export interface CreateDatasetRequest {
     name: string;
-    raw_path?: string;
-    output_path?: string;
+    raw_path: string;
     workload_type?: string;
-    model_path: string;
+    model_path?: string;
     dataset_type?: string;
+    media_type?: "video";
+    file_names: string[];
     num_gpus?: number;
+}
+
+export interface DatasetFilesResponse {
+    file_names: string[];
+    captions: Record<string, string>;
 }
 
 export async function getDatasets(status?: string): Promise<Dataset[]> {
@@ -412,3 +382,34 @@ export async function getDatasetLogs(id: string, after: number = 0): Promise<Dat
     }
     return response.json();
 }
+
+export async function getDatasetFiles(id: string): Promise<DatasetFilesResponse> {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/datasets/${id}/files`);
+    if (!response.ok) {
+        throw new Error("Failed to fetch dataset files");
+    }
+    return response.json();
+}
+
+export async function updateDatasetCaption(
+    id: string,
+    file_name: string,
+    caption: string
+): Promise<void> {
+    const baseApiUrl = getApiBaseUrl();
+    const response = await fetch(`${baseApiUrl}/datasets/${id}/captions`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file_name, caption }),
+    });
+    if (!response.ok) {
+        throw new Error("Failed to update caption");
+    }
+}
+
+export function getDatasetMediaUrl(datasetId: string, fileName: string): string {
+    const baseApiUrl = getApiBaseUrl();
+    return `${baseApiUrl}/datasets/${datasetId}/media/${encodeURIComponent(fileName)}`;
+}
+
