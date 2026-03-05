@@ -42,6 +42,7 @@ export default function DatasetSidebar({
   const [visibleCount, setVisibleCount] = useState(INITIAL_PAGE_SIZE);
   const [isLoading, setIsLoading] = useState(true);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     onWidthChange?.(width);
@@ -127,6 +128,25 @@ export default function DatasetSidebar({
   const visibleFiles = fileNames.slice(0, visibleCount);
   const hasMore = visibleCount < fileNames.length;
 
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const handleScroll = () => {
+      if (!hasMore || isLoading) return;
+      const { scrollTop, scrollHeight, clientHeight } = el;
+      const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+      if (distanceFromBottom < 200) {
+        setVisibleCount((c) => Math.min(c + PAGE_SIZE, fileNames.length));
+      }
+    };
+
+    el.addEventListener("scroll", handleScroll);
+    return () => {
+      el.removeEventListener("scroll", handleScroll);
+    };
+  }, [fileNames.length, hasMore, isLoading]);
+
   return (
     <aside
       className={datasetStyles.sidebar}
@@ -146,7 +166,7 @@ export default function DatasetSidebar({
         </div>
       </div>
       <div className={datasetStyles.gallerySection}>
-        <div className={datasetStyles.galleryScroll}>
+        <div className={datasetStyles.galleryScroll} ref={scrollRef}>
           {isLoading ? (
             <p className={datasetStyles.galleryEmpty}>Loading…</p>
           ) : fileNames.length === 0 ? (
@@ -177,15 +197,6 @@ export default function DatasetSidebar({
                   </div>
                 ))}
               </div>
-              {hasMore && (
-                <button
-                  type="button"
-                  className={datasetStyles.loadMore}
-                  onClick={handleLoadMore}
-                >
-                  Load more ({fileNames.length - visibleCount} remaining)
-                </button>
-              )}
             </>
           )}
         </div>

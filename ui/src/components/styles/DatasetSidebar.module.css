@@ -69,6 +69,11 @@
   background: rgba(99, 102, 241, 0.08);
 }
 
+.closeBtn svg {
+  width: 18px;
+  height: 18px;
+}
+
 .gallerySection {
   flex: 1;
   display: flex;
