@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import copy
 from abc import ABC, abstractmethod
 from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 
+from fastvideo.logger import init_logger
+
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
     from fastvideo.pipelines import TrainingBatch
+
+logger = init_logger(__name__)
 
 
 class ModelBase(ABC):
@@ -26,6 +31,7 @@ class ModelBase(ABC):
     transformer: torch.nn.Module
     noise_scheduler: Any
     _trainable: bool
+    _use_ema: list[str]
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -44,6 +50,59 @@ class ModelBase(ABC):
     def get_rng_generators(self) -> dict[str, torch.Generator]:
         """Return RNG generators for checkpoint resume."""
         return {}
+
+    # ------------------------------------------------------------------
+    # EMA
+    # ------------------------------------------------------------------
+
+    def _setup_ema(self) -> None:
+        """Create EMA copies of the transformer.
+
+        Call after ``self.transformer`` is set and before FSDP wrapping.
+        Each name in ``self._use_ema`` becomes an attribute holding a
+        deep copy of ``self.transformer`` in eval mode with no gradients.
+        """
+        if not getattr(self, "_use_ema", None):
+            return
+        for name in self._use_ema:
+            if hasattr(self, name):
+                logger.warning(
+                    "EMA network %r already exists, "
+                    "skipping initialization.",
+                    name,
+                )
+                continue
+            logger.info(
+                "Initializing EMA network %r from "
+                "transformer",
+                name,
+            )
+            ema = copy.deepcopy(self.transformer)
+            ema.eval().requires_grad_(False)
+            setattr(self, name, ema)
+
+    @property
+    def ema_dict(self) -> dict[str, torch.nn.Module]:
+        """Return dict of EMA networks (empty if EMA disabled)."""
+        if not getattr(self, "_use_ema", None):
+            return {}
+        return {
+            name: getattr(self, name)
+            for name in self._use_ema
+            if hasattr(self, name)
+        }
+
+    @property
+    def transformer_inference(self) -> torch.nn.Module:
+        """Return the transformer for inference.
+
+        Returns the first EMA network when available,
+        otherwise the training transformer.
+        """
+        ema = self.ema_dict
+        if ema:
+            return next(iter(ema.values()))
+        return self.transformer
 
     # ------------------------------------------------------------------
     # Timestep helpers

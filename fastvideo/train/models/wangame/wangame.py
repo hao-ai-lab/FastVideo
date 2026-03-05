@@ -67,9 +67,15 @@ class WanGameModel(ModelBase):
         disable_custom_init_weights: bool = False,
         flow_shift: float = 3.0,
         enable_gradient_checkpointing_type: str | None = None,
+        use_ema: list[str] | bool = False,
     ) -> None:
         self._init_from = str(init_from)
         self._trainable = bool(trainable)
+
+        if isinstance(use_ema, bool):
+            self._use_ema = ["ema"] if use_ema else []
+        else:
+            self._use_ema = list(use_ema)
 
         self.transformer = self._load_transformer(
             init_from=self._init_from,
@@ -78,6 +84,7 @@ class WanGameModel(ModelBase):
             enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
             training_config=training_config,
         )
+        self._setup_ema()
 
         self.noise_scheduler = (FlowMatchEulerDiscreteScheduler(shift=float(flow_shift)))
 

@@ -240,6 +240,8 @@ def maybe_warmstart_role_modules(
     if model is not None:
         if model.transformer is not None:
             modules["transformer"] = model.transformer
+        for ema_name, ema_module in model.ema_dict.items():
+            modules[ema_name] = ema_module
     elif bundle is not None:
         handle = bundle.role(str(role))
         modules = dict(handle.modules)
@@ -333,6 +335,8 @@ def save_role_pretrained(
     if model is not None:
         if model.transformer is not None:
             modules["transformer"] = model.transformer
+        for ema_name, ema_module in model.ema_dict.items():
+            modules[ema_name] = ema_module
     elif bundle is not None:
         handle = bundle.role(str(role))
         modules = dict(handle.modules)
@@ -463,6 +467,10 @@ class CheckpointManager:
         modules: dict[str, torch.nn.Module] = {}
         if model.transformer is not None:
             modules["transformer"] = model.transformer
+
+        # Include EMA networks in checkpoint.
+        for ema_name, ema_module in model.ema_dict.items():
+            modules[ema_name] = ema_module
 
         container = _RoleModuleContainer(modules)
 

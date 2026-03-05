@@ -45,6 +45,7 @@ class WanGameCausalModel(WanGameModel, CausalModelBase):
         disable_custom_init_weights: bool = False,
         flow_shift: float = 3.0,
         enable_gradient_checkpointing_type: str | None = None,
+        use_ema: list[str] | bool = False,
     ) -> None:
         super().__init__(
             init_from=init_from,
@@ -53,6 +54,7 @@ class WanGameCausalModel(WanGameModel, CausalModelBase):
             flow_shift=flow_shift,
             enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
             training_config=training_config,
+            use_ema=use_ema,
         )
         self._streaming_caches: dict[tuple[int, str], _StreamingCaches] = {}
 
