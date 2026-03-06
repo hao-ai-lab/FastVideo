@@ -35,6 +35,7 @@ env
 *.npy
 weights/
 slurm_outputs/
+fastvideo/distillation
 
 # SSIM test outputs
 fastvideo/tests/ssim/generated_videos/

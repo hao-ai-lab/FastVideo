@@ -84,10 +84,20 @@ class WanModel(ModelBase):
             override_transformer_cls_name=("WanTransformer3DModel"),
         )
         transformer = apply_trainable(transformer, trainable=self._trainable)
-        if (self._trainable and enable_gradient_checkpointing_type):
+        # Fall back to training_config.model if not set on the
+        # model YAML section directly.
+        ckpt_type = (
+            enable_gradient_checkpointing_type
+            or getattr(
+                getattr(training_config, "model", None),
+                "enable_gradient_checkpointing_type",
+                None,
+            )
+        )
+        if self._trainable and ckpt_type:
             transformer = apply_activation_checkpointing(
                 transformer,
-                checkpointing_type=(enable_gradient_checkpointing_type),
+                checkpointing_type=ckpt_type,
             )
         self.transformer = transformer
 

@@ -31,11 +31,17 @@ def _make_training_args(
     model_path: str,
 ) -> TrainingArgs:
     """Build a TrainingArgs for PipelineComponentLoader."""
+    pipeline_config = tc.pipeline_config or PipelineConfig()
+    # Propagate dit_precision from TrainingConfig to PipelineConfig
+    # so that TransformerLoader.load() picks up the correct
+    # default_dtype (e.g. fp32 master weights for training).
+    if tc.dit_precision and tc.dit_precision != pipeline_config.dit_precision:
+        pipeline_config.dit_precision = tc.dit_precision
     return TrainingArgs(
         model_path=model_path,
         mode=ExecutionMode.DISTILLATION,
         inference_mode=False,
-        pipeline_config=(tc.pipeline_config or PipelineConfig()),
+        pipeline_config=pipeline_config,
         num_gpus=tc.distributed.num_gpus,
         tp_size=tc.distributed.tp_size,
         sp_size=tc.distributed.sp_size,
