@@ -67,7 +67,7 @@ def run_training_from_config(
 
     trainer = Trainer(
         tc,
-        config=cfg.raw,
+        config=cfg.resolved_config(),
         callback_configs=cfg.callbacks,
     )
 

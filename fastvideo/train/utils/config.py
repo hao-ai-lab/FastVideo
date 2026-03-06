@@ -34,6 +34,35 @@ class RunConfig:
     callbacks: dict[str, dict[str, Any]]
     raw: dict[str, Any]
 
+    def resolved_config(self) -> dict[str, Any]:
+        """Return a fully-resolved config dict with defaults.
+
+        Suitable for logging to W&B so that every parameter
+        (including defaults) is visible.
+        """
+        import dataclasses
+
+        def _safe_asdict(obj: Any) -> Any:
+            if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+                return {
+                    f.name: _safe_asdict(getattr(obj, f.name))
+                    for f in dataclasses.fields(obj)
+                    if not callable(getattr(obj, f.name))
+                }
+            if isinstance(obj, dict):
+                return {k: _safe_asdict(v) for k, v in obj.items()}
+            if isinstance(obj, (list, tuple)):
+                return type(obj)(_safe_asdict(v) for v in obj)
+            return obj
+
+        resolved: dict[str, Any] = {}
+        resolved["models"] = dict(self.models)
+        resolved["method"] = dict(self.method)
+        resolved["training"] = _safe_asdict(self.training)
+        resolved["validation"] = dict(self.validation)
+        resolved["callbacks"] = dict(self.callbacks)
+        return resolved
+
 
 # ---- parsing helpers (kept for use by methods) ----
 

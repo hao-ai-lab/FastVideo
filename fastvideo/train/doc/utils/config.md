@@ -59,7 +59,7 @@
   - `trainable`: 是否训练该 role（只影响 `requires_grad`/模式；具体 optimizer 由 method 决定）
   - `disable_custom_init_weights`: 是否禁用 family 的“加载时自定义 init weights 逻辑”
   - `extra: dict`：保留 `roles.<role>` 下除上述字段外的所有 key/value，
-    交给 model plugin / method 解释（例如 `roles.student.init_from_checkpoint: ...`）
+    交给 model plugin / method 解释
 
 ## 3) Builder 装配相关（build-time / run-time 边界）
 - model plugin（`@register_model`）直接构建并返回一个 `ModelBase` 实例：

@@ -25,5 +25,4 @@
   - `output_dir`（自动选择最新 checkpoint）
 
 **独立函数**
-- `maybe_warmstart_role_modules`: 从 DCP checkpoint best-effort 加载模型权重（不恢复 optimizer/step）。
 - `save_role_pretrained`: 导出 role modules 为 diffusers-style 模型目录。
