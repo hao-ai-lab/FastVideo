@@ -276,6 +276,8 @@ export interface CreateDatasetRequest {
     name: string;
     upload_path: string;
     file_names: string[];
+    /** Optional: file_name -> caption from videos2caption.json */
+    captions?: Record<string, string>;
 }
 
 export interface DatasetFilesResponse {

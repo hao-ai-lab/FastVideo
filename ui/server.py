@@ -458,7 +458,8 @@ def create_dataset(req: CreateDatasetRequest) -> dict[str, Any]:
     }
     database.insert_dataset(dataset)
     for fn in req.file_names:
-        database.upsert_dataset_caption(dataset_id, fn, "")
+        caption = (req.captions.get(fn, "") if req.captions else "") or ""
+        database.upsert_dataset_caption(dataset_id, fn, caption)
     return database.get_dataset(dataset_id) or dataset
 
 
