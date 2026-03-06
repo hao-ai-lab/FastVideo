@@ -829,7 +829,7 @@ class CosmosDenoisingStage(DenoisingStage):
                                 1 - batch.uncond_indicator) * uncond_pred
 
                         guidance_diff = cond_pred - uncond_pred
-                        final_pred = cond_pred + guidance_scale * guidance_diff
+                        final_pred = uncond_pred + guidance_scale * guidance_diff
                     else:
                         final_pred = cond_pred
 
@@ -1074,7 +1074,7 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
                             return_dict=False,
                         )[0]
                         if is_conditioned:
-                            v = cond_v + guidance_scale * (cond_v - uncond_v)
+                            v = uncond_v + guidance_scale * (cond_v - uncond_v)
                         else:
                             v = uncond_v + guidance_scale * (cond_v - uncond_v)
                     else:

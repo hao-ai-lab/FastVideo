@@ -798,7 +798,7 @@ class DistillationPipeline(TrainingPipeline):
                 scheduler=self.noise_scheduler).unflatten(
                     0, real_score_pred_noise_uncond.shape[:2])
 
-            real_score_pred_video = pred_real_video_cond + (
+            real_score_pred_video = pred_real_video_uncond + (
                 pred_real_video_cond -
                 pred_real_video_uncond) * self.real_score_guidance_scale
 
