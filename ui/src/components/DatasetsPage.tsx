@@ -53,8 +53,7 @@ export default function DatasetsPage() {
         <div id="datasets-container">
           {datasets.length === 0 ? (
             <p className={layoutStyles.placeholder}>
-              No datasets yet. Add a raw video dataset to use in
-              training.
+              No datasets yet.
             </p>
           ) : (
             datasets.map((ds) => (

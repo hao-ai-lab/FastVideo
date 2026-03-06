@@ -1,12 +1,13 @@
 'use client';
 
 import { createDataset, uploadRawDataset } from "@/lib/api";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import modalStyles from "./styles/Modal.module.css";
 import formStyles from "./styles/Form.module.css";
 import cardStyles from "./styles/Card.module.css";
 import buttonStyles from "./styles/Button.module.css";
 import UploadZone from "./UploadZone";
+import TabSwitch from "./TabSwitch";
 
 const ALLOWED_VIDEO_EXT = ".mp4,.webm,.avi,.mov,.mkv";
 
@@ -86,24 +87,85 @@ function parseVideos2Caption(
   return { captions, error: null };
 }
 
-/** Parse .txt caption file: one caption per line, order matches videos in alphabetical order. */
-function parseCaptionTxt(
+/** Parse videos.txt + captions.txt: line i in videos = path, line i in captions = caption. */
+function parseVideosCaptionsTxt(
+  videosLines: string[],
+  captionsLines: string[],
+  uploadedFileNames: string[]
+): { captions: Record<string, string>; error: string | null } {
+  const captions: Record<string, string> = {};
+  const len = Math.min(videosLines.length, captionsLines.length);
+  for (let i = 0; i < len; i++) {
+    const path = videosLines[i].trim();
+    if (path) captions[path] = captionsLines[i].trim();
+  }
+  if (uploadedFileNames.length > 0) {
+    const uploadedSet = new Set(uploadedFileNames);
+    const unknownRefs = Object.keys(captions).filter((k) => !uploadedSet.has(k));
+    if (unknownRefs.length > 0) {
+      return {
+        captions: {},
+        error: `videos.txt references file(s) not in the uploaded videos: ${unknownRefs.slice(0, 5).join(", ")}${unknownRefs.length > 5 ? "…" : ""}.`,
+      };
+    }
+  }
+  return { captions, error: null };
+}
+
+/** Parse CSV with video_name,caption columns. */
+function parseCaptionCsv(
   text: string,
   uploadedFileNames: string[]
 ): { captions: Record<string, string>; error: string | null } {
-  if (uploadedFileNames.length === 0) {
-    return {
-      captions: {},
-      error: "Upload videos first so captions can be matched by order (one line per video, alphabetical).",
-    };
+  const lines = text.split(/\r?\n/).filter((s) => s.trim());
+  if (lines.length < 2) {
+    return { captions: {}, error: "CSV must have a header row and at least one data row." };
   }
-  const lines = text.split(/\r?\n/).map((s) => s.trim());
-  const sortedNames = [...uploadedFileNames].sort();
+  const headerParts = parseCsvLine(lines[0]).map((s) => s.trim().toLowerCase());
+  const vidIdx = headerParts.includes("video_name") ? headerParts.indexOf("video_name") : 0;
+  const capIdx = headerParts.includes("caption") ? headerParts.indexOf("caption") : 1;
   const captions: Record<string, string> = {};
-  for (let i = 0; i < sortedNames.length; i++) {
-    captions[sortedNames[i]] = i < lines.length ? lines[i] : "";
+  for (let i = 1; i < lines.length; i++) {
+    const row = parseCsvLine(lines[i]);
+    const path = row[vidIdx]?.trim();
+    const cap = row[capIdx]?.trim() ?? "";
+    if (path) captions[path] = cap;
+  }
+  if (uploadedFileNames.length > 0) {
+    const uploadedSet = new Set(uploadedFileNames);
+    const unknownRefs = Object.keys(captions).filter((k) => !uploadedSet.has(k));
+    if (unknownRefs.length > 0) {
+      return {
+        captions: {},
+        error: `CSV references file(s) not in the uploaded videos: ${unknownRefs.slice(0, 5).join(", ")}${unknownRefs.length > 5 ? "…" : ""}.`,
+      };
+    }
   }
   return { captions, error: null };
+}
+
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if ((c === "," && !inQuotes) || c === "\n") {
+      out.push(cur);
+      cur = "";
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
 }
 
 interface CreateDatasetModalProps {
@@ -123,8 +185,13 @@ export default function CreateDatasetModal({
   const [fileNames, setFileNames] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [captionFormat, setCaptionFormat] = useState<"json" | "txt" | "csv">("json");
   const [captionMap, setCaptionMap] = useState<Record<string, string> | null>(null);
   const [captionFileName, setCaptionFileName] = useState<string | null>(null);
+  const [videosTxtLines, setVideosTxtLines] = useState<string[] | null>(null);
+  const [videosTxtFileName, setVideosTxtFileName] = useState<string | null>(null);
+  const [captionsTxtLines, setCaptionsTxtLines] = useState<string[] | null>(null);
+  const [captionsTxtFileName, setCaptionsTxtFileName] = useState<string | null>(null);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -142,42 +209,148 @@ export default function CreateDatasetModal({
       setRawPath("");
       setFileNames([]);
       setValidationError(null);
+      setCaptionFormat("json");
       setCaptionMap(null);
       setCaptionFileName(null);
+      setVideosTxtLines(null);
+      setVideosTxtFileName(null);
+      setCaptionsTxtLines(null);
+      setCaptionsTxtFileName(null);
       onClose();
     }
   };
 
-  const handleCaptionFileChange = async (files: File[]) => {
+  const txtCaptionMap = useMemo(() => {
+    if (!videosTxtLines || !captionsTxtLines) return null;
+    const { captions, error } = parseVideosCaptionsTxt(
+      videosTxtLines,
+      captionsTxtLines,
+      fileNames
+    );
+    if (error) return null;
+    return Object.keys(captions).length > 0 ? captions : null;
+  }, [videosTxtLines, captionsTxtLines, fileNames]);
+
+  useEffect(() => {
+    if (
+      captionFormat === "txt" &&
+      videosTxtLines &&
+      captionsTxtLines &&
+      fileNames.length > 0
+    ) {
+      const { error } = parseVideosCaptionsTxt(
+        videosTxtLines,
+        captionsTxtLines,
+        fileNames
+      );
+      setValidationError(error ?? null);
+    }
+  }, [captionFormat, videosTxtLines, captionsTxtLines, fileNames]);
+
+  const effectiveCaptionMap =
+    captionFormat === "txt" ? txtCaptionMap : captionMap;
+
+  const handleCaptionJsonChange = async (files: File[]) => {
     setValidationError(null);
     setCaptionMap(null);
     setCaptionFileName(null);
     if (files.length === 0) return;
     const file = files[0];
-    const lower = file.name.toLowerCase();
-    const isJson = lower.endsWith(".json");
-    const isTxt = lower.endsWith(".txt");
-    if (!isJson && !isTxt) {
-      setValidationError("Caption file must be .json (e.g. videos2caption.json) or .txt (one caption per line, alphabetical order).");
-      return;
-    }
     let text: string;
     try {
       text = await file.text();
     } catch {
-      setValidationError("Could not read the caption file.");
+      setValidationError("Could not read the file.");
       return;
     }
     const uploaded = fileNames.length > 0 ? fileNames : [];
-    const { captions, error } = isTxt
-      ? parseCaptionTxt(text, uploaded)
-      : parseVideos2Caption(text, uploaded);
+    const { captions, error } = parseVideos2Caption(text, uploaded);
     if (error) {
       setValidationError(error);
       return;
     }
     setCaptionMap(captions);
     setCaptionFileName(file.name);
+  };
+
+  const handleVideosTxtChange = async (files: File[]) => {
+    setValidationError(null);
+    setVideosTxtLines(null);
+    setVideosTxtFileName(null);
+    if (files.length === 0) return;
+    try {
+      const text = await files[0].text();
+      const lines = text.split(/\r?\n/).map((s) => s.trim());
+      setVideosTxtLines(lines);
+      setVideosTxtFileName(files[0].name);
+      if (captionsTxtLines && fileNames.length > 0) {
+        const { error } = parseVideosCaptionsTxt(
+          lines,
+          captionsTxtLines,
+          fileNames
+        );
+        if (error) setValidationError(error);
+      }
+    } catch {
+      setValidationError("Could not read videos.txt.");
+    }
+  };
+
+  const handleCaptionsTxtChange = async (files: File[]) => {
+    setValidationError(null);
+    setCaptionsTxtLines(null);
+    setCaptionsTxtFileName(null);
+    if (files.length === 0) return;
+    try {
+      const text = await files[0].text();
+      const lines = text.split(/\r?\n/).map((s) => s.trim());
+      setCaptionsTxtLines(lines);
+      setCaptionsTxtFileName(files[0].name);
+      if (videosTxtLines && fileNames.length > 0) {
+        const { error } = parseVideosCaptionsTxt(
+          videosTxtLines,
+          lines,
+          fileNames
+        );
+        if (error) setValidationError(error);
+      }
+    } catch {
+      setValidationError("Could not read captions.txt.");
+    }
+  };
+
+  const handleCaptionCsvChange = async (files: File[]) => {
+    setValidationError(null);
+    setCaptionMap(null);
+    setCaptionFileName(null);
+    if (files.length === 0) return;
+    const file = files[0];
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      setValidationError("Could not read the file.");
+      return;
+    }
+    const uploaded = fileNames.length > 0 ? fileNames : [];
+    const { captions, error } = parseCaptionCsv(text, uploaded);
+    if (error) {
+      setValidationError(error);
+      return;
+    }
+    setCaptionMap(captions);
+    setCaptionFileName(file.name);
+  };
+
+  const handleCaptionFormatChange = (format: string) => {
+    setCaptionFormat(format as "json" | "txt" | "csv");
+    setValidationError(null);
+    setCaptionMap(null);
+    setCaptionFileName(null);
+    setVideosTxtLines(null);
+    setVideosTxtFileName(null);
+    setCaptionsTxtLines(null);
+    setCaptionsTxtFileName(null);
   };
 
   const handleMediaChange = async (files: File[]) => {
@@ -219,13 +392,22 @@ export default function CreateDatasetModal({
       return;
     }
 
-    if (captionFileName && !captionMap) {
-      setValidationError("Caption file has errors. Fix or remove it before creating the dataset.");
-      return;
+    if (captionFormat === "json" || captionFormat === "csv") {
+      if (captionFileName && !captionMap) {
+        setValidationError("Caption file has errors. Fix or remove it before creating the dataset.");
+        return;
+      }
+    } else if (captionFormat === "txt" && (videosTxtFileName || captionsTxtFileName)) {
+      if (!videosTxtFileName || !captionsTxtFileName) {
+        setValidationError("Upload both videos.txt and captions.txt to use TXT captions.");
+        return;
+      }
+      if (validationError) return;
     }
 
-    if (captionMap && Object.keys(captionMap).length > 0) {
-      const missing = fileNames.filter((fn) => !(fn in captionMap));
+    const finalCaptionMap = effectiveCaptionMap && Object.keys(effectiveCaptionMap).length > 0 ? effectiveCaptionMap : null;
+    if (finalCaptionMap) {
+      const missing = fileNames.filter((fn) => !(fn in finalCaptionMap));
       if (missing.length > 0) {
         const list = missing.length <= 5
           ? missing.join(", ")
@@ -243,7 +425,7 @@ export default function CreateDatasetModal({
         name: name.trim(),
         upload_path: rawPath,
         file_names: fileNames,
-        ...(captionMap && Object.keys(captionMap).length > 0 ? { captions: captionMap } : {}),
+        ...(finalCaptionMap ? { captions: finalCaptionMap } : {}),
       });
       onSuccess();
       handleClose();
@@ -312,21 +494,85 @@ export default function CreateDatasetModal({
               />
             </div>
             <div className={formStyles.formRow}>
-              <label>Captions (optional)</label>
-              <UploadZone
-                label="Upload captions (.json or .txt)"
-                hint=".json: videos2caption format. .txt: one caption per line, same order as videos (A–Z)"
-                accept=".json,.txt,application/json,text/plain"
-                value={captionFileName ? "1" : ""}
-                fileName={captionFileName ?? undefined}
-                onFileChange={handleCaptionFileChange}
-                onClear={() => {
-                  setCaptionMap(null);
-                  setCaptionFileName(null);
-                  setValidationError(null);
-                }}
-                disabled={isSubmitting}
-              />
+              <div style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
+                <label style={{ marginBottom: 0 }}>Captions (optional)</label>
+                <TabSwitch
+                  options={[
+                    { id: "json", label: "JSON" },
+                    { id: "txt", label: "TXT" },
+                    { id: "csv", label: "CSV" },
+                  ]}
+                  value={captionFormat}
+                  onChange={handleCaptionFormatChange}
+                  disabled={isSubmitting}
+                />
+              </div>
+              {captionFormat === "json" && (
+                <UploadZone
+                  label="Upload videos2caption.json"
+                  hint="Array of { path, cap } or object mapping file names to captions"
+                  accept=".json,application/json"
+                  value={captionFileName ? "1" : ""}
+                  fileName={captionFileName ?? undefined}
+                  onFileChange={handleCaptionJsonChange}
+                  onClear={() => {
+                    setCaptionMap(null);
+                    setCaptionFileName(null);
+                    setValidationError(null);
+                  }}
+                  disabled={isSubmitting}
+                />
+              )}
+              {captionFormat === "txt" && (
+                <>
+                  <div className={formStyles.row} style={{gap: '15px'}}>
+                  <UploadZone
+                    label="Upload videos.txt"
+                    hint="One video path per line (same order as captions.txt)"
+                    accept=".txt,text/plain"
+                    value={videosTxtFileName ? "1" : ""}
+                    fileName={videosTxtFileName ?? undefined}
+                    onFileChange={handleVideosTxtChange}
+                    onClear={() => {
+                      setVideosTxtLines(null);
+                      setVideosTxtFileName(null);
+                      setValidationError(null);
+                    }}
+                    disabled={isSubmitting}
+                  />
+                  <UploadZone
+                    label="Upload captions.txt"
+                    hint="One caption per line (same order as videos.txt)"
+                    accept=".txt,text/plain"
+                    value={captionsTxtFileName ? "1" : ""}
+                    fileName={captionsTxtFileName ?? undefined}
+                    onFileChange={handleCaptionsTxtChange}
+                    onClear={() => {
+                      setCaptionsTxtLines(null);
+                      setCaptionsTxtFileName(null);
+                      setValidationError(null);
+                    }}
+                    disabled={isSubmitting}
+                  />
+                  </div>
+                </>
+              )}
+              {captionFormat === "csv" && (
+                <UploadZone
+                  label="Upload captions.csv"
+                  hint="CSV with video_name and caption columns"
+                  accept=".csv,text/csv"
+                  value={captionFileName ? "1" : ""}
+                  fileName={captionFileName ?? undefined}
+                  onFileChange={handleCaptionCsvChange}
+                  onClear={() => {
+                    setCaptionMap(null);
+                    setCaptionFileName(null);
+                    setValidationError(null);
+                  }}
+                  disabled={isSubmitting}
+                />
+              )}
             </div>
             {validationError && (
               <div
@@ -340,7 +586,7 @@ export default function CreateDatasetModal({
               <button
                 type="submit"
                 className={`${buttonStyles.btn} ${buttonStyles.btnPrimary}`}
-                disabled={isSubmitting || isUploading || fileNames.length === 0}
+                disabled={isSubmitting || isUploading || fileNames.length === 0 || !name.trim()}
               >
                 {isSubmitting ? "Creating…" : "Create Dataset"}
               </button>

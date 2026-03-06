@@ -6,7 +6,7 @@
   margin-bottom: .85rem;
 }
 
-.settingsRow {
+.row {
   display: flex;
   flex-direction: row;
   justify-content: space-between;
@@ -14,7 +14,7 @@
   margin-bottom: .85rem;
 }
 
-.settingsRow label {
+.row label {
   font-size: .8rem;
   color: var(--text-dim);
   padding-left: 3px;

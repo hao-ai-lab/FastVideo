@@ -21,6 +21,8 @@ interface UploadZoneProps {
   textValue?: string;
   onTextChange?: (value: string) => void;
   textPlaceholder?: string;
+  className?: string;
+  style?: React.CSSProperties;
 }
 
 export default function UploadZone({
@@ -39,6 +41,8 @@ export default function UploadZone({
   textValue = "",
   onTextChange,
   textPlaceholder,
+  className,
+  style,
 }: UploadZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -62,7 +66,8 @@ export default function UploadZone({
 
   return (
     <div
-      className={`${uploadStyles.uploadZone} ${hasContent ? uploadStyles.hasFile : ""}`}
+      className={`${uploadStyles.uploadZone} ${hasContent ? uploadStyles.hasFile : ""} ${className ?? ""}`.trim()}
+      style={style}
       onClick={!textInput ? handleClick : undefined}
       role={!textInput ? "button" : undefined}
       tabIndex={!textInput ? 0 : undefined}

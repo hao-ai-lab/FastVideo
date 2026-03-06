@@ -18,7 +18,7 @@ export default function DatasetCard({
   onSelect,
 }: DatasetCardProps) {
   const [isLoading, setIsLoading] = useState(false);
-  const { activeDatasetId } = useActiveDataset();
+  const { activeDatasetId, setActiveDatasetId } = useActiveDataset();
   const isSelected = activeDatasetId === dataset.id;
 
   const handleDelete = async (e: React.MouseEvent) => {
@@ -29,6 +29,7 @@ export default function DatasetCard({
     setIsLoading(true);
     try {
       await deleteDataset(dataset.id);
+      if (activeDatasetId === dataset.id) setActiveDatasetId(null);
       onUpdated();
     } catch (err) {
       console.error("Failed to delete dataset:", err);
