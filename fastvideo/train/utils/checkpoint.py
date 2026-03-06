@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -401,12 +402,14 @@ class CheckpointManager:
         output_dir: str,
         config: CheckpointConfig,
         callbacks: Any | None = None,
+        raw_config: dict[str, Any] | None = None,
     ) -> None:
         self.method = method
         self.dataloader = dataloader
         self.output_dir = str(output_dir)
         self.config = config
         self._callbacks = callbacks
+        self._raw_config = raw_config
         self._last_saved_step: int | None = None
 
     def _build_states(self) -> dict[str, Any]:
@@ -453,12 +456,38 @@ class CheckpointManager:
 
         states = self._build_states()
         if _rank() == 0:
-            logger.info("Saving Phase 2 checkpoint to %s", checkpoint_dir)
+            logger.info(
+                "Saving checkpoint to %s", checkpoint_dir,
+            )
+            self._write_metadata(checkpoint_dir, step)
         dcp.save(states, checkpoint_id=str(dcp_dir))
         _barrier()
         self._last_saved_step = step
 
         self._cleanup_old_checkpoints()
+
+    def _write_metadata(
+        self, checkpoint_dir: Path, step: int,
+    ) -> None:
+        metadata: dict[str, Any] = {"step": step}
+        if self._raw_config is not None:
+            metadata["config"] = self._raw_config
+        meta_path = checkpoint_dir / "metadata.json"
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+
+    @staticmethod
+    def load_metadata(
+        checkpoint_dir: str | Path,
+    ) -> dict[str, Any]:
+        """Read ``metadata.json`` from a checkpoint dir."""
+        meta_path = Path(checkpoint_dir) / "metadata.json"
+        if not meta_path.is_file():
+            raise FileNotFoundError(
+                f"No metadata.json in {checkpoint_dir}"
+            )
+        with open(meta_path, encoding="utf-8") as f:
+            return json.load(f)  # type: ignore[no-any-return]
 
     def maybe_resume(self, *, resume_from_checkpoint: str | None) -> int | None:
         if not resume_from_checkpoint:
