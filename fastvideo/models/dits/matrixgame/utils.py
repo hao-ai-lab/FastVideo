@@ -4,11 +4,17 @@ import asyncio
 import os
 import random
 
+import numpy as np
 import torch
 from PIL import Image
 
 from fastvideo.distributed.parallel_state import get_local_torch_device
 from fastvideo.utils import logger
+
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 
 
 CAM_VALUE = 0.1
@@ -34,6 +40,21 @@ KEYBOARD_MAP_7 = {  # templerun_distilled_model: still/w/s/left/right/a/d
     "d": [0, 0, 0, 0, 0, 0, 1],  # d
 }
 KEYBOARD_MAP = KEYBOARD_MAP_4  # Default for backward compatibility
+
+SOLARIS_MOVEMENT_KEY_INDICES = {
+    "W": 0,  # forward
+    "S": 1,  # back
+    "A": 2,  # left
+    "D": 3,  # right
+}
+
+def _require_cv2() -> bool:
+    if cv2 is None:
+        logger.warning(
+            "OpenCV is not available; skipping MatrixGame validation overlay."
+        )
+        return False
+    return True
 
 def expand_action_to_frames(action: dict, num_frames: int) -> tuple[torch.Tensor, torch.Tensor]:
     result = {}
@@ -417,3 +438,223 @@ def parse_config(config, mode="universal"):
 #     
 #     export_to_video(out_video, output_video, fps=fps)
 #     logger.info(f"Video saved to {output_video}")
+
+
+def _matrixgame_overlay_keys_from_keyboard(
+    keyboard_frame: np.ndarray | torch.Tensor,
+) -> dict[str, bool]:
+    vec = np.asarray(keyboard_frame, dtype=np.float32).reshape(-1)
+    dim = vec.shape[0]
+
+    if dim >= 23:
+        return {
+            key: bool(vec[idx] > 0.5)
+            for key, idx in SOLARIS_MOVEMENT_KEY_INDICES.items()
+        }
+    if dim == 7:
+        return {
+            "W": bool(vec[1] > 0.5),
+            "S": bool(vec[2] > 0.5),
+            "A": bool(vec[5] > 0.5),
+            "D": bool(vec[6] > 0.5),
+        }
+    if dim >= 6:
+        return {
+            "W": bool(vec[0] > 0.5),
+            "S": bool(vec[1] > 0.5),
+            "A": bool(vec[2] > 0.5),
+            "D": bool(vec[3] > 0.5),
+        }
+    if dim == 4:
+        return {
+            "W": bool(vec[0] > 0.5),
+            "S": bool(vec[1] > 0.5),
+            "A": bool(vec[2] > 0.5),
+            "D": bool(vec[3] > 0.5),
+        }
+    if dim == 2:
+        return {
+            "W": bool(vec[0] > 0.5),
+            "S": bool(vec[1] > 0.5),
+            "A": False,
+            "D": False,
+        }
+    return {"W": False, "S": False, "A": False, "D": False}
+
+
+def draw_rounded_rectangle(
+    image: np.ndarray,
+    top_left: tuple[int, int],
+    bottom_right: tuple[int, int],
+    color: tuple[int, int, int],
+    radius: int = 10,
+    alpha: float = 0.5,
+) -> None:
+    if not _require_cv2():
+        return
+
+    overlay = image.copy()
+    x1, y1 = top_left
+    x2, y2 = bottom_right
+
+    cv2.rectangle(overlay, (x1 + radius, y1), (x2 - radius, y2), color, -1)
+    cv2.rectangle(overlay, (x1, y1 + radius), (x2, y2 - radius), color, -1)
+    cv2.ellipse(
+        overlay, (x1 + radius, y1 + radius), (radius, radius), 180, 0, 90,
+        color, -1
+    )
+    cv2.ellipse(
+        overlay, (x2 - radius, y1 + radius), (radius, radius), 270, 0, 90,
+        color, -1
+    )
+    cv2.ellipse(
+        overlay, (x1 + radius, y2 - radius), (radius, radius), 90, 0, 90,
+        color, -1
+    )
+    cv2.ellipse(
+        overlay, (x2 - radius, y2 - radius), (radius, radius), 0, 0, 90,
+        color, -1
+    )
+    cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0, image)
+
+
+def draw_keys_on_frame(
+    frame: np.ndarray,
+    keys: dict[str, bool],
+    key_size: tuple[int, int] = (30, 30),
+    top_margin: int = 15,
+) -> None:
+    if not _require_cv2():
+        return
+
+    left_margin = 15
+    gap = 3
+    key_positions = {
+        "W": (left_margin + key_size[0] + gap, top_margin),
+        "A": (left_margin, top_margin + key_size[1] + gap),
+        "S": (left_margin + key_size[0] + gap, top_margin + key_size[1] + gap),
+        "D": (
+            left_margin + (key_size[0] + gap) * 2,
+            top_margin + key_size[1] + gap,
+        ),
+    }
+
+    for key, (x, y) in key_positions.items():
+        pressed = keys.get(key, False)
+        color = (0, 255, 0) if pressed else (200, 200, 200)
+        alpha = 0.8 if pressed else 0.5
+        draw_rounded_rectangle(
+            frame,
+            (x, y),
+            (x + key_size[0], y + key_size[1]),
+            color,
+            radius=5,
+            alpha=alpha,
+        )
+        text_size = cv2.getTextSize(
+            key, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
+        )[0]
+        text_x = x + (key_size[0] - text_size[0]) // 2
+        text_y = y + (key_size[1] + text_size[1]) // 2
+        cv2.putText(
+            frame,
+            key,
+            (text_x, text_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 0, 0),
+            1,
+        )
+
+
+def draw_mouse_on_frame(
+    frame: np.ndarray,
+    yaw: float,
+    pitch: float,
+    top_margin: int = 15,
+) -> None:
+    if not _require_cv2():
+        return
+
+    _, width, _ = frame.shape
+    right_margin = 15
+    crosshair_radius = 25
+    crosshair_x = width - right_margin - crosshair_radius
+    crosshair_y = top_margin + crosshair_radius
+
+    dx = int(-yaw * crosshair_radius * 8)
+    dy = int(pitch * crosshair_radius * 8)
+    max_arrow = crosshair_radius - 5
+    dx = max(-max_arrow, min(max_arrow, dx))
+    dy = max(-max_arrow, min(max_arrow, dy))
+
+    cv2.circle(frame, (crosshair_x, crosshair_y), crosshair_radius,
+               (50, 50, 50), -1)
+    cv2.circle(frame, (crosshair_x, crosshair_y), crosshair_radius,
+               (200, 200, 200), 1)
+    cv2.line(
+        frame,
+        (crosshair_x - crosshair_radius + 5, crosshair_y),
+        (crosshair_x + crosshair_radius - 5, crosshair_y),
+        (100, 100, 100),
+        1,
+    )
+    cv2.line(
+        frame,
+        (crosshair_x, crosshair_y - crosshair_radius + 5),
+        (crosshair_x, crosshair_y + crosshair_radius - 5),
+        (100, 100, 100),
+        1,
+    )
+
+    if abs(dx) > 1 or abs(dy) > 1:
+        cv2.arrowedLine(
+            frame,
+            (crosshair_x, crosshair_y),
+            (crosshair_x + dx, crosshair_y + dy),
+            (0, 255, 0),
+            2,
+            tipLength=0.3,
+        )
+
+
+def overlay_validation_actions_on_frames(
+    frames: list[np.ndarray],
+    keyboard_cond: np.ndarray | torch.Tensor | None = None,
+    mouse_cond: np.ndarray | torch.Tensor | None = None,
+) -> list[np.ndarray]:
+    if (keyboard_cond is None and mouse_cond is None) or not _require_cv2():
+        return frames
+
+    if keyboard_cond is not None and torch.is_tensor(keyboard_cond):
+        keyboard_cond = keyboard_cond.detach().cpu().float().numpy()
+    if mouse_cond is not None and torch.is_tensor(mouse_cond):
+        mouse_cond = mouse_cond.detach().cpu().float().numpy()
+
+    if keyboard_cond is not None:
+        keyboard_cond = np.asarray(keyboard_cond, dtype=np.float32)
+        if keyboard_cond.ndim == 3 and keyboard_cond.shape[0] == 1:
+            keyboard_cond = keyboard_cond[0]
+    if mouse_cond is not None:
+        mouse_cond = np.asarray(mouse_cond, dtype=np.float32)
+        if mouse_cond.ndim == 3 and mouse_cond.shape[0] == 1:
+            mouse_cond = mouse_cond[0]
+
+    processed_frames: list[np.ndarray] = []
+    for frame_idx, frame in enumerate(frames):
+        frame = np.ascontiguousarray(frame.copy())
+
+        if keyboard_cond is not None and frame_idx < len(keyboard_cond):
+            draw_keys_on_frame(
+                frame,
+                _matrixgame_overlay_keys_from_keyboard(keyboard_cond[frame_idx]),
+            )
+
+        if mouse_cond is not None and frame_idx < len(mouse_cond):
+            yaw = float(mouse_cond[frame_idx, 0])
+            pitch = float(mouse_cond[frame_idx, 1])
+            draw_mouse_on_frame(frame, yaw=yaw, pitch=pitch)
+
+        processed_frames.append(frame)
+
+    return processed_frames
