@@ -1,81 +1,81 @@
 /* ── Form ─────────────────────────────────────────────────── */
 .formRow {
-  display: flex;
-  flex-direction: column;
-  gap: .35rem;
-  margin-bottom: .85rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+	margin-bottom: 0.85rem;
 }
 
 .row {
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: .85rem;
+	display: flex;
+	flex-direction: row;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 0.85rem;
 }
 
 .row label {
-  font-size: .8rem;
-  color: var(--text-dim);
-  padding-left: 3px;
-  letter-spacing: .04em;
-  margin-bottom: 0;
+	font-size: 0.8rem;
+	color: var(--text-dim);
+	padding-left: 3px;
+	letter-spacing: 0.04em;
+	margin-bottom: 0;
 }
 
 .formRow label {
-  font-size: .8rem;
-  color: var(--text-dim);
-  padding-left: 3px;
-  letter-spacing: .04em;
+	font-size: 0.8rem;
+	color: var(--text-dim);
+	padding-left: 3px;
+	letter-spacing: 0.04em;
 }
 
 .helperText {
-  font-size: .75rem;
-  color: var(--text-dim);
-  margin-top: .2rem;
+	font-size: 0.75rem;
+	color: var(--text-dim);
+	margin-top: 0.2rem;
 }
 
 .clearLink {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: var(--accent-h);
-  cursor: pointer;
-  text-decoration: none;
+	background: none;
+	border: none;
+	padding: 0;
+	font: inherit;
+	color: var(--accent-h);
+	cursor: pointer;
+	text-decoration: none;
 }
 
 .clearLink:hover:not(:disabled) {
-  color: var(--accent);
+	color: var(--accent);
 }
 
 .clearLink:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+	opacity: 0.5;
+	cursor: not-allowed;
 }
 
 /* ── Advanced settings ──────────────────────────────────── */
 .advancedSettings {
-  margin-bottom: 1rem;
+	margin-bottom: 1rem;
 }
 
 .advancedSettings summary {
-  cursor: pointer;
-  font-size: .85rem;
-  color: var(--accent-h);
-  user-select: none;
-  margin-bottom: .5rem;
+	cursor: pointer;
+	font-size: 0.85rem;
+	color: var(--accent-h);
+	user-select: none;
+	margin-bottom: 0.5rem;
 }
 
 .settingsGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: .5rem .75rem;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+	gap: 0.5rem 0.75rem;
 }
 
 /* Responsive */
 @media (max-width: 520px) {
-  .settingsGrid {
-    grid-template-columns: 1fr 1fr;
-  }
+	.settingsGrid {
+		grid-template-columns: 1fr 1fr;
+	}
 }

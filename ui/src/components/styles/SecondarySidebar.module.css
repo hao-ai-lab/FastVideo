@@ -1,166 +1,169 @@
 /* ── Secondary Sidebar (right) ─────────────────────────────── */
 .sidebar {
-  position: fixed;
-  top: var(--header-height);
-  right: 0;
-  bottom: 0;
-  display: flex;
-  flex-direction: column;
-  max-height: calc(100vh - var(--header-height));
-  min-width: 280px;
-  background: var(--surface);
-  border-left: 1px solid var(--border);
-  flex-shrink: 0;
-  z-index: 50;
+	position: fixed;
+	top: var(--header-height);
+	right: 0;
+	bottom: 0;
+	display: flex;
+	flex-direction: column;
+	max-height: calc(100vh - var(--header-height));
+	min-width: 280px;
+	background: var(--surface);
+	border-left: 1px solid var(--border);
+	flex-shrink: 0;
+	z-index: 50;
 }
 
 .resizeHandle {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 6px;
-  bottom: 0;
-  cursor: col-resize;
-  z-index: 1;
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 6px;
+	bottom: 0;
+	cursor: col-resize;
+	z-index: 1;
 }
 
 .resizeHandle:hover,
 .resizeHandleActive {
-  background: rgba(99, 102, 241, 0.2);
+	background: rgba(99, 102, 241, 0.2);
 }
 
 .resizeHandle::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 2px;
-  height: 24px;
-  background: var(--border);
-  border-radius: 1px;
-  opacity: 0;
-  transition: opacity 0.15s;
+	content: "";
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	width: 2px;
+	height: 24px;
+	background: var(--border);
+	border-radius: 1px;
+	opacity: 0;
+	transition: opacity 0.15s;
 }
 
 .resizeHandle:hover::after,
 .resizeHandleActive::after {
-  opacity: 1;
+	opacity: 1;
 }
 
 .header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 1rem 1.25rem;
+	border-bottom: 1px solid var(--border);
+	flex-shrink: 0;
 }
 
 .title {
-  font-size: 1rem;
-  font-weight: 600;
-  margin: 0;
-  color: var(--text);
+	font-size: 1rem;
+	font-weight: 600;
+	margin: 0;
+	color: var(--text);
 }
 
 .headerActions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
 }
 
 .closeBtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.4rem;
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  cursor: pointer;
-  border-radius: var(--radius);
-  transition: color 0.15s, background 0.15s;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0.4rem;
+	background: none;
+	border: none;
+	color: var(--text-dim);
+	cursor: pointer;
+	border-radius: var(--radius);
+	transition:
+		color 0.15s,
+		background 0.15s;
 }
 
 .closeBtn:hover {
-  color: var(--text);
-  background: rgba(99, 102, 241, 0.08);
+	color: var(--text);
+	background: rgba(99, 102, 241, 0.08);
 }
 
 .closeBtn svg {
-  width: 18px;
-  height: 18px;
+	width: 18px;
+	height: 18px;
 }
 
 .consoleSection {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  padding: 1rem 1.25rem;
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	padding: 1rem 1.25rem;
 }
 
 .consoleHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 0.5rem;
 }
 
 .consoleTitle {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+	font-size: 0.8rem;
+	font-weight: 600;
+	color: var(--text-dim);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
 }
 
 .consoleStatus {
-  font-size: 0.7rem;
-  color: var(--green);
-  font-weight: 500;
+	font-size: 0.7rem;
+	color: var(--green);
+	font-weight: 500;
 }
 
 .consoleOutput {
-  flex: 1;
-  min-height: 0;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.75rem;
-  font-family: "Monaco", "Menlo", "Ubuntu Mono", "Consolas", "source-code-pro",
-    monospace;
-  font-size: 0.75rem;
-  line-height: 1.5;
-  color: var(--text);
-  overflow-y: auto;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  margin: 0;
+	flex: 1;
+	min-height: 0;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 0.75rem;
+	font-family:
+		"Monaco", "Menlo", "Ubuntu Mono", "Consolas", "source-code-pro",
+		monospace;
+	font-size: 0.75rem;
+	line-height: 1.5;
+	color: var(--text);
+	overflow-y: auto;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	word-wrap: break-word;
+	margin: 0;
 }
 
 .consoleEmpty {
-  color: var(--text-dim);
-  font-style: italic;
+	color: var(--text-dim);
+	font-style: italic;
 }
 
 .consoleOutput::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+	width: 8px;
+	height: 8px;
 }
 
 .consoleOutput::-webkit-scrollbar-track {
-  background: var(--bg);
-  border-radius: 4px;
+	background: var(--bg);
+	border-radius: 4px;
 }
 
 .consoleOutput::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
+	background: var(--border);
+	border-radius: 4px;
 }
 
 .consoleOutput::-webkit-scrollbar-thumb:hover {
-  background: var(--text-dim);
+	background: var(--text-dim);
 }

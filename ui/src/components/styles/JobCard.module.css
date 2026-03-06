@@ -1,74 +1,73 @@
 /* ── Job Card ─────────────────────────────────────────────── */
 .jobCard {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1rem 1.15rem;
-  margin-bottom: .75rem;
-  display: flex;
-  flex-direction: column;
-  gap: .6rem;
-  cursor: pointer;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 1rem 1.15rem;
+	margin-bottom: 0.75rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.6rem;
+	cursor: pointer;
 }
 
 .jobCard:last-child {
-  margin-bottom: 0;
+	margin-bottom: 0;
 }
 
 .jobCardSelected {
-  border-color: var(--accent);
-  background: rgba(99, 102, 241, 0.06);
+	border-color: var(--accent);
+	background: rgba(99, 102, 241, 0.06);
 }
 
 .jobHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: .5rem;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.5rem;
 }
 
 .jobModel {
-  font-weight: 600;
-  font-size: .95rem;
+	font-weight: 600;
+	font-size: 0.95rem;
 }
 
 .jobPrompt {
-  font-size: .85rem;
-  color: var(--text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
+	font-size: 0.85rem;
+	color: var(--text-dim);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 100%;
 }
 
 .jobMeta {
-  font-size: .75rem;
-  color: var(--text-dim);
-  display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-  align-items: center;
+	font-size: 0.75rem;
+	color: var(--text-dim);
+	display: flex;
+	gap: 1rem;
+	flex-wrap: wrap;
+	align-items: center;
 }
 
 .jobActions {
-  display: flex;
-  gap: .4rem;
-  flex-wrap: wrap;
-  align-items: center;
+	display: flex;
+	gap: 0.4rem;
+	flex-wrap: wrap;
+	align-items: center;
 }
 
 .jobActions .btn {
-  font-size: .75rem;
-  padding: .3rem .7rem;
+	font-size: 0.75rem;
+	padding: 0.3rem 0.7rem;
 }
 
 .jobError {
-  font-size: .8rem;
-  color: var(--red);
-  background: rgba(239, 68, 68, .08);
-  border-radius: var(--radius);
-  padding: .4rem .6rem;
-  word-break: break-word;
+	font-size: 0.8rem;
+	color: var(--red);
+	background: rgba(239, 68, 68, 0.08);
+	border-radius: var(--radius);
+	padding: 0.4rem 0.6rem;
+	word-break: break-word;
 }
-

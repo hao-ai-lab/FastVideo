@@ -1,76 +1,76 @@
-'use client';
+"use client";
 
 import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
+	createContext,
+	useCallback,
+	useContext,
+	useEffect,
+	useState,
 } from "react";
 
 export type ActiveTab =
-  | "inference"
-  | "finetuning"
-  | "distillation"
-  | "lora"
-  | "datasets"
-  | "settings";
+	| "inference"
+	| "finetuning"
+	| "distillation"
+	| "lora"
+	| "datasets"
+	| "settings";
 
 interface ActiveTabContextValue {
-  activeTab: ActiveTab;
-  setActiveTab: (tab: ActiveTab) => void;
-  headerActions: React.ReactNode[];
-  setHeaderActions: (actions: React.ReactNode[]) => void;
+	activeTab: ActiveTab;
+	setActiveTab: (tab: ActiveTab) => void;
+	headerActions: React.ReactNode[];
+	setHeaderActions: (actions: React.ReactNode[]) => void;
 }
 
 const ActiveTabContext = createContext<ActiveTabContextValue | undefined>(
-  undefined
+	undefined,
 );
 
 const TAB_TITLES: Record<ActiveTab, string> = {
-  inference: "Inference",
-  finetuning: "Finetuning",
-  distillation: "Distillation",
-  lora: "LoRA",
-  datasets: "Datasets",
-  settings: "Settings",
+	inference: "Inference",
+	finetuning: "Finetuning",
+	distillation: "Distillation",
+	lora: "LoRA",
+	datasets: "Datasets",
+	settings: "Settings",
 };
 
 export function ActiveTabProvider({ children }: { children: React.ReactNode }) {
-  const [activeTab, setActiveTab] = useState<ActiveTab>("inference");
-  const [headerActions, setHeaderActionsState] = useState<React.ReactNode[]>(
-    []
-  );
+	const [activeTab, setActiveTab] = useState<ActiveTab>("inference");
+	const [headerActions, setHeaderActionsState] = useState<React.ReactNode[]>(
+		[],
+	);
 
-  const setHeaderActions = useCallback((actions: React.ReactNode[]) => {
-    setHeaderActionsState(actions);
-  }, []);
+	const setHeaderActions = useCallback((actions: React.ReactNode[]) => {
+		setHeaderActionsState(actions);
+	}, []);
 
-  const value: ActiveTabContextValue = {
-    activeTab,
-    setActiveTab,
-    headerActions,
-    setHeaderActions,
-  };
+	const value: ActiveTabContextValue = {
+		activeTab,
+		setActiveTab,
+		headerActions,
+		setHeaderActions,
+	};
 
-  return (
-    <ActiveTabContext.Provider value={value}>
-      {children}
-    </ActiveTabContext.Provider>
-  );
+	return (
+		<ActiveTabContext.Provider value={value}>
+			{children}
+		</ActiveTabContext.Provider>
+	);
 }
 
 export function useActiveTab(): ActiveTabContextValue {
-  const ctx = useContext(ActiveTabContext);
-  if (!ctx) {
-    throw new Error("useActiveTab must be used within ActiveTabProvider");
-  }
-  return ctx;
+	const ctx = useContext(ActiveTabContext);
+	if (!ctx) {
+		throw new Error("useActiveTab must be used within ActiveTabProvider");
+	}
+	return ctx;
 }
 
 export function useHeaderTitle(): string {
-  const { activeTab } = useActiveTab();
-  return TAB_TITLES[activeTab];
+	const { activeTab } = useActiveTab();
+	return TAB_TITLES[activeTab];
 }
 
 /**
@@ -78,10 +78,10 @@ export function useHeaderTitle(): string {
  * displayed in the Header and cleared when the view unmounts.
  */
 export function useHeaderActions(actions: React.ReactNode[]): void {
-  const { setHeaderActions } = useActiveTab();
+	const { setHeaderActions } = useActiveTab();
 
-  useEffect(() => {
-    setHeaderActions(actions);
-    return () => setHeaderActions([]);
-  }, [actions, setHeaderActions]);
+	useEffect(() => {
+		setHeaderActions(actions);
+		return () => setHeaderActions([]);
+	}, [actions, setHeaderActions]);
 }
