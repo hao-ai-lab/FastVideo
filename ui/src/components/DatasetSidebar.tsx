@@ -7,6 +7,7 @@ import {
   getDatasetMediaUrl,
 } from "@/lib/api";
 import { useCallback, useEffect, useRef, useState } from "react";
+import DownloadCaptions from "./DownloadCaptions";
 import datasetStyles from "./styles/DatasetSidebar.module.css";
 
 const SIDEBAR_MIN_WIDTH = 320;
@@ -157,6 +158,7 @@ export default function DatasetSidebar({
       <div className={datasetStyles.header}>
         <h2 className={datasetStyles.title}>{dataset.name}</h2>
         <div className={datasetStyles.headerActions}>
+          <DownloadCaptions fileNames={fileNames} captions={captions} />
           <button
             type="button"
             className={datasetStyles.closeBtn}

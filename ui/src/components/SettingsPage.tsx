@@ -67,7 +67,7 @@ export default function SettingsPage() {
     <main className={layoutStyles.main}>
       <section className={cardStyles.card}>
         <h2>Behavior</h2>
-        <div className={formStyles.settingsRow}>
+        <div className={formStyles.row}>
           <label htmlFor="settings-auto-start-job">
             Auto Start Job on Create
           </label>
@@ -79,7 +79,7 @@ export default function SettingsPage() {
         </div>
         <hr style={{ margin: "1rem 0", border: "none", borderTop: "1px solid var(--border)" }} />
         <h2>Paths</h2>
-        <div className={formStyles.settingsRow}>
+        <div className={formStyles.row}>
           <label htmlFor="settings-dataset-upload-path">
             Dataset Upload Path
           </label>
