@@ -726,9 +726,9 @@ class DMD2Method(TrainingMethod):
                 cfg_uncond=self._cfg_uncond,
                 attn_kind="dense",
             )
-            real_cfg_x0 = real_cond_x0 + (
+            real_cfg_x0 = real_uncond_x0 + (
                 real_cond_x0 - real_uncond_x0
-            ) * (guidance_scale - 1)
+            ) * guidance_scale
 
             denom = torch.abs(
                 generator_pred_x0 - real_cfg_x0
