@@ -25,27 +25,18 @@ logger = init_logger(__name__)
 class GradNormClipCallback(Callback):
     """Clip gradient norms before the optimizer step.
 
-    ``max_grad_norm`` defaults to
-    ``training_config.optimizer.max_grad_norm`` when not
-    provided explicitly in the YAML config.
+    ``max_grad_norm`` must be set explicitly in the callback
+    config (``callbacks.grad_clip.max_grad_norm``).
     """
 
     def __init__(
         self,
         *,
-        max_grad_norm: float | None = None,
+        max_grad_norm: float = 0.0,
         log_grad_norms: bool = False,
     ) -> None:
-        self._max_grad_norm_override = max_grad_norm
+        self._max_grad_norm = float(max_grad_norm)
         self._log_grad_norms = bool(log_grad_norms)
-
-    @property
-    def _max_grad_norm(self) -> float:
-        if self._max_grad_norm_override is not None:
-            return float(self._max_grad_norm_override)
-        return float(
-            self.training_config.optimizer.max_grad_norm
-        )
 
     def on_before_optimizer_step(
         self,

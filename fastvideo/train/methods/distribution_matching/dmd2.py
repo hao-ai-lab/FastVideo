@@ -348,22 +348,28 @@ class DMD2Method(TrainingMethod):
             scheduler_name=student_sched,
         )
 
-        # Critic optimizer/scheduler — read from method
-        # config.
+        # Critic optimizer/scheduler — must be set in
+        # method config.
         critic_lr_raw = get_optional_float(
             self.method_config,
             "fake_score_learning_rate",
             where="method.fake_score_learning_rate",
         )
-        critic_lr = float(critic_lr_raw or 0.0)
-        if critic_lr == 0.0:
-            critic_lr = student_lr
+        if critic_lr_raw is None or critic_lr_raw == 0.0:
+            raise ValueError(
+                "method.fake_score_learning_rate must "
+                "be set to a positive value"
+            )
+        critic_lr = float(critic_lr_raw)
 
         critic_betas_raw = self.method_config.get(
             "fake_score_betas", None
         )
         if critic_betas_raw is None:
-            critic_betas_raw = tc.optimizer.betas
+            raise ValueError(
+                "method.fake_score_betas must be set "
+                "(e.g. [0.0, 0.999])"
+            )
         critic_betas = parse_betas(
             critic_betas_raw,
             where="method.fake_score_betas",
@@ -372,9 +378,12 @@ class DMD2Method(TrainingMethod):
         critic_sched_raw = self.method_config.get(
             "fake_score_lr_scheduler", None
         )
-        critic_sched = str(
-            critic_sched_raw or student_sched
-        )
+        if critic_sched_raw is None:
+            raise ValueError(
+                "method.fake_score_lr_scheduler must "
+                "be set (e.g. 'constant')"
+            )
+        critic_sched = str(critic_sched_raw)
         critic_params = [
             p
             for p in self.critic.transformer.parameters()

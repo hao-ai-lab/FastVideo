@@ -360,8 +360,6 @@ def _build_training_config(
                 o.get("lr_power", 0.0) or 0.0),
             min_lr_ratio=float(
                 o.get("min_lr_ratio", 0.5) or 0.5),
-            max_grad_norm=float(
-                o.get("max_grad_norm", 0.0) or 0.0),
         ),
         loop=TrainingLoopConfig(
             max_train_steps=int(

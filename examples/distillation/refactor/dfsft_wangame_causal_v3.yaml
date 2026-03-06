@@ -50,7 +50,6 @@ training:
     weight_decay: 1.0e-4
     lr_scheduler: constant
     lr_warmup_steps: 0
-    max_grad_norm: 1.0
 
   loop:
     max_train_steps: 20000
@@ -71,6 +70,7 @@ training:
 callbacks:
   grad_clip:
     _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
   # ema:
   #   _target_: fastvideo.train.callbacks.ema.EMACallback
   #   beta: 0.9999
