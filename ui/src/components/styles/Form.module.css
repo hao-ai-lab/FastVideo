@@ -42,7 +42,7 @@
   font: inherit;
   color: var(--accent-h);
   cursor: pointer;
-  text-decoration: underline;
+  text-decoration: none;
 }
 
 .clearLink:hover:not(:disabled) {

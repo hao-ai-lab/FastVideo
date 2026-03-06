@@ -14,6 +14,10 @@
   flex-grow: 1;
 }
 
+.uploadZone.allowBoth {
+  cursor: default;
+}
+
 .uploadZone:hover {
   border-color: var(--accent-h);
   background: var(--bg-subtle-hover, rgba(255, 255, 255, 0.04));
@@ -48,6 +52,16 @@
   font-size: 0.75rem;
   color: var(--text-dim);
   margin-top: 0.35rem;
+}
+
+.uploadZone .selectFilesTrigger {
+  cursor: pointer;
+  color: var(--accent-h);
+}
+
+.uploadZone .selectFilesTrigger:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .uploadZone .fileName {
