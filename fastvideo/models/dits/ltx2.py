@@ -2388,7 +2388,6 @@ class LTX2Transformer3DModel(BaseDiT):
             encoder_hidden_states = encoder_hidden_states[0]
         # Get SP parameters
         sp_world_size = get_sp_world_size()
-
         # Get fps for position computation
         fps = None
         try:
