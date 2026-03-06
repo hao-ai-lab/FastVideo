@@ -1,9 +1,9 @@
-# DMD2 distillation: Wan 2.1 T2V 1.3B (teacher 50-step -> student 4-step).
+# DMD2 distillation: Wan 2.1 T2V 1.3B (teacher 50-step -> student 8-step).
 #
 # - Teacher: frozen pretrained Wan 2.1 T2V 1.3B
 # - Student: trainable, initialized from the same pretrained weights
 # - Critic:  trainable, initialized from the same pretrained weights
-# - Validation: 4-step SDE sampling
+# - Validation: 8-step SDE sampling
 
 models:
   student:
@@ -26,7 +26,7 @@ method:
   rollout_mode: simulate
   generator_update_interval: 5
   real_score_guidance_scale: 3.5
-  dmd_denoising_steps: [1000, 750, 500, 250]
+  dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
 
   # Critic optimizer (required — no fallback to training.optimizer)
   fake_score_learning_rate: 8.0e-6
@@ -45,7 +45,7 @@ training:
     data_path: data/Wan-Syn_77x448x832_600k
     dataloader_num_workers: 4
     train_batch_size: 1
-    training_cfg_rate: 0.1
+    training_cfg_rate: 0.0
     seed: 1000
     num_latent_t: 20
     num_height: 448
@@ -54,23 +54,23 @@ training:
 
   optimizer:
     learning_rate: 2.0e-6
-    betas: [0.9, 0.999]
+    betas: [0.0, 0.999]
     weight_decay: 0.01
     lr_scheduler: constant
     lr_warmup_steps: 0
 
   loop:
-    max_train_steps: 10000
+    max_train_steps: 4000
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: outputs/wan2.1_dmd2_4steps
+    output_dir: outputs/wan2.1_dmd2_8steps
     training_state_checkpointing_steps: 1000
     checkpoints_total_limit: 3
 
   tracker:
     project_name: distillation_wan
-    run_name: wan2.1_dmd2_4steps
+    run_name: wan2.1_dmd2_8steps
 
   model:
     enable_gradient_checkpointing_type: full
@@ -81,11 +81,11 @@ callbacks:
   validation:
     pipeline_target: fastvideo.pipelines.basic.wan.wan_pipeline.WanPipeline
     dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
-    every_steps: 100
-    sampling_steps: [4]
+    every_steps: 50
+    sampling_steps: [8]
     sampler_kind: sde
-    sampling_timesteps: [1000, 750, 500, 250]
-    guidance_scale: 5.0
+    sampling_timesteps: [1000, 850, 700, 550, 350, 275, 200, 125]
+    guidance_scale: 6.0
 
 pipeline:
-  flow_shift: 3
+  flow_shift: 8
