@@ -25,7 +25,7 @@ method:
   _target_: fastvideo.train.methods.distribution_matching.dmd2.DMD2Method
   rollout_mode: simulate
   generator_update_interval: 5
-  real_score_guidance_scale: 3.5
+  real_score_guidance_scale: 4.5
   dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
 
   # Critic optimizer (required — no fallback to training.optimizer)
@@ -70,7 +70,7 @@ training:
 
   tracker:
     project_name: distillation_wan
-    run_name: wan2.1_dmd2_8steps
+    run_name: wan2.1_dmd2_8steps_cfg4.5
 
   model:
     enable_gradient_checkpointing_type: full
