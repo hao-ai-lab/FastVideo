@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import re
 import shutil
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,12 +20,6 @@ from torch.distributed.checkpoint.state_dict import (
 
 from fastvideo.train.models.base import ModelBase
 from fastvideo.logger import init_logger
-from fastvideo.training.checkpointing_utils import (
-    ModelWrapper,
-    OptimizerWrapper,
-    RandomStateWrapper,
-    SchedulerWrapper,
-)
 
 logger = init_logger(__name__)
 
@@ -359,10 +352,11 @@ def save_role_pretrained(
 
 
 class _RoleModuleContainer(torch.nn.Module):
-    """Ephemeral container to expose multiple role modules as a single module.
+    """Ephemeral container to expose multiple role modules as a single
+    ``nn.Module``.
 
-    Needed because `OptimizerWrapper` expects a single root module covering all
-    parameters owned by the optimizer.
+    Used by ``OptimizerWrapper`` which expects a single root module
+    covering all parameters owned by the optimizer.
     """
 
     def __init__(self, modules: dict[str, torch.nn.Module]) -> None:
@@ -402,85 +396,31 @@ class CheckpointManager:
     def __init__(
         self,
         *,
-        role_models: dict[str, ModelBase],
-        extra_role_modules: dict[str, dict[str, torch.nn.Module]] | None = None,
-        optimizers: dict[str, torch.optim.Optimizer] | None = None,
-        lr_schedulers: dict[str, Any] | None = None,
+        method: Any,
         dataloader: Any,
         output_dir: str,
         config: CheckpointConfig,
-        get_rng_generators: Callable[[], dict[str, torch.Generator]] | None = None,
         callbacks: Any | None = None,
     ) -> None:
-        self.role_models = role_models
-        self.extra_role_modules = extra_role_modules or {}
-        self.optimizers = optimizers or {}
-        self.lr_schedulers = lr_schedulers or {}
+        self.method = method
         self.dataloader = dataloader
         self.output_dir = str(output_dir)
         self.config = config
-        self._get_rng_generators = get_rng_generators
         self._callbacks = callbacks
         self._last_saved_step: int | None = None
 
-    def _build_role_states_from_model(
-        self,
-        role: str,
-        model: ModelBase,
-    ) -> dict[str, Any]:
-        if not getattr(model, "_trainable", False):
-            return {}
-
-        states: dict[str, Any] = {}
-        modules: dict[str, torch.nn.Module] = {}
-        if model.transformer is not None:
-            modules["transformer"] = model.transformer
-
-        # Include extra modules (e.g. EMA) owned by the method.
-        for name, mod in self.extra_role_modules.get(role, {}).items():
-            modules[name] = mod
-
-        container = _RoleModuleContainer(modules)
-
-        for module_name, module in modules.items():
-            states[f"roles.{role}.{module_name}"] = ModelWrapper(module)
-
-        # Optimizers/schedulers are keyed by role name in the flat dicts.
-        for name, optimizer in self.optimizers.items():
-            if name.startswith(f"{role}.") or name == role:
-                states[f"optimizers.{name}"] = OptimizerWrapper(
-                    container,
-                    optimizer,
-                )
-
-        for name, scheduler in self.lr_schedulers.items():
-            if name.startswith(f"{role}.") or name == role:
-                states[f"schedulers.{name}"] = SchedulerWrapper(scheduler)
-
-        return states
-
     def _build_states(self) -> dict[str, Any]:
-        states: dict[str, Any] = {}
-
-        # Models/opts/schedulers are role-scoped.
-        for role, model in self.role_models.items():
-            states.update(self._build_role_states_from_model(role, model))
+        states: dict[str, Any] = self.method.checkpoint_state()
 
         # Dataloader (optional but recommended for exact resume).
         if _is_stateful(self.dataloader):
             states["dataloader"] = self.dataloader
 
-        # RNG states: always save global RNG; also save adapter-provided generators.
-        states["random_state"] = RandomStateWrapper(None)
-        if self._get_rng_generators is not None:
-            for name, gen in (self._get_rng_generators() or {}).items():
-                if gen is None:
-                    continue
-                states[f"random_state.{name}"] = RandomStateWrapper(gen)
-
         # Callback state (e.g. EMA shadow weights, validation RNG).
         if self._callbacks is not None and _is_stateful(self._callbacks):
-            states["callbacks"] = _CallbackStateWrapper(self._callbacks)
+            states["callbacks"] = _CallbackStateWrapper(
+                self._callbacks,
+            )
 
         return states
 

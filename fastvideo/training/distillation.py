@@ -7,8 +7,6 @@ import os
 import sys
 from typing import Any
 
-import torch
-
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -73,21 +71,11 @@ def run_training_from_config(
         keep_last=int(tc.checkpoint.checkpoints_total_limit or 0),
     )
 
-    # Build extra role modules (e.g. EMA) for checkpointing.
-    extra_role_modules: dict[str, dict[str, torch.nn.Module]] = {}
-    ema = getattr(method, "ema", None)
-    if ema is not None:
-        extra_role_modules["student"] = {"ema": ema}
-
     checkpoint_manager = CheckpointManager(
-        role_models=method._role_models,
-        extra_role_modules=extra_role_modules,
-        optimizers=method._optimizer_dict,
-        lr_schedulers=method._lr_scheduler_dict,
+        method=method,
         dataloader=dataloader,
         output_dir=tc.checkpoint.output_dir,
         config=ckpt_config,
-        get_rng_generators=method.get_rng_generators,
         callbacks=trainer.callbacks,
     )
 

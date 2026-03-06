@@ -11,6 +11,13 @@ import torch
 
 from fastvideo.logger import init_logger
 from fastvideo.train.models.base import ModelBase
+from fastvideo.train.utils.checkpoint import _RoleModuleContainer
+from fastvideo.training.checkpointing_utils import (
+    ModelWrapper,
+    OptimizerWrapper,
+    RandomStateWrapper,
+    SchedulerWrapper,
+)
 
 logger = init_logger(__name__)
 
@@ -135,6 +142,57 @@ class TrainingMethod(torch.nn.Module, ABC):
     @abstractmethod
     def _lr_scheduler_dict(self) -> dict[str, Any]:
         ...
+
+    def checkpoint_state(self) -> dict[str, Any]:
+        """Return DCP-ready checkpoint state for all trainable roles.
+
+        Keys follow the convention:
+        ``roles.<role>.<module>``, ``optimizers.<role>``,
+        ``schedulers.<role>``, ``random_state.*``.
+        """
+        states: dict[str, Any] = {}
+
+        for role, model in self._role_models.items():
+            if not getattr(model, "_trainable", False):
+                continue
+
+            modules: dict[str, torch.nn.Module] = {}
+            if model.transformer is not None:
+                modules["transformer"] = model.transformer
+            ema = getattr(self, "ema", None)
+            if role == "student" and ema is not None:
+                modules["ema"] = ema
+
+            container = _RoleModuleContainer(modules)
+
+            for module_name, module in modules.items():
+                states[
+                    f"roles.{role}.{module_name}"
+                ] = ModelWrapper(module)
+
+            opt = self._optimizer_dict.get(role)
+            if opt is not None:
+                states[
+                    f"optimizers.{role}"
+                ] = OptimizerWrapper(container, opt)
+
+            sched = self._lr_scheduler_dict.get(role)
+            if sched is not None:
+                states[
+                    f"schedulers.{role}"
+                ] = SchedulerWrapper(sched)
+
+        # RNG states.
+        states["random_state"] = RandomStateWrapper(None)
+        for name, gen in (
+            self.get_rng_generators() or {}
+        ).items():
+            if gen is not None:
+                states[
+                    f"random_state.{name}"
+                ] = RandomStateWrapper(gen)
+
+        return states
 
     def backward(
         self,
