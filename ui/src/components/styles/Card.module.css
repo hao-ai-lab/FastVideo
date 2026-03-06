@@ -1,16 +1,16 @@
 /* ── Card ─────────────────────────────────────────────────── */
 .card {
-  padding: 1.5rem;
+	padding: 1.5rem;
 }
 
 .card h2 {
-  font-size: 1.15rem;
-  margin-bottom: 1rem;
+	font-size: 1.15rem;
+	margin-bottom: 1rem;
 }
 
 /* Responsive */
 @media (max-width: 520px) {
-  .card {
-    padding: 1rem;
-  }
+	.card {
+		padding: 1rem;
+	}
 }

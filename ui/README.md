@@ -52,32 +52,32 @@ npm install && npm run dev
 
 ## API Endpoints
 
-| Method   | Path                         | Description                        |
-| -------- | ---------------------------- | ---------------------------------- |
-| `GET`    | `/api/models`                | List available models              |
-| `GET`    | `/api/jobs`                  | List all jobs (newest first)       |
-| `GET`    | `/api/jobs/{id}`             | Get a single job's details         |
-| `POST`   | `/api/jobs`                  | Create a new job                   |
-| `POST`   | `/api/jobs/{id}/start`       | Start a pending/stopped/failed job |
-| `POST`   | `/api/jobs/{id}/stop`        | Request a running job to stop      |
-| `DELETE` | `/api/jobs/{id}`             | Delete a job                       |
-| `GET`    | `/api/jobs/{id}/video`       | Stream the generated video/image   |
-| `GET`    | `/api/jobs/{id}/logs`        | Get job logs (polling, supports `?after=`) |
-| `GET`    | `/api/jobs/{id}/download_log`| Download the job's log file        |
+| Method   | Path                          | Description                                |
+| -------- | ----------------------------- | ------------------------------------------ |
+| `GET`    | `/api/models`                 | List available models                      |
+| `GET`    | `/api/jobs`                   | List all jobs (newest first)               |
+| `GET`    | `/api/jobs/{id}`              | Get a single job's details                 |
+| `POST`   | `/api/jobs`                   | Create a new job                           |
+| `POST`   | `/api/jobs/{id}/start`        | Start a pending/stopped/failed job         |
+| `POST`   | `/api/jobs/{id}/stop`         | Request a running job to stop              |
+| `DELETE` | `/api/jobs/{id}`              | Delete a job                               |
+| `GET`    | `/api/jobs/{id}/video`        | Stream the generated video/image           |
+| `GET`    | `/api/jobs/{id}/logs`         | Get job logs (polling, supports `?after=`) |
+| `GET`    | `/api/jobs/{id}/download_log` | Download the job's log file                |
 
 ### Create Job Request Body
 
 ```json
 {
-  "model_id": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-  "prompt": "A curious raccoon in a sunflower field",
-  "num_inference_steps": 50,
-  "num_frames": 81,
-  "height": 480,
-  "width": 832,
-  "guidance_scale": 5.0,
-  "seed": 1024,
-  "num_gpus": 1
+	"model_id": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+	"prompt": "A curious raccoon in a sunflower field",
+	"num_inference_steps": 50,
+	"num_frames": 81,
+	"height": 480,
+	"width": 832,
+	"guidance_scale": 5.0,
+	"seed": 1024,
+	"num_gpus": 1
 }
 ```
 
@@ -98,12 +98,12 @@ ui/
   in a daemon thread that uses `fastvideo.VideoGenerator` to generate videos.
   Model instances are cached so switching between prompts on the same model
   doesn't reload weights. Provides REST endpoints under `/api/*`.
-  - **Error Handling**: Jobs that crash are automatically marked as `FAILED` without
-    crashing the server. Error details are stored in the job's `error` field.
-  - **Log Files**: Each job maintains a persistent log file (`{job_id}.log`) in a
-    dedicated log directory (configurable via `--log-dir`), containing all logs from
-    model loading through completion or failure. Log files are named after the job ID
-    for easy identification.
+    - **Error Handling**: Jobs that crash are automatically marked as `FAILED` without
+      crashing the server. Error details are stored in the job's `error` field.
+    - **Log Files**: Each job maintains a persistent log file (`{job_id}.log`) in a
+      dedicated log directory (configurable via `--log-dir`), containing all logs from
+      model loading through completion or failure. Log files are named after the job ID
+      for easy identification.
 - **Frontend**: A Next.js (React) application. Jobs are polled when running and
   rendered as cards with status badges and action buttons. The API base URL is
   configured via `NEXT_PUBLIC_API_BASE_URL` in `.env.local`.

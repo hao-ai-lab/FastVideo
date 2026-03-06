@@ -1,94 +1,96 @@
 /* ── Buttons ──────────────────────────────────────────────── */
 .btn {
-  cursor: pointer;
-  border: none;
-  border-radius: var(--radius);
-  font-family: inherit;
-  font-weight: 600;
-  font-size: .85rem;
-  padding: .55rem 1.2rem;
-  transition: background .15s, opacity .15s;
+	cursor: pointer;
+	border: none;
+	border-radius: var(--radius);
+	font-family: inherit;
+	font-weight: 600;
+	font-size: 0.85rem;
+	padding: 0.55rem 1.2rem;
+	transition:
+		background 0.15s,
+		opacity 0.15s;
 }
 
 .btn:disabled {
-  opacity: .5;
-  cursor: not-allowed;
+	opacity: 0.5;
+	cursor: not-allowed;
 }
 
 .btnPrimary {
-  background: var(--accent);
-  color: #fff;
+	background: var(--accent);
+	color: #fff;
 }
 
 .btnPrimary:hover:not(:disabled) {
-  background: var(--accent-h);
+	background: var(--accent-h);
 }
 
 .btnSmall {
-  background: transparent;
-  color: var(--accent-h);
-  border: 1px solid var(--border);
-  padding: .3rem .7rem;
-  font-size: .8rem;
+	background: transparent;
+	color: var(--accent-h);
+	border: 1px solid var(--border);
+	padding: 0.3rem 0.7rem;
+	font-size: 0.8rem;
 }
 
 .btnSmall:hover {
-  background: var(--border);
+	background: var(--border);
 }
 
 .btnStart {
-  background: var(--green);
-  color: #fff;
+	background: var(--green);
+	color: #fff;
 }
 
 .btnStart:hover:not(:disabled) {
-  opacity: .85;
+	opacity: 0.85;
 }
 
 .btnStop {
-  background: var(--yellow);
-  color: #000;
+	background: var(--yellow);
+	color: #000;
 }
 
 .btnStop:hover:not(:disabled) {
-  opacity: .85;
+	opacity: 0.85;
 }
 
 .btnDelete {
-  background: var(--red);
-  color: #fff;
+	background: var(--red);
+	color: #fff;
 }
 
 .btnDelete:hover:not(:disabled) {
-  opacity: .85;
+	opacity: 0.85;
 }
 
 .btnView {
-  background: var(--blue);
-  color: #fff;
+	background: var(--blue);
+	color: #fff;
 }
 
 .btnView:hover:not(:disabled) {
-  opacity: .85;
+	opacity: 0.85;
 }
 
 .btnConsole {
-  background: transparent;
-  color: var(--text-dim);
-  border: 1px solid var(--border);
+	background: transparent;
+	color: var(--text-dim);
+	border: 1px solid var(--border);
 }
 
 .btnConsole:hover {
-  background: var(--border);
-  color: var(--text);
+	background: var(--border);
+	color: var(--text);
 }
 
 .btnActive {
-  background: var(--accent) !important;
-  color: #fff !important;
-  border-color: var(--accent) !important;
+	background: var(--accent) !important;
+	color: #fff !important;
+	border-color: var(--accent) !important;
 }
 
 .btnActive:hover:not(:disabled) {
-  background: var(--accent-h) !important;
+	background: var(--accent-h) !important;
 }
