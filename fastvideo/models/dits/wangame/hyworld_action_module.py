@@ -240,20 +240,6 @@ class WanGameActionSelfAttention(nn.Module):
         # In this case, use LocalAttention (supports different Q/KV lengths)
         if query_all.shape[1] != key_all.shape[1]:
             raise ValueError("Q and KV have different sequence lengths")
-            # KV cache mode: Q has new tokens only, KV has cached + new tokens
-            # Use LocalAttention which supports different Q/KV lengths
-            # LocalAttention will use the appropriate backend (SageAttn, FlashAttn, etc.)
-            if not hasattr(self, '_kv_cache_attn'):
-                from fastvideo.attention import LocalAttention
-                self._kv_cache_attn = LocalAttention(
-                    num_heads=self.num_heads,
-                    head_size=self.head_dim,
-                    causal=False,
-                    supported_attention_backends=(AttentionBackendEnum.SAGE_ATTN,
-                                                  AttentionBackendEnum.FLASH_ATTN,
-                                                  AttentionBackendEnum.TORCH_SDPA)
-                )
-            hidden_states_all = self._kv_cache_attn(query_all, key_all, value_all)
         else:
             # Same sequence length: use DistributedAttention (supports SP)
             # Create default attention mask if not provided

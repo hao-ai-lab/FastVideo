@@ -14,6 +14,6 @@ __all__ = [
     "HunyuanVideoConfig", "HunyuanVideo15Config", "WanVideoConfig",
     "StepVideoConfig", "CosmosVideoConfig", "Cosmos25VideoConfig",
     "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig",
-    "LingBotWorldVideoConfig", "WanGameVideoConfig", "WanLingBotVideoConfig"
+    "LingBotWorldVideoConfig", "WanGameVideoConfig", "WanLingBotVideoConfig",
     "LingBotWorldVideoConfig", "HunyuanGameCraftConfig", "WanVideoConfig"
 ]
