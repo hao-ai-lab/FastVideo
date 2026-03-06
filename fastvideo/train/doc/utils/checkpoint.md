@@ -24,5 +24,5 @@
   - `checkpoint-<step>/dcp`
   - `output_dir`（自动选择最新 checkpoint）
 
-**独立函数**
-- `save_role_pretrained`: 导出 role modules 为 diffusers-style 模型目录。
+**相关**
+- `dcp_to_diffusers` entrypoint 包含 `_save_role_pretrained`：导出 role modules 为 diffusers-style 模型目录。

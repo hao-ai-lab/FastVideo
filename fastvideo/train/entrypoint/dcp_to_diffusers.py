@@ -51,6 +51,136 @@ def _ensure_distributed() -> None:
         os.environ.setdefault(key, default)
 
 
+def _save_role_pretrained(
+    *,
+    role: str,
+    base_model_path: str,
+    output_dir: str,
+    module_names: list[str] | None = None,
+    overwrite: bool = False,
+    model: Any,
+) -> str:
+    """Export a role's modules into a diffusers-style model dir.
+
+    Produces a ``model_path`` loadable by
+    ``PipelineComponentLoader`` (``model_index.json``,
+    ``transformer/``, ``vae/``, etc. copied from
+    ``base_model_path``).
+    """
+    import shutil
+    from pathlib import Path
+
+    import torch
+    import torch.distributed as dist
+    from torch.distributed.checkpoint.state_dict import (
+        StateDictOptions,
+        get_model_state_dict,
+    )
+
+    from fastvideo.utils import maybe_download_model
+
+    def _rank() -> int:
+        if dist.is_available() and dist.is_initialized():
+            return int(dist.get_rank())
+        return 0
+
+    def _barrier() -> None:
+        if dist.is_available() and dist.is_initialized():
+            dist.barrier()
+
+    local_base = Path(
+        maybe_download_model(str(base_model_path))
+    ).resolve()
+    dst = Path(
+        os.path.expanduser(str(output_dir))
+    ).resolve()
+
+    if _rank() == 0:
+        if dst.exists():
+            if overwrite:
+                shutil.rmtree(dst, ignore_errors=True)
+            else:
+                raise FileExistsError(
+                    f"Refusing to overwrite existing "
+                    f"directory: {dst}. "
+                    "Pass --overwrite to replace it."
+                )
+
+        def _copy_or_link(src: str, dest: str) -> None:
+            try:
+                os.link(src, dest)
+            except OSError:
+                shutil.copy2(src, dest)
+
+        logger.info(
+            "Creating pretrained export dir at %s "
+            "(base=%s)", dst, local_base,
+        )
+        shutil.copytree(
+            local_base, dst, symlinks=True,
+            copy_function=_copy_or_link,
+        )
+
+    _barrier()
+
+    modules: dict[str, torch.nn.Module] = {}
+    if model.transformer is not None:
+        modules["transformer"] = model.transformer
+
+    if module_names is None:
+        module_names = sorted(modules.keys())
+
+    for module_name in module_names:
+        if module_name not in modules:
+            raise KeyError(
+                f"Role {role!r} does not have module "
+                f"{module_name!r}. "
+                f"Available: {sorted(modules.keys())}"
+            )
+
+        module_dir = dst / module_name
+        if not module_dir.is_dir():
+            raise FileNotFoundError(
+                f"Export directory missing component "
+                f"dir {module_name!r}: {module_dir}"
+            )
+
+        options = StateDictOptions(
+            full_state_dict=True, cpu_offload=True,
+        )
+        state_dict = get_model_state_dict(
+            modules[module_name], options=options,
+        )
+
+        if _rank() == 0:
+            for path in module_dir.glob("*.safetensors"):
+                path.unlink(missing_ok=True)
+
+            tensor_state: dict[str, torch.Tensor] = {}
+            for key, value in state_dict.items():
+                if not isinstance(value, torch.Tensor):
+                    raise TypeError(
+                        f"Expected tensor in state_dict "
+                        f"for {module_name}.{key}, "
+                        f"got {type(value).__name__}"
+                    )
+                tensor_state[key] = value.detach().cpu()
+
+            from safetensors.torch import save_file
+
+            out_path = module_dir / "model.safetensors"
+            logger.info(
+                "Saving %s weights to %s (%s tensors)",
+                module_name, out_path,
+                len(tensor_state),
+            )
+            save_file(tensor_state, str(out_path))
+
+        _barrier()
+
+    return str(dst)
+
+
 def convert(
     *,
     checkpoint_dir: str,
@@ -72,7 +202,6 @@ def convert(
     from fastvideo.train.utils.checkpoint import (
         CheckpointManager,
         _resolve_resume_checkpoint,
-        save_role_pretrained,
     )
     from fastvideo.train.utils.config import (
         RunConfig,
@@ -148,7 +277,7 @@ def convert(
         output_dir,
         base_model_path,
     )
-    result = save_role_pretrained(
+    result = _save_role_pretrained(
         role=role,
         base_model_path=base_model_path,
         output_dir=output_dir,

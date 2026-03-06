@@ -13,12 +13,6 @@ from typing import Any
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
-from torch.distributed.checkpoint.state_dict import (
-    StateDictOptions,
-    get_model_state_dict,
-)
-
-from fastvideo.train.models.base import ModelBase
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -105,95 +99,6 @@ def _resolve_resume_checkpoint(resume_from_checkpoint: str, *, output_dir: str) 
     raise ValueError("Could not resolve resume checkpoint. Expected a checkpoint directory "
                      f"named 'checkpoint-<step>' (with 'dcp/' inside), or an output_dir "
                      f"containing such checkpoints. Got: {path} (output_dir={out}).")
-
-
-def save_role_pretrained(
-    *,
-    role: str,
-    base_model_path: str,
-    output_dir: str,
-    module_names: list[str] | None = None,
-    overwrite: bool = False,
-    model: ModelBase,
-) -> str:
-    """Export a role's modules into a diffusers-style model directory.
-
-    This is intended to produce a ``model_path`` that can be loaded by
-    ``PipelineComponentLoader`` (i.e., has ``model_index.json``,
-    ``transformer/``, ``vae/``, and other pipeline components copied
-    from ``base_model_path``).
-    """
-
-    # Resolve HF IDs to local directories (same behavior as module loader).
-    from fastvideo.utils import maybe_download_model
-
-    local_base = Path(maybe_download_model(str(base_model_path))).resolve()
-    dst = Path(os.path.expanduser(str(output_dir))).resolve()
-
-    if _rank() == 0:
-        if dst.exists():
-            if overwrite:
-                shutil.rmtree(dst, ignore_errors=True)
-            else:
-                raise FileExistsError(f"Refusing to overwrite existing directory: {dst}. "
-                                      "Pass overwrite=True to replace it.")
-
-        def _copy_or_link(src: str, dest: str) -> None:
-            try:
-                os.link(src, dest)
-            except OSError:
-                shutil.copy2(src, dest)
-
-        logger.info("Creating pretrained export dir at %s (base=%s)", dst, local_base)
-        shutil.copytree(local_base, dst, symlinks=True, copy_function=_copy_or_link)
-
-    _barrier()
-
-    modules: dict[str, torch.nn.Module] = {}
-    if model.transformer is not None:
-        modules["transformer"] = model.transformer
-
-    if module_names is None:
-        module_names = sorted(modules.keys())
-
-    for module_name in module_names:
-        if module_name not in modules:
-            raise KeyError(f"Role {role!r} does not have module {module_name!r}. "
-                           f"Available: {sorted(modules.keys())}")
-
-        module_dir = dst / module_name
-        if not module_dir.is_dir():
-            raise FileNotFoundError(f"Export directory missing component dir {module_name!r}: {module_dir}")
-
-        options = StateDictOptions(full_state_dict=True, cpu_offload=True)
-        state_dict = get_model_state_dict(modules[module_name], options=options)
-
-        if _rank() == 0:
-            # Remove existing *.safetensors to avoid loading duplicate weights.
-            for path in module_dir.glob("*.safetensors"):
-                path.unlink(missing_ok=True)
-
-            tensor_state: dict[str, torch.Tensor] = {}
-            for key, value in state_dict.items():
-                if not isinstance(value, torch.Tensor):
-                    raise TypeError(f"Expected tensor in state_dict for {module_name}.{key}, "
-                                    f"got {type(value).__name__}")
-                tensor_state[key] = value.detach().cpu()
-
-            from safetensors.torch import save_file
-
-            out_path = module_dir / "model.safetensors"
-            logger.info(
-                "Saving %s weights to %s (%s tensors)",
-                module_name,
-                out_path,
-                len(tensor_state),
-            )
-            save_file(tensor_state, str(out_path))
-
-        _barrier()
-
-    return str(dst)
 
 
 class _RoleModuleContainer(torch.nn.Module):
