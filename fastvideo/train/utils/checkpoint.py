@@ -202,11 +202,10 @@ class _WarmstartModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
 
 def maybe_warmstart_role_modules(
     *,
-    bundle: Any = None,
     role: str,
     init_from_checkpoint: str | None,
     checkpoint_role: str | None = None,
-    model: ModelBase | None = None,
+    model: ModelBase,
 ) -> None:
     """Warmstart model modules for `role` from a Phase 2/3 DCP checkpoint.
 
@@ -215,10 +214,6 @@ def maybe_warmstart_role_modules(
     - does not advance `start_step`
 
     The checkpoint directory is expected to be ``checkpoint-<step>/dcp/*.distcp``.
-
-    In the new ``_target_``-based flow, pass ``model`` (a ``ModelBase`` instance)
-    instead of ``bundle``.  The legacy ``bundle`` parameter is accepted but
-    ignored when ``model`` is provided.
     """
 
     if not init_from_checkpoint:
@@ -235,17 +230,9 @@ def maybe_warmstart_role_modules(
     if not dcp_dir.is_dir():
         raise FileNotFoundError(f"Missing dcp dir under checkpoint: {dcp_dir}")
 
-    # Build modules dict: new path uses ModelBase, legacy uses RoleManager.
     modules: dict[str, torch.nn.Module] = {}
-    if model is not None:
-        if model.transformer is not None:
-            modules["transformer"] = model.transformer
-    elif bundle is not None:
-        handle = bundle.role(str(role))
-        modules = dict(handle.modules)
-    else:
-        raise ValueError("maybe_warmstart_role_modules requires either "
-                         "'model' or 'bundle'")
+    if model.transformer is not None:
+        modules["transformer"] = model.transformer
 
     available_modules = _get_dcp_role_module_names(dcp_dir, role=str(checkpoint_role))
 
@@ -284,13 +271,12 @@ def maybe_warmstart_role_modules(
 
 def save_role_pretrained(
     *,
-    bundle: Any = None,
     role: str,
     base_model_path: str,
     output_dir: str,
     module_names: list[str] | None = None,
     overwrite: bool = False,
-    model: ModelBase | None = None,
+    model: ModelBase,
 ) -> str:
     """Export a role's modules into a diffusers-style model directory.
 
@@ -298,9 +284,6 @@ def save_role_pretrained(
     ``PipelineComponentLoader`` (i.e., has ``model_index.json``,
     ``transformer/``, ``vae/``, and other pipeline components copied
     from ``base_model_path``).
-
-    In the new ``_target_``-based flow, pass ``model`` (a ``ModelBase``
-    instance) instead of ``bundle``.
     """
 
     # Resolve HF IDs to local directories (same behavior as module loader).
@@ -328,17 +311,9 @@ def save_role_pretrained(
 
     _barrier()
 
-    # Build modules dict from model or bundle.
     modules: dict[str, torch.nn.Module] = {}
-    if model is not None:
-        if model.transformer is not None:
-            modules["transformer"] = model.transformer
-    elif bundle is not None:
-        handle = bundle.role(str(role))
-        modules = dict(handle.modules)
-    else:
-        raise ValueError("save_role_pretrained requires either "
-                         "'model' or 'bundle'")
+    if model.transformer is not None:
+        modules["transformer"] = model.transformer
 
     if module_names is None:
         module_names = sorted(modules.keys())
@@ -422,16 +397,12 @@ class CheckpointManager:
 
     - Checkpoint policy lives in YAML (via TrainingArgs fields).
     - Resume path is typically provided via CLI (``--resume-from-checkpoint``).
-
-    Accepts either a ``role_models`` dict (new ``_target_``-based flow)
-    or a legacy ``bundle`` (``RoleManager``).
     """
 
     def __init__(
         self,
         *,
-        bundle: Any = None,
-        role_models: dict[str, ModelBase] | None = None,
+        role_models: dict[str, ModelBase],
         extra_role_modules: dict[str, dict[str, torch.nn.Module]] | None = None,
         optimizers: dict[str, torch.optim.Optimizer] | None = None,
         lr_schedulers: dict[str, Any] | None = None,
@@ -441,8 +412,7 @@ class CheckpointManager:
         get_rng_generators: Callable[[], dict[str, torch.Generator]] | None = None,
         callbacks: Any | None = None,
     ) -> None:
-        self.bundle = bundle
-        self.role_models = role_models or {}
+        self.role_models = role_models
         self.extra_role_modules = extra_role_modules or {}
         self.optimizers = optimizers or {}
         self.lr_schedulers = lr_schedulers or {}
@@ -489,41 +459,12 @@ class CheckpointManager:
 
         return states
 
-    def _build_role_states_from_handle(
-        self,
-        role: str,
-        handle: Any,
-    ) -> dict[str, Any]:
-        if not handle.trainable:
-            return {}
-
-        states: dict[str, Any] = {}
-        container = _RoleModuleContainer(handle.modules)
-
-        for module_name, module in handle.modules.items():
-            states[f"roles.{role}.{module_name}"] = ModelWrapper(module)
-
-        for name, optimizer in handle.optimizers.items():
-            states[f"optimizers.{role}.{name}"] = OptimizerWrapper(
-                container,
-                optimizer,
-            )
-
-        for name, scheduler in handle.lr_schedulers.items():
-            states[f"schedulers.{role}.{name}"] = SchedulerWrapper(scheduler)
-
-        return states
-
     def _build_states(self) -> dict[str, Any]:
         states: dict[str, Any] = {}
 
         # Models/opts/schedulers are role-scoped.
-        if self.role_models:
-            for role, model in self.role_models.items():
-                states.update(self._build_role_states_from_model(role, model))
-        elif self.bundle is not None:
-            for role, handle in self.bundle.roles.items():
-                states.update(self._build_role_states_from_handle(role, handle))
+        for role, model in self.role_models.items():
+            states.update(self._build_role_states_from_model(role, model))
 
         # Dataloader (optional but recommended for exact resume).
         if _is_stateful(self.dataloader):

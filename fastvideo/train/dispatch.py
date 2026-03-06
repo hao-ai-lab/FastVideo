@@ -54,7 +54,6 @@ def build_from_config(cfg: RunConfig, ) -> tuple[TrainingConfig, TrainingMethod,
         # Warmstart uses the model's transformer directly.
         model = role_models[role]
         maybe_warmstart_role_modules(
-            bundle=None,
             role=str(role),
             init_from_checkpoint=str(init_from_checkpoint),
             checkpoint_role=(str(checkpoint_role) if checkpoint_role else None),
