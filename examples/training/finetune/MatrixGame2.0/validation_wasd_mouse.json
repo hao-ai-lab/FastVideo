@@ -1,0 +1,324 @@
+{
+    "data": [
+        {
+            "caption": "00",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000051_Bravo_instance_002.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000051_Bravo_instance_002.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "01",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000051_Bravo_instance_003.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000051_Bravo_instance_003.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "02",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Alpha_instance_000.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Alpha_instance_000.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "03",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Alpha_instance_001.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Alpha_instance_001.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "04",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Alpha_instance_003.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Alpha_instance_003.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "05",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Bravo_instance_000.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Bravo_instance_000.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "06",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Bravo_instance_001.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Bravo_instance_001.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "07",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Bravo_instance_003.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Bravo_instance_003.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "08",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "actions/00_w_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "09",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "actions/01_s_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "10",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "actions/02_a_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "11",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "actions/03_d_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "12",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "actions/04_mouse_left_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "13",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "actions/05_mouse_right_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "14",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "actions/06_mouse_up_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "15",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "actions/07_mouse_down_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "00_w_only",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000051_Bravo_instance_002.png",
+            "action_path": "actions/00_w_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "01_s_only",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000051_Bravo_instance_003.png",
+            "action_path": "actions/01_s_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "02_a_only",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Alpha_instance_000.png",
+            "action_path": "actions/02_a_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "03_d_only",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Alpha_instance_001.png",
+            "action_path": "actions/03_d_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "04_mouse_left_only",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000051_Bravo_instance_002.png",
+            "action_path": "actions/04_mouse_left_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "05_mouse_right_only",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000051_Bravo_instance_003.png",
+            "action_path": "actions/05_mouse_right_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "06_mouse_up_only",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Alpha_instance_000.png",
+            "action_path": "actions/06_mouse_up_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "07_mouse_down_only",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Alpha_instance_001.png",
+            "action_path": "actions/07_mouse_down_only.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "08_w_then_s",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000051_Bravo_instance_002.png",
+            "action_path": "actions/08_w_then_s.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "09_s_then_w",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000051_Bravo_instance_003.png",
+            "action_path": "actions/09_s_then_w.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "10_a_then_d",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Alpha_instance_000.png",
+            "action_path": "actions/10_a_then_d.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "11_d_then_a",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Alpha_instance_001.png",
+            "action_path": "actions/11_d_then_a.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "12_mouse_left_then_right",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000051_Bravo_instance_002.png",
+            "action_path": "actions/12_mouse_left_then_right.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "13_mouse_right_then_left",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000051_Bravo_instance_003.png",
+            "action_path": "actions/13_mouse_right_then_left.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "14_mouse_up_then_down",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Alpha_instance_000.png",
+            "action_path": "actions/14_mouse_up_then_down.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "15_mouse_down_then_up",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000052_Alpha_instance_001.png",
+            "action_path": "actions/15_mouse_down_then_up.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        }
+    ]
+}
