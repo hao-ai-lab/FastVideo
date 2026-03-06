@@ -112,7 +112,7 @@ class WanModel(ModelBase):
 
         self.world_group: Any = None
         self.sp_group: Any = None
-        self.device: Any = None
+        self.device: Any = get_local_torch_device()
 
         self.noise_random_generator: (torch.Generator | None) = None
         self.noise_gen_cuda: torch.Generator | None = None
@@ -139,7 +139,6 @@ class WanModel(ModelBase):
 
         self.world_group = get_world_group()
         self.sp_group = get_sp_group()
-        self.device = get_local_torch_device()
 
         self._init_timestep_mechanics()
 
