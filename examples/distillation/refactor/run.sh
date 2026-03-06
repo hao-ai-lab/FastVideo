@@ -55,7 +55,7 @@ torchrun \
     --nproc_per_node "${NUM_GPUS}" \
     --master_addr "${MASTER_ADDR}" \
     --master_port "${MASTER_PORT}" \
-    fastvideo/training/distillation.py \
+    fastvideo/train/entrypoint/train.py \
     --config "${CONFIG}" \
     "$@" \
     2>&1 | tee "${LOG_FILE}"

@@ -479,7 +479,10 @@ class ValidationCallback(Callback):
             validation_batch.get("image_path")
             or validation_batch.get("video_path")
         )
-        if img_path is not None:
+        if img_path is not None and (
+            img_path.startswith("http")
+            or os.path.isfile(img_path)
+        ):
             sampling_param.image_path = img_path
 
         temporal_compression_factor = int(

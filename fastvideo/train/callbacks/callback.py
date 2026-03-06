@@ -19,6 +19,13 @@ if TYPE_CHECKING:
 
 logger = init_logger(__name__)
 
+# Well-known callback names that don't need ``_target_`` in YAML.
+_BUILTIN_CALLBACKS: dict[str, str] = {
+    "grad_clip": "fastvideo.train.callbacks.grad_clip.GradNormClipCallback",
+    "validation": "fastvideo.train.callbacks.validation.ValidationCallback",
+    "ema": "fastvideo.train.callbacks.ema.EMACallback",
+}
+
 
 class Callback:
     """Base callback with no-op hooks.
@@ -99,14 +106,20 @@ class CallbackDict:
         if not callback_configs:
             return
         for name, cb_cfg in callback_configs.items():
+            cb_cfg = dict(cb_cfg)
             if "_target_" not in cb_cfg:
-                logger.warning(
-                    "Callback %r is missing '_target_', "
-                    "skipping: %s",
-                    name,
-                    cb_cfg,
-                )
-                continue
+                if name in _BUILTIN_CALLBACKS:
+                    cb_cfg["_target_"] = (
+                        _BUILTIN_CALLBACKS[name]
+                    )
+                else:
+                    logger.warning(
+                        "Callback %r is missing "
+                        "'_target_', skipping: %s",
+                        name,
+                        cb_cfg,
+                    )
+                    continue
             logger.info(
                 "Instantiating callback %r: %s",
                 name,
