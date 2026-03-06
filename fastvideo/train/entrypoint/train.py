@@ -36,7 +36,7 @@ def run_training_from_config(
         CheckpointConfig,
         CheckpointManager,
     )
-    from fastvideo.train.dispatch import build_from_config
+    from fastvideo.train.utils.builder import build_from_config
     from fastvideo.train.utils.config import load_run_config
 
     cfg = load_run_config(config_path)

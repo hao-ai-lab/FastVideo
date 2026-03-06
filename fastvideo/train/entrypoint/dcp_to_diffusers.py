@@ -68,7 +68,7 @@ def convert(
     from fastvideo.distributed import (
         maybe_init_distributed_environment_and_model_parallel,
     )
-    from fastvideo.train.dispatch import build_from_config
+    from fastvideo.train.utils.builder import build_from_config
     from fastvideo.train.utils.checkpoint import (
         CheckpointManager,
         _resolve_resume_checkpoint,
