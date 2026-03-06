@@ -25,6 +25,7 @@ method:
   _target_: fastvideo.train.methods.distribution_matching.dmd2.DMD2Method
   rollout_mode: simulate
   generator_update_interval: 5
+  real_score_guidance_scale: 3.5
   dmd_denoising_steps: [1000, 750, 500, 250]
 
   # Critic optimizer (required — no fallback to training.optimizer)
