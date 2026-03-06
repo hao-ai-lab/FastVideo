@@ -182,7 +182,9 @@ callbacks:
     every_steps: 100                  # default: 100
     sampling_steps: [4]               # default: [40]
     sampler_kind: sde                 # default: "ode" (use "sde" for few-step distilled models)
-    ode_solver: null                  # default: null ("unipc", "euler"; only for ode)
+    scheduler_target: null            # default: null (_target_ for scheduler class, e.g.
+                                      #   fastvideo.models.schedulers.scheduling_flow_match_euler_discrete.FlowMatchEulerDiscreteScheduler
+                                      #   fastvideo.models.schedulers.scheduling_flow_unipc_multistep.FlowUniPCMultistepScheduler)
     guidance_scale: 5.0               # default: null (uses model default)
     num_frames: null                  # default: null (derived from training.data)
     output_dir: null                  # default: null (falls back to training.checkpoint.output_dir)
@@ -204,11 +206,3 @@ pipeline:
   # vae_tiling: true                  # default: true
   # vae_sp: true                      # default: true
   # disable_autocast: false           # default: false
-
-# ------------------------------------------------------------------------------
-# validation: [FREE] (legacy — prefer callbacks.validation instead)
-#
-# Stored as training.validation dict. Some methods may still read it.
-# Prefer setting validation config in the callbacks section above.
-# ------------------------------------------------------------------------------
-# validation: {}

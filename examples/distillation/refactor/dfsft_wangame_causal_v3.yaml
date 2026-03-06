@@ -82,7 +82,7 @@ callbacks:
     sampling_steps: [40]
     rollout_mode: streaming
     sampler_kind: ode
-    ode_solver: euler
+    scheduler_target: fastvideo.models.schedulers.scheduling_flow_match_euler_discrete.FlowMatchEulerDiscreteScheduler
     guidance_scale: 1.0
     num_frames: 69
 

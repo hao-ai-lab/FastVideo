@@ -83,6 +83,7 @@ callbacks:
     every_steps: 100
     sampling_steps: [4]
     sampler_kind: sde
+    sampling_timesteps: [1000, 750, 500, 250]
     guidance_scale: 5.0
 
 pipeline:

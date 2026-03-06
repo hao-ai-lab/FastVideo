@@ -67,7 +67,7 @@ class ValidationCallback(Callback):
         every_steps: int = 100,
         sampling_steps: list[int] | None = None,
         sampler_kind: str = "ode",
-        ode_solver: str | None = None,
+        scheduler_target: str | None = None,
         guidance_scale: float | None = None,
         num_frames: int | None = None,
         output_dir: str | None = None,
@@ -84,8 +84,9 @@ class ValidationCallback(Callback):
             else [40]
         )
         self.sampler_kind = str(sampler_kind)
-        self.ode_solver = (
-            str(ode_solver) if ode_solver is not None
+        self.scheduler_target = (
+            str(scheduler_target)
+            if scheduler_target is not None
             else None
         )
         self.guidance_scale = (
@@ -350,7 +351,7 @@ class ValidationCallback(Callback):
             id(transformer),
             self.rollout_mode,
             self.sampler_kind,
-            str(self.ode_solver),
+            self.scheduler_target,
         )
         if (
             self._pipeline is not None
@@ -380,19 +381,13 @@ class ValidationCallback(Callback):
         }
         if flow_shift is not None:
             kwargs["flow_shift"] = float(flow_shift)
-        if self.ode_solver is not None:
-            kwargs["ode_solver"] = str(self.ode_solver)
 
-        # For streaming pipelines, build and inject a
-        # scheduler if needed.
-        if self.rollout_mode == "streaming":
-            scheduler = self._build_streaming_scheduler(
-                flow_shift,
+        # Build and inject a scheduler if target is set.
+        scheduler = self._build_scheduler(flow_shift)
+        if scheduler is not None:
+            kwargs["loaded_modules"]["scheduler"] = (
+                scheduler
             )
-            if scheduler is not None:
-                kwargs["loaded_modules"]["scheduler"] = (
-                    scheduler
-                )
 
         self._pipeline = PipelineCls.from_pretrained(
             tc.model_path, **kwargs,
@@ -400,54 +395,19 @@ class ValidationCallback(Callback):
         self._pipeline_key = key
         return self._pipeline
 
-    def _build_streaming_scheduler(
+    def _build_scheduler(
         self, flow_shift: float | None,
     ) -> Any | None:
-        """Build scheduler for streaming validation."""
+        """Build scheduler from ``scheduler_target``."""
+        if self.scheduler_target is None:
+            return None
         if flow_shift is None:
             return None
 
-        if self.sampler_kind == "sde":
-            from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-                FlowMatchEulerDiscreteScheduler, )
-
-            return FlowMatchEulerDiscreteScheduler(
-                shift=float(flow_shift),
-            )
-
-        # ODE mode — choose based on ode_solver.
-        ode_solver_norm = (
-            str(self.ode_solver).strip().lower()
-            if self.ode_solver is not None
-            else "unipc"
+        SchedulerCls = resolve_target(
+            self.scheduler_target
         )
-        if ode_solver_norm in {
-            "unipc",
-            "unipc_multistep",
-            "multistep",
-        }:
-            from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-                FlowUniPCMultistepScheduler, )
-
-            return FlowUniPCMultistepScheduler(
-                shift=float(flow_shift),
-            )
-        if ode_solver_norm in {
-            "euler",
-            "flowmatch",
-            "flowmatch_euler",
-        }:
-            from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-                FlowMatchEulerDiscreteScheduler, )
-
-            return FlowMatchEulerDiscreteScheduler(
-                shift=float(flow_shift),
-            )
-
-        raise ValueError(
-            f"Unknown ode_solver for streaming "
-            f"validation: {self.ode_solver!r}"
-        )
+        return SchedulerCls(shift=float(flow_shift))
 
     # ----------------------------------------------------------
     # Batch preparation

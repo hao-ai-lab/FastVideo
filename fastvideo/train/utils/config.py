@@ -30,7 +30,6 @@ class RunConfig:
     models: dict[str, dict[str, Any]]
     method: dict[str, Any]
     training: TrainingConfig
-    validation: dict[str, Any]
     callbacks: dict[str, dict[str, Any]]
     raw: dict[str, Any]
 
@@ -59,7 +58,6 @@ class RunConfig:
         resolved["models"] = dict(self.models)
         resolved["method"] = dict(self.method)
         resolved["training"] = _safe_asdict(self.training)
-        resolved["validation"] = dict(self.validation)
         resolved["callbacks"] = dict(self.callbacks)
         return resolved
 
@@ -286,7 +284,6 @@ def _build_training_config(
     *,
     models: dict[str, dict[str, Any]],
     pipeline_config: Any,
-    validation: dict[str, Any],
 ) -> TrainingConfig:
     """Build TrainingConfig from nested training: YAML."""
     d = dict(t.get("distributed", {}) or {})
@@ -417,7 +414,6 @@ def _build_training_config(
                     "enable_gradient_checkpointing_type"
                 )),
         ),
-        validation=validation,
         pipeline_config=pipeline_config,
         model_path=model_path,
         dit_precision=str(
@@ -429,7 +425,7 @@ def load_run_config(path: str) -> RunConfig:
     """Load a run config from YAML.
 
     Expected top-level keys: ``models``, ``method``,
-    ``training`` (nested), and optionally ``validation``
+    ``training`` (nested), and optionally ``callbacks``
     and ``pipeline``.
     """
     path = _resolve_existing_file(path)
@@ -460,14 +456,6 @@ def load_run_config(path: str) -> RunConfig:
             "method must have a '_target_' key")
     method = dict(method_raw)
 
-    # --- validation ---
-    validation_raw = cfg.get("validation", None)
-    if validation_raw is None:
-        validation: dict[str, Any] = {}
-    else:
-        validation = _require_mapping(
-            validation_raw, where="validation")
-
     # --- callbacks ---
     callbacks_raw = cfg.get("callbacks", None)
     if callbacks_raw is None:
@@ -484,16 +472,14 @@ def load_run_config(path: str) -> RunConfig:
     training_raw = _require_mapping(
         cfg.get("training"), where="training")
     t = dict(training_raw)
-    t.pop("validation", None)
     training = _build_training_config(
-        t, models=models, pipeline_config=pipeline_config,
-        validation=validation)
+        t, models=models,
+        pipeline_config=pipeline_config)
 
     return RunConfig(
         models=models,
         method=method,
         training=training,
-        validation=validation,
         callbacks=callbacks,
         raw=cfg,
     )

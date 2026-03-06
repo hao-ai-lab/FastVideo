@@ -324,15 +324,6 @@ def _run_config_from_raw(
     )
     method = dict(method_raw)
 
-    validation_raw = raw.get("validation", None)
-    validation: dict[str, Any] = (
-        _require_mapping(
-            validation_raw, where="validation",
-        )
-        if validation_raw is not None
-        else {}
-    )
-
     callbacks_raw = raw.get("callbacks", None)
     callbacks: dict[str, dict[str, Any]] = (
         _require_mapping(
@@ -350,19 +341,16 @@ def _run_config_from_raw(
         raw.get("training"), where="training",
     )
     t = dict(training_raw)
-    t.pop("validation", None)
     training = _build_training_config(
         t,
         models=models,
         pipeline_config=pipeline_config,
-        validation=validation,
     )
 
     return RunConfig(
         models=models,
         method=method,
         training=training,
-        validation=validation,
         callbacks=callbacks,
         raw=raw,
     )
