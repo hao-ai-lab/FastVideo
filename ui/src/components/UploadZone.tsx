@@ -10,6 +10,8 @@ interface UploadZoneProps {
   accept?: string;
   multiple?: boolean;
   directory?: boolean;
+  /** When true with directory, show both file picker and folder picker options */
+  allowBothFileAndDirectory?: boolean;
   value?: string;
   fileName?: string;
   onFileChange?: (files: File[]) => void;
@@ -31,6 +33,7 @@ export default function UploadZone({
   accept,
   multiple = false,
   directory = false,
+  allowBothFileAndDirectory = false,
   value,
   fileName,
   onFileChange,
@@ -44,7 +47,9 @@ export default function UploadZone({
   className,
   style,
 }: UploadZoneProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const directoryInputRef = useRef<HTMLInputElement>(null);
+  const useBoth = directory && allowBothFileAndDirectory;
 
   const hasContent = textInput
     ? !!textValue.trim()
@@ -60,19 +65,26 @@ export default function UploadZone({
 
   const handleClick = () => {
     if (!textInput && !disabled) {
-      inputRef.current?.click();
+      fileInputRef.current?.click();
     }
   };
 
+  const clearInputs = () => {
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (directoryInputRef.current) directoryInputRef.current.value = "";
+  };
+
+  const handleZoneClick = useBoth ? undefined : () => handleClick();
+
   return (
     <div
-      className={`${uploadStyles.uploadZone} ${hasContent ? uploadStyles.hasFile : ""} ${className ?? ""}`.trim()}
+      className={`${uploadStyles.uploadZone} ${hasContent ? uploadStyles.hasFile : ""} ${useBoth ? uploadStyles.allowBoth : ""} ${className ?? ""}`.trim()}
       style={style}
-      onClick={!textInput ? handleClick : undefined}
-      role={!textInput ? "button" : undefined}
-      tabIndex={!textInput ? 0 : undefined}
+      onClick={!textInput ? handleZoneClick : undefined}
+      role={!textInput && !useBoth ? "button" : undefined}
+      tabIndex={!textInput && !useBoth ? 0 : undefined}
       onKeyDown={
-        !textInput
+        !textInput && !useBoth
           ? (e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -83,14 +95,24 @@ export default function UploadZone({
       }
     >
       <input
-        ref={inputRef}
+        ref={fileInputRef}
         type="file"
         accept={accept}
         multiple={multiple}
-        {...(directory && { webkitdirectory: "" })}
+        {...(directory && !allowBothFileAndDirectory && { webkitdirectory: "" })}
         onChange={handleChange}
         disabled={disabled}
       />
+      {useBoth && (
+        <input
+          ref={directoryInputRef}
+          type="file"
+          multiple
+          {...{ webkitdirectory: "" }}
+          onChange={handleChange}
+          disabled={disabled}
+        />
+      )}
       <div className={uploadStyles.label}>{label}</div>
       {textInput ? (
         <input
@@ -105,11 +127,44 @@ export default function UploadZone({
         <>
           {!hasContent && (
             <span className={uploadStyles.hint}>
-              {uploading
-                ? "Uploading…"
-                : directory
-                  ? "Click or drop folder"
-                  : "Click or drop file(s)"}
+              {uploading ? "Uploading…" : null}
+              {!uploading && useBoth && (
+                <>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className={uploadStyles.selectFilesTrigger}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleClick();
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleClick();
+                      }
+                    }}
+                  >
+                    Select files
+                  </span>
+                  {" · "}
+                  <button
+                    type="button"
+                    className={formStyles.clearLink}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!disabled) directoryInputRef.current?.click();
+                    }}
+                    disabled={disabled}
+                  >
+                    Select folder
+                  </button>
+                </>
+              )}
+              {!uploading && !useBoth && directory && "Click or drop folder"}
+              {!uploading && !useBoth && !directory && "Click or drop file(s)"}
             </span>
           )}
           {fileName && (
@@ -124,7 +179,7 @@ export default function UploadZone({
                     onClick={(e) => {
                       e.stopPropagation();
                       onClear();
-                      if (inputRef.current) inputRef.current.value = "";
+                      clearInputs();
                     }}
                     disabled={disabled || uploading}
                   >

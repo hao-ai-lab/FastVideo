@@ -87,19 +87,27 @@ function parseVideos2Caption(
   return { captions, error: null };
 }
 
-/** Parse videos.txt + captions.txt: line i in videos = path, line i in captions = caption. */
+/**
+ * Parse videos.txt + captions.txt: line i in videos = path, line i in captions = caption.
+ * If videosLines is null/empty, map captions to uploaded file names in alphabetical order.
+ */
 function parseVideosCaptionsTxt(
-  videosLines: string[],
+  videosLines: string[] | null,
   captionsLines: string[],
   uploadedFileNames: string[]
 ): { captions: Record<string, string>; error: string | null } {
   const captions: Record<string, string> = {};
-  const len = Math.min(videosLines.length, captionsLines.length);
+  const useAlphabetical =
+    !videosLines || videosLines.length === 0 || videosLines.every((s) => !s.trim());
+  const paths: string[] = useAlphabetical
+    ? [...uploadedFileNames].sort()
+    : videosLines!.map((s) => s.trim()).filter(Boolean);
+  const len = Math.min(paths.length, captionsLines.length);
   for (let i = 0; i < len; i++) {
-    const path = videosLines[i].trim();
+    const path = paths[i];
     if (path) captions[path] = captionsLines[i].trim();
   }
-  if (uploadedFileNames.length > 0) {
+  if (!useAlphabetical && uploadedFileNames.length > 0) {
     const uploadedSet = new Set(uploadedFileNames);
     const unknownRefs = Object.keys(captions).filter((k) => !uploadedSet.has(k));
     if (unknownRefs.length > 0) {
@@ -221,9 +229,10 @@ export default function CreateDatasetModal({
   };
 
   const txtCaptionMap = useMemo(() => {
-    if (!videosTxtLines || !captionsTxtLines) return null;
+    if (!captionsTxtLines) return null;
+    if (fileNames.length === 0) return null;
     const { captions, error } = parseVideosCaptionsTxt(
-      videosTxtLines,
+      videosTxtLines ?? null,
       captionsTxtLines,
       fileNames
     );
@@ -234,16 +243,23 @@ export default function CreateDatasetModal({
   useEffect(() => {
     if (
       captionFormat === "txt" &&
-      videosTxtLines &&
       captionsTxtLines &&
       fileNames.length > 0
     ) {
-      const { error } = parseVideosCaptionsTxt(
-        videosTxtLines,
-        captionsTxtLines,
-        fileNames
-      );
-      setValidationError(error ?? null);
+      const hasVideosTxt =
+        videosTxtLines &&
+        videosTxtLines.length > 0 &&
+        videosTxtLines.some((s) => s.trim());
+      if (hasVideosTxt) {
+        const { error } = parseVideosCaptionsTxt(
+          videosTxtLines,
+          captionsTxtLines,
+          fileNames
+        );
+        setValidationError(error ?? null);
+      } else {
+        setValidationError(null);
+      }
     }
   }, [captionFormat, videosTxtLines, captionsTxtLines, fileNames]);
 
@@ -398,8 +414,8 @@ export default function CreateDatasetModal({
         return;
       }
     } else if (captionFormat === "txt" && (videosTxtFileName || captionsTxtFileName)) {
-      if (!videosTxtFileName || !captionsTxtFileName) {
-        setValidationError("Upload both videos.txt and captions.txt to use TXT captions.");
+      if (!captionsTxtFileName) {
+        setValidationError("Upload captions.txt to use TXT captions.");
         return;
       }
       if (validationError) return;
@@ -472,9 +488,11 @@ export default function CreateDatasetModal({
               <label>Videos</label>
               <UploadZone
                 label="Upload video files"
-                hint="Click or drop one or more videos (.mp4, .webm, .avi, .mov, .mkv)"
+                hint="Select files or a folder (.mp4, .webm, .avi, .mov, .mkv)"
                 accept={ALLOWED_VIDEO_EXT}
                 multiple
+                directory
+                allowBothFileAndDirectory
                 value={rawPath}
                 fileName={
                   fileNames.length > 0
@@ -527,8 +545,8 @@ export default function CreateDatasetModal({
                 <>
                   <div className={formStyles.row} style={{gap: '15px'}}>
                   <UploadZone
-                    label="Upload videos.txt"
-                    hint="One video path per line (same order as captions.txt)"
+                    label="Upload videos.txt (optional)"
+                    hint="One video path per line, or leave empty to match captions to videos in alphabetical order"
                     accept=".txt,text/plain"
                     value={videosTxtFileName ? "1" : ""}
                     fileName={videosTxtFileName ?? undefined}
@@ -542,7 +560,7 @@ export default function CreateDatasetModal({
                   />
                   <UploadZone
                     label="Upload captions.txt"
-                    hint="One caption per line (same order as videos.txt)"
+                    hint="One caption per line (same order as videos.txt, or alphabetical video order if videos.txt is empty)"
                     accept=".txt,text/plain"
                     value={captionsTxtFileName ? "1" : ""}
                     fileName={captionsTxtFileName ?? undefined}
