@@ -1,0 +1,324 @@
+{
+    "data": [
+        {
+            "caption": "00 Val-00: W",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/W.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "01 Val-01: S",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/S.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "02 Val-02: A",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/A.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "03 Val-03: D",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/D.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "04 Val-04: u",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000000.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/u.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "05 Val-05: d",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000001.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/d.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "06 Val-06: l",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000006.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/l.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "07 Val-07: r",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000007.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/r.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "08 Val-00: key rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/key_1_action_rand_1.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "09 Val-01: key rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/key_1_action_rand_2.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "10 Val-02: camera rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/camera_1_action_rand_1.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "11 Val-03: camera rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/camera_1_action_rand_2.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "12 Val-00: key+camera excl rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/key_camera_excl_1_action_rand_1.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "13 Val-01: key+camera excl rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/key_camera_excl_1_action_rand_2.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "14 Val-02: key+camera rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/key_camera_1_action_rand_1.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "15 Val-03: key+camera rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/key_camera_1_action_rand_2.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "16 Val-04: (simultaneous) key rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000000.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/key_2_action_rand_1.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "17 Val-05: (simultaneous) camera rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000001.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/camera_2_action_rand_1.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "18 Val-06: (simultaneous) key+camera excl rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000006.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/key_camera_excl_2_action_rand_1.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "19 Val-07: (simultaneous) key+camera rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000007.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/key_camera_2_action_rand_1.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "20 Val-08: W+A",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/humanplay/000005.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/WA.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "21 Val-09: S+u",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/humanplay/000013.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/S_u.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "22 Val-08: Still",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/humanplay/000005.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/still.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "23 Val-09: Still",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/humanplay/000013.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/still.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "24 Val-06: key+camera excl rand Frame 4",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000006.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/key_camera_excl_1_action_rand_1_f4.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "25 Val-07: key+camera excl rand Frame 4",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000007.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/key_camera_excl_1_action_rand_2_f4.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "26 Train-00",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/first_frame/000500.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/videos/000500_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "27 Train-01",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/first_frame/001000.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/videos/001000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "28 Doom-00: W",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000000.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/W.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "29 Doom-01: key rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000001.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/key_1_action_rand_1.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "30 Doom-02: camera rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/camera_1_action_rand_1.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "31 Doom-03: key+camera excl rand",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/key_camera_excl_1_action_rand_1.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        }
+    ]
+}

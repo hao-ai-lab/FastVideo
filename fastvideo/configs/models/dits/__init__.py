@@ -7,9 +7,13 @@ from fastvideo.configs.models.dits.longcat import LongCatVideoConfig
 from fastvideo.configs.models.dits.ltx2 import LTX2VideoConfig
 from fastvideo.configs.models.dits.wanvideo import WanVideoConfig
 from fastvideo.configs.models.dits.hyworld import HYWorldConfig
+from fastvideo.configs.models.dits.wangamevideo import (WanGameVideoConfig,
+                                                        WanLingBotVideoConfig)
 
 __all__ = [
-    "HunyuanVideoConfig", "HunyuanVideo15Config", "HunyuanGameCraftConfig",
-    "WanVideoConfig", "CosmosVideoConfig", "Cosmos25VideoConfig",
-    "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig"
+    "HunyuanVideoConfig", "HunyuanVideo15Config", "WanVideoConfig",
+    "StepVideoConfig", "CosmosVideoConfig", "Cosmos25VideoConfig",
+    "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig",
+    "LingBotWorldVideoConfig", "WanGameVideoConfig", "WanLingBotVideoConfig",
+    "LingBotWorldVideoConfig", "HunyuanGameCraftConfig", "WanVideoConfig"
 ]

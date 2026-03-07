@@ -18,6 +18,10 @@ from fastvideo.pipelines.preprocess.preprocess_pipeline_text import (
     PreprocessPipeline_Text)
 from fastvideo.pipelines.preprocess.matrixgame.matrixgame_preprocess_pipeline import (
     PreprocessPipeline_MatrixGame)
+from fastvideo.pipelines.preprocess.wangame.wangame_preprocess_pipeline import (
+    PreprocessPipeline_WanGame)
+from fastvideo.pipelines.preprocess.wangame.wangame_preprocess_pipeline_ode_trajectory import (
+    PreprocessPipeline_WanGame_ODE_Trajectory)
 from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
@@ -64,10 +68,16 @@ def main(args) -> None:
         PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
     elif args.preprocess_task == "matrixgame":
         PreprocessPipeline = PreprocessPipeline_MatrixGame
+    elif args.preprocess_task == "wangame":
+        PreprocessPipeline = PreprocessPipeline_WanGame
+    elif args.preprocess_task == "wangame_ode_trajectory":
+        fastvideo_args.pipeline_config.flow_shift = args.flow_shift if args.flow_shift is not None else 5.0
+        PreprocessPipeline = PreprocessPipeline_WanGame_ODE_Trajectory
     else:
         raise ValueError(
             f"Invalid preprocess task: {args.preprocess_task}. "
-            f"Valid options: t2v, i2v, ode_trajectory, text_only, matrixgame")
+            f"Valid options: t2v, i2v, ode_trajectory, text_only, matrixgame, wangame, wangame_ode_trajectory"
+        )
 
     logger.info("Preprocess task: %s using %s", args.preprocess_task,
                 PreprocessPipeline.__name__)
@@ -111,12 +121,14 @@ if __name__ == "__main__":
     parser.add_argument("--group_frame", action="store_true")  # TODO
     parser.add_argument("--group_resolution", action="store_true")  # TODO
     parser.add_argument("--flow_shift", type=float, default=None)
-    parser.add_argument(
-        "--preprocess_task",
-        type=str,
-        default="t2v",
-        choices=["t2v", "i2v", "text_only", "ode_trajectory", "matrixgame"],
-        help="Type of preprocessing task to run")
+    parser.add_argument("--preprocess_task",
+                        type=str,
+                        default="t2v",
+                        choices=[
+                            "t2v", "i2v", "text_only", "ode_trajectory",
+                            "matrixgame", "wangame", "wangame_ode_trajectory"
+                        ],
+                        help="Type of preprocessing task to run")
     parser.add_argument("--train_fps", type=int, default=30)
     parser.add_argument("--use_image_num", type=int, default=0)
     parser.add_argument("--text_max_length", type=int, default=256)

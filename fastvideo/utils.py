@@ -935,7 +935,7 @@ def save_decoded_latents_as_video(decoded_latents: list[torch.Tensor],
     for x in videos:
         x = make_grid(x, nrow=6)
         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-        frames.append((x * 255).numpy().astype(np.uint8))
+        frames.append((x * 255).cpu().numpy().astype(np.uint8))
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     imageio.mimsave(output_path, frames, fps=fps, format="mp4")

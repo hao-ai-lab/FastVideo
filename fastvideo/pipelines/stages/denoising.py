@@ -17,8 +17,6 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -158,6 +156,35 @@ class DenoisingStage(PipelineStage):
                 "encoder_attention_mask": batch.negative_attention_mask,
             },
         )
+
+        if batch.mouse_cond is not None and batch.keyboard_cond is not None:
+            from fastvideo.models.dits.hyworld.pose import process_custom_actions
+            viewmats, intrinsics, action_labels = process_custom_actions(
+                batch.keyboard_cond, batch.mouse_cond)
+            camera_action_kwargs = self.prepare_extra_func_kwargs(
+                self.transformer.forward,
+                {
+                    "viewmats":
+                    viewmats.unsqueeze(0).to(get_local_torch_device(),
+                                             dtype=target_dtype),
+                    "Ks":
+                    intrinsics.unsqueeze(0).to(get_local_torch_device(),
+                                               dtype=target_dtype),
+                    "action":
+                    action_labels.unsqueeze(0).to(get_local_torch_device(),
+                                                  dtype=target_dtype),
+                },
+            )
+            # from fastvideo.models.dits.wangame_lingbot.cam_utils import process_custom_actions as process_lingbot_actions
+            # num_frames = batch.num_frames
+            # latent_height = batch.height // 8
+            # latent_width = batch.width // 8
+            # c2ws_plucker_emb = process_lingbot_actions(
+            #     num_frames, batch.keyboard_cond, batch.mouse_cond,
+            #     latent_height=latent_height, latent_width=latent_width
+            # ).to(get_local_torch_device(), dtype=target_dtype)
+        else:
+            camera_action_kwargs = {}
 
         action_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
@@ -419,8 +446,8 @@ class DenoisingStage(PipelineStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                             **action_kwargs,
-                            **camera_kwargs,
                             **timesteps_r_kwarg,
+                            **camera_action_kwargs,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -438,8 +465,7 @@ class DenoisingStage(PipelineStage):
                                 **image_kwargs,
                                 **neg_cond_kwargs,
                                 **action_kwargs,
-                                **camera_kwargs,
-                                **timesteps_r_kwarg,
+                                **camera_action_kwargs,
                             )
 
                         noise_pred_text = noise_pred
@@ -527,10 +553,19 @@ class DenoisingStage(PipelineStage):
         Returns:
             The prepared kwargs.
         """
-        extra_step_kwargs = {}
+        signature = inspect.signature(func)
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD
+               for p in signature.parameters.values()):
+            # If the callee accepts `**kwargs`, do not filter by signature.
+            # This is important for models that route parameters internally via
+            # `forward(*args, **kwargs)` (e.g. causal Wangame), where filtering
+            # would incorrectly drop conditioning kwargs like `action`.
+            return dict(kwargs)
+
+        accepted = set(signature.parameters.keys())
+        extra_step_kwargs: dict[str, Any] = {}
         for k, v in kwargs.items():
-            accepts = k in set(inspect.signature(func).parameters.keys())
-            if accepts:
+            if k in accepted:
                 extra_step_kwargs[k] = v
         return extra_step_kwargs
 
@@ -1171,14 +1206,16 @@ class Cosmos25AutoDenoisingStage(PipelineStage):
         return self._t2w.verify_output(batch, fastvideo_args)
 
 
-class DmdDenoisingStage(DenoisingStage):
-    """
-    Denoising stage for DMD.
+class SdeDenoisingStage(DenoisingStage):
+    """Denoising stage for SDE-style sampling.
+
+    This stage runs a stochastic rollout loop:
+    - predict x0 at timestep t
+    - inject fresh noise to reach the next timestep
     """
 
     def __init__(self, transformer, scheduler) -> None:
         super().__init__(transformer, scheduler)
-        self.scheduler = FlowMatchEulerDiscreteScheduler(shift=8.0)
 
     def forward(
         self,
@@ -1201,16 +1238,6 @@ class DmdDenoisingStage(DenoisingStage):
         target_dtype = torch.bfloat16
         autocast_enabled = (target_dtype != torch.float32
                             ) and not fastvideo_args.disable_autocast
-
-        # Get timesteps and calculate warmup steps
-        timesteps = batch.timesteps
-
-        # TODO(will): remove this once we add input/output validation for stages
-        if timesteps is None:
-            raise ValueError("Timesteps must be provided")
-        num_inference_steps = batch.num_inference_steps
-        num_warmup_steps = len(
-            timesteps) - num_inference_steps * self.scheduler.order
 
         # Prepare image latents and embeddings for I2V generation
         image_embeds = batch.image_embeds
@@ -1237,6 +1264,37 @@ class DmdDenoisingStage(DenoisingStage):
             },
         )
 
+        if batch.mouse_cond is not None and batch.keyboard_cond is not None:
+            from fastvideo.models.dits.hyworld.pose import process_custom_actions
+
+            viewmats, intrinsics, action_labels = process_custom_actions(
+                batch.keyboard_cond, batch.mouse_cond)
+            camera_action_kwargs = self.prepare_extra_func_kwargs(
+                self.transformer.forward,
+                {
+                    "viewmats":
+                    viewmats.unsqueeze(0).to(get_local_torch_device(),
+                                             dtype=target_dtype),
+                    "Ks":
+                    intrinsics.unsqueeze(0).to(get_local_torch_device(),
+                                               dtype=target_dtype),
+                    "action":
+                    action_labels.unsqueeze(0).to(get_local_torch_device(),
+                                                  dtype=target_dtype),
+                },
+            )
+        else:
+            camera_action_kwargs = {}
+
+        action_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "mouse_cond": batch.mouse_cond,
+                "keyboard_cond": batch.keyboard_cond,
+                "c2ws_plucker_emb": batch.c2ws_plucker_emb,
+            },
+        )
+
         # Get latents and embeddings
         assert batch.latents is not None, "latents must be provided"
         latents = batch.latents
@@ -1245,14 +1303,29 @@ class DmdDenoisingStage(DenoisingStage):
         prompt_embeds = batch.prompt_embeds
         assert not torch.isnan(
             prompt_embeds[0]).any(), "prompt_embeds contains nan"
-        timesteps = torch.tensor(
-            fastvideo_args.pipeline_config.dmd_denoising_steps,
-            dtype=torch.long,
-            device=get_local_torch_device())
+        loop_timesteps = batch.sampling_timesteps
+        if loop_timesteps is None:
+            legacy = getattr(fastvideo_args.pipeline_config,
+                             "dmd_denoising_steps", None)
+            if legacy is not None:
+                loop_timesteps = torch.tensor(legacy, dtype=torch.long)
+            else:
+                loop_timesteps = batch.timesteps
+
+        if loop_timesteps is None:
+            raise ValueError(
+                "SDE sampling requires `batch.sampling_timesteps` (preferred) "
+                "or `pipeline_config.dmd_denoising_steps`.")
+        if not isinstance(loop_timesteps, torch.Tensor):
+            loop_timesteps = torch.tensor(loop_timesteps, dtype=torch.long)
+        if loop_timesteps.ndim != 1:
+            raise ValueError("Expected 1D `sampling_timesteps`, got shape "
+                             f"{tuple(loop_timesteps.shape)}")
+        loop_timesteps = loop_timesteps.to(get_local_torch_device())
 
         # Run denoising loop
-        with self.progress_bar(total=len(timesteps)) as progress_bar:
-            for i, t in enumerate(timesteps):
+        with self.progress_bar(total=len(loop_timesteps)) as progress_bar:
+            for i, t in enumerate(loop_timesteps):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
@@ -1326,6 +1399,8 @@ class DmdDenoisingStage(DenoisingStage):
                             guidance=guidance_expand,
                             **image_kwargs,
                             **pos_cond_kwargs,
+                            **action_kwargs,
+                            **camera_action_kwargs,
                         ).permute(0, 2, 1, 3, 4)
 
                     pred_video = pred_noise_to_pred_video(
@@ -1335,13 +1410,15 @@ class DmdDenoisingStage(DenoisingStage):
                         scheduler=self.scheduler).unflatten(
                             0, pred_noise.shape[:2])
 
-                    if i < len(timesteps) - 1:
-                        next_timestep = timesteps[i + 1] * torch.ones(
+                    if i < len(loop_timesteps) - 1:
+                        next_timestep = loop_timesteps[i + 1] * torch.ones(
                             [1], dtype=torch.long, device=pred_video.device)
-                        noise = torch.randn(video_raw_latent_shape,
-                                            dtype=pred_video.dtype,
-                                            generator=batch.generator[0]).to(
-                                                self.device)
+                        noise = torch.randn(
+                            video_raw_latent_shape,
+                            dtype=pred_video.dtype,
+                            generator=batch.generator[0] if isinstance(
+                                batch.generator, list) else batch.generator).to(
+                                    self.device)
                         latents = self.scheduler.add_noise(
                             pred_video.flatten(0, 1), noise.flatten(0, 1),
                             next_timestep).unflatten(0, pred_video.shape[:2])
@@ -1349,11 +1426,7 @@ class DmdDenoisingStage(DenoisingStage):
                         latents = pred_video
 
                     # Update progress bar
-                    if i == len(timesteps) - 1 or (
-                        (i + 1) > num_warmup_steps and
-                        (i + 1) % self.scheduler.order == 0
-                            and progress_bar is not None):
-                        progress_bar.update()
+                    progress_bar.update()
 
         # Gather results if using sequence parallelism
         latents = latents.permute(0, 2, 1, 3, 4)
@@ -1361,3 +1434,7 @@ class DmdDenoisingStage(DenoisingStage):
         batch.latents = latents
 
         return batch
+
+
+# Backwards-compatible alias (legacy pipelines still import this symbol).
+DmdDenoisingStage = SdeDenoisingStage

@@ -7,6 +7,8 @@ import torch
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
+from fastvideo.configs.models.dits.wangamevideo import (WanGameVideoConfig,
+                                                        WanLingBotVideoConfig)
 from fastvideo.configs.models.encoders import (BaseEncoderOutput,
                                                CLIPVisionConfig, T5Config,
                                                WAN2_1ControlCLIPVisionConfig)
@@ -113,6 +115,23 @@ class WANV2VConfig(WanI2V480PConfig):
 
 
 @dataclass
+class WanLingBotI2V480PConfig(WanI2V480PConfig):
+    """Configuration for Wan LingBot image-to-video pipeline."""
+
+    dit_config: DiTConfig = field(default_factory=WanLingBotVideoConfig)
+
+
+@dataclass
+class WanGameI2V480PConfig(WanI2V480PConfig):
+    """Configuration for WanGame image-to-video pipeline."""
+
+    dit_config: DiTConfig = field(default_factory=WanGameVideoConfig)
+    flow_shift: float | None = 3.0
+    dmd_denoising_steps: list[int] | None = field(
+        default_factory=lambda: [1000, 750, 500, 250, 0])
+
+
+@dataclass
 class FastWan2_1_T2V_480P_Config(WanT2V480PConfig):
     """Base configuration for FastWan T2V 1.3B 480P pipeline architecture with DMD"""
 
@@ -191,6 +210,15 @@ class SelfForcingWan2_2_T2V480PConfig(Wan2_2_T2V_A14B_Config):
     def __post_init__(self) -> None:
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
+
+
+@dataclass
+class SelfForcingWanGameI2V480PConfig(WanGameI2V480PConfig):
+    is_causal: bool = True
+    flow_shift: float | None = 3.0
+    dmd_denoising_steps: list[int] | None = field(
+        default_factory=lambda: [1000, 750, 500, 250, 0])
+    warp_denoising_step: bool = True
 
 
 # =============================================

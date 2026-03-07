@@ -11,6 +11,7 @@ import contextlib
 import copy
 import os
 import pathlib
+import shutil
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -92,6 +93,21 @@ class BaseTracker:
     def finish(self) -> None:  # pragma: no cover - interface
         """Finalize the tracker session."""
 
+    def log_file(
+        self,
+        path: str,
+        *,
+        name: str | None = None,
+    ) -> None:
+        """Log a local file to the tracker run (best-effort).
+
+        Useful for attaching the exact YAML config used for a run.
+
+        Trackers that do not support files should treat this as a no-op.
+        """
+
+        del path, name
+
     def video(
         self,
         data: Any,
@@ -134,12 +150,13 @@ class WandbTracker(BaseTracker):
 
         import wandb
 
-        pathlib.Path(log_dir).mkdir(parents=True, exist_ok=True)
+        self._log_dir = os.path.abspath(str(log_dir))
+        pathlib.Path(self._log_dir).mkdir(parents=True, exist_ok=True)
 
         self._wandb = wandb
         self._run = wandb.init(
             project=experiment_name,
-            dir=log_dir,
+            dir=self._log_dir,
             config=config,
             name=run_name,
         )
@@ -153,6 +170,45 @@ class WandbTracker(BaseTracker):
 
     def finish(self) -> None:
         self._run.finish()
+
+    def log_file(self, path: str, *, name: str | None = None) -> None:
+        resolved = os.path.abspath(os.path.expanduser(str(path)))
+        if not os.path.isfile(resolved):
+            logger.warning("W&B log_file skipped; file not found: %s", resolved)
+            return
+
+        target_name = str(name).strip() if name is not None and str(name).strip() else None
+        if target_name is None:
+            target_name = os.path.basename(resolved)
+
+        # Prefer placing files directly under the W&B run directory to avoid
+        # symlink-based saves (which may not sync reliably on some clusters).
+        run_dir = getattr(self._run, "dir", None)
+        dest_root = self._log_dir if not isinstance(run_dir, str) else run_dir
+        dest_root = os.path.abspath(str(dest_root))
+
+        save_path = resolved
+        dest_path = os.path.join(dest_root, target_name)
+        try:
+            pathlib.Path(dest_root).mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(resolved, dest_path)
+        except Exception:
+            logger.exception(
+                "Failed to copy file for W&B upload: %s -> %s",
+                resolved,
+                dest_path,
+            )
+        else:
+            save_path = dest_path
+
+        try:
+            self._run.save(
+                save_path,
+                base_path=os.path.dirname(save_path),
+                policy="now",
+            )
+        except Exception:
+            logger.exception("Failed to upload file to W&B: %s", save_path)
 
     def video(
         self,
@@ -200,6 +256,10 @@ class SequentialTracker(BaseTracker):
         for tracker in self._trackers:
             tracker.log_artifacts(artifacts, step)
         self._timed_metrics = {}
+
+    def log_file(self, path: str, *, name: str | None = None) -> None:
+        for tracker in self._trackers:
+            tracker.log_file(path, name=name)
 
     def finish(self) -> None:
         for tracker in self._trackers:

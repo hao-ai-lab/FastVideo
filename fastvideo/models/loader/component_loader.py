@@ -23,7 +23,6 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.layers.quantization import get_quantization_config
 from fastvideo.logger import init_logger
-from fastvideo.models.encoders.base import TextEncoder
 from fastvideo.models.hf_transformer_utils import get_diffusers_config
 from fastvideo.models.loader.fsdp_load import maybe_load_fsdp_model, shard_model
 from fastvideo.models.loader.utils import set_default_torch_dtype
@@ -268,11 +267,12 @@ class TextEncoderLoader(ComponentLoader):
                 gemma_path = candidate
                 gemma_path_from_candidate = True
                 model_config["gemma_model_path"] = gemma_path
-        if gemma_path and not gemma_path_from_candidate:
-            if not os.path.isabs(gemma_path):
-                model_config["gemma_model_path"] = os.path.normpath(
-                    os.path.join(repo_root, gemma_path)
-                )
+        if gemma_path and not gemma_path_from_candidate and not os.path.isabs(
+            gemma_path
+        ):
+            model_config["gemma_model_path"] = os.path.normpath(
+                os.path.join(repo_root, gemma_path)
+            )
         transformer_config_path = os.path.join(
             repo_root, "transformer", "config.json"
         )
@@ -280,12 +280,11 @@ class TextEncoderLoader(ComponentLoader):
             try:
                 with open(transformer_config_path, encoding="utf-8") as f:
                     transformer_config = json.load(f)
-                if (
+                if ((
                     "connector_double_precision_rope" not in model_config
                     or not model_config["connector_double_precision_rope"]
-                ):
-                    if transformer_config.get("double_precision_rope") is True:
-                        model_config["connector_double_precision_rope"] = True
+                ) and transformer_config.get("double_precision_rope") is True):
+                    model_config["connector_double_precision_rope"] = True
                 if "connector_rope_type" not in model_config:
                     rope_type = transformer_config.get("rope_type")
                     if rope_type is not None:
@@ -539,7 +538,7 @@ class TokenizerLoader(ComponentLoader):
         tokenizer_cfg_path = os.path.join(resolved_model_path, "config.json")
         if os.path.exists(tokenizer_cfg_path):
             try:
-                with open(tokenizer_cfg_path, "r") as f:
+                with open(tokenizer_cfg_path) as f:
                     tokenizer_cfg = json.load(f)
                 if isinstance(tokenizer_cfg, dict) and (
                     tokenizer_cfg.get("_class_name") == "AutoProcessor"
@@ -844,6 +843,15 @@ class TransformerLoader(ComponentLoader):
             cls_name.startswith("Cosmos25")
             or cls_name == "Cosmos25Transformer3DModel"
             or getattr(fastvideo_args.pipeline_config, "prefix", "") == "Cosmos25"
+        ) and not (
+            cls_name.startswith("WanGame")
+            or cls_name == "WanGameActionTransformer3DModel"
+            or cls_name.startswith("CausalWan")
+            or getattr(fastvideo_args.pipeline_config, "prefix", "") == "WanGame"
+            or cls_name.startswith("WanLingBot")
+            or cls_name == "WanLingBotTransformer3DModel"
+            or getattr(fastvideo_args.pipeline_config, "prefix", "") == "WanLingBot"
+            or cls_name.startswith("CausalWanGameActionTransformer3DModel")
         )
         model = maybe_load_fsdp_model(
             model_cls=model_cls,
@@ -928,7 +936,7 @@ class UpsamplerLoader(ComponentLoader):
         try:
             upsampler_cfg = deepcopy(fastvideo_args.pipeline_config.upsampler_config[0])
             upsampler_cfg.update_model_config(config_dict)
-        except Exception as e:
+        except Exception:
             upsampler_cfg = deepcopy(fastvideo_args.pipeline_config.upsampler_config[1])
             upsampler_cfg.update_model_config(config_dict)
 

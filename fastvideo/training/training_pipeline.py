@@ -15,6 +15,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torchvision
+from diffusers import FlowMatchEulerDiscreteScheduler
 from einops import rearrange
 from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -47,8 +48,9 @@ from fastvideo.training.trackers import (DummyTracker, TrackerType,
                                          initialize_trackers, Trackers)
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
-    compute_density_for_timestep_sampling, count_trainable, get_scheduler,
-    get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint)
+    compute_density_for_timestep_sampling, count_trainable,
+    count_trainable_total, get_scheduler, get_sigmas, load_checkpoint,
+    normalize_dit_input, save_checkpoint, shard_latents_across_sp)
 from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
 
@@ -116,7 +118,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         # Set random seeds for deterministic training
         assert self.seed is not None, "seed must be set"
-        set_random_seed(self.seed + self.global_rank)
+        set_random_seed(self.seed)
         self.transformer.train()
         if training_args.enable_gradient_checkpointing_type is not None:
             self.transformer = apply_activation_checkpointing(
@@ -192,7 +194,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             text_padding_length=training_args.pipeline_config.
             text_encoder_configs[0].arch_config.
             text_len,  # type: ignore[attr-defined]
-            seed=self.seed)
+            seed=self.seed,
+            reshuffle_each_epoch=training_args.reshuffle_each_epoch)
 
         self.noise_scheduler = noise_scheduler
         if self.training_args.boundary_ratio is not None:
@@ -256,6 +259,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             if batch is None:
                 self.current_epoch += 1
                 logger.info("Starting epoch %s", self.current_epoch)
+                # Reshuffle dataset order each epoch
+                self.train_dataset.sampler.set_epoch(self.current_epoch)
                 # Reset iterator for next epoch
                 self.train_loader_iter = iter(self.train_dataloader)
                 # Get first batch of new epoch
@@ -568,26 +573,40 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     local_main_process_only=False)
         if not self.post_init_called:
             self.post_init()
-        num_trainable_params = count_trainable(self.transformer)
-        logger.info("Starting training with %s B trainable parameters",
-                    round(num_trainable_params / 1e9, 3))
+        local_trainable = count_trainable(self.transformer)
+        total_trainable = count_trainable_total(
+            self.transformer,
+            get_local_torch_device(),
+        )
+        logger.info(
+            "Starting training with %s B trainable parameters (total); "
+            "this rank shard: %s B",
+            round(total_trainable / 1e9, 3),
+            round(local_trainable / 1e9, 3),
+        )
 
         if getattr(self, "transformer_2", None) is not None:
-            num_trainable_params = count_trainable(self.transformer_2)
+            local_trainable_2 = count_trainable(self.transformer_2)
+            total_trainable_2 = count_trainable_total(
+                self.transformer_2,
+                get_local_torch_device(),
+            )
             logger.info(
-                "Transformer 2: Starting training with %s B trainable parameters",
-                round(num_trainable_params / 1e9, 3))
+                "Transformer 2: %s B trainable parameters (total); "
+                "this rank shard: %s B",
+                round(total_trainable_2 / 1e9, 3),
+                round(local_trainable_2 / 1e9, 3),
+            )
 
         # Set random seeds for deterministic training
-        self.noise_random_generator = torch.Generator(
-            device="cpu").manual_seed(self.seed + self.global_rank)
+        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
+            self.seed)
         self.noise_gen_cuda = torch.Generator(
-            device=current_platform.device_name).manual_seed(self.seed +
-                                                             self.global_rank)
+            device=current_platform.device_name).manual_seed(self.seed)
         self.validation_random_generator = torch.Generator(
-            device="cpu").manual_seed(self.seed + self.global_rank)
-        logger.info("Initialized random seeds with seed: %s",
-                    self.seed + self.global_rank)
+            device="cpu").manual_seed(self.seed)
+        logger.info("Initialized random seeds with seed: %s", self.seed)
+
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
         if self.training_args.resume_from_checkpoint:
@@ -598,6 +617,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
+
+        self._best_mf_angle_err_mean = float('inf')
+        self._last_mf_angle_err_mean = float('inf')
 
         self._log_validation(self.transformer, self.training_args,
                              self.init_steps)
@@ -708,6 +730,43 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         "GPU memory usage after validation: %s MB, trainable params: %sB",
                         gpu_memory_usage, trainable_params)
 
+                best_start = self.training_args.best_checkpoint_start_step
+                if (best_start > 0
+                        and step >= best_start
+                        and self._last_mf_angle_err_mean
+                        < self._best_mf_angle_err_mean):
+                    self._best_mf_angle_err_mean = (
+                        self._last_mf_angle_err_mean)
+                    logger.info(
+                        "New best mf_angle_err_mean=%.6f at step %d, "
+                        "saving best checkpoint",
+                        self._best_mf_angle_err_mean, step)
+                    save_checkpoint(
+                        self.transformer, self.global_rank,
+                        self.training_args.output_dir, "best",
+                        self.optimizer, self.train_dataloader,
+                        self.lr_scheduler,
+                        self.noise_random_generator)
+                    if self.global_rank == 0:
+                        import json
+                        meta_path = os.path.join(
+                            self.training_args.output_dir,
+                            "checkpoint-best",
+                            "best_metric.json")
+                        with open(meta_path, "w") as f:
+                            json.dump({
+                                "step": step,
+                                "mf_angle_err_mean":
+                                    self._best_mf_angle_err_mean,
+                            }, f, indent=2)
+                        self.tracker.log({
+                            "best/mf_angle_err_mean":
+                                self._best_mf_angle_err_mean,
+                            "best/step": step,
+                        }, step)
+                    self.transformer.train()
+                    self.sp_group.barrier()
+
         self.tracker.finish()
         save_checkpoint(self.transformer, self.global_rank,
                         self.training_args.output_dir,
@@ -790,11 +849,42 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         return batch
 
+    def _post_process_validation_frames(
+            self, frames: list[np.ndarray],
+            batch: ForwardBatch) -> list[np.ndarray]:
+        """Post-process validation frames before saving.
+        
+        Override this method in subclasses to add custom processing,
+        e.g., overlay action indicators for action-conditioned models.
+        
+        Args:
+            frames: List of numpy arrays (H, W, C) representing video frames
+            batch: The ForwardBatch containing input data (may include action data)
+            
+        Returns:
+            Processed frames (same format as input)
+        """
+        return frames
+
+    def _evaluate_validation_video(
+        self,
+        video_path: str,
+        caption: str,
+        action_path: str | None,
+        global_step: int,
+        num_inference_steps: int,
+    ) -> dict[str, float] | None:
+        """Optionally evaluate a saved validation video and return scalars."""
+        del video_path, caption, action_path, global_step
+        del num_inference_steps
+        return None
+
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
         """
         Generate a validation video and log it to the configured tracker to check the quality during training.
         """
+        self._last_mf_angle_err_mean = float('inf')
         training_args.inference_mode = True
         training_args.dit_cpu_offload = False
         if not training_args.log_validation:
@@ -813,7 +903,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     training_args.validation_dataset_file,
                     local_main_process_only=False)
         validation_dataset = ValidationDataset(
-            training_args.validation_dataset_file)
+            training_args.validation_dataset_file,
+            num_samples=training_args.validation_num_samples)
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)
@@ -837,15 +928,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         local_main_process_only=False)
             step_videos: list[np.ndarray] = []
             step_captions: list[str] = []
-
-            step_audio: list[np.ndarray | None] = []
-            step_sample_rates: list[int | None] = []
+            step_action_paths: list[str | None] = []
 
             for validation_batch in validation_dataloader:
                 batch = self._prepare_validation_batch(sampling_param,
                                                        training_args,
                                                        validation_batch,
                                                        num_inference_steps)
+                action_path = validation_batch.get("action_path")
+                if not isinstance(action_path, str):
+                    action_path = None
                 logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
                             self.global_rank,
                             self.rank_in_sp_group,
@@ -881,75 +973,126 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     x = torchvision.utils.make_grid(x, nrow=6)
                     x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                     frames.append((x * 255).numpy().astype(np.uint8))
+
+                # Apply optional post-processing (e.g., overlay for action-conditioned models)
+                frames = self._post_process_validation_frames(frames, batch)
                 step_videos.append(frames)
+                step_action_paths.append(action_path)
 
             # Only sp_group leaders (rank_in_sp_group == 0) need to send their
             # results to global rank 0
-            if self.rank_in_sp_group == 0 and self.global_rank == 0:
-                # Global rank 0 collects results from all sp_group leaders
-                all_videos = step_videos  # Start with own results
-                all_captions = step_captions
-                all_audios = step_audio
-                all_sample_rates = step_sample_rates
+            if self.rank_in_sp_group == 0:
+                local_video_filenames: list[str] = []
+                local_validation_metrics: list[dict[str, float]] = []
+                local_eval_error: str | None = None
 
-                # Receive from other sp_group leaders
-                for sp_group_idx in range(1, num_sp_groups):
-                    src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-                    recv_videos = world_group.recv_object(src=src_rank)
-                    recv_captions = world_group.recv_object(src=src_rank)
-                    recv_audios = world_group.recv_object(src=src_rank)
-                    recv_sample_rates = world_group.recv_object(src=src_rank)
-
-                    all_videos.extend(recv_videos)
-                    all_captions.extend(recv_captions)
-                    all_audios.extend(recv_audios)
-                    all_sample_rates.extend(recv_sample_rates)
-
-                video_filenames = []
-                for i, (video, caption, audio, sample_rate) in enumerate(
-                        zip(all_videos,
-                            all_captions,
-                            all_audios,
-                            all_sample_rates,
+                for i, (video, caption, action_path) in enumerate(
+                        zip(step_videos,
+                            step_captions,
+                            step_action_paths,
                             strict=True)):
                     os.makedirs(training_args.output_dir, exist_ok=True)
                     filename = os.path.join(
                         training_args.output_dir,
-                        f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+                        f"validation_step_{global_step}_inference_steps_{num_inference_steps}_rank_{self.global_rank}_video_{i}.mp4"
                     )
                     imageio.mimsave(filename, video, fps=sampling_param.fps)
-                    # Mux audio if available
-                    if (audio is not None and sample_rate is not None
-                            and not self._mux_audio(
-                                filename,
-                                audio,
-                                sample_rate,
-                            )):
-                        logger.warning(
-                            "Audio mux failed for validation video %s; saved video without audio.",
-                            filename)
-                    video_filenames.append(filename)
+                    local_video_filenames.append(filename)
 
-                artifacts = []
-                for filename, caption in zip(video_filenames,
-                                             all_captions,
-                                             strict=True):
-                    video_artifact = self.tracker.video(filename,
-                                                        caption=caption)
-                    if video_artifact is not None:
-                        artifacts.append(video_artifact)
-                if artifacts:
-                    logs = {
-                        f"validation_videos_{num_inference_steps}_steps":
-                        artifacts
-                    }
-                    self.tracker.log_artifacts(logs, global_step)
-            elif self.rank_in_sp_group == 0:
-                # Other sp_group leaders send their results to global rank 0
-                world_group.send_object(step_videos, dst=0)
-                world_group.send_object(step_captions, dst=0)
-                world_group.send_object(step_audio, dst=0)
-                world_group.send_object(step_sample_rates, dst=0)
+                    try:
+                        sample_metrics = self._evaluate_validation_video(
+                            video_path=filename,
+                            caption=caption,
+                            action_path=action_path,
+                            global_step=global_step,
+                            num_inference_steps=num_inference_steps,
+                        )
+                        if sample_metrics:
+                            local_validation_metrics.append(sample_metrics)
+                    except Exception as e:
+                        local_eval_error = (
+                            f"rank {self.global_rank} validation eval failed "
+                            f"for {filename}: {e}")
+                        logger.exception(local_eval_error)
+                        break
+
+                if self.global_rank == 0:
+                    all_video_filenames = local_video_filenames
+                    all_captions = step_captions
+                    validation_metrics = local_validation_metrics
+                    eval_errors: list[str] = []
+                    if local_eval_error:
+                        eval_errors.append(local_eval_error)
+
+                    # Receive from other sp_group leaders
+                    for sp_group_idx in range(1, num_sp_groups):
+                        src_rank = sp_group_idx * self.sp_world_size
+                        recv_video_filenames = world_group.recv_object(
+                            src=src_rank)
+                        recv_captions = world_group.recv_object(src=src_rank)
+                        recv_metrics = world_group.recv_object(src=src_rank)
+                        recv_error = world_group.recv_object(src=src_rank)
+
+                        all_video_filenames.extend(recv_video_filenames)
+                        all_captions.extend(recv_captions)
+                        validation_metrics.extend(recv_metrics)
+                        if recv_error:
+                            eval_errors.append(str(recv_error))
+
+                    if eval_errors:
+                        raise RuntimeError(
+                            "Validation flow evaluation failed:\n" +
+                            "\n".join(eval_errors))
+
+                    artifacts = []
+                    for filename, caption in zip(all_video_filenames,
+                                                 all_captions,
+                                                 strict=True):
+                        video_artifact = self.tracker.video(filename,
+                                                            caption=caption)
+                        if video_artifact is not None:
+                            artifacts.append(video_artifact)
+                    if artifacts:
+                        logs = {
+                            f"validation_videos_{num_inference_steps}_steps":
+                            artifacts
+                        }
+                        self.tracker.log_artifacts(logs, global_step)
+
+                    if validation_metrics:
+                        metric_logs: dict[str, float] = {}
+                        metric_keys = sorted(
+                            {k for row in validation_metrics for k in row.keys()})
+                        for metric_key in metric_keys:
+                            metric_vals = [
+                                row[metric_key] for row in validation_metrics
+                                if metric_key in row
+                                and np.isfinite(row[metric_key])
+                            ]
+                            if not metric_vals:
+                                continue
+                            metric_logs[f"metrics/{metric_key}"] = float(
+                                np.mean(metric_vals))
+                        self.tracker.log(metric_logs, global_step)
+
+                        mf_val = metric_logs.get(
+                            "metrics/mf_angle_err_mean")
+                        if mf_val is not None:
+                            self._last_mf_angle_err_mean = mf_val
+                else:
+                    # Other sp_group leaders send their local results to rank 0
+                    world_group.send_object(local_video_filenames, dst=0)
+                    world_group.send_object(step_captions, dst=0)
+                    world_group.send_object(local_validation_metrics, dst=0)
+                    world_group.send_object(local_eval_error, dst=0)
+                    if local_eval_error:
+                        raise RuntimeError(local_eval_error)
+
+        # Broadcast the latest mf_angle_err_mean from rank 0 to all ranks
+        _mf_tensor = torch.tensor(
+            [self._last_mf_angle_err_mean], device=self.device)
+        dist.broadcast(_mf_tensor, src=0)
+        self._last_mf_angle_err_mean = _mf_tensor.item()
 
         # Re-enable gradients for training
         training_args.inference_mode = False

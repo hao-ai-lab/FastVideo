@@ -1,0 +1,14 @@
+{
+    "data": [
+        {
+            "caption": "00. Hold [W] + Static",
+            "image_path": "doom/000000.jpg",
+            "action_path": "action/000000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        }
+    ]
+}
