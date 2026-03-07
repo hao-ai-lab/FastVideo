@@ -2,10 +2,12 @@
 	import JobQueue from "$lib/components/JobQueue.svelte";
 	import CreateJobButton from "$lib/components/CreateJobButton.svelte";
 	import { setHeaderActions } from "$lib/stores/headerActions";
-	import { onDestroy } from "svelte";
+	import { onMount, onDestroy } from "svelte";
 
+	onMount(() => {
+		setHeaderActions([{ component: CreateJobButton, props: { jobType: "lora" } }]);
+	});
 	onDestroy(() => setHeaderActions([]));
-	setHeaderActions([{ component: CreateJobButton, props: { jobType: "lora" } }]);
 </script>
 
 <JobQueue jobType="lora" />

@@ -486,6 +486,10 @@
 		gap: 15px;
 		flex-wrap: wrap;
 	}
+	.twoCol :global(> *) {
+		flex: 1 1 0;
+		min-width: 200px;
+	}
 	.validationError {
 		color: var(--red);
 		font-size: 0.85rem;
