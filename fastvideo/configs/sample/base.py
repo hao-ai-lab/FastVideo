@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from fastvideo.logger import init_logger
@@ -48,6 +48,8 @@ class SamplingParam:
     # Text inputs
     prompt: str | list[str] | None = None
     negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+    prompt_attention_mask: list = field(default_factory=list)
+    negative_attention_mask: list = field(default_factory=list)
     prompt_path: str | None = None
     output_path: str = "outputs/"
     output_video_name: str | None = None

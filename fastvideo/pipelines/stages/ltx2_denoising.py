@@ -103,7 +103,12 @@ class LTX2DenoisingStage(PipelineStage):
 
         latents = batch.latents
         prompt_embeds = batch.prompt_embeds[0]
-        prompt_mask = None
+        prompt_mask = (batch.prompt_attention_mask[0]
+                       if batch.prompt_attention_mask else None)
+        if prompt_mask is None:
+            raise ValueError(
+                "LTX-2 denoising requires prompt_attention_mask, "
+                "but none was provided.")
 
         neg_prompt_embeds = None
         neg_prompt_mask = None
@@ -113,6 +118,8 @@ class LTX2DenoisingStage(PipelineStage):
                 raise ValueError(
                     "CFG is enabled but negative_prompt_embeds is empty")
             neg_prompt_embeds = batch.negative_prompt_embeds[0]
+            neg_prompt_mask = (batch.negative_attention_mask[0]
+                               if batch.negative_attention_mask else None)
 
         # Ensure text conditioning is on the same device as latents.
         if prompt_embeds.device != latents.device:
@@ -242,6 +249,10 @@ class LTX2DenoisingStage(PipelineStage):
             raise ValueError("LTX-2 text CFG is enabled "
                              "(ltx2_cfg_scale_video/audio != 1.0), "
                              "but negative prompt embeddings are missing")
+        if do_cfg_text and neg_prompt_mask is None:
+            raise ValueError("LTX-2 text CFG is enabled "
+                             "(ltx2_cfg_scale_video/audio != 1.0), "
+                             "but negative prompt attention mask is missing")
 
         logger.info(
             "[LTX2] Denoising start: steps=%d dtype=%s "
@@ -300,6 +311,7 @@ class LTX2DenoisingStage(PipelineStage):
                     timestep=timestep,
                     audio_hidden_states=audio_latents,
                     audio_encoder_hidden_states=audio_context_p,
+                    audio_encoder_attention_mask=prompt_mask,
                     audio_timestep=audio_timestep,
                 )
                 if isinstance(pos_outputs, tuple):
@@ -326,6 +338,7 @@ class LTX2DenoisingStage(PipelineStage):
                             timestep=timestep,
                             audio_hidden_states=audio_latents,
                             audio_encoder_hidden_states=audio_context_n,
+                            audio_encoder_attention_mask=neg_prompt_mask,
                             audio_timestep=audio_timestep,
                         )
                         if isinstance(neg_outputs, tuple):
@@ -343,6 +356,7 @@ class LTX2DenoisingStage(PipelineStage):
                             timestep=timestep,
                             audio_hidden_states=audio_latents,
                             audio_encoder_hidden_states=audio_context_p,
+                            audio_encoder_attention_mask=prompt_mask,
                             audio_timestep=audio_timestep,
                             skip_cross_modal_attn=True,
                         )
@@ -361,6 +375,7 @@ class LTX2DenoisingStage(PipelineStage):
                             timestep=timestep,
                             audio_hidden_states=audio_latents,
                             audio_encoder_hidden_states=(audio_context_p),
+                            audio_encoder_attention_mask=prompt_mask,
                             audio_timestep=audio_timestep,
                             skip_video_self_attn_blocks=(
                                 stg_blocks_video if do_stg_video else None),
@@ -429,6 +444,8 @@ class LTX2DenoisingStage(PipelineStage):
         result.add_check("latents", batch.latents,
                          [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
+        result.add_check("prompt_attention_mask", batch.prompt_attention_mask,
+                         V.list_not_empty)
         result.add_check("num_inference_steps", batch.num_inference_steps,
                          V.positive_int)
         return result
