@@ -36,6 +36,7 @@ from unittest.mock import patch
 
 import torch
 import torch.distributed
+import torch.distributed as dist
 from torch.distributed import Backend, ProcessGroup, ReduceOp
 
 import fastvideo.envs as envs
@@ -754,6 +755,23 @@ def init_world_group(ranks: list[int], local_rank: int,
     )
 
 
+def get_node_group() -> GroupCoordinator:
+    assert _NODE is not None, ("node group is not initialized")
+    return _NODE
+
+
+def init_node_group(local_rank: int, backend: str):
+    cpu_group = get_world_group().cpu_group
+    node_ranks = same_node_ranks(cpu_group)
+    node_size = len(node_ranks)
+    all_node_ranks = [
+        list(range(i * node_size, (i + 1) * node_size))
+        for i in range(dist.get_world_size() // node_size)
+    ]
+    global _NODE
+    _NODE = init_model_parallel_group(all_node_ranks, local_rank, backend)
+
+
 def init_model_parallel_group(
     group_ranks: list[list[int]],
     local_rank: int,
@@ -840,6 +858,8 @@ def init_distributed_environment(
     else:
         assert _WORLD.world_size == torch.distributed.get_world_size(), (
             "world group already initialized with a different world size")
+    # Init a group for each node
+    init_node_group(local_rank, backend)
 
 
 _SP: GroupCoordinator | None = None
@@ -1091,17 +1111,22 @@ def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
         ray.shutdown()
 
 
-def is_the_same_node_as(pg: ProcessGroup | StatelessProcessGroup,
-                        source_rank: int = 0) -> list[int]:
+def same_node_ranks(pg: ProcessGroup | StatelessProcessGroup,
+                    source_rank: int = 0) -> list[int]:
     """
-    This is a collective operation that returns if each rank is in the same node
+    This is a collective operation that returns ranks that are in the same node
     as the source rank. It tests if processes are attached to the same
     memory system (shared access to shared memory).
+    Args:
+        pg: the global process group to test
+        source_rank: the rank to test against
+    Returns:
+        A list of ranks that are in the same node as the source rank.
     """
     if isinstance(pg, ProcessGroup):
         assert torch.distributed.get_backend(
             pg) != torch.distributed.Backend.NCCL, (
-                "in_the_same_node_as should be tested with a non-NCCL group.")
+                "same_node_ranks should be tested with a non-NCCL group.")
         # local rank inside the group
         rank = torch.distributed.get_rank(group=pg)
         world_size = torch.distributed.get_world_size(group=pg)
@@ -1173,7 +1198,7 @@ def is_the_same_node_as(pg: ProcessGroup | StatelessProcessGroup,
             rank_data = pg.broadcast_obj(is_in_the_same_node, src=i)
             aggregated_data += rank_data
 
-    return [x == 1 for x in aggregated_data.tolist()]
+    return [i for i, x in enumerate(aggregated_data.tolist()) if x == 1]
 
 
 def initialize_tensor_parallel_group(
