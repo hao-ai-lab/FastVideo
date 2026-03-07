@@ -1,9 +1,9 @@
-# DMD2 distillation: Wan 2.1 T2V 1.3B (teacher 50-step -> student 8-step).
+# DMD2 distillation: Wan 2.1 T2V 1.3B (teacher 50-step -> student 4-step).
 #
 # - Teacher: frozen pretrained Wan 2.1 T2V 1.3B
 # - Student: trainable, initialized from the same pretrained weights
 # - Critic:  trainable, initialized from the same pretrained weights
-# - Validation: 8-step SDE sampling
+# - Validation: 4-step SDE sampling
 
 models:
   student:
@@ -26,7 +26,7 @@ method:
   rollout_mode: simulate
   generator_update_interval: 5
   real_score_guidance_scale: 4.5
-  dmd_denoising_steps: [1000, 850, 700, 550, 350, 275, 200, 125]
+  dmd_denoising_steps: [1000, 750, 500, 250]
 
   # Critic optimizer (required — no fallback to training.optimizer)
   fake_score_learning_rate: 8.0e-6
@@ -64,13 +64,13 @@ training:
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: outputs/wan2.1_dmd2_8steps
+    output_dir: outputs/wan2.1_dmd2_4steps
     training_state_checkpointing_steps: 1000
     checkpoints_total_limit: 3
 
   tracker:
     project_name: distillation_wan
-    run_name: wan2.1_dmd2_8steps_cfg4.5
+    run_name: wan2.1_dmd2_4steps
 
   model:
     enable_gradient_checkpointing_type: full
@@ -82,9 +82,9 @@ callbacks:
     pipeline_target: fastvideo.pipelines.basic.wan.wan_pipeline.WanPipeline
     dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
     every_steps: 50
-    sampling_steps: [8]
+    sampling_steps: [4]
     sampler_kind: sde
-    sampling_timesteps: [1000, 850, 700, 550, 350, 275, 200, 125]
+    sampling_timesteps: [1000, 750, 500, 250]
     guidance_scale: 6.0
 
 pipeline:
