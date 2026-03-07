@@ -4,10 +4,9 @@
 	import type { HeaderAction } from "$lib/stores/headerActions";
 
 	const TAB_TITLES: Record<string, string> = {
-		"/inference": "Inference",
-		"/finetuning": "Finetuning",
-		"/distillation": "Distillation",
-		"/lora": "LoRA",
+		"/inference": "Jobs",
+		"/finetuning": "Jobs",
+		"/distillation": "Jobs",
 		"/datasets": "Datasets",
 		"/settings": "Settings",
 	};

@@ -7,10 +7,15 @@
 	import { activeJobId, setActiveJobId, setActiveJob } from "$lib/stores/activeJob";
 	import { registerRefresh, triggerRefresh } from "$lib/stores/jobsRefresh";
 
-	let { jobType }: { jobType: JobType } = $props();
+	let {
+		jobType,
+		jobTypesForList,
+	}: { jobType: JobType; jobTypesForList?: JobType[] } = $props();
 
 	let jobs = $state<Job[]>([]);
 	let interval: ReturnType<typeof setInterval> | null = null;
+
+	const typesToFetch = $derived(jobTypesForList ?? [jobType]);
 
 	const activeJob = $derived(
 		$activeJobId ? jobs.find((j) => j.id === $activeJobId) ?? null : null,
@@ -24,7 +29,20 @@
 
 	async function fetchJobs() {
 		try {
-			jobs = await getJobsList(jobType);
+			if (typesToFetch.length === 1) {
+				jobs = await getJobsList(typesToFetch[0]);
+			} else {
+				const results = await Promise.all(
+					typesToFetch.map((t) => getJobsList(t)),
+				);
+				jobs = results
+					.flat()
+					.sort(
+						(a, b) =>
+							new Date(b.created_at ?? 0).getTime() -
+							new Date(a.created_at ?? 0).getTime(),
+					);
+			}
 		} catch (e) {
 			console.error("Failed to fetch jobs:", e);
 		}
@@ -59,7 +77,10 @@
 	<section class="card">
 		<div id="jobs-container">
 			{#if jobs.length === 0}
-				<p class="placeholder">No {jobType} jobs yet. Create one above.</p>
+				<p class="placeholder">
+					No {typesToFetch.length > 1 ? "jobs" : jobType + " jobs"} yet. Create
+					one above.
+				</p>
 			{:else}
 				{#each jobs as job (job.id)}
 					<JobCard {job} onJobUpdated={fetchJobs} />

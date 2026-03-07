@@ -69,14 +69,13 @@
 	let vsaSparsity = $state(0);
 	let tpSize = $state(-1);
 	let spSize = $state(-1);
-	let dataPath = $state("");
 	let selectedDatasetId = $state("");
 	let readyDatasets = $state<Awaited<ReturnType<typeof getDatasets>>>([]);
 	let maxTrainSteps = $state(1000);
 	let trainBatchSize = $state(1);
 	let learningRate = $state(5e-5);
 	let numLatentT = $state(20);
-	let validationDatasetFile = $state("");
+	let selectedValidationDatasetId = $state("");
 	let loraRank = $state(32);
 	let isSubmitting = $state(false);
 	let isLoadingModels = $state(false);
@@ -109,8 +108,8 @@
 		);
 		imagePath = "";
 		imageFileName = "";
-		dataPath = "";
 		selectedDatasetId = "";
+		selectedValidationDatasetId = "";
 	});
 
 	$effect(() => {
@@ -176,18 +175,20 @@
 		e.preventDefault();
 		if (isInference && workloadType === "i2v" && !imagePath) return;
 		const effectiveDataPath = selectedDatasetId
-			? readyDatasets.find((d) => d.id === selectedDatasetId)?.name
-				? "" /* use dataset; backend may resolve path */
-				: dataPath
-			: dataPath;
-		if (!isInference && !effectiveDataPath.trim()) return;
+			? readyDatasets.find((d) => d.id === selectedDatasetId)?.name ?? ""
+			: "";
+		if (!isInference && !selectedDatasetId) return;
+		const effectiveJobType: JobType =
+			workloadType === "lora_t2v" || workloadType === "lora_i2v"
+				? "lora"
+				: jobType;
 		isSubmitting = true;
 		try {
 			const basePayload = {
 				model_id: modelId,
 				prompt,
 				workload_type: workloadType,
-				job_type: jobType,
+				job_type: effectiveJobType,
 				...(isInference
 					? {}
 					: {
@@ -196,7 +197,11 @@
 							train_batch_size: trainBatchSize,
 							learning_rate: learningRate,
 							num_latent_t: numLatentT,
-							validation_dataset_file: validationDatasetFile || undefined,
+							validation_dataset_file: selectedValidationDatasetId
+								? (readyDatasets.find(
+										(d) => d.id === selectedValidationDatasetId,
+									)?.name ?? "") || undefined
+								: undefined,
 							lora_rank: loraRank,
 						}),
 			};
@@ -351,120 +356,112 @@
 					{/if}
 
 					{#if !isInference}
-						<div class="formRow">
-							<label for="modal-dataset">Dataset *</label>
-							<select
-								id="modal-dataset"
-								bind:value={selectedDatasetId}
-								onchange={() => {
-									if (!selectedDatasetId) dataPath = "";
-								}}
-								disabled={isSubmitting}
-							>
-								<option value="">
-									{readyDatasets.length === 0
-										? "No datasets (add in Datasets tab)"
-										: "Select a dataset…"}
-								</option>
-								{#each readyDatasets as d}
-									<option value={d.id}>{d.name}</option>
-								{/each}
-							</select>
-							{#if !selectedDatasetId}
-								<label for="modal-data-path" class="helperText" style="margin-top: 0.5rem"
-									>Or enter custom path:</label
-								>
-								<input
-									id="modal-data-path"
-									type="text"
-									bind:value={dataPath}
-									placeholder="/path/to/preprocessed/parquet/"
-									disabled={isSubmitting}
-									style="margin-top: 0.25rem"
-								/>
-							{/if}
-							<span class="helperText"
-								>Enter the path to your preprocessed data (e.g. parquet output
-								directory)</span
-							>
-						</div>
-						<div class="formRow">
-							<label for="modal-max-train-steps">Max Train Steps</label>
-							<Slider
-								id="modal-max-train-steps"
-								min={100}
-								max={50000}
-								step={100}
-								value={maxTrainSteps}
-								onChange={(v) => (maxTrainSteps = v)}
-								disabled={isSubmitting}
-							/>
-						</div>
-						<div class="formRow">
-							<label for="modal-train-batch-size">Train Batch Size</label>
-							<Slider
-								id="modal-train-batch-size"
-								min={1}
-								max={8}
-								step={1}
-								value={trainBatchSize}
-								onChange={(v) => (trainBatchSize = v)}
-								disabled={isSubmitting}
-							/>
-						</div>
-						<div class="formRow">
-							<label for="modal-learning-rate">Learning Rate</label>
-							<input
-								id="modal-learning-rate"
-								type="number"
-								step="1e-6"
-								min={1e-6}
-								max={1}
-								bind:value={learningRate}
-								disabled={isSubmitting}
-							/>
-						</div>
-						<div class="formRow">
-							<label for="modal-num-latent-t">Num Latent T</label>
-							<Slider
-								id="modal-num-latent-t"
-								min={8}
-								max={40}
-								step={1}
-								value={numLatentT}
-								onChange={(v) => (numLatentT = v)}
-								disabled={isSubmitting}
-							/>
-						</div>
-						<div class="formRow">
-							<label for="modal-validation-dataset">Validation Dataset (optional)</label>
-							<input
-								id="modal-validation-dataset"
-								type="text"
-								bind:value={validationDatasetFile}
-								placeholder="/path/to/validation.json"
-								disabled={isSubmitting}
-							/>
-						</div>
-						{#if workloadType === "lora_t2v" || workloadType === "lora_i2v"}
+						<div class="datasetRow">
 							<div class="formRow">
-								<label for="modal-lora-rank">LoRA Rank</label>
-								<Slider
-									id="modal-lora-rank"
-									min={8}
-									max={128}
-									step={8}
-									value={loraRank}
-									onChange={(v) => (loraRank = v)}
+								<label for="modal-dataset">Dataset *</label>
+								<select
+									id="modal-dataset"
+									bind:value={selectedDatasetId}
 									disabled={isSubmitting}
-								/>
+								>
+									<option value="" disabled>
+										{readyDatasets.length === 0
+											? "No datasets (add in Datasets tab)"
+											: "Select a dataset…"}
+									</option>
+									{#each readyDatasets as d}
+										<option value={d.id}>{d.name}</option>
+									{/each}
+								</select>
 							</div>
-						{/if}
+							<div class="formRow">
+								<label for="modal-validation-dataset"
+									>Validation Dataset (optional)</label
+								>
+								<select
+									id="modal-validation-dataset"
+									bind:value={selectedValidationDatasetId}
+									disabled={isSubmitting}
+								>
+									<option value="">None</option>
+									{#each readyDatasets as d}
+										<option value={d.id}>{d.name}</option>
+									{/each}
+								</select>
+							</div>
+						</div>
+						<details class="optionsSection">
+							<summary>Options</summary>
+							<div class="settingsGrid">
+								<div class="formRow">
+									<label for="modal-max-train-steps">Max Train Steps</label>
+									<Slider
+										id="modal-max-train-steps"
+										min={100}
+										max={50000}
+										step={100}
+										value={maxTrainSteps}
+										onChange={(v) => (maxTrainSteps = v)}
+										disabled={isSubmitting}
+									/>
+								</div>
+								<div class="formRow">
+									<label for="modal-train-batch-size">Train Batch Size</label>
+									<Slider
+										id="modal-train-batch-size"
+										min={1}
+										max={8}
+										step={1}
+										value={trainBatchSize}
+										onChange={(v) => (trainBatchSize = v)}
+										disabled={isSubmitting}
+									/>
+								</div>
+								<div class="formRow">
+									<label for="modal-learning-rate">Learning Rate</label>
+									<input
+										id="modal-learning-rate"
+										type="number"
+										step="1e-6"
+										min={1e-6}
+										max={1}
+										bind:value={learningRate}
+										disabled={isSubmitting}
+									/>
+								</div>
+								<div class="formRow">
+									<label for="modal-num-latent-t">Num Latent T</label>
+									<Slider
+										id="modal-num-latent-t"
+										min={8}
+										max={40}
+										step={1}
+										value={numLatentT}
+										onChange={(v) => (numLatentT = v)}
+										disabled={isSubmitting}
+									/>
+								</div>
+								{#if workloadType === "lora_t2v" || workloadType === "lora_i2v"}
+									<div class="formRow">
+										<label for="modal-lora-rank">LoRA Rank</label>
+										<Slider
+											id="modal-lora-rank"
+											min={8}
+											max={128}
+											step={8}
+											value={loraRank}
+											onChange={(v) => (loraRank = v)}
+											disabled={isSubmitting}
+										/>
+									</div>
+								{/if}
+							</div>
+						</details>
 					{/if}
 
 					{#if isInference}
-						<details class="advancedSettings">
-							<summary>Advanced Settings</summary>
+						<details class="optionsSection">
+							<summary>Options</summary>
 							<div class="settingsGrid">
 								{#if workloadType !== "t2i"}
 									<div class="formRow">
@@ -757,6 +754,16 @@
 		padding-left: 3px;
 		letter-spacing: 0.04em;
 	}
+	.datasetRow {
+		display: flex;
+		gap: 1rem;
+		margin-bottom: 0.85rem;
+	}
+	.datasetRow .formRow {
+		flex: 1;
+		min-width: 0;
+		margin-bottom: 0;
+	}
 	.helperText {
 		font-size: 0.75rem;
 		color: var(--text-dim);
@@ -774,10 +781,10 @@
 	.clearLink:hover:not(:disabled) {
 		color: var(--accent);
 	}
-	.advancedSettings {
+	.optionsSection {
 		margin-bottom: 1rem;
 	}
-	.advancedSettings summary {
+	.optionsSection summary {
 		cursor: pointer;
 		font-size: 0.85rem;
 		color: var(--accent-h);

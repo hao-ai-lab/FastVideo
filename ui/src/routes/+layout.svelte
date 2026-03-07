@@ -17,7 +17,7 @@
 	let primaryWidth = $state(220);
 	let secondaryWidth = $state(0);
 
-	const jobRoutes = ["/inference", "/finetuning", "/distillation", "/lora"];
+	const jobRoutes = ["/inference", "/finetuning", "/distillation"];
 	const pathname = $derived($page.url.pathname);
 	const jobSidebarOpen = $derived(
 		jobRoutes.includes(pathname) && $activeJob != null,

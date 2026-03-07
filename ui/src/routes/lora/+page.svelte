@@ -1,13 +1,15 @@
 <script lang="ts">
-	import JobQueue from "$lib/components/JobQueue.svelte";
-	import CreateJobButton from "$lib/components/CreateJobButton.svelte";
-	import { setHeaderActions } from "$lib/stores/headerActions";
-	import { onMount, onDestroy } from "svelte";
+	import { goto } from "$app/navigation";
 
-	onMount(() => {
-		setHeaderActions([{ component: CreateJobButton, props: { jobType: "lora" } }]);
-	});
-	onDestroy(() => setHeaderActions([]));
+	goto("/finetuning", { replaceState: true });
 </script>
 
-<JobQueue jobType="lora" />
+<p class="redirect-msg">Redirecting to Finetuning…</p>
+
+<style>
+	.redirect-msg {
+		text-align: center;
+		color: var(--text-dim);
+		padding: 2rem;
+	}
+</style>
