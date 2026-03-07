@@ -1,0 +1,52 @@
+name: Welcome First-Time Contributors
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  welcome:
+    if: github.repository == 'hao-ai-lab/FastVideo'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/first-interaction@34f15e814fe48ac9312ccf29db4e74fa767cbab7 # v1.3.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          issue-message: |
+            Welcome to FastVideo! Thanks for opening your first issue.
+
+            To help us investigate, please include:
+            - **FastVideo version**: `pip show fastvideo`
+            - **GPU**: `nvidia-smi` output (GPU model, driver, CUDA version)
+            - **Python version**: `python --version`
+            - **OS**: e.g., Ubuntu 22.04
+
+            If this is a bug, a minimal reproduction script helps us fix it faster.
+
+            Useful links:
+            - [Documentation](https://hao-ai-lab.github.io/FastVideo)
+            - [Contributing Guide](https://hao-ai-lab.github.io/FastVideo/contributing/overview/)
+            - [Slack](https://join.slack.com/t/fastvideo/shared_invite/zt-3f4lao1uq-u~Ipx6Lt4J27AlD2y~IdLQ)
+          pr-message: |
+            Welcome to FastVideo! Thanks for your first pull request.
+
+            Here's how our CI works:
+            1. **Pre-commit checks** run first (formatting, linting, type checking)
+            2. **GPU tests** run on RunPod if your changes touch relevant paths — these may take a few minutes to provision
+
+            Before your PR is reviewed, please make sure:
+            - [ ] `pre-commit run --all-files` passes locally
+            - [ ] You've added or updated tests for your changes
+            - [ ] The PR description explains what and why
+
+            If pre-commit fails, check the bot comment for fix instructions.
+
+            Useful links:
+            - [Contributing Guide](https://hao-ai-lab.github.io/FastVideo/contributing/overview/)
+            - [Development Roadmap](https://github.com/hao-ai-lab/FastVideo/issues/899)
