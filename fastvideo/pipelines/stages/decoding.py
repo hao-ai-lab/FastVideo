@@ -14,6 +14,7 @@ from fastvideo.models.loader.component_loader import VAELoader
 from fastvideo.models.vaes.common import ParallelTiledVAE
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
+from fastvideo.pipelines.stages.utils import debug_nan_check
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.utils import PRECISION_TO_TYPE
@@ -73,11 +74,14 @@ class DecodingStage(PipelineStage):
 
         # Diffusers-style: scaling_factor (+ optional shift_factor)
         if hasattr(self.vae, "scaling_factor"):
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents / self.vae.scaling_factor.to(
-                    latents.device, latents.dtype)
+            sf = self.vae.scaling_factor
+            if isinstance(sf, torch.Tensor):
+                sf = sf.to(latents.device, latents.dtype)
+                safe_sf = sf.clamp(min=1e-8)
             else:
-                latents = latents / self.vae.scaling_factor
+                safe_sf = max(abs(sf), 1e-8) if sf != 0 else 1e-8
+            # Avoid division by zero (e.g. default config scaling_factor=0) which produces inf
+            latents = latents / safe_sf
 
             if hasattr(self.vae,
                        "shift_factor") and self.vae.shift_factor is not None:
@@ -87,7 +91,64 @@ class DecodingStage(PipelineStage):
                 else:
                     latents = latents + self.vae.shift_factor
 
+        # Clamp to finite range so VAE decode never receives inf (prevents NaN output)
+        if not torch.isfinite(latents).all():
+            latents = torch.nan_to_num(
+                latents, nan=0.0, posinf=10.0, neginf=-10.0
+            )
+        latents = latents.clamp(-10.0, 10.0)
         return latents
+
+    @staticmethod
+    def _unpatchify_latents(latents: torch.Tensor) -> torch.Tensor:
+        """
+        Flux2: (B, 128, H', W') -> (B, 32, 2*H', 2*W').
+        Inverse of 2x2 patch packing; matches diffusers Flux2Pipeline._unpatchify_latents.
+        """
+        batch_size, num_channels, height, width = latents.shape
+        # 128 -> 32*2*2
+        latents = latents.reshape(
+            batch_size, num_channels // (2 * 2), 2, 2, height, width
+        )
+        latents = latents.permute(0, 1, 4, 2, 5, 3)
+        latents = latents.reshape(
+            batch_size, num_channels // (2 * 2), height * 2, width * 2
+        )
+        return latents
+
+    def _flux2_bn_denorm_and_unpatchify(self, latents: torch.Tensor) -> torch.Tensor:
+        """
+        Flux2: BN denormalize then unpatchify packed 128ch -> 32ch for VAE.
+        Uses vae.bn running_mean/running_var and vae.config.batch_norm_eps.
+        Skips BN when stats are invalid (NaN, inf, or all zeros) to avoid NaNs.
+        """
+        running_mean = self.vae.bn.running_mean.view(1, -1, 1, 1).to(
+            latents.device, latents.dtype
+        )
+        running_var = self.vae.bn.running_var.view(1, -1, 1, 1).to(
+            latents.device, latents.dtype
+        )
+        cfg = getattr(self.vae, "config", None)
+        arch = getattr(cfg, "arch_config", None) if cfg else None
+        eps = getattr(arch, "batch_norm_eps", None) or getattr(
+            cfg, "batch_norm_eps", 1e-5
+        )
+        # Skip BN if stats are invalid (unloaded, NaN, or would produce zero std)
+        mean_ok = torch.isfinite(running_mean).all().item()
+        var_ok = (
+            torch.isfinite(running_var).all().item()
+            and (running_var + eps > 0).all().item()
+        )
+        if mean_ok and var_ok:
+            bn_std = torch.sqrt(torch.clamp(running_var + eps, min=1e-6))
+            latents = latents * bn_std + running_mean
+            # Clamp to avoid inf/huge values that can cause NaN in VAE decode
+            latents = latents.clamp(-10.0, 10.0)
+        else:
+            logger.warning(
+                "Flux2 VAE BN stats invalid (NaN/inf or zero var); skipping BN denorm"
+            )
+        return self._unpatchify_latents(latents)
 
     @torch.no_grad()
     def decode(self, latents: torch.Tensor,
@@ -115,7 +176,16 @@ class DecodingStage(PipelineStage):
         vae_autocast_enabled = (
             vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
-        latents = self._denormalize_latents(latents)
+        # Flux2: denormalize only 32ch VAE input, not 128ch packed (scaling_factor is for VAE space)
+        is_flux2_packed = (
+            latents.ndim == 5
+            and latents.shape[1] == 128
+            and hasattr(self.vae, "bn")
+            and getattr(self.vae, "post_quant_conv", None) is not None
+            and self.vae.post_quant_conv.weight.shape[1] == 32
+        )
+        if not is_flux2_packed:
+            latents = self._denormalize_latents(latents)
 
         # Decode latents
         with torch.autocast(device_type="cuda",
@@ -127,7 +197,28 @@ class DecodingStage(PipelineStage):
             #     self.vae.enable_parallel()
             if not vae_autocast_enabled:
                 latents = latents.to(vae_dtype)
+            # Image VAEs (e.g. Flux2) expect 4D (B, C, H, W); squeeze T when 5D with T=1
+            squeezed_for_vae = False
+            if latents.ndim == 5 and latents.shape[2] == 1:
+                latents = latents.squeeze(2)
+                squeezed_for_vae = True
+            # Flux2 packed: 128ch packed -> BN denorm + unpatchify -> 32ch for VAE
+            if (
+                latents.ndim == 4
+                and latents.shape[1] == 128
+                and hasattr(self.vae, "bn")
+                and getattr(self.vae, "post_quant_conv", None) is not None
+                and self.vae.post_quant_conv.weight.shape[1] == 32
+            ):
+                debug_nan_check(latents, "5_before_flux2_unpatchify")
+                latents = self._flux2_bn_denorm_and_unpatchify(latents)
+                # Denormalize 32ch VAE input (scaling_factor / shift_factor for VAE space)
+                latents = self._denormalize_latents(latents)
+            debug_nan_check(latents, "5_before_vae_decode")
             image = self.vae.decode(latents)
+            debug_nan_check(image, "6_after_vae_decode")
+            if squeezed_for_vae:
+                image = image.unsqueeze(2)
 
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)
