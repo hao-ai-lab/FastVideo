@@ -35,26 +35,28 @@ RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
 # Configs
-MODEL_PATH="../mg_models/Matrix-Game-2.0-Foundation-Diffusers"
-DATA_DIR="../solaris/datasets/train/preprocessed_0227"
-VALIDATION_DATASET_FILE="examples/training/finetune/MatrixGame2.0/validation_mc.json"
+MODEL_PATH="../mg_models/Solaris-6K"
+DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/vpt/vpt/train_81f/preprocessed_0306"
+# VALIDATION_DATASET_FILE="examples/training/finetune/MatrixGame2.0/validation_mc.json"
+VALIDATION_DATASET_FILE="examples/training/finetune/MatrixGame2.0/validation_solaris.json"
 
 # Training arguments
 training_args=(
   --tracker_project_name "mg_finetune_solaris"
   --output_dir "checkpoints/matrixgame_finetune_${RUN_NAME}"
-  --wandb_run_name "${RUN_NAME}_bs64_more_steps"
-  --max_train_steps 150000
+  --wandb_run_name "${RUN_NAME}_bs64"
+  --override_transformer_cls_name "MatrixGameWanModel"
+  --max_train_steps 100000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
-  --num_latent_t 20
+  --gradient_accumulation_steps 2
+  --num_latent_t 21
   --num_height 352
   --num_width 640
-  --num_frames 77
+  --num_frames 81
   # --enable_gradient_checkpointing_type "full"
-  --reinit-action-module True
-  --override-keyboard-dim 23
+  # --reinit-action-module True
+  # --override-keyboard-dim 23
 )
 
 # Parallel arguments

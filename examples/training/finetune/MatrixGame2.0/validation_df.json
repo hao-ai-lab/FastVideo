@@ -159,6 +159,166 @@
             "height": 352,
             "width": 640,
             "num_frames": 81
+        },
+        {
+            "caption": "16",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Alpha_instance_000.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Alpha_instance_000.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "17",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Alpha_instance_001.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Alpha_instance_001.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "18",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Alpha_instance_002.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Alpha_instance_002.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "19",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Alpha_instance_003.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Alpha_instance_003.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "20",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Bravo_instance_000.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Bravo_instance_000.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "21",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Bravo_instance_001.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Bravo_instance_001.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "22",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Bravo_instance_002.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Bravo_instance_002.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "23",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Bravo_instance_003.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000054_Bravo_instance_003.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "24",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Alpha_instance_000.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Alpha_instance_000.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "25",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Alpha_instance_001.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Alpha_instance_001.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "26",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Alpha_instance_002.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Alpha_instance_002.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "27",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Alpha_instance_003.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Alpha_instance_003.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "28",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Bravo_instance_000.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Bravo_instance_000.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "29",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Bravo_instance_001.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Bravo_instance_001.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "30",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Bravo_instance_002.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Bravo_instance_002.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "31",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Bravo_instance_003.png",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train/000010/train/75_batch2_split_0_000055_Bravo_instance_003.npy",
+            "video_path": null,
+            "num_inference_steps": 50,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
         }
     ]
 }

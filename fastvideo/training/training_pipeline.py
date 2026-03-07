@@ -819,11 +819,37 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     self.global_rank,
                     training_args.validation_dataset_file,
                     local_main_process_only=False)
-        validation_dataset = ValidationDataset(
-            training_args.validation_dataset_file)
-        validation_dataloader = DataLoader(validation_dataset,
-                                           batch_size=None,
-                                           num_workers=0)
+        local_validation_ok = 1
+        local_validation_error = None
+        try:
+            validation_dataset = ValidationDataset(
+                training_args.validation_dataset_file)
+            validation_dataloader = DataLoader(validation_dataset,
+                                               batch_size=None,
+                                               num_workers=0)
+        except Exception as e:
+            local_validation_ok = 0
+            local_validation_error = repr(e)
+            logger.warning(
+                "Rank %s failed to build validation dataset, will skip validation this round. err=%s",
+                self.global_rank,
+                local_validation_error,
+                local_main_process_only=False)
+
+        validation_ok = torch.tensor(local_validation_ok,
+                                     device=get_local_torch_device(),
+                                     dtype=torch.int32)
+        dist.all_reduce(validation_ok, op=dist.ReduceOp.MIN)
+        if validation_ok.item() == 0:
+            if self.global_rank == 0:
+                logger.warning(
+                    "Skip validation at step %s because at least one rank failed to prepare validation dataset.",
+                    global_step)
+            training_args.inference_mode = False
+            self.transformer.train()
+            if getattr(self, "transformer_2", None) is not None:
+                self.transformer_2.train()
+            return
 
         self.transformer.eval()
         if getattr(self, "transformer_2", None) is not None:

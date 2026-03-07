@@ -42,10 +42,14 @@ KEYBOARD_MAP_7 = {  # templerun_distilled_model: still/w/s/left/right/a/d
 KEYBOARD_MAP = KEYBOARD_MAP_4  # Default for backward compatibility
 
 SOLARIS_MOVEMENT_KEY_INDICES = {
-    "W": 0,  # forward
-    "S": 1,  # back
-    "A": 2,  # left
-    "D": 3,  # right
+    # "W": 0,  # forward
+    # "S": 1,  # back
+    # "A": 2,  # left
+    # "D": 3,  # right
+    "W": 11,  # forward
+    "S": 12,  # back
+    "A": 13,  # left
+    "D": 14,  # right
 }
 
 def _require_cv2() -> bool:
