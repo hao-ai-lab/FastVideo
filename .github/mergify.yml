@@ -170,18 +170,18 @@ pull_request_rules:
 
   - name: comment on pre-commit failure
     conditions:
-      - check-failure=pre-commit
+      - check-failure~=pre-commit
       - -closed
     actions:
       comment:
         message: |
           ## Pre-commit checks failed
 
-          Your PR has formatting or linting issues. To fix them locally:
+          Hi @{{author}}, the pre-commit checks have failed. To fix them locally:
 
           ```bash
           # Install pre-commit if you haven't already
-          pip install pre-commit
+          uv pip install pre-commit
           pre-commit install
 
           # Run all checks and auto-fix what's possible
@@ -194,6 +194,8 @@ pull_request_rules:
           - **codespell**: `codespell --write-changes <file>` (spelling)
 
           After fixing, commit and push the changes. The checks will re-run automatically.
+
+          For future commits, `pre-commit` will run automatically on changed files before each commit.
 
   # ============================================================
   # Merge conflict detection
