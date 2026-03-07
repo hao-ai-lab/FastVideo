@@ -7,17 +7,34 @@
 	const SIDEBAR_COLLAPSED_WIDTH = 0;
 	const SIDEBAR_COLLAPSED_VISIBLE_WIDTH = 60;
 
+	const JOB_ROUTES = [
+		{ href: "/inference", label: "Inference" },
+		{ href: "/finetuning", label: "Finetuning" },
+		{ href: "/distillation", label: "Distillation" },
+	] as const;
+
 	let { onWidthChange }: { onWidthChange?: (w: number) => void } = $props();
 
 	let width = $state(220);
 	let isCollapsed = $state(false);
 	let isDragging = $state(false);
+	let jobsOpen = $state(true);
 
 	const effectiveWidth = isCollapsed ? SIDEBAR_COLLAPSED_WIDTH : width;
 	const layoutWidth = isCollapsed ? SIDEBAR_COLLAPSED_VISIBLE_WIDTH : width;
+	const pathname = $derived($page.url.pathname);
+	const isJobsActive = $derived(
+		JOB_ROUTES.some((r) => pathname === r.href),
+	);
 
 	$effect(() => {
 		onWidthChange?.(layoutWidth);
+	});
+
+	$effect(() => {
+		if (JOB_ROUTES.some((r) => pathname === r.href)) {
+			jobsOpen = true;
+		}
 	});
 
 	const resizableOpts = $derived({
@@ -32,6 +49,10 @@
 	function toggleCollapse() {
 		isCollapsed = !isCollapsed;
 	}
+
+	function toggleJobs() {
+		jobsOpen = !jobsOpen;
+	}
 </script>
 
 <aside
@@ -40,12 +61,43 @@
 	style="width: {effectiveWidth}px"
 >
 	<nav class="tabs">
-		<a href="/inference" class="tab" class:tabActive={$page.url.pathname === "/inference"}>Inference</a>
-		<a href="/finetuning" class="tab" class:tabActive={$page.url.pathname === "/finetuning"}>Finetuning</a>
-		<a href="/distillation" class="tab" class:tabActive={$page.url.pathname === "/distillation"}>Distillation</a>
-		<a href="/lora" class="tab" class:tabActive={$page.url.pathname === "/lora"}>LoRA</a>
-		<a href="/datasets" class="tab" class:tabActive={$page.url.pathname === "/datasets"}>Datasets</a>
-		<a href="/settings" class="tab" class:tabActive={$page.url.pathname === "/settings"}>Settings</a>
+		<div class="jobsGroup">
+			<button
+				type="button"
+				class="tab tabTrigger"
+				class:tabActive={isJobsActive}
+				onclick={toggleJobs}
+				aria-expanded={jobsOpen}
+				aria-haspopup="true"
+			>
+				<span>Jobs</span>
+				<svg
+					class="chevron"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					class:rotated={jobsOpen}
+				>
+					<path d="M6 9l6 6 6-6" />
+				</svg>
+			</button>
+			{#if jobsOpen}
+				<div class="jobsSubnav">
+					{#each JOB_ROUTES as route}
+						<a
+							href={route.href}
+							class="tab subTab"
+							class:tabActive={pathname === route.href}
+						>
+							{route.label}
+						</a>
+					{/each}
+				</div>
+			{/if}
+		</div>
+		<a href="/datasets" class="tab" class:tabActive={pathname === "/datasets"}>Datasets</a>
+		<a href="/settings" class="tab" class:tabActive={pathname === "/settings"}>Settings</a>
 	</nav>
 	<div class="collapseFooter">
 		<button
@@ -184,5 +236,39 @@
 		color: var(--accent);
 		font-weight: 500;
 		background: rgba(99, 102, 241, 0.12);
+	}
+	.jobsGroup {
+		display: flex;
+		flex-direction: column;
+		gap: 0;
+	}
+	.tabTrigger {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		cursor: pointer;
+	}
+	.tabTrigger .chevron {
+		width: 16px;
+		height: 16px;
+		flex-shrink: 0;
+		opacity: 0.85;
+		transition: transform 0.2s;
+	}
+	.tabTrigger .chevron.rotated {
+		transform: rotate(180deg);
+	}
+	.jobsSubnav {
+		display: flex;
+		flex-direction: column;
+		padding-left: 0.5rem;
+		border-left: 2px solid var(--border);
+		margin-left: 1rem;
+		margin-bottom: 0.25rem;
+	}
+	.subTab {
+		padding: 0.5rem 1rem;
+		font-size: 0.85rem;
 	}
 </style>

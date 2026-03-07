@@ -12,4 +12,4 @@
 	onDestroy(() => setHeaderActions([]));
 </script>
 
-<JobQueue jobType="finetuning" />
+<JobQueue jobType="finetuning" jobTypesForList={["finetuning", "lora"]} />

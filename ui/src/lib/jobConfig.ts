@@ -50,6 +50,16 @@ export const WORKLOAD_OPTIONS: Record<JobType, WorkloadOption[]> = {
 			label: "LTX2 T2V",
 			desc: "LTX-2 Text to Video finetune",
 		},
+		{
+			type: "lora_t2v",
+			label: "LoRA T2V",
+			desc: "LoRA finetune Text to Video",
+		},
+		{
+			type: "lora_i2v",
+			label: "LoRA I2V",
+			desc: "LoRA finetune Image to Video",
+		},
 	],
 	distillation: [
 		{
@@ -74,15 +84,7 @@ export const WORKLOAD_OPTIONS: Record<JobType, WorkloadOption[]> = {
 		},
 	],
 	lora: [
-		{
-			type: "lora_t2v",
-			label: "LoRA T2V",
-			desc: "LoRA finetune Text to Video",
-		},
-		{
-			type: "lora_i2v",
-			label: "LoRA I2V",
-			desc: "LoRA finetune Image to Video",
-		},
+		{ type: "lora_t2v", label: "LoRA T2V", desc: "LoRA finetune Text to Video" },
+		{ type: "lora_i2v", label: "LoRA I2V", desc: "LoRA finetune Image to Video" },
 	],
 };
