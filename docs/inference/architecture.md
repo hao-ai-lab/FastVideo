@@ -268,6 +268,7 @@ Specialized variants: `CausalDenoisingStage`, `LTX2DenoisingStage`,
 `positive_int_divisible(divisor)`, etc.
 
 `VerificationResult` collects check results:
+
 ```python
 result = VerificationResult()
 result.add_check("height", batch.height, V.positive_int_divisible(8))
