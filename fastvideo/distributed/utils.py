@@ -81,43 +81,6 @@ def compute_padding_for_sp(seq_len: int, sp_world_size: int) -> tuple[int, int]:
     return padded_seq_len, padding_amount
 
 
-def create_attention_mask_for_padding(
-    seq_len: int,
-    padded_seq_len: int,
-    batch_size: int,
-    device: torch.device,
-    dtype: torch.dtype = torch.bool,
-) -> torch.Tensor | None:
-    """
-    Create attention mask to ignore padded tokens.
-    
-    Args:
-        seq_len: Original sequence length (before padding)
-        padded_seq_len: Padded sequence length
-        batch_size: Batch size
-        device: Device to create mask on
-        dtype: Data type for the mask (default: bool)
-        
-    Returns:
-        Tensor: Boolean mask [B, padded_seq_len] where True = valid token,
-                or None if no padding is needed
-    """
-    if seq_len == padded_seq_len:
-        return None
-
-    # Create mask: True for valid tokens, False for padding
-    attention_mask = torch.ones(
-        (batch_size, padded_seq_len),
-        dtype=dtype,
-        device=device,
-    )
-
-    # Mask out padding tokens
-    attention_mask[:, seq_len:] = 0
-
-    return attention_mask
-
-
 def pad_sequence_tensor(
     tensor: torch.Tensor,
     target_seq_len: int,

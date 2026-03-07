@@ -80,6 +80,7 @@ class GenerateSubcommand(CLISubcommand):
             k: v
             for k, v in merged_args.items() if k in self.generation_arg_names
         }
+        generation_args.setdefault("return_frames", False)
 
         model_path = init_args.pop('model_path')
         prompt = generation_args.pop('prompt', None)

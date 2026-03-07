@@ -92,15 +92,11 @@ class FastVideoArgs:
     # Workload type
     workload_type: WorkloadType = WorkloadType.T2V
 
-    # Cache strategy
-    cache_strategy: str = "none"
-
     # Distributed executor backend
     distributed_executor_backend: str = "mp"
 
     # a few attributes for ray related
     ray_placement_group: PlacementGroup | None = None
-
     ray_runtime_env: RuntimeEnv | None = None
 
     inference_mode: bool = True  # if False == training mode

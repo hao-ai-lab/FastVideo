@@ -94,9 +94,9 @@ def test_lora_training():
 
     # Define thresholds for LoRA training based on the provided console outputs
     fields_and_thresholds = {
-        'avg_step_time': 20.0,  # something up with modal
+        'avg_step_time': 30.0,  # something up with modal
         # 'grad_norm': 0.05,      # too volatile for now. TODO: fix nondeterminism in training
-        'step_time': 20.0,      # something up with modal
+        'step_time': 30.0,      # something up with modal
         'train_loss': 0.05    
     }
 

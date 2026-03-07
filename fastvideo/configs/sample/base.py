@@ -58,7 +58,6 @@ class SamplingParam:
 
     # Original dimensions (before VAE scaling)
     num_frames: int = 125
-    num_frames_round_down: bool = False  # Whether to round down num_frames if it's not divisible by num_gpus
     height: int = 720
     width: int = 1280
     height_sr: int = 1072
@@ -75,7 +74,7 @@ class SamplingParam:
 
     # Misc
     save_video: bool = True
-    return_frames: bool = False
+    return_frames: bool = True
     return_trajectory_latents: bool = False  # returns all latents for each timestep
     return_trajectory_decoded: bool = False  # returns decoded latents for each timestep
 
@@ -218,7 +217,7 @@ class SamplingParam:
         parser.add_argument(
             "--return-frames",
             action="store_true",
-            default=SamplingParam.return_frames,
+            default=False,
             help="Whether to return the raw frames",
         )
         parser.add_argument(

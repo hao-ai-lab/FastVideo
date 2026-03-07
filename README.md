@@ -93,7 +93,6 @@ def main():
     # Generate the video
     video = generator.generate_video(
         prompt,
-        return_frames=True,  # Also return frames from this call (defaults to False)
         output_path="my_videos/",  # Controls where videos are saved
         save_video=True
     )
