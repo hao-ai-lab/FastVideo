@@ -38,6 +38,6 @@ Fixes #
 - [ ] I updated documentation if needed
 - [ ] I considered GPU memory impact of my changes
 
-<!-- For model/pipeline changes, also check: -->
-<!-- - [ ] I verified SSIM regression tests pass -->
-<!-- - [ ] I updated the support matrix if adding a new model -->
+**For model/pipeline changes, also check:**
+- [ ] I verified SSIM regression tests pass
+- [ ] I updated the support matrix if adding a new model
