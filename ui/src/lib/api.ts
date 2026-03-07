@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Job, type JobType } from "./types";
+import { env } from "$env/dynamic/public";
+import type { Job, JobType } from "$lib/types";
+
+const DEFAULT_API_BASE_URL = "http://localhost:8189/api";
 
 function getApiBaseUrl(): string {
-	const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-
-	if (!apiUrl) {
-		throw new Error(
-			"Please set NEXT_PUBLIC_API_BASE_URL in your .env.local file or as an environment variable. " +
-				"Example: NEXT_PUBLIC_API_BASE_URL=http://localhost:8189/api",
-		);
-	}
-
+	const apiUrl =
+		typeof env.PUBLIC_API_BASE_URL === "string" && env.PUBLIC_API_BASE_URL
+			? env.PUBLIC_API_BASE_URL
+			: DEFAULT_API_BASE_URL;
 	return apiUrl;
 }
 
