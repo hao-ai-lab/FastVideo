@@ -282,6 +282,18 @@ class SD35DenoisingStage(PipelineStage):
                     raise ValueError(
                         "Missing negative conditioning tensors for CFG")
                 latent_model_input = torch.cat([latents_4d] * 2, dim=0)
+                pos_len = prompt_embeds.shape[1]
+                neg_len = neg_prompt_embeds.shape[1]
+                if pos_len != neg_len:
+                    max_len = max(pos_len, neg_len)
+                    if pos_len < max_len:
+                        prompt_embeds = F.pad(
+                            prompt_embeds,
+                            (0, 0, 0, max_len - pos_len))
+                    else:
+                        neg_prompt_embeds = F.pad(
+                            neg_prompt_embeds,
+                            (0, 0, 0, max_len - neg_len))
                 cond_embeds = torch.cat([neg_prompt_embeds, prompt_embeds],
                                         dim=0)
                 cond_pooled = torch.cat([neg_pooled, pooled], dim=0)
@@ -301,10 +313,10 @@ class SD35DenoisingStage(PipelineStage):
                     and (get_local_torch_device().type == "cuda"),
             ):
                 noise_pred = self.transformer(
-                    hidden_states=latent_model_input,
+                    hidden_states=latent_model_input.to(dtype=target_dtype),
                     timestep=timestep,
-                    encoder_hidden_states=cond_embeds,
-                    pooled_projections=cond_pooled,
+                    encoder_hidden_states=cond_embeds.to(dtype=target_dtype),
+                    pooled_projections=cond_pooled.to(dtype=target_dtype),
                     return_dict=False,
                 )[0]
 
@@ -358,6 +370,7 @@ class SD35DecodingStage(PipelineStage):
             raise ValueError("latents must be set before SD35DecodingStage")
 
         device = get_local_torch_device()
+        self.vae = self.vae.to(device)
         latents_5d = batch.latents.to(device)
         latents_4d = latents_5d.squeeze(2)
 
@@ -380,4 +393,6 @@ class SD35DecodingStage(PipelineStage):
 
         image = (image / 2 + 0.5).clamp(0, 1)
         batch.output = image.unsqueeze(2).detach().float().cpu()
+        if fastvideo_args.vae_cpu_offload:
+            self.vae = self.vae.to("cpu")
         return batch

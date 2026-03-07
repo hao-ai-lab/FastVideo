@@ -118,6 +118,34 @@ pyarrow_schema_text_only = pa.schema([
 ])
 
 
+pyarrow_schema_sd35 = pa.schema([
+    pa.field("id", pa.string()),
+    # --- Image VAE latents (C, T, H, W) with T=1 for SD3.5 ---
+    pa.field("vae_latent_bytes", pa.binary()),
+    pa.field("vae_latent_shape", pa.list_(pa.int64())),
+    pa.field("vae_latent_dtype", pa.string()),
+    # --- Combined text encoder output (CLIP-L + CLIP-G padded + T5) ---
+    # Shape: [seq_len, 4096] where seq_len = clip_seq + t5_seq
+    pa.field("text_embedding_bytes", pa.binary()),
+    pa.field("text_embedding_shape", pa.list_(pa.int64())),
+    pa.field("text_embedding_dtype", pa.string()),
+    # --- Pooled CLIP projections (CLIP-L pooled + CLIP-G pooled) ---
+    # Shape: [2048]
+    pa.field("pooled_projection_bytes", pa.binary()),
+    pa.field("pooled_projection_shape", pa.list_(pa.int64())),
+    pa.field("pooled_projection_dtype", pa.string()),
+    # --- Metadata ---
+    pa.field("file_name", pa.string()),
+    pa.field("caption", pa.string()),
+    pa.field("media_type", pa.string()),
+    pa.field("width", pa.int64()),
+    pa.field("height", pa.int64()),
+    pa.field("num_frames", pa.int64()),
+    pa.field("duration_sec", pa.float64()),
+    pa.field("fps", pa.float64()),
+])
+
+
 pyarrow_schema_matrixgame = pa.schema([
     pa.field("id", pa.string()),
     # --- Image/Video VAE latents ---
