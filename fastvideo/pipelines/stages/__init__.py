@@ -36,6 +36,9 @@ from fastvideo.pipelines.stages.matrixgame_denoising import (
     MatrixGameCausalDenoisingStage)
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
 from fastvideo.pipelines.stages.gamecraft_denoising import GameCraftDenoisingStage
+from fastvideo.pipelines.stages.gen3c_stages import (
+    Gen3CCFGPolicyStage, Gen3CConditioningStage, Gen3CDenoisingStage,
+    Gen3CLatentPreparationStage)
 from fastvideo.pipelines.stages.text_encoding import (Cosmos25TextEncodingStage,
                                                       TextEncodingStage)
 from fastvideo.pipelines.stages.timestep_preparation import (
@@ -66,6 +69,10 @@ __all__ = [
     "MatrixGameCausalDenoisingStage",
     "HYWorldDenoisingStage",
     "GameCraftDenoisingStage",
+    "Gen3CCFGPolicyStage",
+    "Gen3CConditioningStage",
+    "Gen3CLatentPreparationStage",
+    "Gen3CDenoisingStage",
     "CosmosDenoisingStage",
     "Cosmos25DenoisingStage",
     "Cosmos25T2WDenoisingStage",
