@@ -660,11 +660,102 @@ def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
 
 _register_configs()
 
+
+def get_registered_model_paths() -> list[str]:
+    """Return all registered HuggingFace model paths.
+
+    Useful for UIs and tooling that need to enumerate supported models.
+    """
+    return sorted(_MODEL_HF_PATH_TO_NAME.keys())
+
+
+def _infer_workload_types(model_path: str,
+                          config_info: ConfigInfo) -> list[str]:
+    """Infer supported workload types from model path and pipeline config."""
+    config_name = config_info.pipeline_config_cls.__name__
+    path_lower = model_path.lower()
+
+    # LongCat: same config for T2V, I2V, VC; path distinguishes
+    if "longcat" in path_lower:
+        if "i2v" in path_lower or "imagetovideo" in path_lower:
+            return ["i2v"]
+        if "vc" in path_lower or "videocontinuation" in path_lower:
+            return []  # VC not in UI workload options
+        return ["t2v"]
+
+    # SFWan2.2: I2V vs T2V variant by path
+    if "sfwan2.2" in path_lower or "sfwan2_2" in path_lower:
+        if "i2v" in path_lower:
+            return ["i2v"]
+        return ["t2v"]
+
+    # TI2V models support both T2V and I2V
+    if "ti2v" in config_name.lower():
+        return ["t2v", "i2v"]
+
+    # T2V-only configs (exclude I2V and TI2V)
+    if "t2v" in config_name.lower() and "i2v" not in config_name.lower():
+        return ["t2v"]
+
+    # I2V-only configs (exclude TI2V)
+    if "i2v" in config_name.lower():
+        return ["i2v"]
+
+    # T2I (SD3.5, etc.)
+    if "sd35" in config_name.lower() or "t2i" in config_name.lower():
+        return ["t2i"]
+
+    # Cosmos: video prediction, treat as T2V
+    if "cosmos" in config_name.lower():
+        return ["t2v"]
+
+    # Game/control models (Matrix, GameCraft, LingBot): I2V
+    if any(x in config_name.lower() for x in ("matrix", "gamecraft",
+                                              "lingbot")):
+        return ["i2v"]
+
+    # V2V, SR, etc.: not in UI workload options
+    return []
+
+
+def get_registered_models_with_workloads(
+    workload_type: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return models with workload metadata, optionally filtered by workload.
+
+    Args:
+        workload_type: If set (e.g. "t2v", "i2v", "t2i"), only return models
+            that support this workload. If None, return all with workload_types.
+
+    Returns:
+        List of dicts with keys: id, label, workload_types.
+    """
+    result: list[dict[str, Any]] = []
+    for path in sorted(_MODEL_HF_PATH_TO_NAME.keys()):
+        model_id = _MODEL_HF_PATH_TO_NAME[path]
+        config_info = _CONFIG_REGISTRY.get(model_id)
+        if config_info is None:
+            continue
+        workloads = _infer_workload_types(path, config_info)
+        if workload_type is not None:
+            if workload_type.lower() not in workloads:
+                continue
+        label = path.split("/")[-1].replace("-", " ").replace("_", " ")
+        result.append({
+            "id": path,
+            "label": label,
+            "workload_types": workloads,
+        })
+    return result
+
+
 __all__ = [
     "ConfigInfo",
     "ModelInfo",
     "get_model_info",
     "get_pipeline_config_cls_from_name",
+    "get_registered_model_paths",
+    "get_registered_models_with_workloads",
     "get_sampling_param_cls_for_name",
     "get_pipeline_config_classes",
 ]
