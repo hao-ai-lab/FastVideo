@@ -18,9 +18,7 @@
 
 	$effect(() => {
 		setActiveJob(activeJob);
-	});
-
-	$effect(() => {
+		// Void active job ID if deleeted
 		if ($activeJobId && !activeJob) setActiveJobId(null);
 	});
 

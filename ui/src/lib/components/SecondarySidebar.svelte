@@ -138,15 +138,7 @@
 				<span class="consoleStatus">● Live</span>
 			{/if}
 		</div>
-		<pre bind:this={consoleEl} class="consoleOutput">
-			{#if logs.length === 0}
-				<span class="consoleEmpty">
-					{job.status === "running" ? "Waiting for logs..." : "No logs available"}
-				</span>
-			{:else}
-				{logs.join("\n")}
-			{/if}
-		</pre>
+		<pre bind:this={consoleEl} class="consoleOutput">{#if logs.length === 0}<span class="consoleEmpty">{job.status === "running" ? "Waiting for logs..." : "No logs available"}</span>{:else}{logs.join("\n")}{/if}</pre>
 	</div>
 	<div
 		class="resizeHandle"
