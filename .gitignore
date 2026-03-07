@@ -83,6 +83,11 @@ docs/distillation/examples/
 
 dmd_t2v_output/
 preprocess_output_text/
+
+.claude/
+.codex/
+openspec/
+
 preprocess_output/
 finetune_i2v_output/
 finetune_df_output/
