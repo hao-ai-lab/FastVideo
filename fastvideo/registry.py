@@ -31,6 +31,7 @@ from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionT2V_14B_Config,
     TurboDiffusionT2V_1_3B_Config,
 )
+from fastvideo.configs.pipelines.waypoint import WaypointT2VConfig
 from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config,
     FastWan2_2_TI2V_5B_Config,
@@ -68,6 +69,7 @@ from fastvideo.configs.sample.turbodiffusion import (
     TurboDiffusionT2V_14B_SamplingParam,
     TurboDiffusionT2V_1_3B_SamplingParam,
 )
+from fastvideo.configs.sample.waypoint import WaypointSamplingParam
 from fastvideo.configs.sample.wan import (
     FastWanT2V480P_SamplingParam,
     MatrixGame2_SamplingParam,
@@ -455,6 +457,20 @@ def _register_configs() -> None:
         pipeline_config_cls=TurboDiffusionI2V_A14B_Config,
         hf_model_paths=[
             "loayrashid/TurboWan2.2-I2V-A14B-Diffusers",
+        ],
+    )
+
+    # Waypoint
+    register_configs(
+        sampling_param_cls=WaypointSamplingParam,
+        pipeline_config_cls=WaypointT2VConfig,
+        hf_model_paths=[
+            "Overworld/Waypoint-1-Small",
+            "FastVideo/Waypoint-1-Small-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: "waypoint" in path.lower() or "worldengine" in path.
+            lower(),
         ],
     )
 

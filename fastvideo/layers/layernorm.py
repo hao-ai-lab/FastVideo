@@ -7,6 +7,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fastvideo.layers.custom_op import CustomOp
+from fastvideo.layers.linear import ReplicatedLinear
+
+
+def rms_norm(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    """Parameter-free RMS normalization. Use RMSNorm class for learnable weight."""
+    return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
 
 
 @CustomOp.register("rms_norm")
@@ -296,3 +302,44 @@ class LayerNormScaleShift(nn.Module):
             output = output.to(x.dtype)
 
         return output
+
+
+class AdaLN(nn.Module):
+    """Adaptive Layer Normalization for DiT output modulation.
+
+    Produces scale and shift from conditioning, applies parameter-free RMS norm
+    to x, then modulates: rms_norm(x) * (1 + scale) + shift.
+    Used by Waypoint and similar models for per-frame conditioning.
+
+    cond: [B, N, D] per-frame conditioning (N frames)
+    x: [B, L, D] token features (L = N * tokens_per_frame)
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        bias: bool = False,
+        eps: float = 1e-6,
+        params_dtype: torch.dtype | None = None,
+        prefix: str = "",
+    ):
+        super().__init__()
+        self.eps = eps
+        self.fc = ReplicatedLinear(
+            d_model,
+            2 * d_model,
+            bias=bias,
+            params_dtype=params_dtype,
+            prefix=prefix,
+        )
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        B, L, D = x.shape
+        N = cond.shape[1]
+        h = F.silu(cond)
+        ab, _ = self.fc(h)
+        ab = ab.view(B, N, 1, 2 * D).expand(-1, -1, L // N,
+                                            -1).reshape(B, L, 2 * D)
+        scale, shift = ab.chunk(2, dim=-1)
+        x_norm = rms_norm(x, self.eps)
+        return x_norm * (1 + scale) + shift

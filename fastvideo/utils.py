@@ -588,9 +588,20 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
         raise ValueError(
             f"Model directory {model_path} does not contain a vae/ directory.")
 
-    # Load the config
-    with open(config_path) as f:
-        config = json.load(f)
+    # Load the config (handle empty or invalid file)
+    with open(config_path, encoding="utf-8") as f:
+        raw = f.read().strip()
+    if not raw:
+        raise ValueError(
+            f"model_index.json in {model_path} is empty. "
+            "The Hugging Face repo must contain a valid diffusers model_index.json."
+        )
+    try:
+        config = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"model_index.json in {model_path} is invalid: {e}. "
+            "The repo must contain a valid diffusers model_index.json.") from e
 
     # Verify diffusers version exists
     if "_diffusers_version" not in config:
@@ -626,9 +637,22 @@ def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
                                                filename="model_index.json",
                                                local_dir=tmp_dir)
 
-            # Load the model_index.json
-            with open(model_index_path) as f:
-                config: dict[str, Any] = json.load(f)
+            # Load the model_index.json (handle empty or invalid file)
+            with open(model_index_path, encoding="utf-8") as f:
+                raw = f.read().strip()
+            if not raw:
+                raise ValueError(
+                    f"model_index.json for {model_name_or_path} is empty. "
+                    "The Hugging Face repo must contain a valid diffusers "
+                    "model_index.json.")
+            try:
+                config = json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"model_index.json for {model_name_or_path} is invalid: {e}. "
+                    "The repo must contain a valid diffusers model_index.json."
+                ) from e
+            config = cast(dict[str, Any], config)
 
             # Verify it has the required fields
             if "_class_name" not in config:
@@ -699,7 +723,8 @@ def kill_itself_when_parent_died() -> None:
     import platform
     if platform.system() == "Linux":
         libc = ctypes.CDLL("libc.so.6")
-        libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
+        sigkill = getattr(signal, "SIGKILL", 9)
+        libc.prctl(PR_SET_PDEATHSIG, sigkill)
     # elif platform.system() == "Darwin":
     #     libc = ctypes.CDLL("libc.dylib")
     #     logger.warning("kill_itself_when_parent_died is only supported in linux.")
