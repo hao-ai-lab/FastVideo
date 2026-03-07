@@ -275,7 +275,8 @@ torchrun --nproc_per_node=8 -m fastvideo.train.entrypoint.train \
     --config examples/train/finetune_wan2.1_t2v_1.3B_vsa_phase3.4_0.9sparsity.yaml
 ```
 
-Example configs are in [`examples/train/`](../train/).
+Example configs are in
+[`examples/train/`](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/train).
 
 ---
 
@@ -317,7 +318,7 @@ fastvideo/train/
 
 ## Related
 
-- [RFC: Training Architecture](rfc.md) — Original internal design document.
+- [RFC: Training Architecture](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/train/rfc.md) — Original internal design document.
 - [Self-Forcing paper](https://arxiv.org/abs/2406.05477) — Chen et al., 2024.
 - [DMD2 paper](https://arxiv.org/abs/2405.14867) — Yin et al., 2024.
 - [Diffusion Forcing paper](https://arxiv.org/abs/2407.01392) — Chen et al., 2024.
