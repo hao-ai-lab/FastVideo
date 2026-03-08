@@ -129,16 +129,26 @@ def build_training_args(
 
     # Distillation-specific
     if workload_type.startswith("dmd_") or workload_type.startswith("self_forcing_"):
+        real_score = job.get("real_score_model_path", "") or model_id
+        fake_score = job.get("fake_score_model_path", "") or model_id
         args.extend([
-            "--real-score-model-path", model_id,
-            "--fake-score-model-path", model_id,
+            "--real-score-model-path", real_score,
+            "--fake-score-model-path", fake_score,
             "--training-cfg-rate", "0.0",
-            "--dmd-denoising-steps", "1000,757,522",
-            "--min-timestep-ratio", "0.02",
-            "--max-timestep-ratio", "0.98",
-            "--generator-update-interval", "5",
-            "--real-score-guidance-scale", "3.5",
+            "--dmd-denoising-steps",
+            job.get("dmd_denoising_steps", "1000,757,522") or "1000,757,522",
+            "--min-timestep-ratio", str(job.get("min_timestep_ratio", 0.02)),
+            "--max-timestep-ratio", str(job.get("max_timestep_ratio", 0.98)),
+            "--generator-update-interval",
+            str(job.get("generator_update_interval", 5)),
+            "--real-score-guidance-scale",
+            str(job.get("real_score_guidance_scale", 3.5)),
         ])
+        if job.get("dmd_use_vsa"):
+            args.extend([
+                "--VSA-sparsity",
+                str(job.get("dmd_vsa_sparsity", 0.8)),
+            ])
 
     # ODE init specific
     if workload_type == "ode_init":

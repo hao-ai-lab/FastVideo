@@ -311,6 +311,15 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         vsa_sparsity=req.vsa_sparsity,
         tp_size=req.tp_size,
         sp_size=req.sp_size,
+        dmd_use_vsa=req.dmd_use_vsa,
+        dmd_vsa_sparsity=req.dmd_vsa_sparsity,
+        dmd_denoising_steps=req.dmd_denoising_steps or "1000,757,522",
+        min_timestep_ratio=req.min_timestep_ratio,
+        max_timestep_ratio=req.max_timestep_ratio,
+        real_score_guidance_scale=req.real_score_guidance_scale,
+        generator_update_interval=req.generator_update_interval,
+        real_score_model_path=req.real_score_model_path or "",
+        fake_score_model_path=req.fake_score_model_path or "",
     )
 
     if database is not None:
