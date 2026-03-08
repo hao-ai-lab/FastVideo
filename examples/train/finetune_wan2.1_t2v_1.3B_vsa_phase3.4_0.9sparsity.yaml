@@ -12,7 +12,6 @@ models:
 method:
   _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
   attn_kind: vsa
-  # use_ema: true
 
 training:
   distributed:
@@ -67,7 +66,7 @@ callbacks:
     max_grad_norm: 1.0
   ema:
     _target_: fastvideo.train.callbacks.ema.EMACallback
-    beta: 0.9999
+    decay: 0.9999
   validation:
     _target_: fastvideo.train.callbacks.validation.ValidationCallback
     pipeline_target: fastvideo.pipelines.basic.wan.wan_pipeline.WanPipeline

@@ -8,6 +8,7 @@ section.  The pipeline class is resolved from
 
 from __future__ import annotations
 
+import contextlib
 import os
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
@@ -169,14 +170,35 @@ class ValidationCallback(Callback):
         method: TrainingMethod,
         step: int,
     ) -> None:
-        tc = self.training_config
-        # Use ema_context() to temporarily swap EMA
-        # weights into the student transformer (no-op if
-        # EMA is disabled).
-        with method.ema_context() as transformer:
+        from fastvideo.train.callbacks.ema import (
+            EMACallback,
+        )
+
+        transformer = method.student.transformer
+        # Look for an EMA callback to temporarily swap
+        # EMA weights during validation.
+        ema_cb = self._find_ema_callback()
+        if ema_cb is not None:
+            ctx = ema_cb.ema_context(transformer)
+        else:
+            ctx = contextlib.nullcontext(transformer)
+        with ctx as t:
             self._run_validation_inner(
-                method, step, transformer,
+                method, step, t,
             )
+
+    def _find_ema_callback(self) -> Any | None:
+        """Find the EMA callback in the callback dict."""
+        from fastvideo.train.callbacks.ema import (
+            EMACallback,
+        )
+
+        cb_dict = getattr(self, "_callback_dict", None)
+        if cb_dict is not None:
+            for cb in cb_dict._callbacks.values():
+                if isinstance(cb, EMACallback):
+                    return cb
+        return None
 
     def _run_validation_inner(
         self,

@@ -35,11 +35,11 @@ method:
 
 training:
   distributed:
-    num_gpus: 8
+    num_gpus: 4
     sp_size: 1
     tp_size: 1
     hsdp_replicate_dim: 1
-    hsdp_shard_dim: 8
+    hsdp_shard_dim: 4
 
   data:
     data_path: data/Wan-Syn_77x448x832_600k
@@ -65,7 +65,7 @@ training:
 
   checkpoint:
     output_dir: outputs/wan2.1_dmd2_4steps
-    training_state_checkpointing_steps: 1000
+    training_state_checkpointing_steps: 100
     checkpoints_total_limit: 3
 
   tracker:
@@ -85,6 +85,10 @@ callbacks:
     sampling_steps: [4]
     sampling_timesteps: [1000, 750, 500, 250]
     guidance_scale: 6.0
+  ema:                                                                                                                     
+    _target_: fastvideo.train.callbacks.ema.EMACallback                                                                    
+    decay: 0.98                                                                                                          
+    start_iter: 0        # delay EMA updates until this iteration 
 
 pipeline:
   flow_shift: 8

@@ -68,7 +68,6 @@ method:
   # --- FineTuneMethod keys (if using finetune instead) ---
   # _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
   # attn_kind: vsa                    # "dense" or "vsa"
-  # use_ema: false
 
 # ------------------------------------------------------------------------------
 # training: [TYPED] -> TrainingConfig
@@ -166,13 +165,8 @@ callbacks:
   # --- EMACallback ---
   # ema:
   #   _target_: fastvideo.train.callbacks.ema.EMACallback
-  #   type: constant                  # default: "constant" ("constant", "power", "halflife")
-  #   beta: 0.9999                    # default: 0.9999 (for constant type)
-  #   gamma: 16.97                    # default: 16.97 (for power type)
-  #   ema_halflife_kimg: 500.0        # default: 500.0 (for halflife type)
-  #   ema_rampup_ratio: 0.05          # default: 0.05 (for halflife type)
+  #   decay: 0.9999                   # default: 0.9999
   #   start_iter: 0                   # default: 0
-  #   batch_size: 1                   # default: 1
 
   # --- ValidationCallback ---
   validation:

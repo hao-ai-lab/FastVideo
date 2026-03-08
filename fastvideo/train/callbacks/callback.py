@@ -133,6 +133,7 @@ class CallbackDict:
                     f"Callback subclass."
                 )
             cb.training_config = training_config
+            cb._callback_dict = self
             self._callbacks[name] = cb
 
     def __getattr__(

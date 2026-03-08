@@ -24,7 +24,7 @@ NNODES="${NNODES:-1}"
 NODE_RANK="${NODE_RANK:-0}"
 MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
 MASTER_PORT="${MASTER_PORT:-29501}"
-
+export TOKENIZERS_PARALLELISM=false
 # ── W&B ──────────────────────────────────────────────────────────────
 export WANDB_API_KEY="${WANDB_API_KEY:-}"
 export WANDB_MODE="${WANDB_MODE:-online}"
@@ -35,9 +35,6 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 LOG_DIR="${LOG_DIR:-examples/train}"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/${CONFIG_NAME}_${TIMESTAMP}.log"
-
-source ~/conda/miniconda/bin/activate
-conda activate alexfv
 
 echo "=== Train Training ==="
 echo "Config:      ${CONFIG}"

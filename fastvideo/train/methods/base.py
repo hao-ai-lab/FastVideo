@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
 from abc import ABC, abstractmethod
-from collections.abc import Generator, Sequence
+from collections.abc import Sequence
 from typing import Any, Literal, cast
 
 import torch
@@ -18,7 +17,6 @@ from fastvideo.training.checkpointing_utils import (
     RandomStateWrapper,
     SchedulerWrapper,
 )
-from fastvideo.training.training_utils import EMA_FSDP
 
 logger = init_logger(__name__)
 
@@ -53,12 +51,6 @@ class TrainingMethod(torch.nn.Module, ABC):
         self.validation_config: dict[str, Any] = dict(
             getattr(cfg, "validation", {}) or {}
         )
-        self._use_ema: bool = bool(
-            self.method_config.get("use_ema", False)
-        )
-        self._ema_decay: float = float(
-            self.method_config.get("ema_decay", 0.9999)
-        )
 
         # Build nn.ModuleDict for FSDP / checkpoint visibility.
         self.role_modules = torch.nn.ModuleDict()
@@ -69,54 +61,6 @@ class TrainingMethod(torch.nn.Module, ABC):
                 mods["transformer"] = transformer
             if mods:
                 self.role_modules[role] = torch.nn.ModuleDict(mods)
-
-        self._setup_ema()
-
-    # ------------------------------------------------------------------
-    # EMA
-    # ------------------------------------------------------------------
-
-    def _setup_ema(self) -> None:
-        """Create ``EMA_FSDP`` shadow of student transformer.
-
-        Uses the legacy local-shard approach: each rank keeps an
-        fp32 CPU copy of its own FSDP shard.  Updates are purely
-        local (no all-gather).  For inference, EMA weights are
-        swapped into the live FSDP model via a context manager.
-        """
-        self.generator_ema: EMA_FSDP | None = None
-        if not self._use_ema:
-            return
-        logger.info(
-            "Initializing EMA (local_shard) with "
-            "decay=%s from student transformer",
-            self._ema_decay,
-        )
-        self.generator_ema = EMA_FSDP(
-            self.student.transformer,
-            decay=self._ema_decay,
-            mode="local_shard",
-        )
-
-    @contextlib.contextmanager
-    def ema_context(
-        self,
-    ) -> Generator[torch.nn.Module, None, None]:
-        """Context manager: temporarily apply EMA weights.
-
-        Swaps local EMA shards into the FSDP-wrapped student
-        transformer, yields it, then restores originals.
-        If EMA is disabled, yields the student transformer
-        unchanged.
-        """
-        transformer = self.student.transformer
-        if self.generator_ema is not None:
-            with self.generator_ema.apply_to_model(
-                transformer,
-            ):
-                yield transformer
-        else:
-            yield transformer
 
     # ------------------------------------------------------------------
 
@@ -166,9 +110,8 @@ class TrainingMethod(torch.nn.Module, ABC):
         ``roles.<role>.<module>``, ``optimizers.<role>``,
         ``schedulers.<role>``, ``random_state.*``.
 
-        EMA is maintained as local FSDP shards on CPU
-        (``EMA_FSDP``), not as a separate ``nn.Module``, so
-        it is not included here.
+        EMA state is managed by the ``EMACallback`` and is
+        checkpointed through the callback state mechanism.
         """
         states: dict[str, Any] = {}
 
