@@ -60,11 +60,10 @@ callbacks:
   grad_clip:
     max_grad_norm: 1.0
   validation:
-    pipeline_target: fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline.WanCausalDMDPipeline
+    pipeline_target: fastvideo.pipelines.basic.wan.wan_causal_pipeline.WanCausalPipeline
     dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
     every_steps: 50
-    sampling_steps: [4]
-    sampling_timesteps: [1000, 750, 500, 250]
+    sampling_steps: [40]
     rollout_mode: streaming
     guidance_scale: 6.0
     num_frames: 69
