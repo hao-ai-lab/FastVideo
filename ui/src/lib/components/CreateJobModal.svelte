@@ -70,6 +70,15 @@
 	let selectedValidationDatasetId = $state("");
 	let loraRank = $state(32);
 	let ltx2FirstFrameConditioningP = $state(0.1);
+	let dmdUseVsa = $state(false);
+	let dmdVsaSparsity = $state(0.8);
+	let dmdDenoisingSteps = $state("1000,757,522");
+	let minTimestepRatio = $state(0.02);
+	let maxTimestepRatio = $state(0.98);
+	let realScoreGuidanceScale = $state(3.5);
+	let generatorUpdateInterval = $state(5);
+	let realScoreModelPath = $state("");
+	let fakeScoreModelPath = $state("");
 	let isSubmitting = $state(false);
 	let isLoadingModels = $state(false);
 	let imageInputEl: HTMLInputElement;
@@ -103,6 +112,17 @@
 		imageFileName = "";
 		selectedDatasetId = "";
 		selectedValidationDatasetId = "";
+		if (workloadType === "dmd_t2v") {
+			dmdUseVsa = false;
+			dmdVsaSparsity = 0.8;
+			dmdDenoisingSteps = "1000,757,522";
+			minTimestepRatio = 0.02;
+			maxTimestepRatio = 0.98;
+			realScoreGuidanceScale = 3.5;
+			generatorUpdateInterval = 5;
+			realScoreModelPath = "";
+			fakeScoreModelPath = "";
+		}
 	});
 
 	$effect(() => {
@@ -119,6 +139,11 @@
 					filter as "t2v" | "i2v" | "t2i",
 				);
 				modelId = ids.includes(defaultId) ? defaultId : list[0]?.id ?? "";
+				if (workloadType === "dmd_t2v") {
+					const mid = ids.includes(defaultId) ? defaultId : list[0]?.id ?? "";
+					realScoreModelPath = mid;
+					fakeScoreModelPath = mid;
+				}
 			})
 			.catch((e) => console.error("Failed to load models:", e))
 			.finally(() => (isLoadingModels = false));
@@ -180,7 +205,7 @@
 				prompt,
 				workload_type: workloadType,
 				job_type: effectiveJobType,
-				...(isInference
+						...(isInference
 					? {}
 					: {
 							data_path: effectiveDataPath.trim(),
@@ -196,6 +221,19 @@
 							lora_rank: loraRank,
 							...(isLtx2Model
 								? { ltx2_first_frame_conditioning_p: ltx2FirstFrameConditioningP }
+								: {}),
+							...(workloadType === "dmd_t2v"
+								? {
+										dmd_use_vsa: dmdUseVsa,
+										dmd_vsa_sparsity: dmdVsaSparsity,
+										dmd_denoising_steps: dmdDenoisingSteps,
+										min_timestep_ratio: minTimestepRatio,
+										max_timestep_ratio: maxTimestepRatio,
+										real_score_guidance_scale: realScoreGuidanceScale,
+										generator_update_interval: generatorUpdateInterval,
+										real_score_model_path: realScoreModelPath || modelId,
+										fake_score_model_path: fakeScoreModelPath || modelId,
+									}
 								: {}),
 						}),
 			};
@@ -467,6 +505,119 @@
 											disabled={isSubmitting}
 											formatValue={(v) => v.toFixed(2)}
 										/>
+									</div>
+								{/if}
+								{#if workloadType === "dmd_t2v"}
+									<div class="formRow">
+										<label for="modal-dmd-use-vsa" title="Use Video Sparse Attention for DMD">Video Sparse Attention (VSA)</label>
+										<Toggle
+											id="modal-dmd-use-vsa"
+											checked={dmdUseVsa}
+											onChange={(v) => (dmdUseVsa = v)}
+											disabled={isSubmitting}
+										/>
+									</div>
+									{#if dmdUseVsa}
+										<div class="formRow">
+											<label for="modal-dmd-vsa-sparsity" title="VSA sparsity (0–1)">VSA Sparsity</label>
+											<Slider
+												id="modal-dmd-vsa-sparsity"
+												min={0}
+												max={1}
+												step={0.05}
+												value={dmdVsaSparsity}
+												onChange={(v) => (dmdVsaSparsity = v)}
+												disabled={isSubmitting}
+												formatValue={(v) => v.toFixed(2)}
+											/>
+										</div>
+									{/if}
+									<div class="formRow">
+										<label for="modal-dmd-denoising-steps" title="Comma-separated denoising steps, e.g. 1000,757,522">DMD Denoising Steps</label>
+										<input
+											id="modal-dmd-denoising-steps"
+											type="text"
+											bind:value={dmdDenoisingSteps}
+											placeholder="1000,757,522"
+											disabled={isSubmitting}
+										/>
+									</div>
+									<div class="formRow">
+										<label for="modal-min-timestep-ratio">Min Timestep Ratio</label>
+										<Slider
+											id="modal-min-timestep-ratio"
+											min={0}
+											max={1}
+											step={0.01}
+											value={minTimestepRatio}
+											onChange={(v) => (minTimestepRatio = v)}
+											disabled={isSubmitting}
+											formatValue={(v) => v.toFixed(2)}
+										/>
+									</div>
+									<div class="formRow">
+										<label for="modal-max-timestep-ratio">Max Timestep Ratio</label>
+										<Slider
+											id="modal-max-timestep-ratio"
+											min={0}
+											max={1}
+											step={0.01}
+											value={maxTimestepRatio}
+											onChange={(v) => (maxTimestepRatio = v)}
+											disabled={isSubmitting}
+											formatValue={(v) => v.toFixed(2)}
+										/>
+									</div>
+									<div class="formRow">
+										<label for="modal-real-score-guidance-scale">Real Score Guidance Scale</label>
+										<Slider
+											id="modal-real-score-guidance-scale"
+											min={1}
+											max={10}
+											step={0.1}
+											value={realScoreGuidanceScale}
+											onChange={(v) => (realScoreGuidanceScale = v)}
+											disabled={isSubmitting}
+											formatValue={(v) => v.toFixed(1)}
+										/>
+									</div>
+									<div class="formRow">
+										<label for="modal-generator-update-interval">Generator Update Interval</label>
+										<Slider
+											id="modal-generator-update-interval"
+											min={1}
+											max={20}
+											step={1}
+											value={generatorUpdateInterval}
+											onChange={(v) => (generatorUpdateInterval = v)}
+											disabled={isSubmitting}
+										/>
+									</div>
+									<div class="formRow">
+										<label for="modal-real-score-model">Real Score Model</label>
+										<select
+											id="modal-real-score-model"
+											bind:value={realScoreModelPath}
+											disabled={isSubmitting || isLoadingModels}
+										>
+											<option value="">Same as main model</option>
+											{#each models as model}
+												<option value={model.id}>{model.label} ({model.id})</option>
+											{/each}
+										</select>
+									</div>
+									<div class="formRow">
+										<label for="modal-fake-score-model">Fake Score Model</label>
+										<select
+											id="modal-fake-score-model"
+											bind:value={fakeScoreModelPath}
+											disabled={isSubmitting || isLoadingModels}
+										>
+											<option value="">Same as main model</option>
+											{#each models as model}
+												<option value={model.id}>{model.label} ({model.id})</option>
+											{/each}
+										</select>
 									</div>
 								{/if}
 							</div>

@@ -166,6 +166,16 @@ class Job:
     validation_dataset_file: str = ""
     lora_rank: int = 32
     ltx2_first_frame_conditioning_p: float | None = None
+    # DMD options
+    dmd_use_vsa: bool = False
+    dmd_vsa_sparsity: float = 0.8
+    dmd_denoising_steps: str = "1000,757,522"
+    min_timestep_ratio: float = 0.02
+    max_timestep_ratio: float = 0.98
+    real_score_guidance_scale: float = 3.5
+    generator_update_interval: int = 5
+    real_score_model_path: str = ""
+    fake_score_model_path: str = ""
     # Internal
     _thread: threading.Thread | None = field(
         default=None, repr=False
@@ -226,6 +236,15 @@ class Job:
             "validation_dataset_file": self.validation_dataset_file,
             "lora_rank": self.lora_rank,
             "ltx2_first_frame_conditioning_p": self.ltx2_first_frame_conditioning_p,
+            "dmd_use_vsa": self.dmd_use_vsa,
+            "dmd_vsa_sparsity": self.dmd_vsa_sparsity,
+            "dmd_denoising_steps": self.dmd_denoising_steps,
+            "min_timestep_ratio": self.min_timestep_ratio,
+            "max_timestep_ratio": self.max_timestep_ratio,
+            "real_score_guidance_scale": self.real_score_guidance_scale,
+            "generator_update_interval": self.generator_update_interval,
+            "real_score_model_path": self.real_score_model_path or "",
+            "fake_score_model_path": self.fake_score_model_path or "",
             "progress": self._log_buf.progress,
             "progress_msg": self._log_buf.progress_msg,
             "phase": self._log_buf.phase,
@@ -324,6 +343,15 @@ class JobRunner:
                     validation_dataset_file=row.get("validation_dataset_file", "") or "",
                     lora_rank=row.get("lora_rank", 32),
                     ltx2_first_frame_conditioning_p=row.get("ltx2_first_frame_conditioning_p"),
+                    dmd_use_vsa=row.get("dmd_use_vsa", False),
+                    dmd_vsa_sparsity=float(row.get("dmd_vsa_sparsity", 0.8)),
+                    dmd_denoising_steps=row.get("dmd_denoising_steps", "1000,757,522") or "1000,757,522",
+                    min_timestep_ratio=float(row.get("min_timestep_ratio", 0.02)),
+                    max_timestep_ratio=float(row.get("max_timestep_ratio", 0.98)),
+                    real_score_guidance_scale=float(row.get("real_score_guidance_scale", 3.5)),
+                    generator_update_interval=int(row.get("generator_update_interval", 5)),
+                    real_score_model_path=row.get("real_score_model_path", "") or "",
+                    fake_score_model_path=row.get("fake_score_model_path", "") or "",
                     status=JobStatus(status),
                     created_at=row["created_at"],
                     started_at=row.get("started_at"),
@@ -396,6 +424,15 @@ class JobRunner:
         validation_dataset_file: str = "",
         lora_rank: int = 32,
         ltx2_first_frame_conditioning_p: float | None = None,
+        dmd_use_vsa: bool = False,
+        dmd_vsa_sparsity: float = 0.8,
+        dmd_denoising_steps: str = "1000,757,522",
+        min_timestep_ratio: float = 0.02,
+        max_timestep_ratio: float = 0.98,
+        real_score_guidance_scale: float = 3.5,
+        generator_update_interval: int = 5,
+        real_score_model_path: str = "",
+        fake_score_model_path: str = "",
         num_inference_steps: int = 50,
         num_frames: int = 81,
         height: int = 480,
@@ -432,6 +469,15 @@ class JobRunner:
             validation_dataset_file=validation_dataset_file or "",
             lora_rank=lora_rank,
             ltx2_first_frame_conditioning_p=ltx2_first_frame_conditioning_p,
+            dmd_use_vsa=dmd_use_vsa,
+            dmd_vsa_sparsity=dmd_vsa_sparsity,
+            dmd_denoising_steps=dmd_denoising_steps,
+            min_timestep_ratio=min_timestep_ratio,
+            max_timestep_ratio=max_timestep_ratio,
+            real_score_guidance_scale=real_score_guidance_scale,
+            generator_update_interval=generator_update_interval,
+            real_score_model_path=real_score_model_path or "",
+            fake_score_model_path=fake_score_model_path or "",
             num_inference_steps=num_inference_steps,
             num_frames=num_frames,
             height=height,
@@ -704,8 +750,11 @@ class JobRunner:
             return
 
         module_path, _pipeline_workload, use_vsa, _is_lora = module_info
+        dmd_use_vsa = (
+            job.workload_type.startswith("dmd_") and getattr(job, "dmd_use_vsa", False)
+        )
         env = os.environ.copy()
-        env.update(get_training_env(use_vsa))
+        env.update(get_training_env(use_vsa or dmd_use_vsa))
 
         job_dict = {
             "model_id": job.model_id,
@@ -723,6 +772,28 @@ class JobRunner:
             "lora_rank": job.lora_rank,
             "ltx2_first_frame_conditioning_p": job.ltx2_first_frame_conditioning_p,
         }
+        if job.workload_type.startswith("dmd_") or job.workload_type.startswith(
+            "self_forcing_"
+        ):
+            job_dict["dmd_use_vsa"] = getattr(job, "dmd_use_vsa", False)
+            job_dict["dmd_vsa_sparsity"] = getattr(job, "dmd_vsa_sparsity", 0.8)
+            job_dict["dmd_denoising_steps"] = getattr(
+                job, "dmd_denoising_steps", "1000,757,522"
+            )
+            job_dict["min_timestep_ratio"] = getattr(job, "min_timestep_ratio", 0.02)
+            job_dict["max_timestep_ratio"] = getattr(job, "max_timestep_ratio", 0.98)
+            job_dict["real_score_guidance_scale"] = getattr(
+                job, "real_score_guidance_scale", 3.5
+            )
+            job_dict["generator_update_interval"] = getattr(
+                job, "generator_update_interval", 5
+            )
+            job_dict["real_score_model_path"] = (
+                getattr(job, "real_score_model_path", "") or job.model_id
+            )
+            job_dict["fake_score_model_path"] = (
+                getattr(job, "fake_score_model_path", "") or job.model_id
+            )
         train_args = build_training_args(job_dict, job_output_dir)
 
         repo_root = Path(__file__).resolve().parent.parent

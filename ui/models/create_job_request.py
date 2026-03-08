@@ -37,3 +37,13 @@ class CreateJobRequest(BaseModel):
     vsa_sparsity: float = 0.0
     tp_size: int = -1
     sp_size: int = -1
+    # DMD (Distribution Matching Distillation) options
+    dmd_use_vsa: bool = False
+    dmd_vsa_sparsity: float = 0.8
+    dmd_denoising_steps: str = "1000,757,522"
+    min_timestep_ratio: float = 0.02
+    max_timestep_ratio: float = 0.98
+    real_score_guidance_scale: float = 3.5
+    generator_update_interval: int = 5
+    real_score_model_path: str = ""
+    fake_score_model_path: str = ""
