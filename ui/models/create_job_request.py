@@ -17,6 +17,7 @@ class CreateJobRequest(BaseModel):
     num_latent_t: int = 20
     validation_dataset_file: str = ""
     lora_rank: int = 32
+    ltx2_first_frame_conditioning_p: float | None = None
     negative_prompt: str = ""
     num_inference_steps: int = 50
     num_frames: int = 81

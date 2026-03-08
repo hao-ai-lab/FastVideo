@@ -113,6 +113,9 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "jobs", "num_latent_t", "INTEGER", "20")
     _add_column_if_missing(conn, "jobs", "validation_dataset_file", "TEXT", "''")
     _add_column_if_missing(conn, "jobs", "lora_rank", "INTEGER", "32")
+    _add_column_if_missing(
+        conn, "jobs", "ltx2_first_frame_conditioning_p", "REAL", "NULL"
+    )
     # Settings table
     _add_column_if_missing(
         conn, "settings", "vae_cpu_offload", "INTEGER", "0"
@@ -292,8 +295,9 @@ class Database:
                 use_fsdp_inference, enable_torch_compile, vsa_sparsity, tp_size,
                 sp_size, negative_prompt,
                 data_path, max_train_steps, train_batch_size, learning_rate,
-                num_latent_t, validation_dataset_file, lora_rank
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                num_latent_t, validation_dataset_file, lora_rank,
+                ltx2_first_frame_conditioning_p
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job["id"],
@@ -335,6 +339,7 @@ class Database:
                 job.get("num_latent_t", 20),
                 job.get("validation_dataset_file", ""),
                 job.get("lora_rank", 32),
+                job.get("ltx2_first_frame_conditioning_p"),
             ),
         )
         self._commit()

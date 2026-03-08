@@ -8,24 +8,42 @@ from __future__ import annotations
 from typing import Any
 
 # (script_path for torchrun, relative to repo root; workload_type; use_vsa; is_lora)
+# Only T2V workflows are supported for finetuning and distillation.
+# full_t2v and lora_t2v route to LTX2 pipeline when model is LTX-2 (see get_training_module_info).
 WORKLOAD_TO_MODULE: dict[str, tuple[str, str, bool, bool]] = {
     # Finetuning
     "full_t2v": ("fastvideo/training/wan_training_pipeline.py", "t2v", False, False),
-    "full_i2v": ("fastvideo/training/wan_i2v_training_pipeline.py", "i2v", False, False),
     "vsa_t2v": ("fastvideo/training/wan_training_pipeline.py", "t2v", True, False),
-    "vsa_i2v": ("fastvideo/training/wan_i2v_training_pipeline.py", "i2v", True, False),
     "ode_init": ("fastvideo/training/ode_causal_pipeline.py", "t2v", False, False),
-    "matrixgame_i2v": ("fastvideo/training/matrixgame_training_pipeline.py", "i2v", False, False),
-    "ltx2_t2v": ("fastvideo/training/ltx2_training_pipeline.py", "t2v", False, False),
     # Distillation
     "dmd_t2v": ("fastvideo/training/wan_distillation_pipeline.py", "t2v", False, False),
-    "dmd_i2v": ("fastvideo/training/wan_i2v_distillation_pipeline.py", "i2v", False, False),
     "self_forcing_t2v": ("fastvideo/training/wan_self_forcing_distillation_pipeline.py", "t2v", False, False),
-    "self_forcing_i2v": ("fastvideo/training/wan_self_forcing_distillation_pipeline.py", "i2v", False, False),
     # LoRA
     "lora_t2v": ("fastvideo/training/wan_training_pipeline.py", "t2v", False, True),
-    "lora_i2v": ("fastvideo/training/wan_i2v_training_pipeline.py", "i2v", False, True),
 }
+
+LTX2_TRAINING_MODULE: tuple[str, str, bool, bool] = (
+    "fastvideo/training/ltx2_training_pipeline.py",
+    "t2v",
+    False,
+    False,
+)
+
+
+def is_ltx2_model(model_path: str) -> bool:
+    """True if the model path identifies an LTX-2 model (for training pipeline routing)."""
+    lower = (model_path or "").lower()
+    return "ltx2" in lower or "ltx-2" in lower
+
+
+def get_training_module_info(workload_type: str, model_id: str) -> tuple[str, str, bool, bool] | None:
+    """Resolve (script_path, workload_type, use_vsa, is_lora). Routes full_t2v and lora_t2v to LTX2 pipeline when model is LTX-2."""
+    base = WORKLOAD_TO_MODULE.get(workload_type)
+    if base is None:
+        return None
+    if workload_type in ("full_t2v", "lora_t2v") and is_ltx2_model(model_id):
+        return LTX2_TRAINING_MODULE
+    return base
 
 
 def get_training_env(use_vsa: bool) -> dict[str, str]:
@@ -39,7 +57,9 @@ def get_training_env(use_vsa: bool) -> dict[str, str]:
     return env
 
 
-def build_training_args(job: dict[str, Any], output_dir: str) -> list[str]:
+def build_training_args(
+    job: dict[str, Any], output_dir: str
+) -> list[str]:
     """Build CLI arguments for the training subprocess."""
     model_id = job.get("model_id", "")
     data_path = job.get("data_path", "")
@@ -129,6 +149,12 @@ def build_training_args(job: dict[str, Any], output_dir: str) -> list[str]:
 
     if use_vsa:
         args.extend(["--VSA-sparsity", "0.8"])
+
+    # LTX-2 specific
+    if is_ltx2_model(model_id):
+        p = job.get("ltx2_first_frame_conditioning_p")
+        if p is not None:
+            args.extend(["--ltx2-first-frame-conditioning-p", str(float(p))])
 
     # HSDP / parallelism
     args.extend([
