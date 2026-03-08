@@ -31,6 +31,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
 from fastvideo.models.utils import pred_noise_to_pred_video
+from fastvideo.models.vision_utils import load_video
 from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch,
                                  TrainingBatch)
 from fastvideo.training.activation_checkpoint import (
@@ -1418,8 +1419,13 @@ class DistillationPipeline(TrainingPipeline):
                                                      strict=True):
                             if filename is None:
                                 continue
+                            ref_frames = np.stack(
+                                [np.asarray(frame) for frame in load_video(filename)],
+                                axis=0)
+                            ref_frames = np.ascontiguousarray(
+                                ref_frames.transpose(0, 3, 1, 2))
                             video_artifact = self.tracker.video(
-                                filename,
+                                ref_frames,
                                 caption=caption,
                                 fps=sampling_param.fps)
                             if video_artifact is not None:
