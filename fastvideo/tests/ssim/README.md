@@ -1,6 +1,8 @@
 The reference videos are used as part of e2e SSIM regression tests.
-`test_inference_similarity.py` (and other SSIM tests) compares newly generated
-videos against these references to detect quality regressions.
+Wan inference coverage now lives in `test_wan_t2v_similarity.py` and
+`test_wan_i2v_similarity.py` alongside the other model-specific SSIM files.
+These tests compare newly generated videos against references to detect quality
+regressions.
 
 reference layout:
 - `reference_videos/default/<GPU>_reference_videos/<model>/<backend>/...`

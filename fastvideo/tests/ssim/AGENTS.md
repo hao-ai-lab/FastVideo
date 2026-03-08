@@ -22,9 +22,9 @@ videos and compare them against device-specific reference videos.
 - Full SSIM with full-quality params:
   `pytest fastvideo/tests/ssim/ -vs --ssim-full-quality`
 - Single test file:
-  `pytest fastvideo/tests/ssim/test_inference_similarity.py -vs`
+  `pytest fastvideo/tests/ssim/test_wan_t2v_similarity.py -vs`
 - Single model split:
-  `FASTVIDEO_SSIM_MODEL_ID=<model_id> pytest fastvideo/tests/ssim/test_inference_similarity.py -vs`
+  `FASTVIDEO_SSIM_MODEL_ID=<model_id> pytest fastvideo/tests/ssim/test_wan_t2v_similarity.py -vs`
 - Modal orchestrator (CI-style scheduling):
   `modal run fastvideo/tests/modal/ssim_test.py`
 

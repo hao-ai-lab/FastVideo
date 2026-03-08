@@ -32,7 +32,8 @@ fastvideo/tests/ssim/
 │   └── full_quality/
 │       └── <GPU>_reference_videos/
 ├── test_causal_similarity.py
-├── test_inference_similarity.py
+├── test_wan_t2v_similarity.py
+├── test_wan_i2v_similarity.py
 ├── reference_videos_cli.py
 └── ...
 ```
@@ -41,7 +42,7 @@ fastvideo/tests/ssim/
 
 To add a new SSIM test, follow these steps:
 
-1. **Create or Update a Test File**: You can add a new test function to an existing file (like `test_inference_similarity.py`) or create a new one if testing a distinct category of models.
+1. **Create or Update a Test File**: Prefer model-specific files (for example `test_wan_t2v_similarity.py`) and create a new one when testing a distinct model or pipeline.
 
 2. **Define Model Parameters**: Define the configuration for the model you want to test. This includes model path, dimensions, inference steps, and other generation parameters. **Note:** Consider using lower `num_inference_steps` or reduced resolution (e.g., 480p instead of 720p) to keep test execution time reasonable, provided it doesn't compromise the test's ability to detect regression.
 
@@ -130,7 +131,7 @@ Target specific SSIM files/models:
 
 ```bash
 python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests \
-  --test-files test_inference_similarity.py \
+  --test-files test_wan_t2v_similarity.py \
   --model-ids Wan2.1-T2V-1.3B-Diffusers
 ```
 
