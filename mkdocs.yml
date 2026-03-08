@@ -159,6 +159,7 @@ nav:
     - Debugging: utilities/debugging.md
   - Design:
     - Overview: design/overview.md
+    - Training Architecture: design/training_architecture.md
   - Developer Guide:
     - Overview: contributing/overview.md
     - Developer Environment:
