@@ -7,7 +7,8 @@ complete diffusion pipelines.
 """
 
 from fastvideo.pipelines.stages.base import PipelineStage
-from fastvideo.pipelines.stages.causal_denoising import CausalDMDDenosingStage
+from fastvideo.pipelines.stages.causal_denoising import (
+    CausalDMDDenosingStage, CausalDenoisingStage)
 from fastvideo.pipelines.stages.conditioning import ConditioningStage
 from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.stages.denoising import (
@@ -63,6 +64,7 @@ __all__ = [
     "DenoisingStage",
     "DmdDenoisingStage",
     "CausalDMDDenosingStage",
+    "CausalDenoisingStage",
     "MatrixGameCausalDenoisingStage",
     "HYWorldDenoisingStage",
     "GameCraftDenoisingStage",
