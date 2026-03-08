@@ -291,6 +291,7 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         num_latent_t=req.num_latent_t,
         validation_dataset_file=req.validation_dataset_file or "",
         lora_rank=req.lora_rank,
+        ltx2_first_frame_conditioning_p=req.ltx2_first_frame_conditioning_p,
         negative_prompt=req.negative_prompt,
         num_inference_steps=req.num_inference_steps,
         num_frames=req.num_frames,

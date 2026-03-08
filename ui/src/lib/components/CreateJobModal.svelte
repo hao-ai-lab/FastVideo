@@ -27,15 +27,7 @@
 		workloadType: string;
 	} = $props();
 
-	function getModelWorkloadForTraining(w: string): string {
-		if (
-			w.includes("i2v") ||
-			w === "matrixgame_i2v" ||
-			w === "lora_i2v" ||
-			w === "self_forcing_i2v" ||
-			w === "dmd_i2v"
-		)
-			return "i2v";
+	function getModelWorkloadForTraining(_w: string): string {
 		return "t2v";
 	}
 
@@ -77,6 +69,7 @@
 	let numLatentT = $state(20);
 	let selectedValidationDatasetId = $state("");
 	let loraRank = $state(32);
+	let ltx2FirstFrameConditioningP = $state(0.1);
 	let isSubmitting = $state(false);
 	let isLoadingModels = $state(false);
 	let imageInputEl: HTMLInputElement;
@@ -179,9 +172,7 @@
 			: "";
 		if (!isInference && !selectedDatasetId) return;
 		const effectiveJobType: JobType =
-			workloadType === "lora_t2v" || workloadType === "lora_i2v"
-				? "lora"
-				: jobType;
+			workloadType === "lora_t2v" ? "lora" : jobType;
 		isSubmitting = true;
 		try {
 			const basePayload = {
@@ -203,6 +194,9 @@
 									)?.name ?? "") || undefined
 								: undefined,
 							lora_rank: loraRank,
+							...(isLtx2Model
+								? { ltx2_first_frame_conditioning_p: ltx2FirstFrameConditioningP }
+								: {}),
 						}),
 			};
 			const inferencePayload = isInference
@@ -256,6 +250,11 @@
 		document.addEventListener("keydown", onKey);
 		return () => document.removeEventListener("keydown", onKey);
 	});
+
+	const isLtx2Model = $derived(
+		(modelId || "").toLowerCase().includes("ltx2") ||
+			(modelId || "").toLowerCase().includes("ltx-2"),
+	);
 
 	const workloadLabel = $derived(
 		WORKLOAD_OPTIONS[jobType]?.find((o) => o.type === workloadType)?.label ?? "",
@@ -441,7 +440,7 @@
 										disabled={isSubmitting}
 									/>
 								</div>
-								{#if workloadType === "lora_t2v" || workloadType === "lora_i2v"}
+								{#if workloadType === "lora_t2v"}
 									<div class="formRow">
 										<label for="modal-lora-rank">LoRA Rank</label>
 										<Slider
@@ -452,6 +451,21 @@
 											value={loraRank}
 											onChange={(v) => (loraRank = v)}
 											disabled={isSubmitting}
+										/>
+									</div>
+								{/if}
+								{#if isLtx2Model}
+									<div class="formRow">
+										<label for="modal-ltx2-first-frame" title="Probability of conditioning on the first frame during LTX-2 training">First Frame Conditioning</label>
+										<Slider
+											id="modal-ltx2-first-frame"
+											min={0}
+											max={1}
+											step={0.05}
+											value={ltx2FirstFrameConditioningP}
+											onChange={(v) => (ltx2FirstFrameConditioningP = v)}
+											disabled={isSubmitting}
+											formatValue={(v) => v.toFixed(2)}
 										/>
 									</div>
 								{/if}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export type JobType = "inference" | "finetuning" | "distillation" | "lora";
+export type JobType = "inference" | "finetuning" | "distillation";
 
 export interface Job {
 	id: string;

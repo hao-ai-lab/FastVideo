@@ -25,9 +25,9 @@ from typing import Any
 from fastvideo.utils import get_mp_context
 from ui.database import Database
 from ui.training_config import (
-    WORKLOAD_TO_MODULE,
     build_training_args,
     get_training_env,
+    get_training_module_info,
 )
 
 logger = logging.getLogger("fastvideo.ui.job_runner")
@@ -165,6 +165,7 @@ class Job:
     num_latent_t: int = 20
     validation_dataset_file: str = ""
     lora_rank: int = 32
+    ltx2_first_frame_conditioning_p: float | None = None
     # Internal
     _thread: threading.Thread | None = field(
         default=None, repr=False
@@ -224,6 +225,7 @@ class Job:
             "num_frames": self.num_frames,
             "validation_dataset_file": self.validation_dataset_file,
             "lora_rank": self.lora_rank,
+            "ltx2_first_frame_conditioning_p": self.ltx2_first_frame_conditioning_p,
             "progress": self._log_buf.progress,
             "progress_msg": self._log_buf.progress_msg,
             "phase": self._log_buf.phase,
@@ -321,6 +323,7 @@ class JobRunner:
                     num_latent_t=row.get("num_latent_t", 20),
                     validation_dataset_file=row.get("validation_dataset_file", "") or "",
                     lora_rank=row.get("lora_rank", 32),
+                    ltx2_first_frame_conditioning_p=row.get("ltx2_first_frame_conditioning_p"),
                     status=JobStatus(status),
                     created_at=row["created_at"],
                     started_at=row.get("started_at"),
@@ -392,6 +395,7 @@ class JobRunner:
         num_latent_t: int = 20,
         validation_dataset_file: str = "",
         lora_rank: int = 32,
+        ltx2_first_frame_conditioning_p: float | None = None,
         num_inference_steps: int = 50,
         num_frames: int = 81,
         height: int = 480,
@@ -427,6 +431,7 @@ class JobRunner:
             num_latent_t=num_latent_t,
             validation_dataset_file=validation_dataset_file or "",
             lora_rank=lora_rank,
+            ltx2_first_frame_conditioning_p=ltx2_first_frame_conditioning_p,
             num_inference_steps=num_inference_steps,
             num_frames=num_frames,
             height=height,
@@ -690,7 +695,7 @@ class JobRunner:
             self._save_job(job)
             return
 
-        module_info = WORKLOAD_TO_MODULE.get(job.workload_type)
+        module_info = get_training_module_info(job.workload_type, job.model_id)
         if not module_info:
             job.status = JobStatus.FAILED
             job.error = f"Unknown workload type: {job.workload_type}"
@@ -716,6 +721,7 @@ class JobRunner:
             "num_frames": job.num_frames,
             "validation_dataset_file": job.validation_dataset_file,
             "lora_rank": job.lora_rank,
+            "ltx2_first_frame_conditioning_p": job.ltx2_first_frame_conditioning_p,
         }
         train_args = build_training_args(job_dict, job_output_dir)
 
