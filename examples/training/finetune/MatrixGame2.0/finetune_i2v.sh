@@ -1,39 +1,41 @@
 #!/bin/bash
 
+export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
-DATA_DIR="footsies-dataset/preprocessed/combined_parquet_dataset"
-VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-NUM_GPUS=8
+MODEL_PATH="../mg_models/Solaris-6K"
+DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/vpt/vpt/train_81f/preprocessed_0306"
+VALIDATION_DATASET_FILE="$(dirname "$0")/validation_test.json"
+NUM_GPUS=1
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_finetune"
-  --output_dir "checkpoints/matrixgame_finetune"
-  --max_train_steps 1500
+  --tracker_project_name "mg_finetune_solaris"
+  --wandb_run_name "reference_videos"
+  --output_dir "checkpoints/reference_test"
+  --max_train_steps 1500000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 4
-  --num_latent_t 20
+  --gradient_accumulation_steps 1
+  --num_latent_t 21
   --num_height 352
   --num_width 640
-  --num_frames 77
+  --num_frames 81
   --enable_gradient_checkpointing_type "full"
 )
 
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size 2
+  --sp_size 1
   --tp_size 1
-  --hsdp_replicate_dim 4
-  --hsdp_shard_dim 2
+  --hsdp_replicate_dim 1
+  --hsdp_shard_dim 1
 )
 
 # Model arguments

@@ -38,6 +38,7 @@ from fastvideo.distributed import (cleanup_dist_env_and_memory,
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+from fastvideo.models.vision_utils import load_video
 from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch,
                                  LoRAPipeline, TrainingBatch)
 from fastvideo.platforms import current_platform
@@ -991,9 +992,13 @@ class TrainingPipeline(LoRAPipeline, ABC):
                                                  strict=True):
                         if filename is None:
                             continue
-                        video_artifact = self.tracker.video(filename,
-                                                            caption=caption,
-                                                            fps=sampling_param.fps)
+                        ref_frames = np.stack(
+                            [np.asarray(frame) for frame in load_video(filename)],
+                            axis=0)
+                        ref_frames = np.ascontiguousarray(
+                            ref_frames.transpose(0, 3, 1, 2))
+                        video_artifact = self.tracker.video(
+                            ref_frames, caption=caption, fps=sampling_param.fps)
                         if video_artifact is not None:
                             ref_artifacts.append(video_artifact)
                     if ref_artifacts:
