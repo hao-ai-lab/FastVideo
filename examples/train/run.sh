@@ -32,14 +32,14 @@ export WANDB_MODE="${WANDB_MODE:-online}"
 # ── Log file ─────────────────────────────────────────────────────────
 CONFIG_NAME="$(basename "${CONFIG}" .yaml)"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-LOG_DIR="${LOG_DIR:-examples/distillation/refactor}"
+LOG_DIR="${LOG_DIR:-examples/train/refactor}"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/${CONFIG_NAME}_${TIMESTAMP}.log"
 
 source ~/conda/miniconda/bin/activate
 conda activate alexfv
 
-echo "=== Distillation Training ==="
+echo "=== Train Training ==="
 echo "Config:      ${CONFIG}"
 echo "Num GPUs:    ${NUM_GPUS}"
 echo "Num Nodes:   ${NNODES}"

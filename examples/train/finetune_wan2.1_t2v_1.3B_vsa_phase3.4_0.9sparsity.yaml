@@ -47,11 +47,10 @@ training:
   checkpoint:
     output_dir: outputs/phase3.4_wan2.1_finetune_vsa_0.9_v3
     training_state_checkpointing_steps: 1000
-    weight_only_checkpointing_steps: 1000
     checkpoints_total_limit: 3
 
   tracker:
-    project_name: distillation_wangame_r
+    project_name: distillation_wan_r
     run_name: phase3.4_wan_finetune_vsa_0.9_v3
 
   model:
