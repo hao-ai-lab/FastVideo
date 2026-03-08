@@ -62,6 +62,8 @@ except Exception:
 class WanModel(ModelBase):
     """Wan per-role model: owns transformer + noise_scheduler."""
 
+    _transformer_cls_name: str = "WanTransformer3DModel"
+
     def __init__(
         self,
         *,
@@ -76,30 +78,13 @@ class WanModel(ModelBase):
         self._init_from = str(init_from)
         self._trainable = bool(trainable)
 
-        transformer = load_module_from_path(
-            model_path=self._init_from,
-            module_type="transformer",
-            training_config=training_config,
+        self.transformer = self._load_transformer(
+            init_from=self._init_from,
+            trainable=self._trainable,
             disable_custom_init_weights=(disable_custom_init_weights),
-            override_transformer_cls_name=("WanTransformer3DModel"),
+            enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
+            training_config=training_config,
         )
-        transformer = apply_trainable(transformer, trainable=self._trainable)
-        # Fall back to training_config.model if not set on the
-        # model YAML section directly.
-        ckpt_type = (
-            enable_gradient_checkpointing_type
-            or getattr(
-                getattr(training_config, "model", None),
-                "enable_gradient_checkpointing_type",
-                None,
-            )
-        )
-        if self._trainable and ckpt_type:
-            transformer = apply_activation_checkpointing(
-                transformer,
-                checkpointing_type=ckpt_type,
-            )
-        self.transformer = transformer
 
         self.noise_scheduler = (FlowMatchEulerDiscreteScheduler(shift=float(flow_shift)))
 
@@ -125,6 +110,40 @@ class WanModel(ModelBase):
         self.num_train_timestep: int = int(self.noise_scheduler.num_train_timesteps)
         self.min_timestep: int = 0
         self.max_timestep: int = self.num_train_timestep
+
+    def _load_transformer(
+        self,
+        *,
+        init_from: str,
+        trainable: bool,
+        disable_custom_init_weights: bool,
+        enable_gradient_checkpointing_type: str | None,
+        training_config: TrainingConfig,
+    ) -> torch.nn.Module:
+        transformer = load_module_from_path(
+            model_path=init_from,
+            module_type="transformer",
+            training_config=training_config,
+            disable_custom_init_weights=(disable_custom_init_weights),
+            override_transformer_cls_name=(self._transformer_cls_name),
+        )
+        transformer = apply_trainable(transformer, trainable=trainable)
+        # Fall back to training_config.model if not set on the
+        # model YAML section directly.
+        ckpt_type = (
+            enable_gradient_checkpointing_type
+            or getattr(
+                getattr(training_config, "model", None),
+                "enable_gradient_checkpointing_type",
+                None,
+            )
+        )
+        if trainable and ckpt_type:
+            transformer = apply_activation_checkpointing(
+                transformer,
+                checkpointing_type=ckpt_type,
+            )
+        return transformer
 
     # ------------------------------------------------------------------
     # Lifecycle
