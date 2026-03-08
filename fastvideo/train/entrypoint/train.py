@@ -5,6 +5,14 @@ Usage::
 
     torchrun --nproc_per_node=<N> -m fastvideo.train.entrypoint.train \
         --config path/to/run.yaml
+
+Any unknown ``--dotted.key value`` arguments are applied as
+overrides to the YAML config before parsing.  For example::
+
+    torchrun --nproc_per_node=8 -m fastvideo.train.entrypoint.train \
+        --config path/to/run.yaml \
+        --training.distributed.num_gpus 8 \
+        --training.optimizer.learning_rate 1e-5
 """
 
 from __future__ import annotations
@@ -25,8 +33,7 @@ def run_training_from_config(
     config_path: str,
     *,
     dry_run: bool = False,
-    resume_from_checkpoint: str | None = None,
-    override_output_dir: str | None = None,
+    overrides: list[str] | None = None,
 ) -> None:
     """YAML-only training entrypoint (schema v2)."""
 
@@ -46,15 +53,8 @@ def run_training_from_config(
     torch.backends.cudnn.deterministic = True
     torch.use_deterministic_algorithms(True)
 
-    cfg = load_run_config(config_path)
+    cfg = load_run_config(config_path, overrides=overrides)
     tc = cfg.training
-
-    if resume_from_checkpoint is not None:
-        tc.checkpoint.resume_from_checkpoint = str(
-            resume_from_checkpoint
-        )
-    if override_output_dir is not None:
-        tc.checkpoint.output_dir = str(override_output_dir)
 
     maybe_init_distributed_environment_and_model_parallel(
         tc.distributed.tp_size,
@@ -113,15 +113,12 @@ def run_training_from_config(
     )
 
 
-def main(args: Any) -> None:
+def main(
+    args: Any,
+    overrides: list[str] | None = None,
+) -> None:
     config_path = str(args.config)
     dry_run = bool(args.dry_run)
-    resume_from_checkpoint = getattr(
-        args, "resume_from_checkpoint", None
-    )
-    override_output_dir = getattr(
-        args, "override_output_dir", None
-    )
     logger.info(
         "Starting training from config=%s",
         config_path,
@@ -129,8 +126,7 @@ def main(args: Any) -> None:
     run_training_from_config(
         config_path,
         dry_run=dry_run,
-        resume_from_checkpoint=resume_from_checkpoint,
-        override_output_dir=override_output_dir,
+        overrides=overrides,
     )
     logger.info("Training completed")
 
@@ -156,25 +152,5 @@ if __name__ == "__main__":
             "but do not start training."
         ),
     )
-    parser.add_argument(
-        "--resume-from-checkpoint",
-        type=str,
-        default=None,
-        help=(
-            "Path to a checkpoint directory "
-            "(checkpoint-<step>), its 'dcp/' subdir, "
-            "or an output_dir containing checkpoints "
-            "(auto-picks latest)."
-        ),
-    )
-    parser.add_argument(
-        "--override-output-dir",
-        type=str,
-        default=None,
-        help=(
-            "Override training.output_dir from YAML "
-            "(useful for repeated runs)."
-        ),
-    )
-    args = parser.parse_args(argv[1:])
-    main(args)
+    args, unknown = parser.parse_known_args(argv[1:])
+    main(args, overrides=unknown if unknown else None)
