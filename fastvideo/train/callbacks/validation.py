@@ -307,8 +307,6 @@ class ValidationCallback(Callback):
     ) -> None:
         """Set dmd_denoising_steps on pipeline_config when
         sampling_timesteps are explicitly provided."""
-        if self.rollout_mode != "streaming":
-            return
         if self.sampling_timesteps is None:
             return
         tc.pipeline_config.dmd_denoising_steps = (  # type: ignore[union-attr]
