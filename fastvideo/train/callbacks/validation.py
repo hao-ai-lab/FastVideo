@@ -170,8 +170,21 @@ class ValidationCallback(Callback):
         step: int,
     ) -> None:
         tc = self.training_config
-        # Use EMA transformer for validation when available.
-        transformer = method.transformer_inference
+        # Use ema_context() to temporarily swap EMA
+        # weights into the student transformer (no-op if
+        # EMA is disabled).
+        with method.ema_context() as transformer:
+            self._run_validation_inner(
+                method, step, transformer,
+            )
+
+    def _run_validation_inner(
+        self,
+        method: TrainingMethod,
+        step: int,
+        transformer: torch.nn.Module,
+    ) -> None:
+        tc = self.training_config
         was_training = bool(
             getattr(transformer, "training", False)
         )

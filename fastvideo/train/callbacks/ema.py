@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """EMA (Exponential Moving Average) callback.
 
-Updates EMA shadow weights after each training step.  The model owns
-the EMA network (created by ``ModelBase._setup_ema``); this callback
-only performs the ``lerp_`` update.
+Updates the ``EMA_FSDP`` shadow weights (local FSDP shards on CPU)
+after each training step.  The method owns the ``generator_ema``
+instance; this callback only calls ``update()``.
 """
 
 from __future__ import annotations
@@ -24,38 +24,23 @@ logger = init_logger(__name__)
 class EMACallback(Callback):
     """Update EMA parameters after each optimizer step.
 
-    The EMA network lives on the method (``method.ema``).
-    If the method was created with ``use_ema: false``, the callback
-    detects this at train start and disables itself gracefully.
+    The ``EMA_FSDP`` instance lives on the method
+    (``method.generator_ema``).  If the method was created with
+    ``use_ema: false``, the callback detects this at train start
+    and disables itself gracefully.
 
-    Supports three beta strategies:
-    - ``constant``: fixed ``beta`` every step.
-    - ``power``:  ``(1 - 1/t)^(gamma+1)``.
-    - ``halflife``: half-life in k-images with optional ramp-up.
+    Config knobs (set in method YAML under ``use_ema`` /
+    ``ema_decay``):
+    - ``ema_start_step``: first step at which EMA begins
+      updating (default 0).
     """
 
     def __init__(
         self,
         *,
-        type: str = "constant",
-        beta: float = 0.9999,
-        gamma: float = 16.97,
-        ema_halflife_kimg: float = 500.0,
-        ema_rampup_ratio: float | None = 0.05,
         start_iter: int = 0,
-        batch_size: int = 1,
     ) -> None:
-        self._type = str(type)
-        self._beta = float(beta)
-        self._gamma = float(gamma)
-        self._ema_halflife_kimg = float(ema_halflife_kimg)
-        self._ema_rampup_ratio = (
-            float(ema_rampup_ratio)
-            if ema_rampup_ratio is not None
-            else None
-        )
         self._start_iter = int(start_iter)
-        self._batch_size = int(batch_size)
         self._enabled = True
 
     # ----------------------------------------------------------
@@ -67,7 +52,7 @@ class EMACallback(Callback):
         method: TrainingMethod,
         iteration: int = 0,
     ) -> None:
-        ema = getattr(method, "ema", None)
+        ema = getattr(method, "generator_ema", None)
         if ema is None:
             self._enabled = False
             logger.info(
@@ -75,15 +60,12 @@ class EMACallback(Callback):
                 "EMA callback disabled.",
             )
             return
-
-        assert not ema.training, (
-            "EMA should be in eval mode"
+        logger.info(
+            "EMA callback enabled (decay=%s, "
+            "start_iter=%d).",
+            ema.decay,
+            self._start_iter,
         )
-        for name, p in ema.named_parameters():
-            assert not p.requires_grad, (
-                f"EMA parameter {name} should not "
-                f"require gradients"
-            )
 
     def on_training_step_end(
         self,
@@ -98,97 +80,18 @@ class EMACallback(Callback):
             return
         if iteration == self._start_iter:
             logger.info(
-                "Starting EMA %r updates at iteration %d.",
-                "ema",
+                "Starting EMA updates at iteration %d.",
                 iteration,
             )
 
-        beta = self._compute_beta(iteration)
-        ema = method.ema
-        ema_state = ema.state_dict()
-
-        with torch.no_grad():
-            for name, p_net in (
-                method.student.transformer.named_parameters()
-            ):
-                full = self._gather_full(p_net)
-                ema_key = name.replace(
-                    "_checkpoint_wrapped_module.", "",
-                )
-                if ema_key not in ema_state:
-                    if iteration == self._start_iter:
-                        logger.warning(
-                            "EMA param %r not found, "
-                            "skipping.",
-                            ema_key,
-                        )
-                    continue
-                ema_p = ema_state[ema_key]
-                val = full.to(
-                    device=ema_p.device,
-                    dtype=ema_p.dtype,
-                )
-                if iteration == self._start_iter:
-                    ema_p.copy_(val)
-                else:
-                    ema_p.lerp_(val, 1.0 - beta)
-
-            for name, buf in (
-                method.student.transformer.named_buffers()
-            ):
-                if name in ema_state:
-                    ema_state[name].copy_(
-                        buf.to(
-                            device=ema_state[name].device,
-                            dtype=ema_state[name].dtype,
-                        )
-                    )
+        assert method.generator_ema is not None
+        method.generator_ema.update(
+            method.student.transformer,
+        )
 
         tracker = getattr(method, "tracker", None)
         if tracker is not None:
             tracker.log(
-                {"ema/beta": beta},
+                {"ema/decay": method.generator_ema.decay},
                 iteration,
             )
-
-    # ----------------------------------------------------------
-    # Beta strategies
-    # ----------------------------------------------------------
-
-    def _compute_beta(self, iteration: int) -> float:
-        if self._type == "constant":
-            return self._beta
-        if self._type == "power":
-            it = max(iteration, 1)
-            return (1.0 - 1.0 / it) ** (self._gamma + 1)
-        if self._type == "halflife":
-            return self._halflife_beta(iteration)
-        raise ValueError(
-            f"Invalid EMA type: {self._type!r}"
-        )
-
-    def _halflife_beta(self, iteration: int) -> float:
-        hl_nimg = self._ema_halflife_kimg * 1000.0
-        cur_nimg = iteration * self._batch_size
-        if self._ema_rampup_ratio is not None:
-            hl_nimg = min(
-                hl_nimg,
-                cur_nimg * self._ema_rampup_ratio,
-            )
-        return 0.5 ** (
-            self._batch_size / max(hl_nimg, 1e-8)
-        )
-
-    # ----------------------------------------------------------
-    # FSDP helper
-    # ----------------------------------------------------------
-
-    @staticmethod
-    def _gather_full(
-        param: torch.Tensor,
-    ) -> torch.Tensor:
-        if hasattr(param, "full_tensor"):
-            if param.device.type == "cpu":
-                return param.to("cuda").full_tensor()
-            return param.full_tensor()
-        return param
