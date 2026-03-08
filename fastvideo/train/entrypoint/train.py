@@ -51,7 +51,6 @@ def run_training_from_config(
     # Enable deterministic mode for reproducibility.
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
-    torch.use_deterministic_algorithms(True)
 
     cfg = load_run_config(config_path, overrides=overrides)
     tc = cfg.training
