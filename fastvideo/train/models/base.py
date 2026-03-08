@@ -7,6 +7,8 @@ from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 
+from fastvideo.models.utils import pred_noise_to_pred_video
+
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
@@ -94,7 +96,6 @@ class ModelBase(ABC):
     ) -> torch.Tensor:
         """Predict noise/flow for the given noisy latents."""
 
-    @abstractmethod
     def predict_x0(
         self,
         noisy_latents: torch.Tensor,
@@ -105,7 +106,22 @@ class ModelBase(ABC):
         cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
-        """Predict x0 for the given noisy latents."""
+        """Predict x0 via ``predict_noise`` + conversion."""
+        pred_noise = self.predict_noise(
+            noisy_latents,
+            timestep,
+            batch,
+            conditional=conditional,
+            cfg_uncond=cfg_uncond,
+            attn_kind=attn_kind,
+        )
+        return pred_noise_to_pred_video(
+            pred_noise=pred_noise.flatten(0, 1),
+            noise_input_latent=noisy_latents.flatten(
+                0, 1),
+            timestep=timestep,
+            scheduler=self.noise_scheduler,
+        ).unflatten(0, pred_noise.shape[:2])
 
     @abstractmethod
     def backward(
@@ -145,7 +161,6 @@ class CausalModelBase(ModelBase):
     ) -> torch.Tensor | None:
         """Streaming predict-noise that may update internal caches."""
 
-    @abstractmethod
     def predict_x0_streaming(
         self,
         noisy_latents: torch.Tensor,
@@ -159,4 +174,25 @@ class CausalModelBase(ModelBase):
         cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor | None:
-        """Streaming predict-x0 that may update internal caches."""
+        """Predict x0 streaming via
+        ``predict_noise_streaming`` + conversion."""
+        pred_noise = self.predict_noise_streaming(
+            noisy_latents,
+            timestep,
+            batch,
+            conditional=conditional,
+            cache_tag=cache_tag,
+            store_kv=store_kv,
+            cur_start_frame=cur_start_frame,
+            cfg_uncond=cfg_uncond,
+            attn_kind=attn_kind,
+        )
+        if pred_noise is None:
+            return None
+        return pred_noise_to_pred_video(
+            pred_noise=pred_noise.flatten(0, 1),
+            noise_input_latent=noisy_latents.flatten(
+                0, 1),
+            timestep=timestep,
+            scheduler=self.noise_scheduler,
+        ).unflatten(0, pred_noise.shape[:2])

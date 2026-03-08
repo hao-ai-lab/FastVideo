@@ -9,7 +9,6 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 
 from fastvideo.forward_context import set_forward_context
-from fastvideo.models.utils import pred_noise_to_pred_video
 
 from fastvideo.train.models.base import CausalModelBase
 from fastvideo.train.models.wan.wan import WanModel
@@ -174,51 +173,6 @@ class WanCausalModel(WanModel, CausalModelBase):
                 **input_kwargs,
             ).permute(0, 2, 1, 3, 4)
         return pred_noise
-
-    # --- CausalModelBase override: predict_x0_streaming ---
-    def predict_x0_streaming(
-        self,
-        noisy_latents: torch.Tensor,
-        timestep: torch.Tensor,
-        batch: Any,
-        *,
-        conditional: bool,
-        cache_tag: str = "pos",
-        store_kv: bool = False,
-        cur_start_frame: int = 0,
-        cfg_uncond: dict[str, Any] | None = None,
-        attn_kind: Literal["dense", "vsa"] = "dense",
-    ) -> torch.Tensor | None:
-        pred_noise = self.predict_noise_streaming(
-            noisy_latents,
-            timestep,
-            batch,
-            conditional=conditional,
-            cache_tag=cache_tag,
-            store_kv=store_kv,
-            cur_start_frame=cur_start_frame,
-            cfg_uncond=cfg_uncond,
-            attn_kind=attn_kind,
-        )
-        if pred_noise is None:
-            return None
-
-        pred_x0 = pred_noise_to_pred_video(
-            pred_noise=pred_noise.flatten(0, 1),
-            noise_input_latent=(
-                noisy_latents.flatten(0, 1)),
-            timestep=self.shift_and_clamp_timestep(
-                self._ensure_per_frame_timestep(
-                    timestep=timestep,
-                    batch_size=int(
-                        noisy_latents.shape[0]),
-                    num_frames=int(
-                        noisy_latents.shape[1]),
-                    device=noisy_latents.device,
-                ).flatten()),
-            scheduler=self.noise_scheduler,
-        ).unflatten(0, pred_noise.shape[:2])
-        return pred_x0
 
     # ------------------------------------------------------------------
     # Internal helpers

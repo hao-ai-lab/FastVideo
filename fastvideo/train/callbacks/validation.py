@@ -465,7 +465,6 @@ class ValidationCallback(Callback):
             eta=0.0,
             VSA_sparsity=tc.vsa.sparsity,
             timesteps=sampling_timesteps_tensor,
-            sampling_timesteps=sampling_timesteps_tensor,
         )
         batch._inference_args = inference_args  # type: ignore[attr-defined]
 

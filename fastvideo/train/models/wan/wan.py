@@ -19,7 +19,6 @@ from fastvideo.distributed import (
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
-from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.pipelines.basic.wan.wan_pipeline import (
     WanPipeline, )
@@ -296,48 +295,6 @@ class WanModel(ModelBase):
             timestep,
         ).unflatten(0, (b, t))
         return noisy
-
-    def predict_x0(
-        self,
-        noisy_latents: torch.Tensor,
-        timestep: torch.Tensor,
-        batch: TrainingBatch,
-        *,
-        conditional: bool,
-        cfg_uncond: dict[str, Any] | None = None,
-        attn_kind: Literal["dense", "vsa"] = "dense",
-    ) -> torch.Tensor:
-        device_type = self.device.type
-        dtype = noisy_latents.dtype
-        if conditional:
-            text_dict = batch.conditional_dict
-            if text_dict is None:
-                raise RuntimeError("Missing conditional_dict in "
-                                   "TrainingBatch")
-        else:
-            text_dict = self._get_uncond_text_dict(batch, cfg_uncond=cfg_uncond)
-
-        if attn_kind == "dense":
-            attn_metadata = batch.attn_metadata
-        elif attn_kind == "vsa":
-            attn_metadata = batch.attn_metadata_vsa
-        else:
-            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
-
-        with torch.autocast(device_type, dtype=dtype), set_forward_context(
-                current_timestep=batch.timesteps,
-                attn_metadata=attn_metadata,
-        ):
-            input_kwargs = (self._build_distill_input_kwargs(noisy_latents, timestep, text_dict))
-            transformer = self._get_transformer(timestep)
-            pred_noise = transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
-            pred_x0 = pred_noise_to_pred_video(
-                pred_noise=pred_noise.flatten(0, 1),
-                noise_input_latent=noisy_latents.flatten(0, 1),
-                timestep=timestep,
-                scheduler=self.noise_scheduler,
-            ).unflatten(0, pred_noise.shape[:2])
-        return pred_x0
 
     def predict_noise(
         self,

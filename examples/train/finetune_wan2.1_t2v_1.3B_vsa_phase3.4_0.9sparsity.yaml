@@ -12,7 +12,7 @@ models:
 method:
   _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
   attn_kind: vsa
-  use_ema: true
+  # use_ema: true
 
 training:
   distributed:
