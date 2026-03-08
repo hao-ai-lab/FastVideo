@@ -76,7 +76,7 @@ training:
     checkpoints_total_limit: 3
 
   tracker:
-    project_name: distillation_wan
+    project_name: distillation_wan_r
     run_name: wan2.1_causal_self_forcing
 
   model:
