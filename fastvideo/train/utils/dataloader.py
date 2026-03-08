@@ -31,26 +31,3 @@ def build_parquet_t2v_train_dataloader(
         seed=int(data_config.seed or 0),
     ))
     return dataloader
-
-
-def build_parquet_wangame_train_dataloader(
-    data_config: DataConfig,
-    *,
-    parquet_schema: Any,
-) -> Any:
-    """Build a parquet dataloader for WanGame datasets."""
-
-    from fastvideo.dataset import (
-        build_parquet_map_style_dataloader, )
-
-    _dataset, dataloader = (build_parquet_map_style_dataloader(
-        data_config.data_path,
-        data_config.train_batch_size,
-        num_data_workers=(data_config.dataloader_num_workers),
-        parquet_schema=parquet_schema,
-        cfg_rate=float(data_config.training_cfg_rate or 0.0),
-        drop_last=True,
-        text_padding_length=512,
-        seed=int(data_config.seed or 0),
-    ))
-    return dataloader

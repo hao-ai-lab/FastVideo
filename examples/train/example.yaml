@@ -181,14 +181,10 @@ callbacks:
     dataset_file: path/to/validation.json     # required
     every_steps: 100                  # default: 100
     sampling_steps: [4]               # default: [40]
-    sampler_kind: sde                 # default: "ode" (use "sde" for few-step distilled models)
-    scheduler_target: null            # default: null (_target_ for scheduler class, e.g.
-                                      #   fastvideo.models.schedulers.scheduling_flow_match_euler_discrete.FlowMatchEulerDiscreteScheduler
-                                      #   fastvideo.models.schedulers.scheduling_flow_unipc_multistep.FlowUniPCMultistepScheduler)
     guidance_scale: 5.0               # default: null (uses model default)
     num_frames: null                  # default: null (derived from training.data)
     output_dir: null                  # default: null (falls back to training.checkpoint.output_dir)
-    sampling_timesteps: null          # default: null (explicit timestep list for SDE)
+    sampling_timesteps: null          # default: null (explicit timestep list for streaming)
     rollout_mode: parallel            # default: "parallel" ("parallel" or "streaming")
 
 # ------------------------------------------------------------------------------

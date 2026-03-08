@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Validation callback (unified replacement for WanValidator
-and WanGameValidator).
+"""Validation callback.
 
 All configuration is read from the YAML ``callbacks.validation``
 section.  The pipeline class is resolved from
@@ -56,7 +55,7 @@ class ValidationCallback(Callback):
 
     Works with any pipeline that follows the
     ``PipelineCls.from_pretrained(...)`` + ``pipeline.forward()``
-    contract (Wan, WanGame parallel, WanGame causal/DMD, etc.).
+    contract.
     """
 
     def __init__(
@@ -66,8 +65,6 @@ class ValidationCallback(Callback):
         dataset_file: str,
         every_steps: int = 100,
         sampling_steps: list[int] | None = None,
-        sampler_kind: str = "ode",
-        scheduler_target: str | None = None,
         guidance_scale: float | None = None,
         num_frames: int | None = None,
         output_dir: str | None = None,
@@ -82,12 +79,6 @@ class ValidationCallback(Callback):
             [int(s) for s in sampling_steps]
             if sampling_steps
             else [40]
-        )
-        self.sampler_kind = str(sampler_kind)
-        self.scheduler_target = (
-            str(scheduler_target)
-            if scheduler_target is not None
-            else None
         )
         self.guidance_scale = (
             float(guidance_scale)
@@ -190,7 +181,7 @@ class ValidationCallback(Callback):
             or tc.checkpoint.output_dir
         )
 
-        # For streaming SDE pipelines we may need to
+        # For streaming pipelines we may need to
         # temporarily set dmd_denoising_steps on
         # pipeline_config.
         old_dmd_denoising_steps = getattr(
@@ -301,24 +292,15 @@ class ValidationCallback(Callback):
         tc: TrainingConfig,
         num_inference_steps: int,
     ) -> None:
-        """Set dmd_denoising_steps on pipeline_config for
-        streaming SDE validation."""
+        """Set dmd_denoising_steps on pipeline_config when
+        sampling_timesteps are explicitly provided."""
         if self.rollout_mode != "streaming":
             return
-        if self.sampler_kind != "sde":
+        if self.sampling_timesteps is None:
             return
-        if self.sampling_timesteps is not None:
-            tc.pipeline_config.dmd_denoising_steps = (  # type: ignore[union-attr]
-                list(self.sampling_timesteps)
-            )
-        else:
-            timesteps = np.linspace(
-                1000, 0, int(num_inference_steps),
-            )
-            tc.pipeline_config.dmd_denoising_steps = [  # type: ignore[union-attr]
-                int(max(0, min(1000, round(t))))
-                for t in timesteps
-            ]
+        tc.pipeline_config.dmd_denoising_steps = (  # type: ignore[union-attr]
+            list(self.sampling_timesteps)
+        )
 
         # Also set any pipeline-specific kwargs from
         # YAML (e.g. dmd_denoising_steps override).
@@ -350,8 +332,6 @@ class ValidationCallback(Callback):
         key = (
             id(transformer),
             self.rollout_mode,
-            self.sampler_kind,
-            self.scheduler_target,
         )
         if (
             self._pipeline is not None
@@ -367,7 +347,6 @@ class ValidationCallback(Callback):
 
         kwargs: dict[str, Any] = {
             "inference_mode": True,
-            "sampler_kind": self.sampler_kind,
             "loaded_modules": {
                 "transformer": transformer,
             },
@@ -382,32 +361,11 @@ class ValidationCallback(Callback):
         if flow_shift is not None:
             kwargs["flow_shift"] = float(flow_shift)
 
-        # Build and inject a scheduler if target is set.
-        scheduler = self._build_scheduler(flow_shift)
-        if scheduler is not None:
-            kwargs["loaded_modules"]["scheduler"] = (
-                scheduler
-            )
-
         self._pipeline = PipelineCls.from_pretrained(
             tc.model_path, **kwargs,
         )
         self._pipeline_key = key
         return self._pipeline
-
-    def _build_scheduler(
-        self, flow_shift: float | None,
-    ) -> Any | None:
-        """Build scheduler from ``scheduler_target``."""
-        if self.scheduler_target is None:
-            return None
-        if flow_shift is None:
-            return None
-
-        SchedulerCls = resolve_target(
-            self.scheduler_target
-        )
-        return SchedulerCls(shift=float(flow_shift))
 
     # ----------------------------------------------------------
     # Batch preparation
@@ -498,173 +456,14 @@ class ValidationCallback(Callback):
         )
         batch._inference_args = inference_args  # type: ignore[attr-defined]
 
-        # Conditionally set I2V / WanGame fields.
+        # Conditionally set I2V fields.
         if (
             "image" in validation_batch
             and validation_batch["image"] is not None
         ):
             batch.pil_image = validation_batch["image"]
 
-        self._maybe_set_action_conds(
-            batch, validation_batch, sampling_param,
-        )
         return batch
-
-    def _maybe_set_action_conds(
-        self,
-        batch: ForwardBatch,
-        validation_batch: dict[str, Any],
-        sampling_param: SamplingParam,
-    ) -> None:
-        """Set keyboard_cond / mouse_cond on the batch if
-        present in the dataset."""
-        target_len = int(sampling_param.num_frames)
-
-        if (
-            "keyboard_cond" in validation_batch
-            and validation_batch["keyboard_cond"]
-            is not None
-        ):
-            kb = torch.as_tensor(
-                validation_batch["keyboard_cond"]
-            ).to(dtype=torch.bfloat16)
-            if kb.ndim == 3 and kb.shape[0] == 1:
-                kb = kb.squeeze(0)
-            if kb.ndim != 2:
-                raise ValueError(
-                    "validation keyboard_cond must have"
-                    " shape (T, K), got "
-                    f"{tuple(kb.shape)}"
-                )
-            if kb.shape[0] > target_len:
-                kb = kb[:target_len]
-            elif kb.shape[0] < target_len:
-                pad = torch.zeros(
-                    (
-                        target_len - kb.shape[0],
-                        kb.shape[1],
-                    ),
-                    dtype=kb.dtype,
-                    device=kb.device,
-                )
-                kb = torch.cat([kb, pad], dim=0)
-            batch.keyboard_cond = kb.unsqueeze(0)
-
-        if (
-            "mouse_cond" in validation_batch
-            and validation_batch["mouse_cond"]
-            is not None
-        ):
-            mc = torch.as_tensor(
-                validation_batch["mouse_cond"]
-            ).to(dtype=torch.bfloat16)
-            if mc.ndim == 3 and mc.shape[0] == 1:
-                mc = mc.squeeze(0)
-            if mc.ndim != 2:
-                raise ValueError(
-                    "validation mouse_cond must have "
-                    "shape (T, 2), got "
-                    f"{tuple(mc.shape)}"
-                )
-            if mc.shape[0] > target_len:
-                mc = mc[:target_len]
-            elif mc.shape[0] < target_len:
-                pad = torch.zeros(
-                    (
-                        target_len - mc.shape[0],
-                        mc.shape[1],
-                    ),
-                    dtype=mc.dtype,
-                    device=mc.device,
-                )
-                mc = torch.cat([mc, pad], dim=0)
-            batch.mouse_cond = mc.unsqueeze(0)
-
-    # ----------------------------------------------------------
-    # Post-processing
-    # ----------------------------------------------------------
-
-    def _post_process_validation_frames(
-        self,
-        frames: list[np.ndarray],
-        batch: ForwardBatch,
-    ) -> list[np.ndarray]:
-        """Overlay action indicators if conditions present."""
-        keyboard_cond = getattr(batch, "keyboard_cond", None)
-        mouse_cond = getattr(batch, "mouse_cond", None)
-        if keyboard_cond is None and mouse_cond is None:
-            return frames
-
-        try:
-            from fastvideo.models.dits.matrixgame.utils import (
-                draw_keys_on_frame,
-                draw_mouse_on_frame,
-            )
-        except Exception as e:
-            logger.warning(
-                "Action overlay unavailable: %s", e,
-            )
-            return frames
-
-        if (
-            keyboard_cond is not None
-            and torch.is_tensor(keyboard_cond)
-        ):
-            keyboard_np = (
-                keyboard_cond.squeeze(0)
-                .detach()
-                .cpu()
-                .float()
-                .numpy()
-            )
-        else:
-            keyboard_np = None
-
-        if (
-            mouse_cond is not None
-            and torch.is_tensor(mouse_cond)
-        ):
-            mouse_np = (
-                mouse_cond.squeeze(0)
-                .detach()
-                .cpu()
-                .float()
-                .numpy()
-            )
-        else:
-            mouse_np = None
-
-        key_names = ["W", "S", "A", "D", "left", "right"]
-        processed: list[np.ndarray] = []
-        for fi, frame in enumerate(frames):
-            frame = np.ascontiguousarray(frame.copy())
-            if (
-                keyboard_np is not None
-                and fi < len(keyboard_np)
-            ):
-                keys = {
-                    key_names[i]: bool(
-                        keyboard_np[fi, i]
-                    )
-                    for i in range(
-                        min(
-                            len(key_names),
-                            int(keyboard_np.shape[1]),
-                        )
-                    )
-                }
-                draw_keys_on_frame(
-                    frame, keys, mode="universal",
-                )
-            if (
-                mouse_np is not None
-                and fi < len(mouse_np)
-            ):
-                pitch = float(mouse_np[fi, 0])
-                yaw = float(mouse_np[fi, 1])
-                draw_mouse_on_frame(frame, pitch, yaw)
-            processed.append(frame)
-        return processed
 
     # ----------------------------------------------------------
     # Validation loop
@@ -732,11 +531,6 @@ class ValidationCallback(Callback):
                 frames.append(
                     (x * 255).numpy().astype(np.uint8)
                 )
-            frames = (
-                self._post_process_validation_frames(
-                    frames, batch,
-                )
-            )
             videos.append(frames)
 
         return _ValidationStepResult(

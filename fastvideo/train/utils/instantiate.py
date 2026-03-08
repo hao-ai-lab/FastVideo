@@ -20,7 +20,7 @@ def resolve_target(target: str) -> type:
     """Import and return the class (or callable) at *target*.
 
     *target* must be a fully-qualified dotted path, e.g.
-    ``"fastvideo.train.models.wangame.wangame.WanGameModel"``.
+    ``"fastvideo.train.models.wan.wan.WanModel"``.
     """
     if not isinstance(target, str) or not target.strip():
         raise ValueError(f"_target_ must be a non-empty dotted path string, "

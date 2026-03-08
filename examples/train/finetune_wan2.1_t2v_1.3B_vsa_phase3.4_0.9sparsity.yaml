@@ -79,4 +79,3 @@ callbacks:
 
 pipeline:
   flow_shift: 3
-  sampler_kind: ode
