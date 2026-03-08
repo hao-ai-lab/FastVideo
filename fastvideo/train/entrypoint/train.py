@@ -14,6 +14,8 @@ import os
 import sys
 from typing import Any
 
+import torch
+
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -38,6 +40,11 @@ def run_training_from_config(
     )
     from fastvideo.train.utils.builder import build_from_config
     from fastvideo.train.utils.config import load_run_config
+
+    # Enable deterministic mode for reproducibility.
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.use_deterministic_algorithms(True)
 
     cfg = load_run_config(config_path)
     tc = cfg.training

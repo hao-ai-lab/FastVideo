@@ -35,7 +35,6 @@ from fastvideo.training.training_utils import (
 from fastvideo.utils import (
     is_vmoba_available,
     is_vsa_available,
-    set_random_seed,
 )
 
 from fastvideo.train.models.base import ModelBase
@@ -97,9 +96,6 @@ class WanModel(ModelBase):
         self.world_group: Any = None
         self.sp_group: Any = None
         self.device: Any = get_local_torch_device()
-
-        self.noise_random_generator: (torch.Generator | None) = None
-        self.noise_gen_cuda: torch.Generator | None = None
 
         self.negative_prompt_embeds: (torch.Tensor | None) = None
         self.negative_prompt_attention_mask: (torch.Tensor | None) = None
@@ -188,32 +184,7 @@ class WanModel(ModelBase):
         return timestep.clamp(self.min_timestep, self.max_timestep)
 
     def on_train_start(self) -> None:
-        assert self.training_config is not None
-        seed = self.training_config.data.seed
-        if seed is None:
-            raise ValueError("training.data.seed must be set "
-                             "for training")
-
-        global_rank = int(getattr(self.world_group, "rank", 0))
-        sp_world_size = int(self.training_config.distributed.sp_size or 1)
-        if sp_world_size > 1:
-            sp_group_seed = int(seed) + (global_rank // sp_world_size)
-            set_random_seed(sp_group_seed)
-        else:
-            set_random_seed(int(seed) + global_rank)
-
-        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(int(seed))
-        self.noise_gen_cuda = torch.Generator(device=self.device).manual_seed(int(seed))
-
         self.ensure_negative_conditioning()
-
-    def get_rng_generators(self, ) -> dict[str, torch.Generator]:
-        generators: dict[str, torch.Generator] = {}
-        if self.noise_random_generator is not None:
-            generators["noise_cpu"] = (self.noise_random_generator)
-        if self.noise_gen_cuda is not None:
-            generators["noise_cuda"] = self.noise_gen_cuda
-        return generators
 
     # ------------------------------------------------------------------
     # Runtime primitives
@@ -223,6 +194,7 @@ class WanModel(ModelBase):
         self,
         raw_batch: dict[str, Any],
         *,
+        generator: torch.Generator,
         current_vsa_sparsity: float = 0.0,
         latents_source: Literal["data", "zeros"] = "data",
     ) -> TrainingBatch:
@@ -273,7 +245,7 @@ class WanModel(ModelBase):
         training_batch.infos = infos
 
         training_batch.latents = normalize_dit_input("wan", training_batch.latents, self.vae)
-        training_batch = self._prepare_dit_inputs(training_batch)
+        training_batch = self._prepare_dit_inputs(training_batch, generator)
         training_batch = self._build_attention_metadata(training_batch)
 
         training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
@@ -463,23 +435,26 @@ class WanModel(ModelBase):
         self.negative_prompt_embeds = neg_embeds
         self.negative_prompt_attention_mask = neg_mask
 
-    def _sample_timesteps(self, batch_size: int, device: torch.device) -> torch.Tensor:
-        if self.noise_random_generator is None:
-            raise RuntimeError("on_train_start() must be called before "
-                               "prepare_batch()")
+    def _sample_timesteps(
+        self,
+        batch_size: int,
+        device: torch.device,
+        generator: torch.Generator,
+    ) -> torch.Tensor:
         assert self.training_config is not None
         tc = self.training_config
 
         u = compute_density_for_timestep_sampling(
             weighting_scheme=tc.model.weighting_scheme,
             batch_size=batch_size,
-            generator=self.noise_random_generator,
+            generator=generator,
+            device=device,
             logit_mean=tc.model.logit_mean,
             logit_std=tc.model.logit_std,
             mode_scale=tc.model.mode_scale,
         )
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
-        return self.noise_scheduler.timesteps[indices].to(device=device)
+        return self.noise_scheduler.timesteps[indices.cpu()].to(device=device)
 
     def _build_attention_metadata(self, training_batch: TrainingBatch) -> TrainingBatch:
         assert self.training_config is not None
@@ -525,24 +500,26 @@ class WanModel(ModelBase):
 
         return training_batch
 
-    def _prepare_dit_inputs(self, training_batch: TrainingBatch) -> TrainingBatch:
+    def _prepare_dit_inputs(
+        self,
+        training_batch: TrainingBatch,
+        generator: torch.Generator,
+    ) -> TrainingBatch:
         assert self.training_config is not None
         tc = self.training_config
         latents = training_batch.latents
         assert isinstance(latents, torch.Tensor)
         batch_size = latents.shape[0]
 
-        if self.noise_gen_cuda is None:
-            raise RuntimeError("on_train_start() must be called before "
-                               "prepare_batch()")
-
         noise = torch.randn(
             latents.shape,
-            generator=self.noise_gen_cuda,
+            generator=generator,
             device=latents.device,
             dtype=latents.dtype,
         )
-        timesteps = self._sample_timesteps(batch_size, latents.device)
+        timesteps = self._sample_timesteps(
+            batch_size, latents.device, generator,
+        )
         if int(tc.distributed.sp_size or 1) > 1:
             self.sp_group.broadcast(timesteps, src=0)
 

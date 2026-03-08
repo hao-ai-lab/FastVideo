@@ -33,7 +33,15 @@ class TrainingMethod(torch.nn.Module, ABC):
     The constructor receives *role_models* (a ``dict[str, ModelBase]``)
     and a *cfg* object.  It calls ``init_preprocessors`` on the student
     and builds ``self.role_modules`` for FSDP wrapping.
+
+    A single shared CUDA RNG generator (``cuda_generator``) is
+    created in :meth:`on_train_start`.  All ``torch.randn`` /
+    ``torch.randint`` calls in methods **and** models must use this
+    generator instead of relying on global RNG state.
     """
+
+    # Shared CUDA RNG generator (initialized in on_train_start).
+    cuda_generator: torch.Generator | None = None
 
     def __init__(
         self,
@@ -196,16 +204,48 @@ class TrainingMethod(torch.nn.Module, ABC):
         return {"student": self.student.transformer}
 
     def on_train_start(self) -> None:
+        from fastvideo.distributed import (
+            get_sp_group,
+            get_world_group,
+        )
+        from fastvideo.utils import set_random_seed
+
+        seed = self.training_config.data.seed
+        if seed is None:
+            raise ValueError(
+                "training.data.seed must be set"
+            )
+        seed = int(seed)
+
+        world_group = get_world_group()
+        global_rank = int(world_group.rank)
+        sp_size = int(
+            self.training_config.distributed.sp_size
+            or 1
+        )
+
+        # Ranks within the same SP group share a seed.
+        if sp_size > 1:
+            sp_group_seed = seed + (
+                global_rank // sp_size
+            )
+        else:
+            sp_group_seed = seed + global_rank
+
+        set_random_seed(seed)  
+
+        self.cuda_generator = torch.Generator(
+            device=self.student.device
+        ).manual_seed(sp_group_seed)
+
         self.student.on_train_start()
 
     def get_rng_generators(
         self,
     ) -> dict[str, torch.Generator]:
         generators: dict[str, torch.Generator] = {}
-
-        student_gens = self.student.get_rng_generators()
-        generators.update(student_gens)
-
+        if self.cuda_generator is not None:
+            generators["cuda"] = self.cuda_generator
         return generators
 
     @staticmethod

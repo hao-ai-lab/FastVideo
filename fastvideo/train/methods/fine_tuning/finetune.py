@@ -69,6 +69,7 @@ class FineTuneMethod(TrainingMethod):
         del iteration
         training_batch = self.student.prepare_batch(
             batch,
+            generator=self.cuda_generator,
             current_vsa_sparsity=current_vsa_sparsity,
             latents_source="data",
         )

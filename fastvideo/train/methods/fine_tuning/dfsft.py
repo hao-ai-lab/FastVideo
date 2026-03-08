@@ -75,6 +75,7 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         del iteration
         training_batch = self.student.prepare_batch(
             batch,
+            generator=self.cuda_generator,
             current_vsa_sparsity=current_vsa_sparsity,
             latents_source="data",
         )
@@ -401,6 +402,7 @@ class DiffusionForcingSFTMethod(TrainingMethod):
             size=(batch_size, num_chunks),
             device=device,
             dtype=torch.long,
+            generator=self.cuda_generator,
         )
         expanded = chunk_indices.repeat_interleave(
             chunk_size, dim=1

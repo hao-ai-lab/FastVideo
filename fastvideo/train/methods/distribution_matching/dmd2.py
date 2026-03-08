@@ -111,6 +111,7 @@ class DMD2Method(TrainingMethod):
 
         training_batch = self.student.prepare_batch(
             batch,
+            generator=self.cuda_generator,
             current_vsa_sparsity=current_vsa_sparsity,
             latents_source=latents_source,
         )
@@ -468,6 +469,7 @@ class DMD2Method(TrainingMethod):
             [1],
             device=device,
             dtype=torch.long,
+            generator=self.cuda_generator,
         )
         return step_list[index]
 
@@ -484,7 +486,8 @@ class DMD2Method(TrainingMethod):
                 device
             )
             noise = torch.randn(
-                latents.shape, device=device, dtype=dtype
+                latents.shape, device=device, dtype=dtype,
+                generator=self.cuda_generator,
             )
             noisy_latents = self.student.add_noise(
                 latents, noise, timestep
@@ -508,6 +511,7 @@ class DMD2Method(TrainingMethod):
             [1],
             device=device,
             dtype=torch.long,
+            generator=self.cuda_generator,
         )
         target_timestep_idx_int = int(
             target_timestep_idx.item()
@@ -515,7 +519,8 @@ class DMD2Method(TrainingMethod):
         target_timestep = step_list[target_timestep_idx]
 
         current_noise_latents = torch.randn(
-            latents.shape, device=device, dtype=dtype
+            latents.shape, device=device, dtype=dtype,
+            generator=self.cuda_generator,
         )
         current_noise_latents_copy = (
             current_noise_latents.clone()
@@ -560,6 +565,7 @@ class DMD2Method(TrainingMethod):
                         latents.shape,
                         device=device,
                         dtype=pred_clean.dtype,
+                        generator=self.cuda_generator,
                     )
                     current_noise_latents = (
                         self.student.add_noise(
@@ -621,6 +627,7 @@ class DMD2Method(TrainingMethod):
             [1],
             device=device,
             dtype=torch.long,
+            generator=self.cuda_generator,
         )
         fake_score_timestep = (
             self.student.shift_and_clamp_timestep(
@@ -632,6 +639,7 @@ class DMD2Method(TrainingMethod):
             generator_pred_x0.shape,
             device=device,
             dtype=generator_pred_x0.dtype,
+            generator=self.cuda_generator,
         )
         noisy_x0 = self.student.add_noise(
             generator_pred_x0, noise, fake_score_timestep
@@ -686,6 +694,7 @@ class DMD2Method(TrainingMethod):
                 [1],
                 device=device,
                 dtype=torch.long,
+                generator=self.cuda_generator,
             )
             timestep = (
                 self.student.shift_and_clamp_timestep(
@@ -697,6 +706,7 @@ class DMD2Method(TrainingMethod):
                 generator_pred_x0.shape,
                 device=device,
                 dtype=generator_pred_x0.dtype,
+                generator=self.cuda_generator,
             )
             noisy_latents = self.student.add_noise(
                 generator_pred_x0, noise, timestep

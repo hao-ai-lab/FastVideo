@@ -43,10 +43,6 @@ class ModelBase(ABC):
     def on_train_start(self) -> None:
         """Called once before the training loop begins."""
 
-    def get_rng_generators(self) -> dict[str, torch.Generator]:
-        """Return RNG generators for checkpoint resume."""
-        return {}
-
     # ------------------------------------------------------------------
     # Timestep helpers
     # ------------------------------------------------------------------
@@ -69,6 +65,7 @@ class ModelBase(ABC):
         self,
         raw_batch: dict[str, Any],
         *,
+        generator: torch.Generator,
         current_vsa_sparsity: float = 0.0,
         latents_source: Literal["data", "zeros"] = "data",
     ) -> TrainingBatch:

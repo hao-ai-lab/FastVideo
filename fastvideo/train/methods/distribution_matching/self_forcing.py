@@ -267,6 +267,7 @@ class SelfForcingMethod(DMD2Method):
                     high=num_steps,
                     size=shape,
                     device=device,
+                    generator=self.cuda_generator,
                 )
         else:
             indices = torch.empty(shape, dtype=torch.long, device=device)
@@ -474,6 +475,7 @@ class SelfForcingMethod(DMD2Method):
             [1],
             device=device,
             dtype=torch.long,
+            generator=self.cuda_generator,
         )
         fake_score_timestep = (self.student.shift_and_clamp_timestep(fake_score_timestep))
 
@@ -481,6 +483,7 @@ class SelfForcingMethod(DMD2Method):
             generator_pred_x0.shape,
             device=device,
             dtype=generator_pred_x0.dtype,
+            generator=self.cuda_generator,
         )
         noisy_x0 = self._sf_add_noise(generator_pred_x0, noise, fake_score_timestep)
 
@@ -527,6 +530,7 @@ class SelfForcingMethod(DMD2Method):
                 [1],
                 device=device,
                 dtype=torch.long,
+                generator=self.cuda_generator,
             )
             timestep = self.student.shift_and_clamp_timestep(timestep)
 
@@ -534,6 +538,7 @@ class SelfForcingMethod(DMD2Method):
                 generator_pred_x0.shape,
                 device=device,
                 dtype=generator_pred_x0.dtype,
+                generator=self.cuda_generator,
             )
             noisy_latents = self._sf_add_noise(generator_pred_x0, noise, timestep)
 

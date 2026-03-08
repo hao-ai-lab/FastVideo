@@ -65,7 +65,7 @@ training:
 
   checkpoint:
     output_dir: outputs/wan2.1_dmd2_4steps
-    training_state_checkpointing_steps: 100
+    training_state_checkpointing_steps: 20
     checkpoints_total_limit: 3
 
   tracker:

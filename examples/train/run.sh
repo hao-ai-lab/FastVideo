@@ -14,8 +14,15 @@
 
 set -euo pipefail
 
-CONFIG="${1:?Usage: $0 <config.yaml> [extra flags...]}"
+CONFIG="${1:?Usage: $0 <config.yaml> [--resume <checkpoint_path>] [extra flags...]}"
 shift
+
+# ── Optional --resume flag ───────────────────────────────────────────
+RESUME_CKPT=""
+if [[ "${1:-}" == "--resume" ]]; then
+    RESUME_CKPT="${2:?--resume requires a checkpoint path}"
+    shift 2
+fi
 
 # ── GPU / node settings ──────────────────────────────────────────────
 NUM_GPUS="${NUM_GPUS:-$(nvidia-smi -L 2>/dev/null | wc -l)}"
@@ -36,12 +43,18 @@ LOG_DIR="${LOG_DIR:-examples/train}"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/${CONFIG_NAME}_${TIMESTAMP}.log"
 
+RESUME_FLAG=()
+if [[ -n "${RESUME_CKPT}" ]]; then
+    RESUME_FLAG=(--resume-from-checkpoint "${RESUME_CKPT}")
+fi
+
 echo "=== Train Training ==="
 echo "Config:      ${CONFIG}"
 echo "Num GPUs:    ${NUM_GPUS}"
 echo "Num Nodes:   ${NNODES}"
 echo "Node Rank:   ${NODE_RANK}"
 echo "Master:      ${MASTER_ADDR}:${MASTER_PORT}"
+[[ -n "${RESUME_CKPT}" ]] && echo "Resume from: ${RESUME_CKPT}"
 echo "Extra args:  $*"
 echo "Log file:    ${LOG_FILE}"
 echo "=============================="
@@ -54,5 +67,6 @@ torchrun \
     --master_port "${MASTER_PORT}" \
     fastvideo/train/entrypoint/train.py \
     --config "${CONFIG}" \
+    "${RESUME_FLAG[@]}" \
     "$@" \
     2>&1 | tee "${LOG_FILE}"
