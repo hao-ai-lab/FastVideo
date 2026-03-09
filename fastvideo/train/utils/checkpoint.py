@@ -69,14 +69,28 @@ def _find_latest_checkpoint(output_dir: Path) -> Path | None:
     return candidates[-1][1]
 
 
-def _resolve_resume_checkpoint(resume_from_checkpoint: str, *, output_dir: str) -> Path:
+def _resolve_resume_checkpoint(resume_from_checkpoint: str, *, output_dir: str) -> Path | None:
     """Resolve a user-provided resume path to a concrete checkpoint dir.
 
     Accepted values:
+    - "latest" (auto-pick latest checkpoint-*/dcp under output_dir,
+      or ``None`` if no checkpoint exists yet — starts from scratch)
     - /path/to/output_dir/checkpoint-<step>
     - /path/to/output_dir/checkpoint-<step>/dcp
     - /path/to/output_dir (auto-pick latest checkpoint-*/dcp)
     """
+
+    if str(resume_from_checkpoint).strip().lower() == "latest":
+        out = Path(os.path.expanduser(str(output_dir))).resolve()
+        latest = _find_latest_checkpoint(out)
+        if latest is None:
+            logger.info(
+                "resume_from_checkpoint='latest' but no "
+                "checkpoints found under %s; starting from "
+                "scratch.",
+                out,
+            )
+        return latest
 
     raw = os.path.expanduser(str(resume_from_checkpoint))
     path = Path(raw).resolve()
@@ -286,6 +300,8 @@ class CheckpointManager:
             checkpoint_path,
             output_dir=self.output_dir,
         )
+        if resolved is None:
+            return
         rank = _rank()
         rng_path = resolved / f"rng_state_rank{rank}.pt"
         if not rng_path.is_file():
@@ -330,6 +346,8 @@ class CheckpointManager:
             resume_from_checkpoint,
             output_dir=self.output_dir,
         )
+        if resolved is None:
+            return None
         step = _parse_step_from_dir(resolved)
 
         states = self._build_states()
