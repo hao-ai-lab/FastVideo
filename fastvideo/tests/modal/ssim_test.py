@@ -48,6 +48,9 @@ SSIM_NUM_GPUS = 4
 SSIM_TERMINATE_TIMEOUT_S = 30
 HF_TOKEN_ENV_KEYS = ("HF_API_KEY", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
 RAW_GENERATED_VOLUME_ROOT = "ssim_generated_videos"
+DEFAULT_OUTPUT_QUALITY_TIER = "default"
+FULL_OUTPUT_QUALITY_TIER = "full_quality"
+MODAL_DEVICE_REFERENCE_FOLDER = "L40S_reference_videos"
 SSIM_COMMON_KWARGS = dict(
     image=image,
     timeout=5400,
@@ -203,6 +206,43 @@ def _resolve_generated_volume_subdir(
     return f"{timestamp}_{short_commit}"
 
 
+def _resolve_output_quality_tier(ssim_full_quality: bool) -> str:
+    if ssim_full_quality:
+        return FULL_OUTPUT_QUALITY_TIER
+    return DEFAULT_OUTPUT_QUALITY_TIER
+
+
+def _build_generated_volume_relative_path(
+    *,
+    generated_volume_subdir: str,
+    quality_tier: str,
+) -> str:
+    return os.path.join(
+        RAW_GENERATED_VOLUME_ROOT,
+        quality_tier,
+        generated_volume_subdir,
+        "generated_videos",
+    )
+
+
+def _build_local_generated_download_dir(quality_tier: str) -> str:
+    return os.path.join(".", "generated_videos_modal", quality_tier)
+
+
+def _print_local_reference_copy_command(quality_tier: str) -> None:
+    generated_dir = os.path.join(
+        _build_local_generated_download_dir(quality_tier),
+        MODAL_DEVICE_REFERENCE_FOLDER,
+    )
+    print(
+        "To update local references from the downloaded Modal outputs, run:\n"
+        "  python fastvideo/tests/ssim/reference_videos_cli.py copy-local "
+        f"--quality-tier {quality_tier} "
+        f"--generated-dir {generated_dir} "
+        f"--device-folder {MODAL_DEVICE_REFERENCE_FOLDER}"
+    )
+
+
 def _count_video_files(root: str) -> int:
     count = 0
     for current_root, _, filenames in os.walk(root):
@@ -217,6 +257,7 @@ def _count_video_files(root: str) -> int:
 def _sync_generated_videos_to_volume(
     repo_root: str,
     generated_volume_subdir: str,
+    quality_tier: str,
 ) -> str | None:
     generated_root = os.path.join(
         repo_root,
@@ -224,18 +265,18 @@ def _sync_generated_videos_to_volume(
         "tests",
         "ssim",
         "generated_videos",
+        quality_tier,
     )
     if not os.path.isdir(generated_root):
         print(
-            "No generated_videos directory found; skipping raw generated "
-            "video export."
+            "No generated_videos directory found for quality tier "
+            f"{quality_tier}; skipping raw generated video export."
         )
         return None
 
-    relative_dst = os.path.join(
-        RAW_GENERATED_VOLUME_ROOT,
-        generated_volume_subdir,
-        "generated_videos",
+    relative_dst = _build_generated_volume_relative_path(
+        generated_volume_subdir=generated_volume_subdir,
+        quality_tier=quality_tier,
     )
     absolute_dst = os.path.join("/root/data", relative_dst)
     if os.path.exists(absolute_dst):
@@ -252,8 +293,9 @@ def _sync_generated_videos_to_volume(
     print(
         "Download command:\n"
         f"  modal volume get hf-model-weights {relative_dst} "
-        "./generated_videos_modal"
+        f"{_build_local_generated_download_dir(quality_tier)}"
     )
+    _print_local_reference_copy_command(quality_tier)
     return relative_dst
 
 
@@ -779,7 +821,7 @@ def _print_ssim_task_results(
     return 1 if failed or terminated or skipped else 0
 
 
-@app.function(gpu="L40S:8", **SSIM_COMMON_KWARGS)
+@app.function(gpu="L40S:4", **SSIM_COMMON_KWARGS)
 def run_ssim_tests_single_instance(
     git_repo: str,
     git_commit: str,
@@ -817,6 +859,7 @@ def run_ssim_tests_single_instance(
     )
     exit_code = _print_ssim_task_results(tasks, results)
     if sync_generated_to_volume:
+        quality_tier = _resolve_output_quality_tier(ssim_full_quality)
         resolved_subdir = _resolve_generated_volume_subdir(
             generated_volume_subdir,
             git_commit,
@@ -824,6 +867,7 @@ def run_ssim_tests_single_instance(
         _sync_generated_videos_to_volume(
             repo_root,
             resolved_subdir,
+            quality_tier,
         )
     return exit_code
 
@@ -858,6 +902,7 @@ def run_ssim_tests(
         print(f"Selected model ids: {model_ids}")
     if pytest_k.strip():
         print(f"Using pytest -k filter: {pytest_k}")
+    quality_tier = _resolve_output_quality_tier(full_quality)
     if sync_generated_to_volume:
         resolved_subdir = _resolve_generated_volume_subdir(
             generated_volume_subdir,
@@ -865,7 +910,7 @@ def run_ssim_tests(
         )
         print(
             "Raw generated videos will be saved to Modal volume path: "
-            f"{RAW_GENERATED_VOLUME_ROOT}/{resolved_subdir}/generated_videos"
+            f"{_build_generated_volume_relative_path(generated_volume_subdir=resolved_subdir, quality_tier=quality_tier)}"
         )
     else:
         resolved_subdir = ""
@@ -885,14 +930,17 @@ def run_ssim_tests(
         generated_volume_subdir=resolved_subdir,
     )
     if sync_generated_to_volume:
-        download_src = (
-            f"{RAW_GENERATED_VOLUME_ROOT}/{resolved_subdir}/generated_videos"
+        download_src = _build_generated_volume_relative_path(
+            generated_volume_subdir=resolved_subdir,
+            quality_tier=quality_tier,
         )
+        local_download_dir = _build_local_generated_download_dir(quality_tier)
         print(
             "To download raw generated videos locally, run:\n"
             f"  modal volume get hf-model-weights {download_src} "
-            "./generated_videos_modal"
+            f"{local_download_dir}"
         )
+        _print_local_reference_copy_command(quality_tier)
     if exit_code != 0:
         sys.exit(exit_code)
     print("All SSIM tasks passed.")
