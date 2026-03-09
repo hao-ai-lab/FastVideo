@@ -144,6 +144,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             betas=betas,
             weight_decay=training_args.weight_decay,
             eps=1e-8,
+            foreach=False,
         )
 
         self.init_steps = 0
@@ -170,6 +171,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 betas=(0.9, 0.999),
                 weight_decay=training_args.weight_decay,
                 eps=1e-8,
+                foreach=False,
             )
             self.lr_scheduler_2 = get_scheduler(
                 training_args.lr_scheduler,
