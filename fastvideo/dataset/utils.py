@@ -100,7 +100,8 @@ def collate_rows_from_parquet_schema(rows,
                                      parquet_schema,
                                      text_padding_length,
                                      cfg_rate=0.0,
-                                     rng=None) -> dict[str, Any]:
+                                     rng=None,
+                                     seed=0) -> dict[str, Any]:
     """
     Collate rows from parquet files based on the provided schema.
     Dynamically processes tensor fields based on schema and returns batched data.
@@ -149,13 +150,30 @@ def collate_rows_from_parquet_schema(rows,
                 if len(bytes_data) == 0:
                     tensor = torch.zeros(0, dtype=torch.bfloat16)
                 else:
-                    # Convert bytes to tensor using float32 as default
-                    if tensor_name == 'text_embedding' and (rng.random(
-                    ) if rng else random.random()) < cfg_rate:
-                        data = np.zeros((512, 4096), dtype=np.float32)
+                    # Deterministic per-sample CFG dropout
+                    # using sample index (resume-safe).
+                    drop = False
+                    if (tensor_name == 'text_embedding'
+                            and cfg_rate > 0):
+                        sample_idx = row.get(
+                            "_sample_index")
+                        if sample_idx is not None:
+                            drop = (random.Random(
+                                seed ^ sample_idx
+                            ).random() < cfg_rate)
+                        else:
+                            drop = ((rng.random()
+                                     if rng else
+                                     random.random())
+                                    < cfg_rate)
+                    if drop:
+                        data = np.zeros(
+                            (512, 4096), dtype=np.float32)
                     else:
                         data = np.frombuffer(
-                            bytes_data, dtype=np.float32).reshape(shape).copy()
+                            bytes_data,
+                            dtype=np.float32,
+                        ).reshape(shape).copy()
                     tensor = torch.from_numpy(data)
                     # if len(data.shape) == 3:
                     #     B, L, D = tensor.shape

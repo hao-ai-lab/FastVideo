@@ -137,6 +137,7 @@ nav:
       - STA Mask Search (Archived): inference/examples/sta_mask_search.md
   - Training:
     - Overview: training/overview.md
+    - Training Infrastructure: training/train_infra.md
     - Data Preprocessing: training/data_preprocess.md
     - Fine-tuning: training/finetune.md
     - Examples:
@@ -159,6 +160,7 @@ nav:
     - Debugging: utilities/debugging.md
   - Design:
     - Overview: design/overview.md
+    - Training Architecture: design/training_architecture.md
   - Developer Guide:
     - Overview: contributing/overview.md
     - Developer Environment:

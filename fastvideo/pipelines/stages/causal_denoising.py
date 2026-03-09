@@ -500,31 +500,22 @@ class CausalDenoisingStage(CausalDMDDenosingStage):
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
         target_dtype = torch.bfloat16
-        autocast_enabled = (
-            target_dtype != torch.float32
-            and not fastvideo_args.disable_autocast
-        )
+        autocast_enabled = (target_dtype != torch.float32
+                            and not fastvideo_args.disable_autocast)
 
-        latent_seq_length = (
-            batch.latents.shape[-1] * batch.latents.shape[-2]
-        )
-        patch_ratio = (
-            self.transformer.config.arch_config.patch_size[-1]
-            * self.transformer.config.arch_config.patch_size[-2]
-        )
+        latent_seq_length = (batch.latents.shape[-1] * batch.latents.shape[-2])
+        patch_ratio = (self.transformer.config.arch_config.patch_size[-1] *
+                       self.transformer.config.arch_config.patch_size[-2])
         self.frame_seq_length = latent_seq_length // patch_ratio
 
         pos_cond_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
             {
-                "encoder_attention_mask":
-                    batch.prompt_attention_mask,
+                "encoder_attention_mask": batch.prompt_attention_mask,
             },
         )
 
-        assert batch.latents is not None, (
-            "latents must be provided"
-        )
+        assert batch.latents is not None, ("latents must be provided")
         latents = batch.latents  # [B, C, T, H, W]
         b, c, t, h, w = latents.shape
         prompt_embeds = batch.prompt_embeds
@@ -540,21 +531,16 @@ class CausalDenoisingStage(CausalDMDDenosingStage):
         )
         crossattn_cache = self._initialize_crossattn_cache(
             batch_size=b,
-            max_text_len=(
-                fastvideo_args.pipeline_config
-                .text_encoder_configs[0]
-                .arch_config.text_len
-            ),
+            max_text_len=(fastvideo_args.pipeline_config.
+                          text_encoder_configs[0].arch_config.text_len),
             dtype=target_dtype,
             device=latents.device,
         )
 
         # Determine block sizes
         if t % self.num_frames_per_block != 0:
-            raise ValueError(
-                "num_frames must be divisible by "
-                "num_frames_per_block"
-            )
+            raise ValueError("num_frames must be divisible by "
+                             "num_frames_per_block")
         num_blocks = t // self.num_frames_per_block
         block_sizes = [self.num_frames_per_block] * num_blocks
         start_index = 0
@@ -562,17 +548,19 @@ class CausalDenoisingStage(CausalDMDDenosingStage):
 
         context_noise = getattr(
             fastvideo_args.pipeline_config,
-            "context_noise", 0,
+            "context_noise",
+            0,
         )
 
-        with self.progress_bar(
-            total=len(block_sizes) * num_inference_steps
-        ) as progress_bar:
+        with self.progress_bar(total=len(block_sizes) *
+                               num_inference_steps) as progress_bar:
             for current_num_frames in block_sizes:
                 current_latents = latents[
-                    :, :,
+                    :,
+                    :,
                     start_index:start_index + current_num_frames,
-                    :, :,
+                    :,
+                    :,
                 ]
 
                 # Reset scheduler per block so its multi-step
@@ -584,9 +572,7 @@ class CausalDenoisingStage(CausalDMDDenosingStage):
                 timesteps = self.scheduler.timesteps
 
                 for i, t_cur in enumerate(timesteps):
-                    latent_model_input = current_latents.to(
-                        target_dtype
-                    )
+                    latent_model_input = current_latents.to(target_dtype)
                     t_expanded = t_cur * torch.ones(
                         (b, 1),
                         device=latents.device,
@@ -594,16 +580,16 @@ class CausalDenoisingStage(CausalDMDDenosingStage):
                     )
 
                     with (
-                        torch.autocast(
-                            device_type="cuda",
-                            dtype=target_dtype,
-                            enabled=autocast_enabled,
-                        ),
-                        set_forward_context(
-                            current_timestep=i,
-                            attn_metadata=None,
-                            forward_batch=batch,
-                        ),
+                            torch.autocast(
+                                device_type="cuda",
+                                dtype=target_dtype,
+                                enabled=autocast_enabled,
+                            ),
+                            set_forward_context(
+                                current_timestep=i,
+                                attn_metadata=None,
+                                forward_batch=batch,
+                            ),
                     ):
                         # Transformer returns [B, C, T, H, W],
                         # permute to [B, T, C, H, W] then flatten
@@ -614,10 +600,8 @@ class CausalDenoisingStage(CausalDMDDenosingStage):
                             t_expanded,
                             kv_cache=kv_cache,
                             crossattn_cache=crossattn_cache,
-                            current_start=(
-                                (pos_start_base + start_index)
-                                * self.frame_seq_length
-                            ),
+                            current_start=((pos_start_base + start_index) *
+                                           self.frame_seq_length),
                             start_frame=start_index,
                             **pos_cond_kwargs,
                         )
@@ -625,36 +609,29 @@ class CausalDenoisingStage(CausalDMDDenosingStage):
                     # Flatten [B,C,T,H,W] -> [B*T,C,H,W] for
                     # scheduler, then unflatten back.
                     nf = current_num_frames
-                    noise_pred_flat = (
-                        noise_pred
-                        .permute(0, 2, 1, 3, 4)
-                        .flatten(0, 1)
-                    )
-                    latents_flat = (
-                        current_latents
-                        .permute(0, 2, 1, 3, 4)
-                        .flatten(0, 1)
-                    )
+                    noise_pred_flat = (noise_pred.permute(0, 2, 1, 3,
+                                                          4).flatten(0, 1))
+                    latents_flat = (current_latents.permute(0, 2, 1, 3,
+                                                            4).flatten(0, 1))
                     updated_flat = self.scheduler.step(
                         noise_pred_flat,
                         t_cur,
                         latents_flat,
                         return_dict=False,
                     )[0]
-                    current_latents = (
-                        updated_flat
-                        .unflatten(0, (b, nf))
-                        .permute(0, 2, 1, 3, 4)
-                    )
+                    current_latents = (updated_flat.unflatten(
+                        0, (b, nf)).permute(0, 2, 1, 3, 4))
 
                     if progress_bar is not None:
                         progress_bar.update()
 
                 # Write denoised block back
                 latents[
-                    :, :,
+                    :,
+                    :,
                     start_index:start_index + current_num_frames,
-                    :, :,
+                    :,
+                    :,
                 ] = current_latents
 
                 # Update KV cache with clean context
@@ -665,16 +642,16 @@ class CausalDenoisingStage(CausalDMDDenosingStage):
                 ) * int(context_noise)
                 context_bcthw = current_latents.to(target_dtype)
                 with (
-                    torch.autocast(
-                        device_type="cuda",
-                        dtype=target_dtype,
-                        enabled=autocast_enabled,
-                    ),
-                    set_forward_context(
-                        current_timestep=0,
-                        attn_metadata=None,
-                        forward_batch=batch,
-                    ),
+                        torch.autocast(
+                            device_type="cuda",
+                            dtype=target_dtype,
+                            enabled=autocast_enabled,
+                        ),
+                        set_forward_context(
+                            current_timestep=0,
+                            attn_metadata=None,
+                            forward_batch=batch,
+                        ),
                 ):
                     self.transformer(
                         context_bcthw,
@@ -682,10 +659,8 @@ class CausalDenoisingStage(CausalDMDDenosingStage):
                         t_context.unsqueeze(1),
                         kv_cache=kv_cache,
                         crossattn_cache=crossattn_cache,
-                        current_start=(
-                            (pos_start_base + start_index)
-                            * self.frame_seq_length
-                        ),
+                        current_start=((pos_start_base + start_index) *
+                                       self.frame_seq_length),
                         start_frame=start_index,
                         **pos_cond_kwargs,
                     )
