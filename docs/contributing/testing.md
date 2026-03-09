@@ -144,6 +144,24 @@ python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests \
   --sync-generated-to-volume
 ```
 
+The raw export path is quality-tiered:
+
+* default params: `ssim_generated_videos/default/<subdir>/generated_videos`
+* full-quality params: `ssim_generated_videos/full_quality/<subdir>/generated_videos`
+
+The printed `modal volume get` command also downloads into a quality-specific
+local directory under `./generated_videos_modal/<quality-tier>`.
+
+To turn downloaded Modal outputs into local reference videos, use the matching
+quality tier with `copy-local`, for example:
+
+```bash
+python fastvideo/tests/ssim/reference_videos_cli.py copy-local \
+  --quality-tier full_quality \
+  --generated-dir ./generated_videos_modal/full_quality/L40S_reference_videos \
+  --device-folder L40S_reference_videos
+```
+
 ### Workflow Scripts
 
 The shell script that triggers these tests in the CI pipeline is located at `.buildkite/scripts/pr_test.sh`. If you add a new test category (e.g., a new folder outside of `ssim`), you will need to:
