@@ -31,7 +31,7 @@ class DiffusionForcingSFTMethod(TrainingMethod):
             raise ValueError("DFSFT requires role 'student'")
         if not self.student._trainable:
             raise ValueError("DFSFT requires student to be trainable")
-        self._attn_kind: Literal["dense", "vsa"] = (self._parse_attn_kind(self.method_config.get("attn_kind", None)))
+        self._attn_kind: Literal["dense", "vsa"] = (self._infer_attn_kind())
 
         self._chunk_size = self._parse_chunk_size(self.method_config.get("chunk_size", None))
         self._timestep_index_range = (self._parse_timestep_index_range())

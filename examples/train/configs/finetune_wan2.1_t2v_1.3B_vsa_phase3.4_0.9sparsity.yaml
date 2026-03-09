@@ -11,7 +11,6 @@ models:
 
 method:
   _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
-  attn_kind: vsa
 
 training:
   distributed:

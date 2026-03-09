@@ -67,7 +67,6 @@ method:
 
   # --- FineTuneMethod keys (if using finetune instead) ---
   # _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
-  # attn_kind: vsa                    # "dense" or "vsa"
 
 # ------------------------------------------------------------------------------
 # training: [TYPED] -> TrainingConfig
