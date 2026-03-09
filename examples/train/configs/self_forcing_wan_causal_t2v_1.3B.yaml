@@ -8,9 +8,9 @@
 models:
   student:
     _target_: fastvideo.train.models.wan.WanCausalModel
-    # init_from: wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers
-    init_from: /mnt/weka/home/hao.zhang/alex/weights/WanOdeInit
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: true
+    transformer_override_safetensor: /mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors
   teacher:
     _target_: fastvideo.train.models.wan.WanModel
     init_from: Wan-AI/Wan2.1-T2V-14B-Diffusers
@@ -30,6 +30,7 @@ method:
   dmd_denoising_steps: [1000, 750, 500, 250]
 
   # Self-forcing specific
+  # ode_init_path: /path/to/ode_init_safetensors  # optional: override student weights from safetensors
   chunk_size: 3
   student_sample_type: sde
   context_noise: 0.0
@@ -77,7 +78,7 @@ training:
     checkpoints_total_limit: 3
 
   tracker:
-    project_name: distillation_wan_r
+    project_name: self-forcing-wan
     run_name: wan2.1_causal_self_forcing
 
   model:
