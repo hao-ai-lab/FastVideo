@@ -63,7 +63,7 @@ def instantiate(cfg: dict[str, Any], **extra: Any) -> Any:
     kwargs: dict[str, Any] = {k: v for k, v in cfg.items() if k != "_target_"}
     kwargs.update(extra)
 
-    sig = inspect.signature(cls.__init__)
+    sig = inspect.signature(cls.__init__)  # type: ignore[misc]
     params = sig.parameters
     has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
 

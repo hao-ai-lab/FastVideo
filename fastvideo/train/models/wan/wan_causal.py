@@ -33,8 +33,7 @@ class _StreamingCaches:
 class WanCausalModel(WanModel, CausalModelBase):
     """Wan per-role model with causal/streaming primitives."""
 
-    _transformer_cls_name: str = (
-        "CausalWanTransformer3DModel")
+    _transformer_cls_name: str = ("CausalWanTransformer3DModel")
 
     def __init__(
         self,
@@ -51,22 +50,19 @@ class WanCausalModel(WanModel, CausalModelBase):
             init_from=init_from,
             training_config=training_config,
             trainable=trainable,
-            disable_custom_init_weights=(
-                disable_custom_init_weights),
+            disable_custom_init_weights=(disable_custom_init_weights),
             flow_shift=flow_shift,
-            enable_gradient_checkpointing_type=(
-                enable_gradient_checkpointing_type),
+            enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
         )
-        self._streaming_caches: (
-            dict[tuple[int, str], _StreamingCaches]
-        ) = {}
+        self._streaming_caches: (dict[tuple[int, str], _StreamingCaches]) = {}
 
     # --- CausalModelBase override: clear_caches ---
     def clear_caches(
-        self, *, cache_tag: str = "pos",
+        self,
+        *,
+        cache_tag: str = "pos",
     ) -> None:
-        self._streaming_caches.pop(
-            (id(self), str(cache_tag)), None)
+        self._streaming_caches.pop((id(self), str(cache_tag)), None)
 
     # --- CausalModelBase override: predict_noise_streaming ---
     def predict_noise_streaming(
@@ -87,14 +83,12 @@ class WanCausalModel(WanModel, CausalModelBase):
         elif attn_kind == "vsa":
             attn_metadata = batch.attn_metadata_vsa
         else:
-            raise ValueError(
-                f"Unknown attn_kind: {attn_kind!r}")
+            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
 
         cache_tag = str(cache_tag)
         cur_start_frame = int(cur_start_frame)
         if cur_start_frame < 0:
-            raise ValueError(
-                "cur_start_frame must be >= 0")
+            raise ValueError("cur_start_frame must be >= 0")
 
         batch_size = int(noisy_latents.shape[0])
         num_frames = int(noisy_latents.shape[1])
@@ -105,8 +99,7 @@ class WanCausalModel(WanModel, CausalModelBase):
             device=noisy_latents.device,
         )
 
-        transformer = self._get_transformer(
-            timestep_full)
+        transformer = self._get_transformer(timestep_full)
         caches = self._get_or_init_streaming_caches(
             cache_tag=cache_tag,
             transformer=transformer,
@@ -117,16 +110,13 @@ class WanCausalModel(WanModel, CausalModelBase):
         kv_cache = caches.kv_cache
         crossattn_cache = caches.crossattn_cache
 
-        if (self._should_snapshot_streaming_cache()
-                and torch.is_grad_enabled()):
-            kv_cache = self._snapshot_kv_cache_indices(
-                kv_cache)
+        if (self._should_snapshot_streaming_cache() and torch.is_grad_enabled()):
+            kv_cache = self._snapshot_kv_cache_indices(kv_cache)
 
         model_kwargs: dict[str, Any] = {
             "kv_cache": kv_cache,
             "crossattn_cache": crossattn_cache,
-            "current_start": (
-                cur_start_frame * frame_seq_length),
+            "current_start": (cur_start_frame * frame_seq_length),
             "start_frame": cur_start_frame,
             "is_cache": bool(store_kv),
         }
@@ -137,31 +127,27 @@ class WanCausalModel(WanModel, CausalModelBase):
         if conditional:
             text_dict = batch.conditional_dict
             if text_dict is None:
-                raise RuntimeError(
-                    "Missing conditional_dict in "
-                    "TrainingBatch")
+                raise RuntimeError("Missing conditional_dict in "
+                                   "TrainingBatch")
         else:
-            text_dict = self._get_uncond_text_dict(
-                batch, cfg_uncond=cfg_uncond)
+            text_dict = self._get_uncond_text_dict(batch, cfg_uncond=cfg_uncond)
 
         with (
-            torch.autocast(device_type, dtype=dtype),
-            set_forward_context(
-                current_timestep=batch.timesteps,
-                attn_metadata=attn_metadata,
-            ),
+                torch.autocast(device_type, dtype=dtype),
+                set_forward_context(
+                    current_timestep=batch.timesteps,
+                    attn_metadata=attn_metadata,
+                ),
         ):
-            input_kwargs = (
-                self._build_distill_input_kwargs(
-                    noisy_latents,
-                    timestep_full,
-                    text_dict,
-                ))
-            input_kwargs["timestep"] = (
-                timestep_full.to(
-                    device=self.device,
-                    dtype=torch.long,
-                ))
+            input_kwargs = (self._build_distill_input_kwargs(
+                noisy_latents,
+                timestep_full,
+                text_dict,
+            ))
+            input_kwargs["timestep"] = (timestep_full.to(
+                device=self.device,
+                dtype=torch.long,
+            ))
             input_kwargs.update(model_kwargs)
 
             if store_kv:
@@ -169,9 +155,7 @@ class WanCausalModel(WanModel, CausalModelBase):
                     _ = transformer(**input_kwargs)
                 return None
 
-            pred_noise = transformer(
-                **input_kwargs,
-            ).permute(0, 2, 1, 3, 4)
+            pred_noise = transformer(**input_kwargs, ).permute(0, 2, 1, 3, 4)
         return pred_noise
 
     # ------------------------------------------------------------------
@@ -187,26 +171,18 @@ class WanCausalModel(WanModel, CausalModelBase):
         device: torch.device,
     ) -> torch.Tensor:
         if timestep.ndim == 0:
-            return (
-                timestep.view(1, 1)
-                .expand(batch_size, num_frames)
-                .to(device=device))
+            return (timestep.view(1, 1).expand(batch_size, num_frames).to(device=device))
         if timestep.ndim == 1:
             if int(timestep.shape[0]) == batch_size:
-                return (
-                    timestep.view(batch_size, 1)
-                    .expand(batch_size, num_frames)
-                    .to(device=device))
-            raise ValueError(
-                "streaming timestep must be scalar, "
-                "[B], or [B, T]; got shape="
-                f"{tuple(timestep.shape)}")
+                return (timestep.view(batch_size, 1).expand(batch_size, num_frames).to(device=device))
+            raise ValueError("streaming timestep must be scalar, "
+                             "[B], or [B, T]; got shape="
+                             f"{tuple(timestep.shape)}")
         if timestep.ndim == 2:
             return timestep.to(device=device)
-        raise ValueError(
-            "streaming timestep must be scalar, "
-            "[B], or [B, T]; got ndim="
-            f"{int(timestep.ndim)}")
+        raise ValueError("streaming timestep must be scalar, "
+                         "[B], or [B, T]; got ndim="
+                         f"{int(timestep.ndim)}")
 
     def _get_or_init_streaming_caches(
         self,
@@ -222,14 +198,9 @@ class WanCausalModel(WanModel, CausalModelBase):
         dtype = noisy_latents.dtype
         device = noisy_latents.device
 
-        frame_seq_length = (
-            self._compute_frame_seq_length(
-                transformer, noisy_latents))
-        local_attn_size = self._get_local_attn_size(
-            transformer)
-        sliding_window_num_frames = (
-            self._get_sliding_window_num_frames(
-                transformer))
+        frame_seq_length = (self._compute_frame_seq_length(transformer, noisy_latents))
+        local_attn_size = self._get_local_attn_size(transformer)
+        sliding_window_num_frames = (self._get_sliding_window_num_frames(transformer))
 
         meta = (
             frame_seq_length,
@@ -259,26 +230,20 @@ class WanCausalModel(WanModel, CausalModelBase):
             device=device,
             frame_seq_length=frame_seq_length,
             local_attn_size=local_attn_size,
-            sliding_window_num_frames=(
-                sliding_window_num_frames),
-            checkpoint_safe=(
-                self
-                ._should_use_checkpoint_safe_kv_cache()
-            ),
+            sliding_window_num_frames=(sliding_window_num_frames),
+            checkpoint_safe=(self._should_use_checkpoint_safe_kv_cache()),
         )
-        crossattn_cache = (
-            self._initialize_crossattn_cache(
-                transformer=transformer,
-                device=device,
-            ))
+        crossattn_cache = (self._initialize_crossattn_cache(
+            transformer=transformer,
+            device=device,
+        ))
 
         caches = _StreamingCaches(
             kv_cache=kv_cache,
             crossattn_cache=crossattn_cache,
             frame_seq_length=frame_seq_length,
             local_attn_size=local_attn_size,
-            sliding_window_num_frames=(
-                sliding_window_num_frames),
+            sliding_window_num_frames=(sliding_window_num_frames),
             batch_size=batch_size,
             dtype=dtype,
             device=device,
@@ -291,11 +256,8 @@ class WanCausalModel(WanModel, CausalModelBase):
         transformer: torch.nn.Module,
         noisy_latents: torch.Tensor,
     ) -> int:
-        latent_seq_length = (
-            int(noisy_latents.shape[-1])
-            * int(noisy_latents.shape[-2]))
-        patch_size = getattr(
-            transformer, "patch_size", None)
+        latent_seq_length = (int(noisy_latents.shape[-1]) * int(noisy_latents.shape[-2]))
+        patch_size = getattr(transformer, "patch_size", None)
         if patch_size is None:
             patch_size = getattr(
                 getattr(
@@ -307,41 +269,36 @@ class WanCausalModel(WanModel, CausalModelBase):
                 None,
             )
         if patch_size is None:
-            raise ValueError(
-                "Unable to determine "
-                "transformer.patch_size "
-                "for causal streaming")
-        patch_ratio = (
-            int(patch_size[-1]) * int(patch_size[-2]))
+            raise ValueError("Unable to determine "
+                             "transformer.patch_size "
+                             "for causal streaming")
+        patch_ratio = (int(patch_size[-1]) * int(patch_size[-2]))
         if patch_ratio <= 0:
-            raise ValueError(
-                "Invalid patch_size for causal "
-                "streaming")
+            raise ValueError("Invalid patch_size for causal "
+                             "streaming")
         return latent_seq_length // patch_ratio
 
     def _get_sliding_window_num_frames(
-        self, transformer: torch.nn.Module,
+        self,
+        transformer: torch.nn.Module,
     ) -> int:
         cfg = getattr(transformer, "config", None)
         arch_cfg = getattr(cfg, "arch_config", None)
-        value = (
-            getattr(
-                arch_cfg,
-                "sliding_window_num_frames",
-                None,
-            )
-            if arch_cfg is not None
-            else None)
+        value = (getattr(
+            arch_cfg,
+            "sliding_window_num_frames",
+            None,
+        ) if arch_cfg is not None else None)
         if value is None:
             return 15
         return int(value)
 
     def _get_local_attn_size(
-        self, transformer: torch.nn.Module,
+        self,
+        transformer: torch.nn.Module,
     ) -> int:
         try:
-            value = getattr(
-                transformer, "local_attn_size", -1)
+            value = getattr(transformer, "local_attn_size", -1)
         except Exception:
             value = -1
         if value is None:
@@ -360,63 +317,44 @@ class WanCausalModel(WanModel, CausalModelBase):
         sliding_window_num_frames: int,
         checkpoint_safe: bool,
     ) -> list[dict[str, Any]]:
-        num_blocks = len(
-            getattr(transformer, "blocks", []))
+        num_blocks = len(getattr(transformer, "blocks", []))
         if num_blocks <= 0:
-            raise ValueError(
-                "Unexpected transformer.blocks "
-                "for causal streaming")
+            raise ValueError("Unexpected transformer.blocks "
+                             "for causal streaming")
 
         try:
-            num_attention_heads = int(
-                transformer.num_attention_heads)  # type: ignore[attr-defined]
+            num_attention_heads = int(transformer.num_attention_heads)  # type: ignore[attr-defined]
         except AttributeError as e:
-            raise ValueError(
-                "Transformer is missing "
-                "num_attention_heads") from e
+            raise ValueError("Transformer is missing "
+                             "num_attention_heads") from e
 
         try:
-            attention_head_dim = int(
-                transformer.attention_head_dim)  # type: ignore[attr-defined]
+            attention_head_dim = int(transformer.attention_head_dim)  # type: ignore[attr-defined]
         except AttributeError:
             try:
-                hidden_size = int(
-                    transformer.hidden_size)  # type: ignore[attr-defined]
+                hidden_size = int(transformer.hidden_size)  # type: ignore[attr-defined]
             except AttributeError as e:
-                raise ValueError(
-                    "Transformer is missing "
-                    "attention_head_dim and "
-                    "hidden_size") from e
-            attention_head_dim = (
-                hidden_size
-                // max(1, num_attention_heads))
+                raise ValueError("Transformer is missing "
+                                 "attention_head_dim and "
+                                 "hidden_size") from e
+            attention_head_dim = (hidden_size // max(1, num_attention_heads))
 
         if local_attn_size != -1:
-            kv_cache_size = (
-                int(local_attn_size)
-                * int(frame_seq_length))
+            kv_cache_size = (int(local_attn_size) * int(frame_seq_length))
         else:
-            kv_cache_size = (
-                int(frame_seq_length)
-                * int(sliding_window_num_frames))
+            kv_cache_size = (int(frame_seq_length) * int(sliding_window_num_frames))
 
         if checkpoint_safe:
-            tc = getattr(
-                self, "training_config", None)
-            total_frames = int(
-                tc.data.num_frames
-                if tc is not None
-                else 0)
+            tc = getattr(self, "training_config", None)
+            total_frames = int(tc.data.num_frames if tc is not None else 0)
             if total_frames <= 0:
-                raise ValueError(
-                    "training.num_frames must be set "
-                    "to enable checkpoint-safe "
-                    "streaming KV cache; got "
-                    f"{total_frames}")
+                raise ValueError("training.num_frames must be set "
+                                 "to enable checkpoint-safe "
+                                 "streaming KV cache; got "
+                                 f"{total_frames}")
             kv_cache_size = max(
                 kv_cache_size,
-                int(frame_seq_length)
-                * total_frames,
+                int(frame_seq_length) * total_frames,
             )
 
         kv_cache: list[dict[str, Any]] = []
@@ -445,37 +383,23 @@ class WanCausalModel(WanModel, CausalModelBase):
                     device=device,
                 ),
                 "global_end_index":
-                torch.zeros(
-                    (), dtype=torch.long,
-                    device=device),
+                torch.zeros((), dtype=torch.long, device=device),
                 "local_end_index":
-                torch.zeros(
-                    (), dtype=torch.long,
-                    device=device),
+                torch.zeros((), dtype=torch.long, device=device),
             })
 
         return kv_cache
 
-    def _should_use_checkpoint_safe_kv_cache(
-        self,
-    ) -> bool:
-        tc = getattr(
-            self, "training_config", None)
+    def _should_use_checkpoint_safe_kv_cache(self, ) -> bool:
+        tc = getattr(self, "training_config", None)
         if tc is not None:
-            checkpointing_type = (
-                tc.model
-                .enable_gradient_checkpointing_type)
+            checkpointing_type = (tc.model.enable_gradient_checkpointing_type)
         else:
             checkpointing_type = None
-        return (bool(checkpointing_type)
-                and bool(self._trainable))
+        return (bool(checkpointing_type) and bool(self._trainable))
 
-    def _should_snapshot_streaming_cache(
-        self,
-    ) -> bool:
-        return (
-            self
-            ._should_use_checkpoint_safe_kv_cache())
+    def _should_snapshot_streaming_cache(self, ) -> bool:
+        return (self._should_use_checkpoint_safe_kv_cache())
 
     def _snapshot_kv_cache_indices(
         self,
@@ -483,27 +407,17 @@ class WanCausalModel(WanModel, CausalModelBase):
     ) -> list[dict[str, Any]]:
         snapshot: list[dict[str, Any]] = []
         for block_cache in kv_cache:
-            global_end_index = block_cache.get(
-                "global_end_index")
-            local_end_index = block_cache.get(
-                "local_end_index")
-            if (
-                not isinstance(
-                    global_end_index, torch.Tensor)
-                or not isinstance(
-                    local_end_index, torch.Tensor)
-            ):
-                raise ValueError(
-                    "Unexpected kv_cache index "
-                    "tensors; expected tensors at "
-                    "kv_cache[*].{global_end_index, "
-                    "local_end_index}")
+            global_end_index = block_cache.get("global_end_index")
+            local_end_index = block_cache.get("local_end_index")
+            if (not isinstance(global_end_index, torch.Tensor) or not isinstance(local_end_index, torch.Tensor)):
+                raise ValueError("Unexpected kv_cache index "
+                                 "tensors; expected tensors at "
+                                 "kv_cache[*].{global_end_index, "
+                                 "local_end_index}")
 
             copied = dict(block_cache)
-            copied["global_end_index"] = (
-                global_end_index.detach().clone())
-            copied["local_end_index"] = (
-                local_end_index.detach().clone())
+            copied["global_end_index"] = (global_end_index.detach().clone())
+            copied["local_end_index"] = (local_end_index.detach().clone())
             snapshot.append(copied)
         return snapshot
 
@@ -513,8 +427,7 @@ class WanCausalModel(WanModel, CausalModelBase):
         transformer: torch.nn.Module,
         device: torch.device,
     ) -> list[dict[str, Any]] | None:
-        num_blocks = len(
-            getattr(transformer, "blocks", []))
+        num_blocks = len(getattr(transformer, "blocks", []))
         if num_blocks <= 0:
             return None
         return [{

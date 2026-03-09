@@ -88,23 +88,17 @@ def _save_role_pretrained(
         if dist.is_available() and dist.is_initialized():
             dist.barrier()
 
-    local_base = Path(
-        maybe_download_model(str(base_model_path))
-    ).resolve()
-    dst = Path(
-        os.path.expanduser(str(output_dir))
-    ).resolve()
+    local_base = Path(maybe_download_model(str(base_model_path))).resolve()
+    dst = Path(os.path.expanduser(str(output_dir))).resolve()
 
     if _rank() == 0:
         if dst.exists():
             if overwrite:
                 shutil.rmtree(dst, ignore_errors=True)
             else:
-                raise FileExistsError(
-                    f"Refusing to overwrite existing "
-                    f"directory: {dst}. "
-                    "Pass --overwrite to replace it."
-                )
+                raise FileExistsError(f"Refusing to overwrite existing "
+                                      f"directory: {dst}. "
+                                      "Pass --overwrite to replace it.")
 
         def _copy_or_link(src: str, dest: str) -> None:
             try:
@@ -114,10 +108,14 @@ def _save_role_pretrained(
 
         logger.info(
             "Creating pretrained export dir at %s "
-            "(base=%s)", dst, local_base,
+            "(base=%s)",
+            dst,
+            local_base,
         )
         shutil.copytree(
-            local_base, dst, symlinks=True,
+            local_base,
+            dst,
+            symlinks=True,
             copy_function=_copy_or_link,
         )
 
@@ -132,24 +130,22 @@ def _save_role_pretrained(
 
     for module_name in module_names:
         if module_name not in modules:
-            raise KeyError(
-                f"Role {role!r} does not have module "
-                f"{module_name!r}. "
-                f"Available: {sorted(modules.keys())}"
-            )
+            raise KeyError(f"Role {role!r} does not have module "
+                           f"{module_name!r}. "
+                           f"Available: {sorted(modules.keys())}")
 
         module_dir = dst / module_name
         if not module_dir.is_dir():
-            raise FileNotFoundError(
-                f"Export directory missing component "
-                f"dir {module_name!r}: {module_dir}"
-            )
+            raise FileNotFoundError(f"Export directory missing component "
+                                    f"dir {module_name!r}: {module_dir}")
 
         options = StateDictOptions(
-            full_state_dict=True, cpu_offload=True,
+            full_state_dict=True,
+            cpu_offload=True,
         )
         state_dict = get_model_state_dict(
-            modules[module_name], options=options,
+            modules[module_name],
+            options=options,
         )
 
         if _rank() == 0:
@@ -159,11 +155,9 @@ def _save_role_pretrained(
             tensor_state: dict[str, torch.Tensor] = {}
             for key, value in state_dict.items():
                 if not isinstance(value, torch.Tensor):
-                    raise TypeError(
-                        f"Expected tensor in state_dict "
-                        f"for {module_name}.{key}, "
-                        f"got {type(value).__name__}"
-                    )
+                    raise TypeError(f"Expected tensor in state_dict "
+                                    f"for {module_name}.{key}, "
+                                    f"got {type(value).__name__}")
                 tensor_state[key] = value.detach().cpu()
 
             from safetensors.torch import save_file
@@ -171,7 +165,8 @@ def _save_role_pretrained(
             out_path = module_dir / "model.safetensors"
             logger.info(
                 "Saving %s weights to %s (%s tensors)",
-                module_name, out_path,
+                module_name,
+                out_path,
                 len(tensor_state),
             )
             save_file(tensor_state, str(out_path))
@@ -196,8 +191,7 @@ def convert(
     _ensure_distributed()
 
     from fastvideo.distributed import (
-        maybe_init_distributed_environment_and_model_parallel,
-    )
+        maybe_init_distributed_environment_and_model_parallel, )
     from fastvideo.train.utils.builder import build_from_config
     from fastvideo.train.utils.checkpoint import (
         CheckpointManager,
@@ -212,36 +206,32 @@ def convert(
 
     # -- Resolve checkpoint directory --
     resolved = _resolve_resume_checkpoint(
-        checkpoint_dir, output_dir=checkpoint_dir,
+        checkpoint_dir,
+        output_dir=checkpoint_dir,
     )
     dcp_dir = resolved / "dcp"
     if not dcp_dir.is_dir():
-        raise FileNotFoundError(
-            f"Missing dcp/ under {resolved}"
-        )
+        raise FileNotFoundError(f"Missing dcp/ under {resolved}")
 
     # -- Obtain config --
     cfg: RunConfig
     if config_path is not None:
         cfg = load_run_config(config_path)
     else:
-        metadata = CheckpointManager.load_metadata(
-            resolved
-        )
+        metadata = CheckpointManager.load_metadata(resolved)
         raw_config = metadata.get("config")
         if raw_config is None:
-            raise ValueError(
-                "Checkpoint metadata.json does not "
-                "contain 'config'. Pass --config "
-                "explicitly."
-            )
+            raise ValueError("Checkpoint metadata.json does not "
+                             "contain 'config'. Pass --config "
+                             "explicitly.")
         cfg = _run_config_from_raw(raw_config)
 
     tc = cfg.training
 
     # -- Init distributed (1 GPU is enough; DCP reshards) --
     maybe_init_distributed_environment_and_model_parallel(
-        tp_size=1, sp_size=1,
+        tp_size=1,
+        sp_size=1,
     )
 
     # Override distributed config so model loading uses 1 GPU.
@@ -257,7 +247,8 @@ def convert(
     # -- Load DCP weights into the model --
     states = method.checkpoint_state()
     logger.info(
-        "Loading DCP checkpoint from %s", resolved,
+        "Loading DCP checkpoint from %s",
+        resolved,
     )
     dcp.load(states, checkpoint_id=str(dcp_dir))
 
@@ -265,11 +256,9 @@ def convert(
     model = method._role_models[role]
     base_model_path = str(tc.model_path)
     if not base_model_path:
-        raise ValueError(
-            "Cannot determine base_model_path from "
-            "config. Ensure models.student.init_from "
-            "is set."
-        )
+        raise ValueError("Cannot determine base_model_path from "
+                         "config. Ensure models.student.init_from "
+                         "is set.")
 
     logger.info(
         "Exporting role=%s to %s (base=%s)",
@@ -288,9 +277,7 @@ def convert(
     return result
 
 
-def _run_config_from_raw(
-    raw: dict[str, Any],
-) -> Any:
+def _run_config_from_raw(raw: dict[str, Any], ) -> Any:
     """Reconstruct a RunConfig from a raw config dict.
 
     This mirrors ``load_run_config`` but operates on an
@@ -306,12 +293,14 @@ def _run_config_from_raw(
     )
 
     models_raw = _require_mapping(
-        raw.get("models"), where="models",
+        raw.get("models"),
+        where="models",
     )
     models: dict[str, dict[str, Any]] = {}
     for role_key, model_cfg_raw in models_raw.items():
         role_str = _require_str(
-            role_key, where="models.<role>",
+            role_key,
+            where="models.<role>",
         )
         model_cfg = _require_mapping(
             model_cfg_raw,
@@ -320,25 +309,25 @@ def _run_config_from_raw(
         models[role_str] = dict(model_cfg)
 
     method_raw = _require_mapping(
-        raw.get("method"), where="method",
+        raw.get("method"),
+        where="method",
     )
     method = dict(method_raw)
 
-    callbacks_raw = raw.get("callbacks", None)
-    callbacks: dict[str, dict[str, Any]] = (
-        _require_mapping(
-            callbacks_raw, where="callbacks",
-        )
-        if callbacks_raw is not None
-        else {}
-    )
+    callbacks_raw = raw.get("callbacks")
+    callbacks: dict[str, dict[str, Any]] = (_require_mapping(
+        callbacks_raw,
+        where="callbacks",
+    ) if callbacks_raw is not None else {})
 
     pipeline_config = _parse_pipeline_config(
-        raw, models=models,
+        raw,
+        models=models,
     )
 
     training_raw = _require_mapping(
-        raw.get("training"), where="training",
+        raw.get("training"),
+        where="training",
     )
     t = dict(training_raw)
     training = _build_training_config(
@@ -357,23 +346,17 @@ def _run_config_from_raw(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Convert a DCP training checkpoint to a "
-            "diffusers-style model directory. "
-            "Only 1 GPU needed (DCP reshards "
-            "automatically)."
-        ),
-    )
+    parser = argparse.ArgumentParser(description=("Convert a DCP training checkpoint to a "
+                                                  "diffusers-style model directory. "
+                                                  "Only 1 GPU needed (DCP reshards "
+                                                  "automatically)."), )
     parser.add_argument(
         "--checkpoint",
         type=str,
         required=True,
-        help=(
-            "Path to checkpoint-<step> dir, its dcp/ "
-            "subdir, or an output_dir (auto-picks "
-            "latest)."
-        ),
+        help=("Path to checkpoint-<step> dir, its dcp/ "
+              "subdir, or an output_dir (auto-picks "
+              "latest)."),
     )
     parser.add_argument(
         "--output-dir",
@@ -385,10 +368,8 @@ def main() -> None:
         "--config",
         type=str,
         default=None,
-        help=(
-            "Training YAML config. If omitted, read "
-            "from checkpoint metadata.json."
-        ),
+        help=("Training YAML config. If omitted, read "
+              "from checkpoint metadata.json."),
     )
     parser.add_argument(
         "--role",

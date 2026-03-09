@@ -65,6 +65,7 @@ For each matching file:
 - Ranked list of relevant related work entries with excerpts.
 
 ## Example Usage
+
 ```
 Search for work related to video quality evaluation metrics:
 

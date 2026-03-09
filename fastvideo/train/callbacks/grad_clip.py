@@ -8,13 +8,12 @@ Optionally logs per-module grad norms to the tracker.
 
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from fastvideo.logger import init_logger
 from fastvideo.train.callbacks.callback import Callback
 from fastvideo.train.utils.optimizer import (
-    clip_grad_norm_if_needed,
-)
+    clip_grad_norm_if_needed, )
 
 if TYPE_CHECKING:
     from fastvideo.train.methods.base import TrainingMethod
@@ -52,13 +51,10 @@ class GradNormClipCallback(Callback):
 
         for name, module in targets.items():
             grad_norm = clip_grad_norm_if_needed(
-                module, max_norm,
+                module,
+                max_norm,
             )
-            if (
-                self._log_grad_norms
-                and tracker is not None
-                and grad_norm > 0.0
-            ):
+            if (self._log_grad_norms and tracker is not None and grad_norm > 0.0):
                 tracker.log(
                     {f"grad_norm/{name}": grad_norm},
                     iteration,

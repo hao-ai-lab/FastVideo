@@ -38,8 +38,7 @@ def run_training_from_config(
     """YAML-only training entrypoint (schema v2)."""
 
     from fastvideo.distributed import (
-        maybe_init_distributed_environment_and_model_parallel,
-    )
+        maybe_init_distributed_environment_and_model_parallel, )
     from fastvideo.train import Trainer
     from fastvideo.train.utils.checkpoint import (
         CheckpointConfig,
@@ -60,15 +59,11 @@ def run_training_from_config(
         tc.distributed.sp_size,
     )
 
-    _, method, dataloader, start_step = build_from_config(
-        cfg
-    )
+    _, method, dataloader, start_step = build_from_config(cfg)
 
     if dry_run:
-        logger.info(
-            "Dry-run: config parsed and "
-            "build_from_config succeeded."
-        )
+        logger.info("Dry-run: config parsed and "
+                    "build_from_config succeeded.")
         return
 
     trainer = Trainer(
@@ -85,13 +80,8 @@ def run_training_from_config(
     )
 
     ckpt_config = CheckpointConfig(
-        save_steps=int(
-            tc.checkpoint.training_state_checkpointing_steps
-            or 0
-        ),
-        keep_last=int(
-            tc.checkpoint.checkpoints_total_limit or 0
-        ),
+        save_steps=int(tc.checkpoint.training_state_checkpointing_steps or 0),
+        keep_last=int(tc.checkpoint.checkpoints_total_limit or 0),
     )
 
     checkpoint_manager = CheckpointManager(
@@ -132,24 +122,18 @@ def main(
 
 if __name__ == "__main__":
     argv = sys.argv
-    parser = argparse.ArgumentParser(
-        description="YAML-only training entrypoint.",
-    )
+    parser = argparse.ArgumentParser(description="YAML-only training entrypoint.", )
     parser.add_argument(
         "--config",
         type=str,
         required=True,
-        help=(
-            "Path to training YAML config (schema v2)."
-        ),
+        help=("Path to training YAML config (schema v2)."),
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help=(
-            "Parse config and build runtime, "
-            "but do not start training."
-        ),
+        help=("Parse config and build runtime, "
+              "but do not start training."),
     )
     args, unknown = parser.parse_known_args(argv[1:])
     main(args, overrides=unknown if unknown else None)

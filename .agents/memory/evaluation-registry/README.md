@@ -280,7 +280,7 @@ A comprehensive benchmark examining **four critical capabilities**:
 **Priority**: **Highest** — this is the most important evaluation signal
 **Trust**: Highest — but expensive
 
-#### What It Measures
+### What It Measures
 Human evaluators compare generated videos and rate them on dimensions like:
 - Overall quality and realism
 - Temporal coherence and smoothness

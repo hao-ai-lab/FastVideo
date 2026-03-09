@@ -125,14 +125,11 @@ class WanModel(ModelBase):
         transformer = apply_trainable(transformer, trainable=trainable)
         # Fall back to training_config.model if not set on the
         # model YAML section directly.
-        ckpt_type = (
-            enable_gradient_checkpointing_type
-            or getattr(
-                getattr(training_config, "model", None),
-                "enable_gradient_checkpointing_type",
-                None,
-            )
-        )
+        ckpt_type = (enable_gradient_checkpointing_type or getattr(
+            getattr(training_config, "model", None),
+            "enable_gradient_checkpointing_type",
+            None,
+        ))
         if trainable and ckpt_type:
             transformer = apply_activation_checkpointing(
                 transformer,
@@ -518,7 +515,9 @@ class WanModel(ModelBase):
             dtype=latents.dtype,
         )
         timesteps = self._sample_timesteps(
-            batch_size, latents.device, generator,
+            batch_size,
+            latents.device,
+            generator,
         )
         if int(tc.distributed.sp_size or 1) > 1:
             self.sp_group.broadcast(timesteps, src=0)

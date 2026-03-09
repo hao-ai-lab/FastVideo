@@ -33,14 +33,17 @@ class ModelBase(ABC):
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def init_preprocessors(self, training_config: TrainingConfig) -> None:
+    def init_preprocessors(  # noqa: B027
+            self,
+            training_config: TrainingConfig,
+    ) -> None:
         """Load VAE, build dataloader, seed RNGs.
 
         Called only on the student by the method's ``__init__``.
         Default is a no-op so teacher/critic instances skip this.
         """
 
-    def on_train_start(self) -> None:
+    def on_train_start(self) -> None:  # noqa: B027
         """Called once before the training loop begins."""
 
     # ------------------------------------------------------------------
@@ -114,8 +117,7 @@ class ModelBase(ABC):
         )
         return pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
-            noise_input_latent=noisy_latents.flatten(
-                0, 1),
+            noise_input_latent=noisy_latents.flatten(0, 1),
             timestep=timestep,
             scheduler=self.noise_scheduler,
         ).unflatten(0, pred_noise.shape[:2])
@@ -188,8 +190,7 @@ class CausalModelBase(ModelBase):
             return None
         return pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
-            noise_input_latent=noisy_latents.flatten(
-                0, 1),
+            noise_input_latent=noisy_latents.flatten(0, 1),
             timestep=timestep,
             scheduler=self.noise_scheduler,
         ).unflatten(0, pred_noise.shape[:2])

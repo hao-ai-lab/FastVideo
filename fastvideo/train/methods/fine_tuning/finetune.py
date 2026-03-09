@@ -11,8 +11,7 @@ import torch.nn.functional as F
 from fastvideo.train.methods.base import TrainingMethod, LogScalar
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.optimizer import (
-    build_optimizer_and_scheduler,
-)
+    build_optimizer_and_scheduler, )
 
 
 class FineTuneMethod(TrainingMethod):
@@ -27,19 +26,11 @@ class FineTuneMethod(TrainingMethod):
         super().__init__(cfg=cfg, role_models=role_models)
 
         if "student" not in role_models:
-            raise ValueError(
-                "FineTuneMethod requires role 'student'"
-            )
+            raise ValueError("FineTuneMethod requires role 'student'")
         if not self.student._trainable:
-            raise ValueError(
-                "FineTuneMethod requires student to be "
-                "trainable"
-            )
-        self._attn_kind: Literal["dense", "vsa"] = (
-            self._parse_attn_kind(
-                self.method_config.get("attn_kind", None)
-            )
-        )
+            raise ValueError("FineTuneMethod requires student to be "
+                             "trainable")
+        self._attn_kind: Literal["dense", "vsa"] = (self._parse_attn_kind(self.method_config.get("attn_kind", None)))
 
         # Initialize preprocessors on student.
         self.student.init_preprocessors(self.training_config)
@@ -75,40 +66,24 @@ class FineTuneMethod(TrainingMethod):
         )
 
         if training_batch.latents is None:
-            raise RuntimeError(
-                "prepare_batch() must set "
-                "TrainingBatch.latents"
-            )
+            raise RuntimeError("prepare_batch() must set "
+                               "TrainingBatch.latents")
         if training_batch.noisy_model_input is None:
-            raise RuntimeError(
-                "prepare_batch() must set "
-                "TrainingBatch.noisy_model_input"
-            )
+            raise RuntimeError("prepare_batch() must set "
+                               "TrainingBatch.noisy_model_input")
         if training_batch.noise is None:
-            raise RuntimeError(
-                "prepare_batch() must set "
-                "TrainingBatch.noise"
-            )
+            raise RuntimeError("prepare_batch() must set "
+                               "TrainingBatch.noise")
         if training_batch.sigmas is None:
-            raise RuntimeError(
-                "prepare_batch() must set "
-                "TrainingBatch.sigmas"
-            )
+            raise RuntimeError("prepare_batch() must set "
+                               "TrainingBatch.sigmas")
         if training_batch.timesteps is None:
-            raise RuntimeError(
-                "prepare_batch() must set "
-                "TrainingBatch.timesteps"
-            )
+            raise RuntimeError("prepare_batch() must set "
+                               "TrainingBatch.timesteps")
 
         clean_latents = training_batch.latents
-        noisy_latents = (
-            training_batch.noisy_model_input.permute(
-                0, 2, 1, 3, 4
-            )
-        )
-        noise = training_batch.noise.permute(
-            0, 2, 1, 3, 4
-        )
+        noisy_latents = (training_batch.noisy_model_input.permute(0, 2, 1, 3, 4))
+        noise = training_batch.noise.permute(0, 2, 1, 3, 4)
         sigmas = training_batch.sigmas
         timesteps = training_batch.timesteps
 
@@ -120,18 +95,12 @@ class FineTuneMethod(TrainingMethod):
             attn_kind=self._attn_kind,
         )
 
-        if bool(
-            self.training_config.model.precondition_outputs
-        ):
+        if bool(self.training_config.model.precondition_outputs):
             pred_x0 = noisy_latents - pred * sigmas
-            loss = F.mse_loss(
-                pred_x0.float(), clean_latents.float()
-            )
+            loss = F.mse_loss(pred_x0.float(), clean_latents.float())
         else:
             target = noise - clean_latents
-            loss = F.mse_loss(
-                pred.float(), target.float()
-            )
+            loss = F.mse_loss(pred.float(), target.float())
 
         if self._attn_kind == "vsa":
             attn_metadata = training_batch.attn_metadata_vsa
@@ -176,14 +145,16 @@ class FineTuneMethod(TrainingMethod):
 
     # TrainingMethod override: get_optimizers
     def get_optimizers(
-        self, iteration: int,
+        self,
+        iteration: int,
     ) -> list[torch.optim.Optimizer]:
         del iteration
         return [self._student_optimizer]
 
     # TrainingMethod override: get_lr_schedulers
     def get_lr_schedulers(
-        self, iteration: int,
+        self,
+        iteration: int,
     ) -> list[Any]:
         del iteration
         return [self._student_lr_scheduler]
@@ -193,18 +164,12 @@ class FineTuneMethod(TrainingMethod):
 
         student_lr = float(tc.optimizer.learning_rate)
         if student_lr <= 0.0:
-            raise ValueError(
-                "training.learning_rate must be > 0 "
-                "for finetune"
-            )
+            raise ValueError("training.learning_rate must be > 0 "
+                             "for finetune")
 
         student_betas = tc.optimizer.betas
         student_sched = str(tc.optimizer.lr_scheduler)
-        student_params = [
-            p
-            for p in self.student.transformer.parameters()
-            if p.requires_grad
-        ]
+        student_params = [p for p in self.student.transformer.parameters() if p.requires_grad]
         (
             self._student_optimizer,
             self._student_lr_scheduler,

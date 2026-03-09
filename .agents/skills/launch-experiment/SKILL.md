@@ -88,6 +88,7 @@ torchrun --nnodes 1 --nproc_per_node <num_gpus> \
 ### 5. Log to experiment journal
 
 After launching, append an entry to `.agents/memory/experiment-journal/README.md`:
+
 ```markdown
 ## [YYYY-MM-DD] Experiment: <run_name>
 - **Hypothesis**: <user-provided or auto-generated>
@@ -101,6 +102,7 @@ After launching, append an entry to `.agents/memory/experiment-journal/README.md
 - An experiment journal entry.
 
 ## Example Usage
+
 ```
 Launch a Wan T2V 1.3B finetune on 4 GPUs with lr=5e-5 and max_train_steps=1000:
 

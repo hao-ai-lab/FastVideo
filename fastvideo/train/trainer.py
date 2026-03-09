@@ -104,7 +104,8 @@ class Trainer:
         method.set_tracker(self.tracker)
         method.on_train_start()
         self.callbacks.on_train_start(
-            method, iteration=start_step,
+            method,
+            iteration=start_step,
         )
 
         resume_from_checkpoint = (tc.checkpoint.resume_from_checkpoint or "")
@@ -115,7 +116,8 @@ class Trainer:
             if resumed_step is not None:
                 start_step = int(resumed_step)
         self.callbacks.on_validation_begin(
-            method, iteration=start_step,
+            method,
+            iteration=start_step,
         )
         method.optimizers_zero_grad(start_step)
 
@@ -124,13 +126,8 @@ class Trainer:
         # Restore the RNG snapshot LAST — after dcp.load,
         # after iter(dataloader), after everything that may
         # have advanced the RNG as a side-effect.
-        if (
-            checkpoint_manager is not None
-            and resume_from_checkpoint
-        ):
-            checkpoint_manager.load_rng_snapshot(
-                resume_from_checkpoint,
-            )
+        if (checkpoint_manager is not None and resume_from_checkpoint):
+            checkpoint_manager.load_rng_snapshot(resume_from_checkpoint, )
         progress = tqdm(
             range(start_step + 1, max_steps + 1),
             initial=start_step,
@@ -173,7 +170,8 @@ class Trainer:
                     )
 
             self.callbacks.on_before_optimizer_step(
-                method, iteration=step,
+                method,
+                iteration=step,
             )
             method.optimizers_schedulers_step(step)
             method.optimizers_zero_grad(step)
@@ -186,21 +184,26 @@ class Trainer:
                 self.tracker.log(metrics, step)
 
             self.callbacks.on_training_step_end(
-                method, metrics, iteration=step,
+                method,
+                metrics,
+                iteration=step,
             )
 
             if checkpoint_manager is not None:
                 checkpoint_manager.maybe_save(step)
 
             self.callbacks.on_validation_begin(
-                method, iteration=step,
+                method,
+                iteration=step,
             )
             self.callbacks.on_validation_end(
-                method, iteration=step,
+                method,
+                iteration=step,
             )
 
         self.callbacks.on_train_end(
-            method, iteration=max_steps,
+            method,
+            iteration=max_steps,
         )
 
         if checkpoint_manager is not None:
