@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
@@ -211,6 +213,15 @@ class CheckpointManager:
             self._write_metadata(checkpoint_dir, step)
         dcp.save(states, checkpoint_id=str(dcp_dir))
         _barrier()
+
+        # Save RNG state AFTER dcp.save so it captures the
+        # exact state the continuous run continues with.
+        # dcp.save triggers FSDP all-gather ops that can
+        # advance the RNG between when DCP captures it and
+        # when the save completes.
+        self._save_rng_snapshot(checkpoint_dir)
+        _barrier()
+
         self._last_saved_step = step
 
         self._cleanup_old_checkpoints()
@@ -237,6 +248,87 @@ class CheckpointManager:
             )
         with open(meta_path, encoding="utf-8") as f:
             return json.load(f)  # type: ignore[no-any-return]
+
+    def _save_rng_snapshot(self, checkpoint_dir: Path) -> None:
+        """Save per-rank RNG state to a separate file.
+
+        Called AFTER ``dcp.save`` so the snapshot reflects
+        the exact state the continuous run continues with.
+        Each rank saves its own file because CUDA RNG and
+        custom generators differ across ranks.
+        """
+        rank = _rank()
+        rng: dict[str, Any] = {
+            "torch_rng": torch.get_rng_state(),
+            "python_rng": random.getstate(),
+            "numpy_rng": np.random.get_state(),
+        }
+        if torch.cuda.is_available():
+            rng["cuda_rng"] = torch.cuda.get_rng_state()
+        generators = (
+            self.method.get_rng_generators()
+            if hasattr(self.method, "get_rng_generators")
+            else {}
+        )
+        for name, gen in (generators or {}).items():
+            if gen is not None:
+                rng[f"gen_{name}"] = gen.get_state()
+        torch.save(
+            rng,
+            checkpoint_dir / f"rng_state_rank{rank}.pt",
+        )
+
+    def load_rng_snapshot(
+        self, checkpoint_path: str,
+    ) -> None:
+        """Restore per-rank RNG state from the snapshot file.
+
+        Must be called AFTER ``dcp.load`` **and** after
+        ``iter(dataloader)`` so no later operation can
+        clobber the restored state.
+        """
+        resolved = _resolve_resume_checkpoint(
+            checkpoint_path,
+            output_dir=self.output_dir,
+        )
+        rank = _rank()
+        rng_path = resolved / f"rng_state_rank{rank}.pt"
+        if not rng_path.is_file():
+            # Fall back to legacy single-file snapshot.
+            rng_path = resolved / "rng_state.pt"
+        if not rng_path.is_file():
+            logger.warning(
+                "No rng_state in %s; skipping "
+                "RNG snapshot restore.",
+                resolved,
+            )
+            return
+
+        rng = torch.load(
+            rng_path, map_location="cpu",
+            weights_only=False,
+        )
+        if "torch_rng" in rng:
+            torch.set_rng_state(rng["torch_rng"])
+        if "python_rng" in rng:
+            random.setstate(rng["python_rng"])
+        if "numpy_rng" in rng:
+            np.random.set_state(rng["numpy_rng"])
+        if torch.cuda.is_available():
+            if "cuda_rng" in rng:
+                torch.cuda.set_rng_state(rng["cuda_rng"])
+        generators = (
+            self.method.get_rng_generators()
+            if hasattr(self.method, "get_rng_generators")
+            else {}
+        )
+        for name, gen in (generators or {}).items():
+            key = f"gen_{name}"
+            if key in rng and gen is not None:
+                gen.set_state(rng[key])
+        logger.info(
+            "Restored RNG snapshot from %s", rng_path,
+        )
 
     def maybe_resume(self, *, resume_from_checkpoint: str | None) -> int | None:
         if not resume_from_checkpoint:

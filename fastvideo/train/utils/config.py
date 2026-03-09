@@ -10,6 +10,10 @@ from typing import Any
 
 import yaml
 
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
+
 from fastvideo.train.utils.training_config import (
     CheckpointConfig,
     DataConfig,
@@ -421,17 +425,107 @@ def _build_training_config(
     )
 
 
-def load_run_config(path: str) -> RunConfig:
+def _parse_cli_overrides(
+    overrides: list[str],
+) -> dict[str, Any]:
+    """Parse ``--dotted.key value`` CLI overrides.
+
+    Returns a flat dict mapping dotted keys to parsed
+    values.  Values are auto-cast: ``true``/``false`` to
+    bool, integers/floats to numbers, and YAML list
+    literals (``[a, b]``) to lists.
+    """
+    result: dict[str, Any] = {}
+    i = 0
+    while i < len(overrides):
+        arg = overrides[i]
+        if not arg.startswith("--"):
+            raise ValueError(
+                f"Expected --dotted.key, got {arg!r}"
+            )
+        key = arg[2:]  # strip leading --
+        if "=" in key:
+            key, raw_val = key.split("=", 1)
+        else:
+            i += 1
+            if i >= len(overrides):
+                raise ValueError(
+                    f"Missing value for override {arg!r}"
+                )
+            raw_val = overrides[i]
+        result[key] = _cast_value(raw_val)
+        i += 1
+    return result
+
+
+def _cast_value(raw: str) -> Any:
+    """Best-effort cast a CLI string to a Python value."""
+    if raw.lower() == "true":
+        return True
+    if raw.lower() == "false":
+        return False
+    if raw.lower() in ("none", "null"):
+        return None
+    # Try int
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    # Try float
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    # Try YAML list literal like [1, 2]
+    if raw.startswith("[") and raw.endswith("]"):
+        try:
+            return yaml.safe_load(raw)
+        except yaml.YAMLError:
+            pass
+    return raw
+
+
+def _apply_overrides(
+    cfg: dict[str, Any],
+    overrides: dict[str, Any],
+) -> None:
+    """Apply dotted-key overrides to a nested dict."""
+    for dotted_key, value in overrides.items():
+        parts = dotted_key.split(".")
+        d = cfg
+        for part in parts[:-1]:
+            if part not in d or not isinstance(d[part], dict):
+                d[part] = {}
+            d = d[part]
+        d[parts[-1]] = value
+
+
+def load_run_config(
+    path: str,
+    overrides: list[str] | None = None,
+) -> RunConfig:
     """Load a run config from YAML.
 
     Expected top-level keys: ``models``, ``method``,
     ``training`` (nested), and optionally ``callbacks``
     and ``pipeline``.
+
+    Args:
+        path: Path to the YAML config file.
+        overrides: Optional list of CLI override tokens,
+            e.g. ``["--training.distributed.num_gpus", "4"]``.
+            Dotted keys map to nested YAML paths.
     """
     path = _resolve_existing_file(path)
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     cfg = _require_mapping(raw, where=path)
+
+    # Apply CLI overrides before building typed config.
+    if overrides:
+        parsed = _parse_cli_overrides(overrides)
+        _apply_overrides(cfg, parsed)
+        logger.info("Applied CLI overrides: %s", parsed)
 
     # --- models ---
     models_raw = _require_mapping(

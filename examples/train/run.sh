@@ -1,30 +1,26 @@
 #!/usr/bin/env bash
-# Launch distillation training from a v3 YAML config.
+# Launch training from a YAML config.
 #
 # Usage:
-#   bash examples/distillation/refactor/run.sh <config.yaml> [extra flags]
+#   bash examples/train/run.sh <config.yaml> [--dotted.key value ...]
 #
 # Examples:
-#   bash examples/distillation/refactor/run.sh examples/distillation/refactor/self_forcing_wangame_causal_v3.yaml
-#   bash examples/distillation/refactor/run.sh examples/distillation/refactor/dfsft_wangame_causal_v3.yaml --dry-run
-#   bash examples/distillation/refactor/run.sh examples/distillation/refactor/dfsft_wangame_causal_v3.yaml \
-#       --override-output-dir outputs/my_run
+#   bash examples/train/run.sh examples/train/finetune_wan2.1_t2v_1.3B_vsa_phase3.4_0.9sparsity.yaml
+#   bash examples/train/run.sh examples/train/distill_wan2.1_t2v_1.3B_dmd2.yaml --dry-run
+#   bash examples/train/run.sh examples/train/distill_wan2.1_t2v_1.3B_dmd2.yaml \
+#       --training.distributed.num_gpus 4 \
+#       --training.optimizer.learning_rate 1e-5
+#   bash examples/train/run.sh examples/train/distill_wan2.1_t2v_1.3B_dmd2.yaml \
+#       --training.checkpoint.resume_from_checkpoint outputs/my_run/checkpoint-1000
 #
 # Logs are written to logs/<config_name>_<timestamp>.log (and also printed to stdout).
 
 set -euo pipefail
 
-CONFIG="${1:?Usage: $0 <config.yaml> [--resume <checkpoint_path>] [extra flags...]}"
+CONFIG="${1:?Usage: $0 <config.yaml> [extra flags...]}"
 shift
 
-# ── Optional --resume flag ───────────────────────────────────────────
-RESUME_CKPT=""
-if [[ "${1:-}" == "--resume" ]]; then
-    RESUME_CKPT="${2:?--resume requires a checkpoint path}"
-    shift 2
-fi
-
-# ── GPU / node settings ──────────────────────────────────────────────
+# ── GPU / node settings ──────────────────────────────────────────
 NUM_GPUS="${NUM_GPUS:-$(nvidia-smi -L 2>/dev/null | wc -l)}"
 NUM_GPUS="${NUM_GPUS:-1}"
 NNODES="${NNODES:-1}"
@@ -32,21 +28,16 @@ NODE_RANK="${NODE_RANK:-0}"
 MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
 MASTER_PORT="${MASTER_PORT:-29501}"
 export TOKENIZERS_PARALLELISM=false
-# ── W&B ──────────────────────────────────────────────────────────────
+# ── W&B ──────────────────────────────────────────────────────────
 export WANDB_API_KEY="${WANDB_API_KEY:-}"
 export WANDB_MODE="${WANDB_MODE:-online}"
 
-# ── Log file ─────────────────────────────────────────────────────────
+# ── Log file ─────────────────────────────────────────────────────
 CONFIG_NAME="$(basename "${CONFIG}" .yaml)"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 LOG_DIR="${LOG_DIR:-examples/train}"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/${CONFIG_NAME}_${TIMESTAMP}.log"
-
-RESUME_FLAG=()
-if [[ -n "${RESUME_CKPT}" ]]; then
-    RESUME_FLAG=(--resume-from-checkpoint "${RESUME_CKPT}")
-fi
 
 echo "=== Train Training ==="
 echo "Config:      ${CONFIG}"
@@ -54,7 +45,6 @@ echo "Num GPUs:    ${NUM_GPUS}"
 echo "Num Nodes:   ${NNODES}"
 echo "Node Rank:   ${NODE_RANK}"
 echo "Master:      ${MASTER_ADDR}:${MASTER_PORT}"
-[[ -n "${RESUME_CKPT}" ]] && echo "Resume from: ${RESUME_CKPT}"
 echo "Extra args:  $*"
 echo "Log file:    ${LOG_FILE}"
 echo "=============================="
@@ -67,6 +57,5 @@ torchrun \
     --master_port "${MASTER_PORT}" \
     fastvideo/train/entrypoint/train.py \
     --config "${CONFIG}" \
-    "${RESUME_FLAG[@]}" \
     "$@" \
     2>&1 | tee "${LOG_FILE}"

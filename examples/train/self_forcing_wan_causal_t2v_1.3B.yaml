@@ -8,11 +8,12 @@
 models:
   student:
     _target_: fastvideo.train.models.wan.WanCausalModel
-    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    # init_from: wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers
+    init_from: /mnt/weka/home/hao.zhang/alex/weights/WanOdeInit
     trainable: true
   teacher:
     _target_: fastvideo.train.models.wan.WanModel
-    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    init_from: Wan-AI/Wan2.1-T2V-14B-Diffusers
     trainable: false
     disable_custom_init_weights: true
   critic:
@@ -60,7 +61,7 @@ training:
     num_frames: 77
 
   optimizer:
-    learning_rate: 2.0e-6
+    learning_rate: 1e-5
     betas: [0.0, 0.999]
     weight_decay: 0.01
     lr_scheduler: constant
@@ -76,7 +77,7 @@ training:
     checkpoints_total_limit: 3
 
   tracker:
-    project_name: distillation_wan
+    project_name: distillation_wan_r
     run_name: wan2.1_causal_self_forcing
 
   model:
@@ -91,8 +92,7 @@ callbacks:
     every_steps: 50
     sampling_steps: [4]
     sampling_timesteps: [1000, 750, 500, 250]
-    rollout_mode: streaming
     guidance_scale: 6.0
 
 pipeline:
-  flow_shift: 8
+  flow_shift: 5

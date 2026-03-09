@@ -70,7 +70,6 @@ class ValidationCallback(Callback):
         num_frames: int | None = None,
         output_dir: str | None = None,
         sampling_timesteps: list[int] | None = None,
-        rollout_mode: str = "parallel",
         **pipeline_kwargs: Any,
     ) -> None:
         self.pipeline_target = str(pipeline_target)
@@ -99,7 +98,6 @@ class ValidationCallback(Callback):
             if sampling_timesteps is not None
             else None
         )
-        self.rollout_mode = str(rollout_mode)
         self.pipeline_kwargs = dict(pipeline_kwargs)
 
         # Set after on_train_start.
@@ -216,14 +214,6 @@ class ValidationCallback(Callback):
             or tc.checkpoint.output_dir
         )
 
-        # For streaming pipelines we may need to
-        # temporarily set dmd_denoising_steps on
-        # pipeline_config.
-        old_dmd_denoising_steps = getattr(
-            tc.pipeline_config,
-            "dmd_denoising_steps",
-            None,
-        )
         try:
             transformer.eval()
             num_sp_groups = (
@@ -232,11 +222,6 @@ class ValidationCallback(Callback):
             )
 
             for num_inference_steps in self.sampling_steps:
-                self._maybe_set_dmd_denoising_steps(
-                    tc,
-                    num_inference_steps,
-                )
-
                 result = self._run_validation_for_steps(
                     num_inference_steps,
                     transformer=transformer,
@@ -315,34 +300,8 @@ class ValidationCallback(Callback):
                         result.captions, dst=0,
                     )
         finally:
-            if hasattr(tc.pipeline_config, "dmd_denoising_steps"):
-                tc.pipeline_config.dmd_denoising_steps = (
-                    old_dmd_denoising_steps
-                )
             if was_training:
                 transformer.train()
-
-    def _maybe_set_dmd_denoising_steps(
-        self,
-        tc: TrainingConfig,
-        num_inference_steps: int,
-    ) -> None:
-        """Set dmd_denoising_steps on pipeline_config when
-        sampling_timesteps are explicitly provided."""
-        if self.sampling_timesteps is None:
-            return
-        tc.pipeline_config.dmd_denoising_steps = (  # type: ignore[union-attr]
-            list(self.sampling_timesteps)
-        )
-
-        # Also set any pipeline-specific kwargs from
-        # YAML (e.g. dmd_denoising_steps override).
-        pk = self.pipeline_kwargs
-        if "dmd_denoising_steps" in pk:
-            tc.pipeline_config.dmd_denoising_steps = [  # type: ignore[union-attr]
-                int(s)
-                for s in pk["dmd_denoising_steps"]
-            ]
 
     # ----------------------------------------------------------
     # Pipeline management
@@ -364,7 +323,6 @@ class ValidationCallback(Callback):
     ) -> Any:
         key = (
             id(transformer),
-            self.rollout_mode,
         )
         if (
             self._pipeline is not None
