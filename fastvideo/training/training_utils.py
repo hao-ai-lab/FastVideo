@@ -65,7 +65,8 @@ def gather_state_dict_on_cpu_rank0(
 def compute_density_for_timestep_sampling(
     weighting_scheme: str,
     batch_size: int,
-    generator,
+    generator: torch.Generator,
+    device: torch.device | str = "cpu",
     logit_mean: float | None = None,
     logit_std: float | None = None,
     mode_scale: float | None = None,
@@ -83,15 +84,15 @@ def compute_density_for_timestep_sampling(
             mean=logit_mean,
             std=logit_std,
             size=(batch_size, ),
-            device="cpu",
+            device=device,
             generator=generator,
         )
         u = torch.nn.functional.sigmoid(u)
     elif weighting_scheme == "mode":
-        u = torch.rand(size=(batch_size, ), device="cpu", generator=generator)
+        u = torch.rand(size=(batch_size, ), device=device, generator=generator)
         u = 1 - u - mode_scale * (torch.cos(math.pi * u / 2)**2 - 1 + u)
     else:
-        u = torch.rand(size=(batch_size, ), device="cpu", generator=generator)
+        u = torch.rand(size=(batch_size, ), device=device, generator=generator)
     return u
 
 

@@ -237,6 +237,20 @@ def run_lora_extraction_tests():
     )
 
 
+@app.function(gpu="L40S:2",
+              image=image,
+              timeout=1800,
+              secrets=[
+                  modal.Secret.from_dict(
+                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
+              ],
+              volumes={"/root/data": model_vol})
+def run_performance_tests():
+    run_test(
+        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/performance -vs"
+    )
+
+
 @app.function(gpu="L40S:1",
               image=image,
               timeout=1800,

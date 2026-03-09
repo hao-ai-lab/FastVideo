@@ -1,0 +1,7 @@
+{"name": "launch-experiment", "description": "Generate and execute a training launch command for FastVideo models", "path": "launch-experiment/SKILL.md", "status": "draft", "trust": "low"}
+{"name": "monitor-experiment", "description": "Poll a running W&B training run for progress and emit structured alerts", "path": "monitor-experiment/SKILL.md", "status": "draft", "trust": "low"}
+{"name": "summarize-run", "description": "Extract a W&B run summary into a structured experiment report", "path": "summarize-run/SKILL.md", "status": "draft", "trust": "low"}
+{"name": "log-experiment", "description": "Append or update an experiment entry in the experiment journal", "path": "log-experiment/SKILL.md", "status": "draft", "trust": "low"}
+{"name": "evaluate-video-quality", "description": "Evaluate generated video quality using available metrics (SSIM, loss trajectory, caption consistency)", "path": "evaluate-video-quality/SKILL.md", "status": "draft", "trust": "low"}
+{"name": "index-related-work", "description": "Ingest a paper or repository into the related work index", "path": "index-related-work/SKILL.md", "status": "draft", "trust": "low"}
+{"name": "search-related-work", "description": "Query the related work index for relevant papers, repos, or comparisons", "path": "search-related-work/SKILL.md", "status": "draft", "trust": "low"}

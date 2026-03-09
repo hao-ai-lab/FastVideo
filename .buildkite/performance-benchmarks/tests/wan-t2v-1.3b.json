@@ -1,0 +1,46 @@
+{
+  "benchmark_id": "wan-t2v-1.3b-2gpu",
+  "description": "Wan2.1 T2V 1.3B inference performance",
+  "model": {
+    "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    "model_short_name": "Wan2.1-T2V-1.3B"
+  },
+  "init_kwargs": {
+    "num_gpus": 2,
+    "flow_shift": 7.0,
+    "sp_size": 2,
+    "tp_size": 1,
+    "vae_sp": true,
+    "vae_tiling": true,
+    "text_encoder_precisions": ["fp32"]
+  },
+  "generation_kwargs": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 45,
+    "num_inference_steps": 4,
+    "guidance_scale": 3,
+    "embedded_cfg_scale": 6,
+    "seed": 1024,
+    "fps": 24,
+    "neg_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+  },
+  "test_prompts": [
+    "Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting."
+  ],
+  "run_config": {
+    "num_warmup_runs": 1,
+    "num_measurement_runs": 3,
+    "required_gpus": 2
+  },
+  "thresholds": {
+    "L40S": {
+      "max_generation_time_s": 34.0,
+      "max_peak_memory_mb": 11000.0
+    },
+    "default": {
+      "max_generation_time_s": 120.0,
+      "max_peak_memory_mb": 30000.0
+    }
+  }
+}
