@@ -35,7 +35,7 @@ The preprocessing steps are identical to training. Run the appropriate preproces
 
 ```bash
 # For Wan2.1 T2V
-bash examples/data/preprocessing/v1_preprocess_wan_data_t2v
+bash examples/preprocessing/v1_preprocess_wan_data_t2v
 
 # For Wan2.2 TI2V  
 bash examples/distill/Wan2.2-TI2V-5B-Diffusers/crush_smol/preprocess_wan_data_ti2v_5b.sh

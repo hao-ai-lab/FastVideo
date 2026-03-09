@@ -174,7 +174,6 @@ class Platform:
 
     @classmethod
     def get_torch_device(cls):
-        pass
         """
         Check if the current platform supports torch device.
         """

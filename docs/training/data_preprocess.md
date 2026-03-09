@@ -93,7 +93,7 @@ Use `--preprocess.dataset_type hf` and point `--preprocess.dataset_path` to a Hu
 If you have raw videos and captions in separate files, generate the `videos2caption.json`:
 
 ```bash
-python examples/data/preprocessing/prepare_json_file.py \
+python examples/preprocessing/prepare_json_file.py \
     --data_folder path/to/your_raw_data/ \
     --output path/to/output_folder
 ```
