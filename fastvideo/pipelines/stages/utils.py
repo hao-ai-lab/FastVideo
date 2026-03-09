@@ -9,6 +9,23 @@ from typing import Any
 import torch
 
 
+def debug_nan_check(tensor: torch.Tensor | None, name: str) -> None:
+    """Log whether a tensor contains NaNs (for debugging Flux2/all-NaN output)."""
+    if tensor is None:
+        return
+    has_nan = torch.isnan(tensor).any().item()
+    if has_nan:
+        n = torch.isnan(tensor).sum().item()
+        # Use print so it appears even if logging level is high
+        print(f"[NaN CHECK] {name}: YES ({n} NaNs), shape={tensor.shape}")
+    else:
+        try:
+            mn, mx = tensor.min().item(), tensor.max().item()
+            print(f"[NaN CHECK] {name}: no NaNs, shape={tensor.shape}, min={mn:.4f}, max={mx:.4f}")
+        except Exception:
+            print(f"[NaN CHECK] {name}: no NaNs, shape={tensor.shape}")
+
+
 def retrieve_timesteps(
     scheduler: Any,
     num_inference_steps: int | None = None,

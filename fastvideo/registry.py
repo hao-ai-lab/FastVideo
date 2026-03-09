@@ -26,6 +26,10 @@ from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.configs.pipelines.ltx2 import LTX2T2VConfig
+from fastvideo.configs.pipelines.flux_2 import (
+    Flux2KleinPipelineConfig,
+    Flux2PipelineConfig,
+)
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
     TurboDiffusionT2V_14B_Config,
@@ -63,6 +67,10 @@ from fastvideo.configs.sample.hunyuangamecraft import HunyuanGameCraftSamplingPa
 from fastvideo.configs.sample.lingbotworld import LingBotWorld_SamplingParam
 from fastvideo.configs.sample.ltx2 import (LTX2BaseSamplingParam,
                                            LTX2DistilledSamplingParam)
+from fastvideo.configs.sample.flux_2 import (
+    Flux2KleinSamplingParam,
+    Flux2SamplingParam,
+)
 from fastvideo.configs.sample.turbodiffusion import (
     TurboDiffusionI2V_A14B_SamplingParam,
     TurboDiffusionT2V_14B_SamplingParam,
@@ -269,6 +277,37 @@ def _register_configs() -> None:
         model_detectors=[
             lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and
             "distilled" in path.lower(),
+        ],
+    )
+
+    # Flux2 Klein (distilled, 4-step, no guidance)
+    register_configs(
+        sampling_param_cls=Flux2KleinSamplingParam,
+        pipeline_config_cls=Flux2KleinPipelineConfig,
+        hf_model_paths=[
+            "black-forest-labs/FLUX.2-klein-4B",
+            "black-forest-labs/FLUX.2-klein-9B",
+        ],
+        model_detectors=[
+            lambda path: (
+                "flux.2-klein" in path.lower()
+                or "flux2-klein" in path.lower()
+                or "flux2klein" in path.lower()
+            ),
+        ],
+    )
+    # Flux2 (full, guidance)
+    register_configs(
+        sampling_param_cls=Flux2SamplingParam,
+        pipeline_config_cls=Flux2PipelineConfig,
+        hf_model_paths=[],
+        model_detectors=[
+            lambda path: (
+                "flux2" in path.lower()
+                or "flux_2" in path.lower()
+                or "flux-2" in path.lower()
+            )
+            and "klein" not in path.lower(),
         ],
     )
 

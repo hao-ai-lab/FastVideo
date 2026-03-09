@@ -40,6 +40,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "LTX2Transformer3DModel": ("dits", "ltx2", "LTX2Transformer3DModel"),
     "SD3Transformer2DModel": ("dits", "sd3", "SD3Transformer2DModel"),
     "LingBotWorldTransformer3DModel": ("dits", "lingbotworld", "LingBotWorldTransformer3DModel"),
+    "FluxTransformer2DModel": ("dits", "flux_2", "Flux2Transformer2DModel"),
+    "Flux2Transformer2DModel": ("dits", "flux_2", "Flux2Transformer2DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
@@ -63,6 +65,9 @@ _TEXT_ENCODER_MODELS = {
     "Qwen2_5_VLForConditionalGeneration":
     ("encoders", "reason1", "Reason1TextEncoder"),
     "LTX2GemmaTextEncoderModel": ("encoders", "gemma", "LTX2GemmaTextEncoderModel"),
+    # Qwen3 (e.g. Flux2 Klein)
+    "Qwen3ForCausalLM": ("encoders", "qwen3", "Qwen3ForCausalLM"),
+    "TransformersModel": ("encoders", "qwen3", "Qwen3ForCausalLM"),
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
@@ -81,6 +86,7 @@ _VAE_MODELS = {
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
     "AutoencoderKL": ("vaes", "autoencoder_kl", "AutoencoderKL"),
     "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
+    "AutoencoderKLFlux2": ("vaes", "flux2vae", "AutoencoderKLFlux2"),
 }
 
 _AUDIO_MODELS = {
