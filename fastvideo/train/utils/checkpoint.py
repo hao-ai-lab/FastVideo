@@ -140,7 +140,8 @@ class _CallbackStateWrapper:
         return self._callbacks.state_dict()
 
     def load_state_dict(
-        self, state_dict: dict[str, Any],
+        self,
+        state_dict: dict[str, Any],
     ) -> None:
         self._callbacks.load_state_dict(state_dict)
 
@@ -185,9 +186,7 @@ class CheckpointManager:
 
         # Callback state (e.g. EMA shadow weights, validation RNG).
         if self._callbacks is not None and _is_stateful(self._callbacks):
-            states["callbacks"] = _CallbackStateWrapper(
-                self._callbacks,
-            )
+            states["callbacks"] = _CallbackStateWrapper(self._callbacks, )
 
         return states
 
@@ -221,7 +220,8 @@ class CheckpointManager:
         states = self._build_states()
         if _rank() == 0:
             logger.info(
-                "Saving checkpoint to %s", checkpoint_dir,
+                "Saving checkpoint to %s",
+                checkpoint_dir,
             )
             self._write_metadata(checkpoint_dir, step)
         dcp.save(states, checkpoint_id=str(dcp_dir))
@@ -240,7 +240,9 @@ class CheckpointManager:
         self._cleanup_old_checkpoints()
 
     def _write_metadata(
-        self, checkpoint_dir: Path, step: int,
+        self,
+        checkpoint_dir: Path,
+        step: int,
     ) -> None:
         metadata: dict[str, Any] = {"step": step}
         if self._raw_config is not None:
@@ -250,15 +252,11 @@ class CheckpointManager:
             json.dump(metadata, f, indent=2)
 
     @staticmethod
-    def load_metadata(
-        checkpoint_dir: str | Path,
-    ) -> dict[str, Any]:
+    def load_metadata(checkpoint_dir: str | Path, ) -> dict[str, Any]:
         """Read ``metadata.json`` from a checkpoint dir."""
         meta_path = Path(checkpoint_dir) / "metadata.json"
         if not meta_path.is_file():
-            raise FileNotFoundError(
-                f"No metadata.json in {checkpoint_dir}"
-            )
+            raise FileNotFoundError(f"No metadata.json in {checkpoint_dir}")
         with open(meta_path, encoding="utf-8") as f:
             return json.load(f)  # type: ignore[no-any-return]
 
@@ -278,11 +276,7 @@ class CheckpointManager:
         }
         if torch.cuda.is_available():
             rng["cuda_rng"] = torch.cuda.get_rng_state()
-        generators = (
-            self.method.get_rng_generators()
-            if hasattr(self.method, "get_rng_generators")
-            else {}
-        )
+        generators = (self.method.get_rng_generators() if hasattr(self.method, "get_rng_generators") else {})
         for name, gen in (generators or {}).items():
             if gen is not None:
                 rng[f"gen_{name}"] = gen.get_state()
@@ -292,7 +286,8 @@ class CheckpointManager:
         )
 
     def load_rng_snapshot(
-        self, checkpoint_path: str,
+        self,
+        checkpoint_path: str,
     ) -> None:
         """Restore per-rank RNG state from the snapshot file.
 
@@ -320,7 +315,8 @@ class CheckpointManager:
             return
 
         rng = torch.load(
-            rng_path, map_location="cpu",
+            rng_path,
+            map_location="cpu",
             weights_only=False,
         )
         if "torch_rng" in rng:
@@ -329,20 +325,16 @@ class CheckpointManager:
             random.setstate(rng["python_rng"])
         if "numpy_rng" in rng:
             np.random.set_state(rng["numpy_rng"])
-        if torch.cuda.is_available():
-            if "cuda_rng" in rng:
-                torch.cuda.set_rng_state(rng["cuda_rng"])
-        generators = (
-            self.method.get_rng_generators()
-            if hasattr(self.method, "get_rng_generators")
-            else {}
-        )
+        if torch.cuda.is_available() and "cuda_rng" in rng:
+            torch.cuda.set_rng_state(rng["cuda_rng"])
+        generators = (self.method.get_rng_generators() if hasattr(self.method, "get_rng_generators") else {})
         for name, gen in (generators or {}).items():
             key = f"gen_{name}"
             if key in rng and gen is not None:
                 gen.set_state(rng[key])
         logger.info(
-            "Restored RNG snapshot from %s", rng_path,
+            "Restored RNG snapshot from %s",
+            rng_path,
         )
 
     def maybe_resume(self, *, resume_from_checkpoint: str | None) -> int | None:

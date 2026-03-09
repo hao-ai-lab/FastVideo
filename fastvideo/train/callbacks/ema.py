@@ -101,14 +101,10 @@ class EMACallback(Callback):
                 "model).",
                 iteration,
             )
-            self.student_ema._init_shadow(
-                method.student.transformer,
-            )
+            self.student_ema._init_shadow(method.student.transformer, )
             self._ema_started = True
 
-        self.student_ema.update(
-            method.student.transformer,
-        )
+        self.student_ema.update(method.student.transformer, )
 
         tracker = getattr(method, "tracker", None)
         if tracker is not None:
@@ -130,13 +126,8 @@ class EMACallback(Callback):
 
         If EMA is not active, yields the transformer unchanged.
         """
-        if (
-            self.student_ema is not None
-            and self._ema_started
-        ):
-            with self.student_ema.apply_to_model(
-                transformer,
-            ):
+        if (self.student_ema is not None and self._ema_started):
+            with self.student_ema.apply_to_model(transformer, ):
                 yield transformer
         else:
             yield transformer
@@ -154,14 +145,10 @@ class EMACallback(Callback):
         }
 
     def load_state_dict(
-        self, state_dict: dict[str, Any],
+        self,
+        state_dict: dict[str, Any],
     ) -> None:
         ema_state = state_dict.get("student_ema")
-        if (
-            ema_state is not None
-            and self.student_ema is not None
-        ):
+        if (ema_state is not None and self.student_ema is not None):
             self.student_ema.load_state_dict(ema_state)
-        self._ema_started = bool(
-            state_dict.get("ema_started", False),
-        )
+        self._ema_started = bool(state_dict.get("ema_started", False), )

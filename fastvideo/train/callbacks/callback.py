@@ -37,6 +37,7 @@ class Callback:
 
     training_config: TrainingConfig
     method: TrainingMethod
+    _callback_dict: CallbackDict | None
 
     def on_train_start(
         self,
@@ -85,7 +86,8 @@ class Callback:
         return {}
 
     def load_state_dict(
-        self, state_dict: dict[str, Any],
+        self,
+        state_dict: dict[str, Any],
     ) -> None:
         pass
 
@@ -109,9 +111,7 @@ class CallbackDict:
             cb_cfg = dict(cb_cfg)
             if "_target_" not in cb_cfg:
                 if name in _BUILTIN_CALLBACKS:
-                    cb_cfg["_target_"] = (
-                        _BUILTIN_CALLBACKS[name]
-                    )
+                    cb_cfg["_target_"] = (_BUILTIN_CALLBACKS[name])
                 else:
                     logger.warning(
                         "Callback %r is missing "
@@ -127,17 +127,16 @@ class CallbackDict:
             )
             cb = instantiate(cb_cfg)
             if not isinstance(cb, Callback):
-                raise TypeError(
-                    f"Callback {name!r} resolved to "
-                    f"{type(cb).__name__}, expected a "
-                    f"Callback subclass."
-                )
+                raise TypeError(f"Callback {name!r} resolved to "
+                                f"{type(cb).__name__}, expected a "
+                                f"Callback subclass.")
             cb.training_config = training_config
             cb._callback_dict = self
             self._callbacks[name] = cb
 
     def __getattr__(
-        self, method_name: str,
+        self,
+        method_name: str,
     ) -> Callable[..., Any]:
         if method_name.startswith("_"):
             raise AttributeError(method_name)
@@ -145,18 +144,13 @@ class CallbackDict:
         if method_name == "state_dict":
 
             def _state_dict() -> dict[str, Any]:
-                return {
-                    n: cb.state_dict()
-                    for n, cb in self._callbacks.items()
-                }
+                return {n: cb.state_dict() for n, cb in self._callbacks.items()}
 
             return _state_dict
 
         if method_name == "load_state_dict":
 
-            def _load_state_dict(
-                state_dict: dict[str, Any],
-            ) -> None:
+            def _load_state_dict(state_dict: dict[str, Any], ) -> None:
                 for n, cb in self._callbacks.items():
                     if n in state_dict:
                         cb.load_state_dict(state_dict[n])

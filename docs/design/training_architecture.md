@@ -160,10 +160,10 @@ teacher's score function, with a critic network providing a learned fake-score
 baseline.
 
 - **Rollout modes:**
-    - `simulate` — Student starts from pure noise and iteratively denoises
-      through the full step schedule.
-    - `data_latent` — Student denoises from a single randomly-noised data
-      sample.
+  - `simulate` — Student starts from pure noise and iteratively denoises
+    through the full step schedule.
+  - `data_latent` — Student denoises from a single randomly-noised data
+    sample.
 - **Losses:** Generator loss (DMD gradient) + critic flow-matching loss, with
   alternating updates (`generator_update_interval`).
 

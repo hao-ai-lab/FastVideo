@@ -11,9 +11,6 @@ from typing import Any
 import yaml
 
 from fastvideo.logger import init_logger
-
-logger = init_logger(__name__)
-
 from fastvideo.train.utils.training_config import (
     CheckpointConfig,
     DataConfig,
@@ -25,6 +22,8 @@ from fastvideo.train.utils.training_config import (
     TrainingLoopConfig,
     VSAConfig,
 )
+
+logger = init_logger(__name__)
 
 
 @dataclass(slots=True)
@@ -49,12 +48,11 @@ class RunConfig:
             if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
                 return {
                     f.name: _safe_asdict(getattr(obj, f.name))
-                    for f in dataclasses.fields(obj)
-                    if not callable(getattr(obj, f.name))
+                    for f in dataclasses.fields(obj) if not callable(getattr(obj, f.name))
                 }
             if isinstance(obj, dict):
                 return {k: _safe_asdict(v) for k, v in obj.items()}
-            if isinstance(obj, (list, tuple)):
+            if isinstance(obj, list | tuple):
                 return type(obj)(_safe_asdict(v) for v in obj)
             return obj
 
@@ -277,8 +275,7 @@ def _parse_pipeline_config(
         kwargs["model_path"] = model_path
 
     if isinstance(pipeline_raw, str):
-        kwargs["pipeline_config"] = _resolve_existing_file(
-            pipeline_raw)
+        kwargs["pipeline_config"] = _resolve_existing_file(pipeline_raw)
 
     return PipelineConfig.from_kwargs(kwargs)
 
@@ -302,8 +299,7 @@ def _build_training_config(
     num_gpus = int(d.get("num_gpus", 1) or 1)
 
     betas_raw = o.get("betas", "0.9,0.999")
-    betas = parse_betas(betas_raw,
-                        where="training.optimizer.betas")
+    betas = parse_betas(betas_raw, where="training.optimizer.betas")
 
     model_path = str(t.get("model_path", "") or "")
     if not model_path:
@@ -317,117 +313,68 @@ def _build_training_config(
         distributed=DistributedConfig(
             num_gpus=num_gpus,
             tp_size=int(d.get("tp_size", 1) or 1),
-            sp_size=int(
-                d.get("sp_size", num_gpus) or num_gpus),
-            hsdp_replicate_dim=int(
-                d.get("hsdp_replicate_dim", 1) or 1),
-            hsdp_shard_dim=int(
-                d.get("hsdp_shard_dim", num_gpus)
-                or num_gpus),
-            pin_cpu_memory=bool(
-                d.get("pin_cpu_memory", False)),
+            sp_size=int(d.get("sp_size", num_gpus) or num_gpus),
+            hsdp_replicate_dim=int(d.get("hsdp_replicate_dim", 1) or 1),
+            hsdp_shard_dim=int(d.get("hsdp_shard_dim", num_gpus) or num_gpus),
+            pin_cpu_memory=bool(d.get("pin_cpu_memory", False)),
         ),
         data=DataConfig(
             data_path=str(da.get("data_path", "") or ""),
-            train_batch_size=int(
-                da.get("train_batch_size", 1) or 1),
-            dataloader_num_workers=int(
-                da.get("dataloader_num_workers", 0) or 0),
-            training_cfg_rate=float(
-                da.get("training_cfg_rate", 0.0) or 0.0),
+            train_batch_size=int(da.get("train_batch_size", 1) or 1),
+            dataloader_num_workers=int(da.get("dataloader_num_workers", 0) or 0),
+            training_cfg_rate=float(da.get("training_cfg_rate", 0.0) or 0.0),
             seed=int(da.get("seed", 0) or 0),
-            num_height=int(
-                da.get("num_height", 0) or 0),
+            num_height=int(da.get("num_height", 0) or 0),
             num_width=int(da.get("num_width", 0) or 0),
-            num_latent_t=int(
-                da.get("num_latent_t", 0) or 0),
-            num_frames=int(
-                da.get("num_frames", 0) or 0),
+            num_latent_t=int(da.get("num_latent_t", 0) or 0),
+            num_frames=int(da.get("num_frames", 0) or 0),
         ),
         optimizer=OptimizerConfig(
-            learning_rate=float(
-                o.get("learning_rate", 0.0) or 0.0),
+            learning_rate=float(o.get("learning_rate", 0.0) or 0.0),
             betas=betas,
-            weight_decay=float(
-                o.get("weight_decay", 0.0) or 0.0),
-            lr_scheduler=str(
-                o.get("lr_scheduler", "constant")
-                or "constant"),
-            lr_warmup_steps=int(
-                o.get("lr_warmup_steps", 0) or 0),
-            lr_num_cycles=int(
-                o.get("lr_num_cycles", 0) or 0),
-            lr_power=float(
-                o.get("lr_power", 0.0) or 0.0),
-            min_lr_ratio=float(
-                o.get("min_lr_ratio", 0.5) or 0.5),
+            weight_decay=float(o.get("weight_decay", 0.0) or 0.0),
+            lr_scheduler=str(o.get("lr_scheduler", "constant") or "constant"),
+            lr_warmup_steps=int(o.get("lr_warmup_steps", 0) or 0),
+            lr_num_cycles=int(o.get("lr_num_cycles", 0) or 0),
+            lr_power=float(o.get("lr_power", 0.0) or 0.0),
+            min_lr_ratio=float(o.get("min_lr_ratio", 0.5) or 0.5),
         ),
         loop=TrainingLoopConfig(
-            max_train_steps=int(
-                lo.get("max_train_steps", 0) or 0),
-            gradient_accumulation_steps=int(
-                lo.get("gradient_accumulation_steps", 1)
-                or 1),
+            max_train_steps=int(lo.get("max_train_steps", 0) or 0),
+            gradient_accumulation_steps=int(lo.get("gradient_accumulation_steps", 1) or 1),
         ),
         checkpoint=CheckpointConfig(
-            output_dir=str(
-                ck.get("output_dir", "") or ""),
-            resume_from_checkpoint=str(
-                ck.get("resume_from_checkpoint", "")
-                or ""),
-            training_state_checkpointing_steps=int(
-                ck.get(
-                    "training_state_checkpointing_steps",
-                    0) or 0),
-            checkpoints_total_limit=int(
-                ck.get("checkpoints_total_limit", 0)
-                or 0),
+            output_dir=str(ck.get("output_dir", "") or ""),
+            resume_from_checkpoint=str(ck.get("resume_from_checkpoint", "") or ""),
+            training_state_checkpointing_steps=int(ck.get("training_state_checkpointing_steps", 0) or 0),
+            checkpoints_total_limit=int(ck.get("checkpoints_total_limit", 0) or 0),
         ),
         tracker=TrackerConfig(
-            trackers=list(
-                tr.get("trackers", []) or []),
-            project_name=str(
-                tr.get("project_name", "fastvideo")
-                or "fastvideo"),
+            trackers=list(tr.get("trackers", []) or []),
+            project_name=str(tr.get("project_name", "fastvideo") or "fastvideo"),
             run_name=str(tr.get("run_name", "") or ""),
         ),
         vsa=VSAConfig(
-            sparsity=float(
-                vs.get("sparsity", 0.0) or 0.0),
-            decay_rate=float(
-                vs.get("decay_rate", 0.0) or 0.0),
-            decay_interval_steps=int(
-                vs.get("decay_interval_steps", 0) or 0),
+            sparsity=float(vs.get("sparsity", 0.0) or 0.0),
+            decay_rate=float(vs.get("decay_rate", 0.0) or 0.0),
+            decay_interval_steps=int(vs.get("decay_interval_steps", 0) or 0),
         ),
         model=ModelTrainingConfig(
-            weighting_scheme=str(
-                m.get("weighting_scheme", "uniform")
-                or "uniform"),
-            logit_mean=float(
-                m.get("logit_mean", 0.0) or 0.0),
-            logit_std=float(
-                m.get("logit_std", 1.0) or 1.0),
-            mode_scale=float(
-                m.get("mode_scale", 1.0) or 1.0),
-            precondition_outputs=bool(
-                m.get("precondition_outputs", False)),
-            moba_config=dict(
-                m.get("moba_config", {}) or {}),
-            enable_gradient_checkpointing_type=(
-                m.get(
-                    "enable_gradient_checkpointing_type"
-                )),
+            weighting_scheme=str(m.get("weighting_scheme", "uniform") or "uniform"),
+            logit_mean=float(m.get("logit_mean", 0.0) or 0.0),
+            logit_std=float(m.get("logit_std", 1.0) or 1.0),
+            mode_scale=float(m.get("mode_scale", 1.0) or 1.0),
+            precondition_outputs=bool(m.get("precondition_outputs", False)),
+            moba_config=dict(m.get("moba_config", {}) or {}),
+            enable_gradient_checkpointing_type=(m.get("enable_gradient_checkpointing_type")),
         ),
         pipeline_config=pipeline_config,
         model_path=model_path,
-        dit_precision=str(
-            t.get("dit_precision", "fp32") or "fp32"),
+        dit_precision=str(t.get("dit_precision", "fp32") or "fp32"),
     )
 
 
-def _parse_cli_overrides(
-    overrides: list[str],
-) -> dict[str, Any]:
+def _parse_cli_overrides(overrides: list[str], ) -> dict[str, Any]:
     """Parse ``--dotted.key value`` CLI overrides.
 
     Returns a flat dict mapping dotted keys to parsed
@@ -440,18 +387,14 @@ def _parse_cli_overrides(
     while i < len(overrides):
         arg = overrides[i]
         if not arg.startswith("--"):
-            raise ValueError(
-                f"Expected --dotted.key, got {arg!r}"
-            )
+            raise ValueError(f"Expected --dotted.key, got {arg!r}")
         key = arg[2:]  # strip leading --
         if "=" in key:
             key, raw_val = key.split("=", 1)
         else:
             i += 1
             if i >= len(overrides):
-                raise ValueError(
-                    f"Missing value for override {arg!r}"
-                )
+                raise ValueError(f"Missing value for override {arg!r}")
             raw_val = overrides[i]
         result[key] = _cast_value(raw_val)
         i += 1
@@ -528,26 +471,20 @@ def load_run_config(
         logger.info("Applied CLI overrides: %s", parsed)
 
     # --- models ---
-    models_raw = _require_mapping(
-        cfg.get("models"), where="models")
+    models_raw = _require_mapping(cfg.get("models"), where="models")
     models: dict[str, dict[str, Any]] = {}
     for role, model_cfg_raw in models_raw.items():
-        role_str = _require_str(
-            role, where="models.<role>")
-        model_cfg = _require_mapping(
-            model_cfg_raw, where=f"models.{role_str}")
+        role_str = _require_str(role, where="models.<role>")
+        model_cfg = _require_mapping(model_cfg_raw, where=f"models.{role_str}")
         if "_target_" not in model_cfg:
-            raise ValueError(
-                f"models.{role_str} must have a "
-                "'_target_' key")
+            raise ValueError(f"models.{role_str} must have a "
+                             "'_target_' key")
         models[role_str] = dict(model_cfg)
 
     # --- method ---
-    method_raw = _require_mapping(
-        cfg.get("method"), where="method")
+    method_raw = _require_mapping(cfg.get("method"), where="method")
     if "_target_" not in method_raw:
-        raise ValueError(
-            "method must have a '_target_' key")
+        raise ValueError("method must have a '_target_' key")
     method = dict(method_raw)
 
     # --- callbacks ---
@@ -555,20 +492,15 @@ def load_run_config(
     if callbacks_raw is None:
         callbacks: dict[str, dict[str, Any]] = {}
     else:
-        callbacks = _require_mapping(
-            callbacks_raw, where="callbacks")
+        callbacks = _require_mapping(callbacks_raw, where="callbacks")
 
     # --- pipeline config ---
-    pipeline_config = _parse_pipeline_config(
-        cfg, models=models)
+    pipeline_config = _parse_pipeline_config(cfg, models=models)
 
     # --- training config ---
-    training_raw = _require_mapping(
-        cfg.get("training"), where="training")
+    training_raw = _require_mapping(cfg.get("training"), where="training")
     t = dict(training_raw)
-    training = _build_training_config(
-        t, models=models,
-        pipeline_config=pipeline_config)
+    training = _build_training_config(t, models=models, pipeline_config=pipeline_config)
 
     return RunConfig(
         models=models,

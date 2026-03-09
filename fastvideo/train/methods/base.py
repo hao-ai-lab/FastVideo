@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeAlias, cast
 
 import torch
 
@@ -14,13 +14,12 @@ from fastvideo.train.utils.checkpoint import _RoleModuleContainer
 from fastvideo.training.checkpointing_utils import (
     ModelWrapper,
     OptimizerWrapper,
-    RandomStateWrapper,
     SchedulerWrapper,
 )
 
 logger = init_logger(__name__)
 
-LogScalar = float | int | torch.Tensor
+LogScalar: TypeAlias = float | int | torch.Tensor
 
 
 class TrainingMethod(torch.nn.Module, ABC):
@@ -56,9 +55,7 @@ class TrainingMethod(torch.nn.Module, ABC):
         self.student = role_models["student"]
         self.training_config = cfg.training
         self.method_config: dict[str, Any] = dict(cfg.method)
-        self.validation_config: dict[str, Any] = dict(
-            getattr(cfg, "validation", {}) or {}
-        )
+        self.validation_config: dict[str, Any] = dict(getattr(cfg, "validation", {}) or {})
 
         # Build nn.ModuleDict for FSDP / checkpoint visibility.
         self.role_modules = torch.nn.ModuleDict()
@@ -91,13 +88,15 @@ class TrainingMethod(torch.nn.Module, ABC):
 
     @abstractmethod
     def get_optimizers(
-        self, iteration: int,
+        self,
+        iteration: int,
     ) -> Sequence[torch.optim.Optimizer]:
         raise NotImplementedError
 
     @abstractmethod
     def get_lr_schedulers(
-        self, iteration: int,
+        self,
+        iteration: int,
     ) -> Sequence[Any]:
         raise NotImplementedError
 
@@ -134,31 +133,15 @@ class TrainingMethod(torch.nn.Module, ABC):
             container = _RoleModuleContainer(modules)
 
             for module_name, module in modules.items():
-                states[
-                    f"roles.{role}.{module_name}"
-                ] = ModelWrapper(module)
+                states[f"roles.{role}.{module_name}"] = ModelWrapper(module)
 
             opt = self._optimizer_dict.get(role)
             if opt is not None:
-                states[
-                    f"optimizers.{role}"
-                ] = OptimizerWrapper(container, opt)
+                states[f"optimizers.{role}"] = OptimizerWrapper(container, opt)
 
             sched = self._lr_scheduler_dict.get(role)
             if sched is not None:
-                states[
-                    f"schedulers.{role}"
-                ] = SchedulerWrapper(sched)
-
-        # RNG states.
-        states["random_state"] = RandomStateWrapper(None)
-        for name, gen in (
-            self.get_rng_generators() or {}
-        ).items():
-            if gen is not None:
-                states[
-                    f"random_state.{name}"
-                ] = RandomStateWrapper(gen)
+                states[f"schedulers.{role}"] = SchedulerWrapper(sched)
 
         return states
 
@@ -174,7 +157,8 @@ class TrainingMethod(torch.nn.Module, ABC):
         (loss_map["total_loss"] / grad_accum_rounds).backward()
 
     def optimizers_schedulers_step(
-        self, iteration: int,
+        self,
+        iteration: int,
     ) -> None:
         for optimizer in self.get_optimizers(iteration):
             optimizer.step()
@@ -182,7 +166,8 @@ class TrainingMethod(torch.nn.Module, ABC):
             scheduler.step()
 
     def optimizers_zero_grad(
-        self, iteration: int,
+        self,
+        iteration: int,
     ) -> None:
         for optimizer in self.get_optimizers(iteration):
             try:
@@ -214,7 +199,8 @@ class TrainingMethod(torch.nn.Module, ABC):
     # -- Shared hooks (override in subclasses as needed) --
 
     def get_grad_clip_targets(
-        self, iteration: int,
+        self,
+        iteration: int,
     ) -> dict[str, torch.nn.Module]:
         """Return modules whose gradients should be clipped.
 
@@ -226,59 +212,42 @@ class TrainingMethod(torch.nn.Module, ABC):
 
     def on_train_start(self) -> None:
         from fastvideo.distributed import (
-            get_sp_group,
-            get_world_group,
-        )
+            get_world_group, )
         from fastvideo.utils import set_random_seed
 
         seed = self.training_config.data.seed
         if seed is None:
-            raise ValueError(
-                "training.data.seed must be set"
-            )
+            raise ValueError("training.data.seed must be set")
         seed = int(seed)
 
         world_group = get_world_group()
         global_rank = int(world_group.rank)
-        sp_size = int(
-            self.training_config.distributed.sp_size
-            or 1
-        )
+        sp_size = int(self.training_config.distributed.sp_size or 1)
 
         # Ranks within the same SP group share a seed.
         if sp_size > 1:
-            sp_group_seed = seed + (
-                global_rank // sp_size
-            )
+            sp_group_seed = seed + (global_rank // sp_size)
         else:
             sp_group_seed = seed + global_rank
 
-        set_random_seed(seed)  
+        set_random_seed(seed)
 
-        self.cuda_generator = torch.Generator(
-            device=self.student.device
-        ).manual_seed(sp_group_seed)
+        self.cuda_generator = torch.Generator(device=self.student.device).manual_seed(sp_group_seed)
 
         self.student.on_train_start()
 
-    def get_rng_generators(
-        self,
-    ) -> dict[str, torch.Generator]:
+    def get_rng_generators(self, ) -> dict[str, torch.Generator]:
         generators: dict[str, torch.Generator] = {}
         if self.cuda_generator is not None:
             generators["cuda"] = self.cuda_generator
         return generators
 
     @staticmethod
-    def _parse_attn_kind(
-        raw: Any,
-    ) -> Literal["dense", "vsa"]:
+    def _parse_attn_kind(raw: Any, ) -> Literal["dense", "vsa"]:
         if raw in (None, ""):
             return "dense"
         kind = str(raw).strip().lower()
         if kind not in {"dense", "vsa"}:
-            raise ValueError(
-                "method_config.attn_kind must be one of "
-                f"{{'dense', 'vsa'}}, got {raw!r}."
-            )
+            raise ValueError("method_config.attn_kind must be one of "
+                             f"{{'dense', 'vsa'}}, got {raw!r}.")
         return cast(Literal["dense", "vsa"], kind)

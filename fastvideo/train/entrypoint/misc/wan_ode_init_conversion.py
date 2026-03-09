@@ -25,8 +25,8 @@ import shutil
 
 import torch
 
-
 # -- Key conversion -----------------------------------------------
+
 
 def _convert_key(key: str) -> str:
     """Map a single original-Wan key to diffusers key."""
@@ -35,9 +35,7 @@ def _convert_key(key: str) -> str:
         k = k[len("model."):]
 
     # Top-level modules
-    k = k.replace(
-        "head.modulation", "scale_shift_table"
-    )
+    k = k.replace("head.modulation", "scale_shift_table")
     k = k.replace("head.head.", "proj_out.")
     k = k.replace(
         "time_embedding.0.",
@@ -84,19 +82,16 @@ def _convert_key(key: str) -> str:
     return k
 
 
-def convert_state_dict(
-    orig_sd: dict[str, torch.Tensor],
-) -> dict[str, torch.Tensor]:
+def convert_state_dict(orig_sd: dict[str, torch.Tensor], ) -> dict[str, torch.Tensor]:
     """Convert an entire original-Wan state dict."""
     return {_convert_key(k): v for k, v in orig_sd.items()}
 
 
 # -- Main ---------------------------------------------------------
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Convert ode_init.pt to diffusers format",
-    )
+    parser = argparse.ArgumentParser(description="Convert ode_init.pt to diffusers format", )
     parser.add_argument(
         "--input",
         required=True,
@@ -122,21 +117,15 @@ def main() -> None:
 
     # 1. Load checkpoint
     print(f"Loading {args.input} ...")
-    ckpt = torch.load(
-        args.input, map_location="cpu", weights_only=False
-    )
+    ckpt = torch.load(args.input, map_location="cpu", weights_only=False)
     if "generator" in ckpt:
         orig_sd = ckpt["generator"]
-    elif isinstance(ckpt, dict) and any(
-        k.startswith("model.") for k in ckpt
-    ):
+    elif isinstance(ckpt, dict) and any(k.startswith("model.") for k in ckpt):
         orig_sd = ckpt
     else:
-        raise ValueError(
-            "Cannot find weights in checkpoint. "
-            "Expected key 'generator' or keys starting "
-            "with 'model.'."
-        )
+        raise ValueError("Cannot find weights in checkpoint. "
+                         "Expected key 'generator' or keys starting "
+                         "with 'model.'.")
     print(f"  Found {len(orig_sd)} weight tensors")
 
     # 2. Convert keys
@@ -147,10 +136,8 @@ def main() -> None:
     if not args.skip_verify:
         from diffusers import WanTransformer3DModel
 
-        print(
-            f"Loading reference model from "
-            f"{args.base_model} for verification ..."
-        )
+        print(f"Loading reference model from "
+              f"{args.base_model} for verification ...")
         ref_model = WanTransformer3DModel.from_pretrained(
             args.base_model,
             subfolder="transformer",
@@ -173,10 +160,8 @@ def main() -> None:
             if len(extra) > 10:
                 print(f"    ... and {len(extra) - 10} more")
         if missing or extra:
-            raise RuntimeError(
-                "Key mismatch — conversion mapping needs "
-                "updating. Use --skip-verify to bypass."
-            )
+            raise RuntimeError("Key mismatch — conversion mapping needs "
+                               "updating. Use --skip-verify to bypass.")
 
         ref_model.load_state_dict(new_sd, strict=True)
         print("  Strict load OK — all keys match!")
@@ -196,13 +181,9 @@ def main() -> None:
         from safetensors.torch import save_file
 
         os.makedirs(transformer_dir, exist_ok=True)
-        print(
-            f"Saving transformer weights to "
-            f"{transformer_dir} ..."
-        )
-        save_file(new_sd, os.path.join(
-            transformer_dir, "model.safetensors"
-        ))
+        print(f"Saving transformer weights to "
+              f"{transformer_dir} ...")
+        save_file(new_sd, os.path.join(transformer_dir, "model.safetensors"))
 
     # 5. Copy non-transformer files from base model
     from huggingface_hub import snapshot_download

@@ -38,6 +38,7 @@ pytest fastvideo/tests/ssim/ -vs --video-path <generated> --reference-path <refe
 ```
 
 Or use the SSIM utility directly:
+
 ```python
 from fastvideo.tests.ssim.ssim_utils import compute_ssim
 score = compute_ssim(generated_video, reference_video)
