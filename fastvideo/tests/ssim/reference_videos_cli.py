@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import getpass
 import os
 import shutil
 import sys
@@ -148,23 +147,13 @@ def _has_local_reference_videos(base_dir: Path, quality_tier: str) -> bool:
     return False
 
 
-def _get_hf_token(*, prompt_if_missing: bool) -> str | None:
+def _get_hf_token() -> str | None:
     for key in HF_TOKEN_ENV_KEYS:
         value = os.environ.get(key, "").strip()
         if value:
             return value
 
-    if not prompt_if_missing:
-        return None
-
-    token = getpass.getpass(
-        "Hugging Face API key not found in env "
-        "(HF_API_KEY / HUGGINGFACE_HUB_TOKEN / HF_TOKEN).\n"
-        "Enter token: "
-    ).strip()
-    if not token:
-        raise RuntimeError("No Hugging Face API key provided.")
-    return token
+    return None
 
 
 def _load_hf_sdk():
@@ -385,7 +374,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "  # Download both default and full-quality references from HF\n"
             "  python fastvideo/tests/ssim/reference_videos_cli.py download \\\n"
             "    --repo-id FastVideo/ssim-reference-videos\n\n"
-            "  # Upload both tiers and all GPU folders (prompts for token if unset)\n"
+            "  # Upload both tiers and all GPU folders (fails if token is unset)\n"
             "  python fastvideo/tests/ssim/reference_videos_cli.py upload \\\n"
             "    --repo-id FastVideo/ssim-reference-videos"
         ),
@@ -622,8 +611,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "upload":
-        token = _get_hf_token(prompt_if_missing=True)
-        assert token is not None
+        token = _get_hf_token()
+        if token is None:
+            raise RuntimeError(
+                "Hugging Face API key is required for upload. Set "
+                "HF_API_KEY, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN."
+            )
 
         reference_dirs_by_tier = _resolve_upload_reference_dirs(
             base_dir=args.base_dir.resolve(),

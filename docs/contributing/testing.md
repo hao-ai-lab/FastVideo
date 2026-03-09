@@ -136,8 +136,8 @@ python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests \
 ```
 
 If HF token env vars are not set (`HF_API_KEY` / `HUGGINGFACE_HUB_TOKEN` /
-`HF_TOKEN`), the local entrypoint prompts for a token. To export raw
-`generated_videos` from Modal to the shared volume:
+`HF_TOKEN`), the local entrypoint fails fast. To export raw `generated_videos`
+from Modal to the shared volume:
 
 ```bash
 python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests \
