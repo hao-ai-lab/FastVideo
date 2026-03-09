@@ -355,6 +355,14 @@ class ValidationCallback(Callback):
             model_path=tc.model_path,
         )
 
+        # Propagate sampling_timesteps to pipeline_config so
+        # causal/DMD denoising stages can read them.
+        if (self.sampling_timesteps is not None
+                and inference_args.pipeline_config
+                .dmd_denoising_steps is None):
+            inference_args.pipeline_config.dmd_denoising_steps = (
+                [int(s) for s in self.sampling_timesteps])
+
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             latents=None,

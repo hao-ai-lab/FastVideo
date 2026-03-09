@@ -29,8 +29,6 @@ method:
   real_score_guidance_scale: 4.5
   dmd_denoising_steps: [1000, 750, 500, 250]
 
-  # Self-forcing specific
-  # ode_init_path: /path/to/ode_init_safetensors  # optional: override student weights from safetensors
   chunk_size: 3
   student_sample_type: sde
   context_noise: 0.0
@@ -93,6 +91,7 @@ callbacks:
     every_steps: 50
     sampling_steps: [4]
     sampling_timesteps: [1000, 750, 500, 250]
+    num_frames: 69
     guidance_scale: 6.0
 
 pipeline:
