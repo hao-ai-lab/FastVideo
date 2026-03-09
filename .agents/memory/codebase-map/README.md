@@ -1,6 +1,6 @@
 # FastVideo-WorldModel — Codebase Map
 
-High-level structural index for agent orientation. Updated 2026-03-02.
+High-level structural index for agent orientation. Updated 2026-03-08.
 
 ## Repository Layout
 
@@ -22,7 +22,18 @@ FastVideo-WorldModel/
 │   ├── pipelines/             # End-to-end pipelines
 │   │   ├── basic/             #   Per-model pipelines (wan/, ltx2/, ...)
 │   │   └── stages/            #   Reusable pipeline stages
-│   ├── training/              # Training infrastructure
+│   ├── train/                 # Refactored training framework (YAML-driven, preferred)
+│   │   ├── trainer.py         #   Main training loop coordinator
+│   │   ├── entrypoint/        #   Training entrypoint (train.py) + checkpoint conversion
+│   │   ├── methods/           #   Training algorithms (FineTune, DFSFT, DMD2, SelfForcing)
+│   │   │   ├── base.py        #     TrainingMethod ABC
+│   │   │   ├── fine_tuning/   #     FineTuneMethod, DiffusionForcingSFTMethod
+│   │   │   └── distribution_matching/  # DMD2Method, SelfForcingMethod
+│   │   ├── models/            #   Per-role model wrappers (ModelBase, CausalModelBase)
+│   │   │   └── wan/           #     WanModel, WanCausalModel
+│   │   ├── callbacks/         #   Composable hooks (grad_clip, ema, validation)
+│   │   └── utils/             #   Config, builder, checkpoint, optimizer, tracking
+│   ├── training/              # Legacy training infrastructure (being phased out)
 │   │   ├── trackers.py        #   W&B tracker (BaseTracker → WandbTracker)
 │   │   ├── training_utils.py  #   Checkpointing, grad clipping, state dicts
 │   │   ├── training_pipeline.py        # Base training pipeline
@@ -64,6 +75,17 @@ FastVideo-WorldModel/
 ```
 
 ## Key Training Entrypoints
+
+### New framework (`fastvideo/train/`) — preferred
+
+| Method | Config Example | Launch Pattern |
+|--------|---------------|----------------|
+| FineTune (Wan) | `examples/train/finetune_wan2.1_t2v_1.3B_vsa_*.yaml` | `torchrun -m fastvideo.train.entrypoint.train --config <yaml>` |
+| DFSFT (Wan causal) | `examples/train/dfsft_wan_causal_t2v_1.3B.yaml` | `torchrun -m fastvideo.train.entrypoint.train --config <yaml>` |
+| DMD2 distillation | `examples/train/distill_wan2.1_t2v_1.3B_dmd2.yaml` | `torchrun -m fastvideo.train.entrypoint.train --config <yaml>` |
+| Self-Forcing | `examples/train/self_forcing_wan_causal_t2v_1.3B.yaml` | `torchrun -m fastvideo.train.entrypoint.train --config <yaml>` |
+
+### Legacy pipelines (`fastvideo/training/`) — being phased out
 
 | Pipeline | Entrypoint | Launch Pattern |
 |----------|-----------|----------------|
