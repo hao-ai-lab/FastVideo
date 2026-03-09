@@ -43,7 +43,7 @@ TOTAL_GPUS=$(( NUM_NODES * NUM_GPUS ))
 
 CONFIG_NAME="$(basename "${CONFIG}" .yaml)"
 JOB_NAME="${JOB_NAME:-${CONFIG_NAME}}"
-OUTPUT_DIR="${OUTPUT_DIR:-slurm_logs}"
+OUTPUT_DIR="${OUTPUT_DIR:-logs/slurm}"
 mkdir -p "${OUTPUT_DIR}"
 
 # ── Build sbatch args ─────────────────────────────────────────────
