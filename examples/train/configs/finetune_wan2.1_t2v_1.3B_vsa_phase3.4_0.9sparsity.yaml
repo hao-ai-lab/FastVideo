@@ -24,7 +24,7 @@ training:
     data_path: data/Wan-Syn_77x448x832_600k
     dataloader_num_workers: 4
     train_batch_size: 1
-    training_cfg_rate: 0.1
+    training_cfg_rate: 0.0
     seed: 1000
     num_latent_t: 20
     num_height: 448
@@ -40,7 +40,7 @@ training:
 
   loop:
     max_train_steps: 4000
-    gradient_accumulation_steps: 1
+    gradient_accumulation_steps: 2
 
   checkpoint:
     output_dir: outputs/phase3.4_wan2.1_finetune_vsa_0.9_v3
@@ -62,9 +62,6 @@ callbacks:
   grad_clip:
     _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
     max_grad_norm: 1.0
-  ema:
-    _target_: fastvideo.train.callbacks.ema.EMACallback
-    decay: 0.9999
   validation:
     _target_: fastvideo.train.callbacks.validation.ValidationCallback
     pipeline_target: fastvideo.pipelines.basic.wan.wan_pipeline.WanPipeline
