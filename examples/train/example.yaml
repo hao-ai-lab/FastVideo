@@ -179,7 +179,6 @@ callbacks:
     num_frames: null                  # default: null (derived from training.data)
     output_dir: null                  # default: null (falls back to training.checkpoint.output_dir)
     sampling_timesteps: null          # default: null (explicit timestep list for streaming)
-    rollout_mode: parallel            # default: "parallel" ("parallel" or "streaming")
 
 # ------------------------------------------------------------------------------
 # pipeline: [RESOLVED] -> PipelineConfig

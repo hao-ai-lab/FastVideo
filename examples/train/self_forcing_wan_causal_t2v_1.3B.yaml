@@ -92,7 +92,6 @@ callbacks:
     every_steps: 50
     sampling_steps: [4]
     sampling_timesteps: [1000, 750, 500, 250]
-    rollout_mode: streaming
     guidance_scale: 6.0
 
 pipeline:

@@ -64,7 +64,6 @@ callbacks:
     dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
     every_steps: 50
     sampling_steps: [40]
-    rollout_mode: streaming
     guidance_scale: 6.0
     num_frames: 69
 

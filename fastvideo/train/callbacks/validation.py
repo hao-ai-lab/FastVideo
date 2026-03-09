@@ -70,7 +70,6 @@ class ValidationCallback(Callback):
         num_frames: int | None = None,
         output_dir: str | None = None,
         sampling_timesteps: list[int] | None = None,
-        rollout_mode: str = "parallel",
         **pipeline_kwargs: Any,
     ) -> None:
         self.pipeline_target = str(pipeline_target)
@@ -99,7 +98,6 @@ class ValidationCallback(Callback):
             if sampling_timesteps is not None
             else None
         )
-        self.rollout_mode = str(rollout_mode)
         self.pipeline_kwargs = dict(pipeline_kwargs)
 
         # Set after on_train_start.
@@ -364,7 +362,6 @@ class ValidationCallback(Callback):
     ) -> Any:
         key = (
             id(transformer),
-            self.rollout_mode,
         )
         if (
             self._pipeline is not None
