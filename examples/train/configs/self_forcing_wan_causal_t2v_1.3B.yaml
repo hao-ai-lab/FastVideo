@@ -8,7 +8,7 @@
 models:
   student:
     _target_: fastvideo.train.models.wan.WanCausalModel
-    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    init_from: wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers
     trainable: true
     transformer_override_safetensor: /mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors
   teacher:
