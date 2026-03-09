@@ -236,12 +236,6 @@ class TrainingMethod(torch.nn.Module, ABC):
 
         self.student.on_train_start()
 
-    def get_rng_generators(self, ) -> dict[str, torch.Generator]:
-        generators: dict[str, torch.Generator] = {}
-        if self.cuda_generator is not None:
-            generators["cuda"] = self.cuda_generator
-        return generators
-
     @staticmethod
     def _parse_attn_kind(raw: Any, ) -> Literal["dense", "vsa"]:
         if raw in (None, ""):

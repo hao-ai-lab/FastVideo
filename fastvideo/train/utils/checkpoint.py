@@ -275,12 +275,8 @@ class CheckpointManager:
             "python_rng": random.getstate(),
             "numpy_rng": np.random.get_state(),
         }
-        if torch.cuda.is_available():
-            rng["cuda_rng"] = torch.cuda.get_rng_state()
-        generators = (self.method.get_rng_generators() if hasattr(self.method, "get_rng_generators") else {})
-        for name, gen in (generators or {}).items():
-            if gen is not None:
-                rng[f"gen_{name}"] = gen.get_state()
+        rng["cuda_rng"] = torch.cuda.get_rng_state()
+        rng["gen_cuda"] = self.method.cuda_generator.get_state()
         torch.save(
             rng,
             checkpoint_dir / f"rng_state_rank{rank}.pt",
@@ -326,13 +322,9 @@ class CheckpointManager:
             random.setstate(rng["python_rng"])
         if "numpy_rng" in rng:
             np.random.set_state(rng["numpy_rng"])
-        if torch.cuda.is_available() and "cuda_rng" in rng:
-            torch.cuda.set_rng_state(rng["cuda_rng"])
-        generators = (self.method.get_rng_generators() if hasattr(self.method, "get_rng_generators") else {})
-        for name, gen in (generators or {}).items():
-            key = f"gen_{name}"
-            if key in rng and gen is not None:
-                gen.set_state(rng[key])
+
+        torch.cuda.set_rng_state(rng["cuda_rng"])
+        self.method.cuda_generator.set_state(rng["gen_cuda"])
         logger.info(
             "Restored RNG snapshot from %s",
             rng_path,
