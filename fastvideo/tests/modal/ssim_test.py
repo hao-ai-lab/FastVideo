@@ -1,7 +1,6 @@
 import ast
 import datetime
 import glob
-import getpass
 import os
 import re
 import shutil
@@ -173,8 +172,6 @@ def _resolve_pull_request(pr_number: str) -> str:
 
 def _resolve_hf_api_key(
     hf_api_key: str,
-    *,
-    prompt_if_missing: bool,
 ) -> str:
     if hf_api_key.strip():
         return hf_api_key.strip()
@@ -183,13 +180,6 @@ def _resolve_hf_api_key(
         value = os.environ.get(key, "").strip()
         if value:
             return value
-
-    if prompt_if_missing and sys.stdin.isatty():
-        prompted = getpass.getpass(
-            "HF token not found in HF_API_KEY/HUGGINGFACE_HUB_TOKEN/HF_TOKEN.\nEnter Hugging Face token: "
-        ).strip()
-        if prompted:
-            return prompted
 
     raise RuntimeError(
         "Hugging Face token is required. Set HF_API_KEY, HUGGINGFACE_HUB_TOKEN, or HF_TOKEN; or pass --hf-api-key."
@@ -848,17 +838,13 @@ def run_ssim_tests(
     reference_repo: str = "",
     skip_reference_download: bool = False,
     pytest_k: str = "",
-    no_prompt: bool = False,
     sync_generated_to_volume: bool = False,
     generated_volume_subdir: str = "",
 ):
     resolved_git_repo = _resolve_git_repo(git_repo)
     resolved_git_commit = _resolve_git_commit(git_commit)
     resolved_pr_number = _resolve_pull_request(pr_number)
-    resolved_hf_api_key = _resolve_hf_api_key(
-        hf_api_key,
-        prompt_if_missing=not no_prompt,
-    )
+    resolved_hf_api_key = _resolve_hf_api_key(hf_api_key)
 
     print(f"Running SSIM on repo: {resolved_git_repo}")
     print(f"Using commit: {resolved_git_commit}")

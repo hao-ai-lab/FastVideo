@@ -28,7 +28,7 @@ Use the CLI:
 - `python fastvideo/tests/ssim/reference_videos_cli.py upload --quality-tier full_quality --device-folder H200_reference_videos`
 
 For `upload`, the tool reads HF token from `HF_API_KEY` /
-`HUGGINGFACE_HUB_TOKEN` / `HF_TOKEN`, and prompts securely if none are set.
+`HUGGINGFACE_HUB_TOKEN` / `HF_TOKEN` and fails fast if none are set.
 
 run `pytest fastvideo/tests/ssim/ -vs --ssim-full-quality` to use the
 `*_FULL_QUALITY_PARAMS` configs (default run keeps the original shortened test
