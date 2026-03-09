@@ -87,7 +87,8 @@ def _resolve_resume_checkpoint(resume_from_checkpoint: str, *, output_dir: str) 
             logger.info(
                 "resume_from_checkpoint='latest' but no "
                 "checkpoints found under %s; starting from "
-                "scratch.", out,
+                "scratch.",
+                out,
             )
         return latest
 
