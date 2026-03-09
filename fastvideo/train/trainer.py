@@ -103,22 +103,34 @@ class Trainer:
 
         method.set_tracker(self.tracker)
         method.on_train_start()
-
-        resume_from_checkpoint = (tc.checkpoint.resume_from_checkpoint or "")
-        if checkpoint_manager is not None:
-            resumed_step = (checkpoint_manager.maybe_resume(resume_from_checkpoint=(resume_from_checkpoint)))
-            if resumed_step is not None:
-                start_step = int(resumed_step)
-
         self.callbacks.on_train_start(
             method, iteration=start_step,
         )
+
+        resume_from_checkpoint = (tc.checkpoint.resume_from_checkpoint or "")
+        if checkpoint_manager is not None:
+            if resume_from_checkpoint:
+                method.seed_optimizer_state_for_resume()
+            resumed_step = (checkpoint_manager.maybe_resume(resume_from_checkpoint=(resume_from_checkpoint)))
+            if resumed_step is not None:
+                start_step = int(resumed_step)
         self.callbacks.on_validation_begin(
             method, iteration=start_step,
         )
         method.optimizers_zero_grad(start_step)
 
         data_stream = self._iter_dataloader(dataloader)
+
+        # Restore the RNG snapshot LAST — after dcp.load,
+        # after iter(dataloader), after everything that may
+        # have advanced the RNG as a side-effect.
+        if (
+            checkpoint_manager is not None
+            and resume_from_checkpoint
+        ):
+            checkpoint_manager.load_rng_snapshot(
+                resume_from_checkpoint,
+            )
         progress = tqdm(
             range(start_step + 1, max_steps + 1),
             initial=start_step,

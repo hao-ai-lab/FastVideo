@@ -190,6 +190,27 @@ class TrainingMethod(torch.nn.Module, ABC):
             except TypeError:
                 optimizer.zero_grad()
 
+    def seed_optimizer_state_for_resume(self) -> None:
+        """Seed optimizer state so DCP can load saved state.
+
+        A fresh optimizer has empty state (exp_avg, exp_avg_sq,
+        step are only created on the first optimizer.step()).
+        DCP needs matching entries to load into; without them
+        the saved optimizer state is silently dropped.
+        """
+        for opt in self.get_optimizers(0):
+            for group in opt.param_groups:
+                for p in group["params"]:
+                    if not p.requires_grad:
+                        continue
+                    if len(opt.state.get(p, {})) > 0:
+                        continue
+                    opt.state[p] = {
+                        "step": torch.tensor(0.0),
+                        "exp_avg": torch.zeros_like(p),
+                        "exp_avg_sq": torch.zeros_like(p),
+                    }
+
     # -- Shared hooks (override in subclasses as needed) --
 
     def get_grad_clip_targets(
