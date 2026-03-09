@@ -15,10 +15,10 @@ method:
 
 training:
   distributed:
-    num_gpus: 8
+    num_gpus: 4
     sp_size: 1
     tp_size: 1
-    hsdp_replicate_dim: 8
+    hsdp_replicate_dim: 4
     hsdp_shard_dim: 1
 
   data:
@@ -45,8 +45,9 @@ training:
 
   checkpoint:
     output_dir: outputs/phase3.4_wan2.1_finetune_vsa_0.9_v3
-    training_state_checkpointing_steps: 1000
+    training_state_checkpointing_steps: 100
     checkpoints_total_limit: 3
+    resume_from_checkpoint: latest
 
   tracker:
     project_name: distillation_wan_r
