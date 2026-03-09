@@ -14,7 +14,6 @@ from fastvideo.train.utils.checkpoint import _RoleModuleContainer
 from fastvideo.training.checkpointing_utils import (
     ModelWrapper,
     OptimizerWrapper,
-    RandomStateWrapper,
     SchedulerWrapper,
 )
 
@@ -149,16 +148,6 @@ class TrainingMethod(torch.nn.Module, ABC):
                 states[
                     f"schedulers.{role}"
                 ] = SchedulerWrapper(sched)
-
-        # RNG states.
-        states["random_state"] = RandomStateWrapper(None)
-        for name, gen in (
-            self.get_rng_generators() or {}
-        ).items():
-            if gen is not None:
-                states[
-                    f"random_state.{name}"
-                ] = RandomStateWrapper(gen)
 
         return states
 
