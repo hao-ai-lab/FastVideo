@@ -69,7 +69,6 @@ class ModelBase(ABC):
         raw_batch: dict[str, Any],
         *,
         generator: torch.Generator,
-        current_vsa_sparsity: float = 0.0,
         latents_source: Literal["data", "zeros"] = "data",
     ) -> TrainingBatch:
         """Convert a dataloader batch into forward primitives."""

@@ -78,8 +78,6 @@ class TrainingMethod(torch.nn.Module, ABC):
         self,
         batch: dict[str, Any],
         iteration: int,
-        *,
-        current_vsa_sparsity: float = 0.0,
     ) -> tuple[
             dict[str, torch.Tensor],
             dict[str, Any],
@@ -241,6 +239,6 @@ class TrainingMethod(torch.nn.Module, ABC):
     def _infer_attn_kind() -> Literal["dense", "vsa"]:
         """Derive attn_kind from ``FASTVIDEO_ATTENTION_BACKEND``."""
         backend = envs.FASTVIDEO_ATTENTION_BACKEND
-        if backend in ("VIDEO_SPARSE_ATTN", "VMOBA_ATTN"):
+        if backend == "VIDEO_SPARSE_ATTN":
             return "vsa"
         return "dense"

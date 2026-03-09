@@ -129,8 +129,6 @@ training:
   # --- training.vsa [TYPED] -> VSAConfig ---
   vsa:
     sparsity: 0.0                     # default: 0.0 (0.0 = disabled)
-    decay_rate: 0.0                   # default: 0.0
-    decay_interval_steps: 0           # default: 0
 
   # --- training.model [TYPED] -> ModelTrainingConfig ---
   model:

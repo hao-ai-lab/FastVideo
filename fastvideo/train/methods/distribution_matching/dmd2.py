@@ -81,8 +81,6 @@ class DMD2Method(TrainingMethod):
         self,
         batch: dict[str, Any],
         iteration: int,
-        *,
-        current_vsa_sparsity: float = 0.0,
     ) -> tuple[
             dict[str, torch.Tensor],
             dict[str, Any],
@@ -95,7 +93,6 @@ class DMD2Method(TrainingMethod):
         training_batch = self.student.prepare_batch(
             batch,
             generator=self.cuda_generator,
-            current_vsa_sparsity=current_vsa_sparsity,
             latents_source=latents_source,
         )
 
