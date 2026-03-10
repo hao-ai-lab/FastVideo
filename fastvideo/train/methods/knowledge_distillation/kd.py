@@ -768,3 +768,158 @@ class KDMethod(TrainingMethod):
             betas=tc.optimizer.betas,
             scheduler_name=str(tc.optimizer.lr_scheduler),
         )
+
+
+# ---------------------------------------------------------------------------
+# Causal KD Method
+# ---------------------------------------------------------------------------
+
+
+class KDCausalMethod(KDMethod):
+    """KD for causal Wan: per-frame block-quantized timestep sampling.
+
+    Identical to :class:`KDMethod` except ``single_train_step`` samples
+    a **per-frame** denoising step index (block-quantized to groups of
+    ``num_frames_per_block`` frames) instead of one index per batch.
+    This matches the legacy ``ODEInitTrainingPipeline`` training scheme
+    required by causal / streaming student models.
+
+    Additional YAML field under ``method``::
+
+        num_frames_per_block: 3   # frames sharing the same noise level
+    """
+
+    def __init__(
+        self,
+        *,
+        cfg: Any,
+        role_models: dict[str, ModelBase],
+    ) -> None:
+        mcfg = cfg.get("method", {})
+        self._num_frames_per_block: int = int(
+            mcfg.get("num_frames_per_block", 3))
+        if self._num_frames_per_block < 1:
+            raise ValueError("num_frames_per_block must be >= 1")
+        super().__init__(cfg=cfg, role_models=role_models)
+
+    def single_train_step(
+        self,
+        batch: dict[str, Any],
+        iteration: int,
+        *,
+        current_vsa_sparsity: float = 0.0,
+    ) -> tuple[
+            dict[str, torch.Tensor],
+            dict[str, Any],
+            dict[str, LogScalar],
+    ]:
+        del iteration
+        device = self.student.device
+        dtype = batch["real"].dtype
+
+        # trajectory_latents: [B, S, T, C, H, W]
+        B, _S, T, C, H, W = batch["trajectory_latents"].shape
+        K = self._num_steps  # number of student steps (excludes t=0)
+
+        # Gather the K relevant trajectory steps for t_list[:-1].
+        traj_indices = torch.tensor(
+            [self._t_to_traj_idx[t] for t in self._t_list[:-1]],
+            dtype=torch.long,
+            device=device,
+        )
+        relevant = batch["trajectory_latents"].to(
+            device, dtype=dtype)[:, traj_indices]  # [B, K, T, C, H, W]
+
+        # Sample per-frame step indices, block-quantized.
+        indexes = self._sample_per_frame_step_idx(B, T, K,
+                                                  device)  # [B, T] in [0, K)
+
+        # Gather noisy_input per frame: [B, T, C, H, W]
+        noisy_input = torch.gather(
+            relevant,
+            dim=1,
+            index=indexes[:, None, :, None, None, None].expand(
+                B, 1, T, C, H, W),
+        ).squeeze(1)
+
+        target_x0 = batch["real"].to(device, dtype=dtype)  # [B, T, C, H, W]
+
+        # Per-frame timestep [B, T]
+        t_list_tensor = torch.tensor(self._t_list[:-1],
+                                     dtype=torch.float32,
+                                     device=device)
+        timestep_per_frame = t_list_tensor[indexes]  # [B, T]
+
+        proxy_batch = {
+            "vae_latent": target_x0.permute(0, 2, 1, 3, 4),
+            "text_embedding": batch["text_embedding"].to(device, dtype=dtype),
+            "text_attention_mask":
+            batch["text_attention_mask"].to(device, dtype=dtype),
+        }
+        training_batch = self.student.prepare_batch(
+            proxy_batch,
+            generator=self.cuda_generator,
+            current_vsa_sparsity=current_vsa_sparsity,
+            latents_source="data",
+        )
+        training_batch.timesteps = timestep_per_frame  # [B, T]
+
+        pred_noise = self.student.predict_noise(
+            noisy_input,
+            timestep_per_frame,
+            training_batch,
+            conditional=True,
+            attn_kind="dense",
+        )  # [B, T, C, H, W]
+
+        pred_x0 = pred_noise_to_pred_video(
+            pred_noise=pred_noise.flatten(0, 1),
+            noise_input_latent=noisy_input.flatten(0, 1),
+            timestep=timestep_per_frame.flatten(0, 1),
+            scheduler=self._sf_scheduler,
+        ).unflatten(0, (B, T))  # [B, T, C, H, W]
+
+        loss = 0.5 * F.mse_loss(pred_x0.float(), target_x0.float())
+
+        loss_map: dict[str, torch.Tensor] = {
+            "total_loss": loss,
+            "kd_loss": loss,
+        }
+        outputs: dict[str, Any] = {
+            "_fv_backward": (
+                training_batch.timesteps,
+                training_batch.attn_metadata,
+            )
+        }
+        metrics: dict[str, LogScalar] = {
+            "kd_mean_step_idx": float(indexes.float().mean().item()),
+        }
+        return loss_map, outputs, metrics
+
+    def _sample_per_frame_step_idx(
+        self,
+        B: int,
+        T: int,
+        K: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Sample per-frame step indices, block-quantized.
+
+        Each group of ``num_frames_per_block`` consecutive frames shares
+        the same randomly sampled step index in ``[0, K)``.
+
+        Returns:
+            ``[B, T]`` long tensor with values in ``[0, K)``.
+        """
+        n_blocks = (T + self._num_frames_per_block - 1) // self._num_frames_per_block
+        block_idx = torch.randint(
+            0,
+            K,
+            (B, n_blocks),
+            generator=self.cuda_generator,
+            device=device,
+        )  # [B, n_blocks]
+        # Expand each block index to num_frames_per_block frames, slice to T.
+        per_frame = block_idx.repeat_interleave(
+            self._num_frames_per_block, dim=1)[:, :T]
+        return per_frame  # [B, T]
