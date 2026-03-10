@@ -35,10 +35,10 @@ models:
 method:
   _target_: fastvideo.train.methods.knowledge_distillation.kd.KDCausalMethod
   teacher_path_cache: data/kd_test_cache_small
-  t_list: [999, 937, 833, 624, 0]
+  t_list: [995, 937, 833, 625, 0]
   student_sample_steps: 4
   teacher_inference_steps: 48
-  teacher_guidance_scale: 1.0       # no CFG for speed; use 3.5 for real runs
+  teacher_guidance_scale: 3.5
   num_frames_per_block: 3
 
 training:

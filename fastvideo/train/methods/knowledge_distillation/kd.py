@@ -37,6 +37,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from tqdm import tqdm
+
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
@@ -396,6 +398,13 @@ class KDMethod(TrainingMethod):
             self.teacher.sp_group = get_sp_group()
             self.teacher.on_train_start()
 
+            # Share the student's VAE with the teacher for latent normalization.
+            # The teacher doesn't call init_preprocessors() (non-trainable),
+            # so self.teacher.vae is None. Both models use the same Wan VAE
+            # constants (latents_mean / latents_std), so sharing is safe.
+            if getattr(self.teacher, "vae", None) is None:
+                self.teacher.vae = self.student.vae
+
             source_dataset = self._source_loader.dataset
             total = sum(source_dataset.lengths)
             teacher_id = getattr(self.teacher, "_init_from", "unknown")
@@ -484,6 +493,12 @@ class KDMethod(TrainingMethod):
         samples_dir.mkdir(parents=True, exist_ok=True)
         device = self.student.device
 
+        pbar = tqdm(
+            total=len(missing),
+            desc="Generating KD cache",
+            disable=get_world_rank() != 0,
+            unit="sample",
+        )
         for global_idx in range(total):
             if global_idx not in missing_set:
                 continue  # all ranks skip together — no FSDP divergence
@@ -510,12 +525,12 @@ class KDMethod(TrainingMethod):
                     "text_attention_mask": raw["text_attention_mask"][0].cpu(),
                 }
                 torch.save(out, samples_dir / f"{global_idx:08d}.pt")
-                if (global_idx + 1) % 100 == 0 or global_idx == total - 1:
-                    logger.info("  cached %d / %d samples", global_idx + 1,
-                                total)
+                pbar.update(1)
 
             if dist.is_initialized():
                 dist.barrier()
+
+        pbar.close()
 
     def _teacher_ode_rollout(
         self,
@@ -535,6 +550,9 @@ class KDMethod(TrainingMethod):
         """
         assert self.teacher is not None
         device = self.student.device
+        # bf16 is required by FlashAttention and is consistent with training
+        # precision. Models load as float32 but inference always runs in bf16.
+        dtype = torch.bfloat16
 
         # prepare_batch runs text encoding; latents: [1, T, C, H, W]  (B=1)
         training_batch = self.teacher.prepare_batch(
@@ -542,7 +560,7 @@ class KDMethod(TrainingMethod):
             generator=self.cuda_generator,
             latents_source="data",
         )
-        latents = training_batch.latents
+        latents = training_batch.latents.to(dtype)
         B, T = latents.shape[:2]
 
         # Build teacher's full ODE schedule.
@@ -560,7 +578,7 @@ class KDMethod(TrainingMethod):
         noise = torch.randn(
             latents.shape,
             device=device,
-            dtype=latents.dtype,
+            dtype=dtype,
             generator=self.cuda_generator,
         )
         t0 = teacher_t_list[0]
@@ -569,7 +587,7 @@ class KDMethod(TrainingMethod):
             latents.flatten(0, 1),
             noise.flatten(0, 1),
             t0_flat,
-        ).unflatten(0, (B, T))  # [B, T, C, H, W]
+        ).unflatten(0, (B, T)).to(dtype)  # [B, T, C, H, W]; scheduler may upcast to fp32
 
         # Run full teacher ODE, recording every state before each step.
         traj_states: list[torch.Tensor] = []  # each [T, C, H, W]
@@ -606,7 +624,7 @@ class KDMethod(TrainingMethod):
                 eps = ((x_flat - (1.0 - sigma_cur) * p_flat) /
                        sigma_cur.clamp_min(1e-8))
                 x = ((1.0 - sigma_next) * p_flat +
-                     sigma_next * eps).unflatten(0, (B, T))
+                     sigma_next * eps).unflatten(0, (B, T)).to(dtype)
 
         assert pred_x0 is not None, "teacher_t_list must have at least one step"
 
