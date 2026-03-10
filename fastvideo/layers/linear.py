@@ -30,6 +30,7 @@ from fastvideo.models.parameter import (BasevLLMParameter,
                                         RowvLLMParameter)
 # yapf: enable
 from fastvideo.models.utils import set_weight_attrs
+from fastvideo.profiler import nvtx_range
 
 logger = init_logger(__name__)
 
@@ -274,11 +275,13 @@ class ReplicatedLinear(LinearBase):
         param.data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, Parameter | None]:
-        bias = self.bias if not self.skip_bias_add else None
-        assert self.quant_method is not None
-        output = self.quant_method.apply(self, x, bias)
+        with nvtx_range("ReplicatedLinear.forward.apply"):
+            bias = self.bias if not self.skip_bias_add else None
+            assert self.quant_method is not None
+            output = self.quant_method.apply(self, x, bias)
         output_bias = self.bias if self.skip_bias_add else None
         return output, output_bias
+
 
     def extra_repr(self) -> str:
         s = f"in_features={self.input_size}"

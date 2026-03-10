@@ -377,7 +377,10 @@ class TorchProfilerController:
             yield
             return
 
-        with torch.profiler.record_function(f"fastvideo.region::{region}"):
+        nvtx_name = f"fastvideo.region::{region}"
+        # Push NVTX range for Nsight Systems visibility
+        torch.cuda.nvtx.range_push(nvtx_name)
+        with torch.profiler.record_function(nvtx_name):
             self._active_region_depth += 1
             if self._active_region_depth == 1:
                 logger.info(
@@ -395,6 +398,8 @@ class TorchProfilerController:
                         "PROFILER: Setting collection to False upon exiting region %s",
                         region)
                     self._set_collection(False)
+        # Pop NVTX range
+        torch.cuda.nvtx.range_pop()
 
     def start(self) -> None:
         """Start the profiler and pause collection until a region is entered."""
@@ -454,3 +459,34 @@ def profile_region(
         return wrapped
 
     return decorator
+
+
+# ---------------------------------------------------------------------------
+# Standalone NVTX utilities (work independently of PyTorch profiler)
+# ---------------------------------------------------------------------------
+
+
+@contextlib.contextmanager
+def nvtx_range(name: str):
+    """Context manager that emits an NVTX range for Nsight Systems profiling.
+
+    This works independently of the PyTorch profiler and is captured by
+    ``nsys profile --trace=nvtx``.
+
+    Example usage::
+
+        with nvtx_range("forward_pass"):
+            output = model(input)
+
+    Parameters
+    ----------
+    name:
+        The label shown in the Nsight Systems timeline.
+    """
+    torch.cuda.nvtx.range_push(name)
+    try:
+        yield
+    finally:
+        torch.cuda.nvtx.range_pop()
+
+

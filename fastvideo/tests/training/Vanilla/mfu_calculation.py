@@ -20,7 +20,7 @@ from fastvideo.utils import FlexibleArgumentParser
 from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
 
 MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_PATH = "data/crush-smol_processed_t2v/training_dataset/worker_1/worker_0/"
+DATA_PATH = "data/crush-smol_processed_t2v/combined_parquet_dataset/worker_0/"
 VALIDATION_DATASET_FILE = "examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json"
 OUTPUT_DIR = Path("checkpoints/wan_t2v_finetune")
 PROFILER_TRACE_ROOT = Path("/mnt/fast-disks/hao_lab/ohm/profiler_traces/wan_t2v_finetune")
@@ -32,7 +32,7 @@ GRAD_ACCUM = "1"
 MASTER_PORT = "29504"
 
 os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = MASTER_PORT
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
 
 
 def run_worker():
@@ -49,7 +49,7 @@ def run_worker():
         "--pretrained_model_name_or_path", MODEL_PATH,
         "--data_path", DATA_PATH,
         "--dataloader_num_workers", "1",
-        "--train_batch_size", "4",
+        "--train_batch_size", "8",
         "--train_sp_batch_size", "1",
         "--gradient_accumulation_steps", GRAD_ACCUM,
         "--num_latent_t", "20",
@@ -57,7 +57,7 @@ def run_worker():
         "--num_width", "1280",
         "--num_frames", "77",
         "--enable_gradient_checkpointing_type", "full",
-        "--max_train_steps", "20",
+        "--max_train_steps", "5",
         "--learning_rate", "5e-5",
         "--mixed_precision", "bf16",
         "--weight_only_checkpointing_steps", "250",
@@ -92,7 +92,7 @@ def run_worker():
     pipeline.train()
     logger.info("Training pipeline done")
 
-def test_distributed_training():
+def test_distributed_training(profile=False):
     """Test the distributed training setup"""
     os.environ["WANDB_MODE"] = "online"
 
@@ -111,13 +111,27 @@ def test_distributed_training():
     current_file = Path(__file__).resolve()
     
     # Run torchrun command
-    cmd = [
+    cmd = []
+    if profile:
+        import datetime
+        PROFILER_TRACE_ROOT.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        trace_filename = f"{PROFILER_TRACE_ROOT}/trace_{timestamp}"
+        cmd.extend([
+            "nsys", "profile",
+            "--trace=cuda,nvtx",
+            f"--output={trace_filename}",
+            "--force-overwrite=true",
+        ])
+
+
+    cmd.extend([
         "torchrun",
         "--nnodes", NUM_NODES,
         "--nproc_per_node", NUM_GPUS_PER_NODE,
         "--master_port", MASTER_PORT,
         str(current_file)
-    ]
+    ])
     process = subprocess.run(cmd, capture_output=True, text=True)
     
     # Print stdout and stderr for debugging
@@ -208,4 +222,9 @@ if __name__ == "__main__":
         run_worker()
     else:
         # We're being run directly
-        test_distributed_training()
+        import argparse
+        parser = argparse.ArgumentParser(description="Run MFU calculation test")
+        parser.add_argument("--profile", action="store_true", help="Enable Nsight profiling with CUDA and NVTX tracing")
+        args = parser.parse_args()
+        
+        test_distributed_training(profile=args.profile)
