@@ -72,16 +72,27 @@ def sample_epoch(
     ref_transformer: torch.nn.Module | None = None,
     lora_model: Any | None = None,
     tracker: Any | None = None,
-) -> list[dict[str, Any]]:
+) -> tuple[
+    list[dict[str, Any]],
+    list[torch.Tensor],
+    list[list[str]],
+]:
     """Run one sampling epoch: generate videos, compute
     rewards asynchronously.
 
     Returns:
-        List of sample dicts with prompt_ids,
-        prompt_embeds, latents, log_probs, kl,
-        timesteps, rewards.
+        Tuple of (samples, all_videos, all_prompts):
+        - samples: list of sample dicts with prompt_ids,
+          prompt_embeds, latents, log_probs, kl,
+          timesteps, rewards.
+        - all_videos: list of decoded video tensors
+          per batch, each (B, 3, T, H, W) in [0, 1].
+        - all_prompts: list of prompt string lists
+          per batch.
     """
     samples = []
+    all_videos: list[torch.Tensor] = []
+    all_prompts: list[list[str]] = []
 
     for i in range(num_batches_per_epoch):
         current_epoch_tag = (
@@ -97,6 +108,10 @@ def sample_epoch(
             if epoch_tag == current_epoch_tag:
                 break
 
+        torch.cuda.synchronize()
+        _t_batch_start = time.perf_counter()
+
+        _t_embed = time.perf_counter()
         prompt_embeds = compute_text_embeddings(
             prompts,
             text_encoder,
@@ -124,6 +139,9 @@ def sample_epoch(
             gen.manual_seed(
                 seed + epoch * SEED_EPOCH_STRIDE + i
             )
+
+        torch.cuda.synchronize()
+        _t_embed_done = time.perf_counter()
 
         with torch.no_grad():
             (
@@ -156,6 +174,9 @@ def sample_epoch(
                 lora_model=lora_model,
             )
 
+        torch.cuda.synchronize()
+        _t_denoise_done = time.perf_counter()
+
         latents = torch.stack(latents_list, dim=1)
         log_probs = torch.stack(log_probs_list, dim=1)
         kls = torch.stack(kls_list, dim=1)
@@ -167,6 +188,10 @@ def sample_epoch(
             .repeat(sample_batch_size, 1)
         )
 
+        # Collect decoded videos and prompts for logging.
+        all_videos.append(videos)
+        all_prompts.append(list(prompts))
+
         # Async reward computation.
         rewards_future = executor.submit(
             reward_fn,
@@ -176,6 +201,17 @@ def sample_epoch(
             True,
         )
         time.sleep(0)
+
+        logger.info(
+            "[sample_epoch] batch %d/%d: "
+            "text_embed=%.1fs  denoise=%.1fs  "
+            "batch_total=%.1fs",
+            i + 1,
+            num_batches_per_epoch,
+            _t_embed_done - _t_embed,
+            _t_denoise_done - _t_embed_done,
+            _t_denoise_done - _t_batch_start,
+        )
 
         samples.append(
             {
@@ -194,11 +230,18 @@ def sample_epoch(
         )
 
     # Wait for all rewards.
+    torch.cuda.synchronize()
+    _t_reward_wait = time.perf_counter()
     for sample in samples:
         rewards, _ = sample["rewards"].result()
         sample["rewards"] = {
             key: torch.as_tensor(value, device=device).float()
             for key, value in rewards.items()
         }
+    _t_reward_done = time.perf_counter()
+    logger.info(
+        "[sample_epoch] reward_wait=%.1fs",
+        _t_reward_done - _t_reward_wait,
+    )
 
-    return samples
+    return samples, all_videos, all_prompts

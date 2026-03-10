@@ -113,7 +113,7 @@ class GenRLWanModel(WanModel):
     def _load_text_encoder(self, model_path: str) -> None:
         from transformers import (
             AutoTokenizer,
-            T5EncoderModel,
+            UMT5EncoderModel,
         )
 
         logger.info(
@@ -127,7 +127,7 @@ class GenRLWanModel(WanModel):
             "Loading T5 text encoder from %s", model_path
         )
         dtype = self._get_training_dtype()
-        self.text_encoder = T5EncoderModel.from_pretrained(
+        self.text_encoder = UMT5EncoderModel.from_pretrained(
             model_path,
             subfolder="text_encoder",
             torch_dtype=dtype,

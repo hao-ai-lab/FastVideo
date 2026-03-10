@@ -27,6 +27,7 @@ method:
     videoalign_mq: 1.0
     videoalign_ta: 1.0
   reward_module: null
+  reward_on_gpu: true
 
   # ---- Data ----
   prompt_dataset_path: data/filtered_prompts
@@ -119,6 +120,10 @@ callbacks:
   ema:
     decay: 0.9
     start_iter: 0
+  log_rl_samples:
+    every_steps: 1
+    max_videos: 4
+    fps: 16
 
 pipeline:
   flow_shift: 3.0

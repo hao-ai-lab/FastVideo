@@ -170,6 +170,7 @@ class Trainer:
             self.callbacks.on_before_optimizer_step(
                 method,
                 iteration=step,
+                outputs=outputs,
             )
             method.optimizers_schedulers_step(step)
             method.optimizers_zero_grad(step)

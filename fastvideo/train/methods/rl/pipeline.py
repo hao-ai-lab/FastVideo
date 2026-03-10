@@ -10,9 +10,14 @@ from __future__ import annotations
 
 import contextlib
 import random
+import time
 from typing import Any
 
 import torch
+
+from fastvideo.logger import init_logger
+
+_pipeline_logger = init_logger(__name__)
 
 from fastvideo.train.methods.rl.sde import (
     sde_step_with_logprob,
@@ -178,11 +183,17 @@ def wan_denoising_with_logprob(
     all_kl: list[torch.Tensor] = []
     all_timesteps: list[torch.Tensor] = []
 
+    _denoise_fwd_time = 0.0
+    _denoise_sde_time = 0.0
+    _denoise_kl_time = 0.0
+
     for i, t in enumerate(timesteps):
         latents_ori = latents.clone()
         timestep = t.expand(batch_size)
 
         # Conditional prediction.
+        torch.cuda.synchronize()
+        _fwd_t0 = time.perf_counter()
         noise_pred = model.forward_transformer_raw(
             latents.to(dtype),
             timestep,
@@ -200,6 +211,8 @@ def wan_denoising_with_logprob(
             noise_pred = noise_uncond + guidance_scale * (
                 noise_pred - noise_uncond
             )
+        torch.cuda.synchronize()
+        _denoise_fwd_time += time.perf_counter() - _fwd_t0
 
         # Determine noise level for this step.
         if use_window:
@@ -216,6 +229,7 @@ def wan_denoising_with_logprob(
             cur_noise_level = noise_level
 
         # SDE step.
+        _sde_t0 = time.perf_counter()
         (
             latents,
             log_prob,
@@ -234,6 +248,7 @@ def wan_denoising_with_logprob(
             diffusion_clip=diffusion_clip,
             diffusion_clip_value=diffusion_clip_value,
         )
+        _denoise_sde_time += time.perf_counter() - _sde_t0
         prev_latents = latents.clone()
 
         # Record.
@@ -249,6 +264,7 @@ def wan_denoising_with_logprob(
             all_timesteps.append(t)
 
         # KL computation.
+        _kl_t0 = time.perf_counter()
         if should_record and kl_reward > 0 and not deterministic:
             ref_model = ref_transformer
             ref_ctx: Any = contextlib.nullcontext()
@@ -319,9 +335,26 @@ def wan_denoising_with_logprob(
             all_kl.append(
                 torch.zeros(batch_size, device=device)
             )
+        torch.cuda.synchronize()
+        _denoise_kl_time += time.perf_counter() - _kl_t0
 
     # Decode to video.
+    torch.cuda.synchronize()
+    _vae_t0 = time.perf_counter()
     videos = model.decode_latents(latents)
+
+    torch.cuda.synchronize()
+    _vae_done = time.perf_counter()
+    _pipeline_logger.info(
+        "[denoising] %d steps: "
+        "transformer_fwd=%.1fs  sde_step=%.1fs  "
+        "kl=%.1fs  vae_decode=%.1fs",
+        len(timesteps),
+        _denoise_fwd_time,
+        _denoise_sde_time,
+        _denoise_kl_time,
+        _vae_done - _vae_t0,
+    )
 
     return (
         videos,
