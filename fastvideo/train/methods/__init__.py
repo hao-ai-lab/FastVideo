@@ -9,6 +9,7 @@ __all__ = [
     "KDMethod",
     "SelfForcingMethod",
     "DiffusionForcingSFTMethod",
+    "GenRLMethod",
 ]
 
 
@@ -28,4 +29,7 @@ def __getattr__(name: str) -> object:
     if name == "DiffusionForcingSFTMethod":
         from fastvideo.train.methods.fine_tuning.dfsft import DiffusionForcingSFTMethod
         return DiffusionForcingSFTMethod
+    if name == "GenRLMethod":
+        from fastvideo.train.methods.rl.genrl import GenRLMethod
+        return GenRLMethod
     raise AttributeError(name)

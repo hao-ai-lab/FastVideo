@@ -1,0 +1,125 @@
+# GenRL / Video GRPO: Wan 2.1 T2V 1.3B with LongCat reweighting.
+#
+# Ported from GenRL/config/longcat.yaml.
+#
+# - Student:   trainable (LoRA or full finetune)
+# - Reference: frozen copy for KL penalty (optional, only for full finetune with beta > 0)
+#
+# Usage:
+#   torchrun --nnodes=1 --nproc_per_node=8 \
+#     fastvideo/train/entrypoint/train.py \
+#     --config examples/train/configs/genrl_wan2.1_t2v_1.3B_longcat.yaml
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.wan_genrl.GenRLWanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    enable_gradient_checkpointing_type: full
+
+method:
+  _target_: fastvideo.train.methods.rl.genrl.GenRLMethod
+
+  # ---- Reward functions ----
+  reward_fn:
+    hpsv3_general: 1.0
+    hpsv3_percentile: 1.0
+    videoalign_mq: 1.0
+    videoalign_ta: 1.0
+  reward_module: null
+
+  # ---- Data ----
+  prompt_dataset_path: datasets/filtered_prompts
+  prompt_fn: filtered_prompts
+
+  # ---- Sampling ----
+  sample_batch_size: 4
+  eval_batch_size: 2
+  num_batches_per_epoch: 1
+  num_inference_steps: 16
+  guidance_scale: 4.5
+  num_video_per_prompt: 4
+  noise_level: 1.0
+  sde_type: flow_sde
+  sde_window_size: 1
+  sde_window_range: [0, 6]
+  diffusion_clip: true
+  diffusion_clip_value: 0.45
+  kl_reward: 0
+  same_latent: true
+
+  # ---- Video dimensions ----
+  height: 480
+  width: 832
+  num_frames: 81
+
+  # ---- PPO training ----
+  train_batch_size: 4
+  num_inner_epochs: 1
+  clip_range: 1.0e-3
+  adv_clip_max: 5.0
+  beta: 3.0e-4
+  use_cfg: true
+  loss_reweighting: longcat
+  weight_advantages: true
+  max_grad_norm: 1.0
+  seed: 42
+
+  # ---- Advantage computation ----
+  per_prompt_stat_tracking: true
+  global_std: false
+  max_group_std: true
+
+  # ---- EMA ----
+  use_ema: true
+  ema_decay: 0.9
+  ema_update_interval: 8
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+
+  data:
+    # Not used by GenRL (prompt dataloaders are in method config)
+    # but required by the config parser.
+    data_path: ""
+    train_batch_size: 1
+    seed: 42
+    num_height: 480
+    num_width: 832
+    num_frames: 81
+
+  optimizer:
+    learning_rate: 1.0e-4
+    betas: [0.9, 0.999]
+    weight_decay: 1.0e-4
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    # max_train_steps == num_epochs in GenRL terms.
+    max_train_steps: 100000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/genrl_longcat
+    training_state_checkpointing_steps: 100
+    checkpoints_total_limit: 3
+
+  tracker:
+    project_name: VideoRL
+    run_name: wan_2_1_t2v_1_3b_longcat
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    max_grad_norm: 0.0  # Disabled; GenRLMethod clips internally.
+
+pipeline:
+  flow_shift: 3.0
