@@ -83,17 +83,16 @@ class _KDPathCache:
     Each ``.pt`` file contains a dict::
 
         {
-            "path":                 Tensor[num_steps, T, C, H, W],
+            "trajectory_latents":   Tensor[S, T, C, H, W],  # all S teacher steps
+            "trajectory_timesteps": Tensor[S],               # int64
             "real":                 Tensor[T, C, H, W],
             "text_embedding":       Tensor[L, D],
             "text_attention_mask":  Tensor[L],
-            "path_timesteps":       Tensor[num_steps],  # int64, == t_list[:-1]
         }
 
-    ``path[i]`` is the teacher's ODE state at the teacher trajectory step
-    whose timestep exactly equals ``path_timesteps[i]`` (i.e. ``t_list[i]``).
-    ``t_list`` must be a subset of the teacher's ODE schedule — an error is
-    raised at generation time if any student timestep is not present.
+    The full teacher trajectory is stored so that ``t_list`` can be changed
+    without regenerating the cache.  Subsampling to the student timesteps
+    happens at training time.
     ``real`` is the teacher's final clean x0 prediction after all ODE steps.
     All latents are in permuted ``[T, C, H, W]`` format (not ``[C, T, H, W]``).
     """
@@ -105,8 +104,8 @@ class _KDPathCache:
     @staticmethod
     def validate_or_create_metadata(
         cache_dir: str,
-        t_list: list[int],
         teacher_id: str,
+        teacher_inference_steps: int,
         total_samples: int,
         source_data_path: str,
     ) -> None:
@@ -117,20 +116,22 @@ class _KDPathCache:
             if meta_path.exists():
                 with open(meta_path) as f:
                     stored = json.load(f)
-                if stored.get("t_list") != t_list:
-                    raise ValueError(
-                        f"Cache t_list {stored['t_list']} != config "
-                        f"t_list {t_list}. Delete {cache_dir} and re-run.")
                 if stored.get("teacher") != teacher_id:
                     raise ValueError(
                         f"Cache teacher {stored['teacher']!r} != config "
                         f"teacher {teacher_id!r}. Delete {cache_dir} "
                         "and re-run.")
+                if stored.get("teacher_inference_steps") != teacher_inference_steps:
+                    raise ValueError(
+                        f"Cache teacher_inference_steps "
+                        f"{stored['teacher_inference_steps']} != config "
+                        f"{teacher_inference_steps}. Delete {cache_dir} "
+                        "and re-run.")
             else:
                 meta: dict[str, Any] = {
                     "total_samples": total_samples,
-                    "t_list": t_list,
                     "teacher": teacher_id,
+                    "teacher_inference_steps": teacher_inference_steps,
                     "source_data_path": source_data_path,
                 }
                 with open(meta_path, "w") as f:
@@ -403,8 +404,8 @@ class KDMethod(TrainingMethod):
 
             _KDPathCache.validate_or_create_metadata(
                 self._cache_dir,
-                self._t_list,
                 teacher_id,
+                self._teacher_inference_steps,
                 total,
                 data_path,
             )
@@ -443,6 +444,25 @@ class KDMethod(TrainingMethod):
             seed=int(tc.data.seed),
         )
 
+        # Validate that t_list is a subset of the cached trajectory timesteps
+        # and build a lookup table used in single_train_step.
+        sample0 = _KDPathDataset(self._cache_dir)[0]
+        traj_ts = sample0["trajectory_timesteps"].tolist()
+        t_to_idx: dict[int, int] = {int(t): i for i, t in enumerate(traj_ts)}
+        missing_ts = [t for t in self._t_list[:-1] if t not in t_to_idx]
+        if missing_ts:
+            raise ValueError(
+                f"t_list timesteps {missing_ts} are not present in the cached "
+                f"trajectory timesteps.\nCached: {traj_ts}\n"
+                f"Adjust t_list to use a subset of the cached timesteps.")
+        self._t_to_traj_idx: dict[int, int] = {
+            t: t_to_idx[t] for t in self._t_list[:-1]
+        }
+        logger.info(
+            "t_list → trajectory indices: %s",
+            {t: self._t_to_traj_idx[t] for t in self._t_list[:-1]},
+        )
+
     # ------------------------------------------------------------------
     # Path generation
     # ------------------------------------------------------------------
@@ -476,19 +496,18 @@ class KDMethod(TrainingMethod):
             }
 
             with torch.no_grad():
-                path, real = self._teacher_ode_rollout(raw)
-                # path: [num_steps, T, C, H, W]
-                # real: [T, C, H, W]
+                traj_latents, traj_timesteps, real = self._teacher_ode_rollout(raw)
+                # traj_latents:   [S, T, C, H, W]
+                # traj_timesteps: [S]  int64
+                # real:           [T, C, H, W]
 
             if get_world_rank() == 0:
                 out = {
-                    "path": path.cpu(),
+                    "trajectory_latents": traj_latents.cpu(),
+                    "trajectory_timesteps": traj_timesteps.cpu(),
                     "real": real.cpu(),
                     "text_embedding": raw["text_embedding"][0].cpu(),
-                    "text_attention_mask":
-                    raw["text_attention_mask"][0].cpu(),
-                    "path_timesteps":
-                    torch.tensor(self._t_list[:-1], dtype=torch.long),
+                    "text_attention_mask": raw["text_attention_mask"][0].cpu(),
                 }
                 torch.save(out, samples_dir / f"{global_idx:08d}.pt")
                 if (global_idx + 1) % 100 == 0 or global_idx == total - 1:
@@ -501,20 +520,18 @@ class KDMethod(TrainingMethod):
     def _teacher_ode_rollout(
         self,
         raw_batch: dict[str, Any],
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Run high-quality teacher ODE; return (path, real).
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Run high-quality teacher ODE; return full trajectory.
 
-        The teacher runs ``teacher_inference_steps`` ODE steps (e.g. 48).
-        Each timestep in ``t_list[:-1]`` must appear exactly in the teacher's
-        schedule — if not, an error is raised listing the teacher's timesteps
-        so the user can align ``t_list`` accordingly.
-
-        Only the subsampled states at ``t_list[:-1]`` are returned; the full
-        trajectory is not stored.
+        The teacher runs ``teacher_inference_steps`` ODE steps (e.g. 48),
+        saving every intermediate state.  The full trajectory is returned so
+        the cache is independent of ``t_list`` — subsampling happens at
+        training time.
 
         Returns:
-            path: ``[num_steps, T, C, H, W]``
-            real: ``[T, C, H, W]`` — teacher's final clean x0
+            trajectory_latents:   ``[S, T, C, H, W]`` — state before each step
+            trajectory_timesteps: ``[S]`` int64 — teacher timestep at each state
+            real:                 ``[T, C, H, W]`` — teacher's final clean x0
         """
         assert self.teacher is not None
         device = self.student.device
@@ -538,17 +555,6 @@ class KDMethod(TrainingMethod):
             training=False,
         )
         teacher_t_list = [int(t.item()) for t in teacher_sched.timesteps]
-        teacher_t_set = set(teacher_t_list)
-
-        # Validate that every student timestep is in the teacher schedule.
-        missing = [t for t in self._t_list[:-1] if t not in teacher_t_set]
-        if missing:
-            raise ValueError(
-                f"t_list timesteps {missing} are not present in the teacher's "
-                f"{self._teacher_inference_steps}-step ODE schedule.\n"
-                f"Teacher timesteps: {teacher_t_list}\n"
-                f"Adjust t_list to use a subset of the teacher's timesteps, "
-                f"or change teacher_inference_steps.")
 
         # Start from pure noise at the highest teacher timestep.
         noise = torch.randn(
@@ -565,15 +571,13 @@ class KDMethod(TrainingMethod):
             t0_flat,
         ).unflatten(0, (B, T))  # [B, T, C, H, W]
 
-        # Run full teacher ODE; snapshot states at student timesteps only.
-        student_t_set = set(self._t_list[:-1])
-        path_by_t: dict[int, torch.Tensor] = {}
+        # Run full teacher ODE, recording every state before each step.
+        traj_states: list[torch.Tensor] = []  # each [T, C, H, W]
         pred_x0: torch.Tensor | None = None
         teacher_next = teacher_t_list[1:] + [0]
 
         for t_cur, t_next in zip(teacher_t_list, teacher_next, strict=True):
-            if t_cur in student_t_set:
-                path_by_t[t_cur] = x.squeeze(0).clone()  # [T, C, H, W]
+            traj_states.append(x.squeeze(0).clone())
 
             timestep_b = torch.full((B,), t_cur, device=device,
                                     dtype=torch.float32)
@@ -605,11 +609,11 @@ class KDMethod(TrainingMethod):
                      sigma_next * eps).unflatten(0, (B, T))
 
         assert pred_x0 is not None, "teacher_t_list must have at least one step"
-        real = pred_x0.squeeze(0)  # [T, C, H, W]
 
-        path = torch.stack(
-            [path_by_t[t] for t in self._t_list[:-1]])  # [num_steps, T, C, H, W]
-        return path, real
+        trajectory_latents = torch.stack(traj_states)  # [S, T, C, H, W]
+        trajectory_timesteps = torch.tensor(teacher_t_list, dtype=torch.long)
+        real = pred_x0.squeeze(0)  # [T, C, H, W]
+        return trajectory_latents, trajectory_timesteps, real
 
     def _timestep_to_sigma(
         self,
@@ -640,14 +644,15 @@ class KDMethod(TrainingMethod):
             dict[str, LogScalar],
     ]:
         del iteration
-        # batch keys: path [B, S, T, C, H, W], real [B, T, C, H, W],
-        #             text_embedding [B, L, D], text_attention_mask [B, L],
-        #             path_timesteps [B, S]
+        # batch keys: trajectory_latents [B, S, T, C, H, W],
+        #             trajectory_timesteps [B, S],
+        #             real [B, T, C, H, W],
+        #             text_embedding [B, L, D], text_attention_mask [B, L]
 
         device = self.student.device
         dtype = batch["real"].dtype
 
-        # Randomly select which denoising step to train on.
+        # Randomly select which student denoising step to train on.
         step_i = int(
             torch.randint(
                 0,
@@ -656,9 +661,10 @@ class KDMethod(TrainingMethod):
                 generator=self.cuda_generator,
             ).item())
 
-        noisy_input = batch["path"][:, step_i].to(device, dtype=dtype)  # [B, T, C, H, W]
+        t = self._t_list[step_i]
+        traj_idx = self._t_to_traj_idx[t]
+        noisy_input = batch["trajectory_latents"][:, traj_idx].to(device, dtype=dtype)  # [B, T, C, H, W]
         target_x0 = batch["real"].to(device, dtype=dtype)  # [B, T, C, H, W]
-        t = int(batch["path_timesteps"][0, step_i].item())
         B, T = noisy_input.shape[:2]
 
         # Build a proxy batch so prepare_batch sets up text conditioning and
