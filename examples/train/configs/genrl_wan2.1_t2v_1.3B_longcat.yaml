@@ -29,7 +29,7 @@ method:
   reward_module: null
 
   # ---- Data ----
-  prompt_dataset_path: datasets/filtered_prompts
+  prompt_dataset_path: data/filtered_prompts
   prompt_fn: filtered_prompts
 
   # ---- Sampling ----
@@ -69,11 +69,6 @@ method:
   per_prompt_stat_tracking: true
   global_std: false
   max_group_std: true
-
-  # ---- EMA ----
-  use_ema: true
-  ema_decay: 0.9
-  ema_update_interval: 8
 
 training:
   distributed:
@@ -120,6 +115,9 @@ training:
 callbacks:
   grad_clip:
     max_grad_norm: 0.0  # Disabled; GenRLMethod clips internally.
+  ema:
+    decay: 0.9
+    start_iter: 0
 
 pipeline:
   flow_shift: 3.0

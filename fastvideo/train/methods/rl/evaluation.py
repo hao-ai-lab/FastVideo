@@ -28,8 +28,7 @@ def eval_once(
     sample_neg_prompt_embeds: torch.Tensor,
     eval_reward_fn: Callable,
     global_step: int,
-    ema,
-    transformer_params,
+    ema_callback,
     *,
     eval_num_steps: int,
     eval_guidance_scale: float,
@@ -44,18 +43,28 @@ def eval_once(
 ) -> dict[str, float]:
     """Run evaluation on test set.
 
+    Args:
+        ema_callback: An ``EMACallback`` instance (or
+            ``None``).  Used to temporarily swap EMA
+            weights into the transformer for evaluation.
+
     Returns:
         Dict of aggregated eval metrics.
     """
     model.transformer.eval()
-
-    # Apply EMA weights if available.
-    if ema is not None:
-        ema.copy_ema_to(transformer_params, store_temp=True)
-
     all_rewards: dict[str, list[float]] = {}
 
-    try:
+    # Use EMA context manager if available.
+    if ema_callback is not None:
+        ctx = ema_callback.ema_context(
+            model.transformer
+        )
+    else:
+        from contextlib import nullcontext
+
+        ctx = nullcontext()
+
+    with ctx:
         for batch_idx, (
             _epoch_tag,
             prompts,
@@ -104,11 +113,6 @@ def eval_once(
                     )
                 else:
                     all_rewards[key].append(float(val))
-
-    finally:
-        # Restore original weights.
-        if ema is not None:
-            ema.copy_temp_to(transformer_params)
 
     # Aggregate metrics.
     metrics = {}
