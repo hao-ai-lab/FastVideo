@@ -616,7 +616,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
             with nvtx_range(f"train_step_{step}"):
-                torch.cuda.synchronize()
                 start_time = time.perf_counter()
                 if vsa_available:
                     vsa_sparsity = self.training_args.VSA_sparsity
@@ -639,7 +638,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 loss = training_batch.total_loss
                 grad_norm = training_batch.grad_norm
 
-                torch.cuda.synchronize()
                 step_time = time.perf_counter() - start_time
                 step_times.append(step_time)
                 avg_step_time = sum(step_times) / len(step_times)

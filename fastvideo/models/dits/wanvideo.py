@@ -716,32 +716,17 @@ class WanTransformer3DModel(BaseDiT):
 
         # 4. Transformer blocks
         # if caching is enabled, we might be able to skip the forward pass
-        should_skip_forward = self.should_skip_forward_for_cached_states(
-            timestep_proj=timestep_proj, temb=temb)
-
-        if should_skip_forward:
-            print("skipping forward, cached")
-            hidden_states = self.retrieve_cached_states(hidden_states)
+        if torch.is_grad_enabled() and self.gradient_checkpointing:
+            for i, block in enumerate(self.blocks):
+                with nvtx_range(f"WanTransformer3DModel.forward.block[{i}].forward()"):
+                    hidden_states = self._gradient_checkpointing_func(
+                        block, hidden_states, encoder_hidden_states,
+                        timestep_proj, freqs_cis, original_seq_len)
         else:
-            # if teacache is enabled, we need to cache the original hidden states
-            if enable_teacache:
-                original_hidden_states = hidden_states.clone()
-
-            if torch.is_grad_enabled() and self.gradient_checkpointing:
-                for i, block in enumerate(self.blocks):
-                    with nvtx_range(f"WanTransformer3DModel.forward.block[{i}].forward()"):
-                        hidden_states = self._gradient_checkpointing_func(
-                            block, hidden_states, encoder_hidden_states,
-                            timestep_proj, freqs_cis, attention_mask)
-            else:
-                for i, block in enumerate(self.blocks):
-                    with nvtx_range(f"WanTransformer3DModel.forward.block[{i}].forward()"):
-                        hidden_states = block(hidden_states, encoder_hidden_states,
-                                                timestep_proj, freqs_cis, attention_mask)
-            # if teacache is enabled, we need to cache the original hidden states
-
-            if enable_teacache:
-                self.maybe_cache_states(hidden_states, original_hidden_states)
+            for i, block in enumerate(self.blocks):
+                with nvtx_range(f"WanTransformer3DModel.forward.block[{i}].forward()"):
+                    hidden_states = block(hidden_states, encoder_hidden_states,
+                                          timestep_proj, freqs_cis, original_seq_len)
         # 5. Output norm, projection & unpatchify
         if temb.dim() == 3:
             # batch_size, seq_len, inner_dim (wan 2.2 ti2v)
