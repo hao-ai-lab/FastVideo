@@ -580,6 +580,100 @@ class WanModel(ModelBase):
     def _get_transformer(self, timestep: torch.Tensor) -> torch.nn.Module:
         return self.transformer
 
+    # ------------------------------------------------------------------
+    # RL pipeline primitives
+    # ------------------------------------------------------------------
+
+    def forward_transformer_raw(
+        self,
+        latents: torch.Tensor,
+        timestep: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+    ) -> torch.Tensor:
+        """Direct transformer forward for RL pipelines.
+
+        Bypasses batch preparation / attention-metadata.
+        Uses dense attention (attn_metadata=None).
+
+        Args:
+            latents: (B, C, T, H, W) in diffusion space.
+            timestep: (B,) or scalar timestep.
+            encoder_hidden_states: (B, L, D) text embeddings.
+
+        Returns:
+            Model output tensor (B, C, T, H, W).
+        """
+        dtype = self._get_training_dtype()
+        device_type = self.device.type
+        with (
+            torch.autocast(device_type, dtype=dtype),
+            set_forward_context(
+                current_timestep=timestep,
+                attn_metadata=None,
+            ),
+        ):
+            output = self.transformer(
+                hidden_states=latents.to(dtype),
+                timestep=timestep,
+                encoder_hidden_states=(
+                    encoder_hidden_states.to(dtype)
+                ),
+                return_dict=False,
+            )
+        return output
+
+    def decode_latents(
+        self,
+        latents: torch.Tensor,
+    ) -> torch.Tensor:
+        """Decode latents to pixel-space video.
+
+        Denormalizes from flow diffusion space and passes
+        through the VAE decoder.
+
+        Args:
+            latents: (B, C, T, H, W) denoised latents.
+
+        Returns:
+            Video tensor (B, 3, T_out, H_out, W_out)
+            in [0, 1] range.
+        """
+        vae = self.vae
+        vae_config = vae.config
+        z_dim = getattr(vae_config, "z_dim", 16)
+
+        latents_mean = (
+            torch.tensor(vae_config.latents_mean)
+            .view(1, z_dim, 1, 1, 1)
+            .to(latents.device, latents.dtype)
+        )
+        latents_std_inv = (
+            1.0
+            / torch.tensor(vae_config.latents_std).view(
+                1, z_dim, 1, 1, 1
+            )
+        ).to(latents.device, latents.dtype)
+        latents = latents / latents_std_inv + latents_mean
+
+        # Decode one sample at a time.
+        vae_dtype = next(vae.parameters()).dtype
+        videos = []
+        with torch.no_grad():
+            for idx in range(latents.shape[0]):
+                decoded = vae.decode(
+                    latents[idx : idx + 1].to(vae_dtype)
+                )
+                if isinstance(decoded, tuple):
+                    decoded = decoded[0]
+                videos.append(decoded.float())
+        video = torch.cat(videos, dim=0)
+
+        # Normalize to [0, 1].
+        video = (video / 2 + 0.5).clamp(0, 1)
+        return video
+
+    # ------------------------------------------------------------------
+
     def _get_uncond_text_dict(
         self,
         batch: TrainingBatch,
