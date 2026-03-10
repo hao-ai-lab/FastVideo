@@ -591,5 +591,5 @@ fastvideo/train/
   rationale, model/method abstractions, and open questions.
 - [Training Overview](overview.md) — data requirements and preprocessing.
 - [Data Preprocessing](data_preprocess.md) — how to prepare datasets.
-- [Config Reference](../../examples/train/example.yaml) — fully-commented
+- [Config Reference](../../examples/train/configs/example.yaml) — fully-commented
   YAML config with all fields and defaults.

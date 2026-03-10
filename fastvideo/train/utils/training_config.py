@@ -67,13 +67,6 @@ class TrackerConfig:
 
 
 @dataclass(slots=True)
-class VSAConfig:
-    sparsity: float = 0.0
-    decay_rate: float = 0.0
-    decay_interval_steps: int = 0
-
-
-@dataclass(slots=True)
 class ModelTrainingConfig:
     weighting_scheme: str = "uniform"
     logit_mean: float = 0.0
@@ -92,7 +85,7 @@ class TrainingConfig:
     loop: TrainingLoopConfig = field(default_factory=TrainingLoopConfig)
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
-    vsa: VSAConfig = field(default_factory=VSAConfig)
+    vsa_sparsity: float = 0.0
     model: ModelTrainingConfig = field(default_factory=ModelTrainingConfig)
     pipeline_config: PipelineConfig | None = None
     model_path: str = ""

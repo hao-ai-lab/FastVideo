@@ -31,8 +31,8 @@ class GradNormClipCallback(Callback):
     def __init__(
         self,
         *,
-        max_grad_norm: float = 0.0,
-        log_grad_norms: bool = False,
+        max_grad_norm: float = 1.0,
+        log_grad_norms: bool = True,
     ) -> None:
         self._max_grad_norm = float(max_grad_norm)
         self._log_grad_norms = bool(log_grad_norms)

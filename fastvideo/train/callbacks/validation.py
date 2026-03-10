@@ -361,7 +361,7 @@ class ValidationCallback(Callback):
             generator=self.validation_random_generator,
             n_tokens=n_tokens,
             eta=0.0,
-            VSA_sparsity=tc.vsa.sparsity,
+            VSA_sparsity=tc.vsa_sparsity,
             timesteps=sampling_timesteps_tensor,
         )
         batch._inference_args = inference_args  # type: ignore[attr-defined]

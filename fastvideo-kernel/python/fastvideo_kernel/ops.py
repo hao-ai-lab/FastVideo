@@ -1,20 +1,15 @@
 import math
 import torch
 from .block_sparse_attn import block_sparse_attn
-from .triton_kernels.block_sparse_attn_triton import triton_block_sparse_attn_forward
 from .triton_kernels.st_attn_triton import sliding_tile_attention_triton
-from .triton_kernels.index import map_to_index
 
 # Try to load the C++ extension
 try:
     from fastvideo_kernel._C import fastvideo_kernel_ops
     sta_fwd = getattr(fastvideo_kernel_ops, "sta_fwd", None)
-    block_sparse_fwd = getattr(fastvideo_kernel_ops, "block_sparse_fwd", None)
-    block_sparse_bwd = getattr(fastvideo_kernel_ops, "block_sparse_bwd", None)
 except ImportError:
     sta_fwd = None
-    block_sparse_fwd = None
-    block_sparse_bwd = None
+
 
 def sliding_tile_attention(
     q: torch.Tensor,
@@ -135,14 +130,8 @@ def video_sparse_attn(
     mask = torch.zeros_like(scores,
                             dtype=torch.bool).scatter_(-1, topk_idx, True)
 
-    idx, num = map_to_index(mask)
-    
-    if block_sparse_fwd is not None:
-        # Use autograd-enabled wrapper so backward works (and still uses SM90 kernel when available)
-        out_s = block_sparse_attn(q, k, v, mask, variable_block_sizes)[0]
-    else:
-        # Triton-only forward (kept for environments without the wrapper deps)
-        out_s, _ = triton_block_sparse_attn_forward(q, k, v, idx, num, variable_block_sizes)
+    # out_s = block_sparse_attn(q, k, v, mask, variable_block_sizes)[0]
+    out_s = block_sparse_attn(q, k, v, mask, variable_block_sizes)[0]
 
     if compress_attn_weight is not None:
         return out_c * compress_attn_weight + out_s
