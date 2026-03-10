@@ -12,7 +12,6 @@ import torch
 import fastvideo.envs as envs
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.distributed import (
-    get_local_torch_device,
     get_sp_group,
     get_world_group,
 )
@@ -98,7 +97,6 @@ class WanModel(ModelBase):
 
         self.world_group: Any = None
         self.sp_group: Any = None
-        self.device: Any = get_local_torch_device()
 
         self.negative_prompt_embeds: (torch.Tensor | None) = None
         self.negative_prompt_attention_mask: (torch.Tensor | None) = None
