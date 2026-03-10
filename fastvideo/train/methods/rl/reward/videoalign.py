@@ -5,6 +5,7 @@ text-video alignment."""
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from typing import Any
 
@@ -17,6 +18,14 @@ from fastvideo.train.methods.rl.reward.utils import (
 )
 
 logger = init_logger(__name__)
+
+# Add VideoAlign submodule to path for importing.
+_VIDEOALIGN_ROOT = os.path.join(
+    os.path.dirname(__file__), "VideoAlign"
+)
+if os.path.isdir(_VIDEOALIGN_ROOT):
+    if _VIDEOALIGN_ROOT not in sys.path:
+        sys.path.insert(0, _VIDEOALIGN_ROOT)
 
 # Global cache of VideoAlign inferencers.
 _VIDEOALIGN_INFERENCERS: dict[str, Any] = {}
@@ -46,22 +55,32 @@ def _get_inferencer(
     checkpoint_path: str | None = None,
 ):
     """Get or create VideoAlign inferencer."""
+    if checkpoint_path is None:
+        checkpoint_path = os.path.join(
+            os.path.dirname(__file__),
+            "..", "..", "..", "..", "..",
+            "data", "VideoReward",
+        )
+    checkpoint_path = os.path.abspath(checkpoint_path)
+
     key = _normalize_device_str(device)
-    cache_key = f"{checkpoint_path or 'default'}:{key}"
+    cache_key = f"{checkpoint_path}:{key}"
     if cache_key not in _VIDEOALIGN_INFERENCERS:
         try:
-            from videoalign import VideoAlignInferencer
+            from inference import VideoVLMRewardInference
         except ImportError as exc:
             msg = (
-                "videoalign not installed. "
-                "Install from VideoAlign repo."
+                "VideoAlign not found. Ensure the "
+                "VideoAlign submodule is checked out "
+                "under fastvideo/train/methods/rl/"
+                "reward/VideoAlign"
             )
             raise ImportError(msg) from exc
 
-        kwargs = {"device": device}
-        if checkpoint_path:
-            kwargs["checkpoint_path"] = checkpoint_path
-        inf = VideoAlignInferencer(**kwargs)
+        inf = VideoVLMRewardInference(
+            load_from_pretrained=checkpoint_path,
+            device=device,
+        )
         inf._key_prefix = checkpoint_path or "default"
         _VIDEOALIGN_INFERENCERS[cache_key] = inf
     return _VIDEOALIGN_INFERENCERS[cache_key]

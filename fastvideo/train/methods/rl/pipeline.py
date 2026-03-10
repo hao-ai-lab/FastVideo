@@ -98,16 +98,30 @@ def wan_denoising_with_logprob(
     latent_h = height // vae_scale_spatial
     latent_w = width // vae_scale_spatial
 
-    latents = torch.randn(
-        batch_size,
-        num_channels,
-        latent_frames,
-        latent_h,
-        latent_w,
-        generator=generator,
-        device=device,
-        dtype=torch.float32,
+    latent_shape = (
+        1, num_channels, latent_frames, latent_h, latent_w,
     )
+    if isinstance(generator, list):
+        latents = torch.cat([
+            torch.randn(
+                *latent_shape,
+                generator=generator[i],
+                device=device,
+                dtype=torch.float32,
+            )
+            for i in range(batch_size)
+        ])
+    else:
+        latents = torch.randn(
+            batch_size,
+            num_channels,
+            latent_frames,
+            latent_h,
+            latent_w,
+            generator=generator,
+            device=device,
+            dtype=torch.float32,
+        )
 
     # Setup scheduler.
     scheduler.set_timesteps(

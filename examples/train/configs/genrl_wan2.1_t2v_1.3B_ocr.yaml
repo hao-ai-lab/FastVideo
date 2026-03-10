@@ -1,14 +1,9 @@
-# GenRL / Video GRPO: Wan 2.1 T2V 1.3B with LongCat reweighting.
-#
-# Ported from GenRL/config/longcat.yaml.
-#
-# - Student:   trainable (LoRA or full finetune)
-# - Reference: frozen copy for KL penalty (optional, only for full finetune with beta > 0)
+# GenRL / Video GRPO: Wan 2.1 T2V 1.3B — OCR reward, full finetune, 4 GPUs.
 #
 # Usage:
-#   torchrun --nnodes=1 --nproc_per_node=8 \
+#   torchrun --nnodes=1 --nproc_per_node=4 \
 #     fastvideo/train/entrypoint/train.py \
-#     --config examples/train/configs/genrl_wan2.1_t2v_1.3B_longcat.yaml
+#     --config examples/train/configs/genrl_wan2.1_t2v_1.3B_ocr.yaml
 
 models:
   student:
@@ -22,15 +17,12 @@ method:
 
   # ---- Reward functions ----
   reward_fn:
-    hpsv3_general: 1.0
-    hpsv3_percentile: 1.0
-    videoalign_mq: 1.0
-    videoalign_ta: 1.0
+    video_ocr: 1.0
   reward_module: null
 
   # ---- Data ----
-  prompt_dataset_path: data/filtered_prompts
-  prompt_fn: filtered_prompts
+  prompt_dataset_path: data/ocr
+  prompt_fn: general_ocr
 
   # ---- Sampling ----
   sample_batch_size: 4
@@ -61,7 +53,7 @@ method:
   beta: 3.0e-4
   use_cfg: true
   loss_reweighting: longcat
-  weight_advantages: true
+  weight_advantages: false
   max_grad_norm: 1.0
   seed: 42
 
@@ -72,16 +64,13 @@ method:
 
 training:
   distributed:
-  
     num_gpus: 4
     sp_size: 1
     tp_size: 1
-    hsdp_replicate_dim: 4
-    hsdp_shard_dim: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
 
   data:
-    # Not used by GenRL (prompt dataloaders are in method config)
-    # but required by the config parser.
     data_path: ""
     train_batch_size: 1
     seed: 42
@@ -97,18 +86,17 @@ training:
     lr_warmup_steps: 0
 
   loop:
-    # max_train_steps == num_epochs in GenRL terms.
     max_train_steps: 100000
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: outputs/genrl_longcat
+    output_dir: outputs/genrl_ocr
     training_state_checkpointing_steps: 100
     checkpoints_total_limit: 3
 
   tracker:
     project_name: VideoRL
-    run_name: wan_2_1_t2v_1_3b_longcat
+    run_name: wan_2_1_t2v_1_3b_ocr
 
   model:
     enable_gradient_checkpointing_type: full
