@@ -140,18 +140,6 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/**"
-                - "fastvideo-kernel/**"
-                - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
-              config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Inference Tests STA"
-                env:
-                  - TEST_TYPE=inference_sta
-                agents:
-                  queue: "default"
-            - path:
                 - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
@@ -181,6 +169,37 @@ steps:
                 label: "Unit Tests"
                 env:
                   - TEST_TYPE=unit_test
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/models/dits/**"
+                - "fastvideo/pipelines/**"
+                - "fastvideo/attention/**"
+                - "fastvideo/layers/**"
+                - "fastvideo/worker/**"
+                - "fastvideo/entrypoints/**"
+                - "fastvideo/tests/performance/**"
+                - ".buildkite/performance-benchmarks/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                label: "Performance Tests"
+                env:
+                  - TEST_TYPE=performance
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/entrypoints/openai/**"
+                - "fastvideo/entrypoints/cli/serve.py"
+                - "fastvideo/tests/entrypoints/test_openai_api_integration.py"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                label: "API Server Tests"
+                env:
+                  - TEST_TYPE=api_server
                 agents:
                   queue: "default"
             # - path:

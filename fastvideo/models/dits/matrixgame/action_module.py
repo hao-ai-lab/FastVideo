@@ -95,7 +95,7 @@ def _update_kv_cache_and_attend(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
-    kv_cache: dict[str, torch.Tensor],
+    kv_cache: dict[str, torch.Tensor | int],
     attn_layer: LocalAttention,
     start_frame: int,
     num_frame_per_block: int,
@@ -139,15 +139,26 @@ def _update_kv_cache_and_attend(
     kv_cache_size = kv_cache["k"].shape[1]
     num_new_tokens = k.shape[1] if use_k_for_num_tokens else q.shape[1]
 
+    original_global_end_index = (
+        int(kv_cache["global_end_index"].item())
+        if isinstance(kv_cache["global_end_index"], torch.Tensor)
+        else int(kv_cache["global_end_index"])
+    )
+    original_local_end_index = (
+        int(kv_cache["local_end_index"].item())
+        if isinstance(kv_cache["local_end_index"], torch.Tensor)
+        else int(kv_cache["local_end_index"])
+    )
+
     # Check if we need to evict tokens
-    if (current_end > kv_cache["global_end_index"].item()) and (
-        num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size
+    if (current_end > original_global_end_index) and (
+        num_new_tokens + original_local_end_index > kv_cache_size
     ):
         num_evicted_tokens = (
-            num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
+            num_new_tokens + original_local_end_index - kv_cache_size
         )
         num_rolled_tokens = (
-            kv_cache["local_end_index"].item()
+            original_local_end_index
             - num_evicted_tokens
             - sink_tokens
         )
@@ -171,18 +182,18 @@ def _update_kv_cache_and_attend(
         )
         # Calculate indices with eviction adjustment
         local_end_index = (
-            kv_cache["local_end_index"].item()
+            original_local_end_index
             + current_end
-            - kv_cache["global_end_index"].item()
+            - original_global_end_index
             - num_evicted_tokens
         )
         local_start_index = local_end_index - num_new_tokens
     else:
         # Calculate indices without eviction
         local_end_index = (
-            kv_cache["local_end_index"].item()
+            original_local_end_index
             + current_end
-            - kv_cache["global_end_index"].item()
+            - original_global_end_index
         )
         local_start_index = local_end_index - num_new_tokens
 
@@ -206,8 +217,14 @@ def _update_kv_cache_and_attend(
     attn = attn_layer(q, cached_k, cached_v)
 
     # Update indices
-    kv_cache["global_end_index"].fill_(current_end)
-    kv_cache["local_end_index"].fill_(local_end_index)
+    if isinstance(kv_cache["global_end_index"], torch.Tensor):
+        kv_cache["global_end_index"].fill_(current_end)
+    else:
+        kv_cache["global_end_index"] = current_end
+    if isinstance(kv_cache["local_end_index"], torch.Tensor):
+        kv_cache["local_end_index"].fill_(local_end_index)
+    else:
+        kv_cache["local_end_index"] = local_end_index
 
     return attn
 

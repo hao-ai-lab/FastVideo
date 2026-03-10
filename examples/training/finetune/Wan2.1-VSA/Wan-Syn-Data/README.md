@@ -6,9 +6,7 @@ These are e2e example scripts for finetuning Wan2.1 T2V with VSA to accelerate i
 
 ## Make sure you have installed VSA
 
-```bash
-pip install vsa
-```
+Go to fastvideo-kernel/README.md for instructions.
 
 ### Download the synthetic dataset:
 

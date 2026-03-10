@@ -86,8 +86,10 @@ class ComponentLoader(ABC):
             "vocoder": (VocoderLoader, "diffusers"),
             "text_encoder": (TextEncoderLoader, "transformers"),
             "text_encoder_2": (TextEncoderLoader, "transformers"),
+            "text_encoder_3": (TextEncoderLoader, "transformers"),
             "tokenizer": (TokenizerLoader, "transformers"),
             "tokenizer_2": (TokenizerLoader, "transformers"),
+            "tokenizer_3": (TokenizerLoader, "transformers"),
             "image_processor": (ImageProcessorLoader, "transformers"),
             "feature_extractor": (ImageProcessorLoader, "transformers"),
             "image_encoder": (ImageEncoderLoader, "transformers"),
@@ -292,23 +294,26 @@ class TextEncoderLoader(ComponentLoader):
                 pass
         logger.info("HF Model config: %s", model_config)
 
-        # @TODO(Wei): Better way to handle this?
-        try:
-            encoder_config = (
-                fastvideo_args.pipeline_config.text_encoder_configs[0]
+        base = os.path.basename(os.path.normpath(model_path))
+        idx = 0
+        if base.startswith("text_encoder_"):
+            try:
+                idx = int(base.split("_")[-1]) - 1
+            except Exception:
+                idx = 0
+        encoder_configs = fastvideo_args.pipeline_config.text_encoder_configs
+        encoder_precisions = fastvideo_args.pipeline_config.text_encoder_precisions
+        if idx < 0 or idx >= len(encoder_configs):
+            raise IndexError(
+                f"text encoder index {idx} out of range for text_encoder_configs (len={len(encoder_configs)}), model_path={model_path}"
             )
-            encoder_config.update_model_arch(model_config)
-            encoder_precision = (
-                fastvideo_args.pipeline_config.text_encoder_precisions[0]
+        encoder_config = encoder_configs[idx]
+        encoder_config.update_model_arch(model_config)
+        if idx < 0 or idx >= len(encoder_precisions):
+            raise IndexError(
+                f"text encoder index {idx} out of range for text_encoder_precisions (len={len(encoder_precisions)}), model_path={model_path}"
             )
-        except Exception:
-            encoder_config = (
-                fastvideo_args.pipeline_config.text_encoder_configs[1]
-            )
-            encoder_config.update_model_arch(model_config)
-            encoder_precision = (
-                fastvideo_args.pipeline_config.text_encoder_precisions[1]
-            )
+        encoder_precision = encoder_precisions[idx]
 
         target_device = get_local_torch_device()
         # TODO(will): add support for other dtypes
@@ -362,7 +367,16 @@ class TextEncoderLoader(ComponentLoader):
             with target_device:
                 architectures = getattr(model_config, "architectures", [])
                 model_cls, _ = ModelRegistry.resolve_model_cls(architectures)
-                model: TextEncoder = model_cls(model_config)  # type: ignore
+                if getattr(model_cls, "supports_hf_from_pretrained", False):
+                    model = model_cls.from_pretrained_local(  # type: ignore[attr-defined]
+                        model_path,
+                        model_config,  # type: ignore[arg-type]
+                        dtype=PRECISION_TO_TYPE[dtype],
+                        device=target_device,
+                    )
+                    return model.eval()
+
+                model = model_cls(model_config)  # type: ignore
 
             weights_to_load = {name for name, _ in model.named_parameters()}
             if (
@@ -504,10 +518,25 @@ class TokenizerLoader(ComponentLoader):
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the tokenizer based on the model path, and inference args."""
         logger.info("Loading tokenizer from %s", model_path)
+        resolved_model_path = model_path
+
+        # LTX2 checkpoints may not ship a top-level tokenizer/ directory.
+        # In that case, tokenizer assets live under text_encoder/gemma/.
+        if not os.path.isdir(resolved_model_path):
+            ltx2_gemma_path = os.path.normpath(
+                os.path.join(resolved_model_path, "..", "text_encoder",
+                             "gemma"))
+            if os.path.isdir(ltx2_gemma_path):
+                logger.info(
+                    "Tokenizer directory %s missing; falling back to %s",
+                    resolved_model_path,
+                    ltx2_gemma_path,
+                )
+                resolved_model_path = ltx2_gemma_path
 
         # Cosmos2.5 stores an AutoProcessor config in `tokenizer/config.json` (not a tokenizer
         # config). Use its `_name_or_path` (e.g. Qwen/Qwen2.5-VL-7B-Instruct) as the source.
-        tokenizer_cfg_path = os.path.join(model_path, "config.json")
+        tokenizer_cfg_path = os.path.join(resolved_model_path, "config.json")
         if os.path.exists(tokenizer_cfg_path):
             try:
                 with open(tokenizer_cfg_path, "r") as f:
@@ -533,10 +562,11 @@ class TokenizerLoader(ComponentLoader):
                 pass
 
         tokenizer = AutoTokenizer.from_pretrained(
-            model_path,  # "<path to model>/tokenizer"
+            resolved_model_path,  # "<path to model>/tokenizer"
             # in v0, this was same string as encoder_name "ClipTextModel"
             # TODO(will): pass these tokenizer kwargs from inference args? Maybe
             # other method of config?
+            local_files_only=os.path.isdir(resolved_model_path),
         )
         padding_side = None
         if hasattr(fastvideo_args.pipeline_config, "text_encoder_configs"):
@@ -659,7 +689,10 @@ class VAELoader(ComponentLoader):
                         break
             loaded = remapped
 
-        vae.load_state_dict(loaded, strict=False)
+        # Diffusers-format AutoencoderKL checkpoints should match exactly; load
+        # strictly so missing/unexpected keys are surfaced early.
+        strict_load = class_name == "AutoencoderKL"
+        vae.load_state_dict(loaded, strict=strict_load)
 
         return vae.eval()
 
@@ -879,10 +912,6 @@ class SchedulerLoader(ComponentLoader):
         scheduler = scheduler_cls(**config)
         if fastvideo_args.pipeline_config.flow_shift is not None:
             scheduler.set_shift(fastvideo_args.pipeline_config.flow_shift)
-        if fastvideo_args.pipeline_config.timesteps_scale is not None:
-            scheduler.set_timesteps_scale(
-                fastvideo_args.pipeline_config.timesteps_scale
-            )
         return scheduler
 
 

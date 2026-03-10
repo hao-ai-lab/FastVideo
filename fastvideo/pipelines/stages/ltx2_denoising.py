@@ -11,6 +11,9 @@ import os
 import torch
 from tqdm.auto import tqdm
 
+import fastvideo.envs as envs
+from fastvideo.attention.backends.video_sparse_attn import (
+    VideoSparseAttentionMetadataBuilder)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -23,6 +26,7 @@ from fastvideo.models.dits.ltx2 import (
     DEFAULT_LTX2_AUDIO_DOWNSAMPLE, DEFAULT_LTX2_AUDIO_HOP_LENGTH,
     DEFAULT_LTX2_AUDIO_MEL_BINS, DEFAULT_LTX2_AUDIO_SAMPLE_RATE,
     VideoLatentShape)
+from fastvideo.utils import is_vsa_available
 
 BASE_SHIFT_ANCHOR = 1024
 MAX_SHIFT_ANCHOR = 4096
@@ -34,6 +38,11 @@ DISTILLED_SIGMA_VALUES = [
 ]
 
 logger = init_logger(__name__)
+
+try:
+    vsa_available = is_vsa_available()
+except ImportError:
+    vsa_available = False
 
 
 def _ltx2_sigmas(
@@ -100,8 +109,9 @@ class LTX2DenoisingStage(PipelineStage):
         neg_prompt_mask = None
         # Only load negative prompts if CFG is actually enabled
         if batch.do_classifier_free_guidance:
-            assert batch.negative_prompt_embeds is not None, (
-                "CFG is enabled but negative_prompt_embeds is None")
+            if not batch.negative_prompt_embeds:
+                raise ValueError(
+                    "CFG is enabled but negative_prompt_embeds is empty")
             neg_prompt_embeds = batch.negative_prompt_embeds[0]
 
         # Ensure text conditioning is on the same device as latents.
@@ -141,6 +151,7 @@ class LTX2DenoisingStage(PipelineStage):
                 video_shape)
         else:
             token_count = 1
+
         timestep_template = torch.ones(
             (latents.shape[0], token_count),
             device=latents.device,
@@ -209,15 +220,51 @@ class LTX2DenoisingStage(PipelineStage):
                 device=latents.device,
                 dtype=torch.float32,
             )
+        # Multi-modal CFG parameters (per-stream scales).
+        cfg_scale_video = batch.ltx2_cfg_scale_video
+        cfg_scale_audio = batch.ltx2_cfg_scale_audio
+        modality_scale_video = batch.ltx2_modality_scale_video
+        modality_scale_audio = batch.ltx2_modality_scale_audio
+        rescale_scale = batch.ltx2_rescale_scale
+        # STG (Spatio-Temporal Guidance) parameters.
+        stg_scale_video = batch.ltx2_stg_scale_video
+        stg_scale_audio = batch.ltx2_stg_scale_audio
+        stg_blocks_video = batch.ltx2_stg_blocks_video
+        stg_blocks_audio = batch.ltx2_stg_blocks_audio
+        do_stg_video = stg_scale_video != 0.0
+        do_stg_audio = stg_scale_audio != 0.0
+        do_stg = do_stg_video or do_stg_audio
+        do_cfg_text = (cfg_scale_video != 1.0 or cfg_scale_audio != 1.0)
+        do_mod = (modality_scale_video != 1.0 or modality_scale_audio != 1.0)
+        do_guidance = do_cfg_text or do_mod or do_stg
+
+        if do_cfg_text and neg_prompt_embeds is None:
+            raise ValueError("LTX-2 text CFG is enabled "
+                             "(ltx2_cfg_scale_video/audio != 1.0), "
+                             "but negative prompt embeddings are missing")
+
         logger.info(
-            "[LTX2] Denoising start: steps=%d dtype=%s guidance=%s "
+            "[LTX2] Denoising start: steps=%d dtype=%s "
+            "cfg_video=%.1f cfg_audio=%.1f mod_video=%.1f "
+            "mod_audio=%.1f rescale=%.2f "
+            "stg_video=%.1f stg_audio=%.1f "
             "sigmas_shape=%s latents_shape=%s",
             batch.num_inference_steps,
             target_dtype,
-            batch.guidance_scale,
+            cfg_scale_video,
+            cfg_scale_audio,
+            modality_scale_video,
+            modality_scale_audio,
+            rescale_scale,
+            stg_scale_video,
+            stg_scale_audio,
             tuple(sigmas.shape),
             tuple(latents.shape),
         )
+        use_vsa = (vsa_available
+                   and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN")
+        vsa_metadata_builder = (VideoSparseAttentionMetadataBuilder()
+                                if use_vsa else None)
 
         for step_index in tqdm(range(len(sigmas) - 1)):
             sigma = sigmas[step_index]
@@ -225,6 +272,16 @@ class LTX2DenoisingStage(PipelineStage):
             timestep = timestep_template * sigma
             audio_timestep = (audio_timestep_template * sigma
                               if audio_timestep_template is not None else None)
+            attn_metadata = None
+            if vsa_metadata_builder is not None:
+                attn_metadata = vsa_metadata_builder.build(
+                    current_timestep=step_index,
+                    raw_latent_shape=latents.shape[2:5],
+                    patch_size=fastvideo_args.pipeline_config.dit_config.
+                    patch_size,
+                    VSA_sparsity=fastvideo_args.VSA_sparsity,
+                    device=latents.device,
+                )
 
             with torch.autocast(
                     device_type="cuda",
@@ -232,9 +289,10 @@ class LTX2DenoisingStage(PipelineStage):
                     enabled=autocast_enabled,
             ), set_forward_context(
                     current_timestep=sigma.item(),
-                    attn_metadata=None,
+                    attn_metadata=attn_metadata,
                     forward_batch=batch,
             ):
+                # Pass 1: Full conditioning (text + cross-modal)
                 pos_outputs = self.transformer(
                     hidden_states=latents.to(target_dtype),
                     encoder_hidden_states=prompt_embeds,
@@ -250,27 +308,96 @@ class LTX2DenoisingStage(PipelineStage):
                     pos_denoised = pos_outputs
                     pos_audio = None
 
-                # Only run negative pass if CFG is enabled
-                if batch.do_classifier_free_guidance:
-                    neg_outputs = self.transformer(
-                        hidden_states=latents.to(target_dtype),
-                        encoder_hidden_states=neg_prompt_embeds,
-                        encoder_attention_mask=neg_prompt_mask,
-                        timestep=timestep,
-                        audio_hidden_states=audio_latents,
-                        audio_encoder_hidden_states=audio_context_n,
-                        audio_timestep=audio_timestep,
-                    )
-                    if isinstance(neg_outputs, tuple):
-                        neg_denoised, neg_audio = neg_outputs
-                    else:
-                        neg_denoised = neg_outputs
-                        neg_audio = None
-                    pos_denoised = pos_denoised + (batch.guidance_scale - 1) * (
-                        pos_denoised - neg_denoised)
-                    if pos_audio is not None and neg_audio is not None:
-                        pos_audio = pos_audio + (batch.guidance_scale -
-                                                 1) * (pos_audio - neg_audio)
+                if do_guidance:
+                    # Defaults: (pos - pos) = 0 under each scale.
+                    neg_denoised = pos_denoised
+                    neg_audio = pos_audio
+                    mod_denoised = pos_denoised
+                    mod_audio = pos_audio
+                    ptb_denoised = pos_denoised
+                    ptb_audio = pos_audio
+
+                    # Pass 2: text CFG (negative prompt)
+                    if do_cfg_text:
+                        neg_outputs = self.transformer(
+                            hidden_states=latents.to(target_dtype),
+                            encoder_hidden_states=neg_prompt_embeds,
+                            encoder_attention_mask=neg_prompt_mask,
+                            timestep=timestep,
+                            audio_hidden_states=audio_latents,
+                            audio_encoder_hidden_states=audio_context_n,
+                            audio_timestep=audio_timestep,
+                        )
+                        if isinstance(neg_outputs, tuple):
+                            neg_denoised, neg_audio = neg_outputs
+                        else:
+                            neg_denoised = neg_outputs
+
+                    # Pass 3: Modality-isolated (skip cross-modal
+                    # attn)
+                    if do_mod:
+                        mod_outputs = self.transformer(
+                            hidden_states=latents.to(target_dtype),
+                            encoder_hidden_states=prompt_embeds,
+                            encoder_attention_mask=prompt_mask,
+                            timestep=timestep,
+                            audio_hidden_states=audio_latents,
+                            audio_encoder_hidden_states=audio_context_p,
+                            audio_timestep=audio_timestep,
+                            skip_cross_modal_attn=True,
+                        )
+                        if isinstance(mod_outputs, tuple):
+                            mod_denoised, mod_audio = mod_outputs
+                        else:
+                            mod_denoised = mod_outputs
+
+                    # Pass 4: STG perturbed (skip self-attn in
+                    # specified blocks)
+                    if do_stg:
+                        ptb_outputs = self.transformer(
+                            hidden_states=latents.to(target_dtype),
+                            encoder_hidden_states=prompt_embeds,
+                            encoder_attention_mask=prompt_mask,
+                            timestep=timestep,
+                            audio_hidden_states=audio_latents,
+                            audio_encoder_hidden_states=(audio_context_p),
+                            audio_timestep=audio_timestep,
+                            skip_video_self_attn_blocks=(
+                                stg_blocks_video if do_stg_video else None),
+                            skip_audio_self_attn_blocks=(
+                                stg_blocks_audio if do_stg_audio else None),
+                        )
+                        if isinstance(ptb_outputs, tuple):
+                            ptb_denoised, ptb_audio = ptb_outputs
+                        else:
+                            ptb_denoised = ptb_outputs
+
+                    # Multi-modal guidance formula per stream.
+                    vid = (pos_denoised + (cfg_scale_video - 1) *
+                           (pos_denoised - neg_denoised) +
+                           (modality_scale_video - 1) *
+                           (pos_denoised - mod_denoised) + stg_scale_video *
+                           (pos_denoised - ptb_denoised))
+                    aud = None
+                    if pos_audio is not None:
+                        aud = (pos_audio + (cfg_scale_audio - 1) *
+                               (pos_audio - neg_audio) +
+                               (modality_scale_audio - 1) *
+                               (pos_audio - mod_audio) + stg_scale_audio *
+                               (pos_audio - ptb_audio))
+
+                    # Guidance rescaling (prevents saturation).
+                    if rescale_scale > 0:
+                        f_v = pos_denoised.std() / vid.std()
+                        f_v = rescale_scale * f_v + (1 - rescale_scale)
+                        vid = vid * f_v
+                        if aud is not None:
+                            f_a = pos_audio.std() / aud.std()
+                            f_a = rescale_scale * f_a + (1 - rescale_scale)
+                            aud = aud * f_a
+
+                    pos_denoised = vid
+                    pos_audio = aud
 
             sigma_value = sigma.to(torch.float32) if isinstance(
                 sigma, torch.Tensor) else torch.tensor(
@@ -281,6 +408,7 @@ class LTX2DenoisingStage(PipelineStage):
             dt = sigma_next - sigma
             velocity = ((latents.float() - pos_denoised.float()) /
                         sigma_value).to(latents.dtype)
+
             latents = (latents.float() + velocity.float() * dt).to(
                 latents.dtype)
             if pos_audio is not None and audio_latents is not None:

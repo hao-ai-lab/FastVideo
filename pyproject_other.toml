@@ -65,7 +65,7 @@ dependencies = [
     "remote-pdb",
 
     # Kernel & Packaging
-    "fastvideo-kernel==0.2.5",
+    "fastvideo-kernel==0.2.6",
     "wheel",
 
     # Training Dependencies
@@ -75,7 +75,7 @@ dependencies = [
     "av",
 
     # Preprocessing Dependencies
-    "torchcodec==0.5.0",
+    "torchcodec",
     "ray>=2.49.1",
 ]
 
@@ -121,7 +121,7 @@ check_untyped_defs = true
 follow_imports = "silent"
 
 [tool.codespell]
-skip ="./data,./wandb,./csrc/sliding_tile_attention/tk"
+skip ="./data,./wandb"
 
 [tool.ruff]
 # Allow lines to be as long as 80.
@@ -157,11 +157,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"fastvideo/models/stepvideo/diffusion/video_pipeline.py" = ["F821"]
-"fastvideo/sample/call_remote_server_stepvideo.py" = ["E722"]
-"csrc/sliding_tile_attention/test/bench.py" = ["F841"]
-"fastvideo/models/stepvideo/__init__.py" = ["F403"]
-"fastvideo/models/stepvideo/utils/__init__.py" = ["F403"]
 # Ignore all files that end in `_test.py`.
 "fastvideo/models/hunyuan/diffusion/pipelines/pipeline_hunyuan_video.py" = ["E741"]
 

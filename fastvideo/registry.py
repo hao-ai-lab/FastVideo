@@ -18,13 +18,14 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.cosmos2_5 import Cosmos25Config
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
+from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
 from fastvideo.configs.pipelines.hunyuan15 import (
     Hunyuan15T2V480PConfig, Hunyuan15I2V480PStepDistilledConfig,
     Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig, Hunyuan15SR1080PConfig)
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
+from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.configs.pipelines.ltx2 import LTX2T2VConfig
-from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
     TurboDiffusionT2V_14B_Config,
@@ -45,6 +46,7 @@ from fastvideo.configs.pipelines.wan import (
     WanT2V480PConfig,
     WanT2V720PConfig,
 )
+from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.configs.sample.cosmos import (
     Cosmos_Predict2_2B_Video2World_SamplingParam, )
@@ -57,9 +59,10 @@ from fastvideo.configs.sample.hunyuan15 import (
     Hunyuan15_720P_SamplingParam, Hunyuan15_720P_Distilled_I2V_SamplingParam,
     Hunyuan15_SR_1080P_SamplingParam)
 from fastvideo.configs.sample.hyworld import HYWorld_SamplingParam
+from fastvideo.configs.sample.hunyuangamecraft import HunyuanGameCraftSamplingParam
+from fastvideo.configs.sample.lingbotworld import LingBotWorld_SamplingParam
 from fastvideo.configs.sample.ltx2 import (LTX2BaseSamplingParam,
                                            LTX2DistilledSamplingParam)
-from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 from fastvideo.configs.sample.turbodiffusion import (
     TurboDiffusionI2V_A14B_SamplingParam,
     TurboDiffusionT2V_14B_SamplingParam,
@@ -80,6 +83,8 @@ from fastvideo.configs.sample.wan import (
     WanT2V_14B_SamplingParam,
     WanT2V_1_3B_SamplingParam,
 )
+from fastvideo.configs.sample.sd35 import SD35SamplingParam
+
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index,
@@ -247,10 +252,11 @@ def _register_configs() -> None:
         hf_model_paths=[
             "Lightricks/LTX-2",
             "FastVideo/LTX2-base",
+            "FastVideo/LTX2-Diffusers",
         ],
         model_detectors=[
-            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower())
-            and "distilled" not in path.lower(),
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and
+            "distilled" not in path.lower(),
         ],
     )
     # LTX-2 (distilled)
@@ -261,7 +267,8 @@ def _register_configs() -> None:
             "FastVideo/LTX2-Distilled-Diffusers",
         ],
         model_detectors=[
-            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" in path.lower(),
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and
+            "distilled" in path.lower(),
         ],
     )
 
@@ -311,14 +318,18 @@ def _register_configs() -> None:
         ],
     )
 
-    # Hunyuan
+    # Hunyuan (excludes gamecraft, hyworld, and versioned models)
     register_configs(
         sampling_param_cls=HunyuanSamplingParam,
         pipeline_config_cls=HunyuanConfig,
         hf_model_paths=[
             "hunyuanvideo-community/HunyuanVideo",
         ],
-        model_detectors=[lambda path: "hunyuan" in path.lower()],
+        model_detectors=[
+            lambda path: "hunyuan" in path.lower()
+            and "gamecraft" not in path.lower() and "hyworld" not in path.lower(
+            ) and "1.5" not in path.lower() and "1-5" not in path.lower()
+        ],
     )
     register_configs(
         sampling_param_cls=FastHunyuanSamplingParam,
@@ -338,6 +349,28 @@ def _register_configs() -> None:
         model_detectors=[lambda path: "hyworld" in path.lower()],
     )
 
+    # HunyuanGameCraft
+    register_configs(
+        sampling_param_cls=HunyuanGameCraftSamplingParam,
+        pipeline_config_cls=HunyuanGameCraftPipelineConfig,
+        hf_model_paths=[
+            "FastVideo/HunyuanGameCraft-Diffusers",
+        ],
+        model_detectors=[lambda path: "gamecraft" in path.lower()],
+    )
+    # LingBotWorld
+    register_configs(
+        sampling_param_cls=LingBotWorld_SamplingParam,
+        pipeline_config_cls=LingBotWorldI2V480PConfig,
+        hf_model_paths=[
+            "FastVideo/LingBot-World-Base-Cam-Diffusers",
+        ],
+        model_detectors=[
+            lambda path:
+            ("lingbotworld" in path.lower() or "lingbot-world" in path.lower())
+        ],
+    )
+
     # LongCat
     register_configs(
         sampling_param_cls=None,
@@ -352,16 +385,6 @@ def _register_configs() -> None:
             lambda path: "longcatvideocontinuation" in path.lower(),
             lambda path: "longcat" in path.lower(),
         ],
-    )
-
-    # StepVideo
-    register_configs(
-        sampling_param_cls=StepVideoT2VSamplingParam,
-        pipeline_config_cls=StepVideoT2VConfig,
-        hf_model_paths=[
-            "FastVideo/stepvideo-t2v-diffusers",
-        ],
-        model_detectors=[lambda path: "stepvideo" in path.lower()],
     )
 
     # MatrixGame
@@ -533,6 +556,22 @@ def _register_configs() -> None:
         hf_model_paths=[
             "rand0nmr/SFWan2.2-T2V-A14B-Diffusers",
             "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers",
+        ],
+    )
+
+    # SD3.5
+    register_configs(
+        sampling_param_cls=SD35SamplingParam,
+        pipeline_config_cls=SD35Config,
+        hf_model_paths=[
+            "stabilityai/stable-diffusion-3.5-medium",
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in (
+                "sd35",
+                "stablediffusion3",
+                "stabilityai__stable-diffusion-3.5-medium",
+            )),
         ],
     )
 

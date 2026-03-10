@@ -20,11 +20,6 @@ from fastvideo.training.checkpointing_utils import (ModelWrapper,
                                                     RandomStateWrapper,
                                                     SchedulerWrapper)
 
-from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
-                                                  get_sp_world_size)
-from fastvideo.distributed.utils import (compute_padding_for_sp,
-                                         pad_sequence_tensor)
-
 logger = init_logger(__name__)
 
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
@@ -70,7 +65,8 @@ def gather_state_dict_on_cpu_rank0(
 def compute_density_for_timestep_sampling(
     weighting_scheme: str,
     batch_size: int,
-    generator,
+    generator: torch.Generator,
+    device: torch.device | str = "cpu",
     logit_mean: float | None = None,
     logit_std: float | None = None,
     mode_scale: float | None = None,
@@ -88,15 +84,15 @@ def compute_density_for_timestep_sampling(
             mean=logit_mean,
             std=logit_std,
             size=(batch_size, ),
-            device="cpu",
+            device=device,
             generator=generator,
         )
         u = torch.nn.functional.sigmoid(u)
     elif weighting_scheme == "mode":
-        u = torch.rand(size=(batch_size, ), device="cpu", generator=generator)
+        u = torch.rand(size=(batch_size, ), device=device, generator=generator)
         u = 1 - u - mode_scale * (torch.cos(math.pi * u / 2)**2 - 1 + u)
     else:
-        u = torch.rand(size=(batch_size, ), device="cpu", generator=generator)
+        u = torch.rand(size=(batch_size, ), device=device, generator=generator)
     return u
 
 
@@ -937,32 +933,6 @@ def normalize_dit_input(model_type, latents, vae) -> torch.Tensor:
         return latents
     else:
         raise NotImplementedError(f"model_type {model_type} not supported")
-
-
-def shard_latents_across_sp(latents: torch.Tensor) -> torch.Tensor:
-    sp_world_size = get_sp_world_size()
-    rank_in_sp_group = get_sp_parallel_rank()
-    if sp_world_size > 1:
-        # Shard on the flattened token axis (t*h*w) rather than raw `t`, so we
-        # don't require t % sp_world_size == 0. Pad on the flattened axis if needed.
-        assert latents.ndim == 5, f"Expected latents [b,c,t,h,w], got {latents.shape}"
-        b, c, t, h, w = latents.shape
-        latents = latents.reshape(b, c, t * h * w)
-
-        original_seq_len = latents.shape[2]
-        padded_seq_len, padding_amount = compute_padding_for_sp(
-            original_seq_len, sp_world_size)
-        if padding_amount > 0:
-            latents = pad_sequence_tensor(latents,
-                                          padded_seq_len,
-                                          seq_dim=2,
-                                          pad_value=0.0)
-
-        elements_per_rank = padded_seq_len // sp_world_size
-        start = rank_in_sp_group * elements_per_rank
-        end = (rank_in_sp_group + 1) * elements_per_rank
-        latents = latents[:, :, start:end].contiguous()
-    return latents
 
 
 def clip_grad_norm_while_handling_failing_dtensor_cases(

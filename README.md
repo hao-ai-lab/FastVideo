@@ -3,7 +3,7 @@
 </div>
 
 <p align="center">
-     | <a href="https://hao-ai-lab.github.io/FastVideo"><b>Documentation</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start/"><b> Quick Start</b></a> | <a href="https://github.com/hao-ai-lab/FastVideo/discussions/982"  target="_blank"><b>Weekly Dev Meeting</b></a>  | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-3f4lao1uq-u~Ipx6Lt4J27AlD2y~IdLQ" target="_blank"> <b>Slack</b> </a> |  🟣💬 <a href="https://ibb.co/sv3MMKyv" target="_blank"> <b> WeChat </b> </a> |
+     | <a href="https://hao-ai-lab.github.io/FastVideo"><b>Documentation</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start/"><b> Quick Start</b></a> | <a href="https://github.com/hao-ai-lab/FastVideo/discussions/982"  target="_blank"><b>Weekly Dev Meeting</b></a>  | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-3f4lao1uq-u~Ipx6Lt4J27AlD2y~IdLQ" target="_blank"> <b>Slack</b> </a> |  🟣💬 <a href="https://github.com/hao-ai-lab/FastVideo/discussions/1097" target="_blank"> <b> WeChat </b> </a> |
 </p>
 
 **FastVideo is a unified post-training and inference framework for accelerated video generation.**
@@ -40,19 +40,19 @@ FastVideo has the following features:
 - Diverse hardware and OS support
   - Support H100, A100, 4090
   - Support Linux, Windows, MacOS
-  - See this [page](https://hao-ai-lab.github.io/FastVideo/inference/hardware_support/) for full list of supported hardware and OS.
+  - See this [page](https://hao-ai-lab.github.io/FastVideo/inference/support_matrix/) for full list of supported models, hardware assumptions, and optimization compatibility.
 
 ## Getting Started
 
-We recommend using an environment manager such as `Conda` to create a clean environment:
+We recommend using [uv](https://docs.astral.sh/uv/) to create a clean environment. If you previously used Conda, switching to uv generally gives faster and more stable installs.
 
 ```bash
-# Create and activate a new conda environment
-conda create -n fastvideo python=3.12
-conda activate fastvideo
+# Create and activate a new uv environment
+uv venv --python 3.12 --seed
+source .venv/bin/activate
 
 # Install FastVideo
-pip install fastvideo
+uv pip install fastvideo
 ```
 
 Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/) for more detailed installation instructions.
@@ -72,7 +72,7 @@ See below for recipes and datasets:
 
 ### Generating Your First Video
 
-Here's a minimal example to generate a video using the default settings. Make sure VSA kernels are [installed](https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation/). Create a file called `example.py` with the following code:
+Here's a minimal example to generate a video using the default settings. Make sure VSA kernels are [installed](https://hao-ai-lab.github.io/FastVideo/attention/vsa/#installation). Create a file called `example.py` with the following code:
 
 ```python
 import os
@@ -93,7 +93,6 @@ def main():
     # Generate the video
     video = generator.generate_video(
         prompt,
-        return_frames=True,  # Also return frames from this call (defaults to False)
         output_path="my_videos/",  # Controls where videos are saved
         save_video=True
     )
@@ -122,6 +121,7 @@ For a more detailed guide, please see our [inference quick start](https://hao-ai
 - [DanceGRPO](https://github.com/XueZeyue/DanceGRPO): A unified framework to adapt Group Relative Policy Optimization (GRPO) to visual generation paradigms. Code based on FastVideo.
 - [SRPO](https://github.com/Tencent-Hunyuan/SRPO): A method to directly align the full diffusion trajectory with fine-grained human preference. Code based on FastVideo.
 - [DCM](https://github.com/Vchitect/DCM): Dual-expert consistency model for efficient and high-quality video generation. Code based on FastVideo.
+- [HY-WorldPlay](https://github.com/Tencent-Hunyuan/HY-WorldPlay): An action-conditioned world model model trained using FastVideo framework.
 - [Hunyuan Video 1.5](https://github.com/Tencent-Hunyuan/HunyuanVideo-1.5): A leading lightweight video generation model, where they proposed SSTA based on Sliding Tile Attention.
 - [Kandinsky-5.0](https://github.com/kandinskylab/kandinsky-5): A family of diffusion models for video & image generation, where their NABLA attention includes a Sliding Tile Attention branch.
 - [LongCat Video](https://github.com/meituan-longcat/LongCat-Video): A foundational video generation model with 13.6B parameters with block-sparse attention similar to Video Sparse Attention.

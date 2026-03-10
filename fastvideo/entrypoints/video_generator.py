@@ -6,7 +6,6 @@ This module provides a consolidated interface for generating videos using
 diffusion models.
 """
 
-import math
 import os
 import re
 import threading
@@ -68,18 +67,12 @@ class VideoGenerator:
         self.executor = executor_class(fastvideo_args)
 
     @classmethod
-    def from_pretrained(cls,
-                        model_path: str,
-                        device: str | None = None,
-                        torch_dtype: torch.dtype | None = None,
-                        **kwargs) -> "VideoGenerator":
+    def from_pretrained(cls, model_path: str, **kwargs) -> "VideoGenerator":
         """
         Create a video generator from a pretrained model.
         
         Args:
             model_path: Path or identifier for the pretrained model
-            device: Device to load the model on (e.g., "cuda", "cuda:0", "cpu")
-            torch_dtype: Data type for model weights (e.g., torch.float16)
             pipeline_config: Pipeline config to use for inference
             **kwargs: Additional arguments to customize model loading, set any FastVideoArgs or PipelineConfig attributes here.
                 
@@ -126,7 +119,7 @@ class VideoGenerator:
         grid_sizes: tuple[int, int, int] | list[int] | torch.Tensor
         | None = None,
         **kwargs,
-    ) -> dict[str, Any] | list[np.ndarray] | list[dict[str, Any]]:
+    ) -> dict[str, Any] | list[dict[str, Any]]:
         """
         Generate a video based on the given prompt.
         
@@ -136,7 +129,7 @@ class VideoGenerator:
             output_path: Path to save the video (overrides the one in fastvideo_args)
             prompt_path: Path to prompt file
             save_video: Whether to save the video to disk
-            return_frames: Whether to return the raw frames
+            return_frames: Whether to include raw frames in the result dict
             num_inference_steps: Number of denoising steps (overrides fastvideo_args)
             guidance_scale: Classifier-free guidance scale (overrides fastvideo_args)
             num_frames: Number of frames to generate (overrides fastvideo_args)
@@ -148,7 +141,8 @@ class VideoGenerator:
             callback_steps: Number of steps between each callback
             
         Returns:
-            Either the output dictionary, list of frames, or list of results for batch processing
+            A metadata dictionary for single-prompt generation, or a list of
+            metadata dictionaries for prompt-file batch generation.
         """
         # Handle batch processing from text file
         if sampling_param is None:
@@ -195,9 +189,8 @@ class VideoGenerator:
                         **kwargs)
 
                     # Add prompt info to result
-                    if isinstance(result, dict):
-                        result["prompt_index"] = i
-                        result["prompt"] = batch_prompt
+                    result["prompt_index"] = i
+                    result["prompt"] = batch_prompt
 
                     results.append(result)
                     logger.info("Successfully generated video for prompt %d",
@@ -223,64 +216,82 @@ class VideoGenerator:
                                            sampling_param=sampling_param,
                                            **kwargs)
 
+    def _is_image_workload(self) -> bool:
+        """Return True when the workload produces a single image (t2i, i2i …)."""
+        args = getattr(self, "fastvideo_args", None)
+        if args is None:
+            return False
+        return args.workload_type.value.endswith("2i")
+
     def _prepare_output_path(
         self,
         output_path: str,
         prompt: str,
     ) -> str:
-        """Build a unique, sanitized .mp4 output file path.
+        """Build a unique, sanitized output file path.
 
-        - If `output_path` ends with .mp4 (case-insensitive), treat it as a file path.
-        - Otherwise, treat `output_path` as a directory and derive the filename
-          from the prompt.
+        The file extension is chosen automatically based on the workload type:
+        ``.png`` for image workloads (``t2i``, ``i2i``, …) and ``.mp4`` for
+        video workloads.
+
+        - If ``output_path`` already carries the correct extension, treat it
+          as a file path.
+        - Otherwise, treat ``output_path`` as a directory and derive the
+          filename from the prompt.
         - Invalid filename characters are removed; if the name changes, a
           warning is logged.
         - If the target path already exists, a numeric suffix is appended.
         """
+        target_ext = ".png" if self._is_image_workload() else ".mp4"
 
         def _sanitize_filename_component(name: str) -> str:
             # Remove characters invalid on common filesystems, strip spaces/dots
             sanitized = re.sub(r'[\\/:*?"<>|]', '', name)
             sanitized = sanitized.strip().strip('.')
             sanitized = re.sub(r'\s+', ' ', sanitized)
-            return sanitized or "video"
+            return sanitized or "output"
 
         base_path, extension = os.path.splitext(output_path)
         extension_lower = extension.lower()
 
-        if extension_lower == ".mp4":
+        if extension_lower == target_ext:
             output_dir = os.path.dirname(output_path)
             base_name = os.path.basename(
                 base_path)  # filename without extension
             sanitized_base = _sanitize_filename_component(base_name)
             if sanitized_base != base_name:
                 logger.warning(
-                    "The video name '%s' contained invalid characters. It has been renamed to '%s.mp4'",
+                    "The output name '%s' contained invalid characters. "
+                    "It has been renamed to '%s%s'",
                     os.path.basename(output_path),
                     sanitized_base,
+                    target_ext,
                 )
-            video_name = f"{sanitized_base}.mp4"
+            out_name = f"{sanitized_base}{target_ext}"
         else:
-            # Treat as directory; inform if an unexpected extension was provided.
+            # Treat as directory; inform if an unexpected extension was
+            # provided.
             if extension:
                 logger.info(
-                    "Output path '%s' has non-mp4 extension '%s'; treating it as a directory and using a .mp4 filename derived from the prompt",
+                    "Output path '%s' has extension '%s' which does not "
+                    "match the target '%s'; treating it as a directory",
                     output_path,
                     extension,
+                    target_ext,
                 )
             output_dir = output_path
             prompt_component = _sanitize_filename_component(prompt[:100])
-            video_name = f"{prompt_component}.mp4"
+            out_name = f"{prompt_component}{target_ext}"
 
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
 
-        new_output_path = os.path.join(output_dir, video_name)
+        new_output_path = os.path.join(output_dir, out_name)
         counter = 1
         while os.path.exists(new_output_path):
-            name_part, ext_part = os.path.splitext(video_name)
-            new_video_name = f"{name_part}_{counter}{ext_part}"
-            new_output_path = os.path.join(output_dir, new_video_name)
+            name_part, ext_part = os.path.splitext(out_name)
+            new_name = f"{name_part}_{counter}{ext_part}"
+            new_output_path = os.path.join(output_dir, new_name)
             counter += 1
         return new_output_path
 
@@ -289,11 +300,10 @@ class VideoGenerator:
         prompt: str,
         sampling_param: SamplingParam | None = None,
         **kwargs,
-    ) -> dict[str, Any] | list[np.ndarray]:
+    ) -> dict[str, Any]:
         """Internal method for single video generation"""
         # Create a copy of inference args to avoid modifying the original
         fastvideo_args = self.fastvideo_args
-        pipeline_config = fastvideo_args.pipeline_config
 
         # Validate inputs
         if not isinstance(prompt, str):
@@ -315,39 +325,6 @@ class VideoGenerator:
                 f"Height, width, and num_frames must be positive integers, got "
                 f"height={sampling_param.height}, width={sampling_param.width}, "
                 f"num_frames={sampling_param.num_frames}")
-
-        temporal_scale_factor = pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        num_frames = sampling_param.num_frames
-        num_gpus = fastvideo_args.num_gpus
-        use_temporal_scaling_frames = pipeline_config.vae_config.use_temporal_scaling_frames
-
-        # Adjust number of frames based on number of GPUs
-        if use_temporal_scaling_frames:
-            orig_latent_num_frames = (num_frames -
-                                      1) // temporal_scale_factor + 1
-        else:  # stepvideo only
-            orig_latent_num_frames = sampling_param.num_frames // 17 * 3
-
-        if orig_latent_num_frames % fastvideo_args.num_gpus != 0:
-
-            if use_temporal_scaling_frames:
-                # Convert back to number of frames, ensuring num_frames-1 is a multiple of temporal_scale_factor
-                new_num_frames = (orig_latent_num_frames -
-                                  1) * temporal_scale_factor + 1
-            else:  # stepvideo only
-                # Find the least common multiple of 3 and num_gpus
-                divisor = math.lcm(3, num_gpus)
-                # Round up to the nearest multiple of this LCM
-                orig_latent_num_frames = (
-                    (orig_latent_num_frames + divisor - 1) // divisor) * divisor
-                # Convert back to actual frames using the StepVideo formula
-                new_num_frames = orig_latent_num_frames // 3 * 17
-
-            logger.info(
-                "Adjusting number of frames from %s to %s based on number of GPUs (%s)",
-                sampling_param.num_frames, new_num_frames,
-                fastvideo_args.num_gpus)
-            sampling_param.num_frames = new_num_frames
 
         # Calculate sizes
         target_height = align_to(sampling_param.height, 16)
@@ -389,12 +366,24 @@ class VideoGenerator:
         # Run inference
         start_time = time.perf_counter()
 
-        # Execute forward pass in a new thread for non-blocking tensor allocation
-        result_container = {}
+        # Execute forward pass in a new thread for non-blocking tensor
+        # allocation. Capture thread exceptions so we can surface the true
+        # failure in the main thread instead of later hitting None outputs.
+        result_container = {
+            "output_batch": ForwardBatch(data_type=batch.data_type)
+        }
+        thread_error: dict[str, BaseException | None] = {"error": None}
+        thread_error_traceback: dict[str, str] = {"traceback": ""}
 
         def execute_forward_thread():
-            result_container['output_batch'] = self.executor.execute_forward(
-                batch, fastvideo_args)
+            import traceback
+            try:
+                result_container[
+                    "output_batch"] = self.executor.execute_forward(
+                        batch, fastvideo_args)
+            except BaseException as error:  # noqa: BLE001
+                thread_error["error"] = error
+                thread_error_traceback["traceback"] = traceback.format_exc()
 
         thread = threading.Thread(target=execute_forward_thread)
         thread.start()
@@ -405,7 +394,17 @@ class VideoGenerator:
                               pin_memory=fastvideo_args.pin_cpu_memory)
         thread.join()
 
-        output_batch = result_container['output_batch']
+        if thread_error["error"] is not None:
+            raise RuntimeError("Forward execution thread failed.\n"
+                               f"{thread_error_traceback['traceback']}"
+                               ) from thread_error["error"]
+
+        output_batch = result_container["output_batch"]
+        if output_batch.output is None:
+            raise RuntimeError(
+                "Forward execution returned no output tensor. "
+                "This usually means the executor/pipeline failed earlier.")
+
         if output_batch.output.shape == samples.shape:
             samples.copy_(output_batch.output)
         else:
@@ -423,34 +422,47 @@ class VideoGenerator:
         frames = []
         for x in videos:
             x = torchvision.utils.make_grid(x, nrow=6)
-            x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-            frames.append((x * 255).numpy().astype(np.uint8))
+            x = x.permute(1, 2, 0).squeeze(-1)
+            x = (x * 255).to(torch.uint8)
+            frames.append(x.cpu().numpy())
 
-        # Save video if requested
+        # Save output if requested
         if batch.save_video:
-            imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
-            logger.info("Saved video to %s", output_path)
-            audio = output_batch.extra.get("audio")
-            audio_sample_rate = output_batch.extra.get("audio_sample_rate")
-            if (audio is not None and audio_sample_rate is not None and
-                    not self._mux_audio(output_path, audio, audio_sample_rate)):
-                logger.warning("Audio mux failed; saved video without audio.")
+            if self._is_image_workload():
+                # Image workloads (t2i, i2i, …): save the first frame as PNG.
+                imageio.imwrite(output_path, frames[0])
+                logger.info("Saved image to %s", output_path)
+            else:
+                imageio.mimsave(output_path,
+                                frames,
+                                fps=batch.fps,
+                                format="mp4")
+                logger.info("Saved video to %s", output_path)
+                audio = output_batch.extra.get("audio")
+                audio_sample_rate = output_batch.extra.get("audio_sample_rate")
+                if (audio is not None and audio_sample_rate is not None
+                        and not self._mux_audio(output_path, audio,
+                                                audio_sample_rate)):
+                    logger.warning(
+                        "Audio mux failed; saved video without audio.")
 
-        if batch.return_frames:
-            return frames
-        else:
-            return {
-                "samples": samples,
-                "frames": frames,
-                "audio": output_batch.extra.get("audio"),
-                "prompts": prompt,
-                "size": (target_height, target_width, batch.num_frames),
-                "generation_time": gen_time,
-                "logging_info": logging_info,
-                "trajectory": output_batch.trajectory_latents,
-                "trajectory_timesteps": output_batch.trajectory_timesteps,
-                "trajectory_decoded": output_batch.trajectory_decoded,
-            }
+        result: dict[str, Any] = {
+            "prompts": prompt,
+            "samples": samples if batch.return_frames else None,
+            "frames": frames if batch.return_frames else None,
+            "audio":
+            output_batch.extra.get("audio") if batch.return_frames else None,
+            "size": (target_height, target_width, batch.num_frames),
+            "generation_time": gen_time,
+            "logging_info": logging_info,
+            "trajectory": output_batch.trajectory_latents,
+            "trajectory_timesteps": output_batch.trajectory_timesteps,
+            "trajectory_decoded": output_batch.trajectory_decoded,
+            "video_path": output_path if batch.save_video else None,
+            "peak_memory_mb": output_batch.extra.get("peak_memory_mb"),
+        }
+
+        return result
 
     @staticmethod
     def _mux_audio(

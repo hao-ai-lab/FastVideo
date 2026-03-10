@@ -2,7 +2,6 @@
 import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields
-from enum import Enum
 from typing import Any, cast
 
 import torch
@@ -15,15 +14,6 @@ from fastvideo.logger import init_logger
 from fastvideo.utils import FlexibleArgumentParser, StoreBoolean, shallow_asdict
 
 logger = init_logger(__name__)
-
-
-class STA_Mode(str, Enum):
-    """STA (Sliding Tile Attention) modes."""
-    STA_INFERENCE = "STA_inference"
-    STA_SEARCHING = "STA_searching"
-    STA_TUNING = "STA_tuning"
-    STA_TUNING_CFG = "STA_tuning_cfg"
-    NONE = None
 
 
 def preprocess_text(prompt: str) -> str:
@@ -75,16 +65,6 @@ class PipelineConfig:
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.tensor],
                                   ...] = field(default_factory=lambda:
                                                (postprocess_text, ))
-
-    # StepVideo specific parameters
-    pos_magic: str | None = None
-    neg_magic: str | None = None
-    timesteps_scale: bool | None = None
-
-    # STA (Sliding Tile Attention) parameters
-    mask_strategy_file_path: str | None = None
-    STA_mode: STA_Mode = STA_Mode.STA_INFERENCE
-    skip_time_steps: int = 15
 
     # DMD parameters
     dmd_denoising_steps: list[int] | None = field(default=None)
@@ -187,29 +167,6 @@ class PipelineConfig:
             choices=["fp32", "fp16", "bf16"],
             help="Precision for image encoder",
         )
-        parser.add_argument(
-            f"--{prefix_with_dot}pos_magic",
-            type=str,
-            dest=f"{prefix_with_dot.replace('-', '_')}pos_magic",
-            default=PipelineConfig.pos_magic,
-            help="Positive magic prompt for sampling, used in stepvideo",
-        )
-        parser.add_argument(
-            f"--{prefix_with_dot}neg_magic",
-            type=str,
-            dest=f"{prefix_with_dot.replace('-', '_')}neg_magic",
-            default=PipelineConfig.neg_magic,
-            help="Negative magic prompt for sampling, used in stepvideo",
-        )
-        parser.add_argument(
-            f"--{prefix_with_dot}timesteps_scale",
-            type=bool,
-            dest=f"{prefix_with_dot.replace('-', '_')}timesteps_scale",
-            default=PipelineConfig.timesteps_scale,
-            help=
-            "Bool for applying scheduler scale in set_timesteps, used in stepvideo",
-        )
-
         # DMD parameters
         parser.add_argument(
             f"--{prefix_with_dot}dmd-denoising-steps",
@@ -217,24 +174,6 @@ class PipelineConfig:
             default=PipelineConfig.dmd_denoising_steps,
             help=
             "Comma-separated list of denoising steps (e.g., '1000,757,522')",
-        )
-
-        # STA (Sliding Tile Attention) parameters
-        parser.add_argument(
-            f"--{prefix_with_dot}STA-mode",
-            type=str,
-            dest=f"{prefix_with_dot.replace('-', '_')}STA_mode",
-            default=PipelineConfig.STA_mode.value,
-            choices=[mode.value for mode in STA_Mode],
-            help=
-            "STA mode: STA_inference, STA_searching, STA_tuning, STA_tuning_cfg, None",
-        )
-        parser.add_argument(
-            f"--{prefix_with_dot}skip-time-steps",
-            type=int,
-            dest=f"{prefix_with_dot.replace('-', '_')}skip_time_steps",
-            default=PipelineConfig.skip_time_steps,
-            help="Number of time steps to warmup (full attention) for STA",
         )
 
         # Add VAE configuration arguments
@@ -318,11 +257,6 @@ class PipelineConfig:
         kwargs[prefix_with_dot + 'model_path'] = model_path
         pipeline_config.update_config_from_dict(kwargs, config_cli_prefix)
 
-        # Convert STA_mode string to enum if necessary
-        if isinstance(pipeline_config.STA_mode, str) and not isinstance(
-                pipeline_config.STA_mode, STA_Mode):
-            pipeline_config.STA_mode = STA_Mode(pipeline_config.STA_mode)
-
         return pipeline_config
 
     def check_pipeline_config(self) -> None:
@@ -404,24 +338,6 @@ class PipelineConfig:
 
         if hasattr(self, "__post_init__"):
             self.__post_init__()
-
-
-@dataclass
-class SlidingTileAttnConfig(PipelineConfig):
-    """Configuration for sliding tile attention."""
-
-    # Override any BaseConfig defaults as needed
-    # Add sliding tile specific parameters
-    window_size: int = 16
-    stride: int = 8
-
-    # You can provide custom defaults for inherited fields
-    height: int = 576
-    width: int = 1024
-
-    # Additional configuration specific to sliding tile attention
-    pad_to_square: bool = False
-    use_overlap_optimization: bool = True
 
 
 def parse_int_list(value: str) -> list[int]:

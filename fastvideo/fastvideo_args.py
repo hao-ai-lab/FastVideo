@@ -92,15 +92,11 @@ class FastVideoArgs:
     # Workload type
     workload_type: WorkloadType = WorkloadType.T2V
 
-    # Cache strategy
-    cache_strategy: str = "none"
-
     # Distributed executor backend
     distributed_executor_backend: str = "mp"
 
     # a few attributes for ray related
     ray_placement_group: PlacementGroup | None = None
-
     ray_runtime_env: RuntimeEnv | None = None
 
     inference_mode: bool = True  # if False == training mode
@@ -138,9 +134,6 @@ class FastVideoArgs:
     image_encoder_cpu_offload: bool = True
     vae_cpu_offload: bool = True
     pin_cpu_memory: bool = True
-
-    # STA (Sliding Tile Attention) parameters
-    mask_strategy_file_path: str | None = None
 
     # Compilation
     enable_torch_compile: bool = False
@@ -256,11 +249,6 @@ class FastVideoArgs:
             type=str,
             help=
             "The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
-        )
-        parser.add_argument(
-            "--model-dir",
-            type=str,
-            help="Directory containing StepVideo model",
         )
 
         # Running mode
@@ -462,12 +450,6 @@ class FastVideoArgs:
             help="BSA chunk_3d_shape_k as three ints, e.g., 4 4 4.",
         )
 
-        # STA (Sliding Tile Attention) parameters
-        parser.add_argument(
-            "--mask-strategy-file-path",
-            type=str,
-            help="Path to mask strategy JSON file for STA",
-        )
         parser.add_argument(
             "--enable-torch-compile",
             action=StoreBoolean,

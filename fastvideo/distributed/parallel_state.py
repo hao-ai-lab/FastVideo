@@ -335,6 +335,21 @@ class GroupCoordinator:
 
         return self.device_communicator.all_gather(input_, dim)
 
+    def shard(self,
+              input_: torch.Tensor,
+              dim: int = -1,
+              *,
+              scale_grad: bool) -> torch.Tensor:
+        world_size = self.world_size
+        # Bypass the function if we are using only 1 GPU.
+        if world_size == 1:
+            return input_
+        assert -input_.dim() <= dim < input_.dim(), (
+            f"Invalid dim ({dim}) for input tensor with shape {input_.size()}")
+        return self.device_communicator.slice(input_,
+                                              dim,
+                                              scale_grad=scale_grad)
+
     def gather(self,
                input_: torch.Tensor,
                dst: int = 0,
@@ -990,9 +1005,10 @@ def maybe_init_distributed_environment_and_model_parallel(
 
     # set device if we're on a CUDA/NPU platform
     from fastvideo.platforms import current_platform
-    device_type = current_platform.device_type
-    device = torch.device(f"{device_type}:{local_rank}")
-    current_platform.get_torch_device().set_device(device)
+    if current_platform.is_cuda_alike() or current_platform.is_npu():
+        device_type = current_platform.device_type
+        device = torch.device(f"{device_type}:{local_rank}")
+        current_platform.get_torch_device().set_device(device)
 
 
 def model_parallel_is_initialized() -> bool:

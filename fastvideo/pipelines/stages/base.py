@@ -148,16 +148,19 @@ class PipelineStage(ABC):
         # Execute the actual stage logic
         if envs.FASTVIDEO_STAGE_LOGGING:
             logger.info("[%s] Starting execution", stage_name)
+            torch.cuda.synchronize()
             start_time = time.perf_counter()
 
             try:
                 result = self.forward(batch, fastvideo_args)
+                torch.cuda.synchronize()
                 execution_time = time.perf_counter() - start_time
                 logger.info("[%s] Execution completed in %s ms", stage_name,
                             execution_time * 1000)
                 batch.logging_info.add_stage_execution_time(
                     stage_name, execution_time)
             except Exception as e:
+                torch.cuda.synchronize()
                 execution_time = time.perf_counter() - start_time
                 logger.error("[%s] Error during execution after %s ms: %s",
                              stage_name, execution_time * 1000, e)
@@ -199,11 +202,4 @@ class PipelineStage(ABC):
         Returns:
             The updated batch information after this stage's processing.
         """
-        raise NotImplementedError
-
-    def backward(
-        self,
-        batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
-    ) -> ForwardBatch:
         raise NotImplementedError

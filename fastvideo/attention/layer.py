@@ -67,11 +67,11 @@ class DistributedAttention(nn.Module):
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
+        original_seq_len: int | None = None,
         replicated_q: torch.Tensor | None = None,
         replicated_k: torch.Tensor | None = None,
         replicated_v: torch.Tensor | None = None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
-        attention_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
@@ -79,10 +79,10 @@ class DistributedAttention(nn.Module):
             q (torch.Tensor): Query tensor [batch_size, seq_len, num_heads, head_dim]
             k (torch.Tensor): Key tensor [batch_size, seq_len, num_heads, head_dim]
             v (torch.Tensor): Value tensor [batch_size, seq_len, num_heads, head_dim]
+            original_seq_len (int): Original (unpadded) full sequence length
             replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
             replicated_k (Optional[torch.Tensor]): Replicated key tensor
             replicated_v (Optional[torch.Tensor]): Replicated value tensor
-            attention_mask (Optional[torch.Tensor]): Attention mask [batch_size, seq_len]
             
         Returns:
             Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:
@@ -92,7 +92,7 @@ class DistributedAttention(nn.Module):
         # Check input shapes
         assert q.dim() == 4 and k.dim() == 4 and v.dim(
         ) == 4, "Expected 4D tensors"
-        batch_size, seq_len, num_heads, head_dim = q.shape
+        batch_size, _, num_heads, _ = q.shape
         local_rank = get_sp_parallel_rank()
         world_size = get_sp_world_size()
 
@@ -110,15 +110,11 @@ class DistributedAttention(nn.Module):
                                                         scatter_dim=2,
                                                         gather_dim=1)
 
-        # After all-to-all, each rank has the full sequence but only a subset of heads
-        # The attention mask should now apply to the full sequence length
-        # Since mask is [batch, full_seq_len], it's already in the correct format
-
-        # LOAY TODO, instead of slicing repeatedly maintain an original qkv and rewrite into that
-        valid_seq_len = None
-        if attention_mask is not None:
-            valid_seq_len = (attention_mask[0] == 1).sum().item()
-            qkv = qkv[:, :valid_seq_len, :, :]
+        # After all-to-all, each rank has the full sequence but only a subset of heads.
+        # Trim away SP padding for attention compute, then pad back before returning.
+        original_seq_len = original_seq_len or qkv.shape[1]
+        pad_seq_len = qkv.shape[1] - original_seq_len
+        qkv = qkv[:, :original_seq_len, :, :]
 
         with nvtx_range("DistributedAttention.forward.apply_rotary_emb"):
             if freqs_cis is not None:
@@ -151,7 +147,7 @@ class DistributedAttention(nn.Module):
         # Redistribute back if using sequence parallelism
         replicated_output = None
         if replicated_q is not None:
-            split_idx = seq_len * world_size if valid_seq_len is None else valid_seq_len
+            split_idx = original_seq_len
             replicated_output = output[:, split_idx:]
             output = output[:, :split_idx]
             # TODO: make this asynchronous
@@ -161,9 +157,7 @@ class DistributedAttention(nn.Module):
         with nvtx_range("DistributedAttention.forward.postprocess_output"):
             output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
 
-        if attention_mask is not None:
-            pad_len = (attention_mask[0] == 0).sum().item()
-            output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_len))
+        output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_seq_len))
 
         with nvtx_range("DistributedAttention.forward.all_to_all_gather"):
             output = sequence_model_parallel_all_to_all_4D(output,
@@ -183,12 +177,12 @@ class DistributedAttention_VSA(DistributedAttention):
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
+        original_seq_len: int,
         replicated_q: torch.Tensor | None = None,
         replicated_k: torch.Tensor | None = None,
         replicated_v: torch.Tensor | None = None,
         gate_compress: torch.Tensor | None = None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
-        attention_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
@@ -196,11 +190,11 @@ class DistributedAttention_VSA(DistributedAttention):
             q (torch.Tensor): Query tensor [batch_size, seq_len, num_heads, head_dim]
             k (torch.Tensor): Key tensor [batch_size, seq_len, num_heads, head_dim]
             v (torch.Tensor): Value tensor [batch_size, seq_len, num_heads, head_dim]
+            original_seq_len (int): Original (unpadded) full sequence length
             gate_compress (torch.Tensor): Gate compress tensor [batch_size, seq_len, num_heads, head_dim]
             replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
             replicated_k (Optional[torch.Tensor]): Replicated key tensor
             replicated_v (Optional[torch.Tensor]): Replicated value tensor
-            attention_mask (Optional[torch.Tensor]): Attention mask [batch_size, seq_len]
             
         Returns:
             Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:
@@ -231,11 +225,8 @@ class DistributedAttention_VSA(DistributedAttention):
                                                          gather_dim=1)
 
         # After all-to-all, each rank has the full sequence but only a subset of heads
-        # The attention mask should now apply to the full sequence length
-
-        if attention_mask is not None:
-            valid_seq_len = (attention_mask[0] == 1).sum().item()
-            qkvg = qkvg[:, :valid_seq_len, :, :]
+        pad_seq_len = qkvg.shape[1] - original_seq_len
+        qkvg = qkvg[:, :original_seq_len, :, :]
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
@@ -256,9 +247,7 @@ class DistributedAttention_VSA(DistributedAttention):
         # Apply backend-specific postprocess_output
         output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
 
-        if attention_mask is not None:
-            pad_len = (attention_mask[0] == 0).sum().item()
-            output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_len))
+        output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_seq_len))
 
         output = sequence_model_parallel_all_to_all_4D(output,
                                                        scatter_dim=1,

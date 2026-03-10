@@ -10,7 +10,7 @@ exclude: |
     demo/.*|
     predict\.py|
     scripts/.*|
-    prompts/.*|
+    assets/prompts/.*|
     fastvideo/data_preprocess/.*|
     fastvideo/dataset/.*|
     fastvideo/models/.*|
@@ -60,7 +60,7 @@ repos:
   hooks:
   - id: mypy
     args: [--python-version, '3.10', --follow-imports, "skip", "--disable-error-code", "union-attr", "--disable-error-code", "override" ]
-    additional_dependencies: [types-cachetools, types-setuptools, types-PyYAML, types-requests]
+    additional_dependencies: [types-aiofiles, types-cachetools, types-setuptools, types-PyYAML, types-requests]
 - repo: local
   hooks:
   - id: check-filenames

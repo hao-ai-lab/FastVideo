@@ -443,7 +443,6 @@
         1025,
         "fixed",
         24,
-        -99999,
         -99999
       ],
       "auto_widget_states": {
@@ -491,11 +490,6 @@
           "isAuto": true,
           "value": -99999,
           "cachedValue": "X://insert/path/here.mp4"
-        },
-        "enable_teacache": {
-          "isAuto": true,
-          "value": -99999,
-          "cachedValue": true
         }
       }
     },

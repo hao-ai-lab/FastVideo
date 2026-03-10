@@ -15,7 +15,6 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from fastvideo.attention import get_attn_backend
-from fastvideo.configs.pipelines.base import STA_Mode
 from fastvideo.distributed import (get_local_torch_device, get_world_group)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -26,13 +25,6 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
-
-try:
-    from fastvideo.attention.backends.sliding_tile_attn import (
-        SlidingTileAttentionBackend)
-    st_attn_available = True
-except ImportError:
-    st_attn_available = False
 
 try:
     from fastvideo.attention.backends.vmoba import VMOBAAttentionBackend
@@ -76,7 +68,6 @@ class SRDenoisingStage(PipelineStage):
             head_size=attn_head_size,
             dtype=torch.float16,  # TODO(will): hack
             supported_attention_backends=(
-                AttentionBackendEnum.SLIDING_TILE_ATTN,
                 AttentionBackendEnum.VIDEO_SPARSE_ATTN,
                 AttentionBackendEnum.VMOBA_ATTN,
                 AttentionBackendEnum.FLASH_ATTN,
@@ -171,10 +162,6 @@ class SRDenoisingStage(PipelineStage):
             },
         )
 
-        # Prepare STA parameters
-        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
-            self.prepare_sta_param(batch, fastvideo_args)
-
         # Get latents and embeddings
         prompt_embeds = batch.prompt_embeds
         assert not torch.isnan(
@@ -253,10 +240,8 @@ class SRDenoisingStage(PipelineStage):
                 with torch.autocast(device_type="cuda",
                                     dtype=target_dtype,
                                     enabled=autocast_enabled):
-                    if (st_attn_available
-                            and self.attn_backend == SlidingTileAttentionBackend
-                        ) or (vsa_available and self.attn_backend
-                              == VideoSparseAttentionBackend):
+                    if (vsa_available and self.attn_backend
+                            == VideoSparseAttentionBackend):
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
                         )
 
@@ -271,7 +256,6 @@ class SRDenoisingStage(PipelineStage):
                                 patch_size=fastvideo_args.
                                 pipeline_config.  # type: ignore
                                 dit_config.patch_size,  # type: ignore
-                                STA_param=batch.STA_param,  # type: ignore
                                 VSA_sparsity=fastvideo_args.
                                 VSA_sparsity,  # type: ignore
                                 device=get_local_torch_device(),
@@ -341,10 +325,6 @@ class SRDenoisingStage(PipelineStage):
 
         # Update batch with final latents
         batch.latents = latents
-
-        # Save STA mask search results if needed
-        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend and fastvideo_args.pipeline_config.STA_mode == STA_Mode.STA_SEARCHING:
-            self.save_sta_search_results(batch)
 
         # deallocate transformer if on mps
         if torch.backends.mps.is_available():

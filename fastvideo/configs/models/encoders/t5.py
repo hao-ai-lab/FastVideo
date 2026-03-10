@@ -63,7 +63,6 @@ class T5ArchConfig(TextEncoderArchConfig):
             self.dense_act_fn = "gelu_new"
 
         self.tokenizer_kwargs = {
-            "padding": "max_length",
             "truncation": True,
             "max_length": self.text_len,
             "add_special_tokens": True,

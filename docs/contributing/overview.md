@@ -14,29 +14,30 @@ improving performance, or fixing a bug.
 
 For a full install checklist, see `docs/getting_started/installation/gpu.md`.
 
-## Local development (Conda + editable install)
+## Local development (UV + editable install)
 
-Install Miniconda:
+If you previously used Conda for local setup, switch to uv for a faster and more stable development environment.
 
-```bash
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-bash Miniconda3-latest-Linux-x86_64.sh
-source ~/.bashrc
-```
-
-Create and activate a Conda environment:
-
-```bash
-conda create -n fastvideo python=3.12 -y
-conda activate fastvideo
-```
-
-Install `uv` (optional, but recommended):
+Install `uv`:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 # or
 wget -qO- https://astral.sh/uv/install.sh | sh
+```
+
+Create and activate a uv environment (recommended):
+
+```bash
+uv venv --python 3.12 --seed
+source .venv/bin/activate
+```
+
+Conda alternative (supported):
+
+```bash
+conda create -n fastvideo python=3.12 -y
+conda activate fastvideo
 ```
 
 Clone the repo:
@@ -51,7 +52,7 @@ Install FastVideo in editable mode and set up hooks:
 uv pip install -e .[dev]
 
 # Optional: FlashAttention (builds native kernels)
-uv pip install flash-attn --no-build-isolation
+uv pip install flash-attn --no-build-isolation -v
 
 # Linting, formatting, static typing
 pre-commit install --hook-type pre-commit --hook-type commit-msg

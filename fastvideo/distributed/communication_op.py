@@ -2,10 +2,8 @@
 # Adapted from https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/distributed/communication_op.py
 
 import torch
-import torch.distributed
 
 from fastvideo.distributed.parallel_state import (get_sp_group,
-                                                  get_sp_parallel_rank,
                                                   get_sp_world_size,
                                                   get_tp_group,
                                                   model_parallel_is_initialized)
@@ -86,7 +84,6 @@ def sequence_model_parallel_shard(input_: torch.Tensor,
             - original_seq_len: Original sequence length before padding
     """
 
-    sp_rank = get_sp_parallel_rank()
     sp_world_size = get_sp_world_size()
 
     original_seq_len = input_.shape[dim]
@@ -99,13 +96,8 @@ def sequence_model_parallel_shard(input_: torch.Tensor,
     if padding_amount > 0:
         input_ = pad_sequence_tensor(input_, padded_seq_len, seq_dim=dim)
 
-    elements_per_rank = padded_seq_len // sp_world_size
-
-    # Sharding along dim
-    input_ = input_.movedim(dim, 0)
-    input_ = input_[sp_rank * elements_per_rank:(sp_rank + 1) *
-                    elements_per_rank]
-    input_ = input_.movedim(0, dim)
+    # Sharding with autograd-aware backward (all-gather in backward).
+    input_ = get_sp_group().shard(input_, dim=dim, scale_grad=True)
 
     return input_, original_seq_len
 

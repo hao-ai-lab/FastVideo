@@ -15,6 +15,8 @@ from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
 
+REQUIRED_GPUS = 1
+
 device_name = torch.cuda.get_device_name()
 device_reference_folder_suffix = "_reference_videos"
 
@@ -70,7 +72,7 @@ def test_matrixgame_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     base_output_dir = os.path.join(script_dir, "generated_videos", model_id)
     output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
-    output_video_name = "video.mp4"
+    output_video_name = f"output.mp4"
 
     os.makedirs(output_dir, exist_ok=True)
 

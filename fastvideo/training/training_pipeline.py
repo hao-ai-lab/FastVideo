@@ -19,6 +19,7 @@ from einops import rearrange
 from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
+from diffusers import FlowMatchEulerDiscreteScheduler
 
 import fastvideo.envs as envs
 try:
@@ -47,8 +48,7 @@ from fastvideo.training.trackers import (DummyTracker, TrackerType,
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, count_trainable, get_scheduler,
-    get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint,
-    shard_latents_across_sp)
+    get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint)
 from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
 
@@ -304,6 +304,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 # Make sure that the timesteps are the same across all sp processes.
                 sp_group = get_sp_group()
                 sp_group.broadcast(timesteps, src=0)
+                sp_group.broadcast(noise, src=0)
             sigmas = get_sigmas(
                 self.noise_scheduler,
                 latents.device,
@@ -452,6 +453,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             # make sure no implicit broadcasting happens
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
 
+<<<<<<< HEAD
             # Defensive: avoid NaNs/div0 if an upstream bug ever produces empty tensors.
             # mean(empty) -> NaN; division by 0 -> inf/NaN. Keep a 0 loss with grad history.
             if model_pred.numel() == 0:
@@ -474,6 +476,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         loss = (torch.mean(
                             (model_pred.float() - target.float())**2) /
                                 self.training_args.gradient_accumulation_steps)
+=======
+            loss = (torch.mean((model_pred.float() - target.float())**2) /
+                    self.training_args.gradient_accumulation_steps)
+>>>>>>> main
 
             with nvtx_range("backward"):
                 loss.backward()
@@ -610,6 +616,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             device="cpu").manual_seed(self.seed + self.global_rank)
         logger.info("Initialized random seeds with seed: %s",
                     self.seed + self.global_rank)
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
@@ -860,6 +867,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
             step_videos: list[np.ndarray] = []
             step_captions: list[str] = []
 
+            step_audio: list[np.ndarray | None] = []
+            step_sample_rates: list[int | None] = []
+
             for validation_batch in validation_dataloader:
                 batch = self._prepare_validation_batch(sampling_param,
                                                        training_args,
@@ -880,6 +890,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     batch, training_args)
                 samples = output_batch.output.cpu()
 
+                # Capture audio if available
+                audio = output_batch.extra.get("audio")
+                sample_rate = output_batch.extra.get("audio_sample_rate")
+
+                if audio is not None and torch.is_tensor(audio):
+                    audio = audio.detach().cpu().float().numpy()
+
+                step_audio.append(audio)
+                step_sample_rates.append(sample_rate)
+
                 if self.rank_in_sp_group != 0:
                     continue
 
@@ -894,59 +914,71 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
             # Only sp_group leaders (rank_in_sp_group == 0) need to send their
             # results to global rank 0
-            if self.rank_in_sp_group == 0:
-                if self.global_rank == 0:
-                    # Global rank 0 collects results from all sp_group leaders
-                    all_videos = step_videos  # Start with own results
-                    all_captions = step_captions
+            if self.rank_in_sp_group == 0 and self.global_rank == 0:
+                # Global rank 0 collects results from all sp_group leaders
+                all_videos = step_videos  # Start with own results
+                all_captions = step_captions
+                all_audios = step_audio
+                all_sample_rates = step_sample_rates
 
-                    # Receive from other sp_group leaders
-                    for sp_group_idx in range(1, num_sp_groups):
-                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-                        recv_videos = world_group.recv_object(src=src_rank)
-                        recv_captions = world_group.recv_object(src=src_rank)
-                        all_videos.extend(recv_videos)
-                        all_captions.extend(recv_captions)
+                # Receive from other sp_group leaders
+                for sp_group_idx in range(1, num_sp_groups):
+                    src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
+                    recv_videos = world_group.recv_object(src=src_rank)
+                    recv_captions = world_group.recv_object(src=src_rank)
+                    recv_audios = world_group.recv_object(src=src_rank)
+                    recv_sample_rates = world_group.recv_object(src=src_rank)
 
-                    video_filenames = []
-                    for i, (video, caption) in enumerate(
-                            zip(all_videos, all_captions, strict=True)):
-                        os.makedirs(training_args.output_dir, exist_ok=True)
-                        filename = os.path.join(
-                            training_args.output_dir,
-                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-                        )
-                        imageio.mimsave(filename, video, fps=sampling_param.fps)
-                        # Mux audio if available
-                        audio = output_batch.extra.get("audio")
-                        audio_sample_rate = output_batch.extra.get(
-                            "audio_sample_rate")
-                        if audio is not None and audio_sample_rate is not None:
-                            if not self._mux_audio(filename, audio,
-                                                   audio_sample_rate):
-                                logger.warning(
-                                    "Audio mux failed for validation video %s; saved video without audio.",
-                                    filename)
-                        video_filenames.append(filename)
+                    all_videos.extend(recv_videos)
+                    all_captions.extend(recv_captions)
+                    all_audios.extend(recv_audios)
+                    all_sample_rates.extend(recv_sample_rates)
 
-                    artifacts = []
-                    for filename, caption in zip(video_filenames,
-                                                 all_captions,
-                                                 strict=True):
-                        video_artifact = self.tracker.video(filename,
-                                                            caption=caption)
-                        if video_artifact is not None:
-                            artifacts.append(video_artifact)
-                    if artifacts:
-                        logs = {
-                            f"validation_videos_{num_inference_steps}_steps":
-                            artifacts
-                        }
-                        self.tracker.log_artifacts(logs, global_step)
-                else:
-                    # Other sp_group leaders send their results to global rank 0
-                    world_group.send_object(step_videos, dst=0)
-                    world_group.send_object(step_captions, dst=0)
+                video_filenames = []
+                for i, (video, caption, audio, sample_rate) in enumerate(
+                        zip(all_videos,
+                            all_captions,
+                            all_audios,
+                            all_sample_rates,
+                            strict=True)):
+                    os.makedirs(training_args.output_dir, exist_ok=True)
+                    filename = os.path.join(
+                        training_args.output_dir,
+                        f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+                    )
+                    imageio.mimsave(filename, video, fps=sampling_param.fps)
+                    # Mux audio if available
+                    if (audio is not None and sample_rate is not None
+                            and not self._mux_audio(
+                                filename,
+                                audio,
+                                sample_rate,
+                            )):
+                        logger.warning(
+                            "Audio mux failed for validation video %s; saved video without audio.",
+                            filename)
+                    video_filenames.append(filename)
+
+                artifacts = []
+                for filename, caption in zip(video_filenames,
+                                             all_captions,
+                                             strict=True):
+                    video_artifact = self.tracker.video(filename,
+                                                        caption=caption)
+                    if video_artifact is not None:
+                        artifacts.append(video_artifact)
+                if artifacts:
+                    logs = {
+                        f"validation_videos_{num_inference_steps}_steps":
+                        artifacts
+                    }
+                    self.tracker.log_artifacts(logs, global_step)
+            elif self.rank_in_sp_group == 0:
+                # Other sp_group leaders send their results to global rank 0
+                world_group.send_object(step_videos, dst=0)
+                world_group.send_object(step_captions, dst=0)
+                world_group.send_object(step_audio, dst=0)
+                world_group.send_object(step_sample_rates, dst=0)
 
         # Re-enable gradients for training
         training_args.inference_mode = False
