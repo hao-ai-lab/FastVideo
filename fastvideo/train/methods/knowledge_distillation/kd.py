@@ -795,12 +795,11 @@ class KDCausalMethod(KDMethod):
         cfg: Any,
         role_models: dict[str, ModelBase],
     ) -> None:
-        mcfg = cfg.get("method", {})
+        super().__init__(cfg=cfg, role_models=role_models)
         self._num_frames_per_block: int = int(
-            mcfg.get("num_frames_per_block", 3))
+            self.method_config.get("num_frames_per_block", 3))
         if self._num_frames_per_block < 1:
             raise ValueError("num_frames_per_block must be >= 1")
-        super().__init__(cfg=cfg, role_models=role_models)
 
     def single_train_step(
         self,
