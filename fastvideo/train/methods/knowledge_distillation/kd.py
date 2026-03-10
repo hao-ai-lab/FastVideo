@@ -87,11 +87,14 @@ class _KDPathCache:
             "real":                 Tensor[T, C, H, W],
             "text_embedding":       Tensor[L, D],
             "text_attention_mask":  Tensor[L],
-            "path_timesteps":       Tensor[num_steps],  # int64
+            "path_timesteps":       Tensor[num_steps],  # int64, == t_list[:-1]
         }
 
-    ``path[i]`` is the noisy latent at timestep ``path_timesteps[i]``.
-    ``real`` is the teacher's final clean x0 prediction.
+    ``path[i]`` is the teacher's ODE state at the teacher trajectory step
+    whose timestep exactly equals ``path_timesteps[i]`` (i.e. ``t_list[i]``).
+    ``t_list`` must be a subset of the teacher's ODE schedule — an error is
+    raised at generation time if any student timestep is not present.
+    ``real`` is the teacher's final clean x0 prediction after all ODE steps.
     All latents are in permuted ``[T, C, H, W]`` format (not ``[C, T, H, W]``).
     """
 
@@ -315,6 +318,8 @@ class KDMethod(TrainingMethod):
 
         self._teacher_guidance_scale: float = float(
             mcfg.get("teacher_guidance_scale", 1.0))
+        self._teacher_inference_steps: int = int(
+            mcfg.get("teacher_inference_steps", 48))
 
         # --- Optional teacher ---
         self.teacher: ModelBase | None = role_models.get("teacher")
@@ -332,14 +337,15 @@ class KDMethod(TrainingMethod):
         self._kd_wrapper = _KDDataLoaderWrapper(self._source_loader)
         self.student.dataloader = self._kd_wrapper  # builder captures this
 
-        # --- Build SelfForcingFlowMatchScheduler for ODE rollout ---
+        # --- Build SelfForcingFlowMatchScheduler for sigma lookups ---
+        # num_inference_steps=1000 gives a dense grid accurate for any t.
         tc = self.training_config
-        shift = float(
+        self._flow_shift = float(
             getattr(tc.pipeline_config, "flow_shift", 0.0) or 0.0)
         self._sf_scheduler = SelfForcingFlowMatchScheduler(
             num_inference_steps=1000,
             num_train_timesteps=int(self.student.num_train_timesteps),
-            shift=shift,
+            shift=self._flow_shift,
             sigma_min=0.0,
             extra_one_step=True,
             training=False,
@@ -482,10 +488,7 @@ class KDMethod(TrainingMethod):
                     "text_attention_mask":
                     raw["text_attention_mask"][0].cpu(),
                     "path_timesteps":
-                    torch.tensor(
-                        self._t_list[:-1],
-                        dtype=torch.long,
-                    ),
+                    torch.tensor(self._t_list[:-1], dtype=torch.long),
                 }
                 torch.save(out, samples_dir / f"{global_idx:08d}.pt")
                 if (global_idx + 1) % 100 == 0 or global_idx == total - 1:
@@ -499,52 +502,81 @@ class KDMethod(TrainingMethod):
         self,
         raw_batch: dict[str, Any],
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Run multi-step ODE denoising with teacher; return (path, real).
+        """Run high-quality teacher ODE; return (path, real).
 
-        Uses ``_sf_scheduler`` for sigma computations so the cached
-        timesteps are consistent with student training.
+        The teacher runs ``teacher_inference_steps`` ODE steps (e.g. 48).
+        Each timestep in ``t_list[:-1]`` must appear exactly in the teacher's
+        schedule — if not, an error is raised listing the teacher's timesteps
+        so the user can align ``t_list`` accordingly.
+
+        Only the subsampled states at ``t_list[:-1]`` are returned; the full
+        trajectory is not stored.
 
         Returns:
-            path: ``[num_steps, T, C, H, W]`` — noisy latent at each step
-            real: ``[T, C, H, W]`` — teacher's final clean x0 prediction
+            path: ``[num_steps, T, C, H, W]``
+            real: ``[T, C, H, W]`` — teacher's final clean x0
         """
         assert self.teacher is not None
         device = self.student.device
 
-        # prepare_batch runs text encoding and permutes latents to [B,T,C,H,W]
+        # prepare_batch runs text encoding; latents: [1, T, C, H, W]  (B=1)
         training_batch = self.teacher.prepare_batch(
             raw_batch,
             generator=self.cuda_generator,
             latents_source="data",
         )
-        # latents: [1, T, C, H, W]  (B=1 for single-sample generation)
         latents = training_batch.latents
         B, T = latents.shape[:2]
 
-        # Starting noisy state at t_list[0] using _sf_scheduler.
+        # Build teacher's full ODE schedule.
+        teacher_sched = SelfForcingFlowMatchScheduler(
+            num_inference_steps=self._teacher_inference_steps,
+            num_train_timesteps=int(self.student.num_train_timesteps),
+            shift=self._flow_shift,
+            sigma_min=0.0,
+            extra_one_step=True,
+            training=False,
+        )
+        teacher_t_list = [int(t.item()) for t in teacher_sched.timesteps]
+        teacher_t_set = set(teacher_t_list)
+
+        # Validate that every student timestep is in the teacher schedule.
+        missing = [t for t in self._t_list[:-1] if t not in teacher_t_set]
+        if missing:
+            raise ValueError(
+                f"t_list timesteps {missing} are not present in the teacher's "
+                f"{self._teacher_inference_steps}-step ODE schedule.\n"
+                f"Teacher timesteps: {teacher_t_list}\n"
+                f"Adjust t_list to use a subset of the teacher's timesteps, "
+                f"or change teacher_inference_steps.")
+
+        # Start from pure noise at the highest teacher timestep.
         noise = torch.randn(
             latents.shape,
             device=device,
             dtype=latents.dtype,
             generator=self.cuda_generator,
         )
-        t0 = self._t_list[0]
+        t0 = teacher_t_list[0]
         t0_flat = torch.full((B * T,), t0, device=device, dtype=torch.float32)
         x = self._sf_scheduler.add_noise(
-            latents.flatten(0, 1),  # [B*T, C, H, W]
+            latents.flatten(0, 1),
             noise.flatten(0, 1),
             t0_flat,
         ).unflatten(0, (B, T))  # [B, T, C, H, W]
 
-        path_frames: list[torch.Tensor] = []
+        # Run full teacher ODE; snapshot states at student timesteps only.
+        student_t_set = set(self._t_list[:-1])
+        path_by_t: dict[int, torch.Tensor] = {}
         pred_x0: torch.Tensor | None = None
+        teacher_next = teacher_t_list[1:] + [0]
 
-        for t_cur, t_next in zip(self._t_list[:-1], self._t_list[1:], strict=True):
-            path_frames.append(x.clone())  # save noisy state at t_cur
+        for t_cur, t_next in zip(teacher_t_list, teacher_next, strict=True):
+            if t_cur in student_t_set:
+                path_by_t[t_cur] = x.squeeze(0).clone()  # [T, C, H, W]
 
-            # Teacher prediction: [B] shaped timestep for WanModel.predict_noise
-            timestep_b = torch.full((B,), t_cur, device=device, dtype=torch.float32)
-            # Override training_batch.timesteps so set_forward_context is correct
+            timestep_b = torch.full((B,), t_cur, device=device,
+                                    dtype=torch.float32)
             training_batch.timesteps = timestep_b
 
             pred_noise = self.teacher.predict_noise(
@@ -554,31 +586,29 @@ class KDMethod(TrainingMethod):
                 conditional=True,
                 attn_kind="dense",
             )
-            # Convert to x0 using _sf_scheduler.
-            # pred_noise_to_pred_video expects [B*T, C, H, W] latents and
-            # [B, T] timestep (which it flattens to [B*T]).
             timestep_bt = timestep_b.unsqueeze(1).expand(B, T)
             pred_x0 = pred_noise_to_pred_video(
                 pred_noise=pred_noise.flatten(0, 1),
                 noise_input_latent=x.flatten(0, 1),
                 timestep=timestep_bt,
                 scheduler=self._sf_scheduler,
-            ).unflatten(0, (B, T))  # [B, T, C, H, W]
+            ).unflatten(0, (B, T))
 
             if t_next > 0:
-                # Deterministic ODE step — no random noise injection.
                 sigma_cur = self._timestep_to_sigma(t_cur, B * T, device)
                 sigma_next = self._timestep_to_sigma(t_next, B * T, device)
                 x_flat = x.flatten(0, 1)
                 p_flat = pred_x0.flatten(0, 1)
-                eps = (x_flat - (1.0 - sigma_cur) * p_flat) / sigma_cur.clamp_min(1e-8)
-                x = ((1.0 - sigma_next) * p_flat + sigma_next * eps).unflatten(0, (B, T))
+                eps = ((x_flat - (1.0 - sigma_cur) * p_flat) /
+                       sigma_cur.clamp_min(1e-8))
+                x = ((1.0 - sigma_next) * p_flat +
+                     sigma_next * eps).unflatten(0, (B, T))
 
-        assert pred_x0 is not None, "t_list must have at least one step"
-
-        # Stack path (remove batch dim since B=1).
-        path = torch.stack(path_frames).squeeze(1)  # [num_steps, T, C, H, W]
+        assert pred_x0 is not None, "teacher_t_list must have at least one step"
         real = pred_x0.squeeze(0)  # [T, C, H, W]
+
+        path = torch.stack(
+            [path_by_t[t] for t in self._t_list[:-1]])  # [num_steps, T, C, H, W]
         return path, real
 
     def _timestep_to_sigma(

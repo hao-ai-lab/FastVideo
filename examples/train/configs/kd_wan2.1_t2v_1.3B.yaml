@@ -30,9 +30,10 @@ models:
 method:
   _target_: fastvideo.train.methods.knowledge_distillation.kd.KDMethod
   teacher_path_cache: data/kd_cache/wan14b_4step
-  t_list: [999, 937, 833, 624, 0]   # integer timesteps (num_steps+1 entries)
+  t_list: [999, 937, 833, 624, 0]   # student inference schedule (num_steps+1)
   student_sample_steps: 4
-  teacher_guidance_scale: 1.0       # set > 1.0 for CFG during path generation
+  teacher_inference_steps: 48       # teacher ODE steps; nearest indices selected for t_list
+  teacher_guidance_scale: 3.5       # CFG scale during teacher path generation
 
 training:
   distributed:
