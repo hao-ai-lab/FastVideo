@@ -10,22 +10,3 @@ __all__ = [
     "DiffusionForcingSFTMethod",
     "GenRLMethod",
 ]
-
-
-def __getattr__(name: str) -> object:
-    if name == "DMD2Method":
-        from fastvideo.train.methods.distribution_matching.dmd2 import DMD2Method
-        return DMD2Method
-    if name == "FineTuneMethod":
-        from fastvideo.train.methods.fine_tuning.finetune import FineTuneMethod
-        return FineTuneMethod
-    if name == "SelfForcingMethod":
-        from fastvideo.train.methods.distribution_matching.self_forcing import SelfForcingMethod
-        return SelfForcingMethod
-    if name == "DiffusionForcingSFTMethod":
-        from fastvideo.train.methods.fine_tuning.dfsft import DiffusionForcingSFTMethod
-        return DiffusionForcingSFTMethod
-    if name == "GenRLMethod":
-        from fastvideo.train.methods.rl.genrl import GenRLMethod
-        return GenRLMethod
-    raise AttributeError(name)

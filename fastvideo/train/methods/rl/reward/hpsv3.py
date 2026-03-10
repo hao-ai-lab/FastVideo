@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -16,6 +18,13 @@ from fastvideo.train.methods.rl.reward.utils import (
 )
 
 logger = init_logger(__name__)
+
+# Prefer local HPSv3 submodule over site-packages.
+_HPSV3_ROOT = Path(__file__).resolve().parent / "HPSv3"
+if _HPSV3_ROOT.exists():
+    _hpsv3_path = str(_HPSV3_ROOT)
+    if _hpsv3_path not in sys.path:
+        sys.path.insert(0, _hpsv3_path)
 
 # Global cache of HPSv3 inferencers keyed by device.
 _HPSV3_INFERENCERS: dict[str, Any] = {}
@@ -46,14 +55,15 @@ def _get_hpsv3_inferencer(device):
     key = _normalize_device(device)
     if key not in _HPSV3_INFERENCERS:
         try:
-            from hpsv3 import HPSv3Inferencer
+            from hpsv3 import HPSv3RewardInferencer
         except ImportError as exc:
             msg = (
-                "hpsv3 package not installed. "
-                "Install via: pip install hpsv3"
+                "hpsv3 package not found. Ensure the "
+                "HPSv3 submodule is checked out under "
+                "fastvideo/train/methods/rl/reward/HPSv3"
             )
             raise ImportError(msg) from exc
-        inf = HPSv3Inferencer(device=device)
+        inf = HPSv3RewardInferencer(device=device)
         _HPSV3_INFERENCERS[key] = inf
     return _HPSV3_INFERENCERS[key]
 

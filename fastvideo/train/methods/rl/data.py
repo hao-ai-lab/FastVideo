@@ -137,9 +137,7 @@ class JsonPromptDataset(Dataset):
 
 
 class DistributedKRepeatSampler(Sampler):
-    """Repeat each prompt k times per global batch and
-    shard across ranks."""
-+
+
     def __init__(
         self,
         dataset: Dataset,
