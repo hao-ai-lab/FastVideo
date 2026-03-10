@@ -72,6 +72,8 @@ class WanModel(ModelBase):
         flow_shift: float = 3.0,
         enable_gradient_checkpointing_type: str
         | None = None,
+        transformer_override_safetensor: str
+        | None = None,
     ) -> None:
         self._init_from = str(init_from)
         self._trainable = bool(trainable)
@@ -82,6 +84,7 @@ class WanModel(ModelBase):
             disable_custom_init_weights=(disable_custom_init_weights),
             enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
             training_config=training_config,
+            transformer_override_safetensor=(transformer_override_safetensor),
         )
 
         self.noise_scheduler = (FlowMatchEulerDiscreteScheduler(shift=float(flow_shift)))
@@ -114,6 +117,7 @@ class WanModel(ModelBase):
         disable_custom_init_weights: bool,
         enable_gradient_checkpointing_type: str | None,
         training_config: TrainingConfig,
+        transformer_override_safetensor: str | None = None,
     ) -> torch.nn.Module:
         transformer = load_module_from_path(
             model_path=init_from,
@@ -121,6 +125,7 @@ class WanModel(ModelBase):
             training_config=training_config,
             disable_custom_init_weights=(disable_custom_init_weights),
             override_transformer_cls_name=(self._transformer_cls_name),
+            transformer_override_safetensor=(transformer_override_safetensor),
         )
         transformer = apply_trainable(transformer, trainable=trainable)
         # Fall back to training_config.model if not set on the

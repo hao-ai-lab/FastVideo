@@ -84,6 +84,7 @@ def load_module_from_path(
     training_config: TrainingConfig,
     disable_custom_init_weights: bool = False,
     override_transformer_cls_name: str | None = None,
+    transformer_override_safetensor: str | None = None,
 ) -> torch.nn.Module:
     """Load a single pipeline component module.
 
@@ -115,6 +116,9 @@ def load_module_from_path(
             None,
         )
         fastvideo_args.override_transformer_cls_name = str(override_transformer_cls_name)
+
+    if transformer_override_safetensor:
+        fastvideo_args.init_weights_from_safetensors = str(transformer_override_safetensor)
 
     if disable_custom_init_weights:
         fastvideo_args._loading_teacher_critic_model = True

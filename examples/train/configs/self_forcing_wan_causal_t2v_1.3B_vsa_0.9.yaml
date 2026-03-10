@@ -1,9 +1,9 @@
-# Self-Forcing distillation: Wan 2.1 T2V 1.3B Causal
+# Self-Forcing distillation: Wan 2.1 T2V 1.3B Causal with VSA (0.9 sparsity)
 #
-# - Teacher: frozen pretrained Wan 2.1 T2V 1.3B
-# - Student: trainable causal Wan model
+# - Teacher: frozen pretrained Wan 2.1 T2V 14B
+# - Student: trainable causal Wan model with VSA sparse attention
 # - Critic:  trainable, initialized from pretrained weights
-# - Training: streaming rollout with SDE sampling
+# - Training: streaming rollout with SDE sampling + VSA 0.9 sparsity
 
 models:
   student:
@@ -40,6 +40,8 @@ method:
   fake_score_betas: [0.0, 0.999]
   fake_score_lr_scheduler: constant
 
+  attn_kind: vsa
+
 training:
   distributed:
     num_gpus: 8
@@ -71,16 +73,21 @@ training:
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: outputs/wan2.1_causal_self_forcing
+    output_dir: outputs/wan2.1_causal_self_forcing_vsa_0.9
     training_state_checkpointing_steps: 1000
     checkpoints_total_limit: 3
 
   tracker:
     project_name: self-forcing-wan
-    run_name: wan2.1_causal_self_forcing
+    run_name: wan2.1_causal_self_forcing_vsa_0.9
 
   model:
     enable_gradient_checkpointing_type: full
+
+  vsa:
+    sparsity: 0.9
+    decay_rate: 0.03
+    decay_interval_steps: 1
 
 callbacks:
   grad_clip:

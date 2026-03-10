@@ -45,6 +45,8 @@ class WanCausalModel(WanModel, CausalModelBase):
         flow_shift: float = 3.0,
         enable_gradient_checkpointing_type: str
         | None = None,
+        transformer_override_safetensor: str
+        | None = None,
     ) -> None:
         super().__init__(
             init_from=init_from,
@@ -53,6 +55,7 @@ class WanCausalModel(WanModel, CausalModelBase):
             disable_custom_init_weights=(disable_custom_init_weights),
             flow_shift=flow_shift,
             enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
+            transformer_override_safetensor=(transformer_override_safetensor),
         )
         self._streaming_caches: (dict[tuple[int, str], _StreamingCaches]) = {}
 
