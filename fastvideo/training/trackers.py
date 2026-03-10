@@ -89,6 +89,13 @@ class BaseTracker:
         if artifacts:
             self.log(artifacts, step)
 
+    def log_file(
+        self,
+        file_path: str,
+        name: str | None = None,
+    ) -> None:
+        """Attach a file to the tracker run (e.g. config YAML)."""
+
     def finish(self) -> None:  # pragma: no cover - interface
         """Finalize the tracker session."""
 
@@ -162,6 +169,16 @@ class WandbTracker(BaseTracker):
 
         self.log(normalized_artifacts, step)
 
+    def log_file(
+        self,
+        file_path: str,
+        name: str | None = None,
+    ) -> None:
+        self._wandb.save(
+            file_path,
+            base_path=os.path.dirname(file_path),
+        )
+
     def finish(self) -> None:
         self._run.finish()
 
@@ -211,6 +228,14 @@ class SequentialTracker(BaseTracker):
         for tracker in self._trackers:
             tracker.log_artifacts(artifacts, step)
         self._timed_metrics = {}
+
+    def log_file(
+        self,
+        file_path: str,
+        name: str | None = None,
+    ) -> None:
+        for tracker in self._trackers:
+            tracker.log_file(file_path, name=name)
 
     def finish(self) -> None:
         for tracker in self._trackers:

@@ -343,11 +343,16 @@ class LatentsParquetMapStyleDataset(Dataset):
             for idx in indices
         ]
 
+        # Inject sample indices for deterministic CFG dropout
+        # that is reproducible across checkpoint resume.
+        for row, idx in zip(rows, indices):
+            row["_sample_index"] = idx
+
         batch = collate_rows_from_parquet_schema(rows,
                                                  self.parquet_schema,
                                                  self.text_padding_length,
                                                  cfg_rate=self.cfg_rate,
-                                                 rng=self.rng)
+                                                 seed=self.seed)
         return batch
 
     def __len__(self):
@@ -387,7 +392,6 @@ def build_parquet_map_style_dataloader(
         collate_fn=passthrough,
         num_workers=num_data_workers,
         pin_memory=True,
-        pin_memory_device=current_platform.device_name,
         persistent_workers=num_data_workers > 0,
     )
     return dataset, loader
