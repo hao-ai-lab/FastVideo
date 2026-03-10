@@ -1,3 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
-__all__: list[str] = []
+from fastvideo.train.methods.knowledge_distillation.kd import KDMethod
+
+__all__ = ["KDMethod"]
