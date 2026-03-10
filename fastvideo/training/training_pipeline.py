@@ -453,33 +453,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             # make sure no implicit broadcasting happens
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
 
-<<<<<<< HEAD
-            # Defensive: avoid NaNs/div0 if an upstream bug ever produces empty tensors.
-            # mean(empty) -> NaN; division by 0 -> inf/NaN. Keep a 0 loss with grad history.
-            if model_pred.numel() == 0:
-                loss = (model_pred.sum() *
-                        0.0) / self.training_args.gradient_accumulation_steps
-            else:
-                # Compute MSE on one SP shard. We shard along the flattened token axis
-                # (t*h*w) with optional padding so (t*h*w) need not be divisible by sp_size.
-                sp_world_size = get_sp_group().world_size
-                if sp_world_size > 1:
-                    with nvtx_range("compute_loss_sp"):
-                        sharded_pred = shard_latents_across_sp(model_pred)
-                        sharded_target = shard_latents_across_sp(target)
-                        local_sse = ((sharded_pred.float() -
-                                      sharded_target.float())**2).sum()
-                        loss = (sp_world_size * local_sse / model_pred.numel()
-                                ) / self.training_args.gradient_accumulation_steps
-                else:
-                    with nvtx_range("compute_loss"):
-                        loss = (torch.mean(
-                            (model_pred.float() - target.float())**2) /
-                                self.training_args.gradient_accumulation_steps)
-=======
             loss = (torch.mean((model_pred.float() - target.float())**2) /
                     self.training_args.gradient_accumulation_steps)
->>>>>>> main
 
             with nvtx_range("backward"):
                 loss.backward()

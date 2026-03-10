@@ -525,18 +525,19 @@ class WanTransformerBlock_VSA(nn.Module):
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         gate_compress = gate_compress.squeeze(1).unflatten(
             2, (self.num_attention_heads, -1))
-
-        attn_output, _ = self.attn1(
-            query,
-            key,
-            value,
-            original_seq_len,
-            freqs_cis=freqs_cis,
-            gate_compress=gate_compress,
-        )
-        attn_output = attn_output.flatten(2)
-        attn_output, _ = self.to_out(attn_output)
-        attn_output = attn_output.squeeze(1)
+        with nvtx_range("WanTransformerBlock.forward.attn1"):
+            with nvtx_range("WanTransformerBlock.forward.attn1.attn"):
+                attn_output, _ = self.attn1(
+                    query,
+                    key,
+                    value,
+                    original_seq_len,
+                    freqs_cis=freqs_cis,
+                    gate_compress=gate_compress,
+                )
+                attn_output = attn_output.flatten(2)
+                attn_output, _ = self.to_out(attn_output)
+                attn_output = attn_output.squeeze(1)
 
         null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
         norm_hidden_states, hidden_states = self.self_attn_residual_norm(
