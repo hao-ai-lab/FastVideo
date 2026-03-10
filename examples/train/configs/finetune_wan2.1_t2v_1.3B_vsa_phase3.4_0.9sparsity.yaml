@@ -14,10 +14,10 @@ method:
 
 training:
   distributed:
-    num_gpus: 4
+    num_gpus: 8
     sp_size: 1
     tp_size: 1
-    hsdp_replicate_dim: 4
+    hsdp_replicate_dim: 8
     hsdp_shard_dim: 1
 
   data:
@@ -40,7 +40,7 @@ training:
 
   loop:
     max_train_steps: 4000
-    gradient_accumulation_steps: 2
+    gradient_accumulation_steps: 1
 
   checkpoint:
     output_dir: outputs/phase3.4_wan2.1_finetune_vsa_0.9_v3

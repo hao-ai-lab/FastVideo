@@ -49,7 +49,7 @@ echo "Extra args:  $*"
 echo "Log file:    ${LOG_FILE}"
 echo "=============================="
 
-torchrun \
+python -m torch.distributed.run \
     --nnodes "${NNODES}" \
     --node_rank "${NODE_RANK}" \
     --nproc_per_node "${NUM_GPUS}" \
