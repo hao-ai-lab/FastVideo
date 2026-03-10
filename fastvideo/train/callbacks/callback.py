@@ -24,6 +24,7 @@ _BUILTIN_CALLBACKS: dict[str, str] = {
     "grad_clip": "fastvideo.train.callbacks.grad_clip.GradNormClipCallback",
     "validation": "fastvideo.train.callbacks.validation.ValidationCallback",
     "ema": "fastvideo.train.callbacks.ema.EMACallback",
+    "log_rl_samples": "fastvideo.train.callbacks.log_rl_samples.LogRLSamplesCallback",
 }
 
 
@@ -58,6 +59,7 @@ class Callback:
         self,
         method: TrainingMethod,
         iteration: int = 0,
+        outputs: dict[str, Any] | None = None,
     ) -> None:
         pass
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import time
 from collections.abc import Callable
 from contextlib import contextmanager
 
@@ -158,15 +159,28 @@ def reward_models_on_device(reward_cfg, device):
     """Temporarily move reward models to device."""
     if _has_reward(reward_cfg, _GPU_REWARD_NAMES):
         use_cuda = _device_type(device) == "cuda"
+        _t0 = time.perf_counter()
         move_reward_models(reward_cfg, device)
+        if use_cuda:
+            torch.cuda.synchronize()
+        _t1 = time.perf_counter()
+        logger.info(
+            "[rewards] move_to_device=%.1fs", _t1 - _t0
+        )
         try:
             yield
         finally:
+            _t2 = time.perf_counter()
             move_reward_models(reward_cfg, "cpu")
             if use_cuda:
                 import gc
 
                 gc.collect()
                 torch.cuda.empty_cache()
+            _t3 = time.perf_counter()
+            logger.info(
+                "[rewards] move_to_cpu+gc=%.1fs",
+                _t3 - _t2,
+            )
     else:
         yield

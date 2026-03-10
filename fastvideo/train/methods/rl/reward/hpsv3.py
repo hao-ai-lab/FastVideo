@@ -108,11 +108,11 @@ def hpsv3_general_score(device):
             for frame in frames:
                 path = _save_frame_to_temp(frame)
                 try:
-                    score = inf.score(
-                        path, "A high-quality image"
+                    rewards = inf.reward(
+                        ["A high-quality image"], [path]
                     )
                     frame_scores.append(
-                        _extract_reward_scalar(score)
+                        _extract_reward_scalar(rewards[0][0])
                     )
                 finally:
                     os.remove(path)
@@ -148,9 +148,11 @@ def hpsv3_percentile_score(device):
             for frame in frames:
                 path = _save_frame_to_temp(frame)
                 try:
-                    score = inf.score(path, prompt)
+                    rewards = inf.reward(
+                        [prompt], [path]
+                    )
                     frame_scores.append(
-                        _extract_reward_scalar(score)
+                        _extract_reward_scalar(rewards[0][0])
                     )
                 finally:
                     os.remove(path)

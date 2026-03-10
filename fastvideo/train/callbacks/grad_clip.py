@@ -8,7 +8,7 @@ Optionally logs per-module grad norms to the tracker.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from fastvideo.logger import init_logger
 from fastvideo.train.callbacks.callback import Callback
@@ -41,6 +41,7 @@ class GradNormClipCallback(Callback):
         self,
         method: TrainingMethod,
         iteration: int = 0,
+        outputs: dict[str, Any] | None = None,
     ) -> None:
         max_norm = self._max_grad_norm
         if max_norm <= 0.0:

@@ -127,6 +127,8 @@ class Trainer:
             metric_sums: dict[str, float] = {}
             for accum_iter in range(grad_accum):
                 batch = next(data_stream)
+                # TODO: have method.single_train_step return a single dict of outputs directly
+                # TODO: ask single_train_step to do backward and remove explicity method.backward call
                 loss_map, outputs, step_metrics = method.single_train_step(
                     batch,
                     step,
@@ -156,6 +158,7 @@ class Trainer:
             self.callbacks.on_before_optimizer_step(
                 method,
                 iteration=step,
+                outputs=outputs,
             )
             method.optimizers_schedulers_step(step)
             method.optimizers_zero_grad(step)

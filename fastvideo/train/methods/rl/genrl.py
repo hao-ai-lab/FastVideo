@@ -13,7 +13,9 @@ returns all stats.  The trainer's outer loop just calls
 
 from __future__ import annotations
 
+import contextlib
 import copy
+import time
 from collections import defaultdict
 from concurrent import futures
 from typing import Any
@@ -42,6 +44,7 @@ from fastvideo.train.methods.rl.embeddings import (
     compute_text_embeddings,
 )
 from fastvideo.train.methods.rl.rewards import (
+    move_reward_models,
     multi_score,
     reward_models_on_device,
 )
@@ -108,12 +111,24 @@ class GenRLMethod(TrainingMethod):
         )
 
         # Reward functions.
+        self._reward_on_gpu = bool(
+            mc.get("reward_on_gpu", False)
+        )
+        reward_init_device = (
+            self.student.device
+            if self._reward_on_gpu
+            else torch.device("cpu")
+        )
         self._reward_fn = multi_score(
-            torch.device("cpu"),
+            reward_init_device,
             self._reward_cfg,
             mc.get("reward_module"),
             return_raw_scores=True,
         )
+        if self._reward_on_gpu:
+            move_reward_models(
+                self._reward_cfg, self.student.device
+            )
 
         # Prompt dataloaders.
         wg = get_world_group()
@@ -383,66 +398,124 @@ class GenRLMethod(TrainingMethod):
         }
 
         # 1. Sample epoch.
+        torch.cuda.synchronize()
+        t_sample_start = time.perf_counter()
         self.student.transformer.eval()
-        with reward_models_on_device(
-            self._reward_cfg, device
-        ):
-            samples = sample_epoch(
-                model=self.student,
-                scheduler=self._scheduler,
-                train_sampler=self._train_sampler,
-                train_iter=self._train_iter,
-                reward_fn=self._reward_fn,
-                sample_neg_prompt_embeds=(
-                    self._sample_neg_embeds
-                ),
-                text_encoder=self.student.text_encoder,
-                tokenizer=self.student.tokenizer,
-                executor=self._executor,
-                epoch=epoch,
-                global_step=iteration,
-                sample_batch_size=self._sample_batch_size,
-                num_batches_per_epoch=(
-                    self._num_batches_per_epoch
-                ),
-                num_inference_steps=(
-                    self._num_inference_steps
-                ),
-                guidance_scale=self._guidance_scale,
-                height=self._height,
-                width=self._width,
-                num_frames=self._num_frames,
-                noise_level=self._noise_level,
-                sde_type=self._sde_type,
-                diffusion_clip=self._diffusion_clip,
-                diffusion_clip_value=(
-                    self._diffusion_clip_value
-                ),
-                sde_window_size=self._sde_window_size,
-                sde_window_range=self._sde_window_range,
-                kl_reward=self._kl_reward,
-                same_latent=self._same_latent,
-                seed=self._seed,
-                device=device,
-                is_main_process=self._is_main,
-                ref_transformer=(
-                    self._reference.transformer
-                    if self._reference
-                    else None
-                ),
-                tracker=self.tracker,
+        reward_ctx = (
+            contextlib.nullcontext()
+            if self._reward_on_gpu
+            else reward_models_on_device(
+                self._reward_cfg, device
             )
+        )
+        with reward_ctx:
+            samples, batch_videos, batch_prompts = (
+                sample_epoch(
+                    model=self.student,
+                    scheduler=self._scheduler,
+                    train_sampler=self._train_sampler,
+                    train_iter=self._train_iter,
+                    reward_fn=self._reward_fn,
+                    sample_neg_prompt_embeds=(
+                        self._sample_neg_embeds
+                    ),
+                    text_encoder=self.student.text_encoder,
+                    tokenizer=self.student.tokenizer,
+                    executor=self._executor,
+                    epoch=epoch,
+                    global_step=iteration,
+                    sample_batch_size=(
+                        self._sample_batch_size
+                    ),
+                    num_batches_per_epoch=(
+                        self._num_batches_per_epoch
+                    ),
+                    num_inference_steps=(
+                        self._num_inference_steps
+                    ),
+                    guidance_scale=self._guidance_scale,
+                    height=self._height,
+                    width=self._width,
+                    num_frames=self._num_frames,
+                    noise_level=self._noise_level,
+                    sde_type=self._sde_type,
+                    diffusion_clip=self._diffusion_clip,
+                    diffusion_clip_value=(
+                        self._diffusion_clip_value
+                    ),
+                    sde_window_size=(
+                        self._sde_window_size
+                    ),
+                    sde_window_range=(
+                        self._sde_window_range
+                    ),
+                    kl_reward=self._kl_reward,
+                    same_latent=self._same_latent,
+                    seed=self._seed,
+                    device=device,
+                    is_main_process=self._is_main,
+                    ref_transformer=(
+                        self._reference.transformer
+                        if self._reference
+                        else None
+                    ),
+                    tracker=self.tracker,
+                )
+            )
+        torch.cuda.synchronize()
+        t_sample_end = time.perf_counter()
 
         # 2. Prepare samples (advantages).
+        t_adv_start = time.perf_counter()
         samples = self._prepare_samples(
             samples, epoch, iteration
         )
+        t_adv_end = time.perf_counter()
 
         # 3. PPO training.
+        torch.cuda.synchronize()
+        t_ppo_start = time.perf_counter()
         ppo_metrics = self._ppo_train(
             samples, epoch, iteration
         )
+        torch.cuda.synchronize()
+        t_ppo_end = time.perf_counter()
         all_metrics.update(ppo_metrics)
+
+        logger.info(
+            "[GenRL step %d] TIMING: "
+            "sample=%.1fs  advantages=%.1fs  "
+            "ppo_train=%.1fs  total=%.1fs",
+            iteration,
+            t_sample_end - t_sample_start,
+            t_adv_end - t_adv_start,
+            t_ppo_end - t_ppo_start,
+            t_ppo_end - t_sample_start,
+        )
+        all_metrics["time/sample_sec"] = (
+            t_sample_end - t_sample_start
+        )
+        all_metrics["time/advantages_sec"] = (
+            t_adv_end - t_adv_start
+        )
+        all_metrics["time/ppo_train_sec"] = (
+            t_ppo_end - t_ppo_start
+        )
+
+        # Build outputs dict with sampled videos for
+        # logging callbacks.
+        outputs: dict[str, Any] = {}
+        if self._is_main and batch_videos:
+            vids = batch_videos[0]
+            outputs["sample_videos"] = (
+                (vids * 255)
+                .clamp(0, 255)
+                .to(torch.uint8)
+                .cpu()
+            )
+            outputs["sample_prompts"] = (
+                batch_prompts[0] if batch_prompts else []
+            )
 
         # Return dummy loss (everything is internal).
         dummy_loss = torch.zeros(
@@ -450,7 +523,7 @@ class GenRLMethod(TrainingMethod):
         )
         return (
             {"total_loss": dummy_loss},
-            {},
+            outputs,
             all_metrics,
         )
 
@@ -756,8 +829,11 @@ class GenRLMethod(TrainingMethod):
 
             self.student.transformer.train()
             info: dict[str, list] = defaultdict(list)
+            _ppo_batch_times: list[float] = []
 
             for sample in batched_list:
+                torch.cuda.synchronize()
+                _ppo_batch_t0 = time.perf_counter()
                 # Get embeddings.
                 embeds = sample["prompt_embeds"]
                 neg_embeds = (
@@ -973,7 +1049,20 @@ class GenRLMethod(TrainingMethod):
                 )
                 self._optimizer.step()
                 self._optimizer.zero_grad()
+                torch.cuda.synchronize()
+                _ppo_batch_times.append(
+                    time.perf_counter() - _ppo_batch_t0
+                )
 
+            if _ppo_batch_times:
+                logger.info(
+                    "[GenRL PPO] inner_epoch=%d  "
+                    "micro_batch_times=%s  "
+                    "total=%.1fs",
+                    inner_epoch,
+                    [f"{t:.1f}s" for t in _ppo_batch_times],
+                    sum(_ppo_batch_times),
+                )
             # Aggregate info for this inner epoch.
             for k, v in info.items():
                 all_info[k].extend(v)

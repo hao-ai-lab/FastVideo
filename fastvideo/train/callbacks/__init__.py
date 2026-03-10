@@ -8,6 +8,8 @@ from fastvideo.train.callbacks.ema import (
     EMACallback, )
 from fastvideo.train.callbacks.grad_clip import (
     GradNormClipCallback, )
+from fastvideo.train.callbacks.log_rl_samples import (
+    LogRLSamplesCallback, )
 from fastvideo.train.callbacks.validation import (
     ValidationCallback, )
 
@@ -16,5 +18,6 @@ __all__ = [
     "CallbackDict",
     "EMACallback",
     "GradNormClipCallback",
+    "LogRLSamplesCallback",
     "ValidationCallback",
 ]

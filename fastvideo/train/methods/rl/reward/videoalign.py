@@ -134,10 +134,10 @@ def videoalign_mq_score(
             gray_frames = _convert_to_grayscale(frames)
             path = _save_video_to_temp(gray_frames)
             try:
-                result = inf.score_video(path)
-                mq = float(
-                    result.get("mq", result.get("avg", 0))
+                results = inf.reward(
+                    [path], [""], use_norm=True
                 )
+                mq = float(results[0].get("MQ", 0))
                 batch_scores.append(mq)
             finally:
                 os.remove(path)
@@ -171,12 +171,10 @@ def videoalign_ta_score(
             )
             path = _save_video_to_temp(frames)
             try:
-                result = inf.score_video(
-                    path, prompt=prompt
+                results = inf.reward(
+                    [path], [prompt], use_norm=True
                 )
-                ta = float(
-                    result.get("ta", result.get("avg", 0))
-                )
+                ta = float(results[0].get("TA", 0))
                 batch_scores.append(ta)
             finally:
                 os.remove(path)
