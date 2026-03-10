@@ -41,9 +41,6 @@ from fastvideo.train.methods.rl.diffusion import (
 from fastvideo.train.methods.rl.embeddings import (
     compute_text_embeddings,
 )
-from fastvideo.train.methods.rl.ema import (
-    EMAModuleWrapper,
-)
 from fastvideo.train.methods.rl.rewards import (
     multi_score,
     reward_models_on_device,
@@ -156,9 +153,6 @@ class GenRLMethod(TrainingMethod):
         # Optimizer and scheduler.
         self._init_optimizer()
 
-        # EMA.
-        self._init_ema()
-
         # Async reward executor.
         self._executor = futures.ThreadPoolExecutor(
             max_workers=8
@@ -254,15 +248,6 @@ class GenRLMethod(TrainingMethod):
         )
         if self._num_video_per_prompt == 1:
             self._per_prompt_stat_tracking = False
-
-        # EMA config.
-        self._use_ema = bool(mc.get("use_ema", True))
-        self._ema_decay = float(
-            mc.get("ema_decay", 0.9)
-        )
-        self._ema_update_interval = int(
-            mc.get("ema_update_interval", 8)
-        )
 
         # Reward config.
         self._reward_cfg = dict(mc.get("reward_fn", {}))
@@ -362,18 +347,6 @@ class GenRLMethod(TrainingMethod):
             betas=tc.optimizer.betas,
             scheduler_name=str(tc.optimizer.lr_scheduler),
         )
-
-    def _init_ema(self) -> None:
-        self._ema = None
-        if self._use_ema:
-            self._ema = EMAModuleWrapper(
-                self._transformer_params,
-                decay=self._ema_decay,
-                update_step_interval=(
-                    self._ema_update_interval
-                ),
-                device=self.student.device,
-            )
 
     def _compute_train_timesteps(self) -> None:
         if self._sde_window_size > 0:
@@ -1000,13 +973,6 @@ class GenRLMethod(TrainingMethod):
                 )
                 self._optimizer.step()
                 self._optimizer.zero_grad()
-
-                # EMA.
-                if self._ema is not None:
-                    self._ema.step(
-                        self._transformer_params,
-                        global_step,
-                    )
 
             # Aggregate info for this inner epoch.
             for k, v in info.items():
