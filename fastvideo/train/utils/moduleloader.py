@@ -118,8 +118,7 @@ def load_module_from_path(
         fastvideo_args.override_transformer_cls_name = str(override_transformer_cls_name)
 
     if transformer_override_safetensor:
-        fastvideo_args.init_weights_from_safetensors = str(
-            transformer_override_safetensor)
+        fastvideo_args.init_weights_from_safetensors = str(transformer_override_safetensor)
 
     if disable_custom_init_weights:
         fastvideo_args._loading_teacher_critic_model = True

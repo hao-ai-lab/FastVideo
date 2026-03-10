@@ -400,11 +400,8 @@ class ValidationCallback(Callback):
 
         # Propagate sampling_timesteps to pipeline_config so
         # causal/DMD denoising stages can read them.
-        if (self.sampling_timesteps is not None
-                and inference_args.pipeline_config
-                .dmd_denoising_steps is None):
-            inference_args.pipeline_config.dmd_denoising_steps = (
-                [int(s) for s in self.sampling_timesteps])
+        if (self.sampling_timesteps is not None and inference_args.pipeline_config.dmd_denoising_steps is None):
+            inference_args.pipeline_config.dmd_denoising_steps = ([int(s) for s in self.sampling_timesteps])
 
         videos: list[list[np.ndarray]] = []
         captions: list[str] = []
