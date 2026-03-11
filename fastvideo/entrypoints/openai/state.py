@@ -15,18 +15,18 @@ if TYPE_CHECKING:
 
 DEFAULT_OUTPUT_DIR = "outputs"
 
-_generator: "VideoGenerator | None" = None
-_fastvideo_args: "FastVideoArgs | None" = None
+_generator: VideoGenerator | None = None
+_fastvideo_args: FastVideoArgs | None = None
 _output_dir: str = DEFAULT_OUTPUT_DIR
 
 
-def get_generator() -> "VideoGenerator":
+def get_generator() -> VideoGenerator:
     """Return the global VideoGenerator instance (set during startup)."""
     assert _generator is not None, "Server not initialized — generator is None"
     return _generator
 
 
-def get_server_args() -> "FastVideoArgs":
+def get_server_args() -> FastVideoArgs:
     """Return the global FastVideoArgs (set during startup)."""
     assert _fastvideo_args is not None, "Server not initialized — args is None"
     return _fastvideo_args
@@ -38,8 +38,8 @@ def get_output_dir() -> str:
 
 
 def set_state(
-    generator: "VideoGenerator",
-    fastvideo_args: "FastVideoArgs",
+    generator: VideoGenerator,
+    fastvideo_args: FastVideoArgs,
     output_dir: str,
 ) -> None:
     """Set all server state at once (called from lifespan)."""
