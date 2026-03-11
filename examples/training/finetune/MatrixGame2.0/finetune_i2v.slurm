@@ -35,18 +35,19 @@ RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
 # Configs
-MODEL_PATH="../mg_models/Solaris-6K"
-DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/vpt/vpt/train_81f/preprocessed_0306"
-# VALIDATION_DATASET_FILE="examples/training/finetune/MatrixGame2.0/validation_mc.json"
-VALIDATION_DATASET_FILE="examples/training/finetune/MatrixGame2.0/validation_solaris.json"
+# MODEL_PATH="../mg_models/Solaris-6K"
+MODEL_PATH="../mg_models/Solaris-30K"
+# DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/vpt/vpt/train_81f/preprocessed_0306"
+DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f/preprocessed_0308"
+VALIDATION_DATASET_FILE="examples/training/finetune/MatrixGame2.0/validation.json"
 
 # Training arguments
 training_args=(
   --tracker_project_name "mg_finetune_solaris"
   --output_dir "checkpoints/matrixgame_finetune_${RUN_NAME}"
-  --wandb_run_name "${RUN_NAME}_bs64"
-  --override_transformer_cls_name "MatrixGameWanModel"
-  --max_train_steps 100000
+  --wandb_run_name "${RUN_NAME}_bs64_continue"
+  # --override_transformer_cls_name "MatrixGameWanModel"
+  --max_train_steps 40000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 2

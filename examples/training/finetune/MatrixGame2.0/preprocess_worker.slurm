@@ -17,7 +17,7 @@ START_FILE=${1:-1}  # Starting file number for this node
 NODE_ID=${2:-0}     # Node identifier (0-7)
 
 MODEL_PATH="../mg_models/Matrix-Game-2.0-Base-Diffusers"
-OUTPUT_BASE="../solaris/datasets/vpt/vpt/train_81f/preprocessed_0306"
+OUTPUT_BASE="../solaris/datasets/train_81f/preprocessed_0308"
 
 # Port range calculation
 base_port=$((29500 + NODE_ID * 100))
@@ -28,7 +28,7 @@ for i in {1..8}; do
     gpu=${gpu_ids[((i-1))]}
     file_num=$((START_FILE + i - 1))
     
-    DATA_MERGE_PATH="../solaris/datasets/vpt/vpt/train_81f/merge_${file_num}.txt"
+    DATA_MERGE_PATH="../solaris/datasets/train_81f/merge_${file_num}.txt"
     OUTPUT_DIR="${OUTPUT_BASE}/gpu_${gpu}_file_${file_num}"
     echo "DATA_MERGE_PATH: $DATA_MERGE_PATH"
     echo "OUTPUT_DIR: $OUTPUT_DIR"

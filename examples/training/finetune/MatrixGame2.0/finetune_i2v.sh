@@ -2,13 +2,14 @@
 
 export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
 export WANDB_BASE_URL="https://api.wandb.ai"
-export WANDB_MODE=online
+# export WANDB_MODE=online
+export WANDB_MODE=offline
 export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-MODEL_PATH="../mg_models/Solaris-6K"
-DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/vpt/vpt/train_81f/preprocessed_0306"
-VALIDATION_DATASET_FILE="$(dirname "$0")/validation_test.json"
+MODEL_PATH="../mg_models/Solaris-30K"
+DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f/preprocessed_0308"
+VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=1
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
@@ -26,7 +27,7 @@ training_args=(
   --num_height 352
   --num_width 640
   --num_frames 81
-  --enable_gradient_checkpointing_type "full"
+  # --enable_gradient_checkpointing_type "full"
 )
 
 # Parallel arguments
@@ -52,9 +53,9 @@ dataset_args=(
 
 # Validation arguments
 validation_args=(
-  --log_validation
+  # --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 100
+  # --validation_steps 100
   --validation_sampling_steps "40"
   --validation_guidance_scale "6.0"
 )
