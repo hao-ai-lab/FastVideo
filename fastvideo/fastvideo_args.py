@@ -617,7 +617,11 @@ class FastVideoArgs:
 
         kwargs['pipeline_config'] = PipelineConfig.from_kwargs(kwargs)
         kwargs['preprocess_config'] = PreprocessConfig.from_kwargs(kwargs)
-        return cls(**kwargs)
+        # Filter to only FastVideoArgs dataclass fields — pipeline-specific CLI
+        # args (e.g. enable_bsa, bsa_sparsity) live in PipelineConfig and must
+        # not be forwarded to the FastVideoArgs constructor.
+        valid_fields = {f.name for f in dataclasses.fields(cls)}
+        return cls(**{k: v for k, v in kwargs.items() if k in valid_fields})
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
