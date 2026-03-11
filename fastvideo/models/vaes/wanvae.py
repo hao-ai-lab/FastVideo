@@ -329,10 +329,7 @@ class WanResample(nn.Module):
                             cache_x
                         ],
                                             dim=2)
-                    if _feat_cache[idx] == "Rep":
-                        x = self.time_conv(x)
-                    else:
-                        x = self.time_conv(x, _feat_cache[idx])
+                    x = self.time_conv(x) if _feat_cache[idx] == "Rep" else self.time_conv(x, _feat_cache[idx])
                     _feat_cache[idx] = cache_x
                     _feat_idx += 1
 
@@ -1077,10 +1074,7 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         self.temperal_downsample = list(config.temperal_downsample)
         self.temperal_upsample = list(config.temperal_downsample)[::-1]
 
-        if config.decoder_base_dim is None:
-            decoder_base_dim = config.base_dim
-        else:
-            decoder_base_dim = config.decoder_base_dim
+        decoder_base_dim = config.base_dim if config.decoder_base_dim is None else config.decoder_base_dim
 
         self.latents_mean = list(config.latents_mean)
         self.latents_std = list(config.latents_std)
@@ -1312,10 +1306,7 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         """
         x = sample
         posterior = self.encode(x).latent_dist
-        if sample_posterior:
-            z = posterior.sample(generator=generator)
-        else:
-            z = posterior.mode()
+        z = posterior.sample(generator=generator) if sample_posterior else posterior.mode()
         dec = self.decode(z)
         return dec
 

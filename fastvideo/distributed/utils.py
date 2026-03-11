@@ -22,8 +22,7 @@ logger = init_logger(__name__)
 
 def ensure_divisibility(numerator, denominator) -> None:
     """Ensure that numerator is divisible by the denominator."""
-    assert numerator % denominator == 0, "{} is not divisible by {}".format(
-        numerator, denominator)
+    assert numerator % denominator == 0, "{} is not divisible by {}".format(numerator, denominator)
 
 
 def divide(numerator: int, denominator: int) -> int:
@@ -163,8 +162,7 @@ class StatelessProcessGroup:
     # src rank -> counter
     recv_src_counter: dict[int, int] = dataclasses.field(default_factory=dict)
     broadcast_send_counter: int = 0
-    broadcast_recv_src_counter: dict[int, int] = dataclasses.field(
-        default_factory=dict)
+    broadcast_recv_src_counter: dict[int, int] = dataclasses.field(default_factory=dict)
 
     # A deque to store the data entries, with key and timestamp.
     entries: deque[tuple[str, float]] = dataclasses.field(default_factory=deque)
@@ -196,8 +194,7 @@ class StatelessProcessGroup:
 
     def recv_obj(self, src: int) -> Any:
         """Receive an object from a source rank."""
-        obj = pickle.loads(
-            self.store.get(f"send_to/{self.rank}/{self.recv_src_counter[src]}"))
+        obj = pickle.loads(self.store.get(f"send_to/{self.rank}/{self.recv_src_counter[src]}"))
         self.recv_src_counter[src] += 1
         return obj
 
@@ -271,8 +268,7 @@ class StatelessProcessGroup:
             is_master=(rank == 0),
         )
 
-        return StatelessProcessGroup(
-            rank=rank,
-            world_size=world_size,
-            store=store,
-            data_expiration_seconds=data_expiration_seconds)
+        return StatelessProcessGroup(rank=rank,
+                                     world_size=world_size,
+                                     store=store,
+                                     data_expiration_seconds=data_expiration_seconds)

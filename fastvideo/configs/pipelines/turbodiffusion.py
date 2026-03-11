@@ -39,17 +39,14 @@ class TurboDiffusionT2VConfig(PipelineConfig):
     boundary_ratio: float | None = None
 
     # Text encoding stage
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (T5Config(), ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5Config(), ))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda:
-                                               (t5_postprocess_text, ))
+                                  ...] = field(default_factory=lambda: (t5_postprocess_text, ))
 
     # Precision for each component
     precision: str = "bf16"
     vae_precision: str = "fp32"
-    text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("fp32", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32", ))
 
     # self-forcing params
     warp_denoising_step: bool = True
@@ -96,22 +93,18 @@ class TurboDiffusionI2VConfig(PipelineConfig):
     boundary_ratio: float | None = 0.9
 
     # Text encoding stage
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (T5Config(), ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5Config(), ))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda:
-                                               (t5_postprocess_text, ))
+                                  ...] = field(default_factory=lambda: (t5_postprocess_text, ))
 
     # Image encoder for I2V
-    image_encoder_config: EncoderConfig = field(
-        default_factory=CLIPVisionConfig)
+    image_encoder_config: EncoderConfig = field(default_factory=CLIPVisionConfig)
     image_encoder_precision: str = "fp32"
 
     # Precision for each component
     precision: str = "bf16"
     vae_precision: str = "fp32"
-    text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("fp32", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32", ))
 
     # self-forcing params
     warp_denoising_step: bool = True

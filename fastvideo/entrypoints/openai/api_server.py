@@ -104,8 +104,7 @@ def _parse_args() -> tuple[FastVideoArgs, str, int, str]:
     """Parse CLI arguments and return (FastVideoArgs, host, port, output_dir)"""
     from fastvideo.utils import FlexibleArgumentParser
 
-    parser = FlexibleArgumentParser(
-        description="FastVideo OpenAI-compatible API server")
+    parser = FlexibleArgumentParser(description="FastVideo OpenAI-compatible API server")
     parser.add_argument("--host", type=str, default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--output-dir", type=str, default=DEFAULT_OUTPUT_DIR)
@@ -117,13 +116,8 @@ def _parse_args() -> tuple[FastVideoArgs, str, int, str]:
     output_dir = args.output_dir
 
     # Build FastVideoArgs from the remaining CLI args
-    excluded = {
-        "host", "port", "output_dir", "subparser", "config", "dispatch_function"
-    }
-    cli_kwargs = {
-        k: v
-        for k, v in vars(args).items() if k not in excluded and v is not None
-    }
+    excluded = {"host", "port", "output_dir", "subparser", "config", "dispatch_function"}
+    cli_kwargs = {k: v for k, v in vars(args).items() if k not in excluded and v is not None}
     fastvideo_args = FastVideoArgs.from_kwargs(**cli_kwargs)
     return fastvideo_args, host, port, output_dir
 

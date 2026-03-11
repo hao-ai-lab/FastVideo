@@ -10,10 +10,8 @@ import pyarrow as pa
 import torch
 from datasets import Dataset, Video, load_dataset
 
-from fastvideo.configs.configs import (DatasetType, PreprocessConfig,
-                                       VideoLoaderType)
-from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter,
-                                                     records_to_table)
+from fastvideo.configs.configs import (DatasetType, PreprocessConfig, VideoLoaderType)
+from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter, records_to_table)
 from fastvideo.distributed.parallel_state import get_world_rank, get_world_size
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import PreprocessBatch
@@ -49,11 +47,9 @@ class PreprocessingDataValidator:
     def register_validators(self) -> None:
         self.add_validator("data_type_validator", self._validate_data_type)
         self.add_validator("resolution_validator", self._validate_resolution)
-        self.add_validator("frame_sampling_validator",
-                           self._validate_frame_sampling)
+        self.add_validator("frame_sampling_validator", self._validate_frame_sampling)
 
-    def add_validator(self, name: str, validator: Callable[[dict[str, Any]],
-                                                           bool]) -> None:
+    def add_validator(self, name: str, validator: Callable[[dict[str, Any]], bool]) -> None:
         self.validators[name] = validator
         self.filter_counts[name] = 0
 
@@ -73,8 +69,7 @@ class PreprocessingDataValidator:
 
     def _validate_data_type(self, batch: dict[str, Any]) -> bool:
         """Validate basic validity of data items"""
-        return not (batch["caption"] is None or batch["caption"] == ""
-                    or batch["fps"] is None or batch["fps"] <= 0
+        return not (batch["caption"] is None or batch["caption"] == "" or batch["fps"] is None or batch["fps"] <= 0
                     or batch["num_frames"] is None or batch["num_frames"] <= 0)
 
     def _validate_resolution(self, batch: dict[str, Any]) -> bool:
@@ -90,16 +85,13 @@ class PreprocessingDataValidator:
         """Validate frame sampling constraints"""
 
         if (batch["num_frames"] / batch["fps"]
-                > self.video_length_tolerance_range *
-            (self.num_frames / self.train_fps * self.speed_factor)):
+                > self.video_length_tolerance_range * (self.num_frames / self.train_fps * self.speed_factor)):
             return False
 
         frame_interval = batch["fps"] / self.train_fps
         start_frame_idx = 0
-        frame_indices = np.arange(start_frame_idx, batch["num_frames"],
-                                  frame_interval).astype(int)
-        return not (len(frame_indices) < self.num_frames
-                    and random.random() < self.drop_short_ratio)
+        frame_indices = np.arange(start_frame_idx, batch["num_frames"], frame_interval).astype(int)
+        return not (len(frame_indices) < self.num_frames and random.random() < self.drop_short_ratio)
 
     def log_validation_stats(self):
         info = ""
@@ -135,8 +127,7 @@ class VideoForwardBatchBuilder:
 class ParquetDatasetSaver:
     """Component for saving and writing Parquet datasets using shared parquet_io."""
 
-    def __init__(self, flush_frequency: int, samples_per_file: int,
-                 schema: pa.Schema,
+    def __init__(self, flush_frequency: int, samples_per_file: int, schema: pa.Schema,
                  record_creator: Callable[..., list[dict[str, Any]]]):
         self.flush_frequency = flush_frequency
         self.samples_per_file = samples_per_file
@@ -145,11 +136,10 @@ class ParquetDatasetSaver:
         self.num_processed_samples: int = 0
         self._writer: ParquetDatasetWriter | None = None
 
-    def save_and_write_parquet_batch(
-            self,
-            batch: PreprocessBatch,
-            output_dir: str,
-            extra_features: dict[str, Any] | None = None) -> None:
+    def save_and_write_parquet_batch(self,
+                                     batch: PreprocessBatch,
+                                     output_dir: str,
+                                     extra_features: dict[str, Any] | None = None) -> None:
         """
         Save and write Parquet dataset batch
         
@@ -167,8 +157,8 @@ class ParquetDatasetSaver:
 
         # Process non-padded embeddings (if needed)
         if batch.prompt_attention_mask is not None:
-            batch.prompt_embeds = self._process_non_padded_embeddings(
-                batch.prompt_embeds[0], batch.prompt_attention_mask[0])
+            batch.prompt_embeds = self._process_non_padded_embeddings(batch.prompt_embeds[0],
+                                                                      batch.prompt_attention_mask[0])
         else:
             raise ValueError("prompt_attention_mask is None")
 
@@ -194,8 +184,7 @@ class ParquetDatasetSaver:
             table = records_to_table(batch_data, self.schema)
             if self._writer is None:
                 os.makedirs(output_dir, exist_ok=True)
-                self._writer = ParquetDatasetWriter(
-                    out_dir=output_dir, samples_per_file=self.samples_per_file)
+                self._writer = ParquetDatasetWriter(out_dir=output_dir, samples_per_file=self.samples_per_file)
             self._writer.append_table(table)
             logger.debug("Collected batch with %s samples", len(table))
 
@@ -203,9 +192,8 @@ class ParquetDatasetSaver:
         if self.num_processed_samples >= self.flush_frequency:
             self.flush_tables()
 
-    def _process_non_padded_embeddings(
-            self, prompt_embeds: torch.Tensor,
-            prompt_attention_mask: torch.Tensor) -> list[torch.Tensor]:
+    def _process_non_padded_embeddings(self, prompt_embeds: torch.Tensor,
+                                       prompt_attention_mask: torch.Tensor) -> list[torch.Tensor]:
         """Process non-padded embeddings"""
         assert isinstance(prompt_embeds, torch.Tensor)
         assert isinstance(prompt_attention_mask, torch.Tensor)
@@ -251,20 +239,16 @@ class ParquetDatasetSaver:
         self.clean_up()
 
 
-def build_dataset(preprocess_config: PreprocessConfig, split: str,
-                  validator: Callable[[dict[str, Any]], bool]) -> Dataset:
+def build_dataset(preprocess_config: PreprocessConfig, split: str, validator: Callable[[dict[str, Any]],
+                                                                                       bool]) -> Dataset:
     if preprocess_config.dataset_type == DatasetType.HF:
         dataset = load_dataset(preprocess_config.dataset_path, split=split)
         dataset = dataset.filter(validator)
-        dataset = dataset.shard(num_shards=get_world_size(),
-                                index=get_world_rank())
+        dataset = dataset.shard(num_shards=get_world_size(), index=get_world_rank())
     elif preprocess_config.dataset_type == DatasetType.MERGED:
-        metadata_json_path = os.path.join(preprocess_config.dataset_path,
-                                          "videos2caption.json")
+        metadata_json_path = os.path.join(preprocess_config.dataset_path, "videos2caption.json")
         video_folder = os.path.join(preprocess_config.dataset_path, "videos")
-        dataset = load_dataset("json",
-                               data_files=metadata_json_path,
-                               split=split)
+        dataset = load_dataset("json", data_files=metadata_json_path, split=split)
         column_names = dataset.column_names
         # rename columns to match the schema
         if "cap" in column_names:
@@ -273,8 +257,7 @@ def build_dataset(preprocess_config: PreprocessConfig, split: str,
             dataset = dataset.rename_column("path", "name")
 
         dataset = dataset.filter(validator)
-        dataset = dataset.shard(num_shards=get_world_size(),
-                                index=get_world_rank())
+        dataset = dataset.shard(num_shards=get_world_size(), index=get_world_rank())
 
         # add video column
         def add_video_column(item: dict[str, Any]) -> dict[str, Any]:
@@ -285,7 +268,6 @@ def build_dataset(preprocess_config: PreprocessConfig, split: str,
         if preprocess_config.video_loader_type == VideoLoaderType.TORCHCODEC:
             dataset = dataset.cast_column("video", Video())
     else:
-        raise ValueError(
-            f"Invalid dataset type: {preprocess_config.dataset_type}")
+        raise ValueError(f"Invalid dataset type: {preprocess_config.dataset_type}")
 
     return dataset

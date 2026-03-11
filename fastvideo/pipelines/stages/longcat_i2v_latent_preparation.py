@@ -61,14 +61,13 @@ class LongCatI2VLatentPreparationStage(LatentPreparationStage):
 
         logger.info(
             "I2V Latent Prep: num_frames=%s, num_latent_frames=%s "
-            "(vae_temporal_scale=%s), latent_shape=(%s, %s)", num_frames,
-            num_latent_frames, vae_temporal_scale, latent_height, latent_width)
+            "(vae_temporal_scale=%s), latent_shape=(%s, %s)", num_frames, num_latent_frames, vae_temporal_scale,
+            latent_height, latent_width)
 
         # 2. Generate random noise for all frames
         # batch_size might not be set, default to 1
         batch_size = batch.batch_size if batch.batch_size is not None else 1
-        shape = (batch_size, num_channels, num_latent_frames, latent_height,
-                 latent_width)
+        shape = (batch_size, num_channels, num_latent_frames, latent_height, latent_width)
 
         # Handle generator - may be a list for batch handling
         generator = batch.generator
@@ -76,30 +75,21 @@ class LongCatI2VLatentPreparationStage(LatentPreparationStage):
             generator = generator[0] if generator else None
 
         # torch.randn requires specific argument order: size, generator, dtype
-        latents = torch.randn(*shape,
-                              generator=generator).to(get_local_torch_device(),
-                                                      dtype=torch.float32)
+        latents = torch.randn(*shape, generator=generator).to(get_local_torch_device(), dtype=torch.float32)
 
         # 3. Replace first frame with conditioned image latent
         if batch.image_latent is not None:
             num_cond_latents = batch.num_cond_latents
-            latents[:, :, :
-                    num_cond_latents] = batch.image_latent[:, :, :
-                                                           num_cond_latents]
+            latents[:, :, :num_cond_latents] = batch.image_latent[:, :, :num_cond_latents]
 
-            logger.info(
-                "I2V: Replaced first %s latent frame(s) with image conditioning",
-                num_cond_latents)
+            logger.info("I2V: Replaced first %s latent frame(s) with image conditioning", num_cond_latents)
         else:
-            logger.warning(
-                "No image_latent found in batch, proceeding without conditioning"
-            )
+            logger.warning("No image_latent found in batch, proceeding without conditioning")
 
         # 4. Store in batch
         batch.latents = latents
 
         # Required by base class output validator
-        batch.raw_latent_shape = (num_latent_frames, latent_height,
-                                  latent_width)
+        batch.raw_latent_shape = (num_latent_frames, latent_height, latent_width)
 
         return batch

@@ -7,8 +7,7 @@ from torch.distributed.distributed_c10d import PrefixStore
 
 import fastvideo.envs as envs
 from fastvideo.logger import init_logger
-from fastvideo.platforms.interface import (AttentionBackendEnum, Platform,
-                                           PlatformEnum)
+from fastvideo.platforms.interface import (AttentionBackendEnum, Platform, PlatformEnum)
 
 logger = init_logger(__name__)
 
@@ -65,10 +64,9 @@ class NPUPlatform(Platform):
         torch.npu.reset_peak_memory_stats()
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,
-                             head_size: int, dtype: torch.dtype) -> str:
-        logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s",
-                    envs.FASTVIDEO_ATTENTION_BACKEND)
+    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None, head_size: int,
+                             dtype: torch.dtype) -> str:
+        logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND)
         if envs.FASTVIDEO_ATTENTION_BACKEND != "TORCH_SDPA":
             logger.info("Ascend NPU only supports the Torch SDPA backend.")
         else:
@@ -76,9 +74,7 @@ class NPUPlatform(Platform):
         return "fastvideo.attention.backends.sdpa.SDPABackend"
 
     @classmethod
-    def get_current_memory_usage(cls,
-                                 device: torch.types.Device | None = None
-                                 ) -> float:
+    def get_current_memory_usage(cls, device: torch.types.Device | None = None) -> float:
         torch.npu.reset_peak_memory_stats(device)
         return torch.npu.max_memory_allocated(device)
 
@@ -121,8 +117,7 @@ class NPUPlatform(Platform):
         backend_options = ProcessGroupHCCL.Options()
         backend_options._timeout = timeout
 
-        backend_class = ProcessGroupHCCL(prefix_store, group_rank, group_size,
-                                         backend_options)
+        backend_class = ProcessGroupHCCL(prefix_store, group_rank, group_size, backend_options)
         device = torch.device("npu")
         backend_class._set_sequence_number_for_group()
         backend_type = ProcessGroup.BackendType.CUSTOM

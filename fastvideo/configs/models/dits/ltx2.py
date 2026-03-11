@@ -19,8 +19,7 @@ def is_ltx2_blocks(name: str, _module) -> bool:
 class LTX2VideoArchConfig(DiTArchConfig):
     """Architecture configuration for LTX-2 video transformer."""
 
-    _fsdp_shard_conditions: list = field(
-        default_factory=lambda: [is_ltx2_blocks])
+    _fsdp_shard_conditions: list = field(default_factory=lambda: [is_ltx2_blocks])
     _compile_conditions: list = field(default_factory=lambda: [is_ltx2_blocks])
 
     # Parameter name mapping for weight conversion (hf/comfy -> FastVideo)
@@ -47,8 +46,7 @@ class LTX2VideoArchConfig(DiTArchConfig):
     double_precision_rope: bool = True
 
     positional_embedding_theta: float = 10000.0
-    positional_embedding_max_pos: list[int] = field(
-        default_factory=lambda: [20, 2048, 2048])
+    positional_embedding_max_pos: list[int] = field(default_factory=lambda: [20, 2048, 2048])
     timestep_scale_multiplier: int = 1000
     use_middle_indices_grid: bool = True
 
@@ -64,14 +62,12 @@ class LTX2VideoArchConfig(DiTArchConfig):
     audio_in_channels: int = 128
     audio_out_channels: int = 128
     audio_cross_attention_dim: int = 2048
-    audio_positional_embedding_max_pos: list[int] = field(
-        default_factory=lambda: [20])
+    audio_positional_embedding_max_pos: list[int] = field(default_factory=lambda: [20])
     av_ca_timestep_scale_multiplier: int = 1
 
     def __post_init__(self):
         super().__post_init__()
-        patch_volume = self.patch_size[0] * self.patch_size[
-            1] * self.patch_size[2]
+        patch_volume = self.patch_size[0] * self.patch_size[1] * self.patch_size[2]
         if self.in_channels is None:
             self.in_channels = self.num_channels_latents * patch_volume
         if self.out_channels is None:

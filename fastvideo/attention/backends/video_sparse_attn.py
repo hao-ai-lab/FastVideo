@@ -12,9 +12,7 @@ except ImportError:
 
 from typing import Any
 
-from fastvideo.attention.backends.abstract import (AttentionBackend,
-                                                   AttentionImpl,
-                                                   AttentionMetadata,
+from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
                                                    AttentionMetadataBuilder)
 from fastvideo.distributed import get_sp_group
 from fastvideo.logger import init_logger
@@ -31,14 +29,12 @@ def get_tile_partition_indices(
 ) -> torch.LongTensor:
     T, H, W = dit_seq_shape
     ts, hs, ws = tile_size
-    indices = torch.arange(T * H * W, device=device,
-                           dtype=torch.long).reshape(T, H, W)
+    indices = torch.arange(T * H * W, device=device, dtype=torch.long).reshape(T, H, W)
     ls = []
     for t in range(math.ceil(T / ts)):
         for h in range(math.ceil(H / hs)):
             for w in range(math.ceil(W / ws)):
-                ls.append(indices[t * ts:min(t * ts + ts, T),
-                                  h * hs:min(h * hs + hs, H),
+                ls.append(indices[t * ts:min(t * ts + ts, T), h * hs:min(h * hs + hs, H),
                                   w * ws:min(w * ws + ws, W)].flatten())
     index = torch.cat(ls, dim=0)
     return index
@@ -50,8 +46,7 @@ def get_reverse_tile_partition_indices(
     tile_size: tuple[int, int, int],
     device: torch.device,
 ) -> torch.LongTensor:
-    return torch.argsort(
-        get_tile_partition_indices(dit_seq_shape, tile_size, device))
+    return torch.argsort(get_tile_partition_indices(dit_seq_shape, tile_size, device))
 
 
 @functools.lru_cache(maxsize=10)
@@ -104,10 +99,8 @@ def get_non_pad_index(
     n_win = variable_block_sizes.shape[0]
     device = variable_block_sizes.device
     starts_pad = torch.arange(n_win, device=device) * max_block_size
-    index_pad = starts_pad[:, None] + torch.arange(max_block_size,
-                                                   device=device)[None, :]
-    index_mask = torch.arange(
-        max_block_size, device=device)[None, :] < variable_block_sizes[:, None]
+    index_pad = starts_pad[:, None] + torch.arange(max_block_size, device=device)[None, :]
+    index_mask = torch.arange(max_block_size, device=device)[None, :] < variable_block_sizes[:, None]
     return index_pad[index_mask]
 
 
@@ -167,23 +160,17 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
         **kwargs: dict[str, Any],
     ) -> VideoSparseAttentionMetadata:
         patch_size = patch_size
-        dit_seq_shape = (raw_latent_shape[0] // patch_size[0],
-                         raw_latent_shape[1] // patch_size[1],
+        dit_seq_shape = (raw_latent_shape[0] // patch_size[0], raw_latent_shape[1] // patch_size[1],
                          raw_latent_shape[2] // patch_size[2])
 
-        num_tiles = (math.ceil(dit_seq_shape[0] / VSA_TILE_SIZE[0]),
-                     math.ceil(dit_seq_shape[1] / VSA_TILE_SIZE[1]),
+        num_tiles = (math.ceil(dit_seq_shape[0] / VSA_TILE_SIZE[0]), math.ceil(dit_seq_shape[1] / VSA_TILE_SIZE[1]),
                      math.ceil(dit_seq_shape[2] / VSA_TILE_SIZE[2]))
         total_seq_length = math.prod(dit_seq_shape)
 
-        tile_partition_indices = get_tile_partition_indices(
-            dit_seq_shape, VSA_TILE_SIZE, device)
-        reverse_tile_partition_indices = get_reverse_tile_partition_indices(
-            dit_seq_shape, VSA_TILE_SIZE, device)
-        variable_block_sizes = construct_variable_block_sizes(
-            dit_seq_shape, num_tiles, device)
-        non_pad_index = get_non_pad_index(variable_block_sizes,
-                                          math.prod(VSA_TILE_SIZE))
+        tile_partition_indices = get_tile_partition_indices(dit_seq_shape, VSA_TILE_SIZE, device)
+        reverse_tile_partition_indices = get_reverse_tile_partition_indices(dit_seq_shape, VSA_TILE_SIZE, device)
+        variable_block_sizes = construct_variable_block_sizes(dit_seq_shape, num_tiles, device)
+        non_pad_index = get_non_pad_index(variable_block_sizes, math.prod(VSA_TILE_SIZE))
 
         return VideoSparseAttentionMetadata(
             current_timestep=current_timestep,
@@ -213,23 +200,19 @@ class VideoSparseAttentionImpl(AttentionImpl):
         sp_group = get_sp_group()
         self.sp_size = sp_group.world_size
 
-    def tile(self, x: torch.Tensor, num_tiles: list[int],
-             tile_partition_indices: torch.LongTensor,
+    def tile(self, x: torch.Tensor, num_tiles: list[int], tile_partition_indices: torch.LongTensor,
              non_pad_index: torch.LongTensor) -> torch.Tensor:
         t_padded_size = num_tiles[0] * VSA_TILE_SIZE[0]
         h_padded_size = num_tiles[1] * VSA_TILE_SIZE[1]
         w_padded_size = num_tiles[2] * VSA_TILE_SIZE[2]
 
-        x_padded = torch.zeros(
-            (x.shape[0], t_padded_size * h_padded_size * w_padded_size,
-             x.shape[-2], x.shape[-1]),
-            device=x.device,
-            dtype=x.dtype)
+        x_padded = torch.zeros((x.shape[0], t_padded_size * h_padded_size * w_padded_size, x.shape[-2], x.shape[-1]),
+                               device=x.device,
+                               dtype=x.dtype)
         x_padded[:, non_pad_index] = x[:, tile_partition_indices]
         return x_padded
 
-    def untile(self, x: torch.Tensor,
-               reverse_tile_partition_indices: torch.LongTensor,
+    def untile(self, x: torch.Tensor, reverse_tile_partition_indices: torch.LongTensor,
                non_pad_index: torch.LongTensor) -> torch.Tensor:
         x = x[:, non_pad_index][:, reverse_tile_partition_indices]
         return x
@@ -239,8 +222,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         qkv: torch.Tensor,
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
-        return self.tile(qkv, attn_metadata.num_tiles,
-                         attn_metadata.tile_partition_indices,
+        return self.tile(qkv, attn_metadata.num_tiles, attn_metadata.tile_partition_indices,
                          attn_metadata.non_pad_index)
 
     def postprocess_output(
@@ -248,8 +230,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         output: torch.Tensor,
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
-        return self.untile(output, attn_metadata.reverse_tile_partition_indices,
-                           attn_metadata.non_pad_index)
+        return self.untile(output, attn_metadata.reverse_tile_partition_indices, attn_metadata.non_pad_index)
 
     def forward(  # type: ignore[override]
         self,
@@ -266,20 +247,17 @@ class VideoSparseAttentionImpl(AttentionImpl):
 
         VSA_sparsity = attn_metadata.VSA_sparsity
 
-        cur_topk = math.ceil(
-            (1 - VSA_sparsity) *
-            (attn_metadata.total_seq_length / math.prod(VSA_TILE_SIZE)))
+        cur_topk = math.ceil((1 - VSA_sparsity) * (attn_metadata.total_seq_length / math.prod(VSA_TILE_SIZE)))
 
         if video_sparse_attn is None:
             raise NotImplementedError("video_sparse_attn is not installed")
-        hidden_states = video_sparse_attn(
-            query,
-            key,
-            value,
-            attn_metadata.variable_block_sizes,
-            attn_metadata.variable_block_sizes,
-            cur_topk,
-            block_size=VSA_TILE_SIZE,
-            compress_attn_weight=gate_compress).transpose(1, 2)
+        hidden_states = video_sparse_attn(query,
+                                          key,
+                                          value,
+                                          attn_metadata.variable_block_sizes,
+                                          attn_metadata.variable_block_sizes,
+                                          cur_topk,
+                                          block_size=VSA_TILE_SIZE,
+                                          compress_attn_weight=gate_compress).transpose(1, 2)
 
         return hidden_states

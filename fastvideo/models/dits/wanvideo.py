@@ -176,10 +176,7 @@ class WanT2VCrossAttention(WanSelfAttention):
             v = self.to_v(context)[0].view(b, -1, n, d)
 
         # compute attention
-        if k.size(1) > 0:
-            x = self.attn(q, k, v)
-        else:
-            x = torch.zeros_like(q)
+        x = self.attn(q, k, v) if k.size(1) > 0 else torch.zeros_like(q)
 
         # output
         x = x.flatten(2)
@@ -227,10 +224,7 @@ class WanI2VCrossAttention(WanSelfAttention):
         v_img = self.add_v_proj(context_img)[0].view(b, -1, n, d)
         img_x = self.attn(q, k_img, v_img)
         # compute attention
-        if k.size(1) > 0:
-            x = self.attn(q, k, v)
-        else:
-            x = torch.zeros_like(q)
+        x = self.attn(q, k, v) if k.size(1) > 0 else torch.zeros_like(q)
 
         # output
         x = x.flatten(2)

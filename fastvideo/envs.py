@@ -118,11 +118,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Root directory for FASTVIDEO cache files
     # Defaults to `~/.cache/fastvideo` unless `XDG_CACHE_HOME` is set
     "FASTVIDEO_CACHE_ROOT":
-    lambda: os.path.expanduser(
-        os.getenv(
-            "FASTVIDEO_CACHE_ROOT",
-            os.path.join(get_default_cache_root(), "fastvideo"),
-        )),
+    lambda: os.path.expanduser(os.getenv(
+        "FASTVIDEO_CACHE_ROOT",
+        os.path.join(get_default_cache_root(), "fastvideo"),
+    )),
 
     # used in distributed environment to determine the ip address
     # of the current node, when the node has multiple network interfaces.
@@ -157,8 +156,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
 
     # Internal flag to enable Dynamo fullgraph capture
     "FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE":
-    lambda: bool(
-        os.environ.get("FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE", "1") != "0"),
+    lambda: bool(os.environ.get("FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE", "1") != "0"),
 
     # local rank of the process in the distributed setting, used to determine
     # the GPU device id
@@ -213,23 +211,20 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Enables torch profiler if set. Path to the directory where torch profiler
     # traces are saved. Note that it must be an absolute path.
     "FASTVIDEO_TORCH_PROFILER_DIR":
-    lambda: (None
-             if os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", None) is None else os.
-             path.expanduser(os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", "."))),
+    lambda: (None if os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", None) is None else os.path.expanduser(
+        os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", "."))),
 
     # Enable torch profiler to record shapes if set
     # FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES=1. If not set, torch profiler will
     # not record shapes.
     "FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES":
-    lambda: bool(
-        os.getenv("FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES", "0") != "0"),
+    lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES", "0") != "0"),
 
     # Enable torch profiler to profile memory if set
     # FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY=1. If not set, torch profiler
     # will not profile memory.
     "FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY":
-    lambda: bool(
-        os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY", "0") != "0"),
+    lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY", "0") != "0"),
 
     # Enable torch profiler to profile stack if set
     # FASTVIDEO_TORCH_PROFILER_WITH_STACK=1. If not set, torch profiler WILL

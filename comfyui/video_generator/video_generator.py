@@ -13,11 +13,7 @@ from comfy.model_management import processing_interrupted
 from fastvideo import PipelineConfig
 from fastvideo import VideoGenerator as FastVideoGenerator
 
-sys.path.insert(
-    0,
-    os.path.dirname(
-        os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 
 # Custom exception for interruption
@@ -28,8 +24,7 @@ class GenerationInterruptedException(Exception):
 # Custom exception for interruption that ComfyUI will recognize
 class GenerationCancelledException(Exception):
 
-    def __init__(self,
-                 message: str = "Generation was cancelled by user") -> None:
+    def __init__(self, message: str = "Generation was cancelled by user") -> None:
         self.message = message
         super().__init__(self.message)
 
@@ -139,8 +134,7 @@ class VideoGenerator:
                 self._generation_interrupted = True
 
                 # Try to send interrupt signal to worker processes
-                if self.generator is not None and hasattr(
-                        self.generator, 'executor'):
+                if self.generator is not None and hasattr(self.generator, 'executor'):
                     try:
                         # The MultiprocExecutor has a workers attribute
                         if hasattr(self.generator.executor, 'workers'):
@@ -156,16 +150,12 @@ class VideoGenerator:
                 break
             time.sleep(0.5)
 
-    def _run_generation(self, prompt: str, output_path: str,
-                        inference_args: dict[str, Any]) -> None:
+    def _run_generation(self, prompt: str, output_path: str, inference_args: dict[str, Any]) -> None:
         """Thread function to run the generation"""
         try:
             if self.generator is not None:
-                self.generator.generate_video(prompt=prompt,
-                                              output_path=output_path,
-                                              **inference_args)
-                self._generation_result = os.path.join(output_path,
-                                                       f"{prompt[:100]}.mp4")
+                self.generator.generate_video(prompt=prompt, output_path=output_path, **inference_args)
+                self._generation_result = os.path.join(output_path, f"{prompt[:100]}.mp4")
             else:
                 raise RuntimeError("Generator is not initialized")
         except Exception as e:
@@ -226,8 +216,7 @@ class VideoGenerator:
             update_config_from_args(pipeline_config.vae_config, vae_config)
 
         if text_encoder_config is not None:
-            update_config_from_args(pipeline_config.text_encoder_configs,
-                                    text_encoder_config)
+            update_config_from_args(pipeline_config.text_encoder_configs, text_encoder_config)
 
         # Update top-level pipeline config with remaining arguments
         raw_pipeline_args = {}
@@ -245,10 +234,7 @@ class VideoGenerator:
             raw_pipeline_args['text_encoder_precision'] = text_encoder_precision
 
         # Filter out any value explicitly set to -99999 (auto values)
-        pipeline_args = {
-            k: v
-            for k, v in raw_pipeline_args.items() if str(int(v)) != str(-99999)
-        }
+        pipeline_args = {k: v for k, v in raw_pipeline_args.items() if str(int(v)) != str(-99999)}
 
         update_config_from_args(pipeline_config, pipeline_args)
 
@@ -262,38 +248,30 @@ class VideoGenerator:
         if dit_cpu_offload is not None:
             raw_generation_args['dit_cpu_offload'] = dit_cpu_offload
 
-        generation_args = {
-            k: v
-            for k, v in raw_generation_args.items()
-            if str(int(v)) != str(-99999)
-        }
+        generation_args = {k: v for k, v in raw_generation_args.items() if str(int(v)) != str(-99999)}
 
         if self.generator is None:
             print('generation_args', generation_args)
             print('pipeline_config', pipeline_config)
-            self.generator = FastVideoGenerator.from_pretrained(
-                model_path=model_path,
-                **generation_args,
-                pipeline_config=pipeline_config)
+            self.generator = FastVideoGenerator.from_pretrained(model_path=model_path,
+                                                                **generation_args,
+                                                                pipeline_config=pipeline_config)
 
         print('inference_args', inference_args)
 
         # Start a thread to run the generation
         self._generation_thread = threading.Thread(target=self._run_generation,
-                                                   args=(prompt, output_path,
-                                                         inference_args),
+                                                   args=(prompt, output_path, inference_args),
                                                    daemon=True)
         self._generation_thread.start()
 
         # Start a background thread to monitor for interruptions
         self._generation_active = True
-        self._interrupt_thread = threading.Thread(
-            target=self._monitor_for_interruption, daemon=True)
+        self._interrupt_thread = threading.Thread(target=self._monitor_for_interruption, daemon=True)
         self._interrupt_thread.start()
 
         # Wait for either completion or interruption
-        while self._generation_thread.is_alive(
-        ) and not self._interrupt_event.is_set():
+        while self._generation_thread.is_alive() and not self._interrupt_event.is_set():
             self._generation_thread.join(timeout=0.5)
 
         self._generation_active = False

@@ -100,10 +100,7 @@ DEFAULT_PIP_PATTERNS = {
 def run(command):
     """Return (return-code, stdout, stderr)."""
     shell = True if type(command) is str else False
-    p = subprocess.Popen(command,
-                         stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE,
-                         shell=shell)
+    p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=shell)
     raw_output, raw_err = p.communicate()
     rc = p.returncode
     if get_platform() == 'win32':
@@ -157,8 +154,7 @@ def get_conda_packages(run_lambda, patterns=None):
         return out
 
     return "\n".join(line for line in out.splitlines()
-                     if not line.startswith("#") and any(name in line
-                                                         for name in patterns))
+                     if not line.startswith("#") and any(name in line for name in patterns))
 
 
 def get_gcc_version(run_lambda):
@@ -166,27 +162,24 @@ def get_gcc_version(run_lambda):
 
 
 def get_clang_version(run_lambda):
-    return run_and_parse_first_match(run_lambda, 'clang --version',
-                                     r'clang version (.*)')
+    return run_and_parse_first_match(run_lambda, 'clang --version', r'clang version (.*)')
 
 
 def get_cmake_version(run_lambda):
-    return run_and_parse_first_match(run_lambda, 'cmake --version',
-                                     r'cmake (.*)')
+    return run_and_parse_first_match(run_lambda, 'cmake --version', r'cmake (.*)')
 
 
 def get_nvidia_driver_version(run_lambda):
     if get_platform() == 'darwin':
         cmd = 'kextstat | grep -i cuda'
-        return run_and_parse_first_match(run_lambda, cmd,
-                                         r'com[.]nvidia[.]CUDA [(](.*?)[)]')
+        return run_and_parse_first_match(run_lambda, cmd, r'com[.]nvidia[.]CUDA [(](.*?)[)]')
     smi = get_nvidia_smi()
     return run_and_parse_first_match(run_lambda, smi, r'Driver Version: (.*?) ')
 
 
 def get_gpu_info(run_lambda):
-    if get_platform() == 'darwin' or (TORCH_AVAILABLE and hasattr(
-            torch.version, 'hip') and torch.version.hip is not None):
+    if get_platform() == 'darwin' or (TORCH_AVAILABLE and hasattr(torch.version, 'hip')
+                                      and torch.version.hip is not None):
         if TORCH_AVAILABLE and torch.cuda.is_available():
             if torch.version.hip is not None:
                 prop = torch.cuda.get_device_properties(0)
@@ -208,8 +201,7 @@ def get_gpu_info(run_lambda):
 
 
 def get_running_cuda_version(run_lambda):
-    return run_and_parse_first_match(run_lambda, 'nvcc --version',
-                                     r'release .+ V(.*)')
+    return run_and_parse_first_match(run_lambda, 'nvcc --version', r'release .+ V(.*)')
 
 
 def get_cudnn_version(run_lambda):
@@ -255,8 +247,7 @@ def get_nvidia_smi():
     if get_platform() == 'win32':
         system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
         program_files_root = os.environ.get('PROGRAMFILES', 'C:\\Program Files')
-        legacy_path = os.path.join(program_files_root, 'NVIDIA Corporation',
-                                   'NVSMI', smi)
+        legacy_path = os.path.join(program_files_root, 'NVIDIA Corporation', 'NVSMI', smi)
         new_path = os.path.join(system_root, 'System32', smi)
         smis = [new_path, legacy_path]
         for candidate_smi in smis:
@@ -388,10 +379,8 @@ def get_cpu_info(run_lambda):
     if get_platform() == 'linux':
         rc, out, err = run_lambda('lscpu')
     elif get_platform() == 'win32':
-        rc, out, err = run_lambda(
-            'wmic cpu get Name,Manufacturer,Family,Architecture,ProcessorType,DeviceID, \
-        CurrentClockSpeed,MaxClockSpeed,L2CacheSize,L2CacheSpeed,Revision /VALUE'
-        )
+        rc, out, err = run_lambda('wmic cpu get Name,Manufacturer,Family,Architecture,ProcessorType,DeviceID, \
+        CurrentClockSpeed,MaxClockSpeed,L2CacheSize,L2CacheSpeed,Revision /VALUE')
     elif get_platform() == 'darwin':
         rc, out, err = run_lambda("sysctl -n machdep.cpu.brand_string")
     cpu_info = 'None'
@@ -416,27 +405,22 @@ def get_platform():
 
 
 def get_mac_version(run_lambda):
-    return run_and_parse_first_match(run_lambda, 'sw_vers -productVersion',
-                                     r'(.*)')
+    return run_and_parse_first_match(run_lambda, 'sw_vers -productVersion', r'(.*)')
 
 
 def get_windows_version(run_lambda):
     system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
     wmic_cmd = os.path.join(system_root, 'System32', 'Wbem', 'wmic')
     findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
-    return run_and_read_all(
-        run_lambda,
-        '{} os get Caption | {} /v Caption'.format(wmic_cmd, findstr_cmd))
+    return run_and_read_all(run_lambda, '{} os get Caption | {} /v Caption'.format(wmic_cmd, findstr_cmd))
 
 
 def get_lsb_version(run_lambda):
-    return run_and_parse_first_match(run_lambda, 'lsb_release -a',
-                                     r'Description:\t(.*)')
+    return run_and_parse_first_match(run_lambda, 'lsb_release -a', r'Description:\t(.*)')
 
 
 def check_release_file(run_lambda):
-    return run_and_parse_first_match(run_lambda, 'cat /etc/*-release',
-                                     r'PRETTY_NAME="(.*)"')
+    return run_and_parse_first_match(run_lambda, 'cat /etc/*-release', r'PRETTY_NAME="(.*)"')
 
 
 def get_os(run_lambda):
@@ -499,13 +483,10 @@ def get_pip_packages(run_lambda, patterns=None):
         elif shutil.which("uv") is not None:
             cmd = ["uv", "pip", "list", "--format=freeze"]
         else:
-            raise RuntimeError(
-                "Could not collect pip list output (pip or uv module not available)"
-            )
+            raise RuntimeError("Could not collect pip list output (pip or uv module not available)")
 
         out = run_and_read_all(run_lambda, cmd)
-        return "\n".join(line for line in out.splitlines()
-                         if any(name in line for name in patterns))
+        return "\n".join(line for line in out.splitlines() if any(name in line for name in patterns))
 
     pip_version = 'pip3' if sys.version[0] == '3' else 'pip'
     out = run_with_pip()
@@ -537,8 +518,7 @@ def is_xnnpack_available():
 def get_env_vars():
     env_vars = ''
     secret_terms = ('secret', 'token', 'api', 'access', 'password')
-    report_prefix = ("TORCH", "NCCL", "PYTORCH", "CUDA", "CUBLAS", "CUDNN",
-                     "OMP_", "MKL_", "NVIDIA")
+    report_prefix = ("TORCH", "NCCL", "PYTORCH", "CUDA", "CUBLAS", "CUDNN", "OMP_", "MKL_", "NVIDIA")
     for k, v in os.environ.items():
         if any(term in k.lower() for term in secret_terms):
             continue
@@ -559,8 +539,7 @@ def get_env_info():
         debug_mode_str = str(torch.version.debug)
         cuda_available_str = str(torch.cuda.is_available())
         cuda_version_str = torch.version.cuda
-        if not hasattr(torch.version,
-                       'hip') or torch.version.hip is None:  # cuda version
+        if not hasattr(torch.version, 'hip') or torch.version.hip is None:  # cuda version
             hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
         else:  # HIP version
 
@@ -588,9 +567,8 @@ def get_env_info():
     return SystemEnv(
         torch_version=version_str,
         is_debug_build=debug_mode_str,
-        python_version='{} ({}-bit runtime)'.format(
-            sys_version,
-            sys.maxsize.bit_length() + 1),
+        python_version='{} ({}-bit runtime)'.format(sys_version,
+                                                    sys.maxsize.bit_length() + 1),
         python_platform=get_python_platform(),
         is_cuda_available=cuda_available_str,
         cuda_compiled_version=cuda_version_str,
@@ -714,10 +692,8 @@ def pretty_str(envinfo):
         'nvidia_driver_version',
     ]
     all_cuda_fields = dynamic_cuda_fields + ['cudnn_version']
-    all_dynamic_cuda_fields_missing = all(mutable_dict[field] is None
-                                          for field in dynamic_cuda_fields)
-    if TORCH_AVAILABLE and not torch.cuda.is_available(
-    ) and all_dynamic_cuda_fields_missing:
+    all_dynamic_cuda_fields_missing = all(mutable_dict[field] is None for field in dynamic_cuda_fields)
+    if TORCH_AVAILABLE and not torch.cuda.is_available() and all_dynamic_cuda_fields_missing:
         for field in all_cuda_fields:
             mutable_dict[field] = 'No CUDA'
         if envinfo.cuda_compiled_version is None:
@@ -730,19 +706,15 @@ def pretty_str(envinfo):
     mutable_dict = replace_nones(mutable_dict)
 
     # If either of these are '', replace with 'No relevant packages'
-    mutable_dict['pip_packages'] = replace_if_empty(
-        mutable_dict['pip_packages'])
-    mutable_dict['conda_packages'] = replace_if_empty(
-        mutable_dict['conda_packages'])
+    mutable_dict['pip_packages'] = replace_if_empty(mutable_dict['pip_packages'])
+    mutable_dict['conda_packages'] = replace_if_empty(mutable_dict['conda_packages'])
 
     # Tag conda and pip packages with a prefix
     # If they were previously None, they'll show up as ie '[conda] Could not collect'
     if mutable_dict['pip_packages']:
-        mutable_dict['pip_packages'] = prepend(
-            mutable_dict['pip_packages'], '[{}] '.format(envinfo.pip_version))
+        mutable_dict['pip_packages'] = prepend(mutable_dict['pip_packages'], '[{}] '.format(envinfo.pip_version))
     if mutable_dict['conda_packages']:
-        mutable_dict['conda_packages'] = prepend(mutable_dict['conda_packages'],
-                                                 '[conda] ')
+        mutable_dict['conda_packages'] = prepend(mutable_dict['conda_packages'], '[conda] ')
     mutable_dict['cpu_info'] = envinfo.cpu_info
     return env_info_fmt.format(**mutable_dict)
 
@@ -756,18 +728,13 @@ def main():
     output = get_pretty_env_info()
     print(output)
 
-    if TORCH_AVAILABLE and hasattr(torch, 'utils') and hasattr(
-            torch.utils, '_crash_handler'):
+    if TORCH_AVAILABLE and hasattr(torch, 'utils') and hasattr(torch.utils, '_crash_handler'):
         minidump_dir = torch.utils._crash_handler.DEFAULT_MINIDUMP_DIR
         if sys.platform == "linux" and os.path.exists(minidump_dir):
-            dumps = [
-                os.path.join(minidump_dir, dump)
-                for dump in os.listdir(minidump_dir)
-            ]
+            dumps = [os.path.join(minidump_dir, dump) for dump in os.listdir(minidump_dir)]
             latest = max(dumps, key=os.path.getctime)
             ctime = os.path.getctime(latest)
-            creation_time = datetime.datetime.fromtimestamp(ctime).strftime(
-                '%Y-%m-%d %H:%M:%S')
+            creation_time = datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d %H:%M:%S')
             msg = "\n*** Detected a minidump at {} created on {}, ".format(latest, creation_time) + \
                   "if this is related to your bug please include it when you file a report ***"
             print(msg, file=sys.stderr)

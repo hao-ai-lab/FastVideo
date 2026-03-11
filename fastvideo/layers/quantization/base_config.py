@@ -18,8 +18,7 @@ class QuantizeMethodBase(ABC):
     """Base class for different quantized methods."""
 
     @abstractmethod
-    def create_weights(self, layer: torch.nn.Module, *weight_args,
-                       **extra_weight_attrs):
+    def create_weights(self, layer: torch.nn.Module, *weight_args, **extra_weight_attrs):
         """Create weights for a layer.
 
         The weights will be set as attributes of the layer."""
@@ -33,8 +32,7 @@ class QuantizeMethodBase(ABC):
         raise NotImplementedError
 
     # Not required functions
-    def embedding(self, layer: torch.nn.Module, *args,
-                  **kwargs) -> torch.Tensor:
+    def embedding(self, layer: torch.nn.Module, *args, **kwargs) -> torch.Tensor:
         """Gather embeddings in the layer based on indices in the input tensor.
 
         Expects create_weights to have been called before on the layer."""
@@ -48,19 +46,16 @@ class QuantizeMethodBase(ABC):
         return
 
 
-def method_has_implemented_embedding(
-        method_class: type[QuantizeMethodBase]) -> bool:
+def method_has_implemented_embedding(method_class: type[QuantizeMethodBase]) -> bool:
     """
     Not all quant methods have embedding implemented, so we need to check that
     it exists for our given method. We check this by making sure the function
     has been changed from the base implementation.
     """
-    base_embedding = inspect.getattr_static(QuantizeMethodBase, "embedding",
-                                            None)
+    base_embedding = inspect.getattr_static(QuantizeMethodBase, "embedding", None)
     class_embedding = inspect.getattr_static(method_class, "embedding", None)
 
-    return (class_embedding is not None
-            and class_embedding is not base_embedding)
+    return (class_embedding is not None and class_embedding is not base_embedding)
 
 
 class QuantizationConfig(ABC):
@@ -105,8 +100,7 @@ class QuantizationConfig(ABC):
         raise NotImplementedError
 
     @classmethod
-    def override_quantization_method(cls, hf_quant_cfg,
-                                     user_quant) -> QuantizationMethods | None:
+    def override_quantization_method(cls, hf_quant_cfg, user_quant) -> QuantizationMethods | None:
         """
            Detects if this quantization method can support a given checkpoint
            format by overriding the user specified quantization method -- 
@@ -125,8 +119,7 @@ class QuantizationConfig(ABC):
                          "quantization config.")
 
     @staticmethod
-    def get_from_keys_or(config: dict[str, Any], keys: list[str],
-                         default: Any) -> Any:
+    def get_from_keys_or(config: dict[str, Any], keys: list[str], default: Any) -> Any:
         """Get a optional value from the model's quantization config."""
         try:
             return QuantizationConfig.get_from_keys(config, keys)
@@ -134,8 +127,7 @@ class QuantizationConfig(ABC):
             return default
 
     @abstractmethod
-    def get_quant_method(self, layer: torch.nn.Module,
-                         prefix: str) -> QuantizeMethodBase | None:
+    def get_quant_method(self, layer: torch.nn.Module, prefix: str) -> QuantizeMethodBase | None:
         """Get the quantize method to use for the quantized layer.
         
         Args:

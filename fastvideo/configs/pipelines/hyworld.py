@@ -15,14 +15,12 @@ class HYWorldConfig(Hunyuan15T2V480PConfig):
     dit_config: DiTConfig = field(default_factory=HYWorldDiTConfig)
 
     # SigLIP image encoder for I2V
-    image_encoder_config: EncoderConfig = field(
-        default_factory=SiglipVisionConfig)
+    image_encoder_config: EncoderConfig = field(default_factory=SiglipVisionConfig)
     image_encoder_precision: str = "fp16"
     # vae_precision: str = "fp32"
 
     # Text encoding
-    text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("fp16", "fp32"))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp16", "fp32"))
 
     def __post_init__(self):
         super().__post_init__()

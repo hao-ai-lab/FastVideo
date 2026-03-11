@@ -4,9 +4,7 @@ from typing import Any, cast
 
 import torch
 
-from fastvideo.distributed import (
-    cleanup_dist_env_and_memory,
-    maybe_init_distributed_environment_and_model_parallel)
+from fastvideo.distributed import (cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.distributed.parallel_state import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -17,8 +15,7 @@ logger = init_logger(__name__)
 
 class Worker:
 
-    def __init__(self, fastvideo_args: FastVideoArgs, local_rank: int,
-                 rank: int, distributed_init_method: str):
+    def __init__(self, fastvideo_args: FastVideoArgs, local_rank: int, rank: int, distributed_init_method: str):
         self.fastvideo_args = fastvideo_args
         self.local_rank = local_rank
         self.rank = rank
@@ -69,22 +66,18 @@ class Worker:
             self.init_gpu_memory = 0
 
         # Initialize the distributed environment.
-        maybe_init_distributed_environment_and_model_parallel(
-            self.fastvideo_args.tp_size, self.fastvideo_args.sp_size,
-            self.distributed_init_method)
+        maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size, self.fastvideo_args.sp_size,
+                                                              self.distributed_init_method)
 
         self.pipeline = build_pipeline(self.fastvideo_args)
 
-    def execute_forward(self, forward_batch: ForwardBatch,
-                        fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
         return cast(ForwardBatch, output_batch)
 
     def shutdown(self) -> dict[str, Any]:
         """Gracefully shut down the worker process"""
-        logger.info("Worker %d shutting down...",
-                    self.rank,
-                    local_main_process_only=False)
+        logger.info("Worker %d shutting down...", self.rank, local_main_process_only=False)
         # Clean up resources
         if hasattr(self, 'pipeline') and self.pipeline is not None:
             # Clean up pipeline resources if needed
@@ -93,18 +86,13 @@ class Worker:
         # Destroy the distributed environment
         cleanup_dist_env_and_memory(shutdown_ray=False)
 
-        logger.info("Worker %d shutdown complete",
-                    self.rank,
-                    local_main_process_only=False)
+        logger.info("Worker %d shutdown complete", self.rank, local_main_process_only=False)
         return {"status": "shutdown_complete"}
 
-    def set_lora_adapter(self,
-                         lora_nickname: str,
-                         lora_path: str | None = None) -> dict[str, Any]:
+    def set_lora_adapter(self, lora_nickname: str, lora_path: str | None = None) -> dict[str, Any]:
         if isinstance(self.pipeline, LoRAPipeline):
             self.pipeline.set_lora_adapter(lora_nickname, lora_path)
-            logger.info("Worker %d set LoRA adapter %s with path %s", self.rank,
-                        lora_nickname, lora_path)
+            logger.info("Worker %d set LoRA adapter %s with path %s", self.rank, lora_nickname, lora_path)
             return {"status": "lora_adapter_set"}
         return {"status": "failed: pipeline is not a LoRAPipeline"}
 
@@ -114,14 +102,11 @@ class Worker:
             return {"status": "lora_adapter_unmerged"}
         return {"status": "failed: pipeline is not a LoRAPipeline"}
 
-    def execute_streaming_reset(
-            self, forward_batch: ForwardBatch,
-            fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+    def execute_streaming_reset(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         self.pipeline.streaming_reset(forward_batch, self.fastvideo_args)
         return {"status": "reset_complete"}
 
-    def execute_streaming_step(self, keyboard_action: torch.Tensor,
-                               mouse_action: torch.Tensor) -> ForwardBatch:
+    def execute_streaming_step(self, keyboard_action: torch.Tensor, mouse_action: torch.Tensor) -> ForwardBatch:
         return self.pipeline.streaming_step(keyboard_action, mouse_action)
 
     def execute_streaming_clear(self) -> dict[str, Any]:

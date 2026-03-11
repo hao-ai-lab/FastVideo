@@ -135,10 +135,7 @@ def test_qwen2_5_encoder(qwen_model_path_and_config):
             # Thresholds
             # Qwen2.5-VL RoPE is complex, if our implementation is slightly off (e.g. float32 conversion logic in RoPE),
             # differences might appear. But should be small.
-            if precision_str == "bf16":
-                atol = 5e-2 # relaxed for bf16
-            else:
-                atol = 1e-3
+            atol = 5e-2 if precision_str == "bf16" else 1e-3  # relaxed for bf16
                 
             if max_diff > atol:
                 logger.warning(f"Max diff {max_diff} > {atol}. Checking if it's acceptable...")
