@@ -1,0 +1,87 @@
+# MatrixGame self-forcing distillation with the new trainer framework.
+#
+# This is the minimal train/ config wiring the existing MatrixGame model
+# plugins into SelfForcingMethod. It does not try to replicate every legacy
+# pipeline detail; it only matches the current train/ method surface.
+
+models:
+  student:
+    _target_: fastvideo.train.models.matrixgame.matrixgame_causal.MatrixGameCausalModel
+    init_from: ../mg_models/Solaris-6K
+    trainable: true
+
+  teacher:
+    _target_: fastvideo.train.models.matrixgame.matrixgame.MatrixGameModel
+    init_from: ../mg_models/Solaris-6K
+    trainable: false
+    disable_custom_init_weights: true
+
+  critic:
+    _target_: fastvideo.train.models.matrixgame.matrixgame.MatrixGameModel
+    init_from: ../mg_models/Solaris-6K
+    trainable: true
+    disable_custom_init_weights: true
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.self_forcing.SelfForcingMethod
+  rollout_mode: simulate
+  generator_update_interval: 5
+  real_score_guidance_scale: 1.0
+  dmd_denoising_steps: [1000, 750, 500, 250]
+
+  chunk_size: 3
+  student_sample_type: sde
+  same_step_across_blocks: false
+  last_step_only: false
+  context_noise: 0.0
+  enable_gradient_in_rollout: true
+  start_gradient_frame: 0
+
+  fake_score_learning_rate: 8.0e-6
+  fake_score_betas: [0.0, 0.999]
+  fake_score_lr_scheduler: constant
+
+training:
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 1
+
+  data:
+    data_path: /mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/vpt/vpt/train_81f/preprocessed_0306
+    dataloader_num_workers: 1
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 21
+    num_height: 352
+    num_width: 640
+    num_frames: 81
+
+  optimizer:
+    learning_rate: 1.0e-5
+    betas: [0.0, 0.999]
+    weight_decay: 1.0e-4
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 1500000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: checkpoints/matrixgame_self_forcing_v3
+    training_state_checkpointing_steps: 100
+    checkpoints_total_limit: 3
+
+  tracker:
+    project_name: mg_self_forcing
+    run_name: matrixgame_self_forcing_v3
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+pipeline:
+  flow_shift: 3

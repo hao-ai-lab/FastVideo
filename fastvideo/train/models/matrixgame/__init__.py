@@ -3,3 +3,5 @@
     
 from fastvideo.train.models.matrixgame.matrixgame import (
     MatrixGameModel as MatrixGameModel, )
+from fastvideo.train.models.matrixgame.matrixgame_causal import (
+    MatrixGameCausalModel as MatrixGameCausalModel, )

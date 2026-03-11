@@ -34,6 +34,9 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         self._attn_kind: Literal["dense", "vsa"] = (self._infer_attn_kind())
 
         self._chunk_size = self._parse_chunk_size(self.method_config.get("chunk_size", None))
+        self._share_timestep_within_chunk = self._parse_share_timestep_within_chunk(
+            self.method_config.get("share_timestep_within_chunk", True)
+        )
         self._timestep_index_range = (self._parse_timestep_index_range())
 
         # Initialize preprocessors on student.
@@ -278,6 +281,19 @@ class DiffusionForcingSFTMethod(TrainingMethod):
 
         return min_index, max_index + 1
 
+    def _parse_share_timestep_within_chunk(
+        self,
+        raw: Any,
+    ) -> bool:
+        if raw is None:
+            return True
+        if not isinstance(raw, bool):
+            raise ValueError(
+                "method_config.share_timestep_within_chunk must be a bool, "
+                f"got {type(raw).__name__}"
+            )
+        return raw
+
     def _init_optimizers_and_schedulers(self) -> None:
         tc = self.training_config
         student_lr = float(tc.optimizer.learning_rate)
@@ -307,16 +323,35 @@ class DiffusionForcingSFTMethod(TrainingMethod):
         num_latents: int,
         device: torch.device,
     ) -> torch.Tensor:
-        chunk_size = self._chunk_size
-        num_chunks = ((num_latents + chunk_size - 1) // chunk_size)
         low, high = self._timestep_index_range
-        chunk_indices = torch.randint(
+        timestep_indices = torch.randint(
             low=low,
             high=high,
-            size=(batch_size, num_chunks),
+            size=(batch_size, num_latents),
             device=device,
             dtype=torch.long,
             generator=self.cuda_generator,
         )
-        expanded = chunk_indices.repeat_interleave(chunk_size, dim=1)
-        return expanded[:, :num_latents]
+
+        if self._share_timestep_within_chunk:
+            chunk_size = self._chunk_size
+            num_chunks = (num_latents + chunk_size - 1) // chunk_size
+            padded_num_latents = num_chunks * chunk_size
+            if padded_num_latents != num_latents:
+                pad = timestep_indices[:, -1:].expand(
+                    batch_size,
+                    padded_num_latents - num_latents,
+                )
+                timestep_indices = torch.cat([timestep_indices, pad], dim=1)
+            timestep_indices = timestep_indices.reshape(
+                batch_size,
+                num_chunks,
+                chunk_size,
+            )
+            timestep_indices[:, :, 1:] = timestep_indices[:, :, :1]
+            timestep_indices = timestep_indices.reshape(
+                batch_size,
+                padded_num_latents,
+            )[:, :num_latents]
+
+        return timestep_indices

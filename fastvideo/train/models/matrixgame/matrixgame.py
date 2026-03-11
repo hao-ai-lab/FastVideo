@@ -9,7 +9,6 @@ from typing import Any, Literal
 import torch
 
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame
-from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.training_utils import normalize_dit_input
 
@@ -95,53 +94,7 @@ class MatrixGameModel(WanModel):
         training_batch.mouse_cond = mouse_cond
         training_batch.infos = infos
 
-        training_batch = self._prepare_dit_inputs(training_batch, generator)
-        training_batch = self._build_attention_metadata(training_batch)
-
-        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
-        if training_batch.attn_metadata is not None:
-            training_batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore[attr-defined]
-
-        return training_batch
-
-    def predict_noise(
-        self,
-        noisy_latents: torch.Tensor,
-        timestep: torch.Tensor,
-        batch: TrainingBatch,
-        *,
-        conditional: bool,
-        cfg_uncond: dict[str, Any] | None = None,
-        attn_kind: Literal["dense", "vsa"] = "dense",
-    ) -> torch.Tensor:
-        del cfg_uncond
-        if attn_kind == "dense":
-            attn_metadata = batch.attn_metadata
-        elif attn_kind == "vsa":
-            attn_metadata = batch.attn_metadata_vsa
-        else:
-            raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
-
-        cond_dict = batch.conditional_dict
-        if cond_dict is None:
-            raise RuntimeError("Missing conditional_dict in TrainingBatch")
-
-        if not conditional:
-            cond_dict = batch.unconditional_dict or cond_dict
-
-        device_type = self.device.type
-        dtype = noisy_latents.dtype
-        with torch.autocast(device_type, dtype=dtype), set_forward_context(
-            current_timestep=batch.timesteps,
-            attn_metadata=attn_metadata,
-        ):
-            input_kwargs = self._build_distill_input_kwargs(
-                noisy_latents,
-                timestep,
-                cond_dict,
-            )
-            pred_noise = self.transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
-        return pred_noise
+        return self._finalize_prepared_batch(training_batch, generator)
 
     def _prepare_dit_inputs(
         self,
@@ -170,6 +123,18 @@ class MatrixGameModel(WanModel):
         }
         training_batch.unconditional_dict = dict(training_batch.conditional_dict)
         return training_batch
+
+    def _get_uncond_text_dict(
+        self,
+        batch: TrainingBatch,
+        *,
+        cfg_uncond: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        del cfg_uncond
+        cond_dict = batch.conditional_dict
+        if cond_dict is None:
+            raise RuntimeError("Missing conditional_dict in TrainingBatch")
+        return batch.unconditional_dict or cond_dict
 
     def _build_distill_input_kwargs(
         self,
@@ -255,6 +220,20 @@ class MatrixGameModel(WanModel):
                 f"{key} has {value.shape[1]} frames but requires at least {expected_frames}"
             )
         return value[:, :expected_frames].to(device=self.device, dtype=dtype)
+
+    def _finalize_prepared_batch(
+        self,
+        training_batch: TrainingBatch,
+        generator: torch.Generator,
+    ) -> TrainingBatch:
+        training_batch = self._prepare_dit_inputs(training_batch, generator)
+        training_batch = self._build_attention_metadata(training_batch)
+
+        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
+        if training_batch.attn_metadata is not None:
+            training_batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore[attr-defined]
+
+        return training_batch
 
     def _expected_action_frames(self, num_latent_t: int) -> int:
         return (num_latent_t - 1) * self._temporal_compression_ratio() + 1
