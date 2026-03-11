@@ -104,17 +104,20 @@ class GenRLWanModel(WanModel):
 
         # Load text encoder and tokenizer.
         model_path = str(training_config.model_path)
-        self._load_text_encoder(model_path)
+        self._load_text_encoder(
+            model_path, training_config
+        )
 
         # Dummy dataloader for the trainer's outer loop.
         self.dataloader = _InfiniteDummyLoader()
         self.start_step = 0
 
-    def _load_text_encoder(self, model_path: str) -> None:
-        from transformers import (
-            AutoTokenizer,
-            UMT5EncoderModel,
-        )
+    def _load_text_encoder(
+        self,
+        model_path: str,
+        training_config: TrainingConfig,
+    ) -> None:
+        from transformers import AutoTokenizer
 
         logger.info(
             "Loading tokenizer from %s", model_path
@@ -124,17 +127,14 @@ class GenRLWanModel(WanModel):
         )
 
         logger.info(
-            "Loading T5 text encoder from %s", model_path
+            "Loading text encoder from %s", model_path
         )
-        dtype = self._get_training_dtype()
-        self.text_encoder = UMT5EncoderModel.from_pretrained(
-            model_path,
-            subfolder="text_encoder",
-            torch_dtype=dtype,
+        self.text_encoder = load_module_from_path(
+            model_path=model_path,
+            module_type="text_encoder",
+            training_config=training_config,
         )
-        self.text_encoder.to(self.device)
         self.text_encoder.requires_grad_(False)
-        self.text_encoder.eval()
 
     def on_train_start(self) -> None:
         """Skip negative conditioning (handled by method)."""
