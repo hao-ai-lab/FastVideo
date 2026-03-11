@@ -58,7 +58,9 @@ class FP8ScaledMMLinearKernel(ABC):
 
         x_2d = x.view(-1, x.shape[-1])
         output_shape = [*x.shape[:-1], w.shape[1]]
-        out_dtype = x.dtype if self.config.out_dtype is None else self.config.out_dtype
+        out_dtype = self.config.out_dtype
+        if out_dtype is None:
+            out_dtype = getattr(layer.weight, "output_dtype", x.dtype)
 
         x_2d_q = x_2d
         if x.dtype != FP8_DTYPE:

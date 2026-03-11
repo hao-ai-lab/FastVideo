@@ -139,6 +139,20 @@ class TestAbsMaxFP8Config(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "incompatible quant_method"):
             AbsMaxFP8Config.from_config({"quant_method": "fp8"})
 
+    def test_get_quant_method_delegates_to_fp8_linear_method(self):
+        from fastvideo.layers.linear import LinearBase
+        from fastvideo.layers.quantization.fp8 import Fp8LinearMethod
+
+        config = AbsMaxFP8Config()
+        dummy_linear = LinearBase(4, 8, bias=False)
+        method = config.get_quant_method(dummy_linear, prefix="test")
+        self.assertIsInstance(method, Fp8LinearMethod)
+
+    def test_get_quant_method_returns_none_for_non_linear(self):
+        config = AbsMaxFP8Config()
+        result = config.get_quant_method(nn.Module(), prefix="test")
+        self.assertIsNone(result)
+
 
 @unittest.skipUnless(_HAVE_FP8_GPU, "Requires sm89+ GPU with FP8 tensor cores")
 class TestFP8Compute(unittest.TestCase):

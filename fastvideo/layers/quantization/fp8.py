@@ -21,6 +21,7 @@ from fastvideo.layers.quantization.utils.quant_utils import (
     FP8_DTYPE,
     is_layer_skipped,
     kFp8DynamicTensorSym,
+    kFp8DynamicTokenSym,
     kFp8StaticTensorSym,
 )
 from fastvideo.logger import init_logger
@@ -30,6 +31,7 @@ from fastvideo.models.utils import set_weight_attrs
 logger = init_logger(__name__)
 
 ACTIVATION_SCHEMES = ["static", "dynamic"]
+ACTIVATION_GRANULARITIES = ["per_tensor", "per_token"]
 
 FP8_MAX = torch.finfo(FP8_DTYPE).max
 
@@ -42,6 +44,8 @@ class Fp8Config(QuantizationConfig):
         is_checkpoint_fp8_serialized: bool = False,
         activation_scheme: str = "dynamic",
         ignored_layers: list[str] | None = None,
+        activation_granularity: str = "per_tensor",
+        min_layer_size: int = 0,
     ) -> None:
         super().__init__()
         self.is_checkpoint_fp8_serialized = is_checkpoint_fp8_serialized
@@ -50,6 +54,11 @@ class Fp8Config(QuantizationConfig):
                 f"Unsupported activation scheme {activation_scheme}")
         self.activation_scheme = activation_scheme
         self.ignored_layers = ignored_layers or []
+        if activation_granularity not in ACTIVATION_GRANULARITIES:
+            raise ValueError(
+                f"Unsupported activation granularity {activation_granularity}")
+        self.activation_granularity = activation_granularity
+        self.min_layer_size = min_layer_size
 
     def get_name(self) -> QuantizationMethods:
         return "fp8"
@@ -89,24 +98,15 @@ class Fp8Config(QuantizationConfig):
 
 
 class Fp8LinearMethod(LinearMethodBase):
-    """
-    Linear method for FP8.
-
-    Supports loading FP8 checkpoints with static weight scale and
-    dynamic/static activation scale.
-
-    Limitations:
-    1. Only supports float8_e4m3fn due to torch._scaled_mm constraints.
-
-    Args:
-        quant_config: The quantization config.
-    """
+    """FP8 linear method for pre-serialized FP8 checkpoints."""
 
     def __init__(self, quant_config: Fp8Config):
         self.quant_config = quant_config
 
         if quant_config.activation_scheme == "static":
             activation_quant_key = kFp8StaticTensorSym
+        elif quant_config.activation_granularity == "per_token":
+            activation_quant_key = kFp8DynamicTokenSym
         else:
             activation_quant_key = kFp8DynamicTensorSym
 
@@ -161,6 +161,9 @@ class Fp8LinearMethod(LinearMethodBase):
             layer.register_parameter("input_scale", input_scale)
 
     def process_weights_after_loading(self, layer: nn.Module) -> None:
+        if getattr(layer, "_fp8_weights_processed", False):
+            return
+
         weight = layer.weight.data
         weight_scale = layer.weight_scale.data
         input_scale = getattr(layer, "input_scale", None)
@@ -192,11 +195,16 @@ class Fp8LinearMethod(LinearMethodBase):
             weight = weight.t()
 
         layer._fp8_weight_transposed = transposed
+        out_dtype = getattr(layer, "orig_dtype",
+                            getattr(layer, "_fp8_output_dtype", None))
         layer.weight = nn.Parameter(weight, requires_grad=False)
-        set_weight_attrs(layer.weight, {"output_dtype": layer.orig_dtype})
+        if out_dtype is not None:
+            set_weight_attrs(layer.weight, {"output_dtype": out_dtype})
         layer.weight_scale = nn.Parameter(weight_scale, requires_grad=False)
 
-        if input_scale is not None:
+        if self.quant_config.activation_scheme == "dynamic":
+            layer.input_scale = None
+        elif input_scale is not None:
             layer.input_scale = nn.Parameter(input_scale, requires_grad=False)
         else:
             layer.input_scale = None
@@ -204,12 +212,16 @@ class Fp8LinearMethod(LinearMethodBase):
         if self.fp8_linear is not None:
             self.fp8_linear.process_weights_after_loading(layer)
 
+        layer._fp8_weights_processed = True
+
     def apply(
         self,
         layer: torch.nn.Module,
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        if not getattr(layer, "_fp8_weights_processed", False):
+            self.process_weights_after_loading(layer)
         if self.fp8_linear is not None:
             return self.fp8_linear.apply_weights(layer, x, bias)
         return self._apply_dequant(layer, x, bias)
@@ -274,6 +286,9 @@ class Fp8OnlineLinearMethod(Fp8LinearMethod):
         set_weight_attrs(weight, extra_weight_attrs)
 
     def process_weights_after_loading(self, layer: nn.Module) -> None:
+        if getattr(layer, "_fp8_weights_processed", False):
+            return
+
         from fastvideo.layers.quantization.fp8_utils import FP8_MIN_SCALE
 
         weight = layer.weight.data
@@ -294,3 +309,5 @@ class Fp8OnlineLinearMethod(Fp8LinearMethod):
 
         if self.fp8_linear is not None:
             self.fp8_linear.process_weights_after_loading(layer)
+
+        layer._fp8_weights_processed = True

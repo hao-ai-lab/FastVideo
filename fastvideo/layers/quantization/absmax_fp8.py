@@ -1,3 +1,5 @@
+# Legacy quantization config. get_quant_method() delegates to
+# Fp8LinearMethod (adapted from vLLM) for all new inference paths.
 from __future__ import annotations
 
 from typing import Any
@@ -27,14 +29,12 @@ from fastvideo.layers.quantization.utils.quant_utils import FP8_DTYPE
 from fastvideo.logger import init_logger
 from fastvideo.models.utils import set_weight_attrs
 
-# Re-export bridge functions so existing imports continue to work.
 from fastvideo.layers.quantization.dit_fp8_bridge import (  # noqa: F401
     prepare_model_for_fp8, scan_fp8_modules,
 )
 
 logger = init_logger(__name__)
 
-# Re-export private names used by test_absmax_fp8.py
 _FP8_DTYPE = FP8_DTYPE
 _FP8_MAX = FP8_MAX
 _supports_fp8_compute = supports_fp8_compute
@@ -71,7 +71,15 @@ class AbsMaxFP8Config(QuantizationConfig):
     def get_quant_method(self, layer: torch.nn.Module,
                          prefix: str) -> QuantizeMethodBase | None:
         if isinstance(layer, LinearBase):
-            return AbsMaxFP8LinearMethod()
+            from fastvideo.layers.quantization.fp8 import (
+                Fp8Config,
+                Fp8LinearMethod,
+            )
+            fp8_config = Fp8Config(
+                is_checkpoint_fp8_serialized=True,
+                activation_scheme="dynamic",
+            )
+            return Fp8LinearMethod(fp8_config)
         return None
 
 
@@ -199,13 +207,6 @@ class AbsMaxFP8LinearMethod(LinearMethodBase):
         set_weight_attrs(weight, extra_weight_attrs)
 
     def process_weights_after_loading(self, layer: nn.Module) -> None:
-        """Prepare weight for torch._scaled_mm.
-
-        cuBLASLt requires A=row-major, B=column-major.  A contiguous
-        [out, in] tensor viewed via .t() is [in, out] in column-major
-        layout -- exactly what cuBLASLt needs.  We store the .t() *view*
-        (no copy) so _apply_fp8 can pass it directly.
-        """
         if not supports_fp8_compute():
             return
         w_col_major = layer.weight.data.t()

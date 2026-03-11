@@ -98,18 +98,30 @@ def maybe_load_fsdp_model(
         model = model_cls(**init_params)
 
     # If the model config carries a quantization config, prepare nn.Linear
-    # modules for FP8 by scanning the checkpoint for FP8 weights and
-    # injecting the necessary parameters + forward hooks.
+    # modules for FP8.  Two paths mirror vLLM's Fp8LinearMethod vs
+    # Fp8OnlineLinearMethod:
+    #   - Offline (is_checkpoint_fp8_serialized=True): scan checkpoint for FP8
+    #     weights, replace meta params with FP8-typed placeholders + scales.
+    #   - Online  (is_checkpoint_fp8_serialized=False): keep bf16 weights,
+    #     attach a hook that quantizes to FP8 lazily on first forward.
     _config = init_params.get("config")
     _quant_config = getattr(_config, "quant_config", None) if _config else None
     if _quant_config is not None:
-        from fastvideo.layers.quantization.dit_fp8_bridge import (
-            prepare_model_for_fp8,
-            scan_fp8_modules,
-        )
-        fp8_prefixes = scan_fp8_modules(weight_dir_list)
-        if fp8_prefixes:
-            prepare_model_for_fp8(model, fp8_prefixes, default_dtype)
+        if getattr(_quant_config, "is_checkpoint_fp8_serialized", True):
+            from fastvideo.layers.quantization.dit_fp8_bridge import (
+                prepare_model_for_fp8,
+                scan_fp8_modules,
+            )
+            fp8_prefixes = scan_fp8_modules(weight_dir_list)
+            if fp8_prefixes:
+                prepare_model_for_fp8(model, fp8_prefixes, default_dtype,
+                                      quant_config=_quant_config)
+        else:
+            from fastvideo.layers.quantization.dit_fp8_bridge import (
+                prepare_model_for_online_fp8,
+            )
+            prepare_model_for_online_fp8(model, default_dtype,
+                                         quant_config=_quant_config)
 
     # Check if we should use FSDP
     use_fsdp = training_mode or fsdp_inference
