@@ -9,10 +9,10 @@ from typing import Any
 import torch
 
 from fastvideo.logger import init_logger
-from fastvideo.train.methods.rl.embeddings import (
+from fastvideo.train.methods.rl.utils.embeddings import (
     compute_text_embeddings,
 )
-from fastvideo.train.methods.rl.pipeline import (
+from fastvideo.train.methods.rl.utils.pipeline import (
     wan_denoising_with_logprob,
 )
 

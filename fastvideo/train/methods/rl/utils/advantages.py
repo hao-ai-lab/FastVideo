@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from fastvideo.logger import init_logger
-from fastvideo.train.methods.rl.stat_tracking import (
+from fastvideo.train.methods.rl.utils.stat_tracking import (
     EPSILON,
     PerPromptStatTracker,
 )

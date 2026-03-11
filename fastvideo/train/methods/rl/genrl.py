@@ -31,27 +31,27 @@ from fastvideo.train.methods.base import (
     LogScalar,
     TrainingMethod,
 )
-from fastvideo.train.methods.rl.advantages import (
+from fastvideo.train.methods.rl.utils.advantages import (
     compute_advantages,
 )
-from fastvideo.train.methods.rl.data import (
+from fastvideo.train.methods.rl.utils.data import (
     build_prompt_dataloaders,
 )
-from fastvideo.train.methods.rl.diffusion import (
+from fastvideo.train.methods.rl.utils.diffusion import (
     compute_log_prob,
 )
-from fastvideo.train.methods.rl.embeddings import (
+from fastvideo.train.methods.rl.utils.embeddings import (
     compute_text_embeddings,
 )
-from fastvideo.train.methods.rl.rewards import (
+from fastvideo.train.methods.rl.utils.rewards import (
     move_reward_models,
     multi_score,
     reward_models_on_device,
 )
-from fastvideo.train.methods.rl.sampling import (
+from fastvideo.train.methods.rl.utils.sampling import (
     sample_epoch,
 )
-from fastvideo.train.methods.rl.stat_tracking import (
+from fastvideo.train.methods.rl.utils.stat_tracking import (
     PerPromptStatTracker,
 )
 from fastvideo.train.models.base import ModelBase

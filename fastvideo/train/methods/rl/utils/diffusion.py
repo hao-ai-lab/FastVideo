@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import torch
 
-from fastvideo.train.methods.rl.sde import (
+from fastvideo.train.methods.rl.utils.sde import (
     sde_step_with_logprob,
 )
 
