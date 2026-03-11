@@ -115,8 +115,7 @@ training:
     enable_gradient_checkpointing_type: full
 
 callbacks:
-  grad_clip:
-    max_grad_norm: 0.0  # Disabled; GenRLMethod clips internally.
+  # Gradnorm call back Disabled; GenRLMethod clips internally.
   ema:
     decay: 0.9
     start_iter: 0
