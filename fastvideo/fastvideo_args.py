@@ -174,7 +174,11 @@ class FastVideoArgs:
     })
 
     override_text_encoder_safetensors: str | None = None  # path to safetensors file for text encoder override
-    override_text_encoder_quant: QuantizationMethods = None
+    text_encoder_quantization: QuantizationMethods = None
+    dit_quantization: QuantizationMethods = None
+    dit_fp8_activation_granularity: str = "per_tensor"
+    dit_fp8_ignored_layers: list[str] = field(default_factory=list)
+    dit_fp8_min_layer_size: int = 0
 
     override_transformer_cls_name: str | None = None
     init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
@@ -545,11 +549,46 @@ class FastVideoArgs:
             help="Path to safetensors file for text encoder override",
         )
         parser.add_argument(
+            "--text-encoder-quantization",
             "--override-text-encoder-quant",
             type=str,
             choices=QUANTIZATION_METHODS,
-            default=FastVideoArgs.override_text_encoder_quant,
-            help="Quantization method for text encoder override",
+            dest="text_encoder_quantization",
+            default=FastVideoArgs.text_encoder_quantization,
+            help="Quantization method for text encoder",
+        )
+        parser.add_argument(
+            "--dit-quantization",
+            "--override-dit-quant",
+            type=str,
+            choices=QUANTIZATION_METHODS,
+            dest="dit_quantization",
+            default=FastVideoArgs.dit_quantization,
+            help="Quantization method for DiT/transformer",
+        )
+        parser.add_argument(
+            "--dit-fp8-activation-granularity",
+            type=str,
+            choices=["per_tensor", "per_token"],
+            dest="dit_fp8_activation_granularity",
+            default=FastVideoArgs.dit_fp8_activation_granularity,
+            help="FP8 activation quantization granularity",
+        )
+        parser.add_argument(
+            "--dit-fp8-ignored-layers",
+            type=lambda s: [x.strip() for x in s.split(",") if x.strip()],
+            dest="dit_fp8_ignored_layers",
+            default=FastVideoArgs.dit_fp8_ignored_layers,
+            help=
+            "Comma-separated layer name patterns to skip FP8 (e.g. 'proj_out,norm')",
+        )
+        parser.add_argument(
+            "--dit-fp8-min-layer-size",
+            type=int,
+            dest="dit_fp8_min_layer_size",
+            default=FastVideoArgs.dit_fp8_min_layer_size,
+            help=
+            "Min layer size (in_features * out_features) for FP8; 0 to disable",
         )
         parser.add_argument(
             "--override-transformer-cls-name",

@@ -22,6 +22,7 @@ from fastvideo.configs.models import EncoderConfig
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.layers.quantization import get_quantization_config
+from fastvideo.layers.quantization.fp8_utils import detect_fp8_from_safetensors
 from fastvideo.logger import init_logger
 from fastvideo.models.encoders.base import TextEncoder
 from fastvideo.models.hf_transformer_utils import get_diffusers_config
@@ -349,19 +350,39 @@ class TextEncoderLoader(ComponentLoader):
                 else torch.device("cpu")
             )
 
-        # Set quantization config if specified
-        if (
-            use_text_encoder_override
-            and fastvideo_args.override_text_encoder_quant is not None
-        ):
-            if fastvideo_args.override_text_encoder_safetensors is None:
-                raise ValueError(
-                    "override_text_encoder_quant is set but override_text_encoder_safetensors is None"
+        if use_text_encoder_override:
+            te_safetensors = fastvideo_args.override_text_encoder_safetensors
+
+            if fastvideo_args.text_encoder_quantization is not None:
+                if te_safetensors is None:
+                    raise ValueError(
+                        "text_encoder_quantization is set but override_text_encoder_safetensors is None"
+                    )
+                quant_cls = get_quantization_config(
+                    fastvideo_args.text_encoder_quantization
                 )
-            quant_cls = get_quantization_config(
-                fastvideo_args.override_text_encoder_quant
-            )
-            model_config.quant_config = quant_cls()
+                model_config.quant_config = quant_cls()
+            elif te_safetensors is not None:
+                is_fp8, activation_scheme = detect_fp8_from_safetensors(
+                    [te_safetensors]
+                )
+                if is_fp8:
+                    from fastvideo.layers.quantization.fp8 import Fp8Config
+                    te_act_granularity = getattr(
+                        fastvideo_args,
+                        "dit_fp8_activation_granularity",
+                        "per_tensor",
+                    )
+                    model_config.quant_config = Fp8Config(
+                        is_checkpoint_fp8_serialized=True,
+                        activation_scheme=activation_scheme,
+                        activation_granularity=te_act_granularity,
+                    )
+                    logger.info(
+                        "Auto-detected FP8 checkpoint for text encoder "
+                        "(scheme=%s)",
+                        activation_scheme,
+                    )
 
         with set_default_torch_dtype(PRECISION_TO_TYPE[dtype]):
             with target_device:
@@ -823,6 +844,63 @@ class TransformerLoader(ComponentLoader):
                 )
                 safetensors_list = [custom_weights_path]
 
+        is_fp8, activation_scheme = detect_fp8_from_safetensors(
+            safetensors_list
+        )
+
+        act_granularity = getattr(
+            fastvideo_args, "dit_fp8_activation_granularity", "per_tensor"
+        )
+        fp8_ignored = getattr(
+            fastvideo_args, "dit_fp8_ignored_layers", []
+        ) or []
+        fp8_min_layer_size = getattr(
+            fastvideo_args, "dit_fp8_min_layer_size", 0
+        )
+
+        if fastvideo_args.dit_quantization is not None:
+            from fastvideo.layers.quantization.fp8 import Fp8Config
+            if is_fp8:
+                dit_config.quant_config = Fp8Config(
+                    is_checkpoint_fp8_serialized=True,
+                    activation_scheme=activation_scheme,
+                    ignored_layers=fp8_ignored,
+                    activation_granularity=act_granularity,
+                    min_layer_size=fp8_min_layer_size,
+                )
+                logger.info(
+                    "Using FP8 for DiT: pre-serialized checkpoint "
+                    "(scheme=%s, granularity=%s)",
+                    activation_scheme, act_granularity,
+                )
+            else:
+                dit_config.quant_config = Fp8Config(
+                    is_checkpoint_fp8_serialized=False,
+                    activation_scheme="dynamic",
+                    ignored_layers=fp8_ignored,
+                    activation_granularity=act_granularity,
+                    min_layer_size=fp8_min_layer_size,
+                )
+                logger.info(
+                    "Using FP8 for DiT: online quantization "
+                    "(granularity=%s)",
+                    act_granularity,
+                )
+        elif is_fp8:
+            from fastvideo.layers.quantization.fp8 import Fp8Config
+            dit_config.quant_config = Fp8Config(
+                is_checkpoint_fp8_serialized=True,
+                activation_scheme=activation_scheme,
+                ignored_layers=fp8_ignored,
+                activation_granularity=act_granularity,
+                min_layer_size=fp8_min_layer_size,
+            )
+            logger.info(
+                "Auto-detected FP8 checkpoint for DiT "
+                "(scheme=%s, granularity=%s)",
+                activation_scheme, act_granularity,
+            )
+
         logger.info(
             "Loading model from %s safetensors files: %s",
             len(safetensors_list),
@@ -869,9 +947,23 @@ class TransformerLoader(ComponentLoader):
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
 
-        assert next(model.parameters()).dtype == default_dtype, (
-            "Model dtype does not match default dtype"
-        )
+        # For FP8-quantized models, some parameters will be float8_e4m3fn or
+        # float32 (scales).  Only check non-quantized parameters.
+        if dit_config.quant_config is not None:
+            non_quant_params = [
+                p for p in model.parameters()
+                if p.dtype not in (torch.float8_e4m3fn, torch.float8_e5m2,
+                                   torch.float32)
+            ]
+            if non_quant_params:
+                assert non_quant_params[0].dtype == default_dtype, (
+                    f"Model dtype {non_quant_params[0].dtype} does not match "
+                    f"default dtype {default_dtype}"
+                )
+        else:
+            assert next(model.parameters()).dtype == default_dtype, (
+                "Model dtype does not match default dtype"
+            )
 
         model = model.eval()
 
