@@ -11,7 +11,7 @@ import aiofiles
 from fastapi import (APIRouter, File, Form, HTTPException, Path, Query, UploadFile)
 from fastapi.responses import FileResponse
 
-from fastvideo.entrypoints.openai.api_server import (
+from fastvideo.entrypoints.openai.state import (
     get_generator,
     get_output_dir,
 )

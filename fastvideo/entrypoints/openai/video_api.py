@@ -19,7 +19,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse
 
-from fastvideo.entrypoints.openai.api_server import (
+from fastvideo.entrypoints.openai.state import (
     get_generator,
     get_output_dir,
     get_server_args,
