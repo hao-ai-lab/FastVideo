@@ -119,16 +119,14 @@ class _KDPathCache:
                 with open(meta_path) as f:
                     stored = json.load(f)
                 if stored.get("teacher") != teacher_id:
-                    raise ValueError(
-                        f"Cache teacher {stored['teacher']!r} != config "
-                        f"teacher {teacher_id!r}. Delete {cache_dir} "
-                        "and re-run.")
+                    raise ValueError(f"Cache teacher {stored['teacher']!r} != config "
+                                     f"teacher {teacher_id!r}. Delete {cache_dir} "
+                                     "and re-run.")
                 if stored.get("teacher_inference_steps") != teacher_inference_steps:
-                    raise ValueError(
-                        f"Cache teacher_inference_steps "
-                        f"{stored['teacher_inference_steps']} != config "
-                        f"{teacher_inference_steps}. Delete {cache_dir} "
-                        "and re-run.")
+                    raise ValueError(f"Cache teacher_inference_steps "
+                                     f"{stored['teacher_inference_steps']} != config "
+                                     f"{teacher_inference_steps}. Delete {cache_dir} "
+                                     "and re-run.")
             else:
                 meta: dict[str, Any] = {
                     "total_samples": total_samples,
@@ -251,8 +249,7 @@ class _KDDataLoaderWrapper:
         return {}
 
     def load_state_dict(self, state: dict) -> None:
-        if self._active is not None and hasattr(self._active,
-                                                "load_state_dict"):
+        if self._active is not None and hasattr(self._active, "load_state_dict"):
             self._active.load_state_dict(state)
 
 
@@ -310,27 +307,22 @@ class KDMethod(TrainingMethod):
             raw_steps = len(self._t_list) - 1
         self._num_steps: int = int(raw_steps)
         if len(self._t_list) != self._num_steps + 1:
-            raise ValueError(
-                f"len(t_list)={len(self._t_list)} must equal "
-                f"student_sample_steps+1={self._num_steps + 1}")
+            raise ValueError(f"len(t_list)={len(self._t_list)} must equal "
+                             f"student_sample_steps+1={self._num_steps + 1}")
 
         cache_dir = mcfg.get("teacher_path_cache")
         if not cache_dir:
             raise ValueError("method_config.teacher_path_cache must be set")
         self._cache_dir: str = str(cache_dir)
 
-        self._teacher_guidance_scale: float = float(
-            mcfg.get("teacher_guidance_scale", 1.0))
-        self._teacher_inference_steps: int = int(
-            mcfg.get("teacher_inference_steps", 48))
+        self._teacher_guidance_scale: float = float(mcfg.get("teacher_guidance_scale", 1.0))
+        self._teacher_inference_steps: int = int(mcfg.get("teacher_inference_steps", 48))
 
         # --- Optional teacher ---
         self.teacher: ModelBase | None = role_models.get("teacher")
-        if self.teacher is not None and getattr(self.teacher, "_trainable",
-                                                False):
-            raise ValueError(
-                "KDMethod requires teacher to be non-trainable "
-                "(set trainable: false in models.teacher)")
+        if self.teacher is not None and getattr(self.teacher, "_trainable", False):
+            raise ValueError("KDMethod requires teacher to be non-trainable "
+                             "(set trainable: false in models.teacher)")
 
         # --- Build parquet dataloader via student.init_preprocessors ---
         self.student.init_preprocessors(self.training_config)
@@ -343,8 +335,7 @@ class KDMethod(TrainingMethod):
         # --- Build SelfForcingFlowMatchScheduler for sigma lookups ---
         # num_inference_steps=1000 gives a dense grid accurate for any t.
         tc = self.training_config
-        self._flow_shift = float(
-            getattr(tc.pipeline_config, "flow_shift", 0.0) or 0.0)
+        self._flow_shift = float(getattr(tc.pipeline_config, "flow_shift", 0.0) or 0.0)
         self._sf_scheduler = SelfForcingFlowMatchScheduler(
             num_inference_steps=1000,
             num_train_timesteps=int(self.student.num_train_timesteps),
@@ -386,11 +377,10 @@ class KDMethod(TrainingMethod):
 
         if not _KDPathCache.is_complete(self._cache_dir):
             if self.teacher is None:
-                raise RuntimeError(
-                    f"teacher_path_cache at {self._cache_dir!r} is "
-                    "incomplete and no teacher model is configured. "
-                    "Add a 'teacher' entry under 'models:' in the YAML "
-                    "or provide a complete cache directory.")
+                raise RuntimeError(f"teacher_path_cache at {self._cache_dir!r} is "
+                                   "incomplete and no teacher model is configured. "
+                                   "Add a 'teacher' entry under 'models:' in the YAML "
+                                   "or provide a complete cache directory.")
 
             # Prepare teacher for inference (world_group needed for
             # negative conditioning setup).
@@ -408,8 +398,7 @@ class KDMethod(TrainingMethod):
             source_dataset = self._source_loader.dataset
             total = sum(source_dataset.lengths)
             teacher_id = getattr(self.teacher, "_init_from", "unknown")
-            data_path = str(
-                getattr(self.training_config.data, "data_path", ""))
+            data_path = str(getattr(self.training_config.data, "data_path", ""))
 
             _KDPathCache.validate_or_create_metadata(
                 self._cache_dir,
@@ -460,16 +449,14 @@ class KDMethod(TrainingMethod):
         t_to_idx: dict[int, int] = {int(t): i for i, t in enumerate(traj_ts)}
         missing_ts = [t for t in self._t_list[:-1] if t not in t_to_idx]
         if missing_ts:
-            raise ValueError(
-                f"t_list timesteps {missing_ts} are not present in the cached "
-                f"trajectory timesteps.\nCached: {traj_ts}\n"
-                f"Adjust t_list to use a subset of the cached timesteps.")
-        self._t_to_traj_idx: dict[int, int] = {
-            t: t_to_idx[t] for t in self._t_list[:-1]
-        }
+            raise ValueError(f"t_list timesteps {missing_ts} are not present in the cached "
+                             f"trajectory timesteps.\nCached: {traj_ts}\n"
+                             f"Adjust t_list to use a subset of the cached timesteps.")
+        self._t_to_traj_idx: dict[int, int] = {t: t_to_idx[t] for t in self._t_list[:-1]}
         logger.info(
             "t_list → trajectory indices: %s",
-            {t: self._t_to_traj_idx[t] for t in self._t_list[:-1]},
+            {t: self._t_to_traj_idx[t]
+             for t in self._t_list[:-1]},
         )
 
     # ------------------------------------------------------------------
@@ -505,10 +492,7 @@ class KDMethod(TrainingMethod):
 
             # Load single sample by stable global index.
             raw = source_dataset.__getitems__([global_idx])
-            raw = {
-                k: v.to(device) if isinstance(v, torch.Tensor) else v
-                for k, v in raw.items()
-            }
+            raw = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in raw.items()}
 
             with torch.no_grad():
                 traj_latents, traj_timesteps, real = self._teacher_ode_rollout(raw)
@@ -582,7 +566,7 @@ class KDMethod(TrainingMethod):
             generator=self.cuda_generator,
         )
         t0 = teacher_t_list[0]
-        t0_flat = torch.full((B * T,), t0, device=device, dtype=torch.float32)
+        t0_flat = torch.full((B * T, ), t0, device=device, dtype=torch.float32)
         x = self._sf_scheduler.add_noise(
             latents.flatten(0, 1),
             noise.flatten(0, 1),
@@ -597,8 +581,7 @@ class KDMethod(TrainingMethod):
         for t_cur, t_next in zip(teacher_t_list, teacher_next, strict=True):
             traj_states.append(x.squeeze(0).clone())
 
-            timestep_b = torch.full((B,), t_cur, device=device,
-                                    dtype=torch.float32)
+            timestep_b = torch.full((B, ), t_cur, device=device, dtype=torch.float32)
             training_batch.timesteps = timestep_b
 
             pred_noise = self.teacher.predict_noise(
@@ -621,10 +604,8 @@ class KDMethod(TrainingMethod):
                 sigma_next = self._timestep_to_sigma(t_next, B * T, device)
                 x_flat = x.flatten(0, 1)
                 p_flat = pred_x0.flatten(0, 1)
-                eps = ((x_flat - (1.0 - sigma_cur) * p_flat) /
-                       sigma_cur.clamp_min(1e-8))
-                x = ((1.0 - sigma_next) * p_flat +
-                     sigma_next * eps).unflatten(0, (B, T)).to(dtype)
+                eps = ((x_flat - (1.0 - sigma_cur) * p_flat) / sigma_cur.clamp_min(1e-8))
+                x = ((1.0 - sigma_next) * p_flat + sigma_next * eps).unflatten(0, (B, T)).to(dtype)
 
         assert pred_x0 is not None, "teacher_t_list must have at least one step"
 
@@ -671,13 +652,12 @@ class KDMethod(TrainingMethod):
         dtype = batch["real"].dtype
 
         # Randomly select which student denoising step to train on.
-        step_i = int(
-            torch.randint(
-                0,
-                self._num_steps,
-                (1,),
-                generator=self.cuda_generator,
-            ).item())
+        step_i = int(torch.randint(
+            0,
+            self._num_steps,
+            (1, ),
+            generator=self.cuda_generator,
+        ).item())
 
         t = self._t_list[step_i]
         traj_idx = self._t_to_traj_idx[t]
@@ -692,8 +672,7 @@ class KDMethod(TrainingMethod):
         proxy_batch = {
             "vae_latent": target_x0.permute(0, 2, 1, 3, 4),  # [B, C, T, H, W]
             "text_embedding": batch["text_embedding"].to(device, dtype=dtype),
-            "text_attention_mask":
-            batch["text_attention_mask"].to(device, dtype=dtype),
+            "text_attention_mask": batch["text_attention_mask"].to(device, dtype=dtype),
         }
         training_batch = self.student.prepare_batch(
             proxy_batch,
@@ -703,7 +682,7 @@ class KDMethod(TrainingMethod):
         )
 
         # Override timestep with the actual KD timestep.
-        timestep_b = torch.full((B,), float(t), device=device, dtype=torch.float32)
+        timestep_b = torch.full((B, ), float(t), device=device, dtype=torch.float32)
         training_batch.timesteps = timestep_b
 
         # Student forward: predict noise from the cached noisy latent.
@@ -771,10 +750,7 @@ class KDMethod(TrainingMethod):
         if student_lr <= 0.0:
             raise ValueError("training.optimizer.learning_rate must be > 0")
 
-        student_params = [
-            p for p in self.student.transformer.parameters()
-            if p.requires_grad
-        ]
+        student_params = [p for p in self.student.transformer.parameters() if p.requires_grad]
         (
             self._student_optimizer,
             self._student_lr_scheduler,
@@ -814,8 +790,7 @@ class KDCausalMethod(KDMethod):
         role_models: dict[str, ModelBase],
     ) -> None:
         super().__init__(cfg=cfg, role_models=role_models)
-        self._num_frames_per_block: int = int(
-            self.method_config.get("num_frames_per_block", 3))
+        self._num_frames_per_block: int = int(self.method_config.get("num_frames_per_block", 3))
         if self._num_frames_per_block < 1:
             raise ValueError("num_frames_per_block must be >= 1")
 
@@ -844,34 +819,28 @@ class KDCausalMethod(KDMethod):
             dtype=torch.long,
             device=device,
         )
-        relevant = batch["trajectory_latents"].to(
-            device, dtype=dtype)[:, traj_indices]  # [B, K, T, C, H, W]
+        relevant = batch["trajectory_latents"].to(device, dtype=dtype)[:, traj_indices]  # [B, K, T, C, H, W]
 
         # Sample per-frame step indices, block-quantized.
-        indexes = self._sample_per_frame_step_idx(B, T, K,
-                                                  device)  # [B, T] in [0, K)
+        indexes = self._sample_per_frame_step_idx(B, T, K, device)  # [B, T] in [0, K)
 
         # Gather noisy_input per frame: [B, T, C, H, W]
         noisy_input = torch.gather(
             relevant,
             dim=1,
-            index=indexes[:, None, :, None, None, None].expand(
-                B, 1, T, C, H, W),
+            index=indexes[:, None, :, None, None, None].expand(B, 1, T, C, H, W),
         ).squeeze(1)
 
         target_x0 = batch["real"].to(device, dtype=dtype)  # [B, T, C, H, W]
 
         # Per-frame timestep [B, T]
-        t_list_tensor = torch.tensor(self._t_list[:-1],
-                                     dtype=torch.float32,
-                                     device=device)
+        t_list_tensor = torch.tensor(self._t_list[:-1], dtype=torch.float32, device=device)
         timestep_per_frame = t_list_tensor[indexes]  # [B, T]
 
         proxy_batch = {
             "vae_latent": target_x0.permute(0, 2, 1, 3, 4),
             "text_embedding": batch["text_embedding"].to(device, dtype=dtype),
-            "text_attention_mask":
-            batch["text_attention_mask"].to(device, dtype=dtype),
+            "text_attention_mask": batch["text_attention_mask"].to(device, dtype=dtype),
         }
         training_batch = self.student.prepare_batch(
             proxy_batch,
@@ -937,6 +906,5 @@ class KDCausalMethod(KDMethod):
             device=device,
         )  # [B, n_blocks]
         # Expand each block index to num_frames_per_block frames, slice to T.
-        per_frame = block_idx.repeat_interleave(
-            self._num_frames_per_block, dim=1)[:, :T]
+        per_frame = block_idx.repeat_interleave(self._num_frames_per_block, dim=1)[:, :T]
         return per_frame  # [B, T]

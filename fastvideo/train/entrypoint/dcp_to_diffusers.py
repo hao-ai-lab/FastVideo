@@ -158,8 +158,7 @@ def _save_role_pretrained(
             # the exported safetensors would have internal keys (e.g.
             # "patch_embedding.proj.bias") and the next load would double-map them
             # (e.g. → "patch_embedding.proj.proj.bias").
-            reverse_mapping: dict = getattr(
-                modules[module_name], "reverse_param_names_mapping", {})
+            reverse_mapping: dict = getattr(modules[module_name], "reverse_param_names_mapping", {})
 
             tensor_state: dict[str, torch.Tensor] = {}
             for key, value in state_dict.items():
