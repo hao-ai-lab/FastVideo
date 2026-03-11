@@ -34,13 +34,12 @@ def compute_text_embeddings(
         return_tensors="pt",
     )
     text_input_ids = text_inputs.input_ids.to(device)
-
+    attention_mask = text_inputs.attention_mask.to(device)
     with torch.no_grad():
         prompt_embeds = text_encoder(
-            text_input_ids
-        )[0]
-
-    prompt_embeds = prompt_embeds.to(
-        dtype=text_encoder.dtype, device=device
-    )
+            text_input_ids, attention_mask=attention_mask
+        ).last_hidden_state
+    
+    # make padding token 0
+    prompt_embeds[attention_mask == 0] = 0
     return prompt_embeds
