@@ -152,12 +152,32 @@ def _save_role_pretrained(
             for path in module_dir.glob("*.safetensors"):
                 path.unlink(missing_ok=True)
 
+            # Convert internal parameter names back to HF format.
+            # load_model_from_full_model_state_dict builds reverse_param_names_mapping
+            # (internal_key → hf_key) and stores it on the module.  Without this,
+            # the exported safetensors would have internal keys (e.g.
+            # "patch_embedding.proj.bias") and the next load would double-map them
+            # (e.g. → "patch_embedding.proj.proj.bias").
+            reverse_mapping: dict = getattr(
+                modules[module_name], "reverse_param_names_mapping", {})
+
             tensor_state: dict[str, torch.Tensor] = {}
             for key, value in state_dict.items():
                 if not isinstance(value, torch.Tensor):
                     raise TypeError(f"Expected tensor in state_dict "
                                     f"for {module_name}.{key}, "
                                     f"got {type(value).__name__}")
+                if key in reverse_mapping:
+                    hf_key, merge_index, _ = reverse_mapping[key]
+                    if merge_index is not None:
+                        logger.warning(
+                            "Skipping reverse-mapping for merged param %s "
+                            "(merge_index=%s); saving under internal key.",
+                            key,
+                            merge_index,
+                        )
+                        hf_key = key
+                    key = hf_key
                 tensor_state[key] = value.detach().cpu()
 
             from safetensors.torch import save_file

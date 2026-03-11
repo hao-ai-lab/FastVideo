@@ -26,7 +26,7 @@ models:
     transformer_override_safetensor: outputs/kdtest/kd_ode_init/transformer/model.safetensors
   teacher:
     _target_: fastvideo.train.models.wan.WanModel
-    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    init_from: Wan-AI/Wan2.1-T2V-14B-Diffusers
     trainable: false
     disable_custom_init_weights: true
   critic:
