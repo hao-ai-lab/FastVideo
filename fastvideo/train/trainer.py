@@ -36,7 +36,6 @@ def _coerce_log_scalar(value: Any, *, where: str) -> float:
 class TrainLoopState:
     step: int
     accum_iter: int
-    current_vsa_sparsity: float
 
 
 class Trainer:
@@ -72,19 +71,6 @@ class Trainer:
                 data_iter = iter(dataloader)
                 batch = next(data_iter)
             yield batch
-
-    def _get_current_vsa_sparsity(self, step: int) -> float:
-        tc = self.training_config
-        vsa_sparsity = tc.vsa.sparsity
-        vsa_decay_rate = tc.vsa.decay_rate
-        vsa_decay_interval_steps = (tc.vsa.decay_interval_steps)
-        if vsa_decay_interval_steps > 1:
-            current_decay_times = min(
-                step // vsa_decay_interval_steps,
-                int(vsa_sparsity // vsa_decay_rate),
-            )
-            return current_decay_times * vsa_decay_rate
-        return vsa_sparsity
 
     def run(
         self,
@@ -136,7 +122,6 @@ class Trainer:
         )
         for step in progress:
             t0 = time.perf_counter()
-            current_vsa_sparsity = (self._get_current_vsa_sparsity(step))
 
             loss_sums: dict[str, float] = {}
             metric_sums: dict[str, float] = {}
@@ -145,7 +130,6 @@ class Trainer:
                 loss_map, outputs, step_metrics = method.single_train_step(
                     batch,
                     step,
-                    current_vsa_sparsity=(current_vsa_sparsity),
                 )
 
                 method.backward(
@@ -179,7 +163,7 @@ class Trainer:
             metrics = {k: v / grad_accum for k, v in loss_sums.items()}
             metrics.update({k: v / grad_accum for k, v in metric_sums.items()})
             metrics["step_time_sec"] = (time.perf_counter() - t0)
-            metrics["vsa_sparsity"] = float(current_vsa_sparsity)
+            metrics["vsa_sparsity"] = float(tc.vsa_sparsity)
             if self.global_rank == 0 and metrics:
                 self.tracker.log(metrics, step)
 

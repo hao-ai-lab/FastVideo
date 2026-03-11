@@ -20,7 +20,6 @@ from fastvideo.train.utils.training_config import (
     OptimizerConfig,
     TrackerConfig,
     TrainingLoopConfig,
-    VSAConfig,
 )
 
 logger = init_logger(__name__)
@@ -354,11 +353,7 @@ def _build_training_config(
             project_name=str(tr.get("project_name", "fastvideo") or "fastvideo"),
             run_name=str(tr.get("run_name", "") or ""),
         ),
-        vsa=VSAConfig(
-            sparsity=float(vs.get("sparsity", 0.0) or 0.0),
-            decay_rate=float(vs.get("decay_rate", 0.0) or 0.0),
-            decay_interval_steps=int(vs.get("decay_interval_steps", 0) or 0),
-        ),
+        vsa_sparsity=float(vs.get("sparsity", 0.0) or 0.0),
         model=ModelTrainingConfig(
             weighting_scheme=str(m.get("weighting_scheme", "uniform") or "uniform"),
             logit_mean=float(m.get("logit_mean", 0.0) or 0.0),

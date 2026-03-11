@@ -30,7 +30,7 @@ class FineTuneMethod(TrainingMethod):
         if not self.student._trainable:
             raise ValueError("FineTuneMethod requires student to be "
                              "trainable")
-        self._attn_kind: Literal["dense", "vsa"] = (self._parse_attn_kind(self.method_config.get("attn_kind", None)))
+        self._attn_kind: Literal["dense", "vsa"] = (self._infer_attn_kind())
 
         # Initialize preprocessors on student.
         self.student.init_preprocessors(self.training_config)
@@ -50,8 +50,6 @@ class FineTuneMethod(TrainingMethod):
         self,
         batch: dict[str, Any],
         iteration: int,
-        *,
-        current_vsa_sparsity: float = 0.0,
     ) -> tuple[
             dict[str, torch.Tensor],
             dict[str, Any],
@@ -61,7 +59,6 @@ class FineTuneMethod(TrainingMethod):
         training_batch = self.student.prepare_batch(
             batch,
             generator=self.cuda_generator,
-            current_vsa_sparsity=current_vsa_sparsity,
             latents_source="data",
         )
 

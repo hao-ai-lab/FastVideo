@@ -11,7 +11,6 @@ models:
 
 method:
   _target_: fastvideo.train.methods.fine_tuning.dfsft.DiffusionForcingSFTMethod
-  attn_kind: dense
   chunk_size: 3
 
 training:

@@ -54,6 +54,13 @@ def run_training_from_config(
     cfg = load_run_config(config_path, overrides=overrides)
     tc = cfg.training
 
+    # Auto-set attention backend for VSA when sparsity is configured.
+    if tc.vsa_sparsity > 0.0:
+        os.environ.setdefault(
+            "FASTVIDEO_ATTENTION_BACKEND",
+            "VIDEO_SPARSE_ATTN",
+        )
+
     maybe_init_distributed_environment_and_model_parallel(
         tc.distributed.tp_size,
         tc.distributed.sp_size,

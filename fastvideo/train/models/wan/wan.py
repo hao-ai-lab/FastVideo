@@ -195,7 +195,6 @@ class WanModel(ModelBase):
         raw_batch: dict[str, Any],
         *,
         generator: torch.Generator,
-        current_vsa_sparsity: float = 0.0,
         latents_source: Literal["data", "zeros"] = "data",
     ) -> TrainingBatch:
         self.ensure_negative_conditioning()
@@ -205,7 +204,7 @@ class WanModel(ModelBase):
         dtype = self._get_training_dtype()
         device = self.device
 
-        training_batch = TrainingBatch(current_vsa_sparsity=current_vsa_sparsity)
+        training_batch = TrainingBatch()
         encoder_hidden_states = raw_batch["text_embedding"]
         encoder_attention_mask = raw_batch["text_attention_mask"]
         infos = raw_batch.get("info_list")
@@ -463,7 +462,6 @@ class WanModel(ModelBase):
         patch_size = (
             tc.pipeline_config.dit_config.patch_size  # type: ignore[union-attr]
         )
-        current_vsa_sparsity = (training_batch.current_vsa_sparsity)
         assert latents_shape is not None
         assert training_batch.timesteps is not None
 
@@ -477,7 +475,7 @@ class WanModel(ModelBase):
                 raw_latent_shape=latents_shape[2:5],
                 current_timestep=(training_batch.timesteps),
                 patch_size=patch_size,
-                VSA_sparsity=current_vsa_sparsity,
+                VSA_sparsity=tc.vsa_sparsity,
                 device=self.device,
             )
         elif (envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN"):

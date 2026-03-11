@@ -67,7 +67,6 @@ method:
 
   # --- FineTuneMethod keys (if using finetune instead) ---
   # _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
-  # attn_kind: vsa                    # "dense" or "vsa"
 
 # ------------------------------------------------------------------------------
 # training: [TYPED] -> TrainingConfig
@@ -130,8 +129,6 @@ training:
   # --- training.vsa [TYPED] -> VSAConfig ---
   vsa:
     sparsity: 0.0                     # default: 0.0 (0.0 = disabled)
-    decay_rate: 0.0                   # default: 0.0
-    decay_interval_steps: 0           # default: 0
 
   # --- training.model [TYPED] -> ModelTrainingConfig ---
   model:

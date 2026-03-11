@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Any, Literal, TypeAlias, cast
+from typing import Any, Literal, TypeAlias
 
 import torch
 
+from fastvideo import envs
 from fastvideo.logger import init_logger
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.checkpoint import _RoleModuleContainer
@@ -77,8 +78,6 @@ class TrainingMethod(torch.nn.Module, ABC):
         self,
         batch: dict[str, Any],
         iteration: int,
-        *,
-        current_vsa_sparsity: float = 0.0,
     ) -> tuple[
             dict[str, torch.Tensor],
             dict[str, Any],
@@ -236,18 +235,10 @@ class TrainingMethod(torch.nn.Module, ABC):
 
         self.student.on_train_start()
 
-    def get_rng_generators(self, ) -> dict[str, torch.Generator]:
-        generators: dict[str, torch.Generator] = {}
-        if self.cuda_generator is not None:
-            generators["cuda"] = self.cuda_generator
-        return generators
-
     @staticmethod
-    def _parse_attn_kind(raw: Any, ) -> Literal["dense", "vsa"]:
-        if raw in (None, ""):
-            return "dense"
-        kind = str(raw).strip().lower()
-        if kind not in {"dense", "vsa"}:
-            raise ValueError("method_config.attn_kind must be one of "
-                             f"{{'dense', 'vsa'}}, got {raw!r}.")
-        return cast(Literal["dense", "vsa"], kind)
+    def _infer_attn_kind() -> Literal["dense", "vsa"]:
+        """Derive attn_kind from ``FASTVIDEO_ATTENTION_BACKEND``."""
+        backend = envs.FASTVIDEO_ATTENTION_BACKEND
+        if backend == "VIDEO_SPARSE_ATTN":
+            return "vsa"
+        return "dense"
