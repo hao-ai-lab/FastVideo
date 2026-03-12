@@ -5,11 +5,8 @@ from typing import Any
 import numpy as np
 import torch
 import torch.distributed.checkpoint.stateful
-from torch.distributed.checkpoint.state_dict import (StateDictOptions,
-                                                     get_model_state_dict,
-                                                     get_optimizer_state_dict,
-                                                     set_model_state_dict,
-                                                     set_optimizer_state_dict)
+from torch.distributed.checkpoint.state_dict import (StateDictOptions, get_model_state_dict, get_optimizer_state_dict,
+                                                     set_model_state_dict, set_optimizer_state_dict)
 
 
 class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
@@ -18,17 +15,10 @@ class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
         self.model = model
 
     def state_dict(self) -> dict[str, Any]:
-        state_dict = get_model_state_dict(
-            self.model)  # type: ignore[no-any-return]
+        state_dict = get_model_state_dict(self.model)  # type: ignore[no-any-return]
         # filter out non-trainable parameters
-        param_requires_grad = set([
-            k for k, v in dict(self.model.named_parameters()).items()
-            if v.requires_grad
-        ])
-        state_dict = {
-            k: v
-            for k, v in state_dict.items() if k in param_requires_grad
-        }
+        param_requires_grad = set([k for k, v in dict(self.model.named_parameters()).items() if v.requires_grad])
+        state_dict = {k: v for k, v in state_dict.items() if k in param_requires_grad}
         return state_dict  # type: ignore
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
@@ -41,8 +31,7 @@ class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
 
 class OptimizerWrapper(torch.distributed.checkpoint.stateful.Stateful):
 
-    def __init__(self, model: torch.nn.Module,
-                 optimizer: torch.optim.Optimizer) -> None:
+    def __init__(self, model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> None:
         self.model = model
         self.optimizer = optimizer
 

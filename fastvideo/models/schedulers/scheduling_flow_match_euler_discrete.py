@@ -551,15 +551,9 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
 
         # Hack to make sure that other schedulers which copy this function don't break
         # TODO: Add this logic to the other schedulers
-        if hasattr(self.config, "sigma_min"):
-            sigma_min = self.config.sigma_min
-        else:
-            sigma_min = None
+        sigma_min = self.config.sigma_min if hasattr(self.config, "sigma_min") else None
 
-        if hasattr(self.config, "sigma_max"):
-            sigma_max = self.config.sigma_max
-        else:
-            sigma_max = None
+        sigma_max = self.config.sigma_max if hasattr(self.config, "sigma_max") else None
 
         sigma_min = sigma_min if sigma_min is not None else in_sigmas[-1].item()
         sigma_max = sigma_max if sigma_max is not None else in_sigmas[0].item()
@@ -578,15 +572,9 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
 
         # Hack to make sure that other schedulers which copy this function don't break
         # TODO: Add this logic to the other schedulers
-        if hasattr(self.config, "sigma_min"):
-            sigma_min = self.config.sigma_min
-        else:
-            sigma_min = None
+        sigma_min = self.config.sigma_min if hasattr(self.config, "sigma_min") else None
 
-        if hasattr(self.config, "sigma_max"):
-            sigma_max = self.config.sigma_max
-        else:
-            sigma_max = None
+        sigma_max = self.config.sigma_max if hasattr(self.config, "sigma_max") else None
 
         sigma_min = sigma_min if sigma_min is not None else in_sigmas[-1].item()
         sigma_max = sigma_max if sigma_max is not None else in_sigmas[0].item()
@@ -606,15 +594,9 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
 
         # Hack to make sure that other schedulers which copy this function don't break
         # TODO: Add this logic to the other schedulers
-        if hasattr(self.config, "sigma_min"):
-            sigma_min = self.config.sigma_min
-        else:
-            sigma_min = None
+        sigma_min = self.config.sigma_min if hasattr(self.config, "sigma_min") else None
 
-        if hasattr(self.config, "sigma_max"):
-            sigma_max = self.config.sigma_max
-        else:
-            sigma_max = None
+        sigma_max = self.config.sigma_max if hasattr(self.config, "sigma_max") else None
 
         sigma_min = sigma_min if sigma_min is not None else in_sigmas[-1].item()
         sigma_max = sigma_max if sigma_max is not None else in_sigmas[0].item()

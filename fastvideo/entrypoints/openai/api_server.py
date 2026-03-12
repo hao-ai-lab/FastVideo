@@ -8,6 +8,11 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from fastvideo.entrypoints.openai.state import (
+    DEFAULT_OUTPUT_DIR,
+    clear_state,
+    set_state,
+)
 from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -16,49 +21,25 @@ logger = init_logger(__name__)
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8000
-DEFAULT_OUTPUT_DIR = "outputs"
-
-_generator: VideoGenerator | None = None
-_fastvideo_args: FastVideoArgs | None = None
-_output_dir: str = DEFAULT_OUTPUT_DIR
-
-
-def get_generator() -> VideoGenerator:
-    """Return the global VideoGenerator instance (set during startup)"""
-    assert _generator is not None, "Server not initialized — generator is None"
-    return _generator
-
-
-def get_server_args() -> FastVideoArgs:
-    """Return the global FastVideoArgs (set during startup)"""
-    assert _fastvideo_args is not None, "Server not initialized — args is None"
-    return _fastvideo_args
-
-
-def get_output_dir() -> str:
-    """Return the configured output directory"""
-    return _output_dir
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Load model on startup, clean up on shutdown"""
-    global _generator, _fastvideo_args, _output_dir
-
     args: FastVideoArgs = app.state.fastvideo_args
-    _fastvideo_args = args
-    _output_dir = app.state.output_dir
+    output_dir: str = app.state.output_dir
 
     logger.info("Loading model from %s ...", args.model_path)
-    _generator = VideoGenerator.from_fastvideo_args(args)
+    generator = VideoGenerator.from_fastvideo_args(args)
     logger.info("Model loaded successfully.")
+
+    set_state(generator, args, output_dir)
 
     yield  # server is running
 
     logger.info("Shutting down — releasing model resources ...")
-    if _generator is not None:
-        _generator.shutdown()
-        _generator = None
+    generator.shutdown()
+    clear_state()
     logger.info("Shutdown complete.")
 
 
@@ -104,8 +85,7 @@ def _parse_args() -> tuple[FastVideoArgs, str, int, str]:
     """Parse CLI arguments and return (FastVideoArgs, host, port, output_dir)"""
     from fastvideo.utils import FlexibleArgumentParser
 
-    parser = FlexibleArgumentParser(
-        description="FastVideo OpenAI-compatible API server")
+    parser = FlexibleArgumentParser(description="FastVideo OpenAI-compatible API server")
     parser.add_argument("--host", type=str, default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--output-dir", type=str, default=DEFAULT_OUTPUT_DIR)
@@ -117,13 +97,8 @@ def _parse_args() -> tuple[FastVideoArgs, str, int, str]:
     output_dir = args.output_dir
 
     # Build FastVideoArgs from the remaining CLI args
-    excluded = {
-        "host", "port", "output_dir", "subparser", "config", "dispatch_function"
-    }
-    cli_kwargs = {
-        k: v
-        for k, v in vars(args).items() if k not in excluded and v is not None
-    }
+    excluded = {"host", "port", "output_dir", "subparser", "config", "dispatch_function"}
+    cli_kwargs = {k: v for k, v in vars(args).items() if k not in excluded and v is not None}
     fastvideo_args = FastVideoArgs.from_kwargs(**cli_kwargs)
     return fastvideo_args, host, port, output_dir
 

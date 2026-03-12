@@ -66,9 +66,7 @@ class ServeSubcommand(CLISubcommand):
         if args.num_gpus is not None and args.num_gpus <= 0:
             raise ValueError("Number of gpus must be positive")
 
-    def subparser_init(
-            self,
-            subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
+    def subparser_init(self, subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
         from fastvideo.entrypoints.openai.api_server import (
             DEFAULT_HOST,
             DEFAULT_OUTPUT_DIR,

@@ -143,10 +143,7 @@ class ValidationCallback(Callback):
         # Look for an EMA callback to temporarily swap
         # EMA weights during validation.
         ema_cb = self._find_ema_callback()
-        if ema_cb is not None:
-            ctx = ema_cb.ema_context(transformer)
-        else:
-            ctx = contextlib.nullcontext(transformer)
+        ctx = ema_cb.ema_context(transformer) if ema_cb is not None else contextlib.nullcontext(transformer)
         with ctx as t:
             self._run_validation_inner(
                 method,

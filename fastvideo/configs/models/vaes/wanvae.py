@@ -61,10 +61,8 @@ class WanVAEArchConfig(VAEArchConfig):
     clip_output: bool = True
 
     def __post_init__(self):
-        self.scaling_factor: torch.tensor = 1.0 / torch.tensor(
-            self.latents_std).view(1, self.z_dim, 1, 1, 1)
-        self.shift_factor: torch.tensor = torch.tensor(self.latents_mean).view(
-            1, self.z_dim, 1, 1, 1)
+        self.scaling_factor: torch.tensor = 1.0 / torch.tensor(self.latents_std).view(1, self.z_dim, 1, 1, 1)
+        self.shift_factor: torch.tensor = torch.tensor(self.latents_mean).view(1, self.z_dim, 1, 1, 1)
         self.temporal_compression_ratio = self.scale_factor_temporal
         self.spatial_compression_ratio = self.scale_factor_spatial
 
@@ -79,5 +77,4 @@ class WanVAEConfig(VAEConfig):
     use_parallel_tiling: bool = False
 
     def __post_init__(self):
-        self.blend_num_frames = (self.tile_sample_min_num_frames -
-                                 self.tile_sample_stride_num_frames) * 2
+        self.blend_num_frames = (self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames) * 2

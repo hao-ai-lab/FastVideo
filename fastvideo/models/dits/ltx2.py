@@ -2328,10 +2328,7 @@ class LTX2Transformer3DModel(BaseDiT):
 
         def _hook_factory(block_idx: int, name: str):
             def _hook(_module, _inputs, outputs):  # noqa: ANN001
-                if isinstance(outputs, tuple):
-                    out = outputs[0]
-                else:
-                    out = outputs
+                out = outputs[0] if isinstance(outputs, tuple) else outputs
                 out_sum = _format_sum(out if torch.is_tensor(out) else None)
                 with path.open("a", encoding="utf-8") as f:
                     f.write(f"fastvideo:{block_idx}:{name}:out_sum={out_sum}\n")

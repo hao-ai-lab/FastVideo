@@ -31,14 +31,11 @@ class BenchSubcommand(CLISubcommand):
     def validate(self, args: argparse.Namespace) -> None:
         pass
 
-    def subparser_init(
-            self,
-            subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
+    def subparser_init(self, subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
         bench_parser = subparsers.add_parser(
             "bench",
             help="Benchmark a running FastVideo server",
-            usage=
-            "fastvideo bench [--dataset vbench] [--num-prompts N] [--port PORT]",
+            usage="fastvideo bench [--dataset vbench] [--num-prompts N] [--port PORT]",
         )
 
         bench_parser.add_argument(
@@ -51,8 +48,7 @@ class BenchSubcommand(CLISubcommand):
             "--base-url",
             type=str,
             default=None,
-            help=
-            "Base URL of the server (e.g., http://localhost:8000). Overrides host/port.",
+            help="Base URL of the server (e.g., http://localhost:8000). Overrides host/port.",
         )
         bench_parser.add_argument("--host", type=str, default="localhost")
         bench_parser.add_argument("--port", type=int, default=8000)
@@ -67,17 +63,12 @@ class BenchSubcommand(CLISubcommand):
             "--task",
             type=str,
             default=None,
-            choices=[
-                "text-to-video", "image-to-video", "text-to-image",
-                "image-to-image", "video-to-video"
-            ],
+            choices=["text-to-video", "image-to-video", "text-to-image", "image-to-image", "video-to-video"],
         )
         bench_parser.add_argument("--dataset-path", type=str, default=None)
         bench_parser.add_argument("--num-prompts", type=int, default=10)
         bench_parser.add_argument("--max-concurrency", type=int, default=1)
-        bench_parser.add_argument("--request-rate",
-                                  type=float,
-                                  default=float("inf"))
+        bench_parser.add_argument("--request-rate", type=float, default=float("inf"))
         bench_parser.add_argument("--width", type=int, default=None)
         bench_parser.add_argument("--height", type=int, default=None)
         bench_parser.add_argument("--num-frames", type=int, default=None)

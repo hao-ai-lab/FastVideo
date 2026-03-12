@@ -59,10 +59,7 @@ def validate_fvd(subset_a: Path, subset_b: Path, num_videos: int):
     print("TEST 1: Identity Test")
     print("=" * 70)
 
-    result1 = compute_fvd_with_config(real_videos=str(subset_a),
-                                      gen_videos=str(subset_a),
-                                      config=config,
-                                      verbose=False)
+    result1 = compute_fvd_with_config(real_videos=str(subset_a), gen_videos=str(subset_a), config=config, verbose=False)
     fvd_identity = result1['fvd']
     print(f"\nIdentity FVD: {fvd_identity:.2f}")
 
@@ -70,10 +67,7 @@ def validate_fvd(subset_a: Path, subset_b: Path, num_videos: int):
     print("TEST 2: Real vs Real")
     print("=" * 70)
 
-    result2 = compute_fvd_with_config(real_videos=str(subset_a),
-                                      gen_videos=str(subset_b),
-                                      config=config,
-                                      verbose=False)
+    result2 = compute_fvd_with_config(real_videos=str(subset_a), gen_videos=str(subset_b), config=config, verbose=False)
     fvd_real = result2['fvd']
     print(f"\nReal vs Real FVD: {fvd_real:.2f}")
 
@@ -87,9 +81,7 @@ def validate_fvd(subset_a: Path, subset_b: Path, num_videos: int):
 def main() -> None:
     bair_dir = Path('benchmarks/data/bair_full_videos')
 
-    subset_a, subset_b, count = split_videos(bair_dir,
-                                             n_per_subset=128,
-                                             seed=42)
+    subset_a, subset_b, count = split_videos(bair_dir, n_per_subset=128, seed=42)
     validate_fvd(subset_a, subset_b, count)
 
 

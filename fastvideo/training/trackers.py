@@ -40,10 +40,8 @@ class Timer:
     @property
     def elapsed_time(self) -> float:
         if self._start_time is None:
-            raise RuntimeError(
-                "Timer.start() must be called before elapsed_time")
-        end_time = self._end_time if self._end_time is not None else time.perf_counter(
-        )
+            raise RuntimeError("Timer.start() must be called before elapsed_time")
+        end_time = self._end_time if self._end_time is not None else time.perf_counter()
         return end_time - self._start_time
 
 
@@ -73,8 +71,7 @@ class BaseTracker:
             else:
                 self._timed_metrics[name] = elapsed_time
 
-    def log(self, metrics: dict[str, Any],
-            step: int) -> None:  # pragma: no cover - interface
+    def log(self, metrics: dict[str, Any], step: int) -> None:  # pragma: no cover - interface
         """Log metrics for the given step."""
         # Merge timing metrics with provided metrics
         metrics = {**self._timed_metrics, **metrics}
@@ -118,8 +115,7 @@ class BaseTracker:
 class DummyTracker(BaseTracker):
     """Tracker implementation used when logging is disabled."""
 
-    def log(self, metrics: dict[str, Any],
-            step: int) -> None:  # pragma: no cover - no-op
+    def log(self, metrics: dict[str, Any], step: int) -> None:  # pragma: no cover - no-op
         super().log(metrics, step)
 
     def finish(self) -> None:  # pragma: no cover - no-op
@@ -267,13 +263,10 @@ def initialize_trackers(
     if not tracker_names:
         return DummyTracker()
 
-    unsupported = [
-        name for name in tracker_names if name not in SUPPORTED_TRACKERS
-    ]
+    unsupported = [name for name in tracker_names if name not in SUPPORTED_TRACKERS]
     if unsupported:
         raise ValueError(
-            f"Unsupported tracker(s) provided: {unsupported}. Supported trackers: {sorted(SUPPORTED_TRACKERS)}"
-        )
+            f"Unsupported tracker(s) provided: {unsupported}. Supported trackers: {sorted(SUPPORTED_TRACKERS)}")
 
     tracker_instances: list[BaseTracker] = []
     for tracker_name in tracker_names:

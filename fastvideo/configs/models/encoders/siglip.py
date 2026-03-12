@@ -3,8 +3,7 @@
 
 from dataclasses import dataclass, field
 
-from fastvideo.configs.models.encoders.base import (ImageEncoderArchConfig,
-                                                    ImageEncoderConfig)
+from fastvideo.configs.models.encoders.base import (ImageEncoderArchConfig, ImageEncoderConfig)
 
 
 @dataclass
@@ -15,8 +14,7 @@ class SiglipVisionArchConfig(ImageEncoderArchConfig):
     """
 
     # From config.json
-    architectures: list[str] = field(
-        default_factory=lambda: ["SiglipVisionModel"])
+    architectures: list[str] = field(default_factory=lambda: ["SiglipVisionModel"])
     attention_dropout: float = 0.0
     dtype: str | None = None
     hidden_act: str = "gelu_pytorch_tanh"
@@ -42,8 +40,7 @@ class SiglipVisionArchConfig(ImageEncoderArchConfig):
 class SiglipVisionConfig(ImageEncoderConfig):
     """Configuration for SigLIP vision encoder."""
 
-    arch_config: ImageEncoderArchConfig = field(
-        default_factory=SiglipVisionArchConfig)
+    arch_config: ImageEncoderArchConfig = field(default_factory=SiglipVisionArchConfig)
 
     # FastVideo specific
     num_hidden_layers_override: int | None = None

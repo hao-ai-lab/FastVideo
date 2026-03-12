@@ -16,11 +16,8 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_rcm import RCMScheduler
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
-from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
-                                        DenoisingStage, ImageVAEEncodingStage,
-                                        InputValidationStage,
-                                        LatentPreparationStage,
-                                        TextEncodingStage,
+from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, DenoisingStage, ImageVAEEncodingStage,
+                                        InputValidationStage, LatentPreparationStage, TextEncodingStage,
                                         TimestepPreparationStage)
 
 logger = init_logger(__name__)
@@ -34,22 +31,17 @@ class TurboDiffusionI2VPipeline(LoRAPipeline, ComposedPipelineBase):
     high-quality I2V generation.
     """
 
-    _required_config_modules = [
-        "text_encoder", "tokenizer", "vae", "transformer", "transformer_2",
-        "scheduler"
-    ]
+    _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "transformer_2", "scheduler"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         # Use RCM scheduler with higher sigma_max for I2V
-        logger.info(
-            "Initializing RCM scheduler for TurboDiffusion I2V (sigma_max=200)")
+        logger.info("Initializing RCM scheduler for TurboDiffusion I2V (sigma_max=200)")
         self.modules["scheduler"] = RCMScheduler(sigma_max=200.0)
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
 
-        self.add_stage(stage_name="input_validation_stage",
-                       stage=InputValidationStage())
+        self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
@@ -57,33 +49,27 @@ class TurboDiffusionI2VPipeline(LoRAPipeline, ComposedPipelineBase):
                            tokenizers=[self.get_module("tokenizer")],
                        ))
 
-        self.add_stage(stage_name="conditioning_stage",
-                       stage=ConditioningStage())
+        self.add_stage(stage_name="conditioning_stage", stage=ConditioningStage())
 
         self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(
-                           scheduler=self.get_module("scheduler")))
+                       stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LatentPreparationStage(
-                           scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer", None)))
+                       stage=LatentPreparationStage(scheduler=self.get_module("scheduler"),
+                                                    transformer=self.get_module("transformer", None)))
 
         # I2V: Encode initial image to latent space
         self.add_stage(stage_name="image_latent_preparation_stage",
                        stage=ImageVAEEncodingStage(vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=DenoisingStage(
-                           transformer=self.get_module("transformer"),
-                           transformer_2=self.get_module("transformer_2", None),
-                           scheduler=self.get_module("scheduler"),
-                           vae=self.get_module("vae"),
-                           pipeline=self))
+                       stage=DenoisingStage(transformer=self.get_module("transformer"),
+                                            transformer_2=self.get_module("transformer_2", None),
+                                            scheduler=self.get_module("scheduler"),
+                                            vae=self.get_module("vae"),
+                                            pipeline=self))
 
-        self.add_stage(stage_name="decoding_stage",
-                       stage=DecodingStage(vae=self.get_module("vae"),
-                                           pipeline=self))
+        self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae"), pipeline=self))
 
 
 EntryClass = TurboDiffusionI2VPipeline

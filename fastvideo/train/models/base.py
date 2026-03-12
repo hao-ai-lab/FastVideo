@@ -7,6 +7,7 @@ from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 
+from fastvideo.distributed import get_local_torch_device
 from fastvideo.models.utils import pred_noise_to_pred_video
 
 if TYPE_CHECKING:
@@ -28,6 +29,11 @@ class ModelBase(ABC):
     transformer: torch.nn.Module
     noise_scheduler: Any
     _trainable: bool
+
+    @property
+    def device(self) -> torch.device:
+        """The local CUDA device for this rank."""
+        return get_local_torch_device()
 
     # ------------------------------------------------------------------
     # Lifecycle

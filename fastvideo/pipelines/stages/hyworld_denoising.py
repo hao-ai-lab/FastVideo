@@ -18,8 +18,7 @@ from fastvideo.pipelines.stages.denoising import DenoisingStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.utils import dict_to_3d_list
-from fastvideo.models.dits.hyworld.retrieval_context import (
-    generate_points_in_sphere, select_aligned_memory_frames)
+from fastvideo.models.dits.hyworld.retrieval_context import (generate_points_in_sphere, select_aligned_memory_frames)
 from fastvideo.models.dits.hyworld.pose import pose_to_input, compute_latent_num
 
 logger = init_logger(__name__)
@@ -70,33 +69,27 @@ class HYWorldDenoisingStage(DenoisingStage):
         pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["transformer"]:
             loader = TransformerLoader()
-            self.transformer = loader.load(
-                fastvideo_args.model_paths["transformer"], fastvideo_args)
+            self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
             fastvideo_args.model_loaded["transformer"] = True
 
         # Extract HYWorld-specific parameters from batch.extra or batch attributes
-        viewmats = getattr(batch, "viewmats", None) or batch.extra.get(
-            "viewmats", None)
+        viewmats = getattr(batch, "viewmats", None) or batch.extra.get("viewmats", None)
         Ks = getattr(batch, "Ks", None) or batch.extra.get("Ks", None)
-        action = getattr(batch, "action", None) or batch.extra.get(
-            "action", None)
+        action = getattr(batch, "action", None) or batch.extra.get("action", None)
         chunk_latent_frames = (getattr(batch, "chunk_latent_frames", None)
-                               or batch.extra.get("chunk_latent_frames", 16)
-                               )  # 16 for bidirectional model
+                               or batch.extra.get("chunk_latent_frames", 16))  # 16 for bidirectional model
         stabilization_level = 15
-        points_local = (getattr(batch, "points_local", None)
-                        or batch.extra.get("points_local", None))
+        points_local = (getattr(batch, "points_local", None) or batch.extra.get("points_local", None))
 
         # If viewmats/Ks/action not provided, convert from pose string
         if viewmats is None or Ks is None or action is None:
             pose = getattr(batch, "pose", None) or batch.extra.get("pose", None)
             if pose is None:
-                raise ValueError(
-                    "Either pose string or (viewmats, Ks, action) must be provided. "
-                    "Provide pose in batch.pose or batch.extra['pose'], or "
-                    "viewmats/Ks/action in batch.extra.")
+                raise ValueError("Either pose string or (viewmats, Ks, action) must be provided. "
+                                 "Provide pose in batch.pose or batch.extra['pose'], or "
+                                 "viewmats/Ks/action in batch.extra.")
 
             # Get num_frames from batch
             num_frames = batch.num_frames
@@ -112,9 +105,7 @@ class HYWorldDenoisingStage(DenoisingStage):
             Ks = Ks.unsqueeze(0)  # (1, T, 3, 3)
             action = action.unsqueeze(0)  # (1, T)
 
-            logger.info(
-                "Converted pose '%s' to viewmats, Ks, and action for %d latent frames",
-                pose, latent_num)
+            logger.info("Converted pose '%s' to viewmats, Ks, and action for %d latent frames", pose, latent_num)
 
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
@@ -127,46 +118,37 @@ class HYWorldDenoisingStage(DenoisingStage):
 
         # Setup precision and autocast settings
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32
-                            ) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
         if timesteps is None:
             raise ValueError("Timesteps must be provided")
         num_inference_steps = batch.num_inference_steps
-        num_warmup_steps = (len(timesteps) -
-                            num_inference_steps * self.scheduler.order)
+        num_warmup_steps = (len(timesteps) - num_inference_steps * self.scheduler.order)
 
         # Prepare image latents and embeddings for I2V generation
         image_embeds = batch.image_embeds
         if len(image_embeds) > 0:
-            assert not torch.isnan(
-                image_embeds[0]).any(), "image_embeds contains nan"
-            image_embeds = [
-                image_embed.to(target_dtype) for image_embed in image_embeds
-            ]
+            assert not torch.isnan(image_embeds[0]).any(), "image_embeds contains nan"
+            image_embeds = [image_embed.to(target_dtype) for image_embed in image_embeds]
 
         image_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
             {
-                "encoder_hidden_states_image":
-                image_embeds,
-                "mask_strategy":
-                dict_to_3d_list(None, t_max=50, l_max=60, h_max=24),
+                "encoder_hidden_states_image": image_embeds,
+                "mask_strategy": dict_to_3d_list(None, t_max=50, l_max=60, h_max=24),
             },
         )
 
         # Get latents and embeddings
         latents = batch.latents
         prompt_embeds = batch.prompt_embeds
-        assert not torch.isnan(
-            prompt_embeds[0]).any(), "prompt_embeds contains nan"
+        assert not torch.isnan(prompt_embeds[0]).any(), "prompt_embeds contains nan"
         if batch.do_classifier_free_guidance:
             neg_prompt_embeds = batch.negative_prompt_embeds
             assert neg_prompt_embeds is not None
-            assert not torch.isnan(
-                neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
+            assert not torch.isnan(neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
 
         latent_model_input = latents.to(target_dtype)
         assert latent_model_input.shape[0] == 1, "only support batch size 1"
@@ -213,15 +195,10 @@ class HYWorldDenoisingStage(DenoisingStage):
                     )
                     selected_frame_indices.extend(selected_history_frame_id)
 
-                selected_frame_indices = sorted(
-                    list(set(selected_frame_indices)))
+                selected_frame_indices = sorted(list(set(selected_frame_indices)))
                 # Remove current chunk frames from context
-                to_remove = list(
-                    range(current_frame_idx,
-                          current_frame_idx + chunk_latent_frames))
-                selected_frame_indices = [
-                    x for x in selected_frame_indices if x not in to_remove
-                ]
+                to_remove = list(range(current_frame_idx, current_frame_idx + chunk_latent_frames))
+                selected_frame_indices = [x for x in selected_frame_indices if x not in to_remove]
 
                 # Extract context frames
                 context_latents = latents[:, :, selected_frame_indices]
@@ -248,8 +225,7 @@ class HYWorldDenoisingStage(DenoisingStage):
                             dtype=timesteps.dtype,
                         )
                         latent_model_input = latents[:, :, :chunk_latent_frames]
-                        cond_latents_input = cond_latents[:, :, :
-                                                          chunk_latent_frames]
+                        cond_latents_input = cond_latents[:, :, :chunk_latent_frames]
                     else:
                         # Subsequent chunks: use context frames with different timesteps
                         t_now = torch.full(
@@ -267,11 +243,8 @@ class HYWorldDenoisingStage(DenoisingStage):
                         timestep_input = torch.cat([t_ctx, t_now], dim=0)
 
                         latents_model_now = latents[:, :, start_idx:end_idx]
-                        latent_model_input = torch.cat(
-                            [context_latents, latents_model_now], dim=2)
-                        cond_latents_input = cond_latents[:, :, :
-                                                          latent_model_input.
-                                                          shape[2]]
+                        latent_model_input = torch.cat([context_latents, latents_model_now], dim=2)
+                        cond_latents_input = cond_latents[:, :, :latent_model_input.shape[2]]
 
                     # Prepare viewmats, Ks, action for current chunk
                     viewmats_input = viewmats[:, start_idx:end_idx]
@@ -279,18 +252,14 @@ class HYWorldDenoisingStage(DenoisingStage):
                     action_input = action[:, start_idx:end_idx]
 
                     if chunk_i > 0:
-                        viewmats_input = torch.cat(
-                            [context_w2c, viewmats_input], dim=1)
+                        viewmats_input = torch.cat([context_w2c, viewmats_input], dim=1)
                         Ks_input = torch.cat([context_Ks, Ks_input], dim=1)
-                        action_input = torch.cat([context_action, action_input],
-                                                 dim=1)
+                        action_input = torch.cat([context_action, action_input], dim=1)
 
                     # Prepare latent input (concatenate with cond_latents if needed)
-                    latents_concat = torch.concat(
-                        [latent_model_input, cond_latents_input], dim=1)
+                    latents_concat = torch.concat([latent_model_input, cond_latents_input], dim=1)
 
-                    latents_concat = self.scheduler.scale_model_input(
-                        latents_concat, t)
+                    latents_concat = self.scheduler.scale_model_input(latents_concat, t)
 
                     t_expand_txt = t.unsqueeze(0)
                     t_expand = timestep_input
@@ -318,12 +287,10 @@ class HYWorldDenoisingStage(DenoisingStage):
 
                         # Set encoder_attention_mask for positive/negative conditioning
                         pos_transformer_kwargs = {
-                            **transformer_kwargs, "encoder_attention_mask":
-                            batch.prompt_attention_mask
+                            **transformer_kwargs, "encoder_attention_mask": batch.prompt_attention_mask
                         }
                         neg_transformer_kwargs = {
-                            **transformer_kwargs, "encoder_attention_mask":
-                            batch.negative_attention_mask
+                            **transformer_kwargs, "encoder_attention_mask": batch.negative_attention_mask
                         }
 
                         with set_forward_context(
@@ -351,8 +318,8 @@ class HYWorldDenoisingStage(DenoisingStage):
                                 )
 
                             noise_pred_text = noise_pred
-                            noise_pred = noise_pred_uncond + batch.guidance_scale * (
-                                noise_pred_text - noise_pred_uncond)
+                            noise_pred = noise_pred_uncond + batch.guidance_scale * (noise_pred_text -
+                                                                                     noise_pred_uncond)
 
                             # Apply guidance rescale if needed
                             if batch.guidance_rescale > 0.0:
@@ -363,17 +330,14 @@ class HYWorldDenoisingStage(DenoisingStage):
                                 )
 
                     # Step scheduler - update only the current chunk's latents
-                    latent_model_input = self.scheduler.step(
-                        noise_pred,
-                        t,
-                        latent_model_input,
-                        **extra_step_kwargs,
-                        return_dict=False)[0]
+                    latent_model_input = self.scheduler.step(noise_pred,
+                                                             t,
+                                                             latent_model_input,
+                                                             **extra_step_kwargs,
+                                                             return_dict=False)[0]
 
                     # Update only the current chunk's latents
-                    latents[:, :, start_idx:
-                            end_idx] = latent_model_input[:, :,
-                                                          -chunk_latent_frames:]
+                    latents[:, :, start_idx:end_idx] = latent_model_input[:, :, -chunk_latent_frames:]
 
                     # Save trajectory latents if needed
                     if batch.return_trajectory_latents:
@@ -381,18 +345,15 @@ class HYWorldDenoisingStage(DenoisingStage):
                         trajectory_latents.append(latents.clone())
 
                     # Update progress bar
-                    if i == len(timesteps) - 1 or (
-                        (i + 1) > num_warmup_steps and
-                        (i + 1) % self.scheduler.order == 0
-                            and progress_bar is not None):
+                    if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and
+                                                   (i + 1) % self.scheduler.order == 0 and progress_bar is not None):
                         progress_bar.update()
 
         # Handle trajectory output
         trajectory_tensor: torch.Tensor | None = None
         if trajectory_latents:
             trajectory_tensor = torch.stack(trajectory_latents, dim=1)
-            trajectory_timesteps_tensor = torch.stack(trajectory_timesteps,
-                                                      dim=0)
+            trajectory_timesteps_tensor = torch.stack(trajectory_timesteps, dim=0)
         else:
             trajectory_tensor = None
             trajectory_timesteps_tensor = None
@@ -406,28 +367,22 @@ class HYWorldDenoisingStage(DenoisingStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify HYWorld denoising stage inputs."""
         result = VerificationResult()
-        result.add_check("timesteps", batch.timesteps,
-                         [V.is_tensor, V.min_dims(1)])
-        result.add_check("latents", batch.latents,
-                         [V.is_tensor, V.with_dims(5)])
+        result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.min_dims(1)])
+        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
 
         # Check for HYWorld-specific inputs - either pose string OR
         # (viewmats, Ks, action) must be provided
         pose = getattr(batch, "pose", None) or batch.extra.get("pose", None)
-        viewmats = getattr(batch, "viewmats", None) or batch.extra.get(
-            "viewmats", None)
+        viewmats = getattr(batch, "viewmats", None) or batch.extra.get("viewmats", None)
         Ks = getattr(batch, "Ks", None) or batch.extra.get("Ks", None)
-        action = getattr(batch, "action", None) or batch.extra.get(
-            "action", None)
+        action = getattr(batch, "action", None) or batch.extra.get("action", None)
 
         has_pose = pose is not None
-        has_direct_inputs = (viewmats is not None and Ks is not None
-                             and action is not None)
+        has_direct_inputs = (viewmats is not None and Ks is not None and action is not None)
 
         if not has_pose and not has_direct_inputs:
             result.add_failure(
@@ -437,10 +392,8 @@ class HYWorldDenoisingStage(DenoisingStage):
                 "viewmats/Ks/action in batch.extra.",
             )
 
-        result.add_check("num_inference_steps", batch.num_inference_steps,
-                         V.positive_int)
-        result.add_check("guidance_scale", batch.guidance_scale,
-                         V.positive_float)
+        result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
+        result.add_check("guidance_scale", batch.guidance_scale, V.positive_float)
 
         if batch.do_classifier_free_guidance:
             result.add_check(
@@ -451,10 +404,8 @@ class HYWorldDenoisingStage(DenoisingStage):
 
         return result
 
-    def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify HYWorld denoising stage outputs."""
         result = VerificationResult()
-        result.add_check("latents", batch.latents,
-                         [V.is_tensor, V.with_dims(5)])
+        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         return result

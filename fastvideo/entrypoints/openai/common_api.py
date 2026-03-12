@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from fastapi.responses import ORJSONResponse
 from pydantic import BaseModel, Field
 
-from fastvideo.entrypoints.openai.api_server import get_server_args
+from fastvideo.entrypoints.openai.state import get_server_args
 from fastvideo.logger import init_logger
 
 router = APIRouter(prefix="/v1")

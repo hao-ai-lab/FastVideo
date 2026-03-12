@@ -40,9 +40,7 @@ class LongCatImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
     - Selective denoising (skip first frame in scheduler)
     """
 
-    _required_config_modules = [
-        "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
-    ]
+    _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """Initialize LongCat-specific components."""
@@ -60,8 +58,7 @@ class LongCatImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
             chunk_q = getattr(pipeline_config, 'bsa_chunk_q', None)
             chunk_k = getattr(pipeline_config, 'bsa_chunk_k', None)
 
-            effective_bsa_params = dict(bsa_params_cfg) if isinstance(
-                bsa_params_cfg, dict) else {}
+            effective_bsa_params = dict(bsa_params_cfg) if isinstance(bsa_params_cfg, dict) else {}
             if sparsity is not None:
                 effective_bsa_params['sparsity'] = sparsity
             if cdf_threshold is not None:
@@ -95,8 +92,7 @@ class LongCatImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
         """Set up I2V-specific pipeline stages."""
 
         # 1. Input validation
-        self.add_stage(stage_name="input_validation_stage",
-                       stage=InputValidationStage())
+        self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         # 2. Text encoding (same as T2V)
         self.add_stage(stage_name="prompt_encoding_stage",
@@ -106,43 +102,35 @@ class LongCatImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
                        ))
 
         # 3. Image VAE encoding (for I2V - skipped in refinement mode)
-        self.add_stage(
-            stage_name="image_vae_encoding_stage",
-            stage=LongCatImageVAEEncodingStage(vae=self.get_module("vae")))
+        self.add_stage(stage_name="image_vae_encoding_stage",
+                       stage=LongCatImageVAEEncodingStage(vae=self.get_module("vae")))
 
         # 4. Refinement initialization (skipped if not refining)
-        self.add_stage(stage_name="longcat_refine_init_stage",
-                       stage=LongCatRefineInitStage(vae=self.get_module("vae")))
+        self.add_stage(stage_name="longcat_refine_init_stage", stage=LongCatRefineInitStage(vae=self.get_module("vae")))
 
         # 5. Timestep preparation (generic)
         self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(
-                           scheduler=self.get_module("scheduler")))
+                       stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")))
 
         # 6. Refinement timestep override (skipped if not refining)
         self.add_stage(stage_name="longcat_refine_timestep_stage",
-                       stage=LongCatRefineTimestepStage(
-                           scheduler=self.get_module("scheduler")))
+                       stage=LongCatRefineTimestepStage(scheduler=self.get_module("scheduler")))
 
         # 7. Latent preparation with I2V conditioning
         self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LongCatI2VLatentPreparationStage(
-                           scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer")))
+                       stage=LongCatI2VLatentPreparationStage(scheduler=self.get_module("scheduler"),
+                                                              transformer=self.get_module("transformer")))
 
         # 8. Denoising with I2V support
         self.add_stage(stage_name="denoising_stage",
-                       stage=LongCatI2VDenoisingStage(
-                           transformer=self.get_module("transformer"),
-                           transformer_2=self.get_module("transformer_2", None),
-                           scheduler=self.get_module("scheduler"),
-                           vae=self.get_module("vae"),
-                           pipeline=self))
+                       stage=LongCatI2VDenoisingStage(transformer=self.get_module("transformer"),
+                                                      transformer_2=self.get_module("transformer_2", None),
+                                                      scheduler=self.get_module("scheduler"),
+                                                      vae=self.get_module("vae"),
+                                                      pipeline=self))
 
         # 9. Decoding
-        self.add_stage(stage_name="decoding_stage",
-                       stage=DecodingStage(vae=self.get_module("vae"),
-                                           pipeline=self))
+        self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae"), pipeline=self))
 
 
 EntryClass = LongCatImageToVideoPipeline

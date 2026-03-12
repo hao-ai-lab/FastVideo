@@ -90,8 +90,7 @@ class SamplingParam:
             if hasattr(self, key):
                 setattr(self, key, value)
             else:
-                logger.exception("%s has no attribute %s",
-                                 type(self).__name__, key)
+                logger.exception("%s has no attribute %s", type(self).__name__, key)
 
         self.__post_init__()
 
@@ -102,9 +101,8 @@ class SamplingParam:
         if sampling_cls is not None:
             sampling_param: SamplingParam = sampling_cls()
         else:
-            logger.warning(
-                "Couldn't find an optimal sampling param for %s. Using the default sampling param.",
-                model_path)
+            logger.warning("Couldn't find an optimal sampling param for %s. Using the default sampling param.",
+                           model_path)
             sampling_param = cls()
 
         return sampling_param
@@ -242,8 +240,7 @@ class SamplingParam:
             "--t-thresh",
             type=float,
             default=SamplingParam.t_thresh,
-            help=
-            "Threshold for timestep scheduling in refinement (default: 0.5)",
+            help="Threshold for timestep scheduling in refinement (default: 0.5)",
         )
         parser.add_argument(
             "--spatial-refine-only",
@@ -261,8 +258,7 @@ class SamplingParam:
             "--moba-config-path",
             type=str,
             default=None,
-            help=
-            "Path to a JSON file containing V-MoBA specific configurations.",
+            help="Path to a JSON file containing V-MoBA specific configurations.",
         )
         parser.add_argument(
             "--return-trajectory-latents",

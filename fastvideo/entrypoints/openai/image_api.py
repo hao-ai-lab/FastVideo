@@ -8,11 +8,10 @@ import time
 
 import aiofiles
 
-from fastapi import (APIRouter, File, Form, HTTPException, Path, Query,
-                     UploadFile)
+from fastapi import (APIRouter, File, Form, HTTPException, Path, Query, UploadFile)
 from fastapi.responses import FileResponse
 
-from fastvideo.entrypoints.openai.api_server import (
+from fastvideo.entrypoints.openai.state import (
     get_generator,
     get_output_dir,
 )
@@ -82,8 +81,7 @@ def _build_generation_kwargs(
     if enable_teacache:
         kwargs["enable_teacache"] = True
     if image_path:
-        kwargs["image_path"] = image_path[0] if len(
-            image_path) == 1 else image_path
+        kwargs["image_path"] = image_path[0] if len(image_path) == 1 else image_path
 
     return kwargs
 
@@ -111,8 +109,7 @@ async def generations(request: ImageGenerationsRequest):
 
     start = time.perf_counter()
     try:
-        await loop.run_in_executor(
-            None, lambda: generator.generate_video(**gen_kwargs))
+        await loop.run_in_executor(None, lambda: generator.generate_video(**gen_kwargs))
     except Exception as e:
         logger.error("Image generation failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from None
@@ -123,13 +120,10 @@ async def generations(request: ImageGenerationsRequest):
     resp_format = (request.response_format or "b64_json").lower()
     if resp_format == "b64_json":
         if not os.path.exists(save_file_path):
-            raise HTTPException(status_code=500,
-                                detail="Image was not saved to disk")
+            raise HTTPException(status_code=500, detail="Image was not saved to disk")
         async with aiofiles.open(save_file_path, "rb") as f:
             b64_data = base64.b64encode(await f.read()).decode("utf-8")
-        data = [
-            ImageResponseData(b64_json=b64_data, revised_prompt=request.prompt)
-        ]
+        data = [ImageResponseData(b64_json=b64_data, revised_prompt=request.prompt)]
     elif resp_format == "url":
         data = [
             ImageResponseData(
@@ -139,9 +133,7 @@ async def generations(request: ImageGenerationsRequest):
             )
         ]
     else:
-        raise HTTPException(
-            status_code=400,
-            detail=f"response_format={resp_format} is not supported")
+        raise HTTPException(status_code=400, detail=f"response_format={resp_format} is not supported")
 
     await IMAGE_STORE.upsert(
         request_id,
@@ -187,8 +179,7 @@ async def edits(
     images = image or image_array
     urls = url or url_array
     if (not images or len(images) == 0) and (not urls or len(urls) == 0):
-        raise HTTPException(status_code=422,
-                            detail="Field 'image' or 'url' is required")
+        raise HTTPException(status_code=422, detail="Field 'image' or 'url' is required")
 
     # Save input images
     uploads_dir = os.path.join(get_output_dir(), "uploads")
@@ -199,13 +190,10 @@ async def edits(
     try:
         for idx, img in enumerate(image_list):
             filename = getattr(img, "filename", f"image_{idx}")
-            input_path = await save_image_to_path(
-                img, os.path.join(uploads_dir,
-                                  f"{request_id}_{idx}_{filename}"))
+            input_path = await save_image_to_path(img, os.path.join(uploads_dir, f"{request_id}_{idx}_{filename}"))
             input_paths.append(input_path)
     except Exception as e:
-        raise HTTPException(status_code=400,
-                            detail=f"Failed to process image: {e}") from None
+        raise HTTPException(status_code=400, detail=f"Failed to process image: {e}") from None
 
     gen_kwargs = _build_generation_kwargs(
         request_id=request_id,
@@ -225,8 +213,7 @@ async def edits(
 
     start = time.perf_counter()
     try:
-        await loop.run_in_executor(
-            None, lambda: generator.generate_video(**gen_kwargs))
+        await loop.run_in_executor(None, lambda: generator.generate_video(**gen_kwargs))
     except Exception as e:
         logger.error("Image edit failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from None
@@ -267,23 +254,16 @@ async def edits(
 
 
 @router.get("/{image_id}/content")
-async def download_image_content(image_id: str = Path(...),
-                                 variant: str | None = Query(None)):
+async def download_image_content(image_id: str = Path(...), variant: str | None = Query(None)):
     item = await IMAGE_STORE.get(image_id)
     if not item:
         raise HTTPException(status_code=404, detail="Image not found")
 
     file_path = item.get("file_path")
     if not file_path or not os.path.exists(file_path):
-        raise HTTPException(status_code=404,
-                            detail="Image is still being generated")
+        raise HTTPException(status_code=404, detail="Image is still being generated")
 
     ext = os.path.splitext(file_path)[1].lower()
-    media_type = {
-        ".png": "image/png",
-        ".webp": "image/webp"
-    }.get(ext, "image/jpeg")
+    media_type = {".png": "image/png", ".webp": "image/webp"}.get(ext, "image/jpeg")
 
-    return FileResponse(path=file_path,
-                        media_type=media_type,
-                        filename=os.path.basename(file_path))
+    return FileResponse(path=file_path, media_type=media_type, filename=os.path.basename(file_path))

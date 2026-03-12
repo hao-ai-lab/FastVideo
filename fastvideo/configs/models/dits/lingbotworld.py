@@ -15,20 +15,14 @@ class LingBotWorldArchConfig(DiTArchConfig):
     param_names_mapping: dict = field(
         default_factory=lambda: {
             r"^patch_embedding\.(.*)$": r"patch_embedding.proj.\1",
-            r"^patch_embedding_wancamctrl\.(.*)$":
-            r"patch_embedding_wancamctrl.proj.\1",
+            r"^patch_embedding_wancamctrl\.(.*)$": r"patch_embedding_wancamctrl.proj.\1",
             r"^c2ws_hidden_states_layer1\.(.*)$": r"c2ws_mlp.fc_in.\1",
             r"^c2ws_hidden_states_layer2\.(.*)$": r"c2ws_mlp.fc_out.\1",
-            r"^text_embedding\.0\.(.*)$":
-            r"condition_embedder.text_embedder.fc_in.\1",
-            r"^text_embedding\.2\.(.*)$":
-            r"condition_embedder.text_embedder.fc_out.\1",
-            r"^time_embedding\.0\.(.*)$":
-            r"condition_embedder.time_embedder.mlp.fc_in.\1",
-            r"^time_embedding\.2\.(.*)$":
-            r"condition_embedder.time_embedder.mlp.fc_out.\1",
-            r"^time_projection\.1\.(.*)$":
-            r"condition_embedder.time_modulation.linear.\1",
+            r"^text_embedding\.0\.(.*)$": r"condition_embedder.text_embedder.fc_in.\1",
+            r"^text_embedding\.2\.(.*)$": r"condition_embedder.text_embedder.fc_out.\1",
+            r"^time_embedding\.0\.(.*)$": r"condition_embedder.time_embedder.mlp.fc_in.\1",
+            r"^time_embedding\.2\.(.*)$": r"condition_embedder.time_embedder.mlp.fc_out.\1",
+            r"^time_projection\.1\.(.*)$": r"condition_embedder.time_modulation.linear.\1",
             r"^blocks\.(\d+)\.modulation$": r"blocks.\1.scale_shift_table",
             r"^blocks\.(\d+)\.self_attn\.q\.(.*)$": r"blocks.\1.to_q.\2",
             r"^blocks\.(\d+)\.self_attn\.k\.(.*)$": r"blocks.\1.to_k.\2",
@@ -36,27 +30,19 @@ class LingBotWorldArchConfig(DiTArchConfig):
             r"^blocks\.(\d+)\.self_attn\.o\.(.*)$": r"blocks.\1.to_out.\2",
             r"^blocks\.(\d+)\.self_attn\.norm_q\.(.*)$": r"blocks.\1.norm_q.\2",
             r"^blocks\.(\d+)\.self_attn\.norm_k\.(.*)$": r"blocks.\1.norm_k.\2",
-            r"^blocks\.(\d+)\.norm3\.(.*)$":
-            r"blocks.\1.self_attn_residual_norm.norm.\2",
+            r"^blocks\.(\d+)\.norm3\.(.*)$": r"blocks.\1.self_attn_residual_norm.norm.\2",
             r"^blocks\.(\d+)\.cross_attn\.q\.(.*)$": r"blocks.\1.attn2.to_q.\2",
             r"^blocks\.(\d+)\.cross_attn\.k\.(.*)$": r"blocks.\1.attn2.to_k.\2",
             r"^blocks\.(\d+)\.cross_attn\.v\.(.*)$": r"blocks.\1.attn2.to_v.\2",
-            r"^blocks\.(\d+)\.cross_attn\.o\.(.*)$":
-            r"blocks.\1.attn2.to_out.\2",
-            r"^blocks\.(\d+)\.cross_attn\.norm_q\.(.*)$":
-            r"blocks.\1.attn2.norm_q.\2",
-            r"^blocks\.(\d+)\.cross_attn\.norm_k\.(.*)$":
-            r"blocks.\1.attn2.norm_k.\2",
+            r"^blocks\.(\d+)\.cross_attn\.o\.(.*)$": r"blocks.\1.attn2.to_out.\2",
+            r"^blocks\.(\d+)\.cross_attn\.norm_q\.(.*)$": r"blocks.\1.attn2.norm_q.\2",
+            r"^blocks\.(\d+)\.cross_attn\.norm_k\.(.*)$": r"blocks.\1.attn2.norm_k.\2",
             r"^blocks\.(\d+)\.ffn\.0\.(.*)$": r"blocks.\1.ffn.fc_in.\2",
             r"^blocks\.(\d+)\.ffn\.2\.(.*)$": r"blocks.\1.ffn.fc_out.\2",
-            r"^blocks\.(\d+)\.cam_injector_layer1\.(.*)$":
-            r"blocks.\1.cam_conditioner.cam_injector.fc_in.\2",
-            r"^blocks\.(\d+)\.cam_injector_layer2\.(.*)$":
-            r"blocks.\1.cam_conditioner.cam_injector.fc_out.\2",
-            r"^blocks\.(\d+)\.cam_scale_layer\.(.*)$":
-            r"blocks.\1.cam_conditioner.cam_scale_layer.\2",
-            r"^blocks\.(\d+)\.cam_shift_layer\.(.*)$":
-            r"blocks.\1.cam_conditioner.cam_shift_layer.\2",
+            r"^blocks\.(\d+)\.cam_injector_layer1\.(.*)$": r"blocks.\1.cam_conditioner.cam_injector.fc_in.\2",
+            r"^blocks\.(\d+)\.cam_injector_layer2\.(.*)$": r"blocks.\1.cam_conditioner.cam_injector.fc_out.\2",
+            r"^blocks\.(\d+)\.cam_scale_layer\.(.*)$": r"blocks.\1.cam_conditioner.cam_scale_layer.\2",
+            r"^blocks\.(\d+)\.cam_shift_layer\.(.*)$": r"blocks.\1.cam_conditioner.cam_shift_layer.\2",
             r"^head\.modulation$": r"scale_shift_table",
             r"^head\.head\.(.*)$": r"proj_out.\1",
         })

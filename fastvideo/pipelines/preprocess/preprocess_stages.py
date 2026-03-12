@@ -9,11 +9,9 @@ from einops import rearrange
 from torchvision import transforms
 
 from fastvideo.configs.configs import VideoLoaderType
-from fastvideo.dataset.transform import (CenterCropResizeVideo,
-                                         TemporalRandomCrop)
+from fastvideo.dataset.transform import (CenterCropResizeVideo, TemporalRandomCrop)
 from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
-from fastvideo.pipelines.pipeline_batch_info import (ForwardBatch,
-                                                     PreprocessBatch)
+from fastvideo.pipelines.pipeline_batch_info import (ForwardBatch, PreprocessBatch)
 from fastvideo.pipelines.stages.base import PipelineStage
 
 
@@ -22,13 +20,12 @@ class VideoTransformStage(PipelineStage):
     Crop a video in temporal dimension.
     """
 
-    def __init__(self, train_fps: int, num_frames: int, max_height: int,
-                 max_width: int, do_temporal_sample: bool) -> None:
+    def __init__(self, train_fps: int, num_frames: int, max_height: int, max_width: int,
+                 do_temporal_sample: bool) -> None:
         self.train_fps = train_fps
         self.num_frames = num_frames
         if do_temporal_sample:
-            self.temporal_sample_fn: Callable | None = TemporalRandomCrop(
-                num_frames)
+            self.temporal_sample_fn: Callable | None = TemporalRandomCrop(num_frames)
         else:
             self.temporal_sample_fn = None
 
@@ -36,8 +33,7 @@ class VideoTransformStage(PipelineStage):
             CenterCropResizeVideo((max_height, max_width)),
         ])
 
-    def forward(self, batch: ForwardBatch,
-                fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         batch = cast(PreprocessBatch, batch)
         assert isinstance(batch.fps, list)
         assert isinstance(batch.num_frames, list)
@@ -53,12 +49,10 @@ class VideoTransformStage(PipelineStage):
         for i in range(len(batch.video_loader)):
             frame_interval = batch.fps[i] / self.train_fps
             start_frame_idx = 0
-            frame_indices = np.arange(start_frame_idx, batch.num_frames[i],
-                                      frame_interval).astype(int)
+            frame_indices = np.arange(start_frame_idx, batch.num_frames[i], frame_interval).astype(int)
             if len(frame_indices) > self.num_frames:
                 if self.temporal_sample_fn is not None:
-                    begin_index, end_index = self.temporal_sample_fn(
-                        len(frame_indices))
+                    begin_index, end_index = self.temporal_sample_fn(len(frame_indices))
                     frame_indices = frame_indices[begin_index:end_index]
                 else:
                     frame_indices = frame_indices[:self.num_frames]
@@ -66,19 +60,15 @@ class VideoTransformStage(PipelineStage):
             if fastvideo_args.preprocess_config.video_loader_type == VideoLoaderType.TORCHCODEC:
                 video = batch.video_loader[i].get_frames_at(frame_indices).data
             elif fastvideo_args.preprocess_config.video_loader_type == VideoLoaderType.TORCHVISION:
-                video, _, _ = torchvision.io.read_video(batch.video_loader[i],
-                                                        output_format="TCHW")
+                video, _, _ = torchvision.io.read_video(batch.video_loader[i], output_format="TCHW")
                 video = video[frame_indices]
             else:
-                raise ValueError(
-                    f"Invalid video loader type: {fastvideo_args.preprocess_config.video_loader_type}"
-                )
+                raise ValueError(f"Invalid video loader type: {fastvideo_args.preprocess_config.video_loader_type}")
             video = self.video_transform(video)
             video_pixel_batch.append(video)
 
         video_pixel_values = torch.stack(video_pixel_batch)
-        video_pixel_values = rearrange(video_pixel_values,
-                                       "b t c h w -> b c t h w")
+        video_pixel_values = rearrange(video_pixel_values, "b t c h w -> b c t h w")
         video_pixel_values = video_pixel_values.to(torch.uint8)
 
         if fastvideo_args.workload_type == WorkloadType.I2V:
@@ -86,8 +76,7 @@ class VideoTransformStage(PipelineStage):
 
         video_pixel_values = video_pixel_values.float() / 255.0
         batch.latents = video_pixel_values
-        batch.num_frames = [video_pixel_values.shape[2]] * len(
-            batch.video_loader)
+        batch.num_frames = [video_pixel_values.shape[2]] * len(batch.video_loader)
         batch.height = [video_pixel_values.shape[3]] * len(batch.video_loader)
         batch.width = [video_pixel_values.shape[4]] * len(batch.video_loader)
         return cast(ForwardBatch, batch)
@@ -102,8 +91,7 @@ class TextTransformStage(PipelineStage):
         self.cfg_rate = cfg_uncondition_drop_rate
         self.rng = random.Random(seed)
 
-    def forward(self, batch: ForwardBatch,
-                fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         batch = cast(PreprocessBatch, batch)
 
         prompts = []

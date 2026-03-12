@@ -18,11 +18,9 @@ def is_txt_in(n: str, m) -> bool:
 
 @dataclass
 class HunyuanVideo15ArchConfig(DiTArchConfig):
-    _fsdp_shard_conditions: list = field(
-        default_factory=lambda: [is_double_block, is_refiner_block])
+    _fsdp_shard_conditions: list = field(default_factory=lambda: [is_double_block, is_refiner_block])
 
-    _compile_conditions: list = field(
-        default_factory=lambda: [is_double_block, is_refiner_block, is_txt_in])
+    _compile_conditions: list = field(default_factory=lambda: [is_double_block, is_refiner_block, is_txt_in])
 
     param_names_mapping: dict = field(
         default_factory=lambda: {
@@ -85,18 +83,12 @@ class HunyuanVideo15ArchConfig(DiTArchConfig):
             r"double_blocks.\1.img_attn_q_norm.\2",
             r"^transformer_blocks\.(\d+)\.attn\.norm_k\.(.*)$":
             r"double_blocks.\1.img_attn_k_norm.\2",
-            r"^transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$":
-            (r"double_blocks.\1.img_attn_qkv.\2", 0, 3),
-            r"^transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$":
-            (r"double_blocks.\1.img_attn_qkv.\2", 1, 3),
-            r"^transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$":
-            (r"double_blocks.\1.img_attn_qkv.\2", 2, 3),
-            r"^transformer_blocks\.(\d+)\.attn\.add_q_proj\.(.*)$":
-            (r"double_blocks.\1.txt_attn_qkv.\2", 0, 3),
-            r"^transformer_blocks\.(\d+)\.attn\.add_k_proj\.(.*)$":
-            (r"double_blocks.\1.txt_attn_qkv.\2", 1, 3),
-            r"^transformer_blocks\.(\d+)\.attn\.add_v_proj\.(.*)$":
-            (r"double_blocks.\1.txt_attn_qkv.\2", 2, 3),
+            r"^transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$": (r"double_blocks.\1.img_attn_qkv.\2", 0, 3),
+            r"^transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$": (r"double_blocks.\1.img_attn_qkv.\2", 1, 3),
+            r"^transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$": (r"double_blocks.\1.img_attn_qkv.\2", 2, 3),
+            r"^transformer_blocks\.(\d+)\.attn\.add_q_proj\.(.*)$": (r"double_blocks.\1.txt_attn_qkv.\2", 0, 3),
+            r"^transformer_blocks\.(\d+)\.attn\.add_k_proj\.(.*)$": (r"double_blocks.\1.txt_attn_qkv.\2", 1, 3),
+            r"^transformer_blocks\.(\d+)\.attn\.add_v_proj\.(.*)$": (r"double_blocks.\1.txt_attn_qkv.\2", 2, 3),
             r"^transformer_blocks\.(\d+)\.attn\.to_out\.0\.(.*)$":
             r"double_blocks.\1.img_attn_proj.\2",
             # Corrected: merge attn.to_add_out into the main projection.
@@ -143,8 +135,7 @@ class HunyuanVideo15ArchConfig(DiTArchConfig):
     target_size: int = 640
     task_type: str = "i2v"
     use_meanflow: bool = False
-    exclude_lora_layers: list[str] = field(
-        default_factory=lambda: ["img_in", "txt_in", "time_in", "vector_in"])
+    exclude_lora_layers: list[str] = field(default_factory=lambda: ["img_in", "txt_in", "time_in", "vector_in"])
 
     def __post_init__(self):
         super().__post_init__()

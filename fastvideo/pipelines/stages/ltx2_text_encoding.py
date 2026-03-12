@@ -44,8 +44,7 @@ class LTX2TextEncodingStage(TextEncodingStage):
 
         # SP enabled: only rank 0 encodes, then broadcasts
         if sp_rank == 0:
-            logger.info(
-                "[LTX2TextEncodingStage] SP rank 0: running text encoding")
+            logger.info("[LTX2TextEncodingStage] SP rank 0: running text encoding")
             # Run encoding on rank 0
             result_batch = super().forward(batch, fastvideo_args)
 
@@ -53,30 +52,24 @@ class LTX2TextEncodingStage(TextEncodingStage):
             broadcast_dict = self._build_broadcast_dict(result_batch)
 
             # Broadcast to other ranks
-            logger.info(
-                "[LTX2TextEncodingStage] SP rank 0: broadcasting %d tensors",
-                len(broadcast_dict))
+            logger.info("[LTX2TextEncodingStage] SP rank 0: broadcasting %d tensors", len(broadcast_dict))
             sp_group.broadcast_tensor_dict(broadcast_dict, src=0)
 
             return result_batch
         else:
-            logger.info(
-                "[LTX2TextEncodingStage] SP rank %d: receiving broadcast",
-                sp_rank)
+            logger.info("[LTX2TextEncodingStage] SP rank %d: receiving broadcast", sp_rank)
             # Other ranks: receive broadcast and populate batch
             broadcast_dict = sp_group.broadcast_tensor_dict(None, src=0)
 
             # Unpack into batch
             self._unpack_broadcast_to_batch(batch, broadcast_dict)
 
-            logger.info(
-                "[LTX2TextEncodingStage] SP rank %d: received %d prompt embeds",
-                sp_rank, len(batch.prompt_embeds))
+            logger.info("[LTX2TextEncodingStage] SP rank %d: received %d prompt embeds", sp_rank,
+                        len(batch.prompt_embeds))
 
             return batch
 
-    def _build_broadcast_dict(self,
-                              batch: ForwardBatch) -> dict[str, torch.Tensor]:
+    def _build_broadcast_dict(self, batch: ForwardBatch) -> dict[str, torch.Tensor]:
         """Build dict of tensors to broadcast from rank 0."""
         d: dict[str, torch.Tensor] = {}
 
@@ -85,55 +78,44 @@ class LTX2TextEncodingStage(TextEncodingStage):
 
         # Prompt embeddings
         num_prompt_embeds = len(batch.prompt_embeds)
-        d["_num_prompt_embeds"] = torch.tensor([num_prompt_embeds],
-                                               device=device)
+        d["_num_prompt_embeds"] = torch.tensor([num_prompt_embeds], device=device)
         for i, pe in enumerate(batch.prompt_embeds):
             d[f"prompt_embed_{i}"] = pe
 
         # Prompt attention masks
-        has_prompt_masks = (batch.prompt_attention_mask is not None
-                            and len(batch.prompt_attention_mask) > 0)
-        d["_has_prompt_masks"] = torch.tensor([1 if has_prompt_masks else 0],
-                                              device=device)
+        has_prompt_masks = (batch.prompt_attention_mask is not None and len(batch.prompt_attention_mask) > 0)
+        d["_has_prompt_masks"] = torch.tensor([1 if has_prompt_masks else 0], device=device)
         if has_prompt_masks:
             for i, pm in enumerate(batch.prompt_attention_mask):
                 d[f"prompt_mask_{i}"] = pm
 
         # Negative embeddings (CFG)
-        has_neg_embeds = (batch.negative_prompt_embeds is not None
-                          and len(batch.negative_prompt_embeds) > 0)
-        d["_has_neg_embeds"] = torch.tensor([1 if has_neg_embeds else 0],
-                                            device=device)
+        has_neg_embeds = (batch.negative_prompt_embeds is not None and len(batch.negative_prompt_embeds) > 0)
+        d["_has_neg_embeds"] = torch.tensor([1 if has_neg_embeds else 0], device=device)
         if has_neg_embeds:
-            d["_num_neg_embeds"] = torch.tensor(
-                [len(batch.negative_prompt_embeds)], device=device)
+            d["_num_neg_embeds"] = torch.tensor([len(batch.negative_prompt_embeds)], device=device)
             for i, ne in enumerate(batch.negative_prompt_embeds):
                 d[f"neg_embed_{i}"] = ne
 
             # Negative attention masks
-            has_neg_masks = (batch.negative_attention_mask is not None
-                             and len(batch.negative_attention_mask) > 0)
-            d["_has_neg_masks"] = torch.tensor([1 if has_neg_masks else 0],
-                                               device=device)
+            has_neg_masks = (batch.negative_attention_mask is not None and len(batch.negative_attention_mask) > 0)
+            d["_has_neg_masks"] = torch.tensor([1 if has_neg_masks else 0], device=device)
             if has_neg_masks:
                 for i, nm in enumerate(batch.negative_attention_mask):
                     d[f"neg_mask_{i}"] = nm
 
         # LTX2 audio embeddings
         has_audio_embeds = "ltx2_audio_prompt_embeds" in batch.extra
-        d["_has_audio_embeds"] = torch.tensor([1 if has_audio_embeds else 0],
-                                              device=device)
+        d["_has_audio_embeds"] = torch.tensor([1 if has_audio_embeds else 0], device=device)
         if has_audio_embeds:
             audio_embeds = batch.extra["ltx2_audio_prompt_embeds"]
-            d["_num_audio_embeds"] = torch.tensor([len(audio_embeds)],
-                                                  device=device)
+            d["_num_audio_embeds"] = torch.tensor([len(audio_embeds)], device=device)
             for i, ae in enumerate(audio_embeds):
                 d[f"audio_embed_{i}"] = ae
 
         # LTX2 audio negative embeddings
         has_audio_neg = "ltx2_audio_negative_embeds" in batch.extra
-        d["_has_audio_neg"] = torch.tensor([1 if has_audio_neg else 0],
-                                           device=device)
+        d["_has_audio_neg"] = torch.tensor([1 if has_audio_neg else 0], device=device)
         if has_audio_neg:
             audio_neg = batch.extra["ltx2_audio_negative_embeds"]
             for i, audio_neg_embed in enumerate(audio_neg):
@@ -141,8 +123,7 @@ class LTX2TextEncodingStage(TextEncodingStage):
 
         return d
 
-    def _unpack_broadcast_to_batch(self, batch: ForwardBatch,
-                                   d: dict[str, torch.Tensor]) -> None:
+    def _unpack_broadcast_to_batch(self, batch: ForwardBatch, d: dict[str, torch.Tensor]) -> None:
         """Unpack broadcast dict into batch on non-rank-0 processes."""
         # Prompt embeddings
         num_embeds = int(d["_num_prompt_embeds"].item())
@@ -164,8 +145,7 @@ class LTX2TextEncodingStage(TextEncodingStage):
                     batch.negative_prompt_embeds.append(d[f"neg_embed_{i}"])
 
             # Negative attention masks
-            has_neg_masks = int(
-                d.get("_has_neg_masks", torch.tensor([0])).item()) == 1
+            has_neg_masks = int(d.get("_has_neg_masks", torch.tensor([0])).item()) == 1
             if has_neg_masks and batch.negative_attention_mask is not None:
                 for i in range(num_neg):
                     batch.negative_attention_mask.append(d[f"neg_mask_{i}"])

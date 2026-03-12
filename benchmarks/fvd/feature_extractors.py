@@ -22,8 +22,7 @@ class BaseFeatureExtractor(ABC, nn.Module):
 
     def __init__(self, device: str = 'cuda'):
         super().__init__()
-        self.device = torch.device(
-            device if torch.cuda.is_available() else 'cpu')
+        self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
 
     @property
     @abstractmethod
@@ -53,10 +52,7 @@ class BaseFeatureExtractor(ABC, nn.Module):
         pass
 
     @torch.no_grad()
-    def extract_features(self,
-                         videos: torch.Tensor,
-                         batch_size: int = 32,
-                         verbose: bool = True) -> torch.Tensor:
+    def extract_features(self, videos: torch.Tensor, batch_size: int = 32, verbose: bool = True) -> torch.Tensor:
         """
         Extract features for a large tensor of videos by batching.
         """
@@ -65,9 +61,7 @@ class BaseFeatureExtractor(ABC, nn.Module):
 
         iterator = range(0, N, batch_size)
         if verbose:
-            iterator = tqdm(
-                iterator,
-                desc=f"Extracting features ({self.__class__.__name__})")
+            iterator = tqdm(iterator, desc=f"Extracting features ({self.__class__.__name__})")
 
         for i in iterator:
             batch = videos[i:i + batch_size].to(self.device)
@@ -95,9 +89,7 @@ class I3DFeatureExtractor(BaseFeatureExtractor):
 
     def _load_model(self) -> torch.nn.Module:
         try:
-            model_path = hf_hub_download(repo_id=self.REPO_ID,
-                                         filename=self.MODEL_FILENAME,
-                                         cache_dir=self.cache_dir)
+            model_path = hf_hub_download(repo_id=self.REPO_ID, filename=self.MODEL_FILENAME, cache_dir=self.cache_dir)
             return torch.jit.load(model_path, map_location=self.device)
         except Exception as e:
             raise RuntimeError(f"Failed to load I3D model: {e}") from e
@@ -119,10 +111,7 @@ class I3DFeatureExtractor(BaseFeatureExtractor):
         # Resize to 224x224
         if H != 224 or W != 224:
             videos = videos.reshape(B * T, C, H, W)
-            videos = F.interpolate(videos,
-                                   size=(224, 224),
-                                   mode='bilinear',
-                                   align_corners=False)
+            videos = F.interpolate(videos, size=(224, 224), mode='bilinear', align_corners=False)
             videos = videos.reshape(B, T, C, 224, 224)
 
         # [B, T, C, H, W] -> [B, C, T, H, W]
@@ -131,21 +120,15 @@ class I3DFeatureExtractor(BaseFeatureExtractor):
     def extract_features_batch(self, videos: torch.Tensor) -> torch.Tensor:
         batch = self.preprocess(videos)
         # TorchScript I3D returns raw logits when return_features=True
-        return self.model(batch,
-                          rescale=False,
-                          resize=False,
-                          return_features=True)
+        return self.model(batch, rescale=False, resize=False, return_features=True)
 
 
 # 2. CLIP Extractor (Semantic/Content Quality)
 class CLIPFeatureExtractor(BaseFeatureExtractor):
 
-    def __init__(self,
-                 device: str = 'cuda',
-                 model_name: str = "openai/clip-vit-base-patch32"):
+    def __init__(self, device: str = 'cuda', model_name: str = "openai/clip-vit-base-patch32"):
         if not TRANSFORMERS_AVAILABLE:
-            raise ImportError(
-                "Please install transformers: pip install transformers")
+            raise ImportError("Please install transformers: pip install transformers")
         super().__init__(device)
         self.processor = CLIPProcessor.from_pretrained(model_name)
         self.model = CLIPModel.from_pretrained(model_name).to(self.device)
@@ -172,9 +155,7 @@ class CLIPFeatureExtractor(BaseFeatureExtractor):
         images = videos.view(B * T, C, H, W)
 
         # HF Processor
-        inputs = self.processor(images=images,
-                                return_tensors="pt",
-                                padding=True)
+        inputs = self.processor(images=images, return_tensors="pt", padding=True)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
         # Extract features [B*T, Dim]
@@ -188,24 +169,15 @@ class CLIPFeatureExtractor(BaseFeatureExtractor):
 # 3. VideoMAE Extractor (Structure/Motion Quality)
 class VideoMAEFeatureExtractor(BaseFeatureExtractor):
 
-    def __init__(self,
-                 device: str = 'cuda',
-                 model_name: str = "MCG-NJU/videomae-base"):
+    def __init__(self, device: str = 'cuda', model_name: str = "MCG-NJU/videomae-base"):
         if not TRANSFORMERS_AVAILABLE:
-            raise ImportError(
-                "Please install transformers: pip install transformers")
+            raise ImportError("Please install transformers: pip install transformers")
         super().__init__(device)
         self.model = VideoMAEModel.from_pretrained(model_name).to(self.device)
         self.model.eval()
 
-        self.register_buffer(
-            'mean',
-            torch.tensor([0.485, 0.456, 0.406],
-                         device=self.device).view(1, 1, 3, 1, 1))
-        self.register_buffer(
-            'std',
-            torch.tensor([0.229, 0.224, 0.225],
-                         device=self.device).view(1, 1, 3, 1, 1))
+        self.register_buffer('mean', torch.tensor([0.485, 0.456, 0.406], device=self.device).view(1, 1, 3, 1, 1))
+        self.register_buffer('std', torch.tensor([0.229, 0.224, 0.225], device=self.device).view(1, 1, 3, 1, 1))
 
     @property
     def feature_dim(self) -> int:
@@ -221,10 +193,7 @@ class VideoMAEFeatureExtractor(BaseFeatureExtractor):
         # 1. Resize to 224x224
         if H != 224 or W != 224:
             videos = videos.view(B * T, C, H, W)
-            videos = F.interpolate(videos,
-                                   size=(224, 224),
-                                   mode='bilinear',
-                                   align_corners=False)
+            videos = F.interpolate(videos, size=(224, 224), mode='bilinear', align_corners=False)
             videos = videos.view(B, T, C, 224, 224)
 
         # 2. Normalize to [0, 1]
@@ -260,5 +229,4 @@ def load_extractor(name: str, device: str = 'cuda') -> BaseFeatureExtractor:
     elif name == 'videomae':
         return VideoMAEFeatureExtractor(device)
     else:
-        raise ValueError(
-            f"Unknown extractor: {name}. Options: i3d, clip, videomae")
+        raise ValueError(f"Unknown extractor: {name}. Options: i3d, clip, videomae")

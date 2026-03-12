@@ -36,10 +36,7 @@ def main() -> None:
                 cache_real_features=str(script_dir / f'fvd-cache/{model_name}'),
             )
 
-            results = compute_fvd_with_config(real_dir,
-                                              gen_dir,
-                                              cfg,
-                                              verbose=False)
+            results = compute_fvd_with_config(real_dir, gen_dir, cfg, verbose=False)
             print(f"FVD: {results['fvd']}\nModel: {results['model']}")
 
         except Exception as e:
