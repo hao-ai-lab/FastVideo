@@ -12,11 +12,8 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.pipelines.stages import (DecodingStage, InputValidationStage,
-                                        LTX2AudioDecodingStage,
-                                        LTX2DenoisingStage,
-                                        LTX2LatentPreparationStage,
-                                        LTX2TextEncodingStage)
+from fastvideo.pipelines.stages import (DecodingStage, InputValidationStage, LTX2AudioDecodingStage, LTX2DenoisingStage,
+                                        LTX2LatentPreparationStage, LTX2TextEncodingStage)
 
 logger = init_logger(__name__)
 
@@ -48,14 +45,12 @@ class LTX2Pipeline(ComposedPipelineBase):
 
         self.add_stage(
             stage_name="latent_preparation_stage",
-            stage=LTX2LatentPreparationStage(
-                transformer=self.get_module("transformer"), ),
+            stage=LTX2LatentPreparationStage(transformer=self.get_module("transformer"), ),
         )
 
         self.add_stage(
             stage_name="denoising_stage",
-            stage=LTX2DenoisingStage(
-                transformer=self.get_module("transformer"), ),
+            stage=LTX2DenoisingStage(transformer=self.get_module("transformer"), ),
         )
 
         self.add_stage(
@@ -91,8 +86,7 @@ class LTX2Pipeline(ComposedPipelineBase):
         model_index.pop("workload_type", None)
 
         if len(model_index) <= 1:
-            raise ValueError(
-                "model_index.json must contain at least one pipeline module")
+            raise ValueError("model_index.json must contain at least one pipeline module")
 
         required_modules = self.required_config_modules
         modules: dict[str, Any] = {}
@@ -112,16 +106,12 @@ class LTX2Pipeline(ComposedPipelineBase):
                 continue
 
             component_model_path = os.path.join(self.model_path, module_name)
-            if module_name == "tokenizer" and not os.path.isdir(
-                    component_model_path):
-                gemma_path = os.path.join(self.model_path, "text_encoder",
-                                          "gemma")
+            if module_name == "tokenizer" and not os.path.isdir(component_model_path):
+                gemma_path = os.path.join(self.model_path, "text_encoder", "gemma")
                 if os.path.isdir(gemma_path):
                     component_model_path = gemma_path
                 else:
-                    raise ValueError(
-                        "Tokenizer directory missing and Gemma weights were not found."
-                    )
+                    raise ValueError("Tokenizer directory missing and Gemma weights were not found.")
 
             module = PipelineComponentLoader.load_module(
                 module_name=module_name,
@@ -129,20 +119,17 @@ class LTX2Pipeline(ComposedPipelineBase):
                 transformers_or_diffusers=transformers_or_diffusers,
                 fastvideo_args=fastvideo_args,
             )
-            logger.info("Loaded module %s from %s", module_name,
-                        component_model_path)
+            logger.info("Loaded module %s from %s", module_name, component_model_path)
             modules[module_name] = module
 
         if "tokenizer" in required_modules and "tokenizer" not in modules:
             gemma_path = os.path.join(self.model_path, "text_encoder", "gemma")
             if os.path.isdir(gemma_path):
-                modules["tokenizer"] = AutoTokenizer.from_pretrained(
-                    gemma_path, local_files_only=True)
+                modules["tokenizer"] = AutoTokenizer.from_pretrained(gemma_path, local_files_only=True)
 
         for module_name in required_modules:
             if module_name not in modules or modules[module_name] is None:
-                raise ValueError(
-                    f"Required module {module_name} was not loaded properly")
+                raise ValueError(f"Required module {module_name} was not loaded properly")
 
         return modules
 

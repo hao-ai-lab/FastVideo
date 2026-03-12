@@ -40,3 +40,17 @@
   - test evidence (`pytest`/SSIM outputs or rationale if skipped),
   - linked issue/PR context,
   - screenshots or sample outputs for UI/demo/docs changes.
+
+## Agent Infrastructure
+
+This repository is agent-friendly. Before doing any work, read:
+
+1. `.agents/onboarding/README.md` — full onboarding guide with step-by-step instructions.
+2. `.agents/memory/codebase-map/README.md` — structural index of the entire repository.
+3. `.agents/skills/` — available agent skills (check if one exists before writing code).
+4. `.agents/workflows/` — SOPs for common procedures (experiment lifecycle, evaluation, etc.).
+5. `.agents/lessons/` — known pitfalls and their documented fixes.
+
+If you are exploring a new procedure that has no existing SOP, document your
+progress in `.agents/exploration/` and flag it for review at the end of your
+session.

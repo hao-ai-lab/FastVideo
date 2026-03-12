@@ -43,9 +43,7 @@ class ExecutionMode(str, Enum):
         try:
             return cls(value.lower())
         except ValueError:
-            raise ValueError(
-                f"Invalid mode: {value}. Must be one of: {', '.join([m.value for m in cls])}"
-            ) from None
+            raise ValueError(f"Invalid mode: {value}. Must be one of: {', '.join([m.value for m in cls])}") from None
 
     @classmethod
     def choices(cls) -> list[str]:
@@ -71,8 +69,7 @@ class WorkloadType(str, Enum):
             return cls(value.lower())
         except ValueError:
             raise ValueError(
-                f"Invalid workload type: {value}. Must be one of: {', '.join([m.value for m in cls])}"
-            ) from None
+                f"Invalid workload type: {value}. Must be one of: {', '.join([m.value for m in cls])}") from None
 
     @classmethod
     def choices(cls) -> list[str]:
@@ -197,11 +194,9 @@ class FastVideoArgs:
             try:
                 with open(self.moba_config_path) as f:
                     self.moba_config = json.load(f)
-                logger.info("Loaded V-MoBA config from %s",
-                            self.moba_config_path)
+                logger.info("Loaded V-MoBA config from %s", self.moba_config_path)
             except (FileNotFoundError, json.JSONDecodeError) as e:
-                logger.error("Failed to load V-MoBA config from %s: %s",
-                             self.moba_config_path, e)
+                logger.error("Failed to load V-MoBA config from %s: %s", self.moba_config_path, e)
                 raise
         self._apply_ltx2_vae_overrides()
         self.check_fastvideo_args()
@@ -216,30 +211,24 @@ class FastVideoArgs:
             self.ltx2_vae_temporal_tile_size_in_frames,
             self.ltx2_vae_temporal_tile_overlap_in_frames,
         ))
-        if self.ltx2_vae_tiling is not None and hasattr(self.pipeline_config,
-                                                        "vae_tiling"):
+        if self.ltx2_vae_tiling is not None and hasattr(self.pipeline_config, "vae_tiling"):
             self.pipeline_config.vae_tiling = self.ltx2_vae_tiling
         elif has_any and hasattr(self.pipeline_config, "vae_tiling"):
             self.pipeline_config.vae_tiling = True
 
-        if hasattr(vae_config, "ltx2_spatial_tile_size_in_pixels"
-                   ) and self.ltx2_vae_spatial_tile_size_in_pixels is not None:
-            vae_config.ltx2_spatial_tile_size_in_pixels = (
-                self.ltx2_vae_spatial_tile_size_in_pixels)
+        if hasattr(vae_config,
+                   "ltx2_spatial_tile_size_in_pixels") and self.ltx2_vae_spatial_tile_size_in_pixels is not None:
+            vae_config.ltx2_spatial_tile_size_in_pixels = (self.ltx2_vae_spatial_tile_size_in_pixels)
+        if hasattr(vae_config,
+                   "ltx2_spatial_tile_overlap_in_pixels") and self.ltx2_vae_spatial_tile_overlap_in_pixels is not None:
+            vae_config.ltx2_spatial_tile_overlap_in_pixels = (self.ltx2_vae_spatial_tile_overlap_in_pixels)
+        if hasattr(vae_config,
+                   "ltx2_temporal_tile_size_in_frames") and self.ltx2_vae_temporal_tile_size_in_frames is not None:
+            vae_config.ltx2_temporal_tile_size_in_frames = (self.ltx2_vae_temporal_tile_size_in_frames)
         if hasattr(
-                vae_config, "ltx2_spatial_tile_overlap_in_pixels"
-        ) and self.ltx2_vae_spatial_tile_overlap_in_pixels is not None:
-            vae_config.ltx2_spatial_tile_overlap_in_pixels = (
-                self.ltx2_vae_spatial_tile_overlap_in_pixels)
-        if hasattr(vae_config, "ltx2_temporal_tile_size_in_frames"
-                   ) and self.ltx2_vae_temporal_tile_size_in_frames is not None:
-            vae_config.ltx2_temporal_tile_size_in_frames = (
-                self.ltx2_vae_temporal_tile_size_in_frames)
-        if hasattr(
-                vae_config, "ltx2_temporal_tile_overlap_in_frames"
-        ) and self.ltx2_vae_temporal_tile_overlap_in_frames is not None:
-            vae_config.ltx2_temporal_tile_overlap_in_frames = (
-                self.ltx2_vae_temporal_tile_overlap_in_frames)
+                vae_config,
+                "ltx2_temporal_tile_overlap_in_frames") and self.ltx2_vae_temporal_tile_overlap_in_frames is not None:
+            vae_config.ltx2_temporal_tile_overlap_in_frames = (self.ltx2_vae_temporal_tile_overlap_in_frames)
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
@@ -247,8 +236,7 @@ class FastVideoArgs:
         parser.add_argument(
             "--model-path",
             type=str,
-            help=
-            "The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
+            help="The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
         )
 
         # Running mode
@@ -296,8 +284,7 @@ class FastVideoArgs:
             "--revision",
             type=str,
             default=FastVideoArgs.revision,
-            help=
-            "The specific model version to use (can be a branch name, tag name, or commit id)",
+            help="The specific model version to use (can be a branch name, tag name, or commit id)",
         )
 
         # Parallelism
@@ -352,8 +339,7 @@ class FastVideoArgs:
             "--prompt-txt",
             type=str,
             default=FastVideoArgs.prompt_txt,
-            help=
-            "Path to a text file containing prompts (one per line) for batch processing",
+            help="Path to a text file containing prompts (one per line) for batch processing",
         )
 
         # LTX-2 VAE tiling overrides
@@ -399,31 +385,27 @@ class FastVideoArgs:
             "--lora-path",
             type=str,
             default=FastVideoArgs.lora_path,
-            help=
-            "Path to a LoRA adapter (directory or HF repo id). If set, LoRA will be applied at inference.",
+            help="Path to a LoRA adapter (directory or HF repo id). If set, LoRA will be applied at inference.",
         )
         parser.add_argument(
             "--lora-nickname",
             type=str,
             default=FastVideoArgs.lora_nickname,
-            help=
-            "Nickname to refer to the loaded LoRA adapter (useful for swapping).",
+            help="Nickname to refer to the loaded LoRA adapter (useful for swapping).",
         )
         parser.add_argument(
             "--lora-target-modules",
             nargs="+",
             type=str,
             default=FastVideoArgs.lora_target_modules,
-            help=
-            "Optional list of module name substrings to restrict LoRA injection (e.g. q_proj k_proj v_proj).",
+            help="Optional list of module name substrings to restrict LoRA injection (e.g. q_proj k_proj v_proj).",
         )
 
         # BSA runtime control (LongCat)
         parser.add_argument(
             "--enable-bsa",
             action=StoreBoolean,
-            help=
-            "Enable Block Sparse Attention (BSA) at runtime (overrides config).",
+            help="Enable Block Sparse Attention (BSA) at runtime (overrides config).",
         )
         parser.add_argument(
             "--bsa-sparsity",
@@ -468,8 +450,7 @@ class FastVideoArgs:
         parser.add_argument(
             "--dit-cpu-offload",
             action=StoreBoolean,
-            help=
-            "Use CPU offload for DiT inference. Enable if run out of memory with FSDP.",
+            help="Use CPU offload for DiT inference. Enable if run out of memory with FSDP.",
         )
         parser.add_argument(
             "--dit-layerwise-offload",
@@ -481,20 +462,17 @@ class FastVideoArgs:
             action=StoreBoolean,
             help=
             "Use FSDP for inference by sharding the model weights. FSDP helps reduce GPU memory usage but may introduce"
-            +
-            " weight transfer overhead depending on the specific setup. Enable if run out of memory.",
+            + " weight transfer overhead depending on the specific setup. Enable if run out of memory.",
         )
         parser.add_argument(
             "--text-encoder-cpu-offload",
             action=StoreBoolean,
-            help=
-            "Use CPU offload for text encoder. Enable if run out of memory.",
+            help="Use CPU offload for text encoder. Enable if run out of memory.",
         )
         parser.add_argument(
             "--image-encoder-cpu-offload",
             action=StoreBoolean,
-            help=
-            "Use CPU offload for image encoder. Enable if run out of memory.",
+            help="Use CPU offload for image encoder. Enable if run out of memory.",
         )
         parser.add_argument(
             "--vae-cpu-offload",
@@ -511,8 +489,7 @@ class FastVideoArgs:
         parser.add_argument(
             "--disable-autocast",
             action=StoreBoolean,
-            help=
-            "Disable autocast for denoising loop and vae decoding in pipeline sampling",
+            help="Disable autocast for denoising loop and vae decoding in pipeline sampling",
         )
 
         # VSA parameters
@@ -563,14 +540,12 @@ class FastVideoArgs:
             default=FastVideoArgs.override_pipeline_cls_name,
             help="Override pipeline cls name",
         )
-        parser.add_argument(
-            "--init-weights-from-safetensors",
-            type=str,
-            help="Path to safetensors file for initial weight loading")
-        parser.add_argument(
-            "--init-weights-from-safetensors-2",
-            type=str,
-            help="Path to safetensors file for initial weight loading")
+        parser.add_argument("--init-weights-from-safetensors",
+                            type=str,
+                            help="Path to safetensors file for initial weight loading")
+        parser.add_argument("--init-weights-from-safetensors-2",
+                            type=str,
+                            help="Path to safetensors file for initial weight loading")
 
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
@@ -598,36 +573,28 @@ class FastVideoArgs:
             elif attr == 'mode':
                 # Convert string to ExecutionMode enum
                 mode_value = getattr(args, attr, FastVideoArgs.mode.value)
-                kwargs['mode'] = ExecutionMode.from_string(
-                    mode_value) if isinstance(mode_value, str) else mode_value
+                kwargs['mode'] = ExecutionMode.from_string(mode_value) if isinstance(mode_value, str) else mode_value
             elif attr == 'torch_compile_kwargs':
                 # Parse JSON string for torch.compile kwargs
-                torch_compile_kwargs_str = getattr(args, 'torch_compile_kwargs',
-                                                   None)
+                torch_compile_kwargs_str = getattr(args, 'torch_compile_kwargs', None)
                 if torch_compile_kwargs_str:
                     try:
                         import json
-                        kwargs['torch_compile_kwargs'] = json.loads(
-                            torch_compile_kwargs_str)
+                        kwargs['torch_compile_kwargs'] = json.loads(torch_compile_kwargs_str)
                     except json.JSONDecodeError as e:
-                        raise ValueError(
-                            f"Invalid JSON for torch_compile_kwargs: {e}"
-                        ) from e
+                        raise ValueError(f"Invalid JSON for torch_compile_kwargs: {e}") from e
                 else:
                     kwargs['torch_compile_kwargs'] = {}
             elif attr == 'workload_type':
                 # Convert string to WorkloadType enum
-                workload_type_value = getattr(args, 'workload_type',
-                                              FastVideoArgs.workload_type.value)
-                kwargs['workload_type'] = WorkloadType.from_string(
-                    workload_type_value) if isinstance(
-                        workload_type_value, str) else workload_type_value
+                workload_type_value = getattr(args, 'workload_type', FastVideoArgs.workload_type.value)
+                kwargs['workload_type'] = WorkloadType.from_string(workload_type_value) if isinstance(
+                    workload_type_value, str) else workload_type_value
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 # Get the field to check if it has a default_factory
-                field = dataclasses.fields(cls)[next(
-                    i for i, f in enumerate(dataclasses.fields(cls))
-                    if f.name == attr)]
+                field = dataclasses.fields(cls)[next(i for i, f in enumerate(dataclasses.fields(cls))
+                                                     if f.name == attr)]
                 if field.default_factory is not dataclasses.MISSING:
                     # Use the default_factory to create the default value
                     default_value = field.default_factory()
@@ -645,14 +612,16 @@ class FastVideoArgs:
             kwargs['mode'] = ExecutionMode.from_string(kwargs['mode'])
 
         # Convert workload_type string to enum if necessary
-        if 'workload_type' in kwargs and isinstance(kwargs['workload_type'],
-                                                    str):
-            kwargs['workload_type'] = WorkloadType.from_string(
-                kwargs['workload_type'])
+        if 'workload_type' in kwargs and isinstance(kwargs['workload_type'], str):
+            kwargs['workload_type'] = WorkloadType.from_string(kwargs['workload_type'])
 
         kwargs['pipeline_config'] = PipelineConfig.from_kwargs(kwargs)
         kwargs['preprocess_config'] = PreprocessConfig.from_kwargs(kwargs)
-        return cls(**kwargs)
+        # Filter to only FastVideoArgs dataclass fields — pipeline-specific CLI
+        # args (e.g. enable_bsa, bsa_sparsity) live in PipelineConfig and must
+        # not be forwarded to the FastVideoArgs constructor.
+        valid_fields = {f.name for f in dataclasses.fields(cls)}
+        return cls(**{k: v for k, v in kwargs.items() if k in valid_fields})
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
@@ -664,41 +633,26 @@ class FastVideoArgs:
 
         if self.dit_layerwise_offload:
             if self.use_fsdp_inference:
-                logger.warning(
-                    "dit_layerwise_offload is enabled, automatically disabling use_fsdp_inference."
-                )
+                logger.warning("dit_layerwise_offload is enabled, automatically disabling use_fsdp_inference.")
                 self.use_fsdp_inference = False
             if self.dit_cpu_offload:
-                logger.warning(
-                    "dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload."
-                )
+                logger.warning("dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload.")
                 self.dit_cpu_offload = False
 
         # Validate mode and inference_mode consistency
-        assert isinstance(
-            self.mode, ExecutionMode
-        ), f"Mode must be an ExecutionMode enum, got {type(self.mode)}"
-        assert self.mode in ExecutionMode.choices(
-        ), f"Invalid execution mode: {self.mode}"
+        assert isinstance(self.mode, ExecutionMode), f"Mode must be an ExecutionMode enum, got {type(self.mode)}"
+        assert self.mode in ExecutionMode.choices(), f"Invalid execution mode: {self.mode}"
 
         # Validate workload type
-        assert isinstance(
-            self.workload_type, WorkloadType
-        ), f"Workload type must be a WorkloadType enum, got {type(self.workload_type)}"
-        assert self.workload_type in WorkloadType.choices(
-        ), f"Invalid workload type: {self.workload_type}"
+        assert isinstance(self.workload_type,
+                          WorkloadType), f"Workload type must be a WorkloadType enum, got {type(self.workload_type)}"
+        assert self.workload_type in WorkloadType.choices(), f"Invalid workload type: {self.workload_type}"
 
-        if self.mode in [ExecutionMode.DISTILLATION, ExecutionMode.FINETUNING
-                         ] and self.inference_mode:
-            logger.warning(
-                "Mode is 'training' but inference_mode is True. Setting inference_mode to False."
-            )
+        if self.mode in [ExecutionMode.DISTILLATION, ExecutionMode.FINETUNING] and self.inference_mode:
+            logger.warning("Mode is 'training' but inference_mode is True. Setting inference_mode to False.")
             self.inference_mode = False
-        elif self.mode in [ExecutionMode.INFERENCE, ExecutionMode.PREPROCESS
-                           ] and not self.inference_mode:
-            logger.warning(
-                "Mode is '%s' but inference_mode is False. Setting inference_mode to True.",
-                self.mode)
+        elif self.mode in [ExecutionMode.INFERENCE, ExecutionMode.PREPROCESS] and not self.inference_mode:
+            logger.warning("Mode is '%s' but inference_mode is False. Setting inference_mode to True.", self.mode)
             self.inference_mode = True
 
         if not self.inference_mode:
@@ -728,9 +682,7 @@ class FastVideoArgs:
         # Add preprocessing config validation if needed
         if self.mode == ExecutionMode.PREPROCESS:
             if self.preprocess_config is None:
-                raise ValueError(
-                    "preprocess_config is not set in FastVideoArgs when mode is PREPROCESS"
-                )
+                raise ValueError("preprocess_config is not set in FastVideoArgs when mode is PREPROCESS")
             if self.preprocess_config.model_path == "":
                 self.preprocess_config.model_path = self.model_path
             if not self.pipeline_config.vae_config.load_encoder:
@@ -928,21 +880,17 @@ class TrainingArgs(FastVideoArgs):
             elif attr == 'mode':
                 # Convert string to ExecutionMode enum
                 mode_value = getattr(args, attr, ExecutionMode.FINETUNING.value)
-                kwargs[attr] = ExecutionMode.from_string(
-                    mode_value) if isinstance(mode_value, str) else mode_value
+                kwargs[attr] = ExecutionMode.from_string(mode_value) if isinstance(mode_value, str) else mode_value
             elif attr == 'workload_type':
                 # Convert string to WorkloadType enum
-                workload_type_value = getattr(args, 'workload_type',
-                                              WorkloadType.T2V.value)
-                kwargs[attr] = WorkloadType.from_string(
-                    workload_type_value) if isinstance(
-                        workload_type_value, str) else workload_type_value
+                workload_type_value = getattr(args, 'workload_type', WorkloadType.T2V.value)
+                kwargs[attr] = WorkloadType.from_string(workload_type_value) if isinstance(workload_type_value,
+                                                                                           str) else workload_type_value
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 # Get the field to check its default value
-                field = dataclasses.fields(cls)[next(
-                    i for i, f in enumerate(dataclasses.fields(cls))
-                    if f.name == attr)]
+                field = dataclasses.fields(cls)[next(i for i, f in enumerate(dataclasses.fields(cls))
+                                                     if f.name == attr)]
 
                 # Check if the attribute is provided in args
                 if hasattr(args, attr):
@@ -963,39 +911,19 @@ class TrainingArgs(FastVideoArgs):
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
-        parser.add_argument("--data-path",
-                            type=str,
-                            required=True,
-                            help="Path to parquet files")
+        parser.add_argument("--data-path", type=str, required=True, help="Path to parquet files")
         parser.add_argument("--dataloader-num-workers",
                             type=int,
                             required=True,
                             help="Number of workers for dataloader")
-        parser.add_argument("--num-height",
-                            type=int,
-                            required=True,
-                            help="Number of heights")
-        parser.add_argument("--num-width",
-                            type=int,
-                            required=True,
-                            help="Number of widths")
-        parser.add_argument("--num-frames",
-                            type=int,
-                            required=True,
-                            help="Number of frames")
+        parser.add_argument("--num-height", type=int, required=True, help="Number of heights")
+        parser.add_argument("--num-width", type=int, required=True, help="Number of widths")
+        parser.add_argument("--num-frames", type=int, required=True, help="Number of frames")
 
         # Training batch and model configuration
-        parser.add_argument("--train-batch-size",
-                            type=int,
-                            required=True,
-                            help="Training batch size")
-        parser.add_argument("--num-latent-t",
-                            type=int,
-                            required=True,
-                            help="Number of latent time steps")
-        parser.add_argument("--group-frame",
-                            action=StoreBoolean,
-                            help="Whether to group frames during training")
+        parser.add_argument("--train-batch-size", type=int, required=True, help="Training batch size")
+        parser.add_argument("--num-latent-t", type=int, required=True, help="Number of latent time steps")
+        parser.add_argument("--group-frame", action=StoreBoolean, help="Whether to group frames during training")
         parser.add_argument("--group-resolution",
                             action=StoreBoolean,
                             help="Whether to group resolutions during training")
@@ -1009,144 +937,70 @@ class TrainingArgs(FastVideoArgs):
                             type=str,
                             required=False,
                             help="Path to DiT model or model name")
-        parser.add_argument("--cache-dir",
-                            type=str,
-                            help="Directory to cache models")
+        parser.add_argument("--cache-dir", type=str, help="Directory to cache models")
 
         # DMD model paths - separate paths for each network
-        parser.add_argument(
-            "--generator-model-path",
-            type=str,
-            help="Path to generator (student) model for DMD distillation")
-        parser.add_argument(
-            "--real-score-model-path",
-            type=str,
-            help="Path to real score (teacher) model for DMD distillation")
-        parser.add_argument(
-            "--fake-score-model-path",
-            type=str,
-            help="Path to fake score (critic) model for DMD distillation")
+        parser.add_argument("--generator-model-path",
+                            type=str,
+                            help="Path to generator (student) model for DMD distillation")
+        parser.add_argument("--real-score-model-path",
+                            type=str,
+                            help="Path to real score (teacher) model for DMD distillation")
+        parser.add_argument("--fake-score-model-path",
+                            type=str,
+                            help="Path to fake score (critic) model for DMD distillation")
 
         # Diffusion settings
-        parser.add_argument("--ema-decay",
-                            type=float,
-                            default=0.999,
-                            help="EMA decay rate")
-        parser.add_argument("--ema-start-step",
-                            type=int,
-                            default=0,
-                            help="Step to start EMA")
-        parser.add_argument("--training-cfg-rate",
-                            type=float,
-                            help="Classifier-free guidance scale")
-        parser.add_argument(
-            "--precondition-outputs",
-            action=StoreBoolean,
-            help="Whether to precondition the outputs of the model")
+        parser.add_argument("--ema-decay", type=float, default=0.999, help="EMA decay rate")
+        parser.add_argument("--ema-start-step", type=int, default=0, help="Step to start EMA")
+        parser.add_argument("--training-cfg-rate", type=float, help="Classifier-free guidance scale")
+        parser.add_argument("--precondition-outputs",
+                            action=StoreBoolean,
+                            help="Whether to precondition the outputs of the model")
 
         # Validation and logging
-        parser.add_argument("--validation-dataset-file",
-                            type=str,
-                            help="Path to unprocessed validation dataset")
-        parser.add_argument("--validation-preprocessed-path",
-                            type=str,
-                            help="Path to processed validation dataset")
-        parser.add_argument("--validation-sampling-steps",
-                            type=str,
-                            help="Validation sampling steps")
-        parser.add_argument("--validation-guidance-scale",
-                            type=str,
-                            help="Validation guidance scale")
-        parser.add_argument("--validation-steps",
-                            type=float,
-                            help="Number of validation steps")
-        parser.add_argument("--log-validation",
-                            action=StoreBoolean,
-                            help="Whether to log validation results")
-        parser.add_argument("--visualization-steps",
-                            type=int,
-                            help="Number of visualization steps")
-        parser.add_argument("--tracker-project-name",
-                            type=str,
-                            help="Project name for tracking")
-        parser.add_argument("--wandb-run-name",
-                            type=str,
-                            help="Run name for wandb")
-        parser.add_argument("--seed",
-                            type=int,
-                            default=42,
-                            help="Seed for deterministic training")
+        parser.add_argument("--validation-dataset-file", type=str, help="Path to unprocessed validation dataset")
+        parser.add_argument("--validation-preprocessed-path", type=str, help="Path to processed validation dataset")
+        parser.add_argument("--validation-sampling-steps", type=str, help="Validation sampling steps")
+        parser.add_argument("--validation-guidance-scale", type=str, help="Validation guidance scale")
+        parser.add_argument("--validation-steps", type=float, help="Number of validation steps")
+        parser.add_argument("--log-validation", action=StoreBoolean, help="Whether to log validation results")
+        parser.add_argument("--visualization-steps", type=int, help="Number of visualization steps")
+        parser.add_argument("--tracker-project-name", type=str, help="Project name for tracking")
+        parser.add_argument("--wandb-run-name", type=str, help="Run name for wandb")
+        parser.add_argument("--seed", type=int, default=42, help="Seed for deterministic training")
 
         # Output configuration
-        parser.add_argument("--output-dir",
-                            type=str,
-                            required=True,
-                            help="Output directory for checkpoints and logs")
-        parser.add_argument("--checkpoints-total-limit",
+        parser.add_argument("--output-dir", type=str, required=True, help="Output directory for checkpoints and logs")
+        parser.add_argument("--checkpoints-total-limit", type=int, help="Maximum number of checkpoints to keep")
+        parser.add_argument("--training-state-checkpointing-steps",
                             type=int,
-                            help="Maximum number of checkpoints to keep")
-        parser.add_argument(
-            "--training-state-checkpointing-steps",
-            type=int,
-            help=
-            "Steps between training state checkpoints (for resuming training)")
-        parser.add_argument(
-            "--weight-only-checkpointing-steps",
-            type=int,
-            help="Steps between weight-only checkpoints (for inference)")
-        parser.add_argument("--resume-from-checkpoint",
-                            type=str,
-                            help="Path to checkpoint to resume from")
-        parser.add_argument("--logging-dir",
-                            type=str,
-                            help="Directory for logging")
+                            help="Steps between training state checkpoints (for resuming training)")
+        parser.add_argument("--weight-only-checkpointing-steps",
+                            type=int,
+                            help="Steps between weight-only checkpoints (for inference)")
+        parser.add_argument("--resume-from-checkpoint", type=str, help="Path to checkpoint to resume from")
+        parser.add_argument("--logging-dir", type=str, help="Directory for logging")
 
         # Training configuration
-        parser.add_argument("--num-train-epochs",
-                            type=int,
-                            help="Number of training epochs")
-        parser.add_argument("--max-train-steps",
-                            type=int,
-                            help="Maximum number of training steps")
-        parser.add_argument("--gradient-accumulation-steps",
-                            type=int,
-                            help="Number of steps to accumulate gradients")
-        parser.add_argument("--learning-rate",
-                            type=float,
-                            required=True,
-                            help="Learning rate")
-        parser.add_argument("--scale-lr",
-                            action=StoreBoolean,
-                            help="Whether to scale learning rate")
-        parser.add_argument("--lr-scheduler",
-                            type=str,
-                            default="constant",
-                            help="Learning rate scheduler type")
-        parser.add_argument("--lr-warmup-steps",
-                            type=int,
-                            default=10,
-                            help="Number of warmup steps for learning rate")
-        parser.add_argument("--max-grad-norm",
-                            type=float,
-                            help="Maximum gradient norm")
+        parser.add_argument("--num-train-epochs", type=int, help="Number of training epochs")
+        parser.add_argument("--max-train-steps", type=int, help="Maximum number of training steps")
+        parser.add_argument("--gradient-accumulation-steps", type=int, help="Number of steps to accumulate gradients")
+        parser.add_argument("--learning-rate", type=float, required=True, help="Learning rate")
+        parser.add_argument("--scale-lr", action=StoreBoolean, help="Whether to scale learning rate")
+        parser.add_argument("--lr-scheduler", type=str, default="constant", help="Learning rate scheduler type")
+        parser.add_argument("--lr-warmup-steps", type=int, default=10, help="Number of warmup steps for learning rate")
+        parser.add_argument("--max-grad-norm", type=float, help="Maximum gradient norm")
         parser.add_argument("--enable-gradient-checkpointing-type",
                             type=str,
                             choices=["full", "ops", "block_skip"],
                             default=None,
                             help="Gradient checkpointing type")
-        parser.add_argument("--selective-checkpointing",
-                            type=float,
-                            help="Selective checkpointing threshold")
-        parser.add_argument("--mixed-precision",
-                            type=str,
-                            help="Mixed precision training type")
-        parser.add_argument("--train-sp-batch-size",
-                            type=int,
-                            help="Training spatial parallelism batch size")
+        parser.add_argument("--selective-checkpointing", type=float, help="Selective checkpointing threshold")
+        parser.add_argument("--mixed-precision", type=str, help="Mixed precision training type")
+        parser.add_argument("--train-sp-batch-size", type=int, help="Training spatial parallelism batch size")
 
-        parser.add_argument("--fsdp-sharding-strategy",
-                            type=str,
-                            help="FSDP sharding strategy")
+        parser.add_argument("--fsdp-sharding-strategy", type=str, help="FSDP sharding strategy")
 
         parser.add_argument(
             "--weighting_scheme",
@@ -1170,59 +1024,35 @@ class TrainingArgs(FastVideoArgs):
             "--mode_scale",
             type=float,
             default=1.29,
-            help=
-            "Scale of mode weighting scheme. Only effective when using the `'mode'` as the `weighting_scheme`.",
+            help="Scale of mode weighting scheme. Only effective when using the `'mode'` as the `weighting_scheme`.",
         )
 
         # Additional training parameters
-        parser.add_argument("--num-euler-timesteps",
-                            type=int,
-                            help="Number of Euler timesteps")
-        parser.add_argument("--lr-num-cycles",
-                            type=int,
-                            help="Number of learning rate cycles")
-        parser.add_argument("--lr-power",
+        parser.add_argument("--num-euler-timesteps", type=int, help="Number of Euler timesteps")
+        parser.add_argument("--lr-num-cycles", type=int, help="Number of learning rate cycles")
+        parser.add_argument("--lr-power", type=float, help="Learning rate power")
+        parser.add_argument("--min-lr-ratio",
                             type=float,
-                            help="Learning rate power")
-        parser.add_argument(
-            "--min-lr-ratio",
-            type=float,
-            default=TrainingArgs.min_lr_ratio,
-            help="Minimum learning rate ratio for cosine_with_min_lr scheduler")
-        parser.add_argument("--not-apply-cfg-solver",
-                            action=StoreBoolean,
-                            help="Whether to not apply CFG solver")
-        parser.add_argument("--distill-cfg",
-                            type=float,
-                            help="Distillation CFG scale")
+                            default=TrainingArgs.min_lr_ratio,
+                            help="Minimum learning rate ratio for cosine_with_min_lr scheduler")
+        parser.add_argument("--not-apply-cfg-solver", action=StoreBoolean, help="Whether to not apply CFG solver")
+        parser.add_argument("--distill-cfg", type=float, help="Distillation CFG scale")
         parser.add_argument("--scheduler-type", type=str, help="Scheduler type")
-        parser.add_argument("--linear-quadratic-threshold",
-                            type=float,
-                            help="Linear quadratic threshold")
+        parser.add_argument("--linear-quadratic-threshold", type=float, help="Linear quadratic threshold")
         parser.add_argument("--linear-range", type=float, help="Linear range")
         parser.add_argument("--weight-decay", type=float, help="Weight decay")
         parser.add_argument("--betas",
                             type=str,
                             default=TrainingArgs.betas,
                             help="Betas for optimizer (format: 'beta1,beta2')")
-        parser.add_argument("--use-ema",
-                            action=StoreBoolean,
-                            help="Whether to use EMA")
-        parser.add_argument("--multi-phased-distill-schedule",
-                            type=str,
-                            help="Multi-phased distillation schedule")
-        parser.add_argument("--pred-decay-weight",
-                            type=float,
-                            help="Prediction decay weight")
-        parser.add_argument("--pred-decay-type",
-                            type=str,
-                            help="Prediction decay type")
+        parser.add_argument("--use-ema", action=StoreBoolean, help="Whether to use EMA")
+        parser.add_argument("--multi-phased-distill-schedule", type=str, help="Multi-phased distillation schedule")
+        parser.add_argument("--pred-decay-weight", type=float, help="Prediction decay weight")
+        parser.add_argument("--pred-decay-type", type=str, help="Prediction decay type")
         parser.add_argument("--hunyuan-teacher-disable-cfg",
                             action=StoreBoolean,
                             help="Whether to disable CFG for Hunyuan teacher")
-        parser.add_argument("--master-weight-type",
-                            type=str,
-                            help="Master weight type")
+        parser.add_argument("--master-weight-type", type=str, help="Master weight type")
 
         # VSA parameters for training with dense to sparse adaption
         parser.add_argument(
@@ -1235,17 +1065,14 @@ class TrainingArgs(FastVideoArgs):
             type=int,
             default=TrainingArgs.VSA_decay_interval_steps,
             help="VSA decay interval steps")
-        parser.add_argument("--lora-training",
-                            action=StoreBoolean,
-                            help="Whether to use LoRA training")
+        parser.add_argument("--lora-training", action=StoreBoolean, help="Whether to use LoRA training")
         parser.add_argument("--lora-rank", type=int, help="LoRA rank")
         parser.add_argument("--lora-alpha", type=int, help="LoRA alpha")
         parser.add_argument(
             "--ltx2-first-frame-conditioning-p",
             type=float,
             default=TrainingArgs.ltx2_first_frame_conditioning_p,
-            help=
-            "Probability of conditioning on the first frame during LTX-2 training",
+            help="Probability of conditioning on the first frame during LTX-2 training",
         )
 
         # V-MoBA parameters
@@ -1253,8 +1080,7 @@ class TrainingArgs(FastVideoArgs):
             "--moba-config-path",
             type=str,
             default=None,
-            help=
-            "Path to a JSON file containing V-MoBA specific configurations.",
+            help="Path to a JSON file containing V-MoBA specific configurations.",
         )
 
         # Distillation arguments
@@ -1266,9 +1092,7 @@ class TrainingArgs(FastVideoArgs):
             "--dfake-gen-update-ratio",
             type=int,
             default=TrainingArgs.dfake_gen_update_ratio,
-            help=
-            "Self-forcing: How often to train generator vs critic (train generator every N steps)."
-        )
+            help="Self-forcing: How often to train generator vs critic (train generator every N steps).")
         parser.add_argument("--min-timestep-ratio",
                             type=float,
                             default=TrainingArgs.min_timestep_ratio,
@@ -1285,61 +1109,46 @@ class TrainingArgs(FastVideoArgs):
                             type=float,
                             default=TrainingArgs.fake_score_learning_rate,
                             help="Learning rate for fake score transformer")
-        parser.add_argument(
-            "--fake-score-betas",
-            type=str,
-            default=TrainingArgs.fake_score_betas,
-            help="Betas for fake score optimizer (format: 'beta1,beta2')")
-        parser.add_argument(
-            "--fake-score-lr-scheduler",
-            type=str,
-            default=TrainingArgs.fake_score_lr_scheduler,
-            help="Learning rate scheduler for fake score transformer")
-        parser.add_argument("--log-visualization",
+        parser.add_argument("--fake-score-betas",
+                            type=str,
+                            default=TrainingArgs.fake_score_betas,
+                            help="Betas for fake score optimizer (format: 'beta1,beta2')")
+        parser.add_argument("--fake-score-lr-scheduler",
+                            type=str,
+                            default=TrainingArgs.fake_score_lr_scheduler,
+                            help="Learning rate scheduler for fake score transformer")
+        parser.add_argument("--log-visualization", action=StoreBoolean, help="Whether to log visualization")
+        parser.add_argument("--simulate-generator-forward",
                             action=StoreBoolean,
-                            help="Whether to log visualization")
-        parser.add_argument(
-            "--simulate-generator-forward",
-            action=StoreBoolean,
-            help="Whether to simulate generator forward to match inference")
-        parser.add_argument(
-            "--warp-denoising-step",
-            action=StoreBoolean,
-            help=
-            "Whether to warp denoising step according to the scheduler time shift"
-        )
+                            help="Whether to simulate generator forward to match inference")
+        parser.add_argument("--warp-denoising-step",
+                            action=StoreBoolean,
+                            help="Whether to warp denoising step according to the scheduler time shift")
 
         # Self-forcing specific arguments
-        parser.add_argument(
-            "--num-frame-per-block",
-            type=int,
-            default=TrainingArgs.num_frame_per_block,
-            help="Number of frames per block for causal generation")
-        parser.add_argument(
-            "--independent-first-frame",
-            action=StoreBoolean,
-            help="Whether the first frame is independent in causal generation")
-        parser.add_argument(
-            "--enable-gradient-masking",
-            action=StoreBoolean,
-            help="Whether to enable frame-level gradient masking")
-        parser.add_argument(
-            "--gradient-mask-last-n-frames",
-            type=int,
-            default=TrainingArgs.gradient_mask_last_n_frames,
-            help="Number of last frames to enable gradients for")
-        parser.add_argument(
-            "--validate-cache-structure",
-            action=StoreBoolean,
-            help="Whether to validate KV cache structure (debug flag)")
-        parser.add_argument(
-            "--same-step-across-blocks",
-            action=StoreBoolean,
-            help="Whether to use the same exit timestep for all blocks")
-        parser.add_argument(
-            "--last-step-only",
-            action=StoreBoolean,
-            help="Whether to only use the last timestep for training")
+        parser.add_argument("--num-frame-per-block",
+                            type=int,
+                            default=TrainingArgs.num_frame_per_block,
+                            help="Number of frames per block for causal generation")
+        parser.add_argument("--independent-first-frame",
+                            action=StoreBoolean,
+                            help="Whether the first frame is independent in causal generation")
+        parser.add_argument("--enable-gradient-masking",
+                            action=StoreBoolean,
+                            help="Whether to enable frame-level gradient masking")
+        parser.add_argument("--gradient-mask-last-n-frames",
+                            type=int,
+                            default=TrainingArgs.gradient_mask_last_n_frames,
+                            help="Number of last frames to enable gradients for")
+        parser.add_argument("--validate-cache-structure",
+                            action=StoreBoolean,
+                            help="Whether to validate KV cache structure (debug flag)")
+        parser.add_argument("--same-step-across-blocks",
+                            action=StoreBoolean,
+                            help="Whether to use the same exit timestep for all blocks")
+        parser.add_argument("--last-step-only",
+                            action=StoreBoolean,
+                            help="Whether to only use the last timestep for training")
         parser.add_argument("--context-noise",
                             type=int,
                             default=TrainingArgs.context_noise,

@@ -122,8 +122,7 @@ class Wan2_2_I2V_A14B_SamplingParam(Wan2_2_Base_SamplingParam):
 
 
 @dataclass
-class Wan2_2_Fun_A14B_Control_SamplingParam(
-        Wan2_1_Fun_1_3B_Control_SamplingParam):
+class Wan2_2_Fun_A14B_Control_SamplingParam(Wan2_1_Fun_1_3B_Control_SamplingParam):
     num_frames: int = 81
 
 
@@ -131,14 +130,12 @@ class Wan2_2_Fun_A14B_Control_SamplingParam(
 # ============= Causal Self-Forcing =============
 # =============================================
 @dataclass
-class SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam(
-        Wan2_1_Fun_1_3B_InP_SamplingParam):
+class SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam(Wan2_1_Fun_1_3B_InP_SamplingParam):
     pass
 
 
 @dataclass
-class SelfForcingWan2_2_T2V_A14B_480P_SamplingParam(
-        Wan2_2_T2V_A14B_SamplingParam):
+class SelfForcingWan2_2_T2V_A14B_480P_SamplingParam(Wan2_2_T2V_A14B_SamplingParam):
     num_inference_steps: int = 8
     num_frames: int = 81
     height: int = 448

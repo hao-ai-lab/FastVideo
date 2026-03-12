@@ -55,13 +55,10 @@ class LTX2AudioDecodingStage(PipelineStage):
 
         # Move to CPU for pickling across process boundary
         batch.extra["audio"] = audio_wave.cpu()
-        batch.extra[
-            "audio_sample_rate"] = DEFAULT_LTX2_VOCODER_OUTPUT_SAMPLE_RATE
+        batch.extra["audio_sample_rate"] = DEFAULT_LTX2_VOCODER_OUTPUT_SAMPLE_RATE
         return batch
 
-    def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
-        result.add_check("audio_latents", batch.extra.get("ltx2_audio_latents"),
-                         V.none_or_tensor)
+        result.add_check("audio_latents", batch.extra.get("ltx2_audio_latents"), V.none_or_tensor)
         return result

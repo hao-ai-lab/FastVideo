@@ -32,29 +32,22 @@ class Executor(ABC):
             from fastvideo.worker.ray_distributed_executor import RayDistributedExecutor
             return cast(type["Executor"], RayDistributedExecutor)
         else:
-            raise ValueError(
-                f"Unsupported distributed executor backend: {fastvideo_args.distributed_executor_backend}"
-            )
+            raise ValueError(f"Unsupported distributed executor backend: {fastvideo_args.distributed_executor_backend}")
 
     def execute_forward(
         self,
         forward_batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        outputs: list[dict[str,
-                           Any]] = self.collective_rpc("execute_forward",
-                                                       kwargs={
-                                                           "forward_batch":
-                                                           forward_batch,
-                                                           "fastvideo_args":
-                                                           fastvideo_args
-                                                       })
+        outputs: list[dict[str, Any]] = self.collective_rpc("execute_forward",
+                                                            kwargs={
+                                                                "forward_batch": forward_batch,
+                                                                "fastvideo_args": fastvideo_args
+                                                            })
         return cast(ForwardBatch, outputs[0]["output_batch"])
 
     @abstractmethod
-    def set_lora_adapter(self,
-                         lora_nickname: str,
-                         lora_path: str | None = None) -> None:
+    def set_lora_adapter(self, lora_nickname: str, lora_path: str | None = None) -> None:
         """
         Set the LoRA adapter for the workers.
         """

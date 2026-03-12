@@ -48,12 +48,9 @@ class ProfilerRegion:
 
     def __post_init__(self) -> None:
         if not self.name or self.name.strip() != self.name:
-            raise ValueError(
-                f"Profiler region name must be non-empty without surrounding whitespace: {self.name!r}"
-            )
+            raise ValueError(f"Profiler region name must be non-empty without surrounding whitespace: {self.name!r}")
         if not self.name.islower():
-            raise ValueError(
-                f"Profiler region name must be lower-case: {self.name!r}")
+            raise ValueError(f"Profiler region name must be lower-case: {self.name!r}")
 
 
 _REGISTERED_REGIONS: dict[str, ProfilerRegion] = {}
@@ -199,8 +196,7 @@ def get_or_create_profiler(trace_dir: str | None) -> TorchProfilerController:
         envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK,
         envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS,
     )
-    logger.info("FASTVIDEO_TORCH_PROFILE_REGIONS=%s",
-                envs.FASTVIDEO_TORCH_PROFILE_REGIONS)
+    logger.info("FASTVIDEO_TORCH_PROFILE_REGIONS=%s", envs.FASTVIDEO_TORCH_PROFILE_REGIONS)
 
     profiler = torch.profiler.profile(
         activities=_DEFAULT_ACTIVITIES,
@@ -213,8 +209,7 @@ def get_or_create_profiler(trace_dir: str | None) -> TorchProfilerController:
             warmup=envs.FASTVIDEO_TORCH_PROFILER_WARMUP_STEPS,
             active=envs.FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS,
         ),
-        on_trace_ready=torch.profiler.tensorboard_trace_handler(trace_dir,
-                                                                use_gzip=True),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(trace_dir, use_gzip=True),
     )
     controller = TorchProfilerController(profiler, _DEFAULT_ACTIVITIES)
     controller.start()
@@ -241,16 +236,13 @@ class TorchProfilerConfig:
 
         requested_regions = {
             token.strip()
-            for token in (getattr(envs, "FASTVIDEO_TORCH_PROFILE_REGIONS", "")
-                          or "").split(",") if token.strip()
+            for token in (getattr(envs, "FASTVIDEO_TORCH_PROFILE_REGIONS", "") or "").split(",") if token.strip()
         }
 
         if not requested_regions:
-            available = ", ".join(region.name
-                                  for region in list_profiler_regions())
-            raise ValueError(
-                "FASTVIDEO_TORCH_PROFILE_REGIONS must list at least one region; "
-                f"available regions: {available}")
+            available = ", ".join(region.name for region in list_profiler_regions())
+            raise ValueError("FASTVIDEO_TORCH_PROFILE_REGIONS must list at least one region; "
+                             f"available regions: {available}")
 
         regions: dict[str, bool] = {}
         available_regions = list_profiler_regions()
@@ -259,17 +251,13 @@ class TorchProfilerConfig:
         for token in requested_regions:
             resolved = resolve_profiler_region(token)
             if resolved is None:
-                logger.warning(
-                    "Unknown profiler region '%s'; available regions: %s",
-                    token, available_names)
+                logger.warning("Unknown profiler region '%s'; available regions: %s", token, available_names)
                 continue
             regions[resolved.name] = True
 
         if not regions:
-            raise ValueError(
-                "FASTVIDEO_TORCH_PROFILE_REGIONS did not match any known regions; "
-                f"requested={sorted(requested_regions)}, available={available_names}"
-            )
+            raise ValueError("FASTVIDEO_TORCH_PROFILE_REGIONS did not match any known regions; "
+                             f"requested={sorted(requested_regions)}, available={available_names}")
 
         return cls(regions=regions)
 
@@ -321,9 +309,7 @@ class TorchProfilerController:
         activities_tuple = tuple(activities)
         existing = get_global_controller()
         if existing is not None and not disabled:
-            raise RuntimeError(
-                "TorchProfilerController already initialized globally. Use get_global_controller()."
-            )
+            raise RuntimeError("TorchProfilerController already initialized globally. Use get_global_controller().")
         if disabled:
             self._profiler = None
             return
@@ -333,9 +319,7 @@ class TorchProfilerController:
         self._config = config or TorchProfilerConfig.from_env()
         self._collection_enabled = False
         self._active_region_depth = 0
-        logger.info(
-            "PROFILER: TorchProfilerController initialized with config: %s",
-            self._config)
+        logger.info("PROFILER: TorchProfilerController initialized with config: %s", self._config)
         set_global_profiler(self._profiler)
         set_global_controller(self)
 
@@ -359,8 +343,7 @@ class TorchProfilerController:
             return
         if self._collection_enabled == enabled:
             return
-        event = ("fastvideo.profiler.enable_collection"
-                 if enabled else "fastvideo.profiler.disable_collection")
+        event = ("fastvideo.profiler.enable_collection" if enabled else "fastvideo.profiler.disable_collection")
         with torch.profiler.record_function(event):
             self._profiler.toggle_collection_dynamic(enabled, self._activities)
         self._collection_enabled = enabled
@@ -380,20 +363,16 @@ class TorchProfilerController:
         with torch.profiler.record_function(f"fastvideo.region::{region}"):
             self._active_region_depth += 1
             if self._active_region_depth == 1:
-                logger.info(
-                    "PROFILER: Setting collection to True (depth=%s) for region %s",
-                    self._active_region_depth, region)
+                logger.info("PROFILER: Setting collection to True (depth=%s) for region %s", self._active_region_depth,
+                            region)
                 self._set_collection(True)
             try:
                 yield
             finally:
                 self._active_region_depth -= 1
-                logger.info("PROFILER: Decreasing active region depth to %s",
-                            self._active_region_depth)
+                logger.info("PROFILER: Decreasing active region depth to %s", self._active_region_depth)
                 if self._active_region_depth == 0:
-                    logger.info(
-                        "PROFILER: Setting collection to False upon exiting region %s",
-                        region)
+                    logger.info("PROFILER: Setting collection to False upon exiting region %s", region)
                     self._set_collection(False)
 
     def start(self) -> None:
@@ -437,8 +416,7 @@ class TorchProfilerController:
         return self._profiler
 
 
-def profile_region(
-        region: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def profile_region(region: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Wrap a bound method so it runs inside a profiler region if available."""
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:

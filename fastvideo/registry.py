@@ -19,9 +19,9 @@ from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.cosmos2_5 import Cosmos25Config
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
-from fastvideo.configs.pipelines.hunyuan15 import (
-    Hunyuan15T2V480PConfig, Hunyuan15I2V480PStepDistilledConfig,
-    Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig, Hunyuan15SR1080PConfig)
+from fastvideo.configs.pipelines.hunyuan15 import (Hunyuan15T2V480PConfig, Hunyuan15I2V480PStepDistilledConfig,
+                                                   Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig,
+                                                   Hunyuan15SR1080PConfig)
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
@@ -51,18 +51,16 @@ from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.configs.sample.cosmos import (
     Cosmos_Predict2_2B_Video2World_SamplingParam, )
 from fastvideo.configs.sample.cosmos2_5 import Cosmos25SamplingParamBase
-from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam,
-                                              HunyuanSamplingParam)
-from fastvideo.configs.sample.hunyuan15 import (
-    Hunyuan15_480P_SamplingParam,
-    Hunyuan15_480P_StepDistilled_I2V_SamplingParam,
-    Hunyuan15_720P_SamplingParam, Hunyuan15_720P_Distilled_I2V_SamplingParam,
-    Hunyuan15_SR_1080P_SamplingParam)
+from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam, HunyuanSamplingParam)
+from fastvideo.configs.sample.hunyuan15 import (Hunyuan15_480P_SamplingParam,
+                                                Hunyuan15_480P_StepDistilled_I2V_SamplingParam,
+                                                Hunyuan15_720P_SamplingParam,
+                                                Hunyuan15_720P_Distilled_I2V_SamplingParam,
+                                                Hunyuan15_SR_1080P_SamplingParam)
 from fastvideo.configs.sample.hyworld import HYWorld_SamplingParam
 from fastvideo.configs.sample.hunyuangamecraft import HunyuanGameCraftSamplingParam
 from fastvideo.configs.sample.lingbotworld import LingBotWorld_SamplingParam
-from fastvideo.configs.sample.ltx2 import (LTX2BaseSamplingParam,
-                                           LTX2DistilledSamplingParam)
+from fastvideo.configs.sample.ltx2 import (LTX2BaseSamplingParam, LTX2DistilledSamplingParam)
 from fastvideo.configs.sample.turbodiffusion import (
     TurboDiffusionI2V_A14B_SamplingParam,
     TurboDiffusionT2V_14B_SamplingParam,
@@ -87,8 +85,7 @@ from fastvideo.configs.sample.sd35 import SD35SamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
-from fastvideo.utils import (maybe_download_model_index,
-                             verify_model_config_and_directory)
+from fastvideo.utils import (maybe_download_model_index, verify_model_config_and_directory)
 
 logger = init_logger(__name__)
 
@@ -102,8 +99,7 @@ _PIPELINE_REGISTRY: dict[str, dict[str, type[ComposedPipelineBase]]] = {}
 
 # Registry for pipeline configuration classes (for single-file weights without
 # model_index.json). Maps pipeline_class_name -> (PipelineConfig, SamplingParam)
-_PIPELINE_CONFIG_REGISTRY: dict[str, tuple[type[PipelineConfig],
-                                           type[SamplingParam]]] = {}
+_PIPELINE_CONFIG_REGISTRY: dict[str, tuple[type[PipelineConfig], type[SamplingParam]]] = {}
 
 
 def _discover_and_register_pipelines() -> None:
@@ -118,17 +114,14 @@ def _discover_and_register_pipelines() -> None:
         for pipeline_cls in pipeline_dict.values():
             if pipeline_cls is None:
                 continue
-            if hasattr(pipeline_cls, "pipeline_config_cls") and hasattr(
-                    pipeline_cls, "sampling_params_cls"):
+            if hasattr(pipeline_cls, "pipeline_config_cls") and hasattr(pipeline_cls, "sampling_params_cls"):
                 _PIPELINE_CONFIG_REGISTRY[pipeline_cls.__name__] = (
                     pipeline_cls.pipeline_config_cls,
                     pipeline_cls.sampling_params_cls,
                 )
 
 
-def get_pipeline_config_classes(
-    pipeline_class_name: str
-) -> tuple[type[PipelineConfig], type[SamplingParam]] | None:
+def get_pipeline_config_classes(pipeline_class_name: str) -> tuple[type[PipelineConfig], type[SamplingParam]] | None:
     _discover_and_register_pipelines()
     return _PIPELINE_CONFIG_REGISTRY.get(pipeline_class_name)
 
@@ -171,9 +164,8 @@ def register_configs(
     if hf_model_paths:
         for path in hf_model_paths:
             if path in _MODEL_HF_PATH_TO_NAME:
-                logger.warning(
-                    "Model path '%s' is already mapped to '%s' and will be overwritten by '%s'.",
-                    path, _MODEL_HF_PATH_TO_NAME[path], model_id)
+                logger.warning("Model path '%s' is already mapped to '%s' and will be overwritten by '%s'.", path,
+                               _MODEL_HF_PATH_TO_NAME[path], model_id)
             _MODEL_HF_PATH_TO_NAME[path] = model_id
 
     if model_detectors:
@@ -195,21 +187,16 @@ def _get_config_info(
     # 1. Exact match
     if model_path in _MODEL_HF_PATH_TO_NAME:
         model_id = _MODEL_HF_PATH_TO_NAME[model_path]
-        logger.debug("Resolved model path '%s' from exact path match.",
-                     model_path)
+        logger.debug("Resolved model path '%s' from exact path match.", model_path)
         return _CONFIG_REGISTRY.get(model_id)
 
     # 2. Partial match: use short model name.
     model_name = get_model_short_name(model_path.lower())
-    all_model_hf_paths = sorted(_MODEL_HF_PATH_TO_NAME.keys(),
-                                key=len,
-                                reverse=True)
+    all_model_hf_paths = sorted(_MODEL_HF_PATH_TO_NAME.keys(), key=len, reverse=True)
     for registered_model_hf_id in all_model_hf_paths:
-        registered_model_name = get_model_short_name(
-            registered_model_hf_id.lower())
+        registered_model_name = get_model_short_name(registered_model_hf_id.lower())
         if registered_model_name == model_name:
-            logger.debug("Resolved model name '%s' from partial path match.",
-                         registered_model_hf_id)
+            logger.debug("Resolved model name '%s' from partial path match.", registered_model_hf_id)
             model_id = _MODEL_HF_PATH_TO_NAME[registered_model_hf_id]
             return _CONFIG_REGISTRY.get(model_id)
 
@@ -224,8 +211,7 @@ def _get_config_info(
     matched_model_names: list[str] = []
     for model_id, detector in _MODEL_NAME_DETECTORS:
         if detector(model_path.lower()) or detector(pipeline_name):
-            logger.debug("Matched model name '%s' using a registered detector.",
-                         model_id)
+            logger.debug("Matched model name '%s' using a registered detector.", model_id)
             matched_model_names.append(model_id)
 
     if matched_model_names:
@@ -255,8 +241,7 @@ def _register_configs() -> None:
             "FastVideo/LTX2-Diffusers",
         ],
         model_detectors=[
-            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and
-            "distilled" not in path.lower(),
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" not in path.lower(),
         ],
     )
     # LTX-2 (distilled)
@@ -267,8 +252,7 @@ def _register_configs() -> None:
             "FastVideo/LTX2-Distilled-Diffusers",
         ],
         model_detectors=[
-            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and
-            "distilled" in path.lower(),
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" in path.lower(),
         ],
     )
 
@@ -312,10 +296,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Hunyuan15_SR_1080P_SamplingParam,
         pipeline_config_cls=Hunyuan15SR1080PConfig,
-        hf_model_paths=[
-            "weizhou03/HunyuanVideo-1.5-Diffusers-1080p",
-            "weizhou03/HunyuanVideo-1.5-Diffusers-1080p-2SR"
-        ],
+        hf_model_paths=["weizhou03/HunyuanVideo-1.5-Diffusers-1080p", "weizhou03/HunyuanVideo-1.5-Diffusers-1080p-2SR"],
     )
 
     # Hunyuan (excludes gamecraft, hyworld, and versioned models)
@@ -326,8 +307,7 @@ def _register_configs() -> None:
             "hunyuanvideo-community/HunyuanVideo",
         ],
         model_detectors=[
-            lambda path: "hunyuan" in path.lower()
-            and "gamecraft" not in path.lower() and "hyworld" not in path.lower(
+            lambda path: "hunyuan" in path.lower() and "gamecraft" not in path.lower() and "hyworld" not in path.lower(
             ) and "1.5" not in path.lower() and "1-5" not in path.lower()
         ],
     )
@@ -365,10 +345,7 @@ def _register_configs() -> None:
         hf_model_paths=[
             "FastVideo/LingBot-World-Base-Cam-Diffusers",
         ],
-        model_detectors=[
-            lambda path:
-            ("lingbotworld" in path.lower() or "lingbot-world" in path.lower())
-        ],
+        model_detectors=[lambda path: ("lingbotworld" in path.lower() or "lingbot-world" in path.lower())],
     )
 
     # LongCat
@@ -397,8 +374,7 @@ def _register_configs() -> None:
             "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",
         ],
         model_detectors=[
-            lambda path: "matrix-game" in path.lower() or "matrixgame" in path.
-            lower(),
+            lambda path: "matrix-game" in path.lower() or "matrixgame" in path.lower(),
         ],
     )
 
@@ -426,8 +402,8 @@ def _register_configs() -> None:
             "nvidia/Cosmos-Predict2-2B-Video2World",
         ],
         model_detectors=[
-            lambda path: "cosmos" in path.lower() and ("2.5" not in path.lower(
-            ) and "2_5" not in path.lower() and "25" not in path.lower()),
+            lambda path: "cosmos" in path.lower() and
+            ("2.5" not in path.lower() and "2_5" not in path.lower() and "25" not in path.lower()),
         ],
     )
 
@@ -438,10 +414,7 @@ def _register_configs() -> None:
         hf_model_paths=[
             "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",
         ],
-        model_detectors=[
-            lambda path: "turbodiffusion" in path.lower() or "turbowan" in path.
-            lower()
-        ],
+        model_detectors=[lambda path: "turbodiffusion" in path.lower() or "turbowan" in path.lower()],
     )
     register_configs(
         sampling_param_cls=TurboDiffusionT2V_14B_SamplingParam,
@@ -593,8 +566,7 @@ def get_model_info(
     workload_type: WorkloadType | None = None,
     override_pipeline_cls_name: str | None = None,
 ) -> ModelInfo:
-    from fastvideo.pipelines.pipeline_registry import (PipelineType,
-                                                       get_pipeline_registry)
+    from fastvideo.pipelines.pipeline_registry import (PipelineType, get_pipeline_registry)
 
     if pipeline_type is None:
         pipeline_type = PipelineType.BASIC
@@ -611,18 +583,15 @@ def get_model_info(
 
     pipeline_name = config.get("_class_name")
     if override_pipeline_cls_name:
-        logger.info("Overriding pipeline class name from %s to %s",
-                    pipeline_name, override_pipeline_cls_name)
+        logger.info("Overriding pipeline class name from %s to %s", pipeline_name, override_pipeline_cls_name)
         pipeline_name = override_pipeline_cls_name
 
     if pipeline_name is None:
-        raise ValueError(
-            "Model config does not contain a _class_name attribute. "
-            "Only diffusers format is supported.")
+        raise ValueError("Model config does not contain a _class_name attribute. "
+                         "Only diffusers format is supported.")
 
     pipeline_registry = get_pipeline_registry(pipeline_type)
-    pipeline_cls = pipeline_registry.resolve_pipeline_cls(
-        pipeline_name, pipeline_type, workload_type)
+    pipeline_cls = pipeline_registry.resolve_pipeline_cls(pipeline_name, pipeline_type, workload_type)
 
     config_info = _get_config_info(model_path, raise_on_missing=True)
     assert config_info is not None, "config_info must be resolved"
@@ -636,24 +605,18 @@ def get_model_info(
     )
 
 
-def get_pipeline_config_cls_from_name(
-        pipeline_name_or_path: str) -> type[PipelineConfig]:
-    config_info = _get_config_info(pipeline_name_or_path,
-                                   raise_on_missing=False)
+def get_pipeline_config_cls_from_name(pipeline_name_or_path: str) -> type[PipelineConfig]:
+    config_info = _get_config_info(pipeline_name_or_path, raise_on_missing=False)
     if config_info is None:
         raise ValueError(
-            f"No match found for pipeline {pipeline_name_or_path}, please check the pipeline name or path."
-        )
+            f"No match found for pipeline {pipeline_name_or_path}, please check the pipeline name or path.")
     return config_info.pipeline_config_cls
 
 
 def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
-    config_info = _get_config_info(pipeline_name_or_path,
-                                   raise_on_missing=False)
+    config_info = _get_config_info(pipeline_name_or_path, raise_on_missing=False)
     if config_info is None:
-        logger.warning(
-            "No match found for pipeline %s, using default sampling param.",
-            pipeline_name_or_path)
+        logger.warning("No match found for pipeline %s, using default sampling param.", pipeline_name_or_path)
         return None
     return config_info.sampling_param_cls
 

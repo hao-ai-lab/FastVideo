@@ -26,10 +26,8 @@ import fastvideo.envs as envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.utils import (decorate_logs, get_distributed_init_method,
-                             get_exception_traceback, get_loopback_ip,
-                             get_mp_context, get_open_port,
-                             kill_itself_when_parent_died, force_spawn)
+from fastvideo.utils import (decorate_logs, get_distributed_init_method, get_exception_traceback, get_loopback_ip,
+                             get_mp_context, get_open_port, kill_itself_when_parent_died, force_spawn)
 from fastvideo.worker.executor import Executor
 from fastvideo.worker.worker_base import WorkerWrapperBase
 
@@ -78,8 +76,7 @@ class MultiprocExecutor(Executor):
 
         # Check if master_port is provided in fastvideo_args
         master_port = get_open_port(self.fastvideo_args.master_port)
-        distributed_init_method = get_distributed_init_method(
-            get_loopback_ip(), master_port)
+        distributed_init_method = get_distributed_init_method(get_loopback_ip(), master_port)
         logger.info("Use master port: %s", master_port)
 
         # Create streaming queues BEFORE spawning workers
@@ -111,14 +108,12 @@ class MultiprocExecutor(Executor):
             if not success:
                 # Clean up the worker procs if there was a failure.
                 # Close death_writers first to signal workers to exit
-                self._ensure_worker_termination(
-                    [uw.proc for uw in unready_workers])
+                self._ensure_worker_termination([uw.proc for uw in unready_workers])
 
         # Register shutdown on exit
         atexit.register(self.shutdown)
 
-    def execute_forward(self, forward_batch: ForwardBatch,
-                        fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         responses = self.collective_rpc("execute_forward",
                                         kwargs={
                                             "forward_batch": forward_batch,
@@ -127,12 +122,9 @@ class MultiprocExecutor(Executor):
         output = responses[0]["output_batch"]
 
         logging_info = None
-        if envs.FASTVIDEO_STAGE_LOGGING:
-            logging_info = responses[0]["logging_info"]
-        else:
-            logging_info = None
+        logging_info = responses[0]["logging_info"] if envs.FASTVIDEO_STAGE_LOGGING else None
 
-        # Get extra dict (contains audio, etc.)
+        # Get extra dict (contains audio, peak_memory_mb, etc.)
         extra = responses[0].get("extra", {})
 
         result_batch = ForwardBatch(data_type=forward_batch.data_type,
@@ -142,9 +134,7 @@ class MultiprocExecutor(Executor):
 
         return result_batch
 
-    def execute_streaming_reset(
-            self, forward_batch: ForwardBatch,
-            fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+    def execute_streaming_reset(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         responses = self.collective_rpc("execute_streaming_reset",
                                         kwargs={
                                             "forward_batch": forward_batch,
@@ -152,8 +142,7 @@ class MultiprocExecutor(Executor):
                                         })
         return responses[0]
 
-    def execute_streaming_step(self, keyboard_action: Any,
-                               mouse_action: Any) -> ForwardBatch:
+    def execute_streaming_step(self, keyboard_action: Any, mouse_action: Any) -> ForwardBatch:
         responses = self.collective_rpc("execute_streaming_step",
                                         kwargs={
                                             "keyboard_action": keyboard_action,
@@ -161,14 +150,11 @@ class MultiprocExecutor(Executor):
                                         })
         return responses[0]
 
-    async def execute_streaming_step_async(self, keyboard_action: Any,
-                                           mouse_action: Any) -> ForwardBatch:
+    async def execute_streaming_step_async(self, keyboard_action: Any, mouse_action: Any) -> ForwardBatch:
         responses = await self.collective_rpc_async("execute_streaming_step",
                                                     kwargs={
-                                                        "keyboard_action":
-                                                        keyboard_action,
-                                                        "mouse_action":
-                                                        mouse_action,
+                                                        "keyboard_action": keyboard_action,
+                                                        "mouse_action": mouse_action,
                                                     })
         return responses[0]
 
@@ -188,15 +174,13 @@ class MultiprocExecutor(Executor):
             return
 
         if self._streaming_input_queue is not None:
-            self._streaming_input_queue.put(
-                StreamingTask(task_type=StreamingTaskType.EXIT))
+            self._streaming_input_queue.put(StreamingTask(task_type=StreamingTaskType.EXIT))
         self._streaming_enabled = False
 
         self._streaming_input_queue = None
         self._streaming_output_queue = None
 
-    def submit_reset(self, forward_batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> None:
+    def submit_reset(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> None:
         if not self._streaming_enabled:
             self.enable_streaming()
 
@@ -207,11 +191,9 @@ class MultiprocExecutor(Executor):
                 fastvideo_args=fastvideo_args,
             ))
 
-    def submit_step(self, keyboard_action: torch.Tensor | None,
-                    mouse_action: torch.Tensor | None) -> None:
+    def submit_step(self, keyboard_action: torch.Tensor | None, mouse_action: torch.Tensor | None) -> None:
         if not self._streaming_enabled:
-            raise RuntimeError(
-                "Streaming mode not enabled. Call enable_streaming() first.")
+            raise RuntimeError("Streaming mode not enabled. Call enable_streaming() first.")
 
         self._streaming_input_queue.put(
             StreamingTask(
@@ -222,11 +204,9 @@ class MultiprocExecutor(Executor):
 
     def submit_clear(self) -> None:
         if self._streaming_enabled and self._streaming_input_queue is not None:
-            self._streaming_input_queue.put(
-                StreamingTask(task_type=StreamingTaskType.CLEAR))
+            self._streaming_input_queue.put(StreamingTask(task_type=StreamingTaskType.CLEAR))
 
-    def get_result(self,
-                   timeout: float | None = None) -> StreamingResult | None:
+    def get_result(self, timeout: float | None = None) -> StreamingResult | None:
         if not self._streaming_enabled or self._streaming_output_queue is None:
             return None
 
@@ -244,9 +224,7 @@ class MultiprocExecutor(Executor):
 
         return self._streaming_output_queue.get()
 
-    def set_lora_adapter(self,
-                         lora_nickname: str,
-                         lora_path: str | None = None) -> None:
+    def set_lora_adapter(self, lora_nickname: str, lora_path: str | None = None) -> None:
         responses = self.collective_rpc("set_lora_adapter",
                                         kwargs={
                                             "lora_nickname": lora_nickname,
@@ -254,8 +232,7 @@ class MultiprocExecutor(Executor):
                                         })
         for i, response in enumerate(responses):
             if response["status"] != "lora_adapter_set":
-                raise RuntimeError(
-                    f"Worker {i} failed to set LoRA adapter to {lora_path}")
+                raise RuntimeError(f"Worker {i} failed to set LoRA adapter to {lora_path}")
 
     def unmerge_lora_weights(self) -> None:
         responses = self.collective_rpc("unmerge_lora_weights", kwargs={})
@@ -278,11 +255,7 @@ class MultiprocExecutor(Executor):
 
         try:
             for worker in self.workers:
-                worker.pipe.send({
-                    "method": method,
-                    "args": args,
-                    "kwargs": kwargs
-                })
+                worker.pipe.send({"method": method, "args": args, "kwargs": kwargs})
 
             responses = []
             for worker in self.workers:
@@ -294,8 +267,7 @@ class MultiprocExecutor(Executor):
         except KeyboardInterrupt as e:
             # if we catch a KeyboardInterrupt, user wants to stop the execution.
             # we need to send a signal to all workers to stop.
-            logger.info(
-                "Received KeyboardInterrupt, sending SIGINT to all workers")
+            logger.info("Received KeyboardInterrupt, sending SIGINT to all workers")
             for worker in self.workers:
                 if worker.proc.pid is not None:
                     os.kill(worker.proc.pid, signal.SIGINT)
@@ -317,8 +289,7 @@ class MultiprocExecutor(Executor):
         async def recv_from_worker(worker: WorkerProcHandle) -> Any:
             return await loop.run_in_executor(None, worker.pipe.recv)
 
-        responses = await asyncio.gather(
-            *[recv_from_worker(worker) for worker in self.workers])
+        responses = await asyncio.gather(*[recv_from_worker(worker) for worker in self.workers])
         return list(responses)
 
     def shutdown(self) -> None:
@@ -334,11 +305,7 @@ class MultiprocExecutor(Executor):
             # Send termination message to all workers
             for worker in self.workers:
                 with contextlib.suppress(Exception):
-                    worker.pipe.send({
-                        "method": "shutdown",
-                        "args": (),
-                        "kwargs": {}
-                    })
+                    worker.pipe.send({"method": "shutdown", "args": (), "kwargs": {}})
 
             # Give workers some time to exit gracefully
             start_time = time.perf_counter()
@@ -387,8 +354,7 @@ class MultiprocExecutor(Executor):
         received termination requests. Waits for processing, then sends
         termination and kill signals if needed."""
 
-        def wait_for_termination(procs: list[BaseProcess],
-                                 timeout: float) -> bool:
+        def wait_for_termination(procs: list[BaseProcess], timeout: float) -> bool:
             if not time:
                 # If we are in late stage shutdown, the interpreter may replace
                 # `time` with `None`.
@@ -439,8 +405,7 @@ class WorkerProcHandle:
     pipe: Connection
 
     @classmethod
-    def from_unready_handle(
-            cls, unready_handle: UnreadyWorkerProcHandle) -> WorkerProcHandle:
+    def from_unready_handle(cls, unready_handle: UnreadyWorkerProcHandle) -> WorkerProcHandle:
         return cls(
             proc=unready_handle.proc,
             rank=unready_handle.rank,
@@ -467,8 +432,7 @@ class WorkerMultiprocProc:
         self.pipe = pipe
         self.streaming_input_queue = streaming_input_queue
         self.streaming_output_queue = streaming_output_queue
-        wrapper = WorkerWrapperBase(fastvideo_args=fastvideo_args,
-                                    rpc_rank=rank)
+        wrapper = WorkerWrapperBase(fastvideo_args=fastvideo_args, rpc_rank=rank)
 
         all_kwargs: list[dict] = [{} for _ in range(fastvideo_args.num_gpus)]
         all_kwargs[rank] = {
@@ -581,17 +545,14 @@ class WorkerMultiprocProc:
                 worker.shutdown()
 
     @staticmethod
-    def wait_for_ready(
-        unready_proc_handles: list[UnreadyWorkerProcHandle]
-    ) -> list[WorkerProcHandle]:
+    def wait_for_ready(unready_proc_handles: list[UnreadyWorkerProcHandle]) -> list[WorkerProcHandle]:
 
         e = Exception("WorkerMultiprocProc initialization failed due to "
                       "an exception in a background process. "
                       "See stack trace for root cause.")
 
         pipes = {handle.ready_pipe: handle for handle in unready_proc_handles}
-        ready_proc_handles: list[WorkerProcHandle
-                                 | None] = ([None] * len(unready_proc_handles))
+        ready_proc_handles: list[WorkerProcHandle | None] = ([None] * len(unready_proc_handles))
         while pipes:
             ready = mp.connection.wait(pipes.keys())
             for pipe in ready:
@@ -604,8 +565,7 @@ class WorkerMultiprocProc:
                         raise e
 
                     ready_proc_handles[unready_proc_handle.rank] = (
-                        WorkerProcHandle.from_unready_handle(
-                            unready_proc_handle))
+                        WorkerProcHandle.from_unready_handle(unready_proc_handle))
 
                 except EOFError:
                     e.__suppress_context__ = True
@@ -638,50 +598,43 @@ class WorkerMultiprocProc:
                             self.pipe.send(response)
                         break
                     if method == "start_streaming_queue_loop":
-                        self.pipe.send(
-                            {"status": "streaming_queue_loop_started"})
+                        self.pipe.send({"status": "streaming_queue_loop_started"})
                         self.streaming_queue_loop()
                         continue
                     if method == 'execute_forward':
                         forward_batch = kwargs['forward_batch']
                         fastvideo_args = kwargs['fastvideo_args']
-                        output_batch = self.worker.execute_forward(
-                            forward_batch, fastvideo_args)
+                        output_batch = self.worker.execute_forward(forward_batch, fastvideo_args)
                         logging_info = None
                         if envs.FASTVIDEO_STAGE_LOGGING:
                             logging_info = output_batch.logging_info
                         # result tensor shared by CUDA IPC to avoid serialization overhead
                         result = output_batch.output
+                        extra = output_batch.extra or {}
+                        extra["peak_memory_mb"] = (torch.cuda.max_memory_allocated() / (1024 * 1024))
                         self.pipe.send({
                             "output_batch": result,
                             "logging_info": logging_info,
-                            "extra": output_batch.extra,
+                            "extra": extra,
                         })
                     else:
-                        result = self.worker.execute_method(
-                            method, *args, **kwargs)
+                        result = self.worker.execute_method(method, *args, **kwargs)
                         self.pipe.send(result)
                 else:
                     result = self.worker.execute_method(method, *args, **kwargs)
                     self.pipe.send(result)
             except KeyboardInterrupt:
-                logger.error(
-                    "Worker %d in loop received KeyboardInterrupt, aborting forward pass",
-                    self.rank)
+                logger.error("Worker %d in loop received KeyboardInterrupt, aborting forward pass", self.rank)
                 try:
-                    self.pipe.send(
-                        {"error": "Operation aborted by KeyboardInterrupt"})
-                    logger.info("Worker %d sent error response after interrupt",
-                                self.rank)
+                    self.pipe.send({"error": "Operation aborted by KeyboardInterrupt"})
+                    logger.info("Worker %d sent error response after interrupt", self.rank)
                 except Exception as e:
-                    logger.error("Worker %d failed to send error response: %s",
-                                 self.rank, str(e))
+                    logger.error("Worker %d failed to send error response: %s", self.rank, str(e))
                 continue
 
     def streaming_queue_loop(self) -> None:
         if self.streaming_input_queue is None or self.streaming_output_queue is None:
-            logger.error("Worker %d: streaming queues not initialized",
-                         self.rank)
+            logger.error("Worker %d: streaming queues not initialized", self.rank)
             return
 
         while True:
@@ -692,35 +645,25 @@ class WorkerMultiprocProc:
                     break
                 elif task.task_type == StreamingTaskType.RESET:
                     try:
-                        self.worker.execute_streaming_reset(
-                            task.batch, task.fastvideo_args)
-                        self.streaming_output_queue.put(
-                            StreamingResult(task_type=StreamingTaskType.RESET))
+                        self.worker.execute_streaming_reset(task.batch, task.fastvideo_args)
+                        self.streaming_output_queue.put(StreamingResult(task_type=StreamingTaskType.RESET))
                     except Exception as e:
                         logger.error("Worker %d reset error: %s", self.rank, e)
-                        self.streaming_output_queue.put(
-                            StreamingResult(task_type=StreamingTaskType.RESET,
-                                            error=e))
+                        self.streaming_output_queue.put(StreamingResult(task_type=StreamingTaskType.RESET, error=e))
                 elif task.task_type == StreamingTaskType.STEP:
                     try:
-                        batch = self.worker.execute_streaming_step(
-                            task.keyboard_action, task.mouse_action)
+                        batch = self.worker.execute_streaming_step(task.keyboard_action, task.mouse_action)
                         self.streaming_output_queue.put(
-                            StreamingResult(task_type=StreamingTaskType.STEP,
-                                            output_batch=batch))
+                            StreamingResult(task_type=StreamingTaskType.STEP, output_batch=batch))
                     except Exception as e:
                         logger.error("Worker %d step error: %s", self.rank, e)
-                        self.streaming_output_queue.put(
-                            StreamingResult(task_type=StreamingTaskType.STEP,
-                                            error=e))
+                        self.streaming_output_queue.put(StreamingResult(task_type=StreamingTaskType.STEP, error=e))
                 elif task.task_type == StreamingTaskType.CLEAR:
                     self.worker.execute_streaming_clear()
-                    self.streaming_output_queue.put(
-                        StreamingResult(task_type=StreamingTaskType.CLEAR))
+                    self.streaming_output_queue.put(StreamingResult(task_type=StreamingTaskType.CLEAR))
             except Exception as e:
                 logger.error("Worker %d queue loop error: %s", self.rank, e)
-                self.streaming_output_queue.put(
-                    StreamingResult(task_type=StreamingTaskType.STEP, error=e))
+                self.streaming_output_queue.put(StreamingResult(task_type=StreamingTaskType.STEP, error=e))
 
     @staticmethod
     def setup_proc_title_and_log_prefix() -> None:

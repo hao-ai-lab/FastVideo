@@ -196,6 +196,7 @@ class MMDoubleStreamBlock(nn.Module):
         txt: torch.Tensor,
         vec: torch.Tensor,
         freqs_cis: tuple,
+        original_seq_len: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # Process modulation vectors
         img_mod_outputs = self.img_mod(vec)
@@ -253,7 +254,7 @@ class MMDoubleStreamBlock(nn.Module):
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_k.dtype)
 
         # Run distributed attention
-        img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v, freqs_cis=freqs_cis)
+        img_attn, txt_attn = self.attn(img_q, img_k, img_v, original_seq_len, txt_q, txt_k, txt_v, freqs_cis=freqs_cis)
         img_attn_out, _ = self.img_attn_proj(
             img_attn.view(batch_size, image_seq_len, -1))
         # Use fused operation for residual connection, normalization, and modulation
@@ -355,6 +356,7 @@ class MMSingleStreamBlock(nn.Module):
         vec: torch.Tensor,
         txt_len: int,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
+        original_seq_len: int | None = None,
     ) -> torch.Tensor:
         # Process modulation
         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
@@ -386,7 +388,7 @@ class MMSingleStreamBlock(nn.Module):
 
 
         # Run distributed attention
-        img_attn_output, txt_attn_output = self.attn(img_q, img_k, img_v, txt_q,
+        img_attn_output, txt_attn_output = self.attn(img_q, img_k, img_v, original_seq_len, txt_q,
                                                      txt_k, txt_v, freqs_cis = freqs_cis)
         attn_output = torch.cat((img_attn_output, txt_attn_output),
                                 dim=1).view(batch_size, seq_len, -1)
@@ -594,7 +596,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
 
         # Process through double stream blocks
         for index, block in enumerate(self.double_blocks):
-            double_block_args = [img, txt, vec, freqs_cis]
+            double_block_args = [img, txt, vec, freqs_cis, original_seq_len]
             img, txt = block(*double_block_args)
         # Merge txt and img to pass through single stream blocks
         x = torch.cat((img, txt), 1)
@@ -607,6 +609,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
                     vec,
                     txt_seq_len,
                     freqs_cis,
+                    original_seq_len,
                 ]
                 x = block(*single_block_args)
 

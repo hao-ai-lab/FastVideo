@@ -33,17 +33,14 @@ class DecodingStage(PipelineStage):
         self.vae: ParallelTiledVAE = vae
         self.pipeline = weakref.ref(pipeline) if pipeline else None
 
-    def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify decoding stage inputs."""
         result = VerificationResult()
         # Denoised latents for VAE decoding: [batch_size, channels, frames, height_latents, width_latents]
-        result.add_check("latents", batch.latents,
-                         [V.is_tensor, V.with_dims(5)])
+        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         return result
 
-    def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify decoding stage outputs."""
         result = VerificationResult()
         # Decoded video/images: [batch_size, channels, frames, height, width]
@@ -59,39 +56,29 @@ class DecodingStage(PipelineStage):
         cfg = getattr(self.vae, "config", None)
 
         # MatrixGame-style: z = z * std + mean
-        if (cfg is not None and hasattr(cfg, "latents_mean")
-                and hasattr(cfg, "latents_std")):
-            latents_mean = torch.tensor(cfg.latents_mean,
-                                        device=latents.device,
-                                        dtype=latents.dtype).view(
-                                            1, -1, 1, 1, 1)
-            latents_std = torch.tensor(cfg.latents_std,
-                                       device=latents.device,
-                                       dtype=latents.dtype).view(
-                                           1, -1, 1, 1, 1)
+        if (cfg is not None and hasattr(cfg, "latents_mean") and hasattr(cfg, "latents_std")):
+            latents_mean = torch.tensor(cfg.latents_mean, device=latents.device,
+                                        dtype=latents.dtype).view(1, -1, 1, 1, 1)
+            latents_std = torch.tensor(cfg.latents_std, device=latents.device, dtype=latents.dtype).view(1, -1, 1, 1, 1)
             return latents * latents_std + latents_mean
 
         # Diffusers-style: scaling_factor (+ optional shift_factor)
         if hasattr(self.vae, "scaling_factor"):
             if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents / self.vae.scaling_factor.to(
-                    latents.device, latents.dtype)
+                latents = latents / self.vae.scaling_factor.to(latents.device, latents.dtype)
             else:
                 latents = latents / self.vae.scaling_factor
 
-            if hasattr(self.vae,
-                       "shift_factor") and self.vae.shift_factor is not None:
+            if hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None:
                 if isinstance(self.vae.shift_factor, torch.Tensor):
-                    latents = latents + self.vae.shift_factor.to(
-                        latents.device, latents.dtype)
+                    latents = latents + self.vae.shift_factor.to(latents.device, latents.dtype)
                 else:
                     latents = latents + self.vae.shift_factor
 
         return latents
 
     @torch.no_grad()
-    def decode(self, latents: torch.Tensor,
-               fastvideo_args: FastVideoArgs) -> torch.Tensor:
+    def decode(self, latents: torch.Tensor, fastvideo_args: FastVideoArgs) -> torch.Tensor:
         """
         Decode latent representations into pixel space using VAE.
         
@@ -110,17 +97,13 @@ class DecodingStage(PipelineStage):
         latents = latents.to(get_local_torch_device())
 
         # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[
-            fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast_enabled = (
-            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         latents = self._denormalize_latents(latents)
 
         # Decode latents
-        with torch.autocast(device_type="cuda",
-                            dtype=vae_dtype,
-                            enabled=vae_autocast_enabled):
+        with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
             # if fastvideo_args.vae_sp:
@@ -157,10 +140,8 @@ class DecodingStage(PipelineStage):
         latents = latents.to(get_local_torch_device())
 
         # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[
-            fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast_enabled = (
-            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         latents = self._denormalize_latents(latents)
 
@@ -169,15 +150,12 @@ class DecodingStage(PipelineStage):
             cache = self.vae.get_streaming_cache()
 
         # Decode latents with streaming
-        with torch.autocast(device_type="cuda",
-                            dtype=vae_dtype,
-                            enabled=vae_autocast_enabled):
+        with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
             if not vae_autocast_enabled:
                 latents = latents.to(vae_dtype)
-            image, cache = self.vae.streaming_decode(latents, cache,
-                                                     is_first_chunk)
+            image, cache = self.vae.streaming_decode(latents, cache, is_first_chunk)
 
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)
@@ -218,16 +196,12 @@ class DecodingStage(PipelineStage):
         pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["vae"]:
             loader = VAELoader()
-            self.vae = loader.load(fastvideo_args.model_paths["vae"],
-                                   fastvideo_args)
+            self.vae = loader.load(fastvideo_args.model_paths["vae"], fastvideo_args)
             if pipeline:
                 pipeline.add_module("vae", self.vae)
             fastvideo_args.model_loaded["vae"] = True
 
-        if fastvideo_args.output_type == "latent":
-            frames = batch.latents
-        else:
-            frames = self.decode(batch.latents, fastvideo_args)
+        frames = batch.latents if fastvideo_args.output_type == "latent" else self.decode(batch.latents, fastvideo_args)
 
         # decode trajectory latents if needed
         if batch.return_trajectory_decoded:
@@ -237,8 +211,7 @@ class DecodingStage(PipelineStage):
                 # batch.trajectory_latents is [batch_size, timesteps, channels, frames, height, width]
                 cur_latent = batch.trajectory_latents[:, idx, :, :, :, :]
                 cur_timestep = batch.trajectory_timesteps[idx]
-                logger.info("decoding trajectory latent for timestep: %s",
-                            cur_timestep)
+                logger.info("decoding trajectory latent for timestep: %s", cur_timestep)
                 decoded_frames = self.decode(cur_latent, fastvideo_args)
                 batch.trajectory_decoded.append(decoded_frames.cpu().float())
 
@@ -246,19 +219,14 @@ class DecodingStage(PipelineStage):
         frames = frames.to(torch.float32)
 
         # Crop padding if this is a LongCat refinement
-        if hasattr(batch, 'num_cond_frames_added') and hasattr(
-                batch, 'new_frame_size_before_padding'):
+        if hasattr(batch, 'num_cond_frames_added') and hasattr(batch, 'new_frame_size_before_padding'):
             num_cond_frames_added = batch.num_cond_frames_added
             new_frame_size = batch.new_frame_size_before_padding
             if num_cond_frames_added > 0 or frames.shape[2] != new_frame_size:
                 # frames is [B, C, T, H, W], crop temporal dimension
-                frames = frames[:, :,
-                                num_cond_frames_added:num_cond_frames_added +
-                                new_frame_size, :, :]
-                logger.info(
-                    "Cropped LongCat refinement padding: %s:%s, final shape: %s",
-                    num_cond_frames_added,
-                    num_cond_frames_added + new_frame_size, frames.shape)
+                frames = frames[:, :, num_cond_frames_added:num_cond_frames_added + new_frame_size, :, :]
+                logger.info("Cropped LongCat refinement padding: %s:%s, final shape: %s", num_cond_frames_added,
+                            num_cond_frames_added + new_frame_size, frames.shape)
 
         # Update batch with decoded image
         batch.output = frames

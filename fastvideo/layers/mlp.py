@@ -32,10 +32,7 @@ class MLP(nn.Module):
         self.act = get_act_fn(act_type)
         if output_dim is None:
             output_dim = input_dim
-        self.fc_out = ReplicatedLinear(mlp_hidden_dim,
-                                       output_dim,
-                                       bias=bias,
-                                       params_dtype=dtype)
+        self.fc_out = ReplicatedLinear(mlp_hidden_dim, output_dim, bias=bias, params_dtype=dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x, _ = self.fc_in(x)

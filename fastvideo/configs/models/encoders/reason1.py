@@ -11,8 +11,7 @@ from fastvideo.configs.models.encoders.base import TextEncoderArchConfig, TextEn
 class Reason1ArchConfig(TextEncoderArchConfig):
     """Architecture settings (defaults match Qwen2.5-VL-7B-Instruct)."""
 
-    architectures: list[str] = field(
-        default_factory=lambda: ["Qwen2_5_VLForConditionalGeneration"])
+    architectures: list[str] = field(default_factory=lambda: ["Qwen2_5_VLForConditionalGeneration"])
     model_type: str = "qwen2_5_vl"
 
     vocab_size: int = 152064
