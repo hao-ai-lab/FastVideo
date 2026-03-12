@@ -17,6 +17,9 @@ from fastvideo.layers.mlp import MLP
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 
+FRACTAL_PIXEL_SIZE = 8
+_ARCH_CONFIG_DEFAULTS = Kandinsky5VideoConfig().arch_config
+
 
 def _build_rotary_freqs(dim: int, max_period: float) -> torch.Tensor:
     return torch.exp(-math.log(max_period) * torch.arange(
@@ -87,7 +90,7 @@ def fractal_flatten(x: torch.Tensor,
                     shape: tuple[int, int, int, int],
                     block_mask: bool = False):
     if block_mask:
-        pixel_size = 8
+        pixel_size = FRACTAL_PIXEL_SIZE
         x = local_patching(x, shape, (1, pixel_size, pixel_size), dim=1)
         rope = local_patching(rope, shape, (1, pixel_size, pixel_size), dim=1)
         x = x.flatten(1, 2)
@@ -102,7 +105,7 @@ def fractal_unflatten(x: torch.Tensor,
                       shape: tuple[int, int, int, int],
                       block_mask: bool = False):
     if block_mask:
-        pixel_size = 8
+        pixel_size = FRACTAL_PIXEL_SIZE
         x = x.reshape(x.shape[0], -1, pixel_size**2, *x.shape[2:])
         x = local_merge(x, shape, (1, pixel_size, pixel_size), dim=1)
     else:
@@ -260,9 +263,10 @@ class Kandinsky5Modulation(nn.Module):
 
 
 def _apply_rotary(x: torch.Tensor, rope: torch.Tensor) -> torch.Tensor:
+    orig_dtype = x.dtype
     x_ = x.reshape(*x.shape[:-1], -1, 1, 2).to(torch.float32)
     x_out = (rope * x_).sum(dim=-1)
-    return x_out.reshape(*x.shape).to(torch.bfloat16)
+    return x_out.reshape(*x.shape).to(orig_dtype)
 
 
 class Kandinsky5Attention(nn.Module):
@@ -385,7 +389,7 @@ class Kandinsky5OutLayer(nn.Module):
                                           math.prod(patch_size) * visual_dim,
                                           bias=True)
 
-    def forward(self, visual_embed: torch.Tensor, text_embed: torch.Tensor,
+    def forward(self, visual_embed: torch.Tensor,
                 time_embed: torch.Tensor) -> torch.Tensor:
         shift, scale = torch.chunk(
             self.modulation(time_embed).unsqueeze(dim=1), 2, dim=-1)
@@ -573,14 +577,12 @@ class Kandinsky5Transformer3DModel(BaseDiT):
     Native FastVideo implementation of Kandinsky5 Transformer.
     """
 
-    _fsdp_shard_conditions = Kandinsky5VideoConfig()._fsdp_shard_conditions
-    _compile_conditions = Kandinsky5VideoConfig()._compile_conditions
-    param_names_mapping = Kandinsky5VideoConfig().param_names_mapping
-    reverse_param_names_mapping = Kandinsky5VideoConfig(
-    ).reverse_param_names_mapping
-    lora_param_names_mapping = Kandinsky5VideoConfig().lora_param_names_mapping
-    _supported_attention_backends = Kandinsky5VideoConfig(
-    )._supported_attention_backends
+    _fsdp_shard_conditions = _ARCH_CONFIG_DEFAULTS._fsdp_shard_conditions
+    _compile_conditions = _ARCH_CONFIG_DEFAULTS._compile_conditions
+    param_names_mapping = _ARCH_CONFIG_DEFAULTS.param_names_mapping
+    reverse_param_names_mapping = _ARCH_CONFIG_DEFAULTS.reverse_param_names_mapping
+    lora_param_names_mapping = _ARCH_CONFIG_DEFAULTS.lora_param_names_mapping
+    _supported_attention_backends = _ARCH_CONFIG_DEFAULTS._supported_attention_backends
 
     def __init__(self, config: Kandinsky5VideoConfig,
                  hf_config: dict[str, Any]) -> None:
@@ -643,7 +645,6 @@ class Kandinsky5Transformer3DModel(BaseDiT):
         timestep: torch.Tensor,
         encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
         | None = None,
-        guidance=None,
         pooled_projections: torch.Tensor | None = None,
         visual_rope_pos: tuple[torch.Tensor, torch.Tensor,
                                torch.Tensor] | list[torch.Tensor] | None = None,
@@ -719,7 +720,7 @@ class Kandinsky5Transformer3DModel(BaseDiT):
         visual_embed = fractal_unflatten(visual_embed,
                                          visual_shape,
                                          block_mask=to_fractal)
-        x = self.out_layer(visual_embed, text_embed, time_embed)
+        x = self.out_layer(visual_embed, time_embed)
 
         if return_dict:
             return Kandinsky5TransformerOutput(sample=x)
