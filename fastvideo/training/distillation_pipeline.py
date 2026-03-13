@@ -543,70 +543,74 @@ class DistillationPipeline(TrainingPipeline):
 
         return pred_video
 
-    def _generator_multi_step_simulation_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
+    def _generator_multi_step_simulation_forward(
+            self, training_batch: TrainingBatch) -> torch.Tensor:
         """Forward pass through student transformer matching inference procedure."""
         latents = training_batch.latents
         dtype = latents.dtype
 
         # Step 1: Randomly sample a target timestep index from denoising_step_list
-        target_timestep_idx = torch.randint(0, len(self.denoising_step_list), [1], device=self.device, dtype=torch.long)
+        target_timestep_idx = torch.randint(0,
+                                            len(self.denoising_step_list), [1],
+                                            device=self.device,
+                                            dtype=torch.long)
         target_timestep_idx_int = target_timestep_idx.item()
-        target_timestep = self.denoising_step_list[target_timestep_idx]
+        target_timestep = self.denoising_step_list[target_timestep_idx_int]
 
         # Step 2: Simulate the multi-step inference process up to the target timestep
         # Start from pure noise like in inference
-        current_noise_latents = torch.randn(self.video_latent_shape, device=self.device, dtype=dtype)
-        current_noise_latents_copy = current_noise_latents.clone()
-
-        # Only run intermediate steps if target_timestep_idx > 0
-        max_target_idx = len(self.denoising_step_list) - 1
-        noise_latents = []
-        noise_latent_index = target_timestep_idx_int - 1
-        if max_target_idx > 0:
-            # Run student model for all steps before the target timestep
-            with torch.no_grad():
-                for step_idx in range(max_target_idx):
-                    current_timestep = self.denoising_step_list[step_idx]
-                    current_timestep_tensor = current_timestep * torch.ones(1, device=self.device, dtype=torch.long)
-                    # Run student model to get flow prediction
-                    training_batch_temp = self._build_distill_input_kwargs(current_noise_latents,
-                                                                           current_timestep_tensor,
-                                                                           training_batch.conditional_dict,
-                                                                           training_batch)
-                    pred_flow = self.transformer(**training_batch_temp.input_kwargs).permute(0, 2, 1, 3, 4)
-                    pred_clean = pred_noise_to_pred_video(pred_noise=pred_flow.flatten(0, 1),
-                                                          noise_input_latent=current_noise_latents.flatten(0, 1),
-                                                          timestep=current_timestep_tensor,
-                                                          scheduler=self.noise_scheduler).unflatten(
-                                                              0, pred_flow.shape[:2])
-
-                    # Add noise for the next timestep
-                    next_timestep = self.denoising_step_list[step_idx + 1]
-                    next_timestep_tensor = next_timestep * torch.ones(1, device=self.device, dtype=torch.long)
-                    noise = torch.randn(self.video_latent_shape, device=self.device, dtype=pred_clean.dtype)
-                    current_noise_latents = self.noise_scheduler.add_noise(pred_clean.flatten(0, 1), noise.flatten(
-                        0, 1), next_timestep_tensor).unflatten(0, pred_clean.shape[:2])
-                    latent_copy = current_noise_latents.clone()
-                    noise_latents.append(latent_copy)
-
+        current_noise_latents = torch.randn(self.video_latent_shape,
+                                            device=self.device,
+                                            dtype=dtype)
+        
         # Step 3: Use the simulated noisy input for the final training step
         # For timestep index 0, this is pure noise
         # For timestep index k > 0, this is the result after k denoising steps + noise at target level
-        if noise_latent_index >= 0:
-            assert noise_latent_index < len(self.denoising_step_list) - 1, "noise_latent_index is out of bounds"
-            noisy_input = noise_latents[noise_latent_index]
-        else:
-            noisy_input = current_noise_latents_copy
+        if target_timestep_idx_int > 0:
+            with torch.no_grad():
+                for step_idx in range(target_timestep_idx_int):
+                    current_timestep = self.denoising_step_list[step_idx]
+                    current_timestep_tensor = torch.tensor(
+                        [current_timestep], device=self.device, dtype=torch.long)
+                    # Run student model to get flow prediction
+                    training_batch_temp = self._build_distill_input_kwargs(
+                        current_noise_latents, current_timestep_tensor,
+                        training_batch.conditional_dict, training_batch)
+                    pred_flow = self.transformer(
+                        **training_batch_temp.input_kwargs).permute(
+                            0, 2, 1, 3, 4)
+                    pred_clean = pred_noise_to_pred_video(
+                        pred_noise=pred_flow.flatten(0, 1),
+                        noise_input_latent=current_noise_latents.flatten(0, 1),
+                        timestep=current_timestep_tensor,
+                        scheduler=self.noise_scheduler).unflatten(
+                            0, pred_flow.shape[:2])
+
+                    # Add noise for the next timestep
+                    next_timestep = self.denoising_step_list[step_idx + 1]
+                    next_timestep_tensor = torch.tensor(
+                        [next_timestep], device=self.device, dtype=torch.long)   
+                    noise = torch.randn(self.video_latent_shape,
+                                        device=self.device,
+                                        dtype=pred_clean.dtype)
+                    current_noise_latents = self.noise_scheduler.add_noise(
+                        pred_clean.flatten(0, 1), noise.flatten(0, 1),
+                        next_timestep_tensor).unflatten(0, pred_clean.shape[:2])
+        noisy_input = current_noise_latents
 
         # Step 4: Final student prediction (this is what we train on)
-        training_batch = self._build_distill_input_kwargs(noisy_input, target_timestep, training_batch.conditional_dict,
-                                                          training_batch)
-        pred_noise = self.transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
-        pred_video = pred_noise_to_pred_video(pred_noise=pred_noise.flatten(0, 1),
-                                              noise_input_latent=noisy_input.flatten(0, 1),
-                                              timestep=target_timestep,
-                                              scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
-        training_batch.dmd_latent_vis_dict["generator_timestep"] = target_timestep.float().detach()
+        training_batch = self._build_distill_input_kwargs(
+            noisy_input, target_timestep, training_batch.conditional_dict,
+            training_batch)
+        pred_noise = self.transformer(**training_batch.input_kwargs).permute(
+            0, 2, 1, 3, 4)
+        pred_video = pred_noise_to_pred_video(
+            pred_noise=pred_noise.flatten(0, 1),
+            noise_input_latent=noisy_input.flatten(0, 1),
+            timestep=target_timestep,
+            scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
+        training_batch.dmd_latent_vis_dict[
+            "generator_timestep"] = target_timestep.float().detach()
         return pred_video
 
     def _dmd_forward(self, generator_pred_video: torch.Tensor, training_batch: TrainingBatch) -> torch.Tensor:
