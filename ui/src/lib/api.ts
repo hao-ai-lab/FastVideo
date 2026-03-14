@@ -5,12 +5,17 @@ import type { Job, JobType } from "$lib/types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8189/api";
 
-function getApiBaseUrl(): string {
+export function getApiBaseUrl(): string {
 	const apiUrl =
 		typeof env.PUBLIC_API_BASE_URL === "string" && env.PUBLIC_API_BASE_URL
 			? env.PUBLIC_API_BASE_URL
 			: DEFAULT_API_BASE_URL;
 	return apiUrl;
+}
+
+/** Full URL for streaming a job's video/image output (for &lt;video&gt; or &lt;img&gt; src). */
+export function getJobVideoUrl(jobId: string): string {
+	return `${getApiBaseUrl()}/jobs/${jobId}/video`;
 }
 
 export interface CreateJobRequest {

@@ -8,6 +8,7 @@
 		"/finetuning": "Jobs",
 		"/distillation": "Jobs",
 		"/datasets": "Datasets",
+		"/gallery": "Gallery",
 		"/settings": "Settings",
 	};
 
