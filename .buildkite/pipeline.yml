@@ -67,6 +67,8 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/**"
+                - ".buildkite/**"
+                - ".github/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
