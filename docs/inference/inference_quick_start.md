@@ -60,8 +60,7 @@ python example.py
 
 The generated video will be saved in the current directory under `my_videos/`  
 
-More inference scripts and recipes can be found in `examples/inference/` and
-`scripts/inference/`.
+More inference example scripts can be found in `examples/inference/cli/`
 
 ## Available Models
 

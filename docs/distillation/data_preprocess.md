@@ -11,7 +11,7 @@ For Wan2.1 T2V distillation, we use the **FastVideo 480P Synthetic Wan dataset**
 
 ```bash
 # Download the preprocessed dataset
-python scripts/huggingface/download_hf.py \
+python examples/huggingface/download_hf.py \
     --repo_id "FastVideo/Wan-Syn_77x448x832_600k" \
     --local_dir "FastVideo/Wan-Syn_77x448x832_600k" \
     --repo_type "dataset"
@@ -23,7 +23,7 @@ For Wan2.2 TI2V distillation, we use the crush_smol dataset which includes both 
 
 ```bash
 # Download dataset
-python scripts/huggingface/download_hf.py \
+python examples/huggingface/download_hf.py \
     --repo_id=FastVideo/mini_i2v_dataset \
     --local_dir=data/mini_i2v_dataset \
     --repo_type=dataset
@@ -35,7 +35,7 @@ The preprocessing steps are identical to training. Run the appropriate preproces
 
 ```bash
 # For Wan2.1 T2V
-bash scripts/preprocess/v1_preprocess_wan_data_t2v
+bash examples/preprocessing/v1_preprocess_wan_data_t2v
 
 # For Wan2.2 TI2V  
 bash examples/distill/Wan2.2-TI2V-5B-Diffusers/crush_smol/preprocess_wan_data_ti2v_5b.sh
