@@ -97,6 +97,7 @@
 			{/if}
 		</div>
 		<a href="/datasets" class="tab" class:tabActive={pathname === "/datasets"}>Datasets</a>
+		<a href="/gallery" class="tab" class:tabActive={pathname === "/gallery"}>Gallery</a>
 		<a href="/settings" class="tab" class:tabActive={pathname === "/settings"}>Settings</a>
 	</nav>
 	<div class="collapseFooter">
