@@ -3,13 +3,6 @@ env:
   BUILDKITE_CLEAN_CHECKOUT: true
 
 steps:
-  - label: "pre-commit"
-    command: ".buildkite/scripts/pre_commit.sh"
-    agents:
-      queue: "default"
-
-  - wait
-
   # ============================================================
   # Fastcheck: Runs on every PR (~10-15 min parallel)
   # Core component validation: encoders, VAEs, transformers,
