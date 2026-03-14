@@ -10,12 +10,17 @@ steps:
 
   - wait
 
-  - label: "Trigger Tests"
+  # ============================================================
+  # Fastcheck: Runs on every PR (~10-15 min parallel)
+  # Core component validation: encoders, VAEs, transformers,
+  # CUDA kernels, and unit tests.
+  # ============================================================
+  - label: "Trigger Fastcheck"
     plugins:
       - monorepo-diff#v1.4.0:
           diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
           watch:
-            - path: 
+            - path:
                 - "fastvideo/models/encoders/**"
                 - "fastvideo/models/loader/**"
                 - "fastvideo/tests/encoders/**"
@@ -23,7 +28,7 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 20m .buildkite/scripts/pr_test.sh"
-                label: "Encoder Tests"
+                label: ":microscope: Encoder Tests"
                 env:
                   - TEST_TYPE=encoder
                 agents:
@@ -36,7 +41,7 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 20m .buildkite/scripts/pr_test.sh"
-                label: "VAE Tests"
+                label: ":microscope: VAE Tests"
                 env:
                   - TEST_TYPE=vae
                 agents:
@@ -51,18 +56,53 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Transformer Tests"
+                label: ":microscope: Transformer Tests"
                 env:
                   - TEST_TYPE=transformer
                 agents:
                   queue: "default"
-            - path: 
+            - path:
+                - "fastvideo-kernel/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: ":microscope: Kernel Tests"
+                env:
+                  - TEST_TYPE=kernel_tests
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: ":microscope: Unit Tests"
+                env:
+                  - TEST_TYPE=unit_test
+                agents:
+                  queue: "default"
+
+  # ============================================================
+  # Full Suite: Runs only when FULL_SUITE=true
+  # Triggered by adding the 'ready' label to a PR (via GitHub
+  # Actions → Buildkite API). Includes integration tests, SSIM
+  # regression, training pipelines, and performance benchmarks.
+  # ============================================================
+  - label: "Trigger Full Suite"
+    if: build.env("FULL_SUITE") == "true"
+    plugins:
+      - monorepo-diff#v1.4.0:
+          diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
+          watch:
+            - path:
                 - "fastvideo/**/*.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 90m .buildkite/scripts/pr_test.sh"
-                label: "SSIM Tests"
+                label: ":bar_chart: SSIM Tests"
                 env:
                   - TEST_TYPE=ssim
                 agents:
@@ -77,7 +117,7 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 20m .buildkite/scripts/pr_test.sh"
-                label: "LoRA Inference Tests"
+                label: ":test_tube: LoRA Inference Tests"
                 env:
                   - TEST_TYPE=inference_lora
                 agents:
@@ -88,7 +128,7 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Training Tests"
+                label: ":test_tube: Training Tests"
                 env:
                   - TEST_TYPE=training
                 agents:
@@ -99,7 +139,7 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Distillation DMDTests"
+                label: ":test_tube: Distillation DMD Tests"
                 env:
                   - TEST_TYPE=distillation_dmd
                 agents:
@@ -111,7 +151,7 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Self-Forcing Tests"
+                label: ":test_tube: Self-Forcing Tests"
                 env:
                   - TEST_TYPE=self_forcing
                 agents:
@@ -122,7 +162,7 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "LoRA Training Tests"
+                label: ":test_tube: LoRA Training Tests"
                 env:
                   - TEST_TYPE=training_lora
                 agents:
@@ -134,20 +174,11 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Training Tests VSA"
+                label: ":test_tube: Training Tests VSA"
                 env:
                   - TEST_TYPE=training_vsa
                 agents:
                   queue: "default"
-            - path:
-                - "fastvideo-kernel/**"
-                - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
-              config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Kernel Tests"
-                env:
-                  - TEST_TYPE=kernel_tests
             - path:
                 - "fastvideo-kernel/**"
                 - "fastvideo/attention/backends/vmoba.py"
@@ -155,20 +186,9 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Inference Tests VMoBA"
-                env:  
-                  - TEST_TYPE=inference_vmoba
-                agents:
-                  queue: "default"
-            - path:
-                - "fastvideo/**"
-                - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
-              config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Unit Tests"
+                label: ":test_tube: Inference Tests VMoBA"
                 env:
-                  - TEST_TYPE=unit_test
+                  - TEST_TYPE=inference_vmoba
                 agents:
                   queue: "default"
             - path:
@@ -184,7 +204,7 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 30m .buildkite/scripts/pr_test.sh"
-                label: "Performance Tests"
+                label: ":test_tube: Performance Tests"
                 env:
                   - TEST_TYPE=performance
                 agents:
@@ -197,19 +217,8 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 30m .buildkite/scripts/pr_test.sh"
-                label: "API Server Tests"
+                label: ":test_tube: API Server Tests"
                 env:
                   - TEST_TYPE=api_server
                 agents:
                   queue: "default"
-            # - path:
-            #     - "scripts/lora_extraction/**"
-            #     - "pyproject.toml"
-            #     - "docker/Dockerfile.python3.12"
-            #   config:
-            #     command: "timeout 90m .buildkite/scripts/pr_test.sh"
-            #     label: "LoRA Extraction Tests"
-            #     env:
-            #       - TEST_TYPE=lora_extraction
-            #     agents:
-            #       queue: "default"

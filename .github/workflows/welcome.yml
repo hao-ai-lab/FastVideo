@@ -36,17 +36,21 @@ jobs:
           pr-message: |
             Welcome to FastVideo! Thanks for your first pull request.
 
-            Here's how our CI works:
-            1. **Pre-commit checks** run first (formatting, linting, type checking)
-            2. **GPU tests** run on RunPod if your changes touch relevant paths — these may take a few minutes to provision
+            **How our CI works:**
 
-            Before your PR is reviewed, please make sure:
+            PRs run a two-tier CI system:
+            1. **Pre-commit** — formatting (yapf), linting (ruff), type checking (mypy). Runs immediately on every PR.
+            2. **Fastcheck** — core GPU tests (encoders, VAEs, transformers, kernels, unit tests). Runs automatically via Buildkite on relevant file changes (~10-15 min).
+            3. **Full Suite** — integration tests, training pipelines, SSIM regression. Runs only when a reviewer adds the `ready` label.
+
+            **Before your PR is reviewed:**
             - [ ] `pre-commit run --all-files` passes locally
             - [ ] You've added or updated tests for your changes
             - [ ] The PR description explains what and why
 
-            If pre-commit fails, check the bot comment for fix instructions.
+            If pre-commit fails, a bot comment will explain how to fix it. Fastcheck and Full Suite results appear in the Checks section below.
 
-            Useful links:
+            **Useful links:**
             - [Contributing Guide](https://hao-ai-lab.github.io/FastVideo/contributing/overview/)
             - [Development Roadmap](https://github.com/hao-ai-lab/FastVideo/issues/899)
+            - [Slack](https://join.slack.com/t/fastvideo/shared_invite/zt-3f4lao1uq-u~Ipx6Lt4J27AlD2y~IdLQ)
