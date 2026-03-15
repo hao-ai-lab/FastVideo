@@ -1,0 +1,44 @@
+{
+    "data": [
+        {
+            "caption": "00 Val-00: W",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/W.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "01 Val-01: S",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/S.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "02 Val-02: A",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/A.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "03 Val-03: D",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions/D.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        }
+    ]
+}

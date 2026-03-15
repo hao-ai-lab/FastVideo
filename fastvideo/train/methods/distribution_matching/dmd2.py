@@ -126,6 +126,12 @@ class DMD2Method(TrainingMethod):
         }
 
         outputs: dict[str, Any] = dict(critic_outputs)
+        if training_batch.dmd_latent_vis_dict:
+            outputs["dmd_latent_vis_dict"] = training_batch.dmd_latent_vis_dict
+        if training_batch.fake_score_latent_vis_dict:
+            outputs["fake_score_latent_vis_dict"] = (
+                training_batch.fake_score_latent_vis_dict
+            )
         outputs["_fv_backward"] = {
             "update_student": update_student,
             "student_ctx": student_ctx,
@@ -623,6 +629,12 @@ class DMD2Method(TrainingMethod):
             grad = (faker_x0 - real_cfg_x0) / denom
             grad = torch.nan_to_num(grad)
 
+        batch.dmd_latent_vis_dict.update({
+            "generator_pred_video": generator_pred_x0.detach(),
+            "real_score_pred_video": real_cfg_x0.detach(),
+            "faker_score_pred_video": faker_x0.detach(),
+            "dmd_timestep": timestep.float().detach(),
+        })
         loss = 0.5 * F.mse_loss(
             generator_pred_x0.float(),
             (generator_pred_x0.float() - grad.float()).detach(),

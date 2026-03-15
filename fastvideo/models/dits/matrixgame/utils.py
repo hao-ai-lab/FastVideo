@@ -299,6 +299,209 @@ def parse_config(config, mode="universal"):
                 )
     return key_data, mouse_data
 
+
+def _get_cv2():
+    import cv2
+
+    return cv2
+
+
+def draw_rounded_rectangle(
+    image,
+    top_left,
+    bottom_right,
+    color,
+    radius=10,
+    alpha=0.5,
+):
+    cv2 = _get_cv2()
+    overlay = image.copy()
+    x1, y1 = top_left
+    x2, y2 = bottom_right
+
+    cv2.rectangle(overlay, (x1 + radius, y1), (x2 - radius, y2), color, -1)
+    cv2.rectangle(overlay, (x1, y1 + radius), (x2, y2 - radius), color, -1)
+    cv2.ellipse(
+        overlay,
+        (x1 + radius, y1 + radius),
+        (radius, radius),
+        180,
+        0,
+        90,
+        color,
+        -1,
+    )
+    cv2.ellipse(
+        overlay,
+        (x2 - radius, y1 + radius),
+        (radius, radius),
+        270,
+        0,
+        90,
+        color,
+        -1,
+    )
+    cv2.ellipse(
+        overlay,
+        (x1 + radius, y2 - radius),
+        (radius, radius),
+        90,
+        0,
+        90,
+        color,
+        -1,
+    )
+    cv2.ellipse(
+        overlay,
+        (x2 - radius, y2 - radius),
+        (radius, radius),
+        0,
+        0,
+        90,
+        color,
+        -1,
+    )
+    cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0, image)
+
+
+def draw_keys_on_frame(
+    frame,
+    keys,
+    key_size=(30, 30),
+    spacing=5,
+    top_margin=15,
+    mode="universal",
+):
+    """Draw keyboard action badges on the top-left of the frame."""
+    cv2 = _get_cv2()
+    del spacing  # Preserved for compatibility with the original helper.
+
+    left_margin = 15
+    gap = 3
+
+    key_positions = {
+        "W": (left_margin + key_size[0] + gap, top_margin),
+        "A": (left_margin, top_margin + key_size[1] + gap),
+        "S": (left_margin + key_size[0] + gap, top_margin + key_size[1] + gap),
+        "D": (
+            left_margin + (key_size[0] + gap) * 2,
+            top_margin + key_size[1] + gap,
+        ),
+    }
+    key_icon = {
+        "W": "W",
+        "A": "A",
+        "S": "S",
+        "D": "D",
+        "left": "L",
+        "right": "R",
+    }
+    if mode == "templerun":
+        key_positions.update(
+            {
+                "left": (
+                    left_margin + (key_size[0] + gap) * 3 + 10,
+                    top_margin + key_size[1] + gap,
+                ),
+                "right": (
+                    left_margin + (key_size[0] + gap) * 4 + 15,
+                    top_margin + key_size[1] + gap,
+                ),
+            }
+        )
+
+    for key, (x, y) in key_positions.items():
+        is_pressed = keys.get(key, False)
+        top_left = (x, y)
+        bottom_right = (x + key_size[0], y + key_size[1])
+
+        color = (0, 255, 0) if is_pressed else (200, 200, 200)
+        alpha = 0.8 if is_pressed else 0.5
+        draw_rounded_rectangle(
+            frame,
+            top_left,
+            bottom_right,
+            color,
+            radius=5,
+            alpha=alpha,
+        )
+
+        text = key_icon[key]
+        text_size = cv2.getTextSize(
+            text,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            1,
+        )[0]
+        text_x = x + (key_size[0] - text_size[0]) // 2
+        text_y = y + (key_size[1] + text_size[1]) // 2
+        cv2.putText(
+            frame,
+            text,
+            (text_x, text_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 0, 0),
+            1,
+        )
+
+
+def draw_mouse_on_frame(frame, pitch, yaw, top_margin=15):
+    """Draw a mouse-look crosshair with a direction arrow."""
+    cv2 = _get_cv2()
+    h, w, _ = frame.shape
+
+    right_margin = 15
+    crosshair_radius = 25
+    crosshair_x = w - right_margin - crosshair_radius
+    crosshair_y = top_margin + crosshair_radius
+
+    dx = int(yaw * crosshair_radius * 8)
+    dy = int(-pitch * crosshair_radius * 8)
+
+    max_arrow = crosshair_radius - 5
+    dx = max(-max_arrow, min(max_arrow, dx))
+    dy = max(-max_arrow, min(max_arrow, dy))
+
+    cv2.circle(
+        frame,
+        (crosshair_x, crosshair_y),
+        crosshair_radius,
+        (50, 50, 50),
+        -1,
+    )
+    cv2.circle(
+        frame,
+        (crosshair_x, crosshair_y),
+        crosshair_radius,
+        (200, 200, 200),
+        1,
+    )
+    cv2.line(
+        frame,
+        (crosshair_x - crosshair_radius + 5, crosshair_y),
+        (crosshair_x + crosshair_radius - 5, crosshair_y),
+        (100, 100, 100),
+        1,
+    )
+    cv2.line(
+        frame,
+        (crosshair_x, crosshair_y - crosshair_radius + 5),
+        (crosshair_x, crosshair_y + crosshair_radius - 5),
+        (100, 100, 100),
+        1,
+    )
+
+    if abs(dx) > 1 or abs(dy) > 1:
+        cv2.arrowedLine(
+            frame,
+            (crosshair_x, crosshair_y),
+            (crosshair_x + dx, crosshair_y + dy),
+            (0, 255, 0),
+            2,
+            tipLength=0.3,
+        )
+
 # NOTE: drawing functions are commented out to avoid cv2/libGL dependency.
 #
 # def draw_rounded_rectangle(image, top_left, bottom_right, color, radius=10, alpha=0.5):

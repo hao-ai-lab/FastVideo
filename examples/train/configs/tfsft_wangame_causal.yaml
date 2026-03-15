@@ -1,0 +1,94 @@
+# V3 config: WanGame causal Diffusion-Forcing SFT (DFSFT).
+#
+# Uses _target_-based instantiation — each model role is an independent
+# class instance; the method class is resolved directly from the YAML.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wangame.WanGameCausalModel
+    init_from: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0306-61500steps
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.tfsft.TeacherForcingSFTMethod
+  attn_kind: dense
+  # use_ema: true
+  chunk_size: 3
+  min_timestep_ratio: 0.02
+  max_timestep_ratio: 0.98
+
+training:
+  distributed:
+    num_gpus: 4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+
+  data:
+    data_path: >-
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0204_2130/preprocessed:1,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed:0,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:3,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed:3,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed:3,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/camera/preprocessed:3,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/camera4hold_alpha1/preprocessed:3,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed:3
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 18
+    num_height: 352
+    num_width: 640
+    num_frames: 69
+    apply_bot_died_filter: true
+
+  optimizer:
+    learning_rate: 1e-5
+    betas: [0.0, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 10000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/wangame_tfsft_causal
+    # resume_from_checkpoint: /mnt/weka/home/hao.zhang/mhuo/FastVideo-hyw/outputs/wangame_dfsft_causal_v3/checkpoint-best-step-36500
+    training_state_checkpointing_steps: 5000
+    weight_only_checkpointing_steps: 5000
+    checkpoints_total_limit: 10
+    best_checkpoint_start_step: 2000
+    best_checkpoint_top_k: 5
+
+  tracker:
+    project_name: distillation_wangame_r
+    run_name: wangame_tfsft_causal
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  # ema:
+  #   _target_: fastvideo.train.callbacks.ema.EMACallback
+  #   beta: 0.9999
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.wan.wangame_causal_dmd_pipeline.WangameCausalOdeDMDPipeline
+    dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_4.json
+    every_steps: 500
+    sampling_steps: [40]
+    scheduler_target: fastvideo.models.schedulers.scheduling_flow_match_euler_discrete.FlowMatchEulerDiscreteScheduler
+    guidance_scale: 1.0
+    num_frames: 69
+    evaluate_ptlflow: false
+
+pipeline:
+  flow_shift: 3

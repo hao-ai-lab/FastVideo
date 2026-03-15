@@ -69,6 +69,8 @@ class PipelineConfig:
     # DMD parameters
     dmd_denoising_steps: list[int] | None = field(default=None)
 
+    ode_solver: str = "unipc"
+
     # Wan2.2 TI2V parameters
     ti2v_task: bool = False
     boundary_ratio: float | None = None
@@ -174,6 +176,14 @@ class PipelineConfig:
             default=PipelineConfig.dmd_denoising_steps,
             help=
             "Comma-separated list of denoising steps (e.g., '1000,757,522')",
+        )
+        parser.add_argument(
+            f"--{prefix_with_dot}ode-solver",
+            type=str,
+            choices=["unipc", "euler"],
+            dest=f"{prefix_with_dot.replace('-', '_')}ode_solver",
+            default=PipelineConfig.ode_solver,
+            help="ODE solver selection for ode sampling.",
         )
 
         # Add VAE configuration arguments

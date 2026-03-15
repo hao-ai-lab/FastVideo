@@ -572,5 +572,11 @@ class SelfForcingMethod(DMD2Method):
             grad = (faker_x0 - real_cfg_x0) / denom
             grad = torch.nan_to_num(grad)
 
+        batch.dmd_latent_vis_dict.update({
+            "generator_pred_video": generator_pred_x0.detach(),
+            "real_score_pred_video": real_cfg_x0.detach(),
+            "faker_score_pred_video": faker_x0.detach(),
+            "dmd_timestep": timestep.float().detach(),
+        })
         loss = 0.5 * torch.mean((generator_pred_x0.float() - (generator_pred_x0.float() - grad.float()).detach())**2)
         return loss

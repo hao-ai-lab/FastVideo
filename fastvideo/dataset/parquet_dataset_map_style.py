@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import hashlib
 import os
 import pickle
 import random
@@ -36,7 +37,9 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
         global_rank: int,
         drop_last: bool = True,
         drop_first_row: bool = False,
+        reshuffle_each_epoch: bool = True,
         seed: int = 0,
+        candidate_indices: list[int] | None = None,
     ):
         self.batch_size = batch_size
         self.dataset_size = dataset_size
@@ -45,44 +48,65 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
         self.num_sp_groups = num_sp_groups
         self.global_rank = global_rank
         self.sp_world_size = sp_world_size
+        self.drop_first_row = drop_first_row
+        self.reshuffle_each_epoch = reshuffle_each_epoch
+        self.candidate_indices = (
+            torch.as_tensor(candidate_indices, dtype=torch.long)
+            if candidate_indices is not None else None
+        )
 
-        # ── epoch-level RNG ────────────────────────────────────────────────
-        rng = torch.Generator().manual_seed(self.seed)
-        # Create a random permutation of all indices
-        global_indices = torch.randperm(self.dataset_size, generator=rng)
+        self._build_indices(0)
 
-        if drop_first_row:
-            # drop 0 in global_indices
+    def _build_indices(self, epoch: int) -> None:
+        rng = torch.Generator().manual_seed(self.seed + epoch)
+        if self.candidate_indices is None:
+            global_indices = torch.randperm(self.dataset_size, generator=rng)
+        else:
+            perm = torch.randperm(len(self.candidate_indices), generator=rng)
+            global_indices = self.candidate_indices[perm]
+
+        dataset_size = len(global_indices)
+        if self.drop_first_row:
             global_indices = global_indices[global_indices != 0]
-            self.dataset_size = self.dataset_size - 1
+            dataset_size = len(global_indices)
 
         if self.drop_last:
-            # For drop_last=True, we:
-            # 1. Ensure total samples is divisible by (batch_size * num_sp_groups)
-            # 2. This guarantees each SP group gets same number of complete batches
-            # 3. Prevents uneven batch sizes across SP groups at end of epoch
-            num_batches = self.dataset_size // self.batch_size
+            num_batches = dataset_size // self.batch_size
             num_global_batches = num_batches // self.num_sp_groups
             global_indices = global_indices[:num_global_batches *
                                             self.num_sp_groups *
                                             self.batch_size]
         else:
-            if self.dataset_size % (self.num_sp_groups * self.batch_size) != 0:
-                # add more indices to make it divisible by (batch_size * num_sp_groups)
+            if dataset_size % (self.num_sp_groups * self.batch_size) != 0:
                 padding_size = self.num_sp_groups * self.batch_size - (
-                    self.dataset_size % (self.num_sp_groups * self.batch_size))
+                    dataset_size % (self.num_sp_groups * self.batch_size))
                 logger.info("Padding the dataset from %d to %d",
-                            self.dataset_size, self.dataset_size + padding_size)
+                            dataset_size, dataset_size + padding_size)
                 global_indices = torch.cat(
                     [global_indices, global_indices[:padding_size]])
 
-        # shard the indices to each sp group
         ith_sp_group = self.global_rank // self.sp_world_size
         sp_group_local_indices = global_indices[ith_sp_group::self.
                                                 num_sp_groups]
         self.sp_group_local_indices = sp_group_local_indices
         logger.info("Dataset size for each sp group: %d",
                     len(sp_group_local_indices))
+
+    def set_candidate_indices(
+        self,
+        candidate_indices: list[int] | None,
+        epoch: int = 0,
+    ) -> None:
+        self.candidate_indices = (
+            torch.as_tensor(candidate_indices, dtype=torch.long)
+            if candidate_indices is not None else None
+        )
+        self._build_indices(epoch)
+
+    def set_epoch(self, epoch: int) -> None:
+        if not self.reshuffle_each_epoch:
+            return
+        self._build_indices(epoch)
 
     def __iter__(self):
         indices = self.sp_group_local_indices
@@ -94,19 +118,89 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
         return len(self.sp_group_local_indices) // self.batch_size
 
 
-def get_parquet_files_and_length(path: str):
-    dataset_root = os.path.realpath(os.path.expanduser(path))
-    # Check if cached info exists
-    cache_dir = os.path.join(dataset_root, "map_style_cache")
-    cache_file = os.path.join(cache_dir, "file_info.pkl")
+def _parse_data_path_specs(path: str) -> list[tuple[str, int]]:
+    """
+    Parse data_path into a list of (directory, repeat_count).
+    Syntax: comma-separated entries; each entry is "path" (default 1) or "path:N" (N = repeat count).
+    N=0 means skip that path (convenience to disable without removing). If no ":" present, default is 1.
+    Example: "/dir1:2,/dir2,/dir3:0" -> dir1 2x, dir2 1x, dir3 skipped.
+    """
+    specs: list[tuple[str, int]] = []
+    for part in path.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" in part:
+            p, _, count_str = part.rpartition(":")
+            p = p.strip()
+            try:
+                count = int(count_str.strip())
+            except ValueError:
+                raise ValueError(
+                    f"data_path repeat count must be an integer, got {count_str!r}"
+                ) from None
+            if count < 0:
+                raise ValueError(
+                    f"data_path repeat count must be >= 0, got {count}"
+                )
+            specs.append((p, count))
+        else:
+            specs.append((part, 1))
+    return specs
 
-    # Only rank 0 checks for cache and scans files if needed
+
+def _scan_parquet_files_for_path(p: str) -> tuple[list[str], list[int]]:
+    """Return (file_paths, row_lengths) for a single directory."""
+    file_names: list[str] = []
+    for root, _, files in os.walk(p):
+        for file in sorted(files):
+            if file.endswith(".parquet"):
+                file_names.append(os.path.join(root, file))
+    lengths = []
+    for file_path in tqdm.tqdm(
+            file_names, desc="Reading parquet files to get lengths"):
+        lengths.append(pq.ParquetFile(file_path).metadata.num_rows)
+    logger.info("Found %d parquet files with %d total rows", len(file_names),
+                sum(lengths))
+    return file_names, lengths
+
+
+def get_parquet_files_and_length(path: str):
+    """
+    Collect parquet file paths and row lengths from one or more directories.
+    path: single directory, or comma-separated "path" or "path:N" (N = repeat count).
+    E.g. "/dir1:2,/dir2:1" -> dir1's files appear 2x (oversampled), dir2 once.
+    """
+    path_specs = _parse_data_path_specs(path)
+    if not path_specs:
+        raise ValueError(
+            "data_path must be a non-empty path or comma-separated path specs"
+        )
+
+    first_path = next((p for p, c in path_specs if c > 0), path_specs[0][0])
+    is_single_no_repeat = len(path_specs) == 1 and path_specs[0][1] == 1
+    effective_path = path.strip()
+
+    if is_single_no_repeat:
+        cache_dir = os.path.join(first_path, "map_style_cache")
+        cache_suffix = "file_info.pkl"
+    else:
+        neutral_root = os.environ.get(
+            "FASTVIDEO_MAP_STYLE_CACHE_DIR",
+            os.path.join(os.path.expanduser("~"), ".cache", "fastvideo",
+                         "map_style_cache"),
+        )
+        cache_dir = neutral_root
+        cache_suffix = ("file_info_" +
+                        hashlib.md5(effective_path.encode()).hexdigest()[:16] +
+                        ".pkl")
+    cache_file = os.path.join(cache_dir, cache_suffix)
+
     if get_world_rank() == 0:
         cache_loaded = False
         file_names_sorted = None
         lengths_sorted = None
 
-        # First try to load existing cache
         if os.path.exists(cache_file):
             logger.info("Loading cached file info from %s", cache_file)
             try:
@@ -117,24 +211,11 @@ def get_parquet_files_and_length(path: str):
                         os.path.join(os.getcwd(), p)
                         if not os.path.isabs(p) else p)
                     for p in file_names_sorted)
-                files_outside_dataset_root = [
-                    file_path for file_path in file_names_sorted
-                    if os.path.commonpath([dataset_root, file_path
-                                           ]) != dataset_root
-                ]
                 missing_files = [
                     file_path for file_path in file_names_sorted
                     if not os.path.exists(file_path)
                 ]
-                if files_outside_dataset_root:
-                    logger.warning(
-                        "Cached parquet file list points outside dataset root "
-                        "(%s). Cache will be rebuilt. First out-of-root file: %s",
-                        dataset_root,
-                        files_outside_dataset_root[0],
-                    )
-                    cache_loaded = False
-                elif missing_files:
+                if missing_files:
                     logger.warning(
                         "Cached parquet file list contains %d missing files. "
                         "Cache will be rebuilt. First missing file: %s",
@@ -150,43 +231,43 @@ def get_parquet_files_and_length(path: str):
                 logger.info("Falling back to scanning files")
                 cache_loaded = False
 
-        # If cache not loaded (either doesn't exist or failed to load), scan files
         if not cache_loaded:
-            logger.info("Scanning parquet files to get lengths")
-            lengths = []
-            file_names = []
-            for root, _, files in os.walk(dataset_root):
-                for file in sorted(files):
-                    if file.endswith('.parquet'):
-                        file_path = os.path.realpath(os.path.join(root, file))
-                        file_names.append(file_path)
-            if len(file_names) == 0:
+            logger.info(
+                "Scanning parquet files (path specs: %s)",
+                [(p, c) for p, c in path_specs],
+            )
+            combined: list[tuple[str, int, int]] = []
+            sort_index = 0
+            for p, count in path_specs:
+                if count == 0:
+                    continue
+                fnames, lens = _scan_parquet_files_for_path(p)
+                if not fnames:
+                    logger.warning("No parquet files found under path spec %s", p)
+                    continue
+                for _ in range(count):
+                    for f, ln in zip(fnames, lens, strict=True):
+                        combined.append((f, ln, sort_index))
+                        sort_index += 1
+
+            if len(combined) == 0:
                 raise FileNotFoundError(
                     "No parquet files found under dataset path: "
                     f"{path}. "
                     "Please verify this path points to preprocessed parquet "
                     "data.")
-            for file_path in tqdm.tqdm(
-                    file_names, desc="Reading parquet files to get lengths"):
-                num_rows = pq.ParquetFile(file_path).metadata.num_rows
-                lengths.append(num_rows)
-            # sort according to file name to ensure all rank has the same order
-            file_names_sorted, lengths_sorted = zip(*sorted(zip(file_names,
-                                                                lengths,
-                                                                strict=True),
-                                                            key=lambda x: x[0]),
-                                                    strict=True)
-            # Save the cache
+
+            file_names_sorted, lengths_sorted, _ = zip(
+                *sorted(combined, key=lambda x: (x[0], x[2])), strict=True)
+
             os.makedirs(cache_dir, exist_ok=True)
             with open(cache_file, "wb") as f:
                 pickle.dump((file_names_sorted, lengths_sorted), f)
             logger.info("Saved file info to %s", cache_file)
 
-    # Wait for rank 0 to finish creating/loading cache
     world_group = get_world_group()
     world_group.barrier()
 
-    # Now all ranks load the cache (it should exist and be valid now)
     logger.info("Loading cached file info from %s after barrier", cache_file)
     with open(cache_file, "rb") as f:
         file_names_sorted, lengths_sorted = pickle.load(f)
@@ -364,6 +445,84 @@ class LatentsParquetMapStyleDataset(Dataset):
 # ────────────────────────────────────────────────────────────────────────────
 def passthrough(batch):
     return batch
+
+
+def build_bot_died_excluded_indices(
+    data_path: str,
+    parquet_files: list[str],
+    lengths: list[int],
+) -> set[int]:
+    """Build global row indices to exclude based on per-dir bot_died.json."""
+    import json
+
+    path_specs = [
+        (os.path.realpath(os.path.expanduser(p)), count)
+        for p, count in _parse_data_path_specs(data_path)
+    ]
+
+    bot_died_per_dir: dict[str, set[int]] = {}
+    for p, count in path_specs:
+        if count == 0:
+            continue
+        candidates = [
+            os.path.join(os.path.dirname(p), "filter", "blue_water_random_half.json"),
+            os.path.join(
+                os.path.dirname(os.path.abspath(os.path.expanduser(p))),
+                "filter",
+                "blue_water_random_half.json",
+            ),
+        ]
+        filter_path = next((fp for fp in candidates if os.path.exists(fp)), None)
+        if filter_path is None:
+            continue
+        with open(filter_path, "r", encoding="utf-8") as f:
+            bot_died_per_dir[p] = set(json.load(f))
+        logger.info(
+            "Loaded bot_died filter from %s: %d entries to exclude",
+            filter_path,
+            len(bot_died_per_dir[p]),
+        )
+
+    if not bot_died_per_dir:
+        return set()
+
+    excluded: set[int] = set()
+    matched_file_count: dict[str, int] = {k: 0 for k in bot_died_per_dir}
+    global_offset = 0
+    for file_path, length in zip(parquet_files, lengths, strict=True):
+        file_path_real = os.path.realpath(file_path)
+        matching_dir = None
+        for dir_path in bot_died_per_dir:
+            if (file_path.startswith(dir_path)
+                    or file_path_real.startswith(dir_path)):
+                matching_dir = dir_path
+                break
+
+        if matching_dir is not None:
+            matched_file_count[matching_dir] += 1
+            bot_died_set = bot_died_per_dir[matching_dir]
+            try:
+                table = pq.read_table(file_path, columns=["file_name"])
+                file_names = table.column("file_name").to_pylist()
+                for local_idx, fn in enumerate(file_names):
+                    if int(str(fn).strip()) in bot_died_set:
+                        excluded.add(global_offset + local_idx)
+            except Exception as e:
+                logger.warning(
+                    "Failed to read file_name from %s for bot_died filter: %s",
+                    file_path,
+                    e,
+                )
+        global_offset += length
+
+    for dir_path, count in matched_file_count.items():
+        logger.info(
+            "bot_died matching: dir=%s matched_parquet_files=%d",
+            dir_path,
+            count,
+        )
+
+    return excluded
 
 
 def build_parquet_map_style_dataloader(

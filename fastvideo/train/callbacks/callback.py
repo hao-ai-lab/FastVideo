@@ -173,3 +173,6 @@ class CallbackDict:
                 fn(*args, **kwargs)
 
         return _dispatch
+
+    def get_callback(self, name: str) -> Callback | None:
+        return self._callbacks.get(name)

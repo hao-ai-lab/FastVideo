@@ -290,8 +290,31 @@ def load_model_from_full_model_state_dict(
     """
     meta_sd = model.state_dict()
     sharded_sd = {}
-    custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(
-        full_sd_iterator, param_names_mapping)  # type: ignore
+    if param_names_mapping is None:
+        custom_param_sd = dict(full_sd_iterator)
+        reverse_param_names_mapping = {
+            name: (name, None, None)
+            for name in custom_param_sd
+        }
+    else:
+        def _mapping_with_passthrough(
+            source_param_name: str,
+        ) -> tuple[str, Any, Any]:
+            target_param_name, merge_index, num_params_to_merge = (
+                param_names_mapping(source_param_name)
+            )
+            # Custom override safetensors may already use FastVideo-internal
+            # names. In that case, keep the source name instead of remapping it
+            # a second time through the HF -> custom regex rules.
+            if (target_param_name not in meta_sd
+                    and source_param_name in meta_sd):
+                return source_param_name, None, None
+            return target_param_name, merge_index, num_params_to_merge
+
+        custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(
+            full_sd_iterator,
+            _mapping_with_passthrough,
+        )
     for target_param_name, full_tensor in custom_param_sd.items():
         meta_sharded_param = meta_sd.get(target_param_name)
         if meta_sharded_param is None:

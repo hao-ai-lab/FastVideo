@@ -10,12 +10,16 @@ Adapted from HY-WorldPlay: https://github.com/Tencent-Hunyuan/HY-WorldPlay
 """
 
 import json
+import logging
 import numpy as np
 import torch
 from scipy.spatial.transform import Rotation as R
 from typing import Union, Optional
 
 from .trajectory import generate_camera_trajectory_local
+
+
+logger = logging.getLogger(__name__)
 
 
 # Mapping from one-hot action encoding to single label
@@ -303,6 +307,152 @@ def camera_center_normalization(w2c: np.ndarray) -> np.ndarray:
     C0_inv = np.linalg.inv(c2w[0])
     c2w_aligned = np.array([C0_inv @ C for C in c2w])
     return np.linalg.inv(c2w_aligned)
+
+
+def reformat_keyboard_and_mouse_tensors(
+    keyboard_tensor: torch.Tensor,
+    mouse_tensor: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Collapse frame-level keyboard/mouse controls to latent-level controls.
+
+    The first frame is the anchor frame. The remaining frames are grouped into
+    chunks of 4 and each chunk is expected to be constant.
+    """
+    num_frames = keyboard_tensor.shape[0]
+    assert (num_frames - 1) % 4 == 0, "num_frames must be a multiple of 4"
+    assert mouse_tensor.shape[0] == num_frames, (
+        "mouse_tensor must have the same number of frames as keyboard_tensor"
+    )
+    keyboard_tensor = keyboard_tensor[1:, :]
+    mouse_tensor = mouse_tensor[1:, :]
+
+    groups = keyboard_tensor.view(-1, 4, keyboard_tensor.shape[1])
+    if not (groups == groups[:, 0:1]).all(dim=1).all():
+        logger.warning("keyboard_tensor has different values per 4-frame group")
+
+    groups = mouse_tensor.view(-1, 4, mouse_tensor.shape[1])
+    if not (groups == groups[:, 0:1]).all(dim=1).all():
+        logger.warning("mouse_tensor has different values per 4-frame group")
+
+    return keyboard_tensor[::4], mouse_tensor[::4]
+
+
+def process_custom_actions(
+    keyboard_tensor: torch.Tensor,
+    mouse_tensor: torch.Tensor,
+    forward_speed: float = DEFAULT_FORWARD_SPEED,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Convert custom keyboard/mouse controls into viewmats, intrinsics, and labels.
+    """
+    if keyboard_tensor.ndim == 3:
+        keyboard_tensor = keyboard_tensor.squeeze(0)
+    if mouse_tensor.ndim == 3:
+        mouse_tensor = mouse_tensor.squeeze(0)
+
+    keyboard_tensor, mouse_tensor = reformat_keyboard_and_mouse_tensors(
+        keyboard_tensor, mouse_tensor
+    )
+
+    motions: list[dict[str, float]] = []
+    for t in range(keyboard_tensor.shape[0]):
+        frame_motion: dict[str, float] = {}
+
+        fwd = 0.0
+        if keyboard_tensor[t, 0] > 0.5:
+            fwd += forward_speed
+        if keyboard_tensor[t, 1] > 0.5:
+            fwd -= forward_speed
+        if fwd != 0.0:
+            frame_motion["forward"] = fwd
+
+        rgt = 0.0
+        if keyboard_tensor[t, 2] > 0.5:
+            rgt -= forward_speed
+        if keyboard_tensor[t, 3] > 0.5:
+            rgt += forward_speed
+        if rgt != 0.0:
+            frame_motion["right"] = rgt
+
+        pitch = mouse_tensor[t, 0].item()
+        yaw = mouse_tensor[t, 1].item()
+        if abs(pitch) > 1e-4:
+            frame_motion["pitch"] = pitch
+        if abs(yaw) > 1e-4:
+            frame_motion["yaw"] = yaw
+
+        motions.append(frame_motion)
+
+    poses = generate_camera_trajectory_local(motions)
+
+    w2c_list = []
+    intrinsic_list = []
+    K = np.array(DEFAULT_INTRINSIC)
+    K[0, 0] /= K[0, 2] * 2
+    K[1, 1] /= K[1, 2] * 2
+    K[0, 2] = 0.5
+    K[1, 2] = 0.5
+
+    for pose in poses:
+        c2w = np.array(pose)
+        w2c = np.linalg.inv(c2w)
+        w2c_list.append(w2c)
+        intrinsic_list.append(K)
+
+    viewmats = torch.as_tensor(np.array(w2c_list))
+    intrinsics = torch.as_tensor(np.array(intrinsic_list))
+
+    c2ws = np.linalg.inv(np.array(w2c_list))
+    c_inv = np.linalg.inv(c2ws[:-1])
+    relative_c2w = np.zeros_like(c2ws)
+    relative_c2w[0, ...] = c2ws[0, ...]
+    relative_c2w[1:, ...] = c_inv @ c2ws[1:, ...]
+
+    trans_one_hot = np.zeros((relative_c2w.shape[0], 4), dtype=np.int32)
+    rotate_one_hot = np.zeros((relative_c2w.shape[0], 4), dtype=np.int32)
+    move_norm_valid = 0.0001
+
+    for i in range(1, relative_c2w.shape[0]):
+        move_dirs = relative_c2w[i, :3, 3]
+        move_norms = np.linalg.norm(move_dirs)
+
+        if move_norms > move_norm_valid:
+            move_norm_dirs = move_dirs / move_norms
+            angles_rad = np.arccos(move_norm_dirs.clip(-1.0, 1.0))
+            trans_angles_deg = angles_rad * (180.0 / np.pi)
+        else:
+            trans_angles_deg = np.zeros(3)
+
+        r_rel = relative_c2w[i, :3, :3]
+        rot_angles_deg = R.from_matrix(r_rel).as_euler("xyz", degrees=True)
+
+        if move_norms > move_norm_valid:
+            if trans_angles_deg[2] < 60:
+                trans_one_hot[i, 0] = 1
+            elif trans_angles_deg[2] > 120:
+                trans_one_hot[i, 1] = 1
+
+            if trans_angles_deg[0] < 60:
+                trans_one_hot[i, 2] = 1
+            elif trans_angles_deg[0] > 120:
+                trans_one_hot[i, 3] = 1
+
+        if rot_angles_deg[1] > 5e-2:
+            rotate_one_hot[i, 0] = 1
+        elif rot_angles_deg[1] < -5e-2:
+            rotate_one_hot[i, 1] = 1
+
+        if rot_angles_deg[0] > 5e-2:
+            rotate_one_hot[i, 2] = 1
+        elif rot_angles_deg[0] < -5e-2:
+            rotate_one_hot[i, 3] = 1
+
+    trans_label = one_hot_to_one_dimension(torch.tensor(trans_one_hot))
+    rotate_label = one_hot_to_one_dimension(torch.tensor(rotate_one_hot))
+    action_labels = trans_label * 9 + rotate_label
+
+    return viewmats, intrinsics, action_labels
 
 
 

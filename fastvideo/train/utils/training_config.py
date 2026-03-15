@@ -25,6 +25,7 @@ class DataConfig:
     data_path: str = ""
     train_batch_size: int = 1
     dataloader_num_workers: int = 0
+    apply_bot_died_filter: bool = False
     training_cfg_rate: float = 0.0
     seed: int = 0
     num_height: int = 0
@@ -57,6 +58,8 @@ class CheckpointConfig:
     resume_from_checkpoint: str = ""
     training_state_checkpointing_steps: int = 0
     checkpoints_total_limit: int = 0
+    best_checkpoint_start_step: int = 0
+    best_checkpoint_top_k: int = 1
 
 
 @dataclass(slots=True)

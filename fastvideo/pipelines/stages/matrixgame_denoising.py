@@ -1,6 +1,8 @@
 from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
+import hashlib
+import os
 from typing import Any
 
 import torch  # type: ignore
@@ -24,6 +26,22 @@ except ImportError:
     VideoSparseAttentionBackend = None  # type: ignore
 
 logger = init_logger(__name__)
+
+
+def _should_debug_timesteps(prompt: object) -> bool:
+    if not os.environ.get("FASTVIDEO_DEBUG_TIMESTEPS"):
+        return False
+    if isinstance(prompt, str):
+        return prompt.startswith("00 Val-00:")
+    if isinstance(prompt, list) and prompt:
+        first = prompt[0]
+        return isinstance(first, str) and first.startswith("00 Val-00:")
+    return False
+
+
+def _tensor_md5(tensor: torch.Tensor) -> str:
+    array = tensor.detach().cpu().to(torch.int64).contiguous().numpy()
+    return hashlib.md5(array.tobytes()).hexdigest()
 
 
 @dataclass
@@ -54,6 +72,9 @@ class BlockProcessingContext:
 
     image_kwargs: dict[str, Any]
     pos_cond_kwargs: dict[str, Any]
+    viewmats_full: torch.Tensor | None = None
+    intrinsics_full: torch.Tensor | None = None
+    action_full: torch.Tensor | None = None
 
     def get_kv_cache(self, timestep_val: float) -> list[dict[Any, Any]]:
         if self.boundary_timestep is not None:
@@ -97,10 +118,12 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                                            -1)
         except Exception:
             self.local_attn_size = -1
+            try:
+                self.local_attn_size = getattr(self.transformer.model,
+                                               "local_attn_size", -1)
+            except Exception:
+                self.local_attn_size = -1
 
-        assert self.local_attn_size != -1, (
-            f"local_attn_size must be set for Matrix-Game causal inference, "
-            f"got {self.local_attn_size}. Check MatrixGameWanVideoArchConfig.")
         assert self.num_frame_per_block > 0, (
             f"num_frame_per_block must be positive, got {self.num_frame_per_block}"
         )
@@ -126,7 +149,10 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             ) and not fastvideo_args.disable_autocast
 
         latent_seq_length = batch.latents.shape[-1] * batch.latents.shape[-2]
-        patch_size = self.transformer.patch_size
+        if hasattr(self.transformer, "patch_size"):
+            patch_size = self.transformer.patch_size
+        else:
+            patch_size = self.transformer.config.arch_config.patch_size
         patch_ratio = patch_size[-1] * patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
 
@@ -165,6 +191,31 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         b, c, t, h, w = latents.shape
         prompt_embeds = batch.prompt_embeds
         assert torch.isnan(prompt_embeds[0]).sum() == 0
+
+        viewmats_full = None
+        intrinsics_full = None
+        action_full = None
+        if batch.mouse_cond is not None and batch.keyboard_cond is not None:
+            from fastvideo.models.dits.hyworld.pose import process_custom_actions
+
+            viewmats_list = []
+            intrinsics_list = []
+            action_list = []
+            for bi in range(b):
+                vm, ks, action = process_custom_actions(batch.keyboard_cond[bi],
+                                                        batch.mouse_cond[bi])
+                viewmats_list.append(vm)
+                intrinsics_list.append(ks)
+                action_list.append(action)
+            viewmats_full = torch.stack(viewmats_list,
+                                        dim=0).to(device=latents.device,
+                                                  dtype=target_dtype)
+            intrinsics_full = torch.stack(intrinsics_list,
+                                          dim=0).to(device=latents.device,
+                                                    dtype=target_dtype)
+            action_full = torch.stack(action_list,
+                                      dim=0).to(device=latents.device,
+                                                dtype=target_dtype)
 
         kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0],
                                               dtype=target_dtype,
@@ -225,6 +276,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                                   "context_noise", 0),
             image_kwargs=image_kwargs,
             pos_cond_kwargs=pos_cond_kwargs,
+            viewmats_full=viewmats_full,
+            intrinsics_full=intrinsics_full,
+            action_full=action_full,
         )
 
         context_noise = getattr(fastvideo_args.pipeline_config, "context_noise",
@@ -240,6 +294,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
                 action_kwargs = self._prepare_action_kwargs(
                     batch, start_index, current_num_frames)
+                camera_action_kwargs = self._prepare_camera_action_kwargs(
+                    ctx, start_index, current_num_frames)
 
                 current_latents = self._process_single_block(
                     current_latents=current_latents,
@@ -249,6 +305,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     timesteps=timesteps,
                     ctx=ctx,
                     action_kwargs=action_kwargs,
+                    camera_action_kwargs=camera_action_kwargs,
                     progress_bar=progress_bar,
                 )
 
@@ -263,6 +320,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     current_num_frames=current_num_frames,
                     ctx=ctx,
                     action_kwargs=action_kwargs,
+                    camera_action_kwargs=camera_action_kwargs,
                     context_noise=context_noise,
                 )
 
@@ -324,9 +382,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                torch.zeros((), dtype=torch.long, device=device),
                 "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                torch.zeros((), dtype=torch.long, device=device),
             })
 
         return kv_cache
@@ -362,9 +420,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                torch.zeros((), dtype=torch.long, device=device),
                 "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                torch.zeros((), dtype=torch.long, device=device),
             })
             kv_cache_mouse.append({
                 "k":
@@ -382,9 +440,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                torch.zeros((), dtype=torch.long, device=device),
                 "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                torch.zeros((), dtype=torch.long, device=device),
             })
 
         return kv_cache_mouse, kv_cache_keyboard
@@ -418,6 +476,18 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             })
         return crossattn_cache
 
+    def _prepare_camera_action_kwargs(
+            self, ctx: BlockProcessingContext, start_index: int,
+            current_num_frames: int) -> dict[str, Any]:
+        if ctx.action_full is None or ctx.viewmats_full is None or ctx.intrinsics_full is None:
+            return {}
+        end_index = start_index + current_num_frames
+        return {
+            "viewmats": ctx.viewmats_full[:, start_index:end_index],
+            "Ks": ctx.intrinsics_full[:, start_index:end_index],
+            "action": ctx.action_full[:, start_index:end_index],
+        }
+
     def _process_single_block(
         self,
         current_latents: torch.Tensor,
@@ -427,6 +497,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         timesteps: torch.Tensor,
         ctx: BlockProcessingContext,
         action_kwargs: dict[str, Any],
+        camera_action_kwargs: dict[str, Any],
         noise_generator: Callable[[tuple, torch.dtype, int], torch.Tensor]
         | None = None,
         progress_bar: Any | None = None,
@@ -445,7 +516,16 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
             independent_first_frame = getattr(self.transformer,
                                               'independent_first_frame', False)
-            if batch.image_latent is not None and independent_first_frame and start_index == 0:
+            if batch.image_latent is not None and not independent_first_frame:
+                image_latent_chunk = batch.image_latent[:, :, start_index:
+                                                        start_index +
+                                                        current_num_frames, :, :]
+                latent_model_input = torch.cat([
+                    latent_model_input,
+                    image_latent_chunk.to(ctx.target_dtype)
+                ],
+                                               dim=1)
+            elif batch.image_latent is not None and independent_first_frame and start_index == 0:
                 latent_model_input = torch.cat([
                     latent_model_input,
                     batch.image_latent.to(ctx.target_dtype)
@@ -495,6 +575,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     "crossattn_cache": ctx.crossattn_cache,
                     "current_start": start_index * self.frame_seq_length,
                     "start_frame": start_index,
+                    "is_cache": False,
                 }
 
                 if self.use_action_module and current_model == self.transformer:
@@ -510,6 +591,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     latent_model_input,
                     prompt_embeds,
                     t_expanded_noise,
+                    **camera_action_kwargs,
                     **ctx.image_kwargs,
                     **ctx.pos_cond_kwargs,
                     **model_kwargs,
@@ -582,6 +664,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         current_num_frames: int,
         ctx: BlockProcessingContext,
         action_kwargs: dict[str, Any],
+        camera_action_kwargs: dict[str, Any],
         context_noise: float,
     ) -> None:
         prompt_embeds = batch.prompt_embeds
@@ -592,6 +675,17 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                                device=latents_device,
                                dtype=torch.long) * int(context_noise)
         context_bcthw = current_latents.to(ctx.target_dtype)
+        context_input = context_bcthw
+        independent_first_frame = getattr(self.transformer,
+                                          "independent_first_frame", False)
+        if batch.image_latent is not None and not independent_first_frame:
+            image_context_chunk = batch.image_latent[:, :,
+                                                     start_index:start_index +
+                                                     current_num_frames, :, :]
+            context_input = torch.cat(
+                [context_input,
+                 image_context_chunk.to(ctx.target_dtype)],
+                dim=1)
 
         with torch.autocast(device_type="cuda",
                             dtype=ctx.target_dtype,
@@ -605,6 +699,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 "crossattn_cache": ctx.crossattn_cache,
                 "current_start": start_index * self.frame_seq_length,
                 "start_frame": start_index,
+                "is_cache": True,
             }
 
             if self.use_action_module:
@@ -617,26 +712,409 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 context_model_kwargs.update(action_kwargs)
 
             if ctx.boundary_timestep is not None and self.transformer_2 is not None:
-                self.transformer_2(
-                    context_bcthw,
+                cache_update_ret_2 = self.transformer_2(
+                    context_input,
                     prompt_embeds,
                     t_context,
                     kv_cache=ctx.kv_cache2,
                     crossattn_cache=ctx.crossattn_cache,
                     current_start=start_index * self.frame_seq_length,
                     start_frame=start_index,
+                    is_cache=True,
+                    **camera_action_kwargs,
                     **ctx.image_kwargs,
                     **ctx.pos_cond_kwargs,
                 )
+                if isinstance(cache_update_ret_2,
+                              list) and len(cache_update_ret_2) > 0:
+                    ctx.kv_cache2 = cache_update_ret_2
 
-            self.transformer(
-                context_bcthw,
+            cache_update_ret = self.transformer(
+                context_input,
                 prompt_embeds,
                 t_context,
+                **camera_action_kwargs,
                 **ctx.image_kwargs,
                 **ctx.pos_cond_kwargs,
                 **context_model_kwargs,
             )
+        if isinstance(cache_update_ret, list) and len(cache_update_ret) > 0:
+            ctx.kv_cache1 = cache_update_ret
+
+
+class MatrixGameCausalOdeDenoisingStage(MatrixGameCausalDenoisingStage):
+    """Causal ODE denoising for WanGame/MatrixGame.
+
+    This is the deterministic counterpart of `MatrixGameCausalDenoisingStage`.
+    It performs block-by-block causal rollout, but uses the scheduler's ODE-style
+    `step()` update (no re-noising between steps).
+    """
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        timesteps = batch.timesteps
+        if timesteps is None:
+            raise ValueError(
+                "MatrixGameCausalOdeDenoisingStage requires batch.timesteps. "
+                "Make sure TimestepPreparationStage runs before this stage.")
+
+        target_dtype = torch.bfloat16
+        autocast_enabled = (target_dtype != torch.float32
+                            ) and not fastvideo_args.disable_autocast
+
+        latent_seq_length = batch.latents.shape[-1] * batch.latents.shape[-2]
+        if hasattr(self.transformer, "patch_size"):
+            patch_size = self.transformer.patch_size
+        else:
+            patch_size = self.transformer.config.arch_config.patch_size
+        patch_ratio = patch_size[-1] * patch_size[-2]
+        self.frame_seq_length = latent_seq_length // patch_ratio
+
+        timesteps = timesteps.to(get_local_torch_device())
+        if _should_debug_timesteps(batch.prompt):
+            logger.info(
+                "DEBUG_TIMESTEPS stage=ode_denoising rank=%s prompt=%r "
+                "len=%s md5=%s head=%s tail=%s",
+                os.environ.get("RANK", "?"),
+                batch.prompt,
+                int(timesteps.numel()),
+                _tensor_md5(timesteps),
+                timesteps[:10].detach().cpu().tolist(),
+                timesteps[-10:].detach().cpu().tolist(),
+            )
+
+        boundary_ratio = getattr(fastvideo_args.pipeline_config.dit_config,
+                                 "boundary_ratio", None)
+        if boundary_ratio is not None:
+            boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
+        else:
+            boundary_timestep = None
+
+        image_embeds = batch.image_embeds
+        if len(image_embeds) > 0:
+            assert torch.isnan(image_embeds[0]).sum() == 0
+            image_embeds = [
+                image_embed.to(target_dtype) for image_embed in image_embeds
+            ]
+
+        # directly set the kwarg.
+        image_kwargs = {"encoder_hidden_states_image": image_embeds}
+        pos_cond_kwargs: dict[str, Any] = {}
+
+        assert batch.latents is not None, "latents must be provided"
+        latents = batch.latents
+        b, c, t, h, w = latents.shape
+
+        prompt_embeds = batch.prompt_embeds
+        assert torch.isnan(prompt_embeds[0]).sum() == 0
+
+        viewmats_full = None
+        intrinsics_full = None
+        action_full = None
+        if batch.mouse_cond is not None and batch.keyboard_cond is not None:
+            from fastvideo.models.dits.hyworld.pose import process_custom_actions
+
+            viewmats_list = []
+            intrinsics_list = []
+            action_list = []
+            for bi in range(b):
+                vm, ks, action = process_custom_actions(batch.keyboard_cond[bi],
+                                                        batch.mouse_cond[bi])
+                viewmats_list.append(vm)
+                intrinsics_list.append(ks)
+                action_list.append(action)
+            viewmats_full = torch.stack(viewmats_list,
+                                        dim=0).to(device=latents.device,
+                                                  dtype=target_dtype)
+            intrinsics_full = torch.stack(intrinsics_list,
+                                          dim=0).to(device=latents.device,
+                                                    dtype=target_dtype)
+            action_full = torch.stack(action_list,
+                                      dim=0).to(device=latents.device,
+                                                dtype=target_dtype)
+
+        kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0],
+                                              dtype=target_dtype,
+                                              device=latents.device)
+        kv_cache2 = None
+        if boundary_timestep is not None:
+            kv_cache2 = self._initialize_kv_cache(batch_size=latents.shape[0],
+                                                  dtype=target_dtype,
+                                                  device=latents.device)
+
+        kv_cache_mouse = None
+        kv_cache_keyboard = None
+        if self.use_action_module:
+            kv_cache_mouse, kv_cache_keyboard = self._initialize_action_kv_cache(
+                batch_size=latents.shape[0],
+                dtype=target_dtype,
+                device=latents.device)
+
+        crossattn_cache = self._initialize_crossattn_cache(
+            batch_size=latents.shape[0],
+            max_text_len=257,  # 1 CLS + 256 patch tokens
+            dtype=target_dtype,
+            device=latents.device)
+
+        if t % self.num_frame_per_block != 0:
+            raise ValueError(
+                "num_frames must be divisible by num_frame_per_block for causal denoising"
+            )
+        num_blocks = t // self.num_frame_per_block
+        block_sizes = [self.num_frame_per_block] * num_blocks
+        start_index = 0
+
+        if boundary_timestep is not None:
+            block_sizes[0] = 1
+
+        ctx = BlockProcessingContext(
+            batch=batch,
+            block_idx=0,
+            start_index=0,
+            kv_cache1=kv_cache1,
+            kv_cache2=kv_cache2,
+            kv_cache_mouse=kv_cache_mouse,
+            kv_cache_keyboard=kv_cache_keyboard,
+            crossattn_cache=crossattn_cache,
+            timesteps=timesteps,
+            block_sizes=block_sizes,
+            noise_pool=None,
+            fastvideo_args=fastvideo_args,
+            target_dtype=target_dtype,
+            autocast_enabled=autocast_enabled,
+            boundary_timestep=boundary_timestep,
+            high_noise_timesteps=None,
+            context_noise=getattr(fastvideo_args.pipeline_config,
+                                  "context_noise", 0),
+            image_kwargs=image_kwargs,
+            pos_cond_kwargs=pos_cond_kwargs,
+            viewmats_full=viewmats_full,
+            intrinsics_full=intrinsics_full,
+            action_full=action_full,
+        )
+
+        context_noise = getattr(fastvideo_args.pipeline_config, "context_noise",
+                                0)
+
+        with self.progress_bar(total=len(block_sizes) *
+                               len(timesteps)) as progress_bar:
+            for block_idx, current_num_frames in enumerate(block_sizes):
+                ctx.block_idx = block_idx
+                ctx.start_index = start_index
+                current_latents = latents[:, :, start_index:start_index +
+                                          current_num_frames, :, :]
+
+                # The scheduler maintains an internal `step_index` (and potentially
+                # additional multistep state, e.g. UniPC). Since causal streaming runs
+                # a full denoising trajectory *per block*, reset that state before
+                # each block rollout.
+                self._reset_scheduler_state_for_new_rollout()
+
+                action_kwargs = self._prepare_action_kwargs(
+                    batch, start_index, current_num_frames)
+                camera_action_kwargs = self._prepare_camera_action_kwargs(
+                    ctx, start_index, current_num_frames)
+
+                current_latents = self._process_single_block_ode(
+                    current_latents=current_latents,
+                    batch=batch,
+                    start_index=start_index,
+                    current_num_frames=current_num_frames,
+                    timesteps=timesteps,
+                    ctx=ctx,
+                    action_kwargs=action_kwargs,
+                    camera_action_kwargs=camera_action_kwargs,
+                    progress_bar=progress_bar,
+                )
+
+                latents[:, :, start_index:start_index +
+                        current_num_frames, :, :] = current_latents
+
+                # Update KV caches with clean context
+                self._update_context_cache(
+                    current_latents=current_latents,
+                    batch=batch,
+                    start_index=start_index,
+                    current_num_frames=current_num_frames,
+                    ctx=ctx,
+                    action_kwargs=action_kwargs,
+                    camera_action_kwargs=camera_action_kwargs,
+                    context_noise=context_noise,
+                )
+
+                start_index += current_num_frames
+
+        if boundary_timestep is not None:
+            num_frames_to_remove = self.num_frame_per_block - 1
+            if num_frames_to_remove > 0:
+                latents = latents[:, :, :-num_frames_to_remove, :, :]
+
+        batch.latents = latents
+        return batch
+
+    def _reset_scheduler_state_for_new_rollout(self) -> None:
+        scheduler = self.scheduler
+
+        # Common diffusers-like state.
+        if hasattr(scheduler, "_step_index"):
+            scheduler._step_index = None  # type: ignore[attr-defined]
+        if hasattr(scheduler, "_begin_index"):
+            scheduler._begin_index = None  # type: ignore[attr-defined]
+
+        # UniPC multistep state (FlowUniPCMultistepScheduler) needs additional reset
+        # between independent trajectories.
+        if hasattr(scheduler, "model_outputs") and hasattr(scheduler, "config"):
+            try:
+                solver_order = int(
+                    getattr(scheduler.config, "solver_order", 0) or 0)
+            except Exception:
+                solver_order = 0
+            if solver_order > 0:
+                scheduler.model_outputs = [
+                    None
+                ] * solver_order  # type: ignore[attr-defined]
+        if hasattr(scheduler, "timestep_list") and hasattr(scheduler, "config"):
+            try:
+                solver_order = int(
+                    getattr(scheduler.config, "solver_order", 0) or 0)
+            except Exception:
+                solver_order = 0
+            if solver_order > 0:
+                scheduler.timestep_list = [
+                    None
+                ] * solver_order  # type: ignore[attr-defined]
+        if hasattr(scheduler, "lower_order_nums"):
+            scheduler.lower_order_nums = 0  # type: ignore[attr-defined]
+        if hasattr(scheduler, "last_sample"):
+            scheduler.last_sample = None  # type: ignore[attr-defined]
+
+    def _process_single_block_ode(
+        self,
+        *,
+        current_latents: torch.Tensor,
+        batch: ForwardBatch,
+        start_index: int,
+        current_num_frames: int,
+        timesteps: torch.Tensor,
+        ctx: BlockProcessingContext,
+        action_kwargs: dict[str, Any],
+        camera_action_kwargs: dict[str, Any],
+        progress_bar: Any | None = None,
+    ) -> torch.Tensor:
+        prompt_embeds = batch.prompt_embeds
+        extra_step_kwargs = self.prepare_extra_func_kwargs(
+            self.scheduler.step,
+            {
+                "generator": batch.generator,
+                "eta": batch.eta,
+            },
+        )
+
+        for i, t_cur in enumerate(timesteps):
+            if ctx.boundary_timestep is not None and t_cur < ctx.boundary_timestep:
+                current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
+            else:
+                current_model = self.transformer
+
+            latent_model_input = current_latents.to(ctx.target_dtype)
+
+            independent_first_frame = getattr(self.transformer,
+                                              "independent_first_frame", False)
+            if batch.image_latent is not None and not independent_first_frame:
+                image_latent_chunk = batch.image_latent[:, :, start_index:
+                                                        start_index +
+                                                        current_num_frames, :, :]
+                latent_model_input = torch.cat([
+                    latent_model_input,
+                    image_latent_chunk.to(ctx.target_dtype)
+                ],
+                                               dim=1)
+            elif (batch.image_latent is not None and independent_first_frame
+                  and start_index == 0):
+                latent_model_input = torch.cat([
+                    latent_model_input,
+                    batch.image_latent.to(ctx.target_dtype)
+                ],
+                                               dim=2)
+
+            latent_model_input = self.scheduler.scale_model_input(
+                latent_model_input, t_cur)
+
+            # Build attention metadata if VSA is available
+            if vsa_available and self.attn_backend == VideoSparseAttentionBackend:
+                self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
+                )
+                if self.attn_metadata_builder_cls is not None:
+                    self.attn_metadata_builder = self.attn_metadata_builder_cls(
+                    )
+                    h, w = current_latents.shape[-2:]
+                    attn_metadata = self.attn_metadata_builder.build(
+                        current_timestep=i,
+                        raw_latent_shape=(current_num_frames, h, w),
+                        patch_size=ctx.fastvideo_args.pipeline_config.
+                        dit_config.patch_size,
+                        VSA_sparsity=ctx.fastvideo_args.VSA_sparsity,
+                        device=get_local_torch_device(),
+                    )
+                    assert attn_metadata is not None, "attn_metadata cannot be None"
+                else:
+                    attn_metadata = None
+            else:
+                attn_metadata = None
+
+            with torch.autocast(device_type="cuda",
+                                dtype=ctx.target_dtype,
+                                enabled=ctx.autocast_enabled), \
+                set_forward_context(current_timestep=i,
+                                    attn_metadata=attn_metadata,
+                                    forward_batch=batch):
+                t_expanded = t_cur * torch.ones(
+                    (latent_model_input.shape[0], current_num_frames),
+                    device=latent_model_input.device,
+                    dtype=t_cur.dtype)
+
+                model_kwargs = {
+                    "kv_cache": ctx.get_kv_cache(t_cur),
+                    "crossattn_cache": ctx.crossattn_cache,
+                    "current_start": start_index * self.frame_seq_length,
+                    "start_frame": start_index,
+                    "is_cache": False,
+                }
+
+                if self.use_action_module and current_model == self.transformer:
+                    model_kwargs.update({
+                        "kv_cache_mouse":
+                        ctx.kv_cache_mouse,
+                        "kv_cache_keyboard":
+                        ctx.kv_cache_keyboard,
+                    })
+                    model_kwargs.update(action_kwargs)
+
+                noise_pred = current_model(
+                    latent_model_input,
+                    prompt_embeds,
+                    t_expanded,
+                    **camera_action_kwargs,
+                    **ctx.image_kwargs,
+                    **ctx.pos_cond_kwargs,
+                    **model_kwargs,
+                )
+
+            current_latents = self.scheduler.step(
+                noise_pred,
+                t_cur,
+                current_latents,
+                **extra_step_kwargs,
+                return_dict=False,
+            )[0]
+
+            if progress_bar is not None:
+                progress_bar.update()
+
+        return current_latents
 
     def streaming_reset(self, batch: ForwardBatch,
                         fastvideo_args: FastVideoArgs) -> ForwardBatch:
@@ -645,7 +1123,10 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             ) and not fastvideo_args.disable_autocast
 
         latent_seq_length = batch.latents.shape[-1] * batch.latents.shape[-2]
-        patch_size = self.transformer.patch_size
+        if hasattr(self.transformer, "patch_size"):
+            patch_size = self.transformer.patch_size
+        else:
+            patch_size = self.transformer.config.arch_config.patch_size
         patch_ratio = patch_size[-1] * patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
 
@@ -821,6 +1302,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             timesteps=ctx.timesteps,
             ctx=ctx,
             action_kwargs=action_kwargs,
+            camera_action_kwargs={},
             noise_generator=streaming_noise_generator,
         )
 
@@ -835,6 +1317,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             current_num_frames=current_num_frames,
             ctx=ctx,
             action_kwargs=action_kwargs,
+            camera_action_kwargs={},
             context_noise=ctx.context_noise,
         )
 

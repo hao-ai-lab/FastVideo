@@ -1237,6 +1237,37 @@ class DmdDenoisingStage(DenoisingStage):
             },
         )
 
+        if batch.mouse_cond is not None and batch.keyboard_cond is not None:
+            from fastvideo.models.dits.hyworld.pose import process_custom_actions
+
+            viewmats, intrinsics, action_labels = process_custom_actions(
+                batch.keyboard_cond, batch.mouse_cond)
+            camera_action_kwargs = self.prepare_extra_func_kwargs(
+                self.transformer.forward,
+                {
+                    "viewmats":
+                    viewmats.unsqueeze(0).to(
+                        get_local_torch_device(), dtype=target_dtype),
+                    "Ks":
+                    intrinsics.unsqueeze(0).to(
+                        get_local_torch_device(), dtype=target_dtype),
+                    "action":
+                    action_labels.unsqueeze(0).to(
+                        get_local_torch_device(), dtype=target_dtype),
+                },
+            )
+        else:
+            camera_action_kwargs = {}
+
+        action_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "mouse_cond": batch.mouse_cond,
+                "keyboard_cond": batch.keyboard_cond,
+                "c2ws_plucker_emb": batch.c2ws_plucker_emb,
+            },
+        )
+
         # Get latents and embeddings
         assert batch.latents is not None, "latents must be provided"
         latents = batch.latents
@@ -1245,14 +1276,29 @@ class DmdDenoisingStage(DenoisingStage):
         prompt_embeds = batch.prompt_embeds
         assert not torch.isnan(
             prompt_embeds[0]).any(), "prompt_embeds contains nan"
-        timesteps = torch.tensor(
-            fastvideo_args.pipeline_config.dmd_denoising_steps,
-            dtype=torch.long,
-            device=get_local_torch_device())
+        loop_timesteps = batch.sampling_timesteps
+        if loop_timesteps is None:
+            legacy = getattr(fastvideo_args.pipeline_config,
+                             "dmd_denoising_steps", None)
+            if legacy is not None:
+                loop_timesteps = torch.tensor(legacy, dtype=torch.long)
+            else:
+                loop_timesteps = batch.timesteps
+
+        if loop_timesteps is None:
+            raise ValueError(
+                "SDE sampling requires `batch.sampling_timesteps` "
+                "(preferred) or `pipeline_config.dmd_denoising_steps`.")
+        if not isinstance(loop_timesteps, torch.Tensor):
+            loop_timesteps = torch.tensor(loop_timesteps, dtype=torch.long)
+        if loop_timesteps.ndim != 1:
+            raise ValueError("Expected 1D `sampling_timesteps`, got shape "
+                             f"{tuple(loop_timesteps.shape)}")
+        loop_timesteps = loop_timesteps.to(get_local_torch_device())
 
         # Run denoising loop
-        with self.progress_bar(total=len(timesteps)) as progress_bar:
-            for i, t in enumerate(timesteps):
+        with self.progress_bar(total=len(loop_timesteps)) as progress_bar:
+            for i, t in enumerate(loop_timesteps):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
@@ -1326,6 +1372,8 @@ class DmdDenoisingStage(DenoisingStage):
                             guidance=guidance_expand,
                             **image_kwargs,
                             **pos_cond_kwargs,
+                            **action_kwargs,
+                            **camera_action_kwargs,
                         ).permute(0, 2, 1, 3, 4)
 
                     pred_video = pred_noise_to_pred_video(
@@ -1335,8 +1383,8 @@ class DmdDenoisingStage(DenoisingStage):
                         scheduler=self.scheduler).unflatten(
                             0, pred_noise.shape[:2])
 
-                    if i < len(timesteps) - 1:
-                        next_timestep = timesteps[i + 1] * torch.ones(
+                    if i < len(loop_timesteps) - 1:
+                        next_timestep = loop_timesteps[i + 1] * torch.ones(
                             [1], dtype=torch.long, device=pred_video.device)
                         noise = torch.randn(video_raw_latent_shape,
                                             dtype=pred_video.dtype,
@@ -1349,7 +1397,7 @@ class DmdDenoisingStage(DenoisingStage):
                         latents = pred_video
 
                     # Update progress bar
-                    if i == len(timesteps) - 1 or (
+                    if i == len(loop_timesteps) - 1 or (
                         (i + 1) > num_warmup_steps and
                         (i + 1) % self.scheduler.order == 0
                             and progress_bar is not None):

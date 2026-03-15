@@ -22,15 +22,16 @@ shift
 
 # ── GPU / node settings ──────────────────────────────────────────
 NUM_GPUS="${NUM_GPUS:-$(nvidia-smi -L 2>/dev/null | wc -l)}"
-NUM_GPUS="${NUM_GPUS:-1}"
+NUM_GPUS="${NUM_GPUS:-4}"
 NNODES="${NNODES:-1}"
 NODE_RANK="${NODE_RANK:-0}"
 MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
 MASTER_PORT="${MASTER_PORT:-29501}"
 export TOKENIZERS_PARALLELISM=false
 # ── W&B ──────────────────────────────────────────────────────────
-export WANDB_API_KEY="${WANDB_API_KEY:-}"
+export WANDB_API_KEY="${WANDB_API_KEY:-7ff8b6e8356924f7a6dd51a0342dd1a422ea9352}"
 export WANDB_MODE="${WANDB_MODE:-online}"
+
 
 # ── Log file ─────────────────────────────────────────────────────
 CONFIG_NAME="$(basename "${CONFIG}" .yaml)"
@@ -38,6 +39,12 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 LOG_DIR="${LOG_DIR:-examples/train}"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/${CONFIG_NAME}_${TIMESTAMP}.log"
+
+set +u
+source ~/conda/miniconda/bin/activate
+conda activate mhuo-fv
+set -u
+export PYTHONPATH="/mnt/weka/home/hao.zhang/mhuo/FastVideo-refactor:${PYTHONPATH:-}"
 
 echo "=== Train Training ==="
 echo "Config:      ${CONFIG}"
@@ -49,7 +56,7 @@ echo "Extra args:  $*"
 echo "Log file:    ${LOG_FILE}"
 echo "=============================="
 
-python -m torch.distributed.run \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run \
     --nnodes "${NNODES}" \
     --node_rank "${NODE_RANK}" \
     --nproc_per_node "${NUM_GPUS}" \

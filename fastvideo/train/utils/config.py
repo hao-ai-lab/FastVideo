@@ -321,6 +321,7 @@ def _build_training_config(
             data_path=str(da.get("data_path", "") or ""),
             train_batch_size=int(da.get("train_batch_size", 1) or 1),
             dataloader_num_workers=int(da.get("dataloader_num_workers", 0) or 0),
+            apply_bot_died_filter=bool(da.get("apply_bot_died_filter", False)),
             training_cfg_rate=float(da.get("training_cfg_rate", 0.0) or 0.0),
             seed=int(da.get("seed", 0) or 0),
             num_height=int(da.get("num_height", 0) or 0),
@@ -347,6 +348,8 @@ def _build_training_config(
             resume_from_checkpoint=str(ck.get("resume_from_checkpoint", "") or ""),
             training_state_checkpointing_steps=int(ck.get("training_state_checkpointing_steps", 0) or 0),
             checkpoints_total_limit=int(ck.get("checkpoints_total_limit", 0) or 0),
+            best_checkpoint_start_step=int(ck.get("best_checkpoint_start_step", 0) or 0),
+            best_checkpoint_top_k=max(1, int(ck.get("best_checkpoint_top_k", 1) or 1)),
         ),
         tracker=TrackerConfig(
             trackers=list(tr.get("trackers", []) or []),

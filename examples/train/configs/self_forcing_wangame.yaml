@@ -1,0 +1,100 @@
+models:
+  student:
+    _target_: fastvideo.train.models.wangame.WanGameCausalModel
+    init_from: /mnt/weka/home/hao.zhang/kaiqin/wg_models/SFWanGame-2.1-0308-10000steps
+    trainable: true
+  teacher:
+    _target_: fastvideo.train.models.wangame.WanGameModel
+    init_from: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
+    trainable: false
+    disable_custom_init_weights: true
+  critic:
+    _target_: fastvideo.train.models.wangame.WanGameModel
+    init_from: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
+    trainable: true
+    disable_custom_init_weights: true
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.self_forcing.SelfForcingMethod
+  rollout_mode: simulate
+  generator_update_interval: 5
+  real_score_guidance_scale: 1.0
+  dmd_denoising_steps: [1000, 750, 500, 250]
+
+  chunk_size: 3
+  student_sample_type: sde
+  context_noise: 0.0
+  enable_gradient_in_rollout: true
+  start_gradient_frame: 0
+
+  # Critic optimizer
+  fake_score_learning_rate: 8.0e-6
+  fake_score_betas: [0.0, 0.999]
+  fake_score_lr_scheduler: constant
+
+training:
+  distributed:
+    num_gpus: 4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+
+  data:
+    data_path: >-
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0204_2130/preprocessed:1,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed:0,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:3,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed:3,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed:3,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/camera/preprocessed:3,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/camera4hold_alpha1/preprocessed:3,
+      /mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed:3
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 18
+    num_height: 352
+    num_width: 640
+    num_frames: 69
+    apply_bot_died_filter: true
+
+  optimizer:
+    learning_rate: 1e-5
+    betas: [0.0, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 6
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/wangame_1.3b_self_forcing
+    training_state_checkpointing_steps: 500
+    checkpoints_total_limit: 5
+
+  tracker:
+    project_name: wangame_sf
+    run_name: wangame_1.3b_self_forcing
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    max_grad_norm: 1.0
+  validation:
+    pipeline_target: fastvideo.pipelines.basic.wan.wangame_causal_dmd_pipeline.WangameCausalSdeDMDPipeline
+    dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_4.json
+    every_steps: 5
+    sampling_steps: [4]
+    sampling_timesteps: [1000, 750, 500, 250]
+    num_frames: 69
+    guidance_scale: 1.0
+    evaluate_ptlflow: false
+
+pipeline:
+  flow_shift: 3

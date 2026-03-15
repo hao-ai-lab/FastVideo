@@ -8,6 +8,7 @@ __all__ = [
     "FineTuneMethod",
     "SelfForcingMethod",
     "DiffusionForcingSFTMethod",
+    "TeacherForcingSFTMethod",
 ]
 
 
@@ -24,4 +25,7 @@ def __getattr__(name: str) -> object:
     if name == "DiffusionForcingSFTMethod":
         from fastvideo.train.methods.fine_tuning.dfsft import DiffusionForcingSFTMethod
         return DiffusionForcingSFTMethod
+    if name == "TeacherForcingSFTMethod":
+        from fastvideo.train.methods.fine_tuning.tfsft import TeacherForcingSFTMethod
+        return TeacherForcingSFTMethod
     raise AttributeError(name)

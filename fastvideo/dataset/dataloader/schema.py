@@ -157,3 +157,5 @@ pyarrow_schema_matrixgame = pa.schema([
     pa.field("duration_sec", pa.float64()),
     pa.field("fps", pa.float64()),
 ])
+
+pyarrow_schema_wangame = pyarrow_schema_matrixgame

@@ -73,6 +73,10 @@ class TrainingMethod(torch.nn.Module, ABC):
     def set_tracker(self, tracker: Any) -> None:
         self.tracker = tracker
 
+    @property
+    def transformer_inference(self) -> torch.nn.Module:
+        return self.student.transformer
+
     @abstractmethod
     def single_train_step(
         self,
