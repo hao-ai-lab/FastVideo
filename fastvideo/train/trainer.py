@@ -170,18 +170,42 @@ class Trainer:
             return
 
         artifacts: dict[str, Any] = {}
+
+        def _add_video_artifact(
+            source_dict: dict[str, Any],
+            *,
+            latent_key: str,
+            artifact_key: str,
+        ) -> None:
+            latents = source_dict.get(latent_key)
+            if not isinstance(latents, torch.Tensor):
+                return
+            video = _decode_latent_video(vae, latents)
+            artifact = self.tracker.video(
+                video,
+                fps=24,
+                format="mp4",
+            )
+            if artifact is not None:
+                artifacts[artifact_key] = artifact
+
         dmd_latent_dict = outputs.get("dmd_latent_vis_dict")
         if isinstance(dmd_latent_dict, dict) and dmd_latent_dict:
-            latents = dmd_latent_dict.get("real_score_pred_video")
-            if isinstance(latents, torch.Tensor):
-                video = _decode_latent_video(vae, latents)
-                artifact = self.tracker.video(
-                    video,
-                    fps=24,
-                    format="mp4",
-                )
-                if artifact is not None:
-                    artifacts["dmd_real_score_pred_video"] = artifact
+            _add_video_artifact(
+                dmd_latent_dict,
+                latent_key="generator_pred_video",
+                artifact_key="dmd_generator_pred_video",
+            )
+            _add_video_artifact(
+                dmd_latent_dict,
+                latent_key="real_score_pred_video",
+                artifact_key="dmd_real_score_pred_video",
+            )
+            _add_video_artifact(
+                dmd_latent_dict,
+                latent_key="faker_score_pred_video",
+                artifact_key="dmd_faker_score_pred_video",
+            )
 
             for scalar_key in ("generator_timestep", "dmd_timestep"):
                 value = dmd_latent_dict.get(scalar_key)
@@ -190,6 +214,11 @@ class Trainer:
 
         fake_score_latent_dict = outputs.get("fake_score_latent_vis_dict")
         if isinstance(fake_score_latent_dict, dict) and fake_score_latent_dict:
+            _add_video_artifact(
+                fake_score_latent_dict,
+                latent_key="generator_pred_video",
+                artifact_key="critic_generator_pred_video",
+            )
             value = fake_score_latent_dict.get("fake_score_timestep")
             if isinstance(value, torch.Tensor) and value.numel() == 1:
                 artifacts["fake_score_timestep"] = float(
