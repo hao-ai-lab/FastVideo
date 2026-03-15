@@ -109,6 +109,29 @@ def _decode_latent_video(
         return (video * 255).numpy().astype(np.uint8)
 
 
+def _maybe_add_video_artifact(
+    tracker: Any,
+    videos: list[Any],
+    *,
+    vae: Any,
+    source_dict: dict[str, Any],
+    latent_key: str,
+    caption: str,
+) -> None:
+    latents = source_dict.get(latent_key)
+    if not isinstance(latents, torch.Tensor):
+        return
+    video = _decode_latent_video(vae, latents)
+    artifact = tracker.video(
+        video,
+        caption=caption,
+        fps=24,
+        format="mp4",
+    )
+    if artifact is not None:
+        videos.append(artifact)
+
+
 @dataclass(slots=True)
 class TrainLoopState:
     step: int
@@ -170,41 +193,33 @@ class Trainer:
             return
 
         artifacts: dict[str, Any] = {}
-
-        def _add_video_artifact(
-            source_dict: dict[str, Any],
-            *,
-            latent_key: str,
-            artifact_key: str,
-        ) -> None:
-            latents = source_dict.get(latent_key)
-            if not isinstance(latents, torch.Tensor):
-                return
-            video = _decode_latent_video(vae, latents)
-            artifact = self.tracker.video(
-                video,
-                fps=24,
-                format="mp4",
-            )
-            if artifact is not None:
-                artifacts[artifact_key] = artifact
+        video_artifacts: list[Any] = []
 
         dmd_latent_dict = outputs.get("dmd_latent_vis_dict")
         if isinstance(dmd_latent_dict, dict) and dmd_latent_dict:
-            _add_video_artifact(
-                dmd_latent_dict,
+            _maybe_add_video_artifact(
+                self.tracker,
+                video_artifacts,
                 latent_key="generator_pred_video",
-                artifact_key="dmd_generator_pred_video",
+                caption="generator",
+                vae=vae,
+                source_dict=dmd_latent_dict,
             )
-            _add_video_artifact(
-                dmd_latent_dict,
+            _maybe_add_video_artifact(
+                self.tracker,
+                video_artifacts,
                 latent_key="real_score_pred_video",
-                artifact_key="dmd_real_score_pred_video",
+                caption="real_score",
+                vae=vae,
+                source_dict=dmd_latent_dict,
             )
-            _add_video_artifact(
-                dmd_latent_dict,
+            _maybe_add_video_artifact(
+                self.tracker,
+                video_artifacts,
                 latent_key="faker_score_pred_video",
-                artifact_key="dmd_faker_score_pred_video",
+                caption="fake_score",
+                vae=vae,
+                source_dict=dmd_latent_dict,
             )
 
             for scalar_key in ("generator_timestep", "dmd_timestep"):
@@ -214,16 +229,22 @@ class Trainer:
 
         fake_score_latent_dict = outputs.get("fake_score_latent_vis_dict")
         if isinstance(fake_score_latent_dict, dict) and fake_score_latent_dict:
-            _add_video_artifact(
-                fake_score_latent_dict,
+            _maybe_add_video_artifact(
+                self.tracker,
+                video_artifacts,
                 latent_key="generator_pred_video",
-                artifact_key="critic_generator_pred_video",
+                caption="critic_generator",
+                vae=vae,
+                source_dict=fake_score_latent_dict,
             )
             value = fake_score_latent_dict.get("fake_score_timestep")
             if isinstance(value, torch.Tensor) and value.numel() == 1:
                 artifacts["fake_score_timestep"] = float(
                     value.detach().item()
                 )
+
+        if video_artifacts:
+            artifacts["train_visualization"] = video_artifacts
 
         if artifacts:
             self.tracker.log_artifacts(artifacts, step)
