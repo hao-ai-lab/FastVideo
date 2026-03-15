@@ -5,12 +5,12 @@ models:
     trainable: true
   teacher:
     _target_: fastvideo.train.models.wangame.WanGameModel
-    init_from: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
+    init_from: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0306-61500steps
     trainable: false
     disable_custom_init_weights: true
   critic:
     _target_: fastvideo.train.models.wangame.WanGameModel
-    init_from: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0223-9000steps
+    init_from: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0306-61500steps
     trainable: true
     disable_custom_init_weights: true
 
