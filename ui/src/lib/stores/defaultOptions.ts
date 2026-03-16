@@ -14,11 +14,23 @@ export const defaultOptions = writable<DefaultOptions>(loadDefaultOptions());
 export function initDefaultOptions(): void {
 	getSettings()
 		.then((opts) => {
-			// Merge with DEFAULT_OPTIONS so new fields (like apiServerBaseUrl)
-			// always have sensible defaults even if the server is older.
-			defaultOptions.set({ ...DEFAULT_OPTIONS, ...opts });
+			// Merge server settings into existing local options, but keep
+			// apiServerBaseUrl purely local (do not let the server overwrite it).
+			defaultOptions.update((prev) => {
+				const merged: DefaultOptions = {
+					...DEFAULT_OPTIONS,
+					...prev,
+					...opts,
+					apiServerBaseUrl: prev.apiServerBaseUrl,
+				};
+				saveDefaultOptions(merged);
+				return merged;
+			});
 		})
-		.catch(() => defaultOptions.set(loadDefaultOptions()));
+		.catch(() => {
+			// Fall back to whatever is in local storage (or DEFAULT_OPTIONS)
+			defaultOptions.set(loadDefaultOptions());
+		});
 }
 
 export function updateOption<K extends keyof DefaultOptions>(
