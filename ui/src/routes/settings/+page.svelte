@@ -44,6 +44,21 @@
 		<hr class="hr" />
 		<h2>Paths</h2>
 		<div class="formRow">
+			<label for="settings-api-server-base-url">API Server Base URL</label>
+			<input
+				id="settings-api-server-base-url"
+				type="text"
+				value={$defaultOptions.apiServerBaseUrl ?? ""}
+				oninput={(e) =>
+					updateOption(
+						"apiServerBaseUrl",
+						(e.target as HTMLInputElement).value,
+					)}
+				placeholder="http://localhost:8189/api"
+				style="font-family: monospace; font-size: 0.9rem"
+			/>
+		</div>
+		<div class="formRow">
 			<label for="settings-dataset-upload-path">Dataset Upload Path</label>
 			<input
 				id="settings-dataset-upload-path"
