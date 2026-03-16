@@ -6,6 +6,20 @@ import type { Job, JobType } from "$lib/types";
 const DEFAULT_API_BASE_URL = "http://localhost:8189/api";
 
 export function getApiBaseUrl(): string {
+	// 1) Check user-configured value from local storage (Settings page)
+	if (typeof window !== "undefined") {
+		try {
+			const stored = window.localStorage.getItem("fastvideo-default-options");
+			if (stored) {
+				const parsed = JSON.parse(stored) as { apiServerBaseUrl?: string };
+				return parsed.apiServerBaseUrl!.trim();
+			}
+		} catch {
+			// Ignore storage / JSON errors and fall back to env/default
+		}
+	}
+
+	// 2) Fall back to env var if set, then hardcoded default
 	const apiUrl =
 		typeof env.PUBLIC_API_BASE_URL === "string" && env.PUBLIC_API_BASE_URL
 			? env.PUBLIC_API_BASE_URL

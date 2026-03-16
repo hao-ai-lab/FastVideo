@@ -13,7 +13,11 @@ export const defaultOptions = writable<DefaultOptions>(loadDefaultOptions());
 
 export function initDefaultOptions(): void {
 	getSettings()
-		.then((opts) => defaultOptions.set(opts))
+		.then((opts) => {
+			// Merge with DEFAULT_OPTIONS so new fields (like apiServerBaseUrl)
+			// always have sensible defaults even if the server is older.
+			defaultOptions.set({ ...DEFAULT_OPTIONS, ...opts });
+		})
 		.catch(() => defaultOptions.set(loadDefaultOptions()));
 }
 
@@ -23,7 +27,15 @@ export function updateOption<K extends keyof DefaultOptions>(
 ): void {
 	defaultOptions.update((prev) => {
 		const next = { ...prev, [key]: value };
-		updateSettings({ [key]: value }).catch(() => saveDefaultOptions(next));
+		// API Server Base URL is a purely local (per-browser) setting.
+		// Do not persist it to the backend; just update local storage.
+		if (key === "apiServerBaseUrl") {
+			saveDefaultOptions(next);
+		} else {
+			updateSettings({ [key]: value }).catch(() =>
+				saveDefaultOptions(next),
+			);
+		}
 		return next;
 	});
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export interface DefaultOptions {
+	apiServerBaseUrl: string;
 	defaultModelId: string;
 	defaultModelIdT2v: string;
 	defaultModelIdI2v: string;
@@ -28,6 +29,7 @@ export interface DefaultOptions {
 }
 
 export const DEFAULT_OPTIONS: DefaultOptions = {
+	apiServerBaseUrl: "",
 	defaultModelId: "",
 	defaultModelIdT2v: "",
 	defaultModelIdI2v: "",
