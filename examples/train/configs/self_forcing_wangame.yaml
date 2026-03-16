@@ -20,6 +20,7 @@ method:
   generator_update_interval: 5
   real_score_guidance_scale: 1.0
   dmd_denoising_steps: [1000, 750, 500, 250]
+  warp_denoising_step: true
 
   chunk_size: 3
   student_sample_type: sde
@@ -88,6 +89,7 @@ callbacks:
     max_grad_norm: 1.0
   validation:
     pipeline_target: fastvideo.pipelines.basic.wan.wangame_causal_dmd_pipeline.WangameCausalSdeDMDPipeline
+    scheduler_target: fastvideo.models.schedulers.scheduling_self_forcing_flow_match.SelfForcingFlowMatchScheduler
     dataset_file: examples/training/finetune/WanGame2.1_1.3b_i2v/validation_4.json
     every_steps: 5
     sampling_steps: [4]

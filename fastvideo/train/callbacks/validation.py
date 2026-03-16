@@ -145,6 +145,7 @@ class ValidationCallback(Callback):
         self._last_scalar_metrics: dict[str, float] = {}
         self._last_mf_angle_err_mean: float = float("inf")
         self._last_eval_step: int = -1
+        self._logged_sampling_step_configs: set[int] = set()
 
     # ----------------------------------------------------------
     # Callback hooks
@@ -626,6 +627,8 @@ class ValidationCallback(Callback):
                 for s in pk["dmd_denoising_steps"]
             ]
 
+        self._logged_sampling_step_configs.add(int(num_inference_steps))
+
     # ----------------------------------------------------------
     # Pipeline management
     # ----------------------------------------------------------
@@ -696,7 +699,19 @@ class ValidationCallback(Callback):
         SchedulerCls = resolve_target(
             self.scheduler_target
         )
-        return SchedulerCls(shift=float(flow_shift))
+        scheduler = SchedulerCls(shift=float(flow_shift))
+        if SchedulerCls.__name__ == "SelfForcingFlowMatchScheduler":
+            if hasattr(scheduler, "sigma_min"):
+                scheduler.sigma_min = 0.0
+            if hasattr(scheduler, "extra_one_step"):
+                scheduler.extra_one_step = True
+            if hasattr(scheduler, "set_timesteps"):
+                scheduler.set_timesteps(
+                    num_inference_steps=1000,
+                    training=True,
+                )
+
+        return scheduler
 
     # ----------------------------------------------------------
     # Batch preparation
