@@ -297,6 +297,13 @@ class ValidationCallback(Callback):
             tc.model_path,
             **kwargs,
         )
+
+        scheduler = self._pipeline.get_module("scheduler")
+        if (scheduler is not None and type(scheduler).__name__ == "SelfForcingFlowMatchScheduler"):
+            scheduler.sigma_min = 0.0
+            scheduler.extra_one_step = True
+            scheduler.set_timesteps(num_inference_steps=1000, training=True)
+
         self._pipeline_key = key
         return self._pipeline
 
