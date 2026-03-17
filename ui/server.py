@@ -440,8 +440,6 @@ def create_dataset(req: CreateDatasetRequest) -> dict[str, Any]:
             status_code=400,
             detail="No media files found. Ensure at least one image or video.",
         )
-    if(verbose):
-        print(req)
     dataset_id = str(uuid.uuid4())
     created_at = time.time()
     dest_dir = os.path.join(datasets_upload_dir, dataset_id)

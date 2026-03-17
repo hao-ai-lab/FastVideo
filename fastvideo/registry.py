@@ -135,6 +135,7 @@ class ConfigInfo:
 
     sampling_param_cls: type[SamplingParam] | None
     pipeline_config_cls: type[PipelineConfig]
+    workload_types: tuple[str, ...]
 
 
 # The central registry mapping a model name to its configuration information
@@ -150,15 +151,21 @@ _MODEL_NAME_DETECTORS: list[tuple[str, Callable[[str], bool]]] = []
 def register_configs(
     sampling_param_cls: type[SamplingParam] | None,
     pipeline_config_cls: type[PipelineConfig],
+    workload_types: tuple[str, ...],
     hf_model_paths: list[str] | None = None,
     model_detectors: list[Callable[[str], bool]] | None = None,
 ) -> None:
-    """Register config classes for a model family."""
+    """Register config classes for a model family.
+
+    workload_types declares which UI workload options this config supports
+    (e.g. "t2v", "i2v", "t2i"). Use () for configs not exposed as workload options.
+    """
     model_id = str(len(_CONFIG_REGISTRY))
 
     _CONFIG_REGISTRY[model_id] = ConfigInfo(
         sampling_param_cls=sampling_param_cls,
         pipeline_config_cls=pipeline_config_cls,
+        workload_types=workload_types,
     )
 
     if hf_model_paths:
@@ -235,6 +242,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=LTX2BaseSamplingParam,
         pipeline_config_cls=LTX2T2VConfig,
+        workload_types=("t2v",),
         hf_model_paths=[
             "Lightricks/LTX-2",
             "FastVideo/LTX2-base",
@@ -248,6 +256,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=LTX2DistilledSamplingParam,
         pipeline_config_cls=LTX2T2VConfig,
+        workload_types=("t2v",),
         hf_model_paths=[
             "FastVideo/LTX2-Distilled-Diffusers",
         ],
@@ -260,6 +269,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Hunyuan15_480P_SamplingParam,
         pipeline_config_cls=Hunyuan15T2V480PConfig,
+        workload_types=("t2v",),
         hf_model_paths=[
             "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
         ],
@@ -275,6 +285,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Hunyuan15_480P_StepDistilled_I2V_SamplingParam,
         pipeline_config_cls=Hunyuan15I2V480PStepDistilledConfig,
+        workload_types=("i2v",),
         hf_model_paths=[
             "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v_step_distilled",
         ],
@@ -282,6 +293,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Hunyuan15_720P_SamplingParam,
         pipeline_config_cls=Hunyuan15T2V720PConfig,
+        workload_types=("t2v",),
         hf_model_paths=[
             "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v",
         ],
@@ -289,6 +301,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Hunyuan15_720P_Distilled_I2V_SamplingParam,
         pipeline_config_cls=Hunyuan15I2V720PConfig,
+        workload_types=("i2v",),
         hf_model_paths=[
             "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_i2v_distilled",
         ],
@@ -296,13 +309,18 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Hunyuan15_SR_1080P_SamplingParam,
         pipeline_config_cls=Hunyuan15SR1080PConfig,
-        hf_model_paths=["weizhou03/HunyuanVideo-1.5-Diffusers-1080p", "weizhou03/HunyuanVideo-1.5-Diffusers-1080p-2SR"],
+        workload_types=(),
+        hf_model_paths=[
+            "weizhou03/HunyuanVideo-1.5-Diffusers-1080p",
+            "weizhou03/HunyuanVideo-1.5-Diffusers-1080p-2SR"
+        ],
     )
 
     # Hunyuan (excludes gamecraft, hyworld, and versioned models)
     register_configs(
         sampling_param_cls=HunyuanSamplingParam,
         pipeline_config_cls=HunyuanConfig,
+        workload_types=("t2v",),
         hf_model_paths=[
             "hunyuanvideo-community/HunyuanVideo",
         ],
@@ -314,6 +332,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=FastHunyuanSamplingParam,
         pipeline_config_cls=FastHunyuanConfig,
+        workload_types=("t2v",),
         hf_model_paths=[
             "FastVideo/FastHunyuan-diffusers",
         ],
@@ -323,6 +342,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=HYWorld_SamplingParam,
         pipeline_config_cls=HYWorldConfig,
+        workload_types=(),
         hf_model_paths=[
             "FastVideo/HY-WorldPlay-Bidirectional-Diffusers",
         ],
@@ -333,6 +353,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=HunyuanGameCraftSamplingParam,
         pipeline_config_cls=HunyuanGameCraftPipelineConfig,
+        workload_types=("i2v",),
         hf_model_paths=[
             "FastVideo/HunyuanGameCraft-Diffusers",
         ],
@@ -342,6 +363,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=LingBotWorld_SamplingParam,
         pipeline_config_cls=LingBotWorldI2V480PConfig,
+        workload_types=("i2v",),
         hf_model_paths=[
             "FastVideo/LingBot-World-Base-Cam-Diffusers",
         ],
@@ -352,6 +374,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=PipelineConfig,
+        workload_types=("t2v",),
         hf_model_paths=[
             "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers",
         ],
@@ -360,19 +383,38 @@ def _register_configs() -> None:
         ],
     )
 
-    # LongCat
+    # LongCat (T2V, I2V, VC use same config; workload varies by path)
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=LongCatT2V480PConfig,
-        hf_model_paths=[
-            "FastVideo/LongCat-Video-T2V-Diffusers",
-            "FastVideo/LongCat-Video-I2V-Diffusers",
-            "FastVideo/LongCat-Video-VC-Diffusers",
-        ],
+        workload_types=("t2v",),
+        hf_model_paths=["FastVideo/LongCat-Video-T2V-Diffusers"],
         model_detectors=[
-            lambda path: "longcatimagetovideo" in path.lower(),
-            lambda path: "longcatvideocontinuation" in path.lower(),
-            lambda path: "longcat" in path.lower(),
+            lambda path: "longcat" in path.lower()
+            and "i2v" not in path.lower()
+            and "imagetovideo" not in path.lower()
+            and "vc" not in path.lower()
+            and "videocontinuation" not in path.lower(),
+        ],
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LongCatT2V480PConfig,
+        workload_types=("i2v",),
+        hf_model_paths=["FastVideo/LongCat-Video-I2V-Diffusers"],
+        model_detectors=[
+            lambda path: "longcatimagetovideo" in path.lower()
+            or ("longcat" in path.lower() and "i2v" in path.lower()),
+        ],
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LongCatT2V480PConfig,
+        workload_types=(),
+        hf_model_paths=["FastVideo/LongCat-Video-VC-Diffusers"],
+        model_detectors=[
+            lambda path: "longcatvideocontinuation" in path.lower()
+            or ("longcat" in path.lower() and "vc" in path.lower()),
         ],
     )
 
@@ -380,6 +422,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=MatrixGame2_SamplingParam,
         pipeline_config_cls=MatrixGameI2V480PConfig,
+        workload_types=("i2v",),
         hf_model_paths=[
             "FastVideo/Matrix-Game-2.0-Base-Diffusers",
             "FastVideo/Matrix-Game-2.0-GTA-Diffusers",
@@ -394,6 +437,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Cosmos25SamplingParamBase,
         pipeline_config_cls=Cosmos25Config,
+        workload_types=("t2v",),
         hf_model_paths=[
             "KyleShao/Cosmos-Predict2.5-2B-Diffusers",
         ],
@@ -410,6 +454,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Cosmos_Predict2_2B_Video2World_SamplingParam,
         pipeline_config_cls=CosmosConfig,
+        workload_types=("t2v",),
         hf_model_paths=[
             "nvidia/Cosmos-Predict2-2B-Video2World",
         ],
@@ -423,6 +468,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=TurboDiffusionT2V_1_3B_SamplingParam,
         pipeline_config_cls=TurboDiffusionT2V_1_3B_Config,
+        workload_types=("t2v",),
         hf_model_paths=[
             "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",
         ],
@@ -431,6 +477,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=TurboDiffusionT2V_14B_SamplingParam,
         pipeline_config_cls=TurboDiffusionT2V_14B_Config,
+        workload_types=("t2v",),
         hf_model_paths=[
             "loayrashid/TurboWan2.1-T2V-14B-Diffusers",
         ],
@@ -438,6 +485,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=TurboDiffusionI2V_A14B_SamplingParam,
         pipeline_config_cls=TurboDiffusionI2V_A14B_Config,
+        workload_types=("i2v",),
         hf_model_paths=[
             "loayrashid/TurboWan2.2-I2V-A14B-Diffusers",
         ],
@@ -447,6 +495,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=WanT2V_1_3B_SamplingParam,
         pipeline_config_cls=WanT2V480PConfig,
+        workload_types=("t2v",),
         hf_model_paths=[
             "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         ],
@@ -455,6 +504,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=WanT2V_14B_SamplingParam,
         pipeline_config_cls=WanT2V720PConfig,
+        workload_types=("t2v",),
         hf_model_paths=[
             "Wan-AI/Wan2.1-T2V-14B-Diffusers",
             "FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers",
@@ -463,6 +513,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=WanI2V_14B_480P_SamplingParam,
         pipeline_config_cls=WanI2V480PConfig,
+        workload_types=("i2v",),
         hf_model_paths=[
             "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
         ],
@@ -471,6 +522,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=WanI2V_14B_720P_SamplingParam,
         pipeline_config_cls=WanI2V720PConfig,
+        workload_types=("i2v",),
         hf_model_paths=[
             "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers",
         ],
@@ -478,6 +530,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Wan2_1_Fun_1_3B_InP_SamplingParam,
         pipeline_config_cls=WanI2V480PConfig,
+        workload_types=("i2v",),
         hf_model_paths=[
             "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers",
         ],
@@ -485,6 +538,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Wan2_1_Fun_1_3B_Control_SamplingParam,
         pipeline_config_cls=WANV2VConfig,
+        workload_types=(),
         hf_model_paths=[
             "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers",
         ],
@@ -492,6 +546,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=FastWanT2V480P_SamplingParam,
         pipeline_config_cls=FastWan2_1_T2V_480P_Config,
+        workload_types=("t2v",),
         hf_model_paths=[
             "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
             "FastVideo/FastWan2.1-T2V-14B-480P-Diffusers",
@@ -501,6 +556,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Wan2_2_TI2V_5B_SamplingParam,
         pipeline_config_cls=Wan2_2_TI2V_5B_Config,
+        workload_types=("t2v", "i2v"),
         hf_model_paths=[
             "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
         ],
@@ -508,6 +564,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Wan2_2_TI2V_5B_SamplingParam,
         pipeline_config_cls=FastWan2_2_TI2V_5B_Config,
+        workload_types=("t2v", "i2v"),
         hf_model_paths=[
             "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
             "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
@@ -516,6 +573,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Wan2_2_T2V_A14B_SamplingParam,
         pipeline_config_cls=Wan2_2_T2V_A14B_Config,
+        workload_types=("t2v",),
         hf_model_paths=[
             "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
         ],
@@ -523,6 +581,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Wan2_2_I2V_A14B_SamplingParam,
         pipeline_config_cls=Wan2_2_I2V_A14B_Config,
+        workload_types=("i2v",),
         hf_model_paths=[
             "Wan-AI/Wan2.2-I2V-A14B-Diffusers",
         ],
@@ -530,17 +589,31 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
         pipeline_config_cls=SelfForcingWanT2V480PConfig,
+        workload_types=("t2v",),
         hf_model_paths=[
             "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",
         ],
         model_detectors=[lambda path: "wancausaldmdpipeline" in path.lower()],
     )
+    # SFWan2.2: T2V and I2V variants by path
     register_configs(
         sampling_param_cls=SelfForcingWan2_2_T2V_A14B_480P_SamplingParam,
         pipeline_config_cls=SelfForcingWan2_2_T2V480PConfig,
-        hf_model_paths=[
-            "rand0nmr/SFWan2.2-T2V-A14B-Diffusers",
-            "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers",
+        workload_types=("t2v",),
+        hf_model_paths=["rand0nmr/SFWan2.2-T2V-A14B-Diffusers"],
+        model_detectors=[
+            lambda path: ("sfwan2.2" in path.lower() or "sfwan2_2" in path.lower())
+            and "i2v" not in path.lower(),
+        ],
+    )
+    register_configs(
+        sampling_param_cls=SelfForcingWan2_2_T2V_A14B_480P_SamplingParam,
+        pipeline_config_cls=SelfForcingWan2_2_T2V480PConfig,
+        workload_types=("i2v",),
+        hf_model_paths=["FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers"],
+        model_detectors=[
+            lambda path: ("sfwan2.2" in path.lower() or "sfwan2_2" in path.lower())
+            and "i2v" in path.lower(),
         ],
     )
 
@@ -548,6 +621,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=SD35SamplingParam,
         pipeline_config_cls=SD35Config,
+        workload_types=("t2i",),
         hf_model_paths=[
             "stabilityai/stable-diffusion-3.5-medium",
         ],
@@ -644,55 +718,6 @@ def get_registered_model_paths() -> list[str]:
     return sorted(_MODEL_HF_PATH_TO_NAME.keys())
 
 
-def _infer_workload_types(model_path: str,
-                          config_info: ConfigInfo) -> list[str]:
-    """Infer supported workload types from model path and pipeline config."""
-    config_name = config_info.pipeline_config_cls.__name__
-    path_lower = model_path.lower()
-
-    # LongCat: same config for T2V, I2V, VC; path distinguishes
-    if "longcat" in path_lower:
-        if "i2v" in path_lower or "imagetovideo" in path_lower:
-            return ["i2v"]
-        if "vc" in path_lower or "videocontinuation" in path_lower:
-            return []  # VC not in UI workload options
-        return ["t2v"]
-
-    # SFWan2.2: I2V vs T2V variant by path
-    if "sfwan2.2" in path_lower or "sfwan2_2" in path_lower:
-        if "i2v" in path_lower:
-            return ["i2v"]
-        return ["t2v"]
-
-    # TI2V models support both T2V and I2V
-    if "ti2v" in config_name.lower():
-        return ["t2v", "i2v"]
-
-    # T2V-only configs (exclude I2V and TI2V)
-    if "t2v" in config_name.lower() and "i2v" not in config_name.lower():
-        return ["t2v"]
-
-    # I2V-only configs (exclude TI2V)
-    if "i2v" in config_name.lower():
-        return ["i2v"]
-
-    # T2I (SD3.5, etc.)
-    if "sd35" in config_name.lower() or "t2i" in config_name.lower():
-        return ["t2i"]
-
-    # Cosmos: video prediction, treat as T2V
-    if "cosmos" in config_name.lower():
-        return ["t2v"]
-
-    # Game/control models (Matrix, GameCraft, LingBot): I2V
-    if any(x in config_name.lower() for x in ("matrix", "gamecraft",
-                                              "lingbot")):
-        return ["i2v"]
-
-    # V2V, SR, etc.: not in UI workload options
-    return []
-
-
 def get_registered_models_with_workloads(
     workload_type: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -711,7 +736,7 @@ def get_registered_models_with_workloads(
         config_info = _CONFIG_REGISTRY.get(model_id)
         if config_info is None:
             continue
-        workloads = _infer_workload_types(path, config_info)
+        workloads = list(config_info.workload_types)
         if workload_type is not None:
             if workload_type.lower() not in workloads:
                 continue
