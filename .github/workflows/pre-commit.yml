@@ -1,7 +1,18 @@
 name: pre-commit
 
 on:
-    workflow_call:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_call:
+
+concurrency:
+  group: pre-commit-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
   pre-commit:
@@ -13,6 +24,7 @@ jobs:
         python-version: "3.12"
     - run: echo "::add-matcher::.github/workflows/matchers/actionlint.json"
     - run: echo "::add-matcher::.github/workflows/matchers/mypy.json"
+    - run: echo "::add-matcher::.github/workflows/matchers/ruff.json"
     - uses: pre-commit/action@v3.0.1
       with:
         extra_args: --all-files --hook-stage manual

@@ -36,11 +36,11 @@ jobs:
           
           if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
             echo "Version changed from $OLD_VERSION to $NEW_VERSION"
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "new-version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           else
             echo "Version did not change"
-            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
   build_wheels:
