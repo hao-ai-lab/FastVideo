@@ -178,9 +178,8 @@ class InputValidationStage(PipelineStage):
             if batch.keyboard_cond.dim() != 3:
                 raise ValueError(f"keyboard_cond must have 3 dimensions (B, T, K), but got {batch.keyboard_cond.dim()}")
             keyboard_dim = batch.keyboard_cond.shape[-1]
-            logger.info(
-                "Action control: keyboard_cond validated - shape %s (dim=%d)",
-                batch.keyboard_cond.shape, keyboard_dim)
+            logger.info("Action control: keyboard_cond validated - shape %s (dim=%d)", batch.keyboard_cond.shape,
+                        keyboard_dim)
 
         if batch.grid_sizes is not None:
             if not isinstance(batch.grid_sizes, list | tuple | torch.Tensor):

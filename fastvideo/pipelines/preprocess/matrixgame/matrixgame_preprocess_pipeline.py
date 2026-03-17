@@ -124,26 +124,19 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
                         action_dict = action_data.item()
                         if "keyboard" in action_dict:
                             kb_length = len(action_dict["keyboard"])
-                            assert kb_length >= num_frames, (
-                                f"keyboard length {kb_length} is smaller than "
-                                f"num_frames {num_frames} for {action_path}.")
-                            keyboard_cond_list.append(
-                                action_dict["keyboard"][:num_frames].astype(
-                                    np.float32))
+                            assert kb_length >= num_frames, (f"keyboard length {kb_length} is smaller than "
+                                                             f"num_frames {num_frames} for {action_path}.")
+                            keyboard_cond_list.append(action_dict["keyboard"][:num_frames].astype(np.float32))
                         if "mouse" in action_dict:
                             ms_length = len(action_dict["mouse"])
-                            assert ms_length >= num_frames, (
-                                f"mouse length {ms_length} is smaller than "
-                                f"num_frames {num_frames} for {action_path}.")
-                            mouse_cond_list.append(
-                                action_dict["mouse"][:num_frames])
+                            assert ms_length >= num_frames, (f"mouse length {ms_length} is smaller than "
+                                                             f"num_frames {num_frames} for {action_path}.")
+                            mouse_cond_list.append(action_dict["mouse"][:num_frames])
                     else:
                         kb_length = len(action_data)
-                        assert kb_length >= num_frames, (
-                            f"keyboard length {kb_length} is smaller than "
-                            f"num_frames {num_frames} for {action_path}.")
-                        keyboard_cond_list.append(
-                            action_data.astype(np.float32)[:num_frames])
+                        assert kb_length >= num_frames, (f"keyboard length {kb_length} is smaller than "
+                                                         f"num_frames {num_frames} for {action_path}.")
+                        keyboard_cond_list.append(action_data.astype(np.float32)[:num_frames])
             if keyboard_cond_list:
                 features["keyboard_cond"] = keyboard_cond_list
             if mouse_cond_list:
