@@ -8,6 +8,7 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 import torch.distributed as dist
 
+from fastvideo.logger import init_logger
 from fastvideo.train.models.base import (
     CausalModelBase,
     ModelBase,
@@ -25,6 +26,8 @@ from fastvideo.models.utils import pred_noise_to_pred_video
 if TYPE_CHECKING:
     from fastvideo.pipelines import TrainingBatch
 
+logger = init_logger(__name__)
+
 
 def _require_bool(raw: Any, *, where: str) -> bool:
     if isinstance(raw, bool):
@@ -36,6 +39,26 @@ def _require_str(raw: Any, *, where: str) -> str:
     if not isinstance(raw, str) or not raw.strip():
         raise ValueError(f"Expected non-empty string at {where}")
     return raw
+
+
+def _shape_repr(value: Any) -> str:
+    if isinstance(value, torch.Tensor):
+        return "x".join(str(int(dim)) for dim in value.shape)
+    if value is None:
+        return "None"
+    return type(value).__name__
+
+
+def _preview_tensor(value: Any, *, limit: int = 8) -> list[Any] | None:
+    if not isinstance(value, torch.Tensor):
+        return None
+    flat = value.detach().flatten().cpu()
+    if flat.numel() == 0:
+        return []
+    flat = flat[:limit]
+    if torch.is_floating_point(flat):
+        return [float(x.item()) for x in flat]
+    return [int(x.item()) for x in flat]
 
 
 class SelfForcingMethod(DMD2Method):
@@ -154,6 +177,38 @@ class SelfForcingMethod(DMD2Method):
         )
 
         self._sf_denoising_step_list: torch.Tensor | None = None
+        self._logged_denoising_steps = False
+        self._rollout_debug_calls = 0
+        self._fake_score_debug_calls = 0
+        self._real_score_debug_calls = 0
+
+        scheduler_timesteps = self._sf_scheduler.timesteps
+        logger.warning(
+            "SF_DEBUG init sample_type=%s chunk_size=%s "
+            "same_step_across_blocks=%s last_step_only=%s "
+            "enable_gradient_in_rollout=%s start_gradient_frame=%s "
+            "context_noise=%s raw_denoising_steps=%s "
+            "warp_denoising_step=%s flow_shift=%s cfg_uncond=%s "
+            "scheduler=%s scheduler_num_train_timesteps=%s "
+            "scheduler_timesteps_len=%s scheduler_timesteps_head=%s "
+            "scheduler_timesteps_tail=%s",
+            self._student_sample_type,
+            self._chunk_size,
+            self._same_step_across_blocks,
+            self._last_step_only,
+            self._enable_gradient_in_rollout,
+            self._start_gradient_frame,
+            self._context_noise,
+            self.method_config.get("dmd_denoising_steps"),
+            bool(self.method_config.get("warp_denoising_step", False)),
+            shift,
+            self._cfg_uncond,
+            type(self._sf_scheduler).__name__,
+            int(self.student.num_train_timesteps),
+            int(scheduler_timesteps.numel()),
+            _preview_tensor(scheduler_timesteps[:6]),
+            _preview_tensor(scheduler_timesteps[-6:]),
+        )
 
     def _get_denoising_step_list(self, device: torch.device) -> torch.Tensor:
         if (self._sf_denoising_step_list is not None and self._sf_denoising_step_list.device == device):
@@ -178,6 +233,8 @@ class SelfForcingMethod(DMD2Method):
                 torch.tensor([0], dtype=torch.float32),
             )).to(device)
             steps = timesteps[int(self.student.num_train_timesteps) - steps]
+
+        self._logged_denoising_steps = True
 
         self._sf_denoising_step_list = steps
         return steps
@@ -321,6 +378,32 @@ class SelfForcingMethod(DMD2Method):
             device=device,
         )
 
+        rollout_call = self._rollout_debug_calls
+        if rollout_call < 3:
+            logger.warning(
+                "SF_DEBUG rollout call=%s with_grad=%s latents=%s "
+                "noise_full=%s num_frames=%s chunk_size=%s remaining=%s "
+                "num_blocks=%s denoising_steps=%s exit_indices=%s "
+                "sample_type=%s same_step_across_blocks=%s "
+                "last_step_only=%s start_gradient_frame=%s "
+                "context_noise=%s",
+                rollout_call,
+                with_grad,
+                _shape_repr(latents),
+                _shape_repr(noise_full),
+                num_frames,
+                chunk,
+                remaining,
+                num_blocks,
+                _preview_tensor(denoising_steps, limit=16),
+                exit_indices,
+                self._student_sample_type,
+                self._same_step_across_blocks,
+                self._last_step_only,
+                self._start_gradient_frame,
+                self._context_noise,
+            )
+
         denoised_blocks: list[torch.Tensor] = []
 
         cache_tag = "pos"
@@ -340,6 +423,20 @@ class SelfForcingMethod(DMD2Method):
 
             noisy_block = noise_full[:, start:end]
             exit_idx = int(exit_indices[block_idx])
+            if rollout_call < 2:
+                logger.warning(
+                    "SF_DEBUG rollout_block call=%s block_idx=%s "
+                    "frame_range=[%s,%s) block_frames=%s exit_idx=%s "
+                    "exit_timestep=%s noisy_block=%s",
+                    rollout_call,
+                    block_idx,
+                    start,
+                    end,
+                    end - start,
+                    exit_idx,
+                    float(denoising_steps[exit_idx].item()),
+                    _shape_repr(noisy_block),
+                )
 
             for step_idx, current_timestep in enumerate(denoising_steps):
                 exit_flag = step_idx == exit_idx
@@ -462,6 +559,7 @@ class SelfForcingMethod(DMD2Method):
             raise RuntimeError("Self-forcing rollout produced no blocks")
 
         self.student.clear_caches(cache_tag=cache_tag)
+        self._rollout_debug_calls += 1
         return torch.cat(denoised_blocks, dim=1)
 
     def _critic_flow_matching_loss(self, batch: Any) -> tuple[torch.Tensor, Any, dict[str, Any]]:
@@ -497,6 +595,20 @@ class SelfForcingMethod(DMD2Method):
         )
         target = noise - generator_pred_x0
         flow_matching_loss = torch.mean((pred_noise - target)**2)
+
+        if self._fake_score_debug_calls < 5:
+            logger.warning(
+                "SF_DEBUG fake_score call=%s timestep=%s "
+                "generator_pred_x0=%s noisy_x0=%s pred_noise=%s target=%s "
+                "critic_attn_kind=dense conditional=True",
+                self._fake_score_debug_calls,
+                int(fake_score_timestep.item()),
+                _shape_repr(generator_pred_x0),
+                _shape_repr(noisy_x0),
+                _shape_repr(pred_noise),
+                _shape_repr(target),
+            )
+            self._fake_score_debug_calls += 1
 
         batch.fake_score_latent_vis_dict = {
             "generator_pred_video": generator_pred_x0,
@@ -571,6 +683,25 @@ class SelfForcingMethod(DMD2Method):
             denom = torch.abs(generator_pred_x0 - real_cfg_x0).mean()
             grad = (faker_x0 - real_cfg_x0) / denom
             grad = torch.nan_to_num(grad)
+
+        if self._real_score_debug_calls < 5:
+            logger.warning(
+                "SF_DEBUG real_score call=%s timestep=%s "
+                "guidance_scale=%s generator_pred_x0=%s noisy_latents=%s "
+                "faker_x0=%s real_cond_x0=%s real_uncond_x0=%s "
+                "real_cfg_x0=%s denom=%s",
+                self._real_score_debug_calls,
+                int(timestep.item()),
+                float(guidance_scale),
+                _shape_repr(generator_pred_x0),
+                _shape_repr(noisy_latents),
+                _shape_repr(faker_x0),
+                _shape_repr(real_cond_x0),
+                _shape_repr(real_uncond_x0),
+                _shape_repr(real_cfg_x0),
+                float(denom.detach().item()),
+            )
+            self._real_score_debug_calls += 1
 
         batch.dmd_latent_vis_dict.update({
             "generator_pred_video": generator_pred_x0.detach(),

@@ -28,6 +28,26 @@ except ImportError:
 logger = init_logger(__name__)
 
 
+def _shape_repr(value: Any) -> str:
+    if isinstance(value, torch.Tensor):
+        return "x".join(str(int(dim)) for dim in value.shape)
+    if value is None:
+        return "None"
+    return type(value).__name__
+
+
+def _preview_tensor(value: Any, *, limit: int = 8) -> list[Any] | None:
+    if not isinstance(value, torch.Tensor):
+        return None
+    flat = value.detach().flatten().cpu()
+    if flat.numel() == 0:
+        return []
+    flat = flat[:limit]
+    if torch.is_floating_point(flat):
+        return [float(x.item()) for x in flat]
+    return [int(x.item()) for x in flat]
+
+
 def _should_debug_timesteps(prompt: object) -> bool:
     if not os.environ.get("FASTVIDEO_DEBUG_TIMESTEPS"):
         return False
@@ -138,6 +158,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
         self._streaming_initialized: bool = False
         self._streaming_ctx: BlockProcessingContext | None = None
+        self._logged_forward_setup = False
 
     def forward(
         self,
@@ -250,6 +271,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
         if boundary_timestep is not None:
             block_sizes[0] = 1
+
+        self._logged_forward_setup = True
 
         # NOTE: MatrixGame does NOT process the first frame separately.
         # The first frame information is already encoded in batch.image_latent (cond_concat)
@@ -482,11 +505,12 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         if ctx.action_full is None or ctx.viewmats_full is None or ctx.intrinsics_full is None:
             return {}
         end_index = start_index + current_num_frames
-        return {
+        result = {
             "viewmats": ctx.viewmats_full[:, start_index:end_index],
             "Ks": ctx.intrinsics_full[:, start_index:end_index],
             "action": ctx.action_full[:, start_index:end_index],
         }
+        return result
 
     def _process_single_block(
         self,
