@@ -360,13 +360,13 @@ class Database:
                 job.get("ltx2_first_frame_conditioning_p"),
                 1 if job.get("dmd_use_vsa") else 0,
                 job.get("dmd_vsa_sparsity", 0.8),
-                job.get("dmd_denoising_steps", "1000,757,522") or "1000,757,522",
+                job.get("dmd_denoising_steps", "1000,757,522"),
                 job.get("min_timestep_ratio", 0.02),
                 job.get("max_timestep_ratio", 0.98),
                 job.get("real_score_guidance_scale", 3.5),
                 job.get("generator_update_interval", 5),
-                job.get("real_score_model_path", "") or "",
-                job.get("fake_score_model_path", "") or "",
+                job.get("real_score_model_path", ""),
+                job.get("fake_score_model_path", ""),
             ),
         )
         self._commit()
@@ -631,6 +631,19 @@ def _row_to_dataset(row: sqlite3.Row) -> dict[str, Any]:
 
 def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     """Convert a DB row to job dict (snake_case, matching Job.to_dict)."""
+    int_defaults = {
+        "max_train_steps": 1000,
+        "train_batch_size": 1,
+        "num_latent_t": 20,
+        "lora_rank": 32,
+        "generator_update_interval": 5,
+    }
+    float_defaults = {
+        "dmd_vsa_sparsity": 0.8,
+        "min_timestep_ratio": 0.02,
+        "max_timestep_ratio": 0.98,
+        "real_score_guidance_scale": 3.5,
+    }
     result = {
         "id": row["id"],
         "model_id": row["model_id"],
@@ -690,43 +703,21 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     ):
         if col in row.keys():
             result[col] = (row[col] or "") or ""
-    for col in (
-        "max_train_steps",
-        "train_batch_size",
-        "num_latent_t",
-        "lora_rank",
-    ):
+    for col in int_defaults:
         if col in row.keys():
-            result[col] = int(row[col]) if row[col] is not None else (
-                1000 if col == "max_train_steps" else
-                1 if col == "train_batch_size" else
-                20 if col == "num_latent_t" else 32
-            )
+            val = row[col]
+            result[col] = int(val) if val is not None else int_defaults[col]
     if "learning_rate" in row.keys():
         result["learning_rate"] = float(row["learning_rate"] or 5e-5)
     if "dmd_use_vsa" in row.keys():
         result["dmd_use_vsa"] = bool(row["dmd_use_vsa"])
-    for col in (
-        "dmd_vsa_sparsity",
-        "min_timestep_ratio",
-        "max_timestep_ratio",
-        "real_score_guidance_scale",
-    ):
+    for col in float_defaults:
         if col in row.keys():
-            result[col] = float(row[col]) if row[col] is not None else (
-                0.8 if col == "dmd_vsa_sparsity" else
-                0.02 if col == "min_timestep_ratio" else
-                0.98 if col == "max_timestep_ratio" else 3.5
-            )
+            val = row[col]
+            result[col] = float(val) if val is not None else float_defaults[col]
     for col in ("dmd_denoising_steps", "real_score_model_path", "fake_score_model_path"):
         if col in row.keys():
             result[col] = (row[col] or "") or ""
-    if "generator_update_interval" in row.keys():
-        result["generator_update_interval"] = (
-            int(row["generator_update_interval"])
-            if row["generator_update_interval"] is not None
-            else 5
-        )
     return result
 
 
