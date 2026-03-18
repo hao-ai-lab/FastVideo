@@ -34,10 +34,10 @@ logger = init_logger(__name__)
 
 BSA_TILE_SIZE = (4, 4, 4)
 
-
 # ---------------------------------------------------------------------------
 # Cached index helpers (same pattern as VSA)
 # ---------------------------------------------------------------------------
+
 
 @functools.lru_cache(maxsize=10)
 def get_tile_partition_indices(
@@ -53,13 +53,11 @@ def get_tile_partition_indices(
     for t in range(math.ceil(T / ts)):
         for h in range(math.ceil(H / hs)):
             for w in range(math.ceil(W / ws)):
-                ls.append(
-                    indices[
-                        t * ts : min(t * ts + ts, T),
-                        h * hs : min(h * hs + hs, H),
-                        w * ws : min(w * ws + ws, W),
-                    ].flatten()
-                )
+                ls.append(indices[
+                    t * ts:min(t * ts + ts, T),
+                    h * hs:min(h * hs + hs, H),
+                    w * ws:min(w * ws + ws, W),
+                ].flatten())
     return torch.cat(ls, dim=0)
 
 
@@ -76,6 +74,7 @@ def get_reverse_tile_partition_indices(
 # ---------------------------------------------------------------------------
 # BSA core operations
 # ---------------------------------------------------------------------------
+
 
 def _prune_queries(
     q_blocks: torch.Tensor,
@@ -105,7 +104,7 @@ def _prune_queries(
         return q_blocks, idx, S
 
     center_idx = S // 2
-    center = q_blocks[:, :, :, center_idx : center_idx + 1, :]
+    center = q_blocks[:, :, :, center_idx:center_idx + 1, :]
 
     q_norm = F.normalize(q_blocks, dim=-1)
     c_norm = F.normalize(center, dim=-1)
@@ -148,7 +147,7 @@ def _select_kv_blocks(
     q_repr = sparse_q.mean(dim=3)
     k_repr = k_blocks.mean(dim=3)
 
-    scores = torch.matmul(q_repr, k_repr.transpose(-1, -2)) / (D ** 0.5)
+    scores = torch.matmul(q_repr, k_repr.transpose(-1, -2)) / (D**0.5)
     block_attn = F.softmax(scores, dim=-1)
 
     sorted_attn, sorted_idx = block_attn.sort(dim=-1, descending=True)
@@ -158,7 +157,7 @@ def _select_kv_blocks(
     keep_sorted[..., 1:] = cumsum[..., :-1] < cumulative_threshold
 
     min_mask = torch.zeros_like(keep_sorted)
-    min_mask[..., : min(min_kv_blocks, N)] = True
+    min_mask[..., :min(min_kv_blocks, N)] = True
     keep_sorted = keep_sorted | min_mask
 
     kv_mask = torch.zeros_like(block_attn, dtype=torch.bool)
@@ -202,7 +201,7 @@ def _compute_sparse_attention(
         sel_v = v_blocks[:, :, sel_idx].reshape(B, H, -1, D)
 
         q = sparse_q[:, :, qb]
-        scores = torch.matmul(q, sel_k.transpose(-1, -2)) / (D ** 0.5)
+        scores = torch.matmul(q, sel_k.transpose(-1, -2)) / (D**0.5)
         weights = F.softmax(scores, dim=-1)
         output[:, :, qb] = torch.matmul(weights, sel_v)
 
@@ -232,9 +231,7 @@ def _reconstruct_pruned(
     if keep_size >= block_size:
         return sparse_output
 
-    full_output = torch.zeros(
-        B, H, N, block_size, D, device=device, dtype=sparse_output.dtype
-    )
+    full_output = torch.zeros(B, H, N, block_size, D, device=device, dtype=sparse_output.dtype)
 
     # Scatter kept tokens
     idx_expand = keep_indices.unsqueeze(-1).expand(-1, -1, -1, -1, D)
@@ -262,6 +259,7 @@ def _reconstruct_pruned(
 # ---------------------------------------------------------------------------
 # FastVideo backend classes
 # ---------------------------------------------------------------------------
+
 
 class BSAAttentionBackend(AttentionBackend):
 
@@ -330,16 +328,10 @@ class BSAAttentionMetadataBuilder(AttentionMetadataBuilder):
 
         total_seq_length = math.prod(dit_seq_shape)
         block_size = math.prod(BSA_TILE_SIZE)
-        num_blocks = math.prod(
-            math.ceil(d / t) for d, t in zip(dit_seq_shape, BSA_TILE_SIZE)
-        )
+        num_blocks = math.prod(math.ceil(d / t) for d, t in zip(dit_seq_shape, BSA_TILE_SIZE, strict=False))
 
-        tile_partition_indices = get_tile_partition_indices(
-            dit_seq_shape, BSA_TILE_SIZE, device
-        )
-        reverse_tile_partition_indices = get_reverse_tile_partition_indices(
-            dit_seq_shape, BSA_TILE_SIZE, device
-        )
+        tile_partition_indices = get_tile_partition_indices(dit_seq_shape, BSA_TILE_SIZE, device)
+        reverse_tile_partition_indices = get_reverse_tile_partition_indices(dit_seq_shape, BSA_TILE_SIZE, device)
 
         return BSAAttentionMetadata(
             current_timestep=current_timestep,
@@ -445,9 +437,7 @@ class BSAAttentionImpl(AttentionImpl):
         v_blocks = v.view(B, H, num_blocks, block_size, D)
 
         # --- Query sparsification ---
-        sparse_q, keep_indices, keep_size = _prune_queries(
-            q_blocks, attn_metadata.query_keep_ratio
-        )
+        sparse_q, keep_indices, keep_size = _prune_queries(q_blocks, attn_metadata.query_keep_ratio)
 
         # --- KV block selection ---
         kv_mask = _select_kv_blocks(
@@ -458,14 +448,10 @@ class BSAAttentionImpl(AttentionImpl):
         )
 
         # --- Sparse attention ---
-        sparse_output = _compute_sparse_attention(
-            sparse_q, k_blocks, v_blocks, kv_mask
-        )
+        sparse_output = _compute_sparse_attention(sparse_q, k_blocks, v_blocks, kv_mask)
 
         # --- Reconstruct pruned positions ---
-        full_output = _reconstruct_pruned(
-            sparse_output, keep_indices, block_size
-        )
+        full_output = _reconstruct_pruned(sparse_output, keep_indices, block_size)
 
         # Reshape back: [B, H, num_blocks, block_size, D] -> [B, H, L, D] -> [B, L, H, D]
         hidden_states = full_output.view(B, H, L, D).transpose(1, 2)
