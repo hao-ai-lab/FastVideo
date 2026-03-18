@@ -11,6 +11,8 @@ import torch
 import torch.nn.functional as F
 from torch.nn.attention.flex_attention import create_block_mask
 
+from fastvideo.models.schedulers.scheduling_diffusion_forcing import (
+    DiffusionForcingScheduler, )
 from fastvideo.train.methods.base import TrainingMethod, LogScalar
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.optimizer import (
@@ -37,10 +39,16 @@ class TeacherForcingSFTMethod(TrainingMethod):
             raise ValueError("TFSFT requires role 'student'")
         if not self.student._trainable:
             raise ValueError("TFSFT requires student to be trainable")
+        if self.training_config.model.precondition_outputs:
+            raise ValueError(
+                "TFSFT only supports official diffusion-forcing loss; "
+                "set training.model.precondition_outputs=false"
+            )
         self._attn_kind: Literal["dense", "vsa"] = (self._infer_attn_kind())
 
         self._chunk_size = self._parse_chunk_size(
             self.method_config.get("chunk_size", None))
+        self._tfsft_scheduler = self._build_tfsft_scheduler()
         self._timestep_index_range = self._parse_timestep_index_range()
 
         # Initialize preprocessors on student.
@@ -112,34 +120,25 @@ class TeacherForcingSFTMethod(TrainingMethod):
                 and hasattr(sp_group, "broadcast")):
             sp_group.broadcast(timestep_indices, src=0)
 
-        scheduler = self.student.noise_scheduler
-        if scheduler is None:
-            raise ValueError("TFSFT requires student.noise_scheduler")
-
+        scheduler = self._tfsft_scheduler
         schedule_timesteps = scheduler.timesteps.to(
             device=clean_latents.device,
             dtype=torch.float32,
         )
-        schedule_sigmas = scheduler.sigmas.to(
+        t_inhom = schedule_timesteps[timestep_indices]
+
+        noise = torch.randn(
+            clean_latents.shape,
+            generator=self.cuda_generator,
             device=clean_latents.device,
             dtype=clean_latents.dtype,
         )
-        t_inhom = schedule_timesteps[timestep_indices]
-
-        noise = getattr(training_batch, "noise", None)
-        if noise is None:
-            noise = torch.randn_like(clean_latents)
-        else:
-            if not torch.is_tensor(noise):
-                raise TypeError("TrainingBatch.noise must be a "
-                                "torch.Tensor when set")
-            noise = noise.permute(0, 2, 1, 3, 4).to(dtype=clean_latents.dtype)
-
-        noisy_latents = self.student.add_noise(
-            clean_latents,
-            noise,
+        noisy_latents = scheduler.add_noise(
+            clean_latents.flatten(0, 1),
+            noise.flatten(0, 1),
             t_inhom.flatten(),
-        )
+        ).unflatten(0, clean_latents.shape[:2])
+        training_batch.noise = noise
 
         concat_latents = torch.cat([clean_latents, noisy_latents], dim=1)
         concat_timesteps = torch.cat([torch.zeros_like(t_inhom), t_inhom], dim=1)
@@ -172,15 +171,17 @@ class TeacherForcingSFTMethod(TrainingMethod):
             self._restore_batch_after_concat(training_batch, saved_batch_state)
 
         pred_noisy = pred[:, num_latents:]
-
-        if bool(self.training_config.model.precondition_outputs):
-            sigmas = schedule_sigmas[timestep_indices]
-            sigmas = sigmas.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-            pred_x0 = noisy_latents - pred_noisy * sigmas
-            total_loss = F.mse_loss(pred_x0.float(), clean_latents.float())
-        else:
-            target = noise - clean_latents
-            total_loss = F.mse_loss(pred_noisy.float(), target.float())
+        target = scheduler.training_target(clean_latents, noise, t_inhom)
+        per_frame_loss = F.mse_loss(
+            pred_noisy.float(),
+            target.float(),
+            reduction="none",
+        ).mean(dim=(2, 3, 4))
+        weight = scheduler.training_weight(t_inhom).reshape(
+            batch_size,
+            num_latents,
+        )
+        total_loss = (per_frame_loss * weight.float()).mean()
 
         if self._attn_kind == "vsa":
             attn_metadata = training_batch.attn_metadata_vsa
@@ -420,9 +421,7 @@ class TeacherForcingSFTMethod(TrainingMethod):
                          f"got {type(raw).__name__}")
 
     def _parse_timestep_index_range(self) -> tuple[int, int]:
-        scheduler = self.student.noise_scheduler
-        if scheduler is None:
-            raise ValueError("TFSFT requires student.noise_scheduler")
+        scheduler = self._tfsft_scheduler
         num_steps = int(
             getattr(scheduler, "config", scheduler).num_train_timesteps)
 
@@ -498,3 +497,35 @@ class TeacherForcingSFTMethod(TrainingMethod):
         )
         expanded = chunk_indices.repeat_interleave(chunk_size, dim=1)
         return expanded[:, :num_latents]
+
+    def _build_tfsft_scheduler(self) -> DiffusionForcingScheduler:
+        student_scheduler = getattr(self.student, "noise_scheduler", None)
+        if student_scheduler is None:
+            raise ValueError("TFSFT requires student.noise_scheduler")
+        num_steps = int(
+            getattr(
+                student_scheduler,
+                "config",
+                student_scheduler,
+            ).num_train_timesteps
+        )
+        pipeline_config = self.training_config.pipeline_config
+        if pipeline_config is None:
+            raise ValueError("TFSFT requires training_config.pipeline_config")
+        shift = float(
+            getattr(
+                pipeline_config,
+                "flow_shift",
+                getattr(self.student, "timestep_shift", 1.0),
+            )
+        )
+        scheduler = DiffusionForcingScheduler(
+            num_inference_steps=num_steps,
+            num_train_timesteps=num_steps,
+            shift=shift,
+            sigma_min=0.0,
+            extra_one_step=True,
+            training=True,
+        )
+        scheduler.set_timesteps(num_steps, training=True)
+        return scheduler
