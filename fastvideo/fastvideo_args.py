@@ -912,8 +912,6 @@ class TrainingArgs(FastVideoArgs):
     same_step_across_blocks: bool = False  # Use same exit timestep for all blocks
     last_step_only: bool = False  # Only use the last timestep for training
     context_noise: int = 0  # Context noise level for cache updates
-    use_diagonal_denoising: bool = False
-    diagonal_warmup_mid_steps: list[int] | None = None
     
     reinit_action_module: bool = False
     override_keyboard_dim: int | None = None
@@ -1349,18 +1347,6 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=TrainingArgs.context_noise,
                             help="Context noise level for cache updates")
-        parser.add_argument(
-            "--use-diagonal-denoising",
-            action=StoreBoolean,
-            default=TrainingArgs.use_diagonal_denoising,
-            help="Enable block-wise diagonal denoising schedule.")
-        parser.add_argument(
-            "--diagonal-warmup-mid-steps",
-            type=parse_int_list,
-            default=TrainingArgs.diagonal_warmup_mid_steps,
-            help=(
-                "Comma-separated warmup mid steps for diagonal denoising "
-                "(e.g. '750,500')."))
         parser.add_argument("--reinit-action-module",
                             action=StoreBoolean,
                             help="Whether to reinitialize the action module during training")

@@ -146,19 +146,13 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         pipeline_config.warp_denoising_step = warp_denoising_step
 
         self.use_diagonal_denoising = bool(
-            getattr(training_args, "use_diagonal_denoising", False)
-            or getattr(pipeline_config, "use_diagonal_denoising", False)
+            getattr(pipeline_config, "use_diagonal_denoising", False)
         )
-        training_args.use_diagonal_denoising = self.use_diagonal_denoising
         pipeline_config.use_diagonal_denoising = self.use_diagonal_denoising
 
-        raw_warmup_mid_steps = (
-            getattr(training_args, "diagonal_warmup_mid_steps", None)
-            if getattr(training_args, "diagonal_warmup_mid_steps", None)
-            is not None
-            else getattr(pipeline_config, "diagonal_warmup_mid_steps", None)
+        raw_warmup_mid_steps = getattr(
+            pipeline_config, "diagonal_warmup_mid_steps", None
         )
-        training_args.diagonal_warmup_mid_steps = raw_warmup_mid_steps
         pipeline_config.diagonal_warmup_mid_steps = raw_warmup_mid_steps
 
         self.denoising_step_list = resolve_denoising_steps(
