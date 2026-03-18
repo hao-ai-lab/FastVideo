@@ -18,6 +18,8 @@ from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.matrixgame.kv_cache import KVCache
+from fastvideo.models.schedulers.denoising_schedule import (
+    build_block_denoising_steps, resolve_denoising_steps)
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
     SelfForcingFlowMatchScheduler)
 from fastvideo.models.utils import pred_noise_to_pred_video
@@ -135,22 +137,44 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         super().initialize_training_pipeline(training_args)
+        pipeline_config = training_args.pipeline_config
+        warp_denoising_step = bool(
+            getattr(training_args, "warp_denoising_step", False)
+            or getattr(pipeline_config, "warp_denoising_step", False)
+        )
+        training_args.warp_denoising_step = warp_denoising_step
+        pipeline_config.warp_denoising_step = warp_denoising_step
 
-        self.denoising_step_list = torch.tensor(
-            training_args.pipeline_config.dmd_denoising_steps,
-            dtype=torch.long,
+        self.use_diagonal_denoising = bool(
+            getattr(training_args, "use_diagonal_denoising", False)
+            or getattr(pipeline_config, "use_diagonal_denoising", False)
+        )
+        training_args.use_diagonal_denoising = self.use_diagonal_denoising
+        pipeline_config.use_diagonal_denoising = self.use_diagonal_denoising
+
+        raw_warmup_mid_steps = (
+            getattr(training_args, "diagonal_warmup_mid_steps", None)
+            if getattr(training_args, "diagonal_warmup_mid_steps", None)
+            is not None
+            else getattr(pipeline_config, "diagonal_warmup_mid_steps", None)
+        )
+        training_args.diagonal_warmup_mid_steps = raw_warmup_mid_steps
+        pipeline_config.diagonal_warmup_mid_steps = raw_warmup_mid_steps
+
+        self.denoising_step_list = resolve_denoising_steps(
+            pipeline_config.dmd_denoising_steps,
+            self.noise_scheduler.timesteps,
+            warp_denoising_step,
             device=get_local_torch_device(),
         )
-        if training_args.warp_denoising_step:
-            timesteps = torch.cat(
-                (
-                    self.noise_scheduler.timesteps.cpu(),
-                    torch.tensor([0], dtype=torch.float32),
-                )
-            ).to(get_local_torch_device())
-            self.denoising_step_list = timesteps[
-                1000 - self.denoising_step_list
-            ]
+        self.diagonal_warmup_mid_steps = None
+        if raw_warmup_mid_steps:
+            self.diagonal_warmup_mid_steps = resolve_denoising_steps(
+                raw_warmup_mid_steps,
+                self.noise_scheduler.timesteps,
+                warp_denoising_step,
+                device=get_local_torch_device(),
+            )
 
         self.action_config = getattr(self.transformer, "action_config", {}) or {}
         self.use_action_module = len(self.action_config) > 0
@@ -164,6 +188,14 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         )
         self.keyboard_dim_in = int(self.action_config.get("keyboard_dim_in", 0))
         self.mouse_dim_in = int(self.action_config.get("mouse_dim_in", 0))
+
+    def _get_block_denoising_step_list(self, block_index: int) -> torch.Tensor:
+        return build_block_denoising_steps(
+            base_steps=self.denoising_step_list,
+            block_index=block_index,
+            use_diagonal_denoising=self.use_diagonal_denoising,
+            warmup_mid_steps=self.diagonal_warmup_mid_steps,
+        )
 
     def _assert_matrixgame_i2v_inputs(
         self,
@@ -301,22 +333,24 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             )
 
     def _get_self_forcing_timestep_bounds(
-        self, exit_flag: int
+        self,
+        step_list: torch.Tensor,
+        exit_flag: int,
     ) -> tuple[int | None, int | None]:
         scheduler_timesteps = self.noise_scheduler.timesteps.to(self.device)
         denoising_timestep = torch.as_tensor(
-            self.denoising_step_list[exit_flag],
+            step_list[exit_flag],
             device=self.device,
             dtype=scheduler_timesteps.dtype,
         )
         denoised_timestep_from = self.num_train_timestep - torch.argmin(
             (scheduler_timesteps - denoising_timestep).abs(), dim=0
         ).item()
-        if exit_flag == len(self.denoising_step_list) - 1:
+        if exit_flag == len(step_list) - 1:
             return denoised_timestep_from, 0
 
         next_denoising_timestep = torch.as_tensor(
-            self.denoising_step_list[exit_flag + 1],
+            step_list[exit_flag + 1],
             device=self.device,
             dtype=scheduler_timesteps.dtype,
         )
@@ -746,15 +780,24 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                                                  num_denoising_steps,
                                                  device=noise.device)
         start_gradient_frame_index = max(0, num_output_frames - 21)
+        block0_step_list = self._get_block_denoising_step_list(0)
+        block0_exit_idx = min(exit_flags[0], len(block0_step_list) - 1)
 
         for block_index, current_num_frames in enumerate(all_num_frames):
             noisy_input = noise[
                 :, current_start_frame:current_start_frame + current_num_frames
             ]
+            block_step_list = self._get_block_denoising_step_list(block_index)
+            raw_exit_idx = (
+                exit_flags[0]
+                if self.same_step_across_blocks
+                else exit_flags[block_index]
+            )
+            block_exit_idx = min(raw_exit_idx, len(block_step_list) - 1)
 
             # Step 2.1: Spatial denoising loop
-            for index, current_timestep in enumerate(self.denoising_step_list):
-                exit_flag = (index == exit_flags[0])
+            for index, current_timestep in enumerate(block_step_list):
+                exit_flag = index == block_exit_idx
                 timestep = torch.ones([batch_size, current_num_frames],
                                       device=noise.device,
                                       dtype=torch.int64) * current_timestep
@@ -798,7 +841,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                         scheduler=self.noise_scheduler,
                     ).unflatten(0, pred_flow.shape[:2])
 
-                    next_timestep = self.denoising_step_list[index + 1]
+                    next_timestep = block_step_list[index + 1]
                     noisy_input = self.noise_scheduler.add_noise(
                         denoised_pred.flatten(0, 1),
                         torch.randn_like(denoised_pred.flatten(0, 1)),
@@ -908,7 +951,10 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             current_start_frame += current_num_frames
 
         denoised_timestep_from, denoised_timestep_to = (
-            self._get_self_forcing_timestep_bounds(exit_flags[0])
+            self._get_self_forcing_timestep_bounds(
+                block0_step_list,
+                block0_exit_idx,
+            )
         )
         training_batch.denoised_timestep_from = denoised_timestep_from
         training_batch.denoised_timestep_to = denoised_timestep_to
@@ -917,7 +963,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
         # Store visualization data
         training_batch.dmd_latent_vis_dict["generator_timestep"] = torch.tensor(
-            self.denoising_step_list[exit_flags[0]],
+            block0_step_list[block0_exit_idx],
             dtype=torch.float32,
             device=self.device)
 

@@ -68,6 +68,8 @@ class PipelineConfig:
 
     # DMD parameters
     dmd_denoising_steps: list[int] | None = field(default=None)
+    use_diagonal_denoising: bool = False
+    diagonal_warmup_mid_steps: list[int] | None = field(default=None)
 
     # Wan2.2 TI2V parameters
     ti2v_task: bool = False
@@ -174,6 +176,25 @@ class PipelineConfig:
             default=PipelineConfig.dmd_denoising_steps,
             help=
             "Comma-separated list of denoising steps (e.g., '1000,757,522')",
+        )
+        parser.add_argument(
+            f"--{prefix_with_dot}use-diagonal-denoising",
+            action=StoreBoolean,
+            dest=
+            f"{prefix_with_dot.replace('-', '_')}use_diagonal_denoising",
+            default=PipelineConfig.use_diagonal_denoising,
+            help="Enable block-wise diagonal denoising schedule.",
+        )
+        parser.add_argument(
+            f"--{prefix_with_dot}diagonal-warmup-mid-steps",
+            type=parse_int_list,
+            dest=
+            f"{prefix_with_dot.replace('-', '_')}diagonal_warmup_mid_steps",
+            default=PipelineConfig.diagonal_warmup_mid_steps,
+            help=(
+                "Optional comma-separated warmup mid steps for diagonal "
+                "denoising."
+            ),
         )
 
         # Add VAE configuration arguments

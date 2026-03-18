@@ -9,6 +9,8 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+from fastvideo.models.schedulers.denoising_schedule import (
+    resolve_base_denoising_timesteps, resolve_block_denoising_timesteps)
 from fastvideo.models.utils import pred_noise_to_pred_video, pred_noise_to_x_bound
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
@@ -51,8 +53,9 @@ class BlockProcessingContext:
     target_dtype: torch.dtype
     autocast_enabled: bool
     boundary_timestep: float | None
-    high_noise_timesteps: torch.Tensor | None
     context_noise: float
+    use_diagonal_denoising: bool
+    diagonal_warmup_mid_steps: torch.Tensor | None
 
     image_kwargs: dict[str, Any]
     pos_cond_kwargs: dict[str, Any]
@@ -132,24 +135,25 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         patch_ratio = patch_size[-1] * patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
 
-        timesteps = torch.tensor(
-            fastvideo_args.pipeline_config.dmd_denoising_steps,
-            dtype=torch.long).cpu()
-        if fastvideo_args.pipeline_config.warp_denoising_step:
-            scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(),
-                                             torch.tensor([0],
-                                                          dtype=torch.float32)))
-            timesteps = scheduler_timesteps[1000 - timesteps]
-        timesteps = timesteps.to(get_local_torch_device())
+        timesteps, diagonal_warmup_mid_steps = (
+            resolve_base_denoising_timesteps(
+                fastvideo_args.pipeline_config,
+                self.scheduler.timesteps,
+                device=get_local_torch_device(),
+            )
+        )
+        use_diagonal_denoising = getattr(
+            fastvideo_args.pipeline_config,
+            "use_diagonal_denoising",
+            False,
+        )
 
         boundary_ratio = getattr(fastvideo_args.pipeline_config.dit_config,
                                  'boundary_ratio', None)
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
-            high_noise_timesteps = timesteps[timesteps >= boundary_timestep]
         else:
             boundary_timestep = None
-            high_noise_timesteps = None
 
         image_embeds = batch.image_embeds
         if len(image_embeds) > 0:
@@ -222,9 +226,10 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             target_dtype=target_dtype,
             autocast_enabled=autocast_enabled,
             boundary_timestep=boundary_timestep,
-            high_noise_timesteps=high_noise_timesteps,
             context_noise=getattr(fastvideo_args.pipeline_config,
                                   "context_noise", 0),
+            use_diagonal_denoising=use_diagonal_denoising,
+            diagonal_warmup_mid_steps=diagonal_warmup_mid_steps,
             image_kwargs=image_kwargs,
             pos_cond_kwargs=pos_cond_kwargs,
         )
@@ -232,13 +237,29 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         context_noise = getattr(fastvideo_args.pipeline_config, "context_noise",
                                 0)
 
-        with self.progress_bar(total=len(block_sizes) *
-                               len(timesteps)) as progress_bar:
+        total_steps = sum(
+            len(
+                resolve_block_denoising_timesteps(
+                    timesteps,
+                    block_idx,
+                    use_diagonal_denoising,
+                    diagonal_warmup_mid_steps,
+                )
+            )
+            for block_idx in range(len(block_sizes))
+        )
+        with self.progress_bar(total=total_steps) as progress_bar:
             for block_idx, current_num_frames in enumerate(block_sizes):
                 ctx.block_idx = block_idx
                 ctx.start_index = start_index
                 current_latents = latents[:, :, start_index:start_index +
                                           current_num_frames, :, :]
+                block_timesteps = resolve_block_denoising_timesteps(
+                    timesteps,
+                    block_idx,
+                    use_diagonal_denoising,
+                    diagonal_warmup_mid_steps,
+                )
 
                 action_kwargs = self._prepare_action_kwargs(
                     batch, start_index, current_num_frames)
@@ -248,7 +269,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     batch=batch,
                     start_index=start_index,
                     current_num_frames=current_num_frames,
-                    timesteps=timesteps,
+                    timesteps=block_timesteps,
                     ctx=ctx,
                     action_kwargs=action_kwargs,
                     progress_bar=progress_bar,
@@ -405,6 +426,12 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         prompt_embeds = batch.prompt_embeds
         noise_latents_btchw = current_latents.permute(0, 2, 1, 3, 4)
 
+        local_high_noise_timesteps = None
+        if ctx.boundary_timestep is not None:
+            local_high_noise_timesteps = timesteps[
+                timesteps >= ctx.boundary_timestep
+            ]
+
         for i, t_cur in enumerate(timesteps):
             if ctx.boundary_timestep is not None and t_cur < ctx.boundary_timestep:
                 current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
@@ -521,16 +548,22 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                                 pred_video_btchw.device)
 
                 noise_btchw = noise
-                if ctx.boundary_timestep is not None and ctx.high_noise_timesteps is not None and i < len(
-                        ctx.high_noise_timesteps) - 1:
+                if (
+                    ctx.boundary_timestep is not None
+                    and local_high_noise_timesteps is not None
+                    and i < len(local_high_noise_timesteps) - 1
+                ):
                     noise_latents_btchw = self.scheduler.add_noise_high(
                         pred_video_btchw.flatten(0, 1),
                         noise_btchw.flatten(0, 1), next_timestep,
                         torch.ones_like(next_timestep) *
                         ctx.boundary_timestep).unflatten(
                             0, pred_video_btchw.shape[:2])
-                elif ctx.boundary_timestep is not None and ctx.high_noise_timesteps is not None and i == len(
-                        ctx.high_noise_timesteps) - 1:
+                elif (
+                    ctx.boundary_timestep is not None
+                    and local_high_noise_timesteps is not None
+                    and i == len(local_high_noise_timesteps) - 1
+                ):
                     noise_latents_btchw = pred_video_btchw
                 else:
                     noise_latents_btchw = self.scheduler.add_noise(
@@ -623,24 +656,25 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         patch_ratio = patch_size[-1] * patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
 
-        timesteps = torch.tensor(
-            fastvideo_args.pipeline_config.dmd_denoising_steps,
-            dtype=torch.long).cpu()
-        if fastvideo_args.pipeline_config.warp_denoising_step:
-            scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(),
-                                             torch.tensor([0],
-                                                          dtype=torch.float32)))
-            timesteps = scheduler_timesteps[1000 - timesteps]
-        timesteps = timesteps.to(get_local_torch_device())
+        timesteps, diagonal_warmup_mid_steps = (
+            resolve_base_denoising_timesteps(
+                fastvideo_args.pipeline_config,
+                self.scheduler.timesteps,
+                device=get_local_torch_device(),
+            )
+        )
+        use_diagonal_denoising = getattr(
+            fastvideo_args.pipeline_config,
+            "use_diagonal_denoising",
+            False,
+        )
 
         boundary_ratio = getattr(fastvideo_args.pipeline_config.dit_config,
                                  'boundary_ratio', None)
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
-            high_noise_timesteps = timesteps[timesteps >= boundary_timestep]
         else:
             boundary_timestep = None
-            high_noise_timesteps = None
 
         image_embeds = batch.image_embeds
         if len(image_embeds) > 0:
@@ -694,14 +728,24 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             block_sizes[0] = 1
 
         # Pre-allocate noise pool
-        num_denoising_steps = len(timesteps)
+        max_block_step_count = max(
+            len(
+                resolve_block_denoising_timesteps(
+                    timesteps,
+                    block_idx,
+                    use_diagonal_denoising,
+                    diagonal_warmup_mid_steps,
+                )
+            )
+            for block_idx in range(len(block_sizes))
+        )
         noise_shape = (b, self.num_frame_per_block, c, h, w)
         noise_pool = [
             torch.randn(
                 noise_shape,
                 dtype=target_dtype,
                 device=latents.device,
-            ) for _ in range(num_denoising_steps - 1)
+            ) for _ in range(max_block_step_count - 1)
         ]
 
         # Create and store context
@@ -721,9 +765,10 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             target_dtype=target_dtype,
             autocast_enabled=autocast_enabled,
             boundary_timestep=boundary_timestep,
-            high_noise_timesteps=high_noise_timesteps,
             context_noise=getattr(fastvideo_args.pipeline_config,
                                   "context_noise", 0),
+            use_diagonal_denoising=use_diagonal_denoising,
+            diagonal_warmup_mid_steps=diagonal_warmup_mid_steps,
             image_kwargs=image_kwargs,
             pos_cond_kwargs=pos_cond_kwargs,
         )
@@ -792,7 +837,12 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             batch=batch,
             start_index=start_index,
             current_num_frames=current_num_frames,
-            timesteps=ctx.timesteps,
+            timesteps=resolve_block_denoising_timesteps(
+                ctx.timesteps,
+                ctx.block_idx,
+                ctx.use_diagonal_denoising,
+                ctx.diagonal_warmup_mid_steps,
+            ),
             ctx=ctx,
             action_kwargs=action_kwargs,
             noise_generator=streaming_noise_generator,

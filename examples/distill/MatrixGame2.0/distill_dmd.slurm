@@ -35,9 +35,9 @@ RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
 # Model paths for Self-Forcing DMD distillation:
-GENERATOR_MODEL_PATH="../mg_models/Solaris-10Ksteps-Causal-0302"
-REAL_SCORE_MODEL_PATH="../mg_models/Solaris-20Ksteps-0301"  # Teacher mode
-FAKE_SCORE_MODEL_PATH="../mg_models/Solaris-20Ksteps-0301"  # Critic model
+GENERATOR_MODEL_PATH="../mg_models/Solaris-Causal-30K-8K-18K"
+REAL_SCORE_MODEL_PATH="../mg_models/Solaris-30K-8K-18K"  # Teacher mode
+FAKE_SCORE_MODEL_PATH="../mg_models/Solaris-30K-8K-18K"  # Critic model
 
 # GENERATOR_MODEL_PATH="../mg_models/Solaris-6Ksteps-Causal-0228"
 # REAL_SCORE_MODEL_PATH="../mg_models/Solaris-10Ksteps-0301"  # Teacher mode
@@ -65,6 +65,7 @@ training_args=(
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   # --enable_gradient_masking
   # --gradient_mask_last_n_frames 21
+  --use-diagonal-denoising
 )
 
 # Parallel arguments
@@ -124,7 +125,8 @@ miscellaneous_args=(
 )
 
 dmd_args=(
-  --dmd_denoising_steps '1000,750,500,250'
+  --dmd_denoising_steps '1000,100'
+  --diagonal-warmup-mid-steps '750,500'
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.98
   --dfake_gen_update_ratio 5
