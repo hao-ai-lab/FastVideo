@@ -92,6 +92,9 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
         self.num_frame_per_block = self._resolve_num_frame_per_block(
             training_args
         )
+        self.chunkwise_timestep = bool(
+            getattr(training_args, "chunkwise_timestep", False)
+        )
         self.timestep_shift = training_args.pipeline_config.flow_shift
         self.ar_noise_scheduler = DiffusionForcingScheduler(
             shift=self.timestep_shift, sigma_min=0.0, extra_one_step=True
@@ -102,9 +105,11 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
 
         logger.info(
             "MatrixGame AR diffusion pipeline initialized with "
-            "num_frame_per_block=%d, diffusion_forcing_shift=%.1f",
+            "num_frame_per_block=%d, diffusion_forcing_shift=%.1f, "
+            "chunkwise_timestep=%s",
             self.num_frame_per_block,
             self.timestep_shift,
+            self.chunkwise_timestep,
         )
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
@@ -195,6 +200,28 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
             device=device,
             dtype=torch.long,
         )
+        if not getattr(self, "chunkwise_timestep", False):
+            return timestep
+
+        chunk_size = int(num_frame_per_block)
+        if chunk_size <= 0:
+            raise ValueError(
+                f"num_frame_per_block must be > 0, got {chunk_size}"
+            )
+
+        num_chunks = (num_frame + chunk_size - 1) // chunk_size
+        padded_num_frames = num_chunks * chunk_size
+        if padded_num_frames != num_frame:
+            pad = timestep[:, -1:].expand(
+                batch_size,
+                padded_num_frames - num_frame,
+            )
+            timestep = torch.cat([timestep, pad], dim=1)
+        timestep = timestep.reshape(batch_size, num_chunks, chunk_size)
+        timestep[:, :, 1:] = timestep[:, :, :1]
+        timestep = timestep.reshape(batch_size, padded_num_frames)[
+            :, :num_frame
+        ]
         return timestep
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
@@ -292,6 +319,13 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
             device=latents_btchw.device,
             dtype=latents_btchw.dtype,
         )
+        if (
+            self.training_args.sp_size > 1
+            and self.sp_group is not None
+            and hasattr(self.sp_group, "broadcast")
+        ):
+            self.sp_group.broadcast(timesteps, src=0)
+            self.sp_group.broadcast(noise, src=0)
 
         noisy_latents = self.ar_noise_scheduler.add_noise(
             latents_btchw.flatten(0, 1),

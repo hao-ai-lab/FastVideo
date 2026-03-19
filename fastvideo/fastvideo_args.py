@@ -906,6 +906,7 @@ class TrainingArgs(FastVideoArgs):
 
     # Self-forcing specific arguments
     num_frame_per_block: int = 3
+    chunkwise_timestep: bool = True
     independent_first_frame: bool = False
     enable_gradient_masking: bool = True
     gradient_mask_last_n_frames: int = 21
@@ -1318,6 +1319,10 @@ class TrainingArgs(FastVideoArgs):
             type=int,
             default=TrainingArgs.num_frame_per_block,
             help="Number of frames per block for causal generation")
+        parser.add_argument(
+            "--chunkwise-timestep",
+            action=StoreBoolean,
+            help="Whether to share one timestep within block")
         parser.add_argument(
             "--independent-first-frame",
             action=StoreBoolean,
