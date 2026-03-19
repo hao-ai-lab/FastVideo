@@ -1,0 +1,72 @@
+# HunyuanVideo T2V finetune config.
+#
+# Data must be preprocessed with Hunyuan VAE + dual text encoders
+# (LLaMA + CLIP) into parquet format before training.
+# See scripts/preprocess/ for preprocessing pipeline.
+
+models:
+  student:
+    _target_: fastvideo.train.models.hunyuan.HunyuanModel
+    init_from: hunyuanvideo-community/HunyuanVideo
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 8
+    hsdp_shard_dim: 1
+
+  data:
+    data_path: data/hunyuan_training_data
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 32
+    num_height: 720
+    num_width: 1280
+    num_frames: 125
+
+  optimizer:
+    learning_rate: 1.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 5000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/hunyuan_finetune
+    training_state_checkpointing_steps: 500
+    checkpoints_total_limit: 3
+    resume_from_checkpoint: latest
+
+  tracker:
+    project_name: fastvideo_hunyuan
+    run_name: hunyuan_finetune
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.hunyuan.hunyuan_pipeline.HunyuanVideoPipeline
+    dataset_file: data/hunyuan_training_data/validation_prompts.json
+    every_steps: 100
+    sampling_steps: [50]
+    guidance_scale: 1.0
+
+pipeline:
+  flow_shift: 7
