@@ -1318,6 +1318,7 @@ class DistillationPipeline(TrainingPipeline):
                         x = torchvision.utils.make_grid(x, nrow=6)
                         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                         frames.append((x * 255).numpy().astype(np.uint8))
+                    frames = self._post_process_validation_frames(frames, batch)
                     videos.append(frames)
                     audios.append(output_batch.extra.get("audio"))
                     audio_sample_rates.append(

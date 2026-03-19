@@ -1356,13 +1356,13 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                     key_names[i]: bool(keyboard_cond[frame_idx, i])
                     for i in range(min(len(key_names), keyboard_cond.shape[1]))
                 }
-                draw_keys_on_frame(frame, keys, mode='universal')
+                draw_keys_on_frame(frame, keys)
 
             # Draw mouse overlay
             if mouse_cond is not None and frame_idx < len(mouse_cond):
                 pitch = float(mouse_cond[frame_idx, 0])
                 yaw = float(mouse_cond[frame_idx, 1])
-                draw_mouse_on_frame(frame, pitch, yaw)
+                draw_mouse_on_frame(frame, yaw=yaw, pitch=pitch)
 
             processed_frames.append(frame)
 
