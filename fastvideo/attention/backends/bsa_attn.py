@@ -30,6 +30,17 @@ from fastvideo.attention.backends.abstract import (
 from fastvideo.distributed import get_sp_group
 from fastvideo.logger import init_logger
 
+try:
+    from fastvideo.attention.utils.flash_attn_no_pad import (
+        flash_attn_varlen_func_impl, )
+    FLASH_ATTN_AVAILABLE = True
+except ImportError:
+    try:
+        from flash_attn import flash_attn_varlen_func as flash_attn_varlen_func_impl
+        FLASH_ATTN_AVAILABLE = True
+    except ImportError:
+        FLASH_ATTN_AVAILABLE = False
+
 logger = init_logger(__name__)
 
 BSA_TILE_SIZE = (4, 4, 4)
@@ -166,6 +177,48 @@ def _select_kv_blocks(
     return kv_mask
 
 
+# def _compute_sparse_attention(
+#     sparse_q: torch.Tensor,
+#     k_blocks: torch.Tensor,
+#     v_blocks: torch.Tensor,
+#     kv_mask: torch.Tensor,
+# ) -> torch.Tensor:
+#     """
+#     Compute attention for each query block against selected KV blocks.
+
+#     Reference implementation with loop over query blocks.
+
+#     Args:
+#         sparse_q: [B, H, N, Sq, D]
+#         k_blocks:  [B, H, N, Sk, D]
+#         v_blocks:  [B, H, N, Sk, D]
+#         kv_mask:   [B, H, N, N] boolean
+
+#     Returns:
+#         output: [B, H, N, Sq, D]
+#     """
+#     B, H, N, Sq, D = sparse_q.shape
+#     output = torch.zeros_like(sparse_q)
+
+#     for qb in range(N):
+#         # Use mask from first batch/head element (assumes uniform)
+#         selected = kv_mask[0, 0, qb]
+#         sel_idx = selected.nonzero(as_tuple=True)[0]
+
+#         if sel_idx.shape[0] == 0:
+#             continue
+
+#         sel_k = k_blocks[:, :, sel_idx].reshape(B, H, -1, D)
+#         sel_v = v_blocks[:, :, sel_idx].reshape(B, H, -1, D)
+
+#         q = sparse_q[:, :, qb]
+#         scores = torch.matmul(q, sel_k.transpose(-1, -2)) / (D**0.5)
+#         weights = F.softmax(scores, dim=-1)
+#         output[:, :, qb] = torch.matmul(weights, sel_v)
+
+#     return output
+
+
 def _compute_sparse_attention(
     sparse_q: torch.Tensor,
     k_blocks: torch.Tensor,
@@ -174,23 +227,37 @@ def _compute_sparse_attention(
 ) -> torch.Tensor:
     """
     Compute attention for each query block against selected KV blocks.
-
-    Reference implementation with loop over query blocks.
-
+ 
+    Uses flash_attn_varlen_func when available on GPU for fast
+    computation. Falls back to pure-PyTorch reference on CPU.
+ 
     Args:
         sparse_q: [B, H, N, Sq, D]
         k_blocks:  [B, H, N, Sk, D]
         v_blocks:  [B, H, N, Sk, D]
         kv_mask:   [B, H, N, N] boolean
-
+ 
     Returns:
         output: [B, H, N, Sq, D]
     """
+    if FLASH_ATTN_AVAILABLE and sparse_q.is_cuda:
+        return _compute_sparse_attention_flash(sparse_q, k_blocks, v_blocks, kv_mask)
+    else:
+        return _compute_sparse_attention_reference(sparse_q, k_blocks, v_blocks, kv_mask)
+
+
+def _compute_sparse_attention_reference(
+    sparse_q: torch.Tensor,
+    k_blocks: torch.Tensor,
+    v_blocks: torch.Tensor,
+    kv_mask: torch.Tensor,
+) -> torch.Tensor:
+    """Pure-PyTorch fallback (CPU or when flash_attn unavailable)."""
     B, H, N, Sq, D = sparse_q.shape
     output = torch.zeros_like(sparse_q)
 
     for qb in range(N):
-        # Use mask from first batch/head element (assumes uniform)
+        # NOTE: Assumes kv_mask is uniform across batch and heads.
         selected = kv_mask[0, 0, qb]
         sel_idx = selected.nonzero(as_tuple=True)[0]
 
@@ -204,6 +271,123 @@ def _compute_sparse_attention(
         scores = torch.matmul(q, sel_k.transpose(-1, -2)) / (D**0.5)
         weights = F.softmax(scores, dim=-1)
         output[:, :, qb] = torch.matmul(weights, sel_v)
+
+    return output
+
+
+def _compute_sparse_attention_flash(
+    sparse_q: torch.Tensor,
+    k_blocks: torch.Tensor,
+    v_blocks: torch.Tensor,
+    kv_mask: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Fast implementation using flash_attn_varlen_func.
+ 
+    Packs all query blocks and their selected KV blocks into flat
+    tensors with cumulative sequence lengths, then runs one fused
+    FlashAttention call.
+ 
+    Args:
+        sparse_q: [B, H, N, Sq, D]
+        k_blocks:  [B, H, N, Sk, D]
+        v_blocks:  [B, H, N, Sk, D]
+        kv_mask:   [B, H, N, N] boolean
+ 
+    Returns:
+        output: [B, H, N, Sq, D]
+    """
+    B, H, N, Sq, D = sparse_q.shape
+    Sk = k_blocks.shape[3]
+    device = sparse_q.device
+
+    output = torch.zeros_like(sparse_q)
+
+    for b in range(B):
+        # --- Pack Q, K, V into flat tensors ---
+        # flash_attn_varlen_func expects: [total_tokens, num_heads, head_dim]
+
+        q_list = []
+        k_list = []
+        v_list = []
+        cu_seqlens_q = [0]
+        cu_seqlens_k = [0]
+        active_blocks = []  # track which query blocks have KV selected
+
+        for qb in range(N):
+            # NOTE: Assumes kv_mask uniform across heads
+            selected = kv_mask[b, 0, qb]  # [N] boolean
+            sel_idx = selected.nonzero(as_tuple=True)[0]
+
+            if sel_idx.shape[0] == 0:
+                continue
+
+            active_blocks.append(qb)
+            num_kv_tokens = sel_idx.shape[0] * Sk
+
+            # sparse_q[b] is [H, N, Sq, D]
+            # We need [Sq, H, D] for this query block
+            q_block = sparse_q[b, :, qb].permute(1, 0, 2)  # [Sq, H, D]
+            q_list.append(q_block)
+
+            # Gather selected KV blocks: [H, num_sel, Sk, D]
+            sel_k = k_blocks[b, :, sel_idx]  # [H, num_sel, Sk, D]
+            sel_v = v_blocks[b, :, sel_idx]  # [H, num_sel, Sk, D]
+
+            # Reshape to [num_kv_tokens, H, D]
+            sel_k = sel_k.permute(1, 2, 0, 3).reshape(num_kv_tokens, H, D)
+            sel_v = sel_v.permute(1, 2, 0, 3).reshape(num_kv_tokens, H, D)
+
+            k_list.append(sel_k)
+            v_list.append(sel_v)
+
+            cu_seqlens_q.append(cu_seqlens_q[-1] + Sq)
+            cu_seqlens_k.append(cu_seqlens_k[-1] + num_kv_tokens)
+
+        if not q_list:
+            continue
+
+        # Concatenate into flat tensors
+        flat_q = torch.cat(q_list, dim=0)  # [total_q, H, D]
+        flat_k = torch.cat(k_list, dim=0)  # [total_k, H, D]
+        flat_v = torch.cat(v_list, dim=0)  # [total_v, H, D]
+
+        cu_seqlens_q_t = torch.tensor(cu_seqlens_q, dtype=torch.int32, device=device)
+        cu_seqlens_k_t = torch.tensor(cu_seqlens_k, dtype=torch.int32, device=device)
+
+        max_seqlen_q = Sq
+        max_seqlen_k = int((cu_seqlens_k_t[1:] - cu_seqlens_k_t[:-1]).max().item())
+
+        # flash_attn requires float16 or bfloat16
+        orig_dtype = flat_q.dtype
+        compute_dtype = orig_dtype
+        if compute_dtype not in (torch.float16, torch.bfloat16):
+            compute_dtype = torch.bfloat16
+            flat_q = flat_q.to(compute_dtype)
+            flat_k = flat_k.to(compute_dtype)
+            flat_v = flat_v.to(compute_dtype)
+
+        # Single fused FlashAttention call for all blocks
+        flat_out = flash_attn_varlen_func_impl(
+            flat_q,
+            flat_k,
+            flat_v,
+            cu_seqlens_q_t,
+            cu_seqlens_k_t,
+            max_seqlen_q,
+            max_seqlen_k,
+            causal=False,
+        )
+
+        if compute_dtype != orig_dtype:
+            flat_out = flat_out.to(orig_dtype)
+
+        # Unpack: flat_out is [total_q, H, D]
+        idx = 0
+        for qb in active_blocks:
+            block_out = flat_out[idx:idx + Sq]  # [Sq, H, D]
+            output[b, :, qb] = block_out.permute(1, 0, 2)  # [H, Sq, D]
+            idx += Sq
 
     return output
 
