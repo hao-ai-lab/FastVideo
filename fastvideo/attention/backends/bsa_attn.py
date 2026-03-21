@@ -216,12 +216,12 @@ def _reconstruct_pruned(
     """
     Scatter sparse output back to full block size.
     Pruned positions get nearest kept token's output.
-
+ 
     Args:
         sparse_output: [B, H, N, keep_size, D]
         keep_indices:  [B, H, N, keep_size]
         block_size: original tokens per block
-
+ 
     Returns:
         full_output: [B, H, N, block_size, D]
     """
@@ -237,21 +237,27 @@ def _reconstruct_pruned(
     idx_expand = keep_indices.unsqueeze(-1).expand(-1, -1, -1, -1, D)
     full_output.scatter_(3, idx_expand, sparse_output)
 
-    # Fill pruned positions with nearest kept token (vectorized per block)
-    # Use the first (b, h) pair's indices as representative
-    all_pos = torch.arange(block_size, device=device).float()
+    # Fill pruned positions with nearest kept token (vectorized)
+    all_pos = torch.arange(block_size, device=device)
 
     for n in range(N):
-        kept = keep_indices[0, 0, n].float()  # [keep_size]
-        # [block_size, keep_size] -> nearest kept index for each position
-        dists = (all_pos.unsqueeze(1) - kept.unsqueeze(0)).abs()
-        nearest_local = dists.argmin(dim=1)  # [block_size] index into kept
+        # NOTE: Assumes keep_indices are uniform across batch and heads.
+        # Per-batch/per-head reconstruction is a follow-up optimization.
+        kept = keep_indices[0, 0, n]  # [keep_size]
 
-        kept_set = set(keep_indices[0, 0, n].tolist())
-        for pos in range(block_size):
-            if pos not in kept_set:
-                src = nearest_local[pos].item()
-                full_output[:, :, n, pos] = sparse_output[:, :, n, src]
+        # Distance from every position to every kept position
+        # [block_size, keep_size]
+        dists = (all_pos.view(-1, 1) - kept.view(1, -1)).abs()
+        nearest_local_idx = dists.argmin(dim=1)  # [block_size]
+
+        # Identify pruned positions
+        is_pruned = torch.ones(block_size, dtype=torch.bool, device=device)
+        is_pruned[kept] = False
+        pruned_indices = is_pruned.nonzero(as_tuple=True)[0]
+
+        if pruned_indices.numel() > 0:
+            src_indices = nearest_local_idx[pruned_indices]
+            full_output[:, :, n, pruned_indices] = sparse_output[:, :, n, src_indices]
 
     return full_output
 
@@ -348,22 +354,6 @@ class BSAAttentionMetadataBuilder(AttentionMetadataBuilder):
 
 
 class BSAAttentionImpl(AttentionImpl):
-
-    # def __init__(
-    #     self,
-    #     num_heads: int,
-    #     head_size: int,
-    #     causal: bool,
-    #     softmax_scale: float,
-    #     num_kv_heads: int | None = None,
-    #     prefix: str = "",
-    #     **extra_impl_args,
-    # ) -> None:
-    #     self.prefix = prefix
-    #     self.num_heads = num_heads
-    #     self.head_size = head_size
-    #     sp_group = get_sp_group()
-    #     self.sp_size = sp_group.world_size
 
     def __init__(
         self,

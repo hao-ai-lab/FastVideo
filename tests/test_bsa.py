@@ -16,6 +16,8 @@ from fastvideo.attention.backends.bsa_attn import (
     BSAAttentionImpl,
     _prune_queries,
     _select_kv_blocks,
+    _compute_sparse_attention,    # NEW
+    _reconstruct_pruned,          # NEW
     get_tile_partition_indices,
     get_reverse_tile_partition_indices,
 )
@@ -251,6 +253,260 @@ class TestSparsityStats:
 
         avg_selected = mask.float().sum(dim=-1).mean().item()
         assert avg_selected < N * 0.8
+
+# ---------------------------------------------------------------------------
+# Sparse attention computation tests
+# ---------------------------------------------------------------------------
+ 
+class TestComputeSparseAttention:
+    """Test _compute_sparse_attention in isolation."""
+ 
+    def test_output_shape(self):
+        B, H, N, Sq, Sk, D = 1, 2, 8, 32, 64, 32
+        sparse_q = torch.randn(B, H, N, Sq, D, device=DEVICE)
+        k_blocks = torch.randn(B, H, N, Sk, D, device=DEVICE)
+        v_blocks = torch.randn(B, H, N, Sk, D, device=DEVICE)
+        kv_mask = torch.ones(B, H, N, N, dtype=torch.bool, device=DEVICE)
+ 
+        output = _compute_sparse_attention(sparse_q, k_blocks, v_blocks, kv_mask)
+ 
+        assert output.shape == (B, H, N, Sq, D)
+ 
+    def test_no_nan_or_inf(self):
+        B, H, N, Sq, Sk, D = 2, 4, 4, 16, 64, 32
+        sparse_q = torch.randn(B, H, N, Sq, D, device=DEVICE)
+        k_blocks = torch.randn(B, H, N, Sk, D, device=DEVICE)
+        v_blocks = torch.randn(B, H, N, Sk, D, device=DEVICE)
+        kv_mask = torch.ones(B, H, N, N, dtype=torch.bool, device=DEVICE)
+ 
+        output = _compute_sparse_attention(sparse_q, k_blocks, v_blocks, kv_mask)
+ 
+        assert not torch.isnan(output).any(), "NaN in sparse attention output"
+        assert not torch.isinf(output).any(), "Inf in sparse attention output"
+ 
+    def test_full_mask_matches_dense(self):
+        """With all KV blocks selected, should match dense attention over blocks."""
+        B, H, N, S, D = 1, 1, 4, 16, 16
+        q_blocks = torch.randn(B, H, N, S, D, device=DEVICE)
+        k_blocks = torch.randn(B, H, N, S, D, device=DEVICE)
+        v_blocks = torch.randn(B, H, N, S, D, device=DEVICE)
+        kv_mask = torch.ones(B, H, N, N, dtype=torch.bool, device=DEVICE)
+ 
+        output = _compute_sparse_attention(q_blocks, k_blocks, v_blocks, kv_mask)
+ 
+        # Compare against manual dense attention over all KV
+        all_k = k_blocks.reshape(B, H, N * S, D)
+        all_v = v_blocks.reshape(B, H, N * S, D)
+        for qb in range(N):
+            q = q_blocks[:, :, qb]  # [B, H, S, D]
+            scores = torch.matmul(q, all_k.transpose(-1, -2)) / (D ** 0.5)
+            weights = F.softmax(scores, dim=-1)
+            expected = torch.matmul(weights, all_v)
+            assert torch.allclose(output[:, :, qb], expected, atol=1e-5), (
+                f"Block {qb} doesn't match dense attention"
+            )
+ 
+    def test_sparse_mask_excludes_blocks(self):
+        """With some KV blocks masked out, output should differ from full mask."""
+        B, H, N, S, D = 1, 1, 8, 16, 16
+        sparse_q = torch.randn(B, H, N, S, D, device=DEVICE)
+        k_blocks = torch.randn(B, H, N, S, D, device=DEVICE)
+        v_blocks = torch.randn(B, H, N, S, D, device=DEVICE)
+ 
+        full_mask = torch.ones(B, H, N, N, dtype=torch.bool, device=DEVICE)
+        sparse_mask = torch.zeros(B, H, N, N, dtype=torch.bool, device=DEVICE)
+        sparse_mask[:, :, :, :2] = True  # only keep first 2 KV blocks
+ 
+        out_full = _compute_sparse_attention(sparse_q, k_blocks, v_blocks, full_mask)
+        out_sparse = _compute_sparse_attention(sparse_q, k_blocks, v_blocks, sparse_mask)
+ 
+        assert not torch.allclose(out_full, out_sparse, atol=1e-3), (
+            "Sparse and full mask should produce different outputs"
+        )
+
+# ---------------------------------------------------------------------------
+# Reconstruction tests
+# ---------------------------------------------------------------------------
+ 
+class TestReconstructPruned:
+    """Test _reconstruct_pruned in isolation."""
+ 
+    def test_output_shape(self):
+        B, H, N, keep_size, D = 1, 2, 4, 32, 64
+        block_size = 64
+        sparse_output = torch.randn(B, H, N, keep_size, D, device=DEVICE)
+        keep_indices = torch.stack([
+            torch.randperm(block_size)[:keep_size].sort().values
+            for _ in range(B * H * N)
+        ]).view(B, H, N, keep_size)
+ 
+        full_output = _reconstruct_pruned(sparse_output, keep_indices, block_size)
+ 
+        assert full_output.shape == (B, H, N, block_size, D)
+ 
+    def test_kept_positions_preserved(self):
+        """Kept token outputs should be exactly preserved."""
+        B, H, N, keep_size, D = 1, 1, 2, 4, 8
+        block_size = 8
+        sparse_output = torch.randn(B, H, N, keep_size, D, device=DEVICE)
+        keep_indices = torch.tensor([[[[0, 2, 5, 7], [1, 3, 4, 6]]]])
+ 
+        full_output = _reconstruct_pruned(sparse_output, keep_indices, block_size)
+ 
+        # Check that kept positions match exactly
+        for n in range(N):
+            for i, pos in enumerate(keep_indices[0, 0, n].tolist()):
+                assert torch.allclose(
+                    full_output[0, 0, n, pos],
+                    sparse_output[0, 0, n, i],
+                    atol=1e-6,
+                ), f"Kept position {pos} not preserved in block {n}"
+ 
+    def test_pruned_positions_filled(self):
+        """Pruned positions should not be zero (filled with nearest kept)."""
+        B, H, N, keep_size, D = 1, 1, 1, 4, 8
+        block_size = 8
+        sparse_output = torch.ones(B, H, N, keep_size, D, device=DEVICE)
+        keep_indices = torch.tensor([[[[0, 2, 5, 7]]]])
+ 
+        full_output = _reconstruct_pruned(sparse_output, keep_indices, block_size)
+ 
+        # All positions should be non-zero since sparse_output is all ones
+        for pos in range(block_size):
+            assert full_output[0, 0, 0, pos].abs().sum() > 0, (
+                f"Position {pos} is still zero after reconstruction"
+            )
+ 
+    def test_no_pruning_identity(self):
+        """If keep_size == block_size, output should be unchanged."""
+        B, H, N, D = 1, 2, 4, 32
+        block_size = 16
+        sparse_output = torch.randn(B, H, N, block_size, D, device=DEVICE)
+        keep_indices = torch.arange(block_size, device=DEVICE).view(1, 1, 1, block_size).expand(B, H, N, -1)
+ 
+        full_output = _reconstruct_pruned(sparse_output, keep_indices, block_size)
+ 
+        assert torch.allclose(full_output, sparse_output, atol=1e-6)
+ 
+ # ---------------------------------------------------------------------------
+# End-to-end BSAAttentionImpl.forward tests
+# ---------------------------------------------------------------------------
+ 
+class TestBSAImplForward:
+    """Test BSAAttentionImpl.forward end-to-end."""
+ 
+    def _make_impl_and_metadata(self, T=8, Hv=8, Wv=8, num_heads=4, head_dim=32,
+                                 keep_ratio=0.5, threshold=0.9):
+        impl = BSAAttentionImpl(
+            num_heads=num_heads,
+            head_size=head_dim,
+            causal=False,
+            softmax_scale=head_dim ** -0.5,
+        )
+ 
+        builder = BSAAttentionMetadataBuilder()
+        builder.prepare()
+        metadata = builder.build(
+            current_timestep=0,
+            raw_latent_shape=(T, Hv * 2, Wv * 2),  # pre-patch
+            patch_size=(1, 2, 2),
+            device=torch.device(DEVICE),
+            bsa_query_keep_ratio=keep_ratio,
+            bsa_kv_cumulative_threshold=threshold,
+        )
+ 
+        return impl, metadata
+ 
+    def test_output_shape(self):
+        B, H, D = 1, 4, 32
+        T, Hv, Wv = 8, 8, 8
+        L = T * Hv * Wv
+        impl, metadata = self._make_impl_and_metadata(T, Hv, Wv, H, D)
+ 
+        # Input layout: [B, L, H, D]
+        q = torch.randn(B, L, H, D, device=DEVICE)
+        k = torch.randn(B, L, H, D, device=DEVICE)
+        v = torch.randn(B, L, H, D, device=DEVICE)
+ 
+        output = impl.forward(q, k, v, metadata)
+ 
+        assert output.shape == (B, L, H, D)
+ 
+    def test_no_nan(self):
+        B, H, D = 1, 4, 32
+        T, Hv, Wv = 8, 8, 8
+        L = T * Hv * Wv
+        impl, metadata = self._make_impl_and_metadata(T, Hv, Wv, H, D)
+ 
+        q = torch.randn(B, L, H, D, device=DEVICE)
+        k = torch.randn(B, L, H, D, device=DEVICE)
+        v = torch.randn(B, L, H, D, device=DEVICE)
+ 
+        output = impl.forward(q, k, v, metadata)
+ 
+        assert not torch.isnan(output).any()
+        assert not torch.isinf(output).any()
+ 
+    def test_no_sparsity_approximates_full_attention(self):
+        """With keep_ratio=1.0 and threshold=1.0, should approximate full attention."""
+        B, H, D = 1, 2, 16
+        T, Hv, Wv = 4, 4, 4
+        L = T * Hv * Wv
+        impl, metadata = self._make_impl_and_metadata(
+            T, Hv, Wv, H, D, keep_ratio=1.0, threshold=1.0
+        )
+ 
+        q = torch.randn(B, L, H, D, device=DEVICE)
+        k = torch.randn(B, L, H, D, device=DEVICE)
+        v = torch.randn(B, L, H, D, device=DEVICE)
+ 
+        bsa_out = impl.forward(q, k, v, metadata)
+ 
+        # Reference full attention in [B, H, L, D] layout
+        q_ref = q.transpose(1, 2)
+        k_ref = k.transpose(1, 2)
+        v_ref = v.transpose(1, 2)
+        scores = torch.matmul(q_ref, k_ref.transpose(-1, -2)) / (D ** 0.5)
+        weights = F.softmax(scores, dim=-1)
+        full_out = torch.matmul(weights, v_ref).transpose(1, 2)
+ 
+        cos_sim = F.cosine_similarity(
+            bsa_out.flatten(), full_out.flatten(), dim=0
+        )
+        assert cos_sim > 0.95, f"BSA with no sparsity diverges: cos_sim={cos_sim:.4f}"
+ 
+    def test_batch_size_2(self):
+        B, H, D = 2, 4, 32
+        T, Hv, Wv = 8, 8, 8
+        L = T * Hv * Wv
+        impl, metadata = self._make_impl_and_metadata(T, Hv, Wv, H, D)
+ 
+        q = torch.randn(B, L, H, D, device=DEVICE)
+        k = torch.randn(B, L, H, D, device=DEVICE)
+        v = torch.randn(B, L, H, D, device=DEVICE)
+ 
+        output = impl.forward(q, k, v, metadata)
+ 
+        assert output.shape == (B, L, H, D)
+        assert not torch.isnan(output).any()
+ 
+    def test_high_sparsity(self):
+        B, H, D = 1, 2, 32
+        T, Hv, Wv = 8, 8, 8
+        L = T * Hv * Wv
+        impl, metadata = self._make_impl_and_metadata(
+            T, Hv, Wv, H, D, keep_ratio=0.25, threshold=0.5
+        )
+ 
+        q = torch.randn(B, L, H, D, device=DEVICE)
+        k = torch.randn(B, L, H, D, device=DEVICE)
+        v = torch.randn(B, L, H, D, device=DEVICE)
+ 
+        output = impl.forward(q, k, v, metadata)
+ 
+        assert output.shape == (B, L, H, D)
+        assert not torch.isnan(output).any()
+        assert not torch.isinf(output).any()
 
 
 # ---------------------------------------------------------------------------
