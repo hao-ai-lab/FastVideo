@@ -349,7 +349,7 @@ class WanModel(ModelBase):
 
         from fastvideo.configs.pipelines.wan import (
             t5_postprocess_text, )
-        from fastvideo.utils import maybe_download_model
+        from fastvideo.utils import PRECISION_TO_TYPE, maybe_download_model
 
         model_path = maybe_download_model(tc.model_path)
 
@@ -359,10 +359,11 @@ class WanModel(ModelBase):
         encoder_config = tc.pipeline_config.text_encoder_configs[0]
         tok_kwargs = dict(encoder_config.tokenizer_kwargs)
 
+        text_enc_dtype = PRECISION_TO_TYPE[tc.pipeline_config.text_encoder_precisions[0]]
         tokenizer = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
         text_encoder = T5EncoderModel.from_pretrained(
             os.path.join(model_path, "text_encoder"),
-            torch_dtype=torch.float16,
+            torch_dtype=text_enc_dtype,
         ).to(device).eval()
 
         with torch.no_grad():
