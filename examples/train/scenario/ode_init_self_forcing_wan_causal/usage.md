@@ -11,10 +11,7 @@ bash examples/train/run.sh \
     examples/train/scenario/ode_init_self_forcing_wan_causal/step1_kd.yaml
 
 # Step 2 — Export ODE-init weights to diffusers format
-python -m fastvideo.train.entrypoint.dcp_to_diffusers \
-    --role student \
-    --checkpoint outputs/kdtest/kd_causal/checkpoint-300 \
-    --output-dir outputs/kdtest/kd_ode_init
+bash examples/train/scenario/ode_init_self_forcing_wan_causal/step2_export.sh
 
 # Step 3 — Self-forcing with the exported ODE-init
 bash examples/train/run.sh \
