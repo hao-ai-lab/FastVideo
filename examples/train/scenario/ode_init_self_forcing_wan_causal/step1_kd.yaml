@@ -5,7 +5,7 @@
 #
 # Step 1 — Run KD training:
 #   torchrun --nproc_per_node=1 -m fastvideo.train.entrypoint.train \
-#       --config examples/train/configs/kdtest/kd_causal.yaml
+#       --config examples/train/scenario/ode_init_self_forcing_wan_causal/kd_causal.yaml
 #
 # Step 2 — Export ode_init checkpoint:
 #   python -m fastvideo.train.entrypoint.dcp_to_diffusers \
@@ -15,7 +15,7 @@
 #
 # Step 3 — Run Self-Forcing with the exported ode_init:
 #   torchrun --nproc_per_node=1 -m fastvideo.train.entrypoint.train \
-#       --config examples/train/configs/kdtest/self_forcing_causal.yaml
+#       --config examples/train/scenario/ode_init_self_forcing_wan_causal/self_forcing_causal.yaml
 #
 # Success criteria:
 #   - Cache generates 16 .pt files under data/kd_test_cache/samples/
