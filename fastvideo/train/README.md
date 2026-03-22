@@ -1,4 +1,4 @@
-# fastvideo/train — Modular Training Framework
+# Fastvideo New Modular Training Framework
 
 This is the new training infrastructure for FastVideo, replacing the
 monolithic per-model pipeline scripts in `fastvideo/training/`.
