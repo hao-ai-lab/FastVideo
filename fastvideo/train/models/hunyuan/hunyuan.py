@@ -13,6 +13,7 @@ schedule.  Differences:
 from __future__ import annotations
 
 import copy
+import os
 from typing import Any, Literal, TYPE_CHECKING
 
 import torch
@@ -159,16 +160,86 @@ class HunyuanModel(WanModel):
         }
 
     def ensure_negative_conditioning(self) -> None:
-        """Hunyuan negative conditioning.
+        """Encode the negative prompt with dual text encoders
+        (LLaMA + CLIP).
 
-        For basic finetuning (FineTuneMethod), negative
-        conditioning is not needed since only conditional=True
-        is used.  For distillation methods, this should be
-        extended to encode the negative prompt using
-        HunyuanPipeline with dual text encoders (LLaMA + CLIP).
+        Every rank encodes independently to avoid NCCL deadlocks
+        when only a subset of ranks would otherwise participate.
         """
-        # No-op: negative prompt encoding requires loading
-        # LLaMA + CLIP text encoders, which is expensive.
-        # unconditional_dict will be None, which is fine
-        # for FineTuneMethod.
-        pass
+        if self.negative_prompt_embeds is not None:  # type: ignore[has-type]
+            return
+
+        assert self.training_config is not None
+        tc = self.training_config
+        device = self.device
+        dtype = self._get_training_dtype()
+
+        from transformers import (AutoTokenizer, CLIPTextModel, LlamaModel)
+
+        from fastvideo.configs.pipelines.hunyuan import (
+            clip_preprocess_text,
+            clip_postprocess_text,
+            llama_preprocess_text,
+            llama_postprocess_text,
+        )
+        from fastvideo.utils import (PRECISION_TO_TYPE, maybe_download_model)
+
+        model_path = maybe_download_model(tc.model_path)
+
+        # Use configured precisions for each encoder.
+        precisions = tc.pipeline_config.text_encoder_precisions
+        llama_dtype = PRECISION_TO_TYPE[precisions[0]]
+        clip_dtype = PRECISION_TO_TYPE[precisions[1]]
+
+        # --- LLaMA ---
+        llama_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
+        llama_enc = LlamaModel.from_pretrained(
+            os.path.join(model_path, "text_encoder"),
+            torch_dtype=llama_dtype,
+        ).to(device).eval()
+
+        llama_cfg = tc.pipeline_config.text_encoder_configs[0]
+        llama_tok_kwargs = dict(llama_cfg.tokenizer_kwargs)
+
+        negative_prompt = ""
+        llama_text = llama_preprocess_text(negative_prompt)
+
+        with torch.no_grad():
+            llama_inputs = llama_tok(llama_text, **llama_tok_kwargs).to(device)
+            llama_out = llama_enc(**llama_inputs, output_hidden_states=True)
+            llama_embeds = llama_postprocess_text(llama_out).squeeze(0)
+
+        del llama_enc, llama_tok
+
+        # --- CLIP ---
+        clip_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer_2"))
+        clip_enc = CLIPTextModel.from_pretrained(
+            os.path.join(model_path, "text_encoder_2"),
+            torch_dtype=clip_dtype,
+        ).to(device).eval()
+
+        clip_cfg = tc.pipeline_config.text_encoder_configs[1]
+        clip_tok_kwargs = dict(clip_cfg.tokenizer_kwargs)
+        clip_text = clip_preprocess_text(negative_prompt)
+
+        with torch.no_grad():
+            clip_inputs = clip_tok(clip_text, **clip_tok_kwargs).to(device)
+            clip_out = clip_enc(**clip_inputs)
+            clip_pooled = clip_postprocess_text(clip_out).squeeze(0)
+
+        del clip_enc, clip_tok
+
+        # --- Combine: [pooled_clip_row, llama_embeds] ---
+        llama_dim = llama_embeds.shape[-1]
+        pooled_row = torch.zeros(llama_dim, device=device)
+        pooled_row[:clip_pooled.shape[-1]] = clip_pooled
+        neg_embeds = torch.cat(
+            [pooled_row.unsqueeze(0), llama_embeds],
+            dim=0,
+        ).unsqueeze(0).to(device=device, dtype=dtype)
+
+        # Attention mask: all ones for the combined sequence.
+        neg_mask = torch.ones(neg_embeds.shape[:2], device=device, dtype=dtype)
+
+        self.negative_prompt_embeds = neg_embeds
+        self.negative_prompt_attention_mask = neg_mask
