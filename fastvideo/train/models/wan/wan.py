@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import copy
-import gc
 from typing import Any, Literal, TYPE_CHECKING
 
 import torch
