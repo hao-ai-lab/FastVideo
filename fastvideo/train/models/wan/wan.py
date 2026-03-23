@@ -374,9 +374,6 @@ class WanModel(ModelBase):
             neg_mask = text_inputs["attention_mask"].to(device=device, dtype=dtype)
 
         del text_encoder, tokenizer
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
         self.negative_prompt_embeds = neg_embeds
         self.negative_prompt_attention_mask = neg_mask
