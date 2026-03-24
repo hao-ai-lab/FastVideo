@@ -3,7 +3,6 @@ import sys
 from copy import deepcopy
 from typing import Any
 
-import numpy as np
 import torch
 
 from fastvideo.configs.sample import SamplingParam
@@ -194,19 +193,6 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
             batch.mouse_cond = mouse_cond
 
         return batch
-
-    def _post_process_validation_frames(
-            self, frames: list[np.ndarray],
-            batch: ForwardBatch) -> list[np.ndarray]:
-        from fastvideo.models.dits.matrixgame.utils import (
-            overlay_validation_actions_on_frames,
-        )
-
-        return overlay_validation_actions_on_frames(
-            frames,
-            keyboard_cond=getattr(batch, "keyboard_cond", None),
-            mouse_cond=getattr(batch, "mouse_cond", None),
-        )
 
 
 def main(args) -> None:
