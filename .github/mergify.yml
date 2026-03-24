@@ -1,0 +1,255 @@
+pull_request_rules:
+
+  # ============================================================
+  # Auto-labeling by file path
+  # ============================================================
+
+  - name: label attention changes
+    conditions:
+      - or:
+        - files~=^fastvideo/attention/
+        - files~=^csrc/attn/
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [attention]
+
+  - name: label encoder changes
+    conditions:
+      - files~=^fastvideo/models/encoders/
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [encoder]
+
+  - name: label vae changes
+    conditions:
+      - files~=^fastvideo/models/vaes/
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [vae]
+
+  - name: label transformer/DiT changes
+    conditions:
+      - files~=^fastvideo/models/dits/
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [transformer]
+
+  - name: label training changes
+    conditions:
+      - files~=^fastvideo/training/
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [training]
+
+  - name: label pipeline changes
+    conditions:
+      - files~=^fastvideo/pipelines/
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [pipeline]
+
+  - name: label distributed changes
+    conditions:
+      - files~=^fastvideo/distributed/
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [distributed]
+
+  - name: label kernel changes
+    conditions:
+      - or:
+        - files~=^csrc/
+        - files~=^fastvideo-kernel/
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [kernel]
+
+  - name: label data/dataset changes
+    conditions:
+      - or:
+        - files~=^fastvideo/dataset/
+        - files~=^fastvideo/data_preprocess/
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [data]
+
+  - name: label CLI/entrypoint changes
+    conditions:
+      - files~=^fastvideo/entrypoints/
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [cli]
+
+  - name: label documentation changes
+    conditions:
+      - or:
+        - files~=^docs/
+        - files~=\.md$
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [documentation]
+
+  - name: label CI changes
+    conditions:
+      - or:
+        - files~=^\.github/
+        - files~=^\.buildkite/
+        - files~=^docker/
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [ci]
+
+  - name: label test changes
+    conditions:
+      - or:
+        - files~=^fastvideo/tests/
+        - files~=^tests/
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [tests]
+
+  - name: label ComfyUI changes
+    conditions:
+      - files~=^comfyui/
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [comfyui]
+
+  - name: label layer changes
+    conditions:
+      - files~=^fastvideo/layers/
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [layers]
+
+  - name: label LoRA changes
+    conditions:
+      - or:
+        - files~=^fastvideo/layers/lora/
+        - files~=^fastvideo/tests/lora/
+        - title~=(?i)lora
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [lora]
+
+  # ============================================================
+  # Pre-commit failure help comment
+  # ============================================================
+
+  - name: comment on pre-commit failure
+    conditions:
+      - check-failure~=pre-commit
+      - -closed
+    actions:
+      comment:
+        message: |
+          ## Pre-commit checks failed
+
+          Hi @{{author}}, the pre-commit checks have failed. To fix them locally:
+
+          ```bash
+          # Install pre-commit if you haven't already
+          uv pip install pre-commit
+          pre-commit install
+
+          # Run all checks and auto-fix what's possible
+          pre-commit run --all-files
+          ```
+
+          Common fixes:
+          - **yapf**: `yapf -i <file>` (formatting)
+          - **ruff**: `ruff check --fix <file>` (linting)
+          - **codespell**: `codespell --write-changes <file>` (spelling)
+
+          After fixing, commit and push the changes. The checks will re-run automatically.
+
+          For future commits, `pre-commit` will run automatically on changed files before each commit.
+
+  # ============================================================
+  # Merge conflict detection
+  # ============================================================
+
+  - name: label conflicting PRs
+    conditions:
+      - conflict
+      - -closed
+      - label!=stale
+    actions:
+      label:
+        add: [needs-rebase]
+      comment:
+        message: |
+          This PR has merge conflicts with the base branch. Please rebase:
+
+          ```bash
+          git fetch origin main
+          git rebase origin/main
+          # Resolve any conflicts, then:
+          git push --force-with-lease
+          ```
+
+  - name: remove conflict label when resolved
+    conditions:
+      - -conflict
+      - -closed
+      - label=needs-rebase
+    actions:
+      label:
+        remove: [needs-rebase]
+
+  # ============================================================
+  # Auto-rebase stale PRs
+  # ============================================================
+
+  - name: auto-merge when ready and approved
+    conditions:
+      - label=ready
+      - "#approved-reviews-by>=1"
+      - check-success~=pre-commit
+      - -conflict
+      - -closed
+      - -draft
+    actions:
+      merge:
+        method: squash
+
+  - name: auto-rebase on ready label
+    conditions:
+      - label=ready
+      - "#approved-reviews-by>=1"
+      - -conflict
+      - -closed
+    actions:
+      rebase: {}

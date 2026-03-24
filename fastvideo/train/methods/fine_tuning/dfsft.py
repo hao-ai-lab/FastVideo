@@ -154,10 +154,7 @@ class DiffusionForcingSFTMethod(TrainingMethod):
             target = noise - clean_latents
             loss = F.mse_loss(pred.float(), target.float())
 
-        if self._attn_kind == "vsa":
-            attn_metadata = training_batch.attn_metadata_vsa
-        else:
-            attn_metadata = training_batch.attn_metadata
+        attn_metadata = training_batch.attn_metadata_vsa if self._attn_kind == "vsa" else training_batch.attn_metadata
 
         loss_map = {"total_loss": loss, "dfsft_loss": loss}
         outputs: dict[str, Any] = {

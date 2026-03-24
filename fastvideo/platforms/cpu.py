@@ -44,9 +44,7 @@ class CpuPlatform(Platform):
         return True
 
     @classmethod
-    def get_current_memory_usage(cls,
-                                 device: torch.types.Device | None = None
-                                 ) -> float:
+    def get_current_memory_usage(cls, device: torch.types.Device | None = None) -> float:
         # For CPU, we can't easily get memory usage without additional libraries
         return 0.0
 

@@ -74,11 +74,8 @@ def umt5_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
     seq_lens = mask.gt(0).sum(dim=1).long()
     assert torch.isnan(hidden_state).sum() == 0
     prompt_embeds = [u[:v] for u, v in zip(hidden_state, seq_lens, strict=True)]
-    prompt_embeds_tensor: torch.Tensor = torch.stack([
-        torch.cat([u, u.new_zeros(512 - u.size(0), u.size(1))])
-        for u in prompt_embeds
-    ],
-                                                     dim=0)
+    prompt_embeds_tensor: torch.Tensor = torch.stack(
+        [torch.cat([u, u.new_zeros(512 - u.size(0), u.size(1))]) for u in prompt_embeds], dim=0)
     return prompt_embeds_tensor
 
 
@@ -94,8 +91,7 @@ class LongCatT2V480PConfig(PipelineConfig):
       - scheduler: FlowMatchEulerDiscreteScheduler
     """
 
-    dit_config: DiTConfig = field(
-        default_factory=lambda: DiTConfig(arch_config=LongCatDiTArchConfig()))
+    dit_config: DiTConfig = field(default_factory=lambda: DiTConfig(arch_config=LongCatDiTArchConfig()))
 
     # VAE config: Wan VAE with encoder+decoder enabled
     vae_config: VAEConfig = field(default_factory=WanVAEConfig)
@@ -105,17 +101,13 @@ class LongCatT2V480PConfig(PipelineConfig):
     # Precision defaults
     dit_precision: str = "bf16"
     vae_precision: str = "bf16"
-    text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("bf16", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
 
     # Text encoding (UMT5 uses T5-like config; postprocess to fixed 512)
-    text_encoder_configs: tuple[T5Config, ...] = field(
-        default_factory=lambda: (T5Config(), ))
-    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
-        default_factory=lambda: (longcat_preprocess_text, ))
+    text_encoder_configs: tuple[T5Config, ...] = field(default_factory=lambda: (T5Config(), ))
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(default_factory=lambda: (longcat_preprocess_text, ))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda:
-                                               (umt5_postprocess_text, ))
+                                  ...] = field(default_factory=lambda: (umt5_postprocess_text, ))
 
     # LongCat-specific runtime toggles (consumed by pipeline/stages)
     enable_kv_cache: bool = True
@@ -342,6 +334,4 @@ def get_bucket_config(resolution, scale_factor_spatial):
         elif scale_factor_spatial == 256:
             return ASPECT_RATIO_960_F256
 
-    raise ValueError(
-        f"Unsupported resolution '{resolution}' or scale_factor_spatial '{scale_factor_spatial}'"
-    )
+    raise ValueError(f"Unsupported resolution '{resolution}' or scale_factor_spatial '{scale_factor_spatial}'")

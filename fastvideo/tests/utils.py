@@ -54,10 +54,7 @@ def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
         img2 = frames2[i:i + 1]
 
         with torch.no_grad():
-            if use_ms_ssim:
-                value = ms_ssim(img1, img2, data_range=1.0)
-            else:
-                value = ssim(img1, img2, data_range=1.0)
+            value = ms_ssim(img1, img2, data_range=1.0) if use_ms_ssim else ssim(img1, img2, data_range=1.0)
 
             ssim_values.append(value.item())
 

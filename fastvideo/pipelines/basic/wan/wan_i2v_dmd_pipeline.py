@@ -12,13 +12,11 @@ from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
 # isort: off
-from fastvideo.pipelines.stages import (
-    ImageEncodingStage, ConditioningStage, DecodingStage, DmdDenoisingStage,
-    ImageVAEEncodingStage, InputValidationStage, LatentPreparationStage,
-    TextEncodingStage, TimestepPreparationStage)
+from fastvideo.pipelines.stages import (ImageEncodingStage, ConditioningStage, DecodingStage, DmdDenoisingStage,
+                                        ImageVAEEncodingStage, InputValidationStage, LatentPreparationStage,
+                                        TextEncodingStage, TimestepPreparationStage)
 # isort: on
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
+from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
 
 logger = init_logger(__name__)
 
@@ -31,14 +29,12 @@ class WanImageToVideoDmdPipeline(LoRAPipeline, ComposedPipelineBase):
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift)
+        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(shift=fastvideo_args.pipeline_config.flow_shift)
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
 
-        self.add_stage(stage_name="input_validation_stage",
-                       stage=InputValidationStage())
+        self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
@@ -52,29 +48,24 @@ class WanImageToVideoDmdPipeline(LoRAPipeline, ComposedPipelineBase):
                            image_processor=self.get_module("image_processor"),
                        ))
 
-        self.add_stage(stage_name="conditioning_stage",
-                       stage=ConditioningStage())
+        self.add_stage(stage_name="conditioning_stage", stage=ConditioningStage())
 
         self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(
-                           scheduler=self.get_module("scheduler")))
+                       stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LatentPreparationStage(
-                           scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer"),
-                           use_btchw_layout=True))
+                       stage=LatentPreparationStage(scheduler=self.get_module("scheduler"),
+                                                    transformer=self.get_module("transformer"),
+                                                    use_btchw_layout=True))
 
         self.add_stage(stage_name="image_latent_preparation_stage",
                        stage=ImageVAEEncodingStage(vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=DmdDenoisingStage(
-                           transformer=self.get_module("transformer"),
-                           scheduler=self.get_module("scheduler")))
+                       stage=DmdDenoisingStage(transformer=self.get_module("transformer"),
+                                               scheduler=self.get_module("scheduler")))
 
-        self.add_stage(stage_name="decoding_stage",
-                       stage=DecodingStage(vae=self.get_module("vae")))
+        self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 
 
 EntryClass = WanImageToVideoDmdPipeline

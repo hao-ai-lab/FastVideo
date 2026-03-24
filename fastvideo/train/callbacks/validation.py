@@ -143,10 +143,7 @@ class ValidationCallback(Callback):
         # Look for an EMA callback to temporarily swap
         # EMA weights during validation.
         ema_cb = self._find_ema_callback()
-        if ema_cb is not None:
-            ctx = ema_cb.ema_context(transformer)
-        else:
-            ctx = contextlib.nullcontext(transformer)
+        ctx = ema_cb.ema_context(transformer) if ema_cb is not None else contextlib.nullcontext(transformer)
         with ctx as t:
             self._run_validation_inner(
                 method,
@@ -300,6 +297,13 @@ class ValidationCallback(Callback):
             tc.model_path,
             **kwargs,
         )
+
+        scheduler = self._pipeline.get_module("scheduler")
+        if (scheduler is not None and type(scheduler).__name__ == "SelfForcingFlowMatchScheduler"):
+            scheduler.sigma_min = 0.0
+            scheduler.extra_one_step = True
+            scheduler.set_timesteps(num_inference_steps=1000, training=True)
+
         self._pipeline_key = key
         return self._pipeline
 

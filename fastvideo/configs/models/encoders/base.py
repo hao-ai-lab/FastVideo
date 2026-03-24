@@ -12,8 +12,8 @@ from fastvideo.platforms import AttentionBackendEnum
 @dataclass
 class EncoderArchConfig(ArchConfig):
     architectures: list[str] = field(default_factory=lambda: [])
-    _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
-        AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
+    _supported_attention_backends: tuple[AttentionBackendEnum,
+                                         ...] = (AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
     output_hidden_states: bool = False
     use_return_dict: bool = True
 
@@ -33,8 +33,7 @@ class TextEncoderArchConfig(EncoderArchConfig):
     scalable_attention: bool = True
     tie_word_embeddings: bool = False
     stacked_params_mapping: list[tuple[str, str, str]] = field(
-        default_factory=list
-    )  # mapping from huggingface weight names to custom names
+        default_factory=list)  # mapping from huggingface weight names to custom names
     tokenizer_kwargs: dict[str, Any] = field(default_factory=dict)
     _fsdp_shard_conditions: list = field(default_factory=lambda: [])
 

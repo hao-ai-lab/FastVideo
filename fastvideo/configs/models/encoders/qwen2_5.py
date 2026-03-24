@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 
-from fastvideo.configs.models.encoders.base import (TextEncoderArchConfig,
-                                                    TextEncoderConfig)
+from fastvideo.configs.models.encoders.base import (TextEncoderArchConfig, TextEncoderConfig)
 
 
 def _is_transformer_layer(n: str, m) -> bool:
@@ -54,8 +53,7 @@ class Qwen2_5_VLArchConfig(TextEncoderArchConfig):
                                            (".gate_up_proj", ".up_proj", 1),
                                        ])
     _fsdp_shard_conditions: list = field(
-        default_factory=lambda:
-        [_is_transformer_layer, _is_embeddings, _is_final_norm])
+        default_factory=lambda: [_is_transformer_layer, _is_embeddings, _is_final_norm])
 
     def __post_init__(self):
         super().__post_init__()
@@ -65,8 +63,8 @@ class Qwen2_5_VLArchConfig(TextEncoderArchConfig):
             self.num_key_value_heads = self.num_attention_heads
         if self.layer_types is None:
             self.layer_types = [
-                "sliding_attention" if self.sliding_window is not None
-                and i >= self.max_window_layers else "full_attention"
+                "sliding_attention"
+                if self.sliding_window is not None and i >= self.max_window_layers else "full_attention"
                 for i in range(self.num_hidden_layers)
             ]
         if self.rope_scaling is not None and "type" in self.rope_scaling:
@@ -86,7 +84,6 @@ class Qwen2_5_VLArchConfig(TextEncoderArchConfig):
 
 @dataclass
 class Qwen2_5_VLConfig(TextEncoderConfig):
-    arch_config: TextEncoderArchConfig = field(
-        default_factory=Qwen2_5_VLArchConfig)
+    arch_config: TextEncoderArchConfig = field(default_factory=Qwen2_5_VLArchConfig)
     prefix: str = "qwen2_5_vl"
     is_chat_model: bool = True

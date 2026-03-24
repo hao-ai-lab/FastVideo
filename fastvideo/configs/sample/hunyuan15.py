@@ -15,20 +15,17 @@ class Hunyuan15_480P_SamplingParam(SamplingParam):
     fps: int = 24
 
     guidance_scale: float = 6.0
-    sigmas: list[float] | None = field(
-        default_factory=lambda: list(np.linspace(1.0, 0.0, 50 + 1)[:-1]))
+    sigmas: list[float] | None = field(default_factory=lambda: list(np.linspace(1.0, 0.0, 50 + 1)[:-1]))
 
     negative_prompt: str = ""
 
     def __post_init__(self):
         super().__post_init__()
-        self.sigmas = list(
-            np.linspace(1.0, 0.0, self.num_inference_steps + 1)[:-1])
+        self.sigmas = list(np.linspace(1.0, 0.0, self.num_inference_steps + 1)[:-1])
 
 
 @dataclass
-class Hunyuan15_480P_StepDistilled_I2V_SamplingParam(
-        Hunyuan15_480P_SamplingParam):
+class Hunyuan15_480P_StepDistilled_I2V_SamplingParam(Hunyuan15_480P_SamplingParam):
     num_inference_steps: int = 12
 
     height: int = 720

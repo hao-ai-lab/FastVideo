@@ -149,8 +149,8 @@ follow_imports = "silent"
 skip ="./data,./wandb"
 
 [tool.ruff]
-# Allow lines to be as long as 80.
-line-length = 80
+# Allow lines to be as long as 120.
+line-length = 120
 
 [tool.ruff.lint]
 select = [
@@ -187,10 +187,10 @@ ignore = [
 
 
 [tool.yapf]
-column_limit = 80
+column_limit = 120
 
 [tool.isort]
-line_length = 80
+line_length = 120
 use_parentheses = true
 skip_gitignore = true
 

@@ -14,10 +14,7 @@ class LoadImagePath:
     @classmethod
     def INPUT_TYPES(s):
         input_dir = folder_paths.get_input_directory()
-        files = [
-            f for f in os.listdir(input_dir)
-            if os.path.isfile(os.path.join(input_dir, f))
-        ]
+        files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
         files = folder_paths.filter_files_content_types(files, ["image"])
         return {
             "required": {
@@ -65,13 +62,10 @@ class LoadImagePath:
                 None,
             ]
             if 'A' in processed_image.getbands():
-                mask = np.array(processed_image.getchannel('A')).astype(
-                    np.float32) / 255.0
+                mask = np.array(processed_image.getchannel('A')).astype(np.float32) / 255.0
                 mask = 1. - torch.from_numpy(mask)
             elif processed_image.mode == 'P' and 'transparency' in processed_image.info:
-                mask = np.array(
-                    processed_image.convert('RGBA').getchannel('A')).astype(
-                        np.float32) / 255.0
+                mask = np.array(processed_image.convert('RGBA').getchannel('A')).astype(np.float32) / 255.0
                 mask = 1. - torch.from_numpy(mask)
             else:
                 mask = torch.zeros((64, 64), dtype=torch.float32, device="cpu")

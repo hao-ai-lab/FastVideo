@@ -6,8 +6,7 @@ from typing import Any, cast
 
 import torch
 
-from fastvideo.configs.models import (DiTConfig, EncoderConfig, ModelConfig,
-                                      VAEConfig, UpsamplerConfig)
+from fastvideo.configs.models import (DiTConfig, EncoderConfig, ModelConfig, VAEConfig, UpsamplerConfig)
 from fastvideo.configs.models.encoders import BaseEncoderOutput
 from fastvideo.configs.utils import update_config_from_args
 from fastvideo.logger import init_logger
@@ -56,15 +55,11 @@ class PipelineConfig:
 
     # Text encoder configuration
     DEFAULT_TEXT_ENCODER_PRECISIONS = ("fp32", )
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (EncoderConfig(), ))
-    text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("fp32", ))
-    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
-        default_factory=lambda: (preprocess_text, ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (EncoderConfig(), ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32", ))
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(default_factory=lambda: (preprocess_text, ))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.tensor],
-                                  ...] = field(default_factory=lambda:
-                                               (postprocess_text, ))
+                                  ...] = field(default_factory=lambda: (postprocess_text, ))
 
     # DMD parameters
     dmd_denoising_steps: list[int] | None = field(default=None)
@@ -79,8 +74,7 @@ class PipelineConfig:
     # enable_torch_compile: bool = False
 
     @staticmethod
-    def add_cli_args(parser: FlexibleArgumentParser,
-                     prefix: str = "") -> FlexibleArgumentParser:
+    def add_cli_args(parser: FlexibleArgumentParser, prefix: str = "") -> FlexibleArgumentParser:
         prefix_with_dot = f"{prefix}." if (prefix.strip() != "") else ""
 
         # model_path will be conflicting with the model_path in FastVideoArgs,
@@ -174,8 +168,7 @@ class PipelineConfig:
             f"--{prefix_with_dot}dmd-denoising-steps",
             type=parse_int_list,
             default=PipelineConfig.dmd_denoising_steps,
-            help=
-            "Comma-separated list of denoising steps (e.g., '1000,757,522')",
+            help="Comma-separated list of denoising steps (e.g., '1000,757,522')",
         )
         parser.add_argument(
             f"--{prefix_with_dot}use-diagonal-denoising",
@@ -207,19 +200,11 @@ class PipelineConfig:
 
         return parser
 
-    def update_config_from_dict(self,
-                                args: dict[str, Any],
-                                prefix: str = "") -> None:
+    def update_config_from_dict(self, args: dict[str, Any], prefix: str = "") -> None:
         prefix_with_dot = f"{prefix}." if (prefix.strip() != "") else ""
         update_config_from_args(self, args, prefix, pop_args=True)
-        update_config_from_args(self.vae_config,
-                                args,
-                                f"{prefix_with_dot}vae_config",
-                                pop_args=True)
-        update_config_from_args(self.dit_config,
-                                args,
-                                f"{prefix_with_dot}dit_config",
-                                pop_args=True)
+        update_config_from_args(self.vae_config, args, f"{prefix_with_dot}vae_config", pop_args=True)
+        update_config_from_args(self.dit_config, args, f"{prefix_with_dot}dit_config", pop_args=True)
 
     @classmethod
     def from_pretrained(cls, model_path: str) -> "PipelineConfig":
@@ -232,9 +217,7 @@ class PipelineConfig:
         return cast(PipelineConfig, pipeline_config_cls(model_path=model_path))
 
     @classmethod
-    def from_kwargs(cls,
-                    kwargs: dict[str, Any],
-                    config_cli_prefix: str = "") -> "PipelineConfig":
+    def from_kwargs(cls, kwargs: dict[str, Any], config_cli_prefix: str = "") -> "PipelineConfig":
         """
         Load PipelineConfig from kwargs Dictionary.
         kwargs: dictionary of kwargs
@@ -242,13 +225,10 @@ class PipelineConfig:
         """
         from fastvideo.registry import get_pipeline_config_cls_from_name
 
-        prefix_with_dot = f"{config_cli_prefix}." if (config_cli_prefix.strip()
-                                                      != "") else ""
-        model_path: str | None = kwargs.get(prefix_with_dot + 'model_path',
-                                            None) or kwargs.get('model_path')
-        pipeline_config_or_path: str | PipelineConfig | dict[
-            str, Any] | None = kwargs.get(prefix_with_dot + 'pipeline_config',
-                                          None) or kwargs.get('pipeline_config')
+        prefix_with_dot = f"{config_cli_prefix}." if (config_cli_prefix.strip() != "") else ""
+        model_path: str | None = kwargs.get(prefix_with_dot + 'model_path', None) or kwargs.get('model_path')
+        pipeline_config_or_path: str | PipelineConfig | dict[str, Any] | None = kwargs.get(
+            prefix_with_dot + 'pipeline_config', None) or kwargs.get('pipeline_config')
         if model_path is None:
             raise ValueError("model_path is required in kwargs")
 
@@ -257,9 +237,7 @@ class PipelineConfig:
 
         # 2. Instantiate PipelineConfig
         if pipeline_config_cls is None:
-            logger.warning(
-                "Couldn't find pipeline config for %s. Using the default pipeline config.",
-                model_path)
+            logger.warning("Couldn't find pipeline config for %s. Using the default pipeline config.", model_path)
             pipeline_config = cls()
         else:
             pipeline_config = pipeline_config_cls()
@@ -267,8 +245,7 @@ class PipelineConfig:
         # 3. Load PipelineConfig from a json file or a PipelineConfig object if provided
         if isinstance(pipeline_config_or_path, str):
             pipeline_config.load_from_json(pipeline_config_or_path)
-            kwargs[prefix_with_dot +
-                   'pipeline_config_path'] = pipeline_config_or_path
+            kwargs[prefix_with_dot + 'pipeline_config_path'] = pipeline_config_or_path
         elif isinstance(pipeline_config_or_path, PipelineConfig):
             pipeline_config = pipeline_config_or_path
         elif isinstance(pipeline_config_or_path, dict):
@@ -282,9 +259,7 @@ class PipelineConfig:
 
     def check_pipeline_config(self) -> None:
         if self.vae_sp and not self.vae_tiling:
-            raise ValueError(
-                "Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True."
-            )
+            raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
 
         if len(self.text_encoder_configs) != len(self.text_encoder_precisions):
             raise ValueError(
@@ -310,8 +285,7 @@ class PipelineConfig:
                 # Model Arch Config should be hidden away from the users
                 model_dict.pop("arch_config")
                 output_dict[key] = model_dict
-            elif isinstance(value, tuple) and all(
-                    isinstance(v, ModelConfig) for v in value):
+            elif isinstance(value, tuple) and all(isinstance(v, ModelConfig) for v in value):
                 model_dicts = []
                 for v in value:
                     model_dict = asdict(v)
@@ -334,8 +308,7 @@ class PipelineConfig:
             input_pipeline_dict = json.load(f)
         self.update_pipeline_config(input_pipeline_dict)
 
-    def update_pipeline_config(self, source_pipeline_dict: dict[str,
-                                                                Any]) -> None:
+    def update_pipeline_config(self, source_pipeline_dict: dict[str, Any]) -> None:
         for f in fields(self):
             key = f.name
             if key in source_pipeline_dict:
@@ -345,14 +318,10 @@ class PipelineConfig:
                 # If it's a nested ModelConfig, update it recursively
                 if isinstance(current_value, ModelConfig):
                     current_value.update_model_config(new_value)
-                elif isinstance(current_value, tuple) and all(
-                        isinstance(v, ModelConfig) for v in current_value):
+                elif isinstance(current_value, tuple) and all(isinstance(v, ModelConfig) for v in current_value):
                     assert len(current_value) == len(
-                        new_value
-                    ), "Users shouldn't delete or add text encoder config objects in your json"
-                    for target_config, source_config in zip(current_value,
-                                                            new_value,
-                                                            strict=True):
+                        new_value), "Users shouldn't delete or add text encoder config objects in your json"
+                    for target_config, source_config in zip(current_value, new_value, strict=True):
                         target_config.update_model_config(source_config)
                 else:
                     setattr(self, key, new_value)

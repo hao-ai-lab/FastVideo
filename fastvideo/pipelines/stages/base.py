@@ -35,8 +35,7 @@ class PipelineStage(ABC):
     for a specific part of the process, such as prompt encoding, latent preparation, etc.
     """
 
-    def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """
         Verify the input for the stage.
 
@@ -61,8 +60,7 @@ class PipelineStage(ABC):
         # Default implementation - no verification
         return VerificationResult()
 
-    def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """
         Verify the output for the stage.
 
@@ -76,8 +74,8 @@ class PipelineStage(ABC):
         # Default implementation - no verification
         return VerificationResult()
 
-    def _run_verification(self, verification_result: VerificationResult,
-                          stage_name: str, verification_type: str) -> None:
+    def _run_verification(self, verification_result: VerificationResult, stage_name: str,
+                          verification_type: str) -> None:
         """
         Run verification and raise errors if any checks fail.
         
@@ -93,10 +91,9 @@ class PipelineStage(ABC):
                 detailed_summary = verification_result.get_failure_summary()
 
                 failed_fields_str = ", ".join(failed_fields)
-                error_msg = (
-                    f"{verification_type.capitalize()} verification failed for {stage_name}: "
-                    f"Failed fields: {failed_fields_str}\n"
-                    f"Details: {detailed_summary}")
+                error_msg = (f"{verification_type.capitalize()} verification failed for {stage_name}: "
+                             f"Failed fields: {failed_fields_str}\n"
+                             f"Details: {detailed_summary}")
                 raise StageVerificationError(error_msg)
 
     @property
@@ -132,8 +129,7 @@ class PipelineStage(ABC):
         stage_name = self.__class__.__name__
 
         # Check if verification is enabled (simple approach for prototype)
-        enable_verification = getattr(fastvideo_args,
-                                      'enable_stage_verification', False)
+        enable_verification = getattr(fastvideo_args, 'enable_stage_verification', False)
 
         if enable_verification:
             # Pre-execution input verification
@@ -141,8 +137,7 @@ class PipelineStage(ABC):
                 input_result = self.verify_input(batch, fastvideo_args)
                 self._run_verification(input_result, stage_name, "input")
             except Exception as e:
-                logger.error("Input verification failed for %s: %s", stage_name,
-                             str(e))
+                logger.error("Input verification failed for %s: %s", stage_name, str(e))
                 raise
 
         # Execute the actual stage logic
@@ -155,17 +150,13 @@ class PipelineStage(ABC):
                 result = self.forward(batch, fastvideo_args)
                 torch.cuda.synchronize()
                 execution_time = time.perf_counter() - start_time
-                logger.info("[%s] Execution completed in %s ms", stage_name,
-                            execution_time * 1000)
-                batch.logging_info.add_stage_execution_time(
-                    stage_name, execution_time)
+                logger.info("[%s] Execution completed in %s ms", stage_name, execution_time * 1000)
+                batch.logging_info.add_stage_execution_time(stage_name, execution_time)
             except Exception as e:
                 torch.cuda.synchronize()
                 execution_time = time.perf_counter() - start_time
-                logger.error("[%s] Error during execution after %s ms: %s",
-                             stage_name, execution_time * 1000, e)
-                logger.error("[%s] Traceback: %s", stage_name,
-                             traceback.format_exc())
+                logger.error("[%s] Error during execution after %s ms: %s", stage_name, execution_time * 1000, e)
+                logger.error("[%s] Traceback: %s", stage_name, traceback.format_exc())
                 raise
         else:
             # Direct execution (current behavior)
@@ -177,8 +168,7 @@ class PipelineStage(ABC):
                 output_result = self.verify_output(result, fastvideo_args)
                 self._run_verification(output_result, stage_name, "output")
             except Exception as e:
-                logger.error("Output verification failed for %s: %s",
-                             stage_name, str(e))
+                logger.error("Output verification failed for %s: %s", stage_name, str(e))
                 raise
 
         return result

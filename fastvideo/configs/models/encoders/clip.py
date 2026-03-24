@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 
-from fastvideo.configs.models.encoders.base import (ImageEncoderArchConfig,
-                                                    ImageEncoderConfig,
-                                                    TextEncoderArchConfig,
+from fastvideo.configs.models.encoders.base import (ImageEncoderArchConfig, ImageEncoderConfig, TextEncoderArchConfig,
                                                     TextEncoderConfig)
 
 
@@ -34,15 +32,13 @@ class CLIPTextArchConfig(TextEncoderArchConfig):
     bos_token_id: int = 49406
     eos_token_id: int = 49407
     text_len: int = 77
-    stacked_params_mapping: list[tuple[str, str,
-                                       str]] = field(default_factory=lambda: [
-                                           # (param_name, shard_name, shard_id)
-                                           ("qkv_proj", "q_proj", "q"),
-                                           ("qkv_proj", "k_proj", "k"),
-                                           ("qkv_proj", "v_proj", "v"),
-                                       ])
-    _fsdp_shard_conditions: list = field(
-        default_factory=lambda: [_is_transformer_layer, _is_embeddings])
+    stacked_params_mapping: list[tuple[str, str, str]] = field(default_factory=lambda: [
+        # (param_name, shard_name, shard_id)
+        ("qkv_proj", "q_proj", "q"),
+        ("qkv_proj", "k_proj", "k"),
+        ("qkv_proj", "v_proj", "v"),
+    ])
+    _fsdp_shard_conditions: list = field(default_factory=lambda: [_is_transformer_layer, _is_embeddings])
 
 
 @dataclass
@@ -61,19 +57,17 @@ class CLIPVisionArchConfig(ImageEncoderArchConfig):
     attention_dropout: float = 0.0
     initializer_range: float = 0.02
     initializer_factor: float = 1.0
-    stacked_params_mapping: list[tuple[str, str,
-                                       str]] = field(default_factory=lambda: [
-                                           # (param_name, shard_name, shard_id)
-                                           ("qkv_proj", "q_proj", "q"),
-                                           ("qkv_proj", "k_proj", "k"),
-                                           ("qkv_proj", "v_proj", "v"),
-                                       ])
+    stacked_params_mapping: list[tuple[str, str, str]] = field(default_factory=lambda: [
+        # (param_name, shard_name, shard_id)
+        ("qkv_proj", "q_proj", "q"),
+        ("qkv_proj", "k_proj", "k"),
+        ("qkv_proj", "v_proj", "v"),
+    ])
 
 
 @dataclass
 class CLIPTextConfig(TextEncoderConfig):
-    arch_config: TextEncoderArchConfig = field(
-        default_factory=CLIPTextArchConfig)
+    arch_config: TextEncoderArchConfig = field(default_factory=CLIPTextArchConfig)
 
     num_hidden_layers_override: int | None = None
     require_post_norm: bool | None = None
@@ -84,8 +78,7 @@ class CLIPTextConfig(TextEncoderConfig):
 
 @dataclass
 class CLIPVisionConfig(ImageEncoderConfig):
-    arch_config: ImageEncoderArchConfig = field(
-        default_factory=CLIPVisionArchConfig)
+    arch_config: ImageEncoderArchConfig = field(default_factory=CLIPVisionArchConfig)
 
     num_hidden_layers_override: int | None = 31
     require_post_norm: bool | None = None

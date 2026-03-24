@@ -29,14 +29,13 @@ class RMSNorm(CustomOp):
 
         self.hidden_size = hidden_size
         self.variance_epsilon = eps
-        self.variance_size_override = (None if var_hidden_size == hidden_size
-                                       else var_hidden_size)
+        self.variance_size_override = (None if var_hidden_size == hidden_size else var_hidden_size)
         self.has_weight = has_weight
 
         from fastvideo.platforms import current_platform
 
-        self.weight = torch.ones(hidden_size) if current_platform.is_cuda_alike(
-        ) else torch.ones(hidden_size, dtype=dtype)
+        self.weight = torch.ones(hidden_size) if current_platform.is_cuda_alike() else torch.ones(hidden_size,
+                                                                                                  dtype=dtype)
         if self.has_weight:
             self.weight = nn.Parameter(self.weight)
 
@@ -67,9 +66,8 @@ class RMSNorm(CustomOp):
             x_var = x
         else:
             if hidden_size < self.variance_size_override:
-                raise ValueError(
-                    "Expected hidden_size to be at least "
-                    f"{self.variance_size_override}, but found: {hidden_size}")
+                raise ValueError("Expected hidden_size to be at least "
+                                 f"{self.variance_size_override}, but found: {hidden_size}")
 
             x_var = x[:, :, :self.variance_size_override]
 
@@ -98,16 +96,14 @@ class ScaleResidual(nn.Module):
     def __init__(self, prefix: str = ""):
         super().__init__()
 
-    def forward(self, residual: torch.Tensor, x: torch.Tensor,
-                gate: torch.Tensor) -> torch.Tensor:
+    def forward(self, residual: torch.Tensor, x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
         """Apply gated residual connection."""
         # x.shape: [batch_size, seq_len, inner_dim]
         if gate.dim() == 4:
             # gate.shape: [batch_size, num_frames, 1, inner_dim]
             num_frames = gate.shape[1]
             frame_seqlen = x.shape[1] // num_frames
-            return residual + (x.unflatten(
-                dim=1, sizes=(num_frames, frame_seqlen)) * gate).flatten(1, 2)
+            return residual + (x.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * gate).flatten(1, 2)
         else:
             # gate.shape: [batch_size, 1, inner_dim]
             return residual + x * gate
@@ -151,32 +147,22 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
     ):
         super().__init__()
         if norm_type == "rms":
-            self.norm = RMSNorm(hidden_size,
-                                has_weight=elementwise_affine,
-                                eps=eps,
-                                dtype=dtype)
+            self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps, dtype=dtype)
         elif norm_type == "layer":
             if compute_dtype == torch.float32:
-                self.norm = FP32LayerNorm(hidden_size,
-                                          elementwise_affine=elementwise_affine,
-                                          eps=eps)
+                self.norm = FP32LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps)
             else:
-                self.norm = nn.LayerNorm(hidden_size,
-                                         elementwise_affine=elementwise_affine,
-                                         eps=eps,
-                                         dtype=dtype)
+                self.norm = nn.LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps, dtype=dtype)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
-    def forward(
-        self,
-        residual: torch.Tensor,
-        x: torch.Tensor,
-        gate: torch.Tensor | int,
-        shift: torch.Tensor,
-        scale: torch.Tensor,
-        convert_modulation_dtype: bool = False
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self,
+                residual: torch.Tensor,
+                x: torch.Tensor,
+                gate: torch.Tensor | int,
+                shift: torch.Tensor,
+                scale: torch.Tensor,
+                convert_modulation_dtype: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Apply gated residual connection, followed by layernorm and 
         scale/shift in a single fused operation.
@@ -198,9 +184,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
                 # gate.shape: [batch_size, num_frames, 1, inner_dim]
                 num_frames = gate.shape[1]
                 frame_seqlen = x.shape[1] // num_frames
-                residual_output = residual + (
-                    x.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
-                    gate).flatten(1, 2)
+                residual_output = residual + (x.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * gate).flatten(1, 2)
             else:
                 # used by bidirectional self attention
                 # gate.shape: [batch_size, 1, inner_dim]
@@ -222,9 +206,8 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
             # shift.shape: [batch_size, num_frames, 1, inner_dim]
             num_frames = scale.shape[1]
             frame_seqlen = normalized.shape[1] // num_frames
-            modulated = (
-                normalized.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
-                (1.0 + scale) + shift).flatten(1, 2)
+            modulated = (normalized.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1.0 + scale) + shift).flatten(
+                1, 2)
         else:
             modulated = normalized * (1.0 + scale) + shift
         return modulated, residual_output
@@ -249,19 +232,12 @@ class LayerNormScaleShift(nn.Module):
         super().__init__()
         self.compute_dtype = compute_dtype
         if norm_type == "rms":
-            self.norm = RMSNorm(hidden_size,
-                                has_weight=elementwise_affine,
-                                eps=eps)
+            self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps)
         elif norm_type == "layer":
             if self.compute_dtype == torch.float32:
-                self.norm = FP32LayerNorm(hidden_size,
-                                          elementwise_affine=elementwise_affine,
-                                          eps=eps)
+                self.norm = FP32LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps)
             else:
-                self.norm = nn.LayerNorm(hidden_size,
-                                         elementwise_affine=elementwise_affine,
-                                         eps=eps,
-                                         dtype=dtype)
+                self.norm = nn.LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps, dtype=dtype)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
@@ -284,9 +260,8 @@ class LayerNormScaleShift(nn.Module):
             # scale.shape: [batch_size, num_frames, 1, inner_dim]
             num_frames = scale.shape[1]
             frame_seqlen = normalized.shape[1] // num_frames
-            output = (
-                normalized.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
-                (1.0 + scale) + shift).flatten(1, 2)
+            output = (normalized.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1.0 + scale) + shift).flatten(
+                1, 2)
         else:
             # scale.shape: [batch_size, 1, inner_dim]
             # shift.shape: [batch_size, 1, inner_dim]

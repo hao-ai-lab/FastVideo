@@ -7,8 +7,7 @@ scheduler timestep schedule (40-50 steps) rather than DMD few-step.
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-    FlowUniPCMultistepScheduler)
+from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
 # isort: off
@@ -41,8 +40,7 @@ class WanCausalPipeline(LoRAPipeline, ComposedPipelineBase):
         self,
         fastvideo_args: FastVideoArgs,
     ):
-        self.modules["scheduler"] = (FlowUniPCMultistepScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift, ))
+        self.modules["scheduler"] = (FlowUniPCMultistepScheduler(shift=fastvideo_args.pipeline_config.flow_shift, ))
 
     def create_pipeline_stages(
         self,
@@ -68,8 +66,7 @@ class WanCausalPipeline(LoRAPipeline, ComposedPipelineBase):
 
         self.add_stage(
             stage_name="timestep_preparation_stage",
-            stage=TimestepPreparationStage(
-                scheduler=self.get_module("scheduler"), ),
+            stage=TimestepPreparationStage(scheduler=self.get_module("scheduler"), ),
         )
 
         self.add_stage(

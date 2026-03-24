@@ -21,8 +21,7 @@ class AsyncDictStore:
         async with self._lock:
             self._items[key] = value
 
-    async def update_fields(self, key: str,
-                            updates: dict[str, Any]) -> dict[str, Any] | None:
+    async def update_fields(self, key: str, updates: dict[str, Any]) -> dict[str, Any] | None:
         async with self._lock:
             item = self._items.get(key)
             if item is None:

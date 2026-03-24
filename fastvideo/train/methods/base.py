@@ -224,10 +224,7 @@ class TrainingMethod(torch.nn.Module, ABC):
         sp_size = int(self.training_config.distributed.sp_size or 1)
 
         # Ranks within the same SP group share a seed.
-        if sp_size > 1:
-            sp_group_seed = seed + (global_rank // sp_size)
-        else:
-            sp_group_seed = seed + global_rank
+        sp_group_seed = seed + (global_rank // sp_size) if sp_size > 1 else seed + global_rank
 
         set_random_seed(seed)
 

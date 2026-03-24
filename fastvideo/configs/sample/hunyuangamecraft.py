@@ -68,9 +68,8 @@ class HunyuanGameCraftSamplingParam(SamplingParam):
         # Validate action lists
         if (self.action_list is not None and self.action_speed_list is not None
                 and len(self.action_list) != len(self.action_speed_list)):
-            raise ValueError(
-                f"action_list length ({len(self.action_list)}) must match "
-                f"action_speed_list length ({len(self.action_speed_list)})")
+            raise ValueError(f"action_list length ({len(self.action_list)}) must match "
+                             f"action_speed_list length ({len(self.action_speed_list)})")
 
 
 @dataclass

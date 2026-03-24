@@ -19,7 +19,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse
 
-from fastvideo.entrypoints.openai.api_server import (
+from fastvideo.entrypoints.openai.state import (
     get_generator,
     get_output_dir,
     get_server_args,
@@ -42,8 +42,7 @@ logger = init_logger(__name__)
 router = APIRouter(prefix="/v1/videos", tags=["videos"])
 
 
-def _build_generation_kwargs(request_id: str,
-                             req: VideoGenerationsRequest) -> dict[str, Any]:
+def _build_generation_kwargs(request_id: str, req: VideoGenerationsRequest) -> dict[str, Any]:
 
     kwargs: dict[str, Any] = {}
     kwargs["prompt"] = req.prompt
@@ -226,8 +225,7 @@ async def create_video(
             seconds=seconds if seconds is not None else 4,
             size=size,
             fps=fps if fps is not None else extra.get("fps"),
-            num_frames=(num_frames
-                        if num_frames is not None else extra.get("num_frames")),
+            num_frames=(num_frames if num_frames is not None else extra.get("num_frames")),
             seed=seed,
             negative_prompt=negative_prompt,
             num_inference_steps=num_inference_steps,
@@ -254,8 +252,7 @@ async def create_video(
                 image = image_list[0]
                 uploads_dir = os.path.join(get_output_dir(), "uploads")
                 os.makedirs(uploads_dir, exist_ok=True)
-                input_path = os.path.join(uploads_dir,
-                                          f"{request_id}_url_image")
+                input_path = os.path.join(uploads_dir, f"{request_id}_url_image")
                 try:
                     input_path = await save_image_to_path(image, input_path)
                 except Exception as e:
@@ -273,8 +270,7 @@ async def create_video(
                 detail=f"Invalid request body: {e}",
             ) from None
 
-    logger.info("Video generation request %s: prompt=%s", request_id,
-                req.prompt[:100])
+    logger.info("Video generation request %s: prompt=%s", request_id, req.prompt[:100])
 
     gen_kwargs = _build_generation_kwargs(request_id, req)
     job = _make_video_job(request_id, req, gen_kwargs)
@@ -327,8 +323,7 @@ async def delete_video(video_id: str = Path(...)):
 
 
 @router.get("/{video_id}/content")
-async def download_video_content(video_id: str = Path(...),
-                                 variant: str | None = Query(None)):
+async def download_video_content(video_id: str = Path(...), variant: str | None = Query(None)):
     job = await VIDEO_STORE.get(video_id)
     if not job:
         raise HTTPException(status_code=404, detail="Video not found")
@@ -336,10 +331,8 @@ async def download_video_content(video_id: str = Path(...),
     file_path = job.get("file_path")
     if not file_path or not os.path.exists(file_path):
         if job.get("status") == "failed":
-            raise HTTPException(status_code=500,
-                                detail="Video generation failed")
-        raise HTTPException(status_code=404,
-                            detail="Video still being generated")
+            raise HTTPException(status_code=500, detail="Video generation failed")
+        raise HTTPException(status_code=404, detail="Video still being generated")
 
     return FileResponse(
         path=file_path,

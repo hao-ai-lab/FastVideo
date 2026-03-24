@@ -43,16 +43,13 @@ class CosmosConfig(PipelineConfig):
 
     vae_config: VAEConfig = field(default_factory=CosmosVAEConfig)
 
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (T5LargeConfig(), ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5LargeConfig(), ))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda:
-                                               (t5_large_postprocess_text, ))
+                                  ...] = field(default_factory=lambda: (t5_large_postprocess_text, ))
 
     dit_precision: str = "bf16"
     vae_precision: str = "fp16"
-    text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("bf16", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
 
     conditioning_strategy: str = "frame_replace"
     min_num_conditional_frames: int = 1

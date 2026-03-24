@@ -76,9 +76,7 @@ async def _save_url_image_to_path(image_url: str, target_path: str) -> str:
                 url_path = image_url.split("?")[0]
                 _, url_ext = os.path.splitext(url_path)
                 url_ext = url_ext.lower()
-                if url_ext in {
-                        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"
-                }:
+                if url_ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
                     ext = ".jpg" if url_ext == ".jpeg" else url_ext
                 elif "png" in content_type:
                     ext = ".png"
@@ -104,8 +102,7 @@ async def _save_base64_image_to_path(base64_data: str, target_path: str) -> str:
     data = match.group(3)
     if not data:
         raise ValueError("Empty base64 image data")
-    ext = media_type.split("/")[-1].lower() if media_type.startswith(
-        "image/") else "jpg"
+    ext = media_type.split("/")[-1].lower() if media_type.startswith("image/") else "jpg"
     if ext == "jpeg":
         ext = "jpg"
     target_path = f"{target_path}.{ext}"

@@ -5,16 +5,12 @@ if torch.cuda.is_available():
     from flash_attn.cute.interface import _flash_attn_bwd, _flash_attn_fwd
 else:
     # This error will be caught in flash_attn.py or flash_attn_no_pad.py
-    raise ImportError(
-        "flash_attn.cute is only available on CUDA devices; this error must be handled internally"
-    )
+    raise ImportError("flash_attn.cute is only available on CUDA devices; this error must be handled internally")
 
 
 def _check_dropout(dropout_p: float) -> None:
     if dropout_p != 0.0:
-        raise NotImplementedError(
-            f"flash_attn.cute does not support dropout (got dropout_p={dropout_p})"
-        )
+        raise NotImplementedError(f"flash_attn.cute does not support dropout (got dropout_p={dropout_p})")
 
 
 @torch.library.custom_op(
@@ -61,8 +57,7 @@ def _flash_attn_cute_forward_fake(
     return out, lse
 
 
-def _flash_attn_cute_setup_context(ctx: torch.autograd.function.FunctionCtx,
-                                   inputs, output) -> None:
+def _flash_attn_cute_setup_context(ctx: torch.autograd.function.FunctionCtx, inputs, output) -> None:
     q, k, v, softmax_scale, causal, deterministic = inputs
     out, lse = output
     ctx.save_for_backward(q, k, v, out, lse)
@@ -160,8 +155,7 @@ def _flash_attn_cute_varlen_forward_fake(
     return out, lse
 
 
-def _flash_attn_cute_varlen_setup_context(
-        ctx: torch.autograd.function.FunctionCtx, inputs, output) -> None:
+def _flash_attn_cute_varlen_setup_context(ctx: torch.autograd.function.FunctionCtx, inputs, output) -> None:
     (
         q,
         k,
@@ -229,8 +223,7 @@ def flash_attn_func(
 ) -> torch.Tensor:
     """Only returns the output, not the lse."""
     _check_dropout(dropout_p)
-    out, _ = torch.ops.fastvideo._flash_attn_cute_forward(
-        q, k, v, softmax_scale, causal, deterministic)
+    out, _ = torch.ops.fastvideo._flash_attn_cute_forward(q, k, v, softmax_scale, causal, deterministic)
     return out
 
 
