@@ -37,7 +37,7 @@ class HunyuanModel(WanModel):
     only the pieces that differ for Hunyuan.
     """
 
-    _transformer_cls_name: str = ("HunyuanVideoTransformer3DModel")
+    _transformer_cls_name: str = "HunyuanVideoTransformer3DModel"
 
     def __init__(
         self,
@@ -155,7 +155,7 @@ class HunyuanModel(WanModel):
                              "Hunyuan forward pass")
         return {
             "hidden_states": noise_input.permute(0, 2, 1, 3, 4),
-            "encoder_hidden_states": (text_dict["encoder_hidden_states"]),
+            "encoder_hidden_states": text_dict["encoder_hidden_states"],
             "timestep": timestep,
         }
 
