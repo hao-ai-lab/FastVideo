@@ -15,10 +15,6 @@ from fastvideo.layers.rotary_embedding import (
     _apply_rotary_emb,
 )
 from fastvideo.platforms import AttentionBackendEnum
-from .kv_cache import (
-    attend_with_kv_cache,
-    KVCache,
-)
 
 
 DISABLE_COMPILE = False
@@ -99,7 +95,7 @@ def _update_kv_cache_and_attend(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
-    kv_cache: KVCache,
+    kv_cache: dict[str, torch.Tensor | int],
     attn_layer: LocalAttention,
     start_frame: int,
     num_frame_per_block: int,
@@ -108,25 +104,129 @@ def _update_kv_cache_and_attend(
     use_k_for_num_tokens: bool = False,
     store_first_only: bool = False,
     repeat_factor: int | None = None,
-    update_kv_cache: bool = True,
 ) -> torch.Tensor:
-    """Update KV cache."""
+    """
+    Update KV cache with new tokens and perform attention with cached values.
+
+    Args:
+        q: Query tensor
+        k: Key tensor
+        v: Value tensor
+        kv_cache: Dictionary containing cache tensors and indices
+        attn_layer: Attention layer to use
+        start_frame: Starting frame index
+        num_frame_per_block: Number of frames per block
+        local_attn_size: Maximum attention window size
+        use_k_for_num_tokens: If True, use k.shape[1] for num_new_tokens, else use q.shape[1]
+        store_first_only: If True, only store k[:1] and v[:1] in cache (for keyboard with rope)
+        repeat_factor: If provided, repeat cached k,v by this factor when retrieving (for keyboard with rope)
+
+    Returns:
+        Attention output tensor
+    """
+    current_start = start_frame
+    current_end = current_start + (
+        k.shape[1] if use_k_for_num_tokens else q.shape[1]
+    )
+
     assert (
         k.shape[1] if use_k_for_num_tokens else q.shape[1]
     ) == num_frame_per_block
+
+    sink_size = 0
+    max_attention_size = local_attn_size
+    sink_tokens = sink_size * 1
+    kv_cache_size = kv_cache["k"].shape[1]
     num_new_tokens = k.shape[1] if use_k_for_num_tokens else q.shape[1]
-    return attend_with_kv_cache(
-        q=q,
-        new_k=k,
-        new_v=v,
-        kv_cache=kv_cache,
-        max_attn_size=local_attn_size,
-        attend_fn=attn_layer,
-        update_kv_cache=update_kv_cache,
-        store_first_only=store_first_only,
-        repeat_factor=repeat_factor,
-        num_new_tokens=num_new_tokens,
+
+    original_global_end_index = (
+        int(kv_cache["global_end_index"].item())
+        if isinstance(kv_cache["global_end_index"], torch.Tensor)
+        else int(kv_cache["global_end_index"])
     )
+    original_local_end_index = (
+        int(kv_cache["local_end_index"].item())
+        if isinstance(kv_cache["local_end_index"], torch.Tensor)
+        else int(kv_cache["local_end_index"])
+    )
+
+    # Check if we need to evict tokens
+    if (current_end > original_global_end_index) and (
+        num_new_tokens + original_local_end_index > kv_cache_size
+    ):
+        num_evicted_tokens = (
+            num_new_tokens + original_local_end_index - kv_cache_size
+        )
+        num_rolled_tokens = (
+            original_local_end_index
+            - num_evicted_tokens
+            - sink_tokens
+        )
+        # Roll k cache
+        kv_cache["k"][:, sink_tokens : sink_tokens + num_rolled_tokens] = (
+            kv_cache["k"][
+                :,
+                sink_tokens + num_evicted_tokens : sink_tokens
+                + num_evicted_tokens
+                + num_rolled_tokens,
+            ].clone()
+        )
+        # Roll v cache
+        kv_cache["v"][:, sink_tokens : sink_tokens + num_rolled_tokens] = (
+            kv_cache["v"][
+                :,
+                sink_tokens + num_evicted_tokens : sink_tokens
+                + num_evicted_tokens
+                + num_rolled_tokens,
+            ].clone()
+        )
+        # Calculate indices with eviction adjustment
+        local_end_index = (
+            original_local_end_index
+            + current_end
+            - original_global_end_index
+            - num_evicted_tokens
+        )
+        local_start_index = local_end_index - num_new_tokens
+    else:
+        # Calculate indices without eviction
+        local_end_index = (
+            original_local_end_index
+            + current_end
+            - original_global_end_index
+        )
+        local_start_index = local_end_index - num_new_tokens
+
+    # Store new k, v in cache
+    if store_first_only:
+        kv_cache["k"][:, local_start_index:local_end_index] = k[:1]
+        kv_cache["v"][:, local_start_index:local_end_index] = v[:1]
+    else:
+        kv_cache["k"][:, local_start_index:local_end_index] = k
+        kv_cache["v"][:, local_start_index:local_end_index] = v
+
+    # Retrieve from cache and perform attention
+    cache_start = max(0, local_end_index - max_attention_size)
+    cached_k = kv_cache["k"][:, cache_start:local_end_index]
+    cached_v = kv_cache["v"][:, cache_start:local_end_index]
+
+    if repeat_factor is not None:
+        cached_k = cached_k.repeat(repeat_factor, 1, 1, 1)
+        cached_v = cached_v.repeat(repeat_factor, 1, 1, 1)
+
+    attn = attn_layer(q, cached_k, cached_v)
+
+    # Update indices
+    if isinstance(kv_cache["global_end_index"], torch.Tensor):
+        kv_cache["global_end_index"].fill_(current_end)
+    else:
+        kv_cache["global_end_index"] = current_end
+    if isinstance(kv_cache["local_end_index"], torch.Tensor):
+        kv_cache["local_end_index"].fill_(local_end_index)
+    else:
+        kv_cache["local_end_index"] = local_end_index
+
+    return attn
 
 
 class ActionModule(nn.Module):
@@ -359,12 +459,11 @@ class ActionModule(nn.Module):
         mouse_condition: torch.Tensor,
         *,
         is_causal: bool,
-        kv_cache_mouse: KVCache | None,
+        kv_cache_mouse: dict[str, torch.Tensor] | None,
         pad_t: int,
         num_frame_per_block: int,
         block_mask_mouse: BlockMask | None,
         start_frame: int,
-        update_kv_cache: bool,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         N_feats: int,
         B: int,
@@ -460,7 +559,6 @@ class ActionModule(nn.Module):
                     num_frame_per_block,
                     self.local_attn_size,
                     use_k_for_num_tokens=False,
-                    update_kv_cache=update_kv_cache,
                 )
         else:
             attn = self.mouse_attn_layer(q, k, v)
@@ -477,12 +575,11 @@ class ActionModule(nn.Module):
         *,
         is_causal: bool,
         use_rope_keyboard: bool,
-        kv_cache_keyboard: KVCache | None,
+        kv_cache_keyboard: dict[str, torch.Tensor] | None,
         pad_t: int,
         num_frame_per_block: int,
         block_mask_keyboard: BlockMask | None,
         start_frame: int,
-        update_kv_cache: bool,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         N_feats: int,
         B: int,
@@ -588,7 +685,6 @@ class ActionModule(nn.Module):
                         use_k_for_num_tokens=True,
                         store_first_only=True,
                         repeat_factor=S,
-                        update_kv_cache=update_kv_cache,
                     )
             else:
                 attn = self.keyboard_attn_layer(q, k, v)
@@ -617,7 +713,6 @@ class ActionModule(nn.Module):
                         num_frame_per_block,
                         self.local_attn_size,
                         use_k_for_num_tokens=True,
-                        update_kv_cache=update_kv_cache,
                     )
             else:
                 attn = self.keyboard_attn_layer(q, k, v)
@@ -636,12 +731,11 @@ class ActionModule(nn.Module):
         block_mask_mouse: BlockMask | None = None,
         block_mask_keyboard: BlockMask | None = None,
         is_causal: bool = False,
-        kv_cache_mouse: KVCache | None = None,
-        kv_cache_keyboard: KVCache | None = None,
+        kv_cache_mouse: dict[str, torch.Tensor] | None = None,
+        kv_cache_keyboard: dict[str, torch.Tensor] | None = None,
         start_frame: int = 0,
         use_rope_keyboard: bool = True,
         num_frame_per_block: int = 3,
-        update_kv_cache: bool = True,
     ):
         """
         hidden_states: B, tt*th*tw, C
@@ -711,7 +805,6 @@ class ActionModule(nn.Module):
                 num_frame_per_block=num_frame_per_block,
                 block_mask_mouse=block_mask_mouse,
                 start_frame=start_frame,
-                update_kv_cache=update_kv_cache,
                 freqs_cis=freqs_cis,
                 N_feats=N_feats,
                 B=B,
@@ -735,7 +828,6 @@ class ActionModule(nn.Module):
                 num_frame_per_block=num_frame_per_block,
                 block_mask_keyboard=block_mask_keyboard,
                 start_frame=start_frame,
-                update_kv_cache=update_kv_cache,
                 freqs_cis=freqs_cis,
                 N_feats=N_feats,
                 B=B,
