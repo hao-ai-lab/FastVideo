@@ -785,18 +785,6 @@ class TransformerLoader(ComponentLoader):
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = deepcopy(fastvideo_args.pipeline_config.dit_config)
         dit_config.update_model_arch(config)
-        override_keyboard_dim = getattr(fastvideo_args,
-                                        "override_keyboard_dim", None)
-        action_config = getattr(dit_config, "action_config", None)
-        should_reinit_action = bool(
-            getattr(fastvideo_args, "reinit_action_module", False)
-            or override_keyboard_dim is not None)
-        if isinstance(action_config, dict) and override_keyboard_dim is not None:
-            action_config = deepcopy(action_config)
-            action_config["keyboard_dim_in"] = override_keyboard_dim
-            dit_config.arch_config.action_config = action_config
-            logger.info("Overriding action keyboard_dim_in to %s",
-                        override_keyboard_dim)
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
@@ -876,9 +864,6 @@ class TransformerLoader(ComponentLoader):
             training_mode=fastvideo_args.training_mode,
             enable_torch_compile=fastvideo_args.enable_torch_compile,
             torch_compile_kwargs=fastvideo_args.torch_compile_kwargs,
-            skip_param_loading=(
-                lambda name: "action_model" in name
-            ) if should_reinit_action else None,
         )
 
         total_params = sum(p.numel() for p in model.parameters())

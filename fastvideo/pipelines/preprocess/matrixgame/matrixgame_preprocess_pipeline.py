@@ -9,8 +9,7 @@ from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
-from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (
-    BasePreprocessPipeline)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (BasePreprocessPipeline)
 from fastvideo.pipelines.stages import ImageEncodingStage
 
 
@@ -30,8 +29,7 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
         """Return the PyArrow schema for I2V pipeline."""
         return pyarrow_schema_matrixgame
 
-    def get_extra_features(self, valid_data: dict[str, Any],
-                           fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+    def get_extra_features(self, valid_data: dict[str, Any], fastvideo_args: FastVideoArgs) -> dict[str, Any]:
 
         # TODO(will): move these to cpu at some point
         self.get_module("image_encoder").to(get_local_torch_device())
@@ -39,8 +37,7 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
 
         features = {}
         """Get CLIP features from the first frame of each video."""
-        first_frame = valid_data["pixel_values"][:, :, 0, :, :].permute(
-            0, 2, 3, 1)  # (B, C, T, H, W) -> (B, H, W, C)
+        first_frame = valid_data["pixel_values"][:, :, 0, :, :].permute(0, 2, 3, 1)  # (B, C, T, H, W) -> (B, H, W, C)
         _, _, num_frames, height, width = valid_data["pixel_values"].shape
         # latent_height = height // self.get_module(
         #     "vae").spatial_compression_ratio
@@ -51,14 +48,11 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
         for frame in first_frame:
             frame = (frame + 1) * 127.5
             frame_pil = Image.fromarray(frame.cpu().numpy().astype(np.uint8))
-            processed_img = self.get_module("image_processor")(
-                images=frame_pil, return_tensors="pt")
+            processed_img = self.get_module("image_processor")(images=frame_pil, return_tensors="pt")
             processed_images.append(processed_img)
 
         # Get CLIP features
-        pixel_values = torch.cat(
-            [img['pixel_values'] for img in processed_images],
-            dim=0).to(get_local_torch_device())
+        pixel_values = torch.cat([img['pixel_values'] for img in processed_images], dim=0).to(get_local_torch_device())
         with torch.no_grad():
             image_inputs = {'pixel_values': pixel_values}
             with set_forward_context(current_timestep=0, attn_metadata=None):
@@ -70,43 +64,34 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
         video_conditions = []
         for frame in first_frame:
             processed_img = frame.to(device="cpu", dtype=torch.float32)
-            processed_img = processed_img.unsqueeze(0).permute(0, 3, 1,
-                                                               2).unsqueeze(2)
+            processed_img = processed_img.unsqueeze(0).permute(0, 3, 1, 2).unsqueeze(2)
             # (B, H, W, C) -> (B, C, 1, H, W)
             video_condition = torch.cat([
                 processed_img,
-                processed_img.new_zeros(processed_img.shape[0],
-                                        processed_img.shape[1], num_frames - 1,
-                                        height, width)
+                processed_img.new_zeros(processed_img.shape[0], processed_img.shape[1], num_frames - 1, height, width)
             ],
                                         dim=2)
-            video_condition = video_condition.to(
-                device=get_local_torch_device(), dtype=torch.float32)
+            video_condition = video_condition.to(device=get_local_torch_device(), dtype=torch.float32)
             video_conditions.append(video_condition)
 
         video_conditions = torch.cat(video_conditions, dim=0)
 
-        with torch.autocast(device_type="cuda",
-                            dtype=torch.float32,
-                            enabled=True):
+        with torch.autocast(device_type="cuda", dtype=torch.float32, enabled=True):
             encoder_outputs = self.get_module("vae").encode(video_conditions)
 
         latent_condition = encoder_outputs.mean
-        if (hasattr(self.get_module("vae"), "shift_factor")
-                and self.get_module("vae").shift_factor is not None):
+        if (hasattr(self.get_module("vae"), "shift_factor") and self.get_module("vae").shift_factor is not None):
             if isinstance(self.get_module("vae").shift_factor, torch.Tensor):
-                latent_condition -= self.get_module("vae").shift_factor.to(
-                    latent_condition.device, latent_condition.dtype)
+                latent_condition -= self.get_module("vae").shift_factor.to(latent_condition.device,
+                                                                           latent_condition.dtype)
             else:
                 latent_condition -= self.get_module("vae").shift_factor
 
         if isinstance(self.get_module("vae").scaling_factor, torch.Tensor):
-            latent_condition = latent_condition * self.get_module(
-                "vae").scaling_factor.to(latent_condition.device,
-                                         latent_condition.dtype)
+            latent_condition = latent_condition * self.get_module("vae").scaling_factor.to(
+                latent_condition.device, latent_condition.dtype)
         else:
-            latent_condition = latent_condition * self.get_module(
-                "vae").scaling_factor
+            latent_condition = latent_condition * self.get_module("vae").scaling_factor
 
         # mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height,
         #                            latent_width)
@@ -135,32 +120,23 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
             for action_path in valid_data["action_path"]:
                 if action_path:
                     action_data = np.load(action_path, allow_pickle=True)
-                    if isinstance(
-                            action_data,
-                            np.ndarray) and action_data.dtype == np.dtype('O'):
+                    if isinstance(action_data, np.ndarray) and action_data.dtype == np.dtype('O'):
                         action_dict = action_data.item()
                         if "keyboard" in action_dict:
                             kb_length = len(action_dict["keyboard"])
-                            assert kb_length >= num_frames, (
-                                f"keyboard length {kb_length} is smaller than "
-                                f"num_frames {num_frames} for {action_path}.")
-                            keyboard_cond_list.append(
-                                action_dict["keyboard"][:num_frames].astype(
-                                    np.float32))
+                            assert kb_length >= num_frames, (f"keyboard length {kb_length} is smaller than "
+                                                             f"num_frames {num_frames} for {action_path}.")
+                            keyboard_cond_list.append(action_dict["keyboard"][:num_frames].astype(np.float32))
                         if "mouse" in action_dict:
                             ms_length = len(action_dict["mouse"])
-                            assert ms_length >= num_frames, (
-                                f"mouse length {ms_length} is smaller than "
-                                f"num_frames {num_frames} for {action_path}.")
-                            mouse_cond_list.append(
-                                action_dict["mouse"][:num_frames])
+                            assert ms_length >= num_frames, (f"mouse length {ms_length} is smaller than "
+                                                             f"num_frames {num_frames} for {action_path}.")
+                            mouse_cond_list.append(action_dict["mouse"][:num_frames])
                     else:
                         kb_length = len(action_data)
-                        assert kb_length >= num_frames, (
-                            f"keyboard length {kb_length} is smaller than "
-                            f"num_frames {num_frames} for {action_path}.")
-                        keyboard_cond_list.append(
-                            action_data.astype(np.float32)[:num_frames])
+                        assert kb_length >= num_frames, (f"keyboard length {kb_length} is smaller than "
+                                                         f"num_frames {num_frames} for {action_path}.")
+                        keyboard_cond_list.append(action_data.astype(np.float32)[:num_frames])
             if keyboard_cond_list:
                 features["keyboard_cond"] = keyboard_cond_list
             if mouse_cond_list:
@@ -168,14 +144,13 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
 
         return features
 
-    def create_record(
-            self,
-            video_name: str,
-            vae_latent: np.ndarray,
-            text_embedding: np.ndarray,
-            valid_data: dict[str, Any],
-            idx: int,
-            extra_features: dict[str, Any] | None = None) -> dict[str, Any]:
+    def create_record(self,
+                      video_name: str,
+                      vae_latent: np.ndarray,
+                      text_embedding: np.ndarray,
+                      valid_data: dict[str, Any],
+                      idx: int,
+                      extra_features: dict[str, Any] | None = None) -> dict[str, Any]:
         """Create a record for the Parquet dataset with CLIP features."""
         record = super().create_record(video_name=video_name,
                                        vae_latent=vae_latent,
@@ -201,12 +176,9 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
         if extra_features and "first_frame_latent" in extra_features:
             first_frame_latent = extra_features["first_frame_latent"]
             record.update({
-                "first_frame_latent_bytes":
-                first_frame_latent.tobytes(),
-                "first_frame_latent_shape":
-                list(first_frame_latent.shape),
-                "first_frame_latent_dtype":
-                str(first_frame_latent.dtype),
+                "first_frame_latent_bytes": first_frame_latent.tobytes(),
+                "first_frame_latent_shape": list(first_frame_latent.shape),
+                "first_frame_latent_dtype": str(first_frame_latent.dtype),
             })
         else:
             record.update({
