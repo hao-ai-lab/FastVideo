@@ -515,56 +515,6 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
 
         return batch
 
-    def _post_process_validation_frames(
-            self, frames: list[np.ndarray],
-            batch: ForwardBatch) -> list[np.ndarray]:
-        """Apply action overlay to validation frames for WanGame.
-        
-        Draws keyboard (WASD) and mouse (pitch/yaw) indicators on the video frames.
-        """
-        # Check if action data is available
-        keyboard_cond = getattr(batch, 'keyboard_cond', None)
-        mouse_cond = getattr(batch, 'mouse_cond', None)
-
-        if keyboard_cond is None and mouse_cond is None:
-            return frames
-
-        # Import overlay functions
-        from fastvideo.models.dits.matrixgame.utils import (draw_keys_on_frame,
-                                                            draw_mouse_on_frame)
-
-        # Convert tensors to numpy if needed (bfloat16 -> float32 -> numpy)
-        if keyboard_cond is not None:
-            keyboard_cond = keyboard_cond.squeeze(
-                0).cpu().float().numpy()  # (T, 6)
-        if mouse_cond is not None:
-            mouse_cond = mouse_cond.squeeze(0).cpu().float().numpy()  # (T, 2)
-
-        # MatrixGame convention: keyboard [W, S, A, D, left, right], mouse [Pitch, Yaw]
-        key_names = ["W", "S", "A", "D", "left", "right"]
-
-        processed_frames = []
-        for frame_idx, frame in enumerate(frames):
-            frame = np.ascontiguousarray(frame.copy())
-
-            # Draw keyboard overlay
-            if keyboard_cond is not None and frame_idx < len(keyboard_cond):
-                keys = {
-                    key_names[i]: bool(keyboard_cond[frame_idx, i])
-                    for i in range(min(len(key_names), keyboard_cond.shape[1]))
-                }
-                draw_keys_on_frame(frame, keys, mode='universal')
-
-            # Draw mouse overlay
-            if mouse_cond is not None and frame_idx < len(mouse_cond):
-                pitch = float(mouse_cond[frame_idx, 0])
-                yaw = float(mouse_cond[frame_idx, 1])
-                draw_mouse_on_frame(frame, pitch, yaw)
-
-            processed_frames.append(frame)
-
-        return processed_frames
-
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
         tracker_loss_dict: dict[str, Any] = {}
