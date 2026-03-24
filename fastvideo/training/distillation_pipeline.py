@@ -1050,34 +1050,27 @@ class DistillationPipeline(TrainingPipeline):
                         local_main_process_only=False)
             step_videos: list[np.ndarray] = []
             step_captions: list[str] = []
-            step_ref_videos: list[str | None] = []
 
             # Helper function to run validation with optional EMA contexts
             def run_validation_with_ema(steps: int) -> tuple[list[np.ndarray], list[str], list[Any], list[Any]]:
                 videos: list[np.ndarray] = []
                 captions: list[str] = []
-                ref_videos: list[str | None] = []
                 audios: list[Any] = []
                 audio_sample_rates: list[Any] = []
                 for validation_batch in validation_dataloader:
                     batch = self._prepare_validation_batch(sampling_param, training_args, validation_batch, steps)
 
-                    if hasattr(self.validation_pipeline,
-                               "prompt_encoding_stage"):
-                        negative_prompt = batch.negative_prompt
-                        batch_negative = ForwardBatch(
-                            data_type="video",
-                            prompt=negative_prompt,
-                            prompt_embeds=[],
-                            prompt_attention_mask=[],
-                        )
-                        result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore[attr-defined]
-                            batch_negative, training_args)
-                        self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
-                            0], result_batch.prompt_attention_mask[0]
-                    else:
-                        self.negative_prompt_embeds = None
-                        self.negative_prompt_attention_mask = None
+                    negative_prompt = batch.negative_prompt
+                    batch_negative = ForwardBatch(
+                        data_type="video",
+                        prompt=negative_prompt,
+                        prompt_embeds=[],
+                        prompt_attention_mask=[],
+                    )
+                    result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore
+                        batch_negative, training_args)
+                    self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
+                        0], result_batch.prompt_attention_mask[0]
 
                     logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
                                 self.global_rank,
@@ -1087,7 +1080,6 @@ class DistillationPipeline(TrainingPipeline):
 
                     assert batch.prompt is not None and isinstance(batch.prompt, str)
                     captions.append(batch.prompt)
-                    ref_videos.append(validation_batch.get("ref_video"))
 
                     # Run validation inference
                     with torch.no_grad():
@@ -1103,12 +1095,11 @@ class DistillationPipeline(TrainingPipeline):
                         x = torchvision.utils.make_grid(x, nrow=6)
                         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                         frames.append((x * 255).numpy().astype(np.uint8))
-                    frames = self._post_process_validation_frames(frames, batch)
                     videos.append(frames)
                     audios.append(output_batch.extra.get("audio"))
                     audio_sample_rates.append(output_batch.extra.get("audio_sample_rate"))
 
-                return videos, captions, ref_videos, audios, audio_sample_rates
+                return videos, captions, audios, audio_sample_rates
 
             # Apply EMA contexts if available (nested context managers)
             if ema_context is not None and ema_2_context is not None:
@@ -1138,7 +1129,6 @@ class DistillationPipeline(TrainingPipeline):
                     # Global rank 0 collects results from all sp_group leaders
                     all_videos = step_videos  # Start with own results
                     all_captions = step_captions
-                    all_ref_videos = step_ref_videos
                     all_audios = step_audios
                     all_audio_sample_rates = step_audio_sample_rates
 
@@ -1147,12 +1137,10 @@ class DistillationPipeline(TrainingPipeline):
                         src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
                         recv_videos = world_group.recv_object(src=src_rank)
                         recv_captions = world_group.recv_object(src=src_rank)
-                        recv_ref_videos = world_group.recv_object(src=src_rank)
                         recv_audios = world_group.recv_object(src=src_rank)
                         recv_audio_sample_rates = world_group.recv_object(src=src_rank)
                         all_videos.extend(recv_videos)
                         all_captions.extend(recv_captions)
-                        all_ref_videos.extend(recv_ref_videos)
                         all_audios.extend(recv_audios)
                         all_audio_sample_rates.extend(recv_audio_sample_rates)
 
@@ -1178,34 +1166,10 @@ class DistillationPipeline(TrainingPipeline):
                     if artifacts:
                         logs = {f"validation_videos_{num_inference_steps}_steps": artifacts}
                         self.tracker.log_artifacts(logs, global_step)
-                    if not self.validation_ref_videos_logged:
-                        ref_artifacts = []
-                        for filename, caption in zip(all_ref_videos,
-                                                     all_captions,
-                                                     strict=True):
-                            if filename is None:
-                                continue
-                            ref_frames = np.stack(
-                                [np.asarray(frame) for frame in load_video(filename)],
-                                axis=0)
-                            ref_frames = np.ascontiguousarray(
-                                ref_frames.transpose(0, 3, 1, 2))
-                            video_artifact = self.tracker.video(
-                                ref_frames,
-                                caption=caption,
-                                fps=sampling_param.fps)
-                            if video_artifact is not None:
-                                ref_artifacts.append(video_artifact)
-                        if ref_artifacts:
-                            self.tracker.log_artifacts(
-                                {"validation_ref_videos": ref_artifacts},
-                                global_step)
-                            self.validation_ref_videos_logged = True
                 else:
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
-                    world_group.send_object(step_ref_videos, dst=0)
                     world_group.send_object(step_audios, dst=0)
                     world_group.send_object(step_audio_sample_rates, dst=0)
 
