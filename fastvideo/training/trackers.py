@@ -160,8 +160,7 @@ class WandbTracker(BaseTracker):
 
         normalized_artifacts = dict(artifacts)
         if "validation_ref_videos" in normalized_artifacts:
-            normalized_artifacts["reference_video/videos"] = (
-                normalized_artifacts.pop("validation_ref_videos"))
+            normalized_artifacts["reference_video/videos"] = (normalized_artifacts.pop("validation_ref_videos"))
 
         self.log(normalized_artifacts, step)
 

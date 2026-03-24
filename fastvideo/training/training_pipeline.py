@@ -684,7 +684,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         return batch
 
-
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
         """
@@ -825,24 +824,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     self.tracker.log_artifacts(logs, global_step)
                 if not self.validation_ref_videos_logged:
                     ref_artifacts = []
-                    for filename, caption in zip(all_ref_videos,
-                                                 all_captions,
-                                                 strict=True):
+                    for filename, caption in zip(all_ref_videos, all_captions, strict=True):
                         if filename is None:
                             continue
-                        ref_frames = np.stack(
-                            [np.asarray(frame) for frame in load_video(filename)],
-                            axis=0)
-                        ref_frames = np.ascontiguousarray(
-                            ref_frames.transpose(0, 3, 1, 2))
-                        video_artifact = self.tracker.video(
-                            ref_frames, caption=caption, fps=sampling_param.fps)
+                        ref_frames = np.stack([np.asarray(frame) for frame in load_video(filename)], axis=0)
+                        ref_frames = np.ascontiguousarray(ref_frames.transpose(0, 3, 1, 2))
+                        video_artifact = self.tracker.video(ref_frames, caption=caption, fps=sampling_param.fps)
                         if video_artifact is not None:
                             ref_artifacts.append(video_artifact)
                     if ref_artifacts:
-                        self.tracker.log_artifacts(
-                            {"validation_ref_videos": ref_artifacts},
-                            global_step)
+                        self.tracker.log_artifacts({"validation_ref_videos": ref_artifacts}, global_step)
                         self.validation_ref_videos_logged = True
             elif self.rank_in_sp_group == 0:
                 # Other sp_group leaders send their results to global rank 0
