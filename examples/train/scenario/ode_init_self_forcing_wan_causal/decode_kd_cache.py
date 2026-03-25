@@ -4,7 +4,7 @@ Uses fastvideo's AutoencoderKLWan and its built-in denormalization
 (latent * std + mean, matching normalize_dit_input's inverse).
 
 Usage:
-    python examples/train/configs/kdtest/decode_kd_cache.py \
+    python examples/train/scenario/ode_init_self_forcing_wan_causal/decode_kd_cache.py \
         --cache_dir data/kd_test_cache_small \
         --out_dir   data/kd_test_cache_small/video \
         --fps 16

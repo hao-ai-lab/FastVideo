@@ -1,7 +1,7 @@
 # Self-Forcing Test: Causal Wan 1.3B
 #
 # Smoke-test for SelfForcingMethod on a tiny 16-sample dataset.
-# Run this AFTER kd_causal.yaml + dcp_to_diffusers export.
+# Run this AFTER step1_kd.yaml + dcp_to_diffusers export.
 #
 # Prerequisite — export ode_init from the KD run:
 #   python -m fastvideo.train.entrypoint.dcp_to_diffusers \
@@ -11,7 +11,7 @@
 #
 # Then run this config:
 #   torchrun --nproc_per_node=1 -m fastvideo.train.entrypoint.train \
-#       --config examples/train/scenario/ode_init_self_forcing_wan_causal/self_forcing_causal.yaml
+#       --config examples/train/scenario/ode_init_self_forcing_wan_causal/step3_self_forcing.yaml
 #
 # Success criteria:
 #   - generator_loss and critic_loss both finite at step 0
