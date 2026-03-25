@@ -356,8 +356,7 @@ def _register_configs() -> None:
             "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers",
         ],
         model_detectors=[
-            lambda path: any(token in path.lower()
-                             for token in ("kandinsky5", "kandinsky-5")),
+            lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5")),
         ],
     )
 
