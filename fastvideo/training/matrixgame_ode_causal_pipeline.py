@@ -120,7 +120,6 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
         clip_feature = batch['clip_feature']
         first_frame_latent = batch['first_frame_latent']
         keyboard_cond = batch.get('keyboard_cond', None)
-        # keyboard_cond = keyboard_cond[:, :, :3] # TODO: remove hardcode
         mouse_cond = batch.get('mouse_cond', None)
         infos = batch['info_list']
 
@@ -255,13 +254,11 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
                                                    dim=1,
                                                    index=self._cached_closest_idx_per_dmd.to(traj_latents.device))
         logger.info("relevant_traj_latents: %s", relevant_traj_latents.shape)
-        # assert relevant_traj_latents.shape[0] == 1
 
         indexes = self._get_timestep(  # [B, num_frames]
             0, len(self.dmd_denoising_steps), B, num_frames, 3, uniform_timestep=False)
         logger.info("indexes: %s", indexes.shape)
         logger.info("indexes: %s", indexes)
-        # noisy_input = relevant_traj_latents[indexes]
         noisy_input = torch.gather(relevant_traj_latents,
                                    dim=1,
                                    index=indexes.reshape(B, 1, num_frames, 1, 1,
