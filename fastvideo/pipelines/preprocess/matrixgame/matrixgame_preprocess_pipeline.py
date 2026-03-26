@@ -60,7 +60,7 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
             clip_features = clip_features.last_hidden_state
 
         features["clip_feature"] = clip_features
-        """Get VAE features from the first frame of each video"""
+        # Get CLIP features from the first frame of each video.
         video_conditions = []
         for frame in first_frame:
             processed_img = frame.to(device="cpu", dtype=torch.float32)

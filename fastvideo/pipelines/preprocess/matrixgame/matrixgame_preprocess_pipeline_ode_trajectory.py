@@ -114,7 +114,7 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
 
         features["clip_feature"] = clip_features
         features["pil_image"] = first_frame
-        """Get VAE features from the first frame of each video"""
+        # Get CLIP features from the first frame of each video.
         video_conditions = []
         for frame in first_frame:
             processed_img = frame.to(device="cpu", dtype=torch.float32)
