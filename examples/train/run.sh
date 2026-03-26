@@ -5,12 +5,12 @@
 #   bash examples/train/run.sh <config.yaml> [--dotted.key value ...]
 #
 # Examples:
-#   bash examples/train/run.sh examples/train/finetune_wan2.1_t2v_1.3B_vsa_phase3.4_0.9sparsity.yaml
-#   bash examples/train/run.sh examples/train/distill_wan2.1_t2v_1.3B_dmd2.yaml --dry-run
-#   bash examples/train/run.sh examples/train/distill_wan2.1_t2v_1.3B_dmd2.yaml \
+#   bash examples/train/run.sh examples/train/configs/fine_tuning/wan/t2v.yaml
+#   bash examples/train/run.sh examples/train/configs/distribution_matching/wan/dmd2_t2v.yaml --dry-run
+#   bash examples/train/run.sh examples/train/configs/distribution_matching/wan/dmd2_t2v.yaml \
 #       --training.distributed.num_gpus 4 \
 #       --training.optimizer.learning_rate 1e-5
-#   bash examples/train/run.sh examples/train/distill_wan2.1_t2v_1.3B_dmd2.yaml \
+#   bash examples/train/run.sh examples/train/configs/distribution_matching/wan/dmd2_t2v.yaml \
 #       --training.checkpoint.resume_from_checkpoint outputs/my_run/checkpoint-1000
 #
 # Logs are written to logs/<config_name>_<timestamp>.log (and also printed to stdout).
