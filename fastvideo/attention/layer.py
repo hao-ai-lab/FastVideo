@@ -204,7 +204,10 @@ class DistributedAttention_VSA(DistributedAttention):
         qkvg = self.attn_impl.preprocess_qkv(qkvg, ctx_attn_metadata)
 
         q, k, v, gate_compress = qkvg.chunk(4, dim=0)
-        output = self.attn_impl.forward(q, k, v, gate_compress, ctx_attn_metadata)  # type: ignore[call-arg]
+        if self.backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
+            output = self.attn_impl.forward(q, k, v, gate_compress, ctx_attn_metadata)  # type: ignore[call-arg]
+        else:
+            output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
 
         # Redistribute back if using sequence parallelism
         replicated_output = None
