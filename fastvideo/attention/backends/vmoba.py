@@ -151,6 +151,8 @@ class VMOBAAttentionImpl(AttentionImpl):
         value: [B, L, H, D]
         attn_metadata: AttentionMetadata
         """
+        if attn_metadata is None:
+            raise ValueError("VMOBAAttentionImpl requires attn_metadata to be provided.")
         batch_size, sequence_length, num_heads, head_dim = query.shape
 
         # select chunk type according to layer idx:
