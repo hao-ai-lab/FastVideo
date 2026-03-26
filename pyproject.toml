@@ -150,7 +150,7 @@ check_untyped_defs = true
 follow_imports = "silent"
 
 [tool.codespell]
-skip ="./data,./wandb"
+skip = "./data,./wandb,./ui/package-lock.json"
 
 [tool.ruff]
 # Allow lines to be as long as 120.

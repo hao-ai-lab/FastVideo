@@ -261,7 +261,10 @@
 		background: var(--border);
 		color: var(--text-dim);
 	}
-	.badgeRunning,
+	.badgeRunning {
+		background: rgba(234, 179, 8, 0.2);
+		color: var(--yellow);
+	}
 	.badgeCompleted,
 	.badgeReady {
 		background: rgba(34, 197, 94, 0.2);

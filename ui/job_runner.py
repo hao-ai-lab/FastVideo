@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import atexit
 import collections
+import contextlib
 import enum
 import logging
 import logging.handlers
@@ -232,7 +233,6 @@ class Job:
             "num_latent_t": self.num_latent_t,
             "num_height": self.height,
             "num_width": self.width,
-            "num_frames": self.num_frames,
             "validation_dataset_file": self.validation_dataset_file,
             "lora_rank": self.lora_rank,
             "ltx2_first_frame_conditioning_p": self.ltx2_first_frame_conditioning_p,
@@ -586,12 +586,12 @@ class JobRunner:
                     "Unhandled exception escaped from _run_job for job %s: %s",
                     job.id, exc, exc_info=True
                 )
-                try:
+                with contextlib.suppress(Exception):
                     job.status = JobStatus.FAILED
-                    job.error = f"Unhandled exception: {type(exc).__name__}: {str(exc)}"
+                    job.error = (
+                        f"Unhandled exception: {type(exc).__name__}: {str(exc)}"
+                    )
                     job.finished_at = time.time()
-                except Exception:
-                    pass  # If even setting status fails, at least we logged it
         
         thread = threading.Thread(
             target=safe_run_job, args=(job,), daemon=True
@@ -619,10 +619,8 @@ class JobRunner:
 
         job._stop_event.set()
         if job._process is not None:
-            try:
+            with contextlib.suppress(Exception):
                 job._process.terminate()
-            except Exception:
-                pass
         logger.info("Stop requested for job %s", job.id)
         return job
     
@@ -685,9 +683,9 @@ class JobRunner:
         from fastvideo import VideoGenerator
 
         logger.info(
-            "Loading model %s (workload=%s, num_gpus=%d, offloads: dit=%s te=%s "
-            "vae=%s ie=%s, fsdp=%s, torch_compile=%s, vsa_sparsity=%.2f, tp=%d "
-            "sp=%d) …",
+            "Loading model %s (workload=%s, num_gpus=%d, offloads: "
+            "dit=%s text_encoder=%s vae=%s image_encoder=%s, fsdp=%s, "
+            "torch_compile=%s, vsa_sparsity=%.2f, tp=%d sp=%d) …",
             model_id, workload_type, num_gpus, dit_cpu_offload,
             text_encoder_cpu_offload,
             vae_cpu_offload, image_encoder_cpu_offload, use_fsdp_inference,
@@ -908,9 +906,12 @@ class JobRunner:
             job.started_at = time.time()
             self._save_job(job)
             buf.phase = "starting"
-            logger.info(f"Job {job.id} started at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(job.started_at))}")
-            logger.info(f"Model: {job.model_id}")
-            logger.info(f"Prompt: {job.prompt}")
+            started = time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.localtime(job.started_at)
+            )
+            logger.info("Job %s started at %s", job.id, started)
+            logger.info("Model: %s", job.model_id)
+            logger.info("Prompt: %s", job.prompt)
 
             if job._stop_event.is_set():
                 job.status = JobStatus.STOPPED
@@ -1008,13 +1009,13 @@ class JobRunner:
             video_files = sorted(Path(job_output_dir).glob("*.mp4"))
             if video_files:
                 job.output_path = str(video_files[0])
-                logger.info(f"Found video output: {job.output_path}")
+                logger.info("Found video output: %s", job.output_path)
             else:
                 # Could be an image workload
                 image_files = sorted(Path(job_output_dir).glob("*.png"))
                 if image_files:
                     job.output_path = str(image_files[0])
-                    logger.info(f"Found image output: {job.output_path}")
+                    logger.info("Found image output: %s", job.output_path)
                 else:
                     logger.warning("No output file found in job directory")
 
@@ -1031,7 +1032,7 @@ class JobRunner:
 
         except Exception as exception:
             error_msg = str(exception)
-            logger.error(f"Critical error in job thread: {error_msg}")
+            logger.error("Critical error in job thread: %s", error_msg)
             job.status = JobStatus.FAILED
             job.error = f"Critical error ({type(exception).__name__}): {error_msg}"
             job.finished_at = time.time()
