@@ -268,8 +268,8 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
+        attn_metadata: AttentionMetadata,
         gate_compress: torch.Tensor | None = None,
-        attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
         """Forward pass for SLA attention.
         
@@ -294,8 +294,8 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
 
         # Get topk ratio from metadata if available
         topk_ratio = self.topk_ratio
-        if attn_metadata is not None and hasattr(attn_metadata, 'topk_ratio'):
-            topk_ratio = attn_metadata.topk_ratio
+        if hasattr(attn_metadata, 'topk_ratio'):
+            topk_ratio = attn_metadata.topk_ratio  # type: ignore[union-attr]
 
         # Compute block-sparse attention pattern
         sparse_map, lut, real_topk = get_block_map(q, k, topk_ratio=topk_ratio, BLKQ=self.BLKQ, BLKK=self.BLKK)
@@ -463,8 +463,8 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
+        attn_metadata: AttentionMetadata,
         gate_compress: torch.Tensor | None = None,
-        attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
         """Forward pass for SageSLA attention with quantized kernels.
         
@@ -488,7 +488,7 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
 
         # Get topk ratio from metadata if available
         topk_ratio = self.topk_ratio
-        if attn_metadata is not None and hasattr(attn_metadata, 'topk_ratio'):
+        if hasattr(attn_metadata, 'topk_ratio'):
             topk_ratio = attn_metadata.topk_ratio  # type: ignore[union-attr]
 
         # Determine block sizes based on GPU architecture

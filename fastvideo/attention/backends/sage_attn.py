@@ -52,8 +52,8 @@ class SageAttentionImpl(AttentionImpl):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
+        attn_metadata: AttentionMetadata,
         gate_compress: torch.Tensor | None = None,
-        attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
         output = sageattn(
             query,

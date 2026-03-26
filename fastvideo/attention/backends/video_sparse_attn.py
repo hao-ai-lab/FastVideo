@@ -237,8 +237,8 @@ class VideoSparseAttentionImpl(AttentionImpl):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        gate_compress: torch.Tensor,
         attn_metadata: VideoSparseAttentionMetadata,
+        gate_compress: torch.Tensor,
     ) -> torch.Tensor:
         query = query.transpose(1, 2).contiguous()
         key = key.transpose(1, 2).contiguous()

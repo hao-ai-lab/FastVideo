@@ -142,8 +142,9 @@ class VMOBAAttentionImpl(AttentionImpl):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
+        attn_metadata: AttentionMetadata,
         gate_compress: torch.Tensor | None = None,
-        attn_metadata: AttentionMetadata | None = None,
+        
     ) -> torch.Tensor:
         """
         query: [B, L, H, D]
@@ -151,8 +152,6 @@ class VMOBAAttentionImpl(AttentionImpl):
         value: [B, L, H, D]
         attn_metadata: AttentionMetadata
         """
-        if attn_metadata is None:
-            raise ValueError("VMOBAAttentionImpl requires attn_metadata to be provided.")
         batch_size, sequence_length, num_heads, head_dim = query.shape
 
         # select chunk type according to layer idx:
