@@ -374,7 +374,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=PipelineConfig,
-        workload_types=("t2v",),
+        workload_types=(WorkloadType.T2V,),
         hf_model_paths=[
             "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers",
         ],
