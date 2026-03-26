@@ -60,7 +60,8 @@ class SageAttention3Impl(AttentionImpl):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        attn_metadata: AttentionMetadata,
+        gate_compress: torch.Tensor | None = None,
+        attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
         query = query.transpose(1, 2)
         key = key.transpose(1, 2)

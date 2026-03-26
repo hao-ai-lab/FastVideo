@@ -73,7 +73,8 @@ class SDPAImpl(AttentionImpl):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        attn_metadata: SDPAMetadata,
+        gate_compress: torch.Tensor | None = None,
+        attn_metadata: SDPAMetadata | None = None,
     ) -> torch.Tensor:
         # transpose to bs, heads, seq_len, head_dim
         query = query.transpose(1, 2)

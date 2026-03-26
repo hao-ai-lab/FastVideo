@@ -268,7 +268,8 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        attn_metadata: AttentionMetadata,
+        gate_compress: torch.Tensor | None = None,
+        attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
         """Forward pass for SLA attention.
         
@@ -462,7 +463,8 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        attn_metadata: AttentionMetadata,
+        gate_compress: torch.Tensor | None = None,
+        attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
         """Forward pass for SageSLA attention with quantized kernels.
         
