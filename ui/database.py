@@ -7,6 +7,7 @@ Stores jobs and default settings. Uses Python's built-in sqlite3.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import sqlite3
 import threading
@@ -16,7 +17,7 @@ from typing import Any
 logger = logging.getLogger("fastvideo.ui.database")
 
 # Default options schema - used for settings table defaults
-DEFAULT_SETTINGS = {
+DEFAULT_SETTINGS: dict[str, Any] = {
     "default_model_id": "",  # legacy; migrated to default_model_id_t2v
     "default_model_id_t2v": "",
     "default_model_id_i2v": "",
@@ -42,6 +43,11 @@ DEFAULT_SETTINGS = {
     "auto_start_job": 0,
     "dataset_upload_path": "",
 }
+
+
+def _sqlite_row_get(row: sqlite3.Row, key: str, default: Any) -> Any:
+    """Like dict.get for sqlite3.Row (Row has no .get on Python 3.10)."""
+    return row[key] if key in row else default  # noqa: SIM401
 
 
 def _get_db_path(data_dir: Path) -> Path:
@@ -176,10 +182,9 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
                 "dataset_type", "num_gpus", "media_type", "status", "error",
                 "log_file_path"):
         if col in _get_table_columns(conn, "datasets"):
-            try:
+            with contextlib.suppress(sqlite3.OperationalError):
+                # SQLite < 3.35 or column already dropped
                 conn.execute(f"ALTER TABLE datasets DROP COLUMN {col}")
-            except sqlite3.OperationalError:
-                pass  # SQLite < 3.35 or column already dropped
     # Migrate legacy default_model_id to default_model_id_t2v
     if "default_model_id_t2v" in _get_table_columns(conn, "settings"):
         conn.execute(
@@ -518,17 +523,17 @@ class Database:
             return _default_settings_dict()
         t2v = (
             (row["default_model_id_t2v"] or row["default_model_id"] or "")
-            if "default_model_id_t2v" in row.keys()
+            if "default_model_id_t2v" in row
             else (row["default_model_id"] or "")
         )
         i2v = (
             (row["default_model_id_i2v"] or "")
-            if "default_model_id_i2v" in row.keys()
+            if "default_model_id_i2v" in row
             else ""
         )
         t2i = (
             (row["default_model_id_t2i"] or "")
-            if "default_model_id_t2i" in row.keys()
+            if "default_model_id_t2i" in row
             else ""
         )
         result = {
@@ -560,7 +565,7 @@ class Database:
             ("auto_start_job", "autoStartJob", False),
             ("dataset_upload_path", "datasetUploadPath", ""),
         ]:
-            if col in row.keys():
+            if col in row:
                 v = row[col]
                 if isinstance(default, bool):
                     result[key] = bool(v)
@@ -648,15 +653,9 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "id": row["id"],
         "model_id": row["model_id"],
         "prompt": row["prompt"],
-        "workload_type": (
-            row["workload_type"] if "workload_type" in row.keys() else "t2v"
-        ),
-        "image_path": (
-            (row["image_path"] or "") if "image_path" in row.keys() else ""
-        ),
-        "job_type": (
-            row["job_type"] if "job_type" in row.keys() else "inference"
-        ),
+        "workload_type": _sqlite_row_get(row, "workload_type", "t2v"),
+        "image_path": _sqlite_row_get(row, "image_path", "") or "",
+        "job_type": _sqlite_row_get(row, "job_type", "inference"),
         "status": row["status"],
         "created_at": row["created_at"],
         "started_at": row["started_at"],
@@ -671,17 +670,17 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "guidance_scale": row["guidance_scale"],
         "guidance_rescale": (
             float(row["guidance_rescale"])
-            if "guidance_rescale" in row.keys()
+            if "guidance_rescale" in row
             else 0.0
         ),
-        "fps": int(row["fps"]) if "fps" in row.keys() else 24,
+        "fps": int(row["fps"]) if "fps" in row else 24,
         "seed": row["seed"],
         "num_gpus": row["num_gpus"],
         "dit_cpu_offload": bool(row["dit_cpu_offload"]),
         "text_encoder_cpu_offload": bool(row["text_encoder_cpu_offload"]),
         "use_fsdp_inference": bool(row["use_fsdp_inference"]),
         "negative_prompt": (
-            (row["negative_prompt"] or "") if "negative_prompt" in row.keys()
+            (row["negative_prompt"] or "") if "negative_prompt" in row
             else ""
         ),
         "progress": 0.0,
@@ -689,34 +688,42 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "phase": "initializing",
     }
     for col in ("vae_cpu_offload", "image_encoder_cpu_offload", "enable_torch_compile"):
-        if col in row.keys():
+        if col in row:
             result[col] = bool(row[col])
     for col in ("vsa_sparsity",):
-        if col in row.keys():
+        if col in row:
             result[col] = float(row[col])
     for col in ("tp_size", "sp_size"):
-        if col in row.keys():
+        if col in row:
             result[col] = int(row[col])
     for col in (
         "data_path",
         "validation_dataset_file",
     ):
-        if col in row.keys():
+        if col in row:
             result[col] = (row[col] or "") or ""
     for col in int_defaults:
-        if col in row.keys():
-            val = row[col]
-            result[col] = int(val) if val is not None else int_defaults[col]
-    if "learning_rate" in row.keys():
+        if col in row:
+            int_val_raw: Any = row[col]
+            result[col] = (
+                int(int_val_raw)
+                if int_val_raw is not None
+                else int_defaults[col]
+            )
+    if "learning_rate" in row:
         result["learning_rate"] = float(row["learning_rate"] or 5e-5)
-    if "dmd_use_vsa" in row.keys():
+    if "dmd_use_vsa" in row:
         result["dmd_use_vsa"] = bool(row["dmd_use_vsa"])
     for col in float_defaults:
-        if col in row.keys():
-            val = row[col]
-            result[col] = float(val) if val is not None else float_defaults[col]
+        if col in row:
+            float_val_raw: Any = row[col]
+            result[col] = (
+                float(float_val_raw)
+                if float_val_raw is not None
+                else float_defaults[col]
+            )
     for col in ("dmd_denoising_steps", "real_score_model_path", "fake_score_model_path"):
-        if col in row.keys():
+        if col in row:
             result[col] = (row[col] or "") or ""
     return result
 

@@ -85,7 +85,7 @@ from fastvideo.configs.sample.wan import (
 )
 from fastvideo.configs.sample.sd35 import SD35SamplingParam
 
-from fastvideo.fastvideo_args import WorkloadType
+from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index, verify_model_config_and_directory)
 
@@ -137,7 +137,7 @@ class ConfigInfo:
 
     sampling_param_cls: type[SamplingParam] | None
     pipeline_config_cls: type[PipelineConfig]
-    workload_types: tuple[str, ...]
+    workload_types: WorkloadType
 
 
 # The central registry mapping a model name to its configuration information
@@ -751,9 +751,11 @@ def get_registered_models_with_workloads(
         if config_info is None:
             continue
         workloads = list(config_info.workload_types)
-        if workload_type is not None:
-            if workload_type.lower() not in workloads:
-                continue
+        if (
+            workload_type is not None
+            and workload_type.lower() not in workloads
+        ):
+            continue
         label = path.split("/")[-1].replace("-", " ").replace("_", " ")
         result.append({
             "id": path,

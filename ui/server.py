@@ -15,18 +15,18 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import os
 import shutil
 import signal
-import threading
 import time
 import uuid
 from pathlib import Path
 import uvicorn
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -120,7 +120,9 @@ ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 
 @app.post("/api/upload-image")
-async def upload_image(file: UploadFile = File(...)) -> dict[str, str]:
+async def upload_image(
+    file: Annotated[UploadFile, File()],
+) -> dict[str, str]:
     """Upload an image file for I2V jobs. Returns the absolute path."""
     global upload_dir  # noqa: PLW0603
     if not upload_dir:
@@ -165,7 +167,7 @@ def _filter_video_files(files: list[UploadFile]) -> list[UploadFile]:
 
 @app.post("/api/upload-raw-dataset")
 async def upload_raw_dataset(
-    files: list[UploadFile] = File(...),
+    files: Annotated[list[UploadFile], File()],
 ) -> dict[str, Any]:
     """
     Upload raw video dataset. Returns path and file list.
@@ -177,19 +179,19 @@ async def upload_raw_dataset(
             detail="Database not initialized",
         )
     settings = database.get_settings()
-    base_path = (
+    raw_path = (
         settings.get("datasetUploadPath")
         or settings.get("dataset_upload_path")
         or ""
     )
-    if base_path and isinstance(base_path, str):
-        base_path = base_path.strip()
-    else:
-        base_path = ""
-    if not base_path:
-        base_path = datasets_upload_dir
-    else:
-        base_path = os.path.abspath(base_path)
+    base_path = (
+        raw_path.strip()
+        if raw_path and isinstance(raw_path, str)
+        else ""
+    )
+    base_path = (
+        datasets_upload_dir if not base_path else os.path.abspath(base_path)
+    )
     if not base_path:
         raise HTTPException(
             status_code=503,
@@ -343,7 +345,10 @@ def start_job(job_id: str) -> dict[str, Any]:
         job = job_runner.start_job(job_id)
         return job.to_dict()
     except ValueError as e:
-        raise HTTPException(status_code=404 if "not found" in str(e) else 409, detail=str(e))
+        raise HTTPException(
+            status_code=404 if "not found" in str(e) else 409,
+            detail=str(e),
+        ) from e
 
 
 @app.post("/api/jobs/{job_id}/stop")
@@ -360,7 +365,10 @@ def stop_job(job_id: str) -> dict[str, Any]:
         job = job_runner.stop_job(job_id)
         return job.to_dict()
     except ValueError as e:
-        raise HTTPException(status_code=404 if "not found" in str(e) else 409, detail=str(e))
+        raise HTTPException(
+            status_code=404 if "not found" in str(e) else 409,
+            detail=str(e),
+        ) from e
 
 
 @app.delete("/api/jobs/{job_id}")
@@ -418,10 +426,8 @@ def _dataset_media_stats(dataset_id: str) -> tuple[int, int]:
             path = os.path.join(media_dir, name)
             if os.path.isfile(path) and ext in video_exts:
                 count += 1
-                try:
+                with contextlib.suppress(OSError):
                     total += os.path.getsize(path)
-                except OSError:
-                    pass
     return (count, total)
 
 
@@ -455,10 +461,8 @@ def create_dataset(req: CreateDatasetRequest) -> dict[str, Any]:
             status_code=500,
             detail=f"Failed to move upload: {e}",
         ) from e
-    try:
-        shutil.rmtree(req.upload_path)
-    except OSError:
-        pass  # Best-effort cleanup of upload folder
+    with contextlib.suppress(OSError):
+        shutil.rmtree(req.upload_path)  # Best-effort cleanup of upload folder
     dataset = {
         "id": dataset_id,
         "name": req.name,
@@ -534,10 +538,8 @@ def delete_dataset(dataset_id: str) -> dict[str, str]:
         raise HTTPException(status_code=404, detail="Dataset not found")
     dest_dir = os.path.join(datasets_upload_dir, dataset_id)
     if os.path.isdir(dest_dir):
-        try:
-            shutil.rmtree(dest_dir)
-        except OSError:
-            pass  # Best-effort cleanup
+        with contextlib.suppress(OSError):
+            shutil.rmtree(dest_dir)  # Best-effort cleanup
     return {"detail": f"Dataset {dataset_id} deleted"}
 
 
@@ -551,7 +553,7 @@ def get_job_logs(job_id: str, after: int = 0) -> dict[str, Any]:
     try:
         return job_runner.get_job_logs(job_id, after=after)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @app.get("/api/jobs/{job_id}/video")
@@ -599,7 +601,7 @@ def get_job_log_file(job_id: str) -> FileResponse:
     )
 
 
-def _setup_signal_handlers():
+def _setup_signal_handlers() -> None:
     def handle_sigquit(signum, frame):
         logger.warning(
             "Received SIGQUIT (likely from a crashed worker process). "
@@ -625,14 +627,14 @@ def create_local_env(host: str, port: int) -> None:
     api_url = f"http://{api_host}:{port}/api"
     
     if not os.path.exists(env_local_path):
-        logger.info(f"Creating .env.local with API URL: {api_url}")
+        logger.info("Creating .env.local with API URL: %s", api_url)
         with open(env_local_path, "w", encoding="utf-8") as f:
             f.write(f"NEXT_PUBLIC_API_BASE_URL={api_url}\n")
     else:
-        logger.debug(f".env.local already exists at {env_local_path}")
+        logger.debug(".env.local already exists at %s", env_local_path)
 
 
-def main():
+def main() -> None:
     global job_runner, database, upload_dir, verbose, datasets_upload_dir  # noqa: PLW0603
 
     # Set up signal handlers to prevent worker crashes from killing the server
