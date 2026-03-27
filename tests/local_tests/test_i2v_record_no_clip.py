@@ -20,7 +20,6 @@ _here = os.path.dirname(os.path.abspath(__file__))
 sys.path = [p for p in sys.path if os.path.abspath(p) != _here]
 
 import numpy as np  # noqa: E402
-import torch  # noqa: E402
 
 # We need exactly two leaf modules:
 #   fastvideo.dataset.dataloader.record_schema
