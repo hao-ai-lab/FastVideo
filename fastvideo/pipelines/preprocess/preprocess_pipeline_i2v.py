@@ -31,15 +31,12 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                            tokenizers=[self.get_module("tokenizer")],
                        ))
 
-        if (self.get_module("image_encoder") is not None
-                and self.get_module("image_processor") is not None):
-            self.add_stage(
-                stage_name="image_encoding_stage",
-                stage=ImageEncodingStage(
-                    image_encoder=self.get_module("image_encoder"),
-                    image_processor=self.get_module(
-                        "image_processor"),
-                ))
+        if (self.get_module("image_encoder") is not None and self.get_module("image_processor") is not None):
+            self.add_stage(stage_name="image_encoding_stage",
+                           stage=ImageEncodingStage(
+                               image_encoder=self.get_module("image_encoder"),
+                               image_processor=self.get_module("image_processor"),
+                           ))
 
     def get_pyarrow_schema(self):
         """Return the PyArrow schema for I2V pipeline."""
@@ -55,29 +52,22 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
         _, _, num_frames, height, width = valid_data["pixel_values"].shape
 
         # Get CLIP features if image_encoder is available
-        if (self.get_module("image_encoder") is not None
-                and self.get_module("image_processor") is not None):
-            self.get_module("image_encoder").to(
-                get_local_torch_device())
+        if (self.get_module("image_encoder") is not None and self.get_module("image_processor") is not None):
+            self.get_module("image_encoder").to(get_local_torch_device())
 
             processed_images = []
             for frame in first_frame:
                 frame = (frame + 1) * 127.5
-                frame_pil = Image.fromarray(
-                    frame.cpu().numpy().astype(np.uint8))
-                processed_img = self.get_module("image_processor")(
-                    images=frame_pil, return_tensors="pt")
+                frame_pil = Image.fromarray(frame.cpu().numpy().astype(np.uint8))
+                processed_img = self.get_module("image_processor")(images=frame_pil, return_tensors="pt")
                 processed_images.append(processed_img)
 
-            pixel_values = torch.cat(
-                [img['pixel_values'] for img in processed_images],
-                dim=0).to(get_local_torch_device())
+            pixel_values = torch.cat([img['pixel_values'] for img in processed_images],
+                                     dim=0).to(get_local_torch_device())
             with torch.no_grad():
                 image_inputs = {'pixel_values': pixel_values}
-                with set_forward_context(current_timestep=0,
-                                         attn_metadata=None):
-                    clip_features = self.get_module(
-                        "image_encoder")(**image_inputs)
+                with set_forward_context(current_timestep=0, attn_metadata=None):
+                    clip_features = self.get_module("image_encoder")(**image_inputs)
                 clip_features = clip_features.last_hidden_state
 
             features["clip_feature"] = clip_features
