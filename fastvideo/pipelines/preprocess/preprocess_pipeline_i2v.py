@@ -31,11 +31,15 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                            tokenizers=[self.get_module("tokenizer")],
                        ))
 
-        self.add_stage(stage_name="image_encoding_stage",
-                       stage=ImageEncodingStage(
-                           image_encoder=self.get_module("image_encoder"),
-                           image_processor=self.get_module("image_processor"),
-                       ))
+        if (self.get_module("image_encoder") is not None
+                and self.get_module("image_processor") is not None):
+            self.add_stage(
+                stage_name="image_encoding_stage",
+                stage=ImageEncodingStage(
+                    image_encoder=self.get_module("image_encoder"),
+                    image_processor=self.get_module(
+                        "image_processor"),
+                ))
 
     def get_pyarrow_schema(self):
         """Return the PyArrow schema for I2V pipeline."""
@@ -44,34 +48,40 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
     def get_extra_features(self, valid_data: dict[str, Any], fastvideo_args: FastVideoArgs) -> dict[str, Any]:
 
         # TODO(will): move these to cpu at some point
-        self.get_module("image_encoder").to(get_local_torch_device())
         self.get_module("vae").to(get_local_torch_device())
 
         features = {}
-        """Get CLIP features from the first frame of each video."""
         first_frame = valid_data["pixel_values"][:, :, 0, :, :].permute(0, 2, 3, 1)  # (B, C, T, H, W) -> (B, H, W, C)
         _, _, num_frames, height, width = valid_data["pixel_values"].shape
-        # latent_height = height // self.get_module(
-        #     "vae").spatial_compression_ratio
-        # latent_width = width // self.get_module("vae").spatial_compression_ratio
 
-        processed_images = []
-        # Frame has values between -1 and 1
-        for frame in first_frame:
-            frame = (frame + 1) * 127.5
-            frame_pil = Image.fromarray(frame.cpu().numpy().astype(np.uint8))
-            processed_img = self.get_module("image_processor")(images=frame_pil, return_tensors="pt")
-            processed_images.append(processed_img)
+        # Get CLIP features if image_encoder is available
+        if (self.get_module("image_encoder") is not None
+                and self.get_module("image_processor") is not None):
+            self.get_module("image_encoder").to(
+                get_local_torch_device())
 
-        # Get CLIP features
-        pixel_values = torch.cat([img['pixel_values'] for img in processed_images], dim=0).to(get_local_torch_device())
-        with torch.no_grad():
-            image_inputs = {'pixel_values': pixel_values}
-            with set_forward_context(current_timestep=0, attn_metadata=None):
-                clip_features = self.get_module("image_encoder")(**image_inputs)
-            clip_features = clip_features.last_hidden_state
+            processed_images = []
+            for frame in first_frame:
+                frame = (frame + 1) * 127.5
+                frame_pil = Image.fromarray(
+                    frame.cpu().numpy().astype(np.uint8))
+                processed_img = self.get_module("image_processor")(
+                    images=frame_pil, return_tensors="pt")
+                processed_images.append(processed_img)
 
-        features["clip_feature"] = clip_features
+            pixel_values = torch.cat(
+                [img['pixel_values'] for img in processed_images],
+                dim=0).to(get_local_torch_device())
+            with torch.no_grad():
+                image_inputs = {'pixel_values': pixel_values}
+                with set_forward_context(current_timestep=0,
+                                         attn_metadata=None):
+                    clip_features = self.get_module(
+                        "image_encoder")(**image_inputs)
+                clip_features = clip_features.last_hidden_state
+
+            features["clip_feature"] = clip_features
+
         """Get VAE features from the first frame of each video"""
         video_conditions = []
         for frame in first_frame:
