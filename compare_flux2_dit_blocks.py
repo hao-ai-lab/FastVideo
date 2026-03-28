@@ -12,6 +12,9 @@ By default enables math-only CUDA SDPA for parity; pass --no-math-sdp to allow
 flash/mem-efficient kernels. Double-block diagnostics compare FV ``after_attn``
 to the official encoder tensor at the same point (input to ``norm2_context``),
 not to the full block output.
+
+Also reports post-SDPA tensors (4D, before flatten) for double_0 and double_4,
+and ``ff_context`` sublayer outputs (after linear_in, act_fn, linear_out).
 """
 import argparse
 import os
@@ -235,6 +238,285 @@ def _diffusers_flux2_qk_after_rope(attn, hidden_states, encoder_hidden_states, i
         key = diff_apply_rope(key, image_rotary_emb, sequence_dim=1)
     del value  # mirror Flux2AttnProcessor; only Q/K needed for parity
     return query, key
+
+
+def _diffusers_flux2_sdpa_out_4d(
+    attn,
+    hidden_states,
+    encoder_hidden_states,
+    image_rotary_emb,
+    attn_processor,
+    attention_mask=None,
+):
+    """Attention output [B, S, H, D] after SDPA, before flatten (Flux2AttnProcessor)."""
+    from diffusers.models.attention_dispatch import dispatch_attention_fn
+    from diffusers.models.embeddings import apply_rotary_emb as diff_apply_rope
+    from diffusers.models.transformers import transformer_flux2 as tf2
+
+    query, key, value, enc_q, enc_k, enc_v = tf2._get_qkv_projections(
+        attn, hidden_states, encoder_hidden_states
+    )
+    query = query.unflatten(-1, (attn.heads, -1))
+    key = key.unflatten(-1, (attn.heads, -1))
+    value = value.unflatten(-1, (attn.heads, -1))
+    query = attn.norm_q(query)
+    key = attn.norm_k(key)
+    if attn.added_kv_proj_dim is not None:
+        enc_q = enc_q.unflatten(-1, (attn.heads, -1))
+        enc_k = enc_k.unflatten(-1, (attn.heads, -1))
+        enc_v = enc_v.unflatten(-1, (attn.heads, -1))
+        enc_q = attn.norm_added_q(enc_q)
+        enc_k = attn.norm_added_k(enc_k)
+        query = torch.cat([enc_q, query], dim=1)
+        key = torch.cat([enc_k, key], dim=1)
+        value = torch.cat([enc_v, value], dim=1)
+    if image_rotary_emb is not None:
+        query = diff_apply_rope(query, image_rotary_emb, sequence_dim=1)
+        key = diff_apply_rope(key, image_rotary_emb, sequence_dim=1)
+    return dispatch_attention_fn(
+        query,
+        key,
+        value,
+        attn_mask=attention_mask,
+        backend=attn_processor._attention_backend,
+        parallel_config=attn_processor._parallel_config,
+    )
+
+
+def _tensor_from_forward_output(out):
+    return out[0] if isinstance(out, tuple) else out
+
+
+def _capture_post_sdpa_4d_fv(
+    transformer,
+    latent,
+    prompt_embeds,
+    timestep_scaled,
+    device,
+    freqs_cis,
+    block_index: int,
+    num_txt_tokens: int,
+):
+    """Post-LocalAttention tensor [B,S,H,D]; split text/image by num_txt_tokens."""
+    captured = {}
+    block = transformer.transformer_blocks[block_index]
+    inner = getattr(block.attn, "attn", None)
+    if inner is None:
+        return captured
+
+    def hook(_m, _i, out):
+        try:
+            t = out.detach().clone().cpu().float()
+            captured["full"] = t
+            captured["txt"] = t[:, :num_txt_tokens].contiguous()
+            captured["img"] = t[:, num_txt_tokens:].contiguous()
+        except Exception:
+            pass
+
+    handle = inner.register_forward_hook(hook)
+    try:
+        with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
+            transformer(
+                latent,
+                prompt_embeds,
+                timestep_scaled,
+                guidance=None,
+                freqs_cis=freqs_cis,
+            )
+    finally:
+        handle.remove()
+    return captured
+
+
+def _capture_post_sdpa_4d_official(
+    pipe,
+    latent,
+    prompt_embeds,
+    timestep_scaled,
+    text_ids,
+    latent_ids,
+    device,
+    block_index: int,
+    num_txt_tokens: int,
+):
+    """Recompute SDPA output like Flux2AttnProcessor (pre-flatten)."""
+    captured = {}
+    trans = pipe.transformer
+    if not hasattr(trans, "transformer_blocks") or block_index >= len(
+        trans.transformer_blocks
+    ):
+        return captured
+    attn_m = trans.transformer_blocks[block_index].attn
+
+    def pre_hook(module, args, kwargs=None):
+        if module is not attn_m:
+            return
+        kwargs = kwargs or {}
+        try:
+            hs = kwargs.get("hidden_states")
+            enc = kwargs.get("encoder_hidden_states")
+            rot = kwargs.get("image_rotary_emb")
+            if hs is None and args:
+                hs = args[0]
+            if enc is None and len(args) > 1:
+                enc = args[1]
+            proc = module.processor
+            t = _diffusers_flux2_sdpa_out_4d(
+                module,
+                hs,
+                enc,
+                rot,
+                proc,
+                kwargs.get("attention_mask"),
+            )
+            t = t.detach().clone().cpu().float()
+            captured["full"] = t
+            captured["txt"] = t[:, :num_txt_tokens].contiguous()
+            captured["img"] = t[:, num_txt_tokens:].contiguous()
+        except Exception:
+            pass
+
+    handle = attn_m.register_forward_pre_hook(pre_hook, with_kwargs=True)
+    dtype = next(trans.parameters()).dtype
+    latent_d = latent.to(device, dtype=dtype)
+    timestep = timestep_scaled.to(device)
+    prompt_embeds_d = prompt_embeds.to(device, dtype=dtype)
+    text_ids_d = text_ids.to(device)
+    latent_ids_d = latent_ids.to(device)
+    try:
+        with torch.no_grad():
+            with trans.cache_context("cond"):
+                trans(
+                    hidden_states=latent_d,
+                    timestep=timestep,
+                    guidance=None,
+                    encoder_hidden_states=prompt_embeds_d,
+                    txt_ids=text_ids_d,
+                    img_ids=latent_ids_d,
+                    joint_attention_kwargs=getattr(pipe, "attention_kwargs", None) or {},
+                    return_dict=False,
+                )
+    finally:
+        handle.remove()
+    return captured
+
+
+def _capture_ff_context_steps_fv(
+    transformer,
+    latent,
+    prompt_embeds,
+    timestep_scaled,
+    device,
+    freqs_cis,
+    block_index: int,
+):
+    """ff_context: after linear_in, after act_fn, after linear_out (FastVideo)."""
+    out = {}
+    ff = transformer.transformer_blocks[block_index].ff_context
+    handles = []
+
+    def make_hook(name):
+        def hook(_m, _i, o):
+            try:
+                out[name] = _tensor_from_forward_output(o).detach().clone().cpu().float()
+            except Exception:
+                pass
+
+        return hook
+
+    if hasattr(ff, "linear_in"):
+        handles.append(ff.linear_in.register_forward_hook(make_hook("after_linear_in")))
+    if hasattr(ff, "act_fn"):
+        handles.append(ff.act_fn.register_forward_hook(make_hook("after_act_fn")))
+    if hasattr(ff, "linear_out"):
+        handles.append(ff.linear_out.register_forward_hook(make_hook("after_linear_out")))
+    try:
+        with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
+            transformer(
+                latent,
+                prompt_embeds,
+                timestep_scaled,
+                guidance=None,
+                freqs_cis=freqs_cis,
+            )
+    finally:
+        for h in handles:
+            h.remove()
+    return out
+
+
+def _capture_ff_context_steps_official(
+    pipe,
+    latent,
+    prompt_embeds,
+    timestep_scaled,
+    text_ids,
+    latent_ids,
+    device,
+    block_index: int,
+):
+    """ff_context: after linear_in, after act_fn, after linear_out (Diffusers)."""
+    out = {}
+    trans = pipe.transformer
+    if not hasattr(trans, "transformer_blocks") or block_index >= len(
+        trans.transformer_blocks
+    ):
+        return out
+    ff = trans.transformer_blocks[block_index].ff_context
+    handles = []
+
+    def make_hook(name):
+        def hook(_m, _i, o):
+            try:
+                out[name] = _tensor_from_forward_output(o).detach().clone().cpu().float()
+            except Exception:
+                pass
+
+        return hook
+
+    if hasattr(ff, "linear_in"):
+        handles.append(ff.linear_in.register_forward_hook(make_hook("after_linear_in")))
+    if hasattr(ff, "act_fn"):
+        handles.append(ff.act_fn.register_forward_hook(make_hook("after_act_fn")))
+    if hasattr(ff, "linear_out"):
+        handles.append(ff.linear_out.register_forward_hook(make_hook("after_linear_out")))
+    dtype = next(trans.parameters()).dtype
+    latent_d = latent.to(device, dtype=dtype)
+    timestep = timestep_scaled.to(device)
+    prompt_embeds_d = prompt_embeds.to(device, dtype=dtype)
+    text_ids_d = text_ids.to(device)
+    latent_ids_d = latent_ids.to(device)
+    try:
+        with torch.no_grad():
+            with trans.cache_context("cond"):
+                trans(
+                    hidden_states=latent_d,
+                    timestep=timestep,
+                    guidance=None,
+                    encoder_hidden_states=prompt_embeds_d,
+                    txt_ids=text_ids_d,
+                    img_ids=latent_ids_d,
+                    joint_attention_kwargs=getattr(pipe, "attention_kwargs", None) or {},
+                    return_dict=False,
+                )
+    finally:
+        for h in handles:
+            h.remove()
+    return out
+
+
+def _print_tensor_pair_diff(label: str, a: torch.Tensor | None, b: torch.Tensor | None) -> None:
+    if a is None or b is None:
+        print(f"  {label}: missing (fv={a is not None}, official={b is not None})")
+        return
+    if a.shape != b.shape:
+        print(f"  {label}: SHAPE MISMATCH {a.shape} vs {b.shape}")
+        return
+    d = (a - b).abs()
+    print(
+        f"  {label}: shape={tuple(a.shape)} max_diff={d.max().item():.4f} "
+        f"mean_diff={d.mean().item():.4f}"
+    )
 
 
 def _capture_double0_qk_after_rope_official(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device):
@@ -1047,6 +1329,39 @@ def main():
             else:
                 print("  Could not capture official double_4 context_attn update.")
 
+        print(
+            f"\n--- double_{TARGET_DOUBLE} post-SDPA (4D, before flatten; text/img split) ---"
+        )
+        sdp4_fv = _capture_post_sdpa_4d_fv(
+            transformer,
+            latent_fv,
+            prompt_embeds_fv,
+            timestep_fv,
+            device,
+            freqs_cis,
+            TARGET_DOUBLE,
+            num_txt_tokens,
+        )
+        sdp4_off = {}
+        if len(official_activations) > 0:
+            sdp4_off = _capture_post_sdpa_4d_official(
+                pipe,
+                latent,
+                prompt_embeds,
+                timestep_scaled,
+                text_ids,
+                latent_ids,
+                device,
+                TARGET_DOUBLE,
+                num_txt_tokens,
+            )
+        for key in ("full", "txt", "img"):
+            _print_tensor_pair_diff(
+                f"sdpa_4d_{key}",
+                sdp4_fv.get(key),
+                sdp4_off.get(key),
+            )
+
         # Context FF path: before_ff, context_ff_output, context_ff_update, c_gate_mlp
         print(f"\n--- double_{TARGET_DOUBLE} context FF path ---")
         off_ctx_ff_out, off_ctx_ff_update, off_c_gate_mlp = _capture_official_double4_context_ff(
@@ -1091,6 +1406,35 @@ def main():
             else:
                 print("  c_gate_mlp shape mismatch (check broadcast in block).")
 
+        print(f"\n--- double_{TARGET_DOUBLE} ff_context sublayers ---")
+        fv_ffs = _capture_ff_context_steps_fv(
+            transformer,
+            latent_fv,
+            prompt_embeds_fv,
+            timestep_fv,
+            device,
+            freqs_cis,
+            TARGET_DOUBLE,
+        )
+        off_ffs = {}
+        if len(official_activations) > 0:
+            off_ffs = _capture_ff_context_steps_official(
+                pipe,
+                latent,
+                prompt_embeds,
+                timestep_scaled,
+                text_ids,
+                latent_ids,
+                device,
+                TARGET_DOUBLE,
+            )
+        for step in ("after_linear_in", "after_act_fn", "after_linear_out"):
+            _print_tensor_pair_diff(
+                step,
+                fv_ffs.get(step),
+                off_ffs.get(step),
+            )
+
     # Sub-layer: attention output of double_0 (narrows down where divergence is)
     print("\n--- double_0 attention output (inside first block) ---")
     attn_fv = _capture_double0_attn_output_fv(
@@ -1134,6 +1478,38 @@ def main():
             continue
         diff = (a_fv - a_o).abs()
         print(f"  {key}: shape={a_fv.shape} max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f}")
+
+    # Post-SDPA [B,S,H,D] before flatten — isolates softmax/V vs output linears
+    print("\n--- double_0 post-SDPA (4D, before flatten; text/img split) ---")
+    sdp0_fv = _capture_post_sdpa_4d_fv(
+        transformer,
+        latent_fv,
+        prompt_embeds_fv,
+        timestep_fv,
+        device,
+        freqs_cis,
+        0,
+        num_txt_tokens,
+    )
+    sdp0_off = {}
+    if len(official_activations) > 0:
+        sdp0_off = _capture_post_sdpa_4d_official(
+            pipe,
+            latent,
+            prompt_embeds,
+            timestep_scaled,
+            text_ids,
+            latent_ids,
+            device,
+            0,
+            num_txt_tokens,
+        )
+    for key in ("full", "txt", "img"):
+        _print_tensor_pair_diff(
+            f"sdpa_4d_{key}",
+            sdp0_fv.get(key),
+            sdp0_off.get(key),
+        )
 
     fv_activations = _collect_fv_activations(
         transformer,
