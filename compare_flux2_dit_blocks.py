@@ -5,7 +5,13 @@ Runs both transformers with the same step-0 inputs, captures activations after e
 and reports max/mean diff per block.
 
 Requires: flux2_step0_dump.pt (run dump_flux2_step0.py first).
+
   python compare_flux2_dit_blocks.py [--model-path PATH]
+
+By default enables math-only CUDA SDPA for parity; pass --no-math-sdp to allow
+flash/mem-efficient kernels. Double-block diagnostics compare FV ``after_attn``
+to the official encoder tensor at the same point (input to ``norm2_context``),
+not to the full block output.
 """
 import argparse
 import os
@@ -22,6 +28,18 @@ from fastvideo.models.loader.component_loader import TransformerLoader
 DUMP_PATH = "flux2_step0_dump.pt"
 MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
 THRESHOLD_MEAN = 0.1  # report block as diverged if mean abs diff > this
+
+
+def _enable_torch_math_sdp() -> None:
+    """Prefer math SDPA for parity; flash/mem-efficient can diverge in bf16."""
+    if not torch.cuda.is_available():
+        return
+    try:
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
+    except Exception:
+        pass
 
 
 def _get_transformer_path(model_id: str) -> str:
@@ -190,26 +208,63 @@ def _capture_double0_qk_after_rope_fv(transformer, latent, prompt_embeds, timest
     return captured
 
 
+def _diffusers_flux2_qk_after_rope(attn, hidden_states, encoder_hidden_states, image_rotary_emb):
+    """Same Q/K as Flux2AttnProcessor after apply_rotary_emb (diffusers internal API)."""
+    from diffusers.models.embeddings import apply_rotary_emb as diff_apply_rope
+    from diffusers.models.transformers import transformer_flux2 as tf2
+
+    query, key, value, enc_q, enc_k, enc_v = tf2._get_qkv_projections(
+        attn, hidden_states, encoder_hidden_states
+    )
+    query = query.unflatten(-1, (attn.heads, -1))
+    key = key.unflatten(-1, (attn.heads, -1))
+    value = value.unflatten(-1, (attn.heads, -1))
+    query = attn.norm_q(query)
+    key = attn.norm_k(key)
+    if attn.added_kv_proj_dim is not None:
+        enc_q = enc_q.unflatten(-1, (attn.heads, -1))
+        enc_k = enc_k.unflatten(-1, (attn.heads, -1))
+        enc_v = enc_v.unflatten(-1, (attn.heads, -1))
+        enc_q = attn.norm_added_q(enc_q)
+        enc_k = attn.norm_added_k(enc_k)
+        query = torch.cat([enc_q, query], dim=1)
+        key = torch.cat([enc_k, key], dim=1)
+        value = torch.cat([enc_v, value], dim=1)
+    if image_rotary_emb is not None:
+        query = diff_apply_rope(query, image_rotary_emb, sequence_dim=1)
+        key = diff_apply_rope(key, image_rotary_emb, sequence_dim=1)
+    del value  # mirror Flux2AttnProcessor; only Q/K needed for parity
+    return query, key
+
+
 def _capture_double0_qk_after_rope_official(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device):
-    """Capture Q, K passed to the attention op (after RoPE) in the first double block."""
+    """Capture Q, K after RoPE for double block 0 (Diffusers has no inner LocalAttention)."""
     captured = {}
     trans = pipe.transformer
     if not hasattr(trans, "transformer_blocks") or len(trans.transformer_blocks) == 0:
         return captured
     block0 = trans.transformer_blocks[0]
-    inner_attn = getattr(block0.attn, "attn", None)
-    if inner_attn is None:
-        return captured
+    attn0 = block0.attn
 
-    def pre_hook(_module, args, kwargs=None):
+    def pre_hook(module, args, kwargs=None):
+        if module is not attn0:
+            return
+        kwargs = kwargs or {}
         try:
-            if args and len(args) >= 2:
-                captured["q"] = args[0].detach().clone().cpu().float()
-                captured["k"] = args[1].detach().clone().cpu().float()
+            hs = kwargs.get("hidden_states")
+            enc = kwargs.get("encoder_hidden_states")
+            rot = kwargs.get("image_rotary_emb")
+            if hs is None and args:
+                hs = args[0]
+            if enc is None and len(args) > 1:
+                enc = args[1]
+            q, k = _diffusers_flux2_qk_after_rope(module, hs, enc, rot)
+            captured["q"] = q.detach().clone().cpu().float()
+            captured["k"] = k.detach().clone().cpu().float()
         except Exception:
             pass
 
-    handle = inner_attn.register_forward_pre_hook(pre_hook, with_kwargs=True)
+    handle = attn0.register_forward_pre_hook(pre_hook, with_kwargs=True)
     dtype = next(trans.parameters()).dtype
     latent_d = latent.to(device, dtype=dtype)
     timestep = timestep_scaled.to(device)
@@ -615,6 +670,52 @@ def _capture_official_double4_before_ff(pipe, latent, prompt_embeds, timestep_sc
     return captured_before_ff[0] if captured_before_ff else None
 
 
+def _capture_official_encoder_after_context_attn(
+    pipe,
+    latent,
+    prompt_embeds,
+    timestep_scaled,
+    text_ids,
+    latent_ids,
+    device,
+    block_index: int,
+):
+    """Encoder stream after context-attn residual, before norm2_context (aligns with FV debug after_attn)."""
+    trans = pipe.transformer
+    if not hasattr(trans, "transformer_blocks") or block_index >= len(trans.transformer_blocks):
+        return None
+    block = trans.transformer_blocks[block_index]
+    captured = []
+
+    def pre_norm2_context(_module, args):
+        if args and len(args) > 0 and args[0] is not None:
+            captured.append(args[0].detach().clone().float())
+
+    handle = block.norm2_context.register_forward_pre_hook(pre_norm2_context)
+    dtype = next(trans.parameters()).dtype
+    latent_d = latent.to(device, dtype=dtype)
+    timestep = timestep_scaled.to(device)
+    prompt_embeds_d = prompt_embeds.to(device, dtype=dtype)
+    text_ids_d = text_ids.to(device)
+    latent_ids_d = latent_ids.to(device)
+    try:
+        with torch.no_grad():
+            with trans.cache_context("cond"):
+                trans(
+                    hidden_states=latent_d,
+                    timestep=timestep,
+                    guidance=None,
+                    encoder_hidden_states=prompt_embeds_d,
+                    txt_ids=text_ids_d,
+                    img_ids=latent_ids_d,
+                    joint_attention_kwargs=getattr(pipe, "attention_kwargs", None) or {},
+                    return_dict=False,
+                )
+    finally:
+        handle.remove()
+    return captured[0] if captured else None
+
+
 def _collect_fv_activations(transformer, latent, prompt_embeds, timestep_scaled, device, num_txt_tokens, freqs_cis=None):
     """Run FastVideo transformer with hooks; return list of (block_name, tensor) per block."""
     activations = []
@@ -727,6 +828,11 @@ def main():
     parser.add_argument("--dump", default=DUMP_PATH, help="Path to flux2_step0_dump.pt")
     parser.add_argument("--model-path", default=None, help="Path to transformer dir or repo root")
     parser.add_argument("--device", default="cuda", help="Device for inference")
+    parser.add_argument(
+        "--no-math-sdp",
+        action="store_true",
+        help="Allow flash/mem-efficient SDPA (default: force math SDPA for parity).",
+    )
     args = parser.parse_args()
 
     if not os.path.isfile(args.dump):
@@ -735,6 +841,8 @@ def main():
 
     # Enforce same attention backend (SDPA) for reproducible comparison
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "TORCH_SDPA"
+    if not args.no_math_sdp:
+        _enable_torch_math_sdp()
 
     os.environ.setdefault("LOCAL_RANK", "0")
     os.environ.setdefault("RANK", "0")
@@ -847,7 +955,7 @@ def main():
     if n_double == 0 and (enc_fv or enc_official):
         print("  (one model has no double-block encoder states)")
 
-    # double_4 intermediates: after context attn vs after context FF (find whether 768 is attn or FF path)
+    # double_4 intermediates: align checkpoints (FV after_attn = pre norm2_context, not end of block)
     TARGET_DOUBLE = 4
     if n_double > TARGET_DOUBLE and len(enc_official) > TARGET_DOUBLE:
         print(f"\n--- double_{TARGET_DOUBLE} intermediates (context attn vs context FF) ---")
@@ -855,25 +963,73 @@ def main():
             transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis, block_index=TARGET_DOUBLE
         )
         _, off_enc4 = enc_official[TARGET_DOUBLE]
-        if fv_after_attn is not None and fv_after_ff is not None and off_enc4 is not None:
-            fv_after_attn = fv_after_attn.cpu().float() if fv_after_attn.is_cuda else fv_after_attn.float()
+        off_after_ctx_attn = None
+        if len(official_activations) > 0:
+            off_after_ctx_attn = _capture_official_encoder_after_context_attn(
+                pipe,
+                latent,
+                prompt_embeds,
+                timestep_scaled,
+                text_ids,
+                latent_ids,
+                device,
+                block_index=TARGET_DOUBLE,
+            )
+        if fv_after_attn is not None and off_after_ctx_attn is not None:
+            fa = fv_after_attn.cpu().float() if fv_after_attn.is_cuda else fv_after_attn.float()
+            oa = (
+                off_after_ctx_attn.cpu().float()
+                if off_after_ctx_attn.is_cuda
+                else off_after_ctx_attn.float()
+            )
+            if fa.shape == oa.shape:
+                d_mid = (fa - oa).abs()
+                print(
+                    "  FV after context attn vs official (encoder after attn residual, pre norm2_context): "
+                    f"max_diff={d_mid.max().item():.4f} mean_diff={d_mid.mean().item():.4f}"
+                )
+            else:
+                print(
+                    f"  Shape mismatch after context attn: FV={fa.shape} official={oa.shape}"
+                )
+        elif fv_after_attn is None:
+            print("  Missing FV after_attn (debug hook).")
+        else:
+            print("  Missing official encoder after context attn (norm2_context pre-hook).")
+
+        if fv_after_ff is not None and off_enc4 is not None:
             fv_after_ff = fv_after_ff.cpu().float() if fv_after_ff.is_cuda else fv_after_ff.float()
             off_enc4 = off_enc4.cpu().float() if off_enc4.is_cuda else off_enc4.float()
-            if fv_after_attn.shape == off_enc4.shape and fv_after_ff.shape == off_enc4.shape:
-                d_attn_vs_off = (fv_after_attn - off_enc4).abs()
-                d_ff_vs_off = (fv_after_ff - off_enc4).abs()
-                print(f"  FV after_attn vs official double_{TARGET_DOUBLE} output: max_diff={d_attn_vs_off.max().item():.4f} mean_diff={d_attn_vs_off.mean().item():.4f}")
-                print(f"  FV after_ff    vs official double_{TARGET_DOUBLE} output: max_diff={d_ff_vs_off.max().item():.4f} mean_diff={d_ff_vs_off.mean().item():.4f}")
-                if d_attn_vs_off.max().item() > 100 and d_ff_vs_off.max().item() > 100:
-                    print("  -> Bug likely in context ATTENTION path (both after_attn and after_ff already far from official).")
-                elif d_attn_vs_off.max().item() < 50 and d_ff_vs_off.max().item() > 100:
-                    print("  -> Bug likely in context FF path (after_attn is close; after_ff diverges).")
-                else:
-                    print("  -> Compare context_attn_output / to_add_out and context_ff_output for scale or bias.")
+            if fv_after_ff.shape == off_enc4.shape:
+                d_ff_vs_end = (fv_after_ff - off_enc4).abs()
+                print(
+                    f"  FV after_ff vs official double_{TARGET_DOUBLE} output (end of block): "
+                    f"max_diff={d_ff_vs_end.max().item():.4f} mean_diff={d_ff_vs_end.mean().item():.4f}"
+                )
+                if off_after_ctx_attn is not None and fv_after_attn is not None:
+                    fa = fv_after_attn.cpu().float() if fv_after_attn.is_cuda else fv_after_attn.float()
+                    oa = (
+                        off_after_ctx_attn.cpu().float()
+                        if off_after_ctx_attn.is_cuda
+                        else off_after_ctx_attn.float()
+                    )
+                    if fa.shape == oa.shape:
+                        d_mid = (fa - oa).abs()
+                        if d_mid.max().item() < 10 and d_ff_vs_end.max().item() > 50:
+                            print(
+                                "  -> After context attn matches; larger gap after context FF "
+                                "(check ff_context / clip)."
+                            )
+                        elif d_mid.max().item() > 10:
+                            print(
+                                "  -> Gap already after context attn (joint attention / to_add_out / gates)."
+                            )
             else:
-                print(f"  Shape mismatch: fv_after_attn={fv_after_attn.shape} fv_after_ff={fv_after_ff.shape} official={off_enc4.shape}")
+                print(
+                    f"  Shape mismatch end of block: fv_after_ff={fv_after_ff.shape} official={off_enc4.shape}"
+                )
         else:
-            print("  Missing one of fv_after_attn, fv_after_ff, or official double_4 output.")
+            print("  Missing fv_after_ff or official double_4 output for end-of-block compare.")
 
         # Compare context_attn update (the tensor added to encoder_hidden_states) FV vs official
         if fv_context_attn is not None:
@@ -957,8 +1113,8 @@ def main():
         diff = (a_fv - a_o).abs()
         print(f"  {key}: shape={a_fv.shape} max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f}")
 
-    # Q,K after RoPE (inputs to attention op) — if these differ, bug is in RoPE or Q/K proj; if match, bug is in attn op or output proj
-    print("\n--- double_0 Q,K after RoPE (inputs to attention op) ---")
+    # Q,K after RoPE — official side recomputes via Flux2AttnProcessor (no inner nn.Module)
+    print("\n--- double_0 Q,K after RoPE (inputs to attention / SDPA) ---")
     qk_fv = _capture_double0_qk_after_rope_fv(
         transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis
     )

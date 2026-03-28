@@ -25,6 +25,17 @@ DUMP_PATH = "flux2_step0_dump.pt"
 MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
 
 
+def _enable_torch_math_sdp() -> None:
+    if not torch.cuda.is_available():
+        return
+    try:
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
+    except Exception:
+        pass
+
+
 def _get_transformer_path(model_id: str) -> str:
     """Resolve transformer component path (local or HF cache)."""
     try:
@@ -52,6 +63,11 @@ def main():
     parser.add_argument("--dump", default=DUMP_PATH, help="Path to flux2_step0_dump.pt")
     parser.add_argument("--model-path", default=None, help="Path to transformer dir or repo root")
     parser.add_argument("--device", default="cuda", help="Device for inference")
+    parser.add_argument(
+        "--no-math-sdp",
+        action="store_true",
+        help="Allow flash/mem-efficient SDPA (default: force math SDPA for parity).",
+    )
     args = parser.parse_args()
 
     if not os.path.isfile(args.dump):
@@ -59,6 +75,8 @@ def main():
         sys.exit(1)
 
     os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+    if not args.no_math_sdp:
+        _enable_torch_math_sdp()
 
     # Initialize distributed + model parallel so ColumnParallelLinear in Flux2 DiT can use get_tp_world_size()
     os.environ.setdefault("LOCAL_RANK", "0")

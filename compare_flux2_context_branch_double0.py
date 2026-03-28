@@ -7,7 +7,12 @@ Hooks the same modules on both sides after a step-0 forward. Inputs to block 0
 should already match if the dump is consistent; this isolates ColumnParallelLinear
 (add_*) and to_add_out vs nn.Linear.
 
+ColumnParallelLinear may report .weight shape (0, 0) in named_parameters while
+hooks still see correct matmul I/O at tp_size==1; treat empty weight as a
+storage/inspection quirk, not missing parameters.
+
   python compare_flux2_context_branch_double0.py [--dump PATH] [--device cuda]
+  Use --no-math-sdp to allow non-math SDPA backends.
 
 Requires: flux2_step0_dump.pt (with text_ids, latent_ids), diffusers Flux2KleinPipeline,
 editable FastVideo.
@@ -23,6 +28,17 @@ import torch.nn.functional as F
 
 DUMP_PATH = "flux2_step0_dump.pt"
 MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
+
+
+def _enable_torch_math_sdp() -> None:
+    if not torch.cuda.is_available():
+        return
+    try:
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
+    except Exception:
+        pass
 
 
 def _get_transformer_path(model_id: str) -> str:
@@ -121,6 +137,11 @@ def main() -> None:
     parser.add_argument("--dump", default=DUMP_PATH)
     parser.add_argument("--model-path", default=None)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--no-math-sdp",
+        action="store_true",
+        help="Allow flash/mem-efficient SDPA (default: force math SDPA for parity).",
+    )
     args = parser.parse_args()
 
     if not os.path.isfile(args.dump):
@@ -128,6 +149,8 @@ def main() -> None:
         sys.exit(1)
 
     os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+    if not args.no_math_sdp:
+        _enable_torch_math_sdp()
     os.environ.setdefault("LOCAL_RANK", "0")
     os.environ.setdefault("RANK", "0")
     os.environ.setdefault("WORLD_SIZE", "1")
