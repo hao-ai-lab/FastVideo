@@ -277,30 +277,12 @@ pull_request_rules:
       label:
         remove: [needs-rebase]
 
-  # ============================================================
-  # Auto-rebase stale PRs
-  # ============================================================
-
-  - name: auto-merge when ready and approved
+  - name: enter merge queue when ready and approved
     conditions:
       - label=ready
-      - "#approved-reviews-by>=1"
-      - check-success~=pre-commit
-      - -conflict
-      - -closed
-      - -draft
     actions:
-      merge:
-        method: squash
-
-  - name: auto-rebase on ready label
-    conditions:
-      - label=ready
-      - "#approved-reviews-by>=1"
-      - -conflict
-      - -closed
-    actions:
-      rebase: {}
+      queue:
+        name: default
 
   - name: comment on invalid PR title format
     conditions:
