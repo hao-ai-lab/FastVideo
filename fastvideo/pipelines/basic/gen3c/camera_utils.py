@@ -7,8 +7,7 @@ import math
 import torch
 
 
-def apply_transformation(Bx4x4: torch.Tensor,
-                         another_matrix: torch.Tensor) -> torch.Tensor:
+def apply_transformation(Bx4x4: torch.Tensor, another_matrix: torch.Tensor) -> torch.Tensor:
     """Apply batch transformation to a matrix."""
     B = Bx4x4.shape[0]
     if another_matrix.dim() == 2:
@@ -16,9 +15,7 @@ def apply_transformation(Bx4x4: torch.Tensor,
     return torch.bmm(Bx4x4, another_matrix)
 
 
-def look_at_matrix(camera_pos: torch.Tensor,
-                   target: torch.Tensor,
-                   invert_pos: bool = True) -> torch.Tensor:
+def look_at_matrix(camera_pos: torch.Tensor, target: torch.Tensor, invert_pos: bool = True) -> torch.Tensor:
     """Create a 4x4 look-at view matrix pointing camera toward target."""
     forward = (target - camera_pos).float()
     forward = forward / torch.norm(forward)
@@ -50,9 +47,7 @@ def create_horizontal_trajectory(
     """Create a linear camera trajectory along a specified axis."""
     look_at_target = torch.tensor([0.0, 0.0, center_depth]).to(device)
     trajectory = []
-    initial_camera_pos = torch.tensor([0, 0, 0],
-                                      device=device,
-                                      dtype=torch.float32)
+    initial_camera_pos = torch.tensor([0, 0, 0], device=device, dtype=torch.float32)
 
     translation_positions = []
     for i in range(n_steps):
@@ -76,9 +71,8 @@ def create_horizontal_trajectory(
         elif camera_rotation == "no_rotation":
             _look_at = look_at_target + pos
         else:
-            raise ValueError(
-                f"camera_rotation should be center_facing, trajectory_aligned, "
-                f"or no_rotation, got {camera_rotation}")
+            raise ValueError(f"camera_rotation should be center_facing, trajectory_aligned, "
+                             f"or no_rotation, got {camera_rotation}")
         view_matrix = look_at_matrix(camera_pos, _look_at)
         trajectory.append(view_matrix)
 
@@ -102,9 +96,7 @@ def create_spiral_trajectory(
     """Create a spiral/circular camera trajectory."""
     look_at_target = torch.tensor([0.0, 0.0, center_depth]).to(device)
     trajectory = []
-    initial_camera_pos = torch.tensor([0, 0, 0],
-                                      device=device,
-                                      dtype=torch.float32)
+    initial_camera_pos = torch.tensor([0, 0, 0], device=device, dtype=torch.float32)
 
     theta_max = 2 * math.pi * num_circles
     spiral_positions = []
@@ -112,8 +104,7 @@ def create_spiral_trajectory(
     for i in range(n_steps):
         theta = theta_max * i / (n_steps - 1)
         if start_from_zero:
-            x = radius_x * (math.cos(theta) -
-                            1) * (1 if positive else -1) * center_depth
+            x = radius_x * (math.cos(theta) - 1) * (1 if positive else -1) * center_depth
         else:
             x = radius_x * math.cos(theta) * center_depth
         y = radius_y * math.sin(theta) * center_depth
@@ -129,9 +120,8 @@ def create_spiral_trajectory(
         elif camera_rotation == "no_rotation":
             view_matrix = look_at_matrix(camera_pos, look_at_target + pos)
         else:
-            raise ValueError(
-                f"camera_rotation should be center_facing, trajectory_aligned, "
-                f"or no_rotation, got {camera_rotation}")
+            raise ValueError(f"camera_rotation should be center_facing, trajectory_aligned, "
+                             f"or no_rotation, got {camera_rotation}")
         trajectory.append(view_matrix)
 
     trajectory = torch.stack(trajectory)
@@ -206,8 +196,7 @@ def generate_camera_trajectory(
 
     generated_w2cs = new_w2cs_seq.unsqueeze(0)  # (1, num_frames, 4, 4)
     if initial_intrinsics.dim() == 2:
-        generated_intrinsics = initial_intrinsics.unsqueeze(0).unsqueeze(
-            0).repeat(1, num_frames, 1, 1)
+        generated_intrinsics = initial_intrinsics.unsqueeze(0).unsqueeze(0).repeat(1, num_frames, 1, 1)
     else:
         generated_intrinsics = initial_intrinsics.unsqueeze(0)
 

@@ -19,16 +19,10 @@ from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.cosmos2_5 import Cosmos25Config
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
-<<<<<<< HEAD
+from fastvideo.configs.pipelines.gen3c import Gen3CConfig
 from fastvideo.configs.pipelines.hunyuan15 import (Hunyuan15T2V480PConfig, Hunyuan15I2V480PStepDistilledConfig,
                                                    Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig,
                                                    Hunyuan15SR1080PConfig)
-=======
-from fastvideo.configs.pipelines.hunyuan15 import (
-    Hunyuan15T2V480PConfig, Hunyuan15I2V480PStepDistilledConfig,
-    Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig, Hunyuan15SR1080PConfig)
-from fastvideo.configs.pipelines.gen3c import Gen3CConfig
->>>>>>> 01eee7fc (fix rebase regressions and restore)
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
@@ -58,23 +52,13 @@ from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.configs.sample.cosmos import (
     Cosmos_Predict2_2B_Video2World_SamplingParam, )
 from fastvideo.configs.sample.cosmos2_5 import Cosmos25SamplingParamBase
-<<<<<<< HEAD
+from fastvideo.configs.sample.gen3c import Gen3C_Cosmos_7B_SamplingParam
 from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam, HunyuanSamplingParam)
 from fastvideo.configs.sample.hunyuan15 import (Hunyuan15_480P_SamplingParam,
                                                 Hunyuan15_480P_StepDistilled_I2V_SamplingParam,
                                                 Hunyuan15_720P_SamplingParam,
                                                 Hunyuan15_720P_Distilled_I2V_SamplingParam,
                                                 Hunyuan15_SR_1080P_SamplingParam)
-=======
-from fastvideo.configs.sample.gen3c import Gen3C_Cosmos_7B_SamplingParam
-from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam,
-                                              HunyuanSamplingParam)
-from fastvideo.configs.sample.hunyuan15 import (
-    Hunyuan15_480P_SamplingParam,
-    Hunyuan15_480P_StepDistilled_I2V_SamplingParam,
-    Hunyuan15_720P_SamplingParam, Hunyuan15_720P_Distilled_I2V_SamplingParam,
-    Hunyuan15_SR_1080P_SamplingParam)
->>>>>>> 01eee7fc (fix rebase regressions and restore)
 from fastvideo.configs.sample.hyworld import HYWorld_SamplingParam
 from fastvideo.configs.sample.hunyuangamecraft import HunyuanGameCraftSamplingParam
 from fastvideo.configs.sample.lingbotworld import LingBotWorld_SamplingParam
@@ -444,13 +428,8 @@ def _register_configs() -> None:
             "nvidia/Cosmos-Predict2-2B-Video2World",
         ],
         model_detectors=[
-            lambda path: "cosmos" in path.lower() and
-<<<<<<< HEAD
-            ("2.5" not in path.lower() and "2_5" not in path.lower() and "25" not in path.lower()),
-=======
-            ("2.5" not in path.lower() and "2_5" not in path.lower() and "25"
-             not in path.lower() and "gen3c" not in path.lower()),
->>>>>>> 01eee7fc (fix rebase regressions and restore)
+            lambda path: "cosmos" in path.lower() and ("2.5" not in path.lower() and "2_5" not in path.lower() and "25"
+                                                       not in path.lower() and "gen3c" not in path.lower()),
         ],
     )
 

@@ -30,8 +30,7 @@ def t5_large_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
         attention_mask = outputs.attention_mask
         lengths = attention_mask.sum(dim=1)
         max_len = hidden_state.shape[1]
-        mask = torch.arange(
-            max_len, device=hidden_state.device)[None, :] >= lengths[:, None]
+        mask = torch.arange(max_len, device=hidden_state.device)[None, :] >= lengths[:, None]
         hidden_state[mask] = 0.0
 
     return hidden_state
@@ -52,16 +51,13 @@ class Gen3CConfig(PipelineConfig):
 
     vae_config: VAEConfig = field(default_factory=Gen3CVAEConfig)
 
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (T5LargeConfig(), ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5LargeConfig(), ))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda:
-                                               (t5_large_postprocess_text, ))
+                                  ...] = field(default_factory=lambda: (t5_large_postprocess_text, ))
 
     dit_precision: str = "bf16"
     vae_precision: str = "bf16"
-    text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("bf16", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
 
     # GEN3C-specific conditioning parameters
     conditioning_strategy: str = "frame_replace"
@@ -126,17 +122,13 @@ class Gen3CConfig(PipelineConfig):
         # Validate frame buffer configuration matches DiT
         if hasattr(self.dit_config, 'arch_config'):
             arch_config = self.dit_config.arch_config
-            if (hasattr(arch_config, 'frame_buffer_max')
-                    and arch_config.frame_buffer_max != self.frame_buffer_max):
-                raise ValueError(
-                    f"frame_buffer_max mismatch: pipeline config has {self.frame_buffer_max}, "
-                    f"DiT config has {arch_config.frame_buffer_max}")
+            if (hasattr(arch_config, 'frame_buffer_max') and arch_config.frame_buffer_max != self.frame_buffer_max):
+                raise ValueError(f"frame_buffer_max mismatch: pipeline config has {self.frame_buffer_max}, "
+                                 f"DiT config has {arch_config.frame_buffer_max}")
 
         allowed_cfg_behavior = {"legacy", "official_uncond_at_unity"}
         if self.cfg_behavior not in allowed_cfg_behavior:
-            raise ValueError(
-                f"cfg_behavior must be one of {sorted(allowed_cfg_behavior)}, got {self.cfg_behavior!r}"
-            )
+            raise ValueError(f"cfg_behavior must be one of {sorted(allowed_cfg_behavior)}, got {self.cfg_behavior!r}")
 
 
 @dataclass

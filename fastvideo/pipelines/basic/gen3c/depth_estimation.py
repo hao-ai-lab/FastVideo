@@ -36,12 +36,10 @@ def load_moge_model(
     try:
         from moge.model.v1 import MoGeModel
     except ImportError as exc:
-        raise ImportError(
-            "MoGe is required for GEN3C 3D cache conditioning. "
-            "Install it with: pip install git+https://github.com/microsoft/MoGe.git. "
-            "If import fails with libGL.so.1, install system deps: "
-            "sudo apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender1"
-        ) from exc
+        raise ImportError("MoGe is required for GEN3C 3D cache conditioning. "
+                          "Install it with: pip install git+https://github.com/microsoft/MoGe.git. "
+                          "If import fails with libGL.so.1, install system deps: "
+                          "sudo apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender1") from exc
 
     logger.info("Loading MoGe depth model: %s", model_name)
     model = MoGeModel.from_pretrained(model_name).to(device)
@@ -56,8 +54,7 @@ def predict_depth_from_path(
     target_w: int,
     device: torch.device,
     moge_model: MoGeModel,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
-           torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Predict depth, intrinsics, and mask from an image file path.
 
@@ -82,8 +79,7 @@ def predict_depth_from_path(
         raise FileNotFoundError(f"Input image not found: {image_path}")
     input_image_rgb = cv2.cvtColor(input_image_bgr, cv2.COLOR_BGR2RGB)
 
-    return _predict_depth_core(input_image_rgb, target_h, target_w, device,
-                               moge_model)
+    return _predict_depth_core(input_image_rgb, target_h, target_w, device, moge_model)
 
 
 def predict_depth_from_tensor(
@@ -110,8 +106,7 @@ def predict_depth_from_tensor(
     depth = torch.clamp(depth, min=0, max=1e4)
 
     mask = mask.unsqueeze(0).unsqueeze(0)
-    depth = torch.where(mask == 0, torch.tensor(1000.0, device=depth.device),
-                        depth)
+    depth = torch.where(mask == 0, torch.tensor(1000.0, device=depth.device), depth)
 
     return depth, mask
 
@@ -122,8 +117,7 @@ def _predict_depth_core(
     target_w: int,
     device: torch.device,
     moge_model: MoGeModel,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
-           torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Core depth prediction logic shared between path and tensor inputs."""
     import cv2
 
@@ -131,9 +125,7 @@ def _predict_depth_core(
     depth_pred_h, depth_pred_w = 720, 1280
 
     resized = cv2.resize(input_image_rgb, (depth_pred_w, depth_pred_h))
-    img_tensor = torch.tensor(resized / 255.0,
-                              dtype=torch.float32,
-                              device=device).permute(2, 0, 1)
+    img_tensor = torch.tensor(resized / 255.0, dtype=torch.float32, device=device).permute(2, 0, 1)
 
     # Run MoGe inference
     moge_output = moge_model.infer(img_tensor)
@@ -142,9 +134,7 @@ def _predict_depth_core(
     mask_hw = moge_output["mask"]
 
     # Replace invalid depth with large value
-    depth_hw = torch.where(mask_hw == 0,
-                           torch.tensor(1000.0, device=depth_hw.device),
-                           depth_hw)
+    depth_hw = torch.where(mask_hw == 0, torch.tensor(1000.0, device=depth_hw.device), depth_hw)
 
     # Convert normalized intrinsics to pixel coordinates
     intrinsics_pixel = intrinsics_norm.clone()
@@ -162,14 +152,11 @@ def _predict_depth_core(
                                  mode='bilinear',
                                  align_corners=False).squeeze(0).squeeze(0)
 
-    mask_target = F.interpolate(
-        mask_hw.unsqueeze(0).unsqueeze(0).to(torch.float32),
-        size=(target_h, target_w),
-        mode='nearest').squeeze(0).squeeze(0).to(torch.bool)
+    mask_target = F.interpolate(mask_hw.unsqueeze(0).unsqueeze(0).to(torch.float32),
+                                size=(target_h, target_w),
+                                mode='nearest').squeeze(0).squeeze(0).to(torch.bool)
 
-    img_target = F.interpolate(img_tensor.unsqueeze(0),
-                               size=(target_h, target_w),
-                               mode='bilinear',
+    img_target = F.interpolate(img_tensor.unsqueeze(0), size=(target_h, target_w), mode='bilinear',
                                align_corners=False).squeeze(0)
 
     # Scale intrinsics for target resolution
@@ -189,8 +176,7 @@ def _predict_depth_core(
 
     mask_out = mask_target.unsqueeze(0).unsqueeze(0).unsqueeze(0)
 
-    w2c_out = torch.eye(4, dtype=torch.float32,
-                        device=device).unsqueeze(0).unsqueeze(0)
+    w2c_out = torch.eye(4, dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)
     intrinsics_out = intrinsics_target.unsqueeze(0).unsqueeze(0)
 
     return image_out, depth_out, mask_out, w2c_out, intrinsics_out
