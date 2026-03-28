@@ -15,7 +15,6 @@ from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig, Hunyuan15T2V720PConfig
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.ltx2 import LTX2T2VConfig
-from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionT2V_1_3B_Config, TurboDiffusionT2V_14B_Config,
@@ -53,7 +52,6 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": FastWan2_1_T2V_480P_Config,
     "FastVideo/FastWan2.1-T2V-14B-480P-Diffusers": FastWan2_1_T2V_480P_Config,
     "FastVideo/FastWan2.2-TI2V-5B-Diffusers": FastWan2_2_TI2V_5B_Config,
-    "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VConfig,
     "FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers": WanT2V720PConfig,
     "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers": SelfForcingWanT2V480PConfig,
     "rand0nmr/SFWan2.2-T2V-A14B-Diffusers": SelfForcingWan2_2_T2V480PConfig,
@@ -108,8 +106,6 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "wandmdpipeline" in id.lower(),
     "wancausaldmdpipeline":
     lambda id: "wancausaldmdpipeline" in id.lower(),
-    "stepvideo":
-    lambda id: "stepvideo" in id.lower(),
     "cosmos":
     lambda id: "cosmos" in id.lower() and ("2.5" not in id.lower(
     ) and "2_5" not in id.lower() and "25" not in id.lower()),
@@ -145,7 +141,6 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "wanimagetovideo": WanI2V480PConfig,
     "wandmdpipeline": FastWan2_1_T2V_480P_Config,
     "wancausaldmdpipeline": SelfForcingWanT2V480PConfig,
-    "stepvideo": StepVideoT2VConfig,
     "turbodiffusion": TurboDiffusionT2V_1_3B_Config,
     "ltx2": LTX2T2VConfig,
     "flux2klein": Flux2KleinPipelineConfig,  # before flux2 so Flux2KleinPipeline matches Klein

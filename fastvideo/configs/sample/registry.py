@@ -7,7 +7,6 @@ from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam,
                                               HunyuanSamplingParam)
 from fastvideo.configs.sample.hunyuan15 import Hunyuan15_480P_SamplingParam, Hunyuan15_720P_SamplingParam
 from fastvideo.configs.sample.hyworld import HYWorld_SamplingParam
-from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 
 from fastvideo.configs.sample.cosmos import Cosmos_Predict2_2B_Video2World_SamplingParam
 from fastvideo.configs.sample.cosmos2_5 import Cosmos_Predict2_5_2B_Diffusers_SamplingParam
@@ -53,7 +52,6 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v":
     Hunyuan15_720P_SamplingParam,
     "FastVideo/HY-WorldPlay-Bidirectional-Diffusers": HYWorld_SamplingParam,
-    "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
 
     # Wan2.1
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V_1_3B_SamplingParam,
@@ -132,8 +130,6 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo":
     lambda id: "wanimagetovideo" in id.lower(),
-    "stepvideo":
-    lambda id: "stepvideo" in id.lower(),
     "wandmdpipeline":
     lambda id: "wandmdpipeline" in id.lower(),
     "wancausaldmdpipeline":
@@ -164,7 +160,6 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     "wanimagetovideo": WanI2V_14B_480P_SamplingParam,
     "wandmdpipeline": FastWanT2V480P_SamplingParam,
     "wancausaldmdpipeline": SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
-    "stepvideo": StepVideoT2VSamplingParam,
     "matrixgame": MatrixGame2_SamplingParam,
     "turbodiffusion":
     TurboDiffusionT2V_1_3B_SamplingParam,  # Default to T2V for fallback
