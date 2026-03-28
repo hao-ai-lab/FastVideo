@@ -24,7 +24,7 @@ REQUIRED_GPUS = 1
 
 SD35_MODEL_PATH = os.getenv(
     "SD35_MODEL_DIR",
-    "/FastVideo/official_weights/stabilityai__stable-diffusion-3.5-medium",
+    "stabilityai/stable-diffusion-3.5-medium",
 )
 
 MODEL_ID = "stabilityai__stable-diffusion-3.5-medium"
@@ -71,9 +71,7 @@ def test_sd35_similarity(prompt: str, ATTENTION_BACKEND: str) -> None:
     )
 
     if not os.path.isdir(SD35_MODEL_PATH):
-        pytest.skip(
-            f"SD3.5 weights not found at {SD35_MODEL_PATH} (set SD35_MODEL_DIR to override)"
-        )
+        pytest.skip(f"SD3.5 weights not found at {SD35_MODEL_PATH} (set SD35_MODEL_DIR to override)")
 
     old_backend = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
     old_transformers_verbosity = os.environ.get("TRANSFORMERS_VERBOSITY")
@@ -192,9 +190,7 @@ def test_sd35_similarity(prompt: str, ATTENTION_BACKEND: str) -> None:
                     reference_video_name = filename
                     break
             if not reference_video_name:
-                bless_cmd = (
-                    f"cp {shlex.quote(generated_video_path)} {shlex.quote(reference_folder)}/"
-                )
+                bless_cmd = f"cp {shlex.quote(generated_video_path)} {shlex.quote(reference_folder)}/"
                 pytest.fail(
                     f"Reference video not found for prompt '{prompt}' under: {reference_folder}\n"
                     f"Expected name: {output_video_name}\n"
@@ -205,9 +201,7 @@ def test_sd35_similarity(prompt: str, ATTENTION_BACKEND: str) -> None:
             reference_video_path = os.path.join(reference_folder, reference_video_name)
 
         logger.info("Computing SSIM between %s and %s", reference_video_path, generated_video_path)
-        ssim_values = compute_video_ssim_torchvision(
-            reference_video_path, generated_video_path, use_ms_ssim=True
-        )
+        ssim_values = compute_video_ssim_torchvision(reference_video_path, generated_video_path, use_ms_ssim=True)
 
         mean_ssim = ssim_values[0]
         logger.info("SSIM mean value: %s", mean_ssim)
