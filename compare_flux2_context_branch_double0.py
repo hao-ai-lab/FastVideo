@@ -43,14 +43,6 @@ def _get_transformer_path(model_id: str) -> str:
     raise FileNotFoundError(f"Could not find transformer for {model_id}")
 
 
-def _linear_out(module, x: torch.Tensor) -> torch.Tensor:
-    """Match ColumnParallelLinear (tuple) vs nn.Linear (tensor)."""
-    out = module(x)
-    if isinstance(out, tuple):
-        return out[0]
-    return out
-
-
 def _register_io_hooks(attn_module, storage: dict, prefix: str) -> list:
     handles = []
 
@@ -81,21 +73,45 @@ def _max_mean(a: torch.Tensor, b: torch.Tensor) -> tuple[float, float]:
     return d.max().item(), d.mean().item()
 
 
-def _flinear_vs_module(
-    x: torch.Tensor, weight: torch.Tensor, bias, module_forward
-) -> tuple[float, float]:
-    """max/mean |module(x) - F.linear(x, w, b)| in float32."""
+def _linear_match_captured(
+    x_cap: torch.Tensor,
+    y_cap: torch.Tensor,
+    module: torch.nn.Module,
+    label: str,
+) -> None:
+    """Compare F.linear(x, weight, bias) to hook-captured output (no second forward)."""
+    w = getattr(module, "weight", None)
+    if w is None:
+        print(f"  {label}: module has no .weight")
+        return
+    if w.numel() == 0:
+        print(f"  {label}: .weight is empty; named_parameters:")
+        for n, p in module.named_parameters():
+            print(f"    {n}: {tuple(p.shape)}")
+        return
+    b = getattr(module, "bias", None)
+    dev = w.device
+    dt = w.dtype
+    x2 = x_cap.to(device=dev, dtype=dt).reshape(-1, x_cap.shape[-1])
+    y2 = y_cap.to(device=dev, dtype=dt).reshape(-1, y_cap.shape[-1])
+    if w.shape[1] != x2.shape[1]:
+        print(
+            f"  {label}: skip F.linear check (w.shape={tuple(w.shape)} "
+            f"vs x_in_features={x2.shape[1]})"
+        )
+        return
     with torch.no_grad():
-        y_mod = module_forward(x)
-        if isinstance(y_mod, tuple):
-            y_mod = y_mod[0]
         y_man = F.linear(
-            x.float(),
-            weight.float(),
-            None if bias is None else bias.float(),
-        ).to(dtype=y_mod.dtype)
-        d = (y_mod.float() - y_man.float()).abs()
-        return d.max().item(), d.mean().item()
+            x2.float(),
+            w.float(),
+            None if b is None else b.float(),
+        )
+        d = (y_man - y2.float()).abs()
+        print(
+            f"  {label}: F.linear vs captured out "
+            f"max={d.max().item():.6e} mean={d.mean().item():.6e} "
+            f"(x={tuple(x_cap.shape)} w={tuple(w.shape)} out={tuple(y_cap.shape)})"
+        )
 
 
 def main() -> None:
@@ -216,21 +232,40 @@ def main() -> None:
             f"output max|diff|={mo:.6f} mean={ao:.6f}"
         )
 
-    print("\n--- F.linear sanity (FastVideo weights vs FV module output) ---")
-    x_in = fv_store.get("fv_add_q_proj_in")
-    if x_in is not None:
-        m = fv_attn.add_q_proj
-        w = m.weight
-        b = getattr(m, "bias", None)
-        mmx, mmn = _flinear_vs_module(x_in, w, b, lambda t: _linear_out(m, t))
-        print(f"  add_q_proj F.linear vs module: max={mmx:.6e} mean={mmn:.6e}")
+    print("\n--- F.linear sanity (weights vs hook-captured outputs, no second forward) ---")
+    if fv_store.get("fv_add_q_proj_in") is not None and fv_store.get(
+        "fv_add_q_proj_out"
+    ) is not None:
+        _linear_match_captured(
+            fv_store["fv_add_q_proj_in"],
+            fv_store["fv_add_q_proj_out"],
+            fv_attn.add_q_proj,
+            "add_q_proj",
+        )
+    if fv_store.get("fv_to_add_out_in") is not None and fv_store.get(
+        "fv_to_add_out_out"
+    ) is not None:
+        _linear_match_captured(
+            fv_store["fv_to_add_out_in"],
+            fv_store["fv_to_add_out_out"],
+            fv_attn.to_add_out,
+            "to_add_out",
+        )
 
     print("\n--- Weight vs Diffusers (add_q_proj) ---")
     if hasattr(off_attn, "add_q_proj") and hasattr(fv_attn, "add_q_proj"):
-        ow = off_attn.add_q_proj.weight.data.float()
-        fw = fv_attn.add_q_proj.weight.data.float()
-        d = (ow - fw).abs()
-        print(f"  weight max|diff|={d.max().item():.6e} mean={d.mean().item():.6e}")
+        ow = off_attn.add_q_proj.weight.data
+        fw = fv_attn.add_q_proj.weight.data
+        if ow.numel() == 0 or fw.numel() == 0:
+            print(f"  skip (off weight {tuple(ow.shape)}, fv {tuple(fw.shape)})")
+        elif ow.shape != fw.shape:
+            print(f"  skip shape mismatch off={tuple(ow.shape)} fv={tuple(fw.shape)}")
+        else:
+            d = (ow.float() - fw.float()).abs()
+            print(
+                f"  weight max|diff|={d.max().item():.6e} "
+                f"mean={d.mean().item():.6e}"
+            )
 
 
 if __name__ == "__main__":
