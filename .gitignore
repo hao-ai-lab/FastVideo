@@ -87,4 +87,5 @@ preprocess_output_text/
 
 .claude/
 .codex/
+.sisyphus/
 openspec/
