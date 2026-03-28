@@ -15,6 +15,9 @@ not to the full block output.
 
 Also reports post-SDPA tensors (4D, before flatten) for double_0 and double_4,
 and ``ff_context`` sublayer outputs (after linear_in, act_fn, linear_out).
+
+Use ``--skip-block-scan`` to avoid caching every block's activations on GPU
+(OOM on smaller cards); the script exits after double_0 post-SDPA stats.
 """
 import argparse
 import os
@@ -1115,6 +1118,12 @@ def main():
         action="store_true",
         help="Allow flash/mem-efficient SDPA (default: force math SDPA for parity).",
     )
+    parser.add_argument(
+        "--skip-block-scan",
+        action="store_true",
+        help="Skip storing per-block activations for both models (saves VRAM); "
+        "runs targeted hooks only, then exits after double_0 post-SDPA.",
+    )
     args = parser.parse_args()
 
     if not os.path.isfile(args.dump):
@@ -1145,8 +1154,11 @@ def main():
     device = args.device
     model_path = args.model_path or _get_transformer_path(MODEL_ID)
 
-    # 1. Load official transformer (via pipeline) and collect activations
-    print("Loading official Flux2KleinPipeline and running forward with hooks ...")
+    # 1. Load official pipeline; optionally skip full per-block activation tensor list
+    print("Loading official Flux2KleinPipeline ...")
+    pipe = None
+    official_pipeline_ok = False
+    official_activations: list = []
     try:
         try:
             from diffusers import Flux2KleinPipeline
@@ -1154,13 +1166,27 @@ def main():
             from diffusers.pipelines.flux2 import Flux2KleinPipeline
         pipe = Flux2KleinPipeline.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16)
         pipe = pipe.to(device)
-        official_activations = _collect_official_activations(
-            pipe, latent, prompt_embeds, timestep_scaled,
-            text_ids, latent_ids, device, num_txt_tokens,
-        )
+        official_pipeline_ok = True
+        if args.skip_block_scan:
+            print(
+                "  --skip-block-scan: not caching all block outputs (lower VRAM)."
+            )
+        else:
+            print("Running official transformer with per-block hooks ...")
+            official_activations = _collect_official_activations(
+                pipe,
+                latent,
+                prompt_embeds,
+                timestep_scaled,
+                text_ids,
+                latent_ids,
+                device,
+                num_txt_tokens,
+            )
     except Exception as e:
-        print(f"Official pipeline/hooks failed: {e}")
+        print(f"Official pipeline failed: {e}")
         official_activations = []
+        official_pipeline_ok = False
 
     # 2. Load FastVideo transformer and collect activations
     print("Loading FastVideo transformer and running forward with hooks ...")
@@ -1194,7 +1220,7 @@ def main():
         transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis
     )
     in_official = {}
-    if len(official_activations) > 0:
+    if official_pipeline_ok:
         in_official = _capture_double0_inputs_official(
             pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device
         )
@@ -1216,7 +1242,7 @@ def main():
         transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis
     )
     enc_official = []
-    if len(official_activations) > 0:
+    if official_pipeline_ok:
         enc_official = _collect_official_double_encoder_states(
             pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device
         )
@@ -1246,7 +1272,7 @@ def main():
         )
         _, off_enc4 = enc_official[TARGET_DOUBLE]
         off_after_ctx_attn = None
-        if len(official_activations) > 0:
+        if official_pipeline_ok:
             off_after_ctx_attn = _capture_official_encoder_after_context_attn(
                 pipe,
                 latent,
@@ -1343,7 +1369,7 @@ def main():
             num_txt_tokens,
         )
         sdp4_off = {}
-        if len(official_activations) > 0:
+        if official_pipeline_ok:
             sdp4_off = _capture_post_sdpa_4d_official(
                 pipe,
                 latent,
@@ -1417,7 +1443,7 @@ def main():
             TARGET_DOUBLE,
         )
         off_ffs = {}
-        if len(official_activations) > 0:
+        if official_pipeline_ok:
             off_ffs = _capture_ff_context_steps_official(
                 pipe,
                 latent,
@@ -1441,7 +1467,7 @@ def main():
         transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis
     )
     attn_official = {}
-    if len(official_activations) > 0:
+    if official_pipeline_ok:
         attn_official = _capture_double0_attn_output_official(
             pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device
         )
@@ -1463,7 +1489,7 @@ def main():
         transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis
     )
     qk_official = {}
-    if len(official_activations) > 0:
+    if official_pipeline_ok:
         qk_official = _capture_double0_qk_after_rope_official(
             pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device
         )
@@ -1492,7 +1518,7 @@ def main():
         num_txt_tokens,
     )
     sdp0_off = {}
-    if len(official_activations) > 0:
+    if official_pipeline_ok:
         sdp0_off = _capture_post_sdpa_4d_official(
             pipe,
             latent,
@@ -1510,6 +1536,15 @@ def main():
             sdp0_fv.get(key),
             sdp0_off.get(key),
         )
+
+    if args.skip_block_scan:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        print(
+            "\nDone (--skip-block-scan). Re-run without it for single_0 / "
+            "block-by-block when VRAM allows."
+        )
+        return
 
     fv_activations = _collect_fv_activations(
         transformer,
@@ -1530,7 +1565,7 @@ def main():
         transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, 0, freqs_cis
     )
     in0_official = {}
-    if len(official_activations) > 0:
+    if official_pipeline_ok:
         in0_official = _capture_single_block_input_official(
             pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, 0
         )
@@ -1612,7 +1647,7 @@ def main():
                 transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, single_idx, freqs_cis
             )
             in_official = {}
-            if len(official_activations) > 0:
+            if official_pipeline_ok:
                 in_official = _capture_single_block_input_official(
                     pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, single_idx
                 )

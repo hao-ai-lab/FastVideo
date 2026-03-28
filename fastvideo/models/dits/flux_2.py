@@ -22,6 +22,7 @@ from diffusers.models.normalization import AdaLayerNormContinuous
 
 from fastvideo.configs.models.dits.flux_2 import Flux2Config
 from fastvideo.attention import LocalAttention
+from fastvideo.distributed import get_tp_world_size
 from fastvideo.layers.linear import ColumnParallelLinear
 from fastvideo.layers.rotary_embedding import apply_rotary_emb
 from fastvideo.models.dits.base import BaseDiT
@@ -81,6 +82,12 @@ class Flux2SwiGLU(nn.Module):
 
 
 class Flux2FeedForward(nn.Module):
+    """FF sub-block: SwiGLU + two linears.
+
+    At ``tp_world_size == 1``, use ``nn.Linear`` to match Diffusers numerics and
+    checkpoint layout; under tensor parallel, use ``ColumnParallelLinear``.
+    """
+
     def __init__(
         self,
         dim: int,
@@ -94,19 +101,28 @@ class Flux2FeedForward(nn.Module):
             inner_dim = int(dim * mult)
         dim_out = dim_out or dim
 
-        # Flux2SwiGLU will reduce the dimension by half
-        self.linear_in = ColumnParallelLinear(
-            dim, inner_dim * 2, bias=bias, gather_output=True
-        )
+        self._ff_dense_linear = get_tp_world_size() == 1
+        if self._ff_dense_linear:
+            self.linear_in = nn.Linear(dim, inner_dim * 2, bias=bias)
+            self.linear_out = nn.Linear(inner_dim, dim_out, bias=bias)
+        else:
+            self.linear_in = ColumnParallelLinear(
+                dim, inner_dim * 2, bias=bias, gather_output=True
+            )
+            self.linear_out = ColumnParallelLinear(
+                inner_dim, dim_out, bias=bias, gather_output=True
+            )
         self.act_fn = Flux2SwiGLU()
-        self.linear_out = ColumnParallelLinear(
-            inner_dim, dim_out, bias=bias, gather_output=True
-        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x, _ = self.linear_in(x)
-        x = self.act_fn(x)
-        x, _ = self.linear_out(x)
+        if self._ff_dense_linear:
+            x = self.linear_in(x)
+            x = self.act_fn(x)
+            x = self.linear_out(x)
+        else:
+            x, _ = self.linear_in(x)
+            x = self.act_fn(x)
+            x, _ = self.linear_out(x)
         return x
 
 
