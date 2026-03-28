@@ -1,3 +1,27 @@
+queue_rules:
+  - name: default
+    queue_conditions:
+      - check-success~=pre-commit
+      - "#approved-reviews-by>=1"
+      - -draft
+      - -conflict
+      - -closed
+      - label!=do-not-merge
+    merge_conditions:
+      - check-success~=buildkite/ci
+    merge_method: squash
+    commit_message_template: |
+      {{ title }} (#{{ number }})
+
+      {{ body }}
+
+merge_protections:
+  - name: PR title must follow conventional format
+    if:
+      - base = main
+    success_conditions:
+      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
+
 pull_request_rules:
 
   # ============================================================
@@ -277,3 +301,34 @@ pull_request_rules:
       - -closed
     actions:
       rebase: {}
+
+  - name: comment on invalid PR title format
+    conditions:
+      - -closed
+      - -draft
+      - -"title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
+    actions:
+      comment:
+        message: |
+          ## ⚠️ PR title format required
+
+          Your PR title must start with a type tag in brackets. Examples:
+          - `[feat] Add new model support`
+          - `[bugfix] Fix VAE tiling corruption`
+          - `[refactor] Restructure training pipeline`
+          - `[perf] Optimize attention kernel`
+          - `[ci] Update test infrastructure`
+          - `[docs] Add inference guide`
+          - `[misc] Clean up configs`
+          - `[new-model] Port Flux2 to FastVideo`
+
+          Valid tags: `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`, `ci`, `doc`, `docs`, `misc`, `chore`, `kernel`, `new-model`
+
+          Please update your PR title and the merge protection check will pass automatically.
+
+  - name: delete merged branch
+    conditions:
+      - merged
+      - -head~=^(main|master|release[/-])$
+    actions:
+      delete_head_branch: {}
