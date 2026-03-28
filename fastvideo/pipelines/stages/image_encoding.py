@@ -847,3 +847,83 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
         self.vae.to("cpu")
 
         return batch
+
+
+class MatrixGame3ImageVAEEncodingStage(ImageVAEEncodingStage):
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        assert batch.pil_image is not None
+
+        if fastvideo_args.mode == ExecutionMode.INFERENCE:
+            assert batch.height is not None and isinstance(batch.height, int)
+            assert batch.width is not None and isinstance(batch.width, int)
+            height = batch.height
+            width = batch.width
+        elif fastvideo_args.mode == ExecutionMode.PREPROCESS:
+            assert batch.height is not None and isinstance(batch.height, list)
+            assert batch.width is not None and isinstance(batch.width, list)
+            height = batch.height[0]
+            width = batch.width[0]
+        else:
+            height = batch.height if isinstance(batch.height, int) else batch.height[0]
+            width = batch.width if isinstance(batch.width, int) else batch.width[0]
+
+        self.vae = self.vae.to(get_local_torch_device())
+
+        image = batch.pil_image
+        if isinstance(image, torch.Tensor):
+            if image.dim() == 5:
+                image = image[:, :, :1]
+            elif image.dim() == 4:
+                image = image.unsqueeze(2)
+            else:
+                raise ValueError(f"Unexpected tensor dimensions for MatrixGame3 image: {image.shape}")
+            video_condition = image.to(get_local_torch_device(), dtype=torch.float32)
+        else:
+            image = self.preprocess(image,
+                                    vae_scale_factor=self.vae.spatial_compression_ratio,
+                                    height=height,
+                                    width=width).to(get_local_torch_device(), dtype=torch.float32)
+            video_condition = image.unsqueeze(2).to(get_local_torch_device(), dtype=torch.float32)
+
+        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+
+        with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
+            if fastvideo_args.pipeline_config.vae_tiling:
+                self.vae.enable_tiling()
+            if not vae_autocast_enabled:
+                video_condition = video_condition.to(vae_dtype)
+            encoder_output = self.vae.encode(video_condition)
+
+        img_cond = encoder_output.mode()
+
+        if (hasattr(self.vae.config, 'latents_mean') and hasattr(self.vae.config, 'latents_std')):
+            latents_mean = torch.tensor(self.vae.config.latents_mean, device=img_cond.device,
+                                        dtype=img_cond.dtype).view(1, -1, 1, 1, 1)
+            latents_std = torch.tensor(self.vae.config.latents_std, device=img_cond.device,
+                                       dtype=img_cond.dtype).view(1, -1, 1, 1, 1)
+            img_cond = (img_cond - latents_mean) / latents_std
+        elif (hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None):
+            if isinstance(self.vae.shift_factor, torch.Tensor):
+                img_cond -= self.vae.shift_factor.to(img_cond.device, img_cond.dtype)
+            else:
+                img_cond -= self.vae.shift_factor
+
+            if hasattr(self.vae, 'scaling_factor'):
+                if isinstance(self.vae.scaling_factor, torch.Tensor):
+                    img_cond = img_cond * self.vae.scaling_factor.to(img_cond.device, img_cond.dtype)
+                else:
+                    img_cond = img_cond * self.vae.scaling_factor
+
+        batch.image_latent = img_cond
+
+        if hasattr(self, 'maybe_free_model_hooks'):
+            self.maybe_free_model_hooks()
+
+        self.vae.to("cpu")
+        return batch

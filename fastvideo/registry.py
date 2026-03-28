@@ -26,6 +26,7 @@ from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.configs.pipelines.ltx2 import LTX2T2VConfig
+from fastvideo.configs.pipelines.matrixgame import MatrixGame2I2V480PConfig, MatrixGame3I2V720PConfig
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
     TurboDiffusionT2V_14B_Config,
@@ -34,7 +35,6 @@ from fastvideo.configs.pipelines.turbodiffusion import (
 from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config,
     FastWan2_2_TI2V_5B_Config,
-    MatrixGameI2V480PConfig,
     SelfForcingWan2_2_T2V480PConfig,
     SelfForcingWanT2V480PConfig,
     WANV2VConfig,
@@ -61,6 +61,7 @@ from fastvideo.configs.sample.hyworld import HYWorld_SamplingParam
 from fastvideo.configs.sample.hunyuangamecraft import HunyuanGameCraftSamplingParam
 from fastvideo.configs.sample.lingbotworld import LingBotWorld_SamplingParam
 from fastvideo.configs.sample.ltx2 import (LTX2BaseSamplingParam, LTX2DistilledSamplingParam)
+from fastvideo.configs.sample.matrixgame import MatrixGame2SamplingParam, MatrixGame3SamplingParam
 from fastvideo.configs.sample.turbodiffusion import (
     TurboDiffusionI2V_A14B_SamplingParam,
     TurboDiffusionT2V_14B_SamplingParam,
@@ -68,7 +69,6 @@ from fastvideo.configs.sample.turbodiffusion import (
 )
 from fastvideo.configs.sample.wan import (
     FastWanT2V480P_SamplingParam,
-    MatrixGame2_SamplingParam,
     SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
     SelfForcingWan2_2_T2V_A14B_480P_SamplingParam,
     Wan2_1_Fun_1_3B_Control_SamplingParam,
@@ -378,15 +378,33 @@ def _register_configs() -> None:
 
     # MatrixGame
     register_configs(
-        sampling_param_cls=MatrixGame2_SamplingParam,
-        pipeline_config_cls=MatrixGameI2V480PConfig,
+        sampling_param_cls=MatrixGame2SamplingParam,
+        pipeline_config_cls=MatrixGame2I2V480PConfig,
         hf_model_paths=[
             "FastVideo/Matrix-Game-2.0-Base-Diffusers",
             "FastVideo/Matrix-Game-2.0-GTA-Diffusers",
             "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",
         ],
         model_detectors=[
-            lambda path: "matrix-game" in path.lower() or "matrixgame" in path.lower(),
+            lambda path: any(token in path.lower() for token in (
+                "matrix-game-2",
+                "matrixgame2",
+                "matrix-game-2.0",
+            )),
+        ],
+    )
+    register_configs(
+        sampling_param_cls=MatrixGame3SamplingParam,
+        pipeline_config_cls=MatrixGame3I2V720PConfig,
+        hf_model_paths=[
+            "FastVideo/Matrix-Game-3.0-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in (
+                "matrix-game-3",
+                "matrixgame3",
+                "matrix-game-3.0",
+            )),
         ],
     )
 

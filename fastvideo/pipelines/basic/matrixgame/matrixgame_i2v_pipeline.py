@@ -15,7 +15,7 @@ from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUni
 logger = init_logger(__name__)
 
 
-class MatrixGamePipeline(LoRAPipeline, ComposedPipelineBase):
+class MatrixGame2I2VPipeline(LoRAPipeline, ComposedPipelineBase):
     _required_config_modules = ["vae", "transformer", "scheduler", "image_encoder", "image_processor"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
@@ -59,4 +59,4 @@ class MatrixGamePipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 
 
-EntryClass = [MatrixGamePipeline]
+EntryClass = [MatrixGame2I2VPipeline]

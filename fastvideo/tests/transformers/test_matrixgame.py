@@ -4,7 +4,7 @@ import os
 import pytest
 import torch
 
-from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
+from fastvideo.configs.models.dits.matrixgame import MatrixGame2WanVideoConfig
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.distributed.parallel_state import (
     get_sp_parallel_rank,
@@ -45,7 +45,7 @@ def test_matrixgame_transformer():
         dit_cpu_offload=False,
         use_fsdp_inference=False,
         pipeline_config=PipelineConfig(
-            dit_config=MatrixGameWanVideoConfig(), dit_precision=precision_str
+            dit_config=MatrixGame2WanVideoConfig(), dit_precision=precision_str
         ),
     )
     args.device = device

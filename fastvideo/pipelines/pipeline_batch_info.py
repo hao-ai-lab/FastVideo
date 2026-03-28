@@ -129,6 +129,8 @@ class ForwardBatch:
     mouse_cond: torch.Tensor | None = None  # Shape: (B, T, 2)
     keyboard_cond: torch.Tensor | None = None  # Shape: (B, T, K)
     grid_sizes: torch.Tensor | None = None  # Shape: (3,) [F,H,W]
+    num_iterations: int | None = None
+    use_base_model: bool = False
 
     # Camera control inputs (HYWorld)
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
