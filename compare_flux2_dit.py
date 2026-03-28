@@ -3,7 +3,8 @@
 Load step-0 dump from dump_flux2_step0.py, run FastVideo's Flux2 DiT with the same
 inputs, and compare the output to the official noise_pred.
 
-Requires: flux2_step0_dump.pt (run dump_flux2_step0.py first).
+Requires: flux2_step0_dump.pt (run dump_flux2_step0.py first), including
+text_ids and latent_ids for RoPE (same as Diffusers transformer call).
 Uses FastVideo's component loader to load the transformer from the same checkpoint.
 
   python compare_flux2_dit.py [--model-path PATH]
@@ -15,9 +16,9 @@ import sys
 import torch
 
 # FastVideo imports
-from fastvideo.configs.pipelines.registry import get_pipeline_config_cls_from_name
 from fastvideo.forward_context import set_forward_context
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.models.dits.flux_2 import compute_flux2_freqs_cis_from_ids
 from fastvideo.models.loader.component_loader import TransformerLoader
 
 DUMP_PATH = "flux2_step0_dump.pt"
@@ -57,6 +58,8 @@ def main():
         print(f"Missing dump file: {args.dump}. Run dump_flux2_step0.py first.")
         sys.exit(1)
 
+    os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+
     # Initialize distributed + model parallel so ColumnParallelLinear in Flux2 DiT can use get_tp_world_size()
     os.environ.setdefault("LOCAL_RANK", "0")
     os.environ.setdefault("RANK", "0")
@@ -71,6 +74,14 @@ def main():
     timestep_scaled = data["timestep_scaled"]
     prompt_embeds = data["prompt_embeds"]
     noise_pred_official = data["noise_pred_official"]
+    text_ids = data.get("text_ids")
+    latent_ids = data.get("latent_ids")
+    if text_ids is None or latent_ids is None:
+        print(
+            "Dump missing text_ids or latent_ids; re-run dump_flux2_step0.py so RoPE "
+            "matches Diffusers."
+        )
+        sys.exit(1)
 
     model_path = args.model_path or _get_transformer_path(MODEL_ID)
     print(f"Loading FastVideo transformer from {model_path} ...")
@@ -96,12 +107,21 @@ def main():
     timestep_scaled = timestep_scaled.to(args.device)
     prompt_embeds = prompt_embeds.to(args.device, dtype=model_dtype)
 
+    freqs_cis = compute_flux2_freqs_cis_from_ids(
+        transformer.rotary_emb,
+        text_ids,
+        latent_ids,
+        args.device,
+        dtype=model_dtype,
+    )
+
     with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
         noise_pred_fv = transformer(
             latent,
             prompt_embeds,
             timestep_scaled,
             guidance=None,
+            freqs_cis=freqs_cis,
         )
 
     # Official returns (B, seq, C); FastVideo may return 5D -> take same slice if needed

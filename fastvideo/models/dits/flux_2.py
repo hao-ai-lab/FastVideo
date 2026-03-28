@@ -698,29 +698,25 @@ class Flux2PosEmbed(nn.Module):
         Returns:
             Tuple of (cos, sin) tensors of shape [num_tokens, head_dim]
         """
-        # pos shape: [num_tokens, n_axes] where n_axes = len(axes_dim)
-        num_tokens = pos.shape[0]
         n_axes = pos.shape[1]
-        device = pos.device
-        
-        # Compute 1D embeddings for each axis and concatenate
+
         cos_parts = []
         sin_parts = []
-        
+
         for axis_idx in range(n_axes):
             axis_positions = pos[:, axis_idx].float()  # [num_tokens]
             axis_dim = self.axes_dim[axis_idx]
             
             # Generate 1D rotary embedding for all positions at once
+            # get_1d_rotary_pos_embed(..., use_real=True) already returns full [S, axis_dim]
+            # cos/sin for rotate_half-style RoPE; do not repeat_interleave again or the
+            # width doubles (e.g. 256 vs head_dim 128) and apply_rotary_emb will fail.
             axis_cos, axis_sin = get_1d_rotary_pos_embed(
                 dim=axis_dim,
                 pos=axis_positions,
                 theta=self.theta,
                 dtype=self.dtype,
             )
-            # Repeat each frequency to match diffusers repeat_interleave_real layout [S, axis_dim]
-            axis_cos = axis_cos.repeat_interleave(2, dim=-1)
-            axis_sin = axis_sin.repeat_interleave(2, dim=-1)
             cos_parts.append(axis_cos)
             sin_parts.append(axis_sin)
         
@@ -734,6 +730,42 @@ class Flux2PosEmbed(nn.Module):
         """Forward method that matches NDRotaryEmbedding interface."""
         pos = ids.float()
         return self.forward_uncached(pos=pos)
+
+
+def compute_flux2_freqs_cis_from_ids(
+    rotary_emb: Flux2PosEmbed,
+    text_ids: torch.Tensor,
+    latent_ids: torch.Tensor,
+    device: torch.device,
+    dtype: torch.dtype | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build (cos, sin) for Flux2 attention from text/image position IDs (Diffusers layout).
+
+    Concatenates IDs along the sequence as [text; image], pads/truncates the last axis
+    to ``len(rotary_emb.axes_dim)``, and returns tensors with last dimension
+    ``sum(axes_dim)`` (the attention head dim, e.g. 128).
+    """
+    if text_ids.dim() == 2:
+        text_ids = text_ids.unsqueeze(-1)
+    if latent_ids.dim() == 2:
+        latent_ids = latent_ids.unsqueeze(-1)
+    combined = torch.cat([text_ids, latent_ids], dim=1)
+    n_axes_expected = len(rotary_emb.axes_dim)
+    if combined.shape[-1] != n_axes_expected:
+        need = n_axes_expected - combined.shape[-1]
+        if need > 0:
+            combined = torch.cat(
+                [combined, combined[..., -1:].expand(-1, -1, need)], dim=-1
+            )
+        else:
+            combined = combined[..., :n_axes_expected]
+    pos = combined.reshape(-1, combined.shape[-1]).float()
+    with torch.no_grad():
+        cos, sin = rotary_emb.forward_uncached(pos=pos)
+    cos, sin = cos.to(device=device), sin.to(device)
+    if dtype is not None:
+        cos, sin = cos.to(dtype), sin.to(dtype)
+    return (cos, sin)
 
 
 class Flux2Transformer2DModel(BaseDiT):

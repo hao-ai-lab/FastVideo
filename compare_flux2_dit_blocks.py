@@ -16,6 +16,7 @@ import torch
 # FastVideo imports
 from fastvideo.forward_context import set_forward_context
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.models.dits.flux_2 import compute_flux2_freqs_cis_from_ids
 from fastvideo.models.loader.component_loader import TransformerLoader
 
 DUMP_PATH = "flux2_step0_dump.pt"
@@ -45,33 +46,10 @@ def _get_transformer_path(model_id: str) -> str:
 
 
 def _compute_freqs_cis(transformer, text_ids, latent_ids, device, dtype=None):
-    """Build RoPE (cos, sin) from text and image position IDs using the model's rotary_emb.
-    Position IDs are concatenated along sequence: [text_tokens; image_tokens].
-    Returns (cos, sin) for use as freqs_cis in transformer forward.
-    """
-    # Concat along sequence dim: [B, T+L, ...]
-    if text_ids.dim() == 2:
-        # [B, T] -> treat as 1 axis, expand to n_axes
-        text_ids = text_ids.unsqueeze(-1)  # [B, T, 1]
-    if latent_ids.dim() == 2:
-        latent_ids = latent_ids.unsqueeze(-1)  # [B, L, 1]
-    combined = torch.cat([text_ids, latent_ids], dim=1)  # [B, T+L, n_axes]
-    n_axes = transformer.rotary_emb.axes_dim
-    if combined.shape[-1] != len(n_axes):
-        # Pad or repeat last axis to match expected n_axes
-        need = len(n_axes) - combined.shape[-1]
-        if need > 0:
-            combined = torch.cat([combined, combined[..., -1:].expand(-1, -1, need)], dim=-1)
-        else:
-            combined = combined[..., : len(n_axes)]
-    # [num_tokens, n_axes] — keep on CPU so get_1d_rotary_pos_embed (no device arg) doesn't mix devices
-    pos = combined.reshape(-1, combined.shape[-1]).float()
-    with torch.no_grad():
-        cos, sin = transformer.rotary_emb.forward_uncached(pos=pos)
-    cos, sin = cos.to(device=device), sin.to(device)
-    if dtype is not None:
-        cos, sin = cos.to(dtype), sin.to(dtype)
-    return (cos, sin)
+    """Build RoPE (cos, sin) from text and image position IDs (shared with compare_flux2_dit)."""
+    return compute_flux2_freqs_cis_from_ids(
+        transformer.rotary_emb, text_ids, latent_ids, device, dtype
+    )
 
 
 def _capture_double0_inputs_fv(transformer, latent, prompt_embeds, timestep_scaled, device, freqs_cis):
