@@ -522,6 +522,92 @@ def _print_tensor_pair_diff(label: str, a: torch.Tensor | None, b: torch.Tensor 
     )
 
 
+def _print_flux2_feedforward_linear_types(transformer) -> None:
+    """Confirm ``Flux2FeedForward`` used ``nn.Linear`` when ``tp_world_size==1``."""
+    n = len(transformer.transformer_blocks)
+    if n == 0:
+        print("  (no double transformer blocks)")
+        return
+    show_blocks = sorted({0, min(4, n - 1)})
+    for bi in show_blocks:
+        if bi < 0:
+            continue
+        block = transformer.transformer_blocks[bi]
+        for ff_name in ("ff", "ff_context"):
+            ff = getattr(block, ff_name, None)
+            if ff is None:
+                continue
+            li = getattr(ff, "linear_in", None)
+            lo = getattr(ff, "linear_out", None)
+            dense = getattr(ff, "_ff_dense_linear", "n/a")
+            print(
+                f"  double_{bi} {ff_name}: linear_in={type(li).__name__} "
+                f"linear_out={type(lo).__name__} "
+                f"_ff_dense_linear={dense}"
+            )
+
+
+def _print_ff_context_weight_diff_vs_official(
+    transformer, pipe, block_index: int
+) -> None:
+    """Compare ``ff_context`` weights to Diffusers (same block index)."""
+    trans_fv = transformer
+    if not hasattr(trans_fv, "transformer_blocks") or block_index >= len(
+        trans_fv.transformer_blocks
+    ):
+        return
+    trans_off = pipe.transformer
+    if not hasattr(trans_off, "transformer_blocks") or block_index >= len(
+        trans_off.transformer_blocks
+    ):
+        return
+    fv_ff = trans_fv.transformer_blocks[block_index].ff_context
+    off_ff = trans_off.transformer_blocks[block_index].ff_context
+    print(f"\n--- double_{block_index} ff_context weights vs official ---")
+    for name in ("linear_in", "linear_out"):
+        fv_m = getattr(fv_ff, name, None)
+        off_m = getattr(off_ff, name, None)
+        if fv_m is None or off_m is None:
+            print(f"  {name}: missing module")
+            continue
+        fw = getattr(fv_m, "weight", None)
+        ow = getattr(off_m, "weight", None)
+        if fw is None or ow is None:
+            print(f"  {name}: no .weight")
+            continue
+        if fw.numel() == 0 or ow.numel() == 0:
+            print(
+                f"  {name}: empty weight fv={tuple(fw.shape)} "
+                f"off={tuple(ow.shape)}"
+            )
+            continue
+        if fw.shape != ow.shape:
+            print(
+                f"  {name}: SHAPE MISMATCH fv={tuple(fw.shape)} "
+                f"off={tuple(ow.shape)}"
+            )
+            continue
+        ow32 = ow.to(device=fw.device, dtype=torch.float32)
+        d = (fw.float() - ow32).abs()
+        print(
+            f"  {name}: max|diff|={d.max().item():.6e} "
+            f"mean={d.mean().item():.6e}"
+        )
+        fb, ob = getattr(fv_m, "bias", None), getattr(off_m, "bias", None)
+        if (
+            fb is not None
+            and ob is not None
+            and fb.numel() > 0
+            and ob.numel() > 0
+            and fb.shape == ob.shape
+        ):
+            db = (fb.float() - ob.to(device=fb.device).float()).abs()
+            print(
+                f"  {name} bias: max|diff|={db.max().item():.6e} "
+                f"mean={db.mean().item():.6e}"
+            )
+
+
 def _capture_double0_qk_after_rope_official(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device):
     """Capture Q, K after RoPE for double block 0 (Diffusers has no inner LocalAttention)."""
     captured = {}
@@ -1209,6 +1295,9 @@ def main():
     prompt_embeds_fv = prompt_embeds.to(device, dtype=model_dtype)
     timestep_fv = timestep_scaled.to(device)
 
+    print("\n--- Flux2FeedForward linears (expect nn.Linear when tp==1) ---")
+    _print_flux2_feedforward_linear_types(transformer)
+
     # RoPE: compute freqs_cis from text + image position IDs (same as official pipeline)
     freqs_cis = _compute_freqs_cis(
         transformer, text_ids, latent_ids, device, dtype=model_dtype
@@ -1459,6 +1548,10 @@ def main():
                 step,
                 fv_ffs.get(step),
                 off_ffs.get(step),
+            )
+        if official_pipeline_ok:
+            _print_ff_context_weight_diff_vs_official(
+                transformer, pipe, TARGET_DOUBLE
             )
 
     # Sub-layer: attention output of double_0 (narrows down where divergence is)
