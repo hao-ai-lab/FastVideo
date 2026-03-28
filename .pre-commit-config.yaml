@@ -18,8 +18,8 @@ exclude: |
     fastvideo/train\.py|
     fastvideo/utils/.*|
     examples/.*|
-    .github/workflows/fastvideo-publish.yml|
-    .github/workflows/build-image-template.yml|
+    .github/workflows/publish-fastvideo.yml|
+    .github/workflows/_template-build-image.yml|
     docs/source/inference/support_matrix.md
   )
 repos:
