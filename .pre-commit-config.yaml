@@ -20,8 +20,6 @@ exclude: |
     examples/.*|
     .github/workflows/publish-fastvideo.yml|
     .github/workflows/_template-build-image.yml|
-    .github/workflows/fastvideo-publish.yml|
-    .github/workflows/build-image-template.yml|
     docs/source/inference/support_matrix.md
   )
 repos:
