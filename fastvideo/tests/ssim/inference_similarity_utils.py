@@ -126,6 +126,65 @@ def _assert_similarity(
     )
 
 
+def _build_init_kwargs(
+    base_params: dict[str, object],
+) -> dict[str, object]:
+    init_kwargs: dict[str, object] = {
+        "num_gpus": base_params["num_gpus"],
+        "sp_size": base_params.get("sp_size", 1),
+        "tp_size": base_params.get("tp_size", 1),
+        "use_fsdp_inference": True,
+        "dit_cpu_offload": False,
+        "dit_layerwise_offload": False,
+    }
+    if "flow_shift" in base_params:
+        init_kwargs["flow_shift"] = base_params["flow_shift"]
+    if base_params.get("vae_sp"):
+        init_kwargs["vae_sp"] = True
+        init_kwargs["vae_tiling"] = True
+    if "text-encoder-precision" in base_params:
+        init_kwargs["text_encoder_precisions"] = base_params["text-encoder-precision"]
+    if base_params.get("ltx2_vae_tiling"):
+        init_kwargs["ltx2_vae_tiling"] = True
+        init_kwargs["ltx2_vae_spatial_tile_size_in_pixels"] = base_params.get(
+            "ltx2_vae_spatial_tile_size_in_pixels", 512
+        )
+        init_kwargs["ltx2_vae_spatial_tile_overlap_in_pixels"] = base_params.get(
+            "ltx2_vae_spatial_tile_overlap_in_pixels", 64
+        )
+        init_kwargs["ltx2_vae_temporal_tile_size_in_frames"] = base_params.get(
+            "ltx2_vae_temporal_tile_size_in_frames", 64
+        )
+        init_kwargs["ltx2_vae_temporal_tile_overlap_in_frames"] = base_params.get(
+            "ltx2_vae_temporal_tile_overlap_in_frames", 24
+        )
+    return init_kwargs
+
+
+def _build_generation_kwargs(
+    base_params: dict[str, object],
+    num_inference_steps: int,
+    output_dir: str,
+) -> dict[str, object]:
+    generation_kwargs: dict[str, object] = {
+        "num_inference_steps": num_inference_steps,
+        "output_path": output_dir,
+        "height": base_params["height"],
+        "width": base_params["width"],
+        "num_frames": base_params["num_frames"],
+        "seed": base_params["seed"],
+    }
+    if "guidance_scale" in base_params:
+        generation_kwargs["guidance_scale"] = base_params["guidance_scale"]
+    if "embedded_cfg_scale" in base_params:
+        generation_kwargs["embedded_cfg_scale"] = base_params["embedded_cfg_scale"]
+    if "fps" in base_params:
+        generation_kwargs["fps"] = base_params["fps"]
+    if "neg_prompt" in base_params:
+        generation_kwargs["neg_prompt"] = base_params["neg_prompt"]
+    return generation_kwargs
+
+
 def run_text_to_video_similarity_test(
     *,
     logger: Logger,
@@ -137,6 +196,8 @@ def run_text_to_video_similarity_test(
     default_params_map: dict[str, dict[str, object]],
     full_quality_params_map: dict[str, dict[str, object]],
     min_acceptable_ssim: float,
+    init_kwargs_override: dict[str, object] | None = None,
+    generation_kwargs_override: dict[str, object] | None = None,
 ) -> None:
     with attention_backend(attention_backend_name):
         output_dir = build_generated_output_dir(
@@ -155,53 +216,17 @@ def run_text_to_video_similarity_test(
         base_params = params_map[model_id]
         num_inference_steps = int(base_params["num_inference_steps"])
 
-        init_kwargs = {
-            "num_gpus": base_params["num_gpus"],
-            "sp_size": base_params["sp_size"],
-            "tp_size": base_params["tp_size"],
-            "use_fsdp_inference": True,
-            "dit_cpu_offload": False,
-            "dit_layerwise_offload": False,
-        }
-        if "flow_shift" in base_params:
-            init_kwargs["flow_shift"] = base_params["flow_shift"]
-        if base_params.get("vae_sp"):
-            init_kwargs["vae_sp"] = True
-            init_kwargs["vae_tiling"] = True
-        if "text-encoder-precision" in base_params:
-            init_kwargs["text_encoder_precisions"] = base_params["text-encoder-precision"]
-        if base_params.get("ltx2_vae_tiling"):
-            init_kwargs["ltx2_vae_tiling"] = True
-            init_kwargs["ltx2_vae_spatial_tile_size_in_pixels"] = base_params.get(
-                "ltx2_vae_spatial_tile_size_in_pixels",
-                512,
-            )
-            init_kwargs["ltx2_vae_spatial_tile_overlap_in_pixels"] = base_params.get(
-                "ltx2_vae_spatial_tile_overlap_in_pixels",
-                64,
-            )
-            init_kwargs["ltx2_vae_temporal_tile_size_in_frames"] = base_params.get(
-                "ltx2_vae_temporal_tile_size_in_frames",
-                64,
-            )
-            init_kwargs["ltx2_vae_temporal_tile_overlap_in_frames"] = base_params.get(
-                "ltx2_vae_temporal_tile_overlap_in_frames",
-                24,
-            )
+        init_kwargs = _build_init_kwargs(base_params)
+        if init_kwargs_override:
+            init_kwargs.update(init_kwargs_override)
 
-        generation_kwargs = {
-            "num_inference_steps": num_inference_steps,
-            "output_path": output_dir,
-            "height": base_params["height"],
-            "width": base_params["width"],
-            "num_frames": base_params["num_frames"],
-            "guidance_scale": base_params["guidance_scale"],
-            "embedded_cfg_scale": base_params["embedded_cfg_scale"],
-            "seed": base_params["seed"],
-            "fps": base_params["fps"],
-        }
-        if "neg_prompt" in base_params:
-            generation_kwargs["neg_prompt"] = base_params["neg_prompt"]
+        generation_kwargs = _build_generation_kwargs(
+            base_params,
+            num_inference_steps,
+            output_dir,
+        )
+        if generation_kwargs_override:
+            generation_kwargs.update(generation_kwargs_override)
 
         generator: VideoGenerator | None = None
         try:
@@ -246,6 +271,8 @@ def run_image_to_video_similarity_test(
     default_params_map: dict[str, dict[str, object]],
     full_quality_params_map: dict[str, dict[str, object]],
     min_acceptable_ssim: float,
+    init_kwargs_override: dict[str, object] | None = None,
+    generation_kwargs_override: dict[str, object] | None = None,
 ) -> None:
     with attention_backend(attention_backend_name):
         output_dir = build_generated_output_dir(
@@ -264,32 +291,18 @@ def run_image_to_video_similarity_test(
         base_params = params_map[model_id]
         num_inference_steps = int(base_params["num_inference_steps"])
 
-        init_kwargs = {
-            "num_gpus": base_params["num_gpus"],
-            "flow_shift": base_params["flow_shift"],
-            "sp_size": base_params["sp_size"],
-            "tp_size": base_params["tp_size"],
-        }
-        if base_params.get("vae_sp"):
-            init_kwargs["vae_sp"] = True
-            init_kwargs["vae_tiling"] = True
-        if "text-encoder-precision" in base_params:
-            init_kwargs["text_encoder_precisions"] = base_params["text-encoder-precision"]
+        init_kwargs = _build_init_kwargs(base_params)
+        if init_kwargs_override:
+            init_kwargs.update(init_kwargs_override)
 
-        generation_kwargs = {
-            "num_inference_steps": num_inference_steps,
-            "output_path": output_dir,
-            "image_path": image_path,
-            "height": base_params["height"],
-            "width": base_params["width"],
-            "num_frames": base_params["num_frames"],
-            "guidance_scale": base_params["guidance_scale"],
-            "embedded_cfg_scale": base_params["embedded_cfg_scale"],
-            "seed": base_params["seed"],
-            "fps": base_params["fps"],
-        }
-        if "neg_prompt" in base_params:
-            generation_kwargs["neg_prompt"] = base_params["neg_prompt"]
+        generation_kwargs = _build_generation_kwargs(
+            base_params,
+            num_inference_steps,
+            output_dir,
+        )
+        generation_kwargs["image_path"] = image_path
+        if generation_kwargs_override:
+            generation_kwargs.update(generation_kwargs_override)
 
         generator: VideoGenerator | None = None
         try:
