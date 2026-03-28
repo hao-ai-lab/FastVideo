@@ -25,168 +25,182 @@ merge_protections:
 pull_request_rules:
 
   # ============================================================
-  # Auto-labeling by file path
+  # Type labels (from PR title prefix)
   # ============================================================
 
-  - name: label attention changes
+  - name: "label type: feat"
+    conditions:
+      - "title~=(?i)^\\[(feat|feature)\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: feat"]
+
+  - name: "label type: bugfix"
+    conditions:
+      - "title~=(?i)^\\[(bug)?fix\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: bugfix"]
+
+  - name: "label type: refactor"
+    conditions:
+      - "title~=(?i)^\\[refactor\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: refactor"]
+
+  - name: "label type: perf"
+    conditions:
+      - "title~=(?i)^\\[perf\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: perf"]
+
+  - name: "label type: ci"
+    conditions:
+      - "title~=(?i)^\\[ci\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: ci"]
+
+  - name: "label type: docs"
+    conditions:
+      - "title~=(?i)^\\[(doc|docs)\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: docs"]
+
+  - name: "label type: misc"
+    conditions:
+      - "title~=(?i)^\\[(misc|chore)\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: misc"]
+
+  - name: "label type: new-model"
+    conditions:
+      - "title~=(?i)^\\[new.?model\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: new-model"]
+
+  # ============================================================
+  # Scope labels (from changed files)
+  # ============================================================
+
+  - name: "label scope: training"
     conditions:
       - or:
-        - files~=^fastvideo/attention/
-        - files~=^csrc/attn/
+        - files~=^fastvideo/train/
+        - files~=^fastvideo/training/
+        - files~=^fastvideo/distillation/
+        - files~=^examples/train/
+        - files~=^examples/training/
+        - files~=^examples/distill/
       - -closed
-      - label!=stale
     actions:
       label:
-        add: [attention]
+        add: ["scope: training"]
 
-  - name: label encoder changes
-    conditions:
-      - files~=^fastvideo/models/encoders/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [encoder]
-
-  - name: label vae changes
-    conditions:
-      - files~=^fastvideo/models/vaes/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [vae]
-
-  - name: label transformer/DiT changes
-    conditions:
-      - files~=^fastvideo/models/dits/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [transformer]
-
-  - name: label training changes
-    conditions:
-      - files~=^fastvideo/training/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [training]
-
-  - name: label pipeline changes
-    conditions:
-      - files~=^fastvideo/pipelines/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [pipeline]
-
-  - name: label distributed changes
-    conditions:
-      - files~=^fastvideo/distributed/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [distributed]
-
-  - name: label kernel changes
+  - name: "label scope: inference"
     conditions:
       - or:
-        - files~=^csrc/
+        - files~=^fastvideo/pipelines/basic/
+        - files~=^fastvideo/pipelines/stages/
+        - files~=^fastvideo/pipelines/samplers/
+        - files~=^fastvideo/entrypoints/
+        - files~=^fastvideo/worker/
+        - files~=^fastvideo/configs/sample/
+        - files~=^fastvideo/configs/pipelines/
+        - files~=^examples/inference/
+      - -closed
+    actions:
+      label:
+        add: ["scope: inference"]
+
+  - name: "label scope: attention"
+    conditions:
+      - files~=^fastvideo/attention/
+      - -closed
+    actions:
+      label:
+        add: ["scope: attention"]
+
+  - name: "label scope: kernel"
+    conditions:
+      - or:
         - files~=^fastvideo-kernel/
+        - files~=^csrc/
       - -closed
-      - label!=stale
     actions:
       label:
-        add: [kernel]
+        add: ["scope: kernel"]
 
-  - name: label data/dataset changes
+  - name: "label scope: data"
     conditions:
       - or:
         - files~=^fastvideo/dataset/
-        - files~=^fastvideo/data_preprocess/
+        - files~=^fastvideo/pipelines/preprocess/
+        - files~=^examples/preprocessing/
       - -closed
-      - label!=stale
     actions:
       label:
-        add: [data]
+        add: ["scope: data"]
 
-  - name: label CLI/entrypoint changes
-    conditions:
-      - files~=^fastvideo/entrypoints/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [cli]
-
-  - name: label documentation changes
-    conditions:
-      - or:
-        - files~=^docs/
-        - files~=\.md$
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [documentation]
-
-  - name: label CI changes
+  - name: "label scope: infra"
     conditions:
       - or:
         - files~=^\.github/
         - files~=^\.buildkite/
+        - files~=^fastvideo/tests/
         - files~=^docker/
       - -closed
-      - label!=stale
     actions:
       label:
-        add: [ci]
+        add: ["scope: infra"]
 
-  - name: label test changes
+  - name: "label scope: distributed"
+    conditions:
+      - files~=^fastvideo/distributed/
+      - -closed
+    actions:
+      label:
+        add: ["scope: distributed"]
+
+  - name: "label scope: docs"
+    conditions:
+      - files~=^docs/
+      - -closed
+    actions:
+      label:
+        add: ["scope: docs"]
+
+  - name: "label scope: ui"
+    conditions:
+      - files~=^ui/
+      - -closed
+    actions:
+      label:
+        add: ["scope: ui"]
+
+  - name: "label scope: model"
     conditions:
       - or:
-        - files~=^fastvideo/tests/
-        - files~=^tests/
+        - files~=^fastvideo/models/
+        - files~=^fastvideo/layers/
+        - files~=^fastvideo/configs/models/
       - -closed
-      - label!=stale
     actions:
       label:
-        add: [tests]
-
-  - name: label ComfyUI changes
-    conditions:
-      - files~=^comfyui/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [comfyui]
-
-  - name: label layer changes
-    conditions:
-      - files~=^fastvideo/layers/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [layers]
-
-  - name: label LoRA changes
-    conditions:
-      - or:
-        - files~=^fastvideo/layers/lora/
-        - files~=^fastvideo/tests/lora/
-        - title~=(?i)lora
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [lora]
+        add: ["scope: model"]
 
   # ============================================================
   # Pre-commit failure help comment
