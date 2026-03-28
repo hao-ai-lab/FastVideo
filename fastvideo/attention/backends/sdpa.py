@@ -85,11 +85,13 @@ class SDPAImpl(AttentionImpl):
         attn_mask = attn_metadata.attn_mask if (
             attn_metadata is not None
             and hasattr(attn_metadata, "attn_mask")) else None
+        # Match Diffusers ``dispatch_attention_fn`` native backend: omit ``scale``
+        # so PyTorch uses its default 1/sqrt(head_dim). Passing an explicit float
+        # can change kernel selection / rounding vs ``scale=None``.
         attn_kwargs = {
             "attn_mask": attn_mask,
             "dropout_p": self.dropout,
             "is_causal": self.causal,
-            "scale": self.softmax_scale
         }
         if query.shape[1] != key.shape[1]:
             attn_kwargs["enable_gqa"] = True

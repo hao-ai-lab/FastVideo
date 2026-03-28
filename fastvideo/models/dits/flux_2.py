@@ -22,7 +22,6 @@ from diffusers.models.normalization import AdaLayerNormContinuous
 
 from fastvideo.configs.models.dits.flux_2 import Flux2Config
 from fastvideo.attention import LocalAttention
-from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ColumnParallelLinear
 from fastvideo.layers.rotary_embedding import apply_rotary_emb
 from fastvideo.models.dits.base import BaseDiT
@@ -36,8 +35,8 @@ logger = init_logger(__name__)  # pylint: disable=invalid-name
 def apply_qk_norm(
     q: torch.Tensor,
     k: torch.Tensor,
-    q_norm: RMSNorm,
-    k_norm: RMSNorm,
+    q_norm: nn.Module,
+    k_norm: nn.Module,
     head_dim: int,
     allow_inplace: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -133,7 +132,7 @@ class Flux2Attention(torch.nn.Module, AttentionModuleMixin):
         added_kv_proj_dim: Optional[int] = None,
         added_proj_bias: Optional[bool] = True,
         out_bias: bool = True,
-        eps: float = 1e-5,
+        eps: float = 1e-6,
         out_dim: int = None,
         elementwise_affine: bool = True,
         supported_attention_backends: Optional[Tuple[AttentionBackendEnum, ...]] = None,
@@ -162,9 +161,13 @@ class Flux2Attention(torch.nn.Module, AttentionModuleMixin):
             query_dim, self.inner_dim, bias=bias, gather_output=True
         )
 
-        # QK Norm
-        self.norm_q = RMSNorm(dim_head, eps=eps)
-        self.norm_k = RMSNorm(dim_head, eps=eps)
+        # QK norm: match Diffusers ``nn.RMSNorm`` (not vLLM-style fp32 variance path).
+        self.norm_q = nn.RMSNorm(
+            dim_head, eps=eps, elementwise_affine=elementwise_affine
+        )
+        self.norm_k = nn.RMSNorm(
+            dim_head, eps=eps, elementwise_affine=elementwise_affine
+        )
 
         self.to_out = torch.nn.ModuleList([])
         self.to_out.append(
@@ -175,8 +178,12 @@ class Flux2Attention(torch.nn.Module, AttentionModuleMixin):
         self.to_out.append(torch.nn.Dropout(dropout))
 
         if added_kv_proj_dim is not None:
-            self.norm_added_q = RMSNorm(dim_head, eps=eps)
-            self.norm_added_k = RMSNorm(dim_head, eps=eps)
+            self.norm_added_q = nn.RMSNorm(
+                dim_head, eps=eps, elementwise_affine=elementwise_affine
+            )
+            self.norm_added_k = nn.RMSNorm(
+                dim_head, eps=eps, elementwise_affine=elementwise_affine
+            )
             self.add_q_proj = ColumnParallelLinear(
                 added_kv_proj_dim,
                 self.inner_dim,
@@ -312,7 +319,7 @@ class Flux2ParallelSelfAttention(torch.nn.Module, AttentionModuleMixin):
         dropout: float = 0.0,
         bias: bool = False,
         out_bias: bool = True,
-        eps: float = 1e-5,
+        eps: float = 1e-6,
         out_dim: int = None,
         elementwise_affine: bool = True,
         mlp_ratio: float = 4.0,
@@ -343,9 +350,12 @@ class Flux2ParallelSelfAttention(torch.nn.Module, AttentionModuleMixin):
         )
         self.mlp_act_fn = Flux2SwiGLU()
 
-        # QK Norm
-        self.norm_q = RMSNorm(dim_head, eps=eps)
-        self.norm_k = RMSNorm(dim_head, eps=eps)
+        self.norm_q = nn.RMSNorm(
+            dim_head, eps=eps, elementwise_affine=elementwise_affine
+        )
+        self.norm_k = nn.RMSNorm(
+            dim_head, eps=eps, elementwise_affine=elementwise_affine
+        )
 
         # Fused attention output projection + MLP output projection
         self.to_out = ColumnParallelLinear(
