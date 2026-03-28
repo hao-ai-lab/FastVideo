@@ -115,6 +115,17 @@ class Flux2FeedForward(nn.Module):
 
 
 class Flux2Attention(torch.nn.Module, AttentionModuleMixin):
+    """Joint attention for Flux2 double-stream blocks (image + text).
+
+    **Context (text) branch** uses ``add_q_proj`` / ``add_k_proj`` / ``add_v_proj`` on
+    ``encoder_hidden_states``, QK norm via ``norm_added_*``, concatenation **text then
+    image** on sequence dim, RoPE on the full sequence, attention, then
+    ``to_add_out`` on the **text** slice only. Diffusers does the same layout in
+    ``Flux2AttnProcessor`` with ``nn.Linear``; here those linears are
+    ``ColumnParallelLinear`` (``F.linear`` at ``tp_size==1``). For parity debugging,
+    see ``compare_flux2_context_branch_double0.py``.
+    """
+
     def __init__(
         self,
         query_dim: int,
