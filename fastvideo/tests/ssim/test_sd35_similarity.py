@@ -70,7 +70,8 @@ def test_sd35_similarity(prompt: str, ATTENTION_BACKEND: str) -> None:
         write_ssim_results,
     )
 
-    if not os.path.isdir(SD35_MODEL_PATH):
+    is_hf_repo = "/" in SD35_MODEL_PATH and not SD35_MODEL_PATH.startswith("/")
+    if not is_hf_repo and not os.path.isdir(SD35_MODEL_PATH):
         pytest.skip(f"SD3.5 weights not found at {SD35_MODEL_PATH} (set SD35_MODEL_DIR to override)")
 
     old_backend = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
