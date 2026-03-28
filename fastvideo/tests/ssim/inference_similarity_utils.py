@@ -21,6 +21,7 @@ from fastvideo.worker.multiproc_executor import MultiprocExecutor
 DEVICE_MAPPINGS = (
     ("A40", "A40"),
     ("L40S", "L40S"),
+    ("H100", "H100"),
     ("H200", "H200"),
 )
 
@@ -79,9 +80,7 @@ def _assert_similarity(
 ) -> None:
     if not os.path.exists(reference_folder):
         logger.error("Reference folder missing")
-        raise FileNotFoundError(
-            f"Reference video folder does not exist: {reference_folder}"
-        )
+        raise FileNotFoundError(f"Reference video folder does not exist: {reference_folder}")
 
     try:
         reference_video_path = _find_reference_video(reference_folder, prompt)
@@ -170,30 +169,24 @@ def run_text_to_video_similarity_test(
             init_kwargs["vae_sp"] = True
             init_kwargs["vae_tiling"] = True
         if "text-encoder-precision" in base_params:
-            init_kwargs["text_encoder_precisions"] = base_params[
-                "text-encoder-precision"
-            ]
+            init_kwargs["text_encoder_precisions"] = base_params["text-encoder-precision"]
         if base_params.get("ltx2_vae_tiling"):
             init_kwargs["ltx2_vae_tiling"] = True
             init_kwargs["ltx2_vae_spatial_tile_size_in_pixels"] = base_params.get(
                 "ltx2_vae_spatial_tile_size_in_pixels",
                 512,
             )
-            init_kwargs["ltx2_vae_spatial_tile_overlap_in_pixels"] = (
-                base_params.get(
-                    "ltx2_vae_spatial_tile_overlap_in_pixels",
-                    64,
-                )
+            init_kwargs["ltx2_vae_spatial_tile_overlap_in_pixels"] = base_params.get(
+                "ltx2_vae_spatial_tile_overlap_in_pixels",
+                64,
             )
             init_kwargs["ltx2_vae_temporal_tile_size_in_frames"] = base_params.get(
                 "ltx2_vae_temporal_tile_size_in_frames",
                 64,
             )
-            init_kwargs["ltx2_vae_temporal_tile_overlap_in_frames"] = (
-                base_params.get(
-                    "ltx2_vae_temporal_tile_overlap_in_frames",
-                    24,
-                )
+            init_kwargs["ltx2_vae_temporal_tile_overlap_in_frames"] = base_params.get(
+                "ltx2_vae_temporal_tile_overlap_in_frames",
+                24,
             )
 
         generation_kwargs = {
@@ -220,9 +213,7 @@ def run_text_to_video_similarity_test(
         finally:
             shutdown_executor(generator)
 
-    assert os.path.exists(
-        output_dir
-    ), f"Output video was not generated at {output_dir}"
+    assert os.path.exists(output_dir), f"Output video was not generated at {output_dir}"
 
     reference_folder = build_reference_folder_path(
         script_dir,
@@ -283,9 +274,7 @@ def run_image_to_video_similarity_test(
             init_kwargs["vae_sp"] = True
             init_kwargs["vae_tiling"] = True
         if "text-encoder-precision" in base_params:
-            init_kwargs["text_encoder_precisions"] = base_params[
-                "text-encoder-precision"
-            ]
+            init_kwargs["text_encoder_precisions"] = base_params["text-encoder-precision"]
 
         generation_kwargs = {
             "num_inference_steps": num_inference_steps,
@@ -312,9 +301,7 @@ def run_image_to_video_similarity_test(
         finally:
             shutdown_executor(generator)
 
-    assert os.path.exists(
-        output_dir
-    ), f"Output video was not generated at {output_dir}"
+    assert os.path.exists(output_dir), f"Output video was not generated at {output_dir}"
 
     reference_folder = build_reference_folder_path(
         script_dir,

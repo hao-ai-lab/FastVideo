@@ -5,6 +5,7 @@ SSIM-based similarity test for TurboDiffusion inference.
 TurboDiffusion uses the SLA (Sparse-Linear Attention) backend and RCM scheduler
 for 1-4 step video generation.
 """
+
 import os
 
 import torch
@@ -35,14 +36,13 @@ device_reference_folder = resolve_device_reference_folder(
     (
         ("A40", "A40"),
         ("L40S", "L40S"),
+        ("H100", "H100"),
         ("H200", "H200"),
     ),
     device_name=device_name,
 )
 if device_reference_folder is None:
-    logger.warning(
-        f"Unsupported device for ssim tests: {device_name}, using L40S references"
-    )
+    logger.warning(f"Unsupported device for ssim tests: {device_name}, using L40S references")
     raise ValueError(f"Unsupported device for ssim tests: {device_name}")
 
 
@@ -152,41 +152,32 @@ def test_turbodiffusion_inference_similarity(prompt, model_id):
 
     if not os.path.exists(reference_folder):
         logger.error("Reference folder missing")
-        raise FileNotFoundError(
-            f"Reference video folder does not exist: {reference_folder}"
-        )
+        raise FileNotFoundError(f"Reference video folder does not exist: {reference_folder}")
 
     # Find the matching reference video based on the prompt
     reference_video_name = None
 
     for filename in os.listdir(reference_folder):
-        if filename.endswith('.mp4') and prompt[:100].strip() in filename:
+        if filename.endswith(".mp4") and prompt[:100].strip() in filename:
             reference_video_name = filename
             break
 
     if not reference_video_name:
-        logger.error(
-            f"Reference video not found for prompt: {prompt} with backend: {ATTENTION_BACKEND}"
-        )
+        logger.error(f"Reference video not found for prompt: {prompt} with backend: {ATTENTION_BACKEND}")
         raise FileNotFoundError(f"Reference video missing")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
     generated_video_path = os.path.join(output_dir, output_video_name)
 
-    logger.info(
-        f"Computing SSIM between {reference_video_path} and {generated_video_path}"
-    )
-    ssim_values = compute_video_ssim_torchvision(
-        reference_video_path, generated_video_path, use_ms_ssim=True
-    )
+    logger.info(f"Computing SSIM between {reference_video_path} and {generated_video_path}")
+    ssim_values = compute_video_ssim_torchvision(reference_video_path, generated_video_path, use_ms_ssim=True)
 
     mean_ssim = ssim_values[0]
     logger.info(f"SSIM mean value: {mean_ssim}")
     logger.info(f"Writing SSIM results to directory: {output_dir}")
 
     success = write_ssim_results(
-        output_dir, ssim_values, reference_video_path,
-        generated_video_path, num_inference_steps, prompt
+        output_dir, ssim_values, reference_video_path, generated_video_path, num_inference_steps, prompt
     )
 
     if not success:
@@ -214,9 +205,7 @@ TURBODIFFUSION_I2V_PARAMS = {
     "tp_size": 1,
     "fps": 24,
 }
-_TURBODIFFUSION_I2V_FULL_QUALITY_DEFAULTS = (
-    TurboDiffusionI2V_A14B_SamplingParam()
-)
+_TURBODIFFUSION_I2V_FULL_QUALITY_DEFAULTS = TurboDiffusionI2V_A14B_SamplingParam()
 TURBODIFFUSION_I2V_FULL_QUALITY_PARAMS = {
     "num_gpus": TURBODIFFUSION_I2V_PARAMS["num_gpus"],
     "model_path": TURBODIFFUSION_I2V_PARAMS["model_path"],
@@ -258,8 +247,9 @@ def test_turbodiffusion_i2v_inference_similarity(prompt, model_id):
     ATTENTION_BACKEND = "SLA_ATTN"
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
-    assert len(TURBODIFFUSION_I2V_TEST_PROMPTS) == len(TURBODIFFUSION_I2V_IMAGE_PATHS), \
+    assert len(TURBODIFFUSION_I2V_TEST_PROMPTS) == len(TURBODIFFUSION_I2V_IMAGE_PATHS), (
         "Expect number of prompts equal to number of images"
+    )
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -304,10 +294,7 @@ def test_turbodiffusion_i2v_inference_similarity(prompt, model_id):
         "fps": BASE_PARAMS["fps"],
     }
 
-    generator = VideoGenerator.from_pretrained(
-        model_path=BASE_PARAMS["model_path"],
-        **init_kwargs
-    )
+    generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
     generator.generate_video(prompt, **generation_kwargs)
 
     if isinstance(generator.executor, MultiprocExecutor):
@@ -324,41 +311,32 @@ def test_turbodiffusion_i2v_inference_similarity(prompt, model_id):
 
     if not os.path.exists(reference_folder):
         logger.error("Reference folder missing")
-        raise FileNotFoundError(
-            f"Reference video folder does not exist: {reference_folder}"
-        )
+        raise FileNotFoundError(f"Reference video folder does not exist: {reference_folder}")
 
     # Find the matching reference video based on the prompt
     reference_video_name = None
 
     for filename in os.listdir(reference_folder):
-        if filename.endswith('.mp4') and prompt[:100].strip() in filename:
+        if filename.endswith(".mp4") and prompt[:100].strip() in filename:
             reference_video_name = filename
             break
 
     if not reference_video_name:
-        logger.error(
-            f"Reference video not found for prompt: {prompt} with backend: {ATTENTION_BACKEND}"
-        )
+        logger.error(f"Reference video not found for prompt: {prompt} with backend: {ATTENTION_BACKEND}")
         raise FileNotFoundError(f"Reference video missing")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
     generated_video_path = os.path.join(output_dir, output_video_name)
 
-    logger.info(
-        f"Computing SSIM between {reference_video_path} and {generated_video_path}"
-    )
-    ssim_values = compute_video_ssim_torchvision(
-        reference_video_path, generated_video_path, use_ms_ssim=True
-    )
+    logger.info(f"Computing SSIM between {reference_video_path} and {generated_video_path}")
+    ssim_values = compute_video_ssim_torchvision(reference_video_path, generated_video_path, use_ms_ssim=True)
 
     mean_ssim = ssim_values[0]
     logger.info(f"SSIM mean value: {mean_ssim}")
     logger.info(f"Writing SSIM results to directory: {output_dir}")
 
     success = write_ssim_results(
-        output_dir, ssim_values, reference_video_path,
-        generated_video_path, num_inference_steps, prompt
+        output_dir, ssim_values, reference_video_path, generated_video_path, num_inference_steps, prompt
     )
 
     if not success:
