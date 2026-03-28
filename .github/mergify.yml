@@ -198,6 +198,30 @@ pull_request_rules:
           For future commits, `pre-commit` will run automatically on changed files before each commit.
 
   # ============================================================
+  # Buildkite CI failure notification
+  # ============================================================
+
+  - name: comment on Buildkite CI failure
+    conditions:
+      - check-failure~=buildkite/ci
+      - -closed
+    actions:
+      comment:
+        message: |
+          ## Buildkite CI tests failed
+
+          Hi @{{author}}, some Buildkite CI tests have failed. Check the build for details:
+          [View Buildkite build →](https://buildkite.com/fastvideo/ci)
+
+          Common causes:
+          - **Test failures**: Check the failing step's output for assertion errors or tracebacks
+          - **Import errors**: Make sure new dependencies are added to `pyproject.toml`
+          - **GPU memory**: Some tests require specific GPU types (L40S, H100 NVL)
+          - **Kernel build**: If you changed `fastvideo-kernel/`, the build may have failed
+
+          If the failure is unrelated to your changes, leave a comment explaining why.
+
+  # ============================================================
   # Merge conflict detection
   # ============================================================
 
