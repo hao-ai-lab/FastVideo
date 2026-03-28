@@ -86,7 +86,7 @@ steps:
   # regression, training pipelines, and performance benchmarks.
   # ============================================================
   - label: "Trigger Full Suite"
-    if: build.env("FULL_SUITE") == "true"
+    if: build.env("FULL_SUITE") == "true" || build.branch =~ /^mergify\/merge-queue\//
     plugins:
       - monorepo-diff#v1.4.0:
           diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
