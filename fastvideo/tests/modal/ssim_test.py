@@ -647,6 +647,7 @@ def _schedule_ssim_tasks(
     repo_root: str,
     tasks: list[SSIMTask],
     pytest_extra_args: list[str],
+    fail_fast: bool = True,
 ) -> dict[int, _TaskResult]:
     import tempfile
     import time
@@ -709,7 +710,7 @@ def _schedule_ssim_tasks(
             )
             running_tasks.remove(running_task)
             print(f"Finished {running_task.task.test_name} with exit code {returncode}")
-            if returncode != 0 and not fail_fast_triggered:
+            if returncode != 0 and fail_fast and not fail_fast_triggered:
                 fail_fast_triggered = True
 
         if fail_fast_triggered and running_tasks:
@@ -841,6 +842,7 @@ def run_ssim_partition(
     pytest_k: str = "",
     sync_generated_to_volume: bool = False,
     generated_volume_subdir: str = "",
+    fail_fast: bool = True,
 ) -> _PartitionResult:
     selected_test_files = _split_csv_values(test_files_csv)
     selected_model_ids = _split_csv_values(model_ids_csv)
@@ -871,6 +873,7 @@ def run_ssim_partition(
         repo_root,
         partition,
         pytest_extra_args=pytest_extra_args,
+        fail_fast=fail_fast,
     )
     summaries = _collect_task_summaries(partition, results)
     has_failures = any(s.status != "passed" for s in summaries)
@@ -909,6 +912,7 @@ def run_ssim_tests(
     pytest_k: str = "",
     sync_generated_to_volume: bool = False,
     generated_volume_subdir: str = "",
+    no_fail_fast: bool = False,
 ):
     resolved_git_repo = _resolve_git_repo(git_repo)
     resolved_git_commit = _resolve_git_commit(git_commit)
@@ -951,6 +955,7 @@ def run_ssim_tests(
         pytest_k=pytest_k,
         sync_generated_to_volume=sync_generated_to_volume,
         generated_volume_subdir=resolved_subdir,
+        fail_fast=not no_fail_fast,
     )
     futures = [
         run_ssim_partition.spawn(
