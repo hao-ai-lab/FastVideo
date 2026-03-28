@@ -825,8 +825,10 @@ def _print_combined_results(
     return 1 if has_failures else 0
 
 
-@app.function(gpu="L40S:4", **SSIM_COMMON_KWARGS)
-def run_ssim_tests_single_instance(
+@app.function(gpu=f"L40S:{SSIM_NUM_GPUS}", **SSIM_COMMON_KWARGS)
+def run_ssim_partition(
+    partition_index: int,
+    num_partitions: int,
     git_repo: str,
     git_commit: str,
     pr_number: str = "false",
@@ -839,7 +841,7 @@ def run_ssim_tests_single_instance(
     pytest_k: str = "",
     sync_generated_to_volume: bool = False,
     generated_volume_subdir: str = "",
-) -> int:
+) -> _PartitionResult:
     selected_test_files = _split_csv_values(test_files_csv)
     selected_model_ids = _split_csv_values(model_ids_csv)
     repo_root, tasks = _prepare_ssim_workspace(
@@ -850,6 +852,15 @@ def run_ssim_tests_single_instance(
         selected_test_files=selected_test_files,
         selected_model_ids=selected_model_ids,
     )
+    partition = _partition_tasks(tasks, partition_index, num_partitions)
+    if not partition:
+        print(f"Partition {partition_index}: no tasks assigned.")
+        return _PartitionResult(
+            partition_index=partition_index,
+            task_summaries=[],
+            exit_code=0,
+        )
+    print(f"Partition {partition_index}: running {len(partition)}/{len(tasks)} tasks")
     pytest_extra_args = _build_pytest_extra_args(
         ssim_full_quality=ssim_full_quality,
         ssim_reference_repo=ssim_reference_repo,
@@ -858,10 +869,11 @@ def run_ssim_tests_single_instance(
     )
     results = _schedule_ssim_tasks(
         repo_root,
-        tasks,
+        partition,
         pytest_extra_args=pytest_extra_args,
     )
-    exit_code = _print_ssim_task_results(tasks, results)
+    summaries = _collect_task_summaries(partition, results)
+    has_failures = any(s.status != "passed" for s in summaries)
     if sync_generated_to_volume:
         quality_tier = _resolve_output_quality_tier(ssim_full_quality)
         resolved_subdir = _resolve_generated_volume_subdir(
@@ -873,7 +885,14 @@ def run_ssim_tests_single_instance(
             resolved_subdir,
             quality_tier,
         )
-    return exit_code
+    return _PartitionResult(
+        partition_index=partition_index,
+        task_summaries=summaries,
+        exit_code=1 if has_failures else 0,
+    )
+
+
+NUM_PARTITIONS = 2
 
 
 @app.local_entrypoint()
@@ -919,7 +938,7 @@ def run_ssim_tests(
     else:
         resolved_subdir = ""
 
-    exit_code = run_ssim_tests_single_instance.remote(
+    common_kwargs = dict(
         git_repo=resolved_git_repo,
         git_commit=resolved_git_commit,
         pr_number=resolved_pr_number,
@@ -933,6 +952,17 @@ def run_ssim_tests(
         sync_generated_to_volume=sync_generated_to_volume,
         generated_volume_subdir=resolved_subdir,
     )
+    futures = [
+        run_ssim_partition.spawn(
+            partition_index=i,
+            num_partitions=NUM_PARTITIONS,
+            **common_kwargs,
+        )
+        for i in range(NUM_PARTITIONS)
+    ]
+    results: list[_PartitionResult | None] = [f.get() for f in futures]
+
+    exit_code = _print_combined_results(results)
     if sync_generated_to_volume:
         download_src = _build_generated_volume_relative_path(
             generated_volume_subdir=resolved_subdir,
