@@ -1,3 +1,6 @@
+<!-- PR title must start with a type tag: [feat], [bugfix], [refactor], [perf], [ci], [docs], [misc], [new-model] -->
+<!-- Example: [feat] Add HunyuanVideo 1.5 support -->
+
 ## Purpose
 
 <!-- What does this PR do? Link the related issue if applicable. -->

@@ -106,20 +106,36 @@ pytest fastvideo/tests/ssim/ -vs
 
 Ensure you have the necessary GPUs available as defined in your test parameters.
 
-## Modal Workflow
+## CI Integration
 
-FastVideo uses [Modal](https://modal.com/) for running tests in a CI environment. The workflow scripts are located in `fastvideo/tests/modal/`.
+FastVideo uses [Modal](https://modal.com/) for running tests in a CI environment. The
+workflow scripts are located in `fastvideo/tests/modal/`.
+
+### Buildkite Pipeline
+
+Tests are orchestrated by Buildkite (`.buildkite/pipeline.yml`) and executed on Modal GPU
+instances. The pipeline runs in two modes:
+
+**Fastcheck** — runs on every PR push, path-filtered. Only tests for the components you
+changed are triggered. Tests run in parallel.
+
+**Full Suite** — runs when a PR enters the Merge Queue (or when triggered manually via
+`/test full`). Covers SSIM regression, training, distillation, inference, and performance.
 
 ### `pr_test.py`
 
-The main entry point for CI tests is `fastvideo/tests/modal/pr_test.py`. This script defines Modal functions that execute the pytest suites on specific hardware (e.g., L40S, H100).
+The main entry point for CI tests is `fastvideo/tests/modal/pr_test.py`. This script defines
+Modal functions that execute the pytest suites on specific hardware (e.g., L40S, H100).
 
 ### Updating Modal Configuration
 
 If you add a new test that requires:
+
 * **Different GPU Hardware**: You may need to change the `@app.function(gpu=...)` decorator.
 * **Longer Execution Time**: Increase the `timeout` parameter.
-* **New Environment Variables/Secrets**: Add them to `secrets=[...]` or the image environment. For example, if your model is gated on Hugging Face, ensure `HF_API_KEY` is passed.
+* **New Environment Variables/Secrets**: Add them to `secrets=[...]` or the image
+  environment. For example, if your model is gated on Hugging Face, ensure `HF_API_KEY`
+  is passed.
 
 For SSIM tests, use `fastvideo/tests/modal/ssim_test.py`:
 
@@ -164,9 +180,39 @@ python fastvideo/tests/ssim/reference_videos_cli.py copy-local \
 
 ### Workflow Scripts
 
-The shell script that triggers these tests in the CI pipeline is located at `.buildkite/scripts/pr_test.sh`. If you add a new test category (e.g., a new folder outside of `ssim`), you will need to:
+The shell script that triggers tests in CI is `.buildkite/scripts/pr_test.sh`. If you add
+a new test category (e.g., a new folder outside of `ssim`), you will need to:
+
 1. Add a new function in `fastvideo/tests/modal/pr_test.py`.
 2. Add a new case in `.buildkite/scripts/pr_test.sh` to handle the new test type.
 
 !!! note
-    If you are a maintainer, you'll need to finally manually update the workflow script in Buildkite. Otherwise, a maintainer will help you update.
+    If you are a maintainer, update the workflow script in Buildkite after merging. Otherwise,
+    ask a maintainer for help.
+
+## Triggering Tests via Slash Commands
+
+Maintainers and contributors with write access can trigger individual test suites directly
+from a PR comment. The workflow reacts with a 🚀 emoji to confirm the command was received.
+
+```
+/test ssim              # SSIM regression tests
+/test training          # Training pipeline tests
+/test lora-training     # LoRA training tests
+/test lora-inference    # LoRA inference tests
+/test distillation      # DMD distillation tests
+/test self-forcing      # Self-Forcing tests
+/test vsa               # VSA training tests
+/test vmoba             # VMoBA inference tests
+/test performance       # Performance benchmarks
+/test api               # API server integration tests
+/test encoder           # Encoder component tests (Fastcheck)
+/test vae               # VAE component tests (Fastcheck)
+/test transformer       # Transformer / DiT tests (Fastcheck)
+/test kernel            # CUDA kernel tests (Fastcheck)
+/test unit              # Unit tests (Fastcheck)
+/test full              # Entire Full Suite
+/test fastcheck         # Entire Fastcheck suite
+```
+
+See [CI Architecture](ci_architecture.md) for the complete reference.
