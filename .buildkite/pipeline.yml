@@ -8,11 +8,11 @@ steps:
   # Core component validation: encoders, VAEs, transformers,
   # CUDA kernels, and unit tests.
   # ============================================================
-  - label: "Trigger Fastcheck"
-    plugins:
-      - monorepo-diff#v1.4.0:
-          diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
-          watch:
+    - label: "Trigger Fastcheck"
+      plugins:
+        - monorepo-diff#v1.4.0:
+            diff: 'BASE="${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}"; git fetch origin "$BASE" && git diff --name-only "origin/$BASE...HEAD"'
+            watch:
             - path:
                 - "fastvideo/models/encoders/**"
                 - "fastvideo/models/loader/**"
@@ -85,12 +85,12 @@ steps:
   # Actions → Buildkite API). Includes integration tests, SSIM
   # regression, training pipelines, and performance benchmarks.
   # ============================================================
-  - label: "Trigger Full Suite"
-    if: build.env("FULL_SUITE") == "true" || build.branch =~ /^mergify\/merge-queue\//
-    plugins:
-      - monorepo-diff#v1.4.0:
-          diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
-          watch:
+    - label: "Trigger Full Suite"
+      if: build.env("FULL_SUITE") == "true" || build.branch =~ /^mergify\/merge-queue\//
+      plugins:
+        - monorepo-diff#v1.4.0:
+            diff: 'BASE="${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}"; git fetch origin "$BASE" && git diff --name-only "origin/$BASE...HEAD"'
+            watch:
             - path:
                 - "fastvideo/**/*.py"
                 - "pyproject.toml"
