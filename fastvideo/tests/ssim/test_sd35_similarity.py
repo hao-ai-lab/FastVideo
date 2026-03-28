@@ -17,9 +17,25 @@ from fastvideo.tests.ssim.reference_utils import (
     select_ssim_params,
 )
 
+from fastvideo.tests.ssim.reference_utils import get_cuda_device_name
+
 logger = logging.getLogger(__name__)
 
 REQUIRED_GPUS = 1
+
+device_reference_folder = resolve_device_reference_folder(
+    (
+        ("A40", "A40"),
+        ("L40S", "L40S"),
+        ("H100", "H100"),
+        ("H200", "H200"),
+        ("RTX 4090", "RTX4090"),
+        ("4090", "RTX4090"),
+    ),
+    device_name=get_cuda_device_name(),
+    fallback_device_prefix="L40S",
+    logger=logger,
+)
 
 
 SD35_MODEL_PATH = os.getenv(
@@ -152,18 +168,6 @@ def test_sd35_similarity(prompt: str, ATTENTION_BACKEND: str) -> None:
             f"Output video was not generated under {output_dir} for prompt '{prompt}'"
         )
 
-        device_reference_folder = resolve_device_reference_folder(
-            (
-                ("A40", "A40"),
-                ("L40S", "L40S"),
-                ("H100", "H100"),
-                ("H200", "H200"),
-                ("RTX 4090", "RTX4090"),
-                ("4090", "RTX4090"),
-            ),
-            fallback_device_prefix="L40S",
-            logger=logger,
-        )
         reference_folder = build_reference_folder_path(
             script_dir,
             device_reference_folder,
