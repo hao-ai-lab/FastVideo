@@ -80,10 +80,6 @@ dependencies = [
     "torchcodec",
     "ray>=2.49.1",
     "ftfy==6.3.1",
-
-    # Job Runner
-    "fastapi==0.129.0",
-    "uvicorn==0.41.0"
 ]
 
 [tool.uv]
@@ -150,7 +146,7 @@ check_untyped_defs = true
 follow_imports = "silent"
 
 [tool.codespell]
-skip = "./data,./wandb,./ui/package-lock.json"
+skip ="./data,./wandb"
 
 [tool.ruff]
 # Allow lines to be as long as 120.
