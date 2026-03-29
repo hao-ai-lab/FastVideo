@@ -19,15 +19,10 @@ class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
 
         param_requires_grad = {
             k.replace("._checkpoint_wrapped_module.", ".")
-            for k, v in self.model.named_parameters()
-            if v.requires_grad
+            for k, v in self.model.named_parameters() if v.requires_grad
         }
 
-        filtered_state_dict = {
-            k: v
-            for k, v in state_dict.items()
-            if k in param_requires_grad
-        }
+        filtered_state_dict = {k: v for k, v in state_dict.items() if k in param_requires_grad}
 
         return filtered_state_dict
 
