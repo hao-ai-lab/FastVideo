@@ -1,0 +1,78 @@
+# HunyuanVideo T2V overfitting test config.
+#
+# Overfits on 3 short videos (480x832, 77 frames) to verify the
+# training pipeline works end-to-end.
+#
+# Preprocess data first:
+#   CUDA_VISIBLE_DEVICES=0 python scripts/preprocess_hunyuan_overfit.py
+#
+# Run:
+#   bash examples/train/run.sh examples/train/configs/overfit_hunyuan_t2v.yaml
+
+models:
+  student:
+    _target_: fastvideo.train.models.hunyuan.HunyuanModel
+    init_from: hunyuanvideo-community/HunyuanVideo
+    trainable: true
+    enable_gradient_checkpointing_type: full
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+
+  data:
+    data_path: data/hunyuan_overfit_preprocessed
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 20
+    num_height: 480
+    num_width: 832
+    num_frames: 77
+
+  optimizer:
+    learning_rate: 5.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 300
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/hunyuan_overfit
+    training_state_checkpointing_steps: 50
+    checkpoints_total_limit: 2
+
+  tracker:
+    project_name: fastvideo_hunyuan
+    run_name: hunyuan_overfit
+
+  model:
+    precondition_outputs: true
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.hunyuan.hunyuan_pipeline.HunyuanVideoPipeline
+    dataset_file: data/hunyuan_overfit_preprocessed/validation_prompts.json
+    every_steps: 50
+    sampling_steps: [50]
+    guidance_scale: 1.0
+
+pipeline:
+  flow_shift: 7
