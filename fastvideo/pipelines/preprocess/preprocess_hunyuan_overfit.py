@@ -44,7 +44,7 @@ OUTPUT_DIR = "data/hunyuan_overfit_preprocessed"
 def load_video(path: str, num_frames: int) -> torch.Tensor:
     """Load video as [1, C, T, H, W] in [-1, 1]."""
     cap = cv2.VideoCapture(path)
-    frames = []
+    frames: list[np.ndarray] = []
     while len(frames) < num_frames:
         ret, frame = cap.read()
         if not ret:
@@ -66,10 +66,9 @@ def load_video(path: str, num_frames: int) -> torch.Tensor:
     return video
 
 
-def main():
+def main() -> None:
     device = torch.device("cuda:0")
-    model_path = maybe_download_model(
-        "hunyuanvideo-community/HunyuanVideo")
+    model_path = maybe_download_model("hunyuanvideo-community/HunyuanVideo")
     vae_path = os.path.join(model_path, "vae")
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -96,12 +95,10 @@ def main():
     # --- Load text encoders ---
     print("Loading LLaMA text encoder...")
     from transformers import AutoTokenizer, CLIPTextModel, LlamaModel
-    from fastvideo.configs.pipelines.hunyuan import (
-        HunyuanConfig, LlamaConfig, CLIPTextConfig)
+    from fastvideo.configs.pipelines.hunyuan import (LlamaConfig, CLIPTextConfig)
 
     llama_cfg = LlamaConfig()
-    llama_tok = AutoTokenizer.from_pretrained(
-        os.path.join(model_path, "tokenizer"))
+    llama_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
     llama_enc = LlamaModel.from_pretrained(
         os.path.join(model_path, "text_encoder"),
         torch_dtype=torch.float16,
@@ -110,8 +107,7 @@ def main():
 
     print("Loading CLIP text encoder...")
     clip_cfg = CLIPTextConfig()
-    clip_tok = AutoTokenizer.from_pretrained(
-        os.path.join(model_path, "tokenizer_2"))
+    clip_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer_2"))
     clip_enc = CLIPTextModel.from_pretrained(
         os.path.join(model_path, "text_encoder_2"),
         torch_dtype=torch.float16,
@@ -129,8 +125,7 @@ def main():
         print(f"  Caption: {caption[:80]}...")
 
         # Encode video
-        video = load_video(video_path, NUM_FRAMES).to(
-            device=device, dtype=torch.float16)
+        video = load_video(video_path, NUM_FRAMES).to(device=device, dtype=torch.float16)
         print(f"  Video shape: {video.shape}")
 
         with torch.no_grad():
@@ -142,34 +137,26 @@ def main():
         # Encode text with LLaMA
         llama_text = llama_preprocess_text(caption)
         with torch.no_grad():
-            llama_inputs = llama_tok(
-                llama_text, **llama_tok_kwargs).to(device)
-            llama_out = llama_enc(
-                **llama_inputs, output_hidden_states=True)
-            llama_embeds = llama_postprocess_text(
-                llama_out).squeeze(0)  # [seq, dim]
+            llama_inputs = llama_tok(llama_text, **llama_tok_kwargs).to(device)
+            llama_out = llama_enc(**llama_inputs, output_hidden_states=True)
+            llama_embeds = llama_postprocess_text(llama_out).squeeze(0)  # [seq, dim]
 
         # Encode text with CLIP
         clip_text = clip_preprocess_text(caption)
         with torch.no_grad():
-            clip_inputs = clip_tok(
-                clip_text, **clip_tok_kwargs).to(device)
+            clip_inputs = clip_tok(clip_text, **clip_tok_kwargs).to(device)
             clip_out = clip_enc(**clip_inputs)
-            clip_pooled = clip_postprocess_text(
-                clip_out).squeeze(0)  # [dim]
+            clip_pooled = clip_postprocess_text(clip_out).squeeze(0)  # [dim]
 
         # Combine: [pooled_clip_row, llama_embeds]
         llama_dim = llama_embeds.shape[-1]
-        pooled_row = torch.zeros(llama_dim, device=device,
-                                 dtype=torch.float16)
+        pooled_row = torch.zeros(llama_dim, device=device, dtype=torch.float16)
         pooled_row[:clip_pooled.shape[-1]] = clip_pooled
         text_embedding = torch.cat(
-            [pooled_row.unsqueeze(0), llama_embeds], dim=0,
+            [pooled_row.unsqueeze(0), llama_embeds],
+            dim=0,
         ).float().cpu()  # [seq+1, dim]
         print(f"  Text embedding shape: {text_embedding.shape}")
-
-        # Compute latent frames
-        num_latent_t = latent.shape[1]
 
         record = {
             "id": video_name,
@@ -178,8 +165,7 @@ def main():
             "vae_latent_dtype": str(latent.dtype).replace("torch.", ""),
             "text_embedding_bytes": text_embedding.numpy().tobytes(),
             "text_embedding_shape": list(text_embedding.shape),
-            "text_embedding_dtype": str(
-                text_embedding.dtype).replace("torch.", ""),
+            "text_embedding_dtype": str(text_embedding.dtype).replace("torch.", ""),
             "file_name": video_name,
             "caption": caption,
             "media_type": "video",
@@ -196,7 +182,8 @@ def main():
 
     # Write parquet
     table = pa.table(
-        {k: [r[k] for r in records] for k in records[0]},
+        {k: [r[k] for r in records]
+         for k in records[0]},
         schema=pyarrow_schema_t2v,
     )
     output_path = os.path.join(OUTPUT_DIR, "data_00000.parquet")
@@ -206,9 +193,7 @@ def main():
     # Write validation prompts for callback
     # Wrap in "data" key — ValidationDataset expects field="data"
     # Use "caption" field — ValidationDataset aliases it to "prompt"
-    val_prompts = {"data": [
-        {"caption": item["cap"][0]} for item in caption_data
-    ]}
+    val_prompts = {"data": [{"caption": item["cap"][0]} for item in caption_data]}
     val_path = os.path.join(OUTPUT_DIR, "validation_prompts.json")
     with open(val_path, "w") as f:
         json.dump(val_prompts, f, indent=2)
