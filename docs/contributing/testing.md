@@ -23,13 +23,18 @@ SSIM tests are located in `fastvideo/tests/ssim`. These tests generate videos us
 
 ```
 fastvideo/tests/ssim/
-├── <GPU>_reference_videos/   # Reference videos organized by GPU type (e.g., L40S_reference_videos)
-│   ├── <Model_Name>/
-│   │   ├── <Backend>/        # e.g., FLASH_ATTN, TORCH_SDPA
-│   │   │   └── <Video_File>
+├── reference_videos/
+│   ├── default/
+│   │   └── <GPU>_reference_videos/
+│   │       ├── <Model_Name>/
+│   │       │   ├── <Backend>/        # e.g., FLASH_ATTN, TORCH_SDPA
+│   │       │   │   └── <Video_File>
+│   └── full_quality/
+│       └── <GPU>_reference_videos/
 ├── test_causal_similarity.py
-├── test_inference_similarity.py
-├── update_reference_videos.sh
+├── test_wan_t2v_similarity.py
+├── test_wan_i2v_similarity.py
+├── reference_videos_cli.py
 └── ...
 ```
 
@@ -37,7 +42,7 @@ fastvideo/tests/ssim/
 
 To add a new SSIM test, follow these steps:
 
-1. **Create or Update a Test File**: You can add a new test function to an existing file (like `test_inference_similarity.py`) or create a new one if testing a distinct category of models.
+1. **Create or Update a Test File**: Prefer model-specific files (for example `test_wan_t2v_similarity.py`) and create a new one when testing a distinct model or pipeline.
 
 2. **Define Model Parameters**: Define the configuration for the model you want to test. This includes model path, dimensions, inference steps, and other generation parameters. **Note:** Consider using lower `num_inference_steps` or reduced resolution (e.g., 480p instead of 720p) to keep test execution time reasonable, provided it doesn't compromise the test's ability to detect regression.
 
@@ -81,10 +86,15 @@ To add a new SSIM test, follow these steps:
    ```
 
 4. **Reference Videos**:
-   * When running the test for the first time (or when updating the reference), the test will fail because the reference video is missing. The generated video will be saved in `fastvideo/tests/ssim/generated_videos`.
+   * When running the test for the first time (or when updating the reference), the test will fail because the reference video is missing. The generated video will be saved in `fastvideo/tests/ssim/generated_videos/<quality-tier>/<GPU>_reference_videos`.
    * Inspect the generated video to ensure it meets quality expectations.
-   * Move the generated video to the appropriate reference folder: `fastvideo/tests/ssim/<GPU>_reference_videos/<Model>/<Backend>/`.
-   * You can use the helper script `update_reference_videos.sh` to automate copying videos from `generated_videos` to `L40S_reference_videos`. Note: Check the script to ensure paths match your environment (it defaults to `L40S_reference_videos`).
+   * Move the generated video to the appropriate quality/GPU reference folder:
+     `fastvideo/tests/ssim/reference_videos/<quality-tier>/<GPU>_reference_videos/<Model>/<Backend>/`.
+   * You can use the helper CLI to copy generated videos into a reference folder:
+     `python fastvideo/tests/ssim/reference_videos_cli.py copy-local --quality-tier default --reference-dir fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos`
+   * Upload/download can target both quality tiers and specific GPU folders:
+     `python fastvideo/tests/ssim/reference_videos_cli.py upload --quality-tier all`
+     `python fastvideo/tests/ssim/reference_videos_cli.py download --quality-tier full_quality --device-folder H200_reference_videos`
 
 ### Running Tests Locally
 
@@ -111,15 +121,46 @@ If you add a new test that requires:
 * **Longer Execution Time**: Increase the `timeout` parameter.
 * **New Environment Variables/Secrets**: Add them to `secrets=[...]` or the image environment. For example, if your model is gated on Hugging Face, ensure `HF_API_KEY` is passed.
 
-For SSIM tests, the `run_ssim_tests` function in `pr_test.py` currently runs:
+For SSIM tests, use `fastvideo/tests/modal/ssim_test.py`:
 
-```python
-@app.function(gpu="L40S:2", image=image, timeout=2700, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})])
-def run_ssim_tests():
-    run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/ssim -vs")
+```bash
+python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests
 ```
 
-If your new test file is inside `fastvideo/tests/ssim`, it will automatically be picked up by this command. However, ensure that the `gpu="L40S:2"` configuration is sufficient for your model. If your model requires more GPUs (e.g., 4 or 8), you might need to create a separate Modal function or update the existing one.
+Target specific SSIM files/models:
+
+```bash
+python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests \
+  --test-files test_wan_t2v_similarity.py \
+  --model-ids Wan2.1-T2V-1.3B-Diffusers
+```
+
+If HF token env vars are not set (`HF_API_KEY` / `HUGGINGFACE_HUB_TOKEN` /
+`HF_TOKEN`), the local entrypoint fails fast. To export raw `generated_videos`
+from Modal to the shared volume:
+
+```bash
+python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests \
+  --sync-generated-to-volume
+```
+
+The raw export path is quality-tiered:
+
+* default params: `ssim_generated_videos/default/<subdir>/generated_videos`
+* full-quality params: `ssim_generated_videos/full_quality/<subdir>/generated_videos`
+
+The printed `modal volume get` command also downloads into a quality-specific
+local directory under `./generated_videos_modal/<quality-tier>`.
+
+To turn downloaded Modal outputs into local reference videos, use the matching
+quality tier with `copy-local`, for example:
+
+```bash
+python fastvideo/tests/ssim/reference_videos_cli.py copy-local \
+  --quality-tier full_quality \
+  --generated-dir ./generated_videos_modal/full_quality/L40S_reference_videos \
+  --device-folder L40S_reference_videos
+```
 
 ### Workflow Scripts
 
