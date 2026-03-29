@@ -14,12 +14,27 @@ class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
     def __init__(self, model: torch.nn.Module) -> None:
         self.model = model
 
+    def normalize_key(self, k: str) -> str:
+        return k.replace("._checkpoint_wrapped_module.", ".")
+
     def state_dict(self) -> dict[str, Any]:
-        state_dict = get_model_state_dict(self.model)  # type: ignore[no-any-return]
-        # filter out non-trainable parameters
-        param_requires_grad = set([k for k, v in dict(self.model.named_parameters()).items() if v.requires_grad])
-        state_dict = {k: v for k, v in state_dict.items() if k in param_requires_grad}
-        return state_dict  # type: ignore
+        state_dict = get_model_state_dict(self.model)
+
+        param_requires_grad = {
+            self.normalize_key(k)
+            for k, v in self.model.named_parameters()
+            if v.requires_grad
+        }
+
+        filtered_state_dict = {
+            k: v
+            for k, v in state_dict.items()
+            if k in param_requires_grad
+        }
+
+        print("LoRA keys after filter:", filtered_state_dict.keys())
+
+        return filtered_state_dict
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         set_model_state_dict(
