@@ -7,14 +7,14 @@ on:
       - 'docs/**'
       - 'mkdocs.yml'
       - 'requirements-mkdocs.txt'
-      - '.github/workflows/docs.yml'
+      - '.github/workflows/infra-docs.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
       - 'requirements-mkdocs.txt'
-      - '.github/workflows/docs.yml'
+      - '.github/workflows/infra-docs.yml'
 
 permissions:
   contents: read

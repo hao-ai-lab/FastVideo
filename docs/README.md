@@ -36,4 +36,4 @@ Then open your browser to: http://localhost:8000
 
 ## Automatic Deployment
 
-Documentation is automatically built and deployed to GitHub Pages when changes are pushed to the `main` branch via the `.github/workflows/docs.yml` workflow.
+Documentation is automatically built and deployed to GitHub Pages when changes are pushed to the `main` branch via the `.github/workflows/infra-docs.yml` workflow.
