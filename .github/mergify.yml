@@ -103,12 +103,12 @@ pull_request_rules:
   - name: "label scope: training"
     conditions:
       - or:
-        - files~=^fastvideo/train/
-        - files~=^fastvideo/training/
-        - files~=^fastvideo/distillation/
-        - files~=^examples/train/
-        - files~=^examples/training/
-        - files~=^examples/distill/
+          - files~=^fastvideo/train/
+          - files~=^fastvideo/training/
+          - files~=^fastvideo/distillation/
+          - files~=^examples/train/
+          - files~=^examples/training/
+          - files~=^examples/distill/
       - -closed
     actions:
       label:
@@ -117,14 +117,14 @@ pull_request_rules:
   - name: "label scope: inference"
     conditions:
       - or:
-        - files~=^fastvideo/pipelines/basic/
-        - files~=^fastvideo/pipelines/stages/
-        - files~=^fastvideo/pipelines/samplers/
-        - files~=^fastvideo/entrypoints/
-        - files~=^fastvideo/worker/
-        - files~=^fastvideo/configs/sample/
-        - files~=^fastvideo/configs/pipelines/
-        - files~=^examples/inference/
+          - files~=^fastvideo/pipelines/basic/
+          - files~=^fastvideo/pipelines/stages/
+          - files~=^fastvideo/pipelines/samplers/
+          - files~=^fastvideo/entrypoints/
+          - files~=^fastvideo/worker/
+          - files~=^fastvideo/configs/sample/
+          - files~=^fastvideo/configs/pipelines/
+          - files~=^examples/inference/
       - -closed
     actions:
       label:
@@ -141,8 +141,8 @@ pull_request_rules:
   - name: "label scope: kernel"
     conditions:
       - or:
-        - files~=^fastvideo-kernel/
-        - files~=^csrc/
+          - files~=^fastvideo-kernel/
+          - files~=^csrc/
       - -closed
     actions:
       label:
@@ -151,9 +151,9 @@ pull_request_rules:
   - name: "label scope: data"
     conditions:
       - or:
-        - files~=^fastvideo/dataset/
-        - files~=^fastvideo/pipelines/preprocess/
-        - files~=^examples/preprocessing/
+          - files~=^fastvideo/dataset/
+          - files~=^fastvideo/pipelines/preprocess/
+          - files~=^examples/preprocessing/
       - -closed
     actions:
       label:
@@ -162,10 +162,10 @@ pull_request_rules:
   - name: "label scope: infra"
     conditions:
       - or:
-        - files~=^\.github/
-        - files~=^\.buildkite/
-        - files~=^fastvideo/tests/
-        - files~=^docker/
+          - files~=^\.github/
+          - files~=^\.buildkite/
+          - files~=^fastvideo/tests/
+          - files~=^docker/
       - -closed
     actions:
       label:
@@ -198,9 +198,9 @@ pull_request_rules:
   - name: "label scope: model"
     conditions:
       - or:
-        - files~=^fastvideo/models/
-        - files~=^fastvideo/layers/
-        - files~=^fastvideo/configs/models/
+          - files~=^fastvideo/models/
+          - files~=^fastvideo/layers/
+          - files~=^fastvideo/configs/models/
       - -closed
     actions:
       label:
@@ -329,9 +329,3 @@ pull_request_rules:
 
           Please update your PR title and the merge protection check will pass automatically.
 
-  - name: delete merged branch
-    conditions:
-      - merged
-      - -head~=^(main|master|release[/-])$
-    actions:
-      delete_head_branch: {}
