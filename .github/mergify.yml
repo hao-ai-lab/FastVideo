@@ -310,7 +310,7 @@ pull_request_rules:
       - queue-dequeue-reason!=none
     actions:
       label:
-        remove: [ready, dequeued]
+        remove: [ready]
 
   - name: comment on invalid PR title format
     conditions:
