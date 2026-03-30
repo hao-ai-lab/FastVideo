@@ -302,7 +302,7 @@ pull_request_rules:
     conditions:
       - -closed
       - -draft
-      - -"title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
+      - "-title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
     actions:
       comment:
         message: |
