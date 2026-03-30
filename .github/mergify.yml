@@ -16,11 +16,13 @@ queue_rules:
       {{ body }}
 
 merge_protections:
-  - name: PR title must follow conventional format
+  - name: PR merge requirements
     if:
       - base = main
     success_conditions:
       - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
+      - "#approved-reviews-by>=1"
+      - check-success~=pre-commit
 
 pull_request_rules:
 
@@ -246,18 +248,21 @@ pull_request_rules:
     actions:
       comment:
         message: |
-          ## Buildkite CI tests failed
+          ## ❌ CI tests failed
 
-          Hi @{{author}}, some Buildkite CI tests have failed. Check the build for details:
-          [View Buildkite build →](https://buildkite.com/fastvideo/ci)
+          @{{author}} — to see what failed:
+          1. Scroll to the **Checks** section below
+          2. Find the check marked with ❌ (e.g. `buildkite/ci/microscope-transformer-tests`)
+          3. Click **Details** to view the full build log
 
-          Common causes:
-          - **Test failures**: Check the failing step's output for assertion errors or tracebacks
-          - **Import errors**: Make sure new dependencies are added to `pyproject.toml`
-          - **GPU memory**: Some tests require specific GPU types (L40S, H100 NVL)
-          - **Kernel build**: If you changed `fastvideo-kernel/`, the build may have failed
+          Or [view all builds for this branch on Buildkite →](https://buildkite.com/fastvideo/ci/builds?branch={{head}})
 
-          If the failure is unrelated to your changes, leave a comment explaining why.
+          **Common causes:**
+          - **Assertion error / test failure** — check the failing test's traceback
+          - **Import error** — new dependency missing from `pyproject.toml`
+          - **OOM** — some tests need specific GPUs (L40S, H100 NVL)
+
+          If the failure looks unrelated to your changes, comment why and a maintainer will review.
 
   # ============================================================
   # Merge conflict detection
