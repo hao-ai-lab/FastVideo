@@ -167,6 +167,8 @@ nav:
       - Index: contributing/developer_env/index.md
       - Docker: contributing/developer_env/docker.md
       - RunPod: contributing/developer_env/runpod.md
+    - Pull Requests: contributing/pull_requests.md
+    - CI Architecture: contributing/ci_architecture.md
     - Testing: contributing/testing.md
     - Profiling: contributing/profiling.md
     - Coding Agents: contributing/coding_agents.md

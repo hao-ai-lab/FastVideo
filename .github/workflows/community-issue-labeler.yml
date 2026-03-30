@@ -22,16 +22,15 @@ jobs:
             const labels = [];
 
             const rules = [
-              { keywords: ['training', 'finetune', 'fine-tune', 'lora', 'fsdp', 'distill'], label: 'training' },
-              { keywords: ['inference', 'generate', 'pipeline', 'slow', 'latency'], label: 'inference' },
-              { keywords: ['attention', 'vsa', 'flash', 'sta', 'vmoba', 'sparse attn'], label: 'attention' },
+              { keywords: ['training', 'finetune', 'fine-tune', 'lora', 'fsdp', 'distill'], label: 'scope: training' },
+              { keywords: ['inference', 'generate', 'pipeline', 'slow', 'latency'], label: 'scope: inference' },
+              { keywords: ['attention', 'vsa', 'flash', 'sta', 'vmoba', 'sparse attn'], label: 'scope: attention' },
               { keywords: ['install', 'setup', 'pip', 'cuda', 'uv ', 'import error', 'modulenotfound'], label: 'installation' },
               { keywords: ['docs', 'documentation', 'tutorial', 'example'], label: 'documentation' },
               { keywords: ['memory', 'oom', 'out of memory', 'gpu memory', 'vram'], label: 'performance' },
               { keywords: ['wan', 'hunyuan', 'mochi', 'ltx', 'cogvideo'], label: 'model-specific' },
               { keywords: ['windows', 'macos', 'mac os', 'apple', 'mps'], label: 'platform' },
-              { keywords: ['comfyui', 'comfy'], label: 'comfyui' },
-              { keywords: ['kernel', 'csrc', 'cuda kernel', 'thunderkittens'], label: 'kernel' },
+              { keywords: ['kernel', 'csrc', 'cuda kernel', 'thunderkittens'], label: 'scope: kernel' },
             ];
 
             for (const rule of rules) {
