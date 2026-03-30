@@ -850,6 +850,21 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
 
 
 class MatrixGame3ImageVAEEncodingStage(ImageVAEEncodingStage):
+    def preprocess(
+            self,
+            image: torch.Tensor | PIL.Image.Image,
+            vae_scale_factor: int,
+            height: int | None = None,
+            width: int | None = None,
+            resize_mode: str = "crop",
+    ) -> torch.Tensor:
+        return super().preprocess(
+            image,
+            vae_scale_factor=vae_scale_factor,
+            height=height,
+            width=width,
+            resize_mode=resize_mode,
+        )
 
     def forward(
         self,

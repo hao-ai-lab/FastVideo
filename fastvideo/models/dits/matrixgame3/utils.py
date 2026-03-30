@@ -112,37 +112,15 @@ def pose_to_c2w(pose):
 
 
 def build_intrinsics(height: int, width: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
-    focal = float(max(height, width))
-    return torch.tensor([[focal, focal, width / 2.0, height / 2.0]], device=device, dtype=dtype)
+    fov_rad = float(np.deg2rad(90.0))
+    fx = float(width) / (2.0 * float(np.tan(fov_rad / 2.0)))
+    fy = float(height) / (2.0 * float(np.tan(fov_rad / 2.0)))
+    return torch.tensor([[fx, fy, width / 2.0, height / 2.0]], device=device, dtype=dtype)
 
 
-def build_matrixgame3_action_preset(num_frames: int) -> tuple[torch.Tensor, torch.Tensor]:
-    keyboard_condition = torch.zeros((num_frames, 6), dtype=torch.float32)
-    mouse_condition = torch.zeros((num_frames, 2), dtype=torch.float32)
-
-    segments = [
-        ("forward", 12),
-        ("camera_l", 12),
-        ("forward_left", 12),
-        ("camera_r", 12),
-    ]
-    current = 1
-    for name, seg_len in segments:
-        if current >= num_frames:
-            break
-        end = min(num_frames, current + seg_len)
-        if "forward" in name:
-            keyboard_condition[current:end, 0] = 1
-        if "left" in name and "camera" not in name:
-            keyboard_condition[current:end, 2] = 1
-        if "right" in name and "camera" not in name:
-            keyboard_condition[current:end, 3] = 1
-        if "camera_l" in name:
-            mouse_condition[current:end, 1] = -0.1
-        if "camera_r" in name:
-            mouse_condition[current:end, 1] = 0.1
-        current = end
-    return keyboard_condition, mouse_condition
+def build_matrixgame3_action_preset(num_frames: int, seed: int | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    presets = create_action_presets(num_frames=num_frames, keyboard_dim=6, seed=seed)
+    return presets["keyboard"], presets["mouse"]
 
 
 def get_matrixgame3_total_frames(num_iterations: int) -> int:
@@ -194,14 +172,53 @@ def interpolate_camera_poses_handedness(
     return c2ws
 
 
-def build_matrixgame3_extrinsics_from_actions(
+def build_extrinsics_from_actions(
     keyboard_conditions: torch.Tensor,
     mouse_conditions: torch.Tensor,
 ) -> torch.Tensor:
-    keyboard_np = keyboard_conditions.detach().cpu().numpy()
-    mouse_np = mouse_conditions.detach().cpu().numpy()
+    keyboard_np = keyboard_conditions.detach().to(dtype=torch.float32).cpu().numpy()
+    mouse_np = mouse_conditions.detach().to(dtype=torch.float32).cpu().numpy()
     poses = compute_all_poses_from_actions(keyboard_np, mouse_np)
-    return torch.from_numpy(np.stack([pose_to_c2w(pose) for pose in poses], axis=0)).float()
+    rotations = np.concatenate(
+        [np.zeros((poses.shape[0], 1), dtype=np.float32), poses[:, 3:5]],
+        axis=1,
+    )
+    positions = poses[:, :3]
+    return build_extrinsics(rotations, positions)
+
+
+def build_extrinsics(
+    video_rotation: np.ndarray,
+    video_position: np.ndarray,
+) -> torch.Tensor:
+    extrinsics = []
+    for frame_rotation, frame_position in zip(video_rotation, video_position, strict=False):
+        roll_deg, pitch_deg, yaw_deg = frame_rotation
+        roll, pitch, yaw = np.radians([roll_deg, pitch_deg, yaw_deg])
+
+        rot_z = np.array(
+            [[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]],
+            dtype=np.float32,
+        )
+        rot_y = np.array(
+            [[np.cos(pitch), 0, np.sin(pitch)], [0, 1, 0], [-np.sin(pitch), 0, np.cos(pitch)]],
+            dtype=np.float32,
+        )
+        rot_x = np.array(
+            [[1, 0, 0], [0, np.cos(roll), -np.sin(roll)], [0, np.sin(roll), np.cos(roll)]],
+            dtype=np.float32,
+        )
+        rot = rot_z @ rot_y @ rot_x
+        ext = np.eye(4, dtype=np.float32)
+        ext[:3, :3] = rot
+        ext[:3, 3] = np.asarray(frame_position, dtype=np.float32)
+        extrinsics.append(ext)
+
+    r_init = np.array([[0, 0, 1], [1, 0, 0], [0, -1, 0]], dtype=np.float32)
+    extrinsics_tensor = torch.from_numpy(np.stack(extrinsics, axis=0)).float()
+    extrinsics_tensor[:, :3, :3] = extrinsics_tensor[:, :3, :3] @ torch.from_numpy(r_init)
+    extrinsics_tensor[:, :3, 3] = extrinsics_tensor[:, :3, 3] * 0.01
+    return extrinsics_tensor
 
 
 def build_plucker_from_c2ws(
@@ -215,7 +232,7 @@ def build_plucker_from_c2ws(
     latent_w: int,
     framewise: bool = True,
 ) -> torch.Tensor:
-    c2ws_np = c2ws_seq.detach().cpu().numpy()
+    c2ws_np = c2ws_seq.detach().to(dtype=torch.float32).cpu().numpy()
     c2ws_infer = interpolate_camera_poses_handedness(
         src_indices=src_indices,
         src_rot_mat=c2ws_np[:, :3, :3],
@@ -327,7 +344,7 @@ def build_plucker_from_actions(
     latent_h: int,
     latent_w: int,
 ) -> torch.Tensor:
-    c2ws = build_matrixgame3_extrinsics_from_actions(keyboard_window, mouse_window)
+    c2ws = build_extrinsics_from_actions(keyboard_window, mouse_window)
     relative = compute_relative_poses(c2ws, framewise=True, normalize_trans=True)
     return build_plucker_from_pose(
         relative,
