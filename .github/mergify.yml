@@ -1,6 +1,7 @@
 queue_rules:
   - name: default
     queue_conditions:
+      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
       - check-success~=pre-commit
       - check-success=fastcheck-passed
       - "#approved-reviews-by>=1"
