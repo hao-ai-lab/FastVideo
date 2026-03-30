@@ -319,9 +319,3 @@ pull_request_rules:
 
           Please update your PR title and the merge protection check will pass automatically.
 
-  - name: delete merged branch
-    conditions:
-      - merged
-      - -head~=^(main|master|release[/-])$
-    actions:
-      delete_head_branch: {}
