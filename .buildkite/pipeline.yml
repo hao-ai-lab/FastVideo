@@ -5,7 +5,6 @@ env:
 notify:
   - github_commit_status:
       context: "fastcheck-passed"
-    if: build.branch !~ /^mergify\/merge-queue\//
   - github_commit_status:
       context: "full-suite-passed"
     if: build.branch =~ /^mergify\/merge-queue\//
