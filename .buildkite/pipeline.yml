@@ -17,6 +17,12 @@ steps:
   # CUDA kernels, and unit tests.
   # ============================================================
     - label: "Trigger Fastcheck"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
       plugins:
         - monorepo-diff#v1.4.0:
             diff: 'git fetch origin "${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}" && git diff --name-only "origin/${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}...HEAD"'
@@ -96,6 +102,12 @@ steps:
   # ============================================================
     - label: "Trigger Full Suite"
       if: build.env("FULL_SUITE") == "true" || build.branch =~ /^mergify\/merge-queue\//
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
       plugins:
         - monorepo-diff#v1.4.0:
             diff: 'git fetch origin "${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}" && git diff --name-only "origin/${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}...HEAD"'
