@@ -1,0 +1,31 @@
+name: Trigger Full Suite
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: full-suite-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  trigger:
+    if: github.event.label.name == 'ready'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Buildkite Full Suite
+        uses: buildkite/trigger-pipeline-action@v2.4.1
+        with:
+          buildkite_api_access_token: ${{ secrets.BUILDKITE_API_TOKEN }}
+          pipeline: "${{ vars.BUILDKITE_ORG_SLUG }}/${{ vars.BUILDKITE_PIPELINE_SLUG }}"
+          branch: "${{ github.event.pull_request.head.ref }}"
+          commit: "${{ github.event.pull_request.head.sha }}"
+          message: "Full Suite for PR #${{ github.event.pull_request.number }}"
+          build_env_vars: '{"FULL_SUITE": "true"}'
+          send_pull_request: "true"
+          pull_request_id: "${{ github.event.pull_request.number }}"
+          pull_request_base_branch: "main"
