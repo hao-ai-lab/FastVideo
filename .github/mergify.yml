@@ -305,6 +305,13 @@ pull_request_rules:
       queue:
         name: default
 
+  - name: remove ready label on dequeue
+    conditions:
+      - queue-dequeue-reason!=none
+    actions:
+      label:
+        remove: [ready]
+
   - name: comment on invalid PR title format
     conditions:
       - -closed
