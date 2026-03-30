@@ -31,24 +31,16 @@ jobs:
             }
             core.setOutput('has_write', String(hasWrite));
 
-      - name: Queue PR and react
+      - name: Queue PR via Mergify and react
         if: steps.perm.outputs.has_write == 'true'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const prNumber = context.payload.issue.number;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            // Remove ready+dequeued first, then re-add ready
-            // This resets Mergify's state and re-triggers the queue entry rule
-            for (const label of ['ready', 'dequeued']) {
-              try {
-                await github.rest.issues.removeLabel({ owner, repo, issue_number: prNumber, name: label });
-              } catch (e) {
-                // Label may not exist on this PR — ignore
-              }
-            }
+            const prNumber = context.payload.issue.number;
             await github.rest.issues.addLabels({ owner, repo, issue_number: prNumber, labels: ['ready'] });
+            await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body: '@mergifyio queue' });
             await github.rest.reactions.createForIssueComment({
               owner, repo,
               comment_id: context.payload.comment.id,
