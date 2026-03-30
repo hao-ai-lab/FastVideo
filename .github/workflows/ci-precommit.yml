@@ -14,9 +14,7 @@ permissions:
 
 jobs:
   pre-commit:
-    if: >-
-      github.event.pull_request.draft != true
-      || startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/')
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
