@@ -1,14 +1,16 @@
 queue_rules:
   - name: default
     queue_conditions:
+      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
       - check-success~=pre-commit
+      - check-success=fastcheck-passed
       - "#approved-reviews-by>=1"
       - -draft
       - -conflict
       - -closed
       - label!=do-not-merge
     merge_conditions:
-      - check-success~=buildkite/ci
+      - check-success=full-suite-passed
     merge_method: squash
     commit_message_template: |
       {{ title }} (#{{ number }})
@@ -21,8 +23,8 @@ merge_protections:
       - base = main
     success_conditions:
       - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
-      - "#approved-reviews-by>=1"
       - check-success~=pre-commit
+      - check-success=fastcheck-passed
 
 pull_request_rules:
 
