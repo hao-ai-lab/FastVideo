@@ -23,6 +23,18 @@ flex_attention = torch.compile(
 )
 
 
+class WanRMSNorm(nn.Module):
+
+    def __init__(self, dim: int, eps: float = 1e-5):
+        super().__init__()
+        self.dim = dim
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x * torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+
+
 def _get_nd_rotary_pos_embed_matrixgame(
     rope_dim_list,
     rope_sizes,
@@ -298,10 +310,10 @@ class MatrixGame3ActionModule(nn.Module):
             head_dim = c // heads_num
             self.t_qkv = ReplicatedLinear(c, c * 3, bias=qkv_bias)
             self.img_attn_q_norm = (
-                RMSNorm(head_dim, eps=1e-6) if qk_norm else nn.Identity()
+                WanRMSNorm(head_dim, eps=1e-6) if qk_norm else nn.Identity()
             )
             self.img_attn_k_norm = (
-                RMSNorm(head_dim, eps=1e-6) if qk_norm else nn.Identity()
+                WanRMSNorm(head_dim, eps=1e-6) if qk_norm else nn.Identity()
             )
             self.proj_mouse = ReplicatedLinear(
                 c, img_hidden_size, bias=qkv_bias
@@ -310,10 +322,10 @@ class MatrixGame3ActionModule(nn.Module):
         if self.enable_keyboard:
             head_dim_key = keyboard_hidden_dim // heads_num
             self.key_attn_q_norm = (
-                RMSNorm(head_dim_key, eps=1e-6) if qk_norm else nn.Identity()
+                WanRMSNorm(head_dim_key, eps=1e-6) if qk_norm else nn.Identity()
             )
             self.key_attn_k_norm = (
-                RMSNorm(head_dim_key, eps=1e-6) if qk_norm else nn.Identity()
+                WanRMSNorm(head_dim_key, eps=1e-6) if qk_norm else nn.Identity()
             )
 
             self.mouse_attn_q = ReplicatedLinear(
@@ -457,6 +469,7 @@ class MatrixGame3ActionModule(nn.Module):
         self,
         hidden_states: torch.Tensor,
         mouse_condition: torch.Tensor,
+        mouse_cond_memory: torch.Tensor | None,
         *,
         is_causal: bool,
         kv_cache_mouse: dict[str, torch.Tensor] | None,
@@ -492,7 +505,7 @@ class MatrixGame3ActionModule(nn.Module):
                 for i in range(num_frame_per_block)
             ]
         else:
-            local_num_frames = tt
+            local_num_frames = N_feats
             group_mouse = [
                 mouse_condition[
                     :,
@@ -504,6 +517,11 @@ class MatrixGame3ActionModule(nn.Module):
             ]
 
         group_mouse = torch.stack(group_mouse, dim=1)
+        if mouse_cond_memory is not None:
+            mem = mouse_cond_memory.to(device=group_mouse.device, dtype=group_mouse.dtype)
+            # [B, T_mem, C] -> [B, T_mem, pad_t, C]
+            mem = mem.unsqueeze(2).expand(-1, -1, pad_t, -1)
+            group_mouse = torch.cat([mem, group_mouse], dim=1)
         actual_num_frames = group_mouse.shape[
             1
         ]  # Use actual stacked frame count
@@ -572,6 +590,7 @@ class MatrixGame3ActionModule(nn.Module):
         self,
         hidden_states: torch.Tensor,
         keyboard_condition: torch.Tensor,
+        keyboard_cond_memory: torch.Tensor | None,
         *,
         is_causal: bool,
         use_rope_keyboard: bool,
@@ -609,7 +628,7 @@ class MatrixGame3ActionModule(nn.Module):
             ]
         else:
             keyboard_condition = self.keyboard_embed(keyboard_condition)
-            local_num_frames = tt
+            local_num_frames = N_feats
             group_keyboard = [
                 keyboard_condition[
                     :,
@@ -620,6 +639,13 @@ class MatrixGame3ActionModule(nn.Module):
                 for i in range(local_num_frames)
             ]
         group_keyboard = torch.stack(group_keyboard, dim=1)  # B F RW C
+        if keyboard_cond_memory is not None:
+            k_mem = keyboard_cond_memory.to(
+                device=group_keyboard.device, dtype=group_keyboard.dtype
+            )
+            k_mem = self.keyboard_embed(k_mem)
+            k_mem = k_mem.unsqueeze(2).expand(-1, -1, pad_t, -1)
+            group_keyboard = torch.cat([k_mem, group_keyboard], dim=1)
         group_keyboard = group_keyboard.reshape(
             shape=(group_keyboard.shape[0], group_keyboard.shape[1], -1)
         )
@@ -728,6 +754,8 @@ class MatrixGame3ActionModule(nn.Module):
         tw: int,
         mouse_condition: torch.Tensor | None = None,
         keyboard_condition: torch.Tensor | None = None,
+        mouse_cond_memory: torch.Tensor | None = None,
+        keyboard_cond_memory: torch.Tensor | None = None,
         block_mask_mouse: BlockMask | None = None,
         block_mask_keyboard: BlockMask | None = None,
         is_causal: bool = False,
@@ -760,9 +788,13 @@ class MatrixGame3ActionModule(nn.Module):
         B, N_frames, C = keyboard_condition.shape
         assert tt * th * tw == x.shape[1]
         assert (
-            (N_frames - 1) + self.vae_time_compression_ratio
-        ) % self.vae_time_compression_ratio == 0
-        N_feats = int((N_frames - 1) / self.vae_time_compression_ratio) + 1
+            ((N_frames - 1) + self.vae_time_compression_ratio) % self.vae_time_compression_ratio == 0
+            or (N_frames % self.vae_time_compression_ratio == 0)
+        )
+        if ((N_frames - 1) + self.vae_time_compression_ratio) % self.vae_time_compression_ratio == 0:
+            N_feats = int((N_frames - 1) / self.vae_time_compression_ratio) + 1
+        else:
+            N_feats = N_frames // self.vae_time_compression_ratio
 
         # Lazy initialization of freqs on first forward pass
         if self._freqs_cos is None or self._freqs_sin is None:
@@ -799,6 +831,7 @@ class MatrixGame3ActionModule(nn.Module):
             attn = self._forward_mouse(
                 hidden_states,
                 mouse_condition,
+                mouse_cond_memory,
                 is_causal=is_causal,
                 kv_cache_mouse=kv_cache_mouse,
                 pad_t=pad_t,
@@ -821,6 +854,7 @@ class MatrixGame3ActionModule(nn.Module):
             attn = self._forward_keyboard(
                 hidden_states,
                 keyboard_condition,
+                keyboard_cond_memory,
                 is_causal=is_causal,
                 use_rope_keyboard=use_rope_keyboard,
                 kv_cache_keyboard=kv_cache_keyboard,
