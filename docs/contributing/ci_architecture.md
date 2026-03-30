@@ -16,18 +16,15 @@ PR push
         Buildkite / Modal GPU instances
         Only runs tests for paths you changed
 
-              │ (maintainer adds 'ready' label or comments /merge)
-              ▼
-        Merge Queue
-          Mergify creates mergify/merge-queue/<branch>
-              │
+              │ (developer comments /merge or maintainer adds 'ready' label)
               ▼
         Tier 3: Full Suite (~60-90 min)
           Buildkite / Modal GPU instances
           All integration, SSIM, training, and performance tests
+          Runs on the PR branch directly
               │
-          pass ──► squash-merge to main, branch deleted
-          fail ──► PR ejected from queue; fix and re-queue
+          pass ──► Mergify auto-squash-merges to main, branch deleted
+          fail ──► Mergify removes 'ready' label; fix and /merge again
 ```
 
 ---
@@ -82,11 +79,11 @@ failing test's output.
 
 ---
 
-### Tier 3: Full Test Suite (Merge Queue only)
+### Tier 3: Full Test Suite (triggered by `ready` label)
 
 | Attribute | Value |
 |-----------|-------|
-| Triggered by | Mergify creating a `mergify/merge-queue/*` branch, OR a `/test full` command |
+| Triggered by | Adding the `ready` label to the PR (via `/merge` command), or a `/test full` command |
 | Runs on | Buildkite, Modal GPU instances |
 | Duration | 60-90 minutes total (tests run in parallel, path-filtered) |
 
@@ -105,44 +102,48 @@ failing test's output.
 | Performance Tests | `performance` | 30 min |
 | API Server Tests | `api_server` | 30 min |
 
-A Full Suite failure means the PR is ejected from the Merge Queue. A Mergify comment will
-link to the Buildkite build. Fix the regression, push, and re-queue.
+A Full Suite failure removes the `ready` label automatically. A Mergify comment links to
+the Buildkite build. Fix the regression, push, and comment `/merge` again.
 
 ---
 
-## Merge Queue
+## Auto-merge Flow
 
-The Merge Queue prevents untested code from landing on `main`. Mergify manages the queue;
-Buildkite validates each entry.
+Mergify prevents untested code from landing on `main` by gating squash-merge on the Full
+Suite passing directly on the PR branch.
 
 **How it works:**
 
 1. A developer comments `/merge` on an approved PR (or a maintainer adds the `ready` label).
-2. The `ready` label triggers the Mergify rule `enter merge queue when ready and approved`.
-3. Mergify checks the **queue conditions** before accepting:
-   - `pre-commit` check must be green
+2. The `ready` label triggers `ci-trigger-full-suite.yml`, which calls the Buildkite API to
+   run the Full Suite on the PR branch itself.
+3. While the Full Suite runs, Mergify also auto-rebases the PR branch against `main` if it
+   is behind and has no conflicts.
+4. Once the Full Suite posts `full-suite-passed`, Mergify checks all **merge conditions**:
+   - `pre-commit` check is green
+   - `fastcheck-passed` check is green
+   - `full-suite-passed` check is green
    - At least 1 approved review (`#approved-reviews-by>=1`)
+   - PR title starts with a valid `[type]` tag
    - PR is not a draft
    - No merge conflicts
-   - Not closed
-   - No `do-not-merge` label
-4. If conditions pass, Mergify creates a temporary branch: `mergify/merge-queue/<branch-name>`
-5. Buildkite Full Suite runs on that branch (triggered by the branch name pattern).
-6. Once all Full Suite checks pass (`check-success~=buildkite/ci`), Mergify squash-merges
-   to `main` with the commit message: `<title> (#<number>)` followed by the PR body.
-7. If any Full Suite test fails, the PR is ejected from the queue and Mergify posts a comment.
-   The developer fixes the issue, pushes, and comments `/merge` again.
+5. If all conditions pass, Mergify squash-merges to `main` automatically. The branch is
+   deleted after merge.
+6. If the Full Suite fails, Mergify removes the `ready` label and posts a comment linking to
+   the Buildkite build. The developer fixes the issue, pushes, and comments `/merge` again.
 
-**Queue conditions summary:**
+**Merge conditions summary:**
 
 | Condition | Meaning |
 |-----------|---------|
 | `check-success~=pre-commit` | Tier 1 pre-commit must be green |
+| `check-success=fastcheck-passed` | Tier 2 Fastcheck must be green |
+| `check-success=full-suite-passed` | Tier 3 Full Suite must be green |
 | `#approved-reviews-by>=1` | At least one approved review |
-| `-draft` | Not a draft PR |
+| `title~=(?i)^\[(feat|bugfix|...)` | PR title has a valid type tag |
+| `-draft` | PR is not in draft state |
 | `-conflict` | No merge conflicts with base branch |
 | `-closed` | PR is still open |
-| `label!=do-not-merge` | No `do-not-merge` label present |
 
 ---
 
@@ -186,7 +187,7 @@ Applied by Mergify based on which paths you modified. Multiple scope labels can 
 
 | Label | Who sets it | Meaning |
 |-------|-------------|---------|
-| `ready` | Developer (`/merge` command) or maintainer | Enters the Merge Queue |
+| `ready` | Developer (`/merge` command) or maintainer | Triggers Full Suite and enables auto-merge |
 | `needs-rebase` | Mergify (automatic) | PR has merge conflicts; rebase needed |
 | `do-not-merge` | Maintainer | Blocks queue entry regardless of other conditions |
 
@@ -245,8 +246,11 @@ The command is recognized within a few seconds. The workflow reacts with a 🚀 
 /merge
 ```
 
-Adds the `ready` label to the PR, which triggers Merge Queue entry (subject to queue
-conditions being met).
+Adds the `ready` label to the PR, which triggers the Full Suite on your PR branch and
+enables Mergify to auto-squash-merge once all conditions pass.
+
+The command first removes the `ready` label if it is already present, then re-adds it. This
+ensures the `labeled` event fires and a fresh Full Suite build is started even on a re-try.
 
 ### `/test <name>`
 
@@ -290,6 +294,7 @@ Protected branches (`main`, `master`, `release/*`) are never deleted.
 | Filename | Trigger | What it does |
 |----------|---------|-------------|
 | `ci-precommit.yml` | Every push / PR against `main` | Runs pre-commit hooks (yapf, ruff, mypy, codespell, pymarkdown, actionlint, check-filenames) |
+| `ci-trigger-full-suite.yml` | `ready` label added to a PR | Calls Buildkite API to run Full Suite on the PR branch |
 | `ci-slash-commands.yml` | PR comment starting with `/merge` or `/test` | Handles slash commands; adds `ready` label or triggers Buildkite |
 | `community-issue-labeler.yml` | Issue opened or edited | Auto-labels issues by keyword matching against title and body |
 | `community-welcome.yml` | First contribution | Posts a welcome comment for first-time contributors |

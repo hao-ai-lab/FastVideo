@@ -62,7 +62,7 @@ need to set them manually.
 
 | Label | Who sets it | Meaning |
 |-------|-------------|---------|
-| `ready` | You (`/merge` comment) or a maintainer | Requests entry into the Merge Queue |
+| `ready` | You (`/merge` comment) or a maintainer | Triggers Full Suite and enables auto-merge |
 | `needs-rebase` | Mergify (automatic) | Your PR has conflicts; rebase against `main` |
 | `do-not-merge` | Maintainer | Blocks merge regardless of CI status |
 
@@ -82,11 +82,11 @@ hooks: yapf, ruff, mypy, codespell, pymarkdown, actionlint, and check-filenames.
 Buildkite runs GPU tests only for the components you changed. If you only modified
 `fastvideo/models/vaes/`, only VAE Tests run. Tests run in parallel.
 
-**Tier 3: Full Suite (~60-90 min) — runs only in the Merge Queue**
+**Tier 3: Full Suite (~60-90 min) — triggered by the `ready` label**
 
-When your PR enters the Merge Queue, Buildkite runs the complete test suite: SSIM
-regression, LoRA inference and training, distillation, self-forcing, VSA, VMoBA,
-performance benchmarks, and API server tests.
+When you comment `/merge` (or a maintainer adds the `ready` label), Buildkite runs the
+complete test suite on your PR branch: SSIM regression, LoRA inference and training,
+distillation, self-forcing, VSA, VMoBA, performance benchmarks, and API server tests.
 
 ---
 
@@ -99,14 +99,13 @@ performance benchmarks, and API server tests.
 3. Fix any pre-commit failures locally (`pre-commit run --all-files`) and push again.
 4. Wait for at least one approving review.
 5. Once approved and pre-commit is green, comment `/merge` on the PR.
-6. Mergify adds the `ready` label and checks queue conditions (approval, no draft, no
-   conflicts, no `do-not-merge`).
-7. If conditions pass, Mergify creates a `mergify/merge-queue/<branch>` branch and runs
-   the Full Suite.
-8. If all Full Suite tests pass, your PR is squash-merged to `main` automatically. Your
-   branch is deleted.
-9. If a Full Suite test fails, the PR is ejected from the queue and Mergify posts a comment
-   with a link to the Buildkite build. Fix the issue, push, and comment `/merge` again.
+6. The `ready` label is added, which triggers the Full Suite on your PR branch.
+7. Mergify also auto-rebases your branch against `main` if it is behind and conflict-free.
+8. If all Full Suite tests pass and all merge conditions are met (approval, valid title,
+   pre-commit green, fastcheck green, no draft, no conflicts), Mergify squash-merges to
+   `main` automatically. Your branch is deleted.
+9. If a Full Suite test fails, Mergify removes the `ready` label and posts a comment with a
+   link to the Buildkite build. Fix the issue, push, and comment `/merge` again.
 
 !!! note
     Only contributors with write permission to the repository can trigger slash commands.
@@ -117,7 +116,7 @@ performance benchmarks, and API server tests.
 
 ## Running Tests On Demand
 
-Comment on your PR to trigger specific tests without waiting for the Merge Queue.
+Comment on your PR to trigger specific tests independently of the auto-merge flow.
 
 **Trigger the entire Full Suite:**
 
@@ -198,10 +197,11 @@ git push --force-with-lease
 
 Mergify removes the `needs-rebase` label automatically once conflicts are resolved.
 
-### Merge Queue ejected my PR
+### Full Suite failed after `/merge`
 
-The Full Suite found a regression. The Mergify comment links to the Buildkite build. Check
-the failing step's output for assertion errors or tracebacks.
+The Full Suite found a regression. Mergify removes the `ready` label and posts a comment
+linking to the Buildkite build. Check the failing step's output for assertion errors or
+tracebacks.
 
 Common causes:
 
@@ -210,7 +210,7 @@ Common causes:
 - GPU memory issue (some tests require specific hardware like L40S or H100)
 - Kernel build failure (if you changed `fastvideo-kernel/`)
 
-After fixing, push and comment `/merge` to re-queue.
+After fixing, push and comment `/merge` again.
 
 ### I'm an external contributor without write permission
 
