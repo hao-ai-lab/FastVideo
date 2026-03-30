@@ -2,13 +2,14 @@ queue_rules:
   - name: default
     queue_conditions:
       - check-success~=pre-commit
+      - check-success=fastcheck-passed
       - "#approved-reviews-by>=1"
       - -draft
       - -conflict
       - -closed
       - label!=do-not-merge
     merge_conditions:
-      - check-success~=buildkite/ci
+      - check-success=full-suite-passed
     merge_method: squash
     commit_message_template: |
       {{ title }} (#{{ number }})
