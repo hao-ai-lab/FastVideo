@@ -220,32 +220,6 @@ pull_request_rules:
 
           For future commits, `pre-commit` will run automatically on changed files before each commit.
 
-  # ============================================================
-  # Buildkite CI failure notification
-  # ============================================================
-
-  - name: comment on Buildkite CI failure
-    conditions:
-      - check-failure~=buildkite/ci
-      - -closed
-    actions:
-      comment:
-        message: |
-          ## ❌ CI tests failed
-
-          @{{author}} — to see what failed:
-          1. Scroll to the **Checks** section below
-          2. Find the check marked with ❌ (e.g. `buildkite/ci/microscope-transformer-tests`)
-          3. Click **Details** to view the full build log
-
-          Or [view all builds for this branch on Buildkite →](https://buildkite.com/fastvideo/ci/builds?branch={{head}})
-
-          **Common causes:**
-          - **Assertion error / test failure** — check the failing test's traceback
-          - **Import error** — new dependency missing from `pyproject.toml`
-          - **OOM** — some tests need specific GPUs (L40S, H100 NVL)
-
-          If the failure looks unrelated to your changes, comment why and a maintainer will review.
 
   # ============================================================
   # Merge conflict detection
