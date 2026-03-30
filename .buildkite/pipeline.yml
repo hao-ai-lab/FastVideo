@@ -80,10 +80,11 @@ steps:
                   queue: "default"
 
   # ============================================================
-  # Full Suite: Runs only when FULL_SUITE=true
-  # Triggered by adding the 'ready' label to a PR (via GitHub
-  # Actions → Buildkite API). Includes integration tests, SSIM
-  # regression, training pipelines, and performance benchmarks.
+  # Full Suite: Runs on Merge Queue branches or when FULL_SUITE=true
+  # Triggered by Mergify Merge Queue (mergify/merge-queue/* branches)
+  # or on-demand via /test full slash command.
+  # Includes integration tests, SSIM regression, training pipelines,
+  # and performance benchmarks.
   # ============================================================
     - label: "Trigger Full Suite"
       if: build.env("FULL_SUITE") == "true" || build.branch =~ /^mergify\/merge-queue\//
