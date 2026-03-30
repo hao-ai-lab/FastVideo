@@ -8,7 +8,6 @@ import torch.nn as nn
 
 from fastvideo.attention import DistributedAttention
 from fastvideo.configs.models.dits.matrixgame import MatrixGame3WanVideoConfig
-from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.layers.layernorm import (
     FP32LayerNorm,
     LayerNormScaleShift,
@@ -18,10 +17,6 @@ from fastvideo.layers.layernorm import (
 )
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
-from fastvideo.layers.rotary_embedding import (
-    _apply_rotary_emb,
-    get_rotary_pos_embed,
-)
 from fastvideo.layers.visual_embedding import (
     PatchEmbed,
     TimestepEmbedder,
@@ -36,7 +31,7 @@ from fastvideo.models.dits.wanvideo import (
     WanT2VCrossAttention,
     WanImageEmbedding,
 )
-from fastvideo.platforms import AttentionBackendEnum, current_platform
+from fastvideo.platforms import AttentionBackendEnum
 
 # Import ActionModule
 from .action_module import MatrixGame3ActionModule
@@ -44,26 +39,107 @@ from .action_module import MatrixGame3ActionModule
 logger = init_logger(__name__)
 
 
-def _apply_rotary_emb_with_frame_indices(
-    x: torch.Tensor,
-    cos: torch.Tensor,
-    sin: torch.Tensor,
+def _build_rope_freqs(
     *,
-    table_num_frames: int,
+    max_seq_len: int,
+    head_dim: int,
+    num_heads: int,
+    sigma_theta: float = 0.0,
+    device: torch.device | None = None,
+) -> torch.Tensor:
+    c = head_dim // 2
+    c_t = c - 2 * (c // 3)
+    c_h = c // 3
+    c_w = c // 3
+
+    if sigma_theta > 0:
+        rope_epsilon = torch.linspace(-1, 1, num_heads, dtype=torch.float64, device=device)
+        theta_hat = 10000.0 * (1 + sigma_theta * rope_epsilon)
+
+        def build_axis_freqs(seq_len: int, c_part: int) -> torch.Tensor:
+            exp = torch.arange(c_part, dtype=torch.float64, device=device) / c_part
+            omega = 1.0 / torch.pow(theta_hat.unsqueeze(1), exp.unsqueeze(0))
+            pos = torch.arange(seq_len, dtype=torch.float64, device=device)
+            angles = pos.view(1, -1, 1) * omega.unsqueeze(1)
+            return torch.polar(torch.ones_like(angles), angles)
+
+        return torch.cat(
+            [
+                build_axis_freqs(max_seq_len, c_t),
+                build_axis_freqs(max_seq_len, c_h),
+                build_axis_freqs(max_seq_len, c_w),
+            ],
+            dim=2,
+        )
+
+    def build_axis_freqs(seq_len: int, c_part: int) -> torch.Tensor:
+        exp = torch.arange(c_part, dtype=torch.float64, device=device) / c_part
+        omega = 1.0 / torch.pow(torch.tensor(10000.0, dtype=torch.float64, device=device), exp)
+        pos = torch.arange(seq_len, dtype=torch.float64, device=device)
+        angles = pos[:, None] * omega[None, :]
+        return torch.polar(torch.ones_like(angles), angles)
+
+    return torch.cat(
+        [
+            build_axis_freqs(max_seq_len, c_t),
+            build_axis_freqs(max_seq_len, c_h),
+            build_axis_freqs(max_seq_len, c_w),
+        ],
+        dim=1,
+    )
+
+
+@torch.amp.autocast("cuda", enabled=False)
+def _apply_rope_with_frame_indices(
+    x: torch.Tensor,
+    freqs: torch.Tensor,
+    *,
     height: int,
     width: int,
     frame_indices: list[int] | tuple[int, ...] | torch.Tensor,
 ) -> torch.Tensor:
-    if not torch.is_tensor(frame_indices):
-        frame_indices = torch.tensor(frame_indices, device=cos.device, dtype=torch.long)
-    else:
-        frame_indices = frame_indices.to(device=cos.device, dtype=torch.long)
+    num_heads = x.shape[2]
+    half_dim = x.shape[-1] // 2
+    c_t = half_dim - 2 * (half_dim // 3)
+    c_h = half_dim // 3
+    c_w = half_dim // 3
 
-    cos = cos.view(table_num_frames, height, width, -1)
-    sin = sin.view(table_num_frames, height, width, -1)
-    indexed_cos = cos.index_select(0, frame_indices).reshape(-1, cos.shape[-1])
-    indexed_sin = sin.index_select(0, frame_indices).reshape(-1, sin.shape[-1])
-    return _apply_rotary_emb(x, indexed_cos, indexed_sin, is_neox_style=False)
+    if not torch.is_tensor(frame_indices):
+        frame_indices = torch.tensor(frame_indices, device=freqs.device, dtype=torch.long)
+    else:
+        frame_indices = frame_indices.to(device=freqs.device, dtype=torch.long)
+
+    f = int(frame_indices.numel())
+    seq_len = f * height * width
+    x_complex = torch.view_as_complex(x.to(torch.float32).reshape(x.shape[0], seq_len, num_heads, -1, 2))
+
+    if freqs.dim() == 3:
+        t_freqs = freqs[:, frame_indices, :c_t]
+        h_freqs = freqs[:, :height, c_t:c_t + c_h]
+        w_freqs = freqs[:, :width, c_t + c_h:c_t + c_h + c_w]
+        freqs_i = torch.cat(
+            [
+                t_freqs.permute(1, 0, 2).view(f, 1, 1, num_heads, -1).expand(f, height, width, num_heads, -1),
+                h_freqs.permute(1, 0, 2).view(1, height, 1, num_heads, -1).expand(f, height, width, num_heads, -1),
+                w_freqs.permute(1, 0, 2).view(1, 1, width, num_heads, -1).expand(f, height, width, num_heads, -1),
+            ],
+            dim=-1,
+        ).reshape(seq_len, num_heads, -1)
+    else:
+        t_freqs = freqs[frame_indices, :c_t]
+        h_freqs = freqs[:height, c_t:c_t + c_h]
+        w_freqs = freqs[:width, c_t + c_h:c_t + c_h + c_w]
+        freqs_i = torch.cat(
+            [
+                t_freqs.view(f, 1, 1, -1).expand(f, height, width, -1),
+                h_freqs.view(1, height, 1, -1).expand(f, height, width, -1),
+                w_freqs.view(1, 1, width, -1).expand(f, height, width, -1),
+            ],
+            dim=-1,
+        ).reshape(seq_len, 1, -1)
+
+    out = torch.view_as_real(x_complex * freqs_i.unsqueeze(0).to(x_complex.dtype)).flatten(3)
+    return out.float()
 
 
 class MatrixGame3TimeImageEmbedding(nn.Module):
@@ -130,21 +206,24 @@ class MatrixGame3CrossAttention(WanSelfAttention):
         b, n, d = x.size(0), self.num_heads, self.head_dim
 
         # compute query, key, value
-        q = self.norm_q(self.to_q(x)[0]).view(b, -1, n, d)
+        q_input = x.to(self.to_q.weight.dtype)
+        q = self.norm_q(self.to_q(q_input)[0]).view(b, -1, n, d)
 
         if crossattn_cache is not None:
             if not crossattn_cache["is_init"]:
                 crossattn_cache["is_init"] = True
-                k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
-                v = self.to_v(context)[0].view(b, -1, n, d)
+                context_input = context.to(self.to_k.weight.dtype)
+                k = self.norm_k(self.to_k(context_input)[0]).view(b, -1, n, d)
+                v = self.to_v(context_input)[0].view(b, -1, n, d)
                 crossattn_cache["k"] = k
                 crossattn_cache["v"] = v
             else:
                 k = crossattn_cache["k"]
                 v = crossattn_cache["v"]
         else:
-            k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
-            v = self.to_v(context)[0].view(b, -1, n, d)
+            context_input = context.to(self.to_k.weight.dtype)
+            k = self.norm_k(self.to_k(context_input)[0]).view(b, -1, n, d)
+            v = self.to_v(context_input)[0].view(b, -1, n, d)
 
         # compute attention
         x = self.attn(q, k, v)
@@ -169,9 +248,12 @@ class MatrixGame3TransformerBlock(nn.Module):
         | None = None,
         prefix: str = "",
         action_config: dict | None = None,
+        block_id: int | None = None,
+        use_memory: bool = False,
     ):
         super().__init__()
         action_config = action_config or {}
+        self.use_memory = use_memory
 
         # 1. Self-attention
         self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
@@ -218,7 +300,7 @@ class MatrixGame3TransformerBlock(nn.Module):
             )
         else:
             # T2V
-            self.attn2 = WanT2VCrossAttention(
+            self.attn2 = MatrixGame3CrossAttention(
                 dim, num_heads, qk_norm=qk_norm, eps=eps
             )
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
@@ -231,7 +313,8 @@ class MatrixGame3TransformerBlock(nn.Module):
         )
 
         # 2.1. Action Module Integration
-        self.use_action_module = len(action_config) > 0
+        enabled_blocks = set(action_config.get("blocks", [])) if action_config else set()
+        self.use_action_module = len(action_config) > 0 and (block_id is None or block_id in enabled_blocks)
         if self.use_action_module:
             self.action_model = MatrixGame3ActionModule(**action_config)
         else:
@@ -242,21 +325,28 @@ class MatrixGame3TransformerBlock(nn.Module):
         self.mlp_residual = ScaleResidual()
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
+        if self.use_memory:
+            self.cam_injector_layer1 = nn.Linear(dim, dim)
+            self.cam_injector_layer2 = nn.Linear(dim, dim)
+            self.cam_scale_layer = nn.Linear(dim, dim)
+            self.cam_shift_layer = nn.Linear(dim, dim)
 
     def forward(
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         temb: torch.Tensor,
-        freqs_cis: tuple[torch.Tensor, torch.Tensor],
+        freqs: torch.Tensor,
         # Action Module specific args
         grid_sizes: torch.Tensor,
         mouse_cond: torch.Tensor | None = None,
         keyboard_cond: torch.Tensor | None = None,
+        mouse_cond_memory: torch.Tensor | None = None,
+        keyboard_cond_memory: torch.Tensor | None = None,
+        plucker_emb: torch.Tensor | None = None,
         memory_length: int = 0,
         memory_latent_idx: list[int] | tuple[int, ...] | torch.Tensor | None = None,
         predict_latent_idx: tuple[int, int] | list[int] | tuple[int, ...] | torch.Tensor | None = None,
-        rope_total_frames: int | None = None,
     ) -> torch.Tensor:
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
@@ -296,7 +386,7 @@ class MatrixGame3TransformerBlock(nn.Module):
 
         # 1. Self-attention
         norm_hidden_states = (
-            self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa
+            self.norm1(hidden_states).float() * (1 + scale_msa) + shift_msa
         ).to(orig_dtype)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
@@ -312,13 +402,9 @@ class MatrixGame3TransformerBlock(nn.Module):
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
 
         # Apply rotary embeddings
-        cos, sin = freqs_cis
         grid_frames = int(grid_sizes[0].item())
         grid_height = int(grid_sizes[1].item())
         grid_width = int(grid_sizes[2].item())
-
-        if rope_total_frames is None:
-            rope_total_frames = grid_frames
 
         if memory_length > 0:
             hw = grid_height * grid_width
@@ -337,41 +423,17 @@ class MatrixGame3TransformerBlock(nn.Module):
             elif pred_indices is None:
                 pred_indices = list(range(grid_frames - memory_length))
 
-            query_memory = _apply_rotary_emb_with_frame_indices(
-                query_memory,
-                cos,
-                sin,
-                table_num_frames=rope_total_frames,
-                height=grid_height,
-                width=grid_width,
-                frame_indices=mem_indices,
+            query_memory = _apply_rope_with_frame_indices(
+                query_memory, freqs, height=grid_height, width=grid_width, frame_indices=mem_indices
             )
-            key_memory = _apply_rotary_emb_with_frame_indices(
-                key_memory,
-                cos,
-                sin,
-                table_num_frames=rope_total_frames,
-                height=grid_height,
-                width=grid_width,
-                frame_indices=mem_indices,
+            key_memory = _apply_rope_with_frame_indices(
+                key_memory, freqs, height=grid_height, width=grid_width, frame_indices=mem_indices
             )
-            query_pred = _apply_rotary_emb_with_frame_indices(
-                query_pred,
-                cos,
-                sin,
-                table_num_frames=rope_total_frames,
-                height=grid_height,
-                width=grid_width,
-                frame_indices=pred_indices,
+            query_pred = _apply_rope_with_frame_indices(
+                query_pred, freqs, height=grid_height, width=grid_width, frame_indices=pred_indices
             )
-            key_pred = _apply_rotary_emb_with_frame_indices(
-                key_pred,
-                cos,
-                sin,
-                table_num_frames=rope_total_frames,
-                height=grid_height,
-                width=grid_width,
-                frame_indices=pred_indices,
+            key_pred = _apply_rope_with_frame_indices(
+                key_pred, freqs, height=grid_height, width=grid_width, frame_indices=pred_indices
             )
             query = torch.cat([query_memory, query_pred], dim=1)
             key = torch.cat([key_memory, key_pred], dim=1)
@@ -382,88 +444,72 @@ class MatrixGame3TransformerBlock(nn.Module):
 
             if pred_indices is None:
                 pred_indices = list(range(grid_frames))
-                query = _apply_rotary_emb_with_frame_indices(
-                    query,
-                    cos,
-                    sin,
-                    table_num_frames=rope_total_frames,
-                    height=grid_height,
-                    width=grid_width,
-                    frame_indices=pred_indices,
-                )
-                key = _apply_rotary_emb_with_frame_indices(
-                    key,
-                    cos,
-                    sin,
-                    table_num_frames=rope_total_frames,
-                    height=grid_height,
-                    width=grid_width,
-                    frame_indices=pred_indices,
-                )
-            else:
-                query = _apply_rotary_emb_with_frame_indices(
-                    query,
-                    cos,
-                    sin,
-                    table_num_frames=rope_total_frames,
-                    height=grid_height,
-                    width=grid_width,
-                    frame_indices=pred_indices,
-                )
-                key = _apply_rotary_emb_with_frame_indices(
-                    key,
-                    cos,
-                    sin,
-                    table_num_frames=rope_total_frames,
-                    height=grid_height,
-                    width=grid_width,
-                    frame_indices=pred_indices,
-                )
+            query = _apply_rope_with_frame_indices(
+                query, freqs, height=grid_height, width=grid_width, frame_indices=pred_indices
+            )
+            key = _apply_rope_with_frame_indices(
+                key, freqs, height=grid_height, width=grid_width, frame_indices=pred_indices
+            )
 
         attn_output, _ = self.attn1(query, key, value)
         attn_output = attn_output.flatten(2)
+        attn_output = attn_output.to(self.to_out.weight.dtype)
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
 
-        null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
-        norm_hidden_states, hidden_states = self.self_attn_residual_norm(
-            hidden_states, attn_output, gate_msa, null_shift, null_scale
-        )
-        norm_hidden_states, hidden_states = (
-            norm_hidden_states.to(orig_dtype),
-            hidden_states.to(orig_dtype),
-        )
+        hidden_states = hidden_states.float() + attn_output.float() * gate_msa.float()
+        if self.use_memory and plucker_emb is not None:
+            c2ws_hidden_states = self.cam_injector_layer2(
+                torch.nn.functional.silu(self.cam_injector_layer1(plucker_emb))
+            )
+            c2ws_hidden_states = c2ws_hidden_states + plucker_emb
+            cam_scale = self.cam_scale_layer(c2ws_hidden_states)
+            cam_shift = self.cam_shift_layer(c2ws_hidden_states)
+            hidden_states = (1.0 + cam_scale) * hidden_states + cam_shift
+        norm_hidden_states = self.self_attn_residual_norm.norm(hidden_states)
 
         # 2. Cross-attention
         attn_output = self.attn2(
             norm_hidden_states, context=encoder_hidden_states, context_lens=None
         )
-        norm_hidden_states, hidden_states = self.cross_attn_residual_norm(
-            hidden_states, attn_output, 1, c_shift_msa, c_scale_msa
+
+        # - use_memory / action path: x = norm3(x); x = x + cross_attn(x)
+        # - plain path:              x = x + cross_attn(norm3(x))
+        cross_attn_residual_base = (
+            norm_hidden_states if (mouse_cond is not None or self.use_memory) else hidden_states
         )
-        norm_hidden_states, hidden_states = (
-            norm_hidden_states.to(orig_dtype),
-            hidden_states.to(orig_dtype),
+        hidden_states = cross_attn_residual_base + attn_output
+        norm_hidden_states = self.cross_attn_residual_norm.norm(
+            hidden_states.float()
         )
+        norm_hidden_states = norm_hidden_states * (1 + c_scale_msa) + c_shift_msa
 
         # ================= Action Module =================
         if self.action_model is not None:
             if mouse_cond is not None or keyboard_cond is not None:
+                action_dtype = self.ffn.fc_in.weight.dtype
                 # grid_sizes is expected to be [F, H, W]
                 # ActionModule implementation takes hidden_states directly
                 hidden_states = self.action_model(
-                    hidden_states,
+                    hidden_states.to(action_dtype),
                     int(grid_sizes[0]),
                     int(grid_sizes[1]),
                     int(grid_sizes[2]),
                     mouse_cond,
                     keyboard_cond,
+                    mouse_cond_memory=mouse_cond_memory,
+                    keyboard_cond_memory=keyboard_cond_memory,
                     num_frame_per_block=int(grid_sizes[0]),
                 )
+
+                norm_hidden_states = self.cross_attn_residual_norm.norm(
+                    hidden_states.float()
+                )
+                norm_hidden_states = norm_hidden_states * (1 + c_scale_msa) + c_shift_msa
         # =================================================
 
         # 3. Feed-forward
-        ff_output = self.ffn(norm_hidden_states)
+        ff_output = self.ffn(norm_hidden_states.to(self.ffn.fc_in.weight.dtype))
         hidden_states = self.mlp_residual(hidden_states, ff_output, c_gate_msa)
         hidden_states = hidden_states.to(orig_dtype)
 
@@ -492,7 +538,7 @@ class MatrixGame3WanModel(BaseDiT):
 
     def __init__(
         self,
-        config: MatrixGame2WanVideoConfig | MatrixGame3WanVideoConfig,
+        config: MatrixGame3WanVideoConfig,
         hf_config: dict[str, Any],
         **kwargs,
     ) -> None:
@@ -518,7 +564,24 @@ class MatrixGame3WanModel(BaseDiT):
             time_freq_dim=config.freq_dim,
             image_embed_dim=(config.image_dim if config.image_dim > 0 else None),
         )
+        self.text_embedding = nn.Sequential(
+            nn.Linear(config.text_dim, inner_dim),
+            nn.GELU(approximate="tanh"),
+            nn.Linear(inner_dim, inner_dim),
+        )
         self.use_memory = getattr(config, "use_memory", False)
+        self.sigma_theta = float(getattr(config, "sigma_theta", 0.0))
+        head_dim = inner_dim // self.num_attention_heads
+        self.register_buffer(
+            "freqs",
+            _build_rope_freqs(
+                max_seq_len=(2048 if self.use_memory else 1024),
+                head_dim=head_dim,
+                num_heads=self.num_attention_heads,
+                sigma_theta=(self.sigma_theta if self.use_memory else 0.0),
+            ),
+            persistent=False,
+        )
         self.camera_patch_embedding = None
         self.c2ws_hidden_states_layer1 = None
         self.c2ws_hidden_states_layer2 = None
@@ -549,6 +612,8 @@ class MatrixGame3WanModel(BaseDiT):
                     self._supported_attention_backends,
                     prefix=f"{getattr(config, 'prefix', 'Wan')}.blocks.{i}",
                     action_config=self.action_config,
+                    block_id=i,
+                    use_memory=self.use_memory,
                 )
                 for i in range(config.num_layers)
             ]
@@ -608,56 +673,32 @@ class MatrixGame3WanModel(BaseDiT):
         if x_memory is not None:
             memory_length = x_memory.shape[2]
             hidden_states = torch.cat([x_memory.to(hidden_states.dtype), hidden_states], dim=2)
-            if mouse_cond is not None and mouse_cond_memory is not None:
-                mouse_cond = torch.cat([mouse_cond_memory.to(mouse_cond.dtype), mouse_cond], dim=1)
-            elif mouse_cond is None:
-                mouse_cond = mouse_cond_memory
-
-            if keyboard_cond is not None and keyboard_cond_memory is not None:
-                keyboard_cond = torch.cat([keyboard_cond_memory.to(keyboard_cond.dtype), keyboard_cond], dim=1)
-            elif keyboard_cond is None:
-                keyboard_cond = keyboard_cond_memory
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
         post_patch_num_frames = num_frames // p_t
         post_patch_height = height // p_h
         post_patch_width = width // p_w
-        rope_total_frames = post_patch_num_frames
+        max_frame_index = post_patch_num_frames
         if isinstance(predict_latent_idx, tuple) and len(predict_latent_idx) == 2:
-            rope_total_frames = max(rope_total_frames, int(predict_latent_idx[1]))
+            max_frame_index = max(max_frame_index, int(predict_latent_idx[1]))
         elif predict_latent_idx is not None:
-            rope_total_frames = max(rope_total_frames, int(max(predict_latent_idx)) + 1)
+            max_frame_index = max(max_frame_index, int(max(predict_latent_idx)) + 1)
         if memory_latent_idx is not None and len(memory_latent_idx) > 0:
-            rope_total_frames = max(rope_total_frames, int(max(memory_latent_idx)) + 1)
+            max_frame_index = max(max_frame_index, int(max(memory_latent_idx)) + 1)
 
-        # Get rotary embeddings
-        d = self.hidden_size // self.num_attention_heads
-        rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
-        freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (
-                rope_total_frames * get_sp_world_size(),
-                post_patch_height,
-                post_patch_width,
-            ),
-            self.hidden_size,
-            self.num_attention_heads,
-            rope_dim_list,
-            dtype=torch.float32 if current_platform.is_mps() else torch.float64,
-            rope_theta=10000,
-            do_sp_sharding=True,
-        )
-        freqs_cos = freqs_cos.to(hidden_states.device)
-        freqs_sin = freqs_sin.to(hidden_states.device)
-        freqs_cis = (
-            (freqs_cos.float(), freqs_sin.float())
-            if freqs_cos is not None
-            else None
-        )
+        freqs = self.freqs.to(hidden_states.device)
+        max_seq_len = freqs.shape[1] if freqs.dim() == 3 else freqs.shape[0]
+        if max_frame_index > max_seq_len or post_patch_height > max_seq_len or post_patch_width > max_seq_len:
+            raise ValueError(
+                f"got frames={max_frame_index}, height={post_patch_height}, width={post_patch_width}, "
+                f"max_seq_len={max_seq_len}"
+            )
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
+        plucker_emb = None
         if c2ws_plucker_emb is not None and self.camera_patch_embedding is not None:
             if memory_length > 0 and c2ws_plucker_emb.shape[2] == post_patch_num_frames - memory_length:
                 zeros = torch.zeros(c2ws_plucker_emb.shape[0],
@@ -668,10 +709,24 @@ class MatrixGame3WanModel(BaseDiT):
                                     device=c2ws_plucker_emb.device,
                                     dtype=c2ws_plucker_emb.dtype)
                 c2ws_plucker_emb = torch.cat([zeros, c2ws_plucker_emb], dim=2)
-            camera_tokens = self.camera_patch_embedding(c2ws_plucker_emb.to(hidden_states.dtype))
-            camera_hidden = self.c2ws_hidden_states_layer2(
-                torch.nn.functional.silu(self.c2ws_hidden_states_layer1(camera_tokens)))
-            hidden_states = hidden_states + camera_tokens + camera_hidden
+            target_frames = post_patch_num_frames * p_t
+            target_height = post_patch_height * p_h
+            target_width = post_patch_width * p_w
+            if c2ws_plucker_emb.shape[2] > target_frames or c2ws_plucker_emb.shape[3] > target_height or c2ws_plucker_emb.shape[4] > target_width:
+                c2ws_plucker_emb = c2ws_plucker_emb[:, :, :target_frames, :target_height, :target_width]
+            if c2ws_plucker_emb.shape[2:] != (target_frames, target_height, target_width):
+                raise ValueError(
+                    "Camera conditioning must align with the patchified latent grid, "
+                    f"got camera shape {tuple(c2ws_plucker_emb.shape[2:])} vs target "
+                    f"{(target_frames, target_height, target_width)}"
+                )
+            plucker_emb = self.camera_patch_embedding(
+                c2ws_plucker_emb.to(hidden_states.dtype)
+            )
+            plucker_hidden = self.c2ws_hidden_states_layer2(
+                torch.nn.functional.silu(self.c2ws_hidden_states_layer1(plucker_emb))
+            )
+            plucker_emb = plucker_emb + plucker_hidden
 
         timestep_tokens = timestep
         if timestep_tokens.dim() == 0:
@@ -686,7 +741,9 @@ class MatrixGame3WanModel(BaseDiT):
                 .repeat(1, 1, post_patch_height, post_patch_width)
                 .reshape(timestep_tokens.shape[0], -1)
             )
-        if timestep_memory is not None:
+        if memory_length > 0:
+            if timestep_memory is None:
+                raise ValueError("MatrixGame3 requires timestep_memory when x_memory is provided")
             timestep_tokens = torch.cat(
                 [timestep_memory.to(timestep_tokens.dtype), timestep_tokens], dim=1
             )
@@ -702,14 +759,21 @@ class MatrixGame3WanModel(BaseDiT):
             encoder_hidden_states_image,
             timestep_seq_len=timestep_tokens.shape[1],
         )
-        if timestep_proj.dim() == 3:
-            timestep_proj = timestep_proj.unflatten(1, (timestep_tokens.shape[1], 6))
+        if timestep_proj.dim() == 3 and timestep_proj.shape[-1] % 6 == 0:
+            timestep_proj = timestep_proj.unflatten(2, (6, -1))
 
         if encoder_hidden_states is not None:
             if isinstance(encoder_hidden_states, list):
                 encoder_hidden_states = encoder_hidden_states[0]
             elif encoder_hidden_states.ndim == 2:
                 encoder_hidden_states = encoder_hidden_states.unsqueeze(0)
+            if (
+                encoder_hidden_states.ndim == 3
+                and encoder_hidden_states.shape[-1] == self.text_embedding[0].in_features
+            ):
+                encoder_hidden_states = self.text_embedding(
+                    encoder_hidden_states.to(hidden_states.dtype)
+                )
         else:
             # encoder_hidden_states is None (e.g. no text encoder)
             # MatrixGame uses image-action cross-attn.
@@ -737,28 +801,32 @@ class MatrixGame3WanModel(BaseDiT):
                     hidden_states,
                     encoder_hidden_states,
                     timestep_proj,
-                    freqs_cis,
+                    freqs,
                     grid_sizes=grid_sizes,
                     mouse_cond=mouse_cond,
                     keyboard_cond=keyboard_cond,
+                    mouse_cond_memory=mouse_cond_memory,
+                    keyboard_cond_memory=keyboard_cond_memory,
+                    plucker_emb=plucker_emb,
                     memory_length=memory_length,
                     memory_latent_idx=memory_latent_idx,
                     predict_latent_idx=predict_latent_idx,
-                    rope_total_frames=rope_total_frames,
                 )
             else:
                 hidden_states = block(
                     hidden_states,
                     encoder_hidden_states,
                     timestep_proj,
-                    freqs_cis,
+                    freqs,
                     grid_sizes=grid_sizes,
                     mouse_cond=mouse_cond,
                     keyboard_cond=keyboard_cond,
+                    mouse_cond_memory=mouse_cond_memory,
+                    keyboard_cond_memory=keyboard_cond_memory,
+                    plucker_emb=plucker_emb,
                     memory_length=memory_length,
                     memory_latent_idx=memory_latent_idx,
                     predict_latent_idx=predict_latent_idx,
-                    rope_total_frames=rope_total_frames,
                 )
 
         # Output

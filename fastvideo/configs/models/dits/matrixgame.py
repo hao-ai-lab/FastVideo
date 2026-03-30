@@ -77,6 +77,29 @@ class MatrixGame2WanVideoConfig(WanVideoConfig):
 class MatrixGame3WanVideoArchConfig(WanVideoArchConfig):
     param_names_mapping: dict = field(
         default_factory=lambda: {
+            r"^patch_embedding\.(weight|bias)$": r"patch_embedding.proj.\1",
+            r"^patch_embedding_wancamctrl\.(.*)$": r"camera_patch_embedding.proj.\1",
+            r"^time_embedding\.0\.(.*)$": r"condition_embedder.time_embedder.mlp.fc_in.\1",
+            r"^time_embedding\.2\.(.*)$": r"condition_embedder.time_embedder.mlp.fc_out.\1",
+            r"^time_projection\.1\.(.*)$": r"condition_embedder.time_modulation.linear.\1",
+            r"^head\.head\.(.*)$": r"proj_out.\1",
+            r"^head\.modulation$": r"scale_shift_table",
+            r"^blocks\.(\d+)\.self_attn\.q\.(.*)$": r"blocks.\1.to_q.\2",
+            r"^blocks\.(\d+)\.self_attn\.k\.(.*)$": r"blocks.\1.to_k.\2",
+            r"^blocks\.(\d+)\.self_attn\.v\.(.*)$": r"blocks.\1.to_v.\2",
+            r"^blocks\.(\d+)\.self_attn\.o\.(.*)$": r"blocks.\1.to_out.\2",
+            r"^blocks\.(\d+)\.self_attn\.norm_q\.(.*)$": r"blocks.\1.norm_q.\2",
+            r"^blocks\.(\d+)\.self_attn\.norm_k\.(.*)$": r"blocks.\1.norm_k.\2",
+            r"^blocks\.(\d+)\.cross_attn\.q\.(.*)$": r"blocks.\1.attn2.to_q.\2",
+            r"^blocks\.(\d+)\.cross_attn\.k\.(.*)$": r"blocks.\1.attn2.to_k.\2",
+            r"^blocks\.(\d+)\.cross_attn\.v\.(.*)$": r"blocks.\1.attn2.to_v.\2",
+            r"^blocks\.(\d+)\.cross_attn\.o\.(.*)$": r"blocks.\1.attn2.to_out.\2",
+            r"^blocks\.(\d+)\.cross_attn\.norm_q\.(.*)$": r"blocks.\1.attn2.norm_q.\2",
+            r"^blocks\.(\d+)\.cross_attn\.norm_k\.(.*)$": r"blocks.\1.attn2.norm_k.\2",
+            r"^blocks\.(\d+)\.ffn\.0\.(.*)$": r"blocks.\1.ffn.fc_in.\2",
+            r"^blocks\.(\d+)\.ffn\.2\.(.*)$": r"blocks.\1.ffn.fc_out.\2",
+            r"^blocks\.(\d+)\.norm3\.(.*)$": r"blocks.\1.self_attn_residual_norm.norm.\2",
+            r"^blocks\.(\d+)\.modulation$": r"blocks.\1.scale_shift_table",
             r"^patch_embedding\.(?!proj\.)(.*)$": r"patch_embedding.proj.\1",
             r"^condition_embedder\.text_embedder\.linear_1\.(.*)$": r"condition_embedder.text_embedder.fc_in.\1",
             r"^condition_embedder\.text_embedder\.linear_2\.(.*)$": r"condition_embedder.text_embedder.fc_out.\1",
@@ -105,7 +128,7 @@ class MatrixGame3WanVideoArchConfig(WanVideoArchConfig):
     image_dim: int = 0
     use_text_crossattn: bool = True
     use_memory: bool = True
-    sigma_theta: float = 700.0
+    sigma_theta: float = 0.8
     camera_embed_in_channels: int = 1536
     action_config: dict = field(
         default_factory=lambda: {
