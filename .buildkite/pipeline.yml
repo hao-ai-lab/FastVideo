@@ -99,6 +99,7 @@ steps:
   # Includes integration tests, SSIM regression, training pipelines,
   # and performance benchmarks.
   # ============================================================
+    - label: "Trigger Full Suite"
       if: build.env("FULL_SUITE") == "true"
       retry:
         automatic:
