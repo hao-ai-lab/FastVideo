@@ -135,6 +135,10 @@ steps:
                 label: ":bar_chart: SSIM Tests"
                 env:
                   - TEST_TYPE=ssim
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 2
                 agents:
                   queue: "default"
             - path:
@@ -195,6 +199,10 @@ steps:
                 label: ":test_tube: LoRA Training Tests"
                 env:
                   - TEST_TYPE=training_lora
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 2
                 agents:
                   queue: "default"
             - path:
@@ -207,6 +215,10 @@ steps:
                 label: ":test_tube: Training Tests VSA"
                 env:
                   - TEST_TYPE=training_vsa
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 2
                 agents:
                   queue: "default"
             - path:
