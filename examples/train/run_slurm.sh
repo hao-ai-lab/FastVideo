@@ -6,7 +6,7 @@
 #
 # Examples:
 #   bash examples/train/run_slurm.sh examples/train/configs/example.yaml 2
-#   bash examples/train/run_slurm.sh examples/train/configs/distill_wan2.1_t2v_1.3B_dmd2.yaml 4 \
+#   bash examples/train/run_slurm.sh examples/train/configs/distribution_matching/wan/dmd2_t2v.yaml 4 \
 #       --training.optimizer.learning_rate 1e-5
 #   bash examples/train/run_slurm.sh examples/train/configs/example.yaml 8 \
 #       --training.checkpoint.resume_from_checkpoint outputs/my_run/checkpoint-1000

@@ -2,17 +2,45 @@ env:
   IMAGE_VERSION: "py3.12-latest"
   BUILDKITE_CLEAN_CHECKOUT: true
 
+notify:
+  - github_commit_status:
+      context: "fastcheck-passed"
+    if: build.env("TEST_SCOPE") == "fastcheck" || build.env("TEST_SCOPE") == null
+  - github_commit_status:
+      context: "full-suite-passed"
+    if: build.env("TEST_SCOPE") == "full"
+
 steps:
+  # ============================================================
+    - label: ":dart: Direct Test (${TEST_TYPE})"
+      if: build.env("TEST_SCOPE") == "direct"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+
   # ============================================================
   # Fastcheck: Runs on every PR (~10-15 min parallel)
   # Core component validation: encoders, VAEs, transformers,
   # CUDA kernels, and unit tests.
   # ============================================================
-  - label: "Trigger Fastcheck"
-    plugins:
-      - monorepo-diff#v1.4.0:
-          diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
-          watch:
+    - label: "Trigger Fastcheck"
+      if: build.env("TEST_SCOPE") == "fastcheck" || build.env("TEST_SCOPE") == null
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      plugins:
+        - monorepo-diff#v1.4.0:
+            diff: 'git fetch origin "${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}" && git diff --name-only "origin/${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}...HEAD"'
+            watch:
             - path:
                 - "fastvideo/models/encoders/**"
                 - "fastvideo/models/loader/**"
@@ -80,17 +108,24 @@ steps:
                   queue: "default"
 
   # ============================================================
-  # Full Suite: Runs only when FULL_SUITE=true
-  # Triggered by adding the 'ready' label to a PR (via GitHub
-  # Actions → Buildkite API). Includes integration tests, SSIM
-  # regression, training pipelines, and performance benchmarks.
+  # Full Suite: Runs when TEST_SCOPE=full
+  # Triggered by adding the 'ready' label (via ci-trigger-full-suite.yml)
+  # or on-demand via /test full slash command.
+  # Includes integration tests, SSIM regression, training pipelines,
+  # and performance benchmarks.
   # ============================================================
-  - label: "Trigger Full Suite"
-    if: build.env("FULL_SUITE") == "true"
-    plugins:
-      - monorepo-diff#v1.4.0:
-          diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
-          watch:
+    - label: "Trigger Full Suite"
+      if: build.env("TEST_SCOPE") == "full"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      plugins:
+        - monorepo-diff#v1.4.0:
+            diff: 'git fetch origin "${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}" && git diff --name-only "origin/${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}...HEAD"'
+            watch:
             - path:
                 - "fastvideo/**/*.py"
                 - "pyproject.toml"
@@ -100,6 +135,10 @@ steps:
                 label: ":bar_chart: SSIM Tests"
                 env:
                   - TEST_TYPE=ssim
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 2
                 agents:
                   queue: "default"
             - path:
@@ -160,6 +199,10 @@ steps:
                 label: ":test_tube: LoRA Training Tests"
                 env:
                   - TEST_TYPE=training_lora
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 2
                 agents:
                   queue: "default"
             - path:
@@ -172,6 +215,10 @@ steps:
                 label: ":test_tube: Training Tests VSA"
                 env:
                   - TEST_TYPE=training_vsa
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 2
                 agents:
                   queue: "default"
             - path:
