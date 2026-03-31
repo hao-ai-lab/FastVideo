@@ -51,15 +51,23 @@ jobs:
 
       - name: Trigger Buildkite Full Suite
         if: steps.check.outputs.has_ready == 'true'
-        uses: buildkite/trigger-pipeline-action@v2.4.1
-        with:
-          buildkite_api_access_token: ${{ secrets.BUILDKITE_API_TOKEN }}
-          pipeline: "${{ vars.BUILDKITE_ORG_SLUG }}/${{ vars.BUILDKITE_PIPELINE_SLUG }}"
-          branch: "${{ github.event.pull_request.head.ref }}"
-          commit: "${{ github.event.pull_request.head.sha }}"
-          message: "Full Suite for PR #${{ github.event.pull_request.number }}"
-          build_env_vars: '{"TEST_SCOPE": "full", "FULL_SUITE": "true", "PR_NUMBER": "${{ github.event.pull_request.number }}"}'
-          ignore_pipeline_branch_filter: "true"
-          send_pull_request: "true"
-          pull_request_id: "${{ github.event.pull_request.number }}"
-          pull_request_base_branch: "main"
+        env:
+          BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
+        run: |
+          curl -sS --fail-with-body -X POST \
+            "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds" \
+            -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "commit": "${{ github.event.pull_request.head.sha }}",
+              "branch": "${{ github.event.pull_request.head.ref }}",
+              "message": "Full Suite for PR #${{ github.event.pull_request.number }}",
+              "ignore_pipeline_branch_filters": true,
+              "pull_request_id": ${{ github.event.pull_request.number }},
+              "pull_request_base_branch": "main",
+              "env": {
+                "TEST_SCOPE": "full",
+                "FULL_SUITE": "true",
+                "PR_NUMBER": "${{ github.event.pull_request.number }}"
+              }
+            }'
