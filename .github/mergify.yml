@@ -1,22 +1,3 @@
-queue_rules:
-  - name: default
-    queue_conditions:
-      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
-      - check-success~=pre-commit
-      - check-success=fastcheck-passed
-      - "#approved-reviews-by>=1"
-      - -draft
-      - -conflict
-      - -closed
-      - label!=do-not-merge
-    merge_conditions:
-      - check-success=full-suite-passed
-    merge_method: squash
-    commit_message_template: |
-      {{ title }} (#{{ number }})
-
-      {{ body }}
-
 merge_protections:
   - name: PR merge requirements
     if:
@@ -239,32 +220,6 @@ pull_request_rules:
 
           For future commits, `pre-commit` will run automatically on changed files before each commit.
 
-  # ============================================================
-  # Buildkite CI failure notification
-  # ============================================================
-
-  - name: comment on Buildkite CI failure
-    conditions:
-      - check-failure~=buildkite/ci
-      - -closed
-    actions:
-      comment:
-        message: |
-          ## ❌ CI tests failed
-
-          @{{author}} — to see what failed:
-          1. Scroll to the **Checks** section below
-          2. Find the check marked with ❌ (e.g. `buildkite/ci/microscope-transformer-tests`)
-          3. Click **Details** to view the full build log
-
-          Or [view all builds for this branch on Buildkite →](https://buildkite.com/fastvideo/ci/builds?branch={{head}})
-
-          **Common causes:**
-          - **Assertion error / test failure** — check the failing test's traceback
-          - **Import error** — new dependency missing from `pyproject.toml`
-          - **OOM** — some tests need specific GPUs (L40S, H100 NVL)
-
-          If the failure looks unrelated to your changes, comment why and a maintainer will review.
 
   # ============================================================
   # Merge conflict detection
@@ -298,19 +253,47 @@ pull_request_rules:
       label:
         remove: [needs-rebase]
 
-  - name: enter merge queue when ready and approved
+  # ============================================================
+  # Auto-merge and auto-rebase
+  # ============================================================
+
+  - name: auto-merge when ready and all checks pass
     conditions:
       - label=ready
+      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
+      - "#approved-reviews-by>=1"
+      - check-success~=pre-commit
+      - check-success=fastcheck-passed
+      - check-success=full-suite-passed
+      - -conflict
+      - -closed
+      - -draft
     actions:
-      queue:
-        name: default
+      merge:
+        method: squash
 
-  - name: remove ready label on dequeue
+  - name: auto-rebase when ready and Full Suite passed
     conditions:
-      - queue-dequeue-reason!=none
+      - label=ready
+      - "#approved-reviews-by>=1"
+      - check-success=full-suite-passed
+      - -conflict
+      - -closed
+      - -draft
+    actions:
+      rebase: {}
+
+  - name: remove ready label on Full Suite failure
+    conditions:
+      - label=ready
+      - check-failure=full-suite-passed
     actions:
       label:
         remove: [ready]
+
+  # ============================================================
+  # PR title format help
+  # ============================================================
 
   - name: comment on invalid PR title format
     conditions:
