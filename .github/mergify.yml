@@ -283,14 +283,6 @@ pull_request_rules:
     actions:
       rebase: {}
 
-  - name: remove ready label on Full Suite failure
-    conditions:
-      - label=ready
-      - check-failure=full-suite-passed
-    actions:
-      label:
-        remove: [ready]
-
   # ============================================================
   # PR title format help
   # ============================================================
