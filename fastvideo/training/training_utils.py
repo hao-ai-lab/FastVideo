@@ -806,6 +806,14 @@ def normalize_dit_input(model_type, latents, vae) -> torch.Tensor:
         latents_std = latents_std.view(1, -1, 1, 1, 1).to(device=latents.device)
         latents = ((latents.float() - latents_mean) * latents_std).to(latents)
         return latents
+    elif model_type == "cosmos":
+        latents_mean = torch.tensor(vae.config.latents_mean)
+        latents_std = torch.tensor(vae.config.latents_std)
+
+        latents_mean = latents_mean.view(1, -1, 1, 1, 1).to(device=latents.device)
+        latents_std = latents_std.view(1, -1, 1, 1, 1).to(device=latents.device)
+        latents = ((latents.float() - latents_mean) / latents_std).to(latents)
+        return latents
     else:
         raise NotImplementedError(f"model_type {model_type} not supported")
 
