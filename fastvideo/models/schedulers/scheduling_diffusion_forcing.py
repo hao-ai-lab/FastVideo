@@ -73,8 +73,15 @@ class DiffusionForcingScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
             self.timesteps = (
                 sigmas * float(self.num_train_timesteps)
             ).to(torch.float32)
-            self.linear_timesteps_weights = torch.ones_like(
-                self.timesteps)
+            # Gaussian weighting: emphasize mid-noise timesteps,
+            # down-weight extremes (near-clean and pure-noise).
+            # Matches Causal-Forcing's bsmntw weighting.
+            n = float(self.num_train_timesteps)
+            y = torch.exp(
+                -2 * ((self.timesteps - n / 2) / n) ** 2)
+            y_shifted = y - y.min()
+            self.linear_timesteps_weights = (
+                y_shifted * (n / y_shifted.sum()))
             return
 
         sigma_start = self.sigma_min + (
@@ -175,7 +182,15 @@ class DiffusionForcingScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
     def training_weight(self, timestep):
         if timestep.ndim == 2:
             timestep = timestep.flatten(0, 1)
-        return torch.ones_like(timestep, dtype=torch.float32)
+        self.timesteps = self.timesteps.to(timestep.device)
+        self.linear_timesteps_weights = (
+            self.linear_timesteps_weights.to(timestep.device))
+        timestep_id = torch.argmin(
+            (self.timesteps.unsqueeze(1)
+             - timestep.unsqueeze(0)).abs(),
+            dim=0,
+        )
+        return self.linear_timesteps_weights[timestep_id]
 
     def scale_model_input(
         self, sample: torch.Tensor, timestep: int | None = None
