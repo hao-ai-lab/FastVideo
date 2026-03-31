@@ -163,6 +163,7 @@ jobs:
           commit: "${{ needs.parse-command.outputs.pr_sha }}"
           message: "/test ${{ needs.parse-command.outputs.test_type }} on PR #${{ github.event.issue.number }}"
           build_env_vars: '{"TEST_SCOPE": "${{ needs.parse-command.outputs.test_scope }}", "FULL_SUITE": "${{ needs.parse-command.outputs.full_suite }}", "TEST_TYPE": "${{ needs.parse-command.outputs.test_type }}", "PR_NUMBER": "${{ github.event.issue.number }}"}'
+          ignore_pipeline_branch_filter: "true"
           send_pull_request: "true"
           pull_request_id: "${{ github.event.issue.number }}"
           pull_request_base_branch: "main"
