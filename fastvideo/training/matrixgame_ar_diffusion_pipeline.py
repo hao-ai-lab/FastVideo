@@ -137,53 +137,55 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
 
     def _get_timestep(
         self,
-        min_timestep: int,
-        max_timestep: int,
         batch_size: int,
         num_frame: int,
         num_frame_per_block: int,
         uniform_timestep: bool = False,
     ) -> torch.Tensor:
-        """
-        Sample latents timesteps.
+        """Sample timestep indices and return the scheduler's
+        (shifted) timestep values.
         """
         device = get_local_torch_device()
+        num_schedule_steps = len(self.ar_noise_scheduler.timesteps)
+
         if uniform_timestep:
-            timestep = torch.randint(
-                min_timestep,
-                max_timestep + 1,
+            indices = torch.randint(
+                0,
+                num_schedule_steps,
                 [batch_size, 1],
                 device=device,
                 dtype=torch.long,
             ).repeat(1, num_frame)
-            return timestep
-
-        timestep = torch.randint(
-            min_timestep,
-            max_timestep + 1,
-            [batch_size, num_frame],
-            device=device,
-            dtype=torch.long,
-        )
-        if not getattr(self, "chunkwise_timestep", False):
-            return timestep
-
-        chunk_size = int(num_frame_per_block)
-        if chunk_size <= 0:
-            raise ValueError(f"num_frame_per_block must be > 0, got {chunk_size}")
-
-        num_chunks = (num_frame + chunk_size - 1) // chunk_size
-        padded_num_frames = num_chunks * chunk_size
-        if padded_num_frames != num_frame:
-            pad = timestep[:, -1:].expand(
-                batch_size,
-                padded_num_frames - num_frame,
+        else:
+            indices = torch.randint(
+                0,
+                num_schedule_steps,
+                [batch_size, num_frame],
+                device=device,
+                dtype=torch.long,
             )
-            timestep = torch.cat([timestep, pad], dim=1)
-        timestep = timestep.reshape(batch_size, num_chunks, chunk_size)
-        timestep[:, :, 1:] = timestep[:, :, :1]
-        timestep = timestep.reshape(batch_size, padded_num_frames)[:, :num_frame]
-        return timestep
+
+        if getattr(self, "chunkwise_timestep", False):
+            chunk_size = int(num_frame_per_block)
+            if chunk_size <= 0:
+                raise ValueError(
+                    f"num_frame_per_block must be > 0, "
+                    f"got {chunk_size}")
+            num_chunks = ((num_frame + chunk_size - 1)
+                          // chunk_size)
+            padded = num_chunks * chunk_size
+            if padded != num_frame:
+                pad = indices[:, -1:].expand(
+                    batch_size, padded - num_frame)
+                indices = torch.cat([indices, pad], dim=1)
+            indices = indices.reshape(
+                batch_size, num_chunks, chunk_size)
+            indices[:, :, 1:] = indices[:, :, :1]
+            indices = indices.reshape(
+                batch_size, padded)[:, :num_frame]
+
+        schedule_t = self.ar_noise_scheduler.timesteps.to(device)
+        return schedule_t[indices]
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore
@@ -245,8 +247,6 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
         latents_btchw = latents.permute(0, 2, 1, 3, 4)
 
         timesteps = self._get_timestep(
-            min_timestep=0,
-            max_timestep=self.ar_noise_scheduler.num_train_timesteps,
             batch_size=batch_size,
             num_frame=num_latent_t,
             num_frame_per_block=self.num_frame_per_block,

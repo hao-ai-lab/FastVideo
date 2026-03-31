@@ -34,10 +34,24 @@ class DiffusionForcingScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
         self.extra_one_step = extra_one_step
         self.set_timesteps(num_inference_steps, training=training)
 
-    def sigma_from_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
+    def _apply_shift(self, sigmas: torch.Tensor) -> torch.Tensor:
+        """Apply time-shift to sigmas, matching FlowMatchEulerDiscreteScheduler."""
+        if self.shift != 1.0:
+            sigmas = (self.shift * sigmas
+                      / (1 + (self.shift - 1) * sigmas))
+        return sigmas
+
+    def _lookup_sigma(self, timestep: torch.Tensor) -> torch.Tensor:
+        """Map timestep values to sigmas via table lookup."""
         timestep = timestep.to(torch.float32)
-        sigma = timestep / float(self.num_train_timesteps)
-        return sigma.clamp_(0.0, 1.0)
+        self.timesteps = self.timesteps.to(timestep.device)
+        self.sigmas = self.sigmas.to(timestep.device)
+        timestep_id = torch.argmin(
+            (self.timesteps.unsqueeze(0)
+             - timestep.unsqueeze(1)).abs(),
+            dim=1,
+        )
+        return self.sigmas[timestep_id]
 
     def set_timesteps(
         self,
@@ -48,11 +62,19 @@ class DiffusionForcingScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
         **kwargs,
     ):
         if training:
-            self.timesteps = torch.arange(
-                self.num_train_timesteps, -1, -1, dtype=torch.float32
-            )
-            self.sigmas = self.sigma_from_timestep(self.timesteps)
-            self.linear_timesteps_weights = torch.ones_like(self.timesteps)
+            # Linear sigmas from 1.0 to 0.0 (inclusive),
+            # then apply the same shift used by the student model.
+            raw_sigmas = torch.arange(
+                self.num_train_timesteps, -1, -1,
+                dtype=torch.float32,
+            ) / float(self.num_train_timesteps)
+            sigmas = self._apply_shift(raw_sigmas)
+            self.sigmas = sigmas
+            self.timesteps = (
+                sigmas * float(self.num_train_timesteps)
+            ).to(torch.float32)
+            self.linear_timesteps_weights = torch.ones_like(
+                self.timesteps)
             return
 
         sigma_start = self.sigma_min + (
@@ -66,8 +88,7 @@ class DiffusionForcingScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
             sigmas = torch.linspace(
                 sigma_start, self.sigma_min, num_inference_steps
             )
-        if self.shift != 1.0:
-            sigmas = self.shift * sigmas / (1 + (self.shift - 1) * sigmas)
+        sigmas = self._apply_shift(sigmas)
         self.sigmas = sigmas.to(torch.float32)
         self.timesteps = (
             self.sigmas * float(self.num_train_timesteps)
@@ -89,22 +110,23 @@ class DiffusionForcingScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
 
         timestep = timestep.to(model_output.device, dtype=torch.float32)
         self.timesteps = self.timesteps.to(model_output.device)
+        self.sigmas = self.sigmas.to(model_output.device)
 
-        sigma = self.sigma_from_timestep(timestep).reshape(-1, 1, 1, 1)
+        sigma = self._lookup_sigma(timestep).reshape(-1, 1, 1, 1)
         if to_final:
             sigma_next = torch.zeros_like(sigma)
         else:
             timestep_id = torch.argmin(
-                (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(),
+                (self.timesteps.unsqueeze(0)
+                 - timestep.unsqueeze(1)).abs(),
                 dim=1,
             )
             sigma_next = torch.zeros_like(sigma)
             valid = timestep_id + 1 < len(self.timesteps)
             if valid.any():
-                next_timestep = self.timesteps[timestep_id[valid] + 1]
-                sigma_next[valid] = self.sigma_from_timestep(
-                    next_timestep
-                ).reshape(-1, 1, 1, 1)
+                sigma_next[valid] = self.sigmas[
+                    timestep_id[valid] + 1
+                ].reshape(-1, 1, 1, 1)
 
         prev_sample = sample + model_output * (sigma_next - sigma)
         if isinstance(prev_sample, torch.Tensor | float) and not return_dict:
@@ -120,7 +142,7 @@ class DiffusionForcingScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
     def add_noise(self, original_samples, noise, timestep):
         if timestep.ndim == 2:
             timestep = timestep.flatten(0, 1)
-        sigma = self.sigma_from_timestep(timestep).to(noise.device).reshape(
+        sigma = self._lookup_sigma(timestep).to(noise.device).reshape(
             -1, 1, 1, 1
         )
         sample = (1 - sigma) * original_samples + sigma * noise
@@ -133,15 +155,19 @@ class DiffusionForcingScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
             timestep = timestep.flatten(0, 1)
         if boundary_timestep.ndim == 2:
             boundary_timestep = boundary_timestep.flatten(0, 1)
-        sigma = self.sigma_from_timestep(timestep).to(noise.device).reshape(
+        sigma = self._lookup_sigma(timestep).to(noise.device).reshape(
             -1, 1, 1, 1
         )
-        sigma_boundary = self.sigma_from_timestep(boundary_timestep).to(
-            noise.device
-        ).reshape(-1, 1, 1, 1)
+        sigma_boundary = self._lookup_sigma(
+            boundary_timestep
+        ).to(noise.device).reshape(-1, 1, 1, 1)
         alpha, beta = self.calculate_alpha_beta_high(sigma, sigma_boundary)
         sample = alpha * original_samples + beta * noise
         return sample.type_as(noise)
+
+    def sigma_from_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
+        """Public API used by ``pred_noise_to_pred_video``."""
+        return self._lookup_sigma(timestep)
 
     def training_target(self, sample, noise, timestep):
         return noise - sample
