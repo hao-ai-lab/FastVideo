@@ -134,12 +134,11 @@ def _discover_reference_dirs_for_tier(
 
 
 def _has_local_reference_videos(base_dir: Path, quality_tier: str) -> bool:
-    # Check for completion marker file first
     marker_path = base_dir / REFERENCE_VIDEOS_DIRNAME / quality_tier / f".download_complete_{quality_tier}"
     if not marker_path.exists():
         return False
-    # Also verify at least one .mp4 exists
-    for ref_dir in _discover_reference_dirs_for_tier(base_dir, quality_tier):
+    tier_root = _reference_tier_root(base_dir, quality_tier)
+    for ref_dir in _discover_reference_dirs(tier_root):
         for _ in _iter_video_files(ref_dir):
             return True
     return False
