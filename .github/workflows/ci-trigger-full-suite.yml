@@ -42,7 +42,7 @@ jobs:
           # Find running builds for this branch with TEST_SCOPE=full and cancel them
           builds=$(curl -sS -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
             "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds?branch=${PR_BRANCH}&state=running,scheduled" \
-            | jq -r '.[] | select(.env.TEST_SCOPE == "full") | .number')
+            | jq -r '.[] | select(try (.env.TEST_SCOPE == "full") catch false) | .number')
           for build_num in $builds; do
             echo "Cancelling Buildkite build #$build_num"
             curl -sS -X PUT -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
