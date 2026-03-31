@@ -54,6 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       test_type: ${{ steps.parse.outputs.test_type }}
+      test_scope: ${{ steps.parse.outputs.test_scope }}
       full_suite: ${{ steps.parse.outputs.full_suite }}
       pr_sha: ${{ steps.pr.outputs.sha }}
       pr_branch: ${{ steps.pr.outputs.branch }}
@@ -103,13 +104,16 @@ jobs:
 
           if [ "$TEST_NAME" = "full" ]; then
             echo "test_type=all" >> "$GITHUB_OUTPUT"
+            echo "test_scope=full" >> "$GITHUB_OUTPUT"
             echo "full_suite=true" >> "$GITHUB_OUTPUT"
           elif [ "$TEST_NAME" = "fastcheck" ]; then
             echo "test_type=fastcheck" >> "$GITHUB_OUTPUT"
+            echo "test_scope=fastcheck" >> "$GITHUB_OUTPUT"
             echo "full_suite=false" >> "$GITHUB_OUTPUT"
           else
             echo "test_type=${MAP[$TEST_NAME]}" >> "$GITHUB_OUTPUT"
-            echo "full_suite=true" >> "$GITHUB_OUTPUT"
+            echo "test_scope=direct" >> "$GITHUB_OUTPUT"
+            echo "full_suite=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Get PR details
@@ -152,7 +156,7 @@ jobs:
           branch: "${{ needs.parse-command.outputs.pr_branch }}"
           commit: "${{ needs.parse-command.outputs.pr_sha }}"
           message: "/test ${{ needs.parse-command.outputs.test_type }} on PR #${{ github.event.issue.number }}"
-          build_env_vars: '{"FULL_SUITE": "${{ needs.parse-command.outputs.full_suite }}", "TEST_TYPE": "${{ needs.parse-command.outputs.test_type }}", "PR_NUMBER": "${{ github.event.issue.number }}"}'
+          build_env_vars: '{"TEST_SCOPE": "${{ needs.parse-command.outputs.test_scope }}", "FULL_SUITE": "${{ needs.parse-command.outputs.full_suite }}", "TEST_TYPE": "${{ needs.parse-command.outputs.test_type }}", "PR_NUMBER": "${{ github.event.issue.number }}"}'
           send_pull_request: "true"
           pull_request_id: "${{ github.event.issue.number }}"
           pull_request_base_branch: "main"

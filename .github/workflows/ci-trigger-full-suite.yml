@@ -39,10 +39,10 @@ jobs:
           BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
-          # Find running builds for this branch with FULL_SUITE=true and cancel them
+          # Find running builds for this branch with TEST_SCOPE=full and cancel them
           builds=$(curl -sS -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
             "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds?branch=${PR_BRANCH}&state=running,scheduled" \
-            | jq -r '.[] | select(.env.FULL_SUITE == "true") | .number')
+            | jq -r '.[] | select(.env.TEST_SCOPE == "full") | .number')
           for build_num in $builds; do
             echo "Cancelling Buildkite build #$build_num"
             curl -sS -X PUT -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
@@ -58,7 +58,7 @@ jobs:
           branch: "${{ github.event.pull_request.head.ref }}"
           commit: "${{ github.event.pull_request.head.sha }}"
           message: "Full Suite for PR #${{ github.event.pull_request.number }}"
-          build_env_vars: '{"FULL_SUITE": "true", "PR_NUMBER": "${{ github.event.pull_request.number }}"}'
+          build_env_vars: '{"TEST_SCOPE": "full", "FULL_SUITE": "true", "PR_NUMBER": "${{ github.event.pull_request.number }}"}'
           send_pull_request: "true"
           pull_request_id: "${{ github.event.pull_request.number }}"
           pull_request_base_branch: "main"
