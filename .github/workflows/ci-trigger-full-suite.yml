@@ -58,7 +58,7 @@ jobs:
           branch: "${{ github.event.pull_request.head.ref }}"
           commit: "${{ github.event.pull_request.head.sha }}"
           message: "Full Suite for PR #${{ github.event.pull_request.number }}"
-          build_env_vars: '{"FULL_SUITE": "true"}'
+          build_env_vars: '{"FULL_SUITE": "true", "PR_NUMBER": "${{ github.event.pull_request.number }}"}'
           send_pull_request: "true"
           pull_request_id: "${{ github.event.pull_request.number }}"
           pull_request_base_branch: "main"
