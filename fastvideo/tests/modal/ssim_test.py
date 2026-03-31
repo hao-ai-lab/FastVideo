@@ -473,6 +473,7 @@ def _prepare_ssim_workspace(
       cd {shlex.quote(repo_root)}
     fi
     {checkout_command}
+    rm -rf fastvideo/tests/ssim/reference_videos
     git_retry git submodule update --init --recursive
     cd fastvideo-kernel
     ./build.sh
