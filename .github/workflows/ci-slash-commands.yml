@@ -103,17 +103,23 @@ jobs:
           )
 
           if [ "$TEST_NAME" = "full" ]; then
-            echo "test_type=all" >> "$GITHUB_OUTPUT"
-            echo "test_scope=full" >> "$GITHUB_OUTPUT"
-            echo "full_suite=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "test_type=all"
+              echo "test_scope=full"
+              echo "full_suite=true"
+            } >> "$GITHUB_OUTPUT"
           elif [ "$TEST_NAME" = "fastcheck" ]; then
-            echo "test_type=fastcheck" >> "$GITHUB_OUTPUT"
-            echo "test_scope=fastcheck" >> "$GITHUB_OUTPUT"
-            echo "full_suite=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "test_type=fastcheck"
+              echo "test_scope=fastcheck"
+              echo "full_suite=false"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "test_type=${MAP[$TEST_NAME]}" >> "$GITHUB_OUTPUT"
-            echo "test_scope=direct" >> "$GITHUB_OUTPUT"
-            echo "full_suite=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "test_type=${MAP[$TEST_NAME]}"
+              echo "test_scope=direct"
+              echo "full_suite=false"
+            } >> "$GITHUB_OUTPUT"
           fi
 
       - name: Get PR details
