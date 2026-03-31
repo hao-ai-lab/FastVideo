@@ -157,22 +157,39 @@ jobs:
       - name: Trigger Buildkite
         env:
           BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
+          PR_SHA: ${{ needs.parse-command.outputs.pr_sha }}
+          PR_BRANCH: ${{ needs.parse-command.outputs.pr_branch }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          TEST_SCOPE: ${{ needs.parse-command.outputs.test_scope }}
+          FULL_SUITE: ${{ needs.parse-command.outputs.full_suite }}
+          TEST_TYPE: ${{ needs.parse-command.outputs.test_type }}
+          BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
+          BK_PIPELINE: ${{ vars.BUILDKITE_PIPELINE_SLUG }}
         run: |
           curl -sS --fail-with-body -X POST \
-            "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds" \
+            "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds" \
             -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
             -H "Content-Type: application/json" \
-            -d '{
-              "commit": "${{ needs.parse-command.outputs.pr_sha }}",
-              "branch": "${{ needs.parse-command.outputs.pr_branch }}",
-              "message": "/test ${{ needs.parse-command.outputs.test_type }} on PR #${{ github.event.issue.number }}",
-              "ignore_pipeline_branch_filters": true,
-              "pull_request_id": ${{ github.event.issue.number }},
-              "pull_request_base_branch": "main",
-              "env": {
-                "TEST_SCOPE": "${{ needs.parse-command.outputs.test_scope }}",
-                "FULL_SUITE": "${{ needs.parse-command.outputs.full_suite }}",
-                "TEST_TYPE": "${{ needs.parse-command.outputs.test_type }}",
-                "PR_NUMBER": "${{ github.event.issue.number }}"
-              }
-            }'
+            --data-raw "$(jq -n \
+              --arg commit "$PR_SHA" \
+              --arg branch "$PR_BRANCH" \
+              --arg message "/test ${TEST_TYPE} on PR #${PR_NUMBER}" \
+              --argjson pr_id "$PR_NUMBER" \
+              --arg test_scope "$TEST_SCOPE" \
+              --arg full_suite "$FULL_SUITE" \
+              --arg test_type "$TEST_TYPE" \
+              --arg pr_number "$PR_NUMBER" \
+              '{
+                commit: $commit,
+                branch: $branch,
+                message: $message,
+                ignore_pipeline_branch_filters: true,
+                pull_request_id: $pr_id,
+                pull_request_base_branch: "main",
+                env: {
+                  TEST_SCOPE: $test_scope,
+                  FULL_SUITE: $full_suite,
+                  TEST_TYPE: $test_type,
+                  PR_NUMBER: $pr_number
+                }
+              }')"

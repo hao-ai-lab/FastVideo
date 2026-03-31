@@ -53,21 +53,31 @@ jobs:
         if: steps.check.outputs.has_ready == 'true'
         env:
           BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
+          BK_PIPELINE: ${{ vars.BUILDKITE_PIPELINE_SLUG }}
         run: |
           curl -sS --fail-with-body -X POST \
-            "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds" \
+            "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds" \
             -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
             -H "Content-Type: application/json" \
-            -d '{
-              "commit": "${{ github.event.pull_request.head.sha }}",
-              "branch": "${{ github.event.pull_request.head.ref }}",
-              "message": "Full Suite for PR #${{ github.event.pull_request.number }}",
-              "ignore_pipeline_branch_filters": true,
-              "pull_request_id": ${{ github.event.pull_request.number }},
-              "pull_request_base_branch": "main",
-              "env": {
-                "TEST_SCOPE": "full",
-                "FULL_SUITE": "true",
-                "PR_NUMBER": "${{ github.event.pull_request.number }}"
-              }
-            }'
+            --data-raw "$(jq -n \
+              --arg commit "$PR_SHA" \
+              --arg branch "$PR_BRANCH" \
+              --arg message "Full Suite for PR #${PR_NUMBER}" \
+              --argjson pr_id "$PR_NUMBER" \
+              '{
+                commit: $commit,
+                branch: $branch,
+                message: $message,
+                ignore_pipeline_branch_filters: true,
+                pull_request_id: $pr_id,
+                pull_request_base_branch: "main",
+                env: {
+                  TEST_SCOPE: "full",
+                  FULL_SUITE: "true",
+                  PR_NUMBER: ($pr_id | tostring)
+                }
+              }')"
