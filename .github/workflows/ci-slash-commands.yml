@@ -136,6 +136,11 @@ jobs:
             core.setOutput('sha', pr.head.sha);
             core.setOutput('branch', pr.head.ref);
 
+  pre-commit:
+    needs: parse-command
+    if: needs.parse-command.outputs.has_write == 'true'
+    uses: ./.github/workflows/ci-precommit.yml
+
   trigger-buildkite:
     needs: parse-command
     if: >-
