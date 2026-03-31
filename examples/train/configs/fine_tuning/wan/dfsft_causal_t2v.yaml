@@ -27,10 +27,10 @@ training:
     train_batch_size: 1
     training_cfg_rate: 0.0
     seed: 1000
-    num_latent_t: 20
+    num_latent_t: 18
     num_height: 448
     num_width: 832
-    num_frames: 77
+    num_frames: 69
 
   optimizer:
     learning_rate: 2.0e-6
@@ -50,7 +50,7 @@ training:
 
   tracker:
     project_name: distillation_wan_r
-    run_name: wan2.1_causal_dfsft
+    run_name: wan2.1_causal_dfsft_shift5_gauss_weight
 
   model:
     enable_gradient_checkpointing_type: full
@@ -67,4 +67,4 @@ callbacks:
     num_frames: 69
 
 pipeline:
-  flow_shift: 8
+  flow_shift: 5
