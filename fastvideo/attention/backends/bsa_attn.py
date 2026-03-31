@@ -177,48 +177,6 @@ def _select_kv_blocks(
     return kv_mask
 
 
-# def _compute_sparse_attention(
-#     sparse_q: torch.Tensor,
-#     k_blocks: torch.Tensor,
-#     v_blocks: torch.Tensor,
-#     kv_mask: torch.Tensor,
-# ) -> torch.Tensor:
-#     """
-#     Compute attention for each query block against selected KV blocks.
-
-#     Reference implementation with loop over query blocks.
-
-#     Args:
-#         sparse_q: [B, H, N, Sq, D]
-#         k_blocks:  [B, H, N, Sk, D]
-#         v_blocks:  [B, H, N, Sk, D]
-#         kv_mask:   [B, H, N, N] boolean
-
-#     Returns:
-#         output: [B, H, N, Sq, D]
-#     """
-#     B, H, N, Sq, D = sparse_q.shape
-#     output = torch.zeros_like(sparse_q)
-
-#     for qb in range(N):
-#         # Use mask from first batch/head element (assumes uniform)
-#         selected = kv_mask[0, 0, qb]
-#         sel_idx = selected.nonzero(as_tuple=True)[0]
-
-#         if sel_idx.shape[0] == 0:
-#             continue
-
-#         sel_k = k_blocks[:, :, sel_idx].reshape(B, H, -1, D)
-#         sel_v = v_blocks[:, :, sel_idx].reshape(B, H, -1, D)
-
-#         q = sparse_q[:, :, qb]
-#         scores = torch.matmul(q, sel_k.transpose(-1, -2)) / (D**0.5)
-#         weights = F.softmax(scores, dim=-1)
-#         output[:, :, qb] = torch.matmul(weights, sel_v)
-
-#     return output
-
-
 def _compute_sparse_attention(
     sparse_q: torch.Tensor,
     k_blocks: torch.Tensor,
@@ -227,16 +185,17 @@ def _compute_sparse_attention(
 ) -> torch.Tensor:
     """
     Compute attention for each query block against selected KV blocks.
- 
-    Uses flash_attn_varlen_func when available on GPU for fast
-    computation. Falls back to pure-PyTorch reference on CPU.
- 
+
+    Handles per-batch and per-head KV masks correctly.
+    Uses flash_attn_varlen_func when available on GPU.
+    Falls back to pure-PyTorch reference on CPU.
+
     Args:
         sparse_q: [B, H, N, Sq, D]
         k_blocks:  [B, H, N, Sk, D]
         v_blocks:  [B, H, N, Sk, D]
-        kv_mask:   [B, H, N, N] boolean
- 
+        kv_mask:   [B, H, N, N] boolean (per-batch, per-head)
+
     Returns:
         output: [B, H, N, Sq, D]
     """
@@ -252,25 +211,27 @@ def _compute_sparse_attention_reference(
     v_blocks: torch.Tensor,
     kv_mask: torch.Tensor,
 ) -> torch.Tensor:
-    """Pure-PyTorch fallback (CPU or when flash_attn unavailable)."""
+    """Pure-PyTorch fallback with per-batch, per-head mask support."""
     B, H, N, Sq, D = sparse_q.shape
     output = torch.zeros_like(sparse_q)
 
-    for qb in range(N):
-        # NOTE: Assumes kv_mask is uniform across batch and heads.
-        selected = kv_mask[0, 0, qb]
-        sel_idx = selected.nonzero(as_tuple=True)[0]
+    for b in range(B):
+        for h in range(H):
+            for qb in range(N):
+                selected = kv_mask[b, h, qb]  # [N] boolean
+                sel_idx = selected.nonzero(as_tuple=True)[0]
 
-        if sel_idx.shape[0] == 0:
-            continue
+                if sel_idx.shape[0] == 0:
+                    continue
 
-        sel_k = k_blocks[:, :, sel_idx].reshape(B, H, -1, D)
-        sel_v = v_blocks[:, :, sel_idx].reshape(B, H, -1, D)
+                # [num_sel * Sk, D]
+                sel_k = k_blocks[b, h, sel_idx].reshape(-1, D)
+                sel_v = v_blocks[b, h, sel_idx].reshape(-1, D)
 
-        q = sparse_q[:, :, qb]
-        scores = torch.matmul(q, sel_k.transpose(-1, -2)) / (D**0.5)
-        weights = F.softmax(scores, dim=-1)
-        output[:, :, qb] = torch.matmul(weights, sel_v)
+                q = sparse_q[b, h, qb]  # [Sq, D]
+                scores = torch.matmul(q, sel_k.transpose(-1, -2)) / (D**0.5)
+                weights = F.softmax(scores, dim=-1)
+                output[b, h, qb] = torch.matmul(weights, sel_v)
 
     return output
 
@@ -282,114 +243,241 @@ def _compute_sparse_attention_flash(
     kv_mask: torch.Tensor,
 ) -> torch.Tensor:
     """
-    Fast implementation using flash_attn_varlen_func.
- 
-    Packs all query blocks and their selected KV blocks into flat
-    tensors with cumulative sequence lengths, then runs one fused
-    FlashAttention call.
- 
+    FlashAttention implementation with per-batch, per-head mask support.
+
+    Strategy: check if all heads share the same mask. If so, use a single
+    FlashAttention call per batch (fast path). If not, process each head
+    separately (correct path).
+
     Args:
         sparse_q: [B, H, N, Sq, D]
         k_blocks:  [B, H, N, Sk, D]
         v_blocks:  [B, H, N, Sk, D]
         kv_mask:   [B, H, N, N] boolean
- 
+
     Returns:
         output: [B, H, N, Sq, D]
     """
     B, H, N, Sq, D = sparse_q.shape
     Sk = k_blocks.shape[3]
     device = sparse_q.device
-
     output = torch.zeros_like(sparse_q)
 
     for b in range(B):
-        # --- Pack Q, K, V into flat tensors ---
-        # flash_attn_varlen_func expects: [total_tokens, num_heads, head_dim]
+        # Check if all heads share the same mask for this batch element
+        # Compare each head's mask to head 0's mask
+        head0_mask = kv_mask[b, 0]  # [N, N]
+        all_heads_same = all(torch.equal(kv_mask[b, h], head0_mask) for h in range(1, H))
 
-        q_list = []
-        k_list = []
-        v_list = []
-        cu_seqlens_q = [0]
-        cu_seqlens_k = [0]
-        active_blocks = []  # track which query blocks have KV selected
-
-        for qb in range(N):
-            # NOTE: Assumes kv_mask uniform across heads
-            selected = kv_mask[b, 0, qb]  # [N] boolean
-            sel_idx = selected.nonzero(as_tuple=True)[0]
-
-            if sel_idx.shape[0] == 0:
-                continue
-
-            active_blocks.append(qb)
-            num_kv_tokens = sel_idx.shape[0] * Sk
-
-            # sparse_q[b] is [H, N, Sq, D]
-            # We need [Sq, H, D] for this query block
-            q_block = sparse_q[b, :, qb].permute(1, 0, 2)  # [Sq, H, D]
-            q_list.append(q_block)
-
-            # Gather selected KV blocks: [H, num_sel, Sk, D]
-            sel_k = k_blocks[b, :, sel_idx]  # [H, num_sel, Sk, D]
-            sel_v = v_blocks[b, :, sel_idx]  # [H, num_sel, Sk, D]
-
-            # Reshape to [num_kv_tokens, H, D]
-            sel_k = sel_k.permute(1, 2, 0, 3).reshape(num_kv_tokens, H, D)
-            sel_v = sel_v.permute(1, 2, 0, 3).reshape(num_kv_tokens, H, D)
-
-            k_list.append(sel_k)
-            v_list.append(sel_v)
-
-            cu_seqlens_q.append(cu_seqlens_q[-1] + Sq)
-            cu_seqlens_k.append(cu_seqlens_k[-1] + num_kv_tokens)
-
-        if not q_list:
-            continue
-
-        # Concatenate into flat tensors
-        flat_q = torch.cat(q_list, dim=0)  # [total_q, H, D]
-        flat_k = torch.cat(k_list, dim=0)  # [total_k, H, D]
-        flat_v = torch.cat(v_list, dim=0)  # [total_v, H, D]
-
-        cu_seqlens_q_t = torch.tensor(cu_seqlens_q, dtype=torch.int32, device=device)
-        cu_seqlens_k_t = torch.tensor(cu_seqlens_k, dtype=torch.int32, device=device)
-
-        max_seqlen_q = Sq
-        max_seqlen_k = int((cu_seqlens_k_t[1:] - cu_seqlens_k_t[:-1]).max().item())
-
-        # flash_attn requires float16 or bfloat16
-        orig_dtype = flat_q.dtype
-        compute_dtype = orig_dtype
-        if compute_dtype not in (torch.float16, torch.bfloat16):
-            compute_dtype = torch.bfloat16
-            flat_q = flat_q.to(compute_dtype)
-            flat_k = flat_k.to(compute_dtype)
-            flat_v = flat_v.to(compute_dtype)
-
-        # Single fused FlashAttention call for all blocks
-        flat_out = flash_attn_varlen_func_impl(
-            flat_q,
-            flat_k,
-            flat_v,
-            cu_seqlens_q_t,
-            cu_seqlens_k_t,
-            max_seqlen_q,
-            max_seqlen_k,
-            causal=False,
-        )
-
-        if compute_dtype != orig_dtype:
-            flat_out = flat_out.to(orig_dtype)
-
-        # Unpack: flat_out is [total_q, H, D]
-        idx = 0
-        for qb in active_blocks:
-            block_out = flat_out[idx:idx + Sq]  # [Sq, H, D]
-            output[b, :, qb] = block_out.permute(1, 0, 2)  # [H, Sq, D]
-            idx += Sq
+        if all_heads_same:
+            # Fast path: all heads share the same mask, single FA call
+            _flash_attn_single_mask(
+                sparse_q[b],
+                k_blocks[b],
+                v_blocks[b],
+                head0_mask,
+                output[b],
+                H,
+                N,
+                Sq,
+                Sk,
+                D,
+                device,
+            )
+        else:
+            # Per-head path: process each head individually
+            for h in range(H):
+                head_mask = kv_mask[b, h]  # [N, N]
+                # Process single head: squeeze head dim, run FA, put back
+                _flash_attn_single_head(
+                    sparse_q[b, h],
+                    k_blocks[b, h],
+                    v_blocks[b, h],
+                    head_mask,
+                    output,
+                    b,
+                    h,
+                    N,
+                    Sq,
+                    Sk,
+                    D,
+                    device,
+                )
 
     return output
+
+
+def _flash_attn_single_mask(
+    sparse_q_b: torch.Tensor,  # [H, N, Sq, D]
+    k_blocks_b: torch.Tensor,  # [H, N, Sk, D]
+    v_blocks_b: torch.Tensor,  # [H, N, Sk, D]
+    mask: torch.Tensor,  # [N, N] boolean
+    output_b: torch.Tensor,  # [H, N, Sq, D] (modified in-place)
+    H: int,
+    N: int,
+    Sq: int,
+    Sk: int,
+    D: int,
+    device: torch.device,
+) -> None:
+    """Run FlashAttention for all heads sharing the same KV mask."""
+    q_list = []
+    k_list = []
+    v_list = []
+    cu_seqlens_q = [0]
+    cu_seqlens_k = [0]
+    active_blocks = []
+
+    for qb in range(N):
+        selected = mask[qb]  # [N] boolean
+        sel_idx = selected.nonzero(as_tuple=True)[0]
+
+        if sel_idx.shape[0] == 0:
+            continue
+
+        active_blocks.append(qb)
+        num_kv_tokens = sel_idx.shape[0] * Sk
+
+        # [H, Sq, D] -> [Sq, H, D]
+        q_block = sparse_q_b[:, qb].permute(1, 0, 2)
+        q_list.append(q_block)
+
+        # [H, num_sel, Sk, D] -> [num_kv_tokens, H, D]
+        sel_k = k_blocks_b[:, sel_idx].permute(1, 2, 0, 3).reshape(num_kv_tokens, H, D)
+        sel_v = v_blocks_b[:, sel_idx].permute(1, 2, 0, 3).reshape(num_kv_tokens, H, D)
+        k_list.append(sel_k)
+        v_list.append(sel_v)
+
+        cu_seqlens_q.append(cu_seqlens_q[-1] + Sq)
+        cu_seqlens_k.append(cu_seqlens_k[-1] + num_kv_tokens)
+
+    if not q_list:
+        return
+
+    flat_q = torch.cat(q_list, dim=0)
+    flat_k = torch.cat(k_list, dim=0)
+    flat_v = torch.cat(v_list, dim=0)
+
+    cu_seqlens_q_t = torch.tensor(cu_seqlens_q, dtype=torch.int32, device=device)
+    cu_seqlens_k_t = torch.tensor(cu_seqlens_k, dtype=torch.int32, device=device)
+
+    max_seqlen_q = Sq
+    max_seqlen_k = int((cu_seqlens_k_t[1:] - cu_seqlens_k_t[:-1]).max().item())
+
+    orig_dtype = flat_q.dtype
+    compute_dtype = orig_dtype
+    if compute_dtype not in (torch.float16, torch.bfloat16):
+        compute_dtype = torch.bfloat16
+        flat_q = flat_q.to(compute_dtype)
+        flat_k = flat_k.to(compute_dtype)
+        flat_v = flat_v.to(compute_dtype)
+
+    flat_out = flash_attn_varlen_func_impl(
+        flat_q,
+        flat_k,
+        flat_v,
+        cu_seqlens_q_t,
+        cu_seqlens_k_t,
+        max_seqlen_q,
+        max_seqlen_k,
+        causal=False,
+    )
+
+    if compute_dtype != orig_dtype:
+        flat_out = flat_out.to(orig_dtype)
+
+    idx = 0
+    for qb in active_blocks:
+        block_out = flat_out[idx:idx + Sq]  # [Sq, H, D]
+        output_b[:, qb] = block_out.permute(1, 0, 2)  # [H, Sq, D]
+        idx += Sq
+
+
+def _flash_attn_single_head(
+    sparse_q_bh: torch.Tensor,  # [N, Sq, D]
+    k_blocks_bh: torch.Tensor,  # [N, Sk, D]
+    v_blocks_bh: torch.Tensor,  # [N, Sk, D]
+    mask: torch.Tensor,  # [N, N] boolean
+    output: torch.Tensor,  # [B, H, N, Sq, D] (modified in-place)
+    b: int,
+    h: int,
+    N: int,
+    Sq: int,
+    Sk: int,
+    D: int,
+    device: torch.device,
+) -> None:
+    """Run FlashAttention for a single head with its own KV mask."""
+    q_list = []
+    k_list = []
+    v_list = []
+    cu_seqlens_q = [0]
+    cu_seqlens_k = [0]
+    active_blocks = []
+
+    for qb in range(N):
+        selected = mask[qb]
+        sel_idx = selected.nonzero(as_tuple=True)[0]
+
+        if sel_idx.shape[0] == 0:
+            continue
+
+        active_blocks.append(qb)
+        num_kv_tokens = sel_idx.shape[0] * Sk
+
+        # [Sq, D] -> [Sq, 1, D] (single head)
+        q_block = sparse_q_bh[qb].unsqueeze(1)
+        q_list.append(q_block)
+
+        # [num_sel, Sk, D] -> [num_kv_tokens, 1, D]
+        sel_k = k_blocks_bh[sel_idx].reshape(num_kv_tokens, 1, D)
+        sel_v = v_blocks_bh[sel_idx].reshape(num_kv_tokens, 1, D)
+        k_list.append(sel_k)
+        v_list.append(sel_v)
+
+        cu_seqlens_q.append(cu_seqlens_q[-1] + Sq)
+        cu_seqlens_k.append(cu_seqlens_k[-1] + num_kv_tokens)
+
+    if not q_list:
+        return
+
+    flat_q = torch.cat(q_list, dim=0)
+    flat_k = torch.cat(k_list, dim=0)
+    flat_v = torch.cat(v_list, dim=0)
+
+    cu_seqlens_q_t = torch.tensor(cu_seqlens_q, dtype=torch.int32, device=device)
+    cu_seqlens_k_t = torch.tensor(cu_seqlens_k, dtype=torch.int32, device=device)
+
+    max_seqlen_q = Sq
+    max_seqlen_k = int((cu_seqlens_k_t[1:] - cu_seqlens_k_t[:-1]).max().item())
+
+    orig_dtype = flat_q.dtype
+    compute_dtype = orig_dtype
+    if compute_dtype not in (torch.float16, torch.bfloat16):
+        compute_dtype = torch.bfloat16
+        flat_q = flat_q.to(compute_dtype)
+        flat_k = flat_k.to(compute_dtype)
+        flat_v = flat_v.to(compute_dtype)
+
+    flat_out = flash_attn_varlen_func_impl(
+        flat_q,
+        flat_k,
+        flat_v,
+        cu_seqlens_q_t,
+        cu_seqlens_k_t,
+        max_seqlen_q,
+        max_seqlen_k,
+        causal=False,
+    )
+
+    if compute_dtype != orig_dtype:
+        flat_out = flat_out.to(orig_dtype)
+
+    idx = 0
+    for qb in active_blocks:
+        block_out = flat_out[idx:idx + Sq]  # [Sq, 1, D]
+        output[b, h, qb] = block_out.squeeze(1)  # [Sq, D]
+        idx += Sq
 
 
 def _reconstruct_pruned(
@@ -400,12 +488,14 @@ def _reconstruct_pruned(
     """
     Scatter sparse output back to full block size.
     Pruned positions get nearest kept token's output.
- 
+
+    Handles per-batch, per-head indices correctly.
+
     Args:
         sparse_output: [B, H, N, keep_size, D]
         keep_indices:  [B, H, N, keep_size]
         block_size: original tokens per block
- 
+
     Returns:
         full_output: [B, H, N, block_size, D]
     """
@@ -424,24 +514,23 @@ def _reconstruct_pruned(
     # Fill pruned positions with nearest kept token (vectorized)
     all_pos = torch.arange(block_size, device=device)
 
-    for n in range(N):
-        # NOTE: Assumes keep_indices are uniform across batch and heads.
-        # Per-batch/per-head reconstruction is a follow-up optimization.
-        kept = keep_indices[0, 0, n]  # [keep_size]
+    for b in range(B):
+        for h in range(H):
+            for n in range(N):
+                kept = keep_indices[b, h, n]  # [keep_size]
 
-        # Distance from every position to every kept position
-        # [block_size, keep_size]
-        dists = (all_pos.view(-1, 1) - kept.view(1, -1)).abs()
-        nearest_local_idx = dists.argmin(dim=1)  # [block_size]
+                # Distance from every position to every kept position
+                dists = (all_pos.view(-1, 1) - kept.view(1, -1)).abs()
+                nearest_local_idx = dists.argmin(dim=1)  # [block_size]
 
-        # Identify pruned positions
-        is_pruned = torch.ones(block_size, dtype=torch.bool, device=device)
-        is_pruned[kept] = False
-        pruned_indices = is_pruned.nonzero(as_tuple=True)[0]
+                # Identify pruned positions
+                is_pruned = torch.ones(block_size, dtype=torch.bool, device=device)
+                is_pruned[kept] = False
+                pruned_indices = is_pruned.nonzero(as_tuple=True)[0]
 
-        if pruned_indices.numel() > 0:
-            src_indices = nearest_local_idx[pruned_indices]
-            full_output[:, :, n, pruned_indices] = sparse_output[:, :, n, src_indices]
+                if pruned_indices.numel() > 0:
+                    src_indices = nearest_local_idx[pruned_indices]
+                    full_output[b, h, n, pruned_indices] = sparse_output[b, h, n, src_indices]
 
     return full_output
 
@@ -510,6 +599,10 @@ class BSAAttentionMetadataBuilder(AttentionMetadataBuilder):
         bsa_min_kv_blocks: int = 4,
         **kwargs: dict[str, Any],
     ) -> "BSAAttentionMetadata":
+        # Ensure patching does not drop tokens silently.
+        assert all(r % p == 0 for r, p in zip(raw_latent_shape, patch_size, strict=False)), (
+            "raw_latent_shape must be divisible by patch_size for BSA", )
+
         dit_seq_shape = (
             raw_latent_shape[0] // patch_size[0],
             raw_latent_shape[1] // patch_size[1],
@@ -518,7 +611,10 @@ class BSAAttentionMetadataBuilder(AttentionMetadataBuilder):
 
         total_seq_length = math.prod(dit_seq_shape)
         block_size = math.prod(BSA_TILE_SIZE)
-        num_blocks = math.prod(math.ceil(d / t) for d, t in zip(dit_seq_shape, BSA_TILE_SIZE, strict=False))
+        # Require exact tiling to avoid reshape failures later.
+        assert all(d % t == 0 for d, t in zip(dit_seq_shape, BSA_TILE_SIZE, strict=False)), (
+            "dit_seq_shape must be divisible by BSA_TILE_SIZE", )
+        num_blocks = total_seq_length // block_size
 
         tile_partition_indices = get_tile_partition_indices(dit_seq_shape, BSA_TILE_SIZE, device)
         reverse_tile_partition_indices = get_reverse_tile_partition_indices(dit_seq_shape, BSA_TILE_SIZE, device)
@@ -552,6 +648,14 @@ class BSAAttentionImpl(AttentionImpl):
         self.prefix = prefix
         self.num_heads = num_heads
         self.head_size = head_size
+        if num_kv_heads is not None and num_kv_heads != num_heads:
+            raise ValueError("BSA backend does not support grouped-query attention")
+        if causal:
+            raise ValueError("BSA backend is bidirectional; causal=True is unsupported")
+        if softmax_scale is not None:
+            expected_scale = 1.0 / math.sqrt(self.head_size)
+            if not math.isclose(softmax_scale, expected_scale, rel_tol=1e-4, abs_tol=1e-5):
+                raise ValueError("softmax_scale must be default (1/sqrt(d)) for BSA")
         try:
             sp_group = get_sp_group()
             self.sp_size = sp_group.world_size
@@ -599,6 +703,7 @@ class BSAAttentionImpl(AttentionImpl):
         B, L, H, D = query.shape
         block_size = attn_metadata.block_size
         num_blocks = attn_metadata.num_blocks
+        assert num_blocks * block_size == L, "Sequence length must match tiling"
 
         # Reshape to [B, H, L, D] for attention computation
         q = query.transpose(1, 2).contiguous()  # [B, H, L, D]

@@ -78,6 +78,41 @@ class TestBackendRegistration:
         assert metadata.block_size == 64
         assert metadata.query_keep_ratio == 0.5
 
+    def test_builder_requires_patch_divisible(self):
+        builder = BSAAttentionMetadataBuilder()
+        builder.prepare()
+        with pytest.raises(AssertionError):
+            builder.build(
+                current_timestep=0,
+                raw_latent_shape=(33, 64, 64),
+                patch_size=(1, 2, 2),
+                device=torch.device("cpu"),
+            )
+
+    def test_builder_requires_tile_divisible(self):
+        builder = BSAAttentionMetadataBuilder()
+        builder.prepare()
+        with pytest.raises(AssertionError):
+            builder.build(
+                current_timestep=0,
+                raw_latent_shape=(32, 66, 64),
+                patch_size=(1, 1, 1),
+                device=torch.device("cpu"),
+            )
+
+    def test_num_blocks_matches_sequence(self):
+        builder = BSAAttentionMetadataBuilder()
+        builder.prepare()
+        metadata = builder.build(
+            current_timestep=0,
+            raw_latent_shape=(8, 8, 8),
+            patch_size=(1, 1, 1),
+            device=torch.device("cpu"),
+        )
+        assert metadata.total_seq_length == 512
+        assert metadata.block_size == 64
+        assert metadata.num_blocks == metadata.total_seq_length // metadata.block_size
+
 # ---------------------------------------------------------------------------
 # Tile partition index tests
 # ---------------------------------------------------------------------------
@@ -507,6 +542,47 @@ class TestBSAImplForward:
         assert output.shape == (B, L, H, D)
         assert not torch.isnan(output).any()
         assert not torch.isinf(output).any()
+
+    def test_rejects_causal(self):
+        with pytest.raises(ValueError):
+            BSAAttentionImpl(
+                num_heads=2,
+                head_size=32,
+                causal=True,
+                softmax_scale=32 ** -0.5,
+            )
+
+    def test_rejects_gqa(self):
+        with pytest.raises(ValueError):
+            BSAAttentionImpl(
+                num_heads=4,
+                head_size=32,
+                causal=False,
+                softmax_scale=32 ** -0.5,
+                num_kv_heads=2,
+            )
+
+    def test_rejects_custom_softmax_scale(self):
+        with pytest.raises(ValueError):
+            BSAAttentionImpl(
+                num_heads=2,
+                head_size=32,
+                causal=False,
+                softmax_scale=0.1,
+            )
+
+    def test_length_mismatch_asserts(self):
+        B, H, D = 1, 2, 16
+        T, Hv, Wv = 4, 4, 4
+        impl, metadata = self._make_impl_and_metadata(T, Hv, Wv, H, D)
+
+        L = metadata.total_seq_length
+        q = torch.randn(B, L - 1, H, D, device=DEVICE)
+        k = torch.randn(B, L - 1, H, D, device=DEVICE)
+        v = torch.randn(B, L - 1, H, D, device=DEVICE)
+
+        with pytest.raises(AssertionError):
+            impl.forward(q, k, v, metadata)
 
 
 # ---------------------------------------------------------------------------
