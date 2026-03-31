@@ -7,6 +7,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  statuses: write
 
 jobs:
   handle-merge:
@@ -148,6 +149,27 @@ jobs:
       needs.parse-command.outputs.has_write == 'true'
       && needs.parse-command.outputs.test_scope == 'precommit'
     uses: ./.github/workflows/ci-precommit.yml
+
+  post-precommit-status:
+    needs: [parse-command, pre-commit]
+    if: always() && needs.parse-command.outputs.test_scope == 'precommit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          PR_SHA: ${{ needs.parse-command.outputs.pr_sha }}
+          RESULT: ${{ needs.pre-commit.result }}
+        with:
+          script: |
+            const state = process.env.RESULT === 'success' ? 'success' : 'failure';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.PR_SHA,
+              state,
+              context: 'pre-commit',
+              description: `Triggered via /test pre-commit (${state})`,
+            });
 
   trigger-buildkite:
     needs: parse-command
