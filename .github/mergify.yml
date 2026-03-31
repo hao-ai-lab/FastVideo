@@ -1,168 +1,210 @@
+queue_rules:
+  - name: default
+    queue_conditions:
+      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
+      - check-success~=pre-commit
+      - check-success=fastcheck-passed
+      - "#approved-reviews-by>=1"
+      - -draft
+      - -conflict
+      - -closed
+      - label!=do-not-merge
+    merge_conditions:
+      - check-success=full-suite-passed
+    merge_method: squash
+    commit_message_template: |
+      {{ title }} (#{{ number }})
+
+      {{ body }}
+
+merge_protections:
+  - name: PR merge requirements
+    if:
+      - base = main
+    success_conditions:
+      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
+      - check-success~=pre-commit
+      - check-success=fastcheck-passed
+
 pull_request_rules:
 
   # ============================================================
-  # Auto-labeling by file path
+  # Type labels (from PR title prefix)
   # ============================================================
 
-  - name: label attention changes
+  - name: "label type: feat"
+    conditions:
+      - "title~=(?i)^\\[(feat|feature)\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: feat"]
+
+  - name: "label type: bugfix"
+    conditions:
+      - "title~=(?i)^\\[(bug)?fix\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: bugfix"]
+
+  - name: "label type: refactor"
+    conditions:
+      - "title~=(?i)^\\[refactor\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: refactor"]
+
+  - name: "label type: perf"
+    conditions:
+      - "title~=(?i)^\\[perf\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: perf"]
+
+  - name: "label type: ci"
+    conditions:
+      - "title~=(?i)^\\[ci\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: ci"]
+
+  - name: "label type: docs"
+    conditions:
+      - "title~=(?i)^\\[(doc|docs)\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: docs"]
+
+  - name: "label type: misc"
+    conditions:
+      - "title~=(?i)^\\[(misc|chore)\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: misc"]
+
+  - name: "label type: new-model"
+    conditions:
+      - "title~=(?i)^\\[new.?model\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: new-model"]
+
+  # ============================================================
+  # Scope labels (from changed files)
+  # ============================================================
+
+  - name: "label scope: training"
     conditions:
       - or:
-        - files~=^fastvideo/attention/
-        - files~=^csrc/attn/
+          - files~=^fastvideo/train/
+          - files~=^fastvideo/training/
+          - files~=^fastvideo/distillation/
+          - files~=^examples/train/
+          - files~=^examples/training/
+          - files~=^examples/distill/
       - -closed
-      - label!=stale
     actions:
       label:
-        add: [attention]
+        add: ["scope: training"]
 
-  - name: label encoder changes
+  - name: "label scope: inference"
     conditions:
-      - files~=^fastvideo/models/encoders/
+      - or:
+          - files~=^fastvideo/pipelines/basic/
+          - files~=^fastvideo/pipelines/stages/
+          - files~=^fastvideo/pipelines/samplers/
+          - files~=^fastvideo/entrypoints/
+          - files~=^fastvideo/worker/
+          - files~=^fastvideo/configs/sample/
+          - files~=^fastvideo/configs/pipelines/
+          - files~=^examples/inference/
       - -closed
-      - label!=stale
     actions:
       label:
-        add: [encoder]
+        add: ["scope: inference"]
 
-  - name: label vae changes
+  - name: "label scope: attention"
     conditions:
-      - files~=^fastvideo/models/vaes/
+      - files~=^fastvideo/attention/
       - -closed
-      - label!=stale
     actions:
       label:
-        add: [vae]
+        add: ["scope: attention"]
 
-  - name: label transformer/DiT changes
+  - name: "label scope: kernel"
     conditions:
-      - files~=^fastvideo/models/dits/
+      - or:
+          - files~=^fastvideo-kernel/
+          - files~=^csrc/
       - -closed
-      - label!=stale
     actions:
       label:
-        add: [transformer]
+        add: ["scope: kernel"]
 
-  - name: label training changes
+  - name: "label scope: data"
     conditions:
-      - files~=^fastvideo/training/
+      - or:
+          - files~=^fastvideo/dataset/
+          - files~=^fastvideo/pipelines/preprocess/
+          - files~=^examples/preprocessing/
       - -closed
-      - label!=stale
     actions:
       label:
-        add: [training]
+        add: ["scope: data"]
 
-  - name: label pipeline changes
+  - name: "label scope: infra"
     conditions:
-      - files~=^fastvideo/pipelines/
+      - or:
+          - files~=^\.github/
+          - files~=^\.buildkite/
+          - files~=^fastvideo/tests/
+          - files~=^docker/
       - -closed
-      - label!=stale
     actions:
       label:
-        add: [pipeline]
+        add: ["scope: infra"]
 
-  - name: label distributed changes
+  - name: "label scope: distributed"
     conditions:
       - files~=^fastvideo/distributed/
       - -closed
-      - label!=stale
     actions:
       label:
-        add: [distributed]
+        add: ["scope: distributed"]
 
-  - name: label kernel changes
+  - name: "label scope: docs"
+    conditions:
+      - files~=^docs/
+      - -closed
+    actions:
+      label:
+        add: ["scope: docs"]
+
+  - name: "label scope: ui"
+    conditions:
+      - files~=^ui/
+      - -closed
+    actions:
+      label:
+        add: ["scope: ui"]
+
+  - name: "label scope: model"
     conditions:
       - or:
-        - files~=^csrc/
-        - files~=^fastvideo-kernel/
+          - files~=^fastvideo/models/
+          - files~=^fastvideo/layers/
+          - files~=^fastvideo/configs/models/
       - -closed
-      - label!=stale
     actions:
       label:
-        add: [kernel]
-
-  - name: label data/dataset changes
-    conditions:
-      - or:
-        - files~=^fastvideo/dataset/
-        - files~=^fastvideo/data_preprocess/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [data]
-
-  - name: label CLI/entrypoint changes
-    conditions:
-      - files~=^fastvideo/entrypoints/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [cli]
-
-  - name: label documentation changes
-    conditions:
-      - or:
-        - files~=^docs/
-        - files~=\.md$
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [documentation]
-
-  - name: label CI changes
-    conditions:
-      - or:
-        - files~=^\.github/
-        - files~=^\.buildkite/
-        - files~=^docker/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [ci]
-
-  - name: label test changes
-    conditions:
-      - or:
-        - files~=^fastvideo/tests/
-        - files~=^tests/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [tests]
-
-  - name: label ComfyUI changes
-    conditions:
-      - files~=^comfyui/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [comfyui]
-
-  - name: label layer changes
-    conditions:
-      - files~=^fastvideo/layers/
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [layers]
-
-  - name: label LoRA changes
-    conditions:
-      - or:
-        - files~=^fastvideo/layers/lora/
-        - files~=^fastvideo/tests/lora/
-        - title~=(?i)lora
-      - -closed
-      - label!=stale
-    actions:
-      label:
-        add: [lora]
+        add: ["scope: model"]
 
   # ============================================================
   # Pre-commit failure help comment
@@ -198,6 +240,33 @@ pull_request_rules:
           For future commits, `pre-commit` will run automatically on changed files before each commit.
 
   # ============================================================
+  # Buildkite CI failure notification
+  # ============================================================
+
+  - name: comment on Buildkite CI failure
+    conditions:
+      - check-failure~=buildkite/ci
+      - -closed
+    actions:
+      comment:
+        message: |
+          ## ❌ CI tests failed
+
+          @{{author}} — to see what failed:
+          1. Scroll to the **Checks** section below
+          2. Find the check marked with ❌ (e.g. `buildkite/ci/microscope-transformer-tests`)
+          3. Click **Details** to view the full build log
+
+          Or [view all builds for this branch on Buildkite →](https://buildkite.com/fastvideo/ci/builds?branch={{head}})
+
+          **Common causes:**
+          - **Assertion error / test failure** — check the failing test's traceback
+          - **Import error** — new dependency missing from `pyproject.toml`
+          - **OOM** — some tests need specific GPUs (L40S, H100 NVL)
+
+          If the failure looks unrelated to your changes, comment why and a maintainer will review.
+
+  # ============================================================
   # Merge conflict detection
   # ============================================================
 
@@ -229,27 +298,41 @@ pull_request_rules:
       label:
         remove: [needs-rebase]
 
-  # ============================================================
-  # Auto-rebase stale PRs
-  # ============================================================
-
-  - name: auto-merge when ready and approved
+  - name: enter merge queue when ready and approved
     conditions:
       - label=ready
-      - "#approved-reviews-by>=1"
-      - check-success~=pre-commit
-      - -conflict
+    actions:
+      queue:
+        name: default
+
+  - name: remove ready label on dequeue
+    conditions:
+      - queue-dequeue-reason!=none
+    actions:
+      label:
+        remove: [ready]
+
+  - name: comment on invalid PR title format
+    conditions:
       - -closed
       - -draft
+      - "-title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
     actions:
-      merge:
-        method: squash
+      comment:
+        message: |
+          ## ⚠️ PR title format required
 
-  - name: auto-rebase on ready label
-    conditions:
-      - label=ready
-      - "#approved-reviews-by>=1"
-      - -conflict
-      - -closed
-    actions:
-      rebase: {}
+          Your PR title must start with a type tag in brackets. Examples:
+          - `[feat] Add new model support`
+          - `[bugfix] Fix VAE tiling corruption`
+          - `[refactor] Restructure training pipeline`
+          - `[perf] Optimize attention kernel`
+          - `[ci] Update test infrastructure`
+          - `[docs] Add inference guide`
+          - `[misc] Clean up configs`
+          - `[new-model] Port Flux2 to FastVideo`
+
+          Valid tags: `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`, `ci`, `doc`, `docs`, `misc`, `chore`, `kernel`, `new-model`
+
+          Please update your PR title and the merge protection check will pass automatically.
+

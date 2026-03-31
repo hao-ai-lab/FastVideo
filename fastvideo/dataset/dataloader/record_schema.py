@@ -72,9 +72,12 @@ def i2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
     """Create a record for the Parquet dataset with CLIP features."""
     records = basic_t2v_record_creator(batch)
 
-    assert len(
-        batch.image_embeds) == 1, "image embedding should be a single tensor"
-    image_embeds = batch.image_embeds[0]
+    if len(batch.image_embeds) > 0:
+        assert len(batch.image_embeds
+                   ) == 1, "image embedding should be a single tensor"
+        image_embeds = batch.image_embeds[0]
+    else:
+        image_embeds = None
     image_latent = batch.image_latent
     pil_image = batch.pil_image
 

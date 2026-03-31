@@ -2,17 +2,30 @@ env:
   IMAGE_VERSION: "py3.12-latest"
   BUILDKITE_CLEAN_CHECKOUT: true
 
+notify:
+  - github_commit_status:
+      context: "fastcheck-passed"
+  - github_commit_status:
+      context: "full-suite-passed"
+    if: build.branch =~ /^mergify\/merge-queue\//
+
 steps:
   # ============================================================
   # Fastcheck: Runs on every PR (~10-15 min parallel)
   # Core component validation: encoders, VAEs, transformers,
   # CUDA kernels, and unit tests.
   # ============================================================
-  - label: "Trigger Fastcheck"
-    plugins:
-      - monorepo-diff#v1.4.0:
-          diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
-          watch:
+    - label: "Trigger Fastcheck"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      plugins:
+        - monorepo-diff#v1.4.0:
+            diff: 'git fetch origin "${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}" && git diff --name-only "origin/${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}...HEAD"'
+            watch:
             - path:
                 - "fastvideo/models/encoders/**"
                 - "fastvideo/models/loader/**"
@@ -80,17 +93,24 @@ steps:
                   queue: "default"
 
   # ============================================================
-  # Full Suite: Runs only when FULL_SUITE=true
-  # Triggered by adding the 'ready' label to a PR (via GitHub
-  # Actions → Buildkite API). Includes integration tests, SSIM
-  # regression, training pipelines, and performance benchmarks.
+  # Full Suite: Runs on Merge Queue branches or when FULL_SUITE=true
+  # Triggered by Mergify Merge Queue (mergify/merge-queue/* branches)
+  # or on-demand via /test full slash command.
+  # Includes integration tests, SSIM regression, training pipelines,
+  # and performance benchmarks.
   # ============================================================
-  - label: "Trigger Full Suite"
-    if: build.env("FULL_SUITE") == "true"
-    plugins:
-      - monorepo-diff#v1.4.0:
-          diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
-          watch:
+    - label: "Trigger Full Suite"
+      if: build.env("FULL_SUITE") == "true" || build.branch =~ /^mergify\/merge-queue\//
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      plugins:
+        - monorepo-diff#v1.4.0:
+            diff: 'git fetch origin "${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}" && git diff --name-only "origin/${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}...HEAD"'
+            watch:
             - path:
                 - "fastvideo/**/*.py"
                 - "pyproject.toml"

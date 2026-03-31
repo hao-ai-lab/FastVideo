@@ -1,0 +1,157 @@
+name: Slash Commands
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  handle-merge:
+    if: >-
+      github.event.issue.pull_request != null
+      && startsWith(github.event.comment.body, '/merge')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check write permission
+        id: perm
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const { data: perm } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.payload.comment.user.login,
+            });
+            const hasWrite = ['admin', 'write'].includes(perm.permission);
+            if (!hasWrite) {
+              core.setFailed(`User ${context.payload.comment.user.login} lacks write permission (has: ${perm.permission}).`);
+            }
+            core.setOutput('has_write', String(hasWrite));
+
+      - name: Queue PR via Mergify and react
+        if: steps.perm.outputs.has_write == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.payload.issue.number;
+            await github.rest.issues.addLabels({ owner, repo, issue_number: prNumber, labels: ['ready'] });
+            await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body: '@mergifyio queue' });
+            await github.rest.reactions.createForIssueComment({
+              owner, repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket',
+            });
+  parse-command:
+    if: >-
+      github.event.issue.pull_request != null
+      && startsWith(github.event.comment.body, '/test')
+    runs-on: ubuntu-latest
+    outputs:
+      test_type: ${{ steps.parse.outputs.test_type }}
+      full_suite: ${{ steps.parse.outputs.full_suite }}
+      pr_sha: ${{ steps.pr.outputs.sha }}
+      pr_branch: ${{ steps.pr.outputs.branch }}
+      has_write: ${{ steps.perm.outputs.has_write }}
+    steps:
+      - name: Check write permission
+        id: perm
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const { data: perm } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.payload.comment.user.login,
+            });
+            const hasWrite = ['admin', 'write'].includes(perm.permission);
+            core.setOutput('has_write', String(hasWrite));
+            if (!hasWrite) {
+              core.info(`User ${context.payload.comment.user.login} lacks write permission — ignoring.`);
+            }
+
+      - name: Parse /test command
+        id: parse
+        if: steps.perm.outputs.has_write == 'true'
+        shell: bash
+        env:
+          COMMENT: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          TEST_NAME=$(echo "$COMMENT" | grep -oP '(?<=/test\s)\S+' | head -1 || true)
+
+          VALID="encoder vae transformer kernel unit ssim training lora-inference lora-training distillation self-forcing vsa vmoba performance api full fastcheck"
+          if [ -z "$TEST_NAME" ] || ! echo "$VALID" | grep -qw "$TEST_NAME"; then
+            echo "Unknown test: '$TEST_NAME'. Valid: $VALID"
+            exit 1
+          fi
+
+          declare -A MAP=(
+            [encoder]=encoder [vae]=vae [transformer]=transformer
+            [kernel]=kernel_tests [unit]=unit_test
+            [ssim]=ssim [training]=training
+            [lora-inference]=inference_lora [lora-training]=training_lora
+            [distillation]=distillation_dmd [self-forcing]=self_forcing
+            [vsa]=training_vsa [vmoba]=inference_vmoba
+            [performance]=performance [api]=api_server
+          )
+
+          if [ "$TEST_NAME" = "full" ]; then
+            echo "test_type=all" >> "$GITHUB_OUTPUT"
+            echo "full_suite=true" >> "$GITHUB_OUTPUT"
+          elif [ "$TEST_NAME" = "fastcheck" ]; then
+            echo "test_type=fastcheck" >> "$GITHUB_OUTPUT"
+            echo "full_suite=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "test_type=${MAP[$TEST_NAME]}" >> "$GITHUB_OUTPUT"
+            echo "full_suite=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get PR details
+        id: pr
+        if: steps.perm.outputs.has_write == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.issue.number,
+            });
+            core.setOutput('sha', pr.head.sha);
+            core.setOutput('branch', pr.head.ref);
+
+  trigger-buildkite:
+    needs: parse-command
+    if: >-
+      needs.parse-command.outputs.has_write == 'true'
+      && needs.parse-command.outputs.test_type != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: React to comment
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket',
+            });
+
+      - name: Trigger Buildkite
+        uses: buildkite/trigger-pipeline-action@v2.4.1
+        with:
+          buildkite_api_access_token: ${{ secrets.BUILDKITE_API_TOKEN }}
+          pipeline: "${{ vars.BUILDKITE_ORG_SLUG }}/${{ vars.BUILDKITE_PIPELINE_SLUG }}"
+          branch: "${{ needs.parse-command.outputs.pr_branch }}"
+          commit: "${{ needs.parse-command.outputs.pr_sha }}"
+          message: "/test ${{ needs.parse-command.outputs.test_type }} on PR #${{ github.event.issue.number }}"
+          build_env_vars: '{"FULL_SUITE": "${{ needs.parse-command.outputs.full_suite }}", "TEST_TYPE": "${{ needs.parse-command.outputs.test_type }}"}'
+          send_pull_request: "true"
+          pull_request_id: "${{ github.event.issue.number }}"
+          pull_request_base_branch: "main"
