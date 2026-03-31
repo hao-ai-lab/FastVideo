@@ -79,8 +79,13 @@ def _assert_similarity(
     attention_backend_name: str,
 ) -> None:
     if not os.path.exists(reference_folder):
-        logger.error("Reference folder missing")
-        raise FileNotFoundError(f"Reference video folder does not exist: {reference_folder}")
+        logger.error("Reference folder missing: %s", reference_folder)
+        error_msg = (
+            f"Reference video folder does not exist: {reference_folder}\n"
+            f"To download reference videos, run:\n"
+            f"  python fastvideo/tests/ssim/reference_videos_cli.py download"
+        )
+        raise FileNotFoundError(error_msg)
 
     try:
         reference_video_path = _find_reference_video(reference_folder, prompt)

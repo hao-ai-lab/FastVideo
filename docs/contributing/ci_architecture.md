@@ -277,8 +277,8 @@ Triggers a specific Buildkite test or suite on the current PR branch.
 | `/test vmoba` | VMoBA inference tests | `inference_vmoba` |
 | `/test performance` | Performance benchmarks | `performance` |
 | `/test api` | API server integration tests | `api_server` |
-| `/test full` | Entire Full Suite | all (with `FULL_SUITE=true`) |
-| `/test fastcheck` | Entire Fastcheck suite | fastcheck (with `FULL_SUITE=false`) |
+| `/test full` | Entire Full Suite | all (with `TEST_SCOPE=full`) |
+| `/test fastcheck` | Entire Fastcheck suite | fastcheck (with `TEST_SCOPE=fastcheck`) |
 
 ---
 

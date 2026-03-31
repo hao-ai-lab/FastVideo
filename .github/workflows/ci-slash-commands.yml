@@ -54,6 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       test_type: ${{ steps.parse.outputs.test_type }}
+      test_scope: ${{ steps.parse.outputs.test_scope }}
       full_suite: ${{ steps.parse.outputs.full_suite }}
       pr_sha: ${{ steps.pr.outputs.sha }}
       pr_branch: ${{ steps.pr.outputs.branch }}
@@ -102,14 +103,23 @@ jobs:
           )
 
           if [ "$TEST_NAME" = "full" ]; then
-            echo "test_type=all" >> "$GITHUB_OUTPUT"
-            echo "full_suite=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "test_type=all"
+              echo "test_scope=full"
+              echo "full_suite=true"
+            } >> "$GITHUB_OUTPUT"
           elif [ "$TEST_NAME" = "fastcheck" ]; then
-            echo "test_type=fastcheck" >> "$GITHUB_OUTPUT"
-            echo "full_suite=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "test_type=fastcheck"
+              echo "test_scope=fastcheck"
+              echo "full_suite=false"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "test_type=${MAP[$TEST_NAME]}" >> "$GITHUB_OUTPUT"
-            echo "full_suite=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "test_type=${MAP[$TEST_NAME]}"
+              echo "test_scope=direct"
+              echo "full_suite=false"
+            } >> "$GITHUB_OUTPUT"
           fi
 
       - name: Get PR details
@@ -145,14 +155,41 @@ jobs:
             });
 
       - name: Trigger Buildkite
-        uses: buildkite/trigger-pipeline-action@v2.4.1
-        with:
-          buildkite_api_access_token: ${{ secrets.BUILDKITE_API_TOKEN }}
-          pipeline: "${{ vars.BUILDKITE_ORG_SLUG }}/${{ vars.BUILDKITE_PIPELINE_SLUG }}"
-          branch: "${{ needs.parse-command.outputs.pr_branch }}"
-          commit: "${{ needs.parse-command.outputs.pr_sha }}"
-          message: "/test ${{ needs.parse-command.outputs.test_type }} on PR #${{ github.event.issue.number }}"
-          build_env_vars: '{"FULL_SUITE": "${{ needs.parse-command.outputs.full_suite }}", "TEST_TYPE": "${{ needs.parse-command.outputs.test_type }}", "PR_NUMBER": "${{ github.event.issue.number }}"}'
-          send_pull_request: "true"
-          pull_request_id: "${{ github.event.issue.number }}"
-          pull_request_base_branch: "main"
+        env:
+          BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
+          PR_SHA: ${{ needs.parse-command.outputs.pr_sha }}
+          PR_BRANCH: ${{ needs.parse-command.outputs.pr_branch }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          TEST_SCOPE: ${{ needs.parse-command.outputs.test_scope }}
+          FULL_SUITE: ${{ needs.parse-command.outputs.full_suite }}
+          TEST_TYPE: ${{ needs.parse-command.outputs.test_type }}
+          BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
+          BK_PIPELINE: ${{ vars.BUILDKITE_PIPELINE_SLUG }}
+        run: |
+          curl -sS --fail-with-body -X POST \
+            "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds" \
+            -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-raw "$(jq -n \
+              --arg commit "$PR_SHA" \
+              --arg branch "$PR_BRANCH" \
+              --arg message "/test ${TEST_TYPE} on PR #${PR_NUMBER}" \
+              --argjson pr_id "$PR_NUMBER" \
+              --arg test_scope "$TEST_SCOPE" \
+              --arg full_suite "$FULL_SUITE" \
+              --arg test_type "$TEST_TYPE" \
+              --arg pr_number "$PR_NUMBER" \
+              '{
+                commit: $commit,
+                branch: $branch,
+                message: $message,
+                ignore_pipeline_branch_filters: true,
+                pull_request_id: $pr_id,
+                pull_request_base_branch: "main",
+                env: {
+                  TEST_SCOPE: $test_scope,
+                  FULL_SUITE: $full_suite,
+                  TEST_TYPE: $test_type,
+                  PR_NUMBER: $pr_number
+                }
+              }')"
