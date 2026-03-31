@@ -272,11 +272,10 @@ pull_request_rules:
       merge:
         method: squash
 
-  - name: auto-rebase when ready and Full Suite passed
+  - name: auto-rebase when ready
     conditions:
       - label=ready
       - "#approved-reviews-by>=1"
-      - check-success=full-suite-passed
       - -conflict
       - -closed
       - -draft
