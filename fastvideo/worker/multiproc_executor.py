@@ -630,14 +630,14 @@ class WorkerMultiprocProc:
 
                 except EOFError:
                     # Pipe closed without sending status - worker crashed
-                    worker_errors.append(f"Worker process crashed (pipe closed unexpectedly)")
+                    worker_errors.append("Worker process crashed (pipe closed unexpectedly)")
                     e.__suppress_context__ = True
                     raise e from None
 
                 finally:
                     # Close connection.
                     pipe.close()
-        
+
         # If any workers failed, raise exception with details
         if worker_errors:
             error_msg = "WorkerMultiprocProc initialization failed due to exceptions in background processes:\n"
@@ -751,9 +751,7 @@ class WorkerMultiprocProc:
             return
         # Remove initial handler if present (from worker_main) to avoid duplicates
         if self._initial_log_handler is not None:
-            logging.getLogger("fastvideo").removeHandler(
-                self._initial_log_handler
-            )
+            logging.getLogger("fastvideo").removeHandler(self._initial_log_handler)
             self._initial_log_handler = None
         self._log_queue_handler = _make_queue_log_handler(log_queue)
         logging.getLogger("fastvideo").addHandler(self._log_queue_handler)
@@ -761,9 +759,7 @@ class WorkerMultiprocProc:
     def _clear_log_queue(self) -> None:
         """Remove the log queue handler."""
         if self._log_queue_handler is not None:
-            logging.getLogger("fastvideo").removeHandler(
-                self._log_queue_handler
-            )
+            logging.getLogger("fastvideo").removeHandler(self._log_queue_handler)
             self._log_queue_handler = None
 
     @staticmethod

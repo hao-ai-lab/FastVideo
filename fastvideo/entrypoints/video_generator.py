@@ -70,9 +70,7 @@ class VideoGenerator:
             log_queue: Optional multiprocessing.Queue to forward worker logs to
         """
         self.fastvideo_args = fastvideo_args
-        self.executor = executor_class(
-            fastvideo_args, log_queue=log_queue
-        )
+        self.executor = executor_class(fastvideo_args, log_queue=log_queue)
 
     @classmethod
     def from_pretrained(cls, model_path: str, **kwargs) -> "VideoGenerator":
@@ -162,7 +160,7 @@ class VideoGenerator:
         log_queue = kwargs.pop("log_queue", None)
         if log_queue:
             self.executor.set_log_queue(log_queue)
-            
+
         try:
             return self._generate_video_impl(
                 prompt=prompt,
@@ -204,8 +202,7 @@ class VideoGenerator:
         if self.fastvideo_args.prompt_txt is not None or sampling_param.prompt_path is not None:
             prompt_txt_path = sampling_param.prompt_path or self.fastvideo_args.prompt_txt
             if not prompt_txt_path or not os.path.exists(prompt_txt_path):
-                raise FileNotFoundError(
-                    f"Prompt text file not found: {prompt_txt_path}")
+                raise FileNotFoundError(f"Prompt text file not found: {prompt_txt_path}")
 
             # Read prompts from file
             with open(prompt_txt_path, encoding='utf-8') as f:

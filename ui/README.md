@@ -26,7 +26,7 @@ You can then access the app at [http://localhost:3000](http://localhost:3000).
 
 ### Running API and Web Separately
 
-The UI is composed of two separate components: 
+The UI is composed of two separate components:
 
 - API Server
 - Web Server

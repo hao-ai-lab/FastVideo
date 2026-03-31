@@ -53,12 +53,10 @@ class JobLogBuffer:
     """Ring buffer for storing job log lines with progress tracking."""
 
     def __init__(self, maxlen: int = _MAX_LOG_LINES):
-        self._lines: collections.deque[str] = collections.deque(
-            maxlen=maxlen
-        )
+        self._lines: collections.deque[str] = collections.deque(maxlen=maxlen)
         self._lock = threading.Lock()
-        self.progress: float = 0.0        # 0 – 100
-        self.progress_msg: str = ""       # e.g. "20/50 steps"
+        self.progress: float = 0.0  # 0 – 100
+        self.progress_msg: str = ""  # e.g. "20/50 steps"
         self.phase: str = "initializing"  # human-readable phase
 
     def write(self, text: str):
@@ -110,11 +108,7 @@ class LogBufferHandler(logging.Handler):
     def __init__(self, buffer: JobLogBuffer):
         super().__init__()
         self.buffer = buffer
-        self.setFormatter(
-            logging.Formatter(
-                "%(levelname)s %(asctime)s [%(name)s] %(message)s"
-            )
-        )
+        self.setFormatter(logging.Formatter("%(levelname)s %(asctime)s [%(name)s] %(message)s"))
 
     def emit(self, record):
         try:
@@ -178,18 +172,10 @@ class Job:
     real_score_model_path: str = ""
     fake_score_model_path: str = ""
     # Internal
-    _thread: threading.Thread | None = field(
-        default=None, repr=False
-    )
-    _stop_event: threading.Event = field(
-        default_factory=threading.Event, repr=False
-    )
-    _log_buf: JobLogBuffer = field(
-        default_factory=JobLogBuffer, repr=False
-    )
-    log_file_handler: logging.FileHandler | None = field(
-        default=None, repr=False
-    )
+    _thread: threading.Thread | None = field(default=None, repr=False)
+    _stop_event: threading.Event = field(default_factory=threading.Event, repr=False)
+    _log_buf: JobLogBuffer = field(default_factory=JobLogBuffer, repr=False)
+    log_file_handler: logging.FileHandler | None = field(default=None, repr=False)
     _process: subprocess.Popen | None = field(default=None, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
@@ -277,7 +263,7 @@ class JobRunner:
         self._jobs: dict[str, Job] = {}
         self._jobs_lock = threading.Lock()
         self._load_jobs()
-        
+
         # Cache of loaded generators keyed by model config so that we only pay
         # the model-loading cost once per model configuration.
         self._generators: dict[tuple, Any] = {}
@@ -309,7 +295,9 @@ class JobRunner:
         except Exception as exc:
             logger.warning(
                 "Failed to load logs from %s for job %s: %s",
-                path, job.id, exc,
+                path,
+                job.id,
+                exc,
             )
 
     def _load_jobs(self) -> None:
@@ -390,14 +378,15 @@ class JobRunner:
     def _save_job(self, job: Job) -> None:
         """Persist job to database."""
         try:
-            self._db.update_job(job.id, {
-                "status": job.status.value,
-                "started_at": job.started_at,
-                "finished_at": job.finished_at,
-                "error": job.error,
-                "output_path": job.output_path,
-                "log_file_path": job.log_file_path,
-            })
+            self._db.update_job(
+                job.id, {
+                    "status": job.status.value,
+                    "started_at": job.started_at,
+                    "finished_at": job.finished_at,
+                    "error": job.error,
+                    "output_path": job.output_path,
+                    "log_file_path": job.log_file_path,
+                })
         except Exception as exc:
             logger.warning("Failed to persist job %s: %s", job.id, exc)
 
@@ -511,12 +500,12 @@ class JobRunner:
             job.prompt[:60],
         )
         return job
-    
+
     def get_job(self, job_id: str) -> Job | None:
         """Get a job by ID."""
         with self._jobs_lock:
             return self._jobs.get(job_id)
-    
+
     def list_jobs(self, job_type: str | None = None) -> list[Job]:
         """Return jobs, sorted by creation time (newest first).
         If job_type is set, filter to that type only."""
@@ -525,7 +514,7 @@ class JobRunner:
             if job_type:
                 jobs = [j for j in jobs if j.job_type == job_type]
             return sorted(jobs, key=lambda j: j.created_at, reverse=True)
-    
+
     def delete_job(self, job_id: str) -> bool:
         """Delete a job. Running jobs are stopped first.
 
@@ -545,7 +534,7 @@ class JobRunner:
             logger.warning("Failed to delete job %s from database: %s", job_id, exc)
         logger.info("Deleted job %s", job.id)
         return True
-    
+
     def start_job(self, job_id: str) -> Job:
         """Start (or restart) a pending / stopped / failed job.
         
@@ -559,9 +548,7 @@ class JobRunner:
         if job.status == JobStatus.RUNNING:
             raise ValueError("Job is already running")
         if job.status == JobStatus.COMPLETED:
-            raise ValueError(
-                "Job already completed. Delete and re-create to run again."
-            )
+            raise ValueError("Job already completed. Delete and re-create to run again.")
         # Reset state for re-run
         job.status = JobStatus.PENDING
         job.error = None
@@ -582,25 +569,18 @@ class JobRunner:
                 self._run_job(job)
             except BaseException as exc:
                 # This should never happen, but if it does, we catch it here
-                logger.critical(
-                    "Unhandled exception escaped from _run_job for job %s: %s",
-                    job.id, exc, exc_info=True
-                )
+                logger.critical("Unhandled exception escaped from _run_job for job %s: %s", job.id, exc, exc_info=True)
                 with contextlib.suppress(Exception):
                     job.status = JobStatus.FAILED
-                    job.error = (
-                        f"Unhandled exception: {type(exc).__name__}: {str(exc)}"
-                    )
+                    job.error = (f"Unhandled exception: {type(exc).__name__}: {str(exc)}")
                     job.finished_at = time.time()
-        
-        thread = threading.Thread(
-            target=safe_run_job, args=(job,), daemon=True
-        )
+
+        thread = threading.Thread(target=safe_run_job, args=(job, ), daemon=True)
         job._thread = thread
         thread.start()
         logger.info("Started job %s", job.id)
         return job
-    
+
     def stop_job(self, job_id: str) -> Job:
         """Request a running job to stop.
         
@@ -623,7 +603,7 @@ class JobRunner:
                 job._process.terminate()
         logger.info("Stop requested for job %s", job.id)
         return job
-    
+
     def get_job_logs(self, job_id: str, after: int = 0) -> dict[str, Any]:
         """Return log lines for a job.
         
@@ -650,7 +630,7 @@ class JobRunner:
             "progress_msg": job._log_buf.progress_msg,
             "phase": job._log_buf.phase,
         }
-    
+
     def _get_or_create_generator(
         self,
         model_id: str,
@@ -668,9 +648,17 @@ class JobRunner:
         log_queue: mp.Queue | None = None,
     ) -> Any:
         cache_key = (
-            model_id, workload_type, num_gpus, dit_cpu_offload,
-            text_encoder_cpu_offload, vae_cpu_offload, image_encoder_cpu_offload,
-            use_fsdp_inference, enable_torch_compile, vsa_sparsity, tp_size,
+            model_id,
+            workload_type,
+            num_gpus,
+            dit_cpu_offload,
+            text_encoder_cpu_offload,
+            vae_cpu_offload,
+            image_encoder_cpu_offload,
+            use_fsdp_inference,
+            enable_torch_compile,
+            vsa_sparsity,
+            tp_size,
             sp_size,
         )
 
@@ -686,10 +674,18 @@ class JobRunner:
             "Loading model %s (workload=%s, num_gpus=%d, offloads: "
             "dit=%s text_encoder=%s vae=%s image_encoder=%s, fsdp=%s, "
             "torch_compile=%s, vsa_sparsity=%.2f, tp=%d sp=%d) …",
-            model_id, workload_type, num_gpus, dit_cpu_offload,
+            model_id,
+            workload_type,
+            num_gpus,
+            dit_cpu_offload,
             text_encoder_cpu_offload,
-            vae_cpu_offload, image_encoder_cpu_offload, use_fsdp_inference,
-            enable_torch_compile, vsa_sparsity, tp_size, sp_size,
+            vae_cpu_offload,
+            image_encoder_cpu_offload,
+            use_fsdp_inference,
+            enable_torch_compile,
+            vsa_sparsity,
+            tp_size,
+            sp_size,
         )
 
         gen = VideoGenerator.from_pretrained(
@@ -706,11 +702,11 @@ class JobRunner:
             sp_size=sp_size,
             log_queue=log_queue,
         )
-        
+
         with self._generators_lock:
             if cache_key not in self._generators:
                 self._generators[cache_key] = gen
-            else: # Another thread may have created it while we were loading.
+            else:  # Another thread may have created it while we were loading.
                 gen.shutdown()
                 gen = self._generators[cache_key]
         return gen
@@ -731,10 +727,8 @@ class JobRunner:
 
         if not job.data_path or not os.path.isdir(job.data_path):
             job.status = JobStatus.FAILED
-            job.error = (
-                f"Data path '{job.data_path}' is required and must be an "
-                "existing directory. Preprocess your dataset first."
-            )
+            job.error = (f"Data path '{job.data_path}' is required and must be an "
+                         "existing directory. Preprocess your dataset first.")
             job.finished_at = time.time()
             self._save_job(job)
             return
@@ -748,9 +742,7 @@ class JobRunner:
             return
 
         module_path, _pipeline_workload, use_vsa, _is_lora = module_info
-        dmd_use_vsa = (
-            job.workload_type.startswith("dmd_") and getattr(job, "dmd_use_vsa", False)
-        )
+        dmd_use_vsa = (job.workload_type.startswith("dmd_") and getattr(job, "dmd_use_vsa", False))
         env = os.environ.copy()
         env.update(get_training_env(use_vsa or dmd_use_vsa))
 
@@ -770,35 +762,27 @@ class JobRunner:
             "lora_rank": job.lora_rank,
             "ltx2_first_frame_conditioning_p": job.ltx2_first_frame_conditioning_p,
         }
-        if job.workload_type.startswith("dmd_") or job.workload_type.startswith(
-            "self_forcing_"
-        ):
+        if job.workload_type.startswith("dmd_") or job.workload_type.startswith("self_forcing_"):
             job_dict["dmd_use_vsa"] = getattr(job, "dmd_use_vsa", False)
             job_dict["dmd_vsa_sparsity"] = getattr(job, "dmd_vsa_sparsity", 0.8)
-            job_dict["dmd_denoising_steps"] = getattr(
-                job, "dmd_denoising_steps", "1000,757,522"
-            )
+            job_dict["dmd_denoising_steps"] = getattr(job, "dmd_denoising_steps", "1000,757,522")
             job_dict["min_timestep_ratio"] = getattr(job, "min_timestep_ratio", 0.02)
             job_dict["max_timestep_ratio"] = getattr(job, "max_timestep_ratio", 0.98)
-            job_dict["real_score_guidance_scale"] = getattr(
-                job, "real_score_guidance_scale", 3.5
-            )
-            job_dict["generator_update_interval"] = getattr(
-                job, "generator_update_interval", 5
-            )
-            job_dict["real_score_model_path"] = (
-                getattr(job, "real_score_model_path", "") or job.model_id
-            )
-            job_dict["fake_score_model_path"] = (
-                getattr(job, "fake_score_model_path", "") or job.model_id
-            )
+            job_dict["real_score_guidance_scale"] = getattr(job, "real_score_guidance_scale", 3.5)
+            job_dict["generator_update_interval"] = getattr(job, "generator_update_interval", 5)
+            job_dict["real_score_model_path"] = (getattr(job, "real_score_model_path", "") or job.model_id)
+            job_dict["fake_score_model_path"] = (getattr(job, "fake_score_model_path", "") or job.model_id)
         train_args = build_training_args(job_dict, job_output_dir)
 
         repo_root = Path(__file__).resolve().parent.parent
         torchrun_cmd = [
-            sys.executable, "-m", "torch.distributed.run",
-            "--nproc_per_node", str(job.num_gpus),
-            "--nnodes", "1",
+            sys.executable,
+            "-m",
+            "torch.distributed.run",
+            "--nproc_per_node",
+            str(job.num_gpus),
+            "--nnodes",
+            "1",
             str(repo_root / module_path),
         ] + train_args
         buf.write(f"Starting training: {' '.join(torchrun_cmd[:12])}...")
@@ -872,14 +856,8 @@ class JobRunner:
         job.log_file_path = os.path.join(self.log_dir, f"{job.id}.log")
 
         # Add file handler to persist logs
-        file_handler = logging.FileHandler(
-            job.log_file_path, mode='w', encoding='utf-8'
-        )
-        file_handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-            )
-        )
+        file_handler = logging.FileHandler(job.log_file_path, mode='w', encoding='utf-8')
+        file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
         job.log_file_handler = file_handler
 
         # Hook logger output into job log buffer (main process logs)
@@ -892,9 +870,10 @@ class JobRunner:
         # Use Manager().Queue() so it can be shared with spawned workers (spawn
         # does not inherit memory; mp.Queue only works through inheritance).
         log_queue = self._mp_manager.Queue()
-        queue_listener = logging.handlers.QueueListener(
-            log_queue, buffer_handler, file_handler, respect_handler_level=True
-        )
+        queue_listener = logging.handlers.QueueListener(log_queue,
+                                                        buffer_handler,
+                                                        file_handler,
+                                                        respect_handler_level=True)
         queue_listener.start()
 
         # Set output directory, create if it doesn't exist
@@ -906,9 +885,7 @@ class JobRunner:
             job.started_at = time.time()
             self._save_job(job)
             buf.phase = "starting"
-            started = time.strftime(
-                "%Y-%m-%d %H:%M:%S", time.localtime(job.started_at)
-            )
+            started = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(job.started_at))
             logger.info("Job %s started at %s", job.id, started)
             logger.info("Model: %s", job.model_id)
             logger.info("Prompt: %s", job.prompt)
@@ -936,17 +913,11 @@ class JobRunner:
                         job.workload_type,
                         job.num_gpus,
                         dit_cpu_offload=job.dit_cpu_offload,
-                        text_encoder_cpu_offload=(
-                            job.text_encoder_cpu_offload
-                        ),
+                        text_encoder_cpu_offload=(job.text_encoder_cpu_offload),
                         vae_cpu_offload=job.vae_cpu_offload,
-                        image_encoder_cpu_offload=(
-                            job.image_encoder_cpu_offload
-                        ),
+                        image_encoder_cpu_offload=(job.image_encoder_cpu_offload),
                         use_fsdp_inference=job.use_fsdp_inference,
-                        enable_torch_compile=(
-                            job.enable_torch_compile
-                        ),
+                        enable_torch_compile=(job.enable_torch_compile),
                         vsa_sparsity=job.vsa_sparsity,
                         tp_size=job.tp_size,
                         sp_size=job.sp_size,
@@ -957,7 +928,8 @@ class JobRunner:
                     _gen_error.append(exc)
 
             loader = threading.Thread(
-                target=_load_generator, daemon=True,
+                target=_load_generator,
+                daemon=True,
             )
             loader.start()
 
@@ -979,9 +951,7 @@ class JobRunner:
 
             generator = _gen_result[0]
             buf.phase = "generating"
-            logger.info(
-                "Starting generation for job %s (model=%s)", job.id, job.model_id
-            )
+            logger.info("Starting generation for job %s (model=%s)", job.id, job.model_id)
 
             gen_kwargs: dict[str, Any] = {
                 "prompt": job.prompt,
@@ -1001,7 +971,7 @@ class JobRunner:
             if job.image_path:
                 gen_kwargs["image_path"] = job.image_path
             generator.generate_video(**gen_kwargs)
-        
+
             buf.phase = "saving"
             logger.info("Generation completed, searching for output file...")
 

@@ -10,9 +10,8 @@ import os
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
 
 logger = logging.getLogger("fastvideo.ui.preprocess_runner")
 
@@ -28,22 +27,38 @@ def build_preprocess_args(
 ) -> list[str]:
     """Build CLI args for v1_preprocessing_new."""
     return [
-        "--model-path", model_path,
-        "--mode", "preprocess",
-        "--workload-type", workload_type,
-        "--preprocess.video_loader_type", "torchvision",
-        "--preprocess.dataset_type", dataset_type,
-        "--preprocess.dataset_path", raw_path,
-        "--preprocess.dataset_output_dir", output_dir,
-        "--preprocess.preprocess_video_batch_size", "2",
-        "--preprocess.dataloader_num_workers", "0",
-        "--preprocess.max_height", "480",
-        "--preprocess.max_width", "832",
-        "--preprocess.num_frames", "77",
-        "--preprocess.train_fps", "16",
-        "--preprocess.samples_per_file", "8",
-        "--preprocess.flush_frequency", "8",
-        "--preprocess.video_length_tolerance_range", "5",
+        "--model-path",
+        model_path,
+        "--mode",
+        "preprocess",
+        "--workload-type",
+        workload_type,
+        "--preprocess.video_loader_type",
+        "torchvision",
+        "--preprocess.dataset_type",
+        dataset_type,
+        "--preprocess.dataset_path",
+        raw_path,
+        "--preprocess.dataset_output_dir",
+        output_dir,
+        "--preprocess.preprocess_video_batch_size",
+        "2",
+        "--preprocess.dataloader_num_workers",
+        "0",
+        "--preprocess.max_height",
+        "480",
+        "--preprocess.max_width",
+        "832",
+        "--preprocess.num_frames",
+        "77",
+        "--preprocess.train_fps",
+        "16",
+        "--preprocess.samples_per_file",
+        "8",
+        "--preprocess.flush_frequency",
+        "8",
+        "--preprocess.video_length_tolerance_range",
+        "5",
     ]
 
 
@@ -74,10 +89,15 @@ def run_preprocess(
     )
 
     cmd = [
-        sys.executable, "-m", "torch.distributed.run",
-        "--nproc_per_node", str(num_gpus),
-        "--nnodes", "1",
-        "-m", preprocess_module,
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
+        "--nproc_per_node",
+        str(num_gpus),
+        "--nnodes",
+        "1",
+        "-m",
+        preprocess_module,
     ] + args
 
     env = os.environ.copy()

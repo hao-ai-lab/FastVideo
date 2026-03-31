@@ -57,9 +57,7 @@ def get_training_env(use_vsa: bool) -> dict[str, str]:
     return env
 
 
-def build_training_args(
-    job: dict[str, Any], output_dir: str
-) -> list[str]:
+def build_training_args(job: dict[str, Any], output_dir: str) -> list[str]:
     """Build CLI arguments for the training subprocess."""
     model_id = job.get("model_id", "")
     data_path = job.get("data_path", "")
@@ -82,46 +80,80 @@ def build_training_args(
     _module_path, pipeline_workload, use_vsa, is_lora = module_info
 
     args = [
-        "--model-path", model_id,
-        "--pretrained-model-name-or-path", model_id,
-        "--data-path", data_path,
-        "--output-dir", output_dir,
-        "--inference-mode", "False",
-        "--max-train-steps", str(max_train_steps),
-        "--train-batch-size", str(train_batch_size),
-        "--train-sp-batch-size", str(train_batch_size),
-        "--learning-rate", str(learning_rate),
-        "--num-gpus", str(num_gpus),
-        "--num-latent-t", str(num_latent_t),
-        "--num-height", str(num_height),
-        "--num-width", str(num_width),
-        "--num-frames", str(num_frames),
-        "--mixed-precision", "bf16",
-        "--gradient-accumulation-steps", "8",
-        "--enable-gradient-checkpointing-type", "full",
-        "--weight-decay", "1e-4",
-        "--max-grad-norm", "1.0",
-        "--checkpoints-total-limit", "3",
-        "--training-cfg-rate", "0.1",
-        "--multi-phased-distill-schedule", "4000-1",
+        "--model-path",
+        model_id,
+        "--pretrained-model-name-or-path",
+        model_id,
+        "--data-path",
+        data_path,
+        "--output-dir",
+        output_dir,
+        "--inference-mode",
+        "False",
+        "--max-train-steps",
+        str(max_train_steps),
+        "--train-batch-size",
+        str(train_batch_size),
+        "--train-sp-batch-size",
+        str(train_batch_size),
+        "--learning-rate",
+        str(learning_rate),
+        "--num-gpus",
+        str(num_gpus),
+        "--num-latent-t",
+        str(num_latent_t),
+        "--num-height",
+        str(num_height),
+        "--num-width",
+        str(num_width),
+        "--num-frames",
+        str(num_frames),
+        "--mixed-precision",
+        "bf16",
+        "--gradient-accumulation-steps",
+        "8",
+        "--enable-gradient-checkpointing-type",
+        "full",
+        "--weight-decay",
+        "1e-4",
+        "--max-grad-norm",
+        "1.0",
+        "--checkpoints-total-limit",
+        "3",
+        "--training-cfg-rate",
+        "0.1",
+        "--multi-phased-distill-schedule",
+        "4000-1",
         "--not-apply-cfg-solver",
-        "--dit-precision", "fp32",
-        "--num-euler-timesteps", "50",
-        "--ema-start-step", "0",
-        "--weight-only-checkpointing-steps", "500",
-        "--training-state-checkpointing-steps", "500",
-        "--tracker-project-name", "fastvideo_ui_training",
-        "--workload-type", pipeline_workload,
-        "--dataloader-num-workers", "1",
+        "--dit-precision",
+        "fp32",
+        "--num-euler-timesteps",
+        "50",
+        "--ema-start-step",
+        "0",
+        "--weight-only-checkpointing-steps",
+        "500",
+        "--training-state-checkpointing-steps",
+        "500",
+        "--tracker-project-name",
+        "fastvideo_ui_training",
+        "--workload-type",
+        pipeline_workload,
+        "--dataloader-num-workers",
+        "1",
     ]
 
     if validation_dataset_file:
         args.extend([
             "--log-validation",
-            "--validation-dataset-file", validation_dataset_file,
-            "--validation-steps", "200",
-            "--validation-sampling-steps", "50",
-            "--validation-guidance-scale", "3.0",
+            "--validation-dataset-file",
+            validation_dataset_file,
+            "--validation-steps",
+            "200",
+            "--validation-sampling-steps",
+            "50",
+            "--validation-guidance-scale",
+            "3.0",
         ])
 
     if is_lora:
@@ -132,13 +164,18 @@ def build_training_args(
         real_score = job.get("real_score_model_path", "") or model_id
         fake_score = job.get("fake_score_model_path", "") or model_id
         args.extend([
-            "--real-score-model-path", real_score,
-            "--fake-score-model-path", fake_score,
-            "--training-cfg-rate", "0.0",
+            "--real-score-model-path",
+            real_score,
+            "--fake-score-model-path",
+            fake_score,
+            "--training-cfg-rate",
+            "0.0",
             "--dmd-denoising-steps",
             job.get("dmd_denoising_steps", "1000,757,522") or "1000,757,522",
-            "--min-timestep-ratio", str(job.get("min_timestep_ratio", 0.02)),
-            "--max-timestep-ratio", str(job.get("max_timestep_ratio", 0.98)),
+            "--min-timestep-ratio",
+            str(job.get("min_timestep_ratio", 0.02)),
+            "--max-timestep-ratio",
+            str(job.get("max_timestep_ratio", 0.98)),
             "--generator-update-interval",
             str(job.get("generator_update_interval", 5)),
             "--real-score-guidance-scale",
@@ -154,7 +191,8 @@ def build_training_args(
     if workload_type == "ode_init":
         args.extend([
             "--warp-denoising-step",
-            "--multi-phased-distill-schedule", "4000-1",
+            "--multi-phased-distill-schedule",
+            "4000-1",
         ])
 
     if use_vsa:
@@ -168,10 +206,14 @@ def build_training_args(
 
     # HSDP / parallelism
     args.extend([
-        "--sp-size", str(min(num_gpus, 8)),
-        "--tp-size", "1",
-        "--hsdp-replicate-dim", "1",
-        "--hsdp-shard-dim", str(num_gpus),
+        "--sp-size",
+        str(min(num_gpus, 8)),
+        "--tp-size",
+        "1",
+        "--hsdp-replicate-dim",
+        "1",
+        "--hsdp-shard-dim",
+        str(num_gpus),
     ])
 
     return args

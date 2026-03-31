@@ -62,56 +62,28 @@ def _get_table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {row[1] for row in cur.fetchall()}
 
 
-def _add_column_if_missing(
-    conn: sqlite3.Connection, table: str, col: str, sql_type: str, default: str
-) -> None:
+def _add_column_if_missing(conn: sqlite3.Connection, table: str, col: str, sql_type: str, default: str) -> None:
     """Add a column to the table if it does not exist."""
     cols = _get_table_columns(conn, table)
     if col not in cols:
-        conn.execute(
-            f"ALTER TABLE {table} ADD COLUMN {col} {sql_type} DEFAULT {default}"
-        )
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {sql_type} DEFAULT {default}")
 
 
 def _migrate_db(conn: sqlite3.Connection) -> None:
     """Add new columns to existing tables for schema migrations."""
     # Jobs table
-    _add_column_if_missing(
-        conn, "jobs", "vae_cpu_offload", "INTEGER", "0"
-    )
-    _add_column_if_missing(
-        conn, "jobs", "image_encoder_cpu_offload", "INTEGER", "0"
-    )
-    _add_column_if_missing(
-        conn, "jobs", "enable_torch_compile", "INTEGER", "0"
-    )
-    _add_column_if_missing(
-        conn, "jobs", "vsa_sparsity", "REAL", "0.0"
-    )
-    _add_column_if_missing(
-        conn, "jobs", "tp_size", "INTEGER", "-1"
-    )
-    _add_column_if_missing(
-        conn, "jobs", "sp_size", "INTEGER", "-1"
-    )
-    _add_column_if_missing(
-        conn, "jobs", "negative_prompt", "TEXT", "''"
-    )
-    _add_column_if_missing(
-        conn, "jobs", "guidance_rescale", "REAL", "0.0"
-    )
-    _add_column_if_missing(
-        conn, "jobs", "fps", "INTEGER", "24"
-    )
-    _add_column_if_missing(
-        conn, "jobs", "workload_type", "TEXT", "'t2v'"
-    )
-    _add_column_if_missing(
-        conn, "jobs", "image_path", "TEXT", "''"
-    )
-    _add_column_if_missing(
-        conn, "jobs", "job_type", "TEXT", "'inference'"
-    )
+    _add_column_if_missing(conn, "jobs", "vae_cpu_offload", "INTEGER", "0")
+    _add_column_if_missing(conn, "jobs", "image_encoder_cpu_offload", "INTEGER", "0")
+    _add_column_if_missing(conn, "jobs", "enable_torch_compile", "INTEGER", "0")
+    _add_column_if_missing(conn, "jobs", "vsa_sparsity", "REAL", "0.0")
+    _add_column_if_missing(conn, "jobs", "tp_size", "INTEGER", "-1")
+    _add_column_if_missing(conn, "jobs", "sp_size", "INTEGER", "-1")
+    _add_column_if_missing(conn, "jobs", "negative_prompt", "TEXT", "''")
+    _add_column_if_missing(conn, "jobs", "guidance_rescale", "REAL", "0.0")
+    _add_column_if_missing(conn, "jobs", "fps", "INTEGER", "24")
+    _add_column_if_missing(conn, "jobs", "workload_type", "TEXT", "'t2v'")
+    _add_column_if_missing(conn, "jobs", "image_path", "TEXT", "''")
+    _add_column_if_missing(conn, "jobs", "job_type", "TEXT", "'inference'")
     _add_column_if_missing(conn, "jobs", "data_path", "TEXT", "''")
     _add_column_if_missing(conn, "jobs", "max_train_steps", "INTEGER", "1000")
     _add_column_if_missing(conn, "jobs", "train_batch_size", "INTEGER", "1")
@@ -119,81 +91,44 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "jobs", "num_latent_t", "INTEGER", "20")
     _add_column_if_missing(conn, "jobs", "validation_dataset_file", "TEXT", "''")
     _add_column_if_missing(conn, "jobs", "lora_rank", "INTEGER", "32")
-    _add_column_if_missing(
-        conn, "jobs", "ltx2_first_frame_conditioning_p", "REAL", "NULL"
-    )
+    _add_column_if_missing(conn, "jobs", "ltx2_first_frame_conditioning_p", "REAL", "NULL")
     _add_column_if_missing(conn, "jobs", "dmd_use_vsa", "INTEGER", "0")
     _add_column_if_missing(conn, "jobs", "dmd_vsa_sparsity", "REAL", "0.8")
-    _add_column_if_missing(
-        conn, "jobs", "dmd_denoising_steps", "TEXT", "'1000,757,522'"
-    )
+    _add_column_if_missing(conn, "jobs", "dmd_denoising_steps", "TEXT", "'1000,757,522'")
     _add_column_if_missing(conn, "jobs", "min_timestep_ratio", "REAL", "0.02")
     _add_column_if_missing(conn, "jobs", "max_timestep_ratio", "REAL", "0.98")
-    _add_column_if_missing(
-        conn, "jobs", "real_score_guidance_scale", "REAL", "3.5"
-    )
-    _add_column_if_missing(
-        conn, "jobs", "generator_update_interval", "INTEGER", "5"
-    )
+    _add_column_if_missing(conn, "jobs", "real_score_guidance_scale", "REAL", "3.5")
+    _add_column_if_missing(conn, "jobs", "generator_update_interval", "INTEGER", "5")
     _add_column_if_missing(conn, "jobs", "real_score_model_path", "TEXT", "''")
     _add_column_if_missing(conn, "jobs", "fake_score_model_path", "TEXT", "''")
     # Settings table
-    _add_column_if_missing(
-        conn, "settings", "vae_cpu_offload", "INTEGER", "0"
-    )
-    _add_column_if_missing(
-        conn, "settings", "image_encoder_cpu_offload", "INTEGER", "0"
-    )
-    _add_column_if_missing(
-        conn, "settings", "enable_torch_compile", "INTEGER", "0"
-    )
-    _add_column_if_missing(
-        conn, "settings", "vsa_sparsity", "REAL", "0.0"
-    )
-    _add_column_if_missing(
-        conn, "settings", "tp_size", "INTEGER", "-1"
-    )
-    _add_column_if_missing(
-        conn, "settings", "sp_size", "INTEGER", "-1"
-    )
-    _add_column_if_missing(
-        conn, "settings", "guidance_rescale", "REAL", "0.0"
-    )
-    _add_column_if_missing(
-        conn, "settings", "fps", "INTEGER", "24"
-    )
-    _add_column_if_missing(
-        conn, "settings", "default_model_id_t2v", "TEXT", "''"
-    )
-    _add_column_if_missing(
-        conn, "settings", "default_model_id_i2v", "TEXT", "''"
-    )
-    _add_column_if_missing(
-        conn, "settings", "default_model_id_t2i", "TEXT", "''"
-    )
-    _add_column_if_missing(
-        conn, "settings", "auto_start_job", "INTEGER", "0"
-    )
-    _add_column_if_missing(
-        conn, "settings", "dataset_upload_path", "TEXT", "''"
-    )
+    _add_column_if_missing(conn, "settings", "vae_cpu_offload", "INTEGER", "0")
+    _add_column_if_missing(conn, "settings", "image_encoder_cpu_offload", "INTEGER", "0")
+    _add_column_if_missing(conn, "settings", "enable_torch_compile", "INTEGER", "0")
+    _add_column_if_missing(conn, "settings", "vsa_sparsity", "REAL", "0.0")
+    _add_column_if_missing(conn, "settings", "tp_size", "INTEGER", "-1")
+    _add_column_if_missing(conn, "settings", "sp_size", "INTEGER", "-1")
+    _add_column_if_missing(conn, "settings", "guidance_rescale", "REAL", "0.0")
+    _add_column_if_missing(conn, "settings", "fps", "INTEGER", "24")
+    _add_column_if_missing(conn, "settings", "default_model_id_t2v", "TEXT", "''")
+    _add_column_if_missing(conn, "settings", "default_model_id_i2v", "TEXT", "''")
+    _add_column_if_missing(conn, "settings", "default_model_id_t2i", "TEXT", "''")
+    _add_column_if_missing(conn, "settings", "auto_start_job", "INTEGER", "0")
+    _add_column_if_missing(conn, "settings", "dataset_upload_path", "TEXT", "''")
     # Drop removed columns from datasets (SQLite 3.35+)
-    for col in ("workload_type", "output_path", "model_path", "raw_path",
-                "dataset_type", "num_gpus", "media_type", "status", "error",
-                "log_file_path"):
+    for col in ("workload_type", "output_path", "model_path", "raw_path", "dataset_type", "num_gpus", "media_type",
+                "status", "error", "log_file_path"):
         if col in _get_table_columns(conn, "datasets"):
             with contextlib.suppress(sqlite3.OperationalError):
                 # SQLite < 3.35 or column already dropped
                 conn.execute(f"ALTER TABLE datasets DROP COLUMN {col}")
     # Migrate legacy default_model_id to default_model_id_t2v
     if "default_model_id_t2v" in _get_table_columns(conn, "settings"):
-        conn.execute(
-            """
+        conn.execute("""
             UPDATE settings SET default_model_id_t2v = default_model_id
             WHERE id = 1 AND default_model_id != ''
             AND (default_model_id_t2v IS NULL OR default_model_id_t2v = '')
-            """
-        )
+            """)
 
 
 def init_db(db_path: Path) -> None:
@@ -381,8 +316,12 @@ class Database:
         if not updates:
             return
         allowed = {
-            "status", "started_at", "finished_at", "error",
-            "output_path", "log_file_path",
+            "status",
+            "started_at",
+            "finished_at",
+            "error",
+            "output_path",
+            "log_file_path",
         }
         cols = []
         vals = []
@@ -399,28 +338,24 @@ class Database:
 
     def delete_job(self, job_id: str) -> bool:
         """Delete a job. Returns True if a row was deleted."""
-        cur = self._execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+        cur = self._execute("DELETE FROM jobs WHERE id = ?", (job_id, ))
         self._commit()
         return cur.rowcount > 0
 
-    def get_all_jobs(
-        self, job_type: str | None = None
-    ) -> list[dict[str, Any]]:
+    def get_all_jobs(self, job_type: str | None = None) -> list[dict[str, Any]]:
         """Return all jobs, newest first. Optionally filter by job_type."""
         if job_type:
             cur = self._execute(
                 "SELECT * FROM jobs WHERE job_type = ? ORDER BY created_at DESC",
-                (job_type,),
+                (job_type, ),
             )
         else:
-            cur = self._execute(
-                "SELECT * FROM jobs ORDER BY created_at DESC"
-            )
+            cur = self._execute("SELECT * FROM jobs ORDER BY created_at DESC")
         return [_row_to_job(row) for row in cur.fetchall()]
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         """Get a single job by ID."""
-        cur = self._execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        cur = self._execute("SELECT * FROM jobs WHERE id = ?", (job_id, ))
         row = cur.fetchone()
         return _row_to_job(row) if row else None
 
@@ -441,19 +376,15 @@ class Database:
         )
         self._commit()
 
-    def get_dataset_captions(
-        self, dataset_id: str
-    ) -> dict[str, str]:
+    def get_dataset_captions(self, dataset_id: str) -> dict[str, str]:
         """Return caption map: file_name -> caption."""
         cur = self._execute(
             "SELECT file_name, caption FROM dataset_captions WHERE dataset_id = ?",
-            (dataset_id,),
+            (dataset_id, ),
         )
         return {row["file_name"]: row["caption"] or "" for row in cur.fetchall()}
 
-    def upsert_dataset_caption(
-        self, dataset_id: str, file_name: str, caption: str
-    ) -> None:
+    def upsert_dataset_caption(self, dataset_id: str, file_name: str, caption: str) -> None:
         """Insert or update a caption for a file in a dataset."""
         self._execute(
             """
@@ -465,16 +396,12 @@ class Database:
         )
         self._commit()
 
-    def upsert_dataset_captions(
-        self, dataset_id: str, captions: dict[str, str]
-    ) -> None:
+    def upsert_dataset_captions(self, dataset_id: str, captions: dict[str, str]) -> None:
         """Insert or update multiple captions for a dataset."""
         for file_name, caption in captions.items():
             self.upsert_dataset_caption(dataset_id, file_name, caption)
 
-    def update_dataset(
-        self, dataset_id: str, updates: dict[str, Any]
-    ) -> None:
+    def update_dataset(self, dataset_id: str, updates: dict[str, Any]) -> None:
         """Update dataset fields. Only provided keys are updated."""
         if not updates:
             return
@@ -494,22 +421,18 @@ class Database:
 
     def delete_dataset(self, dataset_id: str) -> bool:
         """Delete a dataset. Returns True if a row was deleted."""
-        cur = self._execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
+        cur = self._execute("DELETE FROM datasets WHERE id = ?", (dataset_id, ))
         self._commit()
         return cur.rowcount > 0
 
     def get_all_datasets(self) -> list[dict[str, Any]]:
         """Return all datasets, newest first."""
-        cur = self._execute(
-            "SELECT * FROM datasets ORDER BY created_at DESC"
-        )
+        cur = self._execute("SELECT * FROM datasets ORDER BY created_at DESC")
         return [_row_to_dataset(row) for row in cur.fetchall()]
 
     def get_dataset(self, dataset_id: str) -> dict[str, Any] | None:
         """Get a single dataset by ID."""
-        cur = self._execute(
-            "SELECT * FROM datasets WHERE id = ?", (dataset_id,)
-        )
+        cur = self._execute("SELECT * FROM datasets WHERE id = ?", (dataset_id, ))
         row = cur.fetchone()
         return _row_to_dataset(row) if row else None
 
@@ -521,21 +444,10 @@ class Database:
         row = cur.fetchone()
         if not row:
             return _default_settings_dict()
-        t2v = (
-            (row["default_model_id_t2v"] or row["default_model_id"] or "")
-            if "default_model_id_t2v" in row
-            else (row["default_model_id"] or "")
-        )
-        i2v = (
-            (row["default_model_id_i2v"] or "")
-            if "default_model_id_i2v" in row
-            else ""
-        )
-        t2i = (
-            (row["default_model_id_t2i"] or "")
-            if "default_model_id_t2i" in row
-            else ""
-        )
+        t2v = ((row["default_model_id_t2v"] or row["default_model_id"] or "") if "default_model_id_t2v" in row else
+               (row["default_model_id"] or ""))
+        i2v = ((row["default_model_id_i2v"] or "") if "default_model_id_i2v" in row else "")
+        t2i = ((row["default_model_id_t2i"] or "") if "default_model_id_t2i" in row else "")
         result = {
             "defaultModelId": row["default_model_id"] or "",
             "defaultModelIdT2v": t2v,
@@ -668,21 +580,14 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "height": row["height"],
         "width": row["width"],
         "guidance_scale": row["guidance_scale"],
-        "guidance_rescale": (
-            float(row["guidance_rescale"])
-            if "guidance_rescale" in row
-            else 0.0
-        ),
+        "guidance_rescale": (float(row["guidance_rescale"]) if "guidance_rescale" in row else 0.0),
         "fps": int(row["fps"]) if "fps" in row else 24,
         "seed": row["seed"],
         "num_gpus": row["num_gpus"],
         "dit_cpu_offload": bool(row["dit_cpu_offload"]),
         "text_encoder_cpu_offload": bool(row["text_encoder_cpu_offload"]),
         "use_fsdp_inference": bool(row["use_fsdp_inference"]),
-        "negative_prompt": (
-            (row["negative_prompt"] or "") if "negative_prompt" in row
-            else ""
-        ),
+        "negative_prompt": ((row["negative_prompt"] or "") if "negative_prompt" in row else ""),
         "progress": 0.0,
         "progress_msg": "",
         "phase": "initializing",
@@ -690,26 +595,22 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     for col in ("vae_cpu_offload", "image_encoder_cpu_offload", "enable_torch_compile"):
         if col in row:
             result[col] = bool(row[col])
-    for col in ("vsa_sparsity",):
+    for col in ("vsa_sparsity", ):
         if col in row:
             result[col] = float(row[col])
     for col in ("tp_size", "sp_size"):
         if col in row:
             result[col] = int(row[col])
     for col in (
-        "data_path",
-        "validation_dataset_file",
+            "data_path",
+            "validation_dataset_file",
     ):
         if col in row:
             result[col] = (row[col] or "") or ""
     for col in int_defaults:
         if col in row:
             int_val_raw: Any = row[col]
-            result[col] = (
-                int(int_val_raw)
-                if int_val_raw is not None
-                else int_defaults[col]
-            )
+            result[col] = (int(int_val_raw) if int_val_raw is not None else int_defaults[col])
     if "learning_rate" in row:
         result["learning_rate"] = float(row["learning_rate"] or 5e-5)
     if "dmd_use_vsa" in row:
@@ -717,11 +618,7 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     for col in float_defaults:
         if col in row:
             float_val_raw: Any = row[col]
-            result[col] = (
-                float(float_val_raw)
-                if float_val_raw is not None
-                else float_defaults[col]
-            )
+            result[col] = (float(float_val_raw) if float_val_raw is not None else float_defaults[col])
     for col in ("dmd_denoising_steps", "real_score_model_path", "fake_score_model_path"):
         if col in row:
             result[col] = (row[col] or "") or ""

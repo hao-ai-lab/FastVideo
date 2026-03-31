@@ -30,13 +30,10 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from fastvideo.registry import (get_registered_model_paths,
-                                get_registered_models_with_workloads)
+from fastvideo.registry import (get_registered_model_paths, get_registered_models_with_workloads)
 from ui.database import Database, _get_db_path
 from ui.job_runner import JobRunner, JobStatus
-from ui.models import (CreateDatasetRequest, CreateJobRequest,
-                       SettingsUpdate, UpdateCaptionRequest)
-
+from ui.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,17 +41,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger("fastvideo.ui.api")
 
-DEFAULT_OUTPUT_DIR = os.path.join(
-    os.path.dirname(__file__), "..", "outputs", "ui_jobs"
-)
+DEFAULT_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs", "ui_jobs")
+
 
 def _get_model_label(model_path: str) -> str:
     """Derive a readable label from a HF model path."""
     return model_path.split("/")[-1].replace("-", " ").replace("_", " ")
 
-_available_models: list[dict[str, str]] = [
-    {"id": path, "label": _get_model_label(path)} for path in get_registered_model_paths()
-]
+
+_available_models: list[dict[str, str]] = [{
+    "id": path,
+    "label": _get_model_label(path)
+} for path in get_registered_model_paths()]
 
 job_runner: JobRunner
 database: Database | None = None
@@ -120,9 +118,7 @@ ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 
 @app.post("/api/upload-image")
-async def upload_image(
-    file: Annotated[UploadFile, File()],
-) -> dict[str, str]:
+async def upload_image(file: Annotated[UploadFile, File()], ) -> dict[str, str]:
     """Upload an image file for I2V jobs. Returns the absolute path."""
     global upload_dir  # noqa: PLW0603
     if not upload_dir:
@@ -134,10 +130,8 @@ async def upload_image(
     if ext not in ALLOWED_IMAGE_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"Invalid file type. Allowed: "
-                f"{', '.join(ALLOWED_IMAGE_EXTENSIONS)}"
-            ),
+            detail=(f"Invalid file type. Allowed: "
+                    f"{', '.join(ALLOWED_IMAGE_EXTENSIONS)}"),
         )
     os.makedirs(upload_dir, exist_ok=True)
     unique_name = f"{uuid.uuid4().hex}{ext}"
@@ -159,16 +153,11 @@ ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".avi", ".mov"}
 
 def _filter_video_files(files: list[UploadFile]) -> list[UploadFile]:
     """Filter uploaded files to only include videos."""
-    return [
-        f for f in files
-        if Path(f.filename or "").suffix.lower() in ALLOWED_VIDEO_EXTENSIONS
-    ]
+    return [f for f in files if Path(f.filename or "").suffix.lower() in ALLOWED_VIDEO_EXTENSIONS]
 
 
 @app.post("/api/upload-raw-dataset")
-async def upload_raw_dataset(
-    files: Annotated[list[UploadFile], File()],
-) -> dict[str, Any]:
+async def upload_raw_dataset(files: Annotated[list[UploadFile], File()], ) -> dict[str, Any]:
     """
     Upload raw video dataset. Returns path and file list.
     Filters files to only include videos. For folder upload, only adds videos.
@@ -179,19 +168,9 @@ async def upload_raw_dataset(
             detail="Database not initialized",
         )
     settings = database.get_settings()
-    raw_path = (
-        settings.get("datasetUploadPath")
-        or settings.get("dataset_upload_path")
-        or ""
-    )
-    base_path = (
-        raw_path.strip()
-        if raw_path and isinstance(raw_path, str)
-        else ""
-    )
-    base_path = (
-        datasets_upload_dir if not base_path else os.path.abspath(base_path)
-    )
+    raw_path = (settings.get("datasetUploadPath") or settings.get("dataset_upload_path") or "")
+    base_path = (raw_path.strip() if raw_path and isinstance(raw_path, str) else "")
+    base_path = (datasets_upload_dir if not base_path else os.path.abspath(base_path))
     if not base_path:
         raise HTTPException(
             status_code=503,
@@ -201,10 +180,8 @@ async def upload_raw_dataset(
     if not filtered:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "No video files found. "
-                f"Allowed: {', '.join(ALLOWED_VIDEO_EXTENSIONS)}"
-            ),
+            detail=("No video files found. "
+                    f"Allowed: {', '.join(ALLOWED_VIDEO_EXTENSIONS)}"),
         )
     upload_id = uuid.uuid4().hex
     media_folder = os.path.join(base_path, upload_id)
@@ -220,16 +197,12 @@ async def upload_raw_dataset(
         try:
             contents = await uf.read()
             # Detect Git LFS pointer files (they look like tiny text files, not real videos)
-            if contents.startswith(
-                b"version https://git-lfs.github.com/spec/v1"
-            ):
+            if contents.startswith(b"version https://git-lfs.github.com/spec/v1"):
                 raise HTTPException(
                     status_code=400,
-                    detail=(
-                        f"File {uf.filename} appears to be a Git LFS pointer, not an actual video. "
-                        "Please run `git lfs pull` (or otherwise download the real video files) "
-                        "and upload the resolved videos instead."
-                    ),
+                    detail=(f"File {uf.filename} appears to be a Git LFS pointer, not an actual video. "
+                            "Please run `git lfs pull` (or otherwise download the real video files) "
+                            "and upload the resolved videos instead."),
                 )
             with open(dest, "wb") as f:
                 f.write(contents)
@@ -273,10 +246,8 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         if req.model_id not in valid_ids:
             raise HTTPException(
                 status_code=400,
-                detail=(
-                    f"Unknown model_id '{req.model_id}'. "
-                    f"Valid options: {sorted(valid_ids)}"
-                ),
+                detail=(f"Unknown model_id '{req.model_id}'. "
+                        f"Valid options: {sorted(valid_ids)}"),
             )
 
     job = job_runner.create_job(
@@ -332,7 +303,8 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
             except ValueError as exc:
                 logger.warning(
                     "Auto-start failed for job %s: %s",
-                    job.id, exc,
+                    job.id,
+                    exc,
                 )
 
     return job.to_dict()
@@ -500,9 +472,7 @@ def get_dataset_files(dataset_id: str) -> dict[str, Any]:
 
 
 @app.put("/api/datasets/{dataset_id}/captions")
-def update_dataset_caption(
-    dataset_id: str, req: UpdateCaptionRequest
-) -> dict[str, str]:
+def update_dataset_caption(dataset_id: str, req: UpdateCaptionRequest) -> dict[str, str]:
     """Update a single caption for a file. Persists to database."""
     if database is None:
         raise HTTPException(status_code=503, detail="Database not initialized")
@@ -563,19 +533,11 @@ def get_video(job_id: str) -> FileResponse:
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status != JobStatus.COMPLETED or not job.output_path:
-        raise HTTPException(
-            status_code=404, detail="No output available for this job"
-        )
+        raise HTTPException(status_code=404, detail="No output available for this job")
     if not os.path.isfile(job.output_path):
-        raise HTTPException(
-            status_code=404, detail="Output file not found on disk"
-        )
+        raise HTTPException(status_code=404, detail="Output file not found on disk")
 
-    media_type = (
-        "video/mp4"
-        if job.output_path.endswith(".mp4")
-        else "image/png"
-    )
+    media_type = ("video/mp4" if job.output_path.endswith(".mp4") else "image/png")
     return FileResponse(job.output_path, media_type=media_type)
 
 
@@ -586,34 +548,25 @@ def get_job_log_file(job_id: str) -> FileResponse:
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if not job.log_file_path:
-        raise HTTPException(
-            status_code=404, detail="Log file not available for this job"
-        )
+        raise HTTPException(status_code=404, detail="Log file not available for this job")
     if not os.path.isfile(job.log_file_path):
-        raise HTTPException(
-            status_code=404, detail="Log file not found on disk"
-        )
+        raise HTTPException(status_code=404, detail="Log file not found on disk")
 
-    return FileResponse(
-        job.log_file_path,
-        media_type="text/plain",
-        filename=f"job_{job_id}.log"
-    )
+    return FileResponse(job.log_file_path, media_type="text/plain", filename=f"job_{job_id}.log")
 
 
 def _setup_signal_handlers() -> None:
+
     def handle_sigquit(signum, frame):
-        logger.warning(
-            "Received SIGQUIT (likely from a crashed worker process). "
-            "Ignoring to keep server running."
-        )
-    
+        logger.warning("Received SIGQUIT (likely from a crashed worker process). "
+                       "Ignoring to keep server running.")
+
     def handle_sigterm(signum, frame):
         logger.info("Received SIGTERM. Shutting down gracefully...")
         raise SystemExit(0)
-    
+
     signal.signal(signal.SIGTERM, handle_sigterm)
-    if hasattr(signal, "SIGQUIT"): # SIGQUIT might not be available on all platforms (e.g., Windows)
+    if hasattr(signal, "SIGQUIT"):  # SIGQUIT might not be available on all platforms (e.g., Windows)
         signal.signal(signal.SIGQUIT, handle_sigquit)
 
 
@@ -621,11 +574,11 @@ def create_local_env(host: str, port: int) -> None:
     """Check if .env.local exists in the ui directory, and create it if not."""
     ui_dir = os.path.dirname(__file__)
     env_local_path = os.path.join(ui_dir, ".env.local")
-    
+
     # Use localhost for the API URL since browsers can't connect to 0.0.0.0
     api_host = "localhost" if host == "0.0.0.0" else host
     api_url = f"http://{api_host}:{port}/api"
-    
+
     if not os.path.exists(env_local_path):
         logger.info("Creating .env.local with API URL: %s", api_url)
         with open(env_local_path, "w", encoding="utf-8") as f:
@@ -640,16 +593,10 @@ def main() -> None:
     # Set up signal handlers to prevent worker crashes from killing the server
     _setup_signal_handlers()
 
-    default_log_dir = os.path.join(
-        os.path.dirname(__file__), "..", "outputs", "ui_logs"
-    )
-    default_data_dir = Path(
-        os.path.dirname(__file__), "..", "outputs", "ui_data"
-    )
+    default_log_dir = os.path.join(os.path.dirname(__file__), "..", "outputs", "ui_logs")
+    default_data_dir = Path(os.path.dirname(__file__), "..", "outputs", "ui_data")
 
-    parser = argparse.ArgumentParser(
-        description="FastVideo Job Runner API server"
-    )
+    parser = argparse.ArgumentParser(description="FastVideo Job Runner API server")
     parser.add_argument(
         "--host",
         default="0.0.0.0",
@@ -664,26 +611,20 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         default=DEFAULT_OUTPUT_DIR,
-        help=(
-            "Directory where generated videos are saved "
-            f"(default: {DEFAULT_OUTPUT_DIR})"
-        ),
+        help=("Directory where generated videos are saved "
+              f"(default: {DEFAULT_OUTPUT_DIR})"),
     )
     parser.add_argument(
         "--log-dir",
         default=default_log_dir,
-        help=(
-            "Directory where job log files are saved "
-            f"(default: {default_log_dir})"
-        ),
+        help=("Directory where job log files are saved "
+              f"(default: {default_log_dir})"),
     )
     parser.add_argument(
         "--data-dir",
         default=str(default_data_dir),
-        help=(
-            "Directory for SQLite database (jobs + settings persistence) "
-            f"(default: {default_data_dir})"
-        ),
+        help=("Directory for SQLite database (jobs + settings persistence) "
+              f"(default: {default_data_dir})"),
     )
     parser.add_argument(
         "--verbose",
@@ -711,7 +652,7 @@ def main() -> None:
         verbose=args.verbose,
         database=database,
     )
-    
+
     logger.info("Output directory: %s", output_dir)
     logger.info("Log directory: %s", log_dir)
 
