@@ -244,11 +244,25 @@ class TrainingPipeline(LoRAPipeline, ABC):
             encoder_attention_mask = batch['text_attention_mask']
             infos = batch['info_list']
 
-            training_batch.latents = latents.to(get_local_torch_device(), dtype=torch.bfloat16)
-            training_batch.encoder_hidden_states = encoder_hidden_states.to(get_local_torch_device(),
-                                                                            dtype=torch.bfloat16)
-            training_batch.encoder_attention_mask = encoder_attention_mask.to(get_local_torch_device(),
-                                                                              dtype=torch.bfloat16)
+            training_batch.latents = latents.to(
+                get_local_torch_device(),
+                dtype=torch.bfloat16,
+                non_blocking=True,
+            )
+            training_batch.encoder_hidden_states = (
+                encoder_hidden_states.to(
+                    get_local_torch_device(),
+                    dtype=torch.bfloat16,
+                    non_blocking=True,
+                )
+            )
+            training_batch.encoder_attention_mask = (
+                encoder_attention_mask.to(
+                    get_local_torch_device(),
+                    dtype=torch.bfloat16,
+                    non_blocking=True,
+                )
+            )
             training_batch.infos = infos
 
         return training_batch
@@ -409,12 +423,18 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
             avg_loss = loss.detach().clone()
 
-        # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
-        #             local_main_process_only=False)
+        # Reduce across ranks without forcing a CPU sync
         with self.tracker.timed("timing/reduce_loss"):
             world_group = get_world_group()
             avg_loss = world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
-        training_batch.total_loss += avg_loss.item()
+        # Accumulate on GPU; materialize to CPU only once after
+        # all gradient-accumulation iterations (see train_one_step).
+        if training_batch.total_loss == 0.0:
+            training_batch.total_loss = avg_loss
+        else:
+            training_batch.total_loss = (
+                training_batch.total_loss + avg_loss
+            )
 
         return training_batch
 
@@ -556,7 +576,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
             training_batch.current_vsa_sparsity = current_vsa_sparsity
             training_batch = self.train_one_step(training_batch)
 
-            loss = training_batch.total_loss
+            loss = (
+                float(training_batch.total_loss.item())
+                if isinstance(training_batch.total_loss, torch.Tensor)
+                else float(training_batch.total_loss)
+            )
             grad_norm = training_batch.grad_norm
 
             step_time = time.perf_counter() - start_time
