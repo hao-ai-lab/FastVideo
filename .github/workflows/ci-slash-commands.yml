@@ -86,7 +86,7 @@ jobs:
           set -euo pipefail
           TEST_NAME=$(echo "$COMMENT" | grep -oP '(?<=/test\s)\S+' | head -1 || true)
 
-          VALID="encoder vae transformer kernel unit ssim training lora-inference lora-training distillation self-forcing vsa vmoba performance api full fastcheck"
+          VALID="encoder vae transformer kernel unit ssim training lora-inference lora-training distillation self-forcing vsa vmoba performance api full fastcheck pre-commit"
           if [ -z "$TEST_NAME" ] || ! echo "$VALID" | grep -qw "$TEST_NAME"; then
             echo "Unknown test: '$TEST_NAME'. Valid: $VALID"
             exit 1
@@ -114,6 +114,12 @@ jobs:
               echo "test_scope=fastcheck"
               echo "full_suite=false"
             } >> "$GITHUB_OUTPUT"
+          elif [ "$TEST_NAME" = "pre-commit" ]; then
+            {
+              echo "test_type="
+              echo "test_scope=precommit"
+              echo "full_suite=false"
+            } >> "$GITHUB_OUTPUT"
           else
             {
               echo "test_type=${MAP[$TEST_NAME]}"
@@ -135,6 +141,13 @@ jobs:
             });
             core.setOutput('sha', pr.head.sha);
             core.setOutput('branch', pr.head.ref);
+
+  pre-commit:
+    needs: parse-command
+    if: >-
+      needs.parse-command.outputs.has_write == 'true'
+      && needs.parse-command.outputs.test_scope == 'precommit'
+    uses: ./.github/workflows/ci-precommit.yml
 
   trigger-buildkite:
     needs: parse-command
