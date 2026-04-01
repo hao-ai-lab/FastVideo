@@ -4,10 +4,11 @@ on:
   pull_request:
     branches: [main]
   workflow_call:
-
-concurrency:
-  group: pre-commit-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    inputs:
+      ref:
+        description: 'Git ref to checkout (defaults to github.ref)'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -18,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref || '' }}
     - uses: actions/setup-python@v5
       with:
         python-version: "3.12"

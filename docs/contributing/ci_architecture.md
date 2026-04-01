@@ -24,7 +24,7 @@ PR push
           Runs on the PR branch directly
               │
           pass ──► Mergify auto-squash-merges to main, branch deleted
-          fail ──► Mergify removes 'ready' label; fix and /merge again
+          fail ──► fix the regression, push, and /merge again
 ```
 
 ---
@@ -102,8 +102,8 @@ failing test's output.
 | Performance Tests | `performance` | 30 min |
 | API Server Tests | `api_server` | 30 min |
 
-A Full Suite failure removes the `ready` label automatically. A Mergify comment links to
-the Buildkite build. Fix the regression, push, and comment `/merge` again.
+If a Full Suite test fails, check the Buildkite build log for the failing step's output.
+Fix the regression, push, and comment `/merge` again to re-trigger.
 
 ---
 
@@ -129,8 +129,8 @@ Suite passing directly on the PR branch.
    - No merge conflicts
 5. If all conditions pass, Mergify squash-merges to `main` automatically. The branch is
    deleted after merge.
-6. If the Full Suite fails, Mergify removes the `ready` label and posts a comment linking to
-   the Buildkite build. The developer fixes the issue, pushes, and comments `/merge` again.
+6. If the Full Suite fails, the developer fixes the issue, pushes, and comments `/merge`
+   again to re-trigger.
 
 **Merge conditions summary:**
 
@@ -279,6 +279,30 @@ Triggers a specific Buildkite test or suite on the current PR branch.
 | `/test api` | API server integration tests | `api_server` |
 | `/test full` | Entire Full Suite | all (with `TEST_SCOPE=full`) |
 | `/test fastcheck` | Entire Fastcheck suite | fastcheck (with `TEST_SCOPE=fastcheck`) |
+| `/test pre-commit` | Pre-commit checks on PR code | — (runs `ci-precommit.yml` via `workflow_call`) |
+
+**Re-running failed tests:** When you use `/test <name>` to re-run a specific failed test,
+the resulting Buildkite check uses the same name as the original (e.g., `/test encoder`
+creates `buildkite/ci/microscope-encoder-tests`). This overwrites the failed check status.
+Once all tests in a tier pass, the aggregate status (`fastcheck-passed` or
+`full-suite-passed`) is automatically updated to `success` by the `ci-aggregate-status.yml`
+workflow.
+
+**How aggregate status refresh works:**
+
+1. `/test <name>` triggers a Buildkite build with `TEST_SCOPE=direct`. The test step uses
+   the same label as its fastcheck/full-suite counterpart, so the resulting GitHub check
+   overwrites the original.
+2. When the build completes, Buildkite's `notify` posts a `direct-test-completed` commit
+   status. This is the only signal that triggers the aggregate workflow — intermediate step
+   status updates do not trigger it.
+3. `ci-aggregate-status.yml` fires, calls `getCombinedStatusForRef` to fetch the latest
+   status for every context on that commit (each context returns only its most recent
+   state), groups them by prefix (`microscope-*` → fastcheck, `test-tube-*`/`bar-chart-*`
+   → full suite), and posts `fastcheck-passed: success` or `full-suite-passed: success` if
+   all entries in the group are `success`.
+4. Tests that were never triggered (skipped by monorepo-diff) have no status entry and do
+   not block the aggregate.
 
 ---
 
@@ -296,6 +320,7 @@ Protected branches (`main`, `master`, `release/*`) are never deleted.
 | `ci-precommit.yml` | Every push / PR against `main` | Runs pre-commit hooks (yapf, ruff, mypy, codespell, pymarkdown, actionlint, check-filenames) |
 | `ci-trigger-full-suite.yml` | `ready` label added to a PR | Calls Buildkite API to run Full Suite on the PR branch |
 | `ci-slash-commands.yml` | PR comment starting with `/merge` or `/test` | Handles slash commands; adds `ready` label or triggers Buildkite |
+| `ci-aggregate-status.yml` | Any Buildkite commit status update | Checks if all tests in a tier passed; updates `fastcheck-passed` or `full-suite-passed` |
 | `community-issue-labeler.yml` | Issue opened or edited | Auto-labels issues by keyword matching against title and body |
 | `community-welcome.yml` | First contribution | Posts a welcome comment for first-time contributors |
 | `community-stale.yml` | Scheduled | Marks and closes stale issues and PRs |
