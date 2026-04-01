@@ -27,6 +27,11 @@ image = (
         "curl",
         "libssl-dev",
         "ffmpeg",
+        "libgl1",
+        "libglib2.0-0",
+        "libsm6",
+        "libxext6",
+        "libxrender1",
     )
     .run_commands("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable")
     .run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc")
@@ -479,6 +484,7 @@ def _prepare_ssim_workspace(
     ./build.sh
     cd ..
     uv pip install -e .[test]
+    uv pip install git+https://github.com/microsoft/MoGe.git
     export HF_HOME='/root/data/.cache'
     hf auth login --token "$HF_API_KEY"
     """

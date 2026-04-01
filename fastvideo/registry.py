@@ -19,6 +19,7 @@ from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.cosmos2_5 import Cosmos25Config
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
+from fastvideo.configs.pipelines.gen3c import Gen3CConfig
 from fastvideo.configs.pipelines.hunyuan15 import (Hunyuan15T2V480PConfig, Hunyuan15I2V480PStepDistilledConfig,
                                                    Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig,
                                                    Hunyuan15SR1080PConfig)
@@ -51,6 +52,7 @@ from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.configs.sample.cosmos import (
     Cosmos_Predict2_2B_Video2World_SamplingParam, )
 from fastvideo.configs.sample.cosmos2_5 import Cosmos25SamplingParamBase
+from fastvideo.configs.sample.gen3c import Gen3C_Cosmos_7B_SamplingParam
 from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam, HunyuanSamplingParam)
 from fastvideo.configs.sample.hunyuan15 import (Hunyuan15_480P_SamplingParam,
                                                 Hunyuan15_480P_StepDistilled_I2V_SamplingParam,
@@ -390,6 +392,18 @@ def _register_configs() -> None:
         ],
     )
 
+    # GEN3C (must register before generic Cosmos detector)
+    register_configs(
+        sampling_param_cls=Gen3C_Cosmos_7B_SamplingParam,
+        pipeline_config_cls=Gen3CConfig,
+        hf_model_paths=[
+            "FastVideo/GEN3C-Cosmos-7B-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: "gen3c" in path.lower(),
+        ],
+    )
+
     # Cosmos 2.5
     register_configs(
         sampling_param_cls=Cosmos25SamplingParamBase,
@@ -414,8 +428,8 @@ def _register_configs() -> None:
             "nvidia/Cosmos-Predict2-2B-Video2World",
         ],
         model_detectors=[
-            lambda path: "cosmos" in path.lower() and
-            ("2.5" not in path.lower() and "2_5" not in path.lower() and "25" not in path.lower()),
+            lambda path: "cosmos" in path.lower() and ("2.5" not in path.lower() and "2_5" not in path.lower() and "25"
+                                                       not in path.lower() and "gen3c" not in path.lower()),
         ],
     )
 
