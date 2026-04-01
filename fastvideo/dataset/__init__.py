@@ -10,7 +10,7 @@ from fastvideo.dataset.transform import (CenterCropResizeVideo, Normalize255,
 from fastvideo.dataset.validation_dataset import ValidationDataset
 
 
-def getdataset(args) -> VideoCaptionMergedDataset:
+def getdataset(args, start_idx: int = 0) -> VideoCaptionMergedDataset:
     if args.do_temporal_sample:
         temporal_sample = TemporalRandomCrop(args.num_frames)  # 16 x
     else:
@@ -36,6 +36,7 @@ def getdataset(args) -> VideoCaptionMergedDataset:
                                      transform=transform,
                                      temporal_sample=temporal_sample,
                                      transform_topcrop=transform_topcrop,
+                                     start_idx=start_idx,
                                      seed=args.seed)
                                     
 

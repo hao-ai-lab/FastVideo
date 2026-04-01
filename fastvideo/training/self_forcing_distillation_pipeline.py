@@ -119,14 +119,21 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         with set_forward_context(
                 current_timestep=training_batch.timesteps,
                 attn_metadata=training_batch.attn_metadata_vsa):
-            generator_pred_video = self._generator_multi_step_simulation_forward(
+            generator_pred_video, exit_timestep = self._generator_multi_step_simulation_forward(
                 training_batch)
 
         with set_forward_context(current_timestep=training_batch.timesteps,
                                  attn_metadata=training_batch.attn_metadata):
-            dmd_loss = self._dmd_forward(
+            if self.training_args.use_decoupled_dmd:
+                dmd_loss = self._dmd_decoupled_forward(
+                    generator_pred_video=generator_pred_video,
+                    training_batch=training_batch,
+                    exit_timestep=exit_timestep)
+            else:
+                dmd_loss = self._dmd_forward(
                 generator_pred_video=generator_pred_video,
-                training_batch=training_batch)
+                training_batch=training_batch,
+                exit_timestep=exit_timestep)
 
         log_dict = {
             "dmdtrain_gradient_norm": torch.tensor(0.0, device=self.device)
@@ -190,7 +197,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             noise = training_batch.trajectory_latents.to(self.device,
                                                          dtype=dtype)
         else:
-            noise = training_batch.latents.to(self.device, dtype=dtype)
+            noise = torch.randn_like(training_batch.latents).to(self.device, dtype=dtype)
 
         batch_size, num_frames, num_channels, height, width = noise.shape
 
@@ -511,6 +518,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             self.denoising_step_list[exit_flags[0]],
             dtype=torch.float32,
             device=self.device)
+        exit_timestep = self.denoising_step_list[exit_flags[0]]
 
         # Store gradient mask information for debugging
         if gradient_mask is not None:
@@ -528,7 +536,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         assert crossattn_cache is not None
         self._reset_simulation_caches(kv_cache1, crossattn_cache)
 
-        return final_output if gradient_mask is not None else pred_image_or_video
+        return (final_output, exit_timestep) if gradient_mask is not None else (pred_image_or_video, exit_timestep)
 
     def _initialize_simulation_caches(
         self,
@@ -543,7 +551,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         latent_shape = self.video_latent_shape_sp
         _, num_frames, _, height, width = latent_shape
 
-        if isinstance(self.transformer.config.patch_size, tuple):
+        if isinstance(self.transformer.config.patch_size, tuple) or isinstance(self.transformer.config.patch_size, list):
             ph, pw = self.transformer.config.patch_size[
                 1], self.transformer.config.patch_size[2]
         elif isinstance(self.transformer.config.patch_size, int):
@@ -804,6 +812,44 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                         self.fake_score_transformer)
             self.fake_score_optimizer.step()
             self.fake_score_lr_scheduler.step()
+
+        if self.training_args.use_gan_loss:
+            # Freeze the base fake-score models and only train GAN head params.
+            # We must handle both experts because timestep routing can select either.
+            fake_score_models = [self.fake_score_transformer]
+            if self.fake_score_transformer_2 is not None:
+                fake_score_models.append(self.fake_score_transformer_2)
+
+            for fs_model in fake_score_models:
+                fs_model.requires_grad_(False)
+                for name, param in fs_model.named_parameters():
+                    if "_cls_pred_branch" in name or "_gan_ca_blocks" in name or "_register_tokens" in name:
+                        param.requires_grad_(True)
+
+            # Prevent accidental gradient carry-over from the previous critic update.
+            self.fake_score_optimizer.zero_grad(set_to_none=True)
+            if self.fake_score_transformer_2 is not None:
+                self.fake_score_optimizer_2.zero_grad(set_to_none=True)
+            batch_gan_critic = copy.deepcopy(training_batch)
+            batch_gan_critic, real_latent = self._get_next_batch_2(batch_gan_critic)
+            with set_forward_context(current_timestep=batch_gan_critic.timesteps,
+                                     attn_metadata=batch_gan_critic.attn_metadata):
+                critic_gan_loss = self._gan_critic_forward(batch_gan_critic, real_latent)
+                (critic_gan_loss / gradient_accumulation_steps).backward()
+            total_critic_loss += critic_gan_loss.detach().item()
+
+            if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
+                self._clip_model_grad_norm_(batch_gan_critic,
+                                            self.fake_score_transformer_2)
+                self.fake_score_optimizer_2.step()
+                self.fake_score_lr_scheduler_2.step()
+            else:
+                self._clip_model_grad_norm_(batch_gan_critic,
+                                            self.fake_score_transformer)
+                self.fake_score_optimizer.step()
+                self.fake_score_lr_scheduler.step()
+            for fs_model in fake_score_models:
+                fs_model.requires_grad_(True)
 
         avg_critic_loss = torch.tensor(total_critic_loss /
                                        gradient_accumulation_steps,

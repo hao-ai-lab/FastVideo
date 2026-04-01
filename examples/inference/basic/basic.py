@@ -15,7 +15,7 @@ def main():
         use_fsdp_inference=False, # set to True if GPU is out of memory
         dit_cpu_offload=False,
         vae_cpu_offload=False,
-        text_encoder_cpu_offload=True,
+        text_encoder_cpu_offload=False,
         pin_cpu_memory=True, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
         # image_encoder_cpu_offload=False,
     )

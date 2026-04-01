@@ -19,12 +19,12 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
-from fastvideo.attention.backends.video_sparse_attn import (
-    VideoSparseAttentionMetadataBuilder)
-from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
+# from fastvideo.attention.backends.video_sparse_attn import (
+#     VideoSparseAttentionMetadataBuilder)
+# from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset import build_parquet_map_style_dataloader
-from fastvideo.dataset.dataloader.schema import pyarrow_schema_ode_trajectory_text_only, pyarrow_schema_t2v
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_ode_trajectory_text_only, pyarrow_schema_t2v, pyarrow_schema_text_only
 from fastvideo.dataset.validation_dataset import ValidationDataset
 from fastvideo.distributed import (cleanup_dist_env_and_memory,
                                    get_local_torch_device, get_sp_group,
@@ -48,8 +48,12 @@ from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
 from fastvideo.optim.muon import get_muon_optimizer
 
-vsa_available = is_vsa_available()
-vmoba_available = is_vmoba_available()
+try:
+    vsa_available = is_vsa_available()
+    vmoba_available = is_vmoba_available()
+except:
+    vsa_available = False
+    vmoba_available = False
 
 logger = init_logger(__name__)
 
@@ -88,8 +92,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             "create_pipeline_stages should not be called for training pipeline")
 
     def set_schemas(self) -> None:
-        self.train_dataset_schema = pyarrow_schema_t2v
-        self.train_dataset_schema_2 = pyarrow_schema_ode_trajectory_text_only
+        self.train_dataset_schema = pyarrow_schema_text_only
+        self.train_dataset_schema_2 = pyarrow_schema_t2v
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing training pipeline...")
@@ -394,7 +398,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         patch_size = self.training_args.pipeline_config.dit_config.patch_size
         current_vsa_sparsity = training_batch.current_vsa_sparsity
         assert latents_shape is not None
-        assert training_batch.timesteps is not None
+        # assert training_batch.timesteps is not None
         if envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
             if not vsa_available:
                 raise ImportError(

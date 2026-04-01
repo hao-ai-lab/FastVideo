@@ -470,15 +470,14 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         self.seed = seed
 
         # Initialize tokenizer
-        tokenizer_path = os.path.join(args.model_path, "tokenizer")
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path,
-                                                  cache_dir=args.cache_dir)
+        tokenizer_path = os.path.join(maybe_download_model(args.model_path), "tokenizer")
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
         # Initialize processing stages
         self._init_stages(args, transform, transform_topcrop, tokenizer)
 
         # Process metadata
-        self.processed_batches = self._process_metadata()
+        self.processed_batches = self._process_metadata(start_idx=start_idx)
 
     def _init_stages(self, args, transform, transform_topcrop,
                      tokenizer) -> None:
@@ -496,13 +495,16 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         self.video_transform_stage = VideoTransformStage(transform)
         self.image_transform_stage = ImageTransformStage(
             transform, transform_topcrop)
-        self.text_encoding_stage = TextEncodingStage(
-            tokenizer=tokenizer,
-            text_max_length=args.text_max_length,
-            cfg_rate=args.training_cfg_rate,
-            seed=self.seed)
+        if tokenizer is not None:
+            self.text_encoding_stage = TextEncodingStage(
+                tokenizer=tokenizer,
+                text_max_length=args.text_max_length,
+                cfg_rate=args.training_cfg_rate,
+                seed=self.seed)
+        else:
+            self.text_encoding_stage = None
 
-    def _load_raw_data(self) -> list[dict]:
+    def _load_raw_data(self, start_idx: int = 0) -> list[dict]:
         """Load raw data from JSON files."""
         # Read folder-annotation pairs
         with open(self.data_merge_path) as f:
@@ -523,11 +525,11 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         for item in data_items:
             item["path"] = opj(folder, item["path"])
 
-        return data_items
+        return data_items[start_idx:]
 
-    def _process_metadata(self) -> list[PreprocessBatch]:
+    def _process_metadata(self, start_idx: int = 0) -> list[PreprocessBatch]:
         """Process the raw metadata through all filtering stages."""
-        raw_data = self._load_raw_data()
+        raw_data = self._load_raw_data(start_idx=start_idx)
         processed_batches = []
 
         # Initialize counters
@@ -605,17 +607,27 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         # Apply transformation stages
         batch = self.video_transform_stage.process(batch)
         batch = self.image_transform_stage.process(batch)
-        batch = self.text_encoding_stage.process(batch)
+        if self.text_encoding_stage is not None:
+            batch = self.text_encoding_stage.process(batch)
+        else:
+            raise ValueError("Text encoding stage is not initialized")
 
         # Build result dictionary
         result = {
             "pixel_values": batch.pixel_values,
-            "text": batch.text,
-            "input_ids": batch.input_ids,
-            "cond_mask": batch.cond_mask,
+            # "text": batch.text,
+            # "input_ids": batch.input_ids,
+            # "cond_mask": batch.cond_mask,
             "path": batch.path,
         }
 
+        if batch.text is not None:
+            result["text"] = batch.text
+            result["input_ids"] = batch.input_ids
+            result["cond_mask"] = batch.cond_mask
+        else:
+            raise ValueError("Text encoding stage is not initialized")
+            
         # Add video-specific fields
         if batch.is_video:
             result.update({"fps": batch.fps, "duration": batch.duration})

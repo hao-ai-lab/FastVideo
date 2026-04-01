@@ -8,6 +8,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from einops import repeat
+
 import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
                                  LocalAttention)
@@ -152,6 +154,32 @@ class WanSelfAttention(nn.Module):
         """
         pass
 
+class WanGanCrossAttention(WanSelfAttention):
+
+    def forward(self, x, context, context_lens=None, crossattn_cache=None):
+        r"""
+        Args:
+            x(Tensor): Shape [B, L1, C]
+            context(Tensor): Shape [B, L2, C]
+            context_lens(Tensor): Shape [B]
+            crossattn_cache (List[dict], *optional*): Contains the cached key and value tensors for context embedding.
+        """
+        b, n, d = x.size(0), self.num_heads, self.head_dim
+
+        # compute query, key, value
+        qq = self.norm_q(self.to_q(context)[0]).view(b, 1, -1, d)
+
+        kk = self.norm_k(self.to_k(x)[0]).view(b, -1, n, d)
+        vv = self.to_v(x)[0].view(b, -1, n, d)
+
+        # compute attention
+        x = self.attn(qq, kk, vv)
+
+        # output
+        x = x.flatten(2)
+        x, _ = self.to_out(x)
+        return x
+
 
 class WanT2VCrossAttention(WanSelfAttention):
 
@@ -245,6 +273,98 @@ class WanI2VCrossAttention(WanSelfAttention):
         x, _ = self.to_out(x)
         return x
 
+class GanAttentionBlock(nn.Module):
+
+    def __init__(self,
+                 dim=1536,
+                 ffn_dim=8192,
+                 num_heads=12,
+                 window_size=(-1, -1),
+                 qk_norm=True,
+                 cross_attn_norm=True,
+                 eps=1e-6):
+        super().__init__()
+        self.dim = dim
+        self.ffn_dim = ffn_dim
+        self.num_heads = num_heads
+        self.window_size = window_size
+        self.qk_norm = qk_norm
+        self.cross_attn_norm = cross_attn_norm
+        self.eps = eps
+
+        # layers
+        # self.norm1 = WanLayerNorm(dim, eps)
+        # self.self_attn = WanSelfAttention(dim, num_heads, window_size, qk_norm,
+        #   eps)
+        self.norm3 = FP32LayerNorm(
+            dim, eps,
+            elementwise_affine=True) if cross_attn_norm else nn.Identity()
+
+        self.norm2 = FP32LayerNorm(dim, eps, elementwise_affine=False)
+        self.ffn = nn.Sequential(
+            nn.Linear(dim, ffn_dim), nn.GELU(approximate='tanh'),
+            nn.Linear(ffn_dim, dim))
+
+        self.cross_attn = WanGanCrossAttention(dim, num_heads,
+                                               (-1, -1),
+                                               qk_norm,
+                                               eps)
+
+        # modulation
+        # self.modulation = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
+
+    def forward(
+        self,
+        hidden_states,
+        encoder_hidden_states,
+        # seq_lens,
+        # grid_sizes,
+        # freqs,
+        # context,
+        # context_lens,
+    ):
+        r"""
+        Args:
+            x(Tensor): Shape [B, L, C]
+            e(Tensor): Shape [B, 6, C]
+            seq_lens(Tensor): Shape [B], length of each sequence in batch
+            grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
+            freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
+        """
+        # assert e.dtype == torch.float32
+        # with amp.autocast(dtype=torch.float32):
+        # e = (self.modulation + e).chunk(6, dim=1)
+        # assert e[0].dtype == torch.float32
+
+        # # self-attention
+        # y = self.self_attn(
+        #     self.norm1(x) * (1 + e[1]) + e[0], seq_lens, grid_sizes,
+        #     freqs)
+        # # with amp.autocast(dtype=torch.float32):
+        # x = x + y * e[2]
+
+        # cross-attention & ffn function
+        def cross_attn_ffn(x, context):
+            token = context + self.cross_attn(self.norm3(x), context)
+            y = self.ffn(self.norm2(token)) + token  # * (1 + e[4]) + e[3])
+            # with amp.autocast(dtype=torch.float32):
+            # x = x + y * e[5]
+            return y
+
+        x = cross_attn_ffn(hidden_states, encoder_hidden_states)
+        return x
+
+class RegisterTokens(nn.Module):
+    def __init__(self, num_registers: int, dim: int):
+        super().__init__()
+        self.register_tokens = nn.Parameter(torch.randn(num_registers, dim) * 0.02)
+        self.rms_norm = RMSNorm(dim, eps=1e-6)
+
+    def forward(self):
+        return self.rms_norm(self.register_tokens)
+
+    def reset_parameters(self):
+        nn.init.normal_(self.register_tokens, std=0.02)
 
 class WanTransformerBlock(nn.Module):
 
@@ -630,6 +750,26 @@ class WanTransformer3DModel(CachableDiT):
         self.cnt = 0
         self.__post_init__()
 
+    def adding_cls_branch(self, atten_dim=1536, num_class=4, time_embed_dim=0) -> None:
+        self._cls_pred_branch = nn.Sequential(
+            # Input: [B, 384, 21, 60, 104]
+            nn.LayerNorm(atten_dim * 3 + time_embed_dim),
+            nn.Linear(atten_dim * 3 + time_embed_dim, 1536),
+            nn.SiLU(),
+            nn.Linear(atten_dim, num_class)
+        )
+        self._cls_pred_branch.requires_grad_(True)
+        num_registers = 3
+        self._register_tokens = RegisterTokens(num_registers=num_registers, dim=atten_dim)
+        self._register_tokens.requires_grad_(True)
+        
+        gan_ca_blocks = []
+        for _ in range(num_registers):
+            block = GanAttentionBlock()
+            gan_ca_blocks.append(block)
+        self._gan_ca_blocks = nn.ModuleList(gan_ca_blocks)
+        self._gan_ca_blocks.requires_grad_(True)
+
     def forward(self,
                 hidden_states: torch.Tensor,
                 encoder_hidden_states: torch.Tensor | list[torch.Tensor],
@@ -637,6 +777,8 @@ class WanTransformer3DModel(CachableDiT):
                 encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
                 | None = None,
                 guidance=None,
+                classify_mode=False,
+                concat_time_embeddings=False,
                 **kwargs) -> torch.Tensor:
         forward_batch = get_forward_context().forward_batch
         enable_teacache = forward_batch is not None and forward_batch.enable_teacache
@@ -727,6 +869,16 @@ class WanTransformer3DModel(CachableDiT):
 
         assert encoder_hidden_states.dtype == orig_dtype
 
+        final_x = None
+        if classify_mode:
+            assert self._register_tokens is not None
+            assert self._gan_ca_blocks is not None
+            assert self._cls_pred_branch is not None
+
+            final_x = []
+            registers = repeat(self._register_tokens(), "n d -> b n d", b=hidden_states.shape[0])
+
+        gan_idx = 0
         # 4. Transformer blocks
         # if caching is enabled, we might be able to skip the forward pass
         should_skip_forward = self.should_skip_forward_for_cached_states(
@@ -740,19 +892,33 @@ class WanTransformer3DModel(CachableDiT):
             if enable_teacache:
                 original_hidden_states = hidden_states.clone()
 
-            if torch.is_grad_enabled() and self.gradient_checkpointing:
-                for block in self.blocks:
+            for ii, block in enumerate(self.blocks):
+                if torch.is_grad_enabled() and self.gradient_checkpointing:
                     hidden_states = self._gradient_checkpointing_func(
                         block, hidden_states, encoder_hidden_states,
                         timestep_proj, freqs_cis, attention_mask)
-            else:
-                for block in self.blocks:
+                else:
                     hidden_states = block(hidden_states, encoder_hidden_states,
-                                              timestep_proj, freqs_cis, attention_mask)
+                                            timestep_proj, freqs_cis, attention_mask)
+
+                if classify_mode and ii in [13, 21, 29]:
+                    gan_token = registers[:, gan_idx: gan_idx + 1]
+                    final_x.append(self._gan_ca_blocks[gan_idx](hidden_states, gan_token))
+                    gan_idx += 1
             # if teacache is enabled, we need to cache the original hidden states
 
             if enable_teacache:
                 self.maybe_cache_states(hidden_states, original_hidden_states)
+
+        if classify_mode:
+            final_x = torch.cat(final_x, dim=1)
+            if concat_time_embeddings:
+                cls_input = torch.cat([final_x.float(), (10 * temb[:, None, :]).float()], dim=1).view(final_x.shape[0], -1)
+                final_x = self._cls_pred_branch(cls_input)
+            else:
+                cls_input = final_x.float().view(final_x.shape[0], -1)
+                final_x = self._cls_pred_branch(cls_input)
+
         # 5. Output norm, projection & unpatchify
         if temb.dim() == 3:
             # batch_size, seq_len, inner_dim (wan 2.2 ti2v)
@@ -778,6 +944,8 @@ class WanTransformer3DModel(CachableDiT):
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 
+        if classify_mode:
+            return output, torch.nan_to_num(final_x)
         return output
 
     def maybe_cache_states(self, hidden_states: torch.Tensor,

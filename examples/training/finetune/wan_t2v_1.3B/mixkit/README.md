@@ -1,0 +1,1 @@
+The raw mixkit dataset is downloaded and preprocessed following instructions from https://github.com/tianweiy/CausVid/tree/master

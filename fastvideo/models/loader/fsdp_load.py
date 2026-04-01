@@ -75,6 +75,7 @@ def maybe_load_fsdp_model(
     pin_cpu_memory: bool = True,
     enable_torch_compile: bool = False,
     torch_compile_kwargs: dict[str, Any] | None = None,
+    add_cls_branch: bool = False,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -96,6 +97,8 @@ def maybe_load_fsdp_model(
     logger.info("Loading model with default_dtype: %s", default_dtype)
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
+    if add_cls_branch:
+        model.adding_cls_branch(atten_dim=1536, num_class=1, time_embed_dim=0)
 
     # Check if we should use FSDP
     use_fsdp = training_mode or fsdp_inference
@@ -340,7 +343,7 @@ def load_model_from_full_model_state_dict(
                        unused_keys)
 
     # List of allowed parameter name patterns
-    ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress", "proj_l"]  # Can be extended as needed
+    ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress", "proj_l", "_cls_pred_branch", "_register_tokens", "_gan_ca_blocks"]  # Can be extended as needed
     for new_param_name in unused_keys:
         if not any(pattern in new_param_name
                    for pattern in ALLOWED_NEW_PARAM_PATTERNS):
@@ -353,14 +356,16 @@ def load_model_from_full_model_state_dict(
         meta_sharded_param = meta_sd.get(new_param_name)
         if not hasattr(meta_sharded_param, "device_mesh"):
             # Initialize with zeros
-            sharded_tensor = torch.zeros_like(meta_sharded_param,
-                                              device=device,
-                                              dtype=param_dtype)
+            # sharded_tensor = torch.zeros_like(meta_sharded_param,
+            #                                   device=device,
+            #                                   dtype=param_dtype)
+            sharded_tensor = meta_sharded_param.to(device=device, dtype=param_dtype)
         else:
             # Initialize with zeros and distribute
-            full_tensor = torch.zeros_like(meta_sharded_param,
-                                           device=device,
-                                           dtype=param_dtype)
+            # full_tensor = torch.zeros_like(meta_sharded_param,
+            #                                device=device,
+            #                                dtype=param_dtype)
+            full_tensor = meta_sharded_param.to(device=device, dtype=param_dtype)
             sharded_tensor = distribute_tensor(
                 full_tensor,
                 meta_sharded_param.device_mesh,

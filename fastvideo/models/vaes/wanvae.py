@@ -1219,6 +1219,7 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
             out = torch.clamp(out, min=-1.0, max=1.0)
             self.clear_cache()
         else:
+            raise NotImplementedError("Feature cache is not supported for WanVAE")
             out = ParallelTiledVAE.decode(self, z)
 
         return out

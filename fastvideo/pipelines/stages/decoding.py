@@ -54,22 +54,23 @@ class DecodingStage(PipelineStage):
         """Convert normalized latents into the VAE's expected latent space."""
         # Some VAEs handle latent (de)normalization internally.
         if bool(getattr(self.vae, "handles_latent_denorm", False)):
+            raise NotImplementedError("handles_latent_denorm is not supported for WanVAE")
             return latents
 
         cfg = getattr(self.vae, "config", None)
 
         # MatrixGame-style: z = z * std + mean
-        if (cfg is not None and hasattr(cfg, "latents_mean")
-                and hasattr(cfg, "latents_std")):
-            latents_mean = torch.tensor(cfg.latents_mean,
-                                        device=latents.device,
-                                        dtype=latents.dtype).view(
-                                            1, -1, 1, 1, 1)
-            latents_std = torch.tensor(cfg.latents_std,
-                                       device=latents.device,
-                                       dtype=latents.dtype).view(
-                                           1, -1, 1, 1, 1)
-            return latents * latents_std + latents_mean
+        # if (cfg is not None and hasattr(cfg, "latents_mean")
+        #         and hasattr(cfg, "latents_std")):
+        #     latents_mean = torch.tensor(cfg.latents_mean,
+        #                                 device=latents.device,
+        #                                 dtype=latents.dtype).view(
+        #                                     1, -1, 1, 1, 1)
+        #     latents_std = torch.tensor(cfg.latents_std,
+        #                                device=latents.device,
+        #                                dtype=latents.dtype).view(
+        #                                    1, -1, 1, 1, 1)
+        #     return latents * latents_std + latents_mean
 
         # Diffusers-style: scaling_factor (+ optional shift_factor)
         if hasattr(self.vae, "scaling_factor"):
@@ -86,6 +87,10 @@ class DecodingStage(PipelineStage):
                         latents.device, latents.dtype)
                 else:
                     latents = latents + self.vae.shift_factor
+            else:
+                raise NotImplementedError("shift_factor is not supported for WanVAE")
+        else:
+            raise NotImplementedError("handles_latent_denorm is not supported for WanVAE")
 
         return latents
 
@@ -121,8 +126,8 @@ class DecodingStage(PipelineStage):
         with torch.autocast(device_type="cuda",
                             dtype=vae_dtype,
                             enabled=vae_autocast_enabled):
-            if fastvideo_args.pipeline_config.vae_tiling:
-                self.vae.enable_tiling()
+            # if fastvideo_args.pipeline_config.vae_tiling:
+            #     self.vae.enable_tiling()
             # if fastvideo_args.vae_sp:
             #     self.vae.enable_parallel()
             if not vae_autocast_enabled:

@@ -283,8 +283,10 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     table = pq.read_table(os.path.join(root, file))
                     start_idx += table.num_rows
 
+        logger.info("Start index: %s", start_idx)
+
         # Loading dataset
-        train_dataset = getdataset(args)
+        train_dataset = getdataset(args, start_idx=start_idx)
 
         train_dataloader = DataLoader(
             train_dataset,
@@ -301,6 +303,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
 
         for batch_idx, data in enumerate(pbar):
             if data is None:
+                logger.warning("Batch is None")
                 continue
 
             with torch.inference_mode():
@@ -313,6 +316,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 num_processed_samples += len(valid_indices)
 
                 if not valid_indices:
+                    logger.warning("No valid indices")
                     continue
 
                 # Create new batch with only valid samples

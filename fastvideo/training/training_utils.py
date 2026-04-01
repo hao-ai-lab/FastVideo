@@ -1318,6 +1318,14 @@ def shift_timestep(timestep: torch.Tensor, shift: float,
     denominator = 1 + (shift - 1) * t
     return num_train_timestep * (shift * t / denominator)
 
+def unshift_timestep(timestep: torch.Tensor, shift: float,
+                   num_train_timestep: float) -> torch.Tensor:
+    # inverse of shift_timestep
+    if shift == 1:
+        return timestep
+    t = timestep / num_train_timestep
+    denominator = shift - (shift - 1) * t
+    return num_train_timestep * (t / denominator)
 
 # coding=utf-8
 # Copyright 2025 The HuggingFace Inc. team.

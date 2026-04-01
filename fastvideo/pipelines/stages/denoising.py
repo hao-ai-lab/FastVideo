@@ -32,21 +32,21 @@ try:
     from fastvideo.attention.backends.sliding_tile_attn import (
         SlidingTileAttentionBackend)
     st_attn_available = True
-except ImportError:
+except:
     st_attn_available = False
 
 try:
     from fastvideo.attention.backends.vmoba import VMOBAAttentionBackend
     from fastvideo.utils import is_vmoba_available
     vmoba_attn_available = is_vmoba_available()
-except ImportError:
+except:
     vmoba_attn_available = False
 
 try:
     from fastvideo.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
     vsa_available = True
-except ImportError:
+except:
     vsa_available = False
 
 logger = init_logger(__name__)
@@ -173,6 +173,13 @@ class DenoisingStage(PipelineStage):
             {
                 "mouse_cond": batch.mouse_cond,
                 "keyboard_cond": batch.keyboard_cond,
+            },
+        )
+
+        tf_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "clean_hidden_states": batch.clean_latents,
             },
         )
 
@@ -320,9 +327,9 @@ class DenoisingStage(PipelineStage):
                         temp_ts.new_ones(seq_len - temp_ts.size(0)) * timestep
                     ])
                     timestep = temp_ts.unsqueeze(0)
-                    t_expand = timestep.repeat(latent_model_input.shape[0], 1)
+                    t_expand = timestep.repeat(latent_model_input.shape[0], 1).to(get_local_torch_device())
                 else:
-                    t_expand = t.repeat(latent_model_input.shape[0])
+                    t_expand = t.repeat(latent_model_input.shape[0]).to(get_local_torch_device())
 
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
@@ -415,8 +422,11 @@ class DenoisingStage(PipelineStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                             **action_kwargs,
+                            **tf_kwargs,
                         )
 
+                    assert batch.do_classifier_free_guidance, "do_classifier_free_guidance must be True"
+                    assert current_guidance_scale == 6.0, "guidance_scale must be 6.0"
                     if batch.do_classifier_free_guidance:
                         batch.is_cfg_negative = True
                         with set_forward_context(
@@ -432,6 +442,7 @@ class DenoisingStage(PipelineStage):
                                 **image_kwargs,
                                 **neg_cond_kwargs,
                                 **action_kwargs,
+                                **tf_kwargs,
                             )
 
                         noise_pred_text = noise_pred
@@ -472,9 +483,15 @@ class DenoisingStage(PipelineStage):
         trajectory_tensor: torch.Tensor | None = None
         if trajectory_latents:
             trajectory_timesteps.append(torch.zeros_like(t))
+            if batch.clean_latents is not None:
+                trajectory_latents.append(batch.clean_latents)
+                trajectory_timesteps.append(torch.zeros_like(t))
+
             trajectory_tensor = torch.stack(trajectory_latents, dim=1)
             trajectory_timesteps_tensor = torch.stack(trajectory_timesteps,
                                                       dim=0)
+            # assert trajectory_tensor.shape[1] == 1, "trajectory_tensor should have 1 frame"
+            # assert trajectory_timesteps_tensor.shape[0] == 1, "trajectory_timesteps_tensor should have 1 frame"
         else:
             trajectory_tensor = None
             trajectory_timesteps_tensor = None

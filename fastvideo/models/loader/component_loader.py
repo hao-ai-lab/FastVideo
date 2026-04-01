@@ -809,6 +809,11 @@ class TransformerLoader(ComponentLoader):
             or cls_name == "Cosmos25Transformer3DModel"
             or getattr(fastvideo_args.pipeline_config, "prefix", "") == "Cosmos25"
         )
+
+        add_cls_branch = False
+        if hasattr(fastvideo_args, "_adding_cls_branch") and fastvideo_args._adding_cls_branch:
+            strict_load = False
+            add_cls_branch = True
         model = maybe_load_fsdp_model(
             model_cls=model_cls,
             init_params={"config": dit_config, "hf_config": hf_config},
@@ -828,6 +833,7 @@ class TransformerLoader(ComponentLoader):
             training_mode=fastvideo_args.training_mode,
             enable_torch_compile=fastvideo_args.enable_torch_compile,
             torch_compile_kwargs=fastvideo_args.torch_compile_kwargs,
+            add_cls_branch=add_cls_branch,
         )
 
         total_params = sum(p.numel() for p in model.parameters())
@@ -869,9 +875,11 @@ class SchedulerLoader(ComponentLoader):
 
         scheduler_cls, _ = ModelRegistry.resolve_model_cls(class_name)
 
+        if fastvideo_args.pipeline_config.flow_shift is not None and "shift" in config:
+            config["shift"] = fastvideo_args.pipeline_config.flow_shift
         scheduler = scheduler_cls(**config)
-        if fastvideo_args.pipeline_config.flow_shift is not None:
-            scheduler.set_shift(fastvideo_args.pipeline_config.flow_shift)
+        # if fastvideo_args.pipeline_config.flow_shift is not None:
+        #     scheduler.set_shift(fastvideo_args.pipeline_config.flow_shift)
         if fastvideo_args.pipeline_config.timesteps_scale is not None:
             scheduler.set_timesteps_scale(
                 fastvideo_args.pipeline_config.timesteps_scale

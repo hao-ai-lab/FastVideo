@@ -123,6 +123,7 @@ class ForwardBatch:
 
     # Latent tensors
     latents: torch.Tensor | None = None
+    clean_latents: torch.Tensor | None = None
     raw_latent_shape: tuple[int, ...] | None = None
     noise_pred: torch.Tensor | None = None
     image_latent: torch.Tensor | None = None

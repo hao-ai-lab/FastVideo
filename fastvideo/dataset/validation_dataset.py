@@ -2,6 +2,7 @@
 # adapted from: https://github.com/a-r-r-o-w/finetrainers/blob/main/finetrainers/data/dataset.py
 import os
 import pathlib
+import json
 
 import datasets
 from torch.utils.data import IterableDataset
@@ -32,10 +33,7 @@ class ValidationDataset(IterableDataset):
                                          data_files=self.filename.as_posix(),
                                          split="train")
         elif self.filename.suffix == ".json":
-            data = datasets.load_dataset("json",
-                                         data_files=self.filename.as_posix(),
-                                         split="train",
-                                         field="data")
+            data = self._load_json_without_hf_locking(self.filename)
         elif self.filename.suffix == ".parquet":
             data = datasets.load_dataset("parquet",
                                          data_files=self.filename.as_posix(),
@@ -162,3 +160,33 @@ class ValidationDataset(IterableDataset):
 
             sample = {k: v for k, v in sample.items() if v is not None}
             yield sample
+
+    @staticmethod
+    def _load_json_without_hf_locking(filename: pathlib.Path) -> list[dict]:
+        """Load JSON validation files without using datasets.load_dataset lock files.
+
+        This avoids distributed lock contention when many ranks initialize
+        validation simultaneously on shared filesystems.
+        """
+        with filename.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+
+        if isinstance(payload, dict):
+            if "data" not in payload:
+                raise ValueError(
+                    f"Validation JSON {filename.as_posix()} must contain a 'data' field when top-level is an object."
+                )
+            records = payload["data"]
+        elif isinstance(payload, list):
+            records = payload
+        else:
+            raise ValueError(
+                f"Validation JSON {filename.as_posix()} must be either a list of samples or an object containing a 'data' list."
+            )
+
+        if not isinstance(records, list):
+            raise ValueError(
+                f"Validation JSON records in {filename.as_posix()} must be a list."
+            )
+
+        return records

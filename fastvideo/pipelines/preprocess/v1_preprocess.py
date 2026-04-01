@@ -12,6 +12,8 @@ from fastvideo.pipelines.preprocess.preprocess_pipeline_i2v import (
     PreprocessPipeline_I2V)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_ode_trajectory import (
     PreprocessPipeline_ODE_Trajectory)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_tf_ode import (
+    PreprocessPipeline_TF_ODE)
 from fastvideo.pipelines.preprocess.hy15.hy15_ode_preprocess_pipeline import (
     Hy15ODEPreprocessPipeline)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_t2v import (
@@ -53,6 +55,7 @@ def main(args) -> None:
         vae_cpu_offload=False,
         text_encoder_cpu_offload=False,
         pipeline_config=pipeline_config,
+        init_weights_from_safetensors=args.init_weights_from_safetensors,
     )
     if args.preprocess_task == "t2v":
         PreprocessPipeline = PreprocessPipeline_T2V
@@ -64,6 +67,9 @@ def main(args) -> None:
         assert args.flow_shift is not None, "flow_shift is required for ode_trajectory"
         fastvideo_args.pipeline_config.flow_shift = args.flow_shift
         PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
+    elif args.preprocess_task == "tf_ode":
+        fastvideo_args.pipeline_config.flow_shift = args.flow_shift
+        PreprocessPipeline = PreprocessPipeline_TF_ODE
     elif args.preprocess_task == "hy15_ode_trajectory":
         assert args.flow_shift is not None, "flow_shift is required for hy15_ode_trajectory"
         fastvideo_args.pipeline_config.flow_shift = args.flow_shift
@@ -73,7 +79,7 @@ def main(args) -> None:
     else:
         raise ValueError(
             f"Invalid preprocess task: {args.preprocess_task}. "
-            f"Valid options: t2v, i2v, ode_trajectory, hy15_ode_trajectory, text_only, matrixgame")
+            f"Valid options: t2v, i2v, ode_trajectory, hy15_ode_trajectory, text_only, matrixgame, tf_ode")
 
     logger.info("Preprocess task: %s using %s", args.preprocess_task,
                 PreprocessPipeline.__name__)
@@ -121,7 +127,7 @@ if __name__ == "__main__":
         "--preprocess_task",
         type=str,
         default="t2v",
-        choices=["t2v", "i2v", "text_only", "ode_trajectory", "hy15_ode_trajectory", "matrixgame"],
+        choices=["t2v", "i2v", "text_only", "ode_trajectory", "hy15_ode_trajectory", "matrixgame", "tf_ode"],
         help="Type of preprocessing task to run")
     parser.add_argument("--train_fps", type=int, default=30)
     parser.add_argument("--use_image_num", type=int, default=0)
@@ -144,6 +150,7 @@ if __name__ == "__main__":
         help=
         "The output directory where the model predictions and checkpoints will be written.",
     )
+    parser.add_argument("--init_weights_from_safetensors", type=str, default=None)
 
     args = parser.parse_args()
     main(args)

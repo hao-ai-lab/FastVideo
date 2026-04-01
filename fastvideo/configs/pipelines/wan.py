@@ -41,7 +41,7 @@ class WanT2V480PConfig(PipelineConfig):
     vae_sp: bool = False
 
     # Denoising stage
-    flow_shift: float | None = 3.0
+    flow_shift: float | None = 5.0
 
     # Text encoding stage
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
@@ -176,6 +176,8 @@ class SelfForcingWanT2V480PConfig(WanT2V480PConfig):
     flow_shift: float | None = 5.0
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 750, 500, 250])
+    # dmd_denoising_steps: list[int] | None = field(
+    #     default_factory=lambda: [1000, 680, 360, 180])
     warp_denoising_step: bool = True
 
 

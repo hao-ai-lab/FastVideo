@@ -937,6 +937,9 @@ class TrainingArgs(FastVideoArgs):
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
     warp_denoising_step: bool = False
+    use_tf: bool = False
+    use_decoupled_dmd: bool = False  # use decoupled DMD
+    use_gan_loss: bool = False
 
     # Self-forcing specific arguments
     num_frame_per_block: int = 3
@@ -1344,6 +1347,21 @@ class TrainingArgs(FastVideoArgs):
             action=StoreBoolean,
             help=
             "Whether to warp denoising step according to the scheduler time shift"
+        )
+        parser.add_argument(
+            "--use-tf",
+            action=StoreBoolean,
+            help="Whether to use Teacher-forcing for finetuning"
+        )
+        parser.add_argument(
+            "--use-decoupled-dmd",
+            action=StoreBoolean,
+            help="Whether to use decoupled DMD"
+        )
+        parser.add_argument(
+            "--use-gan-loss",
+            action=StoreBoolean,
+            help="Whether to use GAN loss"
         )
 
         # Self-forcing specific arguments

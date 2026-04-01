@@ -14,7 +14,7 @@ try:
     from fastvideo.attention.backends.sliding_tile_attn import (
         SlidingTileAttentionBackend)
     st_attn_available = True
-except ImportError:
+except:
     st_attn_available = False
     SlidingTileAttentionBackend = None  # type: ignore
 
@@ -22,7 +22,7 @@ try:
     from fastvideo.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
     vsa_available = True
-except ImportError:
+except:
     vsa_available = False
     VideoSparseAttentionBackend = None  # type: ignore
 
@@ -111,6 +111,13 @@ class CausalDMDDenosingStage(DenoisingStage):
         b, c, t, h, w = latents.shape
         prompt_embeds = batch.prompt_embeds
         assert torch.isnan(prompt_embeds[0]).sum() == 0
+
+        if batch.do_classifier_free_guidance:
+            raise ValueError("Classifier free guidance is not supported for causal DMD denoising")
+            neg_prompt_embeds = batch.negative_prompt_embeds
+            assert neg_prompt_embeds is not None
+            assert not torch.isnan(
+                neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
 
         # Initialize or reset caches
         kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0],
@@ -218,6 +225,11 @@ class CausalDMDDenosingStage(DenoisingStage):
             block_sizes.pop(0)
             latents[:, :, :1, :, :] = first_frame_latent
 
+        # self.scheduler.set_timesteps(num_inference_steps=48,
+        #                             denoising_strength=1.0)
+        # timesteps = self.scheduler.timesteps.to(get_local_torch_device())
+        logger.info(f"timesteps: {timesteps}")
+
         # DMD loop in causal blocks
         with self.progress_bar(total=len(block_sizes) *
                                len(timesteps)) as progress_bar:
@@ -295,6 +307,30 @@ class CausalDMDDenosingStage(DenoisingStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                         ).permute(0, 2, 1, 3, 4)
+
+                    if batch.do_classifier_free_guidance:
+                        batch.is_cfg_negative = True
+                        with torch.autocast(device_type="cuda",
+                                        dtype=target_dtype,
+                                        enabled=autocast_enabled), \
+                            set_forward_context(current_timestep=i,
+                                                attn_metadata=attn_metadata,
+                                                forward_batch=batch):
+                            pred_noise_uncond_btchw = current_model(
+                                latent_model_input,
+                                neg_prompt_embeds,
+                                t_expanded_noise,
+                                kv_cache=_get_kv_cache(t_cur),
+                                crossattn_cache=crossattn_cache,
+                                current_start=(pos_start_base + start_index) *
+                                self.frame_seq_length,
+                                start_frame=start_index,
+                                **image_kwargs,
+                                **pos_cond_kwargs,
+                            ).permute(0, 2, 1, 3, 4)
+
+                            pred_noise_btchw = pred_noise_uncond_btchw + batch.guidance_scale * (
+                                pred_noise_btchw - pred_noise_uncond_btchw)
 
                     # Convert pred noise to pred video with FM Euler scheduler utilities
                     if boundary_timestep is not None and t_cur >= boundary_timestep:

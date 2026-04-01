@@ -69,6 +69,9 @@ class SelfForcingFlowMatchScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
             # use this scheduler for ODE trajectory
             timestep = timestep.unsqueeze(0)
 
+        model_output = model_output.permute(0, 2, 1, 3, 4)
+        sample = sample.permute(0, 2, 1, 3, 4)
+
         self.sigmas = self.sigmas.to(model_output.device)
         self.timesteps = self.timesteps.to(model_output.device)
         timestep = timestep.to(model_output.device)
@@ -81,7 +84,8 @@ class SelfForcingFlowMatchScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
                 self.inverse_timesteps or self.reverse_sigmas) else 0
         else:
             sigma_ = self.sigmas[timestep_id + 1].reshape(-1, 1, 1, 1)
-        prev_sample = sample + model_output * (sigma_ - sigma)
+        prev_sample = sample.flatten(0, 1) + model_output.flatten(0, 1) * (sigma_ - sigma)
+        prev_sample = prev_sample.unflatten(0, model_output.shape[:2]).permute(0, 2, 1, 3, 4)
         if isinstance(prev_sample, torch.Tensor | float) and not return_dict:
             return (prev_sample, )
         return SelfForcingFlowMatchSchedulerOutput(prev_sample=prev_sample)
