@@ -4,8 +4,10 @@ merge_protections:
       - base = main
     success_conditions:
       - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
+      - "#approved-reviews-by>=1"
       - check-success~=pre-commit
       - check-success=fastcheck-passed
+      - check-success=full-suite-passed
 
 pull_request_rules:
 
