@@ -123,31 +123,6 @@ def build_matrixgame3_action_preset(num_frames: int, seed: int | None = None) ->
     return presets["keyboard"], presets["mouse"]
 
 
-def get_matrixgame3_total_frames(num_iterations: int) -> int:
-    return 57 + max(0, num_iterations - 1) * 40
-
-
-def get_matrixgame3_clip_window(clip_idx: int) -> tuple[int, int, int, int]:
-    first_clip = clip_idx == 0
-    end_frame = 57 if first_clip else 57 + clip_idx * 40
-    start_frame = 0 if first_clip else end_frame - 56
-    latent_frames = 15 if first_clip else 14
-    cond_frames = 1 if first_clip else 4
-    return start_frame, end_frame, latent_frames, cond_frames
-
-
-def get_matrixgame3_memory_start(current_start_frame: int) -> int:
-    return max(0, current_start_frame - 16)
-
-
-def get_matrixgame3_latent_idx(frame_idx: int) -> int:
-    return (frame_idx - 1) // 4 + 1
-
-
-def align_matrixgame3_frame_to_block(frame_idx: int) -> int:
-    return (frame_idx - 1) // 4 * 4 + 1 if frame_idx > 0 else 1
-
-
 def interpolate_camera_poses_handedness(
     src_indices: np.ndarray,
     src_rot_mat: np.ndarray,
@@ -422,9 +397,9 @@ def get_current_action(mode="universal"):
                 idx_mouse = []
                 idx_keyboard = []
                 for i in indexes:
-                    if i in CAMERA_VALUE_MAP.keys():
+                    if i in CAMERA_VALUE_MAP:
                         idx_mouse += [i]
-                    elif i in KEYBOARD_IDX.keys():
+                    elif i in KEYBOARD_IDX:
                         idx_keyboard += [i]
                 if len(idx_mouse) == 0:
                     idx_mouse += ['q']
@@ -451,7 +426,7 @@ def get_current_action(mode="universal"):
         while flag != 1:
             try:
                 idx_keyboard = input('Please input the action: \n(e.g. `W` for forward, `Z` for turning left)\n').strip().lower()
-                if idx_keyboard in KEYBOARD_IDX.keys():
+                if idx_keyboard in KEYBOARD_IDX:
                     flag = 1
             except Exception:
                 pass

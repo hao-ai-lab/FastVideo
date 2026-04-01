@@ -11,14 +11,10 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.matrixgame3.utils import (
-    align_matrixgame3_frame_to_block,
     build_matrixgame3_action_preset,
-    build_matrixgame3_extrinsics_from_actions,
+    build_extrinsics_from_actions,
     build_plucker_from_c2ws,
     build_plucker_from_pose,
-    get_matrixgame3_clip_window,
-    get_matrixgame3_latent_idx,
-    get_matrixgame3_total_frames,
     interpolate_camera_poses_handedness,
     select_memory_idx_fov,
 )
@@ -152,7 +148,7 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
 
         assert batch.latents is not None, "latents must be provided"
         latents = batch.latents
-        b, c, t, h, w = latents.shape
+        _, _, t, _, _ = latents.shape
         prompt_embeds = batch.prompt_embeds
         assert torch.isnan(prompt_embeds[0]).sum() == 0
 
@@ -828,8 +824,17 @@ class MatrixGame3DenoisingStage(DenoisingStage):
         target_h = latent_h * spatial_ratio
         target_w = latent_w * spatial_ratio
         num_iterations = self._infer_num_iterations(batch)
+        clip_frame = 56  # hardcode for now
+        first_clip_frame = clip_frame + 1
+        past_frame = 16
 
-        total_video_frames = get_matrixgame3_total_frames(num_iterations)
+        def align_frame_to_block(frame_idx: int) -> int:
+            return (frame_idx - 1) // 4 * 4 + 1 if frame_idx > 0 else 1
+
+        def get_latent_idx(frame_idx: int) -> int:
+            return (frame_idx - 1) // 4 + 1
+
+        total_video_frames = first_clip_frame + max(0, num_iterations - 1) * (clip_frame - past_frame)
         if batch.keyboard_cond is None or batch.mouse_cond is None:
             keyboard_cond, mouse_cond = build_matrixgame3_action_preset(total_video_frames, seed=batch.seed)
             batch.keyboard_cond = keyboard_cond.unsqueeze(0).to(device=device, dtype=target_dtype)
@@ -838,7 +843,7 @@ class MatrixGame3DenoisingStage(DenoisingStage):
             batch.keyboard_cond = batch.keyboard_cond.to(device=device, dtype=target_dtype)
             batch.mouse_cond = batch.mouse_cond.to(device=device, dtype=target_dtype)
 
-        extrinsics_all = build_matrixgame3_extrinsics_from_actions(batch.keyboard_cond[0], batch.mouse_cond[0]).to(device)
+        extrinsics_all = build_extrinsics_from_actions(batch.keyboard_cond[0], batch.mouse_cond[0]).to(device)
         all_latents: list[torch.Tensor] = []
 
         for clip_idx in range(num_iterations):
@@ -852,30 +857,32 @@ class MatrixGame3DenoisingStage(DenoisingStage):
                 self.scheduler.set_timesteps(batch.num_inference_steps, device=device)
             timesteps = self.scheduler.timesteps
 
-            current_start_frame_idx, current_end_frame_idx, current_latent_frames, cond_frames = (
-                get_matrixgame3_clip_window(clip_idx)
-            )
             first_clip = clip_idx == 0
+            current_end_frame_idx = first_clip_frame if first_clip else first_clip_frame + clip_idx * (clip_frame -
+                                                                                                       past_frame)
+            current_start_frame_idx = 0 if first_clip else current_end_frame_idx - clip_frame
+            # 15 for first clip, 14 for later clips
+            current_latent_frames = (first_clip_frame - 1) // 4 + 1 if first_clip else clip_frame // 4
+            cond_frames = 1 if first_clip else 4
+            latent_start_idx = get_latent_idx(current_start_frame_idx)
+            latent_end_idx = get_latent_idx(current_end_frame_idx)
+
             clip_keyboard = batch.keyboard_cond[:, current_start_frame_idx:current_end_frame_idx]
             clip_mouse = batch.mouse_cond[:, current_start_frame_idx:current_end_frame_idx]
-            latent_start_idx = get_matrixgame3_latent_idx(current_start_frame_idx)
-            latent_end_idx = get_matrixgame3_latent_idx(current_end_frame_idx)
 
             cond_frames = min(cond_frames, img_cond.shape[2])
-            current_latents = torch.randn((latents.shape[0], latents.shape[1], latent_end_idx - latent_start_idx, latent_h, latent_w),
-                                          generator=batch.generator if isinstance(batch.generator, torch.Generator) else None,
-                                          device=device,
-                                          dtype=target_dtype)
+            current_latents = torch.randn(
+                (latents.shape[0], latents.shape[1], latent_end_idx - latent_start_idx, latent_h, latent_w),
+                generator=batch.generator if isinstance(batch.generator, torch.Generator) else None,
+                device=device,
+                dtype=target_dtype)
             current_latents[:, :, :cond_frames] = img_cond[:, :, :cond_frames]
 
             c2ws_chunk = extrinsics_all[current_start_frame_idx:current_end_frame_idx]
-            src_indices = np.linspace(current_start_frame_idx,
-                                      current_end_frame_idx - 1,
+            src_indices = np.linspace(current_start_frame_idx, current_end_frame_idx - 1,
                                       current_end_frame_idx - current_start_frame_idx)
-            tgt_len = current_latent_frames
-            tgt_indices = np.linspace(0 if first_clip else current_start_frame_idx + 3,
-                                      current_end_frame_idx - 1,
-                                      tgt_len)
+            tgt_indices = np.linspace(0 if first_clip else current_start_frame_idx + 3, current_end_frame_idx - 1,
+                                      current_latent_frames)
 
             if batch.c2ws_plucker_emb is not None:
                 plucker_no_mem = batch.c2ws_plucker_emb[:, :, current_start_frame_idx:current_end_frame_idx]
@@ -899,6 +906,7 @@ class MatrixGame3DenoisingStage(DenoisingStage):
             memory_latent_idx = None
             c2ws_plucker_emb = plucker_no_mem
             if all_latents:
+                # t-1, t-9, t-17, t-25, t-33
                 selected_index_base = [current_end_frame_idx - offset for offset in range(1, 34, 8)]
                 selected_index = select_memory_idx_fov(
                     extrinsics_all,
@@ -912,10 +920,10 @@ class MatrixGame3DenoisingStage(DenoisingStage):
 
                 memory_pluckers: list[torch.Tensor] = []
                 memory_latent_idx = []
-                for mem_idx, reference_idx in zip(selected_index, selected_index_base):
-                    memory_latent_idx.append(get_matrixgame3_latent_idx(mem_idx))
+                for mem_idx, reference_idx in zip(selected_index, selected_index_base, strict=False):
+                    memory_latent_idx.append(get_latent_idx(mem_idx))
 
-                    mem_idx_aligned = align_matrixgame3_frame_to_block(mem_idx)
+                    mem_idx_aligned = align_frame_to_block(mem_idx)
                     mem_block = extrinsics_all[mem_idx_aligned:mem_idx_aligned + 4]
                     mem_src = np.linspace(mem_idx_aligned, mem_idx_aligned + mem_block.shape[0] - 1, mem_block.shape[0])
                     mem_tgt = np.array([mem_idx_aligned + 3], dtype=np.float32)
@@ -925,7 +933,8 @@ class MatrixGame3DenoisingStage(DenoisingStage):
                         src_trans_vec=mem_block[:, :3, 3].detach().cpu().numpy(),
                         tgt_indices=mem_tgt,
                     ).to(device=device, dtype=target_dtype)
-                    reference_pose = extrinsics_all[reference_idx:reference_idx + 1].to(device=device, dtype=target_dtype)
+                    reference_pose = extrinsics_all[reference_idx:reference_idx + 1].to(device=device,
+                                                                                        dtype=target_dtype)
                     rel_pair = torch.cat([reference_pose, mem_pose], dim=0)
                     rel_pose = compute_relative_poses(rel_pair, framewise=False)[1:2]
                     memory_pluckers.append(
@@ -935,21 +944,22 @@ class MatrixGame3DenoisingStage(DenoisingStage):
                             target_w=target_w,
                             latent_h=latent_h,
                             latent_w=latent_w,
-                        ).to(device=device, dtype=target_dtype)
-                    )
+                        ).to(device=device, dtype=target_dtype))
 
                 if memory_pluckers:
                     c2ws_plucker_emb = torch.cat(memory_pluckers + [plucker_no_mem], dim=2)
                     history = torch.cat(all_latents, dim=2)
                     x_memory = history[:, :, memory_latent_idx]
-                    mouse_cond_memory = torch.ones((clip_keyboard.shape[0], len(memory_latent_idx), clip_mouse.shape[-1]),
-                                                   device=device,
-                                                   dtype=target_dtype)
-                    keyboard_cond_memory = -torch.ones((clip_keyboard.shape[0], len(memory_latent_idx), clip_keyboard.shape[-1]),
-                                                       device=device,
-                                                       dtype=target_dtype)
-                    timestep_memory = x_memory.new_zeros((x_memory.shape[0],
-                                                          x_memory.shape[2] * x_memory.shape[3] * x_memory.shape[4] // 4))
+                    mouse_cond_memory = torch.ones(
+                        (clip_keyboard.shape[0], len(memory_latent_idx), clip_mouse.shape[-1]),
+                        device=device,
+                        dtype=target_dtype)
+                    keyboard_cond_memory = -torch.ones(
+                        (clip_keyboard.shape[0], len(memory_latent_idx), clip_keyboard.shape[-1]),
+                        device=device,
+                        dtype=target_dtype)
+                    timestep_memory = x_memory.new_zeros(
+                        (x_memory.shape[0], x_memory.shape[2] * x_memory.shape[3] * x_memory.shape[4] // 4))
             with self.progress_bar(total=len(timesteps)) as progress_bar:
                 for timestep in timesteps:
                     latent_model_input = current_latents

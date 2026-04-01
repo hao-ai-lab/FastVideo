@@ -28,7 +28,6 @@ from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.dits.wanvideo import (
     WanSelfAttention,
     WanI2VCrossAttention,
-    WanT2VCrossAttention,
     WanImageEmbedding,
 )
 from fastvideo.platforms import AttentionBackendEnum
@@ -139,7 +138,7 @@ def _apply_rope_with_frame_indices(
         ).reshape(seq_len, 1, -1)
 
     out = torch.view_as_real(x_complex * freqs_i.unsqueeze(0).to(x_complex.dtype)).flatten(3)
-    return out.float()
+    return out.to(dtype=x.dtype)
 
 
 class MatrixGame3TimeImageEmbedding(nn.Module):
@@ -485,27 +484,25 @@ class MatrixGame3TransformerBlock(nn.Module):
         norm_hidden_states = norm_hidden_states * (1 + c_scale_msa) + c_shift_msa
 
         # ================= Action Module =================
-        if self.action_model is not None:
-            if mouse_cond is not None or keyboard_cond is not None:
-                action_dtype = self.ffn.fc_in.weight.dtype
-                # grid_sizes is expected to be [F, H, W]
-                # ActionModule implementation takes hidden_states directly
-                hidden_states = self.action_model(
-                    hidden_states.to(action_dtype),
-                    int(grid_sizes[0]),
-                    int(grid_sizes[1]),
-                    int(grid_sizes[2]),
-                    mouse_cond,
-                    keyboard_cond,
-                    mouse_cond_memory=mouse_cond_memory,
-                    keyboard_cond_memory=keyboard_cond_memory,
-                    num_frame_per_block=int(grid_sizes[0]),
-                )
+        if self.action_model is not None and (mouse_cond is not None or keyboard_cond is not None):
+            action_dtype = self.ffn.fc_in.weight.dtype
+            # grid_sizes is expected to be [F, H, W]
+            hidden_states = self.action_model(
+                hidden_states.to(action_dtype),
+                int(grid_sizes[0]),
+                int(grid_sizes[1]),
+                int(grid_sizes[2]),
+                mouse_cond,
+                keyboard_cond,
+                mouse_cond_memory=mouse_cond_memory,
+                keyboard_cond_memory=keyboard_cond_memory,
+                num_frame_per_block=int(grid_sizes[0]),
+            )
 
-                norm_hidden_states = self.cross_attn_residual_norm.norm(
-                    hidden_states.float()
-                )
-                norm_hidden_states = norm_hidden_states * (1 + c_scale_msa) + c_shift_msa
+            norm_hidden_states = self.cross_attn_residual_norm.norm(
+                hidden_states.float()
+            )
+            norm_hidden_states = norm_hidden_states * (1 + c_scale_msa) + c_shift_msa
         # =================================================
 
         # 3. Feed-forward
@@ -571,17 +568,6 @@ class MatrixGame3WanModel(BaseDiT):
         )
         self.use_memory = getattr(config, "use_memory", False)
         self.sigma_theta = float(getattr(config, "sigma_theta", 0.0))
-        head_dim = inner_dim // self.num_attention_heads
-        self.register_buffer(
-            "freqs",
-            _build_rope_freqs(
-                max_seq_len=(2048 if self.use_memory else 1024),
-                head_dim=head_dim,
-                num_heads=self.num_attention_heads,
-                sigma_theta=(self.sigma_theta if self.use_memory else 0.0),
-            ),
-            persistent=False,
-        )
         self.camera_patch_embedding = None
         self.c2ws_hidden_states_layer1 = None
         self.c2ws_hidden_states_layer2 = None
@@ -687,7 +673,14 @@ class MatrixGame3WanModel(BaseDiT):
         if memory_latent_idx is not None and len(memory_latent_idx) > 0:
             max_frame_index = max(max_frame_index, int(max(memory_latent_idx)) + 1)
 
-        freqs = self.freqs.to(hidden_states.device)
+        head_dim = self.hidden_size // self.num_attention_heads
+        freqs = _build_rope_freqs(
+            max_seq_len=(2048 if self.use_memory else 1024),
+            head_dim=head_dim,
+            num_heads=self.num_attention_heads,
+            sigma_theta=(self.sigma_theta if self.use_memory else 0.0),
+            device=hidden_states.device,
+        )
         max_seq_len = freqs.shape[1] if freqs.dim() == 3 else freqs.shape[0]
         if max_frame_index > max_seq_len or post_patch_height > max_seq_len or post_patch_width > max_seq_len:
             raise ValueError(

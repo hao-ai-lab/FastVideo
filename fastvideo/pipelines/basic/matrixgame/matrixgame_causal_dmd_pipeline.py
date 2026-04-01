@@ -7,7 +7,8 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, ForwardBatch, LoRAPipeline
 
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, InputValidationStage, LatentPreparationStage,
-                                        TextEncodingStage, MatrixGameImageEncodingStage, MatrixGame2CausalDenoisingStage)
+                                        TextEncodingStage, MatrixGameImageEncodingStage,
+                                        MatrixGame2CausalDenoisingStage)
 from fastvideo.pipelines.stages.image_encoding import (MatrixGameImageVAEEncodingStage)
 
 logger = init_logger(__name__)
