@@ -8,7 +8,7 @@ models:
     _target_: fastvideo.train.models.wangame.WanGameCausalModel
     init_from: /mnt/weka/home/hao.zhang/kaiqin/wg_models/WanGame-2.1-0306-61500steps
     trainable: true
-    transformer_override_safetensor: /mnt/weka/home/hao.zhang/mhuo/FastVideo-hyw/outputs/wangame_dfsft_causal_v3/checkpoint-best-step-36500/transformer/model.safetensors
+    # transformer_override_safetensor: /mnt/weka/home/hao.zhang/mhuo/FastVideo-hyw/outputs/wangame_dfsft_causal_v3/checkpoint-best-step-36500/transformer/model.safetensors
 
 method:
   _target_: fastvideo.train.methods.fine_tuning.dfsft.DiffusionForcingSFTMethod
@@ -54,17 +54,17 @@ training:
     lr_warmup_steps: 0
 
   loop:
-    max_train_steps: 2
+    max_train_steps: 60000
     gradient_accumulation_steps: 1
 
   checkpoint:
     output_dir: outputs/wangame_dfsft_causal_v3
     # resume_from_checkpoint: /mnt/weka/home/hao.zhang/mhuo/FastVideo-hyw/outputs/wangame_dfsft_causal_v3/checkpoint-best-step-36500
-    training_state_checkpointing_steps: 5000
-    weight_only_checkpointing_steps: 5000
-    checkpoints_total_limit: 10
-    best_checkpoint_start_step: 2000
-    best_checkpoint_top_k: 5
+    training_state_checkpointing_steps: 1000000
+    weight_only_checkpointing_steps: 1000000
+    checkpoints_total_limit: 0
+    best_checkpoint_start_step: 1000000
+    best_checkpoint_top_k: 0
 
   tracker:
     project_name: distillation_wangame_r

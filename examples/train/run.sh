@@ -22,7 +22,7 @@ shift
 
 # ── GPU / node settings ──────────────────────────────────────────
 NUM_GPUS="${NUM_GPUS:-$(nvidia-smi -L 2>/dev/null | wc -l)}"
-NUM_GPUS="${NUM_GPUS:-4}"
+NUM_GPUS="${NUM_GPUS:-8}"
 NNODES="${NNODES:-1}"
 NODE_RANK="${NODE_RANK:-0}"
 MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
@@ -56,7 +56,7 @@ echo "Extra args:  $*"
 echo "Log file:    ${LOG_FILE}"
 echo "=============================="
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.run \
+python -m torch.distributed.run \
     --nnodes "${NNODES}" \
     --node_rank "${NODE_RANK}" \
     --nproc_per_node "${NUM_GPUS}" \
