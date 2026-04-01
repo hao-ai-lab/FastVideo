@@ -274,7 +274,7 @@ pull_request_rules:
       merge:
         method: squash
 
-  - name: auto-rebase when ready
+  - name: auto-update when ready
     conditions:
       - label=ready
       - "#approved-reviews-by>=1"
@@ -282,7 +282,7 @@ pull_request_rules:
       - -closed
       - -draft
     actions:
-      rebase: {}
+      update: {}
 
   # ============================================================
   # PR title format help
