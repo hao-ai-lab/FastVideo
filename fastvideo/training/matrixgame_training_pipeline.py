@@ -11,7 +11,7 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
-from fastvideo.pipelines.basic.matrixgame.matrixgame_i2v_pipeline import (MatrixGamePipeline)
+from fastvideo.pipelines.basic.matrixgame.matrixgame_i2v_pipeline import (MatrixGame2I2VPipeline)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.utils import is_vsa_available, shallow_asdict
@@ -50,16 +50,17 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
         args_copy.dit_cpu_offload = True
         # args_copy.pipeline_config.vae_config.load_encoder = False
         # validation_pipeline = WanImageToVideoValidationPipeline.from_pretrained(
-        self.validation_pipeline = MatrixGamePipeline.from_pretrained(training_args.model_path,
-                                                                      args=None,
-                                                                      inference_mode=True,
-                                                                      loaded_modules={
-                                                                          "transformer": self.get_module("transformer"),
-                                                                      },
-                                                                      tp_size=training_args.tp_size,
-                                                                      sp_size=training_args.sp_size,
-                                                                      num_gpus=training_args.num_gpus,
-                                                                      dit_cpu_offload=True)
+        self.validation_pipeline = MatrixGame2I2VPipeline.from_pretrained(training_args.model_path,
+                                                                          args=None,
+                                                                          inference_mode=True,
+                                                                          loaded_modules={
+                                                                              "transformer":
+                                                                              self.get_module("transformer"),
+                                                                          },
+                                                                          tp_size=training_args.tp_size,
+                                                                          sp_size=training_args.sp_size,
+                                                                          num_gpus=training_args.num_gpus,
+                                                                          dit_cpu_offload=True)
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore

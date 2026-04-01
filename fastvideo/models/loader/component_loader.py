@@ -8,6 +8,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 from copy import deepcopy
+from pathlib import Path
 from typing import cast
 
 import torch
@@ -590,6 +591,15 @@ class VAELoader(ComponentLoader):
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the VAE based on the model path, and inference args."""
+        model_path = str(model_path)
+        model_path_obj = Path(model_path)
+        prefer_light_vae = False
+        if model_path_obj.name == "vae":
+            light_vae_path = model_path_obj.with_name("light_vae")
+            if light_vae_path.is_dir():
+                model_path = str(light_vae_path)
+                prefer_light_vae = True
+
         config = get_diffusers_config(model=model_path)
         class_name = config.pop("_class_name")
         config.pop("_name_or_path", None)
@@ -693,6 +703,13 @@ class VAELoader(ComponentLoader):
         # strictly so missing/unexpected keys are surfaced early.
         strict_load = class_name == "AutoencoderKL"
         vae.load_state_dict(loaded, strict=strict_load)
+        if (
+            class_name == "AutoencoderKLWan"
+            and prefer_light_vae
+            and target_device.type == "cuda"
+            and hasattr(vae, "optimize_memory_format")
+        ):
+            vae.optimize_memory_format()
 
         return vae.eval()
 

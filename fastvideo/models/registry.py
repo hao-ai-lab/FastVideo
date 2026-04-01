@@ -50,6 +50,7 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
     "MatrixGameWanModel": ("dits", "matrixgame", "MatrixGameWanModel"),
     "CausalMatrixGameWanModel": ("dits", "matrixgame", "CausalMatrixGameWanModel"),
+    "MatrixGame3WanModel": ("dits", "matrixgame3", "MatrixGame3WanModel"),
 }
 
 _TEXT_ENCODER_MODELS = {

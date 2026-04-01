@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 
 from fastvideo.attention import DistributedAttention
-from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
+from fastvideo.configs.models.dits.matrixgame import MatrixGame2WanVideoConfig
 from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.layers.layernorm import (
     FP32LayerNorm,
@@ -341,7 +341,7 @@ class MatrixGameTransformerBlock(nn.Module):
         return hidden_states
 
 
-_DEFAULT_MATRIXGAME_CONFIG = MatrixGameWanVideoConfig()
+_DEFAULT_MATRIXGAME_CONFIG = MatrixGame2WanVideoConfig()
 
 
 class MatrixGameWanModel(BaseDiT):
@@ -363,7 +363,7 @@ class MatrixGameWanModel(BaseDiT):
 
     def __init__(
         self,
-        config: MatrixGameWanVideoConfig,
+        config: MatrixGame2WanVideoConfig,
         hf_config: dict[str, Any],
         **kwargs,
     ) -> None:

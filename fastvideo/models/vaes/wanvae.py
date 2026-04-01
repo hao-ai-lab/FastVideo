@@ -228,8 +228,9 @@ class WanRMS_norm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(shape)) if bias else 0.0
 
     def forward(self, x):
-        return F.normalize(x, dim=(1 if self.channel_first else
-                                   -1)) * self.scale * self.gamma + self.bias
+        dims = (1 if self.channel_first else -1)
+        rms = (x.pow(2).mean(dims, keepdim=True) + 1e-6).sqrt()
+        return (x / rms) * self.gamma + self.bias
 
 
 class WanUpsample(nn.Upsample):
@@ -302,6 +303,7 @@ class WanResample(nn.Module):
     def forward(self, x):
         b, c, t, h, w = x.size()
         first_frame = is_first_frame.get()
+        _first_chunk = first_chunk.get()
         if first_frame:
             assert t == 1
         _feat_cache = feat_cache.get()
@@ -311,39 +313,37 @@ class WanResample(nn.Module):
                 idx = _feat_idx
                 if _feat_cache[idx] is None:
                     _feat_cache[idx] = "Rep"
-                    _feat_idx += 1
+                cache_x = x[:, :, -CACHE_T:, :, :].clone()
+                if _feat_cache[idx] == "Rep":
+                    x = self.time_conv(x)
                 else:
-                    cache_x = x[:, :, -CACHE_T:, :, :].clone()
-                    if cache_x.shape[2] < 2 and _feat_cache[
-                            idx] is not None and _feat_cache[idx] != "Rep":
-                        # cache last frame of last two chunk
+                    if cache_x.shape[2] < 2:
                         cache_x = torch.cat([
                             _feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
-                                cache_x.device), cache_x
-                        ],
-                                            dim=2)
-                    if cache_x.shape[2] < 2 and _feat_cache[
-                            idx] is not None and _feat_cache[idx] == "Rep":
-                        cache_x = torch.cat([
-                            torch.zeros_like(cache_x).to(cache_x.device),
-                            cache_x
-                        ],
-                                            dim=2)
-                    x = self.time_conv(x) if _feat_cache[idx] == "Rep" else self.time_conv(x, _feat_cache[idx])
-                    _feat_cache[idx] = cache_x
-                    _feat_idx += 1
+                                x.device
+                            ),
+                            cache_x,
+                        ], dim=2)
+                    x = self.time_conv(x, _feat_cache[idx])
 
-                    x = x.reshape(b, 2, c, t, h, w)
-                    x = torch.stack((x[:, 0, :, :, :, :], x[:, 1, :, :, :, :]),
-                                    3)
-                    x = x.reshape(b, c, t * 2, h, w)
+                _feat_cache[idx] = cache_x
+                _feat_idx += 1
+
+                x = x.reshape(b, 2, c, t, h, w)
+                x = torch.stack((x[:, 0, :, :, :, :], x[:, 1, :, :, :, :]), 3)
+                x = x.reshape(b, c, t * 2, h, w)
+
+                if _first_chunk:
+                    x = x[:, :, 1:, :, :]
                 feat_cache.set(_feat_cache)
                 feat_idx.set(_feat_idx)
-            elif not first_frame and hasattr(self, "time_conv"):
+            elif hasattr(self, "time_conv"):
                 x = self.time_conv(x)
                 x = x.reshape(b, 2, c, t, h, w)
                 x = torch.stack((x[:, 0, :, :, :, :], x[:, 1, :, :, :, :]), 3)
                 x = x.reshape(b, c, t * 2, h, w)
+                if _first_chunk:
+                    x = x[:, :, 1:, :, :]
         t = x.shape[2]
         x = x.permute(0, 2, 1, 3, 4).reshape(b * t, c, h, w)
         x = self.resample(x)
@@ -1128,6 +1128,20 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
             self._enc_conv_num = _count_conv3d(self.encoder)
             self._enc_conv_idx = 0
             self._enc_feat_map = [None] * self._enc_conv_num
+
+    def optimize_memory_format(self) -> None:
+        """Optional CUDA-only weight layout optimization used by MG3 LightVAE."""
+
+        def _convert(module: nn.Module) -> None:
+            for child in module.children():
+                if isinstance(child, nn.Conv3d):
+                    child.weight.data = child.weight.data.to(
+                        memory_format=torch.channels_last_3d
+                    )
+                else:
+                    _convert(child)
+
+        _convert(self)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         if self.use_feature_cache:
