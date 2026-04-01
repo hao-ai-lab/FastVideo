@@ -27,7 +27,6 @@ from fastvideo.distributed.communication_op import (
     sequence_model_parallel_shard,
 )
 from fastvideo.distributed.parallel_state import get_sp_world_size
-from fastvideo.distributed.utils import create_attention_mask_for_padding
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ReplicatedLinear
@@ -270,12 +269,13 @@ class Gen3CSelfAttention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         rope_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
-        attention_mask: torch.Tensor | None = None,
+        original_seq_len: int | None = None,
     ) -> torch.Tensor:
         """
         Args:
             hidden_states: (B, S, D) where S = T*H*W
             rope_emb: Tuple of (cos, sin) for RoPE
+            original_seq_len: Original (unpadded) full sequence length
         """
         # Get QKV
         query, _ = self.to_q(hidden_states)
@@ -302,7 +302,9 @@ class Gen3CSelfAttention(nn.Module):
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
         
-        attn_output, _ = self.attn(query, key, value, attention_mask=attention_mask)
+        attn_output, _ = self.attn(
+            query, key, value, original_seq_len=original_seq_len
+        )
         attn_output = attn_output.flatten(-2, -1)  # (B, S, H*D_h)
 
         # Output projection
@@ -464,7 +466,7 @@ class Gen3CTransformerBlock(nn.Module):
         adaln_lora: torch.Tensor | None = None,
         rope_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
         extra_pos_emb: torch.Tensor | None = None,
-        attention_mask: torch.Tensor | None = None,
+        original_seq_len: int | None = None,
     ) -> torch.Tensor:
         """
         Args:
@@ -474,6 +476,7 @@ class Gen3CTransformerBlock(nn.Module):
             adaln_lora: (B, 3D) AdaLN-LoRA parameters
             rope_emb: Tuple of (cos, sin) for RoPE
             extra_pos_emb: Optional learnable positional embeddings (B, S, D)
+            original_seq_len: Original (unpadded) full sequence length
         """
         # Add extra positional embeddings if provided
         if extra_pos_emb is not None:
@@ -522,7 +525,7 @@ class Gen3CTransformerBlock(nn.Module):
         attn_output = self.attn1(
             norm_hidden_states,
             rope_emb=rope_emb,
-            attention_mask=attention_mask,
+            original_seq_len=original_seq_len,
         )
         hidden_states = hidden_states + gate_self_attn * attn_output
 
@@ -532,7 +535,6 @@ class Gen3CTransformerBlock(nn.Module):
         attn_output = self.attn2(
             norm_hidden_states,
             encoder_hidden_states=encoder_hidden_states,
-            attention_mask=attention_mask,
         )
         hidden_states = hidden_states + gate_cross_attn * attn_output
 
@@ -952,7 +954,6 @@ class Gen3CTransformer3DModel(BaseDiT):
         # This is a no-op when SP world size is 1.
         sp_world_size = get_sp_world_size()
         original_seq_len = hidden_states.shape[1]
-        sp_attention_mask = None
         if sp_world_size > 1:
             hidden_states, original_seq_len = sequence_model_parallel_shard(
                 hidden_states, dim=1
@@ -962,15 +963,6 @@ class Gen3CTransformer3DModel(BaseDiT):
             rope_cos, _ = sequence_model_parallel_shard(rope_emb[0], dim=0)
             rope_sin, _ = sequence_model_parallel_shard(rope_emb[1], dim=0)
             rope_emb = (rope_cos, rope_sin)
-
-            padded_seq_len = hidden_states.shape[1] * sp_world_size
-            if padded_seq_len > original_seq_len:
-                sp_attention_mask = create_attention_mask_for_padding(
-                    seq_len=original_seq_len,
-                    padded_seq_len=padded_seq_len,
-                    batch_size=batch_size,
-                    device=hidden_states.device,
-                )
 
         # 7. Timestep embeddings
         affine_emb, adaln_lora = self.time_embed(timestep, hidden_states.dtype)
@@ -996,7 +988,7 @@ class Gen3CTransformer3DModel(BaseDiT):
                     adaln_lora,
                     rope_emb,
                     extra_pos_emb,
-                    sp_attention_mask,
+                    original_seq_len,
                 )
         else:
             for block in self.transformer_blocks:
@@ -1007,7 +999,7 @@ class Gen3CTransformer3DModel(BaseDiT):
                     adaln_lora=adaln_lora,
                     rope_emb=rope_emb,
                     extra_pos_emb=extra_pos_emb,
-                    attention_mask=sp_attention_mask,
+                    original_seq_len=original_seq_len,
                 )
 
         # 11. Final layer

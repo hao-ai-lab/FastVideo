@@ -6,9 +6,31 @@ import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits.gen3c import Gen3CVideoConfig
-from fastvideo.configs.models.encoders import BaseEncoderOutput, T5LargeConfig
+from fastvideo.configs.models.encoders import BaseEncoderOutput
+from fastvideo.configs.models.encoders.base import TextEncoderArchConfig
+from fastvideo.configs.models.encoders.t5 import (T5LargeArchConfig, T5LargeConfig)
 from fastvideo.configs.models.vaes import Gen3CVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
+
+
+@dataclass
+class _Gen3CT5LargeArchConfig(T5LargeArchConfig):
+    """T5 Large arch config that pads inputs to max_length.
+
+    GEN3C requires padded text encoder inputs, while the base 
+    T5 config no longer pads by default after the SP mask 
+    refactor [PR#1142](https://github.com/hao-ai-lab/FastVideo/pull/1142).
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.tokenizer_kwargs["padding"] = "max_length"
+
+
+@dataclass
+class _Gen3CT5LargeConfig(T5LargeConfig):
+    arch_config: TextEncoderArchConfig = field(default_factory=_Gen3CT5LargeArchConfig)
+    prefix: str = "t5"
 
 
 def t5_large_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
@@ -51,7 +73,7 @@ class Gen3CConfig(PipelineConfig):
 
     vae_config: VAEConfig = field(default_factory=Gen3CVAEConfig)
 
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5LargeConfig(), ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (_Gen3CT5LargeConfig(), ))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
                                   ...] = field(default_factory=lambda: (t5_large_postprocess_text, ))
 
