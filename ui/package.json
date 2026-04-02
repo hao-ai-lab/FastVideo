@@ -1,0 +1,28 @@
+{
+	"name": "fastvideo-ui",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"start": "concurrently --kill-others-on-fail \"npm:start:api\" \"npm:start:web\"",
+		"start:api": "cd .. && python -m ui.server",
+		"start:web": "node build",
+		"lint": "eslint ."
+	},
+	"dependencies": {
+		"@sveltejs/kit": "^2.0.0",
+		"svelte": "^5.0.0"
+	},
+	"devDependencies": {
+		"@sveltejs/adapter-node": "^5.5.4",
+		"@sveltejs/vite-plugin-svelte": "^5.0.0",
+		"@types/node": "^20",
+		"concurrently": "^9",
+		"eslint": "^9",
+		"typescript": "^5",
+		"vite": "^6.0.0"
+	}
+}
