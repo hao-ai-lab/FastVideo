@@ -432,6 +432,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=Gen3C_Cosmos_7B_SamplingParam,
         pipeline_config_cls=Gen3CConfig,
+        workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "FastVideo/GEN3C-Cosmos-7B-Diffusers",
         ],
