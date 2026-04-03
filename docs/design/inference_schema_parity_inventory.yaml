@@ -1,0 +1,717 @@
+status_definitions:
+  kept: "Public field remains on a public adapter surface with the same meaning."
+  moved: "Public field remains supported but normalizes into a different nested path."
+  profile_owned: "Public field remains supported only through a model/profile-specific surface."
+  compatibility_only: "Legacy public field remains adapter-only during migration and is not part of the canonical typed schema."
+  private_only: "Field should only be handled by private adapters and is not a public FastVideo compatibility promise."
+  internal_only: "Field is runtime/config plumbing and should not be part of the new public typed inference API."
+
+surfaces:
+  fastvideo_args:
+    moved:
+      model_path: generator.model_path
+      workload_type: generator.pipeline.workload_type
+      distributed_executor_backend: generator.engine.execution_backend
+      trust_remote_code: generator.trust_remote_code
+      revision: generator.revision
+      num_gpus: generator.engine.num_gpus
+      tp_size: generator.engine.parallelism.tp_size
+      sp_size: generator.engine.parallelism.sp_size
+      hsdp_replicate_dim: generator.engine.parallelism.hsdp_replicate_dim
+      hsdp_shard_dim: generator.engine.parallelism.hsdp_shard_dim
+      dist_timeout: generator.engine.parallelism.dist_timeout
+      lora_path: generator.pipeline.components.lora_path
+      dit_cpu_offload: generator.engine.offload.dit
+      use_fsdp_inference: generator.engine.use_fsdp_inference
+      dit_layerwise_offload: generator.engine.offload.dit_layerwise
+      text_encoder_cpu_offload: generator.engine.offload.text_encoder
+      image_encoder_cpu_offload: generator.engine.offload.image_encoder
+      vae_cpu_offload: generator.engine.offload.vae
+      pin_cpu_memory: generator.engine.offload.pin_cpu_memory
+      enable_torch_compile: generator.engine.compile.enabled
+      torch_compile_kwargs: generator.engine.compile.kwargs
+      disable_autocast: generator.engine.disable_autocast
+      enable_stage_verification: generator.engine.enable_stage_verification
+      prompt_txt: request.inputs.prompt_path
+      override_text_encoder_safetensors: generator.pipeline.components.text_encoder_weights
+      override_text_encoder_quant: generator.engine.quantization.text_encoder_quant
+      override_transformer_cls_name: generator.pipeline.components.override_transformer_cls_name
+      init_weights_from_safetensors: generator.pipeline.components.transformer_weights
+      init_weights_from_safetensors_2: generator.pipeline.components.transformer_2_weights
+      override_pipeline_cls_name: generator.pipeline.components.override_pipeline_cls_name
+      boundary_ratio: request.sampling.boundary_ratio
+    profile_owned:
+      ltx2_vae_tiling: generator.pipeline.profile_overrides.ltx2.vae_tiling
+      ltx2_vae_spatial_tile_size_in_pixels: generator.pipeline.profile_overrides.ltx2.vae.spatial_tile_size_in_pixels
+      ltx2_vae_spatial_tile_overlap_in_pixels: generator.pipeline.profile_overrides.ltx2.vae.spatial_tile_overlap_in_pixels
+      ltx2_vae_temporal_tile_size_in_frames: generator.pipeline.profile_overrides.ltx2.vae.temporal_tile_size_in_frames
+      ltx2_vae_temporal_tile_overlap_in_frames: generator.pipeline.profile_overrides.ltx2.vae.temporal_tile_overlap_in_frames
+      ltx2_initial_latent_path: request.extensions.ltx2.initial_latent_path
+    compatibility_only:
+      mode: "Legacy multi-mode FastVideoArgs switch; typed inference config should not expose execution mode."
+      inference_mode: "Legacy boolean mirror of mode; kept only through adapters while FastVideoArgs remains."
+      lora_nickname: "Legacy adapter-selection surface pending LoRA API cleanup."
+      lora_target_modules: "Legacy LoRA configuration surface pending dedicated component API."
+      output_type: "Legacy output formatting surface pending GenerationResult cleanup."
+      VSA_sparsity: "Model-specific inference optimization not yet represented in the typed public schema."
+      moba_config_path: "Model-specific MoBA optimization surface not yet represented in the typed public schema."
+      master_port: "Executor/bootstrap compatibility field; not part of the canonical inference schema."
+    private_only:
+      ray_placement_group: "Ray deployment-only field."
+      ray_runtime_env: "Ray deployment-only field."
+    internal_only:
+      pipeline_config: "Legacy internal carrier object."
+      preprocess_config: "Legacy preprocess carrier object."
+      moba_config: "Derived runtime config loaded from moba_config_path."
+      model_paths: "Runtime bookkeeping."
+      model_loaded: "Runtime bookkeeping."
+
+  pipeline_config_base:
+    moved:
+      pipeline_config_path: generator.pipeline.components.pipeline_config_path
+    profile_owned:
+      embedded_cfg_scale: generator.pipeline.profile_overrides.embedded_cfg_scale
+      flow_shift: generator.pipeline.profile_overrides.flow_shift
+      flow_shift_sr: generator.pipeline.profile_overrides.flow_shift_sr
+      is_causal: generator.pipeline.profile_overrides.is_causal
+      vae_tiling: generator.pipeline.profile_overrides.vae_tiling
+      vae_sp: generator.pipeline.profile_overrides.vae_sp
+      dmd_denoising_steps: generator.pipeline.profile_overrides.dmd_denoising_steps
+      ti2v_task: generator.pipeline.profile_overrides.ti2v_task
+      boundary_ratio: generator.pipeline.profile_overrides.boundary_ratio
+    compatibility_only:
+      model_path: "Redundant with generator.model_path."
+      disable_autocast: "Duplicated by generator.engine.disable_autocast during migration."
+      dit_precision: "Precision override pending dedicated typed component precision design."
+      upsampler_precision: "Precision override pending dedicated typed component precision design."
+      vae_precision: "Precision override pending dedicated typed component precision design."
+      image_encoder_precision: "Precision override pending dedicated typed component precision design."
+      text_encoder_precisions: "Precision override pending dedicated typed component precision design."
+    internal_only:
+      dit_config: "Legacy internal component config object."
+      upsampler_config: "Legacy internal component config object."
+      vae_config: "Legacy internal component config object."
+      image_encoder_config: "Legacy internal component config object."
+      text_encoder_configs: "Legacy internal component config object."
+      preprocess_text_funcs: "Internal text preprocessing hooks."
+      postprocess_text_funcs: "Internal text postprocessing hooks."
+
+  pipeline_config_extensions:
+    profile_owned:
+      conditioning_strategy:
+        sources:
+          - fastvideo.configs.pipelines.cosmos.CosmosConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      max_num_conditional_frames:
+        sources:
+          - fastvideo.configs.pipelines.cosmos.CosmosConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      min_num_conditional_frames:
+        sources:
+          - fastvideo.configs.pipelines.cosmos.CosmosConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      sigma_conditional:
+        sources:
+          - fastvideo.configs.pipelines.cosmos.CosmosConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      sigma_data:
+        sources:
+          - fastvideo.configs.pipelines.cosmos.CosmosConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      state_ch:
+        sources:
+          - fastvideo.configs.pipelines.cosmos.CosmosConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      state_t:
+        sources:
+          - fastvideo.configs.pipelines.cosmos.CosmosConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      text_encoder_class:
+        sources:
+          - fastvideo.configs.pipelines.cosmos.CosmosConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      autoregressive_chunk_frames:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      autoregressive_overlap_frames:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      cfg_behavior:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      default_camera_rotation:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      default_movement_distance:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      default_negative_prompt:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      default_trajectory_type:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      filter_points_threshold:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      fps:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      frame_buffer_max:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      moge_model_name:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      noise_aug_strength:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      num_frames:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      offload_moge_after_depth:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      use_moge_depth:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      video_resolution:
+        sources:
+          - fastvideo.configs.pipelines.gen3c.Gen3CConfig
+          - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
+      text_encoder_crop_start:
+        sources:
+          - fastvideo.configs.pipelines.hunyuan15.Hunyuan15I2V480PStepDistilledConfig
+          - fastvideo.configs.pipelines.hunyuan15.Hunyuan15I2V720PConfig
+          - fastvideo.configs.pipelines.hunyuan15.Hunyuan15SR1080PConfig
+          - fastvideo.configs.pipelines.hunyuan15.Hunyuan15T2V480PConfig
+          - fastvideo.configs.pipelines.hunyuan15.Hunyuan15T2V720PConfig
+          - fastvideo.configs.pipelines.hyworld.HYWorldConfig
+          - fastvideo.configs.pipelines.hyworld.Hunyuan15T2V480PConfig
+      text_encoder_max_lengths:
+        sources:
+          - fastvideo.configs.pipelines.hunyuan15.Hunyuan15I2V480PStepDistilledConfig
+          - fastvideo.configs.pipelines.hunyuan15.Hunyuan15I2V720PConfig
+          - fastvideo.configs.pipelines.hunyuan15.Hunyuan15SR1080PConfig
+          - fastvideo.configs.pipelines.hunyuan15.Hunyuan15T2V480PConfig
+          - fastvideo.configs.pipelines.hunyuan15.Hunyuan15T2V720PConfig
+          - fastvideo.configs.pipelines.hyworld.HYWorldConfig
+          - fastvideo.configs.pipelines.hyworld.Hunyuan15T2V480PConfig
+      precision:
+        sources:
+          - fastvideo.configs.pipelines.lingbotworld.LingBotWorldI2V480PConfig
+          - fastvideo.configs.pipelines.lingbotworld.Wan2_2_I2V_A14B_Config
+          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionI2VConfig
+          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionI2V_A14B_Config
+          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionT2VConfig
+          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionT2V_14B_Config
+          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionT2V_1_3B_Config
+          - fastvideo.configs.pipelines.wan.FastWan2_1_T2V_480P_Config
+          - fastvideo.configs.pipelines.wan.FastWan2_2_TI2V_5B_Config
+          - fastvideo.configs.pipelines.wan.MatrixGameBaseI2V480PConfig
+          - fastvideo.configs.pipelines.wan.MatrixGameI2V480PConfig
+          - fastvideo.configs.pipelines.wan.SelfForcingWan2_2_T2V480PConfig
+          - fastvideo.configs.pipelines.wan.SelfForcingWanT2V480PConfig
+          - fastvideo.configs.pipelines.wan.WANV2VConfig
+          - fastvideo.configs.pipelines.wan.Wan2_2_I2V_A14B_Config
+          - fastvideo.configs.pipelines.wan.Wan2_2_T2V_A14B_Config
+          - fastvideo.configs.pipelines.wan.Wan2_2_TI2V_5B_Config
+          - fastvideo.configs.pipelines.wan.WanI2V480PConfig
+          - fastvideo.configs.pipelines.wan.WanI2V720PConfig
+          - fastvideo.configs.pipelines.wan.WanT2V480PConfig
+          - fastvideo.configs.pipelines.wan.WanT2V720PConfig
+      warp_denoising_step:
+        sources:
+          - fastvideo.configs.pipelines.lingbotworld.LingBotWorldI2V480PConfig
+          - fastvideo.configs.pipelines.lingbotworld.Wan2_2_I2V_A14B_Config
+          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionI2VConfig
+          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionI2V_A14B_Config
+          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionT2VConfig
+          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionT2V_14B_Config
+          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionT2V_1_3B_Config
+          - fastvideo.configs.pipelines.wan.FastWan2_1_T2V_480P_Config
+          - fastvideo.configs.pipelines.wan.FastWan2_2_TI2V_5B_Config
+          - fastvideo.configs.pipelines.wan.MatrixGameBaseI2V480PConfig
+          - fastvideo.configs.pipelines.wan.MatrixGameI2V480PConfig
+          - fastvideo.configs.pipelines.wan.SelfForcingWan2_2_T2V480PConfig
+          - fastvideo.configs.pipelines.wan.SelfForcingWanT2V480PConfig
+          - fastvideo.configs.pipelines.wan.WANV2VConfig
+          - fastvideo.configs.pipelines.wan.Wan2_2_I2V_A14B_Config
+          - fastvideo.configs.pipelines.wan.Wan2_2_T2V_A14B_Config
+          - fastvideo.configs.pipelines.wan.Wan2_2_TI2V_5B_Config
+          - fastvideo.configs.pipelines.wan.WanI2V480PConfig
+          - fastvideo.configs.pipelines.wan.WanI2V720PConfig
+          - fastvideo.configs.pipelines.wan.WanT2V480PConfig
+          - fastvideo.configs.pipelines.wan.WanT2V720PConfig
+      bsa_cdf_threshold:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+      bsa_chunk_k:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+      bsa_chunk_q:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+      bsa_params:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+      bsa_sparsity:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+      enable_bsa:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+      enable_kv_cache:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+      enhance_hf:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+      offload_kv_cache:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+      t_thresh:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+      use_distill:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+      scheduler_arch:
+        sources: [fastvideo.configs.pipelines.sd35.SD35Config]
+      text_encoder_archs:
+        sources: [fastvideo.configs.pipelines.sd35.SD35Config]
+      tokenizer_archs:
+        sources: [fastvideo.configs.pipelines.sd35.SD35Config]
+      transformer_arch:
+        sources: [fastvideo.configs.pipelines.sd35.SD35Config]
+      vae_arch:
+        sources: [fastvideo.configs.pipelines.sd35.SD35Config]
+      expand_timesteps:
+        sources:
+          - fastvideo.configs.pipelines.wan.FastWan2_2_TI2V_5B_Config
+          - fastvideo.configs.pipelines.wan.Wan2_2_TI2V_5B_Config
+      context_noise:
+        sources: [fastvideo.configs.pipelines.wan.MatrixGameI2V480PConfig]
+      num_frames_per_block:
+        sources: [fastvideo.configs.pipelines.wan.MatrixGameI2V480PConfig]
+    compatibility_only:
+      batch_size: "Gen3C inference-only tuning field pending typed batching design."
+      gradient_checkpointing: "Gen3C inference-only compatibility field pending typed batching design."
+      guidance_scale: "Gen3C pipeline-level default pending profile/default-request cleanup."
+      num_inference_steps: "Gen3C pipeline-level default pending profile/default-request cleanup."
+    internal_only:
+      audio_decoder_config: "Legacy internal component config object."
+      audio_decoder_precision: "Precision override pending dedicated component precision design."
+      vocoder_config: "Legacy internal component config object."
+      vocoder_precision: "Precision override pending dedicated component precision design."
+
+  sampling_param_base:
+    moved:
+      image_path: request.inputs.image_path
+      pil_image: request.inputs.pil_image
+      video_path: request.inputs.video_path
+      mouse_cond: request.inputs.mouse_cond
+      keyboard_cond: request.inputs.keyboard_cond
+      grid_sizes: request.inputs.grid_sizes
+      pose: request.inputs.pose
+      c2ws_plucker_emb: request.inputs.c2ws_plucker_emb
+      refine_from: request.inputs.refine_from
+      stage1_video: request.inputs.stage1_video
+      prompt: request.prompt
+      negative_prompt: request.negative_prompt
+      prompt_path: request.inputs.prompt_path
+      output_path: request.output.output_path
+      output_video_name: request.output.output_video_name
+      num_videos_per_prompt: request.sampling.num_videos_per_prompt
+      seed: request.sampling.seed
+      num_frames: request.sampling.num_frames
+      height: request.sampling.height
+      width: request.sampling.width
+      height_sr: request.sampling.height_sr
+      width_sr: request.sampling.width_sr
+      fps: request.sampling.fps
+      num_inference_steps: request.sampling.num_inference_steps
+      num_inference_steps_sr: request.sampling.num_inference_steps_sr
+      guidance_scale: request.sampling.guidance_scale
+      guidance_rescale: request.sampling.guidance_rescale
+      boundary_ratio: request.sampling.boundary_ratio
+      sigmas: request.sampling.sigmas
+      enable_teacache: request.runtime.enable_teacache
+      save_video: request.output.save_video
+      return_frames: request.output.return_frames
+      return_trajectory_latents: request.runtime.return_trajectory_latents
+      return_trajectory_decoded: request.runtime.return_trajectory_decoded
+    profile_owned:
+      t_thresh: request.stage_overrides.refine.t_thresh
+      spatial_refine_only: request.stage_overrides.refine.spatial_refine_only
+      num_cond_frames: request.stage_overrides.refine.num_cond_frames
+      trajectory_type: request.extensions.gen3c.trajectory_type
+      movement_distance: request.extensions.gen3c.movement_distance
+      camera_rotation: request.extensions.gen3c.camera_rotation
+    internal_only:
+      data_type: "Derived from the request shape and not a public input."
+
+  sampling_param_extensions:
+    moved:
+      guidance_scale_2:
+        target: request.sampling.guidance_scale_2
+        sources:
+          - fastvideo.configs.sample.lingbotworld.LingBotWorld_SamplingParam
+          - fastvideo.configs.sample.lingbotworld.Wan2_2_I2V_A14B_SamplingParam
+          - fastvideo.configs.sample.wan.SelfForcingWan2_2_T2V_A14B_480P_SamplingParam
+          - fastvideo.configs.sample.wan.Wan2_2_I2V_A14B_SamplingParam
+          - fastvideo.configs.sample.wan.Wan2_2_T2V_A14B_SamplingParam
+    profile_owned:
+      action_list:
+        target: request.extensions.hunyuangamecraft.action_list
+        sources:
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraftSamplingParam
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft65FrameSamplingParam
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft129FrameSamplingParam
+      action_speed_list:
+        target: request.extensions.hunyuangamecraft.action_speed_list
+        sources:
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraftSamplingParam
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft65FrameSamplingParam
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft129FrameSamplingParam
+      camera_states:
+        target: request.extensions.hunyuangamecraft.camera_states
+        sources:
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraftSamplingParam
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft65FrameSamplingParam
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft129FrameSamplingParam
+      camera_trajectory:
+        target: request.extensions.hunyuangamecraft.camera_trajectory
+        sources:
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraftSamplingParam
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft65FrameSamplingParam
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft129FrameSamplingParam
+      conditioning_mask:
+        target: request.extensions.hunyuangamecraft.conditioning_mask
+        sources:
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraftSamplingParam
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft65FrameSamplingParam
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft129FrameSamplingParam
+      gt_latents:
+        target: request.extensions.hunyuangamecraft.gt_latents
+        sources:
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraftSamplingParam
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft65FrameSamplingParam
+          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft129FrameSamplingParam
+      prompt_attention_mask:
+        target: request.extensions.hyworld.prompt_attention_mask
+        sources: [fastvideo.configs.sample.hyworld.HYWorld_SamplingParam]
+      negative_attention_mask:
+        target: request.extensions.hyworld.negative_attention_mask
+        sources: [fastvideo.configs.sample.hyworld.HYWorld_SamplingParam]
+      ltx2_cfg_scale_audio:
+        target: request.extensions.ltx2.cfg_scale_audio
+        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
+      ltx2_cfg_scale_video:
+        target: request.extensions.ltx2.cfg_scale_video
+        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
+      ltx2_modality_scale_audio:
+        target: request.extensions.ltx2.modality_scale_audio
+        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
+      ltx2_modality_scale_video:
+        target: request.extensions.ltx2.modality_scale_video
+        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
+      ltx2_rescale_scale:
+        target: request.extensions.ltx2.rescale_scale
+        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
+      ltx2_stg_blocks_audio:
+        target: request.extensions.ltx2.stg_blocks_audio
+        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
+      ltx2_stg_blocks_video:
+        target: request.extensions.ltx2.stg_blocks_video
+        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
+      ltx2_stg_scale_audio:
+        target: request.extensions.ltx2.stg_scale_audio
+        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
+      ltx2_stg_scale_video:
+        target: request.extensions.ltx2.stg_scale_video
+        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
+
+  openai_image_request:
+    kept:
+      model: "HTTP adapter model-routing field."
+      response_format: "HTTP adapter response formatting field."
+      output_format: "HTTP adapter output-format field."
+      background: "HTTP adapter output-format field."
+      quality: "Compatibility field currently accepted by the adapter."
+      style: "Compatibility field currently accepted by the adapter."
+      user: "Compatibility field currently accepted by the adapter."
+    moved:
+      prompt: request.prompt
+      n: request.sampling.num_videos_per_prompt
+      size: request.sampling.height,width
+      num_inference_steps: request.sampling.num_inference_steps
+      guidance_scale: request.sampling.guidance_scale
+      true_cfg_scale: request.sampling.true_cfg_scale
+      seed: request.sampling.seed
+      negative_prompt: request.negative_prompt
+      enable_teacache: request.runtime.enable_teacache
+
+  openai_video_request:
+    kept:
+      model: "HTTP adapter model-routing field."
+    moved:
+      prompt: request.prompt
+      input_reference: request.inputs.image_path
+      reference_url: request.inputs.image_path
+      seconds: request.sampling.num_frames
+      size: request.sampling.height,width
+      fps: request.sampling.fps
+      num_frames: request.sampling.num_frames
+      seed: request.sampling.seed
+      num_inference_steps: request.sampling.num_inference_steps
+      guidance_scale: request.sampling.guidance_scale
+      guidance_scale_2: request.sampling.guidance_scale_2
+      true_cfg_scale: request.sampling.true_cfg_scale
+      negative_prompt: request.negative_prompt
+      enable_teacache: request.runtime.enable_teacache
+      output_path: request.output.output_path
+
+cli:
+  notes:
+    - "CLI parity is checked against the actual generate/serve parser dest sets."
+    - "The inventory tracks parser dest names, excluding argparse's implicit help action."
+  generate:
+    explicit_local_fields:
+      - config
+    expected_dests:
+      - VSA_sparsity
+      - boundary_ratio
+      - bsa_cdf_threshold
+      - bsa_chunk_k
+      - bsa_chunk_q
+      - bsa_sparsity
+      - config
+      - disable_autocast
+      - dist_timeout
+      - distributed_executor_backend
+      - dit_config.prefix
+      - dit_config.quant_config
+      - dit_cpu_offload
+      - dit_layerwise_offload
+      - dit_precision
+      - dmd_denoising_steps
+      - embedded_cfg_scale
+      - enable_bsa
+      - enable_stage_verification
+      - enable_torch_compile
+      - flow_shift
+      - fps
+      - guidance_rescale
+      - guidance_scale
+      - height
+      - hsdp_replicate_dim
+      - hsdp_shard_dim
+      - image_encoder_cpu_offload
+      - image_encoder_precision
+      - image_path
+      - inference_mode
+      - init_weights_from_safetensors
+      - init_weights_from_safetensors_2
+      - lora_nickname
+      - lora_path
+      - lora_target_modules
+      - ltx2_initial_latent_path
+      - ltx2_vae_spatial_tile_overlap_in_pixels
+      - ltx2_vae_spatial_tile_size_in_pixels
+      - ltx2_vae_temporal_tile_overlap_in_frames
+      - ltx2_vae_temporal_tile_size_in_frames
+      - ltx2_vae_tiling
+      - master_port
+      - moba_config_path
+      - mode
+      - model_path
+      - negative_prompt
+      - num_cond_frames
+      - num_frames
+      - num_gpus
+      - num_inference_steps
+      - num_videos_per_prompt
+      - output_path
+      - output_type
+      - output_video_name
+      - override_pipeline_cls_name
+      - override_text_encoder_quant
+      - override_text_encoder_safetensors
+      - override_transformer_cls_name
+      - pin_cpu_memory
+      - pipeline_config_path
+      - preprocess.dataloader_num_workers
+      - preprocess.dataset_output_dir
+      - preprocess.dataset_path
+      - preprocess.dataset_type
+      - preprocess.do_temporal_sample
+      - preprocess.drop_short_ratio
+      - preprocess.flush_frequency
+      - preprocess.max_height
+      - preprocess.max_width
+      - preprocess.model_path
+      - preprocess.num_frames
+      - preprocess.preprocess_video_batch_size
+      - preprocess.samples_per_file
+      - preprocess.seed
+      - preprocess.speed_factor
+      - preprocess.train_fps
+      - preprocess.training_cfg_rate
+      - preprocess.video_length_tolerance_range
+      - preprocess.video_loader_type
+      - preprocess.with_audio
+      - prompt
+      - prompt_path
+      - prompt_txt
+      - refine_from
+      - return_frames
+      - return_trajectory_decoded
+      - return_trajectory_latents
+      - revision
+      - save_video
+      - seed
+      - sp_size
+      - spatial_refine_only
+      - t_thresh
+      - text_encoder_configs
+      - text_encoder_cpu_offload
+      - text_encoder_precisions
+      - torch_compile_kwargs
+      - tp_size
+      - trust_remote_code
+      - use_fsdp_inference
+      - vae_config.blend_num_frames
+      - vae_config.load_decoder
+      - vae_config.load_encoder
+      - vae_config.tile_sample_min_height
+      - vae_config.tile_sample_min_num_frames
+      - vae_config.tile_sample_min_width
+      - vae_config.tile_sample_stride_height
+      - vae_config.tile_sample_stride_num_frames
+      - vae_config.tile_sample_stride_width
+      - vae_config.use_parallel_tiling
+      - vae_config.use_temporal_tiling
+      - vae_config.use_tiling
+      - vae_cpu_offload
+      - vae_precision
+      - vae_sp
+      - vae_tiling
+      - video_path
+      - width
+      - workload_type
+  serve:
+    explicit_local_fields:
+      - config
+      - host
+      - output_dir
+      - port
+    expected_dests:
+      - VSA_sparsity
+      - bsa_cdf_threshold
+      - bsa_chunk_k
+      - bsa_chunk_q
+      - bsa_sparsity
+      - config
+      - disable_autocast
+      - dist_timeout
+      - distributed_executor_backend
+      - dit_config.prefix
+      - dit_config.quant_config
+      - dit_cpu_offload
+      - dit_layerwise_offload
+      - dit_precision
+      - dmd_denoising_steps
+      - embedded_cfg_scale
+      - enable_bsa
+      - enable_stage_verification
+      - enable_torch_compile
+      - flow_shift
+      - host
+      - hsdp_replicate_dim
+      - hsdp_shard_dim
+      - image_encoder_cpu_offload
+      - image_encoder_precision
+      - inference_mode
+      - init_weights_from_safetensors
+      - init_weights_from_safetensors_2
+      - lora_nickname
+      - lora_path
+      - lora_target_modules
+      - ltx2_initial_latent_path
+      - ltx2_vae_spatial_tile_overlap_in_pixels
+      - ltx2_vae_spatial_tile_size_in_pixels
+      - ltx2_vae_temporal_tile_overlap_in_frames
+      - ltx2_vae_temporal_tile_size_in_frames
+      - ltx2_vae_tiling
+      - master_port
+      - mode
+      - model_path
+      - num_gpus
+      - output_dir
+      - output_type
+      - override_pipeline_cls_name
+      - override_text_encoder_quant
+      - override_text_encoder_safetensors
+      - override_transformer_cls_name
+      - pin_cpu_memory
+      - pipeline_config_path
+      - port
+      - preprocess.dataloader_num_workers
+      - preprocess.dataset_output_dir
+      - preprocess.dataset_path
+      - preprocess.dataset_type
+      - preprocess.do_temporal_sample
+      - preprocess.drop_short_ratio
+      - preprocess.flush_frequency
+      - preprocess.max_height
+      - preprocess.max_width
+      - preprocess.model_path
+      - preprocess.num_frames
+      - preprocess.preprocess_video_batch_size
+      - preprocess.samples_per_file
+      - preprocess.seed
+      - preprocess.speed_factor
+      - preprocess.train_fps
+      - preprocess.training_cfg_rate
+      - preprocess.video_length_tolerance_range
+      - preprocess.video_loader_type
+      - preprocess.with_audio
+      - prompt_txt
+      - revision
+      - sp_size
+      - text_encoder_cpu_offload
+      - text_encoder_precisions
+      - torch_compile_kwargs
+      - tp_size
+      - trust_remote_code
+      - use_fsdp_inference
+      - vae_config.blend_num_frames
+      - vae_config.load_decoder
+      - vae_config.load_encoder
+      - vae_config.tile_sample_min_height
+      - vae_config.tile_sample_min_num_frames
+      - vae_config.tile_sample_min_width
+      - vae_config.tile_sample_stride_height
+      - vae_config.tile_sample_stride_num_frames
+      - vae_config.tile_sample_stride_width
+      - vae_config.use_parallel_tiling
+      - vae_config.use_temporal_tiling
+      - vae_config.use_tiling
+      - vae_cpu_offload
+      - vae_precision
+      - vae_sp
+      - vae_tiling
+      - workload_type
