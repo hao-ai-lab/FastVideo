@@ -456,7 +456,9 @@ surfaces:
     moved:
       prompt: request.prompt
       n: request.sampling.num_videos_per_prompt
-      size: request.sampling.height,width
+      size:
+        target: request.sampling.width,height
+        note: "Adapter parses OpenAI size strings as WIDTHxHEIGHT and forwards width then height."
       num_inference_steps: request.sampling.num_inference_steps
       guidance_scale: request.sampling.guidance_scale
       true_cfg_scale: request.sampling.true_cfg_scale
@@ -471,8 +473,9 @@ surfaces:
       prompt: request.prompt
       input_reference: request.inputs.image_path
       reference_url: request.inputs.image_path
-      seconds: request.sampling.num_frames
-      size: request.sampling.height,width
+      size:
+        target: request.sampling.width,height
+        note: "Adapter parses OpenAI size strings as WIDTHxHEIGHT and forwards width then height."
       fps: request.sampling.fps
       num_frames: request.sampling.num_frames
       seed: request.sampling.seed
@@ -483,6 +486,10 @@ surfaces:
       negative_prompt: request.negative_prompt
       enable_teacache: request.runtime.enable_teacache
       output_path: request.output.output_path
+    compatibility_only:
+      seconds:
+        target: request.sampling.num_frames
+        note: "HTTP adapter duration convenience field. If num_frames is omitted, the adapter computes num_frames = fps * seconds."
 
 cli:
   notes:

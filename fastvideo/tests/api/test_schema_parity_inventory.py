@@ -12,6 +12,7 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.entrypoints.cli.generate import GenerateSubcommand
 from fastvideo.entrypoints.cli.serve import ServeSubcommand
+from fastvideo.entrypoints.openai import image_api, video_api
 from fastvideo.entrypoints.openai.protocol import (
     ImageGenerationsRequest,
     VideoGenerationsRequest,
@@ -175,3 +176,43 @@ def test_review_gap_fields_are_explicitly_inventory_tracked() -> None:
     assert "true_cfg_scale" in image_request["moved"]
     assert "guidance_scale_2" in video_request["moved"]
     assert "true_cfg_scale" in video_request["moved"]
+
+
+def test_openai_size_mapping_preserves_width_height_ordering(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    inventory = _load_inventory()
+
+    monkeypatch.setattr(image_api, "get_output_dir", lambda: str(tmp_path))
+    image_kwargs = image_api._build_generation_kwargs(
+        request_id="img-test",
+        prompt="test",
+        size="640x360",
+    )
+    assert image_kwargs["width"] == 640
+    assert image_kwargs["height"] == 360
+
+    image_size = inventory["surfaces"]["openai_image_request"]["moved"]["size"]
+    video_size = inventory["surfaces"]["openai_video_request"]["moved"]["size"]
+    assert image_size["target"] == "request.sampling.width,height"
+    assert video_size["target"] == "request.sampling.width,height"
+
+
+def test_openai_seconds_mapping_preserves_duration_semantics(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    inventory = _load_inventory()
+
+    monkeypatch.setattr(video_api, "get_output_dir", lambda: str(tmp_path))
+    request = VideoGenerationsRequest(prompt="test", seconds=4, fps=24)
+    kwargs = video_api._build_generation_kwargs("vid-test", request)
+    assert kwargs["fps"] == 24
+    assert kwargs["num_frames"] == 96
+
+    seconds_entry = inventory["surfaces"]["openai_video_request"][
+        "compatibility_only"
+    ]["seconds"]
+    assert seconds_entry["target"] == "request.sampling.num_frames"
+    assert "fps * seconds" in seconds_entry["note"]
