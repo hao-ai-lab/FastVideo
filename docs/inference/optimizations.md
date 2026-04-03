@@ -101,7 +101,7 @@ pip install flashinfer
 Enable FP4 attention via environment variables:
 
 ```bash
-FASTVIDEO_NVFP4_FA4=1 CUTE_DSL_ENABLE_TVM_FFI=1 python examples/inference/optimizations/fp4_attention.py --nvfp4_fa4
+FASTVIDEO_NVFP4_FA4=1 CUTE_DSL_ENABLE_TVM_FFI=1 python examples/inference/optimizations/fp4_attn_wan2_1_1_3b.py --nvfp4_fa4
 ```
 
 Or in Python:
