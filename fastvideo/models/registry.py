@@ -59,6 +59,7 @@ _TEXT_ENCODER_MODELS = {
     ("encoders", "clip", "CLIPTextModelWithProjection"),
     "LlamaModel": ("encoders", "llama", "LlamaModel"),
     "UMT5EncoderModel": ("encoders", "t5", "UMT5EncoderModel"),
+    "UMT5ForConditionalGeneration": ("encoders", "t5", "UMT5EncoderModel"),
     "T5EncoderModel": ("encoders", "t5_hf", "T5EncoderModel"),
     "BertModel": ("encoders", "clip", "CLIPTextModel"),
     "Qwen2_5_VLTextModel": ("encoders", "qwen2_5", "Qwen2_5_VLTextModel"),
