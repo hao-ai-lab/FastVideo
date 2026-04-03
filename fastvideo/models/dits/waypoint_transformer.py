@@ -43,7 +43,7 @@ from fastvideo.logger import init_logger
 from fastvideo.configs.models.dits.waypoint_transformer import (
     WaypointConfig,
 )
-from fastvideo.models.dits.base import CachableDiT
+from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 
 # Default config instance used for class-level attributes
@@ -812,7 +812,7 @@ def is_blocks(name: str) -> bool:
     return ".blocks." in name
 
 
-class WaypointWorldModel(CachableDiT):
+class WaypointWorldModel(BaseDiT):
     """
     Waypoint World Model for interactive video generation.
     
@@ -823,7 +823,7 @@ class WaypointWorldModel(CachableDiT):
     - The current noise level
     """
     
-    # Required class attributes for CachableDiT (read from default config)
+    # Required class attributes for BaseDiT (read from default config)
     _fsdp_shard_conditions = _DEFAULT_WAYPOINT_ARCH._fsdp_shard_conditions
     _compile_conditions = []
     param_names_mapping = _DEFAULT_WAYPOINT_ARCH.param_names_mapping
@@ -879,7 +879,9 @@ class WaypointWorldModel(CachableDiT):
         )
 
         self.out_norm = AdaLN(config.d_model)
-    
+
+        self.__post_init__()
+
     def forward(
         self,
         x: torch.Tensor,
