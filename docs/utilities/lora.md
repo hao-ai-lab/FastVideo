@@ -5,7 +5,7 @@ Tools for extracting and merging LoRA adapters for FastVideo models.
 ## Extract LoRA Adapter
 
 ```bash
-python scripts/lora_extraction/extract_lora.py \
+python examples/lora_extraction/extract_lora.py \
   --base Wan-AI/Wan2.2-TI2V-5B-Diffusers \
   --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \
   --out adapter_r32.safetensors \
@@ -23,7 +23,7 @@ python scripts/lora_extraction/extract_lora.py \
 ## Merge Adapter
 
 ```bash
-python scripts/lora_extraction/merge_lora.py \
+python examples/lora_extraction/merge_lora.py \
   --base Wan-AI/Wan2.2-TI2V-5B-Diffusers \
   --adapter adapter_r32.safetensors \
   --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \
@@ -40,7 +40,7 @@ python scripts/lora_extraction/merge_lora.py \
 ## Validate Quality (Optional)
 
 ```bash
-python scripts/lora_extraction/lora_inference_comparison.py \
+python examples/lora_extraction/lora_inference_comparison.py \
   --base merged_model \
   --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \
   --adapter NONE \
