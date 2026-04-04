@@ -100,6 +100,8 @@ class FlashAttentionImpl(AttentionImpl):
         key: torch.Tensor,
         value: torch.Tensor,
         attn_metadata: FlashAttnMetadata,
+        gate_compress: torch.Tensor | None = None,
+        
     ):
 
         def _key_padding_mask_from_attn_mask(attn_mask: torch.Tensor, key_len: int) -> torch.Tensor:

@@ -102,6 +102,8 @@ class AttentionLayer(Protocol):
         value: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
+        gate_compress: torch.Tensor | None = None,
+        
     ) -> torch.Tensor:
         ...
 
@@ -169,5 +171,6 @@ class AttentionImpl(ABC, Generic[T]):
         key: torch.Tensor,
         value: torch.Tensor,
         attn_metadata: T,
+        gate_compress: torch.Tensor | None = None,
     ) -> torch.Tensor:
         raise NotImplementedError

@@ -232,13 +232,13 @@ class VideoSparseAttentionImpl(AttentionImpl):
     ) -> torch.Tensor:
         return self.untile(output, attn_metadata.reverse_tile_partition_indices, attn_metadata.non_pad_index)
 
-    def forward(  # type: ignore[override]
+    def forward(
         self,
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        gate_compress: torch.Tensor,
         attn_metadata: VideoSparseAttentionMetadata,
+        gate_compress: torch.Tensor,
     ) -> torch.Tensor:
         query = query.transpose(1, 2).contiguous()
         key = key.transpose(1, 2).contiguous()
