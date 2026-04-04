@@ -312,3 +312,5 @@ pull_request_rules:
 
           Please update your PR title and the merge protection check will pass automatically.
 
+merge_protections_settings:
+  reporting_method: check-runs
