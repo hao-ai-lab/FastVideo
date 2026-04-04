@@ -154,6 +154,16 @@ class WandbTracker(BaseTracker):
             self._run.log(metrics, step=step)
         self._timed_metrics = {}
 
+    def log_artifacts(self, artifacts: dict[str, Any], step: int) -> None:
+        if not artifacts:
+            return
+
+        normalized_artifacts = dict(artifacts)
+        if "validation_ref_videos" in normalized_artifacts:
+            normalized_artifacts["reference_video/videos"] = (normalized_artifacts.pop("validation_ref_videos"))
+
+        self.log(normalized_artifacts, step)
+
     def log_file(
         self,
         file_path: str,

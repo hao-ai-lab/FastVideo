@@ -157,3 +157,36 @@ pyarrow_schema_matrixgame = pa.schema([
     pa.field("duration_sec", pa.float64()),
     pa.field("fps", pa.float64()),
 ])
+
+pyarrow_schema_matrixgame_ode_trajectory = pa.schema([
+    pa.field("id", pa.string()),
+    # --- Action ---
+    pa.field("mouse_cond_bytes", pa.binary()),
+    pa.field("mouse_cond_shape", pa.list_(pa.int64())),  # [T, 2]
+    pa.field("mouse_cond_dtype", pa.string()),
+    pa.field("keyboard_cond_bytes", pa.binary()),
+    pa.field("keyboard_cond_shape", pa.list_(pa.int64())),  # [T, 4]
+    pa.field("keyboard_cond_dtype", pa.string()),
+    #I2V
+    pa.field("clip_feature_bytes", pa.binary()),
+    pa.field("clip_feature_shape", pa.list_(pa.int64())),
+    pa.field("clip_feature_dtype", pa.string()),
+    pa.field("first_frame_latent_bytes", pa.binary()),
+    pa.field("first_frame_latent_shape", pa.list_(pa.int64())),
+    pa.field("first_frame_latent_dtype", pa.string()),
+    # I2V Validation
+    pa.field("pil_image_bytes", pa.binary()),
+    pa.field("pil_image_shape", pa.list_(pa.int64())),
+    pa.field("pil_image_dtype", pa.string()),
+    # --- ODE Trajectory ---
+    pa.field("trajectory_latents_bytes", pa.binary()),
+    pa.field("trajectory_latents_shape", pa.list_(pa.int64())),
+    pa.field("trajectory_latents_dtype", pa.string()),
+    pa.field("trajectory_timesteps_bytes", pa.binary()),
+    pa.field("trajectory_timesteps_shape", pa.list_(pa.int64())),
+    pa.field("trajectory_timesteps_dtype", pa.string()),
+    # --- Metadata ---
+    pa.field("file_name", pa.string()),
+    pa.field("caption", pa.string()),
+    pa.field("media_type", pa.string()),  # 'image' or 'video'
+])

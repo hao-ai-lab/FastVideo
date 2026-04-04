@@ -173,11 +173,15 @@ def pred_noise_to_pred_video(pred_noise: torch.Tensor,
     device = pred_noise.device
     pred_noise = pred_noise.double().to(device)
     noise_input_latent = noise_input_latent.double().to(device)
-    sigmas = scheduler.sigmas.double().to(device)
-    timesteps = scheduler.timesteps.double().to(device)
-    timestep_id = torch.argmin(
-        (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-    sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
+    if hasattr(scheduler, "sigma_from_timestep"):
+        sigma_t = scheduler.sigma_from_timestep(timestep).double().to(
+            device).reshape(-1, 1, 1, 1)
+    else:
+        sigmas = scheduler.sigmas.double().to(device)
+        timesteps = scheduler.timesteps.double().to(device)
+        timestep_id = torch.argmin(
+            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
+        sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
     pred_video = noise_input_latent - sigma_t * pred_noise
     return pred_video.to(dtype)
 
@@ -217,14 +221,20 @@ def pred_noise_to_x_bound(pred_noise: torch.Tensor,
     device = pred_noise.device
     pred_noise = pred_noise.double().to(device)
     noise_input_latent = noise_input_latent.double().to(device)
-    sigmas = scheduler.sigmas.double().to(device)
-    timesteps = scheduler.timesteps.double().to(device)
-    timestep_id = torch.argmin(
-        (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-    sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
+    if hasattr(scheduler, "sigma_from_timestep"):
+        sigma_t = scheduler.sigma_from_timestep(timestep).double().to(
+            device).reshape(-1, 1, 1, 1)
+        sigma_t_boundary = scheduler.sigma_from_timestep(
+            boundary_timestep).double().to(device).reshape(-1, 1, 1, 1)
+    else:
+        sigmas = scheduler.sigmas.double().to(device)
+        timesteps = scheduler.timesteps.double().to(device)
+        timestep_id = torch.argmin(
+            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
+        sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
 
-    boundary_timestep_id = torch.argmin(
-        (timesteps.unsqueeze(0) - boundary_timestep.unsqueeze(1)).abs(), dim=1)
-    sigma_t_boundary = sigmas[boundary_timestep_id].reshape(-1, 1, 1, 1)
+        boundary_timestep_id = torch.argmin(
+            (timesteps.unsqueeze(0) - boundary_timestep.unsqueeze(1)).abs(), dim=1)
+        sigma_t_boundary = sigmas[boundary_timestep_id].reshape(-1, 1, 1, 1)
     pred_video = noise_input_latent - (sigma_t - sigma_t_boundary) * pred_noise
     return pred_video.to(dtype)
