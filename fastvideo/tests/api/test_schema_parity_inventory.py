@@ -4,10 +4,13 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import pkgutil
+import types
 from pathlib import Path
+from typing import Any, Union, get_args, get_origin, get_type_hints
 
 import yaml
 
+from fastvideo.api import RunConfig, ServeConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.entrypoints.cli.generate import GenerateSubcommand
@@ -72,6 +75,70 @@ def _get_cli_dests(cmd_cls: type) -> set[str]:
         for action in subparser._actions
         if action.option_strings and action.dest != "help"
     }
+
+
+def _iter_inventory_targets(value: object) -> list[str]:
+    if isinstance(value, str):
+        return _expand_inventory_target(value)
+    if isinstance(value, dict):
+        target = value.get("target")
+        if isinstance(target, str):
+            return _expand_inventory_target(target)
+    return []
+
+
+def _expand_inventory_target(target: str) -> list[str]:
+    last_dot = target.rfind(".")
+    if last_dot == -1:
+        return [target]
+    prefix = target[:last_dot]
+    leaf = target[last_dot + 1:]
+    if "," not in leaf:
+        return [target]
+    return [f"{prefix}.{part}" for part in leaf.split(",")]
+
+
+def _document_root_for_target(target: str) -> type:
+    if target.startswith(("generator.", "request.")):
+        return RunConfig
+    if target.startswith(("server.", "default_request.")):
+        return ServeConfig
+    raise AssertionError(f"Unsupported schema target root: {target}")
+
+
+def _walk_schema_target(root_type: type, target: str) -> None:
+    current_annotation: Any = root_type
+    for depth, segment in enumerate(target.split("."), start=1):
+        current_annotation = _unwrap_schema_annotation(current_annotation)
+        if current_annotation is Any:
+            return
+        origin = get_origin(current_annotation)
+        if origin is dict:
+            return
+        assert dataclasses.is_dataclass(current_annotation), (
+            f"{target!r} diverges at {'.'.join(target.split('.')[:depth - 1]) or '<root>'}: "
+            f"{current_annotation!r} is not a dataclass or open dict boundary"
+        )
+        hints = get_type_hints(current_annotation)
+        assert segment in hints, f"{target!r} missing segment {segment!r}"
+        current_annotation = hints[segment]
+
+
+def _unwrap_schema_annotation(annotation: Any) -> Any:
+    origin = get_origin(annotation)
+    if origin in {types.UnionType, Union}:
+        args = [arg for arg in get_args(annotation) if arg is not type(None)]
+        if not args:
+            return Any
+        if Any in args:
+            return Any
+        for arg in args:
+            if dataclasses.is_dataclass(arg):
+                return arg
+            if get_origin(arg) is dict:
+                return arg
+        return args[0]
+    return annotation
 
 
 def test_inventory_file_exists() -> None:
@@ -176,6 +243,21 @@ def test_review_gap_fields_are_explicitly_inventory_tracked() -> None:
     assert "true_cfg_scale" in image_request["moved"]
     assert "guidance_scale_2" in video_request["moved"]
     assert "true_cfg_scale" in video_request["moved"]
+
+
+def test_inventory_targets_exist_in_typed_schema() -> None:
+    inventory = _load_inventory()
+    target_statuses = {"moved", "profile_owned"}
+
+    for surface in inventory["surfaces"].values():
+        for status, entries in surface.items():
+            if status not in target_statuses or not isinstance(entries, dict):
+                continue
+            for value in entries.values():
+                for target in _iter_inventory_targets(value):
+                    if not target.startswith(("generator.", "request.", "server.", "default_request.")):
+                        continue
+                    _walk_schema_target(_document_root_for_target(target), target)
 
 
 def test_openai_size_mapping_preserves_width_height_ordering(

@@ -1,0 +1,34 @@
+name: inference-api-schema
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to checkout (defaults to github.ref)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  inference-api-schema:
+    if: github.event_name == 'workflow_call' || github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref || '' }}
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Upgrade pip
+      run: python -m pip install --upgrade pip
+    - name: Install CPU torch wheels
+      run: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+    - name: Install FastVideo with dev extras
+      run: pip install -e .[dev]
+    - name: Run inference API schema tests
+      run: pytest -q fastvideo/tests/api
