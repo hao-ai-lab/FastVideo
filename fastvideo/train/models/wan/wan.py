@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import copy
-import gc
 from typing import Any, Literal, TYPE_CHECKING
 
 import torch
@@ -19,10 +18,6 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
 from fastvideo.pipelines import TrainingBatch
-from fastvideo.pipelines.basic.wan.wan_pipeline import (
-    WanPipeline, )
-from fastvideo.pipelines.pipeline_batch_info import (
-    ForwardBatch, )
 from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing, )
 from fastvideo.training.training_utils import (
@@ -341,95 +336,43 @@ class WanModel(ModelBase):
 
         assert self.training_config is not None
         tc = self.training_config
-        world_group = self.world_group
         device = self.device
         dtype = self._get_training_dtype()
 
-        from fastvideo.train.utils.moduleloader import (
-            make_inference_args, )
+        # Every rank encodes the negative prompt independently.
+        # This avoids NCCL collectives that would deadlock when
+        # only a subset of ranks creates an inference pipeline.
+        import os
 
-        neg_embeds: torch.Tensor | None = None
-        neg_mask: torch.Tensor | None = None
+        from transformers import AutoTokenizer, T5EncoderModel
 
-        if world_group.rank_in_group == 0:
-            sampling_param = SamplingParam.from_pretrained(tc.model_path)
-            negative_prompt = sampling_param.negative_prompt
+        from fastvideo.configs.pipelines.wan import (
+            t5_postprocess_text, )
+        from fastvideo.utils import PRECISION_TO_TYPE, maybe_download_model
 
-            inference_args = make_inference_args(tc, model_path=tc.model_path)
+        model_path = maybe_download_model(tc.model_path)
 
-            prompt_pipeline = WanPipeline.from_pretrained(
-                tc.model_path,
-                args=inference_args,
-                inference_mode=True,
-                loaded_modules={"transformer": self.transformer},
-                tp_size=tc.distributed.tp_size,
-                sp_size=tc.distributed.sp_size,
-                num_gpus=tc.distributed.num_gpus,
-                pin_cpu_memory=(tc.distributed.pin_cpu_memory),
-                dit_cpu_offload=True,
-            )
+        sampling_param = SamplingParam.from_pretrained(model_path)
+        negative_prompt = sampling_param.negative_prompt
 
-            batch_negative = ForwardBatch(
-                data_type="video",
-                prompt=negative_prompt,
-                prompt_embeds=[],
-                prompt_attention_mask=[],
-            )
-            result_batch = prompt_pipeline.prompt_encoding_stage(  # type: ignore[attr-defined]
-                batch_negative,
-                inference_args,
-            )
+        encoder_config = tc.pipeline_config.text_encoder_configs[0]
+        tok_kwargs = dict(encoder_config.tokenizer_kwargs)
 
-            neg_embeds = result_batch.prompt_embeds[0].to(device=device, dtype=dtype)
-            neg_mask = (result_batch.prompt_attention_mask[0].to(device=device, dtype=dtype))
+        text_enc_dtype = PRECISION_TO_TYPE[tc.pipeline_config.text_encoder_precisions[0]]
+        tokenizer = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
+        text_encoder = T5EncoderModel.from_pretrained(
+            os.path.join(model_path, "text_encoder"),
+            torch_dtype=text_enc_dtype,
+        ).to(device).eval()
 
-            del prompt_pipeline
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+        with torch.no_grad():
+            text_inputs = tokenizer(negative_prompt, **tok_kwargs).to(device)
+            outputs = text_encoder(**text_inputs)
+            outputs.attention_mask = text_inputs["attention_mask"]
+            neg_embeds = t5_postprocess_text(outputs).to(device=device, dtype=dtype)
+            neg_mask = text_inputs["attention_mask"].to(device=device, dtype=dtype)
 
-        meta = torch.zeros((2, ), device=device, dtype=torch.int64)
-        if world_group.rank_in_group == 0:
-            assert neg_embeds is not None
-            assert neg_mask is not None
-            meta[0] = neg_embeds.ndim
-            meta[1] = neg_mask.ndim
-        world_group.broadcast(meta, src=0)
-        embed_ndim, mask_ndim = (
-            int(meta[0].item()),
-            int(meta[1].item()),
-        )
-
-        max_ndim = 8
-        embed_shape = torch.full((max_ndim, ), -1, device=device, dtype=torch.int64)
-        mask_shape = torch.full((max_ndim, ), -1, device=device, dtype=torch.int64)
-        if world_group.rank_in_group == 0:
-            assert neg_embeds is not None
-            assert neg_mask is not None
-            embed_shape[:embed_ndim] = torch.tensor(
-                list(neg_embeds.shape),
-                device=device,
-                dtype=torch.int64,
-            )
-            mask_shape[:mask_ndim] = torch.tensor(
-                list(neg_mask.shape),
-                device=device,
-                dtype=torch.int64,
-            )
-        world_group.broadcast(embed_shape, src=0)
-        world_group.broadcast(mask_shape, src=0)
-
-        embed_sizes = tuple(int(x) for x in embed_shape[:embed_ndim].tolist())
-        mask_sizes = tuple(int(x) for x in mask_shape[:mask_ndim].tolist())
-
-        if world_group.rank_in_group != 0:
-            neg_embeds = torch.empty(embed_sizes, device=device, dtype=dtype)
-            neg_mask = torch.empty(mask_sizes, device=device, dtype=dtype)
-        assert neg_embeds is not None
-        assert neg_mask is not None
-
-        world_group.broadcast(neg_embeds, src=0)
-        world_group.broadcast(neg_mask, src=0)
+        del text_encoder, tokenizer
 
         self.negative_prompt_embeds = neg_embeds
         self.negative_prompt_attention_mask = neg_mask
