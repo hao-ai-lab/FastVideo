@@ -2,17 +2,217 @@ env:
   IMAGE_VERSION: "py3.12-latest"
   BUILDKITE_CLEAN_CHECKOUT: true
 
+notify:
+  - github_commit_status:
+      context: "fastcheck-passed"
+    if: build.env("TEST_SCOPE") == "fastcheck" || build.env("TEST_SCOPE") == null
+  - github_commit_status:
+      context: "full-suite-passed"
+    if: build.env("TEST_SCOPE") == "full"
+  - github_commit_status:
+      context: "direct-test-completed"
+    if: build.env("TEST_SCOPE") == "direct"
+
 steps:
+  # ============================================================
+  # Direct test: triggered by /test <name> slash command.
+  # Labels match fastcheck/full-suite counterparts so the GitHub
+  # check status overwrites the original failed check.
+  # Only ONE step executes per build (gated by TEST_TYPE).
+  # ============================================================
+
+  # --- Fastcheck-scope direct tests ---
+    - label: ":microscope: Encoder Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "encoder"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":microscope: VAE Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "vae"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":microscope: Transformer Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "transformer"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":microscope: Kernel Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "kernel_tests"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":microscope: Unit Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "unit_test"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+
+  # --- Full-suite-scope direct tests ---
+    - label: ":bar_chart: SSIM Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "ssim"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+          - exit_status: 1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: LoRA Inference Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "inference_lora"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: Training Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "training"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: Distillation DMD Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "distillation_dmd"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: Self-Forcing Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "self_forcing"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: LoRA Training Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "training_lora"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+          - exit_status: 1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: Training Tests VSA"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "training_vsa"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+          - exit_status: 1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: Inference Tests VMoBA"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "inference_vmoba"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: Performance Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "performance"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: API Server Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "api_server"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+
   # ============================================================
   # Fastcheck: Runs on every PR (~10-15 min parallel)
   # Core component validation: encoders, VAEs, transformers,
   # CUDA kernels, and unit tests.
   # ============================================================
-  - label: "Trigger Fastcheck"
-    plugins:
-      - monorepo-diff#v1.4.0:
-          diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
-          watch:
+    - label: "Trigger Fastcheck"
+      if: build.env("TEST_SCOPE") == "fastcheck" || build.env("TEST_SCOPE") == null
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      plugins:
+        - monorepo-diff#v1.4.0:
+            diff: 'git fetch origin "${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}" && git diff --name-only "origin/${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}...HEAD"'
+            watch:
             - path:
                 - "fastvideo/models/encoders/**"
                 - "fastvideo/models/loader/**"
@@ -80,17 +280,24 @@ steps:
                   queue: "default"
 
   # ============================================================
-  # Full Suite: Runs only when FULL_SUITE=true
-  # Triggered by adding the 'ready' label to a PR (via GitHub
-  # Actions → Buildkite API). Includes integration tests, SSIM
-  # regression, training pipelines, and performance benchmarks.
+  # Full Suite: Runs when TEST_SCOPE=full
+  # Triggered by adding the 'ready' label (via ci-trigger-full-suite.yml)
+  # or on-demand via /test full slash command.
+  # Includes integration tests, SSIM regression, training pipelines,
+  # and performance benchmarks.
   # ============================================================
-  - label: "Trigger Full Suite"
-    if: build.env("FULL_SUITE") == "true"
-    plugins:
-      - monorepo-diff#v1.4.0:
-          diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
-          watch:
+    - label: "Trigger Full Suite"
+      if: build.env("TEST_SCOPE") == "full"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      plugins:
+        - monorepo-diff#v1.4.0:
+            diff: 'git fetch origin "${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}" && git diff --name-only "origin/${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}...HEAD"'
+            watch:
             - path:
                 - "fastvideo/**/*.py"
                 - "pyproject.toml"
@@ -100,6 +307,10 @@ steps:
                 label: ":bar_chart: SSIM Tests"
                 env:
                   - TEST_TYPE=ssim
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 2
                 agents:
                   queue: "default"
             - path:
@@ -160,6 +371,10 @@ steps:
                 label: ":test_tube: LoRA Training Tests"
                 env:
                   - TEST_TYPE=training_lora
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 2
                 agents:
                   queue: "default"
             - path:
@@ -172,6 +387,10 @@ steps:
                 label: ":test_tube: Training Tests VSA"
                 env:
                   - TEST_TYPE=training_vsa
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 2
                 agents:
                   queue: "default"
             - path:

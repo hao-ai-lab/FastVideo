@@ -154,7 +154,16 @@ class CudaPlatformBase(Platform):
                 raise ImportError("The Video Sparse Attention backend is not installed. "
                                   "To install it, please follow the instructions at: "
                                   "https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation ") from e
+        elif selected_backend == AttentionBackendEnum.BSA_ATTN:
+            try:
+                from fastvideo.attention.backends.bsa_attn import (  # noqa: F401
+                    BSAAttentionBackend)
+                logger.info("Using BSA Attention backend.")
 
+                return "fastvideo.attention.backends.bsa_attn.BSAAttentionBackend"
+            except ImportError as e:
+                logger.error("Failed to import BSA Attention backend: %s", str(e))
+                raise ImportError("The BSA Attention backend failed to import.") from e
         elif selected_backend == AttentionBackendEnum.VMOBA_ATTN:
             try:
                 from fastvideo_kernel import moba_attn_varlen  # noqa: F401

@@ -85,6 +85,10 @@ docs/distillation/examples/
 dmd_t2v_output/
 preprocess_output_text/
 
+# Next.js / Node artifacts under ui/: see ui/.gitignore
+
 .claude/
 .codex/
+.sisyphus/
 openspec/
+fastvideo/tests/ssim/reference_videos/**

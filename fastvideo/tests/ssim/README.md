@@ -1,8 +1,52 @@
-The reference videos in the `*_reference_videos` directory are used as part of an e2e test to ensure consistency in video generation quality across code changes. `test_inference_similarity.py` compares newly generated videos against these references using Structural Similarity Index (SSIM) metrics to detect any regressions in visual quality across code changes.
+The reference videos are used as part of e2e SSIM regression tests.
+Wan inference coverage now lives in `test_wan_t2v_similarity.py` and
+`test_wan_i2v_similarity.py` alongside the other model-specific SSIM files.
+These tests compare newly generated videos against references to detect quality
+regressions.
 
-`A40_reference_videos` are generated on A40s and so on.
+reference layout:
+- `reference_videos/default/<GPU>_reference_videos/<model>/<backend>/...`
+- `reference_videos/full_quality/<GPU>_reference_videos/<model>/<backend>/...`
 
-run `bash update_reference_videos.sh` from inside the `fastvideo/tests/ssim/` directory after running `test_inference_similarity.py` to update reference videos. Note: make sure to update the path to the corresponding device.
+`A40_reference_videos` are generated on A40s and so on. (legacy default layout
+`<ssim_dir>/<GPU>_reference_videos/...` is still read as fallback.)
+
+Before SSIM tests run, missing reference videos are auto-downloaded from a
+public HF repo (configured by `FASTVIDEO_SSIM_REFERENCE_HF_REPO`, default:
+`FastVideo/ssim-reference-videos`).
+
+Use the CLI:
+- `python fastvideo/tests/ssim/reference_videos_cli.py --help`
+- `python fastvideo/tests/ssim/reference_videos_cli.py copy-local --help`
+- `python fastvideo/tests/ssim/reference_videos_cli.py copy-local --quality-tier default --device-folder H200_reference_videos`
+- `python fastvideo/tests/ssim/reference_videos_cli.py copy-local --quality-tier full_quality --device-folder H200_reference_videos`
+- `python fastvideo/tests/ssim/reference_videos_cli.py download --help`
+- `python fastvideo/tests/ssim/reference_videos_cli.py upload --help`
+- `python fastvideo/tests/ssim/reference_videos_cli.py download --quality-tier all`
+- `python fastvideo/tests/ssim/reference_videos_cli.py upload --quality-tier all`
+- `python fastvideo/tests/ssim/reference_videos_cli.py download --quality-tier full_quality --device-folder H200_reference_videos`
+- `python fastvideo/tests/ssim/reference_videos_cli.py upload --quality-tier full_quality --device-folder H200_reference_videos`
+
+For `upload`, the tool reads HF token from `HF_API_KEY` /
+`HUGGINGFACE_HUB_TOKEN` / `HF_TOKEN` and fails fast if none are set.
+
+run `pytest fastvideo/tests/ssim/ -vs --ssim-full-quality` to use the
+`*_FULL_QUALITY_PARAMS` configs (default run keeps the original shortened test
+configs).
+
+to override the HF reference repo at test time:
+`pytest fastvideo/tests/ssim/ -vs --ssim-reference-repo <org/repo>`
+
+to skip auto-download of missing refs:
+`pytest fastvideo/tests/ssim/ -vs --skip-ssim-reference-download`
+
+generated videos are written under:
+- default params: `generated_videos/default/<GPU>_reference_videos/<model_id>/<ATTENTION_BACKEND>/`
+- full-quality params: `generated_videos/full_quality/<GPU>_reference_videos/<model_id>/<ATTENTION_BACKEND>/`
+
+HF repo layout mirrors quality + GPU split:
+- `reference_videos/default/<GPU>_reference_videos/...`
+- `reference_videos/full_quality/<GPU>_reference_videos/...`
 
 reference videos were generated on commit `4aeabbc629e0edf91477e80e795e7bb1823c71cb`
 causal videos were generated on commit b318063c0a4618f1d5d99ea82ca67a06aad0d19d
