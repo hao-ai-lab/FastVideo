@@ -166,6 +166,7 @@ class StreamingContext:
     kv_cache: list | None = None  # Per-layer list of {"k", "v", "end"}
     prompt_emb: torch.Tensor | None = None
     prompt_pad_mask: torch.Tensor | None = None
+    ref_latent_std: float | None = None
 
 
 class WaypointPipeline(ComposedPipelineBase):
@@ -192,6 +193,8 @@ class WaypointPipeline(ComposedPipelineBase):
         super().__init__(*args, **kwargs)
         self._streaming_ctx: StreamingContext | None = None
         self._vae_cache = None
+        # Bulk DiT dtype (bf16/fp16) after load; denoise_step_emb may be fp32 alone.
+        self._waypoint_dit_dtype: torch.dtype | None = None
 
     def create_pipeline_stages(
         self,
@@ -209,6 +212,19 @@ class WaypointPipeline(ComposedPipelineBase):
         transformer = self.get_module("transformer")
         dit_dtype = next(transformer.parameters()).dtype
         transformer.to(dtype=dit_dtype)
+        self._waypoint_dit_dtype = dit_dtype
+
+        # Official Overworld keeps denoise_step_emb (NoiseConditioner) in
+        # fp32 via NoCastModule + _keep_in_fp32_modules.  The MLP weights
+        # inside the conditioner must stay fp32 so the sigma-to-embedding
+        # mapping retains full precision; bf16 weights cause conditioning
+        # error that compounds across autoregressive frames (latent drift).
+        if hasattr(transformer, "denoise_step_emb"):
+            transformer.denoise_step_emb.to(dtype=torch.float32)
+            logger.info(
+                "Upcast denoise_step_emb to fp32 (matches official "
+                "Overworld NoCastModule)"
+            )
 
         vae = self.get_module("vae", None)
         if vae is not None:
@@ -218,6 +234,12 @@ class WaypointPipeline(ComposedPipelineBase):
             vae.to(dtype=vae_dtype)
 
         logger.info("WaypointPipeline initialized for interactive generation")
+
+    def _waypoint_compute_dtype(self, transformer: torch.nn.Module) -> torch.dtype:
+        """DiT activations dtype (bf16/…); not denoise_step_emb’s fp32 params."""
+        if self._waypoint_dit_dtype is not None:
+            return self._waypoint_dit_dtype
+        return next(transformer.parameters()).dtype
 
     def _create_waypoint_kv_cache(self, batch: ForwardBatch,
                                   fastvideo_args: FastVideoArgs) -> list | None:
@@ -241,7 +263,7 @@ class WaypointPipeline(ComposedPipelineBase):
         max_frames = max(cfg_max, batch_frames or 0) or cfg_max
         cache_size = max_frames * tokens_per_frame
         device = next(transformer.parameters()).device
-        dtype = next(transformer.parameters()).dtype
+        dtype = self._waypoint_compute_dtype(transformer)
         B = 1
         # Shared frozen flag: StaticKVCache semantics (read-only during denoise,
         # write only in cache pass). All layers share the same list ref.
@@ -273,6 +295,46 @@ class WaypointPipeline(ComposedPipelineBase):
                 frozen_ref,
             })
         return kv_cache
+
+    @torch.no_grad()
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        """Run one-shot generation for ``VideoGenerator`` / ``execute_forward``.
+
+        ``ComposedPipelineBase.forward`` iterates ``self.stages``, but Waypoint
+        leaves stages empty (interactive API uses ``streaming_*`` only). Bridge
+        by calling the same reset/step/clear path as streaming.
+        """
+        if not self.post_init_called:
+            self.post_init()
+
+        keyboard = batch.keyboard_cond
+        mouse = batch.mouse_cond
+        if keyboard is None or mouse is None:
+            transformer = self.get_module("transformer")
+            device = next(transformer.parameters()).device
+            dtype = self._waypoint_compute_dtype(transformer)
+            nf = batch.num_frames
+            if isinstance(nf, list):
+                nf = max(nf) if nf else 1
+            else:
+                nf = int(nf)
+            logger.warning(
+                "Waypoint forward: missing keyboard_cond/mouse_cond; "
+                "using zeros for %d frames",
+                nf,
+            )
+            keyboard = torch.zeros(1, nf, 256, device=device, dtype=dtype)
+            mouse = torch.zeros(1, nf, 2, device=device, dtype=dtype)
+
+        try:
+            self.streaming_reset(batch, fastvideo_args)
+            return self.streaming_step(keyboard, mouse)
+        finally:
+            self.streaming_clear()
 
     @torch.no_grad()
     def streaming_reset(
@@ -390,7 +452,7 @@ class WaypointPipeline(ComposedPipelineBase):
         latent_w = arch.width * pw
 
         device = next(transformer.parameters()).device
-        dtype = next(transformer.parameters()).dtype
+        dtype = self._waypoint_compute_dtype(transformer)
 
         # Normalize action tensor shapes to [B, T, ...]
         if keyboard_action.dim() == 2:
@@ -531,6 +593,10 @@ class WaypointPipeline(ComposedPipelineBase):
                     [f"{s.item():.6f}" for s in sigmas],
                     len(sigmas) - 1,
                 )
+            # Accumulate the rectified-flow ODE in fp32 to avoid bf16
+            # rounding errors that compound across 240+ autoregressive
+            # frames (manifests as latent drift → darker video).
+            x_fp32 = x.float()
             for i in range(len(sigmas) - 1):
                 sigma_curr = sigmas[i]
                 sigma_next = sigmas[i + 1]
@@ -583,7 +649,7 @@ class WaypointPipeline(ComposedPipelineBase):
                         x_before=_stats_dict(x.clone(), include_sample=True),
                     )
                 if ctx.frame_index == 0:
-                    xf = x.float()
+                    xf = x_fp32
                     vf = v_pred.float()
                     dsig = (sigma_next - sigma_curr).item()
                     logger.info(
@@ -602,7 +668,11 @@ class WaypointPipeline(ComposedPipelineBase):
                         dsig,
                     )
 
-                x = x + (sigma_next - sigma_curr) * v_pred
+                # fp32 accumulation: update in float32 then cast back
+                x_fp32 = x_fp32 + (
+                    sigma_next - sigma_curr
+                ).float() * v_pred.float()
+                x = x_fp32.to(dtype)
                 if ctx.frame_index == 0 and _WAYPOINT_DEBUG_FILE:
                     _collect_debug(
                         "denoise_step_after",
@@ -655,6 +725,35 @@ class WaypointPipeline(ComposedPipelineBase):
                     xf.min().item(),
                     xf.max().item(),
                 )
+
+            # Smooth latent normalization: the autoregressive loop causes
+            # latent std to grow over hundreds of frames (~0.5 → ~1.5).
+            # Instead of a hard on/off threshold (which causes twitching),
+            # smoothly interpolate every frame's scale toward the reference
+            # std from frame 0.  strength=0.8 means 80% pull toward ref.
+            xf = x.float()
+            cur_std = max(xf.std().item(), 1e-6)
+            if ctx.ref_latent_std is None:
+                ctx.ref_latent_std = cur_std
+            else:
+                target_std = ctx.ref_latent_std
+                strength = 0.8
+                blended_std = (
+                    strength * target_std + (1.0 - strength) * cur_std
+                )
+                scale = blended_std / cur_std
+                if abs(scale - 1.0) > 1e-4:
+                    x = (xf * scale).to(dtype)
+                if (ctx.frame_index < DEBUG_MULTIFRAME_MAX
+                        or _is_last_window):
+                    logger.info(
+                        "DEBUG frame %d smooth norm: std %.4f -> "
+                        "%.4f (scale=%.4f)",
+                        ctx.frame_index,
+                        cur_std,
+                        blended_std,
+                        scale,
+                    )
 
             # Cache pass: run forward with sigma=0 to update KV cache for next frame.
             # StaticKVCache semantics: unfreeze for this pass only, then re-freeze.
@@ -860,12 +959,21 @@ class WaypointPipeline(ComposedPipelineBase):
                             out_h,
                             out_w,
                         )
-                # Clamp only; do not rescale. Output in [0, 1] for streaming_generator.
+                # WorldEngineVAE decodes to roughly [-1, 1]. clamp(0, 1) alone maps
+                # all negatives to 0 (crushed blacks); streaming latents can drift
+                # so later frames look progressively darker.
                 if frame.dtype in (torch.uint8, torch.int8, torch.int16,
                                    torch.int32, torch.int64):
                     frame = frame.float() / 255.0
                 else:
-                    frame = frame.float().clamp(0.0, 1.0)
+                    frame = frame.float()
+                    fmin = frame.amin().item()
+                    fmax = frame.amax().item()
+                    if fmax > 1.5:
+                        frame = frame / 255.0
+                    elif fmin < -0.02:
+                        frame = (frame + 1.0) * 0.5
+                    frame = frame.clamp(0.0, 1.0)
 
                 if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
                     logger.info(

@@ -124,6 +124,8 @@ test = [
     "av",
     "pytorch-msssim==1.0.0",
     "pytest",
+    # Overworld/Waypoint-1-Small ModularPipeline remote code imports TensorDict
+    "tensordict",
 ]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]

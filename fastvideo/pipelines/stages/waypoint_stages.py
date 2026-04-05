@@ -61,7 +61,7 @@ class WaypointTextEncodingStage(PipelineStage):
         )
         prompt_emb = outputs.last_hidden_state
         prompt_emb = prompt_emb * attention_mask.unsqueeze(-1).to(
-            prompt_emb.dtype)
+            device=prompt_emb.device, dtype=prompt_emb.dtype)
         prompt_pad_mask = attention_mask.eq(0)
 
         if batch.extra is None:

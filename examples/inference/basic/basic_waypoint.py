@@ -13,6 +13,9 @@ OUTPUT_PATH = "video_samples_waypoint"
 
 
 def main():
+    # Match ``WaypointSamplingParam`` (``fastvideo/configs/sample/waypoint.py``):
+    # 360x640 @ 60fps, 240 frames ~= 4s. Raise KV cache for long autoregressive runs.
+    num_frames = 240
     generator = VideoGenerator.from_pretrained(
         MODEL_PATH,
         num_gpus=1,
@@ -21,9 +24,9 @@ def main():
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
+        max_kv_cache_frames=256,
     )
 
-    num_frames = 60
     keyboard_cond = torch.zeros((num_frames, 256))
     keyboard_cond[:, KEY_FORWARD] = 1.0
     mouse_cond = torch.zeros((num_frames, 2))
@@ -33,7 +36,7 @@ def main():
         mouse_cond=mouse_cond.unsqueeze(0),
         keyboard_cond=keyboard_cond.unsqueeze(0),
         num_frames=num_frames,
-        height=368,
+        height=360,
         width=640,
         num_inference_steps=4,
         output_path=OUTPUT_PATH,
