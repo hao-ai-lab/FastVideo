@@ -196,17 +196,12 @@ class Trainer:
 
             # Single CPU sync point: materialise GPU tensors
             # to float right before logging.
-            def _to_float(v: float | torch.Tensor) -> float:
-                if isinstance(v, torch.Tensor):
-                    return float(v.item())
-                return float(v)
-
             metrics = {
-                k: _to_float(v) / grad_accum
+                k: float(v) / grad_accum
                 for k, v in loss_sums.items()
             }
             metrics.update({
-                k: _to_float(v) / grad_accum
+                k: float(v) / grad_accum
                 for k, v in metric_sums.items()
             })
             metrics["step_time_sec"] = (
