@@ -24,15 +24,12 @@ def _coerce_log_scalar(
     value: Any,
     *,
     where: str,
-    force_cpu: bool = False,
 ) -> float | torch.Tensor:
     """Coerce *value* to a loggable scalar.
 
-    When *force_cpu* is ``False`` (default during grad-accum),
     GPU tensors stay on device so we avoid a
-    ``cudaDeviceSynchronize`` per accumulation step.  Set
-    *force_cpu* to ``True`` when the caller is about to log
-    the final aggregated value.
+    ``cudaDeviceSynchronize`` per accumulation step.
+    The caller must materialize them to float when logging.
     """
     if isinstance(value, torch.Tensor):
         if value.numel() != 1:
@@ -40,8 +37,6 @@ def _coerce_log_scalar(
                 f"Expected scalar tensor at {where}, "
                 f"got shape={tuple(value.shape)}"
             )
-        if force_cpu:
-            return float(value.detach().item())
         return value.detach()
     if isinstance(value, float | int):
         return float(value)
