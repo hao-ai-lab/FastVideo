@@ -249,20 +249,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 dtype=torch.bfloat16,
                 non_blocking=True,
             )
-            training_batch.encoder_hidden_states = (
-                encoder_hidden_states.to(
-                    get_local_torch_device(),
-                    dtype=torch.bfloat16,
-                    non_blocking=True,
-                )
-            )
-            training_batch.encoder_attention_mask = (
-                encoder_attention_mask.to(
-                    get_local_torch_device(),
-                    dtype=torch.bfloat16,
-                    non_blocking=True,
-                )
-            )
+            training_batch.encoder_hidden_states = (encoder_hidden_states.to(
+                get_local_torch_device(),
+                dtype=torch.bfloat16,
+                non_blocking=True,
+            ))
+            training_batch.encoder_attention_mask = (encoder_attention_mask.to(
+                get_local_torch_device(),
+                dtype=torch.bfloat16,
+                non_blocking=True,
+            ))
             training_batch.infos = infos
 
         return training_batch

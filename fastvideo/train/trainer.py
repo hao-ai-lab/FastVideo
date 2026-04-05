@@ -33,17 +33,13 @@ def _coerce_log_scalar(
     """
     if isinstance(value, torch.Tensor):
         if value.numel() != 1:
-            raise ValueError(
-                f"Expected scalar tensor at {where}, "
-                f"got shape={tuple(value.shape)}"
-            )
+            raise ValueError(f"Expected scalar tensor at {where}, "
+                             f"got shape={tuple(value.shape)}")
         return value.detach()
     if isinstance(value, float | int):
         return float(value)
-    raise TypeError(
-        f"Expected a scalar (float/int/Tensor) at "
-        f"{where}, got {type(value).__name__}"
-    )
+    raise TypeError(f"Expected a scalar (float/int/Tensor) at "
+                    f"{where}, got {type(value).__name__}")
 
 
 @dataclass(slots=True)
@@ -140,17 +136,13 @@ class Trainer:
             # Accumulate on GPU during grad-accum; materialise
             # to CPU once per step right before logging.
             loss_sums: dict[str, float | torch.Tensor] = {}
-            metric_sums: dict[
-                str, float | torch.Tensor
-            ] = {}
+            metric_sums: dict[str, float | torch.Tensor] = {}
             for accum_iter in range(grad_accum):
                 batch = next(data_stream)
-                loss_map, outputs, step_metrics = (
-                    method.single_train_step(
-                        batch,
-                        step,
-                    )
-                )
+                loss_map, outputs, step_metrics = (method.single_train_step(
+                    batch,
+                    step,
+                ))
 
                 method.backward(
                     loss_map,
@@ -164,23 +156,16 @@ class Trainer:
                         loss_sums[k] = prev + v.detach()
                 for k, v in step_metrics.items():
                     if k in loss_sums:
-                        raise ValueError(
-                            f"Metric key {k!r} collides "
-                            "with loss key. Use a "
-                            "different name (e.g. prefix "
-                            "with 'train/')."
-                        )
+                        raise ValueError(f"Metric key {k!r} collides "
+                                         "with loss key. Use a "
+                                         "different name (e.g. prefix "
+                                         "with 'train/').")
                     prev = metric_sums.get(k, 0.0)
-                    metric_sums[k] = (
-                        prev
-                        + _coerce_log_scalar(
-                            v,
-                            where=(
-                                "method.single_train_step()"
-                                f".metrics[{k!r}]"
-                            ),
-                        )
-                    )
+                    metric_sums[k] = (prev + _coerce_log_scalar(
+                        v,
+                        where=("method.single_train_step()"
+                               f".metrics[{k!r}]"),
+                    ))
 
             self.callbacks.on_before_optimizer_step(
                 method,
@@ -191,20 +176,10 @@ class Trainer:
 
             # Single CPU sync point: materialise GPU tensors
             # to float right before logging.
-            metrics = {
-                k: float(v) / grad_accum
-                for k, v in loss_sums.items()
-            }
-            metrics.update({
-                k: float(v) / grad_accum
-                for k, v in metric_sums.items()
-            })
-            metrics["step_time_sec"] = (
-                time.perf_counter() - t0
-            )
-            metrics["vsa_sparsity"] = float(
-                tc.vsa_sparsity
-            )
+            metrics = {k: float(v) / grad_accum for k, v in loss_sums.items()}
+            metrics.update({k: float(v) / grad_accum for k, v in metric_sums.items()})
+            metrics["step_time_sec"] = (time.perf_counter() - t0)
+            metrics["vsa_sparsity"] = float(tc.vsa_sparsity)
             if self.global_rank == 0 and metrics:
                 self.tracker.log(metrics, step)
 
