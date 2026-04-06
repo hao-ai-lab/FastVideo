@@ -617,6 +617,28 @@ class CosmosTransformer3DModel(BaseDiT):
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
 
+        # Defensive dtype alignment: the Cosmos checkpoint is bf16 but
+        # FSDP-wrapped training copies may report fp32 via
+        # `next(parameters()).dtype`, which disables autocast in the
+        # shared denoising stage and feeds fp32 tensors into bf16
+        # weights. Cast every external input to the patch_embed weight
+        # dtype so the model forward is robust regardless of caller.
+        _target_dtype = self.patch_embed.proj.weight.dtype
+        if hidden_states.dtype != _target_dtype:
+            hidden_states = hidden_states.to(_target_dtype)
+        if condition_mask is not None and condition_mask.dtype != _target_dtype:
+            condition_mask = condition_mask.to(_target_dtype)
+        if padding_mask is not None and padding_mask.dtype != _target_dtype:
+            padding_mask = padding_mask.to(_target_dtype)
+        if isinstance(encoder_hidden_states, torch.Tensor):
+            if encoder_hidden_states.dtype != _target_dtype:
+                encoder_hidden_states = encoder_hidden_states.to(_target_dtype)
+        else:
+            encoder_hidden_states = [
+                t.to(_target_dtype) if t.dtype != _target_dtype else t
+                for t in encoder_hidden_states
+            ]
+
         # 1. Concatenate padding mask if needed & prepare attention mask
         if condition_mask is not None:
             hidden_states = torch.cat([hidden_states, condition_mask], dim=1)
@@ -626,6 +648,10 @@ class CosmosTransformer3DModel(BaseDiT):
             padding_mask = transforms.functional.resize(
                 padding_mask, list(hidden_states.shape[-2:]), interpolation=transforms.InterpolationMode.NEAREST
             )
+            # torchvision.resize may upcast bf16/fp16 → fp32; restore
+            # hidden_states' dtype so the subsequent cat doesn't promote
+            # everything and break patch_embed (bf16 weights).
+            padding_mask = padding_mask.to(hidden_states.dtype)
             hidden_states = torch.cat(
                 [hidden_states, padding_mask.unsqueeze(2).repeat(batch_size, 1, num_frames, 1, 1)], dim=1
             )
