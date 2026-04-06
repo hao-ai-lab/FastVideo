@@ -185,7 +185,7 @@ def main() -> None:
     val_prompts = {
         "data": [{
             "caption": item["cap"][0],
-            "image_path": cond_frame_path,
+            "image_path": "cond_frame.png",
         } for item in caption_data]
     }
     val_path = os.path.join(OUTPUT_DIR, "validation_prompts.json")
