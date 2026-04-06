@@ -175,6 +175,31 @@ class CosmosModel(WanModel):
         # layout Cosmos's transformer expects.
         noisy_latents = noisy_latents.permute(0, 2, 1, 3, 4)
 
+        # ----------------------------------------------------------
+        # Cosmos preconditioning: match inference convention.
+        #
+        # The pretrained model expects:
+        #   input  = x_t * c_in,  where c_in = 1 - t
+        #   t      = sigma / (sigma + 1)   (continuous, in [0, 1))
+        # but in standard flow-matching training sigma IS t
+        # (sigma ∈ [0, 1]), so c_in = 1 - sigma.
+        #
+        # Inference recovers x̂₀ as:
+        #   x̂₀ = (1-t)*x_t + (-t)*model_output
+        #
+        # finetune.py computes (precondition_outputs=True):
+        #   pred_x0 = x_t - pred * sigma
+        #
+        # Setting pred = x_t + model_output makes these equivalent:
+        #   x_t - (x_t + model_output)*sigma
+        #   = (1-sigma)*x_t - sigma*model_output  ✓
+        # ----------------------------------------------------------
+        assert batch.sigmas is not None
+        # sigmas shape: (B,1,1,1,1) — squeeze to 1D for timestep
+        sigma_1d = batch.sigmas.flatten()[:noisy_latents.shape[0]]
+        c_in = 1.0 - sigma_1d.view(-1, 1, 1, 1, 1)
+        model_input = noisy_latents * c_in
+
         with (
                 torch.autocast(device_type, dtype=dtype),
                 set_forward_context(
@@ -182,14 +207,17 @@ class CosmosModel(WanModel):
                     attn_metadata=attn_metadata,
                 ),
         ):
-            input_kwargs = self._build_distill_input_kwargs(noisy_latents, timestep, text_dict)
+            input_kwargs = self._build_distill_input_kwargs(
+                model_input, sigma_1d, text_dict)
             transformer = self._get_transformer(timestep)
-            pred_noise = transformer(**input_kwargs)
-        # Re-permute transformer output (B, C, T, H, W) back to
-        # (B, T, C, H, W) so finetune.py's arithmetic with the
-        # already-permuted `noisy_latents`/`clean_latents` works.
-        pred_noise = pred_noise.permute(0, 2, 1, 3, 4)
-        return pred_noise
+            model_output = transformer(**input_kwargs)
+
+        # pred = x_t + model_output  (see derivation above)
+        pred = noisy_latents + model_output
+
+        # Re-permute (B, C, T, H, W) → (B, T, C, H, W)
+        pred = pred.permute(0, 2, 1, 3, 4)
+        return pred
 
     def _build_distill_input_kwargs(
         self,
