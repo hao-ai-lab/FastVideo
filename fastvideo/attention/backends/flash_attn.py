@@ -45,12 +45,12 @@ except ImportError:
     _FA4_FP4_AVAILABLE = False
 
 
-def _is_nvfp4_fa4_enabled():
+def _is_nvfp4_fa4_enabled() -> bool:
     """Check if NVFP4 FA4 is enabled via environment variable."""
     return os.environ.get("FASTVIDEO_NVFP4_FA4", "0") == "1"
 
 
-def _nvfp4_quantize_for_fa4(tensor_4d):
+def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Quantize a (batch, seqlen, nheads, headdim) BF16 tensor to FP4.
 
     Returns:
@@ -75,11 +75,8 @@ def _nvfp4_quantize_for_fa4(tensor_4d):
     fp4_data, sf_data = nvfp4_quantize(t2d, one, sfLayout=SfLayout.layout_128x4, do_shuffle=False)
 
     # FP4 data: (batch*seqlen, nheads*headdim/2) → (batch, seqlen, nheads, headdim/2)
-    fp4_tensor = (fp4_data
-        .reshape(batch, seqlen_padded, nheads, headdim // 2)
-        .view(torch.int8)
-        .view(torch.float4_e2m1fn_x2)
-    )
+    fp4_tensor = (fp4_data.reshape(batch, seqlen_padded, nheads,
+                                   headdim // 2).view(torch.int8).view(torch.float4_e2m1fn_x2))
 
     # SF layout conversion: nvfp4_quantize layout_128x4 → FA4 MMA layout
     # layout_128x4 buffer: [mTile, kTile, 32, 4, 4]
@@ -163,13 +160,9 @@ class FlashAttentionImpl(AttentionImpl):
         self.nvfp4_fa4 = extra_impl_args.get("nvfp4_fa4", False) or _is_nvfp4_fa4_enabled()
         if self.nvfp4_fa4:
             cap = torch.cuda.get_device_capability()
-            assert cap in [(10, 0), (10, 3)], (
-                f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}"
-            )
-            assert _FA4_FP4_AVAILABLE, (
-                "NVFP4 FA4 requires flash-attention-fp4 (flash_attn.cute). "
-                "Install via instructions in docs/inference/optimizations.md"
-            )
+            assert cap in [(10, 0), (10, 3)], (f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}")
+            assert _FA4_FP4_AVAILABLE, ("NVFP4 FA4 requires flash-attention-fp4 (flash_attn.cute). "
+                                        "Install via instructions in docs/inference/optimizations.md")
             logger.info("NVFP4 FA4 enabled for FlashAttentionImpl (quant_qk only)")
 
     def forward(
@@ -241,7 +234,7 @@ class FlashAttentionImpl(AttentionImpl):
             )
         return output
 
-    def _forward_nvfp4(self, query, key, value):
+    def _forward_nvfp4(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
         """FP4 flash attention with quantized Q and K, BF16 V."""
         orig_seqlen_q = query.shape[1]
         orig_seqlen_k = key.shape[1]
@@ -256,7 +249,9 @@ class FlashAttentionImpl(AttentionImpl):
             value = F.pad(value, (0, 0, 0, 0, 0, seqlen_k_padded - orig_seqlen_k))
 
         result = _flash_attn_func_fp4(
-            q_fp4, k_fp4, value,
+            q_fp4,
+            k_fp4,
+            value,
             softmax_scale=self.softmax_scale,
             causal=self.causal,
             mSFQ=q_sf,
