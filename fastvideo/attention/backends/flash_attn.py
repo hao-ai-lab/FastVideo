@@ -168,7 +168,7 @@ class FlashAttentionImpl(AttentionImpl):
             )
             assert _FA4_FP4_AVAILABLE, (
                 "NVFP4 FA4 requires flash-attention-fp4 (flash_attn.cute). "
-                "Install via: bash setup_fp4_fa4.sh"
+                "Install via instructions in docs/inference/optimizations.md"
             )
             logger.info("NVFP4 FA4 enabled for FlashAttentionImpl (quant_qk only)")
 
