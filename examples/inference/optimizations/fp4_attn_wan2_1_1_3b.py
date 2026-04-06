@@ -31,6 +31,8 @@ def main():
                         help="Enable NVFP4 FP4 quantized QK flash attention")
     parser.add_argument("--model", default="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
                         help="Model path or HuggingFace ID")
+    parser.add_argument("--compile", action="store_true",
+                        help="Enable torch.compile for DIT")
     parser.add_argument("--num_gpus", type=int, default=1)
     parser.add_argument("--infer_steps", type=int, default=50)
     args = parser.parse_args()
@@ -40,6 +42,8 @@ def main():
         os.environ["CUTE_DSL_ENABLE_TVM_FFI"] = "1"
 
     mode = "nvfp4" if args.nvfp4_fa4 else "bf16"
+    if args.compile:
+        mode += "_compile"
     print(f"Mode: {mode.upper()}")
 
     generator = VideoGenerator.from_pretrained(
@@ -51,6 +55,7 @@ def main():
         dit_layerwise_offload=False,
         vae_cpu_offload=True,
         text_encoder_cpu_offload=True,
+        enable_torch_compile=args.compile,
     )
 
     prompt = (
@@ -59,8 +64,10 @@ def main():
         "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     )
 
-    # Warmup
-    generator.generate_video(prompt, save_video=False, infer_steps=2)
+    # Warmup (2 runs for compile to JIT)
+    n_warmup = 2 if args.compile else 1
+    for i in range(n_warmup):
+        generator.generate_video(prompt, save_video=False, infer_steps=2)
 
     # Timed run
     os.makedirs(OUTPUT_PATH, exist_ok=True)
