@@ -289,6 +289,7 @@ class ValidationCallback(Callback):
             "num_gpus": tc.distributed.num_gpus,
             "pin_cpu_memory": (tc.distributed.pin_cpu_memory),
             "dit_cpu_offload": False,
+            "dit_layerwise_offload": False,
         }
         if flow_shift is not None:
             kwargs["flow_shift"] = float(flow_shift)
