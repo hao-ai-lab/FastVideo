@@ -166,12 +166,26 @@ def main() -> None:
     pq.write_table(table, output_path)
     print(f"\nWrote {len(records)} records to {output_path}")
 
+    # Extract first frame from first video as V2W conditioning image
+    import cv2
+    first_video = os.path.join(
+        DATA_DIR, "videos", caption_data[0]["path"])
+    cap = cv2.VideoCapture(first_video)
+    ret, frame = cap.read()
+    cap.release()
+    cond_frame_path = os.path.join(OUTPUT_DIR, "cond_frame.png")
+    if ret:
+        cv2.imwrite(cond_frame_path, frame)
+        print(f"Saved conditioning frame to {cond_frame_path}")
+
     # Write validation prompts for callback
     # Wrap in "data" key — ValidationDataset expects field="data"
     # Use "caption" field — ValidationDataset aliases it to "prompt"
+    # Include image_path for V2W conditioning during validation
     val_prompts = {
         "data": [{
-            "caption": item["cap"][0]
+            "caption": item["cap"][0],
+            "image_path": cond_frame_path,
         } for item in caption_data]
     }
     val_path = os.path.join(OUTPUT_DIR, "validation_prompts.json")
