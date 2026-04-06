@@ -50,7 +50,8 @@ class CosmosArchConfig(DiTArchConfig):
         })
 
     # Cosmos-specific config parameters based on transformer_cosmos.py
-    in_channels: int = 16
+    # in_channels includes the condition_mask channel (16 latent + 1 cond = 17)
+    in_channels: int = 17
     out_channels: int = 16
     num_attention_heads: int = 16
     attention_head_dim: int = 128

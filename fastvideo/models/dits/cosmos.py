@@ -556,7 +556,10 @@ class CosmosTransformer3DModel(BaseDiT):
         self.extra_pos_embed_type = config.extra_pos_embed_type
 
         # 1. Patch Embedding
-        patch_embed_in_channels = config.in_channels + 1 if config.concat_padding_mask else config.in_channels
+        # config.in_channels already includes the condition_mask channel
+        # (HF config: in_channels=17 = 16 latent + 1 condition_mask).
+        # Only add +1 for the padding_mask when concat_padding_mask=True.
+        patch_embed_in_channels = config.in_channels + (1 if config.concat_padding_mask else 0)
         self.patch_embed = CosmosPatchEmbed(patch_embed_in_channels,
                                             inner_dim,
                                             config.patch_size,
