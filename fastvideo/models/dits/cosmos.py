@@ -729,6 +729,11 @@ class CosmosTransformer3DModel(BaseDiT):
         hidden_states = hidden_states.permute(0, 7, 1, 6, 2, 4, 3, 5)
         hidden_states = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 
+        # Return as tuple for compatibility with callers that
+        # do `transformer(..., return_dict=False)[0]` (diffusers
+        # convention used by CosmosDenoisingStage).
+        if not kwargs.get("return_dict", True):
+            return (hidden_states,)
         return hidden_states
 
 # Entry point for model registry
