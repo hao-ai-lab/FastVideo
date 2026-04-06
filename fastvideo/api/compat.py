@@ -12,6 +12,7 @@ from fastvideo.api.parser import config_to_dict, load_raw_config, parse_config
 from fastvideo.api.request_metadata import (
     EXPLICIT_REQUEST_ATTR,
     bind_generation_request_raw,
+    refresh_generation_request_raw,
 )
 from fastvideo.api.schema import (
     GenerationRequest,
@@ -227,7 +228,9 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
 def normalize_generation_request(request: GenerationRequest | Mapping[str, Any], ) -> GenerationRequest:
     normalized = (request if isinstance(request, GenerationRequest) else parse_config(GenerationRequest, request))
 
-    if not hasattr(normalized, EXPLICIT_REQUEST_ATTR):
+    if hasattr(normalized, EXPLICIT_REQUEST_ATTR):
+        refresh_generation_request_raw(normalized)
+    else:
         bind_generation_request_raw(normalized, _serialize_generation_request(normalized))
     return normalized
 

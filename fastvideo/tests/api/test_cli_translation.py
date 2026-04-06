@@ -92,6 +92,31 @@ def test_build_generate_run_config_loads_nested_config_and_dotted_overrides(
     assert config.request.output.return_frames is True
 
 
+def test_build_generate_run_config_accepts_dashed_dotted_overrides(tmp_path):
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: test-model\n"
+        "request:\n"
+        "  prompt: hello\n",
+        encoding="utf-8",
+    )
+
+    args, unknown = _parse_generate_args([
+        "--config",
+        str(config_path),
+        "--generator.engine.num-gpus",
+        "2",
+        "--request.output.output-path",
+        "outputs/dashed",
+    ])
+
+    config = build_generate_run_config(args, unknown)
+
+    assert config.generator.engine.num_gpus == 2
+    assert config.request.output.output_path == "outputs/dashed"
+
+
 def test_build_generate_run_config_loads_nested_json_config(tmp_path):
     config_path = tmp_path / "run.json"
     config_path.write_text(
