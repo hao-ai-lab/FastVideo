@@ -48,6 +48,7 @@ def main():
         # FSDP shards tensors across GPUs — incompatible with FP4 make_ptr path
         use_fsdp_inference=not args.nvfp4_fa4,
         dit_cpu_offload=False,
+        dit_layerwise_offload=False,
         vae_cpu_offload=True,
         text_encoder_cpu_offload=True,
     )
