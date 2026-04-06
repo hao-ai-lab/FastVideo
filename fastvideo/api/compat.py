@@ -9,6 +9,10 @@ from typing import Any
 
 from fastvideo.api.overrides import apply_overrides, parse_cli_overrides
 from fastvideo.api.parser import config_to_dict, load_raw_config, parse_config
+from fastvideo.api.request_metadata import (
+    EXPLICIT_REQUEST_ATTR,
+    bind_generation_request_raw,
+)
 from fastvideo.api.schema import (
     GenerationRequest,
     GeneratorConfig,
@@ -21,7 +25,6 @@ from fastvideo.configs.sample import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.utils import shallow_asdict
 
-_EXPLICIT_REQUEST_ATTR = "_fastvideo_explicit_request"
 _INPUT_FIELD_NAMES = {field.name for field in fields(InputConfig)}
 _SAMPLING_FIELD_NAMES = {field.name for field in fields(SamplingConfig)}
 _RUNTIME_FIELD_NAMES = {field.name for field in fields(RequestRuntimeConfig)}
@@ -224,8 +227,8 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
 def normalize_generation_request(request: GenerationRequest | Mapping[str, Any], ) -> GenerationRequest:
     normalized = (request if isinstance(request, GenerationRequest) else parse_config(GenerationRequest, request))
 
-    if not hasattr(normalized, _EXPLICIT_REQUEST_ATTR):
-        setattr(normalized, _EXPLICIT_REQUEST_ATTR, _serialize_generation_request(normalized))
+    if not hasattr(normalized, EXPLICIT_REQUEST_ATTR):
+        bind_generation_request_raw(normalized, _serialize_generation_request(normalized))
     return normalized
 
 
@@ -253,7 +256,7 @@ def legacy_generate_call_to_request(
         raw.setdefault("inputs", {})["grid_sizes"] = grid_sizes
 
     normalized = parse_config(GenerationRequest, raw)
-    setattr(normalized, _EXPLICIT_REQUEST_ATTR, deepcopy(raw))
+    bind_generation_request_raw(normalized, raw)
     return normalized
 
 
@@ -355,7 +358,7 @@ def request_to_pipeline_overrides(request: GenerationRequest) -> dict[str, Any]:
 
 
 def _explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
-    raw = getattr(request, _EXPLICIT_REQUEST_ATTR, None)
+    raw = getattr(request, EXPLICIT_REQUEST_ATTR, None)
     if raw is None:
         raw = _serialize_generation_request(request)
 
@@ -424,7 +427,7 @@ def _fan_out_explicit_request_metadata(
     index: int,
     prompt: str,
 ) -> None:
-    raw = getattr(source_request, _EXPLICIT_REQUEST_ATTR, None)
+    raw = getattr(source_request, EXPLICIT_REQUEST_ATTR, None)
     if raw is None:
         return
 
@@ -438,7 +441,7 @@ def _fan_out_explicit_request_metadata(
                 _validate_batched_input_length(source_request.prompt, value, field_name)
                 inputs[field_name] = deepcopy(value[index])
 
-    setattr(target_request, _EXPLICIT_REQUEST_ATTR, raw)
+    setattr(target_request, EXPLICIT_REQUEST_ATTR, raw)
 
 
 def _validate_batched_input_length(

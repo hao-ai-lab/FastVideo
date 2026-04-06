@@ -12,7 +12,12 @@ import yaml
 
 from fastvideo.api.errors import ConfigValidationError
 from fastvideo.api.overrides import apply_overrides, parse_cli_overrides
-from fastvideo.api.schema import RunConfig, ServeConfig
+from fastvideo.api.request_metadata import (
+    bind_generation_request_raw,
+    bind_run_config_raw,
+    bind_serve_config_raw,
+)
+from fastvideo.api.schema import GenerationRequest, RunConfig, ServeConfig
 
 T = TypeVar("T")
 _UNION_ORIGINS = {types.UnionType, Union}
@@ -31,7 +36,14 @@ def parse_config(config_type: type[T], raw: Mapping[str, Any] | T) -> T:
         return raw
     if not isinstance(raw, Mapping):
         raise ConfigValidationError("", f"expected mapping for {config_type.__name__}")
-    return _SchemaParser().parse_dataclass(config_type, raw, "")
+    parsed = _SchemaParser().parse_dataclass(config_type, raw, "")
+    if config_type is GenerationRequest:
+        return bind_generation_request_raw(parsed, raw)
+    if config_type is RunConfig:
+        return bind_run_config_raw(parsed, raw)
+    if config_type is ServeConfig:
+        return bind_serve_config_raw(parsed, raw)
+    return parsed
 
 
 def config_to_dict(config: Any) -> Any:

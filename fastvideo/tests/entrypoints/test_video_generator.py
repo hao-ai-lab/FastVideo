@@ -293,6 +293,43 @@ def test_generate_preserves_schema_defaults_for_dataclass_request(monkeypatch):
     assert captured["sampling_param"].width == 1280
 
 
+def test_generate_mapping_request_preserves_model_defaults_for_omitted_fields(
+    monkeypatch,
+):
+    generator = _new_runtime_video_generator()
+    captured = {}
+
+    def fake_from_pretrained(cls, model_path):
+        return cls(
+            negative_prompt="model default",
+            num_frames=61,
+            height=448,
+            width=832,
+            fps=16,
+            guidance_scale=3.0,
+        )
+
+    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+        captured["sampling_param"] = sampling_param
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
+
+    monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(fake_from_pretrained))
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
+
+    generator.generate(
+        {
+            "prompt": "hello world",
+        }
+    )
+
+    assert captured["sampling_param"].negative_prompt == "model default"
+    assert captured["sampling_param"].num_frames == 61
+    assert captured["sampling_param"].height == 448
+    assert captured["sampling_param"].width == 832
+    assert captured["sampling_param"].fps == 16
+    assert captured["sampling_param"].guidance_scale == 3.0
+
+
 def test_generate_video_legacy_call_uses_legacy_impl(monkeypatch):
     generator = _new_runtime_video_generator()
     captured = {}
