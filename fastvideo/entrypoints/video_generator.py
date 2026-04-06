@@ -31,6 +31,7 @@ from fastvideo.api.compat import (
     load_generator_config_from_file,
     normalize_generation_request,
     normalize_generator_config,
+    request_to_pipeline_overrides,
     request_to_sampling_param,
 )
 from fastvideo.api.results import GenerationResult
@@ -315,6 +316,15 @@ class VideoGenerator:
         self,
         request: GenerationRequest,
     ) -> GenerationResult | list[GenerationResult]:
+        fastvideo_args = self.fastvideo_args
+        pipeline_overrides = request_to_pipeline_overrides(request)
+        if pipeline_overrides:
+            fastvideo_args = deepcopy(self.fastvideo_args)
+            for key, value in pipeline_overrides.items():
+                if not hasattr(fastvideo_args.pipeline_config, key):
+                    raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
+                setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
+
         sampling_param = request_to_sampling_param(
             request,
             model_path=self.fastvideo_args.model_path,
@@ -322,6 +332,7 @@ class VideoGenerator:
         result = self._generate_video_impl(
             prompt=request.prompt,
             sampling_param=sampling_param,
+            fastvideo_args=fastvideo_args,
         )
         return self._wrap_legacy_result(result)
 
@@ -333,12 +344,16 @@ class VideoGenerator:
         keyboard_cond: torch.Tensor | None = None,
         grid_sizes: tuple[int, int, int] | list[int] | torch.Tensor
         | None = None,
+        fastvideo_args: FastVideoArgs | None = None,
         **kwargs,
     ) -> dict[str, Any] | list[np.ndarray] | list[dict[str, Any]]:
         """Internal implementation of generate_video."""
+        if fastvideo_args is None:
+            fastvideo_args = self.fastvideo_args
+
         # Handle batch processing from text file
         if sampling_param is None:
-            sampling_param = SamplingParam.from_pretrained(self.fastvideo_args.model_path)
+            sampling_param = SamplingParam.from_pretrained(fastvideo_args.model_path)
 
         # Add action control inputs to kwargs if provided
         if mouse_cond is not None:
@@ -350,8 +365,8 @@ class VideoGenerator:
 
         sampling_param.update(kwargs)
 
-        if self.fastvideo_args.prompt_txt is not None or sampling_param.prompt_path is not None:
-            prompt_txt_path = sampling_param.prompt_path or self.fastvideo_args.prompt_txt
+        if fastvideo_args.prompt_txt is not None or sampling_param.prompt_path is not None:
+            prompt_txt_path = sampling_param.prompt_path or fastvideo_args.prompt_txt
             if not prompt_txt_path or not os.path.exists(prompt_txt_path):
                 raise FileNotFoundError(f"Prompt text file not found: {prompt_txt_path}")
 
@@ -371,7 +386,12 @@ class VideoGenerator:
                     # Generate video for this prompt using the same logic below
                     output_path = self._prepare_output_path(sampling_param.output_path, batch_prompt)
                     kwargs["output_path"] = output_path
-                    result = self._generate_single_video(prompt=batch_prompt, sampling_param=sampling_param, **kwargs)
+                    result = self._generate_single_video(
+                        prompt=batch_prompt,
+                        sampling_param=sampling_param,
+                        fastvideo_args=fastvideo_args,
+                        **kwargs,
+                    )
 
                     # Add prompt info to result
                     result["prompt_index"] = i
@@ -392,7 +412,12 @@ class VideoGenerator:
             raise ValueError("Either prompt or prompt_txt must be provided")
         output_path = self._prepare_output_path(sampling_param.output_path, prompt)
         kwargs["output_path"] = output_path
-        return self._generate_single_video(prompt=prompt, sampling_param=sampling_param, **kwargs)
+        return self._generate_single_video(
+            prompt=prompt,
+            sampling_param=sampling_param,
+            fastvideo_args=fastvideo_args,
+            **kwargs,
+        )
 
     def _is_image_workload(self) -> bool:
         """Return True when the workload produces a single image (t2i, i2i …)."""
@@ -476,11 +501,12 @@ class VideoGenerator:
         self,
         prompt: str,
         sampling_param: SamplingParam | None = None,
+        fastvideo_args: FastVideoArgs | None = None,
         **kwargs,
     ) -> dict[str, Any]:
         """Internal method for single video generation"""
-        # Create a copy of inference args to avoid modifying the original
-        fastvideo_args = self.fastvideo_args
+        if fastvideo_args is None:
+            fastvideo_args = self.fastvideo_args
 
         # Validate inputs
         if not isinstance(prompt, str):

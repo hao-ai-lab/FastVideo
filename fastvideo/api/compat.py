@@ -27,6 +27,12 @@ _SAMPLING_FIELD_NAMES = {field.name for field in fields(SamplingConfig)}
 _RUNTIME_FIELD_NAMES = {field.name for field in fields(RequestRuntimeConfig)}
 _OUTPUT_FIELD_NAMES = {field.name for field in fields(OutputConfig)}
 _MISSING = object()
+_LEGACY_REQUEST_ALIASES = {
+    "neg_prompt": "negative_prompt",
+}
+_REQUEST_PIPELINE_OVERRIDE_FIELDS = frozenset({
+    "embedded_cfg_scale",
+})
 
 
 def normalize_generator_config(config: GeneratorConfig | Mapping[str, Any], ) -> GeneratorConfig:
@@ -267,7 +273,7 @@ def request_to_sampling_param(
     for key, value in updates.items():
         if hasattr(sampling_param, key):
             setattr(sampling_param, key, deepcopy(value))
-        elif _is_supported_as_default_only(key, value):
+        elif key in _REQUEST_PIPELINE_OVERRIDE_FIELDS or _is_supported_as_default_only(key, value):
             continue
         else:
             raise ValueError(f"Request field {key!r} is not supported by sampling params for {model_path}")
@@ -321,6 +327,7 @@ def _apply_request_field(
     key: str,
     value: Any,
 ) -> None:
+    key = _LEGACY_REQUEST_ALIASES.get(key, key)
     if key == "negative_prompt":
         raw["negative_prompt"] = value
         return
@@ -337,6 +344,14 @@ def _apply_request_field(
         raw.setdefault("output", {})[key] = value
         return
     raw.setdefault("extensions", {})[key] = value
+
+
+def request_to_pipeline_overrides(request: GenerationRequest) -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
+    for key, value in _explicit_request_updates(request).items():
+        if key in _REQUEST_PIPELINE_OVERRIDE_FIELDS:
+            overrides[key] = deepcopy(value)
+    return overrides
 
 
 def _explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
@@ -481,5 +496,6 @@ __all__ = [
     "load_generator_config_from_file",
     "normalize_generation_request",
     "normalize_generator_config",
+    "request_to_pipeline_overrides",
     "request_to_sampling_param",
 ]

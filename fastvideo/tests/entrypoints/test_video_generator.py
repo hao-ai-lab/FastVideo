@@ -322,6 +322,42 @@ def test_generate_video_legacy_call_routes_through_typed_request(monkeypatch):
     assert result["video_path"] == "outputs/test.mp4"
 
 
+def test_generate_video_legacy_request_compat_fields(monkeypatch):
+    generator = _new_runtime_video_generator()
+    generator.fastvideo_args.pipeline_config = SimpleNamespace(
+        embedded_cfg_scale=6.0,
+    )
+    captured = {}
+
+    def fake_from_pretrained(cls, model_path):
+        return cls()
+
+    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+        captured["prompt"] = prompt
+        captured["sampling_param"] = sampling_param
+        captured["fastvideo_args"] = kwargs["fastvideo_args"]
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
+
+    monkeypatch.setattr(
+        SamplingParam,
+        "from_pretrained",
+        classmethod(fake_from_pretrained),
+    )
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
+
+    with pytest.warns(DeprecationWarning):
+        result = generator.generate_video(
+            prompt="legacy prompt",
+            neg_prompt="custom negative",
+            embedded_cfg_scale=7.5,
+        )
+
+    assert captured["prompt"] == "legacy prompt"
+    assert captured["sampling_param"].negative_prompt == "custom negative"
+    assert captured["fastvideo_args"].pipeline_config.embedded_cfg_scale == 7.5
+    assert result["video_path"] == "outputs/test.mp4"
+
+
 def test_generate_batch_prompt_file_returns_typed_results(tmp_path, monkeypatch):
     generator = _new_runtime_video_generator()
     _patch_sampling_param_from_pretrained(monkeypatch)
