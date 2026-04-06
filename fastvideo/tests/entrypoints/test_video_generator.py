@@ -361,6 +361,72 @@ def test_generate_honors_post_load_request_mutations(monkeypatch, tmp_path):
     assert captured["sampling_param"].seed == 7
 
 
+def test_generate_honors_post_load_mutations_matching_schema_defaults(
+    monkeypatch,
+    tmp_path,
+):
+    generator = _new_runtime_video_generator()
+    captured = {}
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: test-model\n"
+        "request:\n"
+        "  prompt: hello world\n",
+        encoding="utf-8",
+    )
+
+    def fake_from_pretrained(cls, model_path):
+        return cls(guidance_scale=3.0)
+
+    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+        captured["sampling_param"] = sampling_param
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
+
+    monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(fake_from_pretrained))
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
+
+    config = load_run_config(config_path)
+    config.request.sampling.guidance_scale = 1.0
+
+    generator.generate(config.request)
+
+    assert captured["sampling_param"].guidance_scale == 1.0
+
+
+def test_generate_removes_deleted_loaded_stage_overrides(monkeypatch, tmp_path):
+    generator = _new_runtime_video_generator()
+    captured = {}
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: test-model\n"
+        "request:\n"
+        "  prompt: hello world\n"
+        "  stage_overrides:\n"
+        "    refine:\n"
+        "      t_thresh: 0.8\n",
+        encoding="utf-8",
+    )
+
+    def fake_from_pretrained(cls, model_path):
+        return cls(t_thresh=0.5)
+
+    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+        captured["sampling_param"] = sampling_param
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
+
+    monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(fake_from_pretrained))
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
+
+    config = load_run_config(config_path)
+    del config.request.stage_overrides["refine"]
+
+    generator.generate(config.request)
+
+    assert captured["sampling_param"].t_thresh == 0.5
+
+
 def test_generate_video_legacy_call_uses_legacy_impl(monkeypatch):
     generator = _new_runtime_video_generator()
     captured = {}

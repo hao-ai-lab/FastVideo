@@ -12,6 +12,7 @@ from fastvideo.logger import init_logger
 from fastvideo.utils import FlexibleArgumentParser
 
 logger = init_logger(__name__)
+_VALIDATED_RUN_CONFIG_ATTR = "_fastvideo_validated_run_config"
 
 
 class GenerateSubcommand(CLISubcommand):
@@ -22,10 +23,12 @@ class GenerateSubcommand(CLISubcommand):
         super().__init__()
 
     def cmd(self, args: argparse.Namespace) -> None:
-        run_config = build_generate_run_config(
-            args,
-            overrides=getattr(args, "_unknown", None),
-        )
+        run_config = getattr(args, _VALIDATED_RUN_CONFIG_ATTR, None)
+        if run_config is None:
+            run_config = build_generate_run_config(
+                args,
+                overrides=getattr(args, "_unknown", None),
+            )
         logger.info("CLI generate config: %s", run_config)
 
         generator = VideoGenerator.from_config(run_config.generator)
@@ -38,6 +41,14 @@ class GenerateSubcommand(CLISubcommand):
                              "run config plus optional dotted overrides")
         if not os.path.exists(args.config):
             raise ValueError(f"Config file not found: {args.config}")
+        setattr(
+            args,
+            _VALIDATED_RUN_CONFIG_ATTR,
+            build_generate_run_config(
+                args,
+                overrides=getattr(args, "_unknown", None),
+            ),
+        )
 
     def subparser_init(self, subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
         generate_parser = subparsers.add_parser(

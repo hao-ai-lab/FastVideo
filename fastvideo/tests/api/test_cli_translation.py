@@ -333,6 +333,50 @@ def test_serve_subcommand_requires_config():
         ServeSubcommand().validate(args)
 
 
+def test_generate_subcommand_rejects_non_positive_num_gpus(tmp_path):
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: test-model\n"
+        "request:\n"
+        "  prompt: hello world\n",
+        encoding="utf-8",
+    )
+    args, _ = _parse_generate_args([
+        "--config",
+        str(config_path),
+        "--generator.engine.num_gpus",
+        "0",
+    ])
+
+    with pytest.raises(
+        ValueError,
+        match=r"generator\.engine\.num_gpus must be > 0; got 0",
+    ):
+        GenerateSubcommand().validate(args)
+
+
+def test_serve_subcommand_rejects_non_positive_num_gpus(tmp_path):
+    config_path = tmp_path / "serve.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: serve-model\n",
+        encoding="utf-8",
+    )
+    args, _ = _parse_serve_args([
+        "--config",
+        str(config_path),
+        "--generator.engine.num_gpus",
+        "0",
+    ])
+
+    with pytest.raises(
+        ValueError,
+        match=r"generator\.engine\.num_gpus must be > 0; got 0",
+    ):
+        ServeSubcommand().validate(args)
+
+
 def test_generate_subcommand_dispatches_via_typed_config(tmp_path, monkeypatch):
     config_path = tmp_path / "run.yaml"
     config_path.write_text(

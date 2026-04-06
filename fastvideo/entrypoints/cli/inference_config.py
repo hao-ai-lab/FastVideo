@@ -31,6 +31,7 @@ def build_generate_run_config(
     )
     _ensure_generate_cli_defaults(raw)
     config = parse_config(RunConfig, raw)
+    _validate_num_gpus(config.generator.engine.num_gpus)
     _validate_generate_prompt_sources(config)
     return config
 
@@ -47,7 +48,9 @@ def build_serve_config(
         overrides,
         allowed_prefixes=_SERVE_OVERRIDE_PREFIXES,
     )
-    return parse_config(ServeConfig, raw)
+    config = parse_config(ServeConfig, raw)
+    _validate_num_gpus(config.generator.engine.num_gpus)
+    return config
 
 
 def _load_nested_config(path: str | None) -> dict[str, Any]:
@@ -95,6 +98,11 @@ def _validate_generate_prompt_sources(config: RunConfig) -> None:
         raise ValueError("Either request.prompt or request.inputs.prompt_path must be provided")
     if has_prompt and has_prompt_path:
         raise ValueError("Cannot provide both request.prompt and request.inputs.prompt_path")
+
+
+def _validate_num_gpus(num_gpus: int) -> None:
+    if num_gpus <= 0:
+        raise ValueError(f"generator.engine.num_gpus must be > 0; got {num_gpus}")
 
 
 __all__ = [

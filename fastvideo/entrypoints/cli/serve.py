@@ -13,6 +13,7 @@ from fastvideo.logger import init_logger
 from fastvideo.utils import FlexibleArgumentParser
 
 logger = init_logger(__name__)
+_VALIDATED_SERVE_CONFIG_ATTR = "_fastvideo_validated_serve_config"
 
 
 class ServeSubcommand(CLISubcommand):
@@ -23,10 +24,12 @@ class ServeSubcommand(CLISubcommand):
         super().__init__()
 
     def cmd(self, args: argparse.Namespace) -> None:
-        serve_config = build_serve_config(
-            args,
-            overrides=getattr(args, "_unknown", None),
-        )
+        serve_config = getattr(args, _VALIDATED_SERVE_CONFIG_ATTR, None)
+        if serve_config is None:
+            serve_config = build_serve_config(
+                args,
+                overrides=getattr(args, "_unknown", None),
+            )
         if serve_config.default_request != GenerationRequest():
             raise NotImplementedError("ServeConfig.default_request is not wired into the OpenAI "
                                       "server yet")
@@ -55,6 +58,14 @@ class ServeSubcommand(CLISubcommand):
                              "serve config plus optional dotted overrides")
         if not os.path.exists(args.config):
             raise ValueError(f"Config file not found: {args.config}")
+        setattr(
+            args,
+            _VALIDATED_SERVE_CONFIG_ATTR,
+            build_serve_config(
+                args,
+                overrides=getattr(args, "_unknown", None),
+            ),
+        )
 
     def subparser_init(self, subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
         serve_parser = subparsers.add_parser(
