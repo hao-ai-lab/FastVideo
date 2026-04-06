@@ -1,11 +1,83 @@
 import os
+from types import SimpleNamespace
+import warnings
 
+import pytest
+
+from fastvideo.api import (
+    GenerationRequest,
+    GenerationResult,
+    GeneratorConfig,
+    SamplingConfig,
+)
+from fastvideo.configs.sample import SamplingParam
 from fastvideo.entrypoints.video_generator import VideoGenerator
+from fastvideo.fastvideo_args import WorkloadType
 
 
 def _new_video_generator() -> VideoGenerator:
     # Bypass __init__ since we only test a pure helper method.
     return VideoGenerator.__new__(VideoGenerator)
+
+
+def _new_runtime_video_generator() -> VideoGenerator:
+    generator = _new_video_generator()
+    generator.fastvideo_args = SimpleNamespace(
+        model_path="test-model",
+        prompt_txt=None,
+        workload_type=SimpleNamespace(value="t2v"),
+    )
+    generator.executor = SimpleNamespace(
+        set_log_queue=lambda queue: None,
+        clear_log_queue=lambda: None,
+    )
+    generator.config = None
+    return generator
+
+
+def _patch_from_fastvideo_args(monkeypatch):
+    captured = {}
+
+    def fake_from_fastvideo_args(cls, fastvideo_args, *, log_queue=None):
+        generator = cls.__new__(cls)
+        generator.fastvideo_args = fastvideo_args
+        generator.executor = None
+        generator.config = None
+        captured["fastvideo_args"] = fastvideo_args
+        captured["log_queue"] = log_queue
+        return generator
+
+    monkeypatch.setattr(
+        VideoGenerator,
+        "from_fastvideo_args",
+        classmethod(fake_from_fastvideo_args),
+    )
+    return captured
+
+
+def _patch_fastvideo_args_from_kwargs(monkeypatch):
+    captured = {}
+
+    def fake_from_kwargs(cls, **kwargs):
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(
+            model_path=kwargs["model_path"],
+            num_gpus=kwargs["num_gpus"],
+            workload_type=WorkloadType.from_string(kwargs.get("workload_type", "t2v")),
+        )
+
+    monkeypatch.setattr(
+        "fastvideo.api.compat.FastVideoArgs.from_kwargs",
+        classmethod(fake_from_kwargs),
+    )
+    return captured
+
+
+def _patch_sampling_param_from_pretrained(monkeypatch):
+    def fake_from_pretrained(cls, model_path):
+        return cls()
+
+    monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(fake_from_pretrained))
 
 
 def test_prepare_output_path_file_sanitization(tmp_path):
@@ -76,3 +148,172 @@ def test_prepare_output_path_empty_prompt_fallback(tmp_path):
     assert os.path.dirname(result) == str(out_dir)
     assert os.path.basename(result) == "output.mp4"
 
+
+def test_from_config_normalizes_and_translates(monkeypatch):
+    captured = _patch_from_fastvideo_args(monkeypatch)
+    _patch_fastvideo_args_from_kwargs(monkeypatch)
+    config = GeneratorConfig(model_path="test-model")
+    config.engine.num_gpus = 2
+    config.pipeline.workload_type = "t2v"
+
+    generator = VideoGenerator.from_config(config)
+
+    assert captured["fastvideo_args"].model_path == "test-model"
+    assert captured["fastvideo_args"].num_gpus == 2
+    assert captured["fastvideo_args"].workload_type.value == "t2v"
+    assert generator.config == config
+
+
+def test_from_file_loads_generator_from_run_config(tmp_path, monkeypatch):
+    captured = _patch_from_fastvideo_args(monkeypatch)
+    _patch_fastvideo_args_from_kwargs(monkeypatch)
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: test-model\n"
+        "  engine:\n"
+        "    num_gpus: 3\n"
+        "request:\n"
+        "  prompt: hello\n",
+        encoding="utf-8",
+    )
+
+    VideoGenerator.from_file(str(config_path))
+
+    assert captured["fastvideo_args"].model_path == "test-model"
+    assert captured["fastvideo_args"].num_gpus == 3
+
+
+def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
+    captured = _patch_from_fastvideo_args(monkeypatch)
+    fastvideo_args_capture = _patch_fastvideo_args_from_kwargs(monkeypatch)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        generator = VideoGenerator.from_pretrained(
+            "test-model",
+            num_gpus=4,
+            use_fsdp_inference=False,
+            text_encoder_cpu_offload=True,
+            pin_cpu_memory=True,
+            dit_cpu_offload=False,
+            vae_cpu_offload=False,
+        )
+
+    assert not caught
+    assert captured["fastvideo_args"].model_path == "test-model"
+    assert captured["fastvideo_args"].num_gpus == 4
+    assert fastvideo_args_capture["kwargs"]["use_fsdp_inference"] is False
+    assert fastvideo_args_capture["kwargs"]["text_encoder_cpu_offload"] is True
+    assert fastvideo_args_capture["kwargs"]["pin_cpu_memory"] is True
+    assert fastvideo_args_capture["kwargs"]["dit_cpu_offload"] is False
+    assert fastvideo_args_capture["kwargs"]["vae_cpu_offload"] is False
+    assert generator.config is not None
+    assert generator.config.model_path == "test-model"
+    assert generator.config.engine.num_gpus == 4
+
+
+def test_from_pretrained_legacy_only_kwargs_warn(monkeypatch):
+    captured = _patch_from_fastvideo_args(monkeypatch)
+    _patch_fastvideo_args_from_kwargs(monkeypatch)
+
+    with pytest.warns(DeprecationWarning, match="legacy-only kwargs"):
+        generator = VideoGenerator.from_pretrained(
+            "test-model",
+            num_gpus=4,
+            workload_type="t2v",
+        )
+
+    assert captured["fastvideo_args"].model_path == "test-model"
+    assert captured["fastvideo_args"].num_gpus == 4
+    assert captured["fastvideo_args"].workload_type.value == "t2v"
+    assert generator.config is not None
+    assert generator.config.pipeline.workload_type == "t2v"
+
+
+def test_generate_uses_typed_request_path(monkeypatch):
+    generator = _new_runtime_video_generator()
+    _patch_sampling_param_from_pretrained(monkeypatch)
+    captured = {}
+
+    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+        captured["prompt"] = prompt
+        captured["sampling_param"] = sampling_param
+        captured["kwargs"] = kwargs
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
+
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
+
+    result = generator.generate(
+        GenerationRequest(
+            prompt="hello world",
+            sampling=SamplingConfig(num_frames=81, height=480, width=832),
+        )
+    )
+
+    assert isinstance(result, GenerationResult)
+    assert captured["prompt"] == "hello world"
+    assert captured["sampling_param"].num_frames == 81
+    assert captured["sampling_param"].height == 480
+    assert captured["sampling_param"].width == 832
+    assert result.video_path == "outputs/test.mp4"
+
+
+def test_generate_video_legacy_call_routes_through_typed_request(monkeypatch):
+    generator = _new_runtime_video_generator()
+    captured = {}
+
+    def fake_generate(self, request, *, log_queue=None):
+        captured["request"] = request
+        captured["log_queue"] = log_queue
+        return GenerationResult(prompt=request.prompt, video_path="outputs/test.mp4")
+
+    monkeypatch.setattr(VideoGenerator, "generate", fake_generate)
+
+    with pytest.warns(DeprecationWarning):
+        result = generator.generate_video(
+            prompt="legacy prompt",
+            num_frames=49,
+            output_path="outputs/legacy",
+            save_video=False,
+            log_queue="queue-token",
+        )
+
+    assert isinstance(captured["request"], GenerationRequest)
+    assert captured["request"].prompt == "legacy prompt"
+    assert captured["request"].sampling.num_frames == 49
+    assert captured["request"].output.output_path == "outputs/legacy"
+    assert captured["request"].output.save_video is False
+    assert captured["log_queue"] == "queue-token"
+    assert result["video_path"] == "outputs/test.mp4"
+
+
+def test_generate_batch_prompt_file_returns_typed_results(tmp_path, monkeypatch):
+    generator = _new_runtime_video_generator()
+    _patch_sampling_param_from_pretrained(monkeypatch)
+    prompt_file = tmp_path / "prompts.txt"
+    prompt_file.write_text("first prompt\nsecond prompt\n", encoding="utf-8")
+    output_dir = tmp_path / "outputs"
+    captured_prompts = []
+
+    def fake_generate_single_video(prompt, sampling_param=None, **kwargs):
+        captured_prompts.append(prompt)
+        return {"prompts": prompt, "video_path": kwargs["output_path"]}
+
+    monkeypatch.setattr(generator, "_generate_single_video", fake_generate_single_video)
+
+    results = generator.generate(
+        {
+            "inputs": {"prompt_path": str(prompt_file)},
+            "output": {
+                "output_path": str(output_dir),
+                "save_video": False,
+                "return_frames": False,
+            },
+        }
+    )
+
+    assert isinstance(results, list)
+    assert [result.prompt for result in results] == ["first prompt", "second prompt"]
+    assert [result.prompt_index for result in results] == [0, 1]
+    assert captured_prompts == ["first prompt", "second prompt"]

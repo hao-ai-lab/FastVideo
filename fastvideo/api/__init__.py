@@ -30,6 +30,7 @@ from fastvideo.api.parser import (
     load_serve_config,
     parse_config,
 )
+from fastvideo.api.results import GenerationResult
 
 __all__ = [
     "CompileConfig",
@@ -37,6 +38,7 @@ __all__ = [
     "ContinuationState",
     "ConfigValidationError",
     "EngineConfig",
+    "GenerationResult",
     "GenerationPlan",
     "GenerationRequest",
     "GeneratorConfig",

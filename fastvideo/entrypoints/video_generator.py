@@ -8,8 +8,12 @@ diffusion models.
 
 import os
 import re
+import shutil
 import threading
 import time
+import tempfile
+import warnings
+from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
@@ -18,9 +22,18 @@ import numpy as np
 import torch
 import torchvision
 from einops import rearrange
-import shutil
-import tempfile
 
+from fastvideo.api.compat import (
+    generator_config_to_fastvideo_args,
+    legacy_from_pretrained_to_config,
+    legacy_generate_call_to_request,
+    load_generator_config_from_file,
+    normalize_generation_request,
+    normalize_generator_config,
+    request_to_sampling_param,
+)
+from fastvideo.api.results import GenerationResult
+from fastvideo.api.schema import GenerationRequest, GeneratorConfig
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -29,6 +42,29 @@ from fastvideo.utils import align_to, shallow_asdict
 from fastvideo.worker.executor import Executor
 
 logger = init_logger(__name__)
+
+_FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
+    "num_gpus",
+    "revision",
+    "trust_remote_code",
+    "distributed_executor_backend",
+    "tp_size",
+    "sp_size",
+    "hsdp_replicate_dim",
+    "hsdp_shard_dim",
+    "dist_timeout",
+    "use_fsdp_inference",
+    "disable_autocast",
+    "enable_stage_verification",
+    "dit_cpu_offload",
+    "dit_layerwise_offload",
+    "text_encoder_cpu_offload",
+    "image_encoder_cpu_offload",
+    "vae_cpu_offload",
+    "pin_cpu_memory",
+    "enable_torch_compile",
+    "torch_compile_kwargs",
+})
 
 
 def _infer_latent_batch_size(batch: ForwardBatch) -> int:
@@ -69,11 +105,16 @@ class VideoGenerator:
             log_stats: Whether to log statistics
             log_queue: Optional multiprocessing.Queue to forward worker logs to
         """
+        self.config: GeneratorConfig | None = None
         self.fastvideo_args = fastvideo_args
         self.executor = executor_class(fastvideo_args, log_queue=log_queue)
 
     @classmethod
-    def from_pretrained(cls, model_path: str, **kwargs) -> "VideoGenerator":
+    def from_pretrained(
+        cls,
+        model_path: str | GeneratorConfig | Mapping[str, Any] | None = None,
+        **kwargs,
+    ) -> "VideoGenerator":
         """
         Create a video generator from a pretrained model.
         
@@ -86,13 +127,69 @@ class VideoGenerator:
             The created video generator
 
         Priority level: Default pipeline config < User's pipeline config < User's kwargs
-        """
-        # If users also provide some kwargs, it will override the FastVideoArgs and PipelineConfig.
-        kwargs['model_path'] = model_path
-        log_queue = kwargs.pop("log_queue", None)
-        fastvideo_args = FastVideoArgs.from_kwargs(**kwargs)
 
-        return cls.from_fastvideo_args(fastvideo_args, log_queue=log_queue)
+        Stable convenience kwargs remain supported here for common engine and
+        offload settings. Advanced model- or pipeline-specific options should
+        move to VideoGenerator.from_config(...).
+        """
+        log_queue = kwargs.pop("log_queue", None)
+        typed_config = kwargs.pop("config", None)
+        if typed_config is not None:
+            if model_path is not None:
+                raise TypeError("Pass either model_path or config to from_pretrained, not both")
+            if kwargs:
+                unexpected = ", ".join(sorted(kwargs))
+                raise TypeError(f"Unexpected keyword arguments with config: {unexpected}")
+            return cls.from_config(typed_config, log_queue=log_queue)
+
+        if isinstance(model_path, GeneratorConfig | Mapping):
+            if kwargs:
+                unexpected = ", ".join(sorted(kwargs))
+                raise TypeError(f"Unexpected keyword arguments with typed config: {unexpected}")
+            return cls.from_config(model_path, log_queue=log_queue)
+
+        if model_path is None:
+            raise TypeError("model_path or config is required")
+
+        legacy_only_kwargs = sorted(set(kwargs) - _FROM_PRETRAINED_CONVENIENCE_KWARGS)
+        if legacy_only_kwargs:
+            warnings.warn(
+                "VideoGenerator.from_pretrained(...) received legacy-only kwargs "
+                f"({', '.join(legacy_only_kwargs)}); prefer VideoGenerator.from_config(...) "
+                "for advanced configuration.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return cls.from_config(
+            legacy_from_pretrained_to_config(model_path, kwargs),
+            log_queue=log_queue,
+        )
+
+    @classmethod
+    def from_config(
+        cls,
+        config: GeneratorConfig | Mapping[str, Any],
+        *,
+        log_queue=None,
+    ) -> "VideoGenerator":
+        normalized = normalize_generator_config(config)
+        fastvideo_args = generator_config_to_fastvideo_args(normalized)
+        generator = cls.from_fastvideo_args(fastvideo_args, log_queue=log_queue)
+        generator.config = normalized
+        return generator
+
+    @classmethod
+    def from_file(
+        cls,
+        path: str,
+        overrides: list[str] | Mapping[str, Any] | None = None,
+        *,
+        log_queue=None,
+    ) -> "VideoGenerator":
+        return cls.from_config(
+            load_generator_config_from_file(path, overrides=overrides),
+            log_queue=log_queue,
+        )
 
     @classmethod
     def from_fastvideo_args(
@@ -121,6 +218,22 @@ class VideoGenerator:
             log_stats=False,  # TODO: implement
             log_queue=log_queue,
         )
+
+    def generate(
+        self,
+        request: GenerationRequest | Mapping[str, Any],
+        *,
+        log_queue=None,
+    ) -> GenerationResult | list[GenerationResult]:
+        normalized_request = normalize_generation_request(request)
+        if log_queue:
+            self.executor.set_log_queue(log_queue)
+
+        try:
+            return self._generate_request_impl(normalized_request)
+        finally:
+            if log_queue:
+                self.executor.clear_log_queue()
 
     def generate_video(
         self,
@@ -158,21 +271,59 @@ class VideoGenerator:
             metadata dictionaries for prompt-file batch generation.
         """
         log_queue = kwargs.pop("log_queue", None)
-        if log_queue:
-            self.executor.set_log_queue(log_queue)
+        warnings.warn(
+            "VideoGenerator.generate_video(...) is deprecated; use "
+            "VideoGenerator.generate(request=...) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        typed_request = legacy_generate_call_to_request(
+            prompt,
+            sampling_param,
+            mouse_cond=mouse_cond,
+            keyboard_cond=keyboard_cond,
+            grid_sizes=grid_sizes,
+            legacy_kwargs=kwargs,
+        )
+        typed_result = self.generate(typed_request, log_queue=log_queue)
+        return self._unwrap_typed_result(typed_result)
 
-        try:
-            return self._generate_video_impl(
-                prompt=prompt,
-                sampling_param=sampling_param,
-                mouse_cond=mouse_cond,
-                keyboard_cond=keyboard_cond,
-                grid_sizes=grid_sizes,
-                **kwargs,
-            )
-        finally:
-            if log_queue:
-                self.executor.clear_log_queue()
+    def _generate_request_impl(
+        self,
+        request: GenerationRequest,
+    ) -> GenerationResult | list[GenerationResult]:
+        if isinstance(request.prompt, list):
+            if request.inputs.prompt_path is not None:
+                raise ValueError("request.prompt list cannot be combined with request.inputs.prompt_path")
+            results: list[GenerationResult] = []
+            for index, prompt in enumerate(request.prompt):
+                single_request = deepcopy(request)
+                single_request.prompt = prompt
+                wrapped = self._generate_single_request(single_request)
+                if isinstance(wrapped, list):
+                    results.extend(wrapped)
+                    continue
+                wrapped.prompt_index = index
+                if wrapped.prompt is None:
+                    wrapped.prompt = prompt
+                results.append(wrapped)
+            return results
+
+        return self._generate_single_request(request)
+
+    def _generate_single_request(
+        self,
+        request: GenerationRequest,
+    ) -> GenerationResult | list[GenerationResult]:
+        sampling_param = request_to_sampling_param(
+            request,
+            model_path=self.fastvideo_args.model_path,
+        )
+        result = self._generate_video_impl(
+            prompt=request.prompt,
+            sampling_param=sampling_param,
+        )
+        return self._wrap_legacy_result(result)
 
     def _generate_video_impl(
         self,
@@ -471,6 +622,20 @@ class VideoGenerator:
         }
 
         return result
+
+    @staticmethod
+    def _wrap_legacy_result(
+        result: dict[str, Any] | list[dict[str, Any]], ) -> GenerationResult | list[GenerationResult]:
+        if isinstance(result, list):
+            return [GenerationResult.from_legacy_result(item) for item in result]
+        return GenerationResult.from_legacy_result(result)
+
+    @staticmethod
+    def _unwrap_typed_result(
+        result: GenerationResult | list[GenerationResult], ) -> dict[str, Any] | list[dict[str, Any]]:
+        if isinstance(result, list):
+            return [item.to_legacy_dict() for item in result]
+        return result.to_legacy_dict()
 
     @staticmethod
     def _mux_audio(
