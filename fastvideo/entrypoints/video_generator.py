@@ -226,6 +226,21 @@ class VideoGenerator:
         *,
         log_queue=None,
     ) -> GenerationResult | list[GenerationResult]:
+        """
+        Generate video or image outputs from a typed inference request.
+
+        Args:
+            request: A `GenerationRequest` instance or a mapping that can be
+                parsed into one. This is the primary public inference
+                entrypoint for the typed API.
+            log_queue: Optional multiprocessing.Queue to forward worker logs to
+                during this request.
+
+        Returns:
+            A `GenerationResult` for single-request generation, or a list of
+            `GenerationResult` objects when the request expands into multiple
+            prompts.
+        """
         normalized_request = normalize_generation_request(request)
         if log_queue:
             self.executor.set_log_queue(log_queue)
