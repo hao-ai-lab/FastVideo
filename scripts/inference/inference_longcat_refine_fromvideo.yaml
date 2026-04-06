@@ -1,0 +1,51 @@
+# Run with:
+#   fastvideo generate --config scripts/inference/inference_longcat_refine_fromvideo.yaml
+generator:
+  model_path: FastVideo/LongCat-Video-T2V-Diffusers
+  engine:
+    num_gpus: 1
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      pin_cpu_memory: false
+  pipeline:
+    components:
+      lora_path: FastVideo/LongCat-Video-T2V-Refinement-LoRA
+    experimental:
+      enable_bsa: true
+      bsa_sparsity: 0.875
+      bsa_chunk_q: [4, 4, 8]
+      bsa_chunk_k: [4, 4, 8]
+      lora_nickname: refinement
+request:
+  prompt: >-
+    In a realistic photography style, a white boy around seven or eight years
+    old sits on a park bench, wearing a light blue T-shirt, denim shorts, and
+    white sneakers. He holds an ice cream cone with vanilla and chocolate
+    flavors, and beside him is a medium-sized golden Labrador. Smiling, the
+    boy offers the ice cream to the dog, who eagerly licks it with its tongue.
+    The sun is shining brightly, and the background features a green lawn and
+    several tall trees, creating a warm and loving scene.
+  negative_prompt: >-
+    Bright tones, overexposed, static, blurred details, subtitles, style,
+    works, paintings, images, static, overall gray, worst quality, low
+    quality, JPEG compression residue, ugly, incomplete, extra fingers,
+    poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen
+    limbs, fused fingers, still picture, messy background, three legs, many
+    people in the background, walking backwards
+  inputs:
+    refine_from: outputs_video/longcat_distill/In a realistic photography style, a white boy around seven or eight years old sits on a park bench,.mp4
+  sampling:
+    seed: 42
+    height: 720
+    width: 1280
+    fps: 30
+    num_inference_steps: 50
+    guidance_scale: 1.0
+  extensions:
+    t_thresh: 0.5
+    spatial_refine_only: false
+    num_cond_frames: 0
+  output:
+    output_path: outputs_video/longcat_refine_720p

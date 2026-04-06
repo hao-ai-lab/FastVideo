@@ -254,6 +254,8 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         return namespace, unknown  # type: ignore[no-any-return]
 
     def _should_defer_config_loading(self, args: list[str]) -> bool:
+        if getattr(self, "defer_config_loading", False):
+            return True
         subcommand = next((arg for arg in args if not arg.startswith('-')), None)
         if subcommand in {"generate", "serve"}:
             return True

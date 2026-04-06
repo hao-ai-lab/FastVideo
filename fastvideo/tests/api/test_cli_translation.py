@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
 import pytest
 
+from fastvideo.entrypoints.cli import main as cli_main
 from fastvideo.entrypoints.cli.generate import GenerateSubcommand
 from fastvideo.entrypoints.cli.inference_config import (
     build_generate_run_config,
@@ -54,7 +56,7 @@ def test_generate_parser_preserves_unknown_dotted_overrides(tmp_path):
     assert unknown == ["--request.sampling.seed", "42"]
 
 
-def test_build_generate_run_config_loads_nested_config_and_cli_overrides(
+def test_build_generate_run_config_loads_nested_config_and_dotted_overrides(
     tmp_path,
 ):
     config_path = tmp_path / "run.yaml"
@@ -73,7 +75,7 @@ def test_build_generate_run_config_loads_nested_config_and_cli_overrides(
     args, unknown = _parse_generate_args([
         "--config",
         str(config_path),
-        "--num-gpus",
+        "--generator.engine.num_gpus",
         "2",
         "--request.sampling.seed",
         "7",
@@ -104,26 +106,43 @@ def test_build_generate_run_config_loads_nested_json_config(tmp_path):
     assert config.request.output.return_frames is False
 
 
-def test_build_generate_run_config_translates_flat_legacy_config(tmp_path):
+def test_build_generate_run_config_rejects_flat_config(tmp_path):
     config_path = tmp_path / "run-flat.yaml"
     config_path.write_text(
         "model_path: flat-model\n"
-        "workload_type: i2v\n"
-        "prompt: hello\n"
-        "num_frames: 81\n"
-        "output_path: out/\n",
+        "prompt: hello\n",
         encoding="utf-8",
     )
 
     args, unknown = _parse_generate_args(["--config", str(config_path)])
-    config = build_generate_run_config(args, unknown)
+    with pytest.raises(
+        ValueError,
+        match="top-level 'generator' mapping",
+    ):
+        build_generate_run_config(args, unknown)
 
-    assert config.generator.model_path == "flat-model"
-    assert config.generator.pipeline.workload_type == "i2v"
-    assert config.request.prompt == "hello"
-    assert config.request.sampling.num_frames == 81
-    assert config.request.output.output_path == "out/"
-    assert config.request.output.return_frames is False
+
+def test_build_generate_run_config_rejects_non_dotted_overrides(tmp_path):
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: test-model\n"
+        "request:\n"
+        "  prompt: hello\n",
+        encoding="utf-8",
+    )
+
+    args, unknown = _parse_generate_args([
+        "--config",
+        str(config_path),
+        "--num-gpus",
+        "2",
+    ])
+    with pytest.raises(
+        ValueError,
+        match="CLI overrides must use dotted config paths",
+    ):
+        build_generate_run_config(args, unknown)
 
 
 def test_build_generate_run_config_requires_single_prompt_source(tmp_path):
@@ -158,33 +177,7 @@ def test_build_generate_run_config_requires_single_prompt_source(tmp_path):
         build_generate_run_config(args, unknown)
 
 
-def test_build_serve_config_translates_flat_legacy_config(tmp_path):
-    config_path = tmp_path / "serve-flat.yaml"
-    config_path.write_text(
-        "model_path: serve-model\n"
-        "num_gpus: 4\n"
-        "workload_type: i2v\n"
-        "host: 127.0.0.1\n"
-        "port: 9001\n"
-        "output_dir: served/\n",
-        encoding="utf-8",
-    )
-
-    args, unknown = _parse_serve_args(["--config", str(config_path)])
-    config = build_serve_config(args, unknown)
-
-    assert config.generator.model_path == "serve-model"
-    assert config.generator.engine.num_gpus == 4
-    assert config.generator.pipeline.workload_type == "i2v"
-    assert config.server.host == "127.0.0.1"
-    assert config.server.port == 9001
-    assert config.server.output_dir == "served/"
-    assert "host" not in config.generator.pipeline.experimental
-    assert "port" not in config.generator.pipeline.experimental
-    assert "output_dir" not in config.generator.pipeline.experimental
-
-
-def test_build_serve_config_loads_nested_config_and_overrides(tmp_path):
+def test_build_serve_config_loads_nested_config_and_dotted_overrides(tmp_path):
     config_path = tmp_path / "serve.yaml"
     config_path.write_text(
         "generator:\n"
@@ -198,7 +191,7 @@ def test_build_serve_config_loads_nested_config_and_overrides(tmp_path):
     args, unknown = _parse_serve_args([
         "--config",
         str(config_path),
-        "--num-gpus",
+        "--generator.engine.num_gpus",
         "3",
         "--server.port",
         "9100",
@@ -212,11 +205,55 @@ def test_build_serve_config_loads_nested_config_and_overrides(tmp_path):
     assert config.server.port == 9100
 
 
-def test_serve_subcommand_requires_config():
-    args, _ = _parse_serve_args([
-        "--model-path",
-        "serve-model",
+def test_build_serve_config_rejects_flat_config(tmp_path):
+    config_path = tmp_path / "serve-flat.yaml"
+    config_path.write_text(
+        "model_path: serve-model\n"
+        "host: 127.0.0.1\n",
+        encoding="utf-8",
+    )
+
+    args, unknown = _parse_serve_args(["--config", str(config_path)])
+    with pytest.raises(
+        ValueError,
+        match="top-level 'generator' mapping",
+    ):
+        build_serve_config(args, unknown)
+
+
+def test_build_serve_config_rejects_non_dotted_overrides(tmp_path):
+    config_path = tmp_path / "serve.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: serve-model\n",
+        encoding="utf-8",
+    )
+
+    args, unknown = _parse_serve_args([
+        "--config",
+        str(config_path),
+        "--port",
+        "9000",
     ])
+    with pytest.raises(
+        ValueError,
+        match="CLI overrides must use dotted config paths",
+    ):
+        build_serve_config(args, unknown)
+
+
+def test_generate_subcommand_requires_config():
+    args, _ = _parse_generate_args([])
+
+    with pytest.raises(
+        ValueError,
+        match="fastvideo generate requires --config PATH",
+    ):
+        GenerateSubcommand().validate(args)
+
+
+def test_serve_subcommand_requires_config():
+    args, _ = _parse_serve_args([])
 
     with pytest.raises(
         ValueError,
@@ -225,13 +262,19 @@ def test_serve_subcommand_requires_config():
         ServeSubcommand().validate(args)
 
 
-def test_generate_subcommand_dispatches_via_typed_config(monkeypatch):
+def test_generate_subcommand_dispatches_via_typed_config(tmp_path, monkeypatch):
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: test-model\n"
+        "request:\n"
+        "  prompt: hello world\n",
+        encoding="utf-8",
+    )
     args, _ = _parse_generate_args([
-        "--model-path",
-        "test-model",
-        "--prompt",
-        "hello world",
-        "--num-frames",
+        "--config",
+        str(config_path),
+        "--request.sampling.num_frames",
         "81",
     ])
     captured: dict[str, object] = {}
@@ -271,13 +314,13 @@ def test_serve_subcommand_dispatches_via_typed_config(tmp_path, monkeypatch):
     args, _ = _parse_serve_args([
         "--config",
         str(config_path),
-        "--host",
+        "--server.host",
         "127.0.0.1",
-        "--port",
+        "--server.port",
         "9000",
-        "--output-dir",
+        "--server.output_dir",
         "serve-outputs/",
-        "--num-gpus",
+        "--generator.engine.num_gpus",
         "2",
     ])
     captured: dict[str, object] = {}
@@ -323,3 +366,20 @@ def test_serve_subcommand_rejects_non_default_default_request(tmp_path):
         match="ServeConfig.default_request is not wired",
     ):
         ServeSubcommand().cmd(args)
+def test_main_rejects_top_level_config_without_subcommand(tmp_path, monkeypatch):
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: test-model\n"
+        "request:\n"
+        "  prompt: hello\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["fastvideo", "--config", str(config_path)],
+    )
+
+    with pytest.raises(SystemExit):
+        cli_main.main()
