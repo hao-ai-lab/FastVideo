@@ -170,6 +170,11 @@ class CosmosModel(WanModel):
         else:
             raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
 
+        # finetune.py hands us `noisy_latents` in (B, T, C, H, W)
+        # (Wan canonical). Un-permute back to the (B, C, T, H, W)
+        # layout Cosmos's transformer expects.
+        noisy_latents = noisy_latents.permute(0, 2, 1, 3, 4)
+
         with (
                 torch.autocast(device_type, dtype=dtype),
                 set_forward_context(
@@ -179,9 +184,11 @@ class CosmosModel(WanModel):
         ):
             input_kwargs = self._build_distill_input_kwargs(noisy_latents, timestep, text_dict)
             transformer = self._get_transformer(timestep)
-            # Cosmos output is already (B, C, T, H, W)
-            # — no permute needed unlike Wan.
             pred_noise = transformer(**input_kwargs)
+        # Re-permute transformer output (B, C, T, H, W) back to
+        # (B, T, C, H, W) so finetune.py's arithmetic with the
+        # already-permuted `noisy_latents`/`clean_latents` works.
+        pred_noise = pred_noise.permute(0, 2, 1, 3, 4)
         return pred_noise
 
     def _build_distill_input_kwargs(
@@ -305,8 +312,12 @@ class CosmosModel(WanModel):
                 "encoder_attention_mask": neg_mask,
             }
 
-        # NOTE: No latents permute for Cosmos.
-        # Cosmos expects (B, C, T, H, W) directly.
+        # Match the canonical (B, T, C, H, W) layout that
+        # finetune.py expects for `training_batch.latents`.
+        # We un-permute back to (B, C, T, H, W) at the
+        # transformer boundary in `predict_noise`.
+        training_batch.latents = (training_batch.latents.permute(
+            0, 2, 1, 3, 4))
         return training_batch
 
     def ensure_negative_conditioning(self) -> None:
