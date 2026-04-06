@@ -27,7 +27,6 @@ from fastvideo.api.compat import (
     expand_request_prompt_batch,
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,
-    legacy_generate_call_to_request,
     load_generator_config_from_file,
     normalize_generation_request,
     normalize_generator_config,
@@ -279,16 +278,21 @@ class VideoGenerator:
             DeprecationWarning,
             stacklevel=2,
         )
-        typed_request = legacy_generate_call_to_request(
-            prompt,
-            sampling_param,
-            mouse_cond=mouse_cond,
-            keyboard_cond=keyboard_cond,
-            grid_sizes=grid_sizes,
-            legacy_kwargs=kwargs,
-        )
-        typed_result = self.generate(typed_request, log_queue=log_queue)
-        return self._unwrap_typed_result(typed_result)
+        if log_queue:
+            self.executor.set_log_queue(log_queue)
+
+        try:
+            return self._generate_video_impl(
+                prompt=prompt,
+                sampling_param=sampling_param,
+                mouse_cond=mouse_cond,
+                keyboard_cond=keyboard_cond,
+                grid_sizes=grid_sizes,
+                **kwargs,
+            )
+        finally:
+            if log_queue:
+                self.executor.clear_log_queue()
 
     def _generate_request_impl(
         self,

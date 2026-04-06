@@ -293,16 +293,27 @@ def test_generate_preserves_schema_defaults_for_dataclass_request(monkeypatch):
     assert captured["sampling_param"].width == 1280
 
 
-def test_generate_video_legacy_call_routes_through_typed_request(monkeypatch):
+def test_generate_video_legacy_call_uses_legacy_impl(monkeypatch):
     generator = _new_runtime_video_generator()
     captured = {}
 
-    def fake_generate(self, request, *, log_queue=None):
-        captured["request"] = request
-        captured["log_queue"] = log_queue
-        return GenerationResult(prompt=request.prompt, video_path="outputs/test.mp4")
+    def fake_generate_video_impl(
+        prompt=None,
+        sampling_param=None,
+        mouse_cond=None,
+        keyboard_cond=None,
+        grid_sizes=None,
+        **kwargs,
+    ):
+        captured["prompt"] = prompt
+        captured["sampling_param"] = sampling_param
+        captured["mouse_cond"] = mouse_cond
+        captured["keyboard_cond"] = keyboard_cond
+        captured["grid_sizes"] = grid_sizes
+        captured["kwargs"] = kwargs
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
 
-    monkeypatch.setattr(VideoGenerator, "generate", fake_generate)
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
 
     with pytest.warns(DeprecationWarning):
         result = generator.generate_video(
@@ -313,36 +324,30 @@ def test_generate_video_legacy_call_routes_through_typed_request(monkeypatch):
             log_queue="queue-token",
         )
 
-    assert isinstance(captured["request"], GenerationRequest)
-    assert captured["request"].prompt == "legacy prompt"
-    assert captured["request"].sampling.num_frames == 49
-    assert captured["request"].output.output_path == "outputs/legacy"
-    assert captured["request"].output.save_video is False
-    assert captured["log_queue"] == "queue-token"
+    assert captured["prompt"] == "legacy prompt"
+    assert captured["kwargs"]["num_frames"] == 49
+    assert captured["kwargs"]["output_path"] == "outputs/legacy"
+    assert captured["kwargs"]["save_video"] is False
     assert result["video_path"] == "outputs/test.mp4"
 
 
-def test_generate_video_legacy_request_compat_fields(monkeypatch):
+def test_generate_video_legacy_call_preserves_unknown_kwargs(monkeypatch):
     generator = _new_runtime_video_generator()
-    generator.fastvideo_args.pipeline_config = SimpleNamespace(
-        embedded_cfg_scale=6.0,
-    )
     captured = {}
 
-    def fake_from_pretrained(cls, model_path):
-        return cls()
-
-    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+    def fake_generate_video_impl(
+        prompt=None,
+        sampling_param=None,
+        mouse_cond=None,
+        keyboard_cond=None,
+        grid_sizes=None,
+        **kwargs,
+    ):
         captured["prompt"] = prompt
         captured["sampling_param"] = sampling_param
-        captured["fastvideo_args"] = kwargs["fastvideo_args"]
+        captured["kwargs"] = kwargs
         return {"prompts": prompt, "video_path": "outputs/test.mp4"}
 
-    monkeypatch.setattr(
-        SamplingParam,
-        "from_pretrained",
-        classmethod(fake_from_pretrained),
-    )
     monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
 
     with pytest.warns(DeprecationWarning):
@@ -353,8 +358,8 @@ def test_generate_video_legacy_request_compat_fields(monkeypatch):
         )
 
     assert captured["prompt"] == "legacy prompt"
-    assert captured["sampling_param"].negative_prompt == "custom negative"
-    assert captured["fastvideo_args"].pipeline_config.embedded_cfg_scale == 7.5
+    assert captured["kwargs"]["neg_prompt"] == "custom negative"
+    assert captured["kwargs"]["embedded_cfg_scale"] == 7.5
     assert result["video_path"] == "outputs/test.mp4"
 
 
