@@ -2,9 +2,13 @@
 # adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/entrypoints/cli/serve.py
 
 import argparse
+import os
 from typing import cast
 
+from fastvideo.api.compat import generator_config_to_fastvideo_args
+from fastvideo.api.schema import GenerationRequest
 from fastvideo.entrypoints.cli.cli_types import CLISubcommand
+from fastvideo.entrypoints.cli.inference_config import build_serve_config
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.utils import FlexibleArgumentParser
@@ -20,49 +24,41 @@ class ServeSubcommand(CLISubcommand):
         super().__init__()
 
     def cmd(self, args: argparse.Namespace) -> None:
-        excluded_args = {
-            "subparser",
-            "config",
-            "dispatch_function",
-            "host",
-            "port",
-            "output_dir",
-        }
-
-        provided: set[str] = getattr(args, '_provided', set())
-        cli_kwargs = {}
-        for k, v in vars(args).items():
-            if k in excluded_args:
-                continue
-            if k == '_provided':
-                continue
-            if k in provided and v is not None:
-                cli_kwargs[k] = v
-
-        if 'model_path' not in cli_kwargs and args.model_path is not None:
-            cli_kwargs['model_path'] = args.model_path
-
-        if not cli_kwargs.get('model_path'):
-            raise ValueError("model_path must be provided via --model-path")
+        if not args.config:
+            raise ValueError("fastvideo serve requires --config PATH; use nested config "
+                             "plus optional dotted or flat overrides")
+        serve_config = build_serve_config(
+            args,
+            overrides=getattr(args, "_unknown", None),
+        )
+        if serve_config.default_request != GenerationRequest():
+            raise NotImplementedError("ServeConfig.default_request is not wired into the OpenAI "
+                                      "server yet")
 
         from fastvideo.entrypoints.openai.api_server import (
-            DEFAULT_HOST,
-            DEFAULT_OUTPUT_DIR,
-            DEFAULT_PORT,
-            run_server,
+            run_server, )
+
+        logger.info("CLI serve config: %s", serve_config)
+        logger.info(
+            "Server will listen on %s:%d",
+            serve_config.server.host,
+            serve_config.server.port,
         )
 
-        host = getattr(args, "host", DEFAULT_HOST)
-        port = getattr(args, "port", DEFAULT_PORT)
-        output_dir = getattr(args, "output_dir", DEFAULT_OUTPUT_DIR)
-
-        logger.info("CLI serve args: %s", cli_kwargs)
-        logger.info("Server will listen on %s:%d", host, port)
-
-        fastvideo_args = FastVideoArgs.from_kwargs(**cli_kwargs)
-        run_server(fastvideo_args, host=host, port=port, output_dir=output_dir)
+        fastvideo_args = generator_config_to_fastvideo_args(serve_config.generator)
+        run_server(
+            fastvideo_args,
+            host=serve_config.server.host,
+            port=serve_config.server.port,
+            output_dir=serve_config.server.output_dir,
+        )
 
     def validate(self, args: argparse.Namespace) -> None:
+        if not args.config:
+            raise ValueError("fastvideo serve requires --config PATH; use nested config "
+                             "plus optional dotted or flat overrides")
+        if not os.path.exists(args.config):
+            raise ValueError(f"Config file not found: {args.config}")
         if args.num_gpus is not None and args.num_gpus <= 0:
             raise ValueError("Number of gpus must be positive")
 
@@ -76,7 +72,7 @@ class ServeSubcommand(CLISubcommand):
         serve_parser = subparsers.add_parser(
             "serve",
             help="Start an OpenAI-compatible HTTP server",
-            usage=("fastvideo serve --model-path MODEL_PATH_OR_ID "
+            usage=("fastvideo serve --config SERVE_CONFIG "
                    "[--host HOST] [--port PORT] [OPTIONS]"),
         )
 
@@ -104,7 +100,7 @@ class ServeSubcommand(CLISubcommand):
             type=str,
             default="",
             required=False,
-            help="Read CLI options from a config JSON or YAML file.",
+            help="Path to a nested config JSON or YAML file. Required.",
         )
 
         serve_parser = FastVideoArgs.add_cli_args(serve_parser)

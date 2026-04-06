@@ -27,7 +27,10 @@ def main() -> None:
     for cmd in cmd_init():
         cmd.subparser_init(subparsers).set_defaults(dispatch_function=cmd.cmd)
         cmds[cmd.name] = cmd
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
+    if unknown and args.subparser not in {"generate", "serve"}:
+        parser.error(f"unrecognized arguments: {' '.join(unknown)}")
+    args._unknown = unknown
     if args.subparser in cmds:
         cmds[args.subparser].validate(args)
 
