@@ -24,6 +24,7 @@ import torchvision
 from einops import rearrange
 
 from fastvideo.api.compat import (
+    expand_request_prompt_batch,
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,
     legacy_generate_call_to_request,
@@ -296,9 +297,8 @@ class VideoGenerator:
             if request.inputs.prompt_path is not None:
                 raise ValueError("request.prompt list cannot be combined with request.inputs.prompt_path")
             results: list[GenerationResult] = []
-            for index, prompt in enumerate(request.prompt):
-                single_request = deepcopy(request)
-                single_request.prompt = prompt
+            for index, single_request in enumerate(expand_request_prompt_batch(request)):
+                prompt = single_request.prompt
                 wrapped = self._generate_single_request(single_request)
                 if isinstance(wrapped, list):
                     results.extend(wrapped)

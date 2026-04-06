@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fastvideo.api.overrides import apply_overrides, parse_cli_overrides
-from fastvideo.api.parser import load_raw_config, parse_config
+from fastvideo.api.parser import config_to_dict, load_raw_config, parse_config
 from fastvideo.api.schema import (
     GenerationRequest,
     GeneratorConfig,
@@ -26,6 +26,7 @@ _INPUT_FIELD_NAMES = {field.name for field in fields(InputConfig)}
 _SAMPLING_FIELD_NAMES = {field.name for field in fields(SamplingConfig)}
 _RUNTIME_FIELD_NAMES = {field.name for field in fields(RequestRuntimeConfig)}
 _OUTPUT_FIELD_NAMES = {field.name for field in fields(OutputConfig)}
+_MISSING = object()
 
 
 def normalize_generator_config(config: GeneratorConfig | Mapping[str, Any], ) -> GeneratorConfig:
@@ -215,11 +216,10 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
 
 
 def normalize_generation_request(request: GenerationRequest | Mapping[str, Any], ) -> GenerationRequest:
-    if isinstance(request, GenerationRequest):
-        return request
+    normalized = (request if isinstance(request, GenerationRequest) else parse_config(GenerationRequest, request))
 
-    normalized = parse_config(GenerationRequest, request)
-    setattr(normalized, _EXPLICIT_REQUEST_ATTR, deepcopy(dict(request)))
+    if not hasattr(normalized, _EXPLICIT_REQUEST_ATTR):
+        setattr(normalized, _EXPLICIT_REQUEST_ATTR, _serialize_generation_request(normalized))
     return normalized
 
 
@@ -267,12 +267,29 @@ def request_to_sampling_param(
     for key, value in updates.items():
         if hasattr(sampling_param, key):
             setattr(sampling_param, key, deepcopy(value))
+        elif _is_supported_as_default_only(key, value):
+            continue
         else:
             raise ValueError(f"Request field {key!r} is not supported by sampling params for {model_path}")
 
     sampling_param.__post_init__()
     sampling_param.check_sampling_param()
     return sampling_param
+
+
+def expand_request_prompt_batch(request: GenerationRequest, ) -> list[GenerationRequest]:
+    if not isinstance(request.prompt, list):
+        return [request]
+
+    requests: list[GenerationRequest] = []
+    for index, prompt in enumerate(request.prompt):
+        single_request = deepcopy(request)
+        single_request.prompt = prompt
+        _fan_out_batched_input_value(request, single_request, "image_path", index)
+        _fan_out_batched_input_value(request, single_request, "video_path", index)
+        _fan_out_explicit_request_metadata(request, single_request, index, prompt)
+        requests.append(single_request)
+    return requests
 
 
 def _looks_like_run_or_serve_config(raw: Mapping[str, Any]) -> bool:
@@ -325,11 +342,12 @@ def _apply_request_field(
 def _explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
     raw = getattr(request, _EXPLICIT_REQUEST_ATTR, None)
     if raw is None:
-        raw = _collect_non_default_fields(
-            request,
-            GenerationRequest(),
-        )
+        raw = _serialize_generation_request(request)
 
+    return _extract_request_updates(raw)
+
+
+def _extract_request_updates(raw: Mapping[str, Any]) -> dict[str, Any]:
     updates: dict[str, Any] = {}
     if "negative_prompt" in raw:
         updates["negative_prompt"] = deepcopy(raw["negative_prompt"])
@@ -368,6 +386,62 @@ def _flatten_stage_overrides(stage_overrides: Any) -> dict[str, Any]:
     return flattened
 
 
+def _serialize_generation_request(request: GenerationRequest) -> dict[str, Any]:
+    return deepcopy(config_to_dict(request))
+
+
+def _fan_out_batched_input_value(
+    source_request: GenerationRequest,
+    target_request: GenerationRequest,
+    field_name: str,
+    index: int,
+) -> None:
+    value = getattr(source_request.inputs, field_name)
+    if not isinstance(value, list):
+        return
+    _validate_batched_input_length(source_request.prompt, value, field_name)
+    setattr(target_request.inputs, field_name, deepcopy(value[index]))
+
+
+def _fan_out_explicit_request_metadata(
+    source_request: GenerationRequest,
+    target_request: GenerationRequest,
+    index: int,
+    prompt: str,
+) -> None:
+    raw = getattr(source_request, _EXPLICIT_REQUEST_ATTR, None)
+    if raw is None:
+        return
+
+    raw = deepcopy(raw)
+    raw["prompt"] = prompt
+    inputs = raw.get("inputs")
+    if isinstance(inputs, dict):
+        for field_name in ("image_path", "video_path"):
+            value = inputs.get(field_name)
+            if isinstance(value, list):
+                _validate_batched_input_length(source_request.prompt, value, field_name)
+                inputs[field_name] = deepcopy(value[index])
+
+    setattr(target_request, _EXPLICIT_REQUEST_ATTR, raw)
+
+
+def _validate_batched_input_length(
+    prompts: str | list[str] | None,
+    values: list[Any],
+    field_name: str,
+) -> None:
+    if not isinstance(prompts, list):
+        return
+    if len(values) != len(prompts):
+        raise ValueError(f"GenerationRequest.inputs.{field_name} must have the same length as request.prompt")
+
+
+def _is_supported_as_default_only(key: str, value: Any) -> bool:
+    default_value = _DEFAULT_REQUEST_UPDATES.get(key, _MISSING)
+    return default_value is not _MISSING and _values_equal(value, default_value)
+
+
 def _collect_non_default_fields(
     value: Any,
     default: Any,
@@ -397,6 +471,8 @@ def _values_equal(left: Any, right: Any) -> bool:
     except Exception:
         return False
 
+
+_DEFAULT_REQUEST_UPDATES = _extract_request_updates(config_to_dict(GenerationRequest()))
 
 __all__ = [
     "generator_config_to_fastvideo_args",

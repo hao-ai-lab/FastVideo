@@ -8,6 +8,7 @@ from fastvideo.api import (
     GenerationRequest,
     GenerationResult,
     GeneratorConfig,
+    InputConfig,
     SamplingConfig,
 )
 from fastvideo.configs.sample import SamplingParam
@@ -259,6 +260,39 @@ def test_generate_uses_typed_request_path(monkeypatch):
     assert result.video_path == "outputs/test.mp4"
 
 
+def test_generate_preserves_schema_defaults_for_dataclass_request(monkeypatch):
+    generator = _new_runtime_video_generator()
+    captured = {}
+
+    def fake_from_pretrained(cls, model_path):
+        return cls(
+            negative_prompt="model default",
+            num_frames=61,
+            height=448,
+            width=832,
+        )
+
+    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+        captured["sampling_param"] = sampling_param
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
+
+    monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(fake_from_pretrained))
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
+
+    generator.generate(
+        GenerationRequest(
+            prompt="hello world",
+            negative_prompt=None,
+            sampling=SamplingConfig(num_frames=125, height=720, width=1280),
+        )
+    )
+
+    assert captured["sampling_param"].negative_prompt is None
+    assert captured["sampling_param"].num_frames == 125
+    assert captured["sampling_param"].height == 720
+    assert captured["sampling_param"].width == 1280
+
+
 def test_generate_video_legacy_call_routes_through_typed_request(monkeypatch):
     generator = _new_runtime_video_generator()
     captured = {}
@@ -317,3 +351,44 @@ def test_generate_batch_prompt_file_returns_typed_results(tmp_path, monkeypatch)
     assert [result.prompt for result in results] == ["first prompt", "second prompt"]
     assert [result.prompt_index for result in results] == [0, 1]
     assert captured_prompts == ["first prompt", "second prompt"]
+
+
+def test_generate_batched_request_fans_out_media_inputs(monkeypatch):
+    generator = _new_runtime_video_generator()
+    _patch_sampling_param_from_pretrained(monkeypatch)
+    captured: list[tuple[str | None, str | None, str | None]] = []
+
+    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+        captured.append((prompt, sampling_param.image_path, sampling_param.video_path))
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
+
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
+
+    results = generator.generate(
+        GenerationRequest(
+            prompt=["first prompt", "second prompt"],
+            inputs=InputConfig(
+                image_path=["first.png", "second.png"],
+                video_path=["first.mp4", "second.mp4"],
+            ),
+        )
+    )
+
+    assert [result.prompt for result in results] == ["first prompt", "second prompt"]
+    assert captured == [
+        ("first prompt", "first.png", "first.mp4"),
+        ("second prompt", "second.png", "second.mp4"),
+    ]
+
+
+def test_generate_batched_request_rejects_mismatched_media_inputs(monkeypatch):
+    generator = _new_runtime_video_generator()
+    _patch_sampling_param_from_pretrained(monkeypatch)
+
+    with pytest.raises(ValueError, match="image_path"):
+        generator.generate(
+            GenerationRequest(
+                prompt=["first prompt", "second prompt"],
+                inputs=InputConfig(image_path=["first.png"]),
+            )
+        )
