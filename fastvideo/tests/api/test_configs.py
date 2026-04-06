@@ -5,11 +5,11 @@ from fastvideo.api import (
     RunConfig,
     SamplingConfig,
     ServeConfig,
-    document_to_dict,
+    config_to_dict,
 )
 
 
-def test_run_config_document_roundtrip_preserves_nested_defaults() -> None:
+def test_run_config_roundtrip_preserves_nested_defaults() -> None:
     config = RunConfig(
         generator=GeneratorConfig(model_path="hf://model"),
         request=GenerationRequest(
@@ -18,7 +18,7 @@ def test_run_config_document_roundtrip_preserves_nested_defaults() -> None:
         ),
     )
 
-    dumped = document_to_dict(config)
+    dumped = config_to_dict(config)
 
     assert dumped["generator"]["model_path"] == "hf://model"
     assert dumped["generator"]["engine"]["execution_backend"] == "mp"
@@ -30,7 +30,7 @@ def test_run_config_document_roundtrip_preserves_nested_defaults() -> None:
 def test_serve_config_includes_server_and_default_request_defaults() -> None:
     config = ServeConfig(generator=GeneratorConfig(model_path="/models/ltx2"))
 
-    dumped = document_to_dict(config)
+    dumped = config_to_dict(config)
 
     assert dumped["server"] == {
         "host": "0.0.0.0",

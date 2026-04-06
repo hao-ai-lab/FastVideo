@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 
-class DocumentValidationError(ValueError):
-    """Validation error that keeps track of the nested document path."""
+class ConfigValidationError(ValueError):
+    """Validation error that keeps track of the nested config path."""
 
     def __init__(self, path: str, message: str):
         self.path = path
@@ -14,4 +14,3 @@ class DocumentValidationError(ValueError):
         if self.path:
             return f"{self.path}: {self.message}"
         return self.message
-

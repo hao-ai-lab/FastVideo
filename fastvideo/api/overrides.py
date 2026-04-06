@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 import yaml
 
-from fastvideo.api.errors import DocumentValidationError
+from fastvideo.api.errors import ConfigValidationError
 
 
 def parse_cli_overrides(overrides: list[str]) -> dict[str, Any]:
@@ -56,7 +56,7 @@ def _apply_single_override(config: dict[str, Any], dotted_key: str, value: Any) 
             existing = {}
             cursor[part] = existing
         elif not isinstance(existing, dict):
-            raise DocumentValidationError(
+            raise ConfigValidationError(
                 ".".join(parts[:depth + 1]),
                 "cannot apply nested override through a non-mapping value",
             )

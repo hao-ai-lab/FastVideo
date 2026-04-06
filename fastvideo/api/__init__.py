@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-from fastvideo.api.documents import (
+from fastvideo.api.schema import (
     CompileConfig,
     ComponentConfig,
     ContinuationState,
@@ -20,22 +20,22 @@ from fastvideo.api.documents import (
     ServeConfig,
     ServerConfig,
 )
-from fastvideo.api.errors import DocumentValidationError
+from fastvideo.api.errors import ConfigValidationError
 from fastvideo.api.overrides import apply_overrides, parse_cli_overrides
 from fastvideo.api.parser import (
-    document_to_dict,
-    load_document,
-    load_raw_document,
+    config_to_dict,
+    load_config,
+    load_raw_config,
     load_run_config,
     load_serve_config,
-    parse_document,
+    parse_config,
 )
 
 __all__ = [
     "CompileConfig",
     "ComponentConfig",
     "ContinuationState",
-    "DocumentValidationError",
+    "ConfigValidationError",
     "EngineConfig",
     "GenerationPlan",
     "GenerationRequest",
@@ -53,11 +53,11 @@ __all__ = [
     "ServeConfig",
     "ServerConfig",
     "apply_overrides",
-    "document_to_dict",
-    "load_document",
-    "load_raw_document",
+    "config_to_dict",
+    "load_config",
+    "load_raw_config",
     "load_run_config",
     "load_serve_config",
     "parse_cli_overrides",
-    "parse_document",
+    "parse_config",
 ]

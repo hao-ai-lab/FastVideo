@@ -4,237 +4,302 @@ from __future__ import annotations
 import dataclasses
 import json
 import types
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Mapping, TypeVar, Union, get_args, get_origin, get_type_hints
 
 import yaml
 
-from fastvideo.api.documents import RunConfig, ServeConfig
-from fastvideo.api.errors import DocumentValidationError
+from fastvideo.api.errors import ConfigValidationError
 from fastvideo.api.overrides import apply_overrides, parse_cli_overrides
+from fastvideo.api.schema import RunConfig, ServeConfig
 
 T = TypeVar("T")
+_UNION_ORIGINS = {types.UnionType, Union}
 
 
-def parse_document(document_type: type[T], raw: Mapping[str, Any] | T) -> T:
-    """Parse a nested mapping into a typed inference document."""
-    if isinstance(raw, document_type):
+@dataclasses.dataclass(frozen=True)
+class _DataclassSpec:
+    cls: type[Any]
+    type_hints: dict[str, Any]
+    fields_by_name: dict[str, dataclasses.Field[Any]]
+
+
+def parse_config(config_type: type[T], raw: Mapping[str, Any] | T) -> T:
+    """Parse a nested mapping into a typed inference config object."""
+    if isinstance(raw, config_type):
         return raw
-    return _parse_dataclass(document_type, raw, "")
+    return _SchemaParser().parse_dataclass(config_type, raw, "")
 
 
-def document_to_dict(document: Any) -> Any:
-    """Serialize a typed document into plain Python containers."""
-    if dataclasses.is_dataclass(document) and not isinstance(document, type):
+def config_to_dict(config: Any) -> Any:
+    """Serialize a typed config object into plain Python containers."""
+    if dataclasses.is_dataclass(config) and not isinstance(config, type):
         return {
-            field.name: document_to_dict(getattr(document, field.name))
-            for field in dataclasses.fields(document)
+            field.name: config_to_dict(getattr(config, field.name))
+            for field in dataclasses.fields(config)
         }
-    if isinstance(document, list):
-        return [document_to_dict(item) for item in document]
-    if isinstance(document, dict):
-        return {key: document_to_dict(value) for key, value in document.items()}
-    return document
+    if isinstance(config, list):
+        return [config_to_dict(item) for item in config]
+    if isinstance(config, dict):
+        return {key: config_to_dict(value) for key, value in config.items()}
+    return config
 
 
-def load_document(
-    document_type: type[T],
+def load_config(
+    config_type: type[T],
     path: str | Path,
     overrides: list[str] | Mapping[str, Any] | None = None,
 ) -> T:
-    """Load a typed document from YAML or JSON."""
-    raw = load_raw_document(path)
-    if overrides:
-        parsed_overrides = (
-            parse_cli_overrides(overrides)
-            if isinstance(overrides, list)
-            else dict(overrides)
-        )
-        raw = apply_overrides(raw, parsed_overrides)
-    return parse_document(document_type, raw)
+    """Load a typed config object from YAML or JSON."""
+    raw = load_raw_config(path)
+    normalized_overrides = _normalize_overrides(overrides)
+    if normalized_overrides:
+        raw = apply_overrides(raw, normalized_overrides)
+    return parse_config(config_type, raw)
 
 
-def load_run_config(path: str | Path, overrides: list[str] | Mapping[str, Any] | None = None) -> RunConfig:
-    return load_document(RunConfig, path, overrides)
+def load_run_config(
+    path: str | Path,
+    overrides: list[str] | Mapping[str, Any] | None = None,
+) -> RunConfig:
+    return load_config(RunConfig, path, overrides)
 
 
-def load_serve_config(path: str | Path, overrides: list[str] | Mapping[str, Any] | None = None) -> ServeConfig:
-    return load_document(ServeConfig, path, overrides)
+def load_serve_config(
+    path: str | Path,
+    overrides: list[str] | Mapping[str, Any] | None = None,
+) -> ServeConfig:
+    return load_config(ServeConfig, path, overrides)
 
 
-def load_raw_document(path: str | Path) -> dict[str, Any]:
+def load_raw_config(path: str | Path) -> dict[str, Any]:
     config_path = Path(path)
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    suffix = config_path.suffix.lower()
     with config_path.open(encoding="utf-8") as handle:
-        if suffix in {".yaml", ".yml"}:
-            raw = yaml.safe_load(handle)
-        elif suffix == ".json":
-            raw = json.load(handle)
-        else:
-            raise ValueError(f"Unsupported config file format: {config_path}")
+        raw = _load_raw_mapping(handle, config_path)
 
     if raw is None:
         return {}
     if not isinstance(raw, Mapping):
-        raise DocumentValidationError("", f"{config_path} must contain a top-level mapping")
+        raise ConfigValidationError("", f"{config_path} must contain a top-level mapping")
     return dict(raw)
 
 
-def _parse_dataclass(document_type: type[T], raw: Mapping[str, Any], path: str) -> T:
-    if not isinstance(raw, Mapping):
-        raise DocumentValidationError(path, f"expected mapping for {document_type.__name__}")
-
-    type_hints = get_type_hints(document_type)
-    fields_by_name = {field.name: field for field in dataclasses.fields(document_type)}
-
-    for key in raw:
-        if not isinstance(key, str):
-            raise DocumentValidationError(path, "expected mapping keys to be strings")
-        if key not in fields_by_name:
-            raise DocumentValidationError(_join_path(path, key), "unknown field")
-
-    values: dict[str, Any] = {}
-    for name, field in fields_by_name.items():
-        field_path = _join_path(path, name)
-        if name in raw:
-            values[name] = _parse_value(type_hints[name], raw[name], field_path)
-            continue
-        if field.default is not dataclasses.MISSING:
-            continue
-        if field.default_factory is not dataclasses.MISSING:
-            continue
-        raise DocumentValidationError(field_path, "missing required field")
-
-    return document_type(**values)
+def _load_raw_mapping(handle: Any, config_path: Path) -> Any:
+    suffix = config_path.suffix.lower()
+    if suffix in {".yaml", ".yml"}:
+        return yaml.safe_load(handle)
+    if suffix == ".json":
+        return json.load(handle)
+    raise ValueError(f"Unsupported config file format: {config_path}")
 
 
-def _parse_value(annotation: Any, value: Any, path: str) -> Any:
-    if annotation is Any:
+def _normalize_overrides(
+    overrides: list[str] | Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not overrides:
+        return None
+    if isinstance(overrides, list):
+        return parse_cli_overrides(overrides)
+    return dict(overrides)
+
+
+class _SchemaParser:
+
+    def parse_dataclass(
+        self,
+        config_type: type[T],
+        raw: Mapping[str, Any],
+        path: str,
+    ) -> T:
+        if not isinstance(raw, Mapping):
+            raise ConfigValidationError(path, f"expected mapping for {config_type.__name__}")
+
+        spec = _get_dataclass_spec(config_type)
+        self._validate_keys(raw, spec, path)
+
+        values: dict[str, Any] = {}
+        for name, field in spec.fields_by_name.items():
+            field_path = _join_path(path, name)
+            if name in raw:
+                values[name] = self.parse_value(spec.type_hints[name], raw[name], field_path)
+                continue
+            if _field_is_required(field):
+                raise ConfigValidationError(field_path, "missing required field")
+
+        return config_type(**values)
+
+    def parse_value(self, annotation: Any, value: Any, path: str) -> Any:
+        if annotation is Any:
+            return value
+
+        origin = get_origin(annotation)
+        if origin in _UNION_ORIGINS:
+            return self._parse_union(annotation, value, path)
+        if origin is Literal:
+            return self._parse_literal(annotation, value, path)
+        if origin is list:
+            return self._parse_list(annotation, value, path)
+        if origin is dict:
+            return self._parse_dict(annotation, value, path)
+        if origin is tuple:
+            return self._parse_tuple(annotation, value, path)
+        if dataclasses.is_dataclass(annotation):
+            return self.parse_dataclass(annotation, value, path)
+
+        scalar_parser = _SCALAR_PARSERS.get(annotation)
+        if scalar_parser is not None:
+            return scalar_parser(value, path)
+
+        return self._parse_instance(annotation, value, path)
+
+    def _validate_keys(
+        self,
+        raw: Mapping[str, Any],
+        spec: _DataclassSpec,
+        path: str,
+    ) -> None:
+        for key in raw:
+            if not isinstance(key, str):
+                raise ConfigValidationError(path, "expected mapping keys to be strings")
+            if key not in spec.fields_by_name:
+                raise ConfigValidationError(_join_path(path, key), "unknown field")
+
+    def _parse_union(self, annotation: Any, value: Any, path: str) -> Any:
+        candidates = [candidate for candidate in get_args(annotation) if candidate is not type(None)]
+        if value is None and len(candidates) != len(get_args(annotation)):
+            return None
+        if len(candidates) == 1:
+            return self.parse_value(candidates[0], value, path)
+
+        errors: list[str] = []
+        for candidate in candidates:
+            try:
+                return self.parse_value(candidate, value, path)
+            except ConfigValidationError as exc:
+                errors.append(exc.message)
+
+        expected = ", ".join(_type_name(candidate) for candidate in candidates)
+        detail = errors[0] if errors else f"expected one of ({expected})"
+        raise ConfigValidationError(path, detail)
+
+    def _parse_literal(self, annotation: Any, value: Any, path: str) -> Any:
+        allowed = get_args(annotation)
+        if value not in allowed:
+            raise ConfigValidationError(path, f"expected one of {sorted(allowed)!r}")
         return value
 
-    origin = get_origin(annotation)
-    if origin in {types.UnionType, Union}:
-        return _parse_union(annotation, value, path)
-    if origin is list:
-        return _parse_list(annotation, value, path)
-    if origin is dict:
-        return _parse_dict(annotation, value, path)
-    if origin is tuple:
-        return _parse_tuple(annotation, value, path)
-    if origin is Literal:
-        return _parse_literal(annotation, value, path)
+    def _parse_list(self, annotation: Any, value: Any, path: str) -> list[Any]:
+        if not isinstance(value, list):
+            raise ConfigValidationError(path, "expected list")
+        item_type = get_args(annotation)[0] if get_args(annotation) else Any
+        return [
+            self.parse_value(item_type, item, f"{path}[{index}]")
+            for index, item in enumerate(value)
+        ]
 
-    if dataclasses.is_dataclass(annotation):
-        return _parse_dataclass(annotation, value, path)
+    def _parse_dict(self, annotation: Any, value: Any, path: str) -> dict[Any, Any]:
+        if not isinstance(value, Mapping):
+            raise ConfigValidationError(path, "expected mapping")
 
-    if annotation is bool:
-        if type(value) is not bool:
-            raise DocumentValidationError(path, "expected bool")
-        return value
-    if annotation is int:
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise DocumentValidationError(path, "expected int")
-        return value
-    if annotation is float:
-        if not isinstance(value, (int, float)) or isinstance(value, bool):
-            raise DocumentValidationError(path, "expected float")
-        return float(value)
-    if annotation is str:
-        if not isinstance(value, str):
-            raise DocumentValidationError(path, "expected str")
+        key_type, value_type = (get_args(annotation) + (Any, Any))[:2]
+        parsed: dict[Any, Any] = {}
+        for key, item in value.items():
+            parsed_key = self._parse_dict_key(key_type, key, path)
+            item_path = _join_path(path, str(key))
+            parsed[parsed_key] = self.parse_value(value_type, item, item_path)
+        return parsed
+
+    def _parse_tuple(self, annotation: Any, value: Any, path: str) -> tuple[Any, ...]:
+        if not isinstance(value, (list, tuple)):
+            raise ConfigValidationError(path, "expected tuple")
+
+        item_types = get_args(annotation)
+        if len(item_types) == 2 and item_types[1] is Ellipsis:
+            return tuple(
+                self.parse_value(item_types[0], item, f"{path}[{index}]")
+                for index, item in enumerate(value)
+            )
+
+        if len(value) != len(item_types):
+            raise ConfigValidationError(path, f"expected tuple of length {len(item_types)}")
+
+        return tuple(
+            self.parse_value(item_type, item, f"{path}[{index}]")
+            for index, (item_type, item) in enumerate(zip(item_types, value, strict=True))
+        )
+
+    def _parse_dict_key(self, annotation: Any, value: Any, path: str) -> Any:
+        if annotation is Any:
+            return value
+        if annotation is str:
+            if not isinstance(value, str):
+                raise ConfigValidationError(path, "expected string dictionary keys")
+            return value
+        if annotation is int:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ConfigValidationError(path, "expected integer dictionary keys")
+            return value
         return value
 
-    if isinstance(annotation, type):
-        if not isinstance(value, annotation):
-            raise DocumentValidationError(path, f"expected {annotation.__name__}")
+    def _parse_instance(self, annotation: Any, value: Any, path: str) -> Any:
+        if isinstance(annotation, type) and not isinstance(value, annotation):
+            raise ConfigValidationError(path, f"expected {annotation.__name__}")
         return value
 
+
+def _parse_bool(value: Any, path: str) -> bool:
+    if type(value) is not bool:
+        raise ConfigValidationError(path, "expected bool")
     return value
 
 
-def _parse_union(annotation: Any, value: Any, path: str) -> Any:
-    union_args = get_args(annotation)
-    if value is None and type(None) in union_args:
-        return None
-
-    candidates = [candidate for candidate in union_args if candidate is not type(None)]
-    if len(candidates) == 1:
-        return _parse_value(candidates[0], value, path)
-
-    errors: list[str] = []
-    for candidate in candidates:
-        try:
-            return _parse_value(candidate, value, path)
-        except DocumentValidationError as exc:
-            errors.append(exc.message)
-
-    expected = ", ".join(_type_name(candidate) for candidate in candidates)
-    detail = errors[0] if errors else f"expected one of ({expected})"
-    raise DocumentValidationError(path, detail)
+def _parse_int(value: Any, path: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ConfigValidationError(path, "expected int")
+    return value
 
 
-def _parse_list(annotation: Any, value: Any, path: str) -> list[Any]:
-    if not isinstance(value, list):
-        raise DocumentValidationError(path, "expected list")
-    item_type = get_args(annotation)[0] if get_args(annotation) else Any
-    return [
-        _parse_value(item_type, item, f"{path}[{index}]")
-        for index, item in enumerate(value)
-    ]
+def _parse_float(value: Any, path: str) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ConfigValidationError(path, "expected float")
+    return float(value)
 
 
-def _parse_dict(annotation: Any, value: Any, path: str) -> dict[Any, Any]:
-    if not isinstance(value, Mapping):
-        raise DocumentValidationError(path, "expected mapping")
-
-    key_type, value_type = (get_args(annotation) + (Any, Any))[:2]
-    parsed: dict[Any, Any] = {}
-    for key, item in value.items():
-        key_path = _join_path(path, str(key))
-        parsed_key = _parse_dict_key(key_type, key, path)
-        parsed[parsed_key] = _parse_value(value_type, item, key_path)
-    return parsed
+def _parse_str(value: Any, path: str) -> str:
+    if not isinstance(value, str):
+        raise ConfigValidationError(path, "expected str")
+    return value
 
 
-def _parse_tuple(annotation: Any, value: Any, path: str) -> tuple[Any, ...]:
-    if not isinstance(value, (list, tuple)):
-        raise DocumentValidationError(path, "expected tuple")
-    item_types = get_args(annotation)
-    if len(item_types) == 2 and item_types[1] is Ellipsis:
-        return tuple(
-            _parse_value(item_types[0], item, f"{path}[{index}]")
-            for index, item in enumerate(value)
-        )
-    if len(value) != len(item_types):
-        raise DocumentValidationError(path, f"expected tuple of length {len(item_types)}")
-    return tuple(
-        _parse_value(item_type, item, f"{path}[{index}]")
-        for index, (item_type, item) in enumerate(zip(item_types, value, strict=True))
+_SCALAR_PARSERS: dict[Any, Any] = {
+    bool: _parse_bool,
+    int: _parse_int,
+    float: _parse_float,
+    str: _parse_str,
+}
+
+
+def _field_is_required(field: dataclasses.Field[Any]) -> bool:
+    return (
+        field.default is dataclasses.MISSING
+        and field.default_factory is dataclasses.MISSING
     )
 
 
-def _parse_literal(annotation: Any, value: Any, path: str) -> Any:
-    allowed = get_args(annotation)
-    if value not in allowed:
-        raise DocumentValidationError(path, f"expected one of {sorted(allowed)!r}")
-    return value
-
-
-def _parse_dict_key(annotation: Any, value: Any, path: str) -> Any:
-    if annotation is Any:
-        return value
-    if annotation is str:
-        if not isinstance(value, str):
-            raise DocumentValidationError(path, "expected string dictionary keys")
-        return value
-    if annotation is int:
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise DocumentValidationError(path, "expected integer dictionary keys")
-        return value
-    return value
+@lru_cache(maxsize=None)
+def _get_dataclass_spec(config_type: type[Any]) -> _DataclassSpec:
+    return _DataclassSpec(
+        cls=config_type,
+        type_hints=get_type_hints(config_type),
+        fields_by_name={
+            field.name: field
+            for field in dataclasses.fields(config_type)
+        },
+    )
 
 
 def _join_path(prefix: str, suffix: str) -> str:
@@ -253,10 +318,10 @@ def _type_name(annotation: Any) -> str:
 
 
 __all__ = [
-    "document_to_dict",
-    "load_document",
-    "load_raw_document",
+    "config_to_dict",
+    "load_config",
+    "load_raw_config",
     "load_run_config",
     "load_serve_config",
-    "parse_document",
+    "parse_config",
 ]

@@ -4,20 +4,20 @@ import json
 import yaml
 
 from fastvideo.api import (
+    config_to_dict,
     ContinuationState,
     GenerationRequest,
     GeneratorConfig,
+    load_run_config,
+    load_serve_config,
+    parse_config,
     PlannedStage,
     RunConfig,
     ServeConfig,
-    document_to_dict,
-    load_run_config,
-    load_serve_config,
-    parse_document,
 )
 
 
-def test_parse_document_builds_nested_typed_config() -> None:
+def test_parse_config_builds_nested_typed_config() -> None:
     raw = {
         "generator": {
             "model_path": "/models/ltx2",
@@ -49,7 +49,7 @@ def test_parse_document_builds_nested_typed_config() -> None:
         },
     }
 
-    config = parse_document(RunConfig, raw)
+    config = parse_config(RunConfig, raw)
 
     assert config.generator.pipeline.profile == "ltx2_two_stage"
     assert config.request.prompt == ["a fox", "a wolf"]
@@ -61,13 +61,13 @@ def test_parse_document_builds_nested_typed_config() -> None:
     assert config.request.plan.stages == [PlannedStage(name="base", kind="sample")]
 
 
-def test_parse_document_accepts_existing_typed_instance() -> None:
+def test_parse_config_accepts_existing_typed_instance() -> None:
     typed = RunConfig(
         generator=GeneratorConfig(model_path="/models/base"),
         request=GenerationRequest(prompt="hello"),
     )
 
-    assert parse_document(RunConfig, typed) is typed
+    assert parse_config(RunConfig, typed) is typed
 
 
 def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
@@ -83,7 +83,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
 
     loaded = load_run_config(path)
 
-    assert document_to_dict(loaded) == {
+    assert config_to_dict(loaded) == {
         "generator": {
             "model_path": "/models/wan",
             "revision": None,

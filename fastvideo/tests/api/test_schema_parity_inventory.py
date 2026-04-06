@@ -98,7 +98,7 @@ def _expand_inventory_target(target: str) -> list[str]:
     return [f"{prefix}.{part}" for part in leaf.split(",")]
 
 
-def _document_root_for_target(target: str) -> type:
+def _config_root_for_target(target: str) -> type:
     if target.startswith(("generator.", "request.")):
         return RunConfig
     if target.startswith(("server.", "default_request.")):
@@ -257,7 +257,7 @@ def test_inventory_targets_exist_in_typed_schema() -> None:
                 for target in _iter_inventory_targets(value):
                     if not target.startswith(("generator.", "request.", "server.", "default_request.")):
                         continue
-                    _walk_schema_target(_document_root_for_target(target), target)
+                    _walk_schema_target(_config_root_for_target(target), target)
 
 
 def test_openai_size_mapping_preserves_width_height_ordering(
