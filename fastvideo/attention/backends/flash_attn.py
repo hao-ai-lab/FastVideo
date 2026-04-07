@@ -35,13 +35,13 @@ logger.info("Using FlashAttention-%s backend", fa_version)
 
 # FP4 FA4 support: quantize Q/K to NVFP4 E2M1 for block-scaled MMA on Blackwell.
 # Requires: flash-attention-fp4, flashinfer, cutlass-dsl. Enable via FASTVIDEO_NVFP4_FA4=1.
-# The FP4 path calls flash_attn.cute.interface directly (not the custom_op wrapper)
-# because it needs mSFQ/mSFK kwargs that the wrapper doesn't support.
+# The FP4 path uses a dedicated custom_op wrapper (flash_attn_fp4_func) so that
+# torch.compile treats the CuTeDSL kernel as an opaque boundary.
 try:
-    from flash_attn.cute.interface import flash_attn_func as _flash_attn_func_fp4
+    from fastvideo.attention.utils.flash_attn_cute import flash_attn_fp4_func
     _FA4_FP4_AVAILABLE = True
 except ImportError:
-    _flash_attn_func_fp4 = None
+    flash_attn_fp4_func = None
     _FA4_FP4_AVAILABLE = False
 
 
@@ -248,16 +248,15 @@ class FlashAttentionImpl(AttentionImpl):
         if seqlen_k_padded != orig_seqlen_k:
             value = F.pad(value, (0, 0, 0, 0, 0, seqlen_k_padded - orig_seqlen_k))
 
-        result = _flash_attn_func_fp4(
+        output = flash_attn_fp4_func(
             q_fp4,
             k_fp4,
             value,
+            q_sf,
+            k_sf,
             softmax_scale=self.softmax_scale,
             causal=self.causal,
-            mSFQ=q_sf,
-            mSFK=k_sf,
         )
-        output = result[0] if isinstance(result, tuple) else result
         # Trim back to original seqlen
         if output.shape[1] != orig_seqlen_q:
             output = output[:, :orig_seqlen_q]
