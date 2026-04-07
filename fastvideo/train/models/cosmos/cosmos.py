@@ -158,10 +158,13 @@ class CosmosModel(WanModel):
         if conditional:
             text_dict = batch.conditional_dict
             if text_dict is None:
-                raise RuntimeError("Missing conditional_dict in "
-                                   "TrainingBatch")
+                raise RuntimeError(
+                    "Missing conditional_dict in TrainingBatch"
+                )
         else:
-            text_dict = self._get_uncond_text_dict(batch, cfg_uncond=cfg_uncond)
+            text_dict = self._get_uncond_text_dict(
+                batch, cfg_uncond=cfg_uncond,
+            )
 
         if attn_kind == "dense":
             attn_metadata = batch.attn_metadata
@@ -176,44 +179,57 @@ class CosmosModel(WanModel):
         noisy_latents = noisy_latents.permute(0, 2, 1, 3, 4)
 
         # ----------------------------------------------------------
-        # Cosmos preconditioning: match inference convention.
+        # EDM preconditioning (matches pretrained Cosmos model).
         #
-        # The pretrained model expects:
-        #   input  = x_t * c_in,  where c_in = 1 - t
-        #   t      = sigma / (sigma + 1)   (continuous, in [0, 1))
-        # but in standard flow-matching training sigma IS t
-        # (sigma ∈ [0, 1]), so c_in = 1 - sigma.
+        # Noise schedule (EDM):  x_t = x_0 + sigma * eps
+        #   where sigma ∈ [sigma_min, sigma_max] (Karras schedule)
         #
-        # Inference recovers x̂₀ as:
-        #   x̂₀ = (1-t)*x_t + (-t)*model_output
+        # Input scaling:   c_in  = 1 / sqrt(sigma² + sigma_data²)
+        # Output x0:       x̂₀   = c_skip * x_t + c_out * F(c_in * x_t)
+        #   c_skip = sigma_data² / (sigma² + sigma_data²)
+        #   c_out  = sigma * sigma_data / sqrt(sigma² + sigma_data²)
         #
-        # finetune.py computes (precondition_outputs=True):
-        #   pred_x0 = x_t - pred * sigma
+        # Timestep:  t = 0.25 * ln(sigma)   (EDM convention)
         #
-        # Setting pred = x_t + model_output makes these equivalent:
-        #   x_t - (x_t + model_output)*sigma
-        #   = (1-sigma)*x_t - sigma*model_output  ✓
+        # _prepare_dit_inputs stores EDM sigmas in batch.sigmas.
         # ----------------------------------------------------------
         assert batch.sigmas is not None
-        # sigmas shape: (B,1,1,1,1) — squeeze to 1D for timestep
+        sigma_data = 1.0
+
         sigma_1d = batch.sigmas.flatten()[:noisy_latents.shape[0]]
-        c_in = 1.0 - sigma_1d.view(-1, 1, 1, 1, 1)
+        sigma_5d = sigma_1d.view(-1, 1, 1, 1, 1)
+
+        c_in = 1.0 / (sigma_5d**2 + sigma_data**2) ** 0.5
         model_input = noisy_latents * c_in
 
+        # EDM timestep: t = 0.25 * ln(sigma)
+        edm_timestep = 0.25 * torch.log(sigma_1d)
+
         with (
-                torch.autocast(device_type, dtype=dtype),
-                set_forward_context(
-                    current_timestep=batch.timesteps,
-                    attn_metadata=attn_metadata,
-                ),
+            torch.autocast(device_type, dtype=dtype),
+            set_forward_context(
+                current_timestep=batch.timesteps,
+                attn_metadata=attn_metadata,
+            ),
         ):
             input_kwargs = self._build_distill_input_kwargs(
-                model_input, sigma_1d, text_dict)
+                model_input, edm_timestep, text_dict,
+            )
             transformer = self._get_transformer(timestep)
             model_output = transformer(**input_kwargs)
 
-        # pred = x_t + model_output  (see derivation above)
-        pred = noisy_latents + model_output
+        # EDM output preconditioning → x0 prediction.
+        c_skip = sigma_data**2 / (sigma_5d**2 + sigma_data**2)
+        c_out = (
+            sigma_5d * sigma_data
+            / (sigma_5d**2 + sigma_data**2) ** 0.5
+        )
+        pred_x0 = c_skip * noisy_latents + c_out * model_output
+
+        # finetune.py computes:  pred_x0 = noisy - pred * sigma
+        # Convert our x0 prediction to that format:
+        #   pred = (noisy - pred_x0) / sigma
+        pred = (noisy_latents - pred_x0) / sigma_5d.clamp(min=1e-6)
 
         # Re-permute (B, C, T, H, W) → (B, T, C, H, W)
         pred = pred.permute(0, 2, 1, 3, 4)
@@ -273,10 +289,12 @@ class CosmosModel(WanModel):
         training_batch: TrainingBatch,
         generator: torch.Generator,
     ) -> TrainingBatch:
-        """Prepare DiT inputs for Cosmos.
+        """Prepare DiT inputs for Cosmos using EDM noise schedule.
 
-        Overrides the Wan version to skip the final
-        latents permute, since Cosmos expects (B,C,T,H,W).
+        Unlike Wan (flow-matching), Cosmos uses the EDM convention:
+            x_t = x_0 + sigma * eps
+        where sigma is sampled from a log-normal distribution
+        matching the pretrained model's training distribution.
         """
         assert self.training_config is not None
         tc = self.training_config
@@ -290,50 +308,70 @@ class CosmosModel(WanModel):
             device=latents.device,
             dtype=latents.dtype,
         )
+
+        # Sample EDM sigmas from log-normal distribution.
+        # Parameters match the Karras/EDM training convention:
+        #   ln(sigma) ~ N(P_mean, P_std²)
+        # with P_mean=0.7, P_std=1.6 (NVIDIA Cosmos defaults).
+        p_mean = 0.7
+        p_std = 1.6
+        log_sigma = (
+            torch.randn(
+                batch_size,
+                generator=generator,
+                device=latents.device,
+                dtype=latents.dtype,
+            )
+            * p_std
+            + p_mean
+        )
+        sigmas = log_sigma.exp()
+        if int(tc.distributed.sp_size or 1) > 1:
+            self.sp_group.broadcast(sigmas, src=0)
+
+        # Reshape for broadcasting: (B,) -> (B, 1, 1, 1, 1)
+        sigmas_5d = sigmas.view(-1, 1, 1, 1, 1)
+
+        # EDM noise schedule: x_t = x_0 + sigma * eps
+        noisy_model_input = latents + sigmas_5d * noise
+
+        # Store flow-matching compatible timesteps for any code
+        # that reads them (e.g., attention metadata).
         timesteps = self._sample_timesteps(
-            batch_size,
-            latents.device,
-            generator,
+            batch_size, latents.device, generator,
         )
         if int(tc.distributed.sp_size or 1) > 1:
             self.sp_group.broadcast(timesteps, src=0)
 
-        from fastvideo.training.training_utils import (
-            get_sigmas, )
-
-        sigmas = get_sigmas(
-            self.noise_scheduler,
-            latents.device,
-            timesteps,
-            n_dim=latents.ndim,
-            dtype=latents.dtype,
-        )
-        noisy_model_input = ((1.0 - sigmas) * latents + sigmas * noise)
-
         training_batch.noisy_model_input = noisy_model_input
         training_batch.timesteps = timesteps
-        training_batch.sigmas = sigmas
+        training_batch.sigmas = sigmas_5d
         training_batch.noise = noise
         training_batch.raw_latent_shape = latents.shape
 
         training_batch.conditional_dict = {
-            "encoder_hidden_states": (training_batch.encoder_hidden_states),
-            "encoder_attention_mask": (training_batch.encoder_attention_mask),
+            "encoder_hidden_states": (
+                training_batch.encoder_hidden_states
+            ),
+            "encoder_attention_mask": (
+                training_batch.encoder_attention_mask
+            ),
         }
 
-        if (self.negative_prompt_embeds is not None  # type: ignore[has-type]
-                and self.negative_prompt_attention_mask is not None):  # type: ignore[has-type]
+        if (
+            self.negative_prompt_embeds is not None  # type: ignore[has-type]
+            and self.negative_prompt_attention_mask  # type: ignore[has-type]
+            is not None
+        ):
             neg_embeds = self.negative_prompt_embeds  # type: ignore[has-type]
-            neg_mask = (self.negative_prompt_attention_mask)  # type: ignore[has-type]
-            if (neg_embeds.shape[0] == 1 and batch_size > 1):
+            neg_mask = self.negative_prompt_attention_mask  # type: ignore[has-type]
+            if neg_embeds.shape[0] == 1 and batch_size > 1:
                 neg_embeds = neg_embeds.expand(
-                    batch_size,
-                    *neg_embeds.shape[1:],
+                    batch_size, *neg_embeds.shape[1:],
                 ).contiguous()
-            if (neg_mask.shape[0] == 1 and batch_size > 1):
+            if neg_mask.shape[0] == 1 and batch_size > 1:
                 neg_mask = neg_mask.expand(
-                    batch_size,
-                    *neg_mask.shape[1:],
+                    batch_size, *neg_mask.shape[1:],
                 ).contiguous()
             training_batch.unconditional_dict = {
                 "encoder_hidden_states": neg_embeds,
@@ -344,8 +382,9 @@ class CosmosModel(WanModel):
         # finetune.py expects for `training_batch.latents`.
         # We un-permute back to (B, C, T, H, W) at the
         # transformer boundary in `predict_noise`.
-        training_batch.latents = (training_batch.latents.permute(
-            0, 2, 1, 3, 4))
+        training_batch.latents = training_batch.latents.permute(
+            0, 2, 1, 3, 4,
+        )
         return training_batch
 
     def ensure_negative_conditioning(self) -> None:
