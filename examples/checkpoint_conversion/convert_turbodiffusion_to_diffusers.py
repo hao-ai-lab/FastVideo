@@ -194,7 +194,7 @@ def main():
     print(f"\nDone! Converted weights saved to: {args.output_dir}")
     print(f"\nNext steps:")
     print(f"  1. Use create_hf_repo.py to create a complete diffusers repo:")
-    print(f"     python scripts/checkpoint_conversion/create_hf_repo.py \\")
+    print(f"     python examples/checkpoint_conversion/create_hf_repo.py \\")
     print(f"       --repo_id Wan-AI/Wan2.1-T2V-1.3B-Diffusers \\")
     print(f"       --local_dir /tmp/turbodiffusion-wan \\")
     print(f"       --checkpoint_dir {args.output_dir} \\")

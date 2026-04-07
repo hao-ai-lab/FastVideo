@@ -105,7 +105,7 @@ FastVideo provides tools to extract LoRA adapters from finetuned models and merg
 Extract a LoRA adapter by comparing a finetuned model to its base:
 
 ```bash
-python scripts/lora_extraction/extract_lora.py \
+python examples/lora_extraction/extract_lora.py \
   --base Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
   --ft path/to/your/finetuned_model \
   --out adapter_r32.safetensors \
@@ -125,7 +125,7 @@ python scripts/lora_extraction/extract_lora.py \
 Merge an adapter back into a base model:
 
 ```bash
-python scripts/lora_extraction/merge_lora.py \
+python examples/lora_extraction/merge_lora.py \
   --base Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
   --adapter adapter_r32.safetensors \
   --ft path/to/your/finetuned_model \
@@ -144,7 +144,7 @@ python scripts/lora_extraction/merge_lora.py \
 Compare the merged model against the original finetuned model:
 
 ```bash
-python scripts/lora_extraction/lora_inference_comparison.py \
+python examples/lora_extraction/lora_inference_comparison.py \
   --base merged_model \
   --ft path/to/your/finetuned_model \
   --adapter NONE \

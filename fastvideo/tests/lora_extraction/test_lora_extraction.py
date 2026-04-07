@@ -2,9 +2,9 @@
 import sys
 from pathlib import Path
 
-# Add scripts/lora_extraction to path for imports
+# Add examples/lora_extraction to path for imports
 repo_root = Path(__file__).parents[3]
-lora_scripts = repo_root / "scripts" / "lora_extraction"
+lora_scripts = repo_root / "examples" / "lora_extraction"
 sys.path.insert(0, str(lora_scripts))
 
 # Import the core functions

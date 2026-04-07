@@ -1,7 +1,7 @@
 """Extract FastVideo-style LoRA adapters from a fine-tuned model by SVDing (FT - base).
 
 Usage:
-    python scripts/lora_extraction/extract_lora.py \\
+    python examples/lora_extraction/extract_lora.py \\
         --base <base_model> --ft <fine_tuned_model> --out adapter.safetensors --rank 16
         
 Example for models with architectural differences (fallback is automatic):

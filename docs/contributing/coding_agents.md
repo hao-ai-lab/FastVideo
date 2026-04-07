@@ -145,13 +145,13 @@ Action:
 - Clone the official repo under the project root (e.g., `FastVideo/LTX-2/`).
 - If a Diffusers-format HF repo already exists, you can skip manual weight
   handling and download it directly with
-  `scripts/huggingface/download_hf.py`.
+  `examples/huggingface/download_hf.py`.
 
 !!! note
     This step is best done manually because large downloads can time out.
     Example:
     ```bash
-    python scripts/huggingface/download_hf.py \
+    python examples/huggingface/download_hf.py \
       --repo_id Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
       --local_dir official_weights/Wan2.1-T2V-1.3B-Diffusers \
       --repo_type model
@@ -194,7 +194,7 @@ Action:
 !!! note
     If a Diffusers-format HF repo already exists and loads correctly, you can
     skip conversion entirely (no conversion script needed) and just download it
-    with `scripts/huggingface/download_hf.py`. Otherwise, you may need a
+    with `examples/huggingface/download_hf.py`. Otherwise, you may need a
     conversion script + a `converted_weights/<model>/` staging directory.
 
 Example (key renaming via arch config mapping, Wan2.1‑style):
@@ -418,7 +418,7 @@ If the model does **not** have a Diffusers-format repo:
 In both cases, parity testing is required to validate correctness.
 
 If you want to publish a Diffusers‑style repo after conversion, use
-`scripts/checkpoint_conversion/create_hf_repo.py` to assemble a HuggingFace‑ready
+`examples/checkpoint_conversion/create_hf_repo.py` to assemble a HuggingFace‑ready
 directory before uploading.
 
 ## FAQ

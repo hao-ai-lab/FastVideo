@@ -6,7 +6,7 @@
 # Uses the distilled LoRA for faster generation.
 #
 # Usage:
-#   bash scripts/inference/v1_inference_longcat_distill.sh
+#   bash examples/inference/cli/v1_inference_longcat_distill.sh
 #
 # Prerequisites:
 #   - Install fastvideo: pip install -e .
