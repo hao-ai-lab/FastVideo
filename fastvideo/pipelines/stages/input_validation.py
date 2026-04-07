@@ -12,8 +12,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.vision_utils import load_image, load_video, pil_to_numpy, numpy_to_pt, normalize, resize
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
-from fastvideo.pipelines.stages.validators import (StageValidators,
-                                                   VerificationResult)
+from fastvideo.pipelines.stages.validators import (StageValidators, VerificationResult)
 from fastvideo.utils import best_output_size
 
 logger = init_logger(__name__)
@@ -30,8 +29,7 @@ class InputValidationStage(PipelineStage):
     before proceeding with the diffusion process.
     """
 
-    def _generate_seeds(self, batch: ForwardBatch,
-                        fastvideo_args: FastVideoArgs):
+    def _generate_seeds(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs):
         """Generate seeds for the inference"""
         seed = batch.seed
         num_videos_per_prompt = batch.num_videos_per_prompt
@@ -65,9 +63,7 @@ class InputValidationStage(PipelineStage):
         batch.seeds = seeds
 
         # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
-        batch.generator = [
-            torch.Generator("cpu").manual_seed(seed) for seed in seeds
-        ]
+        batch.generator = [torch.Generator("cpu").manual_seed(seed) for seed in seeds]
 
     def forward(
         self,
@@ -89,37 +85,27 @@ class InputValidationStage(PipelineStage):
 
         # Ensure prompt is properly formatted
         if batch.prompt is None and batch.prompt_embeds is None:
-            raise ValueError(
-                "Either `prompt` or `prompt_embeds` must be provided")
+            raise ValueError("Either `prompt` or `prompt_embeds` must be provided")
 
         # Ensure negative prompt is properly formatted if using classifier-free guidance
         if (batch.do_classifier_free_guidance and batch.negative_prompt is None
                 and batch.negative_prompt_embeds is None):
-            raise ValueError(
-                "For classifier-free guidance, either `negative_prompt` or "
-                "`negative_prompt_embeds` must be provided")
+            raise ValueError("For classifier-free guidance, either `negative_prompt` or "
+                             "`negative_prompt_embeds` must be provided")
 
         # Validate height and width
         if batch.height is None or batch.width is None:
-            raise ValueError(
-                "Height and width must be provided. Please set `height` and `width`."
-            )
+            raise ValueError("Height and width must be provided. Please set `height` and `width`.")
         if batch.height % 8 != 0 or batch.width % 8 != 0:
-            raise ValueError(
-                f"Height and width must be divisible by 8 but are {batch.height} and {batch.width}."
-            )
+            raise ValueError(f"Height and width must be divisible by 8 but are {batch.height} and {batch.width}.")
 
         # Validate number of inference steps
         if batch.num_inference_steps <= 0:
-            raise ValueError(
-                f"Number of inference steps must be positive, but got {batch.num_inference_steps}"
-            )
+            raise ValueError(f"Number of inference steps must be positive, but got {batch.num_inference_steps}")
 
         # Validate guidance scale if using classifier-free guidance
         if batch.do_classifier_free_guidance and batch.guidance_scale <= 0:
-            raise ValueError(
-                f"Guidance scale must be positive, but got {batch.guidance_scale}"
-            )
+            raise ValueError(f"Guidance scale must be positive, but got {batch.guidance_scale}")
 
         # for i2v, get image from image_path
         # @TODO(Wei) hard-coded for wan2.2 5b ti2v for now. Should put this in image_encoding stage
@@ -132,8 +118,7 @@ class InputValidationStage(PipelineStage):
 
         # further processing for ti2v task
         if (fastvideo_args.pipeline_config.ti2v_task
-                or fastvideo_args.pipeline_config.is_causal
-            ) and batch.pil_image is not None:
+                or fastvideo_args.pipeline_config.is_causal) and batch.pil_image is not None:
             img = batch.pil_image
             ih, iw = img.height, img.width
 
@@ -150,8 +135,7 @@ class InputValidationStage(PipelineStage):
                 ow, oh = best_output_size(iw, ih, dw, dh, max_area)
 
                 scale = max(ow / iw, oh / ih)
-                img = img.resize((round(iw * scale), round(ih * scale)),
-                                 Image.LANCZOS)
+                img = img.resize((round(iw * scale), round(ih * scale)), Image.LANCZOS)
 
                 # center-crop
                 x1 = (img.width - ow) // 2
@@ -159,12 +143,10 @@ class InputValidationStage(PipelineStage):
                 img = img.crop((x1, y1, x1 + ow, y1 + oh))
 
             assert img.width == ow and img.height == oh
-            logger.info("final processed img height: %s, img width: %s",
-                        img.height, img.width)
+            logger.info("final processed img height: %s, img width: %s", img.height, img.width)
 
             # to tensor
-            img = TF.to_tensor(img).sub_(0.5).div_(0.5).to(
-                self.device).unsqueeze(1)
+            img = TF.to_tensor(img).sub_(0.5).div_(0.5).to(self.device).unsqueeze(1)
             img = img.unsqueeze(0)
             batch.height = oh
             batch.width = ow
@@ -172,10 +154,8 @@ class InputValidationStage(PipelineStage):
 
         # for v2v, get control video from video path
         if batch.video_path is not None:
-            pil_images, original_fps = load_video(batch.video_path,
-                                                  return_fps=True)
-            logger.info("Loaded video with %s frames, original FPS: %s",
-                        len(pil_images), original_fps)
+            pil_images, original_fps = load_video(batch.video_path, return_fps=True)
+            logger.info("Loaded video with %s frames, original FPS: %s", len(pil_images), original_fps)
 
             # Get target parameters from batch
             target_fps = batch.fps
@@ -188,25 +168,18 @@ class InputValidationStage(PipelineStage):
                 if frame_skip > 1:
                     pil_images = pil_images[::frame_skip]
                     effective_fps = original_fps / frame_skip
-                    logger.info(
-                        "Resampled video from %.1f fps to %.1f fps (skip=%s)",
-                        original_fps, effective_fps, frame_skip)
+                    logger.info("Resampled video from %.1f fps to %.1f fps (skip=%s)", original_fps, effective_fps,
+                                frame_skip)
 
             # Limit to target number of frames
-            if target_num_frames is not None and len(
-                    pil_images) > target_num_frames:
+            if target_num_frames is not None and len(pil_images) > target_num_frames:
                 pil_images = pil_images[:target_num_frames]
-                logger.info("Limited video to %s frames (from %s total)",
-                            target_num_frames, len(pil_images))
+                logger.info("Limited video to %s frames (from %s total)", target_num_frames, len(pil_images))
 
             # Resize each PIL image to target dimensions
             resized_images = []
             for pil_img in pil_images:
-                resized_img = resize(pil_img,
-                                     target_height,
-                                     target_width,
-                                     resize_mode="default",
-                                     resample="lanczos")
+                resized_img = resize(pil_img, target_height, target_width, resize_mode="default", resample="lanczos")
                 resized_images.append(resized_img)
 
             # Convert PIL images to numpy array
@@ -222,66 +195,47 @@ class InputValidationStage(PipelineStage):
         # Validate action control inputs (Matrix-Game)
         if batch.mouse_cond is not None:
             if batch.mouse_cond.dim() != 3 or batch.mouse_cond.shape[-1] != 2:
-                raise ValueError(
-                    f"mouse_cond must have shape (B, T, 2), but got {batch.mouse_cond.shape}"
-                )
-            logger.info("Action control: mouse_cond validated - shape %s",
-                        batch.mouse_cond.shape)
+                raise ValueError(f"mouse_cond must have shape (B, T, 2), but got {batch.mouse_cond.shape}")
+            logger.info("Action control: mouse_cond validated - shape %s", batch.mouse_cond.shape)
 
         if batch.keyboard_cond is not None:
             if batch.keyboard_cond.dim() != 3:
-                raise ValueError(
-                    f"keyboard_cond must have 3 dimensions (B, T, K), but got {batch.keyboard_cond.dim()}"
-                )
+                raise ValueError(f"keyboard_cond must have 3 dimensions (B, T, K), but got {batch.keyboard_cond.dim()}")
             keyboard_dim = batch.keyboard_cond.shape[-1]
-            if keyboard_dim not in {2, 4, 6, 7}:
-                raise ValueError(
-                    f"keyboard_cond last dimension must be 2, 4, 6, or 7, but got {keyboard_dim}"
-                )
-            logger.info(
-                "Action control: keyboard_cond validated - shape %s (dim=%d)",
-                batch.keyboard_cond.shape, keyboard_dim)
+            logger.info("Action control: keyboard_cond validated - shape %s (dim=%d)", batch.keyboard_cond.shape,
+                        keyboard_dim)
 
         if batch.grid_sizes is not None:
             if not isinstance(batch.grid_sizes, list | tuple | torch.Tensor):
                 raise ValueError("grid_sizes must be a list, tuple, or tensor")
             if isinstance(batch.grid_sizes, torch.Tensor):
                 if batch.grid_sizes.numel() != 3:
-                    raise ValueError(
-                        "grid_sizes must have 3 elements [F, H, W]")
+                    raise ValueError("grid_sizes must have 3 elements [F, H, W]")
             else:
                 if len(batch.grid_sizes) != 3:
-                    raise ValueError(
-                        "grid_sizes must have 3 elements [F, H, W]")
-            logger.info("Action control: grid_sizes validated - %s",
-                        batch.grid_sizes)
+                    raise ValueError("grid_sizes must have 3 elements [F, H, W]")
+            logger.info("Action control: grid_sizes validated - %s", batch.grid_sizes)
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify input validation stage inputs."""
         result = VerificationResult()
-        result.add_check("seed", batch.seed, [V.not_none, V.positive_int])
-        result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt,
-                         V.positive_int)
-        result.add_check(
-            "prompt_or_embeds", None, lambda _: V.string_or_list_strings(
-                batch.prompt) or V.list_not_empty(batch.prompt_embeds))
+        # Cosmos-Predict2.5 default seed is 0; allow non-negative seeds here.
+        result.add_check("seed", batch.seed, [V.not_none, V.non_negative_int])
+        result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt, V.positive_int)
+        result.add_check("prompt_or_embeds", None,
+                         lambda _: V.string_or_list_strings(batch.prompt) or V.list_not_empty(batch.prompt_embeds))
         result.add_check("height", batch.height, V.positive_int)
         result.add_check("width", batch.width, V.positive_int)
-        result.add_check("num_inference_steps", batch.num_inference_steps,
-                         V.positive_int)
-        result.add_check(
-            "guidance_scale", batch.guidance_scale, lambda x: not batch.
-            do_classifier_free_guidance or V.positive_float(x))
+        result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
+        result.add_check("guidance_scale", batch.guidance_scale,
+                         lambda x: not batch.do_classifier_free_guidance or V.positive_float(x))
         return result
 
-    def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify input validation stage outputs."""
         result = VerificationResult()
         result.add_check("seeds", batch.seeds, V.list_not_empty)
-        result.add_check("generator", batch.generator,
-                         V.generator_or_list_generators)
+        result.add_check("generator", batch.generator, V.generator_or_list_generators)
         return result

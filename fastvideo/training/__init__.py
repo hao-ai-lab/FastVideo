@@ -4,8 +4,10 @@ from .wan_training_pipeline import WanTrainingPipeline
 from fastvideo.training.rl import RLPipeline, create_rl_pipeline
 
 __all__ = [
+    
     "TrainingPipeline",
     "WanTrainingPipeline",
+    "LTX2TrainingPipeline",
     "DistillationPipeline",
     "RLPipeline",
     "create_rl_pipeline",

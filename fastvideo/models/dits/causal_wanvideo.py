@@ -33,7 +33,7 @@ from fastvideo.layers.visual_embedding import (PatchEmbed)
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.dits.wanvideo import WanT2VCrossAttention, WanTimeTextImageEmbedding
-from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 logger = init_logger(__name__)
 class CausalWanSelfAttention(nn.Module):
@@ -126,26 +126,36 @@ class CausalWanSelfAttention(nn.Module):
             # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
-            if self.local_attn_size != -1 and (current_end > kv_cache["global_end_index"].item()) and (
-                    num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
+            global_end_index = (
+                int(kv_cache["global_end_index"].item())
+                if isinstance(kv_cache["global_end_index"], torch.Tensor)
+                else int(kv_cache["global_end_index"])
+            )
+            local_end_index_prev = (
+                int(kv_cache["local_end_index"].item())
+                if isinstance(kv_cache["local_end_index"], torch.Tensor)
+                else int(kv_cache["local_end_index"])
+            )
+            if self.local_attn_size != -1 and (current_end > global_end_index) and (
+                    num_new_tokens + local_end_index_prev > kv_cache_size):
                 # Calculate the number of new tokens added in this step
                 # Shift existing cache content left to discard oldest tokens
                 # Clone the source slice to avoid overlapping memory error
-                num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
-                num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - sink_tokens
+                num_evicted_tokens = num_new_tokens + local_end_index_prev - kv_cache_size
+                num_rolled_tokens = local_end_index_prev - num_evicted_tokens - sink_tokens
                 kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
                     kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
                 kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
                     kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
                 # Insert the new keys/values at the end
-                local_end_index = kv_cache["local_end_index"].item() + current_end - \
-                    kv_cache["global_end_index"].item() - num_evicted_tokens
+                local_end_index = local_end_index_prev + current_end - \
+                    global_end_index - num_evicted_tokens
                 local_start_index = local_end_index - num_new_tokens
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             else:
                 # Assign new keys/values directly up to current_end
-                local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
+                local_end_index = local_end_index_prev + current_end - global_end_index
                 local_start_index = local_end_index - num_new_tokens
                 kv_cache["k"] = kv_cache["k"].detach()
                 kv_cache["v"] = kv_cache["v"].detach()
@@ -157,8 +167,14 @@ class CausalWanSelfAttention(nn.Module):
                 kv_cache["k"][:, max(0, local_end_index - self.max_attention_size):local_end_index],
                 kv_cache["v"][:, max(0, local_end_index - self.max_attention_size):local_end_index]
             )
-            kv_cache["global_end_index"].fill_(current_end)
-            kv_cache["local_end_index"].fill_(local_end_index)
+            if isinstance(kv_cache["global_end_index"], torch.Tensor):
+                kv_cache["global_end_index"].fill_(current_end)
+            else:
+                kv_cache["global_end_index"] = current_end
+            if isinstance(kv_cache["local_end_index"], torch.Tensor):
+                kv_cache["local_end_index"].fill_(local_end_index)
+            else:
+                kv_cache["local_end_index"] = local_end_index
 
         return x
 
@@ -286,6 +302,8 @@ class CausalWanTransformerBlock(nn.Module):
         null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
         norm_hidden_states, hidden_states = self.self_attn_residual_norm(
             hidden_states, attn_output, gate_msa, null_shift, null_scale)
+        norm_hidden_states, hidden_states = norm_hidden_states.to(
+            orig_dtype), hidden_states.to(orig_dtype)
 
         # 2. Cross-attention
         attn_output = self.attn2(norm_hidden_states,
@@ -452,7 +470,6 @@ class CausalWanTransformer3DModel(BaseDiT):
         This function will be run for num_frame times.
         Process the latent frames one by one (1560 tokens each)
         """
-        from fastvideo.platforms import current_platform
 
         orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
@@ -677,3 +694,6 @@ class CausalWanTransformer3DModel(BaseDiT):
             u = u.reshape(c, *[i * j for i, j in zip(v, self.patch_size)])
             out.append(u)
         return out
+
+# Entry point for model registry
+EntryClass = CausalWanTransformer3DModel

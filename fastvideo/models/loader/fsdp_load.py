@@ -147,6 +147,9 @@ def maybe_load_fsdp_model(
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
     )
+    if hasattr(model, "materialize_non_persistent_buffers"):
+        model.materialize_non_persistent_buffers(
+            device=device, dtype=default_dtype)
     for n, p in chain(model.named_parameters(), model.named_buffers()):
         if p.is_meta:
             raise RuntimeError(

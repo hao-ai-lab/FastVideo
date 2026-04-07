@@ -1,0 +1,32 @@
+name: pre-commit
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref to checkout (defaults to github.ref)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    if: github.event_name == 'workflow_call' || github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref || '' }}
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - run: echo "::add-matcher::.github/workflows/matchers/actionlint.json"
+    - run: echo "::add-matcher::.github/workflows/matchers/mypy.json"
+    - run: echo "::add-matcher::.github/workflows/matchers/ruff.json"
+    - uses: pre-commit/action@v3.0.1
+      with:
+        extra_args: --all-files --hook-stage manual

@@ -4,6 +4,8 @@ from torchvision.transforms import Lambda
 
 from fastvideo.dataset.parquet_dataset_map_style import (
     build_parquet_map_style_dataloader)
+from fastvideo.dataset.ltx2_precomputed_dataset import (
+    build_ltx2_precomputed_dataloader, LTX2PrecomputedDataset)
 from fastvideo.dataset.preprocessing_datasets import VideoCaptionMergedDataset, TextDataset
 from fastvideo.dataset.transform import (CenterCropResizeVideo, Normalize255,
                                          TemporalRandomCrop)
@@ -12,10 +14,7 @@ from fastvideo.dataset.rl_prompt_dataset import build_rl_prompt_dataloader
 
 
 def getdataset(args) -> VideoCaptionMergedDataset:
-    if args.do_temporal_sample:
-        temporal_sample = TemporalRandomCrop(args.num_frames)  # 16 x
-    else:
-        temporal_sample = None
+    temporal_sample = TemporalRandomCrop(args.num_frames) if args.do_temporal_sample else None  # 16 x
     norm_fun = Lambda(lambda x: 2.0 * x - 1.0)
     resize_topcrop = [
         CenterCropResizeVideo((args.max_height, args.max_width), top_crop=True),
@@ -47,7 +46,11 @@ def gettextdataset(args) -> TextDataset:
 
 
 __all__ = [
-    "build_parquet_map_style_dataloader", "ValidationDataset",
-    "VideoCaptionMergedDataset", "TextDataset",
-    "build_rl_prompt_dataloader"
+    "build_parquet_map_style_dataloader",
+    "build_ltx2_precomputed_dataloader",
+    "LTX2PrecomputedDataset",
+    "ValidationDataset",
+    "VideoCaptionMergedDataset",
+    "TextDataset",
+    "build_rl_prompt_dataloader",
 ]

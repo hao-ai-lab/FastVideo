@@ -27,7 +27,7 @@ RESET = '\033[0;0m'
 _warned_local_main_process = False
 _warned_main_process = False
 
-_FORMAT = (f"{FASTVIDEO_LOGGING_PREFIX}%(levelname)s %(asctime)s "
+_FORMAT = (f"{FASTVIDEO_LOGGING_PREFIX}%(levelname)s %(asctime)s.%(msecs)03d "
            "[%(filename)s:%(lineno)d] %(message)s")
 _DATE_FORMAT = "%m-%d %H:%M:%S"
 
@@ -102,6 +102,7 @@ def _info(logger: Logger,
         - When both are False, the message will be logged from all processes
         - By default, only logs from processes with LOCAL_RANK=0
     """
+    is_distributed = int(os.environ.get("WORLD_SIZE", 1)) > 1
     try:
         local_rank = int(os.environ["LOCAL_RANK"])
         rank = int(os.environ["RANK"])
@@ -112,26 +113,27 @@ def _info(logger: Logger,
     is_main_process = rank == 0
     is_local_main_process = local_rank == 0
 
-    if (main_process_only and is_main_process) or (local_main_process_only
-                                                   and is_local_main_process):
+    if (main_process_only and is_main_process) or (local_main_process_only and is_local_main_process):
         logger.log(logging.INFO, msg, *args, stacklevel=2, **kwargs)
 
     global _warned_local_main_process, _warned_main_process
 
-    if not _warned_local_main_process and local_main_process_only:
-        logger.warning(
-            '%s By default, logger.info(..) will only log from the local main process. Set logger.info(..., is_local_main_process=False) to log from all processes.%s',
-            GREEN,
-            RESET,
-        )
-        _warned_local_main_process = True
-    if not _warned_main_process and main_process_only:
-        logger.warning(
-            '%s is_main_process_only is set to True, logging only from the main (RANK==0) process.%s',
-            GREEN,
-            RESET,
-        )
-        _warned_main_process = True
+    # Only show process-awareness warnings when actually running distributed
+    if is_distributed:
+        if not _warned_local_main_process and local_main_process_only:
+            logger.warning(
+                '%s By default, logger.info(..) will only log from the local main process. Set logger.info(..., is_local_main_process=False) to log from all processes.%s',
+                GREEN,
+                RESET,
+            )
+            _warned_local_main_process = True
+        if not _warned_main_process and main_process_only:
+            logger.warning(
+                '%s is_main_process_only is set to True, logging only from the main (RANK==0) process.%s',
+                GREEN,
+                RESET,
+            )
+            _warned_main_process = True
 
     if not main_process_only and not local_main_process_only:
         logger.log(logging.INFO, msg, *args, stacklevel=2, **kwargs)
@@ -179,27 +181,22 @@ def _configure_fastvideo_root_logger() -> None:
     logging_config = dict[str, Any]()
 
     if not FASTVIDEO_CONFIGURE_LOGGING and FASTVIDEO_LOGGING_CONFIG_PATH:
-        raise RuntimeError(
-            "FASTVIDEO_CONFIGURE_LOGGING evaluated to false, but "
-            "FASTVIDEO_LOGGING_CONFIG_PATH was given. FASTVIDEO_LOGGING_CONFIG_PATH "
-            "implies FASTVIDEO_CONFIGURE_LOGGING. Please enable "
-            "FASTVIDEO_CONFIGURE_LOGGING or unset FASTVIDEO_LOGGING_CONFIG_PATH."
-        )
+        raise RuntimeError("FASTVIDEO_CONFIGURE_LOGGING evaluated to false, but "
+                           "FASTVIDEO_LOGGING_CONFIG_PATH was given. FASTVIDEO_LOGGING_CONFIG_PATH "
+                           "implies FASTVIDEO_CONFIGURE_LOGGING. Please enable "
+                           "FASTVIDEO_CONFIGURE_LOGGING or unset FASTVIDEO_LOGGING_CONFIG_PATH.")
 
     if FASTVIDEO_CONFIGURE_LOGGING:
         logging_config = DEFAULT_LOGGING_CONFIG
 
     if FASTVIDEO_LOGGING_CONFIG_PATH:
         if not path.exists(FASTVIDEO_LOGGING_CONFIG_PATH):
-            raise RuntimeError(
-                "Could not load logging config. File does not exist: %s",
-                FASTVIDEO_LOGGING_CONFIG_PATH)
+            raise RuntimeError("Could not load logging config. File does not exist: %s", FASTVIDEO_LOGGING_CONFIG_PATH)
         with open(FASTVIDEO_LOGGING_CONFIG_PATH, encoding="utf-8") as file:
             custom_config = json.loads(file.read())
 
         if not isinstance(custom_config, dict):
-            raise ValueError("Invalid logging config. Expected Dict, got %s.",
-                             type(custom_config).__name__)
+            raise ValueError("Invalid logging config. Expected Dict, got %s.", type(custom_config).__name__)
         logging_config = custom_config
 
     for formatter in logging_config.get("formatters", {}).values():
@@ -225,8 +222,7 @@ def init_logger(name: str) -> _FastvideoLogger:
     }
 
     for method_name, method in methods_to_patch.items():
-        setattr(logger, method_name,
-                MethodType(method, logger))  # type: ignore[arg-type]
+        setattr(logger, method_name, MethodType(method, logger))  # type: ignore[arg-type]
 
     return cast(_FastvideoLogger, logger)
 
@@ -289,10 +285,9 @@ def enable_trace_function_call(log_file_path: str, root_dir: str | None = None):
     Note that this call is thread-level, any threads calling this function
     will have the trace enabled. Other threads will not be affected.
     """
-    logger.warning(
-        "FASTVIDEO_TRACE_FUNCTION is enabled. It will record every"
-        " function executed by Python. This will slow down the code. It "
-        "is suggested to be used for debugging hang or crashes only.")
+    logger.warning("FASTVIDEO_TRACE_FUNCTION is enabled. It will record every"
+                   " function executed by Python. This will slow down the code. It "
+                   "is suggested to be used for debugging hang or crashes only.")
     logger.info("Trace frame log is saved to %s", log_file_path)
     if root_dir is None:
         # by default, this is the fastvideo root directory

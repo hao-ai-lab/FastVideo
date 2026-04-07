@@ -20,24 +20,16 @@ from tqdm import tqdm
 
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset import gettextdataset
-from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter,
-                                                     records_to_table)
-from fastvideo.dataset.dataloader.record_schema import (
-    ode_text_only_record_creator)
-from fastvideo.dataset.dataloader.schema import (
-    pyarrow_schema_ode_trajectory_text_only)
+from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter, records_to_table)
+from fastvideo.dataset.dataloader.record_schema import (ode_text_only_record_creator)
+from fastvideo.dataset.dataloader.schema import (pyarrow_schema_ode_trajectory_text_only)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
-    SelfForcingFlowMatchScheduler)
+from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (SelfForcingFlowMatchScheduler)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (
-    BasePreprocessPipeline)
-from fastvideo.pipelines.stages import (DecodingStage, DenoisingStage,
-                                        InputValidationStage,
-                                        LatentPreparationStage,
-                                        TextEncodingStage,
-                                        TimestepPreparationStage)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (BasePreprocessPipeline)
+from fastvideo.pipelines.stages import (DecodingStage, DenoisingStage, InputValidationStage, LatentPreparationStage,
+                                        TextEncodingStage, TimestepPreparationStage)
 from fastvideo.utils import save_decoded_latents_as_video, shallow_asdict
 
 logger = init_logger(__name__)
@@ -46,9 +38,7 @@ logger = init_logger(__name__)
 class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
     """ODE Trajectory preprocessing pipeline implementation."""
 
-    _required_config_modules = [
-        "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
-    ]
+    _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
     preprocess_dataloader: StatefulDataLoader
     preprocess_loader_iter: Iterator[dict[str, Any]]
     pbar: Any
@@ -61,38 +51,31 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
         assert fastvideo_args.pipeline_config.flow_shift == 5
-        self.modules["scheduler"] = SelfForcingFlowMatchScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift,
-            sigma_min=0.0,
-            extra_one_step=True)
-        self.modules["scheduler"].set_timesteps(num_inference_steps=48,
-                                                denoising_strength=1.0)
+        self.modules["scheduler"] = SelfForcingFlowMatchScheduler(shift=fastvideo_args.pipeline_config.flow_shift,
+                                                                  sigma_min=0.0,
+                                                                  extra_one_step=True)
+        self.modules["scheduler"].set_timesteps(num_inference_steps=48, denoising_strength=1.0)
 
-        self.add_stage(stage_name="input_validation_stage",
-                       stage=InputValidationStage())
+        self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
                            text_encoders=[self.get_module("text_encoder")],
                            tokenizers=[self.get_module("tokenizer")],
                        ))
         self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(
-                           scheduler=self.get_module("scheduler")))
+                       stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")))
         self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LatentPreparationStage(
-                           scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer", None)))
+                       stage=LatentPreparationStage(scheduler=self.get_module("scheduler"),
+                                                    transformer=self.get_module("transformer", None)))
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(
                            transformer=self.get_module("transformer"),
                            scheduler=self.get_module("scheduler"),
                            pipeline=self,
                        ))
-        self.add_stage(stage_name="decoding_stage",
-                       stage=DecodingStage(vae=self.get_module("vae")))
+        self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 
-    def preprocess_text_and_trajectory(self, fastvideo_args: FastVideoArgs,
-                                       args):
+    def preprocess_text_and_trajectory(self, fastvideo_args: FastVideoArgs, args):
         """Preprocess text-only data and generate trajectory information."""
 
         for batch_idx, data in enumerate(self.pbar):
@@ -121,9 +104,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                 if "fps" in data:
                     valid_data["fps"] = [data["fps"][i] for i in valid_indices]
                 if "duration" in data:
-                    valid_data["duration"] = [
-                        data["duration"][i] for i in valid_indices
-                    ]
+                    valid_data["duration"] = [data["duration"][i] for i in valid_indices]
 
                 batch_captions = valid_data["text"]
                 # Encode text using the standalone TextEncodingStage API
@@ -148,8 +129,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                         return_attention_mask=True,
                     )
                     negative_prompt_embed = negative_prompt_embeds_list[0][0]
-                    negative_prompt_attention_mask = negative_prompt_masks_list[
-                        0][0]
+                    negative_prompt_attention_mask = negative_prompt_masks_list[0][0]
                 else:
                     negative_prompt_embed = None
                     negative_prompt_attention_mask = None
@@ -158,9 +138,8 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                 trajectory_timesteps = []
                 trajectory_decoded = []
 
-                for i, (prompt_embed, prompt_attention_mask) in enumerate(
-                        zip(prompt_embeds, prompt_attention_masks,
-                            strict=False)):
+                for i, (prompt_embed,
+                        prompt_attention_mask) in enumerate(zip(prompt_embeds, prompt_attention_masks, strict=False)):
                     prompt_embed = prompt_embed.unsqueeze(0)
                     prompt_attention_mask = prompt_attention_mask.unsqueeze(0)
 
@@ -169,9 +148,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     batch.prompt_embeds = [prompt_embed]
                     batch.prompt_attention_mask = [prompt_attention_mask]
                     batch.negative_prompt_embeds = [negative_prompt_embed]
-                    batch.negative_attention_mask = [
-                        negative_prompt_attention_mask
-                    ]
+                    batch.negative_attention_mask = [negative_prompt_attention_mask]
                     batch.num_inference_steps = 48
                     batch.return_trajectory_latents = True
                     # Enabling this will save the decoded trajectory videos.
@@ -183,21 +160,14 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     batch.guidance_scale = 6.0
                     batch.do_classifier_free_guidance = True
 
-                    result_batch = self.input_validation_stage(
-                        batch, fastvideo_args)
-                    result_batch = self.timestep_preparation_stage(
-                        batch, fastvideo_args)
-                    result_batch = self.latent_preparation_stage(
-                        result_batch, fastvideo_args)
-                    result_batch = self.denoising_stage(result_batch,
-                                                        fastvideo_args)
-                    result_batch = self.decoding_stage(result_batch,
-                                                       fastvideo_args)
+                    result_batch = self.input_validation_stage(batch, fastvideo_args)
+                    result_batch = self.timestep_preparation_stage(batch, fastvideo_args)
+                    result_batch = self.latent_preparation_stage(result_batch, fastvideo_args)
+                    result_batch = self.denoising_stage(result_batch, fastvideo_args)
+                    result_batch = self.decoding_stage(result_batch, fastvideo_args)
 
-                    trajectory_latents.append(
-                        result_batch.trajectory_latents.cpu())
-                    trajectory_timesteps.append(
-                        result_batch.trajectory_timesteps.cpu())
+                    trajectory_latents.append(result_batch.trajectory_latents.cpu())
+                    trajectory_timesteps.append(result_batch.trajectory_timesteps.cpu())
                     trajectory_decoded.append(result_batch.trajectory_decoded)
 
                 # Prepare extra features for text-only processing
@@ -209,19 +179,15 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                 if batch.return_trajectory_decoded:
                     for i, decoded_frames in enumerate(trajectory_decoded):
                         for j, decoded_frame in enumerate(decoded_frames):
-                            save_decoded_latents_as_video(
-                                decoded_frame,
-                                f"decoded_videos/trajectory_decoded_{i}_{j}.mp4",
-                                args.train_fps)
+                            save_decoded_latents_as_video(decoded_frame,
+                                                          f"decoded_videos/trajectory_decoded_{i}_{j}.mp4",
+                                                          args.train_fps)
 
                 # Prepare batch data for Parquet dataset
                 batch_data: list[dict[str, Any]] = []
 
                 # Add progress bar for saving outputs
-                save_pbar = tqdm(enumerate(valid_data["path"]),
-                                 desc="Saving outputs",
-                                 unit="item",
-                                 leave=False)
+                save_pbar = tqdm(enumerate(valid_data["path"]), desc="Saving outputs", unit="item", leave=False)
 
                 for idx, video_path in save_pbar:
                     video_name = os.path.basename(video_path).split(".")[0]
@@ -234,13 +200,11 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     if extra_features:
                         for key, value in extra_features.items():
                             if isinstance(value, torch.Tensor):
-                                sample_extra_features[key] = value[idx].cpu(
-                                ).numpy()
+                                sample_extra_features[key] = value[idx].cpu().numpy()
                             else:
                                 assert isinstance(value, list)
                                 if isinstance(value[idx], torch.Tensor):
-                                    sample_extra_features[key] = value[idx].cpu(
-                                    ).float().numpy()
+                                    sample_extra_features[key] = value[idx].cpu().float().numpy()
                                 else:
                                     sample_extra_features[key] = value[idx]
 
@@ -249,19 +213,14 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                         video_name=video_name,
                         text_embedding=text_embedding,
                         caption=valid_data["text"][idx],
-                        trajectory_latents=sample_extra_features[
-                            "trajectory_latents"],
-                        trajectory_timesteps=sample_extra_features[
-                            "trajectory_timesteps"],
+                        trajectory_latents=sample_extra_features["trajectory_latents"],
+                        trajectory_timesteps=sample_extra_features["trajectory_timesteps"],
                     )
                     batch_data.append(record)
 
                 if batch_data:
-                    write_pbar = tqdm(total=1,
-                                      desc="Writing to Parquet dataset",
-                                      unit="batch")
-                    table = records_to_table(batch_data,
-                                             self.get_pyarrow_schema())
+                    write_pbar = tqdm(total=1, desc="Writing to Parquet dataset", unit="batch")
+                    table = records_to_table(batch_data, self.get_pyarrow_schema())
                     write_pbar.update(1)
                     write_pbar.close()
 
@@ -292,8 +251,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         self.local_rank = int(os.getenv("RANK", 0))
         os.makedirs(args.output_dir, exist_ok=True)
         # Create directory for combined data
-        self.combined_parquet_dir = os.path.join(args.output_dir,
-                                                 "combined_parquet_dataset")
+        self.combined_parquet_dir = os.path.join(args.output_dir, "combined_parquet_dataset")
         os.makedirs(self.combined_parquet_dir, exist_ok=True)
 
         # Loading dataset

@@ -1,0 +1,83 @@
+name: Trigger Full Suite
+
+on:
+  pull_request_target:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: full-suite-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    if: >-
+      (github.event.action == 'labeled' && github.event.label.name == 'ready')
+      || github.event.action == 'synchronize'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check ready label
+        id: check
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+            });
+            const hasReady = pr.labels.some(l => l.name === 'ready');
+            core.setOutput('has_ready', String(hasReady));
+            if (!hasReady) core.info('No ready label — skipping Full Suite trigger.');
+
+      - name: Cancel previous Buildkite builds
+        if: steps.check.outputs.has_ready == 'true'
+        env:
+          BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # Find running builds for this branch with TEST_SCOPE=full and cancel them
+          builds=$(curl -sS -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
+            "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds?branch=${PR_BRANCH}&state=running,scheduled" \
+            | jq -r '.[] | select(try (.env.TEST_SCOPE == "full") catch false) | .number')
+          for build_num in $builds; do
+            echo "Cancelling Buildkite build #$build_num"
+            curl -sS -X PUT -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
+              "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds/${build_num}/cancel"
+          done
+
+      - name: Trigger Buildkite Full Suite
+        if: steps.check.outputs.has_ready == 'true'
+        env:
+          BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
+          BK_PIPELINE: ${{ vars.BUILDKITE_PIPELINE_SLUG }}
+        run: |
+          curl -sS --fail-with-body -X POST \
+            "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds" \
+            -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-raw "$(jq -n \
+              --arg commit "$PR_SHA" \
+              --arg branch "$PR_BRANCH" \
+              --arg message "Full Suite for PR #${PR_NUMBER}" \
+              --argjson pr_id "$PR_NUMBER" \
+              '{
+                commit: $commit,
+                branch: $branch,
+                message: $message,
+                ignore_pipeline_branch_filters: true,
+                pull_request_id: $pr_id,
+                pull_request_base_branch: "main",
+                env: {
+                  TEST_SCOPE: "full",
+                  FULL_SUITE: "true",
+                  PR_NUMBER: ($pr_id | tostring)
+                }
+              }')"

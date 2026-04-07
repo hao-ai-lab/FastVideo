@@ -44,12 +44,7 @@ class PatchEmbed(nn.Module):
         self.patch_size = patch_size
         self.flatten = flatten
 
-        self.proj = nn.Conv3d(in_chans,
-                              embed_dim,
-                              kernel_size=patch_size,
-                              stride=patch_size,
-                              bias=bias,
-                              dtype=dtype)
+        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size, bias=bias, dtype=dtype)
         self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
 
     def forward(self, x):
@@ -58,6 +53,53 @@ class PatchEmbed(nn.Module):
             x = x.flatten(2).transpose(1, 2)  # BCHW -> BNC
         x = self.norm(x)
         return x
+
+
+class WanCamControlPatchEmbedding(nn.Module):
+    """Lingbot World Patch embedding for Plucker features."""
+
+    def __init__(
+            self,
+            patch_size=(1, 2, 2),
+            in_chans=384,  # 6 * 64
+            embed_dim=2048,
+            bias=True,
+            dtype=None,
+            prefix: str = ""):
+        super().__init__()
+        # must be 3-tuple
+        if isinstance(patch_size, list | tuple):
+            if len(patch_size) != 3:
+                raise ValueError(f"patch_size must have length 3, got {len(patch_size)}")
+        else:
+            raise ValueError(f"Unsupported patch_size type: {type(patch_size)}")
+
+        self.patch_size = patch_size
+        pt, ph, pw = self.patch_size
+        self.in_features = in_chans * pt * ph * pw
+        self.proj = nn.Linear(self.in_features, embed_dim, bias=bias, dtype=dtype)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() != 5:
+            raise ValueError(f"Expected camera embedding shape [B, C, F, H, W], got {x.shape}")
+        bsz, channels, frames, height, width = x.shape
+        pt, ph, pw = self.patch_size
+        if (frames % pt) != 0 or (height % ph) != 0 or (width % pw) != 0:
+            raise ValueError(f"Input shape {x.shape} must be divisible by patch_size {self.patch_size}")
+
+        # '1 c (f c1) (h c2) (w c3) -> 1 (f h w) (c c1 c2 c3)',
+        x = x.view(
+            bsz,
+            channels,
+            frames // pt,
+            pt,
+            height // ph,
+            ph,
+            width // pw,
+            pw,
+        )
+        x = x.permute(0, 2, 4, 6, 1, 3, 5, 7).reshape(bsz, -1, self.in_features)
+        return self.proj(x)
 
 
 class TimestepEmbedder(nn.Module):
@@ -79,21 +121,12 @@ class TimestepEmbedder(nn.Module):
         self.frequency_embedding_size = frequency_embedding_size
         self.max_period = max_period
 
-        self.mlp = MLP(frequency_embedding_size,
-                       hidden_size,
-                       hidden_size,
-                       act_type=act_layer,
-                       dtype=dtype)
+        self.mlp = MLP(frequency_embedding_size, hidden_size, hidden_size, act_type=act_layer, dtype=dtype)
         self.freq_dtype = freq_dtype
 
-    def forward(self,
-                t: torch.Tensor,
-                timestep_seq_len: int | None = None) -> torch.Tensor:
-        t_freq = timestep_embedding(t,
-                                    self.frequency_embedding_size,
-                                    self.max_period,
-                                    dtype=self.freq_dtype).to(
-                                        self.mlp.fc_in.weight.dtype)
+    def forward(self, t: torch.Tensor, timestep_seq_len: int | None = None) -> torch.Tensor:
+        t_freq = timestep_embedding(t, self.frequency_embedding_size, self.max_period,
+                                    dtype=self.freq_dtype).to(self.mlp.fc_in.weight.dtype)
         if timestep_seq_len is not None:
             t_freq = t_freq.unflatten(0, (1, timestep_seq_len))
         # t_freq = t_freq.to(self.mlp.fc_in.weight.dtype)
@@ -117,14 +150,11 @@ def timestep_embedding(t: torch.Tensor,
         Tensor of shape [B, dim] with embeddings
     """
     half = dim // 2
-    freqs = torch.exp(-math.log(max_period) *
-                      torch.arange(start=0, end=half, dtype=dtype) /
-                      half).to(device=t.device)
+    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=dtype) / half).to(device=t.device)
     args = t[:, None].float() * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
     if dim % 2:
-        embedding = torch.cat(
-            [embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+        embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
     return embedding
 
 
@@ -142,10 +172,7 @@ class ModulateProjection(nn.Module):
         super().__init__()
         self.factor = factor
         self.hidden_size = hidden_size
-        self.linear = ReplicatedLinear(hidden_size,
-                                       hidden_size * factor,
-                                       bias=True,
-                                       params_dtype=dtype)
+        self.linear = ReplicatedLinear(hidden_size, hidden_size * factor, bias=True, params_dtype=dtype)
         self.act = get_act_fn(act_layer)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -167,8 +194,7 @@ def unpatchify(x, t, h, w, patch_size, channels) -> torch.Tensor:
     """
     assert x.ndim == 3, f"x.ndim: {x.ndim}"
     assert len(patch_size) == 3, f"patch_size: {patch_size}"
-    assert t * h * w == x.shape[
-        1], f"t * h * w: {t * h * w}, x.shape[1]: {x.shape[1]}"
+    assert t * h * w == x.shape[1], f"t * h * w: {t * h * w}, x.shape[1]: {x.shape[1]}"
     c = channels
     pt, ph, pw = patch_size
 
@@ -208,8 +234,7 @@ def get_timestep_embedding(
     assert len(timesteps.shape) == 1, "Timesteps should be a 1d-array"
 
     half_dim = embedding_dim // 2
-    exponent = -math.log(max_period) * torch.arange(
-        start=0, end=half_dim, dtype=torch.float32, device=timesteps.device)
+    exponent = -math.log(max_period) * torch.arange(start=0, end=half_dim, dtype=torch.float32, device=timesteps.device)
     exponent = exponent / (half_dim - downscale_freq_shift)
 
     emb = torch.exp(exponent)
@@ -233,11 +258,7 @@ def get_timestep_embedding(
 
 class Timesteps(nn.Module):
 
-    def __init__(self,
-                 num_channels: int,
-                 flip_sin_to_cos: bool,
-                 downscale_freq_shift: float,
-                 scale: int = 1):
+    def __init__(self, num_channels: int, flip_sin_to_cos: bool, downscale_freq_shift: float, scale: int = 1):
         super().__init__()
         self.num_channels = num_channels
         self.flip_sin_to_cos = flip_sin_to_cos

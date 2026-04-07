@@ -51,9 +51,8 @@ class ImageProcessor:
         elif isinstance(image, torch.Tensor):
             return self._preprocess_tensor(image, height, width)
         else:
-            raise ValueError(
-                f"Unsupported image type: {type(image)}. "
-                "Supported types: PIL.Image.Image, np.ndarray, torch.Tensor")
+            raise ValueError(f"Unsupported image type: {type(image)}. "
+                             "Supported types: PIL.Image.Image, np.ndarray, torch.Tensor")
 
     def _preprocess_pil(
         self,
@@ -70,8 +69,7 @@ class ImageProcessor:
         height = height - (height % self.vae_scale_factor)
         width = width - (width % self.vae_scale_factor)
 
-        image = image.resize((width, height),
-                             resample=PIL.Image.Resampling.LANCZOS)
+        image = image.resize((width, height), resample=PIL.Image.Resampling.LANCZOS)
 
         image_np = np.array(image, dtype=np.float32) / 255.0
 
@@ -107,14 +105,10 @@ class ImageProcessor:
             pil_image = PIL.Image.fromarray(image)
         else:
             # Assume normalized [0, 1] or similar
-            if image.max() <= 1.0:
-                image_uint8 = (image * 255).astype(np.uint8)
-            else:
-                image_uint8 = image.astype(np.uint8)
+            image_uint8 = (image * 255).astype(np.uint8) if image.max() <= 1.0 else image.astype(np.uint8)
             pil_image = PIL.Image.fromarray(image_uint8)
 
-        pil_image = pil_image.resize((width, height),
-                                     resample=PIL.Image.Resampling.LANCZOS)
+        pil_image = pil_image.resize((width, height), resample=PIL.Image.Resampling.LANCZOS)
         image_np = np.array(pil_image, dtype=np.float32) / 255.0
 
         # Ensure 3D shape
@@ -152,15 +146,10 @@ class ImageProcessor:
         if image.ndim == 2:
             image = image.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
         elif image.ndim == 3:
-            if image.shape[0] in (1, 3, 4):  # (C, H, W)
-                image = image.unsqueeze(0)  # (1, C, H, W)
-            else:  # (H, W, C) - need to rearrange
-                image = image.permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
+            # (C, H, W) or (H, W, C) - rearrange to (1, C, H, W)
+            image = image.unsqueeze(0) if image.shape[0] in (1, 3, 4) else image.permute(2, 0, 1).unsqueeze(0)
 
-        image = torch.nn.functional.interpolate(image,
-                                                size=(height, width),
-                                                mode="bilinear",
-                                                align_corners=False)
+        image = torch.nn.functional.interpolate(image, size=(height, width), mode="bilinear", align_corners=False)
 
         if image.max() > 1.0:  # Assume [0, 255] range
             image = image / 255.0
@@ -181,11 +170,9 @@ class ImageProcessor:
         """
         # Convert to tensor
         if image_np.ndim == 2:  # (H, W) - grayscale
-            tensor = torch.from_numpy(image_np).unsqueeze(0).unsqueeze(
-                0)  # (1, 1, H, W)
+            tensor = torch.from_numpy(image_np).unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
         elif image_np.ndim == 3:  # (H, W, C)
-            tensor = torch.from_numpy(image_np).permute(2, 0, 1).unsqueeze(
-                0)  # (1, C, H, W)
+            tensor = torch.from_numpy(image_np).permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
         else:
             raise ValueError(f"Expected 2D or 3D array, got {image_np.ndim}D")
 
@@ -193,3 +180,45 @@ class ImageProcessor:
         tensor = 2.0 * tensor - 1.0
 
         return tensor
+
+    def _preprocess_cosmos25(
+        self,
+        image: PIL.Image.Image | np.ndarray | torch.Tensor,
+        height: int,
+        width: int,
+    ) -> torch.Tensor:
+        """
+        Cosmos-Predict2.5-style preprocessing for image2world:
+        - aspect-preserving resize (scale so both dims >= target)
+        - center crop to (height, width)
+        - normalize to [-1, 1]
+
+        Returns:
+            torch.Tensor: (1, 3, height, width) in [-1, 1]
+        """
+        if not isinstance(image, PIL.Image.Image):
+            # Reuse the generic preprocess for non-PIL inputs.
+            return self.preprocess(image, height=height, width=width)
+
+        # Ensure RGB (official uses torchvision.to_tensor on PIL, which yields C=3 for RGB inputs)
+        image = image.convert("RGB")
+
+        # Make sure target dims are multiples of VAE scale factor (FastVideo convention)
+        height = height - (height % self.vae_scale_factor)
+        width = width - (width % self.vae_scale_factor)
+
+        orig_w, orig_h = image.size
+        # Scale so that resized image fully covers the target box (like official resize_input()).
+        scale = max(width / float(orig_w), height / float(orig_h))
+        resized_w = int(np.ceil(scale * orig_w))
+        resized_h = int(np.ceil(scale * orig_h))
+
+        image = image.resize((resized_w, resized_h), resample=PIL.Image.Resampling.BILINEAR)
+
+        # Center crop
+        left = max(0, (resized_w - width) // 2)
+        top = max(0, (resized_h - height) // 2)
+        image = image.crop((left, top, left + width, top + height))
+
+        image_np = np.array(image, dtype=np.float32) / 255.0  # [0,1]
+        return self._normalize_to_tensor(image_np)  # -> [-1,1], (1,3,H,W)

@@ -40,10 +40,8 @@ class Timer:
     @property
     def elapsed_time(self) -> float:
         if self._start_time is None:
-            raise RuntimeError(
-                "Timer.start() must be called before elapsed_time")
-        end_time = self._end_time if self._end_time is not None else time.perf_counter(
-        )
+            raise RuntimeError("Timer.start() must be called before elapsed_time")
+        end_time = self._end_time if self._end_time is not None else time.perf_counter()
         return end_time - self._start_time
 
 
@@ -73,8 +71,7 @@ class BaseTracker:
             else:
                 self._timed_metrics[name] = elapsed_time
 
-    def log(self, metrics: dict[str, Any],
-            step: int) -> None:  # pragma: no cover - interface
+    def log(self, metrics: dict[str, Any], step: int) -> None:  # pragma: no cover - interface
         """Log metrics for the given step."""
         # Merge timing metrics with provided metrics
         metrics = {**self._timed_metrics, **metrics}
@@ -88,6 +85,13 @@ class BaseTracker:
 
         if artifacts:
             self.log(artifacts, step)
+
+    def log_file(
+        self,
+        file_path: str,
+        name: str | None = None,
+    ) -> None:
+        """Attach a file to the tracker run (e.g. config YAML)."""
 
     def finish(self) -> None:  # pragma: no cover - interface
         """Finalize the tracker session."""
@@ -111,8 +115,7 @@ class BaseTracker:
 class DummyTracker(BaseTracker):
     """Tracker implementation used when logging is disabled."""
 
-    def log(self, metrics: dict[str, Any],
-            step: int) -> None:  # pragma: no cover - no-op
+    def log(self, metrics: dict[str, Any], step: int) -> None:  # pragma: no cover - no-op
         super().log(metrics, step)
 
     def finish(self) -> None:  # pragma: no cover - no-op
@@ -150,6 +153,16 @@ class WandbTracker(BaseTracker):
         if metrics:
             self._run.log(metrics, step=step)
         self._timed_metrics = {}
+
+    def log_file(
+        self,
+        file_path: str,
+        name: str | None = None,
+    ) -> None:
+        self._wandb.save(
+            file_path,
+            base_path=os.path.dirname(file_path),
+        )
 
     def finish(self) -> None:
         self._run.finish()
@@ -201,6 +214,14 @@ class SequentialTracker(BaseTracker):
             tracker.log_artifacts(artifacts, step)
         self._timed_metrics = {}
 
+    def log_file(
+        self,
+        file_path: str,
+        name: str | None = None,
+    ) -> None:
+        for tracker in self._trackers:
+            tracker.log_file(file_path, name=name)
+
     def finish(self) -> None:
         for tracker in self._trackers:
             tracker.finish()
@@ -242,13 +263,10 @@ def initialize_trackers(
     if not tracker_names:
         return DummyTracker()
 
-    unsupported = [
-        name for name in tracker_names if name not in SUPPORTED_TRACKERS
-    ]
+    unsupported = [name for name in tracker_names if name not in SUPPORTED_TRACKERS]
     if unsupported:
         raise ValueError(
-            f"Unsupported tracker(s) provided: {unsupported}. Supported trackers: {sorted(SUPPORTED_TRACKERS)}"
-        )
+            f"Unsupported tracker(s) provided: {unsupported}. Supported trackers: {sorted(SUPPORTED_TRACKERS)}")
 
     tracker_instances: list[BaseTracker] = []
     for tracker_name in tracker_names:

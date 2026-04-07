@@ -376,9 +376,9 @@ class RLPipeline(TrainingPipeline):
             num_gpus=training_args.num_gpus,
             pin_cpu_memory=training_args.pin_cpu_memory,
             dit_cpu_offload=dit_cpu_offload)
-        # # Override scheduler to use UniPCMultistepScheduler
-        # if scheduler is not None:
-        #     pipeline.modules["scheduler"] = scheduler
+        # Override scheduler to use original UniPCMultistepScheduler
+        pipeline.modules["scheduler"] = scheduler
+        
         return pipeline
 
     def _initialize_value_model(self, training_args: TrainingArgs) -> None:

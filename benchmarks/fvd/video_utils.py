@@ -54,8 +54,7 @@ def _load_video_cv2(video_path: str | Path,
             raise RuntimeError(f"Video has 0 frames: {video_path}")
 
         frames = np.stack(frames)  # [T, H, W, C]
-        frames = torch.from_numpy(frames).permute(0, 3, 1,
-                                                  2).float()  # [T, C, H, W]
+        frames = torch.from_numpy(frames).permute(0, 3, 1, 2).float()  # [T, C, H, W]
         return frames
 
     if total_frames == 0:
@@ -63,14 +62,11 @@ def _load_video_cv2(video_path: str | Path,
 
     # Determine frame indices for sampling
     if total_frames < num_frames:
-        frame_indices = list(range(
-            total_frames)) + [total_frames - 1] * (num_frames - total_frames)
+        frame_indices = list(range(total_frames)) + [total_frames - 1] * (num_frames - total_frames)
     elif sample_strategy == 'uniform':
-        frame_indices = np.linspace(0, total_frames - 1, num_frames,
-                                    dtype=int).tolist()
+        frame_indices = np.linspace(0, total_frames - 1, num_frames, dtype=int).tolist()
     elif sample_strategy == 'random':
-        frame_indices = sorted(
-            np.random.choice(total_frames, num_frames, replace=False))
+        frame_indices = sorted(np.random.choice(total_frames, num_frames, replace=False))
     else:
         raise ValueError(f"Unknown sample_strategy: {sample_strategy}")
 
@@ -94,17 +90,15 @@ def _load_video_cv2(video_path: str | Path,
     cap.release()
 
     frames = np.stack(frames)  # [T, H, W, C]
-    frames = torch.from_numpy(frames).permute(0, 3, 1,
-                                              2).float()  # [T, C, H, W]
+    frames = torch.from_numpy(frames).permute(0, 3, 1, 2).float()  # [T, C, H, W]
 
     return frames
 
 
-def _load_video_from_frames(
-        frame_dir: str | Path,
-        num_frames: int | None = 16,
-        sample_strategy: str = 'uniform',
-        frame_extensions: list[str] | None = None) -> torch.Tensor:
+def _load_video_from_frames(frame_dir: str | Path,
+                            num_frames: int | None = 16,
+                            sample_strategy: str = 'uniform',
+                            frame_extensions: list[str] | None = None) -> torch.Tensor:
     """
     Load video from directory of frame images.
     
@@ -131,9 +125,7 @@ def _load_video_from_frames(
         frame_files.extend(frame_dir.glob(f"*{ext}"))
 
     if len(frame_files) == 0:
-        raise ValueError(
-            f"No frames found in {frame_dir} with extensions {frame_extensions}"
-        )
+        raise ValueError(f"No frames found in {frame_dir} with extensions {frame_extensions}")
 
     frame_files = sorted(frame_files, key=lambda x: x.name)
     total_frames = len(frame_files)
@@ -143,16 +135,11 @@ def _load_video_from_frames(
         frame_indices = list(range(total_frames))
     else:
         if total_frames < num_frames:
-            frame_indices = list(range(total_frames)) + [total_frames - 1] * (
-                num_frames - total_frames)
+            frame_indices = list(range(total_frames)) + [total_frames - 1] * (num_frames - total_frames)
         elif sample_strategy == 'uniform':
-            frame_indices = np.linspace(0,
-                                        total_frames - 1,
-                                        num_frames,
-                                        dtype=int).tolist()
+            frame_indices = np.linspace(0, total_frames - 1, num_frames, dtype=int).tolist()
         elif sample_strategy == 'random':
-            frame_indices = sorted(
-                np.random.choice(total_frames, num_frames, replace=False))
+            frame_indices = sorted(np.random.choice(total_frames, num_frames, replace=False))
         else:
             raise ValueError(f"Unknown sample_strategy: {sample_strategy}")
 
@@ -170,8 +157,7 @@ def _load_video_from_frames(
 
     # Stack and convert to tensor
     frames = np.stack(frames)  # [T, H, W, C]
-    frames = torch.from_numpy(frames).permute(0, 3, 1,
-                                              2).float()  # [T, C, H, W]
+    frames = torch.from_numpy(frames).permute(0, 3, 1, 2).float()  # [T, C, H, W]
 
     return frames
 
@@ -226,13 +212,12 @@ def load_video_auto(video_path: str | Path,
         raise ValueError(f"Unknown video format at {video_path}")
 
 
-def sample_clips_from_video(
-        video: torch.Tensor,
-        num_frames_per_clip: int = 16,
-        num_clips: int = 1,
-        strategy: str | ClipSamplingStrategy = ClipSamplingStrategy.BEGINNING,
-        frame_stride: int = 1,
-        temporal_stride: int = 1) -> list[torch.Tensor]:
+def sample_clips_from_video(video: torch.Tensor,
+                            num_frames_per_clip: int = 16,
+                            num_clips: int = 1,
+                            strategy: str | ClipSamplingStrategy = ClipSamplingStrategy.BEGINNING,
+                            frame_stride: int = 1,
+                            temporal_stride: int = 1) -> list[torch.Tensor]:
     """
     Sample clips from a video with various strategies.
         
@@ -296,10 +281,7 @@ def sample_clips_from_video(
     elif strategy == ClipSamplingStrategy.RANDOM:
         # Sample N random clips
         for _ in range(num_clips):
-            if effective_clip_length == T:
-                start = 0
-            else:
-                start = np.random.randint(0, T - effective_clip_length + 1)
+            start = 0 if effective_clip_length == T else np.random.randint(0, T - effective_clip_length + 1)
             clip = video[start:start + effective_clip_length]
             clips.append(clip)
 
@@ -312,8 +294,7 @@ def sample_clips_from_video(
             clips.append(clip)
         else:
             # Multiple uniformly spaced clips
-            step = (T - effective_clip_length) / (num_clips -
-                                                  1) if num_clips > 1 else 0
+            step = (T - effective_clip_length) / (num_clips - 1) if num_clips > 1 else 0
             for i in range(num_clips):
                 start = int(i * step)
                 start = min(start, T - effective_clip_length)
@@ -422,15 +403,12 @@ def load_video_clips_streaming(directory: str | Path,
     failed_count = 0
     total_clips = 0
 
-    iterator = tqdm(video_paths,
-                    desc="Loading videos") if verbose else video_paths
+    iterator = tqdm(video_paths, desc="Loading videos") if verbose else video_paths
 
     for video_path in iterator:
         try:
             # Load full video
-            video = load_video_auto(video_path,
-                                    num_frames=None,
-                                    sample_strategy='uniform')
+            video = load_video_auto(video_path, num_frames=None, sample_strategy='uniform')
 
             # Sample clips from video
             clips = sample_clips_from_video(video,
@@ -445,18 +423,14 @@ def load_video_clips_streaming(directory: str | Path,
                     T, C, H, W = clip.shape
                     if target_size != (H, W):
                         # Resize to target size
-                        clip = clip.contiguous(
-                        )  # Fix non-contiguous tensors first
-                        clip_flat = clip.view(T * C, H,
-                                              W).unsqueeze(0)  # [1, T*C, H, W]
-                        clip_resized = torch.nn.functional.interpolate(
-                            clip_flat,
-                            size=target_size,
-                            mode='bilinear',
-                            align_corners=False)
-                        clip = clip_resized.squeeze(0).view(
-                            T, C, target_size[0],
-                            target_size[1])  # Back to [T, C, H, W]
+                        clip = clip.contiguous()  # Fix non-contiguous tensors first
+                        clip_flat = clip.view(T * C, H, W).unsqueeze(0)  # [1, T*C, H, W]
+                        clip_resized = torch.nn.functional.interpolate(clip_flat,
+                                                                       size=target_size,
+                                                                       mode='bilinear',
+                                                                       align_corners=False)
+                        clip = clip_resized.squeeze(0).view(T, C, target_size[0],
+                                                            target_size[1])  # Back to [T, C, H, W]
                     resized_clips.append(clip)
                 clips = resized_clips
 
@@ -480,11 +454,7 @@ def load_video_clips_streaming(directory: str | Path,
 
     failure_rate = failed_count / len(video_paths)
     if failure_rate > 0.1:  # More than 10% failed
-        print(
-            f"\nWARNING: {failure_rate:.1%} of videos failed to load ({failed_count}/{len(video_paths)})"
-        )
+        print(f"\nWARNING: {failure_rate:.1%} of videos failed to load ({failed_count}/{len(video_paths)})")
 
     if verbose:
-        print(
-            f"\nSuccessfully loaded {total_clips} clips from {len(video_paths) - failed_count} videos"
-        )
+        print(f"\nSuccessfully loaded {total_clips} clips from {len(video_paths) - failed_count} videos")

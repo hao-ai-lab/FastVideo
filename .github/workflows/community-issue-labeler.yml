@@ -1,0 +1,65 @@
+name: Auto-Label Issues
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  label-issues:
+    if: github.repository == 'hao-ai-lab/FastVideo'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label by keywords
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const title = context.payload.issue.title.toLowerCase();
+            const body = (context.payload.issue.body || '').toLowerCase();
+            const text = title + ' ' + body;
+            const labels = [];
+
+            const rules = [
+              // scope labels (shared with PR labeling via Mergify)
+              // Mapping: label → repo directories
+              //   scope: training    → fastvideo/train/, fastvideo/training/, fastvideo/distillation/
+              //   scope: inference   → fastvideo/pipelines/, fastvideo/entrypoints/, fastvideo/worker/
+              //   scope: attention   → fastvideo/attention/
+              //   scope: kernel      → fastvideo-kernel/, csrc/
+              //   scope: model       → fastvideo/models/, fastvideo/layers/, fastvideo/configs/models/
+              //   scope: data        → fastvideo/dataset/, fastvideo/pipelines/preprocess/
+              //   scope: distributed → fastvideo/distributed/
+              //   scope: docs        → docs/
+              { keywords: ['training', 'finetune', 'fine-tune', 'lora', 'fsdp', 'distill'], label: 'scope: training' },
+              { keywords: ['inference', 'generate', 'pipeline', 'slow', 'latency'], label: 'scope: inference' },
+              { keywords: ['attention', 'vsa', 'flash', 'sta', 'vmoba', 'sparse attn'], label: 'scope: attention' },
+              { keywords: ['kernel', 'csrc', 'cuda kernel', 'thunderkittens'], label: 'scope: kernel' },
+              { keywords: ['wan', 'hunyuan', 'mochi', 'ltx', 'cogvideo', 'flux', 'sd3', 'cosmos'], label: 'scope: model' },
+              { keywords: ['dataset', 'dataloader', 'preprocessing', 'preprocess'], label: 'scope: data' },
+              { keywords: ['distributed', 'sequence parallel', 'fsdp', 'tensor parallel', 'multi-node', 'multi-gpu'], label: 'scope: distributed' },
+              { keywords: ['docs', 'documentation', 'tutorial', 'example'], label: 'scope: docs' },
+              // issue-only labels (cross-module, no single repo directory)
+              { keywords: ['install', 'setup', 'pip', 'cuda', 'uv ', 'import error', 'modulenotfound'], label: 'installation' },
+              { keywords: ['memory', 'oom', 'out of memory', 'gpu memory', 'vram'], label: 'performance' },
+              { keywords: ['windows', 'macos', 'mac os', 'apple', 'mps', 'rocm', 'amd', 'npu'], label: 'platform' },
+            ];
+
+            for (const rule of rules) {
+              if (rule.keywords.some(kw => text.includes(kw))) {
+                labels.push(rule.label);
+              }
+            }
+
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.issue.number,
+                labels: labels,
+              });
+              console.log(`Added labels: ${labels.join(', ')}`);
+            } else {
+              console.log('No keyword matches found');
+            }

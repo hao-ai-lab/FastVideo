@@ -13,8 +13,7 @@ logger = init_logger(__name__)
 @dataclass
 class ArchConfig:
     stacked_params_mapping: list[tuple[str, str, str]] = field(
-        default_factory=list
-    )  # mapping from huggingface weight names to custom names
+        default_factory=list)  # mapping from huggingface weight names to custom names
 
 
 @dataclass
@@ -24,14 +23,12 @@ class ModelConfig:
     arch_config: ArchConfig = field(default_factory=ArchConfig)
 
     # FastVideo-specific parameters here
-    # i.e. STA, quantization, teacache
 
     def __getattr__(self, name):
         # Only called if 'name' is not found in ModelConfig directly
         if hasattr(self.arch_config, name):
             return getattr(self.arch_config, name)
-        raise AttributeError(
-            f"'{type(self).__name__}' object has no attribute '{name}'")
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def __getstate__(self):
         # Return a dictionary of attributes to pickle
@@ -52,8 +49,7 @@ class ModelConfig:
             if key in valid_fields:
                 setattr(arch_config, key, value)
             else:
-                raise AttributeError(
-                    f"{type(arch_config).__name__} has no field '{key}'")
+                raise AttributeError(f"{type(arch_config).__name__} has no field '{key}'")
 
         if hasattr(arch_config, "__post_init__"):
             arch_config.__post_init__()
@@ -67,8 +63,7 @@ class ModelConfig:
             if key in valid_fields:
                 setattr(self, key, value)
             else:
-                logger.warning("%s does not contain field '%s'!",
-                               type(self).__name__, key)
+                logger.warning("%s does not contain field '%s'!", type(self).__name__, key)
                 raise AttributeError(f"Invalid field: {key}")
 
         if hasattr(self, "__post_init__"):

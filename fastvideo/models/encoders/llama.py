@@ -329,10 +329,7 @@ class LlamaModel(TextEncoder):
         output_hidden_states = (output_hidden_states
                                 if output_hidden_states is not None else
                                 self.config.output_hidden_states)
-        if inputs_embeds is not None:
-            hidden_states = inputs_embeds
-        else:
-            hidden_states = self.get_input_embeddings(input_ids)
+        hidden_states = inputs_embeds if inputs_embeds is not None else self.get_input_embeddings(input_ids)
         residual = None
 
         if position_ids is None:
@@ -429,3 +426,6 @@ class LlamaModel(TextEncoder):
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
         return loaded_params
+
+# Entry point for model registry
+EntryClass = LlamaModel

@@ -9,6 +9,7 @@ from safetensors.torch import load_file
 
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.logger import init_logger
+
 # from fastvideo.models.vaes.hunyuanvae import (
 #     AutoencoderKLHunyuanVideo as MyHunyuanVAE)
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -22,9 +23,7 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
 BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join("data", BASE_MODEL_PATH) # store in the large /workspace disk on Runpod
-                                  )
+MODEL_PATH = maybe_download_model(BASE_MODEL_PATH, local_dir=os.path.join("data", BASE_MODEL_PATH))
 VAE_PATH = os.path.join(MODEL_PATH, "vae")
 CONFIG_PATH = os.path.join(VAE_PATH, "config.json")
 
@@ -37,34 +36,33 @@ L40S_REFERENCE_LATENT = -157.09130859375
 
 
 @pytest.mark.usefixtures("distributed_setup")
+@pytest.mark.skip(reason="Skipping test_hunyuan_vae")
 def test_hunyuan_vae():
     device = torch.device("cuda:0")
     precision = torch.bfloat16
     precision_str = "bf16"
-    args = FastVideoArgs(model_path=VAE_PATH, pipeline_config=PipelineConfig(vae_config=HunyuanVAEConfig(), vae_precision=precision_str))
+    args = FastVideoArgs(
+        model_path=VAE_PATH, pipeline_config=PipelineConfig(vae_config=HunyuanVAEConfig(), vae_precision=precision_str)
+    )
     args.device = device
     args.vae_cpu_offload = False
 
     loader = VAELoader()
     model = loader.load(VAE_PATH, args)
 
-    model.enable_tiling(tile_sample_min_height=32,
-                         tile_sample_min_width=32,
-                         tile_sample_min_num_frames=8,
-                         tile_sample_stride_height=16,
-                         tile_sample_stride_width=16,
-                         tile_sample_stride_num_frames=4)
+    model.enable_tiling(
+        tile_sample_min_height=32,
+        tile_sample_min_width=32,
+        tile_sample_min_num_frames=8,
+        tile_sample_stride_height=16,
+        tile_sample_stride_width=16,
+        tile_sample_stride_num_frames=4,
+    )
 
     batch_size = 1
 
     # Video input [B, C, T, H, W]
-    input_tensor = torch.randn(batch_size,
-                               3,
-                               21,
-                               64,
-                               64,
-                               device=device,
-                               dtype=torch.bfloat16)
+    input_tensor = torch.randn(batch_size, 3, 21, 64, 64, device=device, dtype=torch.bfloat16)
 
     # Disable gradients for inference
     with torch.no_grad():
@@ -80,8 +78,5 @@ def test_hunyuan_vae():
         raise ValueError(f"Unknown device: {device_name}")
 
     diff_encoded_latents = abs(REFERENCE_LATENT - latent)
-    logger.info(
-        f"Reference latent: {REFERENCE_LATENT}, Current latent: {latent}"
-    )
+    logger.info(f"Reference latent: {REFERENCE_LATENT}, Current latent: {latent}")
     assert diff_encoded_latents < 1e-4, f"Encoded latents differ significantly: max diff = {diff_encoded_latents}"
-

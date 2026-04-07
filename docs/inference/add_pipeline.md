@@ -101,14 +101,17 @@ Replace standard attention with FastVideo's optimized attention:
 ```python
 # Local attention patterns
 from fastvideo.attention import LocalAttention
-from fastvideo.attention.backends.abstract import _Backend
+from fastvideo.platforms.interface import AttentionBackendEnum
 self.attn = LocalAttention(
     num_heads=num_heads,
     head_size=head_dim,
     dropout_rate=0.0,
     softmax_scale=None,
     causal=False,
-    supported_attention_backends=(_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+    supported_attention_backends=(
+        AttentionBackendEnum.FLASH_ATTN,
+        AttentionBackendEnum.TORCH_SDPA,
+    )
 )
 
 # Distributed attention for long sequences
@@ -119,29 +122,60 @@ self.attn = DistributedAttention(
     dropout_rate=0.0,
     softmax_scale=None,
     causal=False,
-    supported_attention_backends=(_Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+    supported_attention_backends=(
+        AttentionBackendEnum.VIDEO_SPARSE_ATTN,
+        AttentionBackendEnum.FLASH_ATTN,
+        AttentionBackendEnum.TORCH_SDPA,
+    )
 )
 ```
 
 #### Define supported backend selection
 
 ```python
-   _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+_supported_attention_backends = (
+    AttentionBackendEnum.FLASH_ATTN,
+    AttentionBackendEnum.TORCH_SDPA,
+)
 ```
 
 ### Registering Models
 
-Register implemented modules in the model registry:
+Register implemented modules for auto‑discovery by adding `EntryClass` in each
+model module (the registry scans for it):
 
 ```python
-# In fastvideo/models/registry.py
-_TEXT_TO_VIDEO_DIT_MODELS = {
-    "YourTransformerModel": ("dits", "yourmodule", "YourTransformerClass"),
-}
+# In fastvideo/models/dits/your_module.py
+class YourTransformerModel(...):
+    ...
 
-_VAE_MODELS = {
-    "YourVAEModel": ("vaes", "yourvae", "YourVAEClass"),
-}
+# Entry point for model registry
+EntryClass = YourTransformerModel
+```
+
+```python
+# In fastvideo/models/vaes/your_vae.py
+class YourVAEModel(...):
+    ...
+
+# Entry point for model registry
+EntryClass = YourVAEModel
+```
+
+Register pipeline config + sampling defaults in the unified registry:
+
+```python
+# In fastvideo/registry.py
+register_configs(
+    sampling_param_cls=YourSamplingParam,
+    pipeline_config_cls=YourPipelineConfig,
+    hf_model_paths=[
+        "org/your-model-id",
+    ],
+    model_detectors=[
+        lambda path: "your-model" in path.lower(),
+    ],
+)
 ```
 
 ## Step 2: Directory Structure

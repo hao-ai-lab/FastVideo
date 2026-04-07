@@ -6,7 +6,7 @@ import pytest
 import torch
 from transformers import AutoConfig, AutoTokenizer, CLIPTextModel
 import gc
-from fastvideo.configs.pipelines import PipelineConfig
+from fastvideo.configs.pipelines import HunyuanConfig, PipelineConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -21,9 +21,7 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
 BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join("data", BASE_MODEL_PATH) # store in the large /workspace disk on Runpod
-                                  )
+MODEL_PATH = maybe_download_model(BASE_MODEL_PATH, local_dir=os.path.join("data", BASE_MODEL_PATH))
 TEXT_ENCODER_PATH = os.path.join(MODEL_PATH, "text_encoder_2")
 TOKENIZER_PATH = os.path.join(MODEL_PATH, "tokenizer_2")
 
@@ -34,13 +32,12 @@ def test_clip_encoder():
     Tests compatibility between two different implementations for loading text encoders:
     1. load_text_encoder from fastvideo.models.hunyuan.text_encoder
     2. TextEncoderLoader from fastvideo.models.loader
-    
+
     The test verifies that both implementations:
     - Load models with the same weights and parameters
     - Produce nearly identical outputs for the same input prompts
     """
-    args = FastVideoArgs(model_path="openai/clip-vit-large-patch14",
-                         pipeline_config=PipelineConfig(text_encoder_configs=(CLIPTextConfig(),), text_encoder_precisions=("fp16",)))
+    args = FastVideoArgs(model_path="openai/clip-vit-large-patch14", pipeline_config=HunyuanConfig())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     logger.info("Loading models from %s", args.model_path)
@@ -55,6 +52,7 @@ def test_clip_encoder():
     model1 = CLIPTextModel.from_pretrained(TEXT_ENCODER_PATH).to(torch.float16).to(device).eval()
 
     from fastvideo.models.loader.component_loader import TextEncoderLoader
+
     loader = TextEncoderLoader()
     model2 = loader.load(TEXT_ENCODER_PATH, args)
 
@@ -90,10 +88,7 @@ def test_clip_encoder():
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
 
     # Test with some sample prompts
-    prompts = [
-        "a photo of a cat", "a beautiful landscape with mountains",
-        "an astronaut riding a horse on the moon"
-    ]
+    prompts = ["a photo of a cat", "a beautiful landscape with mountains", "an astronaut riding a horse on the moon"]
 
     logger.info("Testing CLIP text encoder with sample prompts")
 
@@ -102,14 +97,11 @@ def test_clip_encoder():
             logger.info("Testing prompt: '%s'", prompt)
 
             # Tokenize the prompt
-            tokens = tokenizer(prompt,
-                               padding="max_length",
-                               max_length=77,
-                               truncation=True,
-                               return_tensors="pt").to(device)
+            tokens = tokenizer(prompt, padding="max_length", max_length=77, truncation=True, return_tensors="pt").to(
+                device
+            )
             # Get embeddings from our implementation
-            outputs1 = model1(input_ids=tokens.input_ids,
-                              output_hidden_states=True)
+            outputs1 = model1(input_ids=tokens.input_ids, output_hidden_states=True)
 
             logger.info("Testing model2")
             print("--------------------------------")
@@ -118,24 +110,25 @@ def test_clip_encoder():
                 outputs2 = model2(
                     input_ids=tokens.input_ids,
                     # attention_mask=tokens.attention_mask,
-                    output_hidden_states=True)
+                    output_hidden_states=True,
+                )
 
             # Compare last hidden states
-            last_hidden_state1 = outputs1.last_hidden_state[
-                tokens.attention_mask == 1]
-            last_hidden_state2 = outputs2.last_hidden_state[
-                tokens.attention_mask == 1]
+            last_hidden_state1 = outputs1.last_hidden_state[tokens.attention_mask == 1]
+            last_hidden_state2 = outputs2.last_hidden_state[tokens.attention_mask == 1]
             # print("last_hidden_state1", last_hidden_state1)
             # print("last_hidden_state2", last_hidden_state2)
 
-            assert last_hidden_state1.shape == last_hidden_state2.shape, \
+            assert last_hidden_state1.shape == last_hidden_state2.shape, (
                 f"Hidden state shapes don't match: {last_hidden_state1.shape} vs {last_hidden_state2.shape}"
+            )
             # Compare pooler outputs
             pooler_output1 = outputs1.pooler_output
             pooler_output2 = outputs2.pooler_output
 
-            assert pooler_output1.shape == pooler_output2.shape, \
+            assert pooler_output1.shape == pooler_output2.shape, (
                 f"Pooler output shapes don't match: {pooler_output1.shape} vs {pooler_output2.shape}"
+            )
 
             assert_close(pooler_output1, pooler_output2, atol=1e-2, rtol=1e-3)
             assert_close(last_hidden_state1, last_hidden_state2, atol=1e-2, rtol=1e-3)

@@ -1,4 +1,3 @@
-
 # Configuration
 
 ## Multi-GPU Setup
@@ -18,7 +17,8 @@ generator = VideoGenerator.from_pretrained(
 - `PipelineConfig`: Initialization time parameters
 - `SamplingParam`: Generation time parameters
 
-You can customize various parameters when generating videos using the `PipelineConfig` and `SamplingParam` class:
+You can customize generation behavior using `PipelineConfig` and
+`SamplingParam`:
 
 ```python
 from fastvideo import VideoGenerator, SamplingParam, PipelineConfig
@@ -27,12 +27,12 @@ def main():
     model_name = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
     config = PipelineConfig.from_pretrained(model_name)
     config.vae_precision = "fp16"
-    config.dit_cpu_offload = True
 
     # Create the generator
     generator = VideoGenerator.from_pretrained(
         model_name,
         num_gpus=1,
+        dit_layerwise_offload=True,  # FastVideoArgs option
         pipeline_config=config
     )
 
@@ -61,15 +61,44 @@ def main():
         prompt, 
         sampling_param=sampling_param, 
         output_path="my_videos/",  # Controls where videos are saved
-        return_frames=True,  # Also return frames from this call (defaults to False)
         save_video=True
     )
 
-    # If return_frames=True, video contains the generated frames as a NumPy array
-    print(f"Generated {len(video)} frames")
+    # If return_frames=True, frames are available in video["frames"]
+    print(f"Generated {len(video['frames'])} frames")
 
 if __name__ == '__main__':
     main()
+```
+
+## JSON/YAML Config Files (CLI)
+
+The CLI supports `--config` with JSON or YAML. Command-line arguments override
+config file values.
+By default, `fastvideo generate` uses `return_frames=false` unless you set
+`--return-frames` (or `return_frames: true` in config).
+
+```bash
+fastvideo generate --config config.yaml
+```
+
+Use CLI argument names as keys (underscore or hyphen is accepted). Example:
+
+```yaml
+model_path: "FastVideo/FastHunyuan-diffusers"
+prompt: "A capybara relaxing in a hammock"
+num_gpus: 2
+sp_size: 2
+num_frames: 45
+height: 720
+width: 1280
+num_inference_steps: 6
+seed: 1024
+dit_precision: "bf16"
+vae_precision: "fp16"
+vae_tiling: true
+vae_sp: true
+enable_torch_compile: false
 ```
 
 ## Performance Optimization

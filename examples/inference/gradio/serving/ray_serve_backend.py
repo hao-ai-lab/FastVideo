@@ -168,7 +168,7 @@ def prepare_sampling_params(video_request: VideoGenerationRequest, default_param
     params.height = video_request.height
     params.width = video_request.width
     params.save_video = False
-    params.return_frames = False
+    params.return_frames = True
     
     return params
 
@@ -229,7 +229,7 @@ class BaseModelDeployment:
             sampling_param=params,
             image_path=image_path,
             save_video=False,
-            return_frames=False,
+            return_frames=True,
         )
         inference_time = time.time() - inference_start_time
 

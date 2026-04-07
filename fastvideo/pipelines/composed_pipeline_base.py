@@ -13,8 +13,8 @@ from typing import Any, cast
 import torch
 
 from fastvideo.configs.pipelines import PipelineConfig
-from fastvideo.distributed import (
-    maybe_init_distributed_environment_and_model_parallel, get_world_group)
+from fastvideo.distributed import (maybe_init_distributed_environment_and_model_parallel, get_world_group)
+from fastvideo.distributed.communication_op import (warmup_sequence_parallel_communication)
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.profiler import get_or_create_profiler
@@ -22,8 +22,7 @@ from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages import PipelineStage
 import fastvideo.envs as envs
-from fastvideo.utils import (maybe_download_model,
-                             verify_model_config_and_directory)
+from fastvideo.utils import (maybe_download_model, verify_model_config_and_directory)
 
 logger = init_logger(__name__)
 
@@ -68,11 +67,9 @@ class ComposedPipelineBase(ABC):
             self._required_config_modules = required_config_modules
 
         if self._required_config_modules is None:
-            raise NotImplementedError(
-                "Subclass must set _required_config_modules")
+            raise NotImplementedError("Subclass must set _required_config_modules")
 
-        maybe_init_distributed_environment_and_model_parallel(
-            fastvideo_args.tp_size, fastvideo_args.sp_size)
+        maybe_init_distributed_environment_and_model_parallel(fastvideo_args.tp_size, fastvideo_args.sp_size)
 
         # Torch profiler. Enabled and configured through env vars:
         # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace
@@ -93,11 +90,60 @@ class ComposedPipelineBase(ABC):
             for name, module in self.trainable_transformer_modules.items():
                 logger.info("Setting %s to requires_grad=True", name)
                 if not isinstance(module, torch.nn.Module):
-                    logger.info(
-                        "Skipping %s because it is not a torch.nn.Module", name)
+                    logger.info("Skipping %s because it is not a torch.nn.Module", name)
                     continue
                 module.requires_grad_(True)
                 module.train()
+
+    @staticmethod
+    def _compile_with_conditions(
+        module: torch.nn.Module,
+        compile_kwargs: dict[str, Any],
+    ) -> int:
+        """Compile submodules that match module._compile_conditions."""
+        compile_conditions = getattr(module, "_compile_conditions", None)
+        if not compile_conditions:
+            return 0
+
+        compiled_count = 0
+        for name, submodule in module.named_modules():
+            if not name:
+                continue
+            if any(cond(name, submodule) for cond in compile_conditions):
+                submodule.forward = torch.compile(submodule.forward, **compile_kwargs)
+                compiled_count += 1
+        return compiled_count
+
+    def _maybe_compile_pipeline_module(
+        self,
+        module_name: str,
+        fsdp_module_cls: type | None,
+        compile_kwargs: dict[str, Any],
+    ) -> None:
+        if module_name not in self.modules:
+            return
+
+        module = self.modules[module_name]
+        if fsdp_module_cls is not None and isinstance(module, fsdp_module_cls):
+            logger.info(
+                "%s is already FSDP-wrapped; skipping torch.compile in pipeline",
+                module_name.capitalize(),
+            )
+            return
+
+        compiled_count = self._compile_with_conditions(module, compile_kwargs)
+        if compiled_count > 0:
+            logger.info(
+                "Enabled torch.compile for %d submodules in %s via _compile_conditions with kwargs=%s",
+                compiled_count,
+                module_name,
+                compile_kwargs,
+            )
+            return
+
+        # Backward-compatible fallback: compile full module if no condition matched.
+        logger.info("Enabling torch.compile for %s with kwargs=%s", module_name, compile_kwargs)
+        self.modules[module_name] = torch.compile(module, **compile_kwargs)
 
     def post_init(self) -> None:
         assert self.fastvideo_args is not None, "fastvideo_args must be set"
@@ -114,11 +160,8 @@ class ComposedPipelineBase(ABC):
 
         self.initialize_pipeline(self.fastvideo_args)
         if self.fastvideo_args.enable_torch_compile:
-            transformer_module = self.modules["transformer"]
             if self.fastvideo_args.training_mode:
-                logger.info(
-                    "Torch Compile enabled via FSDP loader for training; skipping additional pipeline compile"
-                )
+                logger.info("Torch Compile enabled via FSDP loader for training; skipping additional pipeline compile")
             else:
                 fsdp_module_cls = None
                 try:
@@ -128,43 +171,31 @@ class ComposedPipelineBase(ABC):
                     fsdp_module_cls = None
 
                 compile_kwargs = self.fastvideo_args.torch_compile_kwargs or {}
-                if fsdp_module_cls is not None and isinstance(
-                        transformer_module, fsdp_module_cls):
-                    logger.info(
-                        "Transformer is already FSDP-wrapped; skipping torch.compile in pipeline"
-                    )
-                else:
-                    logger.info("Enabling torch.compile for DiT with kwargs=%s",
-                                compile_kwargs)
-                    self.modules["transformer"] = torch.compile(
-                        transformer_module, **compile_kwargs)
-                if "transformer_2" in self.modules:
-                    transformer_module_2 = self.modules["transformer_2"]
-                    if fsdp_module_cls is not None and isinstance(
-                            transformer_module_2, fsdp_module_cls):
-                        logger.info(
-                            "Transformer_2 is already FSDP-wrapped; skipping torch.compile in pipeline"
-                        )
-                    else:
-                        logger.info(
-                            "Enabling torch.compile for Transformer_2 with kwargs=%s",
-                            compile_kwargs)
-                        self.modules["transformer_2"] = torch.compile(
-                            transformer_module_2, **compile_kwargs)
+                self._maybe_compile_pipeline_module(
+                    module_name="transformer",
+                    fsdp_module_cls=fsdp_module_cls,
+                    compile_kwargs=compile_kwargs,
+                )
+                self._maybe_compile_pipeline_module(
+                    module_name="transformer_2",
+                    fsdp_module_cls=fsdp_module_cls,
+                    compile_kwargs=compile_kwargs,
+                )
                 logger.info("Torch Compile enabled for DiT")
 
         if not self.fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")
             self.create_pipeline_stages(self.fastvideo_args)
 
+            # Warmup NCCL communicators for sequence parallelism to avoid
+            # slow first forward pass due to lazy initialization
+            warmup_sequence_parallel_communication()
+
     def initialize_training_pipeline(self, training_args: TrainingArgs):
-        raise NotImplementedError(
-            "if training_mode is True, the pipeline must implement this method")
+        raise NotImplementedError("if training_mode is True, the pipeline must implement this method")
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
-        raise NotImplementedError(
-            "if log_validation is True, the pipeline must implement this method"
-        )
+        raise NotImplementedError("if log_validation is True, the pipeline must implement this method")
 
     @classmethod
     def from_pretrained(cls,
@@ -268,11 +299,9 @@ class ComposedPipelineBase(ABC):
         """
         return
 
-    def load_modules(
-        self,
-        fastvideo_args: FastVideoArgs,
-        loaded_modules: dict[str, torch.nn.Module] | None = None
-    ) -> dict[str, Any]:
+    def load_modules(self,
+                     fastvideo_args: FastVideoArgs,
+                     loaded_modules: dict[str, torch.nn.Module] | None = None) -> dict[str, Any]:
         """
         Load the modules from the config.
         loaded_modules: Optional[Dict[str, torch.nn.Module]] = None, 
@@ -285,26 +314,20 @@ class ComposedPipelineBase(ABC):
         # remove keys that are not pipeline modules
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")
+        model_index.pop("_name_or_path", None)
         model_index.pop("workload_type", None)
-        if "boundary_ratio" in model_index and model_index[
-                "boundary_ratio"] is not None:
-            logger.info(
-                "MoE pipeline detected. Adding transformer_2 to self.required_config_modules..."
-            )
+        if "boundary_ratio" in model_index and model_index["boundary_ratio"] is not None:
+            logger.info("MoE pipeline detected. Adding transformer_2 to self.required_config_modules...")
             self.required_config_modules.append("transformer_2")
-            logger.info("MoE pipeline detected. Setting boundary ratio to %s",
-                        model_index["boundary_ratio"])
-            fastvideo_args.pipeline_config.dit_config.boundary_ratio = model_index[
-                "boundary_ratio"]
+            logger.info("MoE pipeline detected. Setting boundary ratio to %s", model_index["boundary_ratio"])
+            fastvideo_args.pipeline_config.dit_config.boundary_ratio = model_index["boundary_ratio"]
 
         model_index.pop("boundary_ratio", None)
         # used by Wan2.2 ti2v
         model_index.pop("expand_timesteps", None)
 
         # some sanity checks
-        assert len(
-            model_index
-        ) > 1, "model_index.json must contain at least one pipeline module"
+        assert len(model_index) > 1, "model_index.json must contain at least one pipeline module"
 
         for module_name in self.required_config_modules:
             if module_name not in model_index and module_name in self._extra_config_module_map:
@@ -313,8 +336,7 @@ class ComposedPipelineBase(ABC):
                     "model_index.json does not contain a %s module, but found {%s: %s} in _extra_config_module_map, adding to model_index.",
                     module_name, module_name, extra_module_value)
                 if extra_module_value in model_index:
-                    logger.info("Using module %s for %s", extra_module_value,
-                                module_name)
+                    logger.info("Using module %s for %s", extra_module_value, module_name)
                     model_index[module_name] = model_index[extra_module_value]
                     continue
                 else:
@@ -327,12 +349,24 @@ class ComposedPipelineBase(ABC):
         logger.info("Loading required modules: %s", required_modules)
 
         modules = {}
-        for module_name, (transformers_or_diffusers,
-                          architecture) in model_index.items():
-            if transformers_or_diffusers is None:
+        for module_name, module_spec in model_index.items():
+            if not isinstance(module_spec, list | tuple):
+                logger.info(
+                    "Skipping non-module config entry %s=%s",
+                    module_name,
+                    module_spec,
+                )
+                continue
+            if len(module_spec) < 1:
                 logger.warning(
-                    "Module %s in model_index.json has null value, removing from required_config_modules",
-                    module_name)
+                    "Skipping module %s due to invalid empty spec in model_index.json",
+                    module_name,
+                )
+                continue
+            transformers_or_diffusers = module_spec[0]
+            if transformers_or_diffusers is None:
+                logger.warning("Module %s in model_index.json has null value, removing from required_config_modules",
+                               module_name)
                 if module_name in self.required_config_modules:
                     self.required_config_modules.remove(module_name)
                 continue
@@ -350,16 +384,14 @@ class ComposedPipelineBase(ABC):
             else:
                 load_module_name = module_name
 
-            component_model_path = os.path.join(self.model_path,
-                                                load_module_name)
+            component_model_path = os.path.join(self.model_path, load_module_name)
             module = PipelineComponentLoader.load_module(
                 module_name=load_module_name,
                 component_model_path=component_model_path,
                 transformers_or_diffusers=transformers_or_diffusers,
                 fastvideo_args=fastvideo_args,
             )
-            logger.info("Loaded module %s from %s", module_name,
-                        component_model_path)
+            logger.info("Loaded module %s from %s", module_name, component_model_path)
 
             if module_name in modules:
                 logger.warning("Overwriting module %s", module_name)
@@ -389,8 +421,7 @@ class ComposedPipelineBase(ABC):
             self.profiler.stop()
             # only print profiler results on rank 0
             if self.local_rank == 0:
-                print(self.profiler.key_averages().table(
-                    sort_by="self_cuda_time_total"))
+                print(self.profiler.key_averages().table(sort_by="self_cuda_time_total"))
 
     # TODO(will): don't hardcode no_grad
     @torch.no_grad()
@@ -412,8 +443,7 @@ class ComposedPipelineBase(ABC):
             self.post_init()
 
         # Execute each stage
-        logger.info("Running pipeline stages: %s",
-                    self._stage_name_mapping.keys())
+        logger.info("Running pipeline stages: %s", self._stage_name_mapping.keys())
         # logger.info("Batch: %s", batch)
         for stage in self.stages:
             batch = stage(batch, fastvideo_args)
@@ -422,5 +452,4 @@ class ComposedPipelineBase(ABC):
         return batch
 
     def train(self) -> None:
-        raise NotImplementedError(
-            "if training_mode is True, the pipeline must implement this method")
+        raise NotImplementedError("if training_mode is True, the pipeline must implement this method")

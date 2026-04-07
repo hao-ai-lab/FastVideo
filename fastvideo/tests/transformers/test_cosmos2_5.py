@@ -119,10 +119,7 @@ def load_reference_cosmos25_model(checkpoint_path: str, device, dtype):
             
             for key, value in model_state.items():
                 # Strip 'net.' prefix
-                if key.startswith('net.'):
-                    new_key = key[4:]  # Remove 'net.' prefix
-                else:
-                    new_key = key
+                new_key = key[4:] if key.startswith('net.') else key  # Strip 'net.' prefix
                 
                 # Add '_checkpoint_wrapped_module' if needed
                 if needs_checkpoint_wrapper and new_key.startswith('blocks.'):

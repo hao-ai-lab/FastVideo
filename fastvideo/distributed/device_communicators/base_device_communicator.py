@@ -25,10 +25,7 @@ class DistributedAutograd:
         """
 
         @staticmethod
-        def forward(ctx: Any,
-                    group: ProcessGroup,
-                    input_: Tensor,
-                    op: dist.ReduceOp | None = None) -> Tensor:
+        def forward(ctx: Any, group: ProcessGroup, input_: Tensor, op: dist.ReduceOp | None = None) -> Tensor:
             ctx.group = group
             ctx.op = op
             output = input_.clone()
@@ -36,8 +33,7 @@ class DistributedAutograd:
             return output
 
         @staticmethod
-        def backward(ctx: Any,
-                     grad_output: Tensor) -> tuple[None, Tensor, None]:
+        def backward(ctx: Any, grad_output: Tensor) -> tuple[None, Tensor, None]:
             grad_output = grad_output.clone()
             dist.all_reduce(grad_output, group=ctx.group, op=ctx.op)
             return None, grad_output, None
@@ -50,48 +46,79 @@ class DistributedAutograd:
         """
 
         @staticmethod
-        def forward(ctx: Any, group: ProcessGroup, input_: Tensor,
-                    world_size: int, dim: int) -> Tensor:
+        def forward(ctx: Any, group: ProcessGroup, input_: Tensor, world_size: int, dim: int) -> Tensor:
             ctx.group = group
             ctx.world_size = world_size
             ctx.dim = dim
             ctx.input_shape = input_.shape
 
+            # NCCL all_gather_into_tensor requires contiguous tensors.
+            if not input_.is_contiguous():
+                input_ = input_.contiguous()
             input_size = input_.size()
             output_size = (input_size[0] * world_size, ) + input_size[1:]
-            output_tensor = torch.empty(output_size,
-                                        dtype=input_.dtype,
-                                        device=input_.device)
+            output_tensor = torch.empty(output_size, dtype=input_.dtype, device=input_.device)
 
             dist.all_gather_into_tensor(output_tensor, input_, group=group)
 
             output_tensor = output_tensor.reshape((world_size, ) + input_size)
             output_tensor = output_tensor.movedim(0, dim)
-            output_tensor = output_tensor.reshape(input_size[:dim] +
-                                                  (world_size *
-                                                   input_size[dim], ) +
+            output_tensor = output_tensor.reshape(input_size[:dim] + (world_size * input_size[dim], ) +
                                                   input_size[dim + 1:])
             return output_tensor
 
         @staticmethod
-        def backward(ctx: Any,
-                     grad_output: Tensor) -> tuple[None, Tensor, None, None]:
+        def backward(ctx: Any, grad_output: Tensor) -> tuple[None, Tensor, None, None]:
             # Split the gradient tensor along the gathered dimension
             dim_size = grad_output.size(ctx.dim) // ctx.world_size
-            grad_chunks = grad_output.reshape(grad_output.shape[:ctx.dim] +
-                                              (ctx.world_size, dim_size) +
+            grad_chunks = grad_output.reshape(grad_output.shape[:ctx.dim] + (ctx.world_size, dim_size) +
                                               grad_output.shape[ctx.dim + 1:])
             grad_chunks = grad_chunks.movedim(ctx.dim, 0)
 
             # Each rank only needs its corresponding gradient
-            grad_input = torch.empty(ctx.input_shape,
-                                     dtype=grad_output.dtype,
-                                     device=grad_output.device)
-            dist.reduce_scatter_tensor(grad_input,
-                                       grad_chunks.contiguous(),
-                                       group=ctx.group)
+            grad_input = torch.empty(ctx.input_shape, dtype=grad_output.dtype, device=grad_output.device)
+            dist.reduce_scatter_tensor(grad_input, grad_chunks.contiguous(), group=ctx.group)
 
             return None, grad_input, None, None
+
+    class Slice(torch.autograd.Function):
+        """Differentiable slice (shard) operation.
+
+        Forward selects this rank's chunk along `dim`.
+        Backward all-gathers local gradients to reconstruct full input grad.
+        """
+
+        @staticmethod
+        def forward(ctx: Any, group: ProcessGroup, input_: Tensor, world_size: int, dim: int,
+                    scale_grad: bool) -> Tensor:
+            ctx.group = group
+            ctx.world_size = world_size
+            ctx.dim = dim
+            ctx.scale_grad = scale_grad
+            ctx.rank = dist.get_rank(group)
+
+            if world_size == 1:
+                return input_.contiguous()
+
+            shard_size = input_.size(dim) // world_size
+            output = input_.movedim(dim, 0)
+            output = output[ctx.rank * shard_size:(ctx.rank + 1) * shard_size]
+            return output.movedim(0, dim).contiguous()
+
+        @staticmethod
+        def backward(ctx: Any, grad_output: Tensor) -> tuple[None, Tensor, None, None, None]:
+            if ctx.world_size == 1:
+                return None, grad_output, None, None, None
+
+            grad_output = grad_output.movedim(ctx.dim, 0).contiguous()
+            shard_size = grad_output.shape[0]
+            grad_input_shape = (shard_size * ctx.world_size, ) + tuple(grad_output.shape[1:])
+            grad_input = torch.empty(grad_input_shape, dtype=grad_output.dtype, device=grad_output.device)
+            dist.all_gather_into_tensor(grad_input, grad_output, group=ctx.group)
+            if ctx.scale_grad:
+                grad_input = grad_input / ctx.world_size
+
+            return None, grad_input.movedim(0, ctx.dim), None, None, None
 
     class AllToAll4D(torch.autograd.Function):
         """Differentiable all_to_all operation specialized for 4D tensors.
@@ -105,8 +132,7 @@ class DistributedAutograd:
         """
 
         @staticmethod
-        def forward(ctx: Any, group: ProcessGroup, input_: Tensor,
-                    world_size: int, scatter_dim: int,
+        def forward(ctx: Any, group: ProcessGroup, input_: Tensor, world_size: int, scatter_dim: int,
                     gather_dim: int) -> Tensor:
             ctx.group = group
             ctx.world_size = world_size
@@ -116,26 +142,21 @@ class DistributedAutograd:
             if world_size == 1:
                 return input_
 
-            assert input_.dim(
-            ) == 4, f"input must be 4D tensor, got {input_.dim()} and shape {input_.shape}"
+            assert input_.dim() == 4, f"input must be 4D tensor, got {input_.dim()} and shape {input_.shape}"
 
             if scatter_dim == 2 and gather_dim == 1:
                 bs, shard_seqlen, hn, hd = input_.shape
                 seqlen = shard_seqlen * world_size
                 shard_hn = hn // world_size
 
-                input_ = input_.transpose(
-                    0, 2).contiguous()  # hn, shard_seqlen, bs, hd
+                input_ = input_.transpose(0, 2).contiguous()  # hn, shard_seqlen, bs, hd
                 output = torch.empty_like(input_)
 
-                dist.all_to_all_single(output, input_,
-                                       group=group)  # hn, shard_seqlen, bs, hd
+                dist.all_to_all_single(output, input_, group=group)  # hn, shard_seqlen, bs, hd
 
-                output = torch.cat(output.split(shard_hn),
-                                   dim=1)  # sharded hn, seqlen, bs, hd
+                output = torch.cat(output.split(shard_hn), dim=1)  # sharded hn, seqlen, bs, hd
 
-                output = output.transpose(
-                    0, 2).contiguous()  # bs, seqlen, sharded_hn, hd
+                output = output.transpose(0, 2).contiguous()  # bs, seqlen, sharded_hn, hd
 
                 return output
             elif scatter_dim == 1 and gather_dim == 2:
@@ -143,39 +164,32 @@ class DistributedAutograd:
                 hn = shard_hn * world_size
                 shard_seqlen = seqlen // world_size
 
-                input_ = input_.transpose(
-                    0, 2).contiguous()  # shard_hn, seqlen, bs, hd
+                input_ = input_.transpose(0, 2).contiguous()  # shard_hn, seqlen, bs, hd
 
                 input_ = input_.reshape(shard_hn, world_size, shard_seqlen, bs,
-                                        hd).transpose(0, 1).reshape(
-                                            shard_hn * world_size, shard_seqlen,
-                                            bs, hd).contiguous()
+                                        hd).transpose(0, 1).reshape(shard_hn * world_size, shard_seqlen, bs,
+                                                                    hd).contiguous()
 
                 output = torch.empty_like(input_)
 
                 dist.all_to_all_single(output, input_, group=group)
 
-                output = output.transpose(
-                    0, 2).contiguous()  # bs, seqlen, sharded_hn, hd
+                output = output.transpose(0, 2).contiguous()  # bs, seqlen, sharded_hn, hd
 
                 return output
             else:
                 raise RuntimeError(
                     f"Invalid scatter_dim={scatter_dim}, gather_dim={gather_dim}. "
-                    f"Only (scatter_dim=2, gather_dim=1) and (scatter_dim=1, gather_dim=2) are supported."
-                )
+                    f"Only (scatter_dim=2, gather_dim=1) and (scatter_dim=1, gather_dim=2) are supported.")
 
         @staticmethod
-        def backward(
-                ctx: Any,
-                grad_output: Tensor) -> tuple[None, Tensor, None, None, None]:
+        def backward(ctx: Any, grad_output: Tensor) -> tuple[None, Tensor, None, None, None]:
             if ctx.world_size == 1:
                 return None, grad_output, None, None, None
 
             # For backward pass, we swap scatter_dim and gather_dim
-            output = DistributedAutograd.AllToAll4D.apply(
-                ctx.group, grad_output, ctx.world_size, ctx.gather_dim,
-                ctx.scatter_dim)
+            output = DistributedAutograd.AllToAll4D.apply(ctx.group, grad_output, ctx.world_size, ctx.gather_dim,
+                                                          ctx.scatter_dim)
             return None, output, None, None, None
 
 
@@ -201,62 +215,45 @@ class DeviceCommunicatorBase:
         self.ranks = dist.get_process_group_ranks(cpu_group)
         self.global_rank = dist.get_rank()
         self.global_world_size = dist.get_world_size()
-        self.rank_in_group = dist.get_group_rank(self.cpu_group,
-                                                 self.global_rank)
+        self.rank_in_group = dist.get_group_rank(self.cpu_group, self.global_rank)
 
-    def all_reduce(self,
-                   input_: torch.Tensor,
-                   op: dist.ReduceOp | None = ReduceOp.SUM) -> torch.Tensor:
+    def all_reduce(self, input_: torch.Tensor, op: dist.ReduceOp | None = ReduceOp.SUM) -> torch.Tensor:
         """Performs an all_reduce operation with gradient support."""
-        return DistributedAutograd.AllReduce.apply(self.device_group, input_,
-                                                   op)
+        return DistributedAutograd.AllReduce.apply(self.device_group, input_, op)
 
     def all_gather(self, input_: torch.Tensor, dim: int = -1) -> torch.Tensor:
         """Performs an all_gather operation with gradient support."""
         if dim < 0:
             dim += input_.dim()
-        return DistributedAutograd.AllGather.apply(self.device_group, input_,
-                                                   self.world_size, dim)
+        return DistributedAutograd.AllGather.apply(self.device_group, input_, self.world_size, dim)
 
-    def all_to_all_4D(self,
-                      input_: torch.Tensor,
-                      scatter_dim: int = 2,
-                      gather_dim: int = 1) -> torch.Tensor:
+    def slice(self, input_: torch.Tensor, dim: int = -1, *, scale_grad: bool) -> torch.Tensor:
+        """Performs rank-local slicing with all-gather backward."""
+        if dim < 0:
+            dim += input_.dim()
+        return DistributedAutograd.Slice.apply(self.device_group, input_, self.world_size, dim, scale_grad)
+
+    def all_to_all_4D(self, input_: torch.Tensor, scatter_dim: int = 2, gather_dim: int = 1) -> torch.Tensor:
         """Performs a 4D all-to-all operation with gradient support."""
-        return DistributedAutograd.AllToAll4D.apply(self.device_group, input_,
-                                                    self.world_size,
-                                                    scatter_dim, gather_dim)
+        return DistributedAutograd.AllToAll4D.apply(self.device_group, input_, self.world_size, scatter_dim, gather_dim)
 
-    def gather(self,
-               input_: torch.Tensor,
-               dst: int = 0,
-               dim: int = -1) -> torch.Tensor | None:
+    def gather(self, input_: torch.Tensor, dst: int = 0, dim: int = -1) -> torch.Tensor | None:
         """
         NOTE: We assume that the input tensor is on the same device across
         all the ranks.
         NOTE: `dst` is the local rank of the destination rank.
         """
         world_size = self.world_size
-        assert -input_.dim() <= dim < input_.dim(), (
-            f"Invalid dim ({dim}) for input tensor with shape {input_.size()}")
+        assert -input_.dim() <= dim < input_.dim(), (f"Invalid dim ({dim}) for input tensor with shape {input_.size()}")
         if dim < 0:
             # Convert negative dim to positive.
             dim += input_.dim()
 
         # Allocate output tensor.
-        if self.rank_in_group == dst:
-            gather_list = [torch.empty_like(input_) for _ in range(world_size)]
-        else:
-            gather_list = None
+        gather_list = [torch.empty_like(input_) for _ in range(world_size)] if self.rank_in_group == dst else None
         # Gather.
-        torch.distributed.gather(input_,
-                                 gather_list,
-                                 dst=self.ranks[dst],
-                                 group=self.device_group)
-        if self.rank_in_group == dst:
-            output_tensor = torch.cat(gather_list, dim=dim)
-        else:
-            output_tensor = None
+        torch.distributed.gather(input_, gather_list, dst=self.ranks[dst], group=self.device_group)
+        output_tensor = torch.cat(gather_list, dim=dim) if self.rank_in_group == dst else None
         return output_tensor
 
     def send(self, tensor: torch.Tensor, dst: int | None = None) -> None:
@@ -266,10 +263,7 @@ class DeviceCommunicatorBase:
             dst = (self.rank_in_group + 1) % self.world_size
         torch.distributed.send(tensor, self.ranks[dst], self.device_group)
 
-    def recv(self,
-             size: torch.Size,
-             dtype: torch.dtype,
-             src: int | None = None) -> torch.Tensor:
+    def recv(self, size: torch.Size, dtype: torch.dtype, src: int | None = None) -> torch.Tensor:
         """Receives a tensor from the source rank."""
         """NOTE: `src` is the local rank of the source rank."""
         if src is None:

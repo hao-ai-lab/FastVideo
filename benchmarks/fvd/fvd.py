@@ -36,8 +36,7 @@ def compute_frechet_distance(mu1: np.ndarray,
 
     if np.iscomplexobj(covmean):
         if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
-            print(
-                f"Warning: Imaginary component: {np.max(np.abs(covmean.imag))}")
+            print(f"Warning: Imaginary component: {np.max(np.abs(covmean.imag))}")
         covmean = covmean.real
 
     trace_product = np.trace(covmean)
@@ -67,8 +66,7 @@ class FVDConfig:
     temporal_stride: int = 1  # For sliding window clips
 
     # Data processing
-    video_extensions: list[str] = field(
-        default_factory=lambda: ['.mp4', '.avi', '.mov', '.mkv'])
+    video_extensions: list[str] = field(default_factory=lambda: ['.mp4', '.avi', '.mov', '.mkv'])
     support_frame_dirs: bool = True
 
     # Computation
@@ -88,25 +86,17 @@ class FVDConfig:
     @classmethod
     def fvd2048_16f(cls) -> 'FVDConfig':
         """Standard FVD protocol: 2048 videos, 16 frames, beginning clip."""
-        return cls(num_videos=2048,
-                   num_frames_per_clip=16,
-                   clip_strategy='beginning',
-                   use_streaming=True)
+        return cls(num_videos=2048, num_frames_per_clip=16, clip_strategy='beginning', use_streaming=True)
 
     @classmethod
     def fvd2048_128f(cls) -> 'FVDConfig':
         """Long video protocol: 2048 videos, 128 frames."""
-        return cls(num_videos=2048,
-                   num_frames_per_clip=128,
-                   clip_strategy='beginning',
-                   use_streaming=True)
+        return cls(num_videos=2048, num_frames_per_clip=128, clip_strategy='beginning', use_streaming=True)
 
     @classmethod
     def quick_test(cls) -> 'FVDConfig':
         """Quick test config: 100 videos, 16 frames."""
-        return cls(num_videos=100,
-                   num_frames_per_clip=16,
-                   clip_strategy='beginning')
+        return cls(num_videos=100, num_frames_per_clip=16, clip_strategy='beginning')
 
     def to_dict(self) -> dict:
         """Export config to dict for logging"""
@@ -196,14 +186,10 @@ def load_or_compute_features(videos: str | Path | torch.Tensor,
             max_features = config.num_videos * config.num_clips_per_video
 
             if len(features) < max_features:
-                print(
-                    f"WARNING: Cache has {len(features)} features but need {max_features}"
-                )
+                print(f"WARNING: Cache has {len(features)} features but need {max_features}")
                 print("Cached features insufficient - will recompute...")
             elif len(features) > max_features:
-                print(
-                    f"Using {max_features} features from cache (truncated from {len(features)})"
-                )
+                print(f"Using {max_features} features from cache (truncated from {len(features)})")
                 features = features[:max_features]
                 return features
             else:
@@ -215,17 +201,16 @@ def load_or_compute_features(videos: str | Path | torch.Tensor,
     if isinstance(videos, (str | Path)):
         target_size = (224, 224) if config.resize_before_extraction else None
 
-        video_generator = load_video_clips_streaming(
-            videos,
-            num_frames=config.num_frames_per_clip,
-            max_videos=config.num_videos,
-            clip_strategy=config.clip_strategy,
-            frame_stride=config.frame_stride,
-            num_clips_per_video=config.num_clips_per_video,
-            video_extensions=config.video_extensions,
-            support_frame_dirs=config.support_frame_dirs,
-            target_size=target_size,
-            verbose=True)
+        video_generator = load_video_clips_streaming(videos,
+                                                     num_frames=config.num_frames_per_clip,
+                                                     max_videos=config.num_videos,
+                                                     clip_strategy=config.clip_strategy,
+                                                     frame_stride=config.frame_stride,
+                                                     num_clips_per_video=config.num_clips_per_video,
+                                                     video_extensions=config.video_extensions,
+                                                     support_frame_dirs=config.support_frame_dirs,
+                                                     target_size=target_size,
+                                                     verbose=True)
 
         max_clips = config.num_videos * config.num_clips_per_video
         features = extract_features_streaming(video_generator,
@@ -235,17 +220,14 @@ def load_or_compute_features(videos: str | Path | torch.Tensor,
                                               verbose=True)
     else:
         print(f"Extracting features from {len(videos)} video tensors...")
-        features = extractor.extract_features(videos,
-                                              batch_size=config.batch_size,
-                                              verbose=True)
+        features = extractor.extract_features(videos, batch_size=config.batch_size, verbose=True)
         features = features.numpy()
 
     # Validate feature count
     expected_count = config.num_videos * config.num_clips_per_video
     if len(features) < expected_count:
-        raise ValueError(
-            f"ERROR: Only extracted {len(features)} features, but need {expected_count}!\n"
-            f"Found fewer videos than expected. Check your video directory.")
+        raise ValueError(f"ERROR: Only extracted {len(features)} features, but need {expected_count}!\n"
+                         f"Found fewer videos than expected. Check your video directory.")
     elif len(features) > expected_count:
         print(f"Truncating {len(features)} features to {expected_count}")
         features = features[:expected_count]
@@ -312,9 +294,7 @@ def compute_fvd_with_config(real_videos: str | Path | torch.Tensor,
 
     # Initialize Extractor using Factory
     if verbose:
-        print(
-            f"\nInitializing {config.extractor_model.upper()} model on {config.device}..."
-        )
+        print(f"\nInitializing {config.extractor_model.upper()} model on {config.device}...")
 
     extractor = load_extractor(config.extractor_model, device=config.device)
 
@@ -324,12 +304,11 @@ def compute_fvd_with_config(real_videos: str | Path | torch.Tensor,
         print("Extracting REAL video features...")
         print(f"{'='*70}")
 
-    real_features = load_or_compute_features(
-        videos=real_videos,
-        extractor=extractor,
-        config=config,
-        cache_path=config.cache_real_features,
-        cache_name="real_features")
+    real_features = load_or_compute_features(videos=real_videos,
+                                             extractor=extractor,
+                                             config=config,
+                                             cache_path=config.cache_real_features,
+                                             cache_name="real_features")
 
     if verbose:
         print(f"\n{'='*70}")

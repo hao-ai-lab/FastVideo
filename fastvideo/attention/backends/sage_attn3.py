@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import torch
-from fastvideo.attention.backends.sageattn.api import sageattn_blackwell
+from sageattn3 import sageattn3_blackwell
 
-from fastvideo.attention.backends.abstract import (AttentionBackend,
-                                                   AttentionImpl,
-                                                   AttentionMetadata,
+from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
                                                    AttentionMetadataBuilder)
 from fastvideo.logger import init_logger
 
@@ -67,6 +65,6 @@ class SageAttention3Impl(AttentionImpl):
         query = query.transpose(1, 2)
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
-        output = sageattn_blackwell(query, key, value, is_causal=self.causal)
+        output = sageattn3_blackwell(query, key, value, is_causal=self.causal)
         output = output.transpose(1, 2)
         return output

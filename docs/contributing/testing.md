@@ -8,7 +8,7 @@ This guide explains how to add and run tests in FastVideo. The testing suite is 
 * **Component Tests**: Located in `fastvideo/tests/encoders`, `fastvideo/tests/transformers`, and `fastvideo/tests/vaes`. These verify the loading and basic functionality of model components.
 * **SSIM Tests**: Located in `fastvideo/tests/ssim`. These are regression tests that compare generated videos against reference videos using the Structural Similarity Index Measure (SSIM) to detect quality degradation.
 * **Training Tests**: Located in `fastvideo/tests/training`. These validate training loops, loss calculations, and specific training techniques like LoRA, Distillation, and VSA.
-* **Inference Tests**: Located in `fastvideo/tests/inference`. These test specialized inference pipelines and optimizations (e.g., STA, V-MoBA).
+* **Inference Tests**: Located in `fastvideo/tests/inference`. These test specialized inference pipelines and optimizations (e.g., VSA, V-MoBA).
 
 For now, we will focus on **SSIM Tests**.
 
@@ -23,13 +23,18 @@ SSIM tests are located in `fastvideo/tests/ssim`. These tests generate videos us
 
 ```
 fastvideo/tests/ssim/
-├── <GPU>_reference_videos/   # Reference videos organized by GPU type (e.g., L40S_reference_videos)
-│   ├── <Model_Name>/
-│   │   ├── <Backend>/        # e.g., FLASH_ATTN, TORCH_SDPA
-│   │   │   └── <Video_File>
+├── reference_videos/
+│   ├── default/
+│   │   └── <GPU>_reference_videos/
+│   │       ├── <Model_Name>/
+│   │       │   ├── <Backend>/        # e.g., FLASH_ATTN, TORCH_SDPA
+│   │       │   │   └── <Video_File>
+│   └── full_quality/
+│       └── <GPU>_reference_videos/
 ├── test_causal_similarity.py
-├── test_inference_similarity.py
-├── update_reference_videos.sh
+├── test_wan_t2v_similarity.py
+├── test_wan_i2v_similarity.py
+├── reference_videos_cli.py
 └── ...
 ```
 
@@ -37,7 +42,7 @@ fastvideo/tests/ssim/
 
 To add a new SSIM test, follow these steps:
 
-1. **Create or Update a Test File**: You can add a new test function to an existing file (like `test_inference_similarity.py`) or create a new one if testing a distinct category of models.
+1. **Create or Update a Test File**: Prefer model-specific files (for example `test_wan_t2v_similarity.py`) and create a new one when testing a distinct model or pipeline.
 
 2. **Define Model Parameters**: Define the configuration for the model you want to test. This includes model path, dimensions, inference steps, and other generation parameters. **Note:** Consider using lower `num_inference_steps` or reduced resolution (e.g., 480p instead of 720p) to keep test execution time reasonable, provided it doesn't compromise the test's ability to detect regression.
 
@@ -81,10 +86,15 @@ To add a new SSIM test, follow these steps:
    ```
 
 4. **Reference Videos**:
-   * When running the test for the first time (or when updating the reference), the test will fail because the reference video is missing. The generated video will be saved in `fastvideo/tests/ssim/generated_videos`.
+   * When running the test for the first time (or when updating the reference), the test will fail because the reference video is missing. The generated video will be saved in `fastvideo/tests/ssim/generated_videos/<quality-tier>/<GPU>_reference_videos`.
    * Inspect the generated video to ensure it meets quality expectations.
-   * Move the generated video to the appropriate reference folder: `fastvideo/tests/ssim/<GPU>_reference_videos/<Model>/<Backend>/`.
-   * You can use the helper script `update_reference_videos.sh` to automate copying videos from `generated_videos` to `L40S_reference_videos`. Note: Check the script to ensure paths match your environment (it defaults to `L40S_reference_videos`).
+   * Move the generated video to the appropriate quality/GPU reference folder:
+     `fastvideo/tests/ssim/reference_videos/<quality-tier>/<GPU>_reference_videos/<Model>/<Backend>/`.
+   * You can use the helper CLI to copy generated videos into a reference folder:
+     `python fastvideo/tests/ssim/reference_videos_cli.py copy-local --quality-tier default --reference-dir fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos`
+   * Upload/download can target both quality tiers and specific GPU folders:
+     `python fastvideo/tests/ssim/reference_videos_cli.py upload --quality-tier all`
+     `python fastvideo/tests/ssim/reference_videos_cli.py download --quality-tier full_quality --device-folder H200_reference_videos`
 
 ### Running Tests Locally
 
@@ -96,36 +106,113 @@ pytest fastvideo/tests/ssim/ -vs
 
 Ensure you have the necessary GPUs available as defined in your test parameters.
 
-## Modal Workflow
+## CI Integration
 
-FastVideo uses [Modal](https://modal.com/) for running tests in a CI environment. The workflow scripts are located in `fastvideo/tests/modal/`.
+FastVideo uses [Modal](https://modal.com/) for running tests in a CI environment. The
+workflow scripts are located in `fastvideo/tests/modal/`.
+
+### Buildkite Pipeline
+
+Tests are orchestrated by Buildkite (`.buildkite/pipeline.yml`) and executed on Modal GPU
+instances. The pipeline runs in two modes:
+
+**Fastcheck** — runs on every PR push, path-filtered. Only tests for the components you
+changed are triggered. Tests run in parallel.
+
+**Full Suite** — runs when a PR enters the Merge Queue (or when triggered manually via
+`/test full`). Covers SSIM regression, training, distillation, inference, and performance.
 
 ### `pr_test.py`
 
-The main entry point for CI tests is `fastvideo/tests/modal/pr_test.py`. This script defines Modal functions that execute the pytest suites on specific hardware (e.g., L40S, H100).
+The main entry point for CI tests is `fastvideo/tests/modal/pr_test.py`. This script defines
+Modal functions that execute the pytest suites on specific hardware (e.g., L40S, H100).
 
 ### Updating Modal Configuration
 
 If you add a new test that requires:
+
 * **Different GPU Hardware**: You may need to change the `@app.function(gpu=...)` decorator.
 * **Longer Execution Time**: Increase the `timeout` parameter.
-* **New Environment Variables/Secrets**: Add them to `secrets=[...]` or the image environment. For example, if your model is gated on Hugging Face, ensure `HF_API_KEY` is passed.
+* **New Environment Variables/Secrets**: Add them to `secrets=[...]` or the image
+  environment. For example, if your model is gated on Hugging Face, ensure `HF_API_KEY`
+  is passed.
 
-For SSIM tests, the `run_ssim_tests` function in `pr_test.py` currently runs:
+For SSIM tests, use `fastvideo/tests/modal/ssim_test.py`:
 
-```python
-@app.function(gpu="L40S:2", image=image, timeout=2700, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})])
-def run_ssim_tests():
-    run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/ssim -vs")
+```bash
+python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests
 ```
 
-If your new test file is inside `fastvideo/tests/ssim`, it will automatically be picked up by this command. However, ensure that the `gpu="L40S:2"` configuration is sufficient for your model. If your model requires more GPUs (e.g., 4 or 8), you might need to create a separate Modal function or update the existing one.
+Target specific SSIM files/models:
+
+```bash
+python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests \
+  --test-files test_wan_t2v_similarity.py \
+  --model-ids Wan2.1-T2V-1.3B-Diffusers
+```
+
+If HF token env vars are not set (`HF_API_KEY` / `HUGGINGFACE_HUB_TOKEN` /
+`HF_TOKEN`), the local entrypoint fails fast. To export raw `generated_videos`
+from Modal to the shared volume:
+
+```bash
+python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests \
+  --sync-generated-to-volume
+```
+
+The raw export path is quality-tiered:
+
+* default params: `ssim_generated_videos/default/<subdir>/generated_videos`
+* full-quality params: `ssim_generated_videos/full_quality/<subdir>/generated_videos`
+
+The printed `modal volume get` command also downloads into a quality-specific
+local directory under `./generated_videos_modal/<quality-tier>`.
+
+To turn downloaded Modal outputs into local reference videos, use the matching
+quality tier with `copy-local`, for example:
+
+```bash
+python fastvideo/tests/ssim/reference_videos_cli.py copy-local \
+  --quality-tier full_quality \
+  --generated-dir ./generated_videos_modal/full_quality/L40S_reference_videos \
+  --device-folder L40S_reference_videos
+```
 
 ### Workflow Scripts
 
-The shell script that triggers these tests in the CI pipeline is located at `.buildkite/scripts/pr_test.sh`. If you add a new test category (e.g., a new folder outside of `ssim`), you will need to:
+The shell script that triggers tests in CI is `.buildkite/scripts/pr_test.sh`. If you add
+a new test category (e.g., a new folder outside of `ssim`), you will need to:
+
 1. Add a new function in `fastvideo/tests/modal/pr_test.py`.
 2. Add a new case in `.buildkite/scripts/pr_test.sh` to handle the new test type.
 
 !!! note
-    If you are a maintainer, you'll need to finally manually update the workflow script in Buildkite. Otherwise, a maintainer will help you update.
+    If you are a maintainer, update the workflow script in Buildkite after merging. Otherwise,
+    ask a maintainer for help.
+
+## Triggering Tests via Slash Commands
+
+Maintainers and contributors with write access can trigger individual test suites directly
+from a PR comment. The workflow reacts with a 🚀 emoji to confirm the command was received.
+
+```
+/test ssim              # SSIM regression tests
+/test training          # Training pipeline tests
+/test lora-training     # LoRA training tests
+/test lora-inference    # LoRA inference tests
+/test distillation      # DMD distillation tests
+/test self-forcing      # Self-Forcing tests
+/test vsa               # VSA training tests
+/test vmoba             # VMoBA inference tests
+/test performance       # Performance benchmarks
+/test api               # API server integration tests
+/test encoder           # Encoder component tests (Fastcheck)
+/test vae               # VAE component tests (Fastcheck)
+/test transformer       # Transformer / DiT tests (Fastcheck)
+/test kernel            # CUDA kernel tests (Fastcheck)
+/test unit              # Unit tests (Fastcheck)
+/test full              # Entire Full Suite
+/test fastcheck         # Entire Fastcheck suite
+```
+
+See [CI Architecture](ci_architecture.md) for the complete reference.

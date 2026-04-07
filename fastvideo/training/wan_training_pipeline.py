@@ -4,13 +4,15 @@ from copy import deepcopy
 
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-    FlowUniPCMultistepScheduler)
+from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
 from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.utils import is_vsa_available
 
-vsa_available = is_vsa_available()
+try:
+    vsa_available = is_vsa_available()
+except Exception:
+    vsa_available = False
 
 logger = init_logger(__name__)
 
@@ -22,8 +24,7 @@ class WanTrainingPipeline(TrainingPipeline):
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift)
+        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=fastvideo_args.pipeline_config.flow_shift)
 
     def create_training_stages(self, training_args: TrainingArgs):
         """
@@ -55,8 +56,7 @@ class WanTrainingPipeline(TrainingPipeline):
 def main(args) -> None:
     logger.info("Starting training pipeline...")
 
-    pipeline = WanTrainingPipeline.from_pretrained(
-        args.pretrained_model_name_or_path, args=args)
+    pipeline = WanTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
     args = pipeline.training_args
     pipeline.train()
     logger.info("Training pipeline done")

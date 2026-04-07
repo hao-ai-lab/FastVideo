@@ -11,15 +11,15 @@ This page contains step-by-step instructions to get you quickly started with vid
 
 ## Installation
 
-We recommend using an environment manager such as `Conda` to create a clean environment:
+If you previously used Conda, we recommend using [uv](https://docs.astral.sh/uv/) instead for a faster and more stable environment setup:
 
 ```bash
-# Create and activate a new conda environment
-conda create -n fastvideo python=3.12
-conda activate fastvideo
+# Create and activate a new uv environment
+uv venv --python 3.12 --seed
+source .venv/bin/activate
 
 # Install FastVideo
-pip install fastvideo
+uv pip install fastvideo
 ```
 
 For advanced installation options, see the [Installation Guide](../getting_started/installation.md).
@@ -44,7 +44,6 @@ def main():
     # Generate the video
     video = generator.generate_video(
         prompt,
-        return_frames=True,  # Also return frames from this call (defaults to False)
         output_path="my_videos/",  # Controls where videos are saved
         save_video=True
     )
@@ -61,7 +60,8 @@ python example.py
 
 The generated video will be saved in the current directory under `my_videos/`  
 
-More inference example scripts can be found in `scripts/inference/`
+More inference scripts and recipes can be found in `examples/inference/` and
+`scripts/inference/`.
 
 ## Available Models
 
@@ -103,11 +103,10 @@ Common issues and their solutions:
 If you encounter CUDA out of memory errors:
 
 - Reduce `num_frames` or video resolution
-- Enable memory optimization with `enable_model_cpu_offload`
+- Enable FastVideo offloading options such as `dit_layerwise_offload=True`
+  (single GPU) or `use_fsdp_inference=True` (multi-GPU)
 - Try a smaller model or use distilled versions
 - Use `num_gpus` > 1 if multiple GPUs are available
-- Try enabling FSDP inference with `use_fsdp_inference=True` (may slow down generation)
-- Try enabling DiT layerwise offload with `dit_layerwise_offload=True` (now only a few models support this, but may introduce less overhead than FSDP)
 
 ### Slow Generation
 

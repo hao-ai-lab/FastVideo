@@ -116,3 +116,44 @@ pyarrow_schema_text_only = pa.schema([
     # --- Metadata ---
     pa.field("caption", pa.string()),
 ])
+
+
+pyarrow_schema_matrixgame = pa.schema([
+    pa.field("id", pa.string()),
+    # --- Image/Video VAE latents ---
+    # Tensors are stored as raw bytes with shape and dtype info for loading
+    pa.field("vae_latent_bytes", pa.binary()),
+    # e.g., [C, T, H, W] or [C, H, W]
+    pa.field("vae_latent_shape", pa.list_(pa.int64())),
+    # e.g., 'float32'
+    pa.field("vae_latent_dtype", pa.string()),
+    #I2V
+    pa.field("clip_feature_bytes", pa.binary()),
+    pa.field("clip_feature_shape", pa.list_(pa.int64())),
+    pa.field("clip_feature_dtype", pa.string()),
+    pa.field("first_frame_latent_bytes", pa.binary()),
+    pa.field("first_frame_latent_shape", pa.list_(pa.int64())),
+    pa.field("first_frame_latent_dtype", pa.string()),
+    # --- Action ---
+    pa.field("mouse_cond_bytes", pa.binary()),
+    pa.field("mouse_cond_shape", pa.list_(pa.int64())),  # [T, 2]
+    pa.field("mouse_cond_dtype", pa.string()),
+    pa.field("keyboard_cond_bytes", pa.binary()),
+    pa.field("keyboard_cond_shape", pa.list_(pa.int64())),  # [T, 4]
+    pa.field("keyboard_cond_dtype", pa.string()),
+    # I2V Validation
+    pa.field("pil_image_bytes", pa.binary()),
+    pa.field("pil_image_shape", pa.list_(pa.int64())),
+    pa.field("pil_image_dtype", pa.string()),
+    # --- Metadata ---
+    pa.field("file_name", pa.string()),
+    pa.field("caption", pa.string()),
+    pa.field("media_type", pa.string()),  # 'image' or 'video'
+    pa.field("width", pa.int64()),
+    pa.field("height", pa.int64()),
+    # -- Video-specific (can be null/default for images) ---
+    # Number of frames processed (e.g., 1 for image, N for video)
+    pa.field("num_frames", pa.int64()),
+    pa.field("duration_sec", pa.float64()),
+    pa.field("fps", pa.float64()),
+])

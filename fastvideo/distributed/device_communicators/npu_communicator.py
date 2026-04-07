@@ -1,8 +1,7 @@
 import torch
 from torch.distributed import ProcessGroup
 
-from fastvideo.distributed.device_communicators.base_device_communicator import (
-    DeviceCommunicatorBase)
+from fastvideo.distributed.device_communicators.base_device_communicator import (DeviceCommunicatorBase)
 
 
 class NpuCommunicator(DeviceCommunicatorBase):
@@ -14,8 +13,7 @@ class NpuCommunicator(DeviceCommunicatorBase):
                  unique_name: str = ""):
         super().__init__(cpu_group, device, device_group, unique_name)
 
-        from fastvideo.distributed.device_communicators.pyhccl import (
-            PyHcclCommunicator)
+        from fastvideo.distributed.device_communicators.pyhccl import (PyHcclCommunicator)
 
         self.pyhccl_comm: PyHcclCommunicator | None = None
         if self.world_size > 1:
@@ -49,10 +47,7 @@ class NpuCommunicator(DeviceCommunicatorBase):
         else:
             torch.distributed.send(tensor, self.ranks[dst], self.device_group)
 
-    def recv(self,
-             size: torch.Size,
-             dtype: torch.dtype,
-             src: int | None = None) -> torch.Tensor:
+    def recv(self, size: torch.Size, dtype: torch.dtype, src: int | None = None) -> torch.Tensor:
         """Receives a tensor from the source rank."""
         """NOTE: `src` is the local rank of the source rank."""
         if src is None:

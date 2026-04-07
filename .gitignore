@@ -18,6 +18,7 @@ venv/
 .venv/
 runs/
 samples/
+Miniconda3-latest-Linux-x86_64.sh
 *validation/
 data/
 outputs/
@@ -32,6 +33,12 @@ env
 **.txt
 *.log
 weights/
+logs/
+
+# SSIM test outputs
+fastvideo/tests/ssim/generated_videos/
+**/.cache/**
+
 
 # Distribution / packaging
 build/
@@ -69,6 +76,11 @@ docs/distillation/examples/
 !docs/assets/images/**/*.png
 !comfyui/assets/**/*.png
 !comfyui/assets/**/*.gif
+!assets/images/**/*.png
+!assets/images/**/*.jpg
+!assets/images/**/*.jpeg
+!assets/images/**/*.gif
+!assets/videos/**/*.mp4
 
 dmd_t2v_output/
 preprocess_output_text/
@@ -79,3 +91,11 @@ flow_grpo/align_logs/**/*.mp4
 !align_logs/fv_logs/*.txt
 !align_logs/flow_logs/*.txt
 !flow_grpo/align_logs/flow_logs/*.txt
+
+# Next.js / Node artifacts under ui/: see ui/.gitignore
+
+.claude/
+.codex/
+.sisyphus/
+openspec/
+fastvideo/tests/ssim/reference_videos/**

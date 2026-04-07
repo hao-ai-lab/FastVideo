@@ -7,8 +7,7 @@ import torch
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
-from fastvideo.configs.models.encoders import (BaseEncoderOutput,
-                                               CLIPVisionConfig, T5Config,
+from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPVisionConfig, T5Config,
                                                WAN2_1ControlCLIPVisionConfig)
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
@@ -20,11 +19,8 @@ def t5_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
     seq_lens = mask.gt(0).sum(dim=1).long()
     assert torch.isnan(hidden_state).sum() == 0
     prompt_embeds = [u[:v] for u, v in zip(hidden_state, seq_lens, strict=True)]
-    prompt_embeds_tensor: torch.Tensor = torch.stack([
-        torch.cat([u, u.new_zeros(512 - u.size(0), u.size(1))])
-        for u in prompt_embeds
-    ],
-                                                     dim=0)
+    prompt_embeds_tensor: torch.Tensor = torch.stack(
+        [torch.cat([u, u.new_zeros(512 - u.size(0), u.size(1))]) for u in prompt_embeds], dim=0)
     return prompt_embeds_tensor
 
 
@@ -44,17 +40,14 @@ class WanT2V480PConfig(PipelineConfig):
     flow_shift: float | None = 3.0
 
     # Text encoding stage
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (T5Config(), ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5Config(), ))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
-                                  ...] = field(default_factory=lambda:
-                                               (t5_postprocess_text, ))
+                                  ...] = field(default_factory=lambda: (t5_postprocess_text, ))
 
     # Precision for each component
     precision: str = "bf16"
     vae_precision: str = "fp32"
-    text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("fp32", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32", ))
 
     # self-forcing params
     warp_denoising_step: bool = True
@@ -83,8 +76,7 @@ class WanI2V480PConfig(WanT2V480PConfig):
     # WanConfig-specific parameters with defaults
 
     # Precision for each component
-    image_encoder_config: EncoderConfig = field(
-        default_factory=CLIPVisionConfig)
+    image_encoder_config: EncoderConfig = field(default_factory=CLIPVisionConfig)
     image_encoder_precision: str = "fp32"
 
     def __post_init__(self) -> None:
@@ -106,8 +98,7 @@ class WanI2V720PConfig(WanI2V480PConfig):
 class WANV2VConfig(WanI2V480PConfig):
     """Configuration for WAN2.1 1.3B Control pipeline."""
 
-    image_encoder_config: EncoderConfig = field(
-        default_factory=WAN2_1ControlCLIPVisionConfig)
+    image_encoder_config: EncoderConfig = field(default_factory=WAN2_1ControlCLIPVisionConfig)
     # CLIP encoder precision
     image_encoder_precision: str = 'bf16'
 
@@ -120,8 +111,7 @@ class FastWan2_1_T2V_480P_Config(WanT2V480PConfig):
 
     # Denoising stage
     flow_shift: float | None = 8.0
-    dmd_denoising_steps: list[int] | None = field(
-        default_factory=lambda: [1000, 757, 522])
+    dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 757, 522])
 
 
 @dataclass
@@ -139,8 +129,7 @@ class Wan2_2_TI2V_5B_Config(WanT2V480PConfig):
 @dataclass
 class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
     flow_shift: float | None = 5.0
-    dmd_denoising_steps: list[int] | None = field(
-        default_factory=lambda: [1000, 757, 522])
+    dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 757, 522])
 
 
 @dataclass
@@ -149,8 +138,7 @@ class Wan2_2_T2V_A14B_Config(WanT2V480PConfig):
     boundary_ratio: float | None = 0.875
 
     # self-forcing params
-    dmd_denoising_steps: list[int] | None = field(
-        default_factory=lambda: [1000, 750, 500, 250])
+    dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 750, 500, 250])
     warp_denoising_step: bool = True
 
     def __post_init__(self) -> None:
@@ -174,8 +162,7 @@ class Wan2_2_I2V_A14B_Config(WanI2V480PConfig):
 class SelfForcingWanT2V480PConfig(WanT2V480PConfig):
     is_causal: bool = True
     flow_shift: float | None = 5.0
-    dmd_denoising_steps: list[int] | None = field(
-        default_factory=lambda: [1000, 750, 500, 250])
+    dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 750, 500, 250])
     warp_denoising_step: bool = True
 
 
@@ -184,8 +171,7 @@ class SelfForcingWan2_2_T2V480PConfig(Wan2_2_T2V_A14B_Config):
     is_causal: bool = True
     flow_shift: float | None = 12.0
     boundary_ratio: float | None = 0.875
-    dmd_denoising_steps: list[int] | None = field(
-        default_factory=lambda: [1000, 850, 700, 550, 350, 275, 200, 125])
+    dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 850, 700, 550, 350, 275, 200, 125])
     warp_denoising_step: bool = True
 
     def __post_init__(self) -> None:
@@ -197,16 +183,20 @@ class SelfForcingWan2_2_T2V480PConfig(Wan2_2_T2V_A14B_Config):
 # ============= Matrix Game ===================
 # =============================================
 @dataclass
+class MatrixGameBaseI2V480PConfig(WanI2V480PConfig):
+    dit_config: DiTConfig = field(default_factory=MatrixGameWanVideoConfig)
+    flow_shift: float | None = 5.0
+
+
+@dataclass
 class MatrixGameI2V480PConfig(WanI2V480PConfig):
     dit_config: DiTConfig = field(default_factory=MatrixGameWanVideoConfig)
 
-    image_encoder_config: EncoderConfig = field(
-        default_factory=WAN2_1ControlCLIPVisionConfig)
+    image_encoder_config: EncoderConfig = field(default_factory=WAN2_1ControlCLIPVisionConfig)
 
     is_causal: bool = True
     flow_shift: float | None = 5.0
-    dmd_denoising_steps: list[int] | None = field(
-        default_factory=lambda: [1000, 666, 333])
+    dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 666, 333])
     warp_denoising_step: bool = True
     context_noise: int = 0
     num_frames_per_block: int = 3

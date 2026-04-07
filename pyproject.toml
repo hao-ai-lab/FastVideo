@@ -27,8 +27,9 @@ dependencies = [
     "timm==1.0.11",
     "peft>=0.15.0",
     "diffusers>=0.33.1",
-    "torch>=2.9.1",
+    "torch>=2.10.0",
     "torchvision",
+    "torchaudio",
 
     # Acceleration & Optimization
     "accelerate==1.0.1",
@@ -44,6 +45,7 @@ dependencies = [
     "wandb>=0.21.0",
     "loguru",
     "test-tube==0.7.5",
+    
     # Miscellaneous Utilities
     "tqdm",
     "pytest",
@@ -54,8 +56,10 @@ dependencies = [
     "flask",
     "flask_restful",
     "aiohttp",
+    "aiofiles",
     "huggingface_hub",
     "cloudpickle",
+    "omegaconf",
 
     # System & Monitoring Tools
     "gpustat",
@@ -63,7 +67,7 @@ dependencies = [
     "remote-pdb",
 
     # Kernel & Packaging
-    "fastvideo-kernel==0.2.4",
+    "fastvideo-kernel==0.2.6",
     "wheel",
 
     # Training Dependencies
@@ -73,9 +77,13 @@ dependencies = [
     "av",
 
     # Preprocessing Dependencies
-    "torchcodec==0.5.0",
+    "torchcodec",
     "ray>=2.49.1",
     "ftfy==6.3.1",
+
+    # Job Runner
+    "fastapi==0.129.0",
+    "uvicorn==0.41.0"
 ]
 
 [tool.uv]
@@ -108,6 +116,8 @@ explicit = true
 
 lint = [
     "pre-commit==4.0.1",
+    "types-aiofiles",
+    "types-requests",
 ]
 
 test = [
@@ -140,11 +150,11 @@ check_untyped_defs = true
 follow_imports = "silent"
 
 [tool.codespell]
-skip ="./data,./wandb,./csrc/sliding_tile_attention/tk"
+skip = "./data,./wandb,ui/package-lock.json"
 
 [tool.ruff]
-# Allow lines to be as long as 80.
-line-length = 80
+# Allow lines to be as long as 120.
+line-length = 120
 
 [tool.ruff.lint]
 select = [
@@ -176,20 +186,15 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"fastvideo/models/stepvideo/diffusion/video_pipeline.py" = ["F821"]
-"fastvideo/sample/call_remote_server_stepvideo.py" = ["E722"]
-"csrc/sliding_tile_attention/test/bench.py" = ["F841"]
-"fastvideo/models/stepvideo/__init__.py" = ["F403"]
-"fastvideo/models/stepvideo/utils/__init__.py" = ["F403"]
 # Ignore all files that end in `_test.py`.
 "fastvideo/models/hunyuan/diffusion/pipelines/pipeline_hunyuan_video.py" = ["E741"]
 
 
 [tool.yapf]
-column_limit = 80
+column_limit = 120
 
 [tool.isort]
-line_length = 80
+line_length = 120
 use_parentheses = true
 skip_gitignore = true
 

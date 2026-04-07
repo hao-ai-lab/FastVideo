@@ -125,6 +125,7 @@ nav:
   - Inference:
     - Quick Start: inference/inference_quick_start.md
     - Configuration: inference/configuration.md
+    - Offloading: inference/offloading.md
     - Optimizations: inference/optimizations.md
     - ComfyUI: inference/comfyui.md
     - Support Matrix: inference/support_matrix.md
@@ -133,9 +134,10 @@ nav:
     - Examples:
       - Basic: inference/examples/basic.md
       - Optimizations: inference/examples/optimizations.md
-      - STA Mask Search: inference/examples/sta_mask_search.md
+      - STA Mask Search (Archived): inference/examples/sta_mask_search.md
   - Training:
     - Overview: training/overview.md
+    - Training Infrastructure: training/train_infra.md
     - Data Preprocessing: training/data_preprocess.md
     - Fine-tuning: training/finetune.md
     - Examples:
@@ -151,21 +153,26 @@ nav:
   - Attention:
     - Overview: attention/index.md
     - Video Sparse Attention: attention/vsa/index.md
-    - Sliding Tile Attention: attention/sta/index.md
-    - Adding a New Attention Backend: attention/developer/index.md
+    - Sliding Tile Attention (Archived): attention/sta/index.md
+    - Backend Development: contributing/attention_backend.md
   - Utilities:
     - LoRA: utilities/lora.md
+    - Debugging: utilities/debugging.md
   - Design:
     - Overview: design/overview.md
+    - Training Architecture: design/training_architecture.md
   - Developer Guide:
     - Overview: contributing/overview.md
     - Developer Environment:
       - Index: contributing/developer_env/index.md
       - Docker: contributing/developer_env/docker.md
       - RunPod: contributing/developer_env/runpod.md
+    - Pull Requests: contributing/pull_requests.md
+    - CI Architecture: contributing/ci_architecture.md
     - Testing: contributing/testing.md
     - Profiling: contributing/profiling.md
-    - Adding a New Attention Backend: attention/developer/index.md
+    - Coding Agents: contributing/coding_agents.md
+    - Attention Backend Development: contributing/attention_backend.md
   - API Reference:
     - FastVideo: api/fastvideo.md
 

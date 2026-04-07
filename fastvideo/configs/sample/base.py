@@ -28,6 +28,12 @@ class SamplingParam:
     keyboard_cond: Any | None = None  # Shape: (B, T, K)
     grid_sizes: Any | None = None  # Shape: (3,) [F,H,W]
 
+    # Camera control inputs (HYWorld)
+    pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
+
+    # Camera control inputs (LingBotWorld)
+    c2ws_plucker_emb: Any | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
+
     # Refine inputs (LongCat 480p->720p upscaling)
     # Path-based refine (load stage1 video from disk, e.g. MP4)
     refine_from: str | None = None  # Path to stage1 video (480p output from distill)
@@ -52,13 +58,15 @@ class SamplingParam:
 
     # Original dimensions (before VAE scaling)
     num_frames: int = 125
-    num_frames_round_down: bool = False  # Whether to round down num_frames if it's not divisible by num_gpus
     height: int = 720
     width: int = 1280
+    height_sr: int = 1072
+    width_sr: int = 1920
     fps: int = 24
 
     # Denoising parameters
     num_inference_steps: int = 50
+    num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
     guidance_rescale: float = 0.0
     boundary_ratio: float | None = None
@@ -67,9 +75,14 @@ class SamplingParam:
     # TeaCache parameters
     enable_teacache: bool = False
 
+    # GEN3C camera control
+    trajectory_type: str | None = None
+    movement_distance: float | None = None
+    camera_rotation: str | None = None
+
     # Misc
     save_video: bool = True
-    return_frames: bool = False
+    return_frames: bool = True
     return_trajectory_latents: bool = False  # returns all latents for each timestep
     return_trajectory_decoded: bool = False  # returns decoded latents for each timestep
 
@@ -85,22 +98,19 @@ class SamplingParam:
             if hasattr(self, key):
                 setattr(self, key, value)
             else:
-                logger.exception("%s has no attribute %s",
-                                 type(self).__name__, key)
+                logger.exception("%s has no attribute %s", type(self).__name__, key)
 
         self.__post_init__()
 
     @classmethod
     def from_pretrained(cls, model_path: str) -> "SamplingParam":
-        from fastvideo.configs.sample.registry import (
-            get_sampling_param_cls_for_name)
+        from fastvideo.registry import get_sampling_param_cls_for_name
         sampling_cls = get_sampling_param_cls_for_name(model_path)
         if sampling_cls is not None:
             sampling_param: SamplingParam = sampling_cls()
         else:
-            logger.warning(
-                "Couldn't find an optimal sampling param for %s. Using the default sampling param.",
-                model_path)
+            logger.warning("Couldn't find an optimal sampling param for %s. Using the default sampling param.",
+                           model_path)
             sampling_param = cls()
 
         return sampling_param
@@ -213,7 +223,7 @@ class SamplingParam:
         parser.add_argument(
             "--return-frames",
             action="store_true",
-            default=SamplingParam.return_frames,
+            default=False,
             help="Whether to return the raw frames",
         )
         parser.add_argument(
@@ -238,8 +248,7 @@ class SamplingParam:
             "--t-thresh",
             type=float,
             default=SamplingParam.t_thresh,
-            help=
-            "Threshold for timestep scheduling in refinement (default: 0.5)",
+            help="Threshold for timestep scheduling in refinement (default: 0.5)",
         )
         parser.add_argument(
             "--spatial-refine-only",
@@ -257,8 +266,7 @@ class SamplingParam:
             "--moba-config-path",
             type=str,
             default=None,
-            help=
-            "Path to a JSON file containing V-MoBA specific configurations.",
+            help="Path to a JSON file containing V-MoBA specific configurations.",
         )
         parser.add_argument(
             "--return-trajectory-latents",

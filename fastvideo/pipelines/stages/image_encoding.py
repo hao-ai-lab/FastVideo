@@ -17,10 +17,8 @@ from fastvideo.fastvideo_args import ExecutionMode, FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.vaes.common import ParallelTiledVAE
-from fastvideo.models.vision_utils import (get_default_height_width, normalize,
-                                           numpy_to_pt, pil_to_numpy, resize,
-                                           create_default_image,
-                                           preprocess_reference_image_for_clip)
+from fastvideo.models.vision_utils import (get_default_height_width, normalize, numpy_to_pt, pil_to_numpy, resize,
+                                           create_default_image, preprocess_reference_image_for_clip)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
@@ -70,8 +68,7 @@ class ImageEncodingStage(PipelineStage):
 
         image = batch.pil_image
 
-        image_inputs = self.image_processor(
-            images=image, return_tensors="pt").to(get_local_torch_device())
+        image_inputs = self.image_processor(images=image, return_tensors="pt").to(get_local_torch_device())
         with set_forward_context(current_timestep=0, attn_metadata=None):
             outputs = self.image_encoder(**image_inputs)
             image_embeds = outputs.last_hidden_state
@@ -83,20 +80,17 @@ class ImageEncodingStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify image encoding stage inputs."""
         result = VerificationResult()
         result.add_check("pil_image", batch.pil_image, V.not_none)
         result.add_check("image_embeds", batch.image_embeds, V.is_list)
         return result
 
-    def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify image encoding stage outputs."""
         result = VerificationResult()
-        result.add_check("image_embeds", batch.image_embeds,
-                         V.list_of_tensors_dims(3))
+        result.add_check("image_embeds", batch.image_embeds, V.list_of_tensors_dims(3))
         return result
 
 
@@ -105,25 +99,187 @@ class Hy15ImageEncodingStage(ImageEncodingStage):
     Stage for encoding image prompts into embeddings for HunyuanVideo1.5 models.
     """
 
-    def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify image encoding stage inputs."""
         return VerificationResult()
 
-    def forward(self, batch: ForwardBatch,
-                fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """
         Encode the prompt into image encoder hidden states.
         """
         if batch.pil_image is None:
-            batch.image_embeds = [
-                torch.zeros(1, 729, 1152, device=get_local_torch_device())
-            ]
+            batch.image_embeds = [torch.zeros(1, 729, 1152, device=get_local_torch_device())]
 
         raw_latent_shape = list(batch.raw_latent_shape)
         raw_latent_shape[1] = 1
-        batch.video_latent = torch.zeros(tuple(raw_latent_shape),
-                                         device=get_local_torch_device())
+        batch.video_latent = torch.zeros(tuple(raw_latent_shape), device=get_local_torch_device())
+        return batch
+
+
+class HYWorldImageEncodingStage(ImageEncodingStage):
+    """
+    Stage for encoding image prompts into embeddings for HYWorld models.
+    
+    Uses SigLIP (or other vision encoder) to encode reference images for I2V tasks.
+    Also encodes reference image with VAE for conditional latent.
+    """
+
+    def __init__(self, image_encoder=None, image_processor=None, vae=None):
+        super().__init__(image_encoder=image_encoder, image_processor=image_processor)
+        self.vae = vae
+
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify image encoding stage inputs."""
+        return VerificationResult()
+
+    @torch.no_grad()
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        """
+        Encode the prompt into image encoder hidden states and VAE latents.
+        
+        For I2V: 
+            - encodes the reference image using SigLIP → image_embeds
+            - encodes the reference image using VAE → image_latent (expanded to full temporal dim)
+        For T2V: creates zero embeddings
+        
+        The image_latent is expanded to match the full temporal dimension of the video latent,
+        following the original HunyuanVideo-1.5 implementation where:
+        - First frame contains the encoded reference image
+        - All other frames are zeros
+        - Mask channel is 1 for first frame, 0 for rest
+        """
+        device = get_local_torch_device()
+
+        # Default vision embed dimensions for HunyuanVideo1.5/HYWorld
+        num_vision_tokens = 729  # (384/14)^2 for SigLIP
+        vision_dim = 1152  # SigLIP hidden size
+
+        # Get temporal dimension from raw_latent_shape (set by LatentPreparationStage)
+        raw_latent_shape = list(batch.raw_latent_shape)
+        latent_channels = raw_latent_shape[1]
+        latent_temporal = raw_latent_shape[2]  # T dimension
+        latent_height = raw_latent_shape[3]
+        latent_width = raw_latent_shape[4]
+
+        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+
+        if batch.pil_image is None:
+            # T2V case: create zero embeddings for image_embeds
+            batch.image_embeds = [torch.zeros(1, num_vision_tokens, vision_dim, device=device)]
+            # T2V: create zero latents for image_latent with full temporal dimension
+            # Shape: [B, latent_channels + 1 (mask channel), T, H, W]
+            batch.image_latent = torch.zeros(1,
+                                             latent_channels + 1,
+                                             latent_temporal,
+                                             latent_height,
+                                             latent_width,
+                                             device=device)
+        else:
+            image = batch.pil_image
+
+            # 1. Encode with SigLIP for image_embeds
+            if self.image_encoder is not None:
+                self.image_encoder = self.image_encoder.to(device)
+
+                # Get model dtype for proper precision matching (HY-WorldPlay uses fp16)
+                model_dtype = next(self.image_encoder.parameters()).dtype
+
+                # Preprocess image for SigLIP
+                # Convert to numpy and resize to target resolution (matching HY-WorldPlay)
+                import numpy as np
+
+                image_np = np.array(image) if not isinstance(image, np.ndarray) else image
+
+                # Resize to target resolution BEFORE SigLIP preprocessing
+                from fastvideo.models.dits.hyworld.data_utils import resize_and_center_crop
+                image_np = resize_and_center_crop(image_np, target_width=batch.width, target_height=batch.height)
+
+                image_inputs = self.image_processor.preprocess(images=image_np, return_tensors="pt").to(
+                    device=device, dtype=model_dtype)  # Match model dtype!
+                pixel_values = image_inputs['pixel_values']
+
+                with set_forward_context(current_timestep=0, attn_metadata=None):
+                    outputs = self.image_encoder(pixel_values=pixel_values)
+                    image_embeds = outputs.last_hidden_state
+                batch.image_embeds = [image_embeds]
+
+                if fastvideo_args.image_encoder_cpu_offload:
+                    self.image_encoder.to('cpu')
+            else:
+                batch.image_embeds = [torch.zeros(1, num_vision_tokens, vision_dim, device=device)]
+
+            # 2. Encode with VAE for image_latent (conditional latent for I2V)
+            if self.vae is not None:
+
+                from torchvision import transforms
+                from PIL import Image as PILImage
+                import numpy as np
+                # Preprocess image for VAE
+                if isinstance(image, np.ndarray):
+                    image = PILImage.fromarray(image)
+
+                # Get target size from batch
+                origin_size = image.size
+
+                target_height, target_width = batch.height, batch.width
+                original_width, original_height = origin_size
+
+                scale_factor = max(target_width / original_width, target_height / original_height)
+                resize_width = int(round(original_width * scale_factor))
+                resize_height = int(round(original_height * scale_factor))
+
+                ref_image_transform = transforms.Compose([
+                    transforms.Resize((resize_height, resize_width),
+                                      interpolation=transforms.InterpolationMode.LANCZOS),
+                    transforms.CenterCrop((target_height, target_width)),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5], [0.5])
+                ])
+                ref_images_pixel_values = ref_image_transform(image)
+                ref_images_pixel_values = (ref_images_pixel_values.unsqueeze(0).unsqueeze(2).to(device))
+
+                # Encode with VAE
+                self.vae = self.vae.to(device)
+                with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
+                    cond_latents = self.vae.encode(ref_images_pixel_values).mode()
+                    cond_latents.mul_(self.vae.config.scaling_factor)
+
+                # cond_latents shape: [1, 32, 1, H//compression, W//compression]
+                # Expand to full temporal dimension: [1, 32, T, H, W]
+                # First frame contains the encoded image, rest are zeros
+                expanded_latent = cond_latents.repeat(1, 1, latent_temporal, 1, 1)
+                expanded_latent[:, :, 1:, :, :] = 0.0  # Zero out all frames except first
+
+                # Create mask: [1, 1, T, H, W]
+                # First frame mask = 1 (conditional), rest = 0
+                mask = torch.zeros(1,
+                                   1,
+                                   latent_temporal,
+                                   latent_height,
+                                   latent_width,
+                                   device=device,
+                                   dtype=expanded_latent.dtype)
+                mask[:, :, 0, :, :] = 1.0  # First frame is conditional
+
+                # Concatenate latent and mask: [1, 33, T, H, W]
+                batch.image_latent = torch.cat([expanded_latent, mask], dim=1)
+
+                if fastvideo_args.vae_cpu_offload:
+                    self.vae.to('cpu')
+            else:
+                # No VAE available, create zero latents with full temporal dimension
+                batch.image_latent = torch.zeros(1,
+                                                 latent_channels + 1,
+                                                 latent_temporal,
+                                                 latent_height,
+                                                 latent_width,
+                                                 device=device)
+
+        # Initialize video latent placeholder
+        raw_latent_shape[1] = 1
+        batch.video_latent = torch.zeros(tuple(raw_latent_shape), device=device)
+
         return batch
 
 
@@ -144,14 +300,12 @@ class MatrixGameImageEncodingStage(ImageEncodingStage):
 
         if isinstance(image, torch.Tensor):
             if image.dim() == 5:
-                image = image[:, :,
-                              0]  # Extract first frame: [B, C, T, H, W] -> [B, C, H, W]
+                image = image[:, :, 0]  # Extract first frame: [B, C, T, H, W] -> [B, C, H, W]
         else:
             from torchvision import transforms as T
             transform = T.Compose([
                 T.ToTensor(),  # [0, 1]
-                T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5,
-                                                       0.5]),  # -> [-1, 1]
+                T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),  # -> [-1, 1]
             ])
             image = transform(image).unsqueeze(0)  # [1, C, H, W]
 
@@ -159,19 +313,14 @@ class MatrixGameImageEncodingStage(ImageEncodingStage):
         image = image.to(device)
 
         # F.interpolate with bicubic
-        image = torch.nn.functional.interpolate(image,
-                                                size=(224, 224),
-                                                mode='bicubic',
-                                                align_corners=False)
+        image = torch.nn.functional.interpolate(image, size=(224, 224), mode='bicubic', align_corners=False)
 
         #  [-1, 1] to [0, 1]
         image = image * 0.5 + 0.5
 
         # CLIP normalization
-        mean = torch.tensor(self.CLIP_MEAN, device=device,
-                            dtype=image.dtype).view(1, 3, 1, 1)
-        std = torch.tensor(self.CLIP_STD, device=device,
-                           dtype=image.dtype).view(1, 3, 1, 1)
+        mean = torch.tensor(self.CLIP_MEAN, device=device, dtype=image.dtype).view(1, 3, 1, 1)
+        std = torch.tensor(self.CLIP_STD, device=device, dtype=image.dtype).view(1, 3, 1, 1)
         image = (image - mean) / std
 
         with set_forward_context(current_timestep=0, attn_metadata=None):
@@ -215,21 +364,16 @@ class RefImageEncodingStage(ImageEncodingStage):
         if image is None:
             image = create_default_image()
         # Preprocess reference image for CLIP encoder
-        image_tensor = preprocess_reference_image_for_clip(
-            image, get_local_torch_device())
+        image_tensor = preprocess_reference_image_for_clip(image, get_local_torch_device())
 
-        image_inputs = self.image_processor(images=image_tensor,
-                                            return_tensors="pt").to(
-                                                get_local_torch_device())
+        image_inputs = self.image_processor(images=image_tensor, return_tensors="pt").to(get_local_torch_device())
         with set_forward_context(current_timestep=0, attn_metadata=None):
             outputs = self.image_encoder(**image_inputs)
             image_embeds = outputs.last_hidden_state
         batch.image_embeds.append(image_embeds)
 
         if batch.pil_image is None:
-            batch.image_embeds = [
-                torch.zeros_like(x) for x in batch.image_embeds
-            ]
+            batch.image_embeds = [torch.zeros_like(x) for x in batch.image_embeds]
 
         return batch
 
@@ -262,22 +406,18 @@ class ImageVAEEncodingStage(PipelineStage):
         """
         assert batch.pil_image is not None
         if fastvideo_args.mode == ExecutionMode.INFERENCE:
-            assert batch.pil_image is not None and isinstance(
-                batch.pil_image, PIL.Image.Image)
+            assert batch.pil_image is not None and isinstance(batch.pil_image, PIL.Image.Image)
             assert batch.height is not None and isinstance(batch.height, int)
             assert batch.width is not None and isinstance(batch.width, int)
-            assert batch.num_frames is not None and isinstance(
-                batch.num_frames, int)
+            assert batch.num_frames is not None and isinstance(batch.num_frames, int)
             height = batch.height
             width = batch.width
             num_frames = batch.num_frames
         elif fastvideo_args.mode == ExecutionMode.PREPROCESS:
-            assert batch.pil_image is not None and isinstance(
-                batch.pil_image, torch.Tensor)
+            assert batch.pil_image is not None and isinstance(batch.pil_image, torch.Tensor)
             assert batch.height is not None and isinstance(batch.height, list)
             assert batch.width is not None and isinstance(batch.width, list)
-            assert batch.num_frames is not None and isinstance(
-                batch.num_frames, list)
+            assert batch.num_frames is not None and isinstance(batch.num_frames, list)
             num_frames = batch.num_frames[0]
             height = batch.height[0]
             width = batch.width[0]
@@ -288,34 +428,24 @@ class ImageVAEEncodingStage(PipelineStage):
         latent_height = height // self.vae.spatial_compression_ratio
         latent_width = width // self.vae.spatial_compression_ratio
         image = batch.pil_image
-        image = self.preprocess(
-            image,
-            vae_scale_factor=self.vae.spatial_compression_ratio,
-            height=height,
-            width=width).to(get_local_torch_device(), dtype=torch.float32)
+        image = self.preprocess(image, vae_scale_factor=self.vae.spatial_compression_ratio, height=height,
+                                width=width).to(get_local_torch_device(), dtype=torch.float32)
 
         # (B, C, H, W) -> (B, C, 1, H, W)
         image = image.unsqueeze(2)
 
-        video_condition = torch.cat([
-            image,
-            image.new_zeros(image.shape[0], image.shape[1], num_frames - 1,
-                            image.shape[3], image.shape[4])
-        ],
-                                    dim=2)
-        video_condition = video_condition.to(device=get_local_torch_device(),
-                                             dtype=torch.float32)
+        video_condition = torch.cat(
+            [image,
+             image.new_zeros(image.shape[0], image.shape[1], num_frames - 1, image.shape[3], image.shape[4])],
+            dim=2)
+        video_condition = video_condition.to(device=get_local_torch_device(), dtype=torch.float32)
 
         # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[
-            fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast_enabled = (
-            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         # Encode Image
-        with torch.autocast(device_type="cuda",
-                            dtype=vae_dtype,
-                            enabled=vae_autocast_enabled):
+        with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
             # if fastvideo_args.vae_sp:
@@ -333,41 +463,33 @@ class ImageVAEEncodingStage(PipelineStage):
             latent_condition = self.retrieve_latents(encoder_output, generator)
 
         # Apply shifting if needed
-        if (hasattr(self.vae, "shift_factor")
-                and self.vae.shift_factor is not None):
+        if (hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None):
             if isinstance(self.vae.shift_factor, torch.Tensor):
-                latent_condition -= self.vae.shift_factor.to(
-                    latent_condition.device, latent_condition.dtype)
+                latent_condition -= self.vae.shift_factor.to(latent_condition.device, latent_condition.dtype)
             else:
                 latent_condition -= self.vae.shift_factor
 
         if isinstance(self.vae.scaling_factor, torch.Tensor):
-            latent_condition = latent_condition * self.vae.scaling_factor.to(
-                latent_condition.device, latent_condition.dtype)
+            latent_condition = latent_condition * self.vae.scaling_factor.to(latent_condition.device,
+                                                                             latent_condition.dtype)
         else:
             latent_condition = latent_condition * self.vae.scaling_factor
 
         if fastvideo_args.mode == ExecutionMode.PREPROCESS:
             batch.image_latent = latent_condition
         else:
-            mask_lat_size = torch.ones(1, 1, num_frames, latent_height,
-                                       latent_width)
+            mask_lat_size = torch.ones(1, 1, num_frames, latent_height, latent_width)
             mask_lat_size[:, :, list(range(1, num_frames))] = 0
             first_frame_mask = mask_lat_size[:, :, 0:1]
-            first_frame_mask = torch.repeat_interleave(
-                first_frame_mask,
-                dim=2,
-                repeats=self.vae.temporal_compression_ratio)
-            mask_lat_size = torch.concat(
-                [first_frame_mask, mask_lat_size[:, :, 1:, :]], dim=2)
-            mask_lat_size = mask_lat_size.view(
-                1, -1, self.vae.temporal_compression_ratio, latent_height,
-                latent_width)
+            first_frame_mask = torch.repeat_interleave(first_frame_mask,
+                                                       dim=2,
+                                                       repeats=self.vae.temporal_compression_ratio)
+            mask_lat_size = torch.concat([first_frame_mask, mask_lat_size[:, :, 1:, :]], dim=2)
+            mask_lat_size = mask_lat_size.view(1, -1, self.vae.temporal_compression_ratio, latent_height, latent_width)
             mask_lat_size = mask_lat_size.transpose(1, 2)
             mask_lat_size = mask_lat_size.to(latent_condition.device)
 
-            batch.image_latent = torch.concat([mask_lat_size, latent_condition],
-                                              dim=1)
+            batch.image_latent = torch.concat([mask_lat_size, latent_condition], dim=1)
 
         # Offload models if needed
         if hasattr(self, 'maybe_free_model_hooks'):
@@ -386,8 +508,7 @@ class ImageVAEEncodingStage(PipelineStage):
         elif sample_mode == "argmax":
             return encoder_output.mode()
         else:
-            raise AttributeError(
-                "Could not access latents of provided encoder_output")
+            raise AttributeError("Could not access latents of provided encoder_output")
 
     def preprocess(
             self,
@@ -399,8 +520,7 @@ class ImageVAEEncodingStage(PipelineStage):
     ) -> torch.Tensor:
 
         if isinstance(image, PIL.Image.Image):
-            height, width = get_default_height_width(image, vae_scale_factor,
-                                                     height, width)
+            height, width = get_default_height_width(image, vae_scale_factor, height, width)
             image = resize(image, height, width, resize_mode=resize_mode)
             image = pil_to_numpy(image)  # to np
             image = numpy_to_pt(image)  # to pt
@@ -413,12 +533,10 @@ class ImageVAEEncodingStage(PipelineStage):
 
         return image
 
-    def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify encoding stage inputs."""
         result = VerificationResult()
-        result.add_check("generator", batch.generator,
-                         V.generator_or_list_generators)
+        result.add_check("generator", batch.generator, V.generator_or_list_generators)
         if fastvideo_args.mode == ExecutionMode.PREPROCESS:
             result.add_check("height", batch.height, V.list_not_empty)
             result.add_check("width", batch.width, V.list_not_empty)
@@ -429,12 +547,10 @@ class ImageVAEEncodingStage(PipelineStage):
             result.add_check("num_frames", batch.num_frames, V.positive_int)
         return result
 
-    def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify encoding stage outputs."""
         result = VerificationResult()
-        result.add_check("image_latent", batch.image_latent,
-                         [V.is_tensor, V.with_dims(5)])
+        result.add_check("image_latent", batch.image_latent, [V.is_tensor, V.with_dims(5)])
         return result
 
 
@@ -466,16 +582,14 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
         if fastvideo_args.mode == ExecutionMode.INFERENCE:
             assert batch.height is not None and isinstance(batch.height, int)
             assert batch.width is not None and isinstance(batch.width, int)
-            assert batch.num_frames is not None and isinstance(
-                batch.num_frames, int)
+            assert batch.num_frames is not None and isinstance(batch.num_frames, int)
             height = batch.height
             width = batch.width
             num_frames = batch.num_frames
         elif fastvideo_args.mode == ExecutionMode.PREPROCESS:
             assert batch.height is not None and isinstance(batch.height, list)
             assert batch.width is not None and isinstance(batch.width, list)
-            assert batch.num_frames is not None and isinstance(
-                batch.num_frames, list)
+            assert batch.num_frames is not None and isinstance(batch.num_frames, list)
             num_frames = batch.num_frames[0]
             height = batch.height[0]
             width = batch.width[0]
@@ -483,20 +597,15 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
         self.vae = self.vae.to(get_local_torch_device())
 
         # Prepare video tensor from control video
-        video_condition = self._prepare_control_video_tensor(
-            batch.video_latent, num_frames, height,
-            width).to(get_local_torch_device(), dtype=torch.float32)
+        video_condition = self._prepare_control_video_tensor(batch.video_latent, num_frames, height,
+                                                             width).to(get_local_torch_device(), dtype=torch.float32)
 
         # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[
-            fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast_enabled = (
-            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         # Encode control video
-        with torch.autocast(device_type="cuda",
-                            dtype=vae_dtype,
-                            enabled=vae_autocast_enabled):
+        with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
             if not vae_autocast_enabled:
@@ -508,17 +617,15 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
             raise ValueError("Generator must be provided")
         latent_condition = self.retrieve_latents(encoder_output, generator)
 
-        if (hasattr(self.vae, "shift_factor")
-                and self.vae.shift_factor is not None):
+        if (hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None):
             if isinstance(self.vae.shift_factor, torch.Tensor):
-                latent_condition -= self.vae.shift_factor.to(
-                    latent_condition.device, latent_condition.dtype)
+                latent_condition -= self.vae.shift_factor.to(latent_condition.device, latent_condition.dtype)
             else:
                 latent_condition -= self.vae.shift_factor
 
         if isinstance(self.vae.scaling_factor, torch.Tensor):
-            latent_condition = latent_condition * self.vae.scaling_factor.to(
-                latent_condition.device, latent_condition.dtype)
+            latent_condition = latent_condition * self.vae.scaling_factor.to(latent_condition.device,
+                                                                             latent_condition.dtype)
         else:
             latent_condition = latent_condition * self.vae.scaling_factor
 
@@ -532,8 +639,7 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
 
         return batch
 
-    def _prepare_control_video_tensor(self, control_video, num_frames: int,
-                                      height: int, width: int) -> torch.Tensor:
+    def _prepare_control_video_tensor(self, control_video, num_frames: int, height: int, width: int) -> torch.Tensor:
         """
         Prepare video tensor from control video input.
         """
@@ -542,36 +648,25 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
             for i, frame in enumerate(control_video):
                 if i >= num_frames:
                     break
-                processed_frame = self.preprocess(
-                    frame,
-                    vae_scale_factor=self.vae.spatial_compression_ratio,
-                    height=height,
-                    width=width).to(get_local_torch_device(),
-                                    dtype=torch.float32)
+                processed_frame = self.preprocess(frame,
+                                                  vae_scale_factor=self.vae.spatial_compression_ratio,
+                                                  height=height,
+                                                  width=width).to(get_local_torch_device(), dtype=torch.float32)
                 processed_frames.append(processed_frame)
 
             if processed_frames:
-                video_tensor = torch.cat(
-                    [f.unsqueeze(2) for f in processed_frames], dim=2)
+                video_tensor = torch.cat([f.unsqueeze(2) for f in processed_frames], dim=2)
             else:
-                video_tensor = torch.zeros(1,
-                                           3,
-                                           0,
-                                           height,
-                                           width,
-                                           device=get_local_torch_device(),
-                                           dtype=torch.float32)
+                video_tensor = torch.zeros(1, 3, 0, height, width, device=get_local_torch_device(), dtype=torch.float32)
         elif isinstance(control_video, torch.Tensor):
             # Handle tensor input [batch, channels, frames, height, width]
-            video_tensor = control_video.to(get_local_torch_device(),
-                                            dtype=torch.float32)
+            video_tensor = control_video.to(get_local_torch_device(), dtype=torch.float32)
 
             if video_tensor.shape[2] > num_frames:
                 video_tensor = video_tensor[:, :, :num_frames]
         else:
-            raise ValueError(
-                f"Unsupported control_video type: {type(control_video)}. "
-                "Expected list of PIL Images or torch.Tensor.")
+            raise ValueError(f"Unsupported control_video type: {type(control_video)}. "
+                             "Expected list of PIL Images or torch.Tensor.")
 
         # Pad with zeros if we have fewer frames than required
         current_frames = video_tensor.shape[2]
@@ -588,13 +683,11 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
 
         return video_tensor
 
-    def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify video encoding stage inputs."""
         result = VerificationResult()
         result.add_check("video_latent", batch.video_latent, V.not_none)
-        result.add_check("generator", batch.generator,
-                         V.generator_or_list_generators)
+        result.add_check("generator", batch.generator, V.generator_or_list_generators)
         if fastvideo_args.mode == ExecutionMode.PREPROCESS:
             result.add_check("height", batch.height, V.list_not_empty)
             result.add_check("width", batch.width, V.list_not_empty)
@@ -605,12 +698,10 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
             result.add_check("num_frames", batch.num_frames, V.positive_int)
         return result
 
-    def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify video encoding stage outputs."""
         result = VerificationResult()
-        result.add_check("video_latent", batch.video_latent,
-                         [V.is_tensor, V.with_dims(5)])
+        result.add_check("video_latent", batch.video_latent, [V.is_tensor, V.with_dims(5)])
         return result
 
 
@@ -626,33 +717,26 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
         if fastvideo_args.mode == ExecutionMode.INFERENCE:
             # Accept both PIL.Image and torch.Tensor
             # Causal pipeline (is_causal=True) converts PIL to tensor in InputValidationStage
-            assert batch.pil_image is not None and isinstance(
-                batch.pil_image, PIL.Image.Image | torch.Tensor)
+            assert batch.pil_image is not None and isinstance(batch.pil_image, PIL.Image.Image | torch.Tensor)
             assert batch.height is not None and isinstance(batch.height, int)
             assert batch.width is not None and isinstance(batch.width, int)
-            assert batch.num_frames is not None and isinstance(
-                batch.num_frames, int)
+            assert batch.num_frames is not None and isinstance(batch.num_frames, int)
             height = batch.height
             width = batch.width
             num_frames = batch.num_frames
         elif fastvideo_args.mode == ExecutionMode.PREPROCESS:
-            assert batch.pil_image is not None and isinstance(
-                batch.pil_image, torch.Tensor)
+            assert batch.pil_image is not None and isinstance(batch.pil_image, torch.Tensor)
             assert batch.height is not None and isinstance(batch.height, list)
             assert batch.width is not None and isinstance(batch.width, list)
-            assert batch.num_frames is not None and isinstance(
-                batch.num_frames, list)
+            assert batch.num_frames is not None and isinstance(batch.num_frames, list)
             num_frames = batch.num_frames[0]
             height = batch.height[0]
             width = batch.width[0]
         else:
             # Fallback for other modes
-            height = batch.height if isinstance(batch.height,
-                                                int) else batch.height[0]
-            width = batch.width if isinstance(batch.width,
-                                              int) else batch.width[0]
-            num_frames = batch.num_frames if isinstance(
-                batch.num_frames, int) else batch.num_frames[0]
+            height = batch.height if isinstance(batch.height, int) else batch.height[0]
+            width = batch.width if isinstance(batch.width, int) else batch.width[0]
+            num_frames = batch.num_frames if isinstance(batch.num_frames, int) else batch.num_frames[0]
 
         self.vae = self.vae.to(get_local_torch_device())
 
@@ -670,9 +754,8 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
                 # Create video condition with first frame + zeros
                 video_condition = torch.cat([
                     first_frame,
-                    first_frame.new_zeros(
-                        first_frame.shape[0], first_frame.shape[1], num_frames -
-                        1, first_frame.shape[3], first_frame.shape[4])
+                    first_frame.new_zeros(first_frame.shape[0], first_frame.shape[1], num_frames - 1,
+                                          first_frame.shape[3], first_frame.shape[4])
                 ],
                                             dim=2)
             elif image.dim() == 4:
@@ -680,21 +763,18 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
                 image = image.unsqueeze(2)  # [B, C, 1, H, W]
                 video_condition = torch.cat([
                     image,
-                    image.new_zeros(image.shape[0], image.shape[1], num_frames -
-                                    1, image.shape[3], image.shape[4])
+                    image.new_zeros(image.shape[0], image.shape[1], num_frames - 1, image.shape[3], image.shape[4])
                 ],
                                             dim=2)
             else:
                 raise ValueError(f"Unexpected tensor dimensions: {image.dim()}")
-            video_condition = video_condition.to(get_local_torch_device(),
-                                                 dtype=torch.float32)
+            video_condition = video_condition.to(get_local_torch_device(), dtype=torch.float32)
         else:
             # PIL Image input - use preprocess
-            image = self.preprocess(
-                image,
-                vae_scale_factor=self.vae.spatial_compression_ratio,
-                height=height,
-                width=width).to(get_local_torch_device(), dtype=torch.float32)
+            image = self.preprocess(image,
+                                    vae_scale_factor=self.vae.spatial_compression_ratio,
+                                    height=height,
+                                    width=width).to(get_local_torch_device(), dtype=torch.float32)
 
             # (B, C, H, W) -> (B, C, 1, H, W)
             image = image.unsqueeze(2)
@@ -702,23 +782,17 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
             # Create video tensor with first frame as image, rest as zeros
             video_condition = torch.cat([
                 image,
-                image.new_zeros(image.shape[0], image.shape[1], num_frames - 1,
-                                image.shape[3], image.shape[4])
+                image.new_zeros(image.shape[0], image.shape[1], num_frames - 1, image.shape[3], image.shape[4])
             ],
                                         dim=2)
-            video_condition = video_condition.to(
-                device=get_local_torch_device(), dtype=torch.float32)
+            video_condition = video_condition.to(device=get_local_torch_device(), dtype=torch.float32)
 
         # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[
-            fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast_enabled = (
-            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         # Encode Image
-        with torch.autocast(device_type="cuda",
-                            dtype=vae_dtype,
-                            enabled=vae_autocast_enabled):
+        with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
             if not vae_autocast_enabled:
@@ -730,34 +804,26 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
         img_cond = encoder_output.mode()
 
         # manually using latents_mean and latents_std from config...
-        if (hasattr(self.vae.config, 'latents_mean')
-                and hasattr(self.vae.config, 'latents_std')):
+        if (hasattr(self.vae.config, 'latents_mean') and hasattr(self.vae.config, 'latents_std')):
             # Convert config values to tensors
-            latents_mean = torch.tensor(self.vae.config.latents_mean,
-                                        device=img_cond.device,
-                                        dtype=img_cond.dtype).view(
-                                            1, -1, 1, 1, 1)
+            latents_mean = torch.tensor(self.vae.config.latents_mean, device=img_cond.device,
+                                        dtype=img_cond.dtype).view(1, -1, 1, 1, 1)
 
-            latents_std = torch.tensor(self.vae.config.latents_std,
-                                       device=img_cond.device,
-                                       dtype=img_cond.dtype).view(
-                                           1, -1, 1, 1, 1)
+            latents_std = torch.tensor(self.vae.config.latents_std, device=img_cond.device,
+                                       dtype=img_cond.dtype).view(1, -1, 1, 1, 1)
 
             # Apply normalization: (latent - mean) * (1/std)
             img_cond = (img_cond - latents_mean) / latents_std
-        elif (hasattr(self.vae, "shift_factor")
-              and self.vae.shift_factor is not None):
+        elif (hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None):
             # Fallback to shift_factor/scaling_factor if available
             if isinstance(self.vae.shift_factor, torch.Tensor):
-                img_cond -= self.vae.shift_factor.to(img_cond.device,
-                                                     img_cond.dtype)
+                img_cond -= self.vae.shift_factor.to(img_cond.device, img_cond.dtype)
             else:
                 img_cond -= self.vae.shift_factor
 
             if hasattr(self.vae, 'scaling_factor'):
                 if isinstance(self.vae.scaling_factor, torch.Tensor):
-                    img_cond = img_cond * self.vae.scaling_factor.to(
-                        img_cond.device, img_cond.dtype)
+                    img_cond = img_cond * self.vae.scaling_factor.to(img_cond.device, img_cond.dtype)
                 else:
                     img_cond = img_cond * self.vae.scaling_factor
 

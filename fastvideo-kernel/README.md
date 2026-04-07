@@ -7,6 +7,13 @@ CUDA kernels for FastVideo video generation.
 ### Standard Installation (Local Development)
 This will automatically detect your GPU architecture. If an NVIDIA Hopper (H100/sm_90a) GPU is detected, ThunderKittens kernels will be enabled. Otherwise, they will be skipped, and the package will use Triton fallbacks at runtime.
 
+Before installation, set CUDA toolchain paths:
+
+```bash
+export CUDA_HOME=/usr/local/cuda
+export CUDACXX=$CUDA_HOME/bin/nvcc
+```
+
 ```bash
 git submodule update --init --recursive
 cd fastvideo-kernel
@@ -40,6 +47,17 @@ out = video_sparse_attn(q, k, v, block_sizes, block_sizes, topk=5)
 out = moba_attn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_k, ...)
 ```
 
+## Benchmark
+
+### VSA (block-sparse) TFLOPs
+
+After building/installing `fastvideo-kernel`, run:
+
+```bash
+cd fastvideo-kernel
+python benchmarks/bench_vsa.py --batch_size 1 --num_heads 16 --head_dim 128 --q_seq_lens 49152 --topk 64
+```
+
 ### TurboDiffusion Kernels
 
 This package also includes kernels from [TurboDiffusion](https://github.com/thu-ml/TurboDiffusion), including INT8 GEMM, Quantization, RMSNorm and LayerNorm.
@@ -51,6 +69,8 @@ This package also includes kernels from [TurboDiffusion](https://github.com/thu-
   - Any CUDA GPU for Triton-based fallbacks.
 - **Build**:
   - CUDA Toolkit 12.3+
+  - `CUDA_HOME` must be set (for example, `/usr/local/cuda`)
+  - `CUDACXX` must be set (for example, `$CUDA_HOME/bin/nvcc`)
   - C++20 compatible compiler (GCC 10+, Clang 11+)
 
 ## Acknowledgement

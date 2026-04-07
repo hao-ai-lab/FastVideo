@@ -4,13 +4,14 @@ from copy import deepcopy
 
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
-from fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline import (
-    WanCausalDMDPipeline)
-from fastvideo.training.self_forcing_distillation_pipeline import (
-    SelfForcingDistillationPipeline)
+from fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline import (WanCausalDMDPipeline)
+from fastvideo.training.self_forcing_distillation_pipeline import (SelfForcingDistillationPipeline)
 from fastvideo.utils import is_vsa_available
 
-vsa_available = is_vsa_available()
+try:
+    vsa_available = is_vsa_available()
+except Exception:
+    vsa_available = False
 
 logger = init_logger(__name__)
 
@@ -57,8 +58,7 @@ class WanSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
 def main(args) -> None:
     logger.info("Starting Wan self-forcing distillation pipeline...")
 
-    pipeline = WanSelfForcingDistillationPipeline.from_pretrained(
-        args.pretrained_model_name_or_path, args=args)
+    pipeline = WanSelfForcingDistillationPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
 
     args = pipeline.training_args
     pipeline.train()

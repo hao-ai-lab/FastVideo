@@ -8,8 +8,7 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 
-def _tensor_placeholder(tensor: torch.Tensor,
-                        device: torch.device) -> torch.Tensor:
+def _tensor_placeholder(tensor: torch.Tensor, device: torch.device) -> torch.Tensor:
     """Create a rank-preserving empty placeholder on the specified device."""
     shape = (0, ) if tensor.ndim <= 0 else (0, ) * tensor.ndim
     return torch.empty(shape, device=device, dtype=tensor.dtype)
@@ -38,8 +37,7 @@ class LayerwiseOffloadState:
         self.module_ref = module
         for name, param in self.module_ref.named_parameters():
             if self._will_offload(name):
-                self.cpu_named_parameters[name] = (
-                    param.data.detach().to("cpu").pin_memory())
+                self.cpu_named_parameters[name] = (param.data.detach().to("cpu").pin_memory())
                 param.data = _tensor_placeholder(param.data, self.device)
 
     @torch.compiler.disable
@@ -51,8 +49,7 @@ class LayerwiseOffloadState:
                 continue
             if name not in self.gpu_named_parameters:
                 # first load with blocking load
-                self.gpu_named_parameters[name] = self.cpu_named_parameters[
-                    name].to(self.device)
+                self.gpu_named_parameters[name] = self.cpu_named_parameters[name].to(self.device)
             param.data = self.gpu_named_parameters[name]
 
     @torch.compiler.disable
@@ -63,11 +60,8 @@ class LayerwiseOffloadState:
                 if not self._will_offload(name):
                     continue
                 assert name not in self.gpu_named_parameters
-                gpu_param = self.cpu_named_parameters[name].to(
-                    self.device, non_blocking=True)
-                gpu_param.record_stream(
-                    compute_stream
-                )  # ensure tensor will not be freed until forward is completed
+                gpu_param = self.cpu_named_parameters[name].to(self.device, non_blocking=True)
+                gpu_param.record_stream(compute_stream)  # ensure tensor will not be freed until forward is completed
                 self.gpu_named_parameters[name] = gpu_param
 
     @torch.compiler.disable
@@ -93,8 +87,7 @@ class LayerwiseOffloadHook(ForwardHook):
         for name, cpu_tensor in self.state.cpu_named_parameters.items():
             if name not in self.state.gpu_named_parameters:
                 if name in named_parameters:
-                    named_parameters[name].data = cpu_tensor.to(
-                        device=self.state.device)
+                    named_parameters[name].data = cpu_tensor.to(device=self.state.device)
                 else:
                     logger.warning(
                         "Parameter {} not found in module during detachment.",
@@ -132,16 +125,14 @@ def enable_layerwise_offload(model: nn.Module, is_replace: bool = False):
     if torch.cuda.is_available():
         device = torch.device("cuda", torch.cuda.current_device())
     else:
-        logger.warning(
-            "CUDA is not available. Layerwise offloading is disabled.")
+        logger.warning("CUDA is not available. Layerwise offloading is disabled.")
         return
     state_list = []
     async_stream = torch.cuda.Stream()
     for name, submodule in model.named_children():
         if isinstance(submodule, nn.ModuleList):
             for idx, module_entry in enumerate(submodule):
-                state = LayerwiseOffloadState(async_copy_stream=async_stream,
-                                              device=device)
+                state = LayerwiseOffloadState(async_copy_stream=async_stream, device=device)
                 state_list.append(state)
                 hook_mgr = ModuleHookManager.get_from_or_default(module_entry)
                 hook = LayerwiseOffloadHook(state)
@@ -150,14 +141,12 @@ def enable_layerwise_offload(model: nn.Module, is_replace: bool = False):
                     if existing_hook is not None:
                         hook_mgr.replace_forward_hook(hook.name(), hook)
                     else:
-                        raise AssertionError(
-                            f"Expect hook exists in {name} for replacement.")
+                        raise AssertionError(f"Expect hook exists in {name} for replacement.")
                 else:
                     hook_mgr.append_forward_hook(hook)
             break
     if len(state_list) == 0:
-        raise ValueError(
-            "No nn.ModuleList found in the model for layerwise offloading.")
+        raise ValueError("No nn.ModuleList found in the model for layerwise offloading.")
 
     # circular linking of states
     for i in range(len(state_list)):

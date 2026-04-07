@@ -20,23 +20,32 @@ import pytest
 import torch
 
 from fastvideo import VideoGenerator
+from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.logger import init_logger
+from fastvideo.tests.ssim.reference_utils import (
+    build_generated_output_dir,
+    build_reference_folder_path,
+    get_cuda_device_name,
+    resolve_device_reference_folder,
+    select_ssim_params,
+)
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
 
 logger = init_logger(__name__)
 
-# Device-specific reference folder
-device_name = torch.cuda.get_device_name()
-device_reference_folder_suffix = "_reference_videos"
+REQUIRED_GPUS = 1
 
-if "A40" in device_name:
-    device_reference_folder = "A40" + device_reference_folder_suffix
-elif "L40S" in device_name:
-    device_reference_folder = "L40S" + device_reference_folder_suffix
-elif "H100" in device_name:
-    device_reference_folder = "H100" + device_reference_folder_suffix
-else:
-    logger.warning(f"Unsupported device for ssim tests: {device_name}")
+# Device-specific reference folder
+device_reference_folder = resolve_device_reference_folder(
+    (
+        ("A40", "A40"),
+        ("L40S", "L40S"),
+        ("H100", "H100"),
+        ("H200", "H200"),
+    ),
+    device_name=get_cuda_device_name(),
+    logger=logger,
+)
 
 # Common negative prompt from example scripts
 NEGATIVE_PROMPT = (
@@ -62,6 +71,21 @@ LONGCAT_T2V_PARAMS = {
     "seed": 42,
     "negative_prompt": NEGATIVE_PROMPT,
 }
+_LONGCAT_T2V_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
+    LONGCAT_T2V_PARAMS["model_path"]
+)
+LONGCAT_T2V_FULL_QUALITY_PARAMS = {
+    "num_gpus": LONGCAT_T2V_PARAMS["num_gpus"],
+    "model_path": LONGCAT_T2V_PARAMS["model_path"],
+    "height": _LONGCAT_T2V_FULL_QUALITY_DEFAULTS.height,
+    "width": _LONGCAT_T2V_FULL_QUALITY_DEFAULTS.width,
+    "num_frames": LONGCAT_T2V_PARAMS["num_frames"],  # default num_frames: 125
+    "num_inference_steps": _LONGCAT_T2V_FULL_QUALITY_DEFAULTS.num_inference_steps,
+    "guidance_scale": _LONGCAT_T2V_FULL_QUALITY_DEFAULTS.guidance_scale,
+    "fps": _LONGCAT_T2V_FULL_QUALITY_DEFAULTS.fps,
+    "seed": _LONGCAT_T2V_FULL_QUALITY_DEFAULTS.seed,
+    "negative_prompt": _LONGCAT_T2V_FULL_QUALITY_DEFAULTS.negative_prompt,
+}
 
 # =============================================================================
 # LongCat I2V Parameters (from basic_longcat_i2v.py)
@@ -77,6 +101,21 @@ LONGCAT_I2V_PARAMS = {
     "fps": 15,
     "seed": 42,
     "negative_prompt": NEGATIVE_PROMPT,
+}
+_LONGCAT_I2V_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
+    LONGCAT_I2V_PARAMS["model_path"]
+)
+LONGCAT_I2V_FULL_QUALITY_PARAMS = {
+    "num_gpus": LONGCAT_I2V_PARAMS["num_gpus"],
+    "model_path": LONGCAT_I2V_PARAMS["model_path"],
+    "height": _LONGCAT_I2V_FULL_QUALITY_DEFAULTS.height,
+    "width": _LONGCAT_I2V_FULL_QUALITY_DEFAULTS.width,
+    "num_frames": LONGCAT_I2V_PARAMS["num_frames"],  # default num_frames: 125
+    "num_inference_steps": _LONGCAT_I2V_FULL_QUALITY_DEFAULTS.num_inference_steps,
+    "guidance_scale": _LONGCAT_I2V_FULL_QUALITY_DEFAULTS.guidance_scale,
+    "fps": _LONGCAT_I2V_FULL_QUALITY_DEFAULTS.fps,
+    "seed": _LONGCAT_I2V_FULL_QUALITY_DEFAULTS.seed,
+    "negative_prompt": _LONGCAT_I2V_FULL_QUALITY_DEFAULTS.negative_prompt,
 }
 
 # =============================================================================
@@ -94,6 +133,22 @@ LONGCAT_VC_PARAMS = {
     "seed": 42,
     "num_cond_frames": 13,
     "negative_prompt": NEGATIVE_PROMPT,
+}
+_LONGCAT_VC_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
+    LONGCAT_VC_PARAMS["model_path"]
+)
+LONGCAT_VC_FULL_QUALITY_PARAMS = {
+    "num_gpus": LONGCAT_VC_PARAMS["num_gpus"],
+    "model_path": LONGCAT_VC_PARAMS["model_path"],
+    "height": _LONGCAT_VC_FULL_QUALITY_DEFAULTS.height,
+    "width": _LONGCAT_VC_FULL_QUALITY_DEFAULTS.width,
+    "num_frames": LONGCAT_VC_PARAMS["num_frames"],  # default num_frames: 125
+    "num_inference_steps": _LONGCAT_VC_FULL_QUALITY_DEFAULTS.num_inference_steps,
+    "guidance_scale": _LONGCAT_VC_FULL_QUALITY_DEFAULTS.guidance_scale,
+    "fps": _LONGCAT_VC_FULL_QUALITY_DEFAULTS.fps,
+    "seed": _LONGCAT_VC_FULL_QUALITY_DEFAULTS.seed,
+    "num_cond_frames": LONGCAT_VC_PARAMS["num_cond_frames"],
+    "negative_prompt": _LONGCAT_VC_FULL_QUALITY_DEFAULTS.negative_prompt,
 }
 
 # Test prompts
@@ -151,15 +206,22 @@ def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     """
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
+    params = select_ssim_params(LONGCAT_T2V_PARAMS, LONGCAT_T2V_FULL_QUALITY_PARAMS)
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_id = "LongCat-Video-T2V"
     
-    output_dir = os.path.join(script_dir, "generated_videos", model_id, ATTENTION_BACKEND)
+    output_dir = build_generated_output_dir(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
+    )
     output_video_name = f"{prompt[:100].strip()}.mp4"
     os.makedirs(output_dir, exist_ok=True)
 
     init_kwargs = {
-        "num_gpus": LONGCAT_T2V_PARAMS["num_gpus"],
+        "num_gpus": params["num_gpus"],
         "use_fsdp_inference": True,
         "dit_cpu_offload": True,
         "vae_cpu_offload": True,
@@ -169,18 +231,18 @@ def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
 
     generation_kwargs = {
         "output_path": output_dir,
-        "height": LONGCAT_T2V_PARAMS["height"],
-        "width": LONGCAT_T2V_PARAMS["width"],
-        "num_frames": LONGCAT_T2V_PARAMS["num_frames"],
-        "num_inference_steps": LONGCAT_T2V_PARAMS["num_inference_steps"],
-        "guidance_scale": LONGCAT_T2V_PARAMS["guidance_scale"],
-        "fps": LONGCAT_T2V_PARAMS["fps"],
-        "seed": LONGCAT_T2V_PARAMS["seed"],
-        "negative_prompt": LONGCAT_T2V_PARAMS["negative_prompt"],
+        "height": params["height"],
+        "width": params["width"],
+        "num_frames": params["num_frames"],
+        "num_inference_steps": params["num_inference_steps"],
+        "guidance_scale": params["guidance_scale"],
+        "fps": params["fps"],
+        "seed": params["seed"],
+        "negative_prompt": params["negative_prompt"],
     }
 
     generator = VideoGenerator.from_pretrained(
-        model_path=LONGCAT_T2V_PARAMS["model_path"], **init_kwargs
+        model_path=params["model_path"], **init_kwargs
     )
     generator.generate_video(prompt, **generation_kwargs)
     generator.shutdown()
@@ -191,8 +253,11 @@ def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     )
 
     # Find reference video
-    reference_folder = os.path.join(
-        script_dir, device_reference_folder, model_id, ATTENTION_BACKEND
+    reference_folder = build_reference_folder_path(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
     )
     if not os.path.exists(reference_folder):
         raise FileNotFoundError(
@@ -222,7 +287,7 @@ def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
 
     write_ssim_results(
         output_dir, ssim_values, reference_video_path, generated_video_path,
-        LONGCAT_T2V_PARAMS["num_inference_steps"], prompt
+        params["num_inference_steps"], prompt
     )
 
     min_acceptable_ssim = 0.90
@@ -242,10 +307,17 @@ def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     """
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
+    params = select_ssim_params(LONGCAT_I2V_PARAMS, LONGCAT_I2V_FULL_QUALITY_PARAMS)
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_id = "LongCat-Video-I2V"
     
-    output_dir = os.path.join(script_dir, "generated_videos", model_id, ATTENTION_BACKEND)
+    output_dir = build_generated_output_dir(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
+    )
     output_video_name = f"{prompt[:100].strip()}.mp4"
     os.makedirs(output_dir, exist_ok=True)
 
@@ -254,7 +326,7 @@ def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     image_path = _resolve_asset_path(I2V_IMAGE_PATHS[prompt_idx])
 
     init_kwargs = {
-        "num_gpus": LONGCAT_I2V_PARAMS["num_gpus"],
+        "num_gpus": params["num_gpus"],
         "use_fsdp_inference": True,
         "dit_cpu_offload": True,
         "vae_cpu_offload": True,
@@ -265,18 +337,18 @@ def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     generation_kwargs = {
         "output_path": output_dir,
         "image_path": image_path,
-        "height": LONGCAT_I2V_PARAMS["height"],
-        "width": LONGCAT_I2V_PARAMS["width"],
-        "num_frames": LONGCAT_I2V_PARAMS["num_frames"],
-        "num_inference_steps": LONGCAT_I2V_PARAMS["num_inference_steps"],
-        "guidance_scale": LONGCAT_I2V_PARAMS["guidance_scale"],
-        "fps": LONGCAT_I2V_PARAMS["fps"],
-        "seed": LONGCAT_I2V_PARAMS["seed"],
-        "negative_prompt": LONGCAT_I2V_PARAMS["negative_prompt"],
+        "height": params["height"],
+        "width": params["width"],
+        "num_frames": params["num_frames"],
+        "num_inference_steps": params["num_inference_steps"],
+        "guidance_scale": params["guidance_scale"],
+        "fps": params["fps"],
+        "seed": params["seed"],
+        "negative_prompt": params["negative_prompt"],
     }
 
     generator = VideoGenerator.from_pretrained(
-        model_path=LONGCAT_I2V_PARAMS["model_path"], **init_kwargs
+        model_path=params["model_path"], **init_kwargs
     )
     generator.generate_video(prompt, **generation_kwargs)
     generator.shutdown()
@@ -287,8 +359,11 @@ def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     )
 
     # Find reference video
-    reference_folder = os.path.join(
-        script_dir, device_reference_folder, model_id, ATTENTION_BACKEND
+    reference_folder = build_reference_folder_path(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
     )
     if not os.path.exists(reference_folder):
         raise FileNotFoundError(
@@ -318,7 +393,7 @@ def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
 
     write_ssim_results(
         output_dir, ssim_values, reference_video_path, generated_video_path,
-        LONGCAT_I2V_PARAMS["num_inference_steps"], prompt
+        params["num_inference_steps"], prompt
     )
 
     min_acceptable_ssim = 0.90
@@ -338,10 +413,17 @@ def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str):
     """
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
+    params = select_ssim_params(LONGCAT_VC_PARAMS, LONGCAT_VC_FULL_QUALITY_PARAMS)
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_id = "LongCat-Video-VC"
     
-    output_dir = os.path.join(script_dir, "generated_videos", model_id, ATTENTION_BACKEND)
+    output_dir = build_generated_output_dir(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
+    )
     output_video_name = f"{prompt[:100].strip()}.mp4"
     os.makedirs(output_dir, exist_ok=True)
 
@@ -353,7 +435,7 @@ def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str):
         pytest.skip(f"Input video not found at {video_path}")
 
     init_kwargs = {
-        "num_gpus": LONGCAT_VC_PARAMS["num_gpus"],
+        "num_gpus": params["num_gpus"],
         "use_fsdp_inference": False,
         "dit_cpu_offload": False,
         "vae_cpu_offload": True,
@@ -365,19 +447,19 @@ def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str):
     generation_kwargs = {
         "output_path": output_dir,
         "video_path": video_path,
-        "num_cond_frames": LONGCAT_VC_PARAMS["num_cond_frames"],
-        "height": LONGCAT_VC_PARAMS["height"],
-        "width": LONGCAT_VC_PARAMS["width"],
-        "num_frames": LONGCAT_VC_PARAMS["num_frames"],
-        "num_inference_steps": LONGCAT_VC_PARAMS["num_inference_steps"],
-        "guidance_scale": LONGCAT_VC_PARAMS["guidance_scale"],
-        "fps": LONGCAT_VC_PARAMS["fps"],
-        "seed": LONGCAT_VC_PARAMS["seed"],
-        "negative_prompt": LONGCAT_VC_PARAMS["negative_prompt"],
+        "num_cond_frames": params["num_cond_frames"],
+        "height": params["height"],
+        "width": params["width"],
+        "num_frames": params["num_frames"],
+        "num_inference_steps": params["num_inference_steps"],
+        "guidance_scale": params["guidance_scale"],
+        "fps": params["fps"],
+        "seed": params["seed"],
+        "negative_prompt": params["negative_prompt"],
     }
 
     generator = VideoGenerator.from_pretrained(
-        model_path=LONGCAT_VC_PARAMS["model_path"], **init_kwargs
+        model_path=params["model_path"], **init_kwargs
     )
     generator.generate_video(prompt, **generation_kwargs)
     generator.shutdown()
@@ -388,8 +470,11 @@ def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str):
     )
 
     # Find reference video
-    reference_folder = os.path.join(
-        script_dir, device_reference_folder, model_id, ATTENTION_BACKEND
+    reference_folder = build_reference_folder_path(
+        script_dir,
+        device_reference_folder,
+        model_id,
+        ATTENTION_BACKEND,
     )
     if not os.path.exists(reference_folder):
         raise FileNotFoundError(
@@ -419,7 +504,7 @@ def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str):
 
     write_ssim_results(
         output_dir, ssim_values, reference_video_path, generated_video_path,
-        LONGCAT_VC_PARAMS["num_inference_steps"], prompt
+        params["num_inference_steps"], prompt
     )
 
     min_acceptable_ssim = 0.90

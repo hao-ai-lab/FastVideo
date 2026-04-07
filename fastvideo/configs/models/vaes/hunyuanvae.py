@@ -31,8 +31,7 @@ class HunyuanVAEArchConfig(VAEArchConfig):
     mid_block_add_attention: bool = True
 
     def __post_init__(self):
-        self.spatial_compression_ratio: int = 2**(len(self.block_out_channels) -
-                                                  1)
+        self.spatial_compression_ratio: int = 2**(len(self.block_out_channels) - 1)
 
 
 @dataclass

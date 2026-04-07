@@ -126,10 +126,7 @@ def load_image(
 
     image = PIL.ImageOps.exif_transpose(image)
 
-    if convert_method is not None:
-        image = convert_method(image)
-    else:
-        image = image.convert("RGB")
+    image = convert_method(image) if convert_method is not None else image.convert("RGB")
 
     return image
 
@@ -277,7 +274,7 @@ def load_video(
     if convert_method is not None:
         pil_images = convert_method(pil_images)
 
-    return pil_images, original_fps if return_fps else pil_images
+    return (pil_images, original_fps) if return_fps else pil_images
 
 
 def get_default_height_width(

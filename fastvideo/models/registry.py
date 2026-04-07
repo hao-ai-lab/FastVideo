@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/models/registry.py
 
+import ast
 import importlib
 import os
 import pickle
@@ -24,50 +25,73 @@ logger = init_logger(__name__)
 _TEXT_TO_VIDEO_DIT_MODELS = {
     "HunyuanVideoTransformer3DModel":
     ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
+    "HunyuanGameCraftTransformer3DModel":
+    ("dits", "hunyuangamecraft", "HunyuanGameCraftTransformer3DModel"),
     "HunyuanVideo15Transformer3DModel":
     ("dits", "hunyuanvideo15", "HunyuanVideo15Transformer3DModel"),
+    "HYWorldTransformer3DModel":
+    ("dits", "hyworld", "HYWorldTransformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
-    "StepVideoModel": ("dits", "stepvideo", "StepVideoModel"),
     "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel"),
     "Cosmos25Transformer3DModel": ("dits", "cosmos2_5", "Cosmos25Transformer3DModel"),
     "LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),  # Wrapper (Phase 1)
     "LongCatTransformer3DModel": ("dits", "longcat", "LongCatTransformer3DModel"),  # Native (Phase 2)
+    "LTX2Transformer3DModel": ("dits", "ltx2", "LTX2Transformer3DModel"),
+    "SD3Transformer2DModel": ("dits", "sd3", "SD3Transformer2DModel"),
+    "LingBotWorldTransformer3DModel": ("dits", "lingbotworld", "LingBotWorldTransformer3DModel"),
+    "Gen3CTransformer3DModel": ("dits", "gen3c", "Gen3CTransformer3DModel"),
+    "Kandinsky5Transformer3DModel": ("dits", "kandinsky5", "Kandinsky5Transformer3DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
     # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
-    "MatrixGameWanModel": ("dits", "matrix_game", "MatrixGameWanModel"),
-    "CausalMatrixGameWanModel": ("dits", "matrix_game", "CausalMatrixGameWanModel"),
+    "MatrixGameWanModel": ("dits", "matrixgame", "MatrixGameWanModel"),
+    "CausalMatrixGameWanModel": ("dits", "matrixgame", "CausalMatrixGameWanModel"),
 }
 
 _TEXT_ENCODER_MODELS = {
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
+    "CLIPTextModelWithProjection":
+    ("encoders", "clip", "CLIPTextModelWithProjection"),
     "LlamaModel": ("encoders", "llama", "LlamaModel"),
     "UMT5EncoderModel": ("encoders", "t5", "UMT5EncoderModel"),
-    "T5EncoderModel": ("encoders", "t5", "T5EncoderModel"),
-    "STEP1TextEncoder": ("encoders", "stepllm", "STEP1TextEncoder"),
+    "T5EncoderModel": ("encoders", "t5_hf", "T5EncoderModel"),
     "BertModel": ("encoders", "clip", "CLIPTextModel"),
     "Qwen2_5_VLTextModel": ("encoders", "qwen2_5", "Qwen2_5_VLTextModel"),
     "Reason1TextEncoder": ("encoders", "reason1", "Reason1TextEncoder"),
     "Qwen2_5_VLForConditionalGeneration":
     ("encoders", "reason1", "Reason1TextEncoder"),
+    "LTX2GemmaTextEncoderModel": ("encoders", "gemma", "LTX2GemmaTextEncoderModel"),
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
     # "HunyuanVideoTransformer3DModel": ("image_encoder", "hunyuanvideo", "HunyuanVideoImageEncoder"),
     "CLIPVisionModelWithProjection": ("encoders", "clip", "CLIPVisionModel"),
     "CLIPVisionModel": ("encoders", "clip", "CLIPVisionModel"),
+    "SiglipVisionModel": ("encoders", "siglip", "SiglipVisionModel"),
 }
 
 _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo":
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
+    "AutoencoderKLCausal3D": ("vaes", "gamecraftvae", "GameCraftVAE"),
+    "AutoencoderKLHYWorld": ("vaes", "hyworldvae", "AutoencoderKLHYWorld"),
     "AutoencoderKLHunyuanVideo15": ("vaes", "hunyuan15vae", "AutoencoderKLHunyuanVideo15"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
-    "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo")
+    "AutoencoderKL": ("vaes", "autoencoder_kl", "AutoencoderKL"),
+    "AutoencoderKLGen3CTokenizer":
+    ("vaes", "gen3c_tokenizer_vae", "AutoencoderKLGen3CTokenizer"),
+    "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
+    "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
+}
+
+_AUDIO_MODELS = {
+    "LTX2AudioEncoder": ("audio", "ltx2_audio_vae", "LTX2AudioEncoder"),
+    "LTX2AudioDecoder": ("audio", "ltx2_audio_vae", "LTX2AudioDecoder"),
+    "LTX2Vocoder": ("audio", "ltx2_audio_vae", "LTX2Vocoder"),
 }
 
 _SCHEDULERS = {
@@ -85,14 +109,114 @@ _SCHEDULERS = {
     ("schedulers", "scheduling_rcm", "RCMScheduler"),
 }
 
-_FAST_VIDEO_MODELS = {
+_UPSAMPLERS = {
+    "SRTo720pUpsampler": ("upsamplers", "hunyuan15", "SRTo720pUpsampler"),
+    "SRTo1080pUpsampler": ("upsamplers", "hunyuan15", "SRTo1080pUpsampler"),
+}
+
+_LEGACY_FAST_VIDEO_MODELS = {
     **_TEXT_TO_VIDEO_DIT_MODELS,
     **_IMAGE_TO_VIDEO_DIT_MODELS,
     **_TEXT_ENCODER_MODELS,
     **_IMAGE_ENCODER_MODELS,
     **_VAE_MODELS,
+    **_AUDIO_MODELS,
     **_SCHEDULERS,
+    **_UPSAMPLERS,
 }
+
+MODELS_PATH = os.path.dirname(__file__)
+
+
+@lru_cache(maxsize=None)
+def _discover_and_register_models() -> dict[str, tuple[str, str, str]]:
+    discovered_models: dict[str, tuple[str, str, str]] = {}
+    for root, dirs, files in os.walk(MODELS_PATH):
+        dirs[:] = [
+            d for d in dirs
+            if not d.startswith(".") and d != "__pycache__"
+        ]
+
+        for filename in files:
+            if not filename.endswith(".py"):
+                continue
+
+            filepath = os.path.join(root, filename)
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    source = f.read()
+                tree = ast.parse(source, filename=filename)
+
+                entry_class_node = None
+                first_class_def = None
+
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Assign):
+                        for target in node.targets:
+                            if isinstance(target, ast.Name) and target.id == "EntryClass":
+                                entry_class_node = node
+                                break
+                    if first_class_def is None and isinstance(node, ast.ClassDef):
+                        first_class_def = node
+
+                if not entry_class_node or not first_class_def:
+                    continue
+
+                model_cls_name_list: list[str] = []
+                value_node = entry_class_node.value
+
+                if isinstance(value_node, ast.Name):
+                    model_cls_name_list.append(value_node.id)
+                elif isinstance(value_node, (ast.List, ast.Tuple)):
+                    for elt in value_node.elts:
+                        if isinstance(elt, ast.Constant) and isinstance(
+                                elt.value, str):
+                            model_cls_name_list.append(elt.value)
+                        elif isinstance(elt, ast.Name):
+                            model_cls_name_list.append(elt.id)
+
+                if not model_cls_name_list:
+                    continue
+
+                rel_dir = os.path.relpath(root, MODELS_PATH)
+                if rel_dir == ".":
+                    continue
+
+                rel_parts = rel_dir.split(os.sep)
+                component_name = rel_parts[0]
+                sub_parts = rel_parts[1:]
+
+                if filename == "__init__.py":
+                    mod_relname = ".".join(sub_parts)
+                else:
+                    mod_base = filename[:-3]
+                    mod_relname = ".".join(sub_parts +
+                                           [mod_base]) if sub_parts else mod_base
+
+                for model_cls_str in model_cls_name_list:
+                    if model_cls_str in discovered_models:
+                        logger.warning(
+                            "Duplicate architecture found: %s. Overwriting.",
+                            model_cls_str)
+                    discovered_models[model_cls_str] = (
+                        component_name,
+                        mod_relname,
+                        model_cls_str,
+                    )
+
+            except Exception as e:
+                logger.warning("Could not parse %s to find models: %s",
+                               filepath, e)
+
+    return discovered_models
+
+
+_DISCOVERED_MODELS = _discover_and_register_models()
+_FAST_VIDEO_MODELS = dict(_DISCOVERED_MODELS)
+for model_arch, spec in _LEGACY_FAST_VIDEO_MODELS.items():
+    if model_arch in _FAST_VIDEO_MODELS:
+        continue
+    _FAST_VIDEO_MODELS[model_arch] = spec
 
 _SUBPROCESS_COMMAND = [sys.executable, "-m", "fastvideo.models.dits.registry"]
 
@@ -325,7 +449,8 @@ class _ModelRegistry:
 ModelRegistry = _ModelRegistry({
     model_arch:
     _LazyRegisteredModel(
-        module_name=f"fastvideo.models.{component_name}.{mod_relname}",
+        module_name=(f"fastvideo.models.{component_name}.{mod_relname}"
+                     if mod_relname else f"fastvideo.models.{component_name}"),
         component_name=component_name,
         class_name=cls_name,
     )

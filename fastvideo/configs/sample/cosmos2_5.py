@@ -5,15 +5,19 @@ from fastvideo.configs.sample.base import SamplingParam
 
 
 @dataclass
-class Cosmos_Predict2_5_2B_Diffusers_SamplingParam(SamplingParam):
-    """Defaults for Cosmos 2.5 (Predict2.5) text-to-video diffusers-format model."""
-
-    height: int = 480
-    width: int = 832
-    num_frames: int = 121
+class Cosmos25SamplingParamBase(SamplingParam):
+    height: int = 704
+    width: int = 1280
+    num_frames: int = 77
     fps: int = 24
+    seed: int = 0
 
     guidance_scale: float = 7.0
-    # Official Cosmos2.5 sampling uses empty string as unconditional.
-    negative_prompt: str = ""
+    negative_prompt: str = (
+        "The video captures a series of frames showing ugly scenes, static with no motion, motion blur, "
+        "over-saturation, shaky footage, low resolution, grainy texture, pixelated images, poorly lit areas, "
+        "underexposed and overexposed scenes, poor color balance, washed out colors, choppy sequences, jerky movements, "
+        "low frame rate, artifacting, color banding, unnatural transitions, outdated special effects, fake elements, "
+        "unconvincing visuals, poorly edited content, jump cuts, visual noise, and flickering. "
+        "Overall, the video is of poor quality.")
     num_inference_steps: int = 35

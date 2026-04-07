@@ -44,17 +44,14 @@ _forward_context: Optional["ForwardContext"] = None
 
 def get_forward_context() -> "ForwardContext":
     """Get the current forward context."""
-    assert _forward_context is not None, (
-        "Forward context is not set. "
-        "Please use `set_forward_context` to set the forward context.")
+    assert _forward_context is not None, ("Forward context is not set. "
+                                          "Please use `set_forward_context` to set the forward context.")
     return _forward_context
 
 
 # TODO(will): finalize the interface
 @contextmanager
-def set_forward_context(current_timestep,
-                        attn_metadata,
-                        forward_batch: Optional["ForwardBatch"] = None):
+def set_forward_context(current_timestep, attn_metadata, forward_batch: Optional["ForwardBatch"] = None):
     """A context manager that stores the current forward context,
     can be attention metadata, etc.
     Here we can inject common logic for every model forward pass.
@@ -83,8 +80,7 @@ def set_forward_context(current_timestep,
                 batchsize = attn_metadata.num_input_tokens
             now = time.perf_counter()
             # time measurement is in milliseconds
-            batchsize_forward_time[batchsize].append(
-                (now - forward_start_time) * 1000)
+            batchsize_forward_time[batchsize].append((now - forward_start_time) * 1000)
             if now - last_logging_time > batchsize_logging_interval:
                 last_logging_time = now
                 forward_stats = []
@@ -98,6 +94,5 @@ def set_forward_context(current_timestep,
                 forward_stats.sort(key=lambda x: x[1], reverse=True)
                 if forward_stats:
                     logger.info(("Batchsize forward time stats "
-                                 "(batchsize, count, median_time(ms)): %s"),
-                                forward_stats)
+                                 "(batchsize, count, median_time(ms)): %s"), forward_stats)
         _forward_context = prev_context
