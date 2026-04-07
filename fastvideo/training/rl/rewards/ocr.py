@@ -56,23 +56,15 @@ class OcrScorerVideo(BaseRewardModel):
         Returns:
             Average reward across positive-scoring frames
         """
-        # Same as flow_grpo OcrScorer_video_or_image: use full prompt, normalized
-        target_text = prompt.replace(" ", "").lower()
-        if not target_text:
-            return 0.0
+        prompt = prompt.replace(' ','').lower()
 
         # video_tensor is [C, T, H, W]
         C, T, H, W = video_tensor.shape
-
-        # Convert to numpy and move to CPU if needed (align with flow_grpo)
         video_np = video_tensor.detach().float().cpu().numpy()
-
         video_np = np.transpose(video_np, (1, 2, 3, 0))  # [C, T, H, W] --> [T, H, W, C]
-
-        # Same as flow_grpo: (videos * 255).round().clamp(0, 255) -> uint8
         video_np = np.clip(np.round(video_np * 255.0), 0.0, 255.0).astype(np.uint8)
 
-        frame_rewards = []
+        rewards = []
 
         # Sample frames at specified interval
         for frame_idx in range(0, T, self.frame_interval):
@@ -82,26 +74,21 @@ class OcrScorerVideo(BaseRewardModel):
                 result = self.ocr.ocr(frame, cls=False)
                 # Same text extraction as flow_grpo OcrScorer_video_or_image
                 recognized_text = (
-                    "".join([res[1][0] if res[1][1] > 0 else "" for res in result[0]])
-                    if result and result[0]
-                    else ""
+                    ''.join([res[1][0] if res[1][1] > 0 else '' for res in result[0]])
+                    if result[0]
+                    else ''
                 )
+                recognized_text = recognized_text.replace(' ', '').lower()
+
+                dist = distance(recognized_text, prompt)
+                dist = min(dist, len(prompt))
             except Exception as e:
-                logger.info("OCR failed on frame %d: %s", frame_idx, str(e))
-                recognized_text = ""
+                dist=len(prompt)
 
-            recognized_text = recognized_text.replace(" ", "").lower()
-            # Same as flow_grpo: always use distance (no substring check)
-            dist = distance(recognized_text, target_text)
-            dist = min(dist, len(target_text))
-            reward = 1.0 - dist / len(target_text)
+            reward = 1.0 - dist / len(prompt)
+            rewards.append(reward)
 
-            if reward > 0:
-                frame_rewards.append(reward)
-
-
-        # Same as flow_grpo: average of positive frame rewards
-        return (sum(frame_rewards) / len(frame_rewards)) if frame_rewards else 0.0
+        return (sum(rewards) / len(rewards)) if rewards else 0.0
 
     @torch.no_grad()
     def compute_reward(self, videos: torch.Tensor, prompts: list[str],

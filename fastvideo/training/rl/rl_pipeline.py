@@ -1713,7 +1713,7 @@ class RLPipeline(TrainingPipeline):
                 # Note: std_dev_t and dt_ref are already broadcast to [B, 1, 1, 1, 1]
                 # Aligned with flow_grpo: no epsilon added to match exactly
                 kl_loss_j = ((prev_sample_mean - prev_sample_mean_ref)**2).mean(
-                    dim=(1, 2, 3, 4), keepdim=True) / (2 *
+                    dim=(1, 2, 3), keepdim=True) / (2 *
                                                        (std_dev_t * dt_ref)**2)
                 kl_loss_j = kl_loss_j.mean()  # Average over batch dimension
             else:
