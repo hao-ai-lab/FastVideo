@@ -1,18 +1,18 @@
-# Cosmos-Predict2-2B T2V overfitting test config.
+# Cosmos-Predict2.5-2B Text-to-World overfitting test config.
 #
 # Overfits on a few short videos (480x832, 93 frames) to verify the
-# Cosmos training plugin works end-to-end.
+# Cosmos 2.5 training plugin works end-to-end.
 #
 # Preprocess data first:
-#   CUDA_VISIBLE_DEVICES=0 python fastvideo/pipelines/preprocess/preprocess_cosmos_overfit.py
+#   CUDA_VISIBLE_DEVICES=0 python fastvideo/pipelines/preprocess/preprocess_cosmos25_overfit.py
 #
 # Run:
-#   bash examples/train/run.sh examples/train/configs/overfit_cosmos_t2v.yaml
+#   bash examples/train/run.sh examples/train/configs/overfit_cosmos25_t2w.yaml
 
 models:
   student:
     _target_: fastvideo.train.models.cosmos.CosmosModel
-    init_from: nvidia/Cosmos-Predict2-2B-Video2World
+    init_from: KyleShao/Cosmos-Predict2.5-2B-Diffusers
     trainable: true
     enable_gradient_checkpointing_type: full
     flow_shift: 1.0
@@ -29,7 +29,7 @@ training:
     hsdp_shard_dim: 1
 
   data:
-    data_path: data/cosmos_overfit_preprocessed
+    data_path: data/cosmos25_overfit_preprocessed
     dataloader_num_workers: 0
     train_batch_size: 1
     training_cfg_rate: 0.0
@@ -51,13 +51,13 @@ training:
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: outputs/cosmos_overfit
+    output_dir: outputs/cosmos25_overfit
     training_state_checkpointing_steps: 50
     checkpoints_total_limit: 2
 
   tracker:
-    project_name: fastvideo_cosmos
-    run_name: cosmos_overfit
+    project_name: fastvideo_cosmos25
+    run_name: cosmos25_overfit
 
   model:
     precondition_outputs: true
@@ -69,8 +69,8 @@ callbacks:
     max_grad_norm: 1.0
   validation:
     _target_: fastvideo.train.callbacks.validation.ValidationCallback
-    pipeline_target: fastvideo.pipelines.basic.cosmos.cosmos_pipeline.Cosmos2VideoToWorldPipeline
-    dataset_file: data/cosmos_overfit_preprocessed/validation_prompts.json
+    pipeline_target: fastvideo.pipelines.basic.cosmos.cosmos2_5_pipeline.Cosmos2_5Pipeline
+    dataset_file: data/cosmos25_overfit_preprocessed/validation_prompts.json
     every_steps: 150
     sampling_steps: [35]
     guidance_scale: 7.0

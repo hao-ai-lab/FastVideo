@@ -33,14 +33,21 @@ if TYPE_CHECKING:
 
 
 class CosmosModel(WanModel):
-    """Cosmos per-role model.
+    """Cosmos 2.5 per-role model.
 
     Inherits most behaviour from WanModel (noise scheduler,
     timestep sampling, attention metadata, backward).  Overrides
-    only the pieces that differ for Cosmos.
+    only the pieces that differ for Cosmos 2.5.
+
+    Cosmos 2.5 uses:
+    - Cosmos25Transformer3DModel (velocity prediction)
+    - EDM noise schedule: x_t = x_0 + sigma * eps
+    - No input/output preconditioning (raw latents)
+    - Timestep = raw sigma value
+    - Model output = velocity ≈ noise
     """
 
-    _transformer_cls_name: str = "CosmosTransformer3DModel"
+    _transformer_cls_name: str = "Cosmos25Transformer3DModel"
 
     def __init__(
         self,
@@ -179,31 +186,24 @@ class CosmosModel(WanModel):
         noisy_latents = noisy_latents.permute(0, 2, 1, 3, 4)
 
         # ----------------------------------------------------------
-        # EDM preconditioning (matches pretrained Cosmos model).
+        # Cosmos 2.5: velocity prediction, no preconditioning.
         #
         # Noise schedule (EDM):  x_t = x_0 + sigma * eps
-        #   where sigma ∈ [sigma_min, sigma_max] (Karras schedule)
+        # Model input:   raw x_t (no c_in scaling)
+        # Timestep:      raw sigma value
+        # Model output:  velocity v ≈ noise
         #
-        # Input scaling:   c_in  = 1 / sqrt(sigma² + sigma_data²)
-        # Output x0:       x̂₀   = c_skip * x_t + c_out * F(c_in * x_t)
-        #   c_skip = sigma_data² / (sigma² + sigma_data²)
-        #   c_out  = sigma * sigma_data / sqrt(sigma² + sigma_data²)
-        #
-        # Timestep:  t = 0.25 * ln(sigma)   (EDM convention)
-        #
-        # _prepare_dit_inputs stores EDM sigmas in batch.sigmas.
+        # finetune.py (precondition_outputs=True) computes:
+        #   pred_x0 = x_t - pred * sigma
+        # Since v ≈ noise, this gives:
+        #   pred_x0 = (x_0 + sigma*eps) - eps*sigma = x_0  ✓
         # ----------------------------------------------------------
         assert batch.sigmas is not None
-        sigma_data = 1.0
-
         sigma_1d = batch.sigmas.flatten()[:noisy_latents.shape[0]]
-        sigma_5d = sigma_1d.view(-1, 1, 1, 1, 1)
 
-        c_in = 1.0 / (sigma_5d**2 + sigma_data**2) ** 0.5
-        model_input = noisy_latents * c_in
-
-        # EDM timestep: t = 0.25 * ln(sigma)
-        edm_timestep = 0.25 * torch.log(sigma_1d)
+        # Cosmos 2.5 timestep = raw sigma (matching inference
+        # convention where scheduler timestep * 0.001 = sigma).
+        cosmos_timestep = sigma_1d
 
         with (
             torch.autocast(device_type, dtype=dtype),
@@ -213,26 +213,14 @@ class CosmosModel(WanModel):
             ),
         ):
             input_kwargs = self._build_distill_input_kwargs(
-                model_input, edm_timestep, text_dict,
+                noisy_latents, cosmos_timestep, text_dict,
             )
             transformer = self._get_transformer(timestep)
             model_output = transformer(**input_kwargs)
 
-        # EDM output preconditioning → x0 prediction.
-        c_skip = sigma_data**2 / (sigma_5d**2 + sigma_data**2)
-        c_out = (
-            sigma_5d * sigma_data
-            / (sigma_5d**2 + sigma_data**2) ** 0.5
-        )
-        pred_x0 = c_skip * noisy_latents + c_out * model_output
-
-        # finetune.py computes:  pred_x0 = noisy - pred * sigma
-        # Convert our x0 prediction to that format:
-        #   pred = (noisy - pred_x0) / sigma
-        pred = (noisy_latents - pred_x0) / sigma_5d.clamp(min=1e-6)
-
+        # Raw velocity output (≈ noise).
         # Re-permute (B, C, T, H, W) → (B, T, C, H, W)
-        pred = pred.permute(0, 2, 1, 3, 4)
+        pred = model_output.permute(0, 2, 1, 3, 4)
         return pred
 
     def _build_distill_input_kwargs(
@@ -241,47 +229,48 @@ class CosmosModel(WanModel):
         timestep: torch.Tensor,
         text_dict: dict[str, torch.Tensor] | None,
     ) -> dict[str, Any]:
-        """Build transformer forward kwargs for Cosmos.
+        """Build transformer forward kwargs for Cosmos 2.5.
 
-        Unlike Wan, Cosmos:
-        - takes hidden_states in (B,C,T,H,W) directly
-        - does not use encoder_attention_mask
-        - needs condition_mask and padding_mask
+        Cosmos 2.5 transformer expects:
+        - hidden_states in (B, C, T, H, W)
+        - timestep as (B, 1) for T2W (scalar per sample)
+        - condition_mask and padding_mask
+        - fps tensor
         """
         if text_dict is None:
-            raise ValueError("text_dict cannot be None for "
-                             "Cosmos forward pass")
+            raise ValueError(
+                "text_dict cannot be None for Cosmos forward"
+            )
 
         b, c, t, h, w = noise_input.shape
 
-        # For t2v fine-tuning, no conditioning frames
-        # → all-zero condition_mask.
+        # For T2W fine-tuning: no conditioning frames.
         condition_mask = torch.zeros(
-            b,
-            1,
-            t,
-            h,
-            w,
+            b, 1, t, h, w,
             device=noise_input.device,
             dtype=noise_input.dtype,
         )
 
         # Padding mask: zeros (no padding).
         padding_mask = torch.zeros(
-            1,
-            1,
-            h,
-            w,
+            1, 1, h, w,
             device=noise_input.device,
             dtype=noise_input.dtype,
         )
 
+        # Cosmos 2.5 expects timestep as (B, 1) for T2W.
+        if timestep.ndim == 1:
+            timestep = timestep.unsqueeze(1)
+
         return {
             "hidden_states": noise_input,
-            "encoder_hidden_states": (text_dict["encoder_hidden_states"]),
+            "encoder_hidden_states": (
+                text_dict["encoder_hidden_states"]
+            ),
             "timestep": timestep,
             "condition_mask": condition_mask,
             "padding_mask": padding_mask,
+            "fps": 16,
         }
 
     def _prepare_dit_inputs(
@@ -388,68 +377,41 @@ class CosmosModel(WanModel):
         return training_batch
 
     def ensure_negative_conditioning(self) -> None:
-        """Encode the negative prompt with T5 text encoder.
+        """Create negative (unconditional) prompt embeddings.
 
-        Cosmos uses a single T5 encoder (not dual like
-        Hunyuan).  Every rank encodes independently.
+        Cosmos 2.5 uses Reason1 (Qwen2.5-VL) which is expensive
+        to load.  For training with ``training_cfg_rate=0`` (no
+        classifier-free guidance dropout), the negative embedding
+        is never used.  We create a zero-valued placeholder that
+        matches the text embedding dimension from the dataset.
         """
         if self.negative_prompt_embeds is not None:  # type: ignore[has-type]
             return
 
-        assert self.training_config is not None
-        tc = self.training_config
         device = self.device
         dtype = self._get_training_dtype()
 
-        from transformers import (
-            AutoTokenizer,
-            T5EncoderModel,
+        # Infer embedding dimension from the pipeline config's
+        # text encoder settings, or fall back to a reasonable
+        # default for Cosmos 2.5 (Reason1 full_concat: 100352).
+        assert self.training_config is not None
+        tc = self.training_config
+        text_enc_cfgs = tc.pipeline_config.text_encoder_configs
+        if text_enc_cfgs:
+            arch = text_enc_cfgs[0].arch_config
+            embed_dim = getattr(arch, "hidden_size", 100352)
+        else:
+            embed_dim = 100352
+
+        num_tokens = 512  # Reason1 default padding length
+
+        neg_embeds = torch.zeros(
+            1, num_tokens, embed_dim,
+            device=device, dtype=dtype,
         )
-        from fastvideo.configs.pipelines.cosmos import (
-            t5_large_postprocess_text, )
-        from fastvideo.utils import maybe_download_model
-
-        model_path = maybe_download_model(tc.model_path)
-
-        import os
-
-        # Load T5 text encoder.
-        text_enc_cfg = tc.pipeline_config.text_encoder_configs[0]
-        tok_kwargs = dict(text_enc_cfg.tokenizer_kwargs)
-        precision = tc.pipeline_config.text_encoder_precisions[0]
-        from fastvideo.utils import PRECISION_TO_TYPE
-        enc_dtype = PRECISION_TO_TYPE[precision]
-
-        tokenizer = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
-        text_encoder = T5EncoderModel.from_pretrained(
-            os.path.join(model_path, "text_encoder"),
-            torch_dtype=enc_dtype,
-        ).to(device).eval()
-
-        negative_prompt = ""
-        with torch.no_grad():
-            inputs = tokenizer(negative_prompt, **tok_kwargs).to(device)
-            outputs = text_encoder(**inputs)
-
-            # Use the same postprocessing as inference.
-            from fastvideo.configs.models.encoders.base import (
-                BaseEncoderOutput, )
-            enc_output = BaseEncoderOutput(
-                last_hidden_state=outputs.last_hidden_state,
-                attention_mask=inputs.get("attention_mask"),
-            )
-            neg_embeds = t5_large_postprocess_text(enc_output, ).unsqueeze(0).to(device=device, dtype=dtype)
-
-        del text_encoder, tokenizer
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-        # Attention mask: all ones.
         neg_mask = torch.ones(
-            neg_embeds.shape[:2],
-            device=device,
-            dtype=dtype,
+            1, num_tokens,
+            device=device, dtype=dtype,
         )
 
         self.negative_prompt_embeds = neg_embeds
