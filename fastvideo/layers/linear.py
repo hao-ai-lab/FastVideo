@@ -150,8 +150,8 @@ class UnquantizedLinearMethod(LinearMethodBase):
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
         output = (
-            F.linear(x, layer.weight, bias) if torch.cuda.is_available() or bias is None else F.linear(
-                x, layer.weight, bias.to(x.dtype))
+            F.linear(x, layer.weight, bias) if torch.cuda.is_available()
+            or bias is None else F.linear(x, layer.weight, bias.to(x.dtype))
         )  # NOTE: this line assumes that we are using amp when using cuda and is needed to account for the fact that amp isn't supported in mps
         return output
 
@@ -189,7 +189,8 @@ class LinearBase(torch.nn.Module):
         self.quant_config = quant_config
         self.prefix = prefix
         if quant_config is None:
-            self.quant_method: QuantizeMethodBase | None = (UnquantizedLinearMethod())
+            self.quant_method: QuantizeMethodBase | None = (
+                UnquantizedLinearMethod())
         else:
             self.quant_method = quant_config.get_quant_method(self, prefix=prefix)
 
@@ -211,42 +212,38 @@ class ReplicatedLinear(LinearBase):
                         (e.g. model.layers.0.qkv_proj)
     """
 
-    def __init__(
-        self,
-        input_size: int,
-        output_size: int,
-        bias: bool = True,
-        skip_bias_add: bool = False,
-        params_dtype: torch.dtype | None = None,
-        quant_config: QuantizationConfig | None = None,
-        prefix: str = "",
-    ):
-        super().__init__(
-            input_size,
-            output_size,
-            skip_bias_add,
-            params_dtype,
-            quant_config,
-            prefix=prefix,
-        )
+    def __init__(self,
+                 input_size: int,
+                 output_size: int,
+                 bias: bool = True,
+                 skip_bias_add: bool = False,
+                 params_dtype: torch.dtype | None = None,
+                 quant_config: QuantizationConfig | None = None,
+                 prefix: str = ""):
+        super().__init__(input_size,
+                         output_size,
+                         skip_bias_add,
+                         params_dtype,
+                         quant_config,
+                         prefix=prefix)
 
         # All the linear layer supports quant method.
-        assert self.quant_method is not None
-        self.quant_method.create_weights(
-            self,
-            self.input_size,
-            [self.output_size],
-            self.input_size,
-            self.output_size,
-            self.params_dtype,
-            weight_loader=self.weight_loader,
-        )
+        if self.quant_method is None:
+            self.quant_method = UnquantizedLinearMethod()
+        
+        self.quant_method.create_weights(self,
+                                         self.input_size, [self.output_size],
+                                         self.input_size,
+                                         self.output_size,
+                                         self.params_dtype,
+                                         weight_loader=self.weight_loader)
 
         if bias:
-            self.bias = Parameter(torch.empty(
-                self.output_size,
-                dtype=self.params_dtype,
-            ))
+            self.bias = Parameter(
+                torch.empty(
+                    self.output_size,
+                    dtype=self.params_dtype,
+                ))
             set_weight_attrs(
                 self.bias,
                 {
@@ -269,8 +266,25 @@ class ReplicatedLinear(LinearBase):
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, Parameter | None]:
         bias = self.bias if not self.skip_bias_add else None
-        assert self.quant_method is not None
+        if self.quant_method is None:
+            self.quant_method = UnquantizedLinearMethod()
+        
         output = self.quant_method.apply(self, x, bias)
+        
+        # Create a shape key for uniqueness checking
+        # shape_key = (x.shape, output.shape)
+        
+        # Track unique shapes and map them to layer types
+        # if shape_key not in self._unique_shapes:
+        #     self._unique_shapes.add(shape_key)
+        #     self._shape_to_layer_types[shape_key] = []
+        #     print(f"Layer: {self.prefix} | input shape: {x.shape} --> output shape: {output.shape}, Quant Method: {self.quant_method.__class__.__name__}")
+        
+        # Add this layer type to the list for this shape if not already present
+        # layer_type = self.__class__.__name__
+        # if layer_type not in self._shape_to_layer_types[shape_key]:
+        #     self._shape_to_layer_types[shape_key].append(layer_type)
+        
         output_bias = self.bias if self.skip_bias_add else None
         return output, output_bias
 
@@ -279,6 +293,28 @@ class ReplicatedLinear(LinearBase):
         s += f", output_features={self.output_size}"
         s += f", bias={self.bias is not None}"
         return s
+    
+    @classmethod
+    def get_shape_mapping(cls) -> dict:
+        """Get the mapping from (input_shape, output_shape) to layer types."""
+        return cls._shape_to_layer_types.copy()
+    
+    @classmethod
+    def print_shape_summary(cls):
+        """Print a summary of all unique shapes and their layer types."""
+        if not cls._shape_to_layer_types:
+            print("No shapes have been processed yet.")
+            return
+        
+        print(f"\n=== Matrix Multiplication Shape Summary ===")
+        print(f"Total unique shapes: {len(cls._shape_to_layer_types)}")
+        print()
+        
+        for i, (shape_key, layer_types) in enumerate(cls._shape_to_layer_types.items(), 1):
+            input_shape, output_shape = shape_key
+            print(f"{i}. Input: {input_shape} → Output: {output_shape}")
+            print(f"   Layer types: {', '.join(layer_types)}")
+            print()
 
 
 class ColumnParallelLinear(LinearBase):
@@ -340,7 +376,9 @@ class ColumnParallelLinear(LinearBase):
         if output_sizes is None:
             output_sizes = [output_size]
 
-        assert self.quant_method is not None
+        if self.quant_method is None:
+            self.quant_method = UnquantizedLinearMethod()
+        
         self.quant_method.create_weights(
             layer=self,
             input_size_per_partition=self.input_size_per_partition,
@@ -348,14 +386,16 @@ class ColumnParallelLinear(LinearBase):
             input_size=self.input_size,
             output_size=self.output_size,
             params_dtype=self.params_dtype,
-            weight_loader=(self.weight_loader_v2 if self.quant_method.__class__.__name__ in WEIGHT_LOADER_V2_SUPPORTED
-                           else self.weight_loader),
+            weight_loader=(
+                self.weight_loader_v2 if self.quant_method.__class__.__name__
+                in WEIGHT_LOADER_V2_SUPPORTED else self.weight_loader),
         )
         if bias:
-            self.bias = Parameter(torch.empty(
-                self.output_size_per_partition,
-                dtype=params_dtype,
-            ))
+            self.bias = Parameter(
+                torch.empty(
+                    self.output_size_per_partition,
+                    dtype=params_dtype,
+                ))
             set_weight_attrs(
                 self.bias,
                 {
@@ -399,7 +439,8 @@ class ColumnParallelLinear(LinearBase):
         bias = self.bias if not self.skip_bias_add else None
 
         # Matrix multiply.
-        assert self.quant_method is not None
+        if self.quant_method is None:
+            self.quant_method = UnquantizedLinearMethod()
         output_parallel = self.quant_method.apply(self, input_, bias)
         # All-gather across the partitions if needed.
         output = tensor_model_parallel_all_gather(output_parallel) if self.gather_output else output_parallel
@@ -556,8 +597,9 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
             # for the packing.
             if (isinstance(param, PackedColumnParameter | PackedvLLMParameter)
                     and param.packed_dim == param.output_dim):
-                shard_size, shard_offset = (param.adjust_shard_indexes_for_packing(shard_size=shard_size,
-                                                                                   shard_offset=shard_offset))
+                shard_size, shard_offset = (
+                    param.adjust_shard_indexes_for_packing(
+                        shard_size=shard_size, shard_offset=shard_offset))
 
             loaded_weight_shard = loaded_weight.narrow(param.output_dim, shard_offset, shard_size)
             self.weight_loader_v2(param, loaded_weight_shard, shard_id)
@@ -665,7 +707,8 @@ class QKVParallelLinear(ColumnParallelLinear):
             self.num_kv_heads = divide(self.total_num_kv_heads, tp_size)
             self.num_kv_head_replicas = 1
         input_size = self.hidden_size
-        output_size = ((self.num_heads + 2 * self.num_kv_heads) * tp_size * self.head_size)
+        output_size = ((self.num_heads + 2 * self.num_kv_heads) * tp_size *
+                       self.head_size)
         self.output_sizes = [
             self.num_heads * self.head_size * tp_size,  # q_proj
             self.num_kv_heads * self.head_size * tp_size,  # k_proj
@@ -720,7 +763,8 @@ class QKVParallelLinear(ColumnParallelLinear):
             ),
             (
                 "v",
-                (self.total_num_heads + self.total_num_kv_heads) * self.head_size,
+                (self.total_num_heads + self.total_num_kv_heads) *
+                self.head_size,
                 self.total_num_kv_heads * self.head_size,
             ),
         ]
@@ -731,8 +775,9 @@ class QKVParallelLinear(ColumnParallelLinear):
             # for the packing.
             if (isinstance(param, PackedColumnParameter | PackedvLLMParameter)
                     and param.packed_dim == param.output_dim):
-                shard_size, shard_offset = (param.adjust_shard_indexes_for_packing(shard_size=shard_size,
-                                                                                   shard_offset=shard_offset))
+                shard_size, shard_offset = (
+                    param.adjust_shard_indexes_for_packing(
+                        shard_size=shard_size, shard_offset=shard_offset))
 
             loaded_weight_shard = loaded_weight.narrow(param.output_dim, shard_offset, shard_size)
             self.weight_loader_v2(param, loaded_weight_shard, shard_id)
@@ -801,13 +846,15 @@ class QKVParallelLinear(ColumnParallelLinear):
                 ),
                 (
                     "v",
-                    (self.total_num_heads + self.total_num_kv_heads) * self.head_size,
+                    (self.total_num_heads + self.total_num_kv_heads) *
+                    self.head_size,
                     self.total_num_kv_heads * self.head_size,
                 ),
             ]
 
             for shard_id, shard_offset, shard_size in shard_offsets:
-                loaded_weight_shard = loaded_weight.narrow(output_dim, shard_offset, shard_size)
+                loaded_weight_shard = loaded_weight.narrow(
+                    output_dim, shard_offset, shard_size)
                 self.weight_loader(param, loaded_weight_shard, shard_id)
             return
 
@@ -916,7 +963,9 @@ class RowParallelLinear(LinearBase):
         self.input_is_parallel = input_is_parallel
         self.reduce_results = reduce_results
 
-        assert self.quant_method is not None
+        if self.quant_method is None:
+            self.quant_method = UnquantizedLinearMethod()
+        
         self.quant_method.create_weights(
             layer=self,
             input_size_per_partition=self.input_size_per_partition,
@@ -924,15 +973,17 @@ class RowParallelLinear(LinearBase):
             input_size=self.input_size,
             output_size=self.output_size,
             params_dtype=self.params_dtype,
-            weight_loader=(self.weight_loader_v2 if self.quant_method.__class__.__name__ in WEIGHT_LOADER_V2_SUPPORTED
-                           else self.weight_loader),
+            weight_loader=(
+                self.weight_loader_v2 if self.quant_method.__class__.__name__
+                in WEIGHT_LOADER_V2_SUPPORTED else self.weight_loader),
         )
         if not reduce_results and (bias and not skip_bias_add):
             raise ValueError("When not reduce the results, adding bias to the "
                              "results can lead to incorrect results")
 
         if bias:
-            self.bias = Parameter(torch.empty(self.output_size, dtype=params_dtype))
+            self.bias = Parameter(
+                torch.empty(self.output_size, dtype=params_dtype))
             set_weight_attrs(
                 self.bias,
                 {
@@ -965,7 +1016,8 @@ class RowParallelLinear(LinearBase):
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
 
-    def weight_loader_v2(self, param: BasevLLMParameter, loaded_weight: torch.Tensor):
+    def weight_loader_v2(self, param: BasevLLMParameter,
+                         loaded_weight: torch.Tensor):
         # Special case for loading scales off disk, which often do not
         # have a shape (such as in the case of AutoFP8).
         if len(loaded_weight.shape) == 0:
@@ -983,7 +1035,8 @@ class RowParallelLinear(LinearBase):
             input_parallel = splitted_input[tp_rank].contiguous()
 
         # Matrix multiply.
-        assert self.quant_method is not None
+        if self.quant_method is None:
+            self.quant_method = UnquantizedLinearMethod()
         # Only fuse bias add into GEMM for rank 0 (this ensures that
         # bias will not get added more than once in TP>1 case)
         bias_ = None if (self.tp_rank > 0 or self.skip_bias_add) else self.bias
@@ -1004,3 +1057,4 @@ class RowParallelLinear(LinearBase):
         s += f", tp_size={self.tp_size}"
         s += f", reduce_results={self.reduce_results}"
         return s
+

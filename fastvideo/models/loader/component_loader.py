@@ -561,6 +561,7 @@ class TokenizerLoader(ComponentLoader):
                 # If parsing fails, fall through to AutoTokenizer below.
                 pass
 
+
         tokenizer = AutoTokenizer.from_pretrained(
             resolved_model_path,  # "<path to model>/tokenizer"
             # in v0, this was same string as encoder_name "ClipTextModel"

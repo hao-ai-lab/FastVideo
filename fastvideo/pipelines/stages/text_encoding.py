@@ -85,9 +85,6 @@ class TextEncodingStage(PipelineStage):
                 encoder_index=all_indices,
                 return_attention_mask=True,
             )
-            if self._last_audio_embeds is not None:
-                batch.extra["ltx2_audio_negative_embeds"] = self._last_audio_embeds
-
             assert batch.negative_prompt_embeds is not None
             for ne in neg_embeds_list:
                 batch.negative_prompt_embeds.append(ne)
@@ -104,7 +101,8 @@ class TextEncodingStage(PipelineStage):
         # result.add_check(
         #     "negative_prompt", batch.negative_prompt, lambda x: not batch.
         #     do_classifier_free_guidance or V.string_not_empty(x))
-        result.add_check("do_classifier_free_guidance", batch.do_classifier_free_guidance, V.bool_value)
+        result.add_check("do_classifier_free_guidance",
+                         batch.do_classifier_free_guidance, V.bool_value)
         result.add_check("prompt_embeds", batch.prompt_embeds, V.is_list)
         result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds, V.none_or_list)
         return result
@@ -185,8 +183,8 @@ class TextEncodingStage(PipelineStage):
         preprocess_funcs = fastvideo_args.pipeline_config.preprocess_text_funcs
         postprocess_funcs = fastvideo_args.pipeline_config.postprocess_text_funcs
         encoder_cfgs = fastvideo_args.pipeline_config.text_encoder_configs
-        is_ltx2 = getattr(fastvideo_args.pipeline_config.dit_config, "prefix", "") == "ltx2"
-
+        is_ltx2 = getattr(fastvideo_args.pipeline_config.dit_config, "prefix",
+                          "") == "ltx2"
         if return_type not in ("list", "dict", "stack"):
             raise ValueError(f"Invalid return_type '{return_type}'. Expected one of: 'list', 'dict', 'stack'")
 
@@ -360,4 +358,70 @@ class Cosmos25TextEncodingStage(PipelineStage):
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors_min_dims(2))
         result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds,
                          lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x))
+        return result
+
+
+class Cosmos25TextEncodingStage(PipelineStage):
+    """Cosmos 2.5 text encoding stage.
+
+    Cosmos 2.5 uses Reason1 (Qwen2.5-VL) and relies on the encoder's
+    `compute_text_embeddings_online()`.
+    """
+
+    def __init__(self, text_encoder) -> None:
+        super().__init__()
+        self.text_encoder = text_encoder
+
+    @torch.no_grad()
+    def forward(self, batch: ForwardBatch,
+                fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        assert batch.prompt is not None
+        prompts = [batch.prompt] if isinstance(batch.prompt,
+                                               str) else batch.prompt
+
+        encoder = self.text_encoder
+        if not hasattr(encoder, "compute_text_embeddings_online"):
+            raise RuntimeError(
+                "Cosmos25TextEncodingStage requires text_encoder.compute_text_embeddings_online()"
+            )
+
+        with set_forward_context(current_timestep=0, attn_metadata=None):
+            prompt_embeds = encoder.compute_text_embeddings_online(
+                {"text": prompts}, "text")
+
+        batch.prompt_embeds = [prompt_embeds]
+
+        if batch.do_classifier_free_guidance:
+            neg = batch.negative_prompt
+            neg_prompts = ([neg] *
+                           len(prompts)) if isinstance(neg, str) else neg
+            with set_forward_context(current_timestep=0, attn_metadata=None):
+                neg_embeds = encoder.compute_text_embeddings_online(
+                    {"text": neg_prompts}, "text")
+            batch.negative_prompt_embeds = [neg_embeds]
+        else:
+            batch.negative_prompt_embeds = []
+
+        return batch
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        result = VerificationResult()
+        result.add_check("prompt", batch.prompt, V.string_or_list_strings)
+        result.add_check(
+            "negative_prompt",
+            batch.negative_prompt,
+            lambda x:
+            (not batch.do_classifier_free_guidance) or isinstance(x, str),
+        )
+        return result
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+        result = VerificationResult()
+        result.add_check("prompt_embeds", batch.prompt_embeds,
+                         V.list_of_tensors_min_dims(2))
+        result.add_check(
+            "negative_prompt_embeds", batch.negative_prompt_embeds, lambda x:
+            not batch.do_classifier_free_guidance or V.list_not_empty(x))
         return result

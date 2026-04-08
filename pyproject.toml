@@ -23,7 +23,7 @@ dependencies = [
     # Machine Learning & Transformers
     "transformers==4.57.3",
     "tokenizers>=0.20.1",
-    "sentencepiece==0.2.0",
+    "sentencepiece==0.2.1",
     "timm==1.0.11",
     "peft>=0.15.0",
     "diffusers>=0.33.1",
@@ -98,6 +98,7 @@ torchvision = [
   { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
   { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
 ]
+fastvideo-kernel = { path = "fastvideo-kernel", editable = true }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

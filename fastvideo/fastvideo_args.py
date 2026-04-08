@@ -199,6 +199,7 @@ class FastVideoArgs:
                 logger.error("Failed to load V-MoBA config from %s: %s", self.moba_config_path, e)
                 raise
         self._apply_ltx2_vae_overrides()
+        self._apply_ltx2_vae_overrides()
         self.check_fastvideo_args()
 
     def _apply_ltx2_vae_overrides(self) -> None:
@@ -385,6 +386,100 @@ class FastVideoArgs:
             "--lora-path",
             type=str,
             default=FastVideoArgs.lora_path,
+            help=
+            "Path to a LoRA adapter (directory or HF repo id). If set, LoRA will be applied at inference.",
+        )
+        parser.add_argument(
+            "--lora-nickname",
+            type=str,
+            default=FastVideoArgs.lora_nickname,
+            help=
+            "Nickname to refer to the loaded LoRA adapter (useful for swapping).",
+        )
+        parser.add_argument(
+            "--lora-target-modules",
+            nargs="+",
+            type=str,
+            default=FastVideoArgs.lora_target_modules,
+            help=
+            "Optional list of module name substrings to restrict LoRA injection (e.g. q_proj k_proj v_proj).",
+        )
+
+        # BSA runtime control (LongCat)
+        parser.add_argument(
+            "--enable-bsa",
+            action=StoreBoolean,
+            help=
+            "Enable Block Sparse Attention (BSA) at runtime (overrides config).",
+        )
+        parser.add_argument(
+            "--bsa-sparsity",
+            type=float,
+            help="BSA sparsity (e.g., 0.9375).",
+        )
+        parser.add_argument(
+            "--bsa-cdf-threshold",
+            type=float,
+            help="BSA CDF threshold (optional).",
+        )
+        parser.add_argument(
+            "--bsa-chunk-q",
+            nargs=3,
+            type=int,
+            metavar=("T", "H", "W"),
+            help="BSA chunk_3d_shape_q as three ints, e.g., 4 4 4.",
+        )
+        parser.add_argument(
+            "--bsa-chunk-k",
+            nargs=3,
+            type=int,
+            metavar=("T", "H", "W"),
+            help="BSA chunk_3d_shape_k as three ints, e.g., 4 4 4.",
+        )
+
+        # LTX-2 VAE tiling overrides
+        parser.add_argument(
+            "--ltx2-vae-tiling",
+            action=StoreBoolean,
+            default=FastVideoArgs.ltx2_vae_tiling,
+            help="Enable LTX-2 VAE tiling overrides.",
+        )
+        parser.add_argument(
+            "--ltx2-vae-spatial-tile-size-in-pixels",
+            type=int,
+            default=FastVideoArgs.ltx2_vae_spatial_tile_size_in_pixels,
+            help="LTX-2 VAE spatial tile size in pixels.",
+        )
+        parser.add_argument(
+            "--ltx2-vae-spatial-tile-overlap-in-pixels",
+            type=int,
+            default=FastVideoArgs.ltx2_vae_spatial_tile_overlap_in_pixels,
+            help="LTX-2 VAE spatial tile overlap in pixels.",
+        )
+        parser.add_argument(
+            "--ltx2-vae-temporal-tile-size-in-frames",
+            type=int,
+            default=FastVideoArgs.ltx2_vae_temporal_tile_size_in_frames,
+            help="LTX-2 VAE temporal tile size in frames.",
+        )
+        parser.add_argument(
+            "--ltx2-vae-temporal-tile-overlap-in-frames",
+            type=int,
+            default=FastVideoArgs.ltx2_vae_temporal_tile_overlap_in_frames,
+            help="LTX-2 VAE temporal tile overlap in frames.",
+        )
+        parser.add_argument(
+            "--ltx2-initial-latent-path",
+            type=str,
+            default=FastVideoArgs.ltx2_initial_latent_path,
+            help="Path to load/save a precomputed LTX-2 initial latent.",
+        )
+
+        # LoRA parameters (inference-time adapter loading)
+        parser.add_argument(
+            "--lora-path",
+            type=str,
+            default=FastVideoArgs.lora_path,
             help="Path to a LoRA adapter (directory or HF repo id). If set, LoRA will be applied at inference.",
         )
         parser.add_argument(
@@ -458,11 +553,14 @@ class FastVideoArgs:
             help="Enable layerwise CPU offload with async H2D prefetch overlap.",
         )
         parser.add_argument(
+            "--dit-layerwise-offload",
+            action=StoreBoolean,
+            help="Enable layerwise CPU offload with async H2D prefetch overlap.",
+        )
+        parser.add_argument(
             "--use-fsdp-inference",
             action=StoreBoolean,
-            help=
-            "Use FSDP for inference by sharding the model weights. FSDP helps reduce GPU memory usage but may introduce"
-            + " weight transfer overhead depending on the specific setup. Enable if run out of memory.",
+            help="Use FSDP for inference by sharding the model weights. Latency is very low due to prefetch--enable if run out of memory.",
         )
         parser.add_argument(
             "--text-encoder-cpu-offload",
@@ -533,6 +631,12 @@ class FastVideoArgs:
             type=str,
             default=FastVideoArgs.override_transformer_cls_name,
             help="Override transformer cls name",
+        )
+        parser.add_argument(
+            "--override-pipeline-cls-name",
+            type=str,
+            default=FastVideoArgs.override_pipeline_cls_name,
+            help="Override pipeline cls name",
         )
         parser.add_argument(
             "--override-pipeline-cls-name",
@@ -855,6 +959,8 @@ class TrainingArgs(FastVideoArgs):
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
     warp_denoising_step: bool = False
+    generator_4bit_attn: bool = False
+    generator_4bit_linear: bool = False
 
     # Self-forcing specific arguments
     num_frame_per_block: int = 3

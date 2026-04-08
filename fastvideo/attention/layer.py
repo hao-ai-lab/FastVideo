@@ -50,6 +50,10 @@ class DistributedAttention(nn.Module):
         # This ensures its parameters are included in state_dict() for saving/loading
         if isinstance(self.attn_impl, nn.Module):
             self.add_module('attn_impl', self.attn_impl)
+        # Register attn_impl as submodule if it has learnable parameters (e.g., SLA's proj_l)
+        # This ensures its parameters are included in state_dict() for saving/loading
+        if isinstance(self.attn_impl, nn.Module):
+            self.add_module('attn_impl', self.attn_impl)
         self.num_heads = num_heads
         self.head_size = head_size
         self.num_kv_heads = num_kv_heads
@@ -158,6 +162,7 @@ class DistributedAttention_VSA(DistributedAttention):
         replicated_v: torch.Tensor | None = None,
         gate_compress: torch.Tensor | None = None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
+        attention_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
@@ -170,6 +175,7 @@ class DistributedAttention_VSA(DistributedAttention):
             replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
             replicated_k (Optional[torch.Tensor]): Replicated key tensor
             replicated_v (Optional[torch.Tensor]): Replicated value tensor
+            attention_mask (Optional[torch.Tensor]): Attention mask [batch_size, seq_len]
             
         Returns:
             Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:

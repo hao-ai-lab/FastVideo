@@ -147,6 +147,14 @@ class DenoisingStage(PipelineStage):
             {
                 "mouse_cond": batch.mouse_cond,
                 "keyboard_cond": batch.keyboard_cond,
+            },
+        )
+
+        action_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "mouse_cond": batch.mouse_cond,
+                "keyboard_cond": batch.keyboard_cond,
                 "c2ws_plucker_emb": batch.c2ws_plucker_emb,
             },
         )
@@ -157,6 +165,7 @@ class DenoisingStage(PipelineStage):
                 "camera_states": batch.camera_states,
             },
         )
+
 
         # Get latents and embeddings
         latents = batch.latents

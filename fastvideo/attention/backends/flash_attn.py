@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn.functional as F
+import torch.nn.functional as F
 from flash_attn import flash_attn_func as flash_attn_2_func
 from dataclasses import dataclass
 
