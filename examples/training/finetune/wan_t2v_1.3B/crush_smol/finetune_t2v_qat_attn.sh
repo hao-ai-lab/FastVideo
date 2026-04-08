@@ -16,7 +16,7 @@ export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 # export TRITON_PRINT_AUTOTUNING=1  # to print the best config
-export WANDB_API_KEY=2f25ad37933894dbf0966c838c0b8494987f9f2f
+export WANDB_API_KEY=YOUR_WANDB_API_KEY
 # Use node-local Triton cache to avoid stale file handle errors on shared filesystems
 export TRITON_CACHE_DIR="/tmp/triton_cache_${SLURM_JOB_ID}_${SLURM_NODEID}"
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"

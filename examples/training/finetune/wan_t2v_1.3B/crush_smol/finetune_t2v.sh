@@ -16,7 +16,7 @@ export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 # export TRITON_PRINT_AUTOTUNING=1  # to print the best config
-export WANDB_API_KEY=2f25ad37933894dbf0966c838c0b8494987f9f2f
+export WANDB_API_KEY=YOUR_WANDB_API_KEY
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR=data/Wan-Syn_77x448x832_600k
 VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json"
