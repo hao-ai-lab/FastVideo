@@ -68,7 +68,7 @@ class QATAttentionBackend(AttentionBackend):
 
     @staticmethod
     def get_supported_head_sizes() -> list[int]:
-        return [64, 128]
+        return [64, 96, 128, 160, 192, 224, 256]
 
     @staticmethod
     def get_name() -> str:
