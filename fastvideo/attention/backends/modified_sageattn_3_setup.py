@@ -11,7 +11,7 @@ from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtensio
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
-PACKAGE_NAME = "sageattn3"
+PACKAGE_NAME = "modified_sageattn"
 
 # FORCE_BUILD: Force a fresh build locally, instead of attempting to find prebuilt wheels
 # SKIP_CUDA_BUILD: Intended to allow CI to use a simple `python setup.py sdist` run to copy over raw files, without any cuda compilation
@@ -68,7 +68,10 @@ if not SKIP_CUDA_BUILD:
     # https://github.com/pytorch/pytorch/blob/8472c24e3b5b60150096486616d98b7bea01500b/torch/utils/cpp_extension.py#L920
     if FORCE_CXX11_ABI:
         torch._C._GLIBCXX_USE_CXX11_ABI = True
-    repo_dir = Path(this_dir)
+    repo_dir = Path(this_dir).resolve()
+    modified_sageattn_dir = (
+        repo_dir.parents[2] / "fastvideo-kernel" / "modified_sageattn"
+    )
     cutlass_dir = repo_dir / "csrc" / "cutlass"
     (repo_dir / "csrc").mkdir(parents=True, exist_ok=True)
     if not cutlass_dir.exists():
@@ -100,7 +103,7 @@ if not SKIP_CUDA_BUILD:
         "-DDQINRMEM",
     ]
     include_dirs = [
-        repo_dir / "sageattn",
+        modified_sageattn_dir,
         cutlass_dir / "include",
         cutlass_dir / "tools" / "util" / "include",
     ]
@@ -108,7 +111,7 @@ if not SKIP_CUDA_BUILD:
     ext_modules.append(
         CUDAExtension(
             name="fp4attn_cuda",
-            sources=["sageattn/blackwell/api.cu"],
+            sources=[str(modified_sageattn_dir / "blackwell/api.cu")],
             extra_compile_args={
                 "cxx": ["-O3", "-std=c++17"],
                 "nvcc": append_nvcc_threads(
@@ -123,7 +126,7 @@ if not SKIP_CUDA_BUILD:
     ext_modules.append(
         CUDAExtension(
             name="fp4quant_cuda",
-            sources=["sageattn/quantization/fp4_quantization_4d.cu"],
+            sources=[str(modified_sageattn_dir / "quantization/fp4_quantization_4d.cu")],
             extra_compile_args={
                 "cxx": ["-O3", "-std=c++17"],
                 "nvcc": append_nvcc_threads(

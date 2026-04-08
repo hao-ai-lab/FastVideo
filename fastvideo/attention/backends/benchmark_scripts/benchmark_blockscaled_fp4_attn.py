@@ -3,14 +3,14 @@ import sys
 import os
 import traceback
 
-from fastvideo.attention.backends.sageattn.api import (
+from modified_sageattn.api import (
     blockscaled_fp4_attn,
     preprocess_qkv,
     scale_and_quant_fp4,
     scale_and_quant_fp4_permute,
     scale_and_quant_fp4_transpose,
 )
-from fastvideo.attention.backends.sageattn.quantization.bench.bench_utils import bench
+from modified_sageattn.quantization.bench.bench_utils import bench
 
 
 def calculate_attention_flops(batch_size, num_heads, seq_len_q, seq_len_k, head_dim, is_causal=False):
@@ -281,4 +281,3 @@ if __name__ == "__main__":
         print("      excluding quantization overhead.")
         sys.stdout.flush()
         run_benchmark_suite()
-

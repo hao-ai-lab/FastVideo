@@ -3,8 +3,8 @@ import sys
 import os
 import traceback
 
-from fastvideo.attention.backends.sageattn.api import sageattn_blackwell
-from fastvideo.attention.backends.sageattn.quantization.bench.bench_utils import bench
+from modified_sageattn.api import sageattn_blackwell
+from modified_sageattn.quantization.bench.bench_utils import bench
 
 
 def calculate_attention_flops(batch_size, num_heads, seq_len_q, seq_len_k, head_dim, is_causal=False):
@@ -247,4 +247,3 @@ if __name__ == "__main__":
         print("Example: python benchmark_sageattn3.py --batch-size 1 --num-heads 16 --seq-len 4096 --head-dim 128")
         sys.stdout.flush()
         run_benchmark_suite()
-

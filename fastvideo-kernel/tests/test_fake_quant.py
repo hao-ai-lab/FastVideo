@@ -10,7 +10,10 @@ import torch
 import triton
 import triton.language as tl
 from flashinfer import SfLayout, nvfp4_quantize, e2m1_and_ufp8sf_scale_to_float
-from nvfp4_utils import _compute_quant_and_scale, _compute_dequant
+from fastvideo_kernel.triton_kernels.nvfp4_utils import (
+    _compute_quant_and_scale,
+    _compute_dequant,
+)
 from typing import Optional
 
 # MXFP_BLOCK_SIZE is 16 - use Python int for runtime checks

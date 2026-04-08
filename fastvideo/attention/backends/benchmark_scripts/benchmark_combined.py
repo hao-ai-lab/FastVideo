@@ -9,10 +9,10 @@ import numpy as np
 from typing import Dict, List, Tuple, Optional
 
 from flash_attn import flash_attn_func
-from fastvideo.attention.backends.sageattn.quantization.bench.bench_utils import bench
+from modified_sageattn.quantization.bench.bench_utils import bench
 
 # Import SageAttn components for direct control
-from fastvideo.attention.backends.sageattn.api import (
+from modified_sageattn.api import (
     preprocess_qkv, 
     scale_and_quant_fp4, 
     scale_and_quant_fp4_permute, 
@@ -377,4 +377,3 @@ if __name__ == "__main__":
         seq_lens=args.seq_lens,
         output_file=args.output
     )
-

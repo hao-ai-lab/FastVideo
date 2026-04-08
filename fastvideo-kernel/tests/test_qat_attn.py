@@ -5,8 +5,8 @@ Tests forward and backward passes with and without QAT enabled.
 """
 
 import torch
-from qat_attn import _attention
-from fused_attention import attention as fused_attention
+from fastvideo_kernel.triton_kernels.qat_attn import _attention
+from fastvideo_kernel.triton_kernels.fused_attention import attention as fused_attention
 from math import sqrt
 
 attention = _attention.apply

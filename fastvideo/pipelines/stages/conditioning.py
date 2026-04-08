@@ -86,5 +86,9 @@ class ConditioningStage(PipelineStage):
     def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify conditioning stage outputs."""
         result = VerificationResult()
-        result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
+        if batch.prompt_embeds is None or not batch.prompt_embeds:
+            batch.do_classifier_free_guidance = False
+            return result
+        if batch.do_classifier_free_guidance or batch.prompt_embeds:
+            result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
         return result
