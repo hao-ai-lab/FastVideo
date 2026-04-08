@@ -870,16 +870,25 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
             },
         )
 
-        if hasattr(self.transformer, 'module'):
-            transformer_dtype = next(self.transformer.module.parameters()).dtype
-        else:
-            transformer_dtype = next(self.transformer.parameters()).dtype
-        target_dtype = transformer_dtype
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        # Detect the actual weight dtype.  FSDP-wrapped models may
+        # report fp32 via next(parameters()) even when the physical
+        # weights are bf16.  Walk through parameters to find one
+        # that is NOT fp32 (the real checkpoint dtype).
+        target_dtype = torch.bfloat16  # safe default for Cosmos 2.5
+        for p in self.transformer.parameters():
+            if p.dtype != torch.float32:
+                target_dtype = p.dtype
+                break
+        autocast_enabled = (
+            target_dtype != torch.float32
+        ) and not fastvideo_args.disable_autocast
 
         latents = batch.latents
         if latents is None:
-            raise ValueError("latents must be provided for Cosmos25DenoisingStage")
+            raise ValueError(
+                "latents must be provided for "
+                "Cosmos25DenoisingStage"
+            )
         guidance_scale = batch.guidance_scale
 
         if batch.timesteps is None:

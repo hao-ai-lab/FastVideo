@@ -278,101 +278,24 @@ class CosmosModel(WanModel):
         training_batch: TrainingBatch,
         generator: torch.Generator,
     ) -> TrainingBatch:
-        """Prepare DiT inputs for Cosmos using EDM noise schedule.
+        """Prepare DiT inputs for Cosmos 2.5.
 
-        Unlike Wan (flow-matching), Cosmos uses the EDM convention:
-            x_t = x_0 + sigma * eps
-        where sigma is sampled from a log-normal distribution
-        matching the pretrained model's training distribution.
+        Uses the same flow-matching noise schedule as the parent
+        WanModel but with the Karras sigma schedule from the
+        Cosmos scheduler.  The noisy input is:
+
+            x_t = (1 - sigma) * x_0 + sigma * noise
+
+        where sigma comes from the scheduler's Karras schedule.
+        The model predicts the flow-matching velocity
+        ``v = noise - x_0``.
         """
-        assert self.training_config is not None
-        tc = self.training_config
-        latents = training_batch.latents
-        assert isinstance(latents, torch.Tensor)
-        batch_size = latents.shape[0]
-
-        noise = torch.randn(
-            latents.shape,
-            generator=generator,
-            device=latents.device,
-            dtype=latents.dtype,
-        )
-
-        # Sample EDM sigmas from log-normal distribution.
-        # Parameters match the Karras/EDM training convention:
-        #   ln(sigma) ~ N(P_mean, P_std²)
-        # with P_mean=0.7, P_std=1.6 (NVIDIA Cosmos defaults).
-        p_mean = 0.7
-        p_std = 1.6
-        log_sigma = (
-            torch.randn(
-                batch_size,
-                generator=generator,
-                device=latents.device,
-                dtype=latents.dtype,
-            )
-            * p_std
-            + p_mean
-        )
-        sigmas = log_sigma.exp()
-        if int(tc.distributed.sp_size or 1) > 1:
-            self.sp_group.broadcast(sigmas, src=0)
-
-        # Reshape for broadcasting: (B,) -> (B, 1, 1, 1, 1)
-        sigmas_5d = sigmas.view(-1, 1, 1, 1, 1)
-
-        # EDM noise schedule: x_t = x_0 + sigma * eps
-        noisy_model_input = latents + sigmas_5d * noise
-
-        # Store flow-matching compatible timesteps for any code
-        # that reads them (e.g., attention metadata).
-        timesteps = self._sample_timesteps(
-            batch_size, latents.device, generator,
-        )
-        if int(tc.distributed.sp_size or 1) > 1:
-            self.sp_group.broadcast(timesteps, src=0)
-
-        training_batch.noisy_model_input = noisy_model_input
-        training_batch.timesteps = timesteps
-        training_batch.sigmas = sigmas_5d
-        training_batch.noise = noise
-        training_batch.raw_latent_shape = latents.shape
-
-        training_batch.conditional_dict = {
-            "encoder_hidden_states": (
-                training_batch.encoder_hidden_states
-            ),
-            "encoder_attention_mask": (
-                training_batch.encoder_attention_mask
-            ),
-        }
-
-        if (
-            self.negative_prompt_embeds is not None  # type: ignore[has-type]
-            and self.negative_prompt_attention_mask  # type: ignore[has-type]
-            is not None
-        ):
-            neg_embeds = self.negative_prompt_embeds  # type: ignore[has-type]
-            neg_mask = self.negative_prompt_attention_mask  # type: ignore[has-type]
-            if neg_embeds.shape[0] == 1 and batch_size > 1:
-                neg_embeds = neg_embeds.expand(
-                    batch_size, *neg_embeds.shape[1:],
-                ).contiguous()
-            if neg_mask.shape[0] == 1 and batch_size > 1:
-                neg_mask = neg_mask.expand(
-                    batch_size, *neg_mask.shape[1:],
-                ).contiguous()
-            training_batch.unconditional_dict = {
-                "encoder_hidden_states": neg_embeds,
-                "encoder_attention_mask": neg_mask,
-            }
-
-        # Match the canonical (B, T, C, H, W) layout that
-        # finetune.py expects for `training_batch.latents`.
-        # We un-permute back to (B, C, T, H, W) at the
-        # transformer boundary in `predict_noise`.
-        training_batch.latents = training_batch.latents.permute(
-            0, 2, 1, 3, 4,
+        # Delegate entirely to the parent WanModel implementation.
+        # This uses the noise scheduler's sigmas (Karras, [0..80])
+        # with standard flow-matching interpolation:
+        #   x_t = (1 - sigma) * x_0 + sigma * noise
+        training_batch = super()._prepare_dit_inputs(
+            training_batch, generator,
         )
         return training_batch
 

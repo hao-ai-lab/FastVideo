@@ -60,7 +60,7 @@ training:
     run_name: cosmos25_overfit
 
   model:
-    precondition_outputs: true
+    precondition_outputs: false
     enable_gradient_checkpointing_type: full
 
 callbacks:
