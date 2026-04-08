@@ -1,9 +1,6 @@
 import torch
 from fastvideo import VideoGenerator
 from fastvideo.configs.pipelines.base import PipelineConfig
-from fastvideo.layers.quantization.fp4_config import FP4Config
-# from fastvideo.layers.quantization.fp8_config import FP8Config
-from fastvideo.layers.linear import ReplicatedLinear
 
 OUTPUT_PATH = "video_samples"
 
@@ -25,19 +22,16 @@ def main():
     model_id = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
     # model_id = "Wan-AI/Wan2.1-T2V-14B-Diffusers"
     pipeline_config = PipelineConfig.from_pretrained(model_id)
-    pipeline_config.dit_precision = "bf16" 
-    pipeline_config.dit_config.quant_config = FP4Config()
-    # pipeline_config.dit_config.quant_config = FP8Config()
+    pipeline_config.dit_precision = "bf16"
 
-    # ReplicatedLinear.print_shape_summary()
-    
     print("\nLoading model with FP4 quantization...")
     generator = VideoGenerator.from_pretrained(
         model_id,
         pipeline_config=pipeline_config,
         num_gpus=1,
         use_fsdp_inference=True,
-        dit_cpu_offload=False,  
+        transformer_quant="fp4",
+        dit_cpu_offload=False,
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=False,

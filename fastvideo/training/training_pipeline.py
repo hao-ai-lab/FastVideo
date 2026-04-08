@@ -55,12 +55,24 @@ except Exception:
 logger = init_logger(__name__)
 
 
+def _get_generator_sage_attn3_impl_cls() -> type[Any]:
+    from fastvideo.attention.backends.modified_sage_attn3 import (
+        ModifiedSageAttention3Impl,
+    )
+
+    return ModifiedSageAttention3Impl
+
+
 def swap_sage_attn3(obj: Any, obj_path: str) -> int:
     """
-    If `obj` has an attribute named `attn_impl`, replace it with SageAttention3Impl,
-    carrying over `.causal` and `.softmax_scale`. Everything else set to None.
+    If `obj` has an attribute named `attn_impl`, replace it with the modified
+    SageAttention3 implementation used by generator 4-bit attention, carrying
+    over `.causal` and `.softmax_scale`.
+
     Returns number of swaps performed (0 or 1).
     """
+    impl_cls = _get_generator_sage_attn3_impl_cls()
+
     # Quick reject: no attribute
     if not hasattr(obj, "attn_impl"):
         return 0
@@ -72,7 +84,7 @@ def swap_sage_attn3(obj: Any, obj_path: str) -> int:
         return 0
 
     # Already None or already of the desired type => skip
-    if old_impl is None or isinstance(old_impl, SageAttention3Impl):
+    if old_impl is None or isinstance(old_impl, impl_cls):
         return 0
 
     # Extract fields with sensible defaults
@@ -80,7 +92,7 @@ def swap_sage_attn3(obj: Any, obj_path: str) -> int:
     softmax_scale = getattr(old_impl, "softmax_scale", 1.0)
 
 
-    new_impl = SageAttention3Impl(
+    new_impl = impl_cls(
         num_heads=None,
         head_size=None,
         causal=causal,

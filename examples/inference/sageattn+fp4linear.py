@@ -3,7 +3,7 @@ import os
 # from fastvideo.configs.sample import SamplingParam
 
 OUTPUT_PATH = "video_samples"
-os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "SAGE_ATTN_THREE"
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "MODIFIED_SAGE_ATTN_THREE"
 
 def main():
     # FastVideo will automatically use the optimal default arguments for the

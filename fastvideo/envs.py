@@ -201,6 +201,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # - "VIDEO_SPARSE_ATTN": use Video Sparse Attention
     # - "SAGE_ATTN": use Sage Attention
     # - "SAGE_ATTN_THREE": use Sage Attention 3
+    # - "MODIFIED_SAGE_ATTN_THREE": use the in-repo modified Sage Attention 3
     "FASTVIDEO_ATTENTION_BACKEND":
     lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
 

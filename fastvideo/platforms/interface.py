@@ -15,6 +15,7 @@ class AttentionBackendEnum(enum.Enum):
     TORCH_SDPA = enum.auto()
     SAGE_ATTN = enum.auto()
     SAGE_ATTN_THREE = enum.auto()
+    MODIFIED_SAGE_ATTN_THREE = enum.auto()
     VIDEO_SPARSE_ATTN = enum.auto()
     BSA_ATTN = enum.auto()
     VMOBA_ATTN = enum.auto()
