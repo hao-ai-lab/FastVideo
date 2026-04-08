@@ -172,6 +172,7 @@ class FastVideoArgs:
 
     override_text_encoder_safetensors: str | None = None  # path to safetensors file for text encoder override
     override_text_encoder_quant: QuantizationMethods = None
+    transformer_quant: QuantizationMethods = None
 
     override_transformer_cls_name: str | None = None
     init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
@@ -625,6 +626,13 @@ class FastVideoArgs:
             choices=QUANTIZATION_METHODS,
             default=FastVideoArgs.override_text_encoder_quant,
             help="Quantization method for text encoder override",
+        )
+        parser.add_argument(
+            "--transformer-quant",
+            type=str,
+            choices=QUANTIZATION_METHODS,
+            default=FastVideoArgs.transformer_quant,
+            help="Quantization method for transformer loading",
         )
         parser.add_argument(
             "--override-transformer-cls-name",

@@ -9,6 +9,7 @@ from fastvideo.api import (
     GenerationResult,
     GeneratorConfig,
     InputConfig,
+    QuantizationConfig,
     SamplingConfig,
 )
 from fastvideo.configs.sample import SamplingParam
@@ -152,9 +153,10 @@ def test_prepare_output_path_empty_prompt_fallback(tmp_path):
 
 def test_from_config_normalizes_and_translates(monkeypatch):
     captured = _patch_from_fastvideo_args(monkeypatch)
-    _patch_fastvideo_args_from_kwargs(monkeypatch)
+    fastvideo_args_capture = _patch_fastvideo_args_from_kwargs(monkeypatch)
     config = GeneratorConfig(model_path="test-model")
     config.engine.num_gpus = 2
+    config.engine.quantization = QuantizationConfig(transformer_quant="fp4")
     config.pipeline.workload_type = "t2v"
 
     generator = VideoGenerator.from_config(config)
@@ -162,6 +164,7 @@ def test_from_config_normalizes_and_translates(monkeypatch):
     assert captured["fastvideo_args"].model_path == "test-model"
     assert captured["fastvideo_args"].num_gpus == 2
     assert captured["fastvideo_args"].workload_type.value == "t2v"
+    assert fastvideo_args_capture["kwargs"]["transformer_quant"] == "fp4"
     assert generator.config == config
 
 
@@ -195,6 +198,7 @@ def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
             "test-model",
             num_gpus=4,
             use_fsdp_inference=False,
+            transformer_quant="fp4",
             text_encoder_cpu_offload=True,
             pin_cpu_memory=True,
             dit_cpu_offload=False,
@@ -205,6 +209,7 @@ def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
     assert captured["fastvideo_args"].model_path == "test-model"
     assert captured["fastvideo_args"].num_gpus == 4
     assert fastvideo_args_capture["kwargs"]["use_fsdp_inference"] is False
+    assert fastvideo_args_capture["kwargs"]["transformer_quant"] == "fp4"
     assert fastvideo_args_capture["kwargs"]["text_encoder_cpu_offload"] is True
     assert fastvideo_args_capture["kwargs"]["pin_cpu_memory"] is True
     assert fastvideo_args_capture["kwargs"]["dit_cpu_offload"] is False
@@ -212,6 +217,8 @@ def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
     assert generator.config is not None
     assert generator.config.model_path == "test-model"
     assert generator.config.engine.num_gpus == 4
+    assert generator.config.engine.quantization is not None
+    assert generator.config.engine.quantization.transformer_quant == "fp4"
 
 
 def test_from_pretrained_legacy_only_kwargs_warn(monkeypatch):
