@@ -1,3 +1,4 @@
+# Modified from the original SageATtention3 code
 """
 Copyright (c) 2025 by SageAttention team.
 

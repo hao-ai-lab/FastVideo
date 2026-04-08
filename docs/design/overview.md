@@ -167,6 +167,9 @@ How this maps to FastVideo:
 
 - Attention backends live in `fastvideo/attention/` and can be selected via
   `FASTVIDEO_ATTENTION_BACKEND`.
+- SageAttention3 is split into two selectable backends:
+  `SAGE_ATTN_THREE` for the regular upstream package and
+  `MODIFIED_SAGE_ATTN_THREE` for the FastVideoKernel-backed modified variant.
 - `LocalAttention` is used for cross-attention and most attention layers.
 - `DistributedAttention` is used for full-sequence self-attention in the DiT.
 - Tensor-parallel layers live in `fastvideo/layers/`.

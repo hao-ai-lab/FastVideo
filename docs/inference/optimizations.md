@@ -21,6 +21,7 @@ This page describes the various options for speeding up generation times in Fast
 - Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
+- Modified Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=MODIFIED_SAGE_ATTN_THREE`
 - Video MoBA Attention: `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`
 - Sparse Linear Attention: `FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
 - SageSLA Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_SLA_ATTN`
@@ -103,6 +104,14 @@ python setup.py install  # or pip install -e .
 
 ### Sage Attention 3
 
+FastVideo now exposes two SageAttention3-compatible backends with distinct
+environment variable values:
+
+- `SAGE_ATTN_THREE`: the regular upstream SageAttention3 backend imported from
+  the `sageattn3` package.
+- `MODIFIED_SAGE_ATTN_THREE`: the FastVideoKernel-backed modified variant used
+  for the in-repo FP4/QAT path.
+
 **`SAGE_ATTN_THREE`**
 
 [SageAttention 3](https://github.com/thu-ml/SageAttention/tree/main/sageattention3_blackwell) is an advanced attention mechanism that leverages FP4 quantization and Blackwell GPU Tensor Cores for significant performance improvements.
@@ -116,6 +125,27 @@ python setup.py install  # or pip install -e .
 Note that Sage Attention 3 requires `python>=3.13`, `torch>=2.8.0`, `CUDA >=12.8`. If you are using `uv` and using `torch==2.8.0` make sure that `sentencepiece==0.2.1` in the pyproject.toml file.
 
 To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repository to install the package from source.
+
+### Modified Sage Attention 3
+
+**`MODIFIED_SAGE_ATTN_THREE`**
+
+This backend uses the modified SageAttention3 implementation that lives in the
+`fastvideo-kernel` repository alongside the `fastvideo_kernel` Triton kernels.
+Use this backend when you want the FastVideo-specific SageAttention3 path, such
+as the FP4 linear + modified attention example.
+
+This backend currently assumes access to the in-repo `fastvideo-kernel`
+checkout or an equivalent editable/source install that exposes both:
+
+- `modified_sageattn`
+- `fastvideo_kernel`
+
+Example:
+
+```python
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "MODIFIED_SAGE_ATTN_THREE"
+```
 
 ### V-MoBA / SLA / SageSLA
 
