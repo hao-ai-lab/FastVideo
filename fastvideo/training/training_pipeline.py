@@ -55,23 +55,23 @@ except Exception:
 logger = init_logger(__name__)
 
 
-def _get_generator_sage_attn3_impl_cls() -> type[Any]:
-    from fastvideo.attention.backends.modified_sage_attn3 import (
-        ModifiedSageAttention3Impl,
+def _get_generator_qat_attn_impl_cls() -> type[Any]:
+    from fastvideo.attention.backends.qat_attn import (
+        QATAttentionImpl,
     )
 
-    return ModifiedSageAttention3Impl
+    return QATAttentionImpl
 
 
 def swap_sage_attn3(obj: Any, obj_path: str) -> int:
     """
-    If `obj` has an attribute named `attn_impl`, replace it with the modified
-    SageAttention3 implementation used by generator 4-bit attention, carrying
-    over `.causal` and `.softmax_scale`.
+    If `obj` has an attribute named `attn_impl`, replace it with the QAT
+    attention implementation used by generator 4-bit attention, carrying over
+    `.causal` and `.softmax_scale`.
 
     Returns number of swaps performed (0 or 1).
     """
-    impl_cls = _get_generator_sage_attn3_impl_cls()
+    impl_cls = _get_generator_qat_attn_impl_cls()
 
     # Quick reject: no attribute
     if not hasattr(obj, "attn_impl"):
@@ -242,7 +242,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         
         if training_args.generator_4bit_attn:
             num_swaps = traverse_swap_module(self.transformer, swap_fn=swap_sage_attn3)
-            logger.info(f"Swapped {num_swaps} attn_impl to SageAttention3Impl instances in self.transformer")
+            logger.info(f"Swapped {num_swaps} attn_impl to QATAttentionImpl instances in self.transformer")
         if training_args.generator_4bit_linear:
             num_swaps = traverse_swap_module(self.transformer, swap_fn=swap_fp4_linear)
             logger.info(f"Swapped {num_swaps} linear layers to LinearFWD4BWD16 instances in self.transformer")

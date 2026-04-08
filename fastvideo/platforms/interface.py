@@ -16,6 +16,7 @@ class AttentionBackendEnum(enum.Enum):
     SAGE_ATTN = enum.auto()
     SAGE_ATTN_THREE = enum.auto()
     MODIFIED_SAGE_ATTN_THREE = enum.auto()
+    QAT_ATTN = enum.auto()
     VIDEO_SPARSE_ATTN = enum.auto()
     BSA_ATTN = enum.auto()
     VMOBA_ATTN = enum.auto()

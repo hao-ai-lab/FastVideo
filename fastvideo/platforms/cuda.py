@@ -152,6 +152,18 @@ class CudaPlatformBase(Platform):
             except ImportError as e:
                 logger.info(e)
                 logger.info("Modified Sage Attention 3 backend is not installed. Fall back to Flash Attention.")
+        elif selected_backend == AttentionBackendEnum.QAT_ATTN:
+            try:
+                from fastvideo_kernel.triton_kernels.qat_attn import attention  # noqa: F401
+
+                from fastvideo.attention.backends.qat_attn import (  # noqa: F401
+                    QATAttentionBackend)
+                logger.info("Using QAT attention backend.")
+
+                return "fastvideo.attention.backends.qat_attn.QATAttentionBackend"
+            except ImportError as e:
+                logger.info(e)
+                logger.info("QAT attention backend is not installed. Fall back to Flash Attention.")
         elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             try:
                 from fastvideo_kernel import video_sparse_attn  # noqa: F401

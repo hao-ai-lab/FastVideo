@@ -13,16 +13,6 @@ for _path in (_project_root, _kernel_root, _kernel_python_root):
 
 import torch
 
-try:
-    # Prefer the in-repo kernel implementation during local development.
-    from modified_sageattn import sageattn_blackwell
-except ImportError:
-    # Fall back to installed package if local version not available.
-    try:
-        from sageattn import sageattn_blackwell
-    except ImportError:
-        sageattn_blackwell = None
-
 from fastvideo.attention.backends.abstract import (
     AttentionBackend,
     AttentionImpl,
@@ -30,11 +20,49 @@ from fastvideo.attention.backends.abstract import (
     AttentionMetadataBuilder,
 )
 from fastvideo.logger import init_logger
+from fastvideo_kernel.triton_kernels.qat_attn import attention
 
 logger = init_logger(__name__)
 
 
-class ModifiedSageAttention3Backend(AttentionBackend):
+def qat_attn(q_BLHD: torch.Tensor, k_BLHD: torch.Tensor, v_BLHD: torch.Tensor, is_causal: bool = False) -> torch.Tensor:
+    q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
+    k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
+    v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
+
+    use_qat_qkv_backward = True
+    smooth_k = False
+    warp_specialize = True
+    is_qat = True
+    two_level_quant_p_sage3 = False
+    fake_quant_p_bwd = True
+    use_high_prec_o = True
+    smooth_q = False
+    sm_scale = 1.0 / (q_BHLD.shape[-1] ** 0.5)
+    use_global_sf_qkv = False
+    use_global_sf_p = False
+
+    o_BHLD = attention(
+        q_BHLD,
+        k_BHLD,
+        v_BHLD,
+        is_causal,
+        sm_scale,
+        use_qat_qkv_backward,
+        smooth_k,
+        warp_specialize,
+        is_qat,
+        two_level_quant_p_sage3,
+        fake_quant_p_bwd,
+        use_high_prec_o,
+        smooth_q,
+        use_global_sf_p,
+        use_global_sf_qkv,
+    )
+    return o_BHLD.permute(0, 2, 1, 3).contiguous()
+
+
+class QATAttentionBackend(AttentionBackend):
 
     accept_output_buffer: bool = True
 
@@ -44,11 +72,11 @@ class ModifiedSageAttention3Backend(AttentionBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "MODIFIED_SAGE_ATTN_THREE"
+        return "QAT_ATTN"
 
     @staticmethod
-    def get_impl_cls() -> type["ModifiedSageAttention3Impl"]:
-        return ModifiedSageAttention3Impl
+    def get_impl_cls() -> type["QATAttentionImpl"]:
+        return QATAttentionImpl
 
     @staticmethod
     def get_metadata_cls() -> type["AttentionMetadata"]:
@@ -59,7 +87,7 @@ class ModifiedSageAttention3Backend(AttentionBackend):
         raise NotImplementedError
 
 
-class ModifiedSageAttention3Impl(AttentionImpl):
+class QATAttentionImpl(AttentionImpl):
 
     def __init__(
         self,
@@ -82,23 +110,4 @@ class ModifiedSageAttention3Impl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        if sageattn_blackwell is None:
-            raise ImportError("modified_sageattn is not available. "
-                              "Please ensure the modified SageAttention3 kernel is installed.")
-
-        query = query.transpose(1, 2).contiguous()
-        key = key.transpose(1, 2).contiguous()
-        value = value.transpose(1, 2).contiguous()
-
-        output = sageattn_blackwell(
-            query,
-            key,
-            value,
-            attn_mask=None,
-            is_causal=self.causal,
-        )
-        return output.transpose(1, 2).contiguous()
-
-
-SageAttention3Backend = ModifiedSageAttention3Backend
-SageAttention3Impl = ModifiedSageAttention3Impl
+        return qat_attn(query, key, value, is_causal=self.causal)

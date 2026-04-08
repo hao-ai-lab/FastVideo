@@ -22,6 +22,7 @@ This page describes the various options for speeding up generation times in Fast
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
 - Modified Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=MODIFIED_SAGE_ATTN_THREE`
+- QAT Attention: `FASTVIDEO_ATTENTION_BACKEND=QAT_ATTN`
 - Video MoBA Attention: `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`
 - Sparse Linear Attention: `FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
 - SageSLA Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_SLA_ATTN`
@@ -109,8 +110,8 @@ environment variable values:
 
 - `SAGE_ATTN_THREE`: the regular upstream SageAttention3 backend imported from
   the `sageattn3` package.
-- `MODIFIED_SAGE_ATTN_THREE`: the FastVideoKernel-backed modified variant used
-  for the in-repo FP4/QAT path.
+- `MODIFIED_SAGE_ATTN_THREE`: the modified SageAttention3 CUDA-kernel backend
+  imported from the in-repo `modified_sageattn` package.
 
 **`SAGE_ATTN_THREE`**
 
@@ -132,19 +133,37 @@ To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repos
 
 This backend uses the modified SageAttention3 implementation that lives in the
 `fastvideo-kernel` repository alongside the `fastvideo_kernel` Triton kernels.
-Use this backend when you want the FastVideo-specific SageAttention3 path, such
-as the FP4 linear + modified attention example.
+Use this backend when you want to run the modified SageAttention3 CUDA kernel
+directly during inference.
 
 This backend currently assumes access to the in-repo `fastvideo-kernel`
 checkout or an equivalent editable/source install that exposes both:
 
 - `modified_sageattn`
-- `fastvideo_kernel`
 
 Example:
 
 ```python
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "MODIFIED_SAGE_ATTN_THREE"
+```
+
+### QAT Attention
+
+**`QAT_ATTN`**
+
+This backend uses the FastVideoKernel Triton QAT attention implementation from
+`fastvideo_kernel.triton_kernels.qat_attn`. Use it when you specifically want
+the QAT/Triton attention path rather than the modified SageAttention3 CUDA
+kernel path.
+
+This backend currently assumes access to an install that exposes:
+
+- `fastvideo_kernel`
+
+Example:
+
+```python
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "QAT_ATTN"
 ```
 
 ### V-MoBA / SLA / SageSLA
