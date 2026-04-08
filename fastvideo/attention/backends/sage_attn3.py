@@ -4,16 +4,19 @@ import os
 import sys
 from pathlib import Path
 
-# Add project root to sys.path to allow importing qat_attn
+# Add local repo roots to sys.path for kernel-side imports during development.
 _project_root = Path(__file__).resolve().parent.parent.parent.parent
-if str(_project_root) not in sys.path:
-    sys.path.insert(0, str(_project_root))
+_kernel_root = _project_root / "fastvideo-kernel"
+_kernel_python_root = _kernel_root / "python"
+for _path in (_project_root, _kernel_root, _kernel_python_root):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 import torch
 import triton
 try:
-    # Use local version first (avoids issues with installed package)
-    from fastvideo.attention.backends.sageattn import sageattn_blackwell
+    # Prefer the in-repo kernel implementation during local development.
+    from modified_sageattn import sageattn_blackwell
 except ImportError:
     # Fall back to installed package if local version not available
     try:
@@ -24,10 +27,13 @@ except ImportError:
 from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
                                                    AttentionMetadataBuilder)
 from fastvideo.logger import init_logger
-from test_quantization_precision import get_fake_quant
-from qat_attn import attention
-from qat_attn import _attn_bwd_preprocess, _attn_bwd_dq_cross, _attn_bwd_dkdv_cross, _attn_bwd
-# from fastvideo.attention.backends.sageattn.api import triton_group_mean
+from fastvideo_kernel.triton_kernels.qat_attn import attention
+from fastvideo_kernel.triton_kernels.qat_attn import (
+    _attn_bwd,
+    _attn_bwd_dkdv_cross,
+    _attn_bwd_dq_cross,
+    _attn_bwd_preprocess,
+)
 logger = init_logger(__name__)
 
 from math import sqrt
@@ -37,15 +43,12 @@ except ImportError:
     _wrapped_flash_attn_forward = None
     _wrapped_flash_attn_backward = None
 
-logger = init_logger(__name__)
+from fastvideo_kernel.triton_kernels.quant_utils import (
+    fake_quantize_kv,
+    fake_quantize_q,
+)
+
 from flashinfer import SfLayout, mm_fp4, nvfp4_quantize
-from quant_utils import fake_quantize_q, fake_quantize_kv
-
-def fp_16_qk(q, k):
-    qk = torch.matmul(q, k) / torch.sqrt(torch.tensor(q.shape[-1], device=q.device, dtype=q.dtype))
-    p = torch.softmax(qk, dim=-1)
-    return p
-
 
 def matmul_3d_4bit(a, b):
     H, M, K1 = a.shape
@@ -105,53 +108,6 @@ class _Matmul3d4bitFWD16bitBWD_with_smoothing(torch.autograd.Function):
         grad_b = grad_out.transpose(1, 2).matmul(a)
         # None for the three extra forward args
         return grad_a, grad_b, None
-
-def attn_forward_4bit_fwd_16bit_bwd(q, k, v, is_causal=False, per_block_mean=False):
-    assert is_causal == False
-    assert per_block_mean == False
-    q, k, v = q.transpose(1, 2).contiguous(), k.transpose(1, 2).contiguous(), v.transpose(1, 2).contiguous()
-    p = sage_attn_qk_torch(q, k).to(q.dtype)
-    row_max_p = p.max(dim=-1, keepdim=True).values
-    scale_row = row_max_p / (448 * 6)
-    out = _Matmul3d4bitFWD16bitBWD.apply(p.squeeze(0), v.squeeze(0).transpose(1, 2).contiguous(), scale_row.squeeze(0)).unsqueeze(0)
-    return out.transpose(1, 2).contiguous()
-
-def preprocess(q, k, v):
-    return get_fake_quant(q), get_fake_quant(k), get_fake_quant(v)
-
-def qat_attn_qk_torch(fq_q, fq_k):
-    """
-    Inputs:  q/k/v in [B, H, L, D]
-    Returns: out in  [B, H, L, D]
-    """
-    B, H, qL, D = fq_q.shape
-    B, H, kL, D = fq_k.shape
-    assert B == 1
-    q, k = fq_q.squeeze(0), fq_k.squeeze(0)
-    qk = torch.matmul(q, k.transpose(-2, -1)) / torch.sqrt(torch.tensor(q.shape[-1], device=q.device, dtype=q.dtype))
-    qk = qk / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))
-    p = torch.softmax(qk, dim=-1)
-    return p.unsqueeze(0)
-
-def qat_attn_backward_16bit(fq_q_BLHD, fq_k_BLHD, fq_v_BLHD, high_prec_o_BLHD, grad_out_BLHD, is_causal=False):
-    assert is_causal == False
-    fq_q, fq_k, fq_v, high_prec_o, do = fq_q_BLHD.transpose(1 ,2).contiguous(), fq_k_BLHD.transpose(1 ,2).contiguous(), fq_v_BLHD.transpose(1 ,2).contiguous(), high_prec_o_BLHD.transpose(1 ,2).contiguous(), grad_out_BLHD.transpose(1 ,2).contiguous()
-    B, H, _, D = fq_q.shape
-    p = qat_attn_qk_torch(fq_q, fq_k).to(do.dtype)
-    fq_p = get_fake_quant(p).unsqueeze(0)
-    dV = fq_p.transpose(-2, -1) @ do  # [B,H,L,D]
-
-    dP = do @ fq_v.transpose(-2, -1)  # [B,H,L,L]
-
-    do_dot_o = (do * high_prec_o).sum(dim=-1, keepdim=True)  # [B,H,L,1]
-    dS = p * (dP - do_dot_o)  # [B,H,L,L]
-
-
-    dQ = (dS @ fq_k) / torch.sqrt(torch.tensor(D, device=fq_q.device, dtype=fq_q.dtype))            # [B,H,L,D]
-    dK = (dS.transpose(-2, -1) @ fq_q) / torch.sqrt(torch.tensor(D, device=fq_q.device, dtype=fq_q.dtype))  # [B,H,L,D]
-
-    # grads w.r.t inputs, None for non-tensor inputs
-    return dQ.transpose(1, 2).contiguous(), dK.transpose(1, 2).contiguous(), dV.transpose(1, 2).contiguous(), None, None, None
 
 USE_SMOOTHING = False
 def sage_attn_qk_torch(q, k, per_block_mean=False):
@@ -529,7 +485,7 @@ class SageAttention3Impl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
+        # output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
         # output = sageattn_blackwell_with_triton_bwd(query, key, value, is_causal=self.causal)
-        # output = qat_attn(query, key, value, is_causal=self.causal)
+        output = qat_attn(query, key, value, is_causal=self.causal)
         return output
