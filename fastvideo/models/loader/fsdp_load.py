@@ -23,6 +23,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.loader.utils import (get_param_names_mapping,
                                            hf_to_custom_state_dict)
 from fastvideo.models.loader.weight_utils import safetensors_weights_iterator
+from fastvideo.layers.fp4_config import convert_model_to_fp4
 from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
 
 logger = init_logger(__name__)
@@ -56,7 +57,6 @@ def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
         torch.set_default_dtype(old_dtype)
 
 
-USE_FP8 = False
 USE_FP4 = False  # TODO: move to FastVideoArgs
 # TODO(PY): add compile option
 def maybe_load_fsdp_model(
