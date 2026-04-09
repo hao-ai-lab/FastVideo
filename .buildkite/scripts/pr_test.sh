@@ -39,7 +39,11 @@ if [ -n "$MODAL_TOKEN_ID" ] && [ -n "$MODAL_TOKEN_SECRET" ]; then
     log "Retrieved Modal credentials from Buildkite secrets"
     python3 -m modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile buildkite-ci --activate --verify
     if [ $? -eq 0 ]; then
+        export MODAL_PROFILE=buildkite-ci
+        export MODAL_TOKEN_ID
+        export MODAL_TOKEN_SECRET
         log "Modal authentication successful"
+        log "Using Modal profile: $MODAL_PROFILE"
     else
         log "Error: Failed to set Modal credentials"
         exit 1
@@ -63,73 +67,90 @@ EFFECTIVE_PR=${BUILDKITE_PULL_REQUEST:-false}
 if [ "$EFFECTIVE_PR" = "false" ] && [ -n "${PR_NUMBER:-}" ]; then
     EFFECTIVE_PR=$PR_NUMBER
 fi
-MODAL_ENV="BUILDKITE_REPO=$BUILDKITE_REPO BUILDKITE_COMMIT=$BUILDKITE_COMMIT BUILDKITE_PULL_REQUEST=$EFFECTIVE_PR IMAGE_VERSION=$IMAGE_VERSION"
+export BUILDKITE_REPO
+export BUILDKITE_COMMIT
+export BUILDKITE_PULL_REQUEST=$EFFECTIVE_PR
+export IMAGE_VERSION
+
+MODAL_TARGET=""
 
 case "$TEST_TYPE" in
     "encoder")
         log "Running encoder tests..."
-        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_encoder_tests"
+        export HF_API_KEY
+        MODAL_TARGET="$MODAL_TEST_FILE::run_encoder_tests"
         ;;
     "vae")
         log "Running VAE tests..."
-        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_vae_tests"
+        export HF_API_KEY
+        MODAL_TARGET="$MODAL_TEST_FILE::run_vae_tests"
         ;;
     "transformer")
         log "Running transformer tests..."
-        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_transformer_tests"
+        export HF_API_KEY
+        MODAL_TARGET="$MODAL_TEST_FILE::run_transformer_tests"
         ;;
     "ssim")
         log "Running SSIM tests..."
-        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_SSIM_TEST_FILE::run_ssim_tests"
+        export HF_API_KEY
+        MODAL_TARGET="$MODAL_SSIM_TEST_FILE::run_ssim_tests"
         ;;
     "training")
         log "Running training tests..."
-        MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_tests"
+        export WANDB_API_KEY
+        MODAL_TARGET="$MODAL_TEST_FILE::run_training_tests"
         ;;
     "training_lora")
         log "Running LoRA training tests..."
-        MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_lora_tests"
+        export WANDB_API_KEY
+        MODAL_TARGET="$MODAL_TEST_FILE::run_training_lora_tests"
         ;;
     "training_vsa")
         log "Running training VSA tests..."
-        MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_tests_VSA"
+        export WANDB_API_KEY
+        MODAL_TARGET="$MODAL_TEST_FILE::run_training_tests_VSA"
         ;;
     "kernel_tests")
         log "Running kernel tests..."
-        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_kernel_tests"
+        MODAL_TARGET="$MODAL_TEST_FILE::run_kernel_tests"
         ;;
     "inference_lora")
         log "Running LoRA tests..."
-        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_inference_lora_tests"
+        MODAL_TARGET="$MODAL_TEST_FILE::run_inference_lora_tests"
         ;;
     "distillation_dmd")
         log "Running distillation DMD tests..."
-        MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_distill_dmd_tests"
+        export WANDB_API_KEY
+        MODAL_TARGET="$MODAL_TEST_FILE::run_distill_dmd_tests"
         ;;
         # run_inference_tests_vmoba
     "self_forcing")
         log "Running self-forcing tests..."
-        MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_self_forcing_tests"
+        export WANDB_API_KEY
+        MODAL_TARGET="$MODAL_TEST_FILE::run_self_forcing_tests"
         ;;
     "inference_vmoba")
         log "Running V-MoBA inference tests..."
-        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_inference_tests_vmoba"
+        MODAL_TARGET="$MODAL_TEST_FILE::run_inference_tests_vmoba"
         ;;
     "unit_test")
         log "Running unit tests..."
-        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_unit_test"
+        MODAL_TARGET="$MODAL_TEST_FILE::run_unit_test"
         ;;
     "lora_extraction")
         log "Running LoRA extraction tests..."
-        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_lora_extraction_tests"
+        export HF_API_KEY
+        MODAL_TARGET="$MODAL_TEST_FILE::run_lora_extraction_tests"
         ;;
     "performance")
         log "Running performance tests..."
-        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_performance_tests"
+        export HF_API_KEY
+        MODAL_TARGET="$MODAL_TEST_FILE::run_performance_tests"
         ;;
     "api_server")
         log "Running API server integration tests..."
-        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_api_server_tests"
+        export HF_API_KEY
+        MODAL_TARGET="$MODAL_TEST_FILE::run_api_server_tests"
         ;;
     *)
         log "Error: Unknown test type: $TEST_TYPE"
@@ -137,8 +158,8 @@ case "$TEST_TYPE" in
         ;;
 esac
 
-log "Executing: $MODAL_COMMAND"
-eval "$MODAL_COMMAND"
+log "Executing: python3 -m modal run $MODAL_TARGET"
+python3 -m modal run "$MODAL_TARGET"
 TEST_EXIT_CODE=$?
 
 if [ $TEST_EXIT_CODE -eq 0 ]; then
