@@ -13,7 +13,7 @@ source .venv/bin/activate
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
-# export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
+export FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN
 
 # export TRITON_PRINT_AUTOTUNING=1  # to print the best config
 export WANDB_API_KEY=YOUR_WANDB_API_KEY
@@ -45,7 +45,7 @@ echo "MASTER_ADDR=$MASTER_ADDR MASTER_PORT=$MASTER_PORT NNODES=$NNODES"
 # Training arguments
 training_args=(
   --tracker_project_name "wan_t2v_finetune_qat"
-  --output_dir "checkpoints/wan_t2v_finetune_qat_16_gsf_qkv"
+  --output_dir "checkpoints/wan_1.3B_t2v_finetune_qat"
   --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -55,7 +55,6 @@ training_args=(
   --num_width 832
   --num_frames 77
   --enable_gradient_checkpointing_type "full" # if OOM enable this
-  --generator_4bit_attn True
 )
 
 # Parallel arguments

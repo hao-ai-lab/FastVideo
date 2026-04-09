@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import asdict
+from contextlib import AbstractContextManager, nullcontext
 import math
 import os
 import shutil
@@ -36,8 +37,9 @@ from fastvideo.distributed import (cleanup_dist_env_and_memory, get_local_torch_
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+from fastvideo.attention.selector import global_force_attn_backend_context_manager
 from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch, LoRAPipeline, TrainingBatch)
-from fastvideo.platforms import current_platform
+from fastvideo.platforms import AttentionBackendEnum, current_platform
 from fastvideo.training.activation_checkpoint import (apply_activation_checkpointing)
 from fastvideo.training.trackers import (DummyTracker, TrackerType, initialize_trackers, Trackers)
 from fastvideo.training.training_utils import (clip_grad_norm_while_handling_failing_dtensor_cases,
@@ -54,52 +56,6 @@ except Exception:
     vmoba_available = False
 
 logger = init_logger(__name__)
-
-
-def _get_generator_attn_qat_train_impl_cls() -> type[Any]:
-    from fastvideo.attention.backends.attn_qat_train import AttnQatTrainImpl
-
-    return AttnQatTrainImpl
-
-
-def swap_attn_qat_train(obj: Any, obj_path: str) -> int:
-    """
-    If `obj` has an attribute named `attn_impl`, replace it with the
-    attn_qat_train implementation used by generator 4-bit attention, carrying
-    over `.causal` and `.softmax_scale`.
-
-    Returns number of swaps performed (0 or 1).
-    """
-    impl_cls = _get_generator_attn_qat_train_impl_cls()
-
-    # Quick reject: no attribute
-    if not hasattr(obj, "attn_impl"):
-        return 0
-
-    # Access may raise if it's a property; guard it.
-    try:
-        old_impl = obj.attn_impl
-    except Exception:
-        return 0
-
-    # Already None or already of the desired type => skip
-    if old_impl is None or isinstance(old_impl, impl_cls):
-        return 0
-
-    # Extract fields with sensible defaults
-    causal = getattr(old_impl, "causal", False)
-    softmax_scale = getattr(old_impl, "softmax_scale", 1.0)
-
-    new_impl = impl_cls(
-        num_heads=None,
-        head_size=None,
-        causal=causal,
-        softmax_scale=softmax_scale,
-        num_kv_heads=None,
-        prefix="",
-    )
-    obj.attn_impl = new_impl
-    return 1
 
 
 def swap_fp4_linear(obj: Any, obj_path: str) -> int:
@@ -176,6 +132,24 @@ class TrainingPipeline(LoRAPipeline, ABC):
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError("create_pipeline_stages should not be called for training pipeline")
 
+    @staticmethod
+    def _should_force_generator_attn_qat_train(fastvideo_args: FastVideoArgs) -> bool:
+        if not isinstance(fastvideo_args, TrainingArgs):
+            return False
+        return (fastvideo_args.generator_4bit_attn or envs.FASTVIDEO_ATTENTION_BACKEND == "ATTN_QAT_TRAIN")
+
+    def load_modules(self,
+                     fastvideo_args: FastVideoArgs,
+                     loaded_modules: dict[str, torch.nn.Module] | None = None) -> dict[str, Any]:
+        force_generator_qat = self._should_force_generator_attn_qat_train(fastvideo_args)
+        load_context: AbstractContextManager[None] = nullcontext()
+        if force_generator_qat:
+            logger.info("Forcing generator attention backend to ATTN_QAT_TRAIN during module loading")
+            load_context = global_force_attn_backend_context_manager(AttentionBackendEnum.ATTN_QAT_TRAIN)
+
+        with load_context:
+            return super().load_modules(fastvideo_args, loaded_modules)
+
     def set_schemas(self) -> None:
         self.train_dataset_schema = pyarrow_schema_t2v
 
@@ -206,9 +180,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 self.transformer_2 = apply_activation_checkpointing(
                     self.transformer_2, checkpointing_type=training_args.enable_gradient_checkpointing_type)
 
-        if training_args.generator_4bit_attn:
-            num_swaps = traverse_swap_module(self.transformer, swap_fn=swap_attn_qat_train)
-            logger.info("Swapped %s attn_impl to AttnQatTrainImpl instances in self.transformer", num_swaps)
         if training_args.generator_4bit_linear:
             num_swaps = traverse_swap_module(self.transformer, swap_fn=swap_fp4_linear)
             logger.info("Swapped %s linear layers to LinearFWD4BWD16 instances in self.transformer", num_swaps)

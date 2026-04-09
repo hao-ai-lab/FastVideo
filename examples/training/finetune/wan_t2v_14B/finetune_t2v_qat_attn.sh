@@ -27,7 +27,7 @@ export CUDA_VISIBLE_DEVICES=$SLURM_LOCALID
 export TOKENIZERS_PARALLELISM=false
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
-# export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
+export FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN
 
 echo "MASTER_ADDR: $MASTER_ADDR"
 echo "NODE_RANK: $NODE_RANK"
@@ -44,7 +44,7 @@ TOTAL_GPUS=$((NUM_GPUS_PER_NODE * SLURM_JOB_NUM_NODES))
 # Training arguments
 training_args=(
   --tracker_project_name "wan_t2v_finetune_qat"
-  --output_dir "checkpoints/wan_t2v_finetune_qat_16_14B_M2"
+  --output_dir "checkpoints/wan_14B_t2v_finetune_qat"
   --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -54,7 +54,6 @@ training_args=(
   --num_width 1280
   --num_frames 77
   --enable_gradient_checkpointing_type "full" # if OOM enable this
-  --generator_4bit_attn True
 )
 
 # Parallel arguments

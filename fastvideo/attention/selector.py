@@ -85,7 +85,26 @@ def get_attn_backend(
     supported_attention_backends: tuple[AttentionBackendEnum, ...]
     | None = None,
 ) -> type[AttentionBackend]:
-    return _cached_get_attn_backend(head_size, dtype, supported_attention_backends)
+    selected_backend, is_forced = _resolve_backend_override()
+    return _cached_get_attn_backend(
+        head_size,
+        dtype,
+        supported_attention_backends,
+        selected_backend,
+        is_forced,
+    )
+
+
+def _resolve_backend_override() -> tuple[AttentionBackendEnum | None, bool]:
+    backend_by_global_setting = get_global_forced_attn_backend()
+    if backend_by_global_setting is not None:
+        return backend_by_global_setting, True
+
+    backend_by_env_var: str | None = envs.FASTVIDEO_ATTENTION_BACKEND
+    if backend_by_env_var is not None:
+        return backend_name_to_enum(backend_by_env_var), False
+
+    return None, False
 
 
 @cache
@@ -94,28 +113,16 @@ def _cached_get_attn_backend(
     dtype: torch.dtype,
     supported_attention_backends: tuple[AttentionBackendEnum, ...]
     | None = None,
+    selected_backend: AttentionBackendEnum | None = None,
+    is_forced_backend: bool = False,
 ) -> type[AttentionBackend]:
-    # Check whether a particular choice of backend was
-    # previously forced.
-    #
-    # THIS SELECTION OVERRIDES THE FASTVIDEO_ATTENTION_BACKEND
-    # ENVIRONMENT VARIABLE.
     if not supported_attention_backends:
         raise ValueError("supported_attention_backends is empty")
-    selected_backend = None
-    backend_by_global_setting: AttentionBackendEnum | None = (get_global_forced_attn_backend())
-    if backend_by_global_setting is not None:
-        selected_backend = backend_by_global_setting
-    else:
-        # Check the environment variable and override if specified
-        backend_by_env_var: str | None = envs.FASTVIDEO_ATTENTION_BACKEND
-        if backend_by_env_var is not None:
-            selected_backend = backend_name_to_enum(backend_by_env_var)
 
     # get device-specific attn_backend
     from fastvideo.platforms import current_platform
 
-    if selected_backend not in supported_attention_backends:
+    if not is_forced_backend and selected_backend not in supported_attention_backends:
         selected_backend = None
     attention_cls = current_platform.get_attn_backend_cls(selected_backend, head_size, dtype)
     if not attention_cls:
