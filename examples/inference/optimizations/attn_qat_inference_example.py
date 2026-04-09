@@ -23,7 +23,7 @@ def main():
         text_encoder_cpu_offload=True,
         pin_cpu_memory=False, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
         # image_encoder_cpu_offload=False,
-        # Load custom weights from checkpoint-5000
+        # Load custom weights from checkpoint 
         init_weights_from_safetensors="safetensors_path"
     )
 
