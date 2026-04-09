@@ -137,7 +137,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         if training_args.generator_4bit_linear:
             num_swaps = traverse_swap_module(self.transformer, swap_fn=swap_fp4_linear)
-            logger.info("Swapped %s linear layers to LinearFWD4BWD16 instances in self.transformer", num_swaps)
+            logger.info("Swapped %s linear layers to the FP4 forward path in self.transformer", num_swaps)
         noise_scheduler = self.modules["scheduler"]
         self.set_trainable()
         params_to_optimize = self.transformer.parameters()

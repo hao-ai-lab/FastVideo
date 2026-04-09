@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import math
 import sys
+import types
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from fastvideo.layers.fp4linear import LinearFWD4BWD16
+from fastvideo.layers.fp4linear import fp4_linear_forward
+from fastvideo.layers.linear import ReplicatedLinear
 
 def fail(msg: str):
     print(f"[FAIL] {msg}")
@@ -45,16 +47,11 @@ def run_case(case, fwd_cos_min=0.98, fwd_rel_l2_max=0.15,
     # Reference BF16 Linear
     ref = nn.Linear(IN, OUT, bias=True).to(device=device, dtype=torch.bfloat16)
 
-    # FP4-forward layer (stores fp32, casts to activation dtype internally)
-    try:
-        LinearFWD4BWD16
-    except NameError:
-        print("LinearFWD4BWD16 is not defined/imported. Please import it before running.")
-        sys.exit(1)
-
-    test_layer = LinearFWD4BWD16(
-        IN, OUT, bias=True, backend="cutlass", block_size=16, use_128x4_sf_layout=True
+    # FP4-forward path is installed by monkey-patching ReplicatedLinear.forward.
+    test_layer = ReplicatedLinear(
+        IN, OUT, bias=True, params_dtype=torch.float32
     ).to(device)
+    test_layer.forward = types.MethodType(fp4_linear_forward, test_layer)
 
     # Initialize identically from the same fp32 master params
     with torch.no_grad():
@@ -78,7 +75,7 @@ def run_case(case, fwd_cos_min=0.98, fwd_rel_l2_max=0.15,
     # -------- Forward comparison --------
     with torch.inference_mode():
         y_ref = ref(x_ref)
-        y_fp4 = test_layer(x)
+        y_fp4, _ = test_layer(x)
 
     print("Forward metrics (FP4-forward vs BF16):")
     metric_report(y_ref, y_fp4, "forward", fwd_cos_min, fwd_rel_l2_max)
@@ -101,7 +98,7 @@ def run_case(case, fwd_cos_min=0.98, fwd_rel_l2_max=0.15,
 
     # Recompute forward with grad graph (no inference_mode)
     y_ref = ref(x_ref)
-    y_fp4 = test_layer(x)
+    y_fp4, _ = test_layer(x)
 
     # Backward with same grad_out
     y_ref.backward(grad_out)
