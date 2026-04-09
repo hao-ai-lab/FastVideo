@@ -318,10 +318,7 @@ class WaypointPipeline(ComposedPipelineBase):
             device = next(transformer.parameters()).device
             dtype = self._waypoint_compute_dtype(transformer)
             nf = batch.num_frames
-            if isinstance(nf, list):
-                nf = max(nf) if nf else 1
-            else:
-                nf = int(nf)
+            nf = (max(nf) if nf else 1) if isinstance(nf, list) else int(nf)
             logger.warning(
                 "Waypoint forward: missing keyboard_cond/mouse_cond; "
                 "using zeros for %d frames",
