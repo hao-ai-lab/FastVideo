@@ -20,6 +20,11 @@ cd fastvideo-kernel
 ./build.sh
 ```
 
+On supported Blackwell environments, the same install also packages
+`modified_sageattn` and builds its `fp4attn_cuda` / `fp4quant_cuda`
+extensions automatically. This path requires CUDA Toolkit 12.8+ and
+targets `sm_120a`.
+
 ### Rocm Build
 If you are in a rocm environment without the compilation toolchaine of CUDA.
 

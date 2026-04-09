@@ -17,11 +17,7 @@ try:
     # Prefer the in-repo kernel implementation during local development.
     from modified_sageattn import sageattn_blackwell
 except ImportError:
-    # Fall back to installed package if local version not available.
-    try:
-        from sageattn import sageattn_blackwell
-    except ImportError:
-        sageattn_blackwell = None
+    sageattn_blackwell = None
 
 from fastvideo.attention.backends.abstract import (
     AttentionBackend,
@@ -32,6 +28,10 @@ from fastvideo.attention.backends.abstract import (
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+
+
+def is_modified_sageattn_available() -> bool:
+    return sageattn_blackwell is not None
 
 
 class ModifiedSageAttention3Backend(AttentionBackend):
@@ -82,9 +82,11 @@ class ModifiedSageAttention3Impl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        if sageattn_blackwell is None:
-            raise ImportError("modified_sageattn is not available. "
-                              "Please ensure the modified SageAttention3 kernel is installed.")
+        if not is_modified_sageattn_available():
+            raise ImportError(
+                "modified_sageattn is not available. Please ensure the "
+                "modified SageAttention3 kernel is installed."
+            )
 
         query = query.transpose(1, 2).contiguous()
         key = key.transpose(1, 2).contiguous()

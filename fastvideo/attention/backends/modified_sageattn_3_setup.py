@@ -10,6 +10,8 @@ import torch
 from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension, CUDA_HOME
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
+repo_dir = Path(this_dir).resolve()
+package_root = repo_dir.parents[2] / "fastvideo-kernel"
 
 PACKAGE_NAME = "modified_sageattn"
 
@@ -68,9 +70,8 @@ if not SKIP_CUDA_BUILD:
     # https://github.com/pytorch/pytorch/blob/8472c24e3b5b60150096486616d98b7bea01500b/torch/utils/cpp_extension.py#L920
     if FORCE_CXX11_ABI:
         torch._C._GLIBCXX_USE_CXX11_ABI = True
-    repo_dir = Path(this_dir).resolve()
     modified_sageattn_dir = (
-        repo_dir.parents[2] / "fastvideo-kernel" / "modified_sageattn"
+        package_root / "modified_sageattn"
     )
     cutlass_dir = repo_dir / "csrc" / "cutlass"
     (repo_dir / "csrc").mkdir(parents=True, exist_ok=True)
@@ -149,6 +150,7 @@ setup(
     name=PACKAGE_NAME,
     version="1.0.0",
     packages=find_packages(
+        where=str(package_root),
         exclude=(
             "build",
             "csrc",
@@ -158,6 +160,7 @@ setup(
             "benchmarks",
         )
     ),
+    package_dir={"": str(package_root)},
     description="FP4FlashAttention",
     long_description_content_type="text/markdown",
     classifiers=[
