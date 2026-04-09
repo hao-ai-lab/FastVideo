@@ -172,8 +172,6 @@ def maybe_load_fsdp_model(
                     compile_kwargs)
         model = torch.compile(model, **compile_kwargs)
         logger.info("torch.compile enabled for %s", type(model).__name__)
-    # elif USE_FP8:
-    #     convert_model_to_fp8(model)
     return model
 
 
