@@ -1,627 +1,0 @@
-W0105 20:45:36.871000 2647951 torch/distributed/run.py:803] 
-W0105 20:45:36.871000 2647951 torch/distributed/run.py:803] *****************************************
-W0105 20:45:36.871000 2647951 torch/distributed/run.py:803] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
-W0105 20:45:36.871000 2647951 torch/distributed/run.py:803] *****************************************
-W0105 20:45:36.904000 456319 torch/distributed/run.py:803] 
-W0105 20:45:36.904000 456319 torch/distributed/run.py:803] *****************************************
-W0105 20:45:36.904000 456319 torch/distributed/run.py:803] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
-W0105 20:45:36.904000 456319 torch/distributed/run.py:803] *****************************************
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 2648.37it/s]
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 5185.80it/s]
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 11407.39it/s]
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 12986.44it/s]
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 10524.26it/s]
-Loading safetensors checkpoint shards:   0% Completed | 0/12 [00:00<?, ?it/s]
-Loading safetensors checkpoint shards:  33% Completed | 4/12 [00:00<00:00, 38.02it/s]
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 10054.17it/s]
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 11846.68it/s]
-Loading safetensors checkpoint shards:  67% Completed | 8/12 [00:00<00:00, 17.01it/s]
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 11148.56it/s]
-Loading safetensors checkpoint shards:  92% Completed | 11/12 [00:00<00:00, 15.86it/s]
-Loading safetensors checkpoint shards: 100% Completed | 12/12 [00:00<00:00, 16.69it/s]
-
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 6307.69it/s]
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 8677.72it/s]
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 9993.98it/s]
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 10269.11it/s]
-wandb: Currently logged in as: nmr73 (backpropt) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 9908.76it/s]
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 12063.59it/s]
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 10479.37it/s]
-wandb: setting up run 5avue7cp
-wandb: Tracking run with wandb version 0.23.0
-wandb: Run data is saved locally in /home/hal-matthewn/FastVideo-Quantization/checkpoints/wan_t2v_finetune_sage3_14B/tracker/wandb/run-20260105_204932-5avue7cp
-wandb: Run `wandb offline` to turn off syncing.
-wandb: Syncing run vague-oath-108
-wandb: ⭐️ View project at https://wandb.ai/backpropt/wan_t2v_finetune_qat
-wandb: 🚀 View run at https://wandb.ai/backpropt/wan_t2v_finetune_qat/runs/5avue7cp
-Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 10958.16it/s]
-Loading safetensors checkpoint shards:   0% Completed | 0/5 [00:00<?, ?it/s]
-Loading safetensors checkpoint shards:  20% Completed | 1/5 [00:09<00:37,  9.37s/it]
-Loading safetensors checkpoint shards:  40% Completed | 2/5 [00:29<00:47, 15.97s/it]
-Loading safetensors checkpoint shards:  60% Completed | 3/5 [00:49<00:35, 17.63s/it]
-Loading safetensors checkpoint shards:  80% Completed | 4/5 [01:10<00:19, 19.00s/it]
-Loading safetensors checkpoint shards: 100% Completed | 5/5 [01:34<00:00, 20.61s/it]
-Loading safetensors checkpoint shards: 100% Completed | 5/5 [01:34<00:00, 18.83s/it]
-
-/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/data/dataloader.py:659: UserWarning: pin_memory_device is deprecated, the current accelerator will be used as the device,ignore pin_memory_device='cuda'.
-  warnings.warn(
-/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/data/dataloader.py:659: UserWarning: pin_memory_device is deprecated, the current accelerator will be used as the device,ignore pin_memory_device='cuda'.
-  warnings.warn(
-/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/data/dataloader.py:659: UserWarning: pin_memory_device is deprecated, the current accelerator will be used as the device,ignore pin_memory_device='cuda'.
-  warnings.warn(
-/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/data/dataloader.py:659: UserWarning: pin_memory_device is deprecated, the current accelerator will be used as the device,ignore pin_memory_device='cuda'.
-  warnings.warn(
-/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/data/dataloader.py:659: UserWarning: pin_memory_device is deprecated, the current accelerator will be used as the device,ignore pin_memory_device='cuda'.
-  warnings.warn(
-/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/data/dataloader.py:659: UserWarning: pin_memory_device is deprecated, the current accelerator will be used as the device,ignore pin_memory_device='cuda'.
-  warnings.warn(
-/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/data/dataloader.py:659: UserWarning: pin_memory_device is deprecated, the current accelerator will be used as the device,ignore pin_memory_device='cuda'.
-  warnings.warn(
-/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/data/dataloader.py:659: UserWarning: pin_memory_device is deprecated, the current accelerator will be used as the device,ignore pin_memory_device='cuda'.
-  warnings.warn(
-  0%|          | 0/50 [00:00<?, ?it/s]  2%|▏         | 1/50 [00:33<27:00, 33.08s/it]  4%|▍         | 2/50 [00:56<21:57, 27.44s/it]  6%|▌         | 3/50 [01:20<20:07, 25.70s/it]  8%|▊         | 4/50 [01:43<19:02, 24.84s/it] 10%|█         | 5/50 [02:07<18:15, 24.35s/it] 12%|█▏        | 6/50 [02:30<17:42, 24.15s/it] 14%|█▍        | 7/50 [02:54<17:09, 23.94s/it] 16%|█▌        | 8/50 [03:17<16:39, 23.80s/it] 18%|█▊        | 9/50 [03:41<16:12, 23.71s/it] 20%|██        | 10/50 [04:05<15:49, 23.75s/it] 22%|██▏       | 11/50 [04:28<15:23, 23.67s/it] 24%|██▍       | 12/50 [04:52<14:57, 23.62s/it] 26%|██▌       | 13/50 [05:15<14:32, 23.59s/it] 28%|██▊       | 14/50 [05:39<14:08, 23.56s/it] 30%|███       | 15/50 [06:03<13:47, 23.64s/it] 32%|███▏      | 16/50 [06:26<13:22, 23.60s/it] 34%|███▍      | 17/50 [06:50<12:57, 23.57s/it] 36%|███▌      | 18/50 [07:13<12:33, 23.55s/it] 38%|███▊      | 19/50 [07:37<12:09,   0%|          | 0/50 [00:00<?, ?it/s]  2%|▏         | 1/50 [00:30<24:34, 30.08s/it]  4%|▍         | 2/50 [00:53<20:58, 26.22s/it]  6%|▌         | 3/50 [01:17<19:36, 25.04s/it]  8%|▊         | 4/50 [01:40<18:43, 24.43s/it] 10%|█         | 5/50 [02:04<18:04, 24.10s/it] 12%|█▏        | 6/50 [02:27<17:35, 23.98s/it] 14%|█▍        | 7/50 [02:51<17:04, 23.83s/it] 16%|█▌        | 8/50 [03:14<16:36, 23.72s/it] 18%|█▊        | 9/50 [03:38<16:10, 23.66s/it] 20%|██        | 10/50 [04:02<15:48, 23.71s/it] 22%|██▏       | 11/50 [04:25<15:22, 23.65s/it] 24%|██▍       | 12/50 [04:49<14:57, 23.61s/it] 26%|██▌       | 13/50 [05:12<14:32, 23.58s/it] 28%|██▊       | 14/50 [05:36<14:07, 23.56s/it] 30%|███       | 15/50 [06:00<13:47, 23.63s/it] 32%|███▏      | 16/50 [06:23<13:22, 23.59s/it] 34%|███▍      | 17/50 [06:47<12:57, 23.57s/it] 36%|███▌      | 18/50 [07:10<12:33, 23.55s/it] 38%|███▊      | 19/50 [07:34<12:09, 23.54s/it] 40%|████      | 20/50 [08:00<11:45, 23.53s/it] 42%|████▏     | 21/50 [08:24<11:22, 23.52s/it] 44%|████▍     | 22/50 [08:47<10:58, 23.52s/it] 46%|████▌     | 23/50 [09:11<10:34, 23.51s/it] 48%|████▊     | 24/50 [09:34<10:11, 23.51s/it] 50%|█████     | 25/50 [09:58<09:47, 23.51s/it] 52%|█████▏    | 26/50 [10:21<09:24, 23.51s/it] 54%|█████▍    | 27/50 [10:45<09:00, 23.51s/it] 56%|█████▌    | 28/50 [11:08<08:37, 23.51s/it] 58%|█████▊    | 29/50 [11:32<08:13, 23.51s/it] 60%|██████    | 30/50 [11:55<07:50, 23.51s/it] 62%|██████▏   | 31/50 [12:19<07:26, 23.51s/it] 64%|██████▍   | 32/50 [12:42<07:03, 23.51s/it] 66%|██████▌   | 33/50 [13:06<06:39, 23.51s/it] 68%|██████▊   | 34/50 [13:29<06:16, 23.51s/it] 70%|███████   | 35/50 [13:53<05:52, 23.51s/it] 72%|███████▏  | 36/50 [14:16<05:29, 23.523.54s/it] 40%|████      | 20/50 [07:57<11:45, 23.53s/it] 42%|████▏     | 21/50 [08:21<11:22, 23.52s/it] 44%|████▍     | 22/50 [08:44<10:58, 23.52s/it] 46%|████▌     | 23/50 [09:08<10:34, 23.51s/it] 48%|████▊     | 24/50 [09:31<10:11, 23.51s/it] 50%|█████     | 25/50 [09:55<09:47, 23.51s/it] 52%|█████▏    | 26/50 [10:18<09:24, 23.51s/it] 54%|█████▍    | 27/50 [10:42<09:00, 23.51s/it] 56%|█████▌    | 28/50 [11:05<08:37, 23.51s/it] 58%|█████▊    | 29/50 [11:29<08:13, 23.51s/it] 60%|██████    | 30/50 [11:52<07:50, 23.51s/it] 62%|██████▏   | 31/50 [12:16<07:26, 23.51s/it] 64%|██████▍   | 32/50 [12:39<07:03, 23.51s/it] 66%|██████▌   | 33/50 [13:03<06:39, 23.51s/it] 68%|██████▊   | 34/50 [13:26<06:16, 23.51s/it] 70%|███████   | 35/50 [13:50<05:52, 23.51s/it] 72%|███████▏  | 36/50 [14:13<05:29, 23.51s/it] 74%|███████▍  | 37/50 [14:40<05:05, 23.51s/it] 76%|███████▌  | 38/50 [15:03<04:42, 23.51s/it] 78%|███████▊  | 39/50 [15:27<04:18, 23.51s/it] 80%|████████  | 40/50 [15:50<03:55, 23.51s/it] 82%|████████▏ | 41/50 [16:14<03:31, 23.51s/it] 84%|████████▍ | 42/50 [16:37<03:08, 23.51s/it] 86%|████████▌ | 43/50 [17:01<02:44, 23.51s/it] 88%|████████▊ | 44/50 [17:24<02:21, 23.51s/it] 90%|█████████ | 45/50 [17:48<01:57, 23.51s/it] 92%|█████████▏| 46/50 [18:11<01:34, 23.51s/it] 94%|█████████▍| 47/50 [18:35<01:10, 23.51s/it] 96%|█████████▌| 48/50 [18:58<00:47, 23.51s/it] 98%|█████████▊| 49/50 [19:22<00:23, 23.51s/it]100%|██████████| 50/50 [19:45<00:00, 23.51s/it]100%|██████████| 50/50 [19:45<00:00, 23.72s/it]
-1s/it] 74%|███████▍  | 37/50 [14:37<05:05, 23.51s/it] 76%|███████▌  | 38/50 [15:00<04:42, 23.51s/it] 78%|███████▊  | 39/50 [15:24<04:18, 23.51s/it] 80%|████████  | 40/50 [15:47<03:55, 23.51s/it] 82%|████████▏ | 41/50 [16:11<03:31, 23.51s/it] 84%|████████▍ | 42/50 [16:34<03:08, 23.51s/it] 86%|████████▌ | 43/50 [16:58<02:44, 23.51s/it] 88%|████████▊ | 44/50 [17:21<02:21, 23.51s/it] 90%|█████████ | 45/50 [17:45<01:57, 23.51s/it] 92%|█████████▏| 46/50 [18:08<01:34, 23.51s/it] 94%|█████████▍| 47/50 [18:32<01:10, 23.51s/it] 96%|█████████▌| 48/50 [18:55<00:47, 23.51s/it] 98%|█████████▊| 49/50 [19:19<00:23, 23.51s/it]100%|██████████| 50/50 [19:42<00:00, 23.51s/it]100%|██████████| 50/50 [19:42<00:00, 23.66s/it]
-  0%|          | 0/50 [00:00<?, ?it/s]  2%|▏         | 1/50 [00:28<22:58, 28.14s/it]  4%|▍         | 2/50 [00:51<20:19, 25.41s/it]  6%|▌         | 3/50 [01:15<19:13, 24.53s/it]W0105 21:12:40.064000 2647951 torch/distributed/elastic/rendezvous/dynamic_rendezvous.py:1341] The node 'hpc-rack-1-13.slurm-compute.slurm.svc.cluster.local_2647951_0' has failed to send a keep-alive heartbeat to the rendezvous 'none' due to an error of type RendezvousTimeoutError.
-  0%|          | 0/50 [00:00<?, ?it/s]  2%|▏         | 1/50 [00:28<23:31, 28.80s/it]  4%|▍         | 2/50 [00:52<20:32, 25.68s/it]  6%|▌         | 3/50 [01:15<19:20, 24.68s/it]  8%|▊         | 4/50 [01:39<18:33, 24.21s/it] 10%|█         | 5/50 [02:02<17:58, 23.96s/it] 12%|█▏        | 6/50 [02:26<17:27, 23.80s/it] 14%|█▍        | 7/50 [02:49<16:59, 23.70s/it] 16%|█▌        | 8/50 [03:13<16:32, 23.64s/it] 18%|█▊        | 9/50 [03:36<16:07, 23.59s/it] 20%|██        | 10/50 [04:00<15:42, 23.56s/it] 22%|██▏       | 11/50 [04:23<15:18, 23.54s/it] 24%|██▍       | 12/50 [04:47<14:54, 23.53s/it] 26%|██▌       | 13/50 [05:10<14:30, 23.52s/it] 28%|██▊       | 14/50 [05:34<14:06, 23.51s/it] 30%|███       | 15/50 [05:57<13:42, 23.51s/it] 32%|███▏      | 16/50 [06:21<13:19, 23.50s/it] 34%|███▍      | 17/50 [06:44<12:55, 23.50s/it] 36%|███▌      | 18/50 [07:08<12:31, 23.50s/it] 38%|███▊      | 19/50 [07:31<12:08,   8%|▊         | 4/50 [01:38<18:29, 24.13s/it] 10%|█         | 5/50 [02:02<17:55, 23.90s/it] 12%|█▏        | 6/50 [02:25<17:25, 23.76s/it] 14%|█▍        | 7/50 [02:49<16:58, 23.68s/it] 16%|█▌        | 8/50 [03:12<16:31, 23.62s/it] 18%|█▊        | 9/50 [03:36<16:06, 23.58s/it] 20%|██        | 10/50 [03:59<15:42, 23.56s/it] 22%|██▏       | 11/50 [04:23<15:17, 23.54s/it] 24%|██▍       | 12/50 [04:46<14:53, 23.53s/it] 26%|██▌       | 13/50 [05:10<14:30, 23.52s/it] 28%|██▊       | 14/50 [05:33<14:06, 23.51s/it] 30%|███       | 15/50 [05:57<13:42, 23.51s/it] 32%|███▏      | 16/50 [06:20<13:19, 23.50s/it] 34%|███▍      | 17/50 [06:44<12:55, 23.50s/it] 36%|███▌      | 18/50 [07:07<12:31, 23.50s/it] 38%|███▊      | 19/50 [07:31<12:08, 23.50s/it] 40%|████      | 20/50 [07:54<11:44, 23.50s/it] 42%|████▏     | 21/50 [08:18<11:21, 23.50s/it] 44%|████▍     | 22/50 [08:41<10:57, 23.50s/it] 4623.50s/it] 40%|████      | 20/50 [07:55<11:44, 23.50s/it] 42%|████▏     | 21/50 [08:18<11:21, 23.50s/it] 44%|████▍     | 22/50 [08:42<10:57, 23.50s/it] 46%|████▌     | 23/50 [09:05<10:34, 23.50s/it] 48%|████▊     | 24/50 [09:29<10:10, 23.50s/it] 50%|█████     | 25/50 [09:52<09:47, 23.50s/it] 52%|█████▏    | 26/50 [10:16<09:23, 23.50s/it] 54%|█████▍    | 27/50 [10:39<09:00, 23.50s/it] 56%|█████▌    | 28/50 [11:03<08:36, 23.50s/it] 58%|█████▊    | 29/50 [11:26<08:13, 23.50s/it] 60%|██████    | 30/50 [11:50<07:50, 23.50s/it] 62%|██████▏   | 31/50 [12:13<07:26, 23.50s/it] 64%|██████▍   | 32/50 [12:37<07:02, 23.50s/it] 66%|██████▌   | 33/50 [13:00<06:39, 23.50s/it] 68%|██████▊   | 34/50 [13:24<06:15, 23.50s/it] 70%|███████   | 35/50 [13:47<05:52, 23.50s/it] 72%|███████▏  | 36/50 [14:11<05:28, 23.5%|████▌     | 23/50 [09:05<10:34, 23.50s/it] 48%|████▊     | 24/50 [09:28<10:10, 23.50s/it] 50%|█████     | 25/50 [09:52<09:47, 23.50s/it] 52%|█████▏    | 26/50 [10:15<09:23, 23.50s/it] 54%|█████▍    | 27/50 [10:39<09:00, 23.50s/it] 56%|█████▌    | 28/50 [11:02<08:36, 23.50s/it] 58%|█████▊    | 29/50 [11:26<08:13, 23.50s/it] 60%|██████    | 30/50 [11:49<07:50, 23.50s/it] 62%|██████▏   | 31/50 [12:13<07:26, 23.50s/it] 64%|██████▍   | 32/50 [12:36<07:02, 23.50s/it] 66%|██████▌   | 33/50 [13:00<06:39, 23.50s/it] 68%|██████▊   | 34/50 [13:23<06:15, 23.50s/it] 70%|███████   | 35/50 [13:47<05:52, 23.50s/it] 72%|███████▏  | 36/50 [14:10<05:28, 23.50s/it] 74%|███████▍  | 37/50 [14:34<05:05, 23.50s/it] 76%|███████▌  | 38/50 [14:57<04:41, 23.50s/it] 78%|███████▊  | 39/50 [15:21<04:180s/it] 74%|███████▍  | 37/50 [14:34<05:05, 23.50s/it] 76%|███████▌  | 38/50 [14:58<04:41, 23.50s/it] 78%|███████▊  | 39/50 [15:21<04:18, 23.50s/it] 80%|████████  | 40/50 [15:45<03:54, 23.50s/it] 82%|████████▏ | 41/50 [16:08<03:31, 23.50s/it] 84%|████████▍ | 42/50 [16:32<03:07, 23.50s/it] 86%|████████▌ | 43/50 [16:55<02:44, 23.50s/it] 88%|████████▊ | 44/50 [17:19<02:20, 23.50s/it] 90%|█████████ | 45/50 [17:42<01:57, 23.50s/it] 92%|█████████▏| 46/50 [18:06<01:33, 23.50s/it] 94%|█████████▍| 47/50 [18:29<01:10, 23.50s/it] 96%|█████████▌| 48/50 [18:53<00:46, 23.49s/it] 98%|█████████▊| 49/50 [19:16<00:23, 23.49s/it]100%|██████████| 50/50 [19:40<00:00, 23.50s/it]100%|██████████| 50/50 [19:40<00:00, 23.60s/it]
-, 23.50s/it] 80%|████████  | 40/50 [15:44<03:54, 23.50s/it] 82%|████████▏ | 41/50 [16:08<03:31, 23.50s/it] 84%|████████▍ | 42/50 [16:31<03:07, 23.50s/it] 86%|████████▌ | 43/50 [16:55<02:44, 23.50s/it] 88%|████████▊ | 44/50 [17:18<02:20, 23.50s/it] 90%|█████████ | 45/50 [17:42<01:57, 23.50s/it] 92%|█████████▏| 46/50 [18:05<01:33, 23.50s/it] 94%|█████████▍| 47/50 [18:29<01:10, 23.50s/it] 96%|█████████▌| 48/50 [18:52<00:46, 23.49s/it] 98%|█████████▊| 49/50 [19:15<00:23, 23.49s/it]100%|██████████| 50/50 [19:39<00:00, 23.50s/it]100%|██████████| 50/50 [19:39<00:00, 23.59s/it]
-  0%|          | 0/50 [00:00<?, ?it/s]  2%|▏         | 1/50 [00:25<20:31, 25.13s/it]  4%|▍         | 2/50 [00:48<19:20, 24.17s/it]  6%|▌         | 3/50 [01:12<18:41, 23.87s/it]  8%|▊         | 4/50 [01:35<18:11, 23.72s/it] 10%|█         | 5/50 [01:59<17:43, 23.64s/it] 12%|█▏        | 6/50 [02:22<17:18, 23.59s/it] 14%|█▍        | 7/50 [02:46<16:53, 23.56s/it] 16%|█▌        | 8/50 [03:09<16:28, 23.54s/it] 18%|█▊        | 9/50 [03:33<16:04, 23.53s/it] 20%|██        | 10/50 [03:56<15:40, 23.52s/it] 22%|██▏       | 11/50 [04:20<15:16, 23.51s/it] 24%|██▍       | 12/50 [04:43<14:53, 23.51s/it] 26%|██▌       | 13/50 [05:07<14:29, 23.51s/it] 28%|██▊       | 14/50 [05:30<14:06, 23.50s/it] 30%|███       | 15/50 [05:54<13:42, 23.50s/it] 32%|███▏      | 16/50 [06:17<13:19, 23.50s/it] 34%|███▍      | 17/50 [06:41<12:55, 23.50s/it] 36%|███▌      | 18/50 [07:04<12:32, 23.50s/it] 38%|███▊      | 19/50 [07:28<12:08,   0%|          | 0/50 [00:00<?, ?it/s]  2%|▏         | 1/50 [00:23<19:10, 23.49s/it]  4%|▍         | 2/50 [00:46<18:47, 23.50s/it]  6%|▌         | 3/50 [01:10<18:24, 23.50s/it]  8%|▊         | 4/50 [01:33<18:00, 23.50s/it] 10%|█         | 5/50 [01:57<17:37, 23.50s/it] 12%|█▏        | 6/50 [02:20<17:13, 23.50s/it] 14%|█▍        | 7/50 [02:44<16:50, 23.50s/it] 16%|█▌        | 8/50 [03:07<16:26, 23.50s/it] 18%|█▊        | 9/50 [03:31<16:03, 23.50s/it] 20%|██        | 10/50 [03:54<15:39, 23.50s/it] 22%|██▏       | 11/50 [04:18<15:16, 23.50s/it] 24%|██▍       | 12/50 [04:41<14:52, 23.50s/it] 26%|██▌       | 13/50 [05:05<14:29, 23.50s/it] 28%|██▊       | 14/50 [05:28<14:05, 23.50s/it] 30%|███       | 15/50 [05:52<13:42, 23.50s/it] 32%|███▏      | 16/50 [06:15<13:18, 23.50s/it] 34%|███▍      | 17/50 [06:39<12:55, 23.50s/it] 36%|███▌      | 18/50 [07:02<12:31, 23.50s/it] 38%|███▊      | 19/50 [07:26<12:08, 23.50s/it] 40%|████      | 20/50 [07:49<11:44, 23.50s/it] 42%|████▏     | 21/50 [08:13<11:21, 23.50s/it] 44%|████▍     | 22/50 [08:36<10:57, 23.50s/it] 46%|████▌     | 23/50 [09:00<10:34, 23.50s/it] 48%|████▊     | 24/50 [09:23<10:10, 23.50s/it] 50%|█████     | 25/50 [09:47<09:47, 23.50s/it] 52%|█████▏    | 26/50 [10:10<09:23, 23.50s/it] 54%|█████▍    | 27/50 [10:34<09:00, 23.50s/it] 56%|█████▌    | 28/50 [10:57<08:36, 23.50s/it] 58%|█████▊    | 29/50 [11:21<08:13, 23.50s/it] 60%|██████    | 30/50 [11:44<07:49, 23.50s/it] 62%|██████▏   | 31/50 [12:08<07:26, 23.50s/it] 64%|██████▍   | 32/50 [12:31<07:02, 23.50s/it] 66%|██████▌   | 33/50 [12:55<06:39, 23.50s/it] 68%|██████▊   | 34/50 [13:18<06:15, 23.50s/it] 70%|███████   | 35/50 [13:42<05:52, 23.50s/it] 72%|███████▏  | 36/50 [14:05<05:28, 23.523.50s/it] 40%|████      | 20/50 [07:51<11:45, 23.50s/it] 42%|████▏     | 21/50 [08:15<11:21, 23.50s/it] 44%|████▍     | 22/50 [08:38<10:57, 23.50s/it] 46%|████▌     | 23/50 [09:02<10:34, 23.50s/it] 48%|████▊     | 24/50 [09:25<10:10, 23.50s/it] 50%|█████     | 25/50 [09:49<09:47, 23.50s/it] 52%|█████▏    | 26/50 [10:12<09:23, 23.50s/it] 54%|█████▍    | 27/50 [10:36<09:00, 23.50s/it] 56%|█████▌    | 28/50 [10:59<08:36, 23.50s/it] 58%|█████▊    | 29/50 [11:23<08:13, 23.50s/it] 60%|██████    | 30/50 [11:46<07:49, 23.50s/it] 62%|██████▏   | 31/50 [12:10<07:26, 23.50s/it] 64%|██████▍   | 32/50 [12:33<07:02, 23.50s/it] 66%|██████▌   | 33/50 [12:57<06:39, 23.50s/it] 68%|██████▊   | 34/50 [13:20<06:15, 23.50s/it] 70%|███████   | 35/50 [13:44<05:52, 23.50s/it] 72%|███████▏  | 36/50 [14:07<05:28, 23.50s/it] 74%|███████▍  | 37/50 [14:31<05:05, 23.50s/it] 76%|███████▌  | 38/50 [14:54<04:41, 23.50s/it] 78%|███████▊  | 39/50 [15:18<04:18, 23.50s/it] 80%|████████  | 40/50 [15:41<03:54, 23.50s/it] 82%|████████▏ | 41/50 [16:05<03:31, 23.50s/it] 84%|████████▍ | 42/50 [16:28<03:07, 23.50s/it] 86%|████████▌ | 43/50 [16:52<02:44, 23.50s/it] 88%|████████▊ | 44/50 [17:15<02:20, 23.50s/it] 90%|█████████ | 45/50 [17:39<01:57, 23.50s/it] 92%|█████████▏| 46/50 [18:02<01:33, 23.50s/it] 94%|█████████▍| 47/50 [18:26<01:10, 23.50s/it] 96%|█████████▌| 48/50 [18:49<00:46, 23.50s/it] 98%|█████████▊| 49/50 [19:13<00:23, 23.50s/it]100%|██████████| 50/50 [19:36<00:00, 23.50s/it]100%|██████████| 50/50 [19:36<00:00, 23.53s/it]
-0s/it] 74%|███████▍  | 37/50 [14:29<05:05, 23.50s/it] 76%|███████▌  | 38/50 [14:52<04:41, 23.50s/it] 78%|███████▊  | 39/50 [15:16<04:18, 23.50s/it] 80%|████████  | 40/50 [15:39<03:54, 23.50s/it] 82%|████████▏ | 41/50 [16:03<03:31, 23.50s/it] 84%|████████▍ | 42/50 [16:26<03:07, 23.50s/it] 86%|████████▌ | 43/50 [16:50<02:44, 23.50s/it] 88%|████████▊ | 44/50 [17:13<02:20, 23.50s/it] 90%|█████████ | 45/50 [17:37<01:57, 23.50s/it] 92%|█████████▏| 46/50 [18:00<01:33, 23.50s/it] 94%|█████████▍| 47/50 [18:24<01:10, 23.50s/it] 96%|█████████▌| 48/50 [18:47<00:46, 23.50s/it] 98%|█████████▊| 49/50 [19:11<00:23, 23.50s/it]100%|██████████| 50/50 [19:34<00:00, 23.50s/it]100%|██████████| 50/50 [19:34<00:00, 23.50s/it]
-  0%|          | 0/50 [00:00<?, ?it/s]  2%|▏         | 1/50 [00:23<19:10, 23.49s/it]  4%|▍         | 2/50 [00:46<18:47, 23.49s/it]  6%|▌         | 3/50 [01:10<18:24, 23.50s/it]  8%|▊         | 4/50 [01:33<18:00, 23.50s/it] 10%|█         | 5/50 [01:57<17:37, 23.50s/it] 12%|█▏        | 6/50 [02:20<17:13, 23.50s/it] 14%|█▍        | 7/50 [02:44<16:50, 23.50s/it] 16%|█▌        | 8/50 [03:07<16:26, 23.50s/it] 18%|█▊        | 9/50 [03:31<16:03, 23.50s/it] 20%|██        | 10/50 [03:54<15:39, 23.50s/it] 22%|██▏       | 11/50 [04:18<15:16, 23.50s/it] 24%|██▍       | 12/50 [04:41<14:52, 23.50s/it] 26%|██▌       | 13/50 [05:05<14:29, 23.50s/it] 28%|██▊       | 14/50 [05:28<14:05, 23.50s/it] 30%|███       | 15/50 [05:52<13:42, 23.50s/it] 32%|███▏      | 16/50 [06:15<13:18, 23.50s/it] 34%|███▍      | 17/50 [06:39<12:55, 23.50s/it] 36%|███▌      | 18/50 [07:02<12:31, 23.50s/it] 38%|███▊      | 19/50 [07:26<12:08,   0%|          | 0/50 [00:00<?, ?it/s]  2%|▏         | 1/50 [00:23<19:16, 23.59s/it]  4%|▍         | 2/50 [00:47<18:49, 23.54s/it]  6%|▌         | 3/50 [01:10<18:25, 23.52s/it]  8%|▊         | 4/50 [01:34<18:01, 23.51s/it] 10%|█         | 5/50 [01:57<17:37, 23.51s/it] 12%|█▏        | 6/50 [02:21<17:14, 23.50s/it] 14%|█▍        | 7/50 [02:44<16:50, 23.50s/it] 16%|█▌        | 8/50 [03:08<16:27, 23.50s/it] 18%|█▊        | 9/50 [03:31<16:03, 23.50s/it] 20%|██        | 10/50 [03:55<15:39, 23.50s/it] 22%|██▏       | 11/50 [04:18<15:16, 23.50s/it] 24%|██▍       | 12/50 [04:42<14:52, 23.50s/it] 26%|██▌       | 13/50 [05:05<14:29, 23.50s/it] 28%|██▊       | 14/50 [05:29<14:05, 23.50s/it] 30%|███       | 15/50 [05:52<13:42, 23.50s/it] 32%|███▏      | 16/50 [06:16<13:18, 23.50s/it] 34%|███▍      | 17/50 [06:39<12:55, 23.50s/it] 36%|███▌      | 18/50 [07:03<12:31, 23.50s/it] 38%|███▊      | 19/50 [07:26<12:08, 23.50s/it] 40%|████      | 20/50 [07:49<11:44, 23.50s/it] 42%|████▏     | 21/50 [08:13<11:21, 23.50s/it] 44%|████▍     | 22/50 [08:36<10:57, 23.50s/it] 46%|████▌     | 23/50 [09:00<10:34, 23.50s/it] 48%|████▊     | 24/50 [09:23<10:10, 23.50s/it] 50%|█████     | 25/50 [09:47<09:47, 23.50s/it] 52%|█████▏    | 26/50 [10:10<09:23, 23.50s/it] 54%|█████▍    | 27/50 [10:34<09:00, 23.50s/it] 56%|█████▌    | 28/50 [10:57<08:36, 23.50s/it] 58%|█████▊    | 29/50 [11:21<08:13, 23.50s/it] 60%|██████    | 30/50 [11:44<07:49, 23.50s/it] 62%|██████▏   | 31/50 [12:08<07:26, 23.50s/it] 64%|██████▍   | 32/50 [12:31<07:02, 23.50s/it] 66%|██████▌   | 33/50 [12:55<06:39, 23.50s/it] 68%|██████▊   | 34/50 [13:18<06:15, 23.50s/it] 70%|███████   | 35/50 [13:42<05:52, 23.50s/it] 72%|███████▏  | 36/50 [14:05<05:28, 23.523.50s/it] 40%|████      | 20/50 [07:50<11:44, 23.50s/it] 42%|████▏     | 21/50 [08:13<11:21, 23.50s/it] 44%|████▍     | 22/50 [08:37<10:57, 23.50s/it] 46%|████▌     | 23/50 [09:00<10:34, 23.50s/it] 48%|████▊     | 24/50 [09:24<10:10, 23.50s/it] 50%|█████     | 25/50 [09:47<09:47, 23.50s/it] 52%|█████▏    | 26/50 [10:11<09:23, 23.50s/it] 54%|█████▍    | 27/50 [10:34<09:00, 23.50s/it] 56%|█████▌    | 28/50 [10:58<08:36, 23.50s/it] 58%|█████▊    | 29/50 [11:21<08:13, 23.50s/it] 60%|██████    | 30/50 [11:45<07:49, 23.50s/it] 62%|██████▏   | 31/50 [12:08<07:26, 23.50s/it] 64%|██████▍   | 32/50 [12:32<07:02, 23.50s/it] 66%|██████▌   | 33/50 [12:55<06:39, 23.50s/it] 68%|██████▊   | 34/50 [13:19<06:15, 23.50s/it] 70%|███████   | 35/50 [13:42<05:52, 23.50s/it] 72%|███████▏  | 36/50 [14:06<05:28, 23.50s/it] 74%|███████▍  | 37/50 [14:29<05:05, 23.50s/it] 76%|███████▌  | 38/50 [14:52<04:41, 23.50s/it] 78%|███████▊  | 39/50 [15:16<04:18, 23.50s/it] 80%|████████  | 40/50 [15:39<03:54, 23.50s/it] 82%|████████▏ | 41/50 [16:03<03:31, 23.50s/it] 84%|████████▍ | 42/50 [16:26<03:07, 23.50s/it] 86%|████████▌ | 43/50 [16:50<02:44, 23.50s/it] 88%|████████▊ | 44/50 [17:13<02:20, 23.50s/it] 90%|█████████ | 45/50 [17:37<01:57, 23.50s/it] 92%|█████████▏| 46/50 [18:00<01:33, 23.50s/it] 94%|█████████▍| 47/50 [18:24<01:10, 23.50s/it] 96%|█████████▌| 48/50 [18:47<00:46, 23.50s/it] 98%|█████████▊| 49/50 [19:11<00:23, 23.50s/it]100%|██████████| 50/50 [19:34<00:00, 23.50s/it]100%|██████████| 50/50 [19:34<00:00, 23.50s/it]
-0s/it] 74%|███████▍  | 37/50 [14:29<05:05, 23.50s/it] 76%|███████▌  | 38/50 [14:53<04:41, 23.50s/it] 78%|███████▊  | 39/50 [15:16<04:18, 23.50s/it] 80%|████████  | 40/50 [15:40<03:54, 23.50s/it] 82%|████████▏ | 41/50 [16:03<03:31, 23.50s/it] 84%|████████▍ | 42/50 [16:27<03:07, 23.50s/it] 86%|████████▌ | 43/50 [16:50<02:44, 23.50s/it] 88%|████████▊ | 44/50 [17:14<02:20, 23.50s/it] 90%|█████████ | 45/50 [17:37<01:57, 23.50s/it] 92%|█████████▏| 46/50 [18:01<01:33, 23.50s/it] 94%|█████████▍| 47/50 [18:24<01:10, 23.50s/it] 96%|█████████▌| 48/50 [18:47<00:46, 23.50s/it] 98%|█████████▊| 49/50 [19:11<00:23, 23.50s/it]100%|██████████| 50/50 [19:34<00:00, 23.50s/it]100%|██████████| 50/50 [19:34<00:00, 23.50s/it]
-  0%|          | 0/50 [00:00<?, ?it/s]  2%|▏         | 1/50 [00:23<19:17, 23.62s/it]  4%|▍         | 2/50 [00:47<18:50, 23.55s/it]  6%|▌         | 3/50 [01:10<18:25, 23.53s/it]  8%|▊         | 4/50 [01:34<18:01, 23.51s/it] 10%|█         | 5/50 [01:57<17:37, 23.51s/it] 12%|█▏        | 6/50 [02:21<17:14, 23.51s/it] 14%|█▍        | 7/50 [02:44<16:50, 23.50s/it] 16%|█▌        | 8/50 [03:08<16:27, 23.50s/it] 18%|█▊        | 9/50 [03:31<16:03, 23.50s/it] 20%|██        | 10/50 [03:55<15:39, 23.50s/it] 22%|██▏       | 11/50 [04:18<15:16, 23.50s/it] 24%|██▍       | 12/50 [04:42<14:52, 23.50s/it] 26%|██▌       | 13/50 [05:05<14:29, 23.50s/it] 28%|██▊       | 14/50 [05:29<14:05, 23.50s/it] 30%|███       | 15/50 [05:52<13:42, 23.50s/it] 32%|███▏      | 16/50 [06:16<13:18, 23.50s/it] 34%|███▍      | 17/50 [06:39<12:55, 23.50s/it] 36%|███▌      | 18/50 [07:03<12:31, 23.50s/it] 38%|███▊      | 19/50 [07:26<12:08,   0%|          | 0/50 [00:00<?, ?it/s]  2%|▏         | 1/50 [00:23<19:10, 23.49s/it]  4%|▍         | 2/50 [00:46<18:47, 23.50s/it]  6%|▌         | 3/50 [01:10<18:24, 23.50s/it]  8%|▊         | 4/50 [01:33<18:00, 23.50s/it] 10%|█         | 5/50 [01:57<17:37, 23.49s/it] 12%|█▏        | 6/50 [02:20<17:13, 23.50s/it] 14%|█▍        | 7/50 [02:44<16:50, 23.50s/it] 16%|█▌        | 8/50 [03:07<16:26, 23.50s/it] 18%|█▊        | 9/50 [03:31<16:03, 23.50s/it] 20%|██        | 10/50 [03:54<15:39, 23.50s/it] 22%|██▏       | 11/50 [04:18<15:16, 23.50s/it] 24%|██▍       | 12/50 [04:41<14:52, 23.50s/it] 26%|██▌       | 13/50 [05:05<14:29, 23.50s/it] 28%|██▊       | 14/50 [05:28<14:05, 23.50s/it] 30%|███       | 15/50 [05:52<13:42, 23.50s/it] 32%|███▏      | 16/50 [06:15<13:18, 23.50s/it] 34%|███▍      | 17/50 [06:39<12:55, 23.50s/it] 36%|███▌      | 18/50 [07:02<12:31, 23.50s/it] 38%|███▊      | 19/50 [07:26<12:08, 23.50s/it] 40%|████      | 20/50 [07:49<11:44, 23.50s/it] 42%|████▏     | 21/50 [08:13<11:21, 23.50s/it] 44%|████▍     | 22/50 [08:36<10:57, 23.50s/it] 46%|████▌     | 23/50 [09:00<10:34, 23.50s/it] 48%|████▊     | 24/50 [09:23<10:10, 23.50s/it] 50%|█████     | 25/50 [09:47<09:47, 23.50s/it] 52%|█████▏    | 26/50 [10:10<09:23, 23.50s/it] 54%|█████▍    | 27/50 [10:34<09:00, 23.50s/it] 56%|█████▌    | 28/50 [10:57<08:36, 23.50s/it] 58%|█████▊    | 29/50 [11:21<08:13, 23.50s/it] 60%|██████    | 30/50 [11:44<07:49, 23.50s/it] 62%|██████▏   | 31/50 [12:08<07:26, 23.50s/it] 64%|██████▍   | 32/50 [12:31<07:02, 23.50s/it] 66%|██████▌   | 33/50 [12:55<06:39, 23.50s/it] 68%|██████▊   | 34/50 [13:18<06:15, 23.50s/it] 70%|███████   | 35/50 [13:42<05:52, 23.50s/it] 72%|███████▏  | 36/50 [14:05<05:28, 23.523.50s/it] 40%|████      | 20/50 [07:50<11:44, 23.50s/it] 42%|████▏     | 21/50 [08:13<11:21, 23.50s/it] 44%|████▍     | 22/50 [08:37<10:57, 23.50s/it] 46%|████▌     | 23/50 [09:00<10:34, 23.50s/it] 48%|████▊     | 24/50 [09:24<10:10, 23.50s/it] 50%|█████     | 25/50 [09:47<09:47, 23.50s/it] 52%|█████▏    | 26/50 [10:11<09:23, 23.50s/it] 54%|█████▍    | 27/50 [10:34<09:00, 23.50s/it] 56%|█████▌    | 28/50 [10:58<08:36, 23.50s/it] 58%|█████▊    | 29/50 [11:21<08:13, 23.50s/it] 60%|██████    | 30/50 [11:45<07:49, 23.50s/it] 62%|██████▏   | 31/50 [12:08<07:26, 23.50s/it] 64%|██████▍   | 32/50 [12:32<07:02, 23.50s/it] 66%|██████▌   | 33/50 [12:55<06:39, 23.50s/it] 68%|██████▊   | 34/50 [13:19<06:15, 23.50s/it] 70%|███████   | 35/50 [13:42<05:52, 23.50s/it] 72%|███████▏  | 36/50 [14:06<05:28, 23.50s/it] 74%|███████▍  | 37/50 [14:29<05:05, 23.50s/it] 76%|███████▌  | 38/50 [14:52<04:41, 23.50s/it] 78%|███████▊  | 39/50 [15:16<04:18, 23.50s/it] 80%|████████  | 40/50 [15:39<03:54, 23.50s/it] 82%|████████▏ | 41/50 [16:03<03:31, 23.50s/it] 84%|████████▍ | 42/50 [16:26<03:07, 23.50s/it] 86%|████████▌ | 43/50 [16:50<02:44, 23.50s/it] 88%|████████▊ | 44/50 [17:13<02:20, 23.50s/it] 90%|█████████ | 45/50 [17:37<01:57, 23.50s/it] 92%|█████████▏| 46/50 [18:00<01:33, 23.50s/it] 94%|█████████▍| 47/50 [18:24<01:10, 23.50s/it] 96%|█████████▌| 48/50 [18:47<00:46, 23.50s/it] 98%|█████████▊| 49/50 [19:11<00:23, 23.50s/it]100%|██████████| 50/50 [19:34<00:00, 23.50s/it]100%|██████████| 50/50 [19:34<00:00, 23.50s/it]
-0s/it] 74%|███████▍  | 37/50 [14:29<05:05, 23.50s/it] 76%|███████▌  | 38/50 [14:53<04:41, 23.50s/it] 78%|███████▊  | 39/50 [15:16<04:18, 23.50s/it] 80%|████████  | 40/50 [15:40<03:54, 23.50s/it] 82%|████████▏ | 41/50 [16:03<03:31, 23.50s/it] 84%|████████▍ | 42/50 [16:27<03:07, 23.50s/it] 86%|████████▌ | 43/50 [16:50<02:44, 23.50s/it] 88%|████████▊ | 44/50 [17:14<02:20, 23.50s/it] 90%|█████████ | 45/50 [17:37<01:57, 23.50s/it] 92%|█████████▏| 46/50 [18:01<01:33, 23.50s/it] 94%|█████████▍| 47/50 [18:24<01:10, 23.50s/it] 96%|█████████▌| 48/50 [18:48<00:46, 23.50s/it] 98%|█████████▊| 49/50 [19:11<00:23, 23.50s/it]100%|██████████| 50/50 [19:35<00:00, 23.50s/it]100%|██████████| 50/50 [19:35<00:00, 23.50s/it]
-wandb: WARNING `format` argument was not provided, defaulting to `gif`. This parameter will be required in v0.20.0, please specify the format explicitly.
-wandb: WARNING `format` argument was not provided, defaulting to `gif`. This parameter will be required in v0.20.0, please specify the format explicitly.
-wandb: WARNING `format` argument was not provided, defaulting to `gif`. This parameter will be required in v0.20.0, please specify the format explicitly.
-wandb: WARNING `format` argument was not provided, defaulting to `gif`. This parameter will be required in v0.20.0, please specify the format explicitly.
-wandb: WARNING `format` argument was not provided, defaulting to `gif`. This parameter will be required in v0.20.0, please specify the format explicitly.
-Steps:   0%|          | 0/4000 [00:00<?, ?it/s]Traceback (most recent call last):
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 532, in reduce
-    return _apply_recipe(
-        backend, recipe, cast(Tensor, tensor), reduction_type=reduction, axes_lengths=hashable_axes_lengths
-    )
-[rank3]: Traceback (most recent call last):
-[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 532, in reduce
-[rank3]:     return _apply_recipe(
-[rank3]:         backend, recipe, cast(Tensor, tensor), reduction_type=reduction, axes_lengths=hashable_axes_lengths
-[rank3]:     )
-[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 235, in _apply_recipe
-[rank3]:     init_shapes, axes_reordering, reduced_axes, added_axes, final_shapes, n_axes_w_added = _reconstruct_from_shape(
-[rank3]:                                                                                            ~~~~~~~~~~~~~~~~~~~~~~~^
-[rank3]:         recipe, backend.shape(tensor), axes_lengths
-[rank3]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank3]:     )
-[rank3]:     ^
-[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 188, in _reconstruct_from_shape_uncached
-[rank3]:     raise EinopsError(f"Shape mismatch, can't divide axis of length {length} in chunks of {known_product}")
-[rank3]: einops.EinopsError: Shape mismatch, can't divide axis of length 20 in chunks of 8
-
-[rank3]: During handling of the above exception, another exception occurred:
-
-[rank3]: Traceback (most recent call last):
-[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
-[rank3]:     main(args)
-[rank3]:     ~~~~^^^^^^
-[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
-[rank3]:     pipeline.train()
-[rank3]:     ~~~~~~~~~~~~~~^^
-[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank3]:     return fn(self, *args, **kwargs)
-[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 741, in train
-[rank3]:     training_batch = self.train_one_step(training_batch)
-[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank3]:     return fn(self, *args, **kwargs)
-[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 638, in train_one_step
-[rank3]:     training_batch = self._transformer_forward_and_compute_loss(
-[rank3]:         training_batch)
-[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 560, in _transformer_forward_and_compute_loss
-[rank3]:     sharded_pred = shard_latents_across_sp(model_pred)
-[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_utils.py", line 870, in shard_latents_across_sp
-[rank3]:     latents = rearrange(latents,
-[rank3]:               ~~~~~~~~~^^^^^^^^^
-[rank3]:                         "b c (n s) h w -> b c n s h w",
-[rank3]:                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank3]:                         n=sp_world_size).contiguous()
-[rank3]:                         ^^^^^^^^^^^^^^^^
-[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 600, in rearrange
-[rank3]:     return reduce(tensor, pattern, reduction="rearrange", **axes_lengths)
-[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 542, in reduce
-[rank3]:     raise EinopsError(message + "\n {}".format(e))
-[rank3]: einops.EinopsError:  Error while processing rearrange-reduction pattern "b c (n s) h w -> b c n s h w".
-[rank3]:  Input tensor shape: torch.Size([1, 16, 20, 56, 104]). Additional info: {'n': 8}.
-[rank3]:  Shape mismatch, can't divide axis of length 20 in chunks of 8
-[rank2]: Traceback (most recent call last):
-[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 532, in reduce
-[rank2]:     return _apply_recipe(
-[rank2]:         backend, recipe, cast(Tensor, tensor), reduction_type=reduction, axes_lengths=hashable_axes_lengths
-[rank2]:     )
-[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 235, in _apply_recipe
-[rank2]:     init_shapes, axes_reordering, reduced_axes, added_axes, final_shapes, n_axes_w_added = _reconstruct_from_shape(
-[rank2]:                                                                                            ~~~~~~~~~~~~~~~~~~~~~~~^
-[rank2]:         recipe, backend.shape(tensor), axes_lengths
-[rank2]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank2]:     )
-[rank2]:     ^
-[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 188, in _reconstruct_from_shape_uncached
-[rank2]:     raise EinopsError(f"Shape mismatch, can't divide axis of length {length} in chunks of {known_product}")
-[rank2]: einops.EinopsError: Shape mismatch, can't divide axis of length 20 in chunks of 8
-
-[rank2]: During handling of the above exception, another exception occurred:
-
-[rank2]: Traceback (most recent call last):
-[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
-[rank2]:     main(args)
-[rank2]:     ~~~~^^^^^^
-[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
-[rank2]:     pipeline.train()
-[rank2]:     ~~~~~~~~~~~~~~^^
-[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank2]:     return fn(self, *args, **kwargs)
-[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 741, in train
-[rank2]:     training_batch = self.train_one_step(training_batch)
-[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank2]:     return fn(self, *args, **kwargs)
-[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 638, in train_one_step
-[rank2]:     training_batch = self._transformer_forward_and_compute_loss(
-[rank2]:         training_batch)
-[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 560, in _transformer_forward_and_compute_loss
-[rank2]:     sharded_pred = shard_latents_across_sp(model_pred)
-[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_utils.py", line 870, in shard_latents_across_sp
-[rank2]:     latents = rearrange(latents,
-[rank2]:               ~~~~~~~~~^^^^^^^^^
-[rank2]:                         "b c (n s) h w -> b c n s h w",
-[rank2]:                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank2]:                         n=sp_world_size).contiguous()
-[rank2]:                         ^^^^^^^^^^^^^^^^
-[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 600, in rearrange
-[rank2]:     return reduce(tensor, pattern, reduction="rearrange", **axes_lengths)
-[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 542, in reduce
-[rank2]:     raise EinopsError(message + "\n {}".format(e))
-[rank2]: einops.EinopsError:  Error while processing rearrange-reduction pattern "b c (n s) h w -> b c n s h w".
-[rank2]:  Input tensor shape: torch.Size([1, 16, 20, 56, 104]). Additional info: {'n': 8}.
-[rank2]:  Shape mismatch, can't divide axis of length 20 in chunks of 8
-[rank1]: Traceback (most recent call last):
-[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 532, in reduce
-[rank1]:     return _apply_recipe(
-[rank1]:         backend, recipe, cast(Tensor, tensor), reduction_type=reduction, axes_lengths=hashable_axes_lengths
-[rank1]:     )
-[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 235, in _apply_recipe
-[rank1]:     init_shapes, axes_reordering, reduced_axes, added_axes, final_shapes, n_axes_w_added = _reconstruct_from_shape(
-[rank1]:                                                                                            ~~~~~~~~~~~~~~~~~~~~~~~^
-[rank1]:         recipe, backend.shape(tensor), axes_lengths
-[rank1]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:     )
-[rank1]:     ^
-[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 188, in _reconstruct_from_shape_uncached
-[rank1]:     raise EinopsError(f"Shape mismatch, can't divide axis of length {length} in chunks of {known_product}")
-[rank1]: einops.EinopsError: Shape mismatch, can't divide axis of length 20 in chunks of 8
-
-[rank1]: During handling of the above exception, another exception occurred:
-
-[rank1]: Traceback (most recent call last):
-[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
-[rank1]:     main(args)
-[rank1]:     ~~~~^^^^^^
-[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
-[rank1]:     pipeline.train()
-[rank1]:     ~~~~~~~~~~~~~~^^
-[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank1]:     return fn(self, *args, **kwargs)
-[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 741, in train
-[rank1]:     training_batch = self.train_one_step(training_batch)
-[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank1]:     return fn(self, *args, **kwargs)
-[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 638, in train_one_step
-[rank1]:     training_batch = self._transformer_forward_and_compute_loss(
-[rank1]:         training_batch)
-[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 560, in _transformer_forward_and_compute_loss
-[rank1]:     sharded_pred = shard_latents_across_sp(model_pred)
-[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_utils.py", line 870, in shard_latents_across_sp
-[rank1]:     latents = rearrange(latents,
-[rank1]:               ~~~~~~~~~^^^^^^^^^
-[rank1]:                         "b c (n s) h w -> b c n s h w",
-[rank1]:                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:                         n=sp_world_size).contiguous()
-[rank1]:                         ^^^^^^^^^^^^^^^^
-[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 600, in rearrange
-[rank1]:     return reduce(tensor, pattern, reduction="rearrange", **axes_lengths)
-[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 542, in reduce
-[rank1]:     raise EinopsError(message + "\n {}".format(e))
-[rank1]: einops.EinopsError:  Error while processing rearrange-reduction pattern "b c (n s) h w -> b c n s h w".
-[rank1]:  Input tensor shape: torch.Size([1, 16, 20, 56, 104]). Additional info: {'n': 8}.
-[rank1]:  Shape mismatch, can't divide axis of length 20 in chunks of 8
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 235, in _apply_recipe
-    init_shapes, axes_reordering, reduced_axes, added_axes, final_shapes, n_axes_w_added = _reconstruct_from_shape(
-                                                                                           ~~~~~~~~~~~~~~~~~~~~~~~^
-        recipe, backend.shape(tensor), axes_lengths
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    )
-    ^
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 188, in _reconstruct_from_shape_uncached
-    raise EinopsError(f"Shape mismatch, can't divide axis of length {length} in chunks of {known_product}")
-einops.EinopsError: Shape mismatch, can't divide axis of length 20 in chunks of 8
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
-    main(args)
-    ~~~~^^^^^^
-  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
-    pipeline.train()
-    ~~~~~~~~~~~~~~^^
-  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-    return fn(self, *args, **kwargs)
-  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 741, in train
-    training_batch = self.train_one_step(training_batch)
-  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-    return fn(self, *args, **kwargs)
-  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 638, in train_one_step
-    training_batch = self._transformer_forward_and_compute_loss(
-        training_batch)
-  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 560, in _transformer_forward_and_compute_loss
-    sharded_pred = shard_latents_across_sp(model_pred)
-  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_utils.py", line 870, in shard_latents_across_sp
-    latents = rearrange(latents,
-              ~~~~~~~~~^^^^^^^^^
-                        "b c (n s) h w -> b c n s h w",
-                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-                        n=sp_world_size).contiguous()
-                        ^^^^^^^^^^^^^^^^
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 600, in rearrange
-    return reduce(tensor, pattern, reduction="rearrange", **axes_lengths)
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 542, in reduce
-    raise EinopsError(message + "\n {}".format(e))
-einops.EinopsError:  Error while processing rearrange-reduction pattern "b c (n s) h w -> b c n s h w".
- Input tensor shape: torch.Size([1, 16, 20, 56, 104]). Additional info: {'n': 8}.
- Shape mismatch, can't divide axis of length 20 in chunks of 8
-[rank0]: Traceback (most recent call last):
-[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 532, in reduce
-[rank0]:     return _apply_recipe(
-[rank0]:         backend, recipe, cast(Tensor, tensor), reduction_type=reduction, axes_lengths=hashable_axes_lengths
-[rank0]:     )
-[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 235, in _apply_recipe
-[rank0]:     init_shapes, axes_reordering, reduced_axes, added_axes, final_shapes, n_axes_w_added = _reconstruct_from_shape(
-[rank0]:                                                                                            ~~~~~~~~~~~~~~~~~~~~~~~^
-[rank0]:         recipe, backend.shape(tensor), axes_lengths
-[rank0]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:     )
-[rank0]:     ^
-[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 188, in _reconstruct_from_shape_uncached
-[rank0]:     raise EinopsError(f"Shape mismatch, can't divide axis of length {length} in chunks of {known_product}")
-[rank0]: einops.EinopsError: Shape mismatch, can't divide axis of length 20 in chunks of 8
-
-[rank0]: During handling of the above exception, another exception occurred:
-
-[rank0]: Traceback (most recent call last):
-[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
-[rank0]:     main(args)
-[rank0]:     ~~~~^^^^^^
-[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
-[rank0]:     pipeline.train()
-[rank0]:     ~~~~~~~~~~~~~~^^
-[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank0]:     return fn(self, *args, **kwargs)
-[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 741, in train
-[rank0]:     training_batch = self.train_one_step(training_batch)
-[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank0]:     return fn(self, *args, **kwargs)
-[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 638, in train_one_step
-[rank0]:     training_batch = self._transformer_forward_and_compute_loss(
-[rank0]:         training_batch)
-[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 560, in _transformer_forward_and_compute_loss
-[rank0]:     sharded_pred = shard_latents_across_sp(model_pred)
-[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_utils.py", line 870, in shard_latents_across_sp
-[rank0]:     latents = rearrange(latents,
-[rank0]:               ~~~~~~~~~^^^^^^^^^
-[rank0]:                         "b c (n s) h w -> b c n s h w",
-[rank0]:                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:                         n=sp_world_size).contiguous()
-[rank0]:                         ^^^^^^^^^^^^^^^^
-[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 600, in rearrange
-[rank0]:     return reduce(tensor, pattern, reduction="rearrange", **axes_lengths)
-[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 542, in reduce
-[rank0]:     raise EinopsError(message + "\n {}".format(e))
-[rank0]: einops.EinopsError:  Error while processing rearrange-reduction pattern "b c (n s) h w -> b c n s h w".
-[rank0]:  Input tensor shape: torch.Size([1, 16, 20, 56, 104]). Additional info: {'n': 8}.
-[rank0]:  Shape mismatch, can't divide axis of length 20 in chunks of 8
-Steps:   0%|          | 0/4000 [00:00<?, ?it/s][rank7]: Traceback (most recent call last):
-[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 532, in reduce
-[rank7]:     return _apply_recipe(
-[rank7]:         backend, recipe, cast(Tensor, tensor), reduction_type=reduction, axes_lengths=hashable_axes_lengths
-[rank7]:     )
-[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 235, in _apply_recipe
-[rank7]:     init_shapes, axes_reordering, reduced_axes, added_axes, final_shapes, n_axes_w_added = _reconstruct_from_shape(
-[rank7]:                                                                                            ~~~~~~~~~~~~~~~~~~~~~~~^
-[rank7]:         recipe, backend.shape(tensor), axes_lengths
-[rank7]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank7]:     )
-[rank7]:     ^
-[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 188, in _reconstruct_from_shape_uncached
-[rank7]:     raise EinopsError(f"Shape mismatch, can't divide axis of length {length} in chunks of {known_product}")
-[rank7]: einops.EinopsError: Shape mismatch, can't divide axis of length 20 in chunks of 8
-
-[rank7]: During handling of the above exception, another exception occurred:
-
-[rank7]: Traceback (most recent call last):
-[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
-[rank7]:     main(args)
-[rank7]:     ~~~~^^^^^^
-[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
-[rank7]:     pipeline.train()
-[rank7]:     ~~~~~~~~~~~~~~^^
-[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank7]:     return fn(self, *args, **kwargs)
-[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 741, in train
-[rank7]:     training_batch = self.train_one_step(training_batch)
-[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank7]:     return fn(self, *args, **kwargs)
-[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 638, in train_one_step
-[rank7]:     training_batch = self._transformer_forward_and_compute_loss(
-[rank7]:         training_batch)
-[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 560, in _transformer_forward_and_compute_loss
-[rank7]:     sharded_pred = shard_latents_across_sp(model_pred)
-[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_utils.py", line 870, in shard_latents_across_sp
-[rank7]:     latents = rearrange(latents,
-[rank7]:               ~~~~~~~~~^^^^^^^^^
-[rank7]:                         "b c (n s) h w -> b c n s h w",
-[rank7]:                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank7]:                         n=sp_world_size).contiguous()
-[rank7]:                         ^^^^^^^^^^^^^^^^
-[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 600, in rearrange
-[rank7]:     return reduce(tensor, pattern, reduction="rearrange", **axes_lengths)
-[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 542, in reduce
-[rank7]:     raise EinopsError(message + "\n {}".format(e))
-[rank7]: einops.EinopsError:  Error while processing rearrange-reduction pattern "b c (n s) h w -> b c n s h w".
-[rank7]:  Input tensor shape: torch.Size([1, 16, 20, 56, 104]). Additional info: {'n': 8}.
-[rank7]:  Shape mismatch, can't divide axis of length 20 in chunks of 8
-[rank6]: Traceback (most recent call last):
-[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 532, in reduce
-[rank6]:     return _apply_recipe(
-[rank6]:         backend, recipe, cast(Tensor, tensor), reduction_type=reduction, axes_lengths=hashable_axes_lengths
-[rank6]:     )
-[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 235, in _apply_recipe
-[rank6]:     init_shapes, axes_reordering, reduced_axes, added_axes, final_shapes, n_axes_w_added = _reconstruct_from_shape(
-[rank6]:                                                                                            ~~~~~~~~~~~~~~~~~~~~~~~^
-[rank6]:         recipe, backend.shape(tensor), axes_lengths
-[rank6]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank6]:     )
-[rank6]:     ^
-[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 188, in _reconstruct_from_shape_uncached
-[rank6]:     raise EinopsError(f"Shape mismatch, can't divide axis of length {length} in chunks of {known_product}")
-[rank6]: einops.EinopsError: Shape mismatch, can't divide axis of length 20 in chunks of 8
-
-[rank6]: During handling of the above exception, another exception occurred:
-
-[rank6]: Traceback (most recent call last):
-[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
-[rank6]:     main(args)
-[rank6]:     ~~~~^^^^^^
-[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
-[rank6]:     pipeline.train()
-[rank6]:     ~~~~~~~~~~~~~~^^
-[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank6]:     return fn(self, *args, **kwargs)
-[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 741, in train
-[rank6]:     training_batch = self.train_one_step(training_batch)
-[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank6]:     return fn(self, *args, **kwargs)
-[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 638, in train_one_step
-[rank6]:     training_batch = self._transformer_forward_and_compute_loss(
-[rank6]:         training_batch)
-[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 560, in _transformer_forward_and_compute_loss
-[rank6]:     sharded_pred = shard_latents_across_sp(model_pred)
-[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_utils.py", line 870, in shard_latents_across_sp
-[rank6]:     latents = rearrange(latents,
-[rank6]:               ~~~~~~~~~^^^^^^^^^
-[rank6]:                         "b c (n s) h w -> b c n s h w",
-[rank6]:                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank6]:                         n=sp_world_size).contiguous()
-[rank6]:                         ^^^^^^^^^^^^^^^^
-[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 600, in rearrange
-[rank6]:     return reduce(tensor, pattern, reduction="rearrange", **axes_lengths)
-[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 542, in reduce
-[rank6]:     raise EinopsError(message + "\n {}".format(e))
-[rank6]: einops.EinopsError:  Error while processing rearrange-reduction pattern "b c (n s) h w -> b c n s h w".
-[rank6]:  Input tensor shape: torch.Size([1, 16, 20, 56, 104]). Additional info: {'n': 8}.
-[rank6]:  Shape mismatch, can't divide axis of length 20 in chunks of 8
-[rank4]: Traceback (most recent call last):
-[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 532, in reduce
-[rank4]:     return _apply_recipe(
-[rank4]:         backend, recipe, cast(Tensor, tensor), reduction_type=reduction, axes_lengths=hashable_axes_lengths
-[rank4]:     )
-[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 235, in _apply_recipe
-[rank4]:     init_shapes, axes_reordering, reduced_axes, added_axes, final_shapes, n_axes_w_added = _reconstruct_from_shape(
-[rank4]:                                                                                            ~~~~~~~~~~~~~~~~~~~~~~~^
-[rank4]:         recipe, backend.shape(tensor), axes_lengths
-[rank4]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank4]:     )
-[rank4]:     ^
-[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 188, in _reconstruct_from_shape_uncached
-[rank4]:     raise EinopsError(f"Shape mismatch, can't divide axis of length {length} in chunks of {known_product}")
-[rank4]: einops.EinopsError: Shape mismatch, can't divide axis of length 20 in chunks of 8
-
-[rank4]: During handling of the above exception, another exception occurred:
-
-[rank4]: Traceback (most recent call last):
-[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
-[rank4]:     main(args)
-[rank4]:     ~~~~^^^^^^
-[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
-[rank4]:     pipeline.train()
-[rank4]:     ~~~~~~~~~~~~~~^^
-[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank4]:     return fn(self, *args, **kwargs)
-[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 741, in train
-[rank4]:     training_batch = self.train_one_step(training_batch)
-[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank4]:     return fn(self, *args, **kwargs)
-[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 638, in train_one_step
-[rank4]:     training_batch = self._transformer_forward_and_compute_loss(
-[rank4]:         training_batch)
-[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 560, in _transformer_forward_and_compute_loss
-[rank4]:     sharded_pred = shard_latents_across_sp(model_pred)
-[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_utils.py", line 870, in shard_latents_across_sp
-[rank4]:     latents = rearrange(latents,
-[rank4]:               ~~~~~~~~~^^^^^^^^^
-[rank4]:                         "b c (n s) h w -> b c n s h w",
-[rank4]:                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank4]:                         n=sp_world_size).contiguous()
-[rank4]:                         ^^^^^^^^^^^^^^^^
-[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 600, in rearrange
-[rank4]:     return reduce(tensor, pattern, reduction="rearrange", **axes_lengths)
-[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 542, in reduce
-[rank4]:     raise EinopsError(message + "\n {}".format(e))
-[rank4]: einops.EinopsError:  Error while processing rearrange-reduction pattern "b c (n s) h w -> b c n s h w".
-[rank4]:  Input tensor shape: torch.Size([1, 16, 20, 56, 104]). Additional info: {'n': 8}.
-[rank4]:  Shape mismatch, can't divide axis of length 20 in chunks of 8
-[rank5]: Traceback (most recent call last):
-[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 532, in reduce
-[rank5]:     return _apply_recipe(
-[rank5]:         backend, recipe, cast(Tensor, tensor), reduction_type=reduction, axes_lengths=hashable_axes_lengths
-[rank5]:     )
-[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 235, in _apply_recipe
-[rank5]:     init_shapes, axes_reordering, reduced_axes, added_axes, final_shapes, n_axes_w_added = _reconstruct_from_shape(
-[rank5]:                                                                                            ~~~~~~~~~~~~~~~~~~~~~~~^
-[rank5]:         recipe, backend.shape(tensor), axes_lengths
-[rank5]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank5]:     )
-[rank5]:     ^
-[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 188, in _reconstruct_from_shape_uncached
-[rank5]:     raise EinopsError(f"Shape mismatch, can't divide axis of length {length} in chunks of {known_product}")
-[rank5]: einops.EinopsError: Shape mismatch, can't divide axis of length 20 in chunks of 8
-
-[rank5]: During handling of the above exception, another exception occurred:
-
-[rank5]: Traceback (most recent call last):
-[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
-[rank5]:     main(args)
-[rank5]:     ~~~~^^^^^^
-[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
-[rank5]:     pipeline.train()
-[rank5]:     ~~~~~~~~~~~~~~^^
-[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank5]:     return fn(self, *args, **kwargs)
-[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 741, in train
-[rank5]:     training_batch = self.train_one_step(training_batch)
-[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/profiler.py", line 450, in wrapped
-[rank5]:     return fn(self, *args, **kwargs)
-[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 638, in train_one_step
-[rank5]:     training_batch = self._transformer_forward_and_compute_loss(
-[rank5]:         training_batch)
-[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 560, in _transformer_forward_and_compute_loss
-[rank5]:     sharded_pred = shard_latents_across_sp(model_pred)
-[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_utils.py", line 870, in shard_latents_across_sp
-[rank5]:     latents = rearrange(latents,
-[rank5]:               ~~~~~~~~~^^^^^^^^^
-[rank5]:                         "b c (n s) h w -> b c n s h w",
-[rank5]:                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank5]:                         n=sp_world_size).contiguous()
-[rank5]:                         ^^^^^^^^^^^^^^^^
-[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 600, in rearrange
-[rank5]:     return reduce(tensor, pattern, reduction="rearrange", **axes_lengths)
-[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/einops/einops.py", line 542, in reduce
-[rank5]:     raise EinopsError(message + "\n {}".format(e))
-[rank5]: einops.EinopsError:  Error while processing rearrange-reduction pattern "b c (n s) h w -> b c n s h w".
-[rank5]:  Input tensor shape: torch.Size([1, 16, 20, 56, 104]). Additional info: {'n': 8}.
-[rank5]:  Shape mismatch, can't divide axis of length 20 in chunks of 8
-Steps:   0%|          | 0/4000 [00:29<?, ?it/s]
-[rank1]:[W105 22:30:18.580670746 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
-[rank3]:[W105 22:30:18.596404731 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
-[rank2]:[W105 22:30:18.646793630 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
-[rank6]:[W105 22:30:18.527453843 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
-[rank7]:[W105 22:30:18.529575347 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
-[rank5]:[W105 22:30:18.533031764 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
-[rank4]:[W105 22:30:18.596623266 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
-[rank0]:[W105 22:30:20.061680770 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
-W0105 22:30:20.888000 2647951 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 2648022 closing signal SIGTERM
-W0105 22:30:20.891000 2647951 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 2648024 closing signal SIGTERM
-W0105 22:30:20.891000 2647951 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 2648025 closing signal SIGTERM
-W0105 22:30:21.761000 456319 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 456392 closing signal SIGTERM
-W0105 22:30:21.763000 456319 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 456394 closing signal SIGTERM
-W0105 22:30:21.763000 456319 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 456395 closing signal SIGTERM
-E0105 22:30:21.978000 456319 torch/distributed/elastic/multiprocessing/api.py:882] failed (exitcode: 1) local_rank: 1 (pid: 456393) of binary: /home/hal-matthewn/FastVideo-Quantization/.venv/bin/python3
-Traceback (most recent call last):
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/bin/torchrun", line 10, in <module>
-    sys.exit(main())
-             ~~~~^^
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
-    return f(*args, **kwargs)
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/run.py", line 936, in main
-    run(args)
-    ~~~^^^^^^
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/run.py", line 927, in run
-    elastic_launch(
-    ~~~~~~~~~~~~~~~
-        config=config,
-        ~~~~~~~~~~~~~~
-        entrypoint=cmd,
-        ~~~~~~~~~~~~~~~
-    )(*cmd_args)
-    ~^^^^^^^^^^^
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/launcher/api.py", line 156, in __call__
-    return launch_agent(self._config, self._entrypoint, list(args))
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/launcher/api.py", line 293, in launch_agent
-    raise ChildFailedError(
-    ...<2 lines>...
-    )
-torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
-============================================================
-fastvideo/training/wan_training_pipeline.py FAILED
-------------------------------------------------------------
-Failures:
-  <NO_OTHER_FAILURES>
-------------------------------------------------------------
-Root Cause (first observed failure):
-[0]:
-  time      : 2026-01-05_22:30:21
-  host      : hpc-rack-1-8.slurm-compute.slurm.svc.cluster.local
-  rank      : 5 (local_rank: 1)
-  exitcode  : 1 (pid: 456393)
-  error_file: <N/A>
-  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
-============================================================
-E0105 22:30:22.008000 2647951 torch/distributed/elastic/multiprocessing/api.py:882] failed (exitcode: 1) local_rank: 1 (pid: 2648023) of binary: /home/hal-matthewn/FastVideo-Quantization/.venv/bin/python3
-Traceback (most recent call last):
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/bin/torchrun", line 10, in <module>
-    sys.exit(main())
-             ~~~~^^
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
-    return f(*args, **kwargs)
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/run.py", line 936, in main
-    run(args)
-    ~~~^^^^^^
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/run.py", line 927, in run
-    elastic_launch(
-    ~~~~~~~~~~~~~~~
-        config=config,
-        ~~~~~~~~~~~~~~
-        entrypoint=cmd,
-        ~~~~~~~~~~~~~~~
-    )(*cmd_args)
-    ~^^^^^^^^^^^
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/launcher/api.py", line 156, in __call__
-    return launch_agent(self._config, self._entrypoint, list(args))
-  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/launcher/api.py", line 293, in launch_agent
-    raise ChildFailedError(
-    ...<2 lines>...
-    )
-torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
-============================================================
-fastvideo/training/wan_training_pipeline.py FAILED
-------------------------------------------------------------
-Failures:
-  <NO_OTHER_FAILURES>
-------------------------------------------------------------
-Root Cause (first observed failure):
-[0]:
-  time      : 2026-01-05_22:30:20
-  host      : hpc-rack-1-13.slurm-compute.slurm.svc.cluster.local
-  rank      : 1 (local_rank: 1)
-  exitcode  : 1 (pid: 2648023)
-  error_file: <N/A>
-  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
-============================================================
-srun: error: hpc-rack-1-13: task 1: Exited with exit code 1
-srun: error: hpc-rack-1-8: task 0: Exited with exit code 1
