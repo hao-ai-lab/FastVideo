@@ -35,7 +35,7 @@ echo "NODE_RANK: $NODE_RANK"
 # export TRITON_PRINT_AUTOTUNING=1  # to print the best config
 export WANDB_API_KEY=YOUR_WANDB_API_KEY
 MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
-DATA_DIR=/mnt/weka/home/hao.zhang/wl/sharefs/Vchitect-2M/Wan-Syn_77x768x1280/latents_i2v/train
+DATA_DIR=YOUR_DATA_DIR
 VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json"
 NUM_GPUS_PER_NODE=8
 TOTAL_GPUS=$((NUM_GPUS_PER_NODE * SLURM_JOB_NUM_NODES))

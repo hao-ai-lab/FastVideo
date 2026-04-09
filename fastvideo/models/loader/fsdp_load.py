@@ -57,7 +57,7 @@ def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
         torch.set_default_dtype(old_dtype)
 
 
-# TODO(PY): add compile option
+# Supports optional torch.compile for FSDP-wrapped models during training
 def maybe_load_fsdp_model(
     model_cls: type[nn.Module],
     init_params: dict[str, Any],

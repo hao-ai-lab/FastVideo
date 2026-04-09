@@ -211,6 +211,10 @@ class ReplicatedLinear(LinearBase):
                         (e.g. model.layers.0.qkv_proj)
     """
 
+    enable_shape_tracking = False
+    _unique_shapes: set[tuple[torch.Size, torch.Size]] = set()
+    _shape_to_layer_types: dict[tuple[torch.Size, torch.Size], list[str]] = {}
+
     def __init__(self,
                  input_size: int,
                  output_size: int,
@@ -263,20 +267,8 @@ class ReplicatedLinear(LinearBase):
             self.quant_method = UnquantizedLinearMethod()
 
         output = self.quant_method.apply(self, x, bias)
-
-        # Create a shape key for uniqueness checking
-        # shape_key = (x.shape, output.shape)
-
-        # Track unique shapes and map them to layer types
-        # if shape_key not in self._unique_shapes:
-        #     self._unique_shapes.add(shape_key)
-        #     self._shape_to_layer_types[shape_key] = []
-        #     print(f"Layer: {self.prefix} | input shape: {x.shape} --> output shape: {output.shape}, Quant Method: {self.quant_method.__class__.__name__}")
-
-        # Add this layer type to the list for this shape if not already present
-        # layer_type = self.__class__.__name__
-        # if layer_type not in self._shape_to_layer_types[shape_key]:
-        #     self._shape_to_layer_types[shape_key].append(layer_type)
+        if self.enable_shape_tracking:
+            self._track_shape(x.shape, output.shape)
 
         output_bias = self.bias if self.skip_bias_add else None
         return output, output_bias
@@ -291,6 +283,26 @@ class ReplicatedLinear(LinearBase):
     def get_shape_mapping(cls) -> dict:
         """Get the mapping from (input_shape, output_shape) to layer types."""
         return cls._shape_to_layer_types.copy()
+
+    @classmethod
+    def reset_shape_tracking(cls) -> None:
+        """Clear tracked shapes and layer type mappings."""
+        cls._unique_shapes.clear()
+        cls._shape_to_layer_types.clear()
+
+    def _track_shape(self, input_shape: torch.Size, output_shape: torch.Size) -> None:
+        shape_key = (input_shape, output_shape)
+
+        if shape_key not in self._unique_shapes:
+            self._unique_shapes.add(shape_key)
+            self._shape_to_layer_types[shape_key] = []
+            print(f"Layer: {self.prefix} | input shape: {input_shape} --> "
+                  f"output shape: {output_shape}, Quant Method: "
+                  f"{self.quant_method.__class__.__name__}")
+
+        layer_type = self.__class__.__name__
+        if layer_type not in self._shape_to_layer_types[shape_key]:
+            self._shape_to_layer_types[shape_key].append(layer_type)
 
     @classmethod
     def print_shape_summary(cls):

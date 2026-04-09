@@ -127,17 +127,17 @@ Note that Sage Attention 3 requires `python>=3.13`, `torch>=2.8.0`, `CUDA >=12.8
 
 To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repository to install the package from source.
 
-### Modified Sage Attention 3
+### Attn QAT Infer
 
 **`ATTN_QAT_INFER`**
 
-This backend uses the modified SageAttention3 implementation that lives in the
+This backend uses the `attn_qat_infer` implementation that lives in the
 `fastvideo-kernel` repository alongside the `fastvideo_kernel` Triton kernels.
-Use this backend when you want to run the modified SageAttention3 CUDA kernel
+Use this backend when you want to run the dedicated FP4 inference CUDA kernel
 directly during inference.
 
 This backend currently assumes access to the in-repo `fastvideo-kernel`
-checkout or an equivalent editable/source install that exposes both:
+checkout or an equivalent editable/source install that exposes:
 
 - `attn_qat_infer`
 

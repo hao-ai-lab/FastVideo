@@ -13,7 +13,7 @@ different codepaths and serve different purposes.
 | Backend | Best for | Package requirement | Primary kernel location |
 |---------|----------|---------------------|-------------------------|
 | `ATTN_QAT_TRAIN` | finetuning, validation during training, reproducing the training attention path | `fastvideo_kernel` | `fastvideo-kernel/python/fastvideo_kernel/triton_kernels/attn_qat_train.py` |
-| `ATTN_QAT_INFER` | standalone inference with the modified SageAttention3-style CUDA kernel | `attn_qat_infer` from the in-repo `fastvideo-kernel` checkout | `fastvideo-kernel/attn_qat_infer/` |
+| `ATTN_QAT_INFER` | standalone inference with the `attn_qat_infer` CUDA kernel | `attn_qat_infer` from the in-repo `fastvideo-kernel` checkout | `fastvideo-kernel/attn_qat_infer/` |
 
 In FastVideo itself, backend selection is routed through:
 
@@ -38,7 +38,7 @@ Use these paths when you want to trace or modify the Attn QAT flow:
 |----------|---------|
 | `fastvideo/attention/backends/attn_qat_train.py` | FastVideo wrapper that imports and calls the Triton training kernel |
 | `fastvideo/attention/backends/attn_qat_infer.py` | FastVideo wrapper that imports and calls the inference kernel |
-| `fastvideo/attention/backends/attn_qat_infer_setup.py` | Local build helper for packaging the `attn_qat_infer` inference kernel |
+| `fastvideo-kernel/CMakeLists.txt` | Kernel build definition that compiles the `attn_qat_infer` inference extensions |
 | `fastvideo/platforms/cuda.py` | Chooses the concrete attention backend at runtime |
 | `fastvideo/envs.py` | Documents supported `FASTVIDEO_ATTENTION_BACKEND` values |
 | `fastvideo/training/training_pipeline.py` | Training-time forcing logic for the generator attention backend |
@@ -71,7 +71,8 @@ Backend-specific notes:
 - `ATTN_QAT_TRAIN` is the Triton training path shipped through
   `fastvideo-kernel`.
 - `ATTN_QAT_INFER` currently targets the Blackwell CUDA path in
-  `fastvideo-kernel/attn_qat_infer/` and requires CUDA 12.8+.
+  `fastvideo-kernel/attn_qat_infer/`, is built by `fastvideo-kernel/CMakeLists.txt`,
+  and requires CUDA 12.8+.
 
 For the full kernel build requirements and CUDA notes, see:
 

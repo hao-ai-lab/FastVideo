@@ -22,8 +22,8 @@ cd fastvideo-kernel
 
 On supported Blackwell environments, the same install also packages
 `attn_qat_infer` and builds its `fp4attn_cuda` / `fp4quant_cuda`
-extensions automatically. This path requires CUDA Toolkit 12.8+ and
-targets `sm_120a`.
+extensions directly from `fastvideo-kernel/attn_qat_infer/`. This path
+requires CUDA Toolkit 12.8+ and targets `sm_120a`.
 
 ### Rocm Build
 If you are in a rocm environment without the compilation toolchaine of CUDA.

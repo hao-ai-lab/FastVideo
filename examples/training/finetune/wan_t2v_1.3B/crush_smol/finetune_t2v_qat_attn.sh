@@ -20,7 +20,7 @@ export WANDB_API_KEY=YOUR_WANDB_API_KEY
 # Use node-local Triton cache to avoid stale file handle errors on shared filesystems
 export TRITON_CACHE_DIR="/tmp/triton_cache_${SLURM_JOB_ID}_${SLURM_NODEID}"
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR=data2/Wan-Syn_77x448x832_600k
+DATA_DIR=YOUR_DATA_DIR
 VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json"
 NUM_GPUS=16
 # export CUDA_VISIBLE_DEVICES=4,5

@@ -1,14 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
-from fastvideo.layers.quantization.base_config import QuantizationConfig, QuantizeMethodBase
+import logging
+from typing import Any
+
 import torch
 from torch.nn.parameter import Parameter
 
-from typing import Any
-from flashinfer import nvfp4_quantize, mm_fp4, SfLayout
+from fastvideo.layers.quantization.base_config import QuantizationConfig, QuantizeMethodBase
 from fastvideo.models.utils import set_weight_attrs
-import logging
+
+try:
+    import flashinfer
+except ImportError:
+    flashinfer = None
 
 logger = logging.getLogger(__name__)
+
+
+def _require_flashinfer() -> Any:
+    if flashinfer is None:
+        raise ImportError("flashinfer is required for FP4 quantization. "
+                          "Please install flashinfer to use the fp4 quantization backend.")
+    return flashinfer
 
 
 class FP4QuantizeMethod(QuantizeMethodBase):
@@ -34,6 +46,7 @@ class FP4QuantizeMethod(QuantizeMethodBase):
     @torch.compile
     def apply(self, layer: torch.nn.Module, x: torch.Tensor, bias: torch.Tensor | None = None) -> torch.Tensor:
         """Apply FP4 quantized computation."""
+        flashinfer_mod = _require_flashinfer()
         out_dim = layer.weight.shape[0]
         original_shape = x.shape
         assert x.dtype == torch.bfloat16 or x.dtype == torch.float16, f"only allow bf16/fp16 inputs to fp4 linear, got {x.dtype}"
@@ -41,19 +54,26 @@ class FP4QuantizeMethod(QuantizeMethodBase):
         x = x.view(-1, x.shape[-1])
 
         x_global_sf = (448 * 6) / x.float().abs().nan_to_num().max()
-        x_fp4, x_scale = nvfp4_quantize(x, x_global_sf, sfLayout=SfLayout.layout_128x4, do_shuffle=False)
+        x_fp4, x_scale = flashinfer_mod.nvfp4_quantize(
+            x,
+            x_global_sf,
+            sfLayout=flashinfer_mod.SfLayout.layout_128x4,
+            do_shuffle=False,
+        )
         weight_fp4 = layer._fp4_weight
         weight_scale = layer._fp4_weight_scale
         weight_global_sf = layer._weight_global_sf
 
-        out = mm_fp4(x_fp4,
-                     weight_fp4.T,
-                     x_scale,
-                     weight_scale.T,
-                     1.0 / (x_global_sf * weight_global_sf),
-                     torch.bfloat16,
-                     None,
-                     backend='cutlass')
+        out = flashinfer_mod.mm_fp4(
+            x_fp4,
+            weight_fp4.T,
+            x_scale,
+            weight_scale.T,
+            1.0 / (x_global_sf * weight_global_sf),
+            torch.bfloat16,
+            None,
+            backend="cutlass",
+        )
 
         if bias is not None:
             if bias.device != out.device or bias.dtype != out.dtype:
@@ -99,6 +119,7 @@ class FP4Config(QuantizationConfig):
 
 @torch.compile
 def convert_model_to_fp4(model: torch.nn.Module):
+    flashinfer_mod = _require_flashinfer()
     from torch.distributed.tensor import DTensor  # type: ignore
     for mod in model.modules():
         qm = getattr(mod, "quant_method", None)
@@ -108,10 +129,12 @@ def convert_model_to_fp4(model: torch.nn.Module):
                 continue
             weight_local = weight.to_local() if isinstance(weight, DTensor) else weight  # type: ignore[arg-type]
             weight_global_sf = (448 * 6) / weight_local.float().abs().nan_to_num().max()
-            fp4_w, fp4_s = nvfp4_quantize(weight_local,
-                                          weight_global_sf,
-                                          sfLayout=SfLayout.layout_128x4,
-                                          do_shuffle=False)
+            fp4_w, fp4_s = flashinfer_mod.nvfp4_quantize(
+                weight_local,
+                weight_global_sf,
+                sfLayout=flashinfer_mod.SfLayout.layout_128x4,
+                do_shuffle=False,
+            )
             mod.register_buffer("_fp4_weight", fp4_w, persistent=False)
             mod.register_buffer("_fp4_weight_scale", fp4_s, persistent=False)
             mod.register_buffer("_weight_global_sf",

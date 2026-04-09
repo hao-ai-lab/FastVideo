@@ -30,7 +30,6 @@ dependencies = [
     "torch>=2.10.0",
     "torchvision",
     "torchaudio",
-    "flashinfer-python",
 
     # Acceleration & Optimization
     "accelerate==1.0.1",

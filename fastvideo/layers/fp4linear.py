@@ -1,11 +1,26 @@
+from typing import Any
+
 import torch
-from flashinfer import SfLayout, mm_fp4, nvfp4_quantize
+
+try:
+    import flashinfer
+except ImportError:
+    flashinfer = None
+
+
+def _require_flashinfer() -> Any:
+    if flashinfer is None:
+        raise ImportError("flashinfer is required for FP4 linear layers. "
+                          "Please install flashinfer to use this path.")
+    return flashinfer
 
 
 class _LinearFWD4BWD16Fn(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x, weight, bias, backend="cutlass", block_size=16, use_128x4_sf_layout=True):
+        flashinfer_mod = _require_flashinfer()
+
         # assert activation dtype
         if x.dtype not in (torch.float16, torch.bfloat16):
             x = x.to(dtype=torch.bfloat16)
@@ -29,16 +44,27 @@ class _LinearFWD4BWD16Fn(torch.autograd.Function):
             maxabs = torch.maximum(maxabs, torch.tensor(1e-12, device=t.device, dtype=maxabs.dtype))
             return (448.0 * 6.0) / maxabs
 
-        a_sf_layout = SfLayout.layout_128x4 if use_128x4_sf_layout else SfLayout.layout_8x4
+        a_sf_layout = (flashinfer_mod.SfLayout.layout_128x4
+                       if use_128x4_sf_layout else flashinfer_mod.SfLayout.layout_8x4)
         global_sf_a = _global_sf(x2d)
         global_sf_b = _global_sf(weight_cast)
 
-        a_fp4, a_inv_s = nvfp4_quantize(x2d, global_sf_a, sfLayout=a_sf_layout, do_shuffle=False)
-        b_fp4, b_inv_s = nvfp4_quantize(weight_cast, global_sf_b, sfLayout=SfLayout.layout_128x4, do_shuffle=False)
+        a_fp4, a_inv_s = flashinfer_mod.nvfp4_quantize(
+            x2d,
+            global_sf_a,
+            sfLayout=a_sf_layout,
+            do_shuffle=False,
+        )
+        b_fp4, b_inv_s = flashinfer_mod.nvfp4_quantize(
+            weight_cast,
+            global_sf_b,
+            sfLayout=flashinfer_mod.SfLayout.layout_128x4,
+            do_shuffle=False,
+        )
 
         alpha = 1.0 / (global_sf_a * global_sf_b)
 
-        mm_fp4(
+        flashinfer_mod.mm_fp4(
             a_fp4,
             b_fp4.T,
             a_inv_s,
