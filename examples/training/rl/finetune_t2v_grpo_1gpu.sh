@@ -1,5 +1,5 @@
 #!/bin/bash
-# Wan 2.1 GRPO training on 8 GPUs
+# Wan 2.1 GRPO training on single GPU
 
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
@@ -10,14 +10,14 @@ MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 RL_DATASET_DIR="data/ocr"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALIDATION_DATASET_FILE="$SCRIPT_DIR/validation.json"
-NUM_GPUS=8
+NUM_GPUS=1
 
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=0
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 training_args=(
   --tracker_project_name "$WANDB_PROJECT"
-  --output_dir "checkpoints/${WANDB_PROJECT}_4gpu"
+  --output_dir "checkpoints/${WANDB_PROJECT}_1gpu"
   --max_train_steps 3000
   --train_batch_size 8
   --train_sp_batch_size 1

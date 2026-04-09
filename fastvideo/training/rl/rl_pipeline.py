@@ -583,7 +583,7 @@ class RLPipeline(TrainingPipeline):
                 for x in video:
                     x = torchvision.utils.make_grid(x, nrow=6)
                     x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-                    frames.append((x * 255).numpy().astype(np.uint8))
+                    frames.append((x * 255).cpu().numpy().astype(np.uint8))
                 step_videos.append(frames)
 
             if self.global_rank == 0:
