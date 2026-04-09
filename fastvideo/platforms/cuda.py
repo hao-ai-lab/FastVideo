@@ -102,7 +102,7 @@ class CudaPlatformBase(Platform):
         return float(torch.cuda.max_memory_allocated(device))
 
     @classmethod
-    def get_torch_device(cls):
+    def get_torch_device(cls) -> object:
         """
         Return torch.cuda
         """

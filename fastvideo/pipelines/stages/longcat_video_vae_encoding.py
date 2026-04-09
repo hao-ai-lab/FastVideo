@@ -35,7 +35,7 @@ class LongCatVideoVAEEncodingStage(PipelineStage):
     6. Calculates num_cond_latents
     """
 
-    def __init__(self, vae):
+    def __init__(self, vae: Any) -> None:
         super().__init__()
         self.vae = vae
 

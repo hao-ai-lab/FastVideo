@@ -97,7 +97,7 @@ if TYPE_CHECKING:
 
 # --- Part 1: Pipeline Discovery ---
 
-_PIPELINE_REGISTRY: dict[str, dict[str, type[ComposedPipelineBase]]] = {}
+_PIPELINE_REGISTRY: dict[str, dict[str, type[ComposedPipelineBase] | None]] = {}
 
 # Registry for pipeline configuration classes (for single-file weights without
 # model_index.json). Maps pipeline_class_name -> (PipelineConfig, SamplingParam)

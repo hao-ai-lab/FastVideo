@@ -227,6 +227,7 @@ class SRDenoisingStage(PipelineStage):
                             self.attn_metadata_builder = self.attn_metadata_builder_cls()
                             # Prepare V-MoBA parameters from config
                             moba_params = fastvideo_args.moba_config.copy()
+                            assert batch.raw_latent_shape is not None, "raw_latent_shape must be set for V-MoBA SR"
                             moba_params.update({
                                 "current_timestep": i,
                                 "raw_latent_shape": batch.raw_latent_shape[2:5],

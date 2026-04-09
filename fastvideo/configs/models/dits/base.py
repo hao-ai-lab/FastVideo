@@ -26,8 +26,12 @@ class DiTArchConfig(ArchConfig):
     hidden_size: int = 0
     num_attention_heads: int = 0
     num_channels_latents: int = 0
-    in_channels: int = 0
-    out_channels: int = 0
+    in_channels: int | None = 0
+    out_channels: int | None = 0
+    patch_size: int | tuple[int, int, int] | None = None
+    expand_timesteps: bool = False
+    num_layers: int = 0
+    ffn_dim: int = 0
     exclude_lora_layers: list[str] = field(default_factory=list)
     boundary_ratio: float | None = None
 
@@ -43,6 +47,13 @@ class DiTConfig(ModelConfig):
     # FastVideoDiT-specific parameters
     prefix: str = ""
     quant_config: QuantizationConfig | None = None
+    expand_timesteps: bool = False
+    boundary_ratio: float | None = None
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.arch_config.expand_timesteps = self.expand_timesteps
+        self.arch_config.boundary_ratio = self.boundary_ratio
 
     @staticmethod
     def add_cli_args(parser: Any, prefix: str = "dit-config") -> Any:

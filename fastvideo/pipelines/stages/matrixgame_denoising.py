@@ -669,9 +669,11 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             start_frame = 0 if start_index == 0 else 1 + vae_ratio * (start_index - 1)
 
             if keyboard_action is not None:
+                assert batch.keyboard_cond is not None, "keyboard_cond must be initialized for streaming updates"
                 n = keyboard_action.shape[1]
                 batch.keyboard_cond[:, start_frame:start_frame + n] = keyboard_action.to(batch.keyboard_cond.device)
             if mouse_action is not None:
+                assert batch.mouse_cond is not None, "mouse_cond must be initialized for streaming updates"
                 n = mouse_action.shape[1]
                 batch.mouse_cond[:, start_frame:start_frame + n] = mouse_action.to(batch.mouse_cond.device)
 

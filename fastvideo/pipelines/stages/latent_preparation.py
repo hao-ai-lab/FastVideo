@@ -4,7 +4,7 @@ Latent preparation stage for diffusion pipelines.
 """
 
 import os
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -652,10 +652,12 @@ class Cosmos25T2WLatentPreparationStage(PipelineStage):
         return batch
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
-        return Cosmos25LatentPreparationStage.verify_input(self, batch, fastvideo_args)  # type: ignore[misc]
+        typed_self = cast(Cosmos25LatentPreparationStage, self)
+        return Cosmos25LatentPreparationStage.verify_input(typed_self, batch, fastvideo_args)
 
     def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
-        return Cosmos25LatentPreparationStage.verify_output(self, batch, fastvideo_args)  # type: ignore[misc]
+        typed_self = cast(Cosmos25LatentPreparationStage, self)
+        return Cosmos25LatentPreparationStage.verify_output(typed_self, batch, fastvideo_args)
 
 
 class Cosmos25V2WLatentPreparationStage(Cosmos25LatentPreparationStage):

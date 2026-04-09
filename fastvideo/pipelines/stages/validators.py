@@ -376,6 +376,13 @@ class VerificationResult:
 
         return self
 
+    def add_failure(self, field_name: str, failure: ValidationFailure | str) -> "VerificationResult":
+        self._checks[field_name] = False
+        if isinstance(failure, str):
+            failure = ValidationFailure(validator_name="manual_failure", actual_value=None, error_msg=failure)
+        self._failures.setdefault(field_name, []).append(failure)
+        return self
+
     def _create_validation_failure(self, validator: Callable, value: Any) -> ValidationFailure:
         """Create a ValidationFailure with detailed information."""
         validator_name = getattr(validator, '__name__', str(validator))

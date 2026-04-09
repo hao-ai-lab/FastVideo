@@ -1,6 +1,6 @@
 import enum
 import random
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import numpy as np
 import torch
@@ -176,7 +176,7 @@ class Platform:
         raise NotImplementedError
 
     @classmethod
-    def get_torch_device(cls):
+    def get_torch_device(cls) -> Any:
         """
         Check if the current platform supports torch device.
         """

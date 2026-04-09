@@ -82,6 +82,8 @@ class LongCatDenoisingStage(DenoisingStage):
         # Extract batch parameters
         latents = batch.latents
         timesteps = batch.timesteps
+        assert latents is not None, "latents must be initialized before LongCat denoising"
+        assert timesteps is not None, "timesteps must be initialized before LongCat denoising"
         prompt_embeds = batch.prompt_embeds[0]  # LongCat uses single encoder
         prompt_attention_mask = batch.prompt_attention_mask[0] if batch.prompt_attention_mask else None
         guidance_scale = batch.guidance_scale
@@ -89,6 +91,7 @@ class LongCatDenoisingStage(DenoisingStage):
 
         # Get negative prompts if doing CFG
         if do_classifier_free_guidance:
+            assert batch.negative_prompt_embeds is not None, "negative_prompt_embeds required for CFG"
             negative_prompt_embeds = batch.negative_prompt_embeds[0]
             negative_prompt_attention_mask = (batch.negative_attention_mask[0]
                                               if batch.negative_attention_mask else None)

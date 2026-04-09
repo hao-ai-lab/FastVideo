@@ -256,7 +256,7 @@ class StreamingVideoGenerator(VideoGenerator):
 
         return frames
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         if self.writer:
             self.writer.close()
             self.writer = None

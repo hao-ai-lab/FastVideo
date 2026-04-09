@@ -112,7 +112,7 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
 
     vae_tiling: bool = True
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
         if self.text_encoder_configs:

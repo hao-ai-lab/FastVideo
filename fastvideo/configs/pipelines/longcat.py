@@ -32,7 +32,7 @@ class LongCatDiTArchConfig(DiTArchConfig):
     num_heads: int = 32
     out_channels: int = 16
     text_tokens_zero_pad: bool = True
-    patch_size: list[int] = field(default_factory=lambda: [1, 2, 2])
+    patch_size: tuple[int, int, int] = (1, 2, 2)
     cp_split_hw: list[int] | None = None
     bsa_params: dict | None = None
 
@@ -314,7 +314,7 @@ ASPECT_RATIO_960_F256 = {
 }
 
 
-def get_bucket_config(resolution, scale_factor_spatial):
+def get_bucket_config(resolution: str, scale_factor_spatial: int) -> dict[str, tuple[list[int], int]]:
     if resolution == '480p':
         if scale_factor_spatial == 16 or scale_factor_spatial == 32:
             return ASPECT_RATIO_627

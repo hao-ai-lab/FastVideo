@@ -61,7 +61,7 @@ def method_has_implemented_embedding(method_class: type[QuantizeMethodBase]) -> 
 class QuantizationConfig(ABC):
     """Base class for quantization configs."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         # mapping is updated by models as they initialize
         self.packed_modules_mapping: dict[str, list[str]] = dict()

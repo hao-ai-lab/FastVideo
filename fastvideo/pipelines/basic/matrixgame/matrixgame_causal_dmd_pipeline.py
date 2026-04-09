@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Matrix-Game causal DMD pipeline implementation."""
 
+from typing import Any, cast
+
 from fastvideo.fastvideo_args import FastVideoArgs
 import torch
 from fastvideo.logger import init_logger
@@ -9,6 +11,7 @@ from fastvideo.pipelines import ComposedPipelineBase, ForwardBatch, LoRAPipeline
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, InputValidationStage, LatentPreparationStage,
                                         TextEncodingStage, MatrixGameImageEncodingStage, MatrixGameCausalDenoisingStage)
 from fastvideo.pipelines.stages.image_encoding import (MatrixGameImageVAEEncodingStage)
+from fastvideo.pipelines.stages.matrixgame_denoising import BlockProcessingContext
 
 logger = init_logger(__name__)
 
@@ -78,7 +81,7 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
     def streaming_step(self, keyboard_action, mouse_action) -> ForwardBatch:
         denoiser = self._stage_name_mapping["denoising_stage"]
-        ctx = denoiser._streaming_ctx
+        ctx = cast(BlockProcessingContext | None, denoiser._streaming_ctx)
         assert ctx is not None, "streaming_ctx must be set"
 
         start_idx = ctx.start_index
@@ -87,13 +90,15 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
         # Decode only the new generated block
         if end_idx > start_idx:
+            assert batch.latents is not None, "latents must be set after streaming_step"
             current_latents = batch.latents[:, :, start_idx:end_idx, :, :]
             args = ctx.fastvideo_args
             decoder = self._stage_name_mapping["decoding_stage"]
-            decoded_frames, self._vae_cache = decoder.streaming_decode(current_latents,
-                                                                       args,
-                                                                       cache=self._vae_cache,
-                                                                       is_first_chunk=(start_idx == 0))
+            decoded_frames_and_cache = cast(
+                tuple[Any, Any],
+                decoder.streaming_decode(current_latents, args, cache=self._vae_cache, is_first_chunk=(start_idx == 0)),
+            )
+            decoded_frames, self._vae_cache = decoded_frames_and_cache
             batch.output = decoded_frames
         else:
             batch.output = None

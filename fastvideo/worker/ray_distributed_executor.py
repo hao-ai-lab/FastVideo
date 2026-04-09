@@ -43,7 +43,7 @@ class RayWorkerMetaData:
     and we need to reset the rank after creating all workers.
     """
 
-    worker: ActorHandle
+    worker: Any
     created_rank: int
     adjusted_rank: int = -1
     ip: str = ""
@@ -84,7 +84,7 @@ class RayDistributedExecutor(Executor):
         num_gpus = envs.FASTVIDEO_RAY_PER_WORKER_GPUS
 
         # The remaining workers are the actual ray actors.
-        self.workers: list[RayWorkerWrapper] = []
+        self.workers: list[Any] = []
 
         # Create the workers.
         # use the first N bundles that have GPU resources.
@@ -242,11 +242,11 @@ class RayDistributedExecutor(Executor):
         # This is the list of workers that are rank 0 of each TP group EXCEPT
         # global rank 0. These are the workers that will broadcast to the
         # rest of the workers.
-        self.tp_driver_workers: list[RayWorkerWrapper] = []
+        self.tp_driver_workers: list[Any] = []
         # This is the list of workers that are not drivers and not the first
         # worker in a TP group. These are the workers that will be
         # broadcasted to.
-        self.non_driver_workers: list[RayWorkerWrapper] = []
+        self.non_driver_workers: list[Any] = []
 
         # Enforce rank order for correct rank to return final output.
         for index, worker in enumerate(self.workers):

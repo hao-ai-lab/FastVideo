@@ -184,7 +184,7 @@ class FastVideoArgs:
     # dmd_denoising_steps: List[int] | None = field(default=None)
 
     # MoE parameters used by Wan2.2
-    boundary_ratio: float | None = 0.875
+    boundary_ratio: float = 0.875
 
     @property
     def training_mode(self) -> bool:
@@ -201,6 +201,9 @@ class FastVideoArgs:
                 raise
         self._apply_ltx2_vae_overrides()
         self.check_fastvideo_args()
+
+    def __getattr__(self, name: str) -> Any:
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def _apply_ltx2_vae_overrides(self) -> None:
         if self.pipeline_config is None:
@@ -890,7 +893,8 @@ class TrainingArgs(FastVideoArgs):
     trackers: list[str] = dataclasses.field(default_factory=list)
     tracker_project_name: str = ""
     wandb_run_name: str = ""
-    seed: int | None = None
+    seed: int = 0
+    _loading_teacher_critic_model: bool = False
 
     # output
     output_dir: str = ""

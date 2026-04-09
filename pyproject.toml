@@ -172,7 +172,6 @@ module = [
     "fastvideo.worker.*",
     "ui.*",
 ]
-ignore_errors = true
 
 [tool.codespell]
 skip = "./data,./wandb,ui/package-lock.json"

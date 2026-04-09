@@ -13,7 +13,6 @@ import contextlib
 import enum
 import logging
 import logging.handlers
-import multiprocessing as mp
 import os
 import re
 import subprocess
@@ -645,7 +644,7 @@ class JobRunner:
         vsa_sparsity: float = 0.0,
         tp_size: int = -1,
         sp_size: int = -1,
-        log_queue: mp.Queue | None = None,
+        log_queue: Any | None = None,
     ) -> Any:
         cache_key = (
             model_id,

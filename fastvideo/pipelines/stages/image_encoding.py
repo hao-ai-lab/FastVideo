@@ -9,6 +9,8 @@ This module contains implementations of encoding stages for diffusion pipelines:
 - VideoVAEEncodingStage: Encodes videos to latent space using VAE for V2V and control tasks
 """
 
+from typing import Any
+
 import PIL
 import torch
 
@@ -110,6 +112,7 @@ class Hy15ImageEncodingStage(ImageEncodingStage):
         if batch.pil_image is None:
             batch.image_embeds = [torch.zeros(1, 729, 1152, device=get_local_torch_device())]
 
+        assert batch.raw_latent_shape is not None, "raw_latent_shape must be initialized before image encoding"
         raw_latent_shape = list(batch.raw_latent_shape)
         raw_latent_shape[1] = 1
         batch.video_latent = torch.zeros(tuple(raw_latent_shape), device=get_local_torch_device())
@@ -124,7 +127,7 @@ class HYWorldImageEncodingStage(ImageEncodingStage):
     Also encodes reference image with VAE for conditional latent.
     """
 
-    def __init__(self, image_encoder=None, image_processor=None, vae=None):
+    def __init__(self, image_encoder: Any = None, image_processor: Any = None, vae: Any = None) -> None:
         super().__init__(image_encoder=image_encoder, image_processor=image_processor)
         self.vae = vae
 
@@ -155,6 +158,7 @@ class HYWorldImageEncodingStage(ImageEncodingStage):
         vision_dim = 1152  # SigLIP hidden size
 
         # Get temporal dimension from raw_latent_shape (set by LatentPreparationStage)
+        assert batch.raw_latent_shape is not None, "raw_latent_shape must be initialized before HYWorld image encoding"
         raw_latent_shape = list(batch.raw_latent_shape)
         latent_channels = raw_latent_shape[1]
         latent_temporal = raw_latent_shape[2]  # T dimension

@@ -26,18 +26,18 @@ from fastvideo.attention import AttentionMetadata
 class PipelineLoggingInfo:
     """Simple approach using OrderedDict to track stage metrics."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         # OrderedDict preserves insertion order and allows easy access
         self.stages: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
-    def add_stage_execution_time(self, stage_name: str, execution_time: float):
+    def add_stage_execution_time(self, stage_name: str, execution_time: float) -> None:
         """Add execution time for a stage."""
         if stage_name not in self.stages:
             self.stages[stage_name] = {}
         self.stages[stage_name]['execution_time'] = execution_time
         self.stages[stage_name]['timestamp'] = time.time()
 
-    def add_stage_metric(self, stage_name: str, metric_name: str, value: Any):
+    def add_stage_metric(self, stage_name: str, metric_name: str, value: Any) -> None:
         """Add any metric for a stage."""
         if stage_name not in self.stages:
             self.stages[stage_name] = {}
@@ -121,9 +121,12 @@ class ForwardBatch:
     # Latent tensors
     latents: torch.Tensor | None = None
     lq_latents: torch.Tensor | None = None
-    raw_latent_shape: tuple[int, ...] | None = None
+    raw_latent_shape: Any | None = None
     noise_pred: torch.Tensor | None = None
     image_latent: torch.Tensor | None = None
+    conditioning_latents: torch.Tensor | None = None
+    cond_latents: torch.Tensor | None = None
+    padding_mask: torch.Tensor | None = None
 
     # Action control inputs (Matrix-Game)
     mouse_cond: torch.Tensor | None = None  # Shape: (B, T, 2)
@@ -147,18 +150,28 @@ class ForwardBatch:
     trajectory_type: str | None = None
     movement_distance: float | None = None
     camera_rotation: str | None = None
+    condition_video_pose: torch.Tensor | None = None
+    condition_video_input_mask: torch.Tensor | None = None
+    condition_video_augment_sigma: torch.Tensor | None = None
+    rendered_warp_images: torch.Tensor | None = None
+    rendered_warp_masks: torch.Tensor | None = None
+    input_image_conditioning: torch.Tensor | None = None
+    cache_3d: Any = None
 
     # Latent dimensions
-    height_latents: list[int] | int | None = None
-    width_latents: list[int] | int | None = None
-    num_frames: list[int] | int = 1  # Default for image models
+    height_latents: Any = None
+    width_latents: Any = None
+    num_frames: Any = 1  # Default for image models
+    latent_height: int | None = None
+    latent_width: int | None = None
+    latent_frames: int | None = None
 
     # Original dimensions (before VAE scaling)
-    height: list[int] | int | None = None
-    width: list[int] | int | None = None
-    height_sr: list[int] | int | None = None
-    width_sr: list[int] | int | None = None
-    fps: list[int] | int | None = None
+    height: Any = None
+    width: Any = None
+    height_sr: Any = None
+    width_sr: Any = None
+    fps: Any = None
 
     # Timesteps
     timesteps: torch.Tensor | None = None
@@ -170,7 +183,7 @@ class ForwardBatch:
     num_inference_steps: int = 50
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
-    guidance_scale_2: float | None = None
+    guidance_scale_2: Any = None
     guidance_rescale: float = 0.0
     eta: float = 0.0
     sigmas: list[float] | None = None
@@ -196,18 +209,18 @@ class ForwardBatch:
     extra_step_kwargs: dict[str, Any] = field(default_factory=dict)
 
     # Component modules (populated by the pipeline)
-    modules: dict[str, Any] = field(default_factory=dict)
+    modules: Any = field(default_factory=dict)
 
     # Final output (after pipeline completion)
     output: torch.Tensor | None = None
     return_trajectory_latents: bool = False
     return_trajectory_decoded: bool = False
-    trajectory_timesteps: list[torch.Tensor] | None = None
-    trajectory_latents: torch.Tensor | None = None
-    trajectory_decoded: list[torch.Tensor] | None = None
+    trajectory_timesteps: Any = None
+    trajectory_latents: Any = None
+    trajectory_decoded: Any = None
 
     # Extra parameters that might be needed by specific pipeline implementations
-    extra: dict[str, Any] = field(default_factory=dict)
+    extra: Any = field(default_factory=dict)
 
     # Misc
     save_video: bool = True
@@ -217,11 +230,21 @@ class ForwardBatch:
 
     # VSA parameters
     VSA_sparsity: float = 0.0
+    kv_cache_dict: dict[int, Any] = field(default_factory=dict)
+    use_kv_cache: bool = False
+    num_cond_latents: int = 0
+    num_cond_frames_added: int = 0
+    num_noise_frames_added: int = 0
+    new_frame_size_before_padding: int | None = None
+    cond_indicator: torch.Tensor | None = None
+    uncond_indicator: torch.Tensor | None = None
+    cond_mask: torch.Tensor | None = None
+    uncond_mask: torch.Tensor | None = None
 
     # Logging info
-    logging_info: PipelineLoggingInfo = field(default_factory=PipelineLoggingInfo)
+    logging_info: PipelineLoggingInfo | None = field(default_factory=PipelineLoggingInfo)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Initialize dependent fields after dataclass initialization."""
 
         # Enable CFG for standard guidance_scale and LTX-2 text CFG scales.
@@ -233,7 +256,10 @@ class ForwardBatch:
         if self.guidance_scale_2 is None:
             self.guidance_scale_2 = self.guidance_scale
 
-    def __str__(self):
+    def __getattr__(self, name: str) -> Any:
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+    def __str__(self) -> str:
         return pprint.pformat(asdict(self), indent=2, width=120)
 
 
@@ -244,7 +270,7 @@ class TrainingBatch:
 
     # Dataloader batch outputs
     latents: torch.Tensor | None = None
-    raw_latent_shape: tuple[int, ...] | None = None
+    raw_latent_shape: Any | None = None
     noise_latents: torch.Tensor | None = None
     encoder_hidden_states: torch.Tensor | None = None
     encoder_attention_mask: torch.Tensor | None = None
@@ -256,6 +282,12 @@ class TrainingBatch:
     audio_encoder_hidden_states: torch.Tensor | None = None
     audio_encoder_attention_mask: torch.Tensor | None = None
     conditioning_mask: torch.Tensor | None = None
+    mouse_cond: torch.Tensor | None = None
+    keyboard_cond: torch.Tensor | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
     # i2v
     preprocessed_image: torch.Tensor | None = None
     image_embeds: torch.Tensor | None = None
@@ -277,20 +309,20 @@ class TrainingBatch:
     attn_metadata: AttentionMetadata | None = None
 
     # input kwargs
-    input_kwargs: dict[str, Any] | None = None
+    input_kwargs: Any = None
 
     # Training loss
     loss: torch.Tensor | None = None
 
     # Training outputs
-    total_loss: float | None = None
-    grad_norm: float | None = None
+    total_loss: Any = None
+    grad_norm: Any = None
 
     # Distillation-specific attributes
     encoder_hidden_states_neg: torch.Tensor | None = None
     encoder_attention_mask_neg: torch.Tensor | None = None
-    conditional_dict: dict[str, Any] | None = None
-    unconditional_dict: dict[str, Any] | None = None
+    conditional_dict: Any = None
+    unconditional_dict: Any = None
 
     # Distillation losses
     generator_loss: float = 0.0

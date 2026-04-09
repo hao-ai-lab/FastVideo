@@ -39,8 +39,8 @@ class ComposedPipelineBase(ABC):
     is_video_pipeline: bool = False  # To be overridden by video pipelines
     _required_config_modules: list[str] = []
     _extra_config_module_map: dict[str, str] = {}
-    training_args: TrainingArgs | None = None
-    fastvideo_args: FastVideoArgs | TrainingArgs | None = None
+    training_args: Any = None
+    fastvideo_args: Any = None
     modules: dict[str, Any] = {}
     # do not need to include moe related transformers
     trainable_transformer_names: list[str] = ["transformer"]
@@ -203,7 +203,7 @@ class ComposedPipelineBase(ABC):
                         device: str | None = None,
                         torch_dtype: torch.dtype | None = None,
                         pipeline_config: str | PipelineConfig | None = None,
-                        args: argparse.Namespace | None = None,
+                        args: argparse.Namespace | FastVideoArgs | TrainingArgs | None = None,
                         required_config_modules: list[str] | None = None,
                         loaded_modules: dict[str, torch.nn.Module]
                         | None = None,
@@ -213,13 +213,16 @@ class ComposedPipelineBase(ABC):
         loaded_modules: Optional[Dict[str, torch.nn.Module]] = None,
         If provided, loaded_modules will be used instead of loading from config/pretrained weights.
         """
-        if args is None or args.inference_mode:
+        if args is None or (isinstance(args, FastVideoArgs) and args.inference_mode):
 
             kwargs['model_path'] = model_path
             fastvideo_args = FastVideoArgs.from_kwargs(**kwargs)
         else:
-            assert args is not None, "args must be provided for training mode"
-            fastvideo_args = TrainingArgs.from_cli_args(args)
+            if isinstance(args, TrainingArgs):
+                fastvideo_args = args
+            else:
+                assert isinstance(args, argparse.Namespace), "training mode expects argparse.Namespace args"
+                fastvideo_args = TrainingArgs.from_cli_args(args)
             # TODO(will): fix this so that its not so ugly
             fastvideo_args.model_path = model_path
             for key, value in kwargs.items():
@@ -248,6 +251,11 @@ class ComposedPipelineBase(ABC):
 
     def add_module(self, module_name: str, module: Any):
         self.modules[module_name] = module
+
+    def __getattr__(self, name: str) -> Any:
+        if "_stage_name_mapping" in self.__dict__ and name in self._stage_name_mapping:
+            return self._stage_name_mapping[name]
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
         model_path = maybe_download_model(self.model_path)
@@ -455,3 +463,12 @@ class ComposedPipelineBase(ABC):
 
     def train(self) -> None:
         raise NotImplementedError("if training_mode is True, the pipeline must implement this method")
+
+    def streaming_reset(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        raise NotImplementedError(f"{type(self).__name__} does not support streaming_reset")
+
+    def streaming_step(self, *args: Any, **kwargs: Any) -> ForwardBatch:
+        raise NotImplementedError(f"{type(self).__name__} does not support streaming_step")
+
+    def streaming_clear(self) -> None:
+        raise NotImplementedError(f"{type(self).__name__} does not support streaming_clear")

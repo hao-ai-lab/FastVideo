@@ -443,6 +443,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         patch_size = self.training_args.pipeline_config.dit_config.patch_size
         current_vsa_sparsity = training_batch.current_vsa_sparsity
         assert latents_shape is not None
+        assert isinstance(patch_size, tuple), f"Expected tuple patch_size, got {patch_size!r}"
         assert training_batch.timesteps is not None
         if envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
             if not vsa_available:
@@ -463,7 +464,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             moba_params = self.training_args.moba_config.copy()
             moba_params.update({
                 "current_timestep": training_batch.timesteps,
-                "raw_latent_shape": training_batch.raw_latent_shape[2:5],
+                "raw_latent_shape": latents_shape[2:5],
                 "patch_size": self.training_args.pipeline_config.dit_config.patch_size,
                 "device": get_local_torch_device(),
             })
@@ -564,6 +565,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
             training_batch = self._normalize_dit_input(training_batch)
             # Create noisy model input
             training_batch = self._prepare_dit_inputs(training_batch)
+            assert training_batch.latents is not None
+            assert training_batch.noisy_model_input is not None
+            assert training_batch.noise is not None
 
             # old sharding code, need to shard latents and noise but not input
             # Shard latents across sp groups
@@ -688,9 +692,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     "vsa_sparsity": current_vsa_sparsity,
                 }
                 try:
+                    assert training_batch.raw_latent_shape is not None
                     metrics["batch_size"] = int(training_batch.raw_latent_shape[0])
 
-                    patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
+                    patch_size = self.training_args.pipeline_config.dit_config.patch_size
+                    assert isinstance(patch_size, tuple), f"Expected tuple patch_size, got {patch_size!r}"
+                    patch_t, patch_h, patch_w = patch_size
                     seq_len = (training_batch.raw_latent_shape[2] // patch_t) * (
                         training_batch.raw_latent_shape[3] // patch_h) * (training_batch.raw_latent_shape[4] // patch_w)
                     if training_batch.encoder_hidden_states is not None:

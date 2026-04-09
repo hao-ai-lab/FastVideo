@@ -54,7 +54,7 @@ class RocmPlatform(Platform):
         return float(torch.cuda.max_memory_allocated(device))
 
     @classmethod
-    def get_torch_device(cls):
+    def get_torch_device(cls) -> object:
         """
         Return torch.cuda
         """
@@ -72,7 +72,7 @@ class RocmPlatform(Platform):
         elif selected_backend in (AttentionBackendEnum.FLASH_ATTN, None):
             pass
 
-        elif selected_backend in (AttentionBackendEnum.SAGE_ATTN):
+        elif selected_backend in (AttentionBackendEnum.SAGE_ATTN, ):
             raise ValueError(f"{selected_backend.name} is not supported on {cls.device_name}.")
         elif selected_backend:
             raise ValueError(f"Invalid attention backend for {cls.device_name}: {selected_backend}")

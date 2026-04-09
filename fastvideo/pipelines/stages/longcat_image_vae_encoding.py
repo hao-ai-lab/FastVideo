@@ -6,6 +6,8 @@ This stage handles encoding a single input image to latent space with
 LongCat-specific normalization for I2V conditioning.
 """
 
+from typing import Any
+
 import PIL
 import torch
 
@@ -31,7 +33,7 @@ class LongCatImageVAEEncodingStage(PipelineStage):
     4. Stores latent and calculates num_cond_latents
     """
 
-    def __init__(self, vae):
+    def __init__(self, vae: Any) -> None:
         super().__init__()
         self.vae = vae
 
@@ -115,7 +117,7 @@ class LongCatImageVAEEncodingStage(PipelineStage):
 
         return batch
 
-    def retrieve_latents(self, encoder_output: object, generator: torch.Generator | None) -> torch.Tensor:
+    def retrieve_latents(self, encoder_output: Any, generator: torch.Generator | None) -> torch.Tensor:
         """Sample from VAE posterior."""
         # WAN VAE returns an object with .sample() method
         if hasattr(encoder_output, 'sample'):

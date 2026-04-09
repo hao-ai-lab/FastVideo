@@ -23,6 +23,7 @@ class Executor(ABC):
     ):
         self.fastvideo_args = fastvideo_args
         self._log_queue = log_queue
+        self._streaming_enabled = False
 
         self._init_executor()
 
@@ -120,3 +121,30 @@ class Executor(ABC):
         Shutdown the executor.
         """
         raise NotImplementedError
+
+    def execute_streaming_reset(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def execute_streaming_step(self, keyboard_action: Any = None, mouse_action: Any = None) -> ForwardBatch:
+        raise NotImplementedError
+
+    async def execute_streaming_step_async(self, keyboard_action: Any = None, mouse_action: Any = None) -> ForwardBatch:
+        raise NotImplementedError
+
+    def execute_streaming_clear(self) -> dict[str, Any] | None:
+        raise NotImplementedError
+
+    def submit_reset(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> None:
+        raise NotImplementedError
+
+    def submit_step(self, keyboard_action: Any = None, mouse_action: Any = None) -> None:
+        raise NotImplementedError
+
+    def submit_clear(self) -> None:
+        raise NotImplementedError
+
+    def wait_result(self) -> Any:
+        raise NotImplementedError
+
+    def disable_streaming(self) -> None:
+        self._streaming_enabled = False

@@ -325,7 +325,7 @@ class VideoGenerator:
                     results.extend(wrapped)
                     continue
                 wrapped.prompt_index = index
-                if wrapped.prompt is None:
+                if wrapped.prompt is None and isinstance(prompt, str):
                     wrapped.prompt = prompt
                 results.append(wrapped)
             return results
@@ -358,7 +358,7 @@ class VideoGenerator:
 
     def _generate_video_impl(
         self,
-        prompt: str | None = None,
+        prompt: str | list[str] | None = None,
         sampling_param: SamplingParam | None = None,
         mouse_cond: torch.Tensor | None = None,
         keyboard_cond: torch.Tensor | None = None,
@@ -430,6 +430,8 @@ class VideoGenerator:
         # Single prompt generation (original behavior)
         if prompt is None:
             raise ValueError("Either prompt or prompt_txt must be provided")
+        if not isinstance(prompt, str):
+            raise ValueError("Single-prompt generation expects a string prompt")
         output_path = self._prepare_output_path(sampling_param.output_path, prompt)
         kwargs["output_path"] = output_path
         return self._generate_single_video(
@@ -787,7 +789,7 @@ class VideoGenerator:
     def merge_lora_weights(self) -> None:
         self.executor.merge_lora_weights()
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         """
         Shutdown the video generator.
         """

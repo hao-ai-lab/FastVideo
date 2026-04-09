@@ -134,3 +134,18 @@ class PyHcclCommunicator:
         buffer = buffer_type(tensor.data_ptr())
         self.hccl.hcclBroadcast(buffer, tensor.numel(), hcclDataTypeEnum.from_torch(tensor.dtype), src, self.comm,
                                 aclrtStream_t(stream.npu_stream))
+
+    def send(self, tensor: torch.Tensor, dst: int) -> None:
+        if isinstance(self.group, StatelessProcessGroup):
+            self.group.send_obj(tensor.cpu(), dst)
+            return
+        dist.send(tensor, dst=dist.get_process_group_ranks(self.group)[dst], group=self.group)
+
+    def recv(self, tensor: torch.Tensor, src: int) -> None:
+        if isinstance(self.group, StatelessProcessGroup):
+            received = self.group.recv_obj(src)
+            if not isinstance(received, torch.Tensor):
+                raise TypeError(f"Expected a tensor from rank {src}, got {type(received)!r}")
+            tensor.copy_(received.to(device=tensor.device, dtype=tensor.dtype))
+            return
+        dist.recv(tensor, src=dist.get_process_group_ranks(self.group)[src], group=self.group)

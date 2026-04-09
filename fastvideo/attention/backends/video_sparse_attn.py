@@ -144,10 +144,10 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
-    def prepare(self):
+    def prepare(self) -> None:
         pass
 
     def build(  # type: ignore
