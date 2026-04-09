@@ -1,8 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
+"""Track which GenerationRequest fields the user explicitly provided.
+
+This module solves a specific problem: when translating a GenerationRequest into
+a legacy SamplingParam, we need to distinguish user-provided values (which
+should override model defaults) from schema defaults (which should NOT override
+model defaults).
+
+The approach:
+1. At bind time, store the original raw dict and a baseline snapshot.
+2. Patch __setattr__ on tracked dataclass types to record dirty field paths.
+3. At access time, do a lazy 3-way merge: raw + baseline + current state,
+   with dirty paths forcing inclusion even when current == baseline.
+"""
 from __future__ import annotations
 
 from collections.abc import Mapping
-from contextlib import contextmanager
 from copy import deepcopy
 import dataclasses
 from typing import Any, cast
@@ -25,9 +37,8 @@ EXPLICIT_REQUEST_ATTR = "_fastvideo_explicit_request"
 ORIGINAL_REQUEST_STATE_ATTR = "_fastvideo_original_request_state"
 _TRACKING_ROOT_ATTR = "_fastvideo_request_tracking_root"
 _TRACKING_PATH_ATTR = "_fastvideo_request_tracking_path"
-_TRACKING_SUSPENDED_ATTR = "_fastvideo_request_tracking_suspended"
 _TRACKING_PATCHED_ATTR = "_fastvideo_request_tracking_patched"
-_MISSING = object()
+_DIRTY_PATHS_ATTR = "_fastvideo_dirty_paths"
 _TRACKED_REQUEST_TYPES = (
     GenerationRequest,
     InputConfig,
@@ -40,86 +51,18 @@ _TRACKED_REQUEST_TYPES = (
 )
 
 
-class _TrackedRequestDict(dict):
-
-    def __init__(
-        self,
-        initial: Mapping[str, Any] | None = None,
-        *,
-        root: GenerationRequest,
-        path: tuple[Any, ...],
-    ) -> None:
-        super().__init__()
-        object.__setattr__(self, _TRACKING_ROOT_ATTR, root)
-        object.__setattr__(self, _TRACKING_PATH_ATTR, path)
-        with _suspend_tracking(root):
-            for key, value in dict(initial or {}).items():
-                dict.__setitem__(
-                    self,
-                    key,
-                    _track_request_value(root, path + (key, ), value),
-                )
-
-    def __setitem__(self, key: Any, value: Any) -> None:
-        root = getattr(self, _TRACKING_ROOT_ATTR, None)
-        path = getattr(self, _TRACKING_PATH_ATTR, ())
-        tracked_value = _track_request_value(root, path + (key, ), value)
-        dict.__setitem__(self, key, tracked_value)
-        _set_explicit_request_value(root, path + (key, ), tracked_value)
-
-    def __delitem__(self, key: Any) -> None:
-        dict.__delitem__(self, key)
-        _delete_explicit_request_value(
-            getattr(self, _TRACKING_ROOT_ATTR, None),
-            getattr(self, _TRACKING_PATH_ATTR, ()) + (key, ),
-        )
-
-    def clear(self) -> None:
-        for key in list(self.keys()):
-            del self[key]
-
-    def pop(self, key: Any, default: Any = _MISSING) -> Any:
-        if key in self:
-            value = dict.__getitem__(self, key)
-            del self[key]
-            return value
-        if default is not _MISSING:
-            return default
-        raise KeyError(key)
-
-    def popitem(self) -> tuple[Any, Any]:
-        key = next(iter(self))
-        value = dict.__getitem__(self, key)
-        del self[key]
-        return key, value
-
-    def setdefault(self, key: Any, default: Any = None) -> Any:
-        if key not in self:
-            self[key] = default
-        return dict.__getitem__(self, key)
-
-    def update(self, *args: Any, **kwargs: Any) -> None:
-        for key, value in dict(*args, **kwargs).items():
-            self[key] = value
-
-    def rebind(self, root: GenerationRequest, path: tuple[Any, ...]) -> None:
-        object.__setattr__(self, _TRACKING_ROOT_ATTR, root)
-        object.__setattr__(self, _TRACKING_PATH_ATTR, path)
-        with _suspend_tracking(root):
-            for key, value in list(self.items()):
-                tracked_value = _track_request_value(root, path + (key, ), value)
-                if tracked_value is not value:
-                    dict.__setitem__(self, key, tracked_value)
-
-
 def bind_generation_request_raw(
     request: GenerationRequest,
     raw: Mapping[str, Any] | None,
 ) -> GenerationRequest:
     _ensure_request_tracking()
-    setattr(request, EXPLICIT_REQUEST_ATTR, deepcopy(dict(raw or {})))
-    setattr(request, ORIGINAL_REQUEST_STATE_ATTR, _serialize_config(request))
-    _bind_request_tracking(request)
+    # Disable dirty tracking during bind so tree walk doesn't record paths.
+    object.__setattr__(request, _DIRTY_PATHS_ATTR, None)
+    object.__setattr__(request, EXPLICIT_REQUEST_ATTR, deepcopy(dict(raw or {})))
+    object.__setattr__(request, ORIGINAL_REQUEST_STATE_ATTR, _serialize_config(request))
+    _set_tracking_roots(request, request, "")
+    # Enable dirty tracking.
+    object.__setattr__(request, _DIRTY_PATHS_ATTR, set())
     return request
 
 
@@ -151,43 +94,64 @@ def refresh_generation_request_raw(request: GenerationRequest, ) -> dict[str, An
     if not isinstance(raw, Mapping) or not isinstance(baseline, Mapping):
         return None
 
+    dirty = getattr(request, _DIRTY_PATHS_ATTR, None) or frozenset()
     current = _serialize_config(request)
     merged = deepcopy(dict(raw))
-    _merge_request_mutations(
-        merged,
-        dict(baseline),
-        current,
-    )
-    setattr(request, EXPLICIT_REQUEST_ATTR, merged)
-    setattr(request, ORIGINAL_REQUEST_STATE_ATTR, current)
+    _merge_request_mutations(merged, dict(baseline), current, dirty)
+
+    object.__setattr__(request, EXPLICIT_REQUEST_ATTR, merged)
+    object.__setattr__(request, ORIGINAL_REQUEST_STATE_ATTR, current)
+    object.__setattr__(request, _DIRTY_PATHS_ATTR, set())
     return merged
+
+
+# ---------------------------------------------------------------------------
+# 3-way merge: raw + baseline + current, with dirty-path forcing
+# ---------------------------------------------------------------------------
+
+_MISSING = object()
 
 
 def _merge_request_mutations(
     merged: dict[str, Any],
     baseline: Mapping[str, Any],
     current: Mapping[str, Any],
+    dirty: frozenset[str] | set[str],
+    path_prefix: str = "",
 ) -> None:
+    # Remove keys that were deleted from the current state.
     for key in set(merged) | set(baseline):
         if key not in current:
             merged.pop(key, None)
 
     for key in current:
+        current_path = f"{path_prefix}.{key}" if path_prefix else key
         current_value = current[key]
         baseline_value = baseline.get(key, _MISSING)
         merged_value = merged.get(key, _MISSING)
 
+        # Recurse into nested mappings.
         if isinstance(current_value, Mapping) and isinstance(baseline_value, Mapping):
             nested = (deepcopy(dict(merged_value)) if isinstance(merged_value, Mapping) else {})
-            _merge_request_mutations(nested, baseline_value, current_value)
+            _merge_request_mutations(nested, baseline_value, current_value, dirty, current_path)
             if nested:
                 merged[key] = nested
             else:
                 merged.pop(key, None)
             continue
 
-        if baseline_value is _MISSING or current_value != baseline_value:
+        # A field is explicitly set if:
+        # - it's new (not in baseline),
+        # - it changed from baseline, or
+        # - its path was touched by __setattr__ (dirty).
+        is_dirty = current_path in dirty
+        if baseline_value is _MISSING or current_value != baseline_value or is_dirty:
             merged[key] = deepcopy(current_value)
+
+
+# ---------------------------------------------------------------------------
+# __setattr__ patching for dirty-path recording
+# ---------------------------------------------------------------------------
 
 
 def _ensure_request_tracking() -> None:
@@ -211,127 +175,43 @@ def _patch_tracking_setattr(config_type: type[Any]) -> None:
             return
 
         root = getattr(self, _TRACKING_ROOT_ATTR, None)
-        if root is None or getattr(root, _TRACKING_SUSPENDED_ATTR, False):
-            original_setattr(self, name, value)
-            return
+        if root is not None:
+            dirty = getattr(root, _DIRTY_PATHS_ATTR, None)
+            if isinstance(dirty, set):
+                prefix = getattr(self, _TRACKING_PATH_ATTR, "")
+                path = f"{prefix}.{name}" if prefix else name
+                dirty.add(path)
 
-        path = getattr(self, _TRACKING_PATH_ATTR, ())
-        tracked_value = _track_request_value(root, path + (name, ), value)
-        original_setattr(self, name, tracked_value)
-        _set_explicit_request_value(root, path + (name, ), tracked_value)
+        original_setattr(self, name, value)
 
     type.__setattr__(config_type, "__setattr__", _tracking_setattr)
     setattr(config_type, _TRACKING_PATCHED_ATTR, True)
 
 
-def _bind_request_tracking(request: GenerationRequest) -> None:
-    object.__setattr__(request, _TRACKING_SUSPENDED_ATTR, True)
-    try:
-        _track_request_value(request, (), request)
-    finally:
-        object.__setattr__(request, _TRACKING_SUSPENDED_ATTR, False)
+# ---------------------------------------------------------------------------
+# Tree walk to set tracking root/path on nested dataclasses
+# ---------------------------------------------------------------------------
 
 
-def _track_request_value(
-    root: GenerationRequest | None,
-    path: tuple[Any, ...],
-    value: Any,
-) -> Any:
-    if root is None:
-        return value
-
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        _patch_tracking_setattr(type(value))
-        object.__setattr__(value, _TRACKING_ROOT_ATTR, root)
-        object.__setattr__(value, _TRACKING_PATH_ATTR, path)
-        with _suspend_tracking(root):
-            for field in dataclasses.fields(value):
-                current = getattr(value, field.name)
-                tracked_current = _track_request_value(
-                    root,
-                    path + (field.name, ),
-                    current,
-                )
-                if tracked_current is not current:
-                    object.__setattr__(value, field.name, tracked_current)
-        return value
-
-    if isinstance(value, _TrackedRequestDict):
-        value.rebind(root, path)
-        return value
-
-    if isinstance(value, dict):
-        return _TrackedRequestDict(value, root=root, path=path)
-
-    return value
-
-
-@contextmanager
-def _suspend_tracking(root: GenerationRequest | None):
-    if root is None:
-        yield
-        return
-
-    was_suspended = getattr(root, _TRACKING_SUSPENDED_ATTR, False)
-    object.__setattr__(root, _TRACKING_SUSPENDED_ATTR, True)
-    try:
-        yield
-    finally:
-        object.__setattr__(root, _TRACKING_SUSPENDED_ATTR, was_suspended)
-
-
-def _set_explicit_request_value(
-    root: GenerationRequest | None,
-    path: tuple[Any, ...],
-    value: Any,
+def _set_tracking_roots(
+    root: GenerationRequest,
+    obj: Any,
+    prefix: str,
 ) -> None:
-    if root is None or getattr(root, _TRACKING_SUSPENDED_ATTR, False) or not path:
+    if not dataclasses.is_dataclass(obj) or isinstance(obj, type):
         return
-
-    raw = getattr(root, EXPLICIT_REQUEST_ATTR, None)
-    if not isinstance(raw, dict):
-        return
-
-    cursor = raw
-    for key in path[:-1]:
-        child = cursor.get(key)
-        if not isinstance(child, dict):
-            child = {}
-            cursor[key] = child
-        cursor = child
-    cursor[path[-1]] = _serialize_config(value)
+    object.__setattr__(obj, _TRACKING_ROOT_ATTR, root)
+    object.__setattr__(obj, _TRACKING_PATH_ATTR, prefix)
+    for field in dataclasses.fields(obj):
+        child = getattr(obj, field.name)
+        child_path = f"{prefix}.{field.name}" if prefix else field.name
+        if dataclasses.is_dataclass(child) and not isinstance(child, type):
+            _set_tracking_roots(root, child, child_path)
 
 
-def _delete_explicit_request_value(
-    root: GenerationRequest | None,
-    path: tuple[Any, ...],
-) -> None:
-    if root is None or getattr(root, _TRACKING_SUSPENDED_ATTR, False) or not path:
-        return
-
-    raw = getattr(root, EXPLICIT_REQUEST_ATTR, None)
-    if not isinstance(raw, dict):
-        return
-
-    _delete_explicit_request_path(raw, path)
-
-
-def _delete_explicit_request_path(
-    raw: dict[str, Any],
-    path: tuple[Any, ...],
-) -> bool:
-    key = path[0]
-    if len(path) == 1:
-        raw.pop(key, None)
-        return not raw
-
-    child = raw.get(key)
-    if not isinstance(child, dict):
-        return not raw
-
-    if _delete_explicit_request_path(child, path[1:]):
-        raw.pop(key, None)
-    return not raw
+# ---------------------------------------------------------------------------
+# Serialization helper
+# ---------------------------------------------------------------------------
 
 
 def _serialize_config(config: Any) -> Any:
