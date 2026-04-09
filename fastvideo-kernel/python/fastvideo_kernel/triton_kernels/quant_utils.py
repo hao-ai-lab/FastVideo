@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
-from nvfp4_utils import _compute_quant_and_scale, _compute_dequant
+
+from .nvfp4_utils import _compute_quant_and_scale, _compute_dequant
 
 @triton.jit
 def fake_quantize(src_tensor, valid_src_mask, BLOCK_SIZE_OUT_DIM: tl.constexpr, 
