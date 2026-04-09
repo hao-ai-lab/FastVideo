@@ -250,9 +250,6 @@ def _register_configs() -> None:
             "FastVideo/LTX2-base",
             "FastVideo/LTX2-Diffusers",
         ],
-        model_detectors=[
-            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" not in path.lower(),
-        ],
     )
     # LTX-2 (distilled)
     register_configs(
@@ -261,9 +258,6 @@ def _register_configs() -> None:
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "FastVideo/LTX2-Distilled-Diffusers",
-        ],
-        model_detectors=[
-            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" in path.lower(),
         ],
     )
 
