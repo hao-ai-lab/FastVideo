@@ -150,6 +150,29 @@ ignore_missing_imports = true
 disallow_untyped_calls = true
 check_untyped_defs = true
 follow_imports = "silent"
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = [
+    "fastvideo.api.compat",
+    "fastvideo.attention.backends.bsa_attn",
+    "fastvideo.attention.backends.flash_attn",
+    "fastvideo.attention.backends.vmoba",
+    "fastvideo.attention.utils.flash_attn_no_pad",
+    "fastvideo.configs.*",
+    "fastvideo.distributed.*",
+    "fastvideo.entrypoints.*",
+    "fastvideo.fastvideo_args",
+    "fastvideo.layers.quantization.*",
+    "fastvideo.pipelines.*",
+    "fastvideo.platforms.rocm",
+    "fastvideo.registry",
+    "fastvideo.train.*",
+    "fastvideo.training.*",
+    "fastvideo.worker.*",
+    "ui.*",
+]
+ignore_errors = true
 
 [tool.codespell]
 skip = "./data,./wandb,ui/package-lock.json"

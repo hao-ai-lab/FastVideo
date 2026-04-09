@@ -1,15 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import importlib
 import sys
+from collections.abc import Callable
 from pathlib import Path
-
-# Add local repo roots to sys.path for kernel-side imports during development.
-_project_root = Path(__file__).resolve().parent.parent.parent.parent
-_kernel_root = _project_root / "fastvideo-kernel"
-_kernel_python_root = _kernel_root / "python"
-for _path in (_project_root, _kernel_root, _kernel_python_root):
-    if str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
 
 import torch
 
@@ -20,12 +14,47 @@ from fastvideo.attention.backends.abstract import (
     AttentionMetadataBuilder,
 )
 from fastvideo.logger import init_logger
-from fastvideo_kernel.triton_kernels.qat_attn import attention
 
 logger = init_logger(__name__)
 
+_project_root = Path(__file__).resolve().parent.parent.parent.parent
+_kernel_root = _project_root / "fastvideo-kernel"
+_kernel_python_root = _kernel_root / "python"
+_qat_attention: Callable[..., torch.Tensor] | None = None
+_qat_import_attempted = False
+
+
+def _ensure_kernel_paths() -> None:
+    for path in (_project_root, _kernel_root, _kernel_python_root):
+        path_str = str(path)
+        if path_str not in sys.path:
+            sys.path.insert(0, path_str)
+
+
+def _get_qat_attention() -> Callable[..., torch.Tensor] | None:
+    global _qat_attention
+    global _qat_import_attempted
+
+    if _qat_import_attempted:
+        return _qat_attention
+
+    _qat_import_attempted = True
+    _ensure_kernel_paths()
+
+    try:
+        _qat_attention = importlib.import_module("fastvideo_kernel.triton_kernels.qat_attn").attention
+    except ImportError:
+        _qat_attention = None
+
+    return _qat_attention
+
 
 def qat_attn(q_BLHD: torch.Tensor, k_BLHD: torch.Tensor, v_BLHD: torch.Tensor, is_causal: bool = False) -> torch.Tensor:
+    attention = _get_qat_attention()
+    if attention is None:
+        raise ImportError("fastvideo_kernel.triton_kernels.qat_attn is not available. Please ensure the "
+                          "FastVideo kernel package is installed.")
+
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -38,7 +67,7 @@ def qat_attn(q_BLHD: torch.Tensor, k_BLHD: torch.Tensor, v_BLHD: torch.Tensor, i
     fake_quant_p_bwd = True
     use_high_prec_o = True
     smooth_q = False
-    sm_scale = 1.0 / (q_BHLD.shape[-1] ** 0.5)
+    sm_scale = 1.0 / (q_BHLD.shape[-1]**0.5)
     use_global_sf_qkv = False
     use_global_sf_p = False
 

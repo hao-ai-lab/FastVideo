@@ -1,23 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import importlib
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
-# Add local repo roots to sys.path for kernel-side imports during development.
-_project_root = Path(__file__).resolve().parent.parent.parent.parent
-_kernel_root = _project_root / "fastvideo-kernel"
-_kernel_python_root = _kernel_root / "python"
-for _path in (_project_root, _kernel_root, _kernel_python_root):
-    if str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
-
 import torch
-
-try:
-    # Prefer the in-repo kernel implementation during local development.
-    from modified_sageattn import sageattn_blackwell
-except ImportError:
-    sageattn_blackwell = None
 
 from fastvideo.attention.backends.abstract import (
     AttentionBackend,
@@ -29,9 +17,41 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
+_project_root = Path(__file__).resolve().parent.parent.parent.parent
+_kernel_root = _project_root / "fastvideo-kernel"
+_kernel_python_root = _kernel_root / "python"
+_sageattn_blackwell: Callable[..., torch.Tensor] | None = None
+_sageattn_import_attempted = False
+
+
+def _ensure_kernel_paths() -> None:
+    for path in (_project_root, _kernel_root, _kernel_python_root):
+        path_str = str(path)
+        if path_str not in sys.path:
+            sys.path.insert(0, path_str)
+
+
+def _get_sageattn_blackwell() -> Callable[..., torch.Tensor] | None:
+    global _sageattn_blackwell
+    global _sageattn_import_attempted
+
+    if _sageattn_import_attempted:
+        return _sageattn_blackwell
+
+    _sageattn_import_attempted = True
+    _ensure_kernel_paths()
+
+    try:
+        # Prefer the in-repo kernel implementation during local development.
+        _sageattn_blackwell = importlib.import_module("modified_sageattn").sageattn_blackwell
+    except ImportError:
+        _sageattn_blackwell = None
+
+    return _sageattn_blackwell
+
 
 def is_modified_sageattn_available() -> bool:
-    return sageattn_blackwell is not None
+    return _get_sageattn_blackwell() is not None
 
 
 class ModifiedSageAttention3Backend(AttentionBackend):
@@ -82,11 +102,10 @@ class ModifiedSageAttention3Impl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        if not is_modified_sageattn_available():
-            raise ImportError(
-                "modified_sageattn is not available. Please ensure the "
-                "modified SageAttention3 kernel is installed."
-            )
+        sageattn_blackwell = _get_sageattn_blackwell()
+        if sageattn_blackwell is None:
+            raise ImportError("modified_sageattn is not available. Please ensure the "
+                              "modified SageAttention3 kernel is installed.")
 
         query = query.transpose(1, 2).contiguous()
         key = key.transpose(1, 2).contiguous()

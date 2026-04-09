@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import time
+import types
 from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Iterator
@@ -37,12 +38,12 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch, LoRAPipeline, TrainingBatch)
 from fastvideo.platforms import current_platform
-from training_utils import traverse_swap_module
 from fastvideo.training.activation_checkpoint import (apply_activation_checkpointing)
 from fastvideo.training.trackers import (DummyTracker, TrackerType, initialize_trackers, Trackers)
 from fastvideo.training.training_utils import (clip_grad_norm_while_handling_failing_dtensor_cases,
                                                compute_density_for_timestep_sampling, count_trainable, get_scheduler,
-                                               get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint)
+                                               get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint,
+                                               traverse_swap_module)
 from fastvideo.utils import (is_vmoba_available, is_vsa_available, set_random_seed, shallow_asdict)
 
 try:
@@ -56,9 +57,7 @@ logger = init_logger(__name__)
 
 
 def _get_generator_qat_attn_impl_cls() -> type[Any]:
-    from fastvideo.attention.backends.qat_attn import (
-        QATAttentionImpl,
-    )
+    from fastvideo.attention.backends.qat_attn import QATAttentionImpl
 
     return QATAttentionImpl
 
@@ -79,7 +78,7 @@ def swap_sage_attn3(obj: Any, obj_path: str) -> int:
 
     # Access may raise if it's a property; guard it.
     try:
-        old_impl = getattr(obj, "attn_impl")
+        old_impl = obj.attn_impl
     except Exception:
         return 0
 
@@ -91,7 +90,6 @@ def swap_sage_attn3(obj: Any, obj_path: str) -> int:
     causal = getattr(old_impl, "causal", False)
     softmax_scale = getattr(old_impl, "softmax_scale", 1.0)
 
-
     new_impl = impl_cls(
         num_heads=None,
         head_size=None,
@@ -100,7 +98,7 @@ def swap_sage_attn3(obj: Any, obj_path: str) -> int:
         num_kv_heads=None,
         prefix="",
     )
-    setattr(obj, "attn_impl", new_impl)
+    obj.attn_impl = new_impl
     return 1
 
 
@@ -129,8 +127,6 @@ def swap_fp4_linear(obj: Any, obj_path: str) -> int:
         should_replace = False
         in_features = None
         out_features = None
-        bias = None
-
         # if isinstance(attr_value, torch.nn.Linear):
         #     should_replace = True
         #     in_features = attr_value.in_features
@@ -141,9 +137,6 @@ def swap_fp4_linear(obj: Any, obj_path: str) -> int:
             should_replace = True
             in_features = attr_value.input_size
             out_features = attr_value.output_size
-            # For ReplicatedLinear, check if bias exists
-            bias = hasattr(attr_value, 'bias') and attr_value.bias is not None
-
 
         if should_replace and in_features is not None and out_features is not None:
             # Create new LinearFWD4BWD16 layer with same dimensions
@@ -164,7 +157,7 @@ def swap_fp4_linear(obj: Any, obj_path: str) -> int:
             # if bias and hasattr(attr_value, 'bias') and attr_value.bias is not None:
             #     with torch.no_grad():
             #         new_layer.bias.copy_(attr_value.bias.data.float())
-            layer = getattr(obj, attr_name)            # Replace the attribute
+            layer = getattr(obj, attr_name)  # Replace the attribute
             layer.forward = types.MethodType(fp4_linear_forward, layer)
 
             # from fpdb import ForkedPdb; ForkedPdb().set_trace()
@@ -173,10 +166,9 @@ def swap_fp4_linear(obj: Any, obj_path: str) -> int:
             # setattr(new_layer, "bias", old_layer.bias)
             swaps_performed += 1
 
-
-
-
     return swaps_performed
+
+
 class TrainingPipeline(LoRAPipeline, ABC):
     """
     A pipeline for training a model. All training pipelines should inherit from this class.
@@ -235,17 +227,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 self.transformer, checkpointing_type=training_args.enable_gradient_checkpointing_type)
             if self.transformer_2 is not None:
                 self.transformer_2 = apply_activation_checkpointing(
-                    self.transformer_2,
-                    checkpointing_type=training_args.
-                    enable_gradient_checkpointing_type)
-            
-        
+                    self.transformer_2, checkpointing_type=training_args.enable_gradient_checkpointing_type)
+
         if training_args.generator_4bit_attn:
             num_swaps = traverse_swap_module(self.transformer, swap_fn=swap_sage_attn3)
-            logger.info(f"Swapped {num_swaps} attn_impl to QATAttentionImpl instances in self.transformer")
+            logger.info("Swapped %s attn_impl to QATAttentionImpl instances in self.transformer", num_swaps)
         if training_args.generator_4bit_linear:
             num_swaps = traverse_swap_module(self.transformer, swap_fn=swap_fp4_linear)
-            logger.info(f"Swapped {num_swaps} linear layers to LinearFWD4BWD16 instances in self.transformer")
+            logger.info("Swapped %s linear layers to LinearFWD4BWD16 instances in self.transformer", num_swaps)
         noise_scheduler = self.modules["scheduler"]
         self.set_trainable()
         params_to_optimize = self.transformer.parameters()

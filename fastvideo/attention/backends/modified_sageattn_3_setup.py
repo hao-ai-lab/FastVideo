@@ -1,13 +1,16 @@
 import warnings
 import os
 from pathlib import Path
-from packaging.version import parse, Version
-from setuptools import setup, find_packages
 import subprocess
+from typing import Any
+
+from packaging.version import parse, Version
+from setuptools import find_packages, setup
+from setuptools._distutils.cmd import Command
 from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 import torch
-from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension, CUDA_HOME
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CUDA_HOME
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 repo_dir = Path(this_dir).resolve()
@@ -23,8 +26,7 @@ SKIP_CUDA_BUILD = os.getenv("FAHOPPER_SKIP_CUDA_BUILD", "FALSE") == "TRUE"
 FORCE_CXX11_ABI = os.getenv("FAHOPPER_FORCE_CXX11_ABI", "FALSE") == "TRUE"
 
 
-
-def get_cuda_bare_metal_version(cuda_dir):
+def get_cuda_bare_metal_version(cuda_dir: str) -> tuple[str, Version]:
     raw_output = subprocess.check_output([cuda_dir + "/bin/nvcc", "-V"], universal_newlines=True)
     output = raw_output.split()
     release_idx = output.index("release") + 1
@@ -41,16 +43,16 @@ def check_if_cuda_home_none(global_option: str) -> None:
     warnings.warn(
         f"{global_option} was requested, but nvcc was not found.  Are you sure your environment has nvcc available?  "
         "If you're installing within a container from https://hub.docker.com/r/pytorch/pytorch, "
-        "only images whose names contain 'devel' will provide nvcc."
+        "only images whose names contain 'devel' will provide nvcc.",
+        stacklevel=2,
     )
 
 
-def append_nvcc_threads(nvcc_extra_args):
+def append_nvcc_threads(nvcc_extra_args: list[str]) -> list[str]:
     return nvcc_extra_args + ["--threads", "4"]
 
 
-cmdclass = {}
-ext_modules = []
+ext_modules: list[Any] = []
 
 if not SKIP_CUDA_BUILD:
     print("\n\ntorch.__version__  = {}\n\n".format(torch.__version__))
@@ -70,16 +72,13 @@ if not SKIP_CUDA_BUILD:
     # https://github.com/pytorch/pytorch/blob/8472c24e3b5b60150096486616d98b7bea01500b/torch/utils/cpp_extension.py#L920
     if FORCE_CXX11_ABI:
         torch._C._GLIBCXX_USE_CXX11_ABI = True
-    modified_sageattn_dir = (
-        package_root / "modified_sageattn"
-    )
+    modified_sageattn_dir = (package_root / "modified_sageattn")
     cutlass_dir = repo_dir / "csrc" / "cutlass"
     (repo_dir / "csrc").mkdir(parents=True, exist_ok=True)
     if not cutlass_dir.exists():
-        subprocess.run(
-            ["git", "clone", "--depth", "1", "https://github.com/NVIDIA/cutlass.git", str(cutlass_dir)],
-            check=True
-        )
+        subprocess.run(["git", "clone", "--depth", "1", "https://github.com/NVIDIA/cutlass.git",
+                        str(cutlass_dir)],
+                       check=True)
     nvcc_flags = [
         "-O3",
         # "-O0",
@@ -115,51 +114,52 @@ if not SKIP_CUDA_BUILD:
             sources=[str(modified_sageattn_dir / "blackwell/api.cu")],
             extra_compile_args={
                 "cxx": ["-O3", "-std=c++17"],
-                "nvcc": append_nvcc_threads(
-                    nvcc_flags + ["-DEXECMODE=0"] + cc_flag
-                ),
+                "nvcc": append_nvcc_threads(nvcc_flags + ["-DEXECMODE=0"] + cc_flag),
             },
             include_dirs=include_dirs,
             # Without this we get and error about cuTensorMapEncodeTiled not defined
-            libraries=["cuda"]
-        )
-    )
+            libraries=["cuda"]))
     ext_modules.append(
         CUDAExtension(
             name="fp4quant_cuda",
             sources=[str(modified_sageattn_dir / "quantization/fp4_quantization_4d.cu")],
             extra_compile_args={
                 "cxx": ["-O3", "-std=c++17"],
-                "nvcc": append_nvcc_threads(
-                    nvcc_flags + ["-DEXECMODE=0"] + cc_flag
-                ),
+                "nvcc": append_nvcc_threads(nvcc_flags + ["-DEXECMODE=0"] + cc_flag),
             },
             include_dirs=include_dirs,
             # Without this we get and error about cuTensorMapEncodeTiled not defined
-            libraries=["cuda"]
-        )
-    )
-
+            libraries=["cuda"]))
 
 
 class CachedWheelsCommand(_bdist_wheel):
+
     def run(self):
         super().run()
+
+
+setup_cmdclass: dict[str, type[Command]]
+if ext_modules:
+    setup_cmdclass = {
+        "bdist_wheel": CachedWheelsCommand,
+        "build_ext": BuildExtension,
+    }
+else:
+    setup_cmdclass = {
+        "bdist_wheel": CachedWheelsCommand,
+    }
 
 setup(
     name=PACKAGE_NAME,
     version="1.0.0",
-    packages=find_packages(
-        where=str(package_root),
-        exclude=(
-            "build",
-            "csrc",
-            "tests",
-            "dist",
-            "docs",
-            "benchmarks",
-        )
-    ),
+    packages=find_packages(where=str(package_root), exclude=(
+        "build",
+        "csrc",
+        "tests",
+        "dist",
+        "docs",
+        "benchmarks",
+    )),
     package_dir={"": str(package_root)},
     description="FP4FlashAttention",
     long_description_content_type="text/markdown",
@@ -169,11 +169,7 @@ setup(
         "Operating System :: Unix",
     ],
     ext_modules=ext_modules,
-    cmdclass={"bdist_wheel": CachedWheelsCommand, "build_ext": BuildExtension}
-    if ext_modules
-    else {
-        "bdist_wheel": CachedWheelsCommand,
-    },
+    cmdclass=setup_cmdclass,  # type: ignore[arg-type]
     python_requires=">=3.8",
     install_requires=[
         "torch",

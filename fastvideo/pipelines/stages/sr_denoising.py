@@ -61,11 +61,10 @@ class SRDenoisingStage(PipelineStage):
         self.attn_backend = get_attn_backend(
             head_size=attn_head_size,
             dtype=torch.float16,  # TODO(will): hack
-            supported_attention_backends=(AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.VMOBA_ATTN,
-                                          AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA,
-                                          AttentionBackendEnum.SAGE_ATTN_THREE,
-                                          AttentionBackendEnum.MODIFIED_SAGE_ATTN_THREE,
-                                          AttentionBackendEnum.QAT_ATTN)  # hack
+            supported_attention_backends=(
+                AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.VMOBA_ATTN,
+                AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.SAGE_ATTN_THREE,
+                AttentionBackendEnum.MODIFIED_SAGE_ATTN_THREE, AttentionBackendEnum.QAT_ATTN)  # hack
         )
 
     def add_noise_to_lq(self, lq_latents: torch.Tensor, strength: float = 0.7) -> torch.Tensor:

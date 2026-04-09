@@ -12,6 +12,18 @@ else()
     enable_language(CUDA)
     # Ensure CUDA toolkit targets (CUDA::cudart, CUDA::cuda_driver, etc.) are available.
     find_package(CUDAToolkit REQUIRED)
+    if(NOT DEFINED CUDA_TOOLKIT_ROOT_DIR)
+        if(DEFINED CUDAToolkit_ROOT)
+            set(CUDA_TOOLKIT_ROOT_DIR "${CUDAToolkit_ROOT}" CACHE PATH
+                "CUDA toolkit root directory" FORCE)
+        elseif(DEFINED ENV{CUDAToolkit_ROOT})
+            set(CUDA_TOOLKIT_ROOT_DIR "$ENV{CUDAToolkit_ROOT}" CACHE PATH
+                "CUDA toolkit root directory" FORCE)
+        elseif(DEFINED ENV{CUDA_HOME})
+            set(CUDA_TOOLKIT_ROOT_DIR "$ENV{CUDA_HOME}" CACHE PATH
+                "CUDA toolkit root directory" FORCE)
+        endif()
+    endif()
 endif()
 
 # Import common utils if needed, but we keep it simple for now
@@ -19,13 +31,46 @@ endif()
 # Find Python and Torch
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 
-# Robustly find Torch include paths using Python
+# Locate the installed torch package without importing it. This keeps CMake
+# configure working even on nodes where CUDA runtime libraries are not yet on
+# the dynamic loader path.
 execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c "import torch; from torch.utils.cpp_extension import include_paths; print(';'.join(include_paths()))"
-    OUTPUT_VARIABLE TORCH_INCLUDE_PATHS
+    COMMAND "${Python_EXECUTABLE}" -c "import sysconfig; print(sysconfig.get_path('platlib'))"
+    OUTPUT_VARIABLE PYTHON_PLATLIB
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
-list(APPEND TORCH_INCLUDE_DIRS ${TORCH_INCLUDE_PATHS})
+execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c "import sysconfig; print(sysconfig.get_path('purelib'))"
+    OUTPUT_VARIABLE PYTHON_PURELIB
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+set(TORCH_PYTHON_PACKAGE_DIR "")
+foreach(_candidate
+    "${PYTHON_PLATLIB}/torch"
+    "${PYTHON_PURELIB}/torch"
+)
+    if(EXISTS "${_candidate}")
+        set(TORCH_PYTHON_PACKAGE_DIR "${_candidate}")
+        break()
+    endif()
+endforeach()
+
+if(NOT TORCH_PYTHON_PACKAGE_DIR)
+    message(FATAL_ERROR "Could not locate the installed torch Python package.")
+endif()
+
+list(APPEND TORCH_INCLUDE_DIRS
+    "${TORCH_PYTHON_PACKAGE_DIR}/include"
+    "${TORCH_PYTHON_PACKAGE_DIR}/include/torch/csrc/api/include"
+)
+
+if(NOT Torch_DIR)
+    set(_TORCH_CONFIG_DIR "${TORCH_PYTHON_PACKAGE_DIR}/share/cmake/Torch")
+    if(EXISTS "${_TORCH_CONFIG_DIR}/TorchConfig.cmake")
+        set(Torch_DIR "${_TORCH_CONFIG_DIR}" CACHE PATH "Path to Torch CMake config" FORCE)
+    endif()
+endif()
 
 # Find Torch package (still useful for libraries)
 find_package(Torch REQUIRED)
@@ -214,12 +259,15 @@ if(BUILD_CXX_KERNELS)
 
     # Also link against libtorch_python to satisfy Python-binding symbols
     # (e.g., torch::PyWarningHandler) required by torch/extension.h.
-    execute_process(
-        COMMAND "${Python_EXECUTABLE}" -c "import torch; from pathlib import Path; p=Path(torch.__file__).parent/'lib'; m=sorted(p.glob('libtorch_python*')); print(str(m[0]) if m else '')"
-        OUTPUT_VARIABLE TORCH_PYTHON_LIBRARY_PATH
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
+    file(GLOB TORCH_PYTHON_LIBRARY_CANDIDATES
+        "${TORCH_PYTHON_PACKAGE_DIR}/lib/libtorch_python*"
     )
+    list(LENGTH TORCH_PYTHON_LIBRARY_CANDIDATES _TORCH_PYTHON_LIBRARY_COUNT)
+    if(_TORCH_PYTHON_LIBRARY_COUNT GREATER 0)
+        list(GET TORCH_PYTHON_LIBRARY_CANDIDATES 0 TORCH_PYTHON_LIBRARY_PATH)
+    else()
+        set(TORCH_PYTHON_LIBRARY_PATH "")
+    endif()
     if(TORCH_PYTHON_LIBRARY_PATH)
         message(STATUS "TORCH_PYTHON_LIBRARY_PATH: ${TORCH_PYTHON_LIBRARY_PATH}")
         target_link_libraries(fastvideo_kernel_ops PRIVATE "${TORCH_PYTHON_LIBRARY_PATH}")

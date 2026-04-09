@@ -143,13 +143,10 @@ class CudaPlatformBase(Platform):
         elif selected_backend == AttentionBackendEnum.MODIFIED_SAGE_ATTN_THREE:
             try:
                 from fastvideo.attention.backends.modified_sage_attn3 import (  # noqa: F401
-                    ModifiedSageAttention3Backend,
-                    is_modified_sageattn_available,
+                    ModifiedSageAttention3Backend, is_modified_sageattn_available,
                 )
                 if not is_modified_sageattn_available():
-                    raise ImportError(
-                        "modified_sageattn could not be imported."
-                    )
+                    raise ImportError("modified_sageattn could not be imported.")
                 logger.info("Using modified Sage Attention 3 backend.")
 
                 return "fastvideo.attention.backends.modified_sage_attn3.ModifiedSageAttention3Backend"

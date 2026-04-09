@@ -2,7 +2,6 @@
 
 import torch
 from dataclasses import dataclass
-from dataclasses import dataclass
 from fastvideo.attention.backends.abstract import (  # FlashAttentionMetadata,
     AttentionBackend, AttentionImpl, AttentionMetadata, AttentionMetadataBuilder)
 from fastvideo.logger import init_logger

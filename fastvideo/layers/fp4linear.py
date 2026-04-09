@@ -1,9 +1,9 @@
-import math
 import torch
-import torch.nn as nn
 from flashinfer import SfLayout, mm_fp4, nvfp4_quantize
 
+
 class _LinearFWD4BWD16Fn(torch.autograd.Function):
+
     @staticmethod
     def forward(ctx, x, weight, bias, backend="cutlass", block_size=16, use_128x4_sf_layout=True):
         # assert activation dtype
@@ -22,7 +22,7 @@ class _LinearFWD4BWD16Fn(torch.autograd.Function):
         M = x2d.shape[0]
 
         out2d = torch.empty((M, n), device=x.device, dtype=x.dtype)
-        
+
         @torch.compile
         def _global_sf(t: torch.Tensor) -> torch.Tensor:
             maxabs = t.float().abs().nan_to_num().max()
@@ -39,8 +39,13 @@ class _LinearFWD4BWD16Fn(torch.autograd.Function):
         alpha = 1.0 / (global_sf_a * global_sf_b)
 
         mm_fp4(
-            a_fp4, b_fp4.T, a_inv_s, b_inv_s.T, alpha,
-            x.dtype, out2d,
+            a_fp4,
+            b_fp4.T,
+            a_inv_s,
+            b_inv_s.T,
+            alpha,
+            x.dtype,
+            out2d,
             block_size=block_size,
             use_8x4_sf_layout=(not use_128x4_sf_layout),
             backend=backend,
@@ -78,7 +83,4 @@ class _LinearFWD4BWD16Fn(torch.autograd.Function):
 
 def fp4_linear_forward(self, x: torch.Tensor) -> torch.Tensor:
     # pass config **positionally**; autograd.Function.apply ignores kwargs
-    return _LinearFWD4BWD16Fn.apply(
-        x, self.weight, self.bias,
-        "cutlass", 16, True
-    ), None 
+    return _LinearFWD4BWD16Fn.apply(x, self.weight, self.bias, "cutlass", 16, True), None
