@@ -25,6 +25,40 @@ logger = init_logger(__name__)
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
 
 
+def swap_fp4_linear(obj: Any, obj_path: str) -> int:
+    """
+    Swap supported linear layers to use the FP4 forward path in-place.
+
+    Returns the number of layers updated on ``obj``.
+    """
+    from fastvideo.layers.fp4linear import fp4_linear_forward
+    from fastvideo.layers.linear import ReplicatedLinear
+
+    del obj_path  # Unused today, but kept for traverse_swap_module compatibility.
+
+    swaps_performed = 0
+
+    for attr_name in dir(obj):
+        if attr_name.startswith("_"):
+            continue
+
+        try:
+            attr_value = getattr(obj, attr_name)
+        except Exception:
+            continue
+
+        should_replace = False
+        if isinstance(attr_value, ReplicatedLinear):
+            should_replace = True
+
+        if should_replace:
+            layer = getattr(obj, attr_name)
+            layer.forward = types.MethodType(fp4_linear_forward, layer)
+            swaps_performed += 1
+
+    return swaps_performed
+
+
 def gather_state_dict_on_cpu_rank0(
     model,
     device: torch.device | None = None,

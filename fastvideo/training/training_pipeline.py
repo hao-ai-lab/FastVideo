@@ -6,7 +6,6 @@ import os
 import shutil
 import tempfile
 import time
-import types
 from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Iterator
@@ -45,7 +44,7 @@ from fastvideo.training.trackers import (DummyTracker, TrackerType, initialize_t
 from fastvideo.training.training_utils import (clip_grad_norm_while_handling_failing_dtensor_cases,
                                                compute_density_for_timestep_sampling, count_trainable, get_scheduler,
                                                get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint,
-                                               traverse_swap_module)
+                                               swap_fp4_linear, traverse_swap_module)
 from fastvideo.utils import (is_vmoba_available, is_vsa_available, set_random_seed, shallow_asdict)
 
 try:
@@ -56,50 +55,6 @@ except Exception:
     vmoba_available = False
 
 logger = init_logger(__name__)
-
-
-def swap_fp4_linear(obj: Any, obj_path: str) -> int:
-    """
-    Replace torch.nn.Linear and ReplicatedLinear layers with LinearFWD4BWD16,
-    preserving the input/output dimensions and bias setting.
-    Returns number of swaps performed.
-    """
-    from fastvideo.layers.fp4linear import fp4_linear_forward
-    from fastvideo.layers.linear import ReplicatedLinear
-
-    swaps_performed = 0
-
-    # Find all Linear-like attributes in the object
-    for attr_name in dir(obj):
-        if attr_name.startswith('_'):
-            continue
-
-        try:
-            attr_value = getattr(obj, attr_name)
-        except Exception:
-            continue
-
-        # Check if it's a linear layer we want to replace
-        should_replace = False
-        in_features = None
-        out_features = None
-        # if isinstance(attr_value, torch.nn.Linear):
-        #     should_replace = True
-        #     in_features = attr_value.in_features
-        #     out_features = attr_value.out_features
-        #     bias = attr_value.bias is not None
-
-        if isinstance(attr_value, ReplicatedLinear):
-            should_replace = True
-            in_features = attr_value.input_size
-            out_features = attr_value.output_size
-
-        if should_replace and in_features is not None and out_features is not None:
-            layer = getattr(obj, attr_name)  # Replace the attribute
-            layer.forward = types.MethodType(fp4_linear_forward, layer)
-            swaps_performed += 1
-
-    return swaps_performed
 
 
 class TrainingPipeline(LoRAPipeline, ABC):
