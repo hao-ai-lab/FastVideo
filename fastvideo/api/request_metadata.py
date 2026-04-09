@@ -118,6 +118,7 @@ def _merge_request_mutations(
     current: Mapping[str, Any],
     dirty: frozenset[str] | set[str],
     path_prefix: str = "",
+    force_dirty: bool = False,
 ) -> None:
     # Remove keys that were deleted from the current state.
     for key in set(merged) | set(baseline):
@@ -130,10 +131,21 @@ def _merge_request_mutations(
         baseline_value = baseline.get(key, _MISSING)
         merged_value = merged.get(key, _MISSING)
 
+        # If this exact path was dirtied (e.g. whole section replaced),
+        # propagate to all children.
+        child_force = force_dirty or current_path in dirty
+
         # Recurse into nested mappings.
         if isinstance(current_value, Mapping) and isinstance(baseline_value, Mapping):
             nested = (deepcopy(dict(merged_value)) if isinstance(merged_value, Mapping) else {})
-            _merge_request_mutations(nested, baseline_value, current_value, dirty, current_path)
+            _merge_request_mutations(
+                nested,
+                baseline_value,
+                current_value,
+                dirty,
+                current_path,
+                child_force,
+            )
             if nested:
                 merged[key] = nested
             else:
@@ -142,9 +154,10 @@ def _merge_request_mutations(
 
         # A field is explicitly set if:
         # - it's new (not in baseline),
-        # - it changed from baseline, or
-        # - its path was touched by __setattr__ (dirty).
-        is_dirty = current_path in dirty
+        # - it changed from baseline,
+        # - its path was touched by __setattr__ (dirty), or
+        # - an ancestor path was dirty (whole section replaced).
+        is_dirty = child_force or current_path in dirty
         if baseline_value is _MISSING or current_value != baseline_value or is_dirty:
             merged[key] = deepcopy(current_value)
 
