@@ -9,7 +9,7 @@ import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
 
 from .quant_utils import fake_quantize_q, fake_quantize_kv, fake_quantize
-# from modified_sageattn.api import triton_group_mean
+# from attn_qat_infer.api import triton_group_mean
 
 
 def is_cuda():

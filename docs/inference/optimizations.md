@@ -21,8 +21,8 @@ This page describes the various options for speeding up generation times in Fast
 - Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
-- Modified Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=MODIFIED_SAGE_ATTN_THREE`
-- QAT Attention: `FASTVIDEO_ATTENTION_BACKEND=QAT_ATTN`
+- Attn QAT Infer: `FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER`
+- Attn QAT Train: `FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN`
 - Video MoBA Attention: `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`
 - Sparse Linear Attention: `FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
 - SageSLA Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_SLA_ATTN`
@@ -110,8 +110,8 @@ environment variable values:
 
 - `SAGE_ATTN_THREE`: the regular upstream SageAttention3 backend imported from
   the `sageattn3` package.
-- `MODIFIED_SAGE_ATTN_THREE`: the modified SageAttention3 CUDA-kernel backend
-  imported from the in-repo `modified_sageattn` package.
+- `ATTN_QAT_INFER`: the inference CUDA-kernel backend imported from the
+  in-repo `attn_qat_infer` package.
 
 **`SAGE_ATTN_THREE`**
 
@@ -129,7 +129,7 @@ To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repos
 
 ### Modified Sage Attention 3
 
-**`MODIFIED_SAGE_ATTN_THREE`**
+**`ATTN_QAT_INFER`**
 
 This backend uses the modified SageAttention3 implementation that lives in the
 `fastvideo-kernel` repository alongside the `fastvideo_kernel` Triton kernels.
@@ -139,22 +139,22 @@ directly during inference.
 This backend currently assumes access to the in-repo `fastvideo-kernel`
 checkout or an equivalent editable/source install that exposes both:
 
-- `modified_sageattn`
+- `attn_qat_infer`
 
 Example:
 
 ```python
-os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "MODIFIED_SAGE_ATTN_THREE"
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "ATTN_QAT_INFER"
 ```
 
 ### QAT Attention
 
-**`QAT_ATTN`**
+**`ATTN_QAT_TRAIN`**
 
-This backend uses the FastVideoKernel Triton QAT attention implementation from
-`fastvideo_kernel.triton_kernels.qat_attn`. Use it when you specifically want
-the QAT/Triton attention path rather than the modified SageAttention3 CUDA
-kernel path.
+This backend uses the FastVideoKernel Triton attention implementation from
+`fastvideo_kernel.triton_kernels.attn_qat_train`. Use it when you specifically
+want the training-oriented Triton attention path rather than the
+`attn_qat_infer` CUDA kernel path.
 
 This backend currently assumes access to an install that exposes:
 
@@ -163,7 +163,7 @@ This backend currently assumes access to an install that exposes:
 Example:
 
 ```python
-os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "QAT_ATTN"
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "ATTN_QAT_TRAIN"
 ```
 
 ### V-MoBA / SLA / SageSLA

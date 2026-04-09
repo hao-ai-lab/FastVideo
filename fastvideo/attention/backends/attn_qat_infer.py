@@ -20,8 +20,8 @@ logger = init_logger(__name__)
 _project_root = Path(__file__).resolve().parent.parent.parent.parent
 _kernel_root = _project_root / "fastvideo-kernel"
 _kernel_python_root = _kernel_root / "python"
-_sageattn_blackwell: Callable[..., torch.Tensor] | None = None
-_sageattn_import_attempted = False
+_attn_qat_infer: Callable[..., torch.Tensor] | None = None
+_attn_qat_infer_import_attempted = False
 
 
 def _ensure_kernel_paths() -> None:
@@ -31,30 +31,30 @@ def _ensure_kernel_paths() -> None:
             sys.path.insert(0, path_str)
 
 
-def _get_sageattn_blackwell() -> Callable[..., torch.Tensor] | None:
-    global _sageattn_blackwell
-    global _sageattn_import_attempted
+def _get_attn_qat_infer() -> Callable[..., torch.Tensor] | None:
+    global _attn_qat_infer
+    global _attn_qat_infer_import_attempted
 
-    if _sageattn_import_attempted:
-        return _sageattn_blackwell
+    if _attn_qat_infer_import_attempted:
+        return _attn_qat_infer
 
-    _sageattn_import_attempted = True
+    _attn_qat_infer_import_attempted = True
     _ensure_kernel_paths()
 
     try:
         # Prefer the in-repo kernel implementation during local development.
-        _sageattn_blackwell = importlib.import_module("modified_sageattn").sageattn_blackwell
+        _attn_qat_infer = importlib.import_module("attn_qat_infer").sageattn_blackwell
     except ImportError:
-        _sageattn_blackwell = None
+        _attn_qat_infer = None
 
-    return _sageattn_blackwell
-
-
-def is_modified_sageattn_available() -> bool:
-    return _get_sageattn_blackwell() is not None
+    return _attn_qat_infer
 
 
-class ModifiedSageAttention3Backend(AttentionBackend):
+def is_attn_qat_infer_available() -> bool:
+    return _get_attn_qat_infer() is not None
+
+
+class AttnQatInferBackend(AttentionBackend):
 
     accept_output_buffer: bool = True
 
@@ -64,11 +64,11 @@ class ModifiedSageAttention3Backend(AttentionBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "MODIFIED_SAGE_ATTN_THREE"
+        return "ATTN_QAT_INFER"
 
     @staticmethod
-    def get_impl_cls() -> type["ModifiedSageAttention3Impl"]:
-        return ModifiedSageAttention3Impl
+    def get_impl_cls() -> type["AttnQatInferImpl"]:
+        return AttnQatInferImpl
 
     @staticmethod
     def get_metadata_cls() -> type["AttentionMetadata"]:
@@ -79,7 +79,7 @@ class ModifiedSageAttention3Backend(AttentionBackend):
         raise NotImplementedError
 
 
-class ModifiedSageAttention3Impl(AttentionImpl):
+class AttnQatInferImpl(AttentionImpl):
 
     def __init__(
         self,
@@ -102,16 +102,16 @@ class ModifiedSageAttention3Impl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        sageattn_blackwell = _get_sageattn_blackwell()
-        if sageattn_blackwell is None:
-            raise ImportError("modified_sageattn is not available. Please ensure the "
-                              "modified SageAttention3 kernel is installed.")
+        attn_qat_infer = _get_attn_qat_infer()
+        if attn_qat_infer is None:
+            raise ImportError("attn_qat_infer is not available. Please ensure the "
+                              "attn_qat_infer kernel package is installed.")
 
         query = query.transpose(1, 2).contiguous()
         key = key.transpose(1, 2).contiguous()
         value = value.transpose(1, 2).contiguous()
 
-        output = sageattn_blackwell(
+        output = attn_qat_infer(
             query,
             key,
             value,
@@ -119,7 +119,3 @@ class ModifiedSageAttention3Impl(AttentionImpl):
             is_causal=self.causal,
         )
         return output.transpose(1, 2).contiguous()
-
-
-SageAttention3Backend = ModifiedSageAttention3Backend
-SageAttention3Impl = ModifiedSageAttention3Impl

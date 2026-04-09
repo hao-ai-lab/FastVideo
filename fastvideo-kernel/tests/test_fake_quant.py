@@ -62,7 +62,7 @@ def fake_quantize(src_tensor, valid_src_mask, BLOCK_SIZE_OUT_DIM: tl.constexpr,
                     dst_dtype: tl.constexpr,
                     mx_tensor_dtype: tl.constexpr = tl.uint8):
     """
-    Fake quantize function - matches API from qat_attn.py.
+    Fake quantize function - matches API from attn_qat_train.py.
     """
     high_prec_src_tensor = src_tensor
     src_tensor, src_scale, src_s_dec = _compute_quant_and_scale(
@@ -449,7 +449,7 @@ def test_fake_quantize_fp8():
 
 
 def test_fake_quantize_attention_shapes():
-    """Test fake_quantize with attention-like shapes (similar to test_qat_attn.py)."""
+    """Test fake_quantize with attention-like shapes (similar to test_attn_qat_train.py)."""
     torch.manual_seed(42)
     
     test_configs = [

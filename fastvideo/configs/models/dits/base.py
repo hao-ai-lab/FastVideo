@@ -19,8 +19,8 @@ class DiTArchConfig(ArchConfig):
                                                  AttentionBackendEnum.TORCH_SDPA,
                                                  AttentionBackendEnum.VIDEO_SPARSE_ATTN,
                                                  AttentionBackendEnum.VMOBA_ATTN, AttentionBackendEnum.SAGE_ATTN_THREE,
-                                                 AttentionBackendEnum.MODIFIED_SAGE_ATTN_THREE,
-                                                 AttentionBackendEnum.QAT_ATTN, AttentionBackendEnum.SLA_ATTN,
+                                                 AttentionBackendEnum.ATTN_QAT_INFER,
+                                                 AttentionBackendEnum.ATTN_QAT_TRAIN, AttentionBackendEnum.SLA_ATTN,
                                                  AttentionBackendEnum.SAGE_SLA_ATTN)
 
     hidden_size: int = 0

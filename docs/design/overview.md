@@ -169,8 +169,8 @@ How this maps to FastVideo:
   `FASTVIDEO_ATTENTION_BACKEND`.
 - SageAttention3 is split into two selectable backends:
   `SAGE_ATTN_THREE` for the regular upstream package and
-  `MODIFIED_SAGE_ATTN_THREE` for the FastVideoKernel-backed modified variant.
-- `QAT_ATTN` is a separate FastVideoKernel Triton backend for the QAT attention
+  `ATTN_QAT_INFER` for the FastVideoKernel-backed inference variant.
+- `ATTN_QAT_TRAIN` is a separate FastVideoKernel Triton backend for the QAT attention
   path.
 - `LocalAttention` is used for cross-attention and most attention layers.
 - `DistributedAttention` is used for full-sequence self-attention in the DiT.

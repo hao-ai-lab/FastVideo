@@ -56,21 +56,21 @@ except Exception:
 logger = init_logger(__name__)
 
 
-def _get_generator_qat_attn_impl_cls() -> type[Any]:
-    from fastvideo.attention.backends.qat_attn import QATAttentionImpl
+def _get_generator_attn_qat_train_impl_cls() -> type[Any]:
+    from fastvideo.attention.backends.attn_qat_train import AttnQatTrainImpl
 
-    return QATAttentionImpl
+    return AttnQatTrainImpl
 
 
-def swap_sage_attn3(obj: Any, obj_path: str) -> int:
+def swap_attn_qat_train(obj: Any, obj_path: str) -> int:
     """
-    If `obj` has an attribute named `attn_impl`, replace it with the QAT
-    attention implementation used by generator 4-bit attention, carrying over
-    `.causal` and `.softmax_scale`.
+    If `obj` has an attribute named `attn_impl`, replace it with the
+    attn_qat_train implementation used by generator 4-bit attention, carrying
+    over `.causal` and `.softmax_scale`.
 
     Returns number of swaps performed (0 or 1).
     """
-    impl_cls = _get_generator_qat_attn_impl_cls()
+    impl_cls = _get_generator_attn_qat_train_impl_cls()
 
     # Quick reject: no attribute
     if not hasattr(obj, "attn_impl"):
@@ -139,31 +139,8 @@ def swap_fp4_linear(obj: Any, obj_path: str) -> int:
             out_features = attr_value.output_size
 
         if should_replace and in_features is not None and out_features is not None:
-            # Create new LinearFWD4BWD16 layer with same dimensions
-            # new_layer = LinearFWD4BWD16(
-            #     in_features=in_features,
-            #     out_features=out_features,
-            #     bias=bias,
-            #     backend="cutlass",  # Default backend
-            #     block_size=16,      # Default block size
-            #     use_128x4_sf_layout=True  # Default layout
-            # )
-
-            # Copy weights if possible
-            # if hasattr(attr_value, 'weight') and attr_value.weight is not None:
-            #     with torch.no_grad():
-            #         new_layer.weight.copy_(attr_value.weight.data.float())
-
-            # if bias and hasattr(attr_value, 'bias') and attr_value.bias is not None:
-            #     with torch.no_grad():
-            #         new_layer.bias.copy_(attr_value.bias.data.float())
             layer = getattr(obj, attr_name)  # Replace the attribute
             layer.forward = types.MethodType(fp4_linear_forward, layer)
-
-            # from fpdb import ForkedPdb; ForkedPdb().set_trace()
-            # setattr(obj, attr_name, new_layer)
-            # setattr(new_layer, "weight", old_layer.weight)
-            # setattr(new_layer, "bias", old_layer.bias)
             swaps_performed += 1
 
     return swaps_performed
@@ -230,8 +207,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     self.transformer_2, checkpointing_type=training_args.enable_gradient_checkpointing_type)
 
         if training_args.generator_4bit_attn:
-            num_swaps = traverse_swap_module(self.transformer, swap_fn=swap_sage_attn3)
-            logger.info("Swapped %s attn_impl to QATAttentionImpl instances in self.transformer", num_swaps)
+            num_swaps = traverse_swap_module(self.transformer, swap_fn=swap_attn_qat_train)
+            logger.info("Swapped %s attn_impl to AttnQatTrainImpl instances in self.transformer", num_swaps)
         if training_args.generator_4bit_linear:
             num_swaps = traverse_swap_module(self.transformer, swap_fn=swap_fp4_linear)
             logger.info("Swapped %s linear layers to LinearFWD4BWD16 instances in self.transformer", num_swaps)

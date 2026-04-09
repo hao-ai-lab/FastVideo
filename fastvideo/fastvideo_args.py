@@ -200,7 +200,6 @@ class FastVideoArgs:
                 logger.error("Failed to load V-MoBA config from %s: %s", self.moba_config_path, e)
                 raise
         self._apply_ltx2_vae_overrides()
-        self._apply_ltx2_vae_overrides()
         self.check_fastvideo_args()
 
     def _apply_ltx2_vae_overrides(self) -> None:

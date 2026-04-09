@@ -20,8 +20,8 @@ logger = init_logger(__name__)
 _project_root = Path(__file__).resolve().parent.parent.parent.parent
 _kernel_root = _project_root / "fastvideo-kernel"
 _kernel_python_root = _kernel_root / "python"
-_qat_attention: Callable[..., torch.Tensor] | None = None
-_qat_import_attempted = False
+_attn_qat_train_attention: Callable[..., torch.Tensor] | None = None
+_attn_qat_train_import_attempted = False
 
 
 def _ensure_kernel_paths() -> None:
@@ -31,29 +31,32 @@ def _ensure_kernel_paths() -> None:
             sys.path.insert(0, path_str)
 
 
-def _get_qat_attention() -> Callable[..., torch.Tensor] | None:
-    global _qat_attention
-    global _qat_import_attempted
+def _get_attn_qat_train_attention() -> Callable[..., torch.Tensor] | None:
+    global _attn_qat_train_attention
+    global _attn_qat_train_import_attempted
 
-    if _qat_import_attempted:
-        return _qat_attention
+    if _attn_qat_train_import_attempted:
+        return _attn_qat_train_attention
 
-    _qat_import_attempted = True
+    _attn_qat_train_import_attempted = True
     _ensure_kernel_paths()
 
     try:
-        _qat_attention = importlib.import_module("fastvideo_kernel.triton_kernels.qat_attn").attention
+        _attn_qat_train_attention = importlib.import_module("fastvideo_kernel.triton_kernels.attn_qat_train").attention
     except ImportError:
-        _qat_attention = None
+        _attn_qat_train_attention = None
 
-    return _qat_attention
+    return _attn_qat_train_attention
 
 
-def qat_attn(q_BLHD: torch.Tensor, k_BLHD: torch.Tensor, v_BLHD: torch.Tensor, is_causal: bool = False) -> torch.Tensor:
-    attention = _get_qat_attention()
+def attn_qat_train(q_BLHD: torch.Tensor,
+                   k_BLHD: torch.Tensor,
+                   v_BLHD: torch.Tensor,
+                   is_causal: bool = False) -> torch.Tensor:
+    attention = _get_attn_qat_train_attention()
     if attention is None:
-        raise ImportError("fastvideo_kernel.triton_kernels.qat_attn is not available. Please ensure the "
-                          "FastVideo kernel package is installed.")
+        raise ImportError("fastvideo_kernel.triton_kernels.attn_qat_train is not available. "
+                          "Please ensure the FastVideo kernel package is installed.")
 
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -91,7 +94,7 @@ def qat_attn(q_BLHD: torch.Tensor, k_BLHD: torch.Tensor, v_BLHD: torch.Tensor, i
     return o_BHLD.permute(0, 2, 1, 3).contiguous()
 
 
-class QATAttentionBackend(AttentionBackend):
+class AttnQatTrainBackend(AttentionBackend):
 
     accept_output_buffer: bool = True
 
@@ -101,11 +104,11 @@ class QATAttentionBackend(AttentionBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "QAT_ATTN"
+        return "ATTN_QAT_TRAIN"
 
     @staticmethod
-    def get_impl_cls() -> type["QATAttentionImpl"]:
-        return QATAttentionImpl
+    def get_impl_cls() -> type["AttnQatTrainImpl"]:
+        return AttnQatTrainImpl
 
     @staticmethod
     def get_metadata_cls() -> type["AttentionMetadata"]:
@@ -116,7 +119,7 @@ class QATAttentionBackend(AttentionBackend):
         raise NotImplementedError
 
 
-class QATAttentionImpl(AttentionImpl):
+class AttnQatTrainImpl(AttentionImpl):
 
     def __init__(
         self,
@@ -139,4 +142,4 @@ class QATAttentionImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        return qat_attn(query, key, value, is_causal=self.causal)
+        return attn_qat_train(query, key, value, is_causal=self.causal)

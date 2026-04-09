@@ -3,14 +3,14 @@ import sys
 import os
 import traceback
 
-from modified_sageattn.api import (
+from attn_qat_infer.api import (
     blockscaled_fp4_attn,
     preprocess_qkv,
     scale_and_quant_fp4,
     scale_and_quant_fp4_permute,
     scale_and_quant_fp4_transpose,
 )
-from modified_sageattn.quantization.bench.bench_utils import bench
+from attn_qat_infer.quantization.bench.bench_utils import bench
 
 
 def calculate_attention_flops(batch_size, num_heads, seq_len_q, seq_len_k, head_dim, is_causal=False):

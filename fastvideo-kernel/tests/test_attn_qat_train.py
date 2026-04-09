@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Simple test for QAT attention implementation.
+Simple test for attn_qat_train.
 Tests forward and backward passes with and without QAT enabled.
 """
 
 import torch
-from fastvideo_kernel.triton_kernels.qat_attn import _attention
+from fastvideo_kernel.triton_kernels.attn_qat_train import _attention
 from fastvideo_kernel.triton_kernels.fused_attention import attention as fused_attention
 from math import sqrt
 
@@ -13,9 +13,9 @@ attention = _attention.apply
 DEVICE = torch.device("cuda")
 
 
-def qat_attn_wrapper(q_BLHD, k_BLHD, v_BLHD, is_causal=False, sm_scale=None):
+def attn_qat_train_wrapper(q_BLHD, k_BLHD, v_BLHD, is_causal=False, sm_scale=None):
     """
-    Wrapper function that mimics qat_attn from sage_attn3.py.
+    Wrapper function that mimics attn_qat_train from the backend wrapper.
     Converts from BLHD format to BHLD format, calls attention, then converts back.
     
     Args:
@@ -158,7 +158,7 @@ def test_qat_attention_forward():
     v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE, requires_grad=True)
     
     # Test with QAT (using wrapper that does permute/contiguous)
-    out_qat_BLHD = qat_attn_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
+    out_qat_BLHD = attn_qat_train_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
     
     # Convert to BHLD for naive attention comparison
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -209,7 +209,7 @@ def test_qat_attention_backward():
     v_naive_BHLD = v_qat_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
     
     # Forward pass with QAT (using wrapper)
-    out_qat_BLHD = qat_attn_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
+    out_qat_BLHD = attn_qat_train_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
     
     # Forward pass with naive
     out_naive_BHLD = naive_attention(q_naive_BHLD, k_naive_BHLD, v_naive_BHLD, causal, sm_scale)
@@ -288,7 +288,7 @@ def test_qat_attention_different_shapes():
         v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
         
         sm_scale = 1.0 / sqrt(HEAD_DIM)
-        out_qat_BLHD = qat_attn_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
+        out_qat_BLHD = attn_qat_train_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
         
         # Convert to BHLD for naive attention
         q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -328,7 +328,7 @@ def test_qat_attention_non_causal():
     k_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     
-    out_qat_BLHD = qat_attn_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
+    out_qat_BLHD = attn_qat_train_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
     
     # Convert to BHLD for naive attention
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -368,7 +368,7 @@ def test_qat_attention_causal():
     k_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     
-    out_qat_BLHD = qat_attn_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
+    out_qat_BLHD = attn_qat_train_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
     
     # Convert to BHLD for naive attention
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -414,7 +414,7 @@ def test_qat_attention_causal_backward():
     v_naive_BHLD = v_qat_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
     
     # Forward pass with QAT
-    out_qat_BLHD = qat_attn_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
+    out_qat_BLHD = attn_qat_train_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
     
     # Forward pass with naive
     out_naive_BHLD = naive_attention(q_naive_BHLD, k_naive_BHLD, v_naive_BHLD, causal, sm_scale)
@@ -476,7 +476,7 @@ def test_qat_attention_different_seq_lengths():
         v_BLHD = torch.randn((Z, N_CTX_KV, H, HEAD_DIM), dtype=dtype, device=DEVICE)
         
         # Test with QAT (using wrapper that does permute/contiguous)
-        out_qat_BLHD = qat_attn_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
+        out_qat_BLHD = attn_qat_train_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
         
         # Convert to BHLD for naive attention comparison
         q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -530,7 +530,7 @@ def test_qat_attention_different_seq_lengths_backward():
         v_naive_BHLD = v_qat_BLHD.clone().permute(0, 2, 1, 3).contiguous().detach().requires_grad_(True)
         
         # Forward pass with QAT
-        out_qat_BLHD = qat_attn_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
+        out_qat_BLHD = attn_qat_train_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
         
         # Forward pass with naive
         out_naive_BHLD = naive_attention(q_naive_BHLD, k_naive_BHLD, v_naive_BHLD, causal, sm_scale)
@@ -923,7 +923,7 @@ def test_fused_vs_qat_attention_forward():
     q_qat_BLHD = q_BLHD.clone().to(torch.bfloat16)
     k_qat_BLHD = k_BLHD.clone().to(torch.bfloat16)
     v_qat_BLHD = v_BLHD.clone().to(torch.bfloat16)
-    out_qat_BLHD = qat_attn_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
+    out_qat_BLHD = attn_qat_train_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
     
     # Convert QAT output back to float16 for comparison
     out_qat_BLHD = out_qat_BLHD.to(torch.bfloat16)
@@ -971,7 +971,7 @@ def test_fused_vs_qat_attention_backward():
     out_fused_BLHD = fused_attn_wrapper(q_fused_BLHD, k_fused_BLHD, v_fused_BLHD, causal, sm_scale)
     
     # Forward pass with QAT
-    out_qat_BLHD = qat_attn_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
+    out_qat_BLHD = attn_qat_train_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
     
     # Create dummy gradient (same for both, in BLHD format)
     dout = torch.randn_like(out_fused_BLHD).contiguous()
@@ -1053,7 +1053,7 @@ def test_fused_vs_qat_attention_different_shapes():
         q_qat_BLHD = q_BLHD.clone().to(torch.bfloat16)
         k_qat_BLHD = k_BLHD.clone().to(torch.bfloat16)
         v_qat_BLHD = v_BLHD.clone().to(torch.bfloat16)
-        out_qat_BLHD = qat_attn_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
+        out_qat_BLHD = attn_qat_train_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
         out_qat_BLHD = out_qat_BLHD.to(torch.bfloat16)
         
         assert out_fused_BLHD.shape == (Z, N_CTX, H, HEAD_DIM)
@@ -1093,7 +1093,7 @@ def test_fused_vs_qat_attention_non_causal():
     q_qat_BLHD = q_BLHD.clone().to(torch.bfloat16)
     k_qat_BLHD = k_BLHD.clone().to(torch.bfloat16)
     v_qat_BLHD = v_BLHD.clone().to(torch.bfloat16)
-    out_qat_BLHD = qat_attn_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
+    out_qat_BLHD = attn_qat_train_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
     out_qat_BLHD = out_qat_BLHD.to(torch.bfloat16)
     
     assert out_fused_BLHD.shape == (Z, N_CTX, H, HEAD_DIM)
@@ -1133,7 +1133,7 @@ def test_fused_vs_qat_attention_causal():
     q_qat_BLHD = q_BLHD.clone().to(torch.bfloat16)
     k_qat_BLHD = k_BLHD.clone().to(torch.bfloat16)
     v_qat_BLHD = v_BLHD.clone().to(torch.bfloat16)
-    out_qat_BLHD = qat_attn_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
+    out_qat_BLHD = attn_qat_train_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
     out_qat_BLHD = out_qat_BLHD.to(torch.bfloat16)
     
     assert out_fused_BLHD.shape == (Z, N_CTX, H, HEAD_DIM)
@@ -1175,7 +1175,7 @@ def test_fused_vs_qat_attention_causal_backward():
     out_fused_BLHD = fused_attn_wrapper(q_fused_BLHD, k_fused_BLHD, v_fused_BLHD, causal, sm_scale)
     
     # Forward pass with QAT
-    out_qat_BLHD = qat_attn_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
+    out_qat_BLHD = attn_qat_train_wrapper(q_qat_BLHD, k_qat_BLHD, v_qat_BLHD, causal, sm_scale)
     
     # Create dummy gradient
     dout = torch.randn_like(out_fused_BLHD).contiguous()
@@ -1234,7 +1234,7 @@ def test_qat_attention_wan_shape_forward():
     v_BLHD = torch.randn((Z, N_CTX, H, HEAD_DIM), dtype=dtype, device=DEVICE)
     
     # Test with QAT (using wrapper that does permute/contiguous)
-    out_qat_BLHD = qat_attn_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
+    out_qat_BLHD = attn_qat_train_wrapper(q_BLHD.clone(), k_BLHD.clone(), v_BLHD.clone(), causal, sm_scale)
     
     # Convert to BHLD for naive attention comparison
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -1293,7 +1293,7 @@ def test_qat_attention_wan_shape_backward():
     # -----------------------------
     # FORWARD — QAT
     # -----------------------------
-    out_qat_BLHD = qat_attn_wrapper(q_BLHD, k_BLHD, v_BLHD, causal, sm_scale)
+    out_qat_BLHD = attn_qat_train_wrapper(q_BLHD, k_BLHD, v_BLHD, causal, sm_scale)
 
     # -----------------------------
     # FORWARD — NAIVE
@@ -1395,7 +1395,7 @@ def test_qat_attention_wan_shape_non_divisible_64():
     # -----------------------------
     # FORWARD
     # -----------------------------
-    out_qat_BLHD = qat_attn_wrapper(q_BLHD, k_BLHD, v_BLHD, causal, sm_scale)
+    out_qat_BLHD = attn_qat_train_wrapper(q_BLHD, k_BLHD, v_BLHD, causal, sm_scale)
     out_naive_BHLD = naive_attention(q_BHLD, k_BHLD, v_BHLD, causal, sm_scale)
     out_naive_BLHD = out_naive_BHLD.permute(0,2,1,3).contiguous()
 
