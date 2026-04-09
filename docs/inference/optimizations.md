@@ -136,6 +136,10 @@ This backend uses the `attn_qat_infer` implementation that lives in the
 Use this backend when you want to run the dedicated FP4 inference CUDA kernel
 directly during inference.
 
+For the full Attention QAT guide, including Wan 2.1 14B checkpoint download,
+example editing steps, training launchers, and troubleshooting, see
+[Attention QAT](../attention/attn_qat/index.md).
+
 This backend currently assumes access to the in-repo `fastvideo-kernel`
 checkout or an equivalent editable/source install that exposes:
 
@@ -155,6 +159,10 @@ This backend uses the FastVideoKernel Triton attention implementation from
 `fastvideo_kernel.triton_kernels.attn_qat_train`. Use it when you specifically
 want the training-oriented Triton attention path rather than the
 `attn_qat_infer` CUDA kernel path.
+
+The dedicated [Attention QAT](../attention/attn_qat/index.md) page covers when
+to use `ATTN_QAT_TRAIN` versus `ATTN_QAT_INFER`, the ready-made training
+launchers, and the end-to-end Wan 2.1 14B inference workflow.
 
 This backend currently assumes access to an install that exposes:
 
