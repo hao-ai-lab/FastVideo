@@ -1,9 +1,10 @@
-import torch
 import sys
-import os
 import traceback
 
-from attn_qat_infer.api import sageattn_blackwell
+import _bootstrap  # noqa: F401
+import torch
+
+from flash_attn import flash_attn_func
 from attn_qat_infer.quantization.bench.bench_utils import bench
 
 
@@ -15,12 +16,11 @@ def calculate_attention_flops(batch_size, num_heads, seq_len_q, seq_len_k, head_
     return f
 
 
-def benchmark_sageattn3(batch_size, num_heads, seq_len, head_dim, 
-                        is_causal=False, dtype=torch.bfloat16, 
-                        per_block_mean=True, single_level_p_quant=False,
-                        num_warmups=100, num_tests=1000):
+def benchmark_flashattn2(batch_size, num_heads, seq_len, head_dim, 
+                         is_causal=False, dtype=torch.bfloat16, 
+                         num_warmups=100, num_tests=1000):
     """
-    Benchmark SageAttention3 and return performance metrics.
+    Benchmark FlashAttention2 and return performance metrics.
     
     Args:
         batch_size: Batch size
@@ -29,8 +29,6 @@ def benchmark_sageattn3(batch_size, num_heads, seq_len, head_dim,
         head_dim: Head dimension
         is_causal: Whether to use causal masking
         dtype: Data type (torch.bfloat16 or torch.float16)
-        per_block_mean: Whether to use per-block mean for Q smoothing
-        single_level_p_quant: If True, use single-level quantization for P matrix
         num_warmups: Number of warmup iterations
         num_tests: Number of test iterations
     
@@ -41,21 +39,19 @@ def benchmark_sageattn3(batch_size, num_heads, seq_len, head_dim,
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is not available. This benchmark requires a CUDA device.")
     
-    # Create input tensors
-    q = torch.randn(batch_size, num_heads, seq_len, head_dim, 
+    # Create input tensors - FlashAttention2 expects (batch, seq_len, num_heads, head_dim)
+    q = torch.randn(batch_size, seq_len, num_heads, head_dim, 
                     device=device, dtype=dtype)
-    k = torch.randn(batch_size, num_heads, seq_len, head_dim, 
+    k = torch.randn(batch_size, seq_len, num_heads, head_dim, 
                     device=device, dtype=dtype)
-    v = torch.randn(batch_size, num_heads, seq_len, head_dim, 
+    v = torch.randn(batch_size, seq_len, num_heads, head_dim, 
                     device=device, dtype=dtype)
     
-    # Create closure for benchmarking (no extra stream needed - bench handles synchronization)
+    # Create closure for benchmarking
     def run_attention():
-        return sageattn_blackwell(
+        return flash_attn_func(
             q, k, v, 
-            is_causal=is_causal,
-            per_block_mean=per_block_mean,
-            single_level_p_quant=single_level_p_quant
+            causal=is_causal,
         )
     
     # Benchmark using the bench utility (handles warmup and timing)
@@ -80,8 +76,6 @@ def benchmark_sageattn3(batch_size, num_heads, seq_len, head_dim,
         'head_dim': head_dim,
         'is_causal': is_causal,
         'dtype': str(dtype),
-        'per_block_mean': per_block_mean,
-        'single_level_p_quant': single_level_p_quant,
         'avg_time_ms': avg_time_ms,
         'avg_time_s': avg_time_s,
         'total_flops': total_flops,
@@ -93,7 +87,7 @@ def benchmark_sageattn3(batch_size, num_heads, seq_len, head_dim,
 def print_results(results):
     """Print benchmark results in a formatted table."""
     print("\n" + "="*100)
-    print("SageAttention3 Benchmark Results")
+    print("FlashAttention2 Benchmark Results")
     print("="*100)
     print(f"Configuration:")
     print(f"  Batch Size:         {results['batch_size']}")
@@ -102,8 +96,6 @@ def print_results(results):
     print(f"  Head Dimension:     {results['head_dim']}")
     print(f"  Causal:             {results['is_causal']}")
     print(f"  Data Type:          {results['dtype']}")
-    print(f"  Per Block Mean:     {results['per_block_mean']}")
-    print(f"  Single Level P Quant: {results['single_level_p_quant']}")
     print(f"\nPerformance:")
     print(f"  Average Time:       {results['avg_time_ms']:.3f} ms")
     print(f"  Total FLOPs:        {results['total_flops']/1e12:.4f} TFLOPs (theoretical)")
@@ -115,7 +107,7 @@ def print_results(results):
 
 def run_benchmark_suite():
     """Run a comprehensive benchmark suite with various configurations."""
-    print("Starting SageAttention3 Benchmark Suite...")
+    print("Starting FlashAttention2 Benchmark Suite...")
     print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
     print(f"CUDA Version: {torch.version.cuda}")
     print(f"PyTorch Version: {torch.__version__}\n")
@@ -159,7 +151,7 @@ def run_benchmark_suite():
         sys.stdout.flush()
         
         try:
-            results = benchmark_sageattn3(
+            results = benchmark_flashattn2(
                 batch_size=batch_size,
                 num_heads=num_heads,
                 seq_len=seq_len,
@@ -199,7 +191,7 @@ def run_benchmark_suite():
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description='Benchmark SageAttention3 in TFLOPs')
+    parser = argparse.ArgumentParser(description='Benchmark FlashAttention2 in TFLOPs')
     parser.add_argument('--batch-size', type=int, default=None, help='Batch size')
     parser.add_argument('--num-heads', type=int, default=None, help='Number of attention heads')
     parser.add_argument('--seq-len', type=int, default=None, help='Sequence length')
@@ -207,14 +199,6 @@ if __name__ == "__main__":
     parser.add_argument('--causal', action='store_true', help='Use causal attention')
     parser.add_argument('--dtype', type=str, default='bfloat16', choices=['bfloat16', 'float16'],
                         help='Data type')
-    parser.add_argument('--per-block-mean', action='store_true', default=True,
-                        help='Use per-block mean for Q smoothing (default: True)')
-    parser.add_argument('--no-per-block-mean', action='store_false', dest='per_block_mean',
-                        help='Disable per-block mean for Q smoothing')
-    parser.add_argument('--single-level-p-quant', action='store_true', default=False,
-                        help='Use single-level P quantization (default: True)')
-    parser.add_argument('--two-level-p-quant', action='store_false', dest='single_level_p_quant',
-                        help='Use two-level P quantization')
     parser.add_argument('--num-warmups', type=int, default=10, help='Number of warmup iterations')
     parser.add_argument('--num-tests', type=int, default=50, help='Number of test iterations')
     parser.add_argument('--suite', action='store_true', help='Run full benchmark suite')
@@ -229,21 +213,22 @@ if __name__ == "__main__":
     if args.suite:
         run_benchmark_suite()
     elif args.batch_size and args.num_heads and args.seq_len and args.head_dim:
-        results = benchmark_sageattn3(
+        results = benchmark_flashattn2(
             batch_size=args.batch_size,
             num_heads=args.num_heads,
             seq_len=args.seq_len,
             head_dim=args.head_dim,
             is_causal=args.causal,
             dtype=dtype_map[args.dtype],
-            per_block_mean=args.per_block_mean,
-            single_level_p_quant=args.single_level_p_quant,
             num_warmups=args.num_warmups,
             num_tests=args.num_tests
         )
         print_results(results)
     else:
         print("Running default benchmark suite. Use --suite for full suite or provide all parameters.")
-        print("Example: python benchmark_sageattn3.py --batch-size 1 --num-heads 16 --seq-len 4096 --head-dim 128")
+        print(
+            "Example: python benchmarks/benchmark_flashattn2.py "
+            "--batch-size 1 --num-heads 16 --seq-len 4096 --head-dim 128"
+        )
         sys.stdout.flush()
         run_benchmark_suite()

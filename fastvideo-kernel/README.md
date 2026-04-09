@@ -63,6 +63,18 @@ cd fastvideo-kernel
 python benchmarks/bench_vsa.py --batch_size 1 --num_heads 16 --head_dim 128 --q_seq_lens 49152 --topk 64
 ```
 
+### Attn QAT Attention Benchmarks
+
+The Attn QAT microbenchmarks now live alongside the kernel package:
+
+```bash
+cd fastvideo-kernel
+python benchmarks/benchmark_flashattn2.py --batch-size 1 --num-heads 16 --seq-len 4096 --head-dim 128
+python benchmarks/benchmark_sageattn3.py --batch-size 1 --num-heads 16 --seq-len 4096 --head-dim 128
+python benchmarks/benchmark_blockscaled_fp4_attn.py --batch-size 1 --num-heads 16 --seq-len 4096 --head-dim 128
+python benchmarks/benchmark_combined.py --output benchmark_attention.png
+```
+
 ### TurboDiffusion Kernels
 
 This package also includes kernels from [TurboDiffusion](https://github.com/thu-ml/TurboDiffusion), including INT8 GEMM, Quantization, RMSNorm and LayerNorm.

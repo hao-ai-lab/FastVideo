@@ -1,12 +1,13 @@
-import torch
-import sys
-import traceback
 import argparse
-import matplotlib.pyplot as plt
+import sys
+from typing import Dict, List, Optional
+
+import _bootstrap  # noqa: F401
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for server environments
+import matplotlib.pyplot as plt
 import numpy as np
-from typing import Dict, List, Tuple, Optional
+import torch
 
 from flash_attn import flash_attn_func
 from attn_qat_infer.quantization.bench.bench_utils import bench

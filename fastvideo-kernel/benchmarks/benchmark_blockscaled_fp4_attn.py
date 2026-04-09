@@ -1,9 +1,16 @@
-import torch
 import sys
-import os
 import traceback
 
-from flash_attn import flash_attn_func
+import _bootstrap  # noqa: F401
+import torch
+
+from attn_qat_infer.api import (
+    blockscaled_fp4_attn,
+    preprocess_qkv,
+    scale_and_quant_fp4,
+    scale_and_quant_fp4_permute,
+    scale_and_quant_fp4_transpose,
+)
 from attn_qat_infer.quantization.bench.bench_utils import bench
 
 
@@ -15,11 +22,15 @@ def calculate_attention_flops(batch_size, num_heads, seq_len_q, seq_len_k, head_
     return f
 
 
-def benchmark_flashattn2(batch_size, num_heads, seq_len, head_dim, 
-                         is_causal=False, dtype=torch.bfloat16, 
-                         num_warmups=100, num_tests=1000):
+def benchmark_blockscaled_fp4_attn(batch_size, num_heads, seq_len, head_dim, 
+                                    is_causal=False, dtype=torch.bfloat16, 
+                                    per_block_mean=True, single_level_p_quant=False,
+                                    num_warmups=100, num_tests=1000):
     """
-    Benchmark FlashAttention2 and return performance metrics.
+    Benchmark blockscaled_fp4_attn function (excluding quantization overhead).
+    
+    This benchmarks ONLY the core FP4 attention kernel, with pre-quantized inputs.
+    The quantization step is performed once before benchmarking.
     
     Args:
         batch_size: Batch size
@@ -28,6 +39,8 @@ def benchmark_flashattn2(batch_size, num_heads, seq_len, head_dim,
         head_dim: Head dimension
         is_causal: Whether to use causal masking
         dtype: Data type (torch.bfloat16 or torch.float16)
+        per_block_mean: Whether to use per-block mean for Q smoothing
+        single_level_p_quant: If True, use single-level quantization for P matrix
         num_warmups: Number of warmup iterations
         num_tests: Number of test iterations
     
@@ -38,43 +51,63 @@ def benchmark_flashattn2(batch_size, num_heads, seq_len, head_dim,
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is not available. This benchmark requires a CUDA device.")
     
-    # Create input tensors - FlashAttention2 expects (batch, seq_len, num_heads, head_dim)
-    q = torch.randn(batch_size, seq_len, num_heads, head_dim, 
+    # Create input tensors
+    q = torch.randn(batch_size, num_heads, seq_len, head_dim, 
                     device=device, dtype=dtype)
-    k = torch.randn(batch_size, seq_len, num_heads, head_dim, 
+    k = torch.randn(batch_size, num_heads, seq_len, head_dim, 
                     device=device, dtype=dtype)
-    v = torch.randn(batch_size, seq_len, num_heads, head_dim, 
+    v = torch.randn(batch_size, num_heads, seq_len, head_dim, 
                     device=device, dtype=dtype)
     
-    # Create closure for benchmarking
+    # Pre-process and quantize inputs (done once, not included in benchmark)
+    is_bf16 = dtype == torch.bfloat16
+    KL = k.size(2)
+    q_processed, k_processed, v_processed, delta_s = preprocess_qkv(q, k, v, per_block_mean)
+    qlist = scale_and_quant_fp4(q_processed)
+    klist = scale_and_quant_fp4_permute(k_processed)
+    vlist = scale_and_quant_fp4_transpose(v_processed)
+    
+    # Synchronize to ensure quantization is complete
+    torch.cuda.synchronize()
+    
+    # Create closure for benchmarking (only the attention kernel)
     def run_attention():
-        return flash_attn_func(
-            q, k, v, 
-            causal=is_causal,
+        return blockscaled_fp4_attn(
+            qlist, klist, vlist,
+            delta_s,
+            KL,
+            is_causal=is_causal,
+            per_block_mean=per_block_mean,
+            is_bf16=is_bf16,
+            single_level_p_quant=single_level_p_quant
         )
     
     # Benchmark using the bench utility (handles warmup and timing)
     avg_time_ms = bench(run_attention, num_warmups=num_warmups, num_tests=num_tests)
     avg_time_s = avg_time_ms / 1000.0
     
-    # Calculate FLOPs
+    # Calculate FLOPs (use processed sequence length after padding)
+    processed_seq_len = q_processed.size(2)
     total_flops = calculate_attention_flops(
-        batch_size, num_heads, seq_len, seq_len, head_dim, is_causal
+        batch_size, num_heads, processed_seq_len, processed_seq_len, head_dim, is_causal
     )
     
     # Calculate TFLOPs
     tflops = total_flops / (avg_time_s * 1e12)
     
-    # Calculate throughput (tokens/sec)
+    # Calculate throughput (tokens/sec) - use original seq_len for meaningful metric
     tokens_per_second = (batch_size * seq_len) / avg_time_s
     
     return {
         'batch_size': batch_size,
         'num_heads': num_heads,
         'seq_len': seq_len,
+        'processed_seq_len': processed_seq_len,
         'head_dim': head_dim,
         'is_causal': is_causal,
         'dtype': str(dtype),
+        'per_block_mean': per_block_mean,
+        'single_level_p_quant': single_level_p_quant,
         'avg_time_ms': avg_time_ms,
         'avg_time_s': avg_time_s,
         'total_flops': total_flops,
@@ -86,53 +119,62 @@ def benchmark_flashattn2(batch_size, num_heads, seq_len, head_dim,
 def print_results(results):
     """Print benchmark results in a formatted table."""
     print("\n" + "="*100)
-    print("FlashAttention2 Benchmark Results")
+    print("blockscaled_fp4_attn Benchmark Results (Kernel Only, No Quantization)")
     print("="*100)
     print(f"Configuration:")
-    print(f"  Batch Size:         {results['batch_size']}")
-    print(f"  Num Heads:          {results['num_heads']}")
-    print(f"  Sequence Length:    {results['seq_len']}")
-    print(f"  Head Dimension:     {results['head_dim']}")
-    print(f"  Causal:             {results['is_causal']}")
-    print(f"  Data Type:          {results['dtype']}")
+    print(f"  Batch Size:           {results['batch_size']}")
+    print(f"  Num Heads:            {results['num_heads']}")
+    print(f"  Sequence Length:      {results['seq_len']}")
+    print(f"  Processed Seq Length: {results['processed_seq_len']} (after padding)")
+    print(f"  Head Dimension:       {results['head_dim']}")
+    print(f"  Causal:               {results['is_causal']}")
+    print(f"  Data Type:            {results['dtype']}")
+    print(f"  Per Block Mean:       {results['per_block_mean']}")
+    print(f"  Single Level P Quant: {results['single_level_p_quant']}")
     print(f"\nPerformance:")
-    print(f"  Average Time:       {results['avg_time_ms']:.3f} ms")
-    print(f"  Total FLOPs:        {results['total_flops']/1e12:.4f} TFLOPs (theoretical)")
-    print(f"  Throughput:         {results['tflops']:.4f} TFLOPs/s")
-    print(f"  Tokens/sec:         {results['tokens_per_second']:,.0f}")
+    print(f"  Average Time:         {results['avg_time_ms']:.3f} ms")
+    print(f"  Total FLOPs:          {results['total_flops']/1e12:.4f} TFLOPs (theoretical)")
+    print(f"  Throughput:           {results['tflops']:.4f} TFLOPs/s")
+    print(f"  Tokens/sec:           {results['tokens_per_second']:,.0f}")
     print("="*100 + "\n")
     sys.stdout.flush()
 
 
 def run_benchmark_suite():
     """Run a comprehensive benchmark suite with various configurations."""
-    print("Starting FlashAttention2 Benchmark Suite...")
+    print("Starting blockscaled_fp4_attn Benchmark Suite (Kernel Only)...")
     print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
     print(f"CUDA Version: {torch.version.cuda}")
     print(f"PyTorch Version: {torch.__version__}\n")
+    print("Note: This benchmark measures only the FP4 attention kernel,")
+    print("      excluding quantization overhead.\n")
     sys.stdout.flush()
     
     # Default configurations to test
     # (batch_size, num_heads, seq_len, head_dim, is_causal, dtype)
     configs = [
+        (1, 16, 512, 64, False, torch.bfloat16),
         (1, 16, 1024, 64, False, torch.bfloat16),
         (1, 16, 2048, 64, False, torch.bfloat16),
         (1, 16, 4096, 64, False, torch.bfloat16),
         (1, 16, 8192, 64, False, torch.bfloat16),
         (1, 16, 16384, 64, False, torch.bfloat16),
 
+        (1, 16, 512, 128, False, torch.bfloat16),
         (1, 16, 1024, 128, False, torch.bfloat16),
         (1, 16, 2048, 128, False, torch.bfloat16),
         (1, 16, 4096, 128, False, torch.bfloat16),
         (1, 16, 8192, 128, False, torch.bfloat16),
         (1, 16, 16384, 128, False, torch.bfloat16),
 
+        (1, 32, 512, 64, False, torch.bfloat16),
         (1, 32, 1024, 64, False, torch.bfloat16),
         (1, 32, 2048, 64, False, torch.bfloat16),
         (1, 32, 4096, 64, False, torch.bfloat16),
         (1, 32, 8192, 64, False, torch.bfloat16),
         (1, 32, 16384, 64, False, torch.bfloat16),
 
+        (1, 32, 512, 128, False, torch.bfloat16),
         (1, 32, 1024, 128, False, torch.bfloat16),
         (1, 32, 2048, 128, False, torch.bfloat16),
         (1, 32, 4096, 128, False, torch.bfloat16),
@@ -150,7 +192,7 @@ def run_benchmark_suite():
         sys.stdout.flush()
         
         try:
-            results = benchmark_flashattn2(
+            results = benchmark_blockscaled_fp4_attn(
                 batch_size=batch_size,
                 num_heads=num_heads,
                 seq_len=seq_len,
@@ -173,7 +215,7 @@ def run_benchmark_suite():
     
     # Print summary table
     print("\n" + "="*120)
-    print("Summary Table")
+    print("Summary Table (blockscaled_fp4_attn Kernel Only)")
     print("="*120)
     print(f"{'B':<4} {'H':<4} {'L':<6} {'D':<4} {'Causal':<7} {'Time (ms)':<12} {'TFLOPs/s':<12} {'Tokens/s':<15}")
     print("-"*120)
@@ -190,7 +232,7 @@ def run_benchmark_suite():
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description='Benchmark FlashAttention2 in TFLOPs')
+    parser = argparse.ArgumentParser(description='Benchmark blockscaled_fp4_attn kernel (excluding quantization)')
     parser.add_argument('--batch-size', type=int, default=None, help='Batch size')
     parser.add_argument('--num-heads', type=int, default=None, help='Number of attention heads')
     parser.add_argument('--seq-len', type=int, default=None, help='Sequence length')
@@ -198,6 +240,14 @@ if __name__ == "__main__":
     parser.add_argument('--causal', action='store_true', help='Use causal attention')
     parser.add_argument('--dtype', type=str, default='bfloat16', choices=['bfloat16', 'float16'],
                         help='Data type')
+    parser.add_argument('--per-block-mean', action='store_true', default=True,
+                        help='Use per-block mean for Q smoothing (default: True)')
+    parser.add_argument('--no-per-block-mean', action='store_false', dest='per_block_mean',
+                        help='Disable per-block mean for Q smoothing')
+    parser.add_argument('--single-level-p-quant', action='store_true', default=False,
+                        help='Use single-level P quantization (default: False)')
+    parser.add_argument('--two-level-p-quant', action='store_false', dest='single_level_p_quant',
+                        help='Use two-level P quantization')
     parser.add_argument('--num-warmups', type=int, default=10, help='Number of warmup iterations')
     parser.add_argument('--num-tests', type=int, default=50, help='Number of test iterations')
     parser.add_argument('--suite', action='store_true', help='Run full benchmark suite')
@@ -212,19 +262,26 @@ if __name__ == "__main__":
     if args.suite:
         run_benchmark_suite()
     elif args.batch_size and args.num_heads and args.seq_len and args.head_dim:
-        results = benchmark_flashattn2(
+        results = benchmark_blockscaled_fp4_attn(
             batch_size=args.batch_size,
             num_heads=args.num_heads,
             seq_len=args.seq_len,
             head_dim=args.head_dim,
             is_causal=args.causal,
             dtype=dtype_map[args.dtype],
+            per_block_mean=args.per_block_mean,
+            single_level_p_quant=args.single_level_p_quant,
             num_warmups=args.num_warmups,
             num_tests=args.num_tests
         )
         print_results(results)
     else:
         print("Running default benchmark suite. Use --suite for full suite or provide all parameters.")
-        print("Example: python benchmark_flashattn2.py --batch-size 1 --num-heads 16 --seq-len 4096 --head-dim 128")
+        print(
+            "Example: python benchmarks/benchmark_blockscaled_fp4_attn.py "
+            "--batch-size 1 --num-heads 16 --seq-len 4096 --head-dim 128"
+        )
+        print("\nNote: This benchmark measures only the FP4 attention kernel,")
+        print("      excluding quantization overhead.")
         sys.stdout.flush()
         run_benchmark_suite()
