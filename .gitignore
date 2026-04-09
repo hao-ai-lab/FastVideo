@@ -94,4 +94,3 @@ openspec/
 fastvideo/tests/ssim/reference_videos/**
 data2/
 FastVideo/
-uv.lock
