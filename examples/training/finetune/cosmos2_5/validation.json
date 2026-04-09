@@ -1,0 +1,31 @@
+{
+  "data": [
+    {
+      "caption": "A watermelon wearing a helmet is crushed by a hydraulic press, causing it to flatten and burst open.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 35,
+      "height": 480,
+      "width": 832,
+      "num_frames": 49
+    },
+    {
+      "caption": "A red toy car is being crushed by a large hydraulic press, which is flattening objects as if they were under a hydraulic press.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 35,
+      "height": 480,
+      "width": 832,
+      "num_frames": 49
+    },
+    {
+      "caption": "A large, cylindrical object is seen pressing down on a small orange ball, causing it to flatten as if it were under a hydraulic press. The background features a green wall with yellow and red warning signs.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 35,
+      "height": 480,
+      "width": 832,
+      "num_frames": 49
+    }
+  ]
+}

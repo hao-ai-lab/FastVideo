@@ -412,11 +412,13 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
 
         # Initialize tokenizer
         tokenizer_path = os.path.join(args.model_path, "tokenizer")
+        tokenizer = None
         if os.path.exists(tokenizer_path):
-            tokenizer = AutoTokenizer.from_pretrained(tokenizer_path,
-                                                      cache_dir=args.cache_dir)
-        else:
-            tokenizer = None
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(
+                    tokenizer_path, cache_dir=args.cache_dir)
+            except (ValueError, OSError):
+                pass
 
         # Initialize processing stages
         self._init_stages(args, transform, transform_topcrop, tokenizer)

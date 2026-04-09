@@ -3,7 +3,6 @@ import os
 from typing import Any
 
 from fastvideo import PipelineConfig
-from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.distributed import (get_world_size, maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -25,18 +24,18 @@ def main(args) -> None:
 
     pipeline_config = PipelineConfig.from_pretrained(args.model_path)
 
-    kwargs: dict[str, Any] = {}
-    if args.preprocess_task == "text_only":
-        kwargs = {
-            "text_encoder_cpu_offload": False,
-        }
-    else:
-        # Full config for video/image processing
-        kwargs = {
-            "vae_precision": "fp32",
-            "vae_config": WanVAEConfig(load_encoder=True, load_decoder=True),
-        }
+    kwargs: dict[str, Any] = ({
+        "text_encoder_cpu_offload": False
+    } if args.preprocess_task == "text_only" else {
+        "vae_precision": "fp32"
+    })
     pipeline_config.update_config_from_dict(kwargs)
+
+    if args.preprocess_task != "text_only":
+        # Set VAE encoder/decoder flags on the existing config (don't
+        # replace with WanVAEConfig — that breaks non-Wan models).
+        pipeline_config.vae_config.load_encoder = True
+        pipeline_config.vae_config.load_decoder = True
 
     fastvideo_args = FastVideoArgs(
         model_path=args.model_path,

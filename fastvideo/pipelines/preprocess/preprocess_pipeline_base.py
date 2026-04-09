@@ -341,7 +341,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
 
                 # Convert tensors to numpy arrays
                 vae_latent = latent.cpu().numpy()
-                text_embedding = prompt_embeds[idx].cpu().numpy()
+                text_embedding = prompt_embeds[idx].cpu().float().numpy()
 
                 # Get extra features for this sample if needed
                 sample_extra_features = {}
