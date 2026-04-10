@@ -111,9 +111,8 @@ def _tensor_stats(t: torch.Tensor, name: str = "t") -> str:
     if t is None:
         return f"{name}=None"
     f = t.float()
-    return (
-        f"{name} shape={tuple(t.shape)} mean={f.mean().item():.6f} std={f.std().item():.6f} "
-        f"min={f.min().item():.6f} max={f.max().item():.6f}")
+    return (f"{name} shape={tuple(t.shape)} mean={f.mean().item():.6f} std={f.std().item():.6f} "
+            f"min={f.min().item():.6f} max={f.max().item():.6f}")
 
 
 @dataclass
@@ -149,10 +148,7 @@ class CtrlInput:
             if 0 <= b < n_buttons:
                 button[0, 0, b] = 1.0
 
-        scroll = torch.tensor(
-            [[[float(self.scroll > 0) - float(self.scroll < 0)]]],
-            device=device,
-            dtype=dtype)
+        scroll = torch.tensor([[[float(self.scroll > 0) - float(self.scroll < 0)]]], device=device, dtype=dtype)
 
         return mouse, button, scroll
 
@@ -221,10 +217,8 @@ class WaypointPipeline(ComposedPipelineBase):
         # error that compounds across autoregressive frames (latent drift).
         if hasattr(transformer, "denoise_step_emb"):
             transformer.denoise_step_emb.to(dtype=torch.float32)
-            logger.info(
-                "Upcast denoise_step_emb to fp32 (matches official "
-                "Overworld NoCastModule)"
-            )
+            logger.info("Upcast denoise_step_emb to fp32 (matches official "
+                        "Overworld NoCastModule)")
 
         vae = self.get_module("vae", None)
         if vae is not None:
@@ -241,8 +235,7 @@ class WaypointPipeline(ComposedPipelineBase):
             return self._waypoint_dit_dtype
         return next(transformer.parameters()).dtype
 
-    def _create_waypoint_kv_cache(self, batch: ForwardBatch,
-                                  fastvideo_args: FastVideoArgs) -> list | None:
+    def _create_waypoint_kv_cache(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> list | None:
         """Create per-layer KV cache for autoregressive cross-frame attention."""
         transformer = self.get_module("transformer", None)
         if transformer is None:
@@ -252,8 +245,7 @@ class WaypointPipeline(ComposedPipelineBase):
         arch = getattr(dit_config, "arch_config", dit_config)
         n_layers = getattr(arch, "n_layers", getattr(arch, "num_layers", 22))
         n_kv_heads = getattr(arch, "n_kv_heads", 20)
-        head_dim = getattr(arch, "attention_head_dim",
-                           arch.d_model // arch.n_heads)
+        head_dim = getattr(arch, "attention_head_dim", arch.d_model // arch.n_heads)
         tokens_per_frame = getattr(arch, "tokens_per_frame", 256)
         # Use at least num_frames so long videos don't evict; override from batch if present
         cfg_max = getattr(pipeline_config, "max_kv_cache_frames", 64)
@@ -271,8 +263,7 @@ class WaypointPipeline(ComposedPipelineBase):
         kv_cache = []
         for _ in range(n_layers):
             kv_cache.append({
-                "k":
-                torch.zeros(
+                "k": torch.zeros(
                     B,
                     n_kv_heads,
                     cache_size,
@@ -280,8 +271,7 @@ class WaypointPipeline(ComposedPipelineBase):
                     device=device,
                     dtype=dtype,
                 ),
-                "v":
-                torch.zeros(
+                "v": torch.zeros(
                     B,
                     n_kv_heads,
                     cache_size,
@@ -289,10 +279,8 @@ class WaypointPipeline(ComposedPipelineBase):
                     device=device,
                     dtype=dtype,
                 ),
-                "end":
-                0,
-                "frozen_ref":
-                frozen_ref,
+                "end": 0,
+                "frozen_ref": frozen_ref,
             })
         return kv_cache
 
@@ -443,8 +431,7 @@ class WaypointPipeline(ComposedPipelineBase):
         dit_config = pipeline_config.dit_config
         arch = getattr(dit_config, "arch_config", dit_config)
         patch = getattr(arch, "patch", (1, 1))
-        ph, pw = (patch, patch) if isinstance(patch, int) else (patch[0],
-                                                                patch[1])
+        ph, pw = (patch, patch) if isinstance(patch, int) else (patch[0], patch[1])
         latent_h = arch.height * ph
         latent_w = arch.width * pw
 
@@ -466,11 +453,7 @@ class WaypointPipeline(ComposedPipelineBase):
         keyboard_action = keyboard_action[:, :t].to(device=device, dtype=dtype)
         mouse_action = mouse_action[:, :t].to(device=device, dtype=dtype)
 
-        scroll_action = torch.zeros(keyboard_action.shape[0],
-                                    t,
-                                    1,
-                                    device=device,
-                                    dtype=dtype)
+        scroll_action = torch.zeros(keyboard_action.shape[0], t, 1, device=device, dtype=dtype)
 
         button = keyboard_action
         mouse = mouse_action
@@ -510,14 +493,9 @@ class WaypointPipeline(ComposedPipelineBase):
                 latent_h,
                 latent_w,
             )
-            seed = getattr(ctx.batch, "seed", None) or getattr(
-                ctx.fastvideo_args, "seed", None) or 0
-            g = torch.Generator(
-                device=device).manual_seed(int(seed) + ctx.frame_index)
-            x = torch.randn(latent_shape,
-                            device=device,
-                            dtype=dtype,
-                            generator=g)
+            seed = getattr(ctx.batch, "seed", None) or getattr(ctx.fastvideo_args, "seed", None) or 0
+            g = torch.Generator(device=device).manual_seed(int(seed) + ctx.frame_index)
+            x = torch.randn(latent_shape, device=device, dtype=dtype, generator=g)
             if _WAYPOINT_DEBUG and ctx.frame_index == 0:
                 logger.info(
                     "DEBUG [noise] frame=%d %s",
@@ -537,11 +515,9 @@ class WaypointPipeline(ComposedPipelineBase):
                 device=device,
                 dtype=torch.long,
             )
-            ctrl_step = (min(ctx.frame_index, mouse.shape[1] -
-                             1) if mouse.shape[1] > 0 else 0)
+            ctrl_step = (min(ctx.frame_index, mouse.shape[1] - 1) if mouse.shape[1] > 0 else 0)
 
-            _is_last_window = (_log_last_frames
-                               and ctx.frame_index >= t - DEBUG_LAST_N)
+            _is_last_window = (_log_last_frames and ctx.frame_index >= t - DEBUG_LAST_N)
             if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
                 m_slice = mouse[:, ctrl_step:ctrl_step + 1]
                 b_slice = button[:, ctrl_step:ctrl_step + 1]
@@ -613,11 +589,8 @@ class WaypointPipeline(ComposedPipelineBase):
                     )
 
                 # Ensure prompt tensors are on same device as transformer (needed with CPU offload)
-                prompt_emb = ctx.prompt_emb.to(
-                    device=device,
-                    dtype=dtype) if ctx.prompt_emb is not None else None
-                prompt_pad_mask = ctx.prompt_pad_mask.to(
-                    device=device) if ctx.prompt_pad_mask is not None else None
+                prompt_emb = ctx.prompt_emb.to(device=device, dtype=dtype) if ctx.prompt_emb is not None else None
+                prompt_pad_mask = ctx.prompt_pad_mask.to(device=device) if ctx.prompt_pad_mask is not None else None
                 with set_forward_context(
                         current_timestep=i,
                         attn_metadata=attn_metadata,
@@ -666,9 +639,7 @@ class WaypointPipeline(ComposedPipelineBase):
                     )
 
                 # fp32 accumulation: update in float32 then cast back
-                x_fp32 = x_fp32 + (
-                    sigma_next - sigma_curr
-                ).float() * v_pred.float()
+                x_fp32 = x_fp32 + (sigma_next - sigma_curr).float() * v_pred.float()
                 x = x_fp32.to(dtype)
                 if ctx.frame_index == 0 and _WAYPOINT_DEBUG_FILE:
                     _collect_debug(
@@ -688,8 +659,7 @@ class WaypointPipeline(ComposedPipelineBase):
                 _collect_debug(
                     "denoised",
                     frame=ctx.frame_index,
-                    denoised=_stats_dict(x,
-                                         include_sample=(ctx.frame_index < 5)),
+                    denoised=_stats_dict(x, include_sample=(ctx.frame_index < 5)),
                 )
             if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
                 xf = x.float()
@@ -735,14 +705,11 @@ class WaypointPipeline(ComposedPipelineBase):
             else:
                 target_std = ctx.ref_latent_std
                 strength = 0.8
-                blended_std = (
-                    strength * target_std + (1.0 - strength) * cur_std
-                )
+                blended_std = (strength * target_std + (1.0 - strength) * cur_std)
                 scale = blended_std / cur_std
                 if abs(scale - 1.0) > 1e-4:
                     x = (xf * scale).to(dtype)
-                if (ctx.frame_index < DEBUG_MULTIFRAME_MAX
-                        or _is_last_window):
+                if (ctx.frame_index < DEBUG_MULTIFRAME_MAX or _is_last_window):
                     logger.info(
                         "DEBUG frame %d smooth norm: std %.4f -> "
                         "%.4f (scale=%.4f)",
@@ -756,14 +723,10 @@ class WaypointPipeline(ComposedPipelineBase):
             # StaticKVCache semantics: unfreeze for this pass only, then re-freeze.
             if ctx.kv_cache is not None:
                 ctx.kv_cache[0]["frozen_ref"][0] = False
-                sigma_zero = torch.zeros(x.shape[0],
-                                         1,
-                                         device=device,
-                                         dtype=dtype)
+                sigma_zero = torch.zeros(x.shape[0], 1, device=device, dtype=dtype)
                 with set_forward_context(
                         current_timestep=0,
-                        attn_metadata=SDPAMetadata(current_timestep=0,
-                                                   attn_mask=None),
+                        attn_metadata=SDPAMetadata(current_timestep=0, attn_mask=None),
                         forward_batch=None,
                 ):
                     transformer(
@@ -809,10 +772,8 @@ class WaypointPipeline(ComposedPipelineBase):
                 vae_dtype = next(vae.parameters()).dtype
                 latent_in = latent_in.to(dtype=vae_dtype)
                 vae_config = getattr(vae, "config", None)
-                scaling_factor = (getattr(vae_config, "scaling_factor", None)
-                                  or getattr(vae, "scaling_factor", 1.0))
-                if scaling_factor is not None and abs(
-                        float(scaling_factor) - 1.0) > 1e-5:
+                scaling_factor = (getattr(vae_config, "scaling_factor", None) or getattr(vae, "scaling_factor", 1.0))
+                if scaling_factor is not None and abs(float(scaling_factor) - 1.0) > 1e-5:
                     latent_in = latent_in / float(scaling_factor)
                 shift = getattr(vae_config, "shift_factor", None)
                 if shift is not None:
@@ -835,16 +796,13 @@ class WaypointPipeline(ComposedPipelineBase):
                 if _WAYPOINT_DEBUG_FILE and ctx.frame_index == 0:
                     shift_val = getattr(vae_config, "shift_factor", None)
                     shift_s = None
-                    if shift_val is not None and isinstance(
-                            shift_val, torch.Tensor):
-                        shift_s = float(shift_val.item()) if shift_val.numel(
-                        ) == 1 else None
+                    if shift_val is not None and isinstance(shift_val, torch.Tensor):
+                        shift_s = float(shift_val.item()) if shift_val.numel() == 1 else None
                     elif shift_val is not None:
                         shift_s = float(shift_val)
                     _collect_debug(
                         "vae_config",
-                        scaling_factor=(float(scaling_factor)
-                                        if scaling_factor is not None else 1.0),
+                        scaling_factor=(float(scaling_factor) if scaling_factor is not None else 1.0),
                         shift_factor=shift_s,
                     )
                 if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
@@ -886,8 +844,7 @@ class WaypointPipeline(ComposedPipelineBase):
                             torch.isnan(_df).any().item(),
                             torch.isinf(_df).any().item(),
                         )
-                if _WAYPOINT_DEBUG_FILE and isinstance(
-                        _d, torch.Tensor) and ctx.frame_index < 30:
+                if _WAYPOINT_DEBUG_FILE and isinstance(_d, torch.Tensor) and ctx.frame_index < 30:
                     vae_stats = _stats_dict(_d, include_sample=True)
                     rgb = _stats_rgb(_d)
                     _collect_debug(
@@ -898,8 +855,7 @@ class WaypointPipeline(ComposedPipelineBase):
                             "vae_out_rgb": rgb
                         } if rgb else {}),
                     )
-                if isinstance(_d, torch.Tensor
-                              ) and ctx.frame_index < DEBUG_MULTIFRAME_MAX:
+                if isinstance(_d, torch.Tensor) and ctx.frame_index < DEBUG_MULTIFRAME_MAX:
                     _df = _d.float()
                     logger.info(
                         "DEBUG frame %d decoded: mean=%.2f std=%.2f min=%.1f max=%.1f",
@@ -932,8 +888,7 @@ class WaypointPipeline(ComposedPipelineBase):
                         _df.max().item(),
                     )
 
-                frame = (decoded.sample
-                         if hasattr(decoded, "sample") else decoded)
+                frame = (decoded.sample if hasattr(decoded, "sample") else decoded)
                 # Normalize to [B, C, H, W]
                 if frame.dim() == 3:
                     frame = frame.unsqueeze(0)
@@ -959,8 +914,7 @@ class WaypointPipeline(ComposedPipelineBase):
                 # WorldEngineVAE decodes to roughly [-1, 1]. clamp(0, 1) alone maps
                 # all negatives to 0 (crushed blacks); streaming latents can drift
                 # so later frames look progressively darker.
-                if frame.dtype in (torch.uint8, torch.int8, torch.int16,
-                                   torch.int32, torch.int64):
+                if frame.dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
                     frame = frame.float() / 255.0
                 else:
                     frame = frame.float()

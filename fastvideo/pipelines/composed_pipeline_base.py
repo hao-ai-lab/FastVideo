@@ -386,21 +386,16 @@ class ComposedPipelineBase(ABC):
             # - Modular pipelines (diffusers ModularPipeline style):
             #     "text_encoder": [null, null, {"pretrained_model_name_or_path": "google/umt5-xl", "type_hint": ["transformers","UMT5EncoderModel"]}]
             component_model_path: str
-            if (isinstance(module_spec, list | tuple)
-                    and len(module_spec) == 2):
+            if (isinstance(module_spec, list | tuple) and len(module_spec) == 2):
                 transformers_or_diffusers = module_spec[0]
                 # architecture = module_spec[1]  # currently unused by loaders
                 # we load the module from the extra config module map if it exists
                 if module_name in self._extra_config_module_map:
-                    load_module_name = self._extra_config_module_map[
-                        module_name]
+                    load_module_name = self._extra_config_module_map[module_name]
                 else:
                     load_module_name = module_name
-                component_model_path = os.path.join(self.model_path,
-                                                    load_module_name)
-            elif (isinstance(module_spec, list | tuple)
-                  and len(module_spec) == 3
-                  and isinstance(module_spec[2], dict)):
+                component_model_path = os.path.join(self.model_path, load_module_name)
+            elif (isinstance(module_spec, list | tuple) and len(module_spec) == 3 and isinstance(module_spec[2], dict)):
                 cfg: dict[str, Any] = module_spec[2]
                 type_hint = cfg.get("type_hint")
                 if isinstance(type_hint, list | tuple) and len(type_hint) >= 1:
@@ -410,18 +405,13 @@ class ComposedPipelineBase(ABC):
 
                 src = cfg.get("pretrained_model_name_or_path", "")
                 if not isinstance(src, str) or not src.strip():
-                    raise ValueError(
-                        f"Invalid pretrained_model_name_or_path for module {module_name}"
-                    )
+                    raise ValueError(f"Invalid pretrained_model_name_or_path for module {module_name}")
                 src_local = maybe_download_model(src.strip())
                 subfolder = cfg.get("subfolder")
-                component_model_path = (os.path.join(src_local, subfolder)
-                                        if subfolder else src_local)
+                component_model_path = (os.path.join(src_local, subfolder) if subfolder else src_local)
                 load_module_name = module_name
             else:
-                raise ValueError(
-                    f"Unsupported module spec for {module_name}: {module_spec}"
-                )
+                raise ValueError(f"Unsupported module spec for {module_name}: {module_spec}")
             module = PipelineComponentLoader.load_module(
                 module_name=load_module_name,
                 component_model_path=component_model_path,

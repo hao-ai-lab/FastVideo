@@ -558,16 +558,13 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     with open(config_path, encoding="utf-8") as f:
         raw = f.read().strip()
     if not raw:
-        raise ValueError(
-            f"model_index.json in {model_path} is empty. "
-            "The Hugging Face repo must contain a valid diffusers model_index.json."
-        )
+        raise ValueError(f"model_index.json in {model_path} is empty. "
+                         "The Hugging Face repo must contain a valid diffusers model_index.json.")
     try:
         config = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise ValueError(
-            f"model_index.json in {model_path} is invalid: {e}. "
-            "The repo must contain a valid diffusers model_index.json.") from e
+        raise ValueError(f"model_index.json in {model_path} is invalid: {e}. "
+                         "The repo must contain a valid diffusers model_index.json.") from e
 
     # Verify diffusers version exists
     if "_diffusers_version" not in config:
@@ -607,17 +604,14 @@ def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
             with open(model_index_path, encoding="utf-8") as f:
                 raw = f.read().strip()
             if not raw:
-                raise ValueError(
-                    f"model_index.json for {model_name_or_path} is empty. "
-                    "The Hugging Face repo must contain a valid diffusers "
-                    "model_index.json.")
+                raise ValueError(f"model_index.json for {model_name_or_path} is empty. "
+                                 "The Hugging Face repo must contain a valid diffusers "
+                                 "model_index.json.")
             try:
                 config = json.loads(raw)
             except json.JSONDecodeError as e:
-                raise ValueError(
-                    f"model_index.json for {model_name_or_path} is invalid: {e}. "
-                    "The repo must contain a valid diffusers model_index.json."
-                ) from e
+                raise ValueError(f"model_index.json for {model_name_or_path} is invalid: {e}. "
+                                 "The repo must contain a valid diffusers model_index.json.") from e
             config = cast(dict[str, Any], config)
 
             # Verify it has the required fields

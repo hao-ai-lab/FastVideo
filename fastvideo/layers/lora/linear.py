@@ -21,8 +21,7 @@ torch._dynamo.config.recompile_limit = 16
 
 def _optional_torch_compile(fn):
     """Apply torch.compile only when TORCH_COMPILE_DISABLE/TORCHDYNAMO_DISABLE unset."""
-    if os.environ.get("TORCH_COMPILE_DISABLE") == "1" or os.environ.get(
-            "TORCHDYNAMO_DISABLE") == "1":
+    if os.environ.get("TORCH_COMPILE_DISABLE") == "1" or os.environ.get("TORCHDYNAMO_DISABLE") == "1":
         return fn
     return torch.compile()(fn)
 

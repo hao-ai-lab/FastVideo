@@ -42,8 +42,7 @@ class WaypointTextEncodingStage(PipelineStage):
 
         text_encoder = self.text_encoder
         tokenizer = self.tokenizer
-        max_length = getattr(getattr(text_encoder, "config", None), "text_len",
-                             512)
+        max_length = getattr(getattr(text_encoder, "config", None), "text_len", 512)
         text_inputs = tokenizer(
             batch.prompt,
             padding="max_length",
@@ -60,8 +59,7 @@ class WaypointTextEncodingStage(PipelineStage):
             attention_mask=attention_mask,
         )
         prompt_emb = outputs.last_hidden_state
-        prompt_emb = prompt_emb * attention_mask.unsqueeze(-1).to(
-            device=prompt_emb.device, dtype=prompt_emb.dtype)
+        prompt_emb = prompt_emb * attention_mask.unsqueeze(-1).to(device=prompt_emb.device, dtype=prompt_emb.dtype)
         prompt_pad_mask = attention_mask.eq(0)
 
         if batch.extra is None:

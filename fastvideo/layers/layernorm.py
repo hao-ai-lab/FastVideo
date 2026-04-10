@@ -313,8 +313,7 @@ class AdaLN(nn.Module):
         N = cond.shape[1]
         h = F.silu(cond)
         ab, _ = self.fc(h)
-        ab = ab.view(B, N, 1, 2 * D).expand(-1, -1, L // N,
-                                            -1).reshape(B, L, 2 * D)
+        ab = ab.view(B, N, 1, 2 * D).expand(-1, -1, L // N, -1).reshape(B, L, 2 * D)
         scale, shift = ab.chunk(2, dim=-1)
         x_norm = rms_norm(x, self.eps)
         return x_norm * (1 + scale) + shift

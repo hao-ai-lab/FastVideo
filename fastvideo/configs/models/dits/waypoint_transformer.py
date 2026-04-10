@@ -18,11 +18,10 @@ class WaypointArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(default_factory=lambda: [is_blocks])
 
     # Map checkpoint fc1/fc2 to FastVideo MLP fc_in/fc_out
-    param_names_mapping: dict = field(
-        default_factory=lambda: {
-            r"^(.*)\.mlp\.fc1\.(.*)$": r"\1.mlp.fc_in.\2",
-            r"^(.*)\.mlp\.fc2\.(.*)$": r"\1.mlp.fc_out.\2",
-        })
+    param_names_mapping: dict = field(default_factory=lambda: {
+        r"^(.*)\.mlp\.fc1\.(.*)$": r"\1.mlp.fc_in.\2",
+        r"^(.*)\.mlp\.fc2\.(.*)$": r"\1.mlp.fc_out.\2",
+    })
 
     # Reverse mapping for saving checkpoints
     reverse_param_names_mapping: dict = field(default_factory=lambda: {})

@@ -511,8 +511,7 @@ def _register_configs() -> None:
             "FastVideo/Waypoint-1-Small-Diffusers",
         ],
         model_detectors=[
-            lambda path: "waypoint" in path.lower() or "worldengine" in path.
-            lower(),
+            lambda path: "waypoint" in path.lower() or "worldengine" in path.lower(),
         ],
     )
 

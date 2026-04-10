@@ -49,16 +49,13 @@ class WaypointT2VConfig(PipelineConfig):
     vae_sp: bool = False
 
     # Text encoding - uses UMT5-XL (loaded from model subfolder)
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (T5Config(), ))
-    postprocess_text_funcs: tuple = field(
-        default_factory=lambda: (umt5_postprocess_text, ))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5Config(), ))
+    postprocess_text_funcs: tuple = field(default_factory=lambda: (umt5_postprocess_text, ))
 
     # Precision settings
     precision: str = "bf16"
     vae_precision: str = "fp32"
-    text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("fp32", ))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32", ))
 
     # Waypoint-specific settings
     # Fixed sigma schedule (no flow shift). Match official Overworld transformer config.

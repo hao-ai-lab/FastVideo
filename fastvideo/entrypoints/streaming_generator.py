@@ -33,10 +33,7 @@ class IncrementalVideoWriter:
         self._path = path
         # quality 0-10: higher = sharper MP4 (default 5 is often blurry)
         self._quality = min(10, max(0, quality))
-        self._writer = imageio.get_writer(path,
-                                          fps=fps,
-                                          format="mp4",
-                                          quality=self._quality)
+        self._writer = imageio.get_writer(path, fps=fps, format="mp4", quality=self._quality)
         self._pending_main: Future | None = None
         self._block_dir = block_dir
         self._block_idx = 0
@@ -68,11 +65,7 @@ class IncrementalVideoWriter:
             self._writer.append_data(frame)
 
     def _write_block(self, frames: list[np.ndarray], path: str) -> str:
-        imageio.mimsave(path,
-                        frames,
-                        fps=self._fps,
-                        format="mp4",
-                        quality=self._quality)
+        imageio.mimsave(path, frames, fps=self._fps, format="mp4", quality=self._quality)
         return path
 
     def close(self) -> None:
@@ -161,8 +154,7 @@ class StreamingVideoGenerator(VideoGenerator):
         self.sampling_param.save_video = False
 
         batch_kw = shallow_asdict(self.sampling_param)
-        batch_kw.pop("video_quality",
-                     None)  # writer-only, not a ForwardBatch field
+        batch_kw.pop("video_quality", None)  # writer-only, not a ForwardBatch field
         batch_kw.pop("max_kv_cache_frames", None)  # used by pipeline config
         self.batch = ForwardBatch(
             **batch_kw,
@@ -272,23 +264,19 @@ class StreamingVideoGenerator(VideoGenerator):
         frames = []
         target_h = getattr(self.sampling_param, "height", None)
         target_w = getattr(self.sampling_param, "width", None)
-        pad_for_writer = (self.writer is not None and target_h is not None
-                          and target_w is not None)
+        pad_for_writer = (self.writer is not None and target_h is not None and target_w is not None)
         for x in videos:
             x = torchvision.utils.make_grid(x, nrow=1)
             x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
             # Support both float [0, 1] and uint8 [0, 255] from pipelines
-            if x.dtype in (torch.uint8, torch.int8, torch.int16, torch.int32,
-                           torch.int64):
+            if x.dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
                 arr = x.cpu().numpy()
             else:
                 arr = (x.float().clamp(0.0, 1.0).cpu().numpy() * 255.0)
             arr = arr.astype(np.uint8)
             # Pad to target size so imageio does not resize (avoids macro_block_size warning)
-            if pad_for_writer and (arr.shape[0] != target_h
-                                   or arr.shape[1] != target_w):
-                padded = np.zeros((target_h, target_w, arr.shape[2]),
-                                  dtype=arr.dtype)
+            if pad_for_writer and (arr.shape[0] != target_h or arr.shape[1] != target_w):
+                padded = np.zeros((target_h, target_w, arr.shape[2]), dtype=arr.dtype)
                 padded[:arr.shape[0], :arr.shape[1], :] = arr
                 arr = padded
             frames.append(arr)
