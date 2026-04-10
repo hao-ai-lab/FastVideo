@@ -55,8 +55,7 @@ def sde_step_with_logprob(
     deterministic: bool = False,
     return_pixel_log_prob: bool = False,
     return_dt_and_std_dev_t: bool = False,
-    return_variance_noise_sum: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     """
     Predict the sample from the previous timestep by reversing the SDE and
     compute log probabilities for the transition.
@@ -64,9 +63,7 @@ def sde_step_with_logprob(
     if isinstance(timestep, torch.Tensor):
         if timestep.ndim == 0:
             timestep = timestep.unsqueeze(0)
-        step_indices = [
-            scheduler.index_for_timestep(t.item()) for t in timestep
-        ]
+        step_indices = [scheduler.index_for_timestep(t.item()) for t in timestep]
     else:
         step_indices = [scheduler.index_for_timestep(timestep)]
 
@@ -81,27 +78,20 @@ def sde_step_with_logprob(
     dt = sigma_prev - sigma
 
     std_dev_t = sigma_min + (sigma_max - sigma_min) * sigma
-    prev_sample_mean = (sample * (1 + std_dev_t**2 / (2 * sigma) * dt) +
-                        model_output * (1 + std_dev_t**2 * (1 - sigma) /
-                                        (2 * sigma)) * dt)
+    prev_sample_mean = (sample * (1 + std_dev_t**2 / (2 * sigma) * dt) + model_output *
+                        (1 + std_dev_t**2 * (1 - sigma) / (2 * sigma)) * dt)
 
     if prev_sample is not None and generator is not None:
-        raise ValueError(
-            "Cannot pass both generator and prev_sample. Please make sure that either `generator` or"
-            " `prev_sample` stays `None`.")
+        raise ValueError("Cannot pass both generator and prev_sample. Please make sure that either `generator` or"
+                         " `prev_sample` stays `None`.")
 
-    variance_noise_sum_fp64: float = 0.0
     if prev_sample is None:
-        # When generator is provided (e.g. debug: torch.Generator("cpu").manual_seed(42)), use it for reproducible variance_noise.
-        # Otherwise None for GRPO training (independent random noise per timestep).
         variance_noise = randn_tensor(
             model_output.shape,
             generator=generator,
             device=model_output.device,
             dtype=model_output.dtype,
         )
-        if return_variance_noise_sum:
-            variance_noise_sum_fp64 = float(variance_noise.detach().to(torch.float64).sum().item())
         sqrt_dt = torch.sqrt(-1 * dt)
         prev_sample = prev_sample_mean + std_dev_t * sqrt_dt * variance_noise
     else:
@@ -112,21 +102,16 @@ def sde_step_with_logprob(
         sqrt_dt = torch.sqrt(-1 * dt)
 
     if return_pixel_log_prob:
-        raise NotImplementedError(
-            "Pixel-level log prob is not supported in this helper.")
+        raise NotImplementedError("Pixel-level log prob is not supported in this helper.")
 
     std_dev_sqrt_dt = std_dev_t * sqrt_dt
-    log_prob = (
-        -((prev_sample.detach() - prev_sample_mean)**2) /
-        (2 *
-         (std_dev_sqrt_dt**2)) - torch.log(std_dev_sqrt_dt + 1e-8) - torch.log(
-             torch.sqrt(2 * torch.as_tensor(math.pi, device=sample.device))))
+    log_prob = (-((prev_sample.detach() - prev_sample_mean)**2) / (2 * (std_dev_sqrt_dt**2)) -
+                torch.log(std_dev_sqrt_dt + 1e-8) -
+                torch.log(torch.sqrt(2 * torch.as_tensor(math.pi, device=sample.device))))
 
     log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
 
     if return_dt_and_std_dev_t:
-        if return_variance_noise_sum:
-            return prev_sample, log_prob, prev_sample_mean, std_dev_t, sqrt_dt, variance_noise_sum_fp64
         return prev_sample, log_prob, prev_sample_mean, std_dev_t, sqrt_dt
     return prev_sample, log_prob, prev_sample_mean, std_dev_t * sqrt_dt
 
@@ -267,8 +252,7 @@ class DenoisingStage(PipelineStage):
         rl_data = batch.rl_data if batch.rl_data and batch.rl_data.enabled else None
 
         if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
-            assert latent_model_input.shape[
-                0] == 1, "TI2V task only supports batch size 1"
+            assert latent_model_input.shape[0] == 1, "TI2V task only supports batch size 1"
             # TI2V directly replaces the first frame of the latent with
             # the image latent instead of appending along the channel dim
             assert batch.image_latent is None, "TI2V task should not have image latents"
@@ -329,12 +313,6 @@ class DenoisingStage(PipelineStage):
                 "image_latent": batch.image_latent,
             }
             rl_per_step_contexts = []
-
-        # Debug: one generator (seed 42, cpu) for all SDE steps so variance_noise is deterministic and comparable across codebases.
-        # debug_sde_generator = None
-        # if rl_data is not None and getattr(rl_data, "collect_debug_sums", False):
-        #     debug_sde_generator = torch.Generator("cpu").manual_seed(42)
-
 
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -416,24 +394,6 @@ class DenoisingStage(PipelineStage):
                     device=get_local_torch_device(),
                 ).to(target_dtype) * 1000.0 if fastvideo_args.pipeline_config.embedded_cfg_scale is not None else None)
 
-                def run_transformer(model, encoder_hidden_states, cond_kwargs,
-                                    is_cfg_negative: bool):
-                    batch.is_cfg_negative = is_cfg_negative
-                    with set_forward_context(
-                            current_timestep=i,
-                            attn_metadata=attn_metadata,
-                            forward_batch=batch,
-                    ):
-                        return model(
-                            latent_model_input,
-                            encoder_hidden_states,
-                            t_expand,
-                            guidance=guidance_expand,
-                            **image_kwargs,
-                            **cond_kwargs,
-                            **action_kwargs,
-                        )
-
                 # Predict noise residual
                 with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
                     if (vsa_available and self.attn_backend == VideoSparseAttentionBackend):
@@ -474,10 +434,8 @@ class DenoisingStage(PipelineStage):
                     # Save per-step context for RL so _compute_log_prob_for_timestep can replay same forward
                     if rl_data is not None and rl_transformer_forward_kwargs is not None:
                         rl_per_step_contexts.append({
-                            "current_timestep":
-                            i,
-                            "attn_metadata":
-                            attn_metadata,
+                            "current_timestep": i,
+                            "attn_metadata": attn_metadata,
                         })
                     # TODO(will): finalize the interface. vLLM uses this to
                     # support torch dynamo compilation. They pass in
@@ -533,71 +491,67 @@ class DenoisingStage(PipelineStage):
                                 noise_pred_text,
                                 guidance_rescale=batch.guidance_rescale,
                             )
-                    collect_debug = rl_data is not None and getattr(rl_data, "collect_debug_sums", False)
-                    if collect_debug:
-                        s = float(noise_pred.detach().to(torch.float64).sum().item())
-                        rl_data.debug_model_pred_sum += s
-                        rl_data.debug_model_pred_per_step.append(s)
                     # Compute the previous noisy sample
                     prev_latents = latents
                     prev_latents_mean = None
                     std_dev_t = None
                     if rl_data is not None and rl_data.collect_log_probs:
-                        # For RL training, use sde_step_with_logprob to generate latents with random noise
-                        # Note: generator=None ensures each timestep gets independent random noise (required for GRPO)
-                        if collect_debug:
-                            latents, log_prob, prev_latents_mean, std_dev_t, _, variance_noise_sum = sde_step_with_logprob(
-                                self.scheduler,
-                                noise_pred.float(),
-                                t,
-                                prev_latents.float(),
-                                prev_sample=None,
-                                generator=None, #debug_sde_generator,
-                                deterministic=False,
-                                return_dt_and_std_dev_t=True,
-                                return_variance_noise_sum=True,
-                            )
-                            rl_data.debug_intermediate_latents_per_step.append(latents.double().sum().item())
-                            rl_data.debug_variance_noise_sum_per_step.append(variance_noise_sum)
-                        else:
-                            latents, log_prob, prev_latents_mean, std_dev_t, _ = sde_step_with_logprob(
-                                self.scheduler,
-                                noise_pred.float(),
-                                t,
-                                prev_latents.float(),
-                                prev_sample=None,
-                                generator=None,
-                                deterministic=False,
-                                return_dt_and_std_dev_t=True,
-                            )
+                        latents, log_prob, prev_latents_mean, std_dev_t, _ = sde_step_with_logprob(
+                            self.scheduler,
+                            noise_pred.float(),
+                            t,
+                            prev_latents.float(),
+                            prev_sample=None,
+                            generator=None,
+                            deterministic=False,
+                            return_dt_and_std_dev_t=True,
+                        )
                         rl_log_probs.append(log_prob)
                     else:
-                        # For non-RL inference, use scheduler.step() as before
-                        latents = self.scheduler.step(noise_pred,
-                                                      t,
-                                                      latents,
-                                                      **extra_step_kwargs,
-                                                      return_dict=False)[0]
+                        # For non-RL inference, use scheduler.step()
+                        latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
 
                     # KL computation (runs when RL is enabled and collect_kl is True)
-                    # Note: KL computation requires prev_latents_mean and std_dev_t from log_prob computation
                     if rl_data is not None and rl_data.collect_kl and rl_data.kl_reward > 0:
                         if prev_latents_mean is None or std_dev_t is None:
-                            raise ValueError(
-                                "KL computation requires collect_log_probs to be True. "
-                                "prev_latents_mean and std_dev_t must be computed first."
-                            )
+                            raise ValueError("KL computation requires collect_log_probs to be True. "
+                                             "prev_latents_mean and std_dev_t must be computed first.")
                         adapter_ctx = nullcontext()
                         if hasattr(current_model, "disable_adapter"):
                             adapter_ctx = current_model.disable_adapter()
+
                         with adapter_ctx:
-                            noise_pred_ref = run_transformer(
-                                current_model, prompt_embeds, pos_cond_kwargs,
-                                False)
+                            batch.is_cfg_negative = False
+                            with set_forward_context(
+                                    current_timestep=i,
+                                    attn_metadata=attn_metadata,
+                                    forward_batch=batch,
+                            ):
+                                noise_pred_ref = current_model(
+                                    latent_model_input,
+                                    prompt_embeds,
+                                    t_expand,
+                                    guidance=guidance_expand,
+                                    **image_kwargs,
+                                    **pos_cond_kwargs,
+                                    **action_kwargs,
+                                )
                             if batch.do_classifier_free_guidance:
-                                noise_pred_uncond_ref = run_transformer(
-                                    current_model, neg_prompt_embeds,
-                                    neg_cond_kwargs, True)
+                                batch.is_cfg_negative = True
+                                with set_forward_context(
+                                        current_timestep=i,
+                                        attn_metadata=attn_metadata,
+                                        forward_batch=batch,
+                                ):
+                                    noise_pred_uncond_ref = current_model(
+                                        latent_model_input,
+                                        neg_prompt_embeds,
+                                        t_expand,
+                                        guidance=guidance_expand,
+                                        **image_kwargs,
+                                        **neg_cond_kwargs,
+                                        **action_kwargs,
+                                    )
                                 noise_pred_text_ref = noise_pred_ref
                                 noise_pred_ref = noise_pred_uncond_ref + current_guidance_scale * (
                                     noise_pred_text_ref - noise_pred_uncond_ref)
@@ -608,18 +562,13 @@ class DenoisingStage(PipelineStage):
                             noise_pred_ref.float(),
                             t,
                             prev_latents.float(),
-                            prev_sample=latents.float(
-                            ),  # Use latents from current policy
-                            deterministic=
-                            False,  # Match the deterministic setting used above
+                            prev_sample=latents.float(),  # Use latents from current policy
+                            deterministic=False,  # Match the deterministic setting used above
                             return_dt_and_std_dev_t=True,
                         )
                         if not torch.allclose(std_dev_t, std_dev_t_ref):
-                            logger.warning(
-                                "std_dev_t mismatch in RL KL computation at step %s",
-                                i)
-                        kl = (prev_latents_mean -
-                              prev_latents_mean_ref)**2 / (2 * std_dev_t**2)
+                            logger.warning("std_dev_t mismatch in RL KL computation at step %s", i)
+                        kl = (prev_latents_mean - prev_latents_mean_ref)**2 / (2 * std_dev_t**2)
                         kl = kl.mean(dim=tuple(range(1, kl.ndim)))
                         rl_kl.append(kl)
                     if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
@@ -636,10 +585,7 @@ class DenoisingStage(PipelineStage):
                     if rl_data.store_trajectory:
                         rl_latents.append(latents)
                     if rl_data.collect_kl and rl_data.kl_reward <= 0:
-                        rl_kl.append(
-                            torch.zeros(latents.shape[0],
-                                        device=latents.device,
-                                        dtype=latents.dtype))
+                        rl_kl.append(torch.zeros(latents.shape[0], device=latents.device, dtype=latents.dtype))
 
                 # Update progress bar
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and
@@ -661,13 +607,11 @@ class DenoisingStage(PipelineStage):
             if rl_timesteps:
                 rl_data.trajectory_timesteps = torch.stack(rl_timesteps, dim=0)
                 if rl_data.keep_trajectory_on_cpu:
-                    rl_data.trajectory_timesteps = rl_data.trajectory_timesteps.cpu(
-                    )
+                    rl_data.trajectory_timesteps = rl_data.trajectory_timesteps.cpu()
             if rl_data.store_trajectory and rl_latents:
                 rl_data.trajectory_latents = torch.stack(rl_latents, dim=1)
                 if rl_data.keep_trajectory_on_cpu:
-                    rl_data.trajectory_latents = rl_data.trajectory_latents.cpu(
-                    )
+                    rl_data.trajectory_latents = rl_data.trajectory_latents.cpu()
             if rl_log_probs:
                 rl_data.log_probs = torch.stack(rl_log_probs, dim=1)
                 if rl_data.keep_trajectory_on_cpu:

@@ -3,7 +3,6 @@ import torch
 import numpy as np
 from Levenshtein import distance
 from typing import Any
-from PIL import Image
 
 from fastvideo.training.rl.rewards.base import BaseRewardModel
 from fastvideo.logger import init_logger
@@ -19,10 +18,7 @@ class OcrScorerVideo(BaseRewardModel):
     sampling frames at a specified interval and averaging the OCR scores.
     """
 
-    def __init__(self,
-                 model_path: str | None = None,
-                 device: str = "cpu",
-                 frame_interval: int = 4):
+    def __init__(self, model_path: str | None = None, device: str = "cpu", frame_interval: int = 4):
         """
         OCR reward calculator for videos
 
@@ -41,11 +37,9 @@ class OcrScorerVideo(BaseRewardModel):
             show_log=False  # Disable unnecessary log output
         )
 
-        logger.info("Initialized OcrScorerVideo (device=%s, frame_interval=%d)",
-                    device, frame_interval)
+        logger.info("Initialized OcrScorerVideo (device=%s, frame_interval=%d)", device, frame_interval)
 
-    def _process_single_video(self, video_tensor: torch.Tensor,
-                              prompt: str) -> float:
+    def _process_single_video(self, video_tensor: torch.Tensor, prompt: str) -> float:
         """
         Process a single video tensor and return its OCR reward.
 
@@ -56,7 +50,7 @@ class OcrScorerVideo(BaseRewardModel):
         Returns:
             Average reward across positive-scoring frames
         """
-        prompt = prompt.replace(' ','').lower()
+        prompt = prompt.replace(' ', '').lower()
 
         # video_tensor is [C, T, H, W]
         C, T, H, W = video_tensor.shape
@@ -73,17 +67,14 @@ class OcrScorerVideo(BaseRewardModel):
             try:
                 result = self.ocr.ocr(frame, cls=False)
                 # Same text extraction as flow_grpo OcrScorer_video_or_image
-                recognized_text = (
-                    ''.join([res[1][0] if res[1][1] > 0 else '' for res in result[0]])
-                    if result[0]
-                    else ''
-                )
+                recognized_text = (''.join([res[1][0] if res[1][1] > 0 else ''
+                                            for res in result[0]]) if result[0] else '')
                 recognized_text = recognized_text.replace(' ', '').lower()
 
                 dist = distance(recognized_text, prompt)
                 dist = min(dist, len(prompt))
-            except Exception as e:
-                dist=len(prompt)
+            except Exception:
+                dist = len(prompt)
 
             reward = 1.0 - dist / len(prompt)
             rewards.append(reward)
@@ -91,8 +82,7 @@ class OcrScorerVideo(BaseRewardModel):
         return (sum(rewards) / len(rewards)) if rewards else 0.0
 
     @torch.no_grad()
-    def compute_reward(self, videos: torch.Tensor, prompts: list[str],
-                       **kwargs: Any) -> torch.Tensor:
+    def compute_reward(self, videos: torch.Tensor, prompts: list[str], **kwargs: Any) -> torch.Tensor:
         """
         Calculate OCR reward by evaluating sampled frames across the video.
 
@@ -112,16 +102,11 @@ class OcrScorerVideo(BaseRewardModel):
         assert len(videos) == len(prompts), "Mismatch between images and prompts."
 
         # Ensure videos is a torch tensor with correct shape
-        assert isinstance(
-            videos,
-            torch.Tensor), f"videos must be torch.Tensor, got {type(videos)}"
+        assert isinstance(videos, torch.Tensor), f"videos must be torch.Tensor, got {type(videos)}"
         assert videos.ndim == 5, f"videos must have 5 dimensions [B, C, T, H, W], got shape {videos.shape}"
 
-
         B, C, T, H, W = videos.shape
-        assert len(
-            prompts
-        ) == B, f"Number of prompts ({len(prompts)}) must match batch size ({B})"
+        assert len(prompts) == B, f"Number of prompts ({len(prompts)}) must match batch size ({B})"
 
         rewards = []
         for b in range(B):
@@ -132,11 +117,9 @@ class OcrScorerVideo(BaseRewardModel):
 
         rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
 
-
         # Check for NaN or Inf values
         if torch.isnan(rewards).any() or torch.isinf(rewards).any():
-            logger.warning(
-                "NaN or Inf detected in OCR rewards, returning zero tensor")
+            logger.warning("NaN or Inf detected in OCR rewards, returning zero tensor")
             return torch.zeros_like(rewards)
 
         return rewards
@@ -173,7 +156,7 @@ if __name__ == "__main__":
     B = videos.shape[0]
 
     # Same prompt parsing as flow_grpo: all lines, first B
-    with open("prompts.txt", "r", encoding="utf-8") as f:
+    with open("prompts.txt", encoding="utf-8") as f:
         lines = [line.strip() for line in f]
     prompts = lines[:B]
 

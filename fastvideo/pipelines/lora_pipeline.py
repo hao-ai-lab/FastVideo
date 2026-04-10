@@ -452,7 +452,7 @@ class LoRAPipeline(ComposedPipelineBase):
             for layer_name, layer in transformer_lora_layers.all_lora_layers():
                 original_states[(transformer_name, layer_name)] = layer.disable_lora
                 layer.disable_lora = True
-        
+
         try:
             yield
         finally:

@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import asdict
-import json
 import math
 import os
 import shutil
@@ -192,11 +191,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         if not self.training_args.rl_args.rl_mode:
             self.num_update_steps_per_epoch = math.ceil(
-                len(self.train_dataloader) /
-                training_args.gradient_accumulation_steps * training_args.sp_size /
+                len(self.train_dataloader) / training_args.gradient_accumulation_steps * training_args.sp_size /
                 training_args.train_sp_batch_size)
-            self.num_train_epochs = math.ceil(training_args.max_train_steps /
-                                            self.num_update_steps_per_epoch)
+            self.num_train_epochs = math.ceil(training_args.max_train_steps / self.num_update_steps_per_epoch)
 
         # TODO(will): is there a cleaner way to track epochs?
         self.current_epoch = 0
@@ -496,7 +493,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             else:
                 self.optimizer.step()
                 self.lr_scheduler.step()
-        
+
         return training_batch
 
     def _resume_from_checkpoint(self) -> None:
@@ -529,15 +526,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         # Set random seeds for deterministic training
         if not self.training_args.rl_args.rl_mode:
-            self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
-                self.seed)
+            self.noise_random_generator = torch.Generator(device="cpu").manual_seed(self.seed)
         else:
-            self.noise_random_generator = torch.Generator(device=self.device).manual_seed(
-                self.seed)
-        self.noise_gen_cuda = torch.Generator(
-            device=current_platform.device_name).manual_seed(self.seed)
-        self.validation_random_generator = torch.Generator(
-            device="cpu").manual_seed(self.seed)
+            self.noise_random_generator = torch.Generator(device=self.device).manual_seed(self.seed)
+        self.noise_gen_cuda = torch.Generator(device=current_platform.device_name).manual_seed(self.seed)
+        self.validation_random_generator = torch.Generator(device="cpu").manual_seed(self.seed)
         logger.info("Initialized random seeds with seed: %s", self.seed)
 
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
@@ -694,7 +687,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
         num_frames = (training_args.num_latent_t - 1) * temporal_compression_factor + 1
         sampling_param.num_frames = num_frames
-        
+
         # Calculate n_tokens AFTER updating num_frames (aligns with sampling pipeline)
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1, sampling_param.height // 8, sampling_param.width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]

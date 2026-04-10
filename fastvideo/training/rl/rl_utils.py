@@ -13,14 +13,12 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 
-def compute_gae(
-    rewards: torch.Tensor,
-    values: torch.Tensor,
-    next_values: torch.Tensor,
-    dones: torch.Tensor | None = None,
-    gamma: float = 0.99,
-    lambda_: float = 0.95
-) -> tuple[torch.Tensor, torch.Tensor]:
+def compute_gae(rewards: torch.Tensor,
+                values: torch.Tensor,
+                next_values: torch.Tensor,
+                dones: torch.Tensor | None = None,
+                gamma: float = 0.99,
+                lambda_: float = 0.95) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Compute Generalized Advantage Estimation (GAE-lambda).
 
@@ -71,10 +69,7 @@ def compute_gae(
     return advantages, returns
 
 
-def normalize_advantages(
-    advantages: torch.Tensor,
-    epsilon: float = 1e-8
-) -> torch.Tensor:
+def normalize_advantages(advantages: torch.Tensor, epsilon: float = 1e-8) -> torch.Tensor:
     """
     Normalize advantages to have zero mean and unit variance.
 
@@ -91,15 +86,14 @@ def normalize_advantages(
     std = advantages.std()
     return (advantages - mean) / (std + epsilon)
 
+
 #TODO(jiali): refactor into algorithm
-def compute_grpo_policy_loss(
-    log_probs: torch.Tensor,
-    old_log_probs: torch.Tensor,
-    advantages: torch.Tensor,
-    clip_range: float = 0.2,
-    use_ratio_norm: bool = True,
-    max_importance_ratio: float = 10.0
-) -> tuple[torch.Tensor, dict[str, Any]]:
+def compute_grpo_policy_loss(log_probs: torch.Tensor,
+                             old_log_probs: torch.Tensor,
+                             advantages: torch.Tensor,
+                             clip_range: float = 0.2,
+                             use_ratio_norm: bool = True,
+                             max_importance_ratio: float = 10.0) -> tuple[torch.Tensor, dict[str, Any]]:
     """
     Compute GRPO policy loss with importance sampling and clipping.
 
@@ -166,13 +160,11 @@ def compute_grpo_policy_loss(
     return policy_loss, info
 
 
-def compute_value_loss(
-    values: torch.Tensor,
-    returns: torch.Tensor,
-    old_values: torch.Tensor | None = None,
-    clip_range: float = 0.2,
-    use_clipping: bool = True
-) -> tuple[torch.Tensor, dict[str, Any]]:
+def compute_value_loss(values: torch.Tensor,
+                       returns: torch.Tensor,
+                       old_values: torch.Tensor | None = None,
+                       clip_range: float = 0.2,
+                       use_clipping: bool = True) -> tuple[torch.Tensor, dict[str, Any]]:
     """
     Compute value function loss with optional clipping.
 
@@ -192,11 +184,7 @@ def compute_value_loss(
 
     # Clipped value loss (PPO-style)
     if use_clipping and old_values is not None:
-        values_clipped = old_values + torch.clamp(
-            values - old_values,
-            -clip_range,
-            clip_range
-        )
+        values_clipped = old_values + torch.clamp(values - old_values, -clip_range, clip_range)
         value_loss_clipped = F.mse_loss(values_clipped, returns, reduction="none")
         value_loss = torch.max(value_loss_unclipped, value_loss_clipped).mean()
     else:
@@ -233,11 +221,9 @@ def compute_policy_entropy(log_probs: torch.Tensor) -> torch.Tensor:
     return entropy
 
 
-def apply_gradient_reweighting(
-    gradients: torch.Tensor,
-    timesteps: torch.Tensor,
-    num_train_timesteps: int = 1000
-) -> torch.Tensor:
+def apply_gradient_reweighting(gradients: torch.Tensor,
+                               timesteps: torch.Tensor,
+                               num_train_timesteps: int = 1000) -> torch.Tensor:
     """
     Apply GRPO-Guard gradient reweighting across denoising steps.
 
@@ -260,13 +246,11 @@ def apply_gradient_reweighting(
     return gradients * timestep_weights
 
 
-def sample_random_timesteps(
-    batch_size: int,
-    min_timestep: int,
-    max_timestep: int,
-    device: torch.device,
-    generator: torch.Generator | None = None
-) -> torch.Tensor:
+def sample_random_timesteps(batch_size: int,
+                            min_timestep: int,
+                            max_timestep: int,
+                            device: torch.device,
+                            generator: torch.Generator | None = None) -> torch.Tensor:
     """
     Sample random timesteps for noise injection (Flow-GRPO-Fast).
 
@@ -281,27 +265,14 @@ def sample_random_timesteps(
         timesteps: Random timesteps [B]
     """
     if generator is not None:
-        timesteps = torch.randint(
-            min_timestep,
-            max_timestep + 1,
-            (batch_size,),
-            device=device,
-            generator=generator
-        )
+        timesteps = torch.randint(min_timestep, max_timestep + 1, (batch_size, ), device=device, generator=generator)
     else:
-        timesteps = torch.randint(
-            min_timestep,
-            max_timestep + 1,
-            (batch_size,),
-            device=device
-        )
+        timesteps = torch.randint(min_timestep, max_timestep + 1, (batch_size, ), device=device)
 
     return timesteps
 
 
-def compute_reward_statistics(
-    rewards: torch.Tensor
-) -> dict[str, float]:
+def compute_reward_statistics(rewards: torch.Tensor) -> dict[str, float]:
     """
     Compute statistics for reward distribution.
 
@@ -319,10 +290,7 @@ def compute_reward_statistics(
     }
 
 
-def check_early_stopping(
-    kl_divergence: float,
-    target_kl: float
-) -> bool:
+def check_early_stopping(kl_divergence: float, target_kl: float) -> bool:
     """
     Check if training should stop early based on KL divergence.
 
@@ -334,20 +302,14 @@ def check_early_stopping(
         should_stop: True if KL exceeds target
     """
     if kl_divergence > target_kl:
-        logger.warning(
-            "Early stopping triggered: KL divergence %.4f > target %.4f",
-            kl_divergence,
-            target_kl
-        )
+        logger.warning("Early stopping triggered: KL divergence %.4f > target %.4f", kl_divergence, target_kl)
         return True
     return False
 
 
-def compute_log_probs_from_model_output(
-    model_output: torch.Tensor,
-    target: torch.Tensor,
-    noise_level: float = 0.1
-) -> torch.Tensor:
+def compute_log_probs_from_model_output(model_output: torch.Tensor,
+                                        target: torch.Tensor,
+                                        noise_level: float = 0.1) -> torch.Tensor:
     """
     Compute log probabilities from model predictions.
 
@@ -363,10 +325,10 @@ def compute_log_probs_from_model_output(
         log_probs: Log probabilities [B]
     """
     # Compute mean squared error per sample
-    mse = ((model_output - target) ** 2).flatten(1).mean(dim=1)
+    mse = ((model_output - target)**2).flatten(1).mean(dim=1)
 
     # Log probability under Gaussian: log p(x) = -0.5 * (x - mu)^2 / sigma^2 + const
-    log_probs = -0.5 * mse / (noise_level ** 2)
+    log_probs = -0.5 * mse / (noise_level**2)
 
     return log_probs
 

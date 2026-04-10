@@ -131,7 +131,7 @@ class LatentPreparationStage(PipelineStage):
             # If doing RL training, latents should be generated without seed
             # if batch.rl_data is not None:
             #     generator = torch.Generator("cpu").manual_seed(41)
-            
+
             # Handle batch processing: if generator is a list, generate latents for each item separately
             # This ensures each batch item gets unique randomness from its own generator
             if isinstance(generator, list) and len(generator) > 1:
@@ -139,7 +139,7 @@ class LatentPreparationStage(PipelineStage):
                 latents_list = []
                 for b in range(batch_size):
                     # Generate latents for single item: [1, C, T, H, W] or [1, T, C, H, W] depending on layout
-                    single_shape = (1,) + shape[1:]
+                    single_shape = (1, ) + shape[1:]
                     single_latents = randn_tensor(
                         single_shape,
                         generator=generator[b],

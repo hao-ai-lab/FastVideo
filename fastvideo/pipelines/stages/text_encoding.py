@@ -17,7 +17,9 @@ from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 from fastvideo.logger import init_logger
+
 logger = init_logger(__name__)
+
 
 class TextEncodingStage(PipelineStage):
     """
@@ -63,7 +65,6 @@ class TextEncodingStage(PipelineStage):
         assert batch.prompt is not None
         prompt_text: str | list[str] = batch.prompt
         all_indices: list[int] = list(range(len(self.text_encoders)))
-        logger.info("===positive prompt===")
         prompt_embeds_list, prompt_masks_list = self.encode_text(
             prompt_text,
             fastvideo_args,
@@ -81,6 +82,7 @@ class TextEncodingStage(PipelineStage):
 
         # Encode negative prompt if CFG is enabled
         if batch.do_classifier_free_guidance:
+            negative_prompt_text: str | list[str]
             # Handle batch dimension: if prompt is a list, repeat negative_prompt to match
             if isinstance(prompt_text, list):
                 # Repeat negative_prompt string to match the number of prompts
@@ -90,7 +92,8 @@ class TextEncodingStage(PipelineStage):
                     # If already a list, ensure it matches the prompt list length
                     if len(batch.negative_prompt) != len(prompt_text):
                         # Repeat the first negative prompt if lengths don't match
-                        negative_prompt_text = [batch.negative_prompt[0] if batch.negative_prompt else ""] * len(prompt_text)
+                        negative_prompt_text = [batch.negative_prompt[0] if batch.negative_prompt else ""
+                                                ] * len(prompt_text)
                     else:
                         negative_prompt_text = batch.negative_prompt
                 else:
@@ -103,8 +106,7 @@ class TextEncodingStage(PipelineStage):
                     negative_prompt_text = batch.negative_prompt[0]
                 else:
                     negative_prompt_text = ""
-            
-            logger.info("===negative prompt===")
+
             neg_embeds_list, neg_masks_list = self.encode_text(
                 negative_prompt_text,
                 fastvideo_args,
@@ -179,8 +181,6 @@ class TextEncodingStage(PipelineStage):
 
         assert len(self.tokenizers) == len(self.text_encoders)
         assert len(self.text_encoders) == len(fastvideo_args.pipeline_config.text_encoder_configs)
-
-        logger.info("prompt_embedding_fv: num_text_encoders=%s num_text_tokenizers=%s", len(self.text_encoders), len(self.tokenizers))
 
         # Resolve selection into indices
         encoder_cfgs = fastvideo_args.pipeline_config.text_encoder_configs

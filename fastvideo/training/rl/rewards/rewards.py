@@ -19,6 +19,7 @@ import torch.nn as nn
 from fastvideo.logger import init_logger
 from fastvideo.training.rl.rewards.ocr import OcrScorerVideo
 from fastvideo.training.rl.rewards.base import BaseRewardModel
+
 logger = init_logger(__name__)
 
 
@@ -31,12 +32,10 @@ class MultiRewardAggregator(nn.Module):
     text-video alignment, compositional understanding, etc.)
     """
 
-    def __init__(
-        self,
-        reward_models: list[BaseRewardModel],
-        reward_weights: list[float] | None = None,
-        normalize_rewards: bool = False
-    ):
+    def __init__(self,
+                 reward_models: list[BaseRewardModel],
+                 reward_weights: list[float] | None = None,
+                 normalize_rewards: bool = False):
         """
         Initialize multi-reward aggregator.
 
@@ -60,19 +59,14 @@ class MultiRewardAggregator(nn.Module):
         self.reward_weights = reward_weights
         self.normalize_rewards = normalize_rewards
 
-        logger.info(
-            "Initialized MultiRewardAggregator with %d models: %s",
-            len(reward_models),
-            [(type(m).__name__, w) for m, w in zip(reward_models, reward_weights, strict=False)]
-        )
+        logger.info("Initialized MultiRewardAggregator with %d models: %s", len(reward_models),
+                    [(type(m).__name__, w) for m, w in zip(reward_models, reward_weights, strict=False)])
 
-    def compute_reward(
-        self,
-        videos: torch.Tensor,
-        prompts: list[str],
-        return_individual: bool = False,
-        **kwargs: Any
-    ) -> torch.Tensor | dict[str, torch.Tensor]:
+    def compute_reward(self,
+                       videos: torch.Tensor,
+                       prompts: list[str],
+                       return_individual: bool = False,
+                       **kwargs: Any) -> torch.Tensor | dict[str, torch.Tensor]:
         """
         Compute aggregated reward from multiple models.
 
@@ -113,10 +107,8 @@ class MultiRewardAggregator(nn.Module):
         return aggregated
 
     def __repr__(self) -> str:
-        models_str = ", ".join([
-            f"{type(m).__name__}(w={w:.3f})"
-            for m, w in zip(self.reward_models, self.reward_weights, strict=False)
-        ])
+        models_str = ", ".join(
+            [f"{type(m).__name__}(w={w:.3f})" for m, w in zip(self.reward_models, self.reward_weights, strict=False)])
         return f"MultiRewardAggregator({models_str})"
 
 
@@ -132,12 +124,7 @@ class ValueModel(nn.Module):
     the chosen architecture strategy.
     """
 
-    def __init__(
-        self,
-        transformer: nn.Module,
-        share_backbone: bool = False,
-        hidden_size: int | None = None
-    ):
+    def __init__(self, transformer: nn.Module, share_backbone: bool = False, hidden_size: int | None = None):
         """
         Initialize value model.
 
@@ -152,18 +139,10 @@ class ValueModel(nn.Module):
 
         # Value head will be added later based on transformer architecture
         # For now, just store the transformer reference
-        logger.info(
-            "Initialized ValueModel (share_backbone=%s)",
-            share_backbone
-        )
+        logger.info("Initialized ValueModel (share_backbone=%s)", share_backbone)
 
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-        timestep: torch.Tensor,
-        **kwargs: Any
-    ) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor, encoder_hidden_states: torch.Tensor, timestep: torch.Tensor,
+                **kwargs: Any) -> torch.Tensor:
         """
         Forward pass to compute value predictions.
 
@@ -198,16 +177,13 @@ class DummyRewardModel(BaseRewardModel):
         self.mean = mean
         self.std = std
         logger.info("Initialized DummyRewardModel (VIDEO) - mean=%.2f, std=%.2f", mean, std)
-        logger.warning(
-            "DummyRewardModel is for TESTING ONLY - does not evaluate actual video quality!"
-        )
+        logger.warning("DummyRewardModel is for TESTING ONLY - does not evaluate actual video quality!")
 
     def compute_reward(
-        self,
-        videos: torch.Tensor,  # [B, T, C, H, W]
-        prompts: list[str],
-        **kwargs: Any
-    ) -> torch.Tensor:
+            self,
+            videos: torch.Tensor,  # [B, T, C, H, W]
+            prompts: list[str],
+            **kwargs: Any) -> torch.Tensor:
         """
         Return random rewards for testing.
 
@@ -221,11 +197,7 @@ class DummyRewardModel(BaseRewardModel):
         batch_size = videos.shape[0]
         num_frames = videos.shape[1]
 
-        logger.debug(
-            "DummyRewardModel processing %d videos with %d frames each",
-            batch_size,
-            num_frames
-        )
+        logger.debug("DummyRewardModel processing %d videos with %d frames each", batch_size, num_frames)
 
         # Generate random rewards (not based on actual video content!)
         rewards = torch.randn(batch_size, device=videos.device) * self.std + self.mean
@@ -236,10 +208,7 @@ class DummyRewardModel(BaseRewardModel):
         pass
 
 
-def create_reward_models(
-    reward_models: dict,
-    device: str = "cuda"
-) -> MultiRewardAggregator:
+def create_reward_models(reward_models: dict, device: str = "cuda") -> MultiRewardAggregator:
     """
     Factory function to create VIDEO reward models from configuration strings.
 
@@ -278,10 +247,9 @@ def create_reward_models(
         ... )
     """
 
-
     assert reward_models, "No reward models specified. Please select at least 1 reward model"
 
-    types = [t.strip() for t in reward_models.keys()]
+    types = [t.strip() for t in reward_models]
     weights = list(reward_models.values())
 
     assert len(types) == len(weights), \
@@ -299,40 +267,26 @@ def create_reward_models(
 
         elif reward_type == "video_score":
             # TODO: Implement VideoScore reward model (Phase 2)
-            logger.warning(
-                "VideoScore reward not implemented yet, using DummyRewardModel"
-            )
+            logger.warning("VideoScore reward not implemented yet, using DummyRewardModel")
             model = DummyRewardModel()
         elif reward_type == "video_text_alignment":
             # TODO: Implement VideoTextAlignment reward model (Phase 2)
-            logger.warning(
-                "VideoTextAlignment reward not implemented yet, using DummyRewardModel"
-            )
+            logger.warning("VideoTextAlignment reward not implemented yet, using DummyRewardModel")
             model = DummyRewardModel()
         elif reward_type == "temporal_coherence":
             # TODO: Implement TemporalCoherence reward model (Phase 2)
-            logger.warning(
-                "TemporalCoherence reward not implemented yet, using DummyRewardModel"
-            )
+            logger.warning("TemporalCoherence reward not implemented yet, using DummyRewardModel")
             model = DummyRewardModel()
         elif reward_type == "motion_quality":
             # TODO: Implement MotionQuality reward model (Phase 2)
-            logger.warning(
-                "MotionQuality reward not implemented yet, using DummyRewardModel"
-            )
+            logger.warning("MotionQuality reward not implemented yet, using DummyRewardModel")
             model = DummyRewardModel()
         else:
-            logger.warning(
-                "Unknown VIDEO reward type '%s', using DummyRewardModel",
-                reward_type
-            )
+            logger.warning("Unknown VIDEO reward type '%s', using DummyRewardModel", reward_type)
             model = DummyRewardModel()
 
         models_list.append(model)
 
-    logger.info(
-        "Created MultiRewardAggregator with %d VIDEO reward models",
-        len(models_list)
-    )
+    logger.info("Created MultiRewardAggregator with %d VIDEO reward models", len(models_list))
 
     return MultiRewardAggregator(models_list, weights)

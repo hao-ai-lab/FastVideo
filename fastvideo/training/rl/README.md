@@ -175,11 +175,3 @@ flow_grpo/
 **Dataset.** Prompt data lives under `dataset/ocr/` (train.txt, test.txt) or `dataset/geneval/` (train_metadata.jsonl, test_metadata.jsonl). The dataset classes and `DistributedKRepeatSampler` (k repeats per prompt for GRPO) are defined in `scripts/train_wan2_1.py`; the script builds the dataloader from the config’s dataset path and split.
 
 **EMA.** `flow_grpo/ema.py` provides `EMAModuleWrapper` for exponential moving average of the policy; the training script optionally maintains an EMA model and can save it with checkpoints.
-
----
-
-# Debugging message rules
-
-Debugging messages should be printed using the logger.info function
-Newly added debugging messages should preceed with "RL_METRIC: " before its content
-Debugging messages should be wrapped in myregion comments; the debug code snippet should start with "# myregion debug", and end with "# endregion"

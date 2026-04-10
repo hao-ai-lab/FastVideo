@@ -44,8 +44,7 @@ class InputValidationStage(PipelineStage):
         # `InputValidationStage` runs before `prompt_encoding_stage`, so
         # `prompt_embeds` will typically still be empty.
         elif batch.prompt is not None:
-            batch_size = len(batch.prompt) if isinstance(batch.prompt,
-                                                         list) else 1
+            batch_size = len(batch.prompt) if isinstance(batch.prompt, list) else 1
         elif batch.prompt_embeds:
             batch_size = int(batch.prompt_embeds[0].shape[0])
         # Fall back to non-text conditioning inputs (e.g. Matrix-Game / I2V)

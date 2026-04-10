@@ -21,7 +21,9 @@ from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 
+
 class BaseRewardModel(ABC, nn.Module):
+
     def __init__(self, model_path: str | None = None, device: str = "cuda"):
         super().__init__()
         self.model_path = model_path
@@ -29,11 +31,10 @@ class BaseRewardModel(ABC, nn.Module):
 
     @abstractmethod
     def compute_reward(
-        self,
-        videos: torch.Tensor,  # [B, T, C, H, W] decoded video sequences
-        prompts: list[str] | None,  # Text prompts
-        **kwargs: Any
-    ) -> torch.Tensor:
+            self,
+            videos: torch.Tensor,  # [B, T, C, H, W] decoded video sequences
+            prompts: list[str] | None,  # Text prompts
+            **kwargs: Any) -> torch.Tensor:
         """
         Compute rewards for generated VIDEO sequences.
 

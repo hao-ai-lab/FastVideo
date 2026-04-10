@@ -3,8 +3,6 @@ import sys
 
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_unipc_multistep import (
-    UniPCMultistepScheduler)
 from fastvideo.training.rl.rl_pipeline import RLPipeline
 from fastvideo.utils import is_vsa_available
 
@@ -19,9 +17,7 @@ class WanRLTrainingPipeline(RLPipeline):
     
     This pipeline extends RLPipeline with Wan-specific initialization.
     """
-    _required_config_modules = [
-        "scheduler", "transformer", "vae", "text_encoder", "tokenizer"
-    ]
+    _required_config_modules = ["scheduler", "transformer", "vae", "text_encoder", "tokenizer"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         pass
@@ -34,14 +30,13 @@ class WanRLTrainingPipeline(RLPipeline):
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing validation pipeline...")
-        self.validation_pipeline = self._create_inference_pipeline(
-            training_args, dit_cpu_offload=True)
+        self.validation_pipeline = self._create_inference_pipeline(training_args, dit_cpu_offload=True)
+
 
 def main(args) -> None:
     logger.info("Starting RL training pipeline...")
 
-    pipeline = WanRLTrainingPipeline.from_pretrained(
-        args.pretrained_model_name_or_path, args=args)
+    pipeline = WanRLTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
     args = pipeline.training_args
     pipeline.train()
     logger.info("RL training pipeline done")

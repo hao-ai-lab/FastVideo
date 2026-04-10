@@ -10,7 +10,6 @@ Ported from: flow_grpo/flow_grpo/stat_tracking.py
 """
 
 import numpy as np
-from typing import Union
 
 import torch
 
@@ -43,12 +42,10 @@ class PerPromptStatTracker:
         self.stats: dict[str, list] = {}  # Maps prompt -> list of rewards
         self.history_prompts: set[int] = set()  # Set of hashed prompts seen
 
-    def update(
-        self,
-        prompts: Union[list[str], np.ndarray],
-        rewards: Union[list[float], np.ndarray, torch.Tensor],
-        type: str = 'grpo'
-    ) -> np.ndarray:
+    def update(self,
+               prompts: list[str] | np.ndarray,
+               rewards: list[float] | np.ndarray | torch.Tensor,
+               type: str = 'grpo') -> np.ndarray:
         """
         Compute normalized advantages from rewards (GRPO: per-prompt mean/std).
 
@@ -102,9 +99,9 @@ class PerPromptStatTracker:
         else:
             total_samples = sum(len(v) for v in self.stats.values())
             avg_group_size = total_samples / len(self.stats)
-        
+
         history_prompts = len(self.history_prompts)
-        
+
         return avg_group_size, history_prompts
 
     def clear(self) -> None:
@@ -113,8 +110,7 @@ class PerPromptStatTracker:
         Called by the pipeline after each compute_advantages (GRPO).
         """
         self.stats = {}
-        logger.debug("Cleared per-prompt statistics (kept %d unique prompts in history)", 
-                    len(self.history_prompts))
+        logger.debug("Cleared per-prompt statistics (kept %d unique prompts in history)", len(self.history_prompts))
 
 
 def _unit_test_stat_tracker() -> None:

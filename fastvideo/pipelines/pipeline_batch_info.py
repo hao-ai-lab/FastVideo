@@ -9,7 +9,7 @@ in a functional manner, reducing the need for explicit parameter passing.
 
 import pprint
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import PIL.Image
 import torch
@@ -84,13 +84,6 @@ class ForwardBatch:
         transformer_forward_contexts: list[dict[str, Any]] | None = None
         # transformer_forward_kwargs: batch-level kwargs passed to transformer (image_kwargs, pos_cond_kwargs, neg_cond_kwargs, action_kwargs, guidance_expand).
         transformer_forward_kwargs: dict[str, Any] | None = None
-        # Debug: use fixed seed (don't null generator in latent_prep); per-step sums from denoising.
-        debug_fixed_seed: bool = False
-        collect_debug_sums: bool = False
-        debug_model_pred_sum: float = 0.0
-        debug_model_pred_per_step: list = field(default_factory=list)
-        debug_intermediate_latents_per_step: list = field(default_factory=list)
-        debug_variance_noise_sum_per_step: list = field(default_factory=list)
 
     # TODO(will): double check that args are separate from fastvideo_args
     # properly. Also maybe think about providing an abstraction for pipeline
@@ -345,12 +338,9 @@ class TrainingBatch:
     prompt_embeds: torch.Tensor | None = None  # Prompt embeddings used in sampling [B, seq_len, hidden_dim]
     negative_prompt_embeds: torch.Tensor | None = None  # Negative prompt embeddings for CFG [B, seq_len, hidden_dim]
     # Saved from trajectory collection: same transformer forward context used in DenoisingStage (for GRPO loss).
-    rl_transformer_forward_contexts: list[dict[
-        str,
-        Any]] | None = None  # Per-timestep: current_timestep, attn_metadata
+    rl_transformer_forward_contexts: list[dict[str, Any]] | None = None  # Per-timestep: current_timestep, attn_metadata
     rl_transformer_forward_kwargs: dict[
-        str,
-        Any] | None = None  # image_kwargs, pos_cond_kwargs, neg_cond_kwargs, action_kwargs, guidance_expand
+        str, Any] | None = None  # image_kwargs, pos_cond_kwargs, neg_cond_kwargs, action_kwargs, guidance_expand
 
     # RL loss components
     policy_loss: float = 0.0  # GRPO/PPO policy loss
@@ -407,7 +397,7 @@ def _cat_tensors_or_none(tensors: list) -> torch.Tensor | None:
     return torch.cat(non_none, dim=0)
 
 
-def _concat_dict_tensors(dicts: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _concat_dict_tensors(dicts: list[dict[str, Any] | None]) -> dict[str, Any] | None:
     if not dicts or all(d is None for d in dicts):
         return dicts[0] if dicts else None
     out = {}
@@ -424,7 +414,8 @@ def _concat_dict_tensors(dicts: list[dict[str, Any]]) -> dict[str, Any] | None:
         if isinstance(v0, torch.Tensor):
             out[k] = torch.cat(vals, dim=0)
         elif isinstance(v0, dict):
-            out[k] = _concat_dict_tensors(vals)
+            nested_dicts = [v for v in vals if isinstance(v, dict)]
+            out[k] = _concat_dict_tensors(cast(list[dict[str, Any] | None], nested_dicts))
         else:
             out[k] = v0
     return out if out else None
@@ -453,7 +444,9 @@ def concat_training_batches(batches: list[TrainingBatch]) -> TrainingBatch:
                     lst.extend(v) if isinstance(v, list) else lst.append(v)
             if lst:
                 out.input_kwargs[k] = lst
-        vlist = [b.input_kwargs["decoded_videos"] for b in batches if b.input_kwargs and "decoded_videos" in b.input_kwargs]
+        vlist = [
+            b.input_kwargs["decoded_videos"] for b in batches if b.input_kwargs and "decoded_videos" in b.input_kwargs
+        ]
         if vlist:
             out.input_kwargs["decoded_videos"] = torch.cat(vlist, dim=0)
 
@@ -466,8 +459,8 @@ def concat_training_batches(batches: list[TrainingBatch]) -> TrainingBatch:
     out.rl_transformer_forward_kwargs = _concat_dict_tensors([b.rl_transformer_forward_kwargs for b in batches])
 
     if batches[0].raw_latent_shape is not None:
-        total_b = sum((b.raw_latent_shape or (0,))[0] for b in batches)
-        out.raw_latent_shape = (total_b,) + tuple(batches[0].raw_latent_shape[1:])
+        total_b = sum((b.raw_latent_shape or (0, ))[0] for b in batches)
+        out.raw_latent_shape = (total_b, ) + tuple(batches[0].raw_latent_shape[1:])
 
     return out
 
@@ -499,9 +492,7 @@ def split_training_batch(batch: TrainingBatch, num_splits: int) -> list[Training
         if batch.input_kwargs:
             sub.input_kwargs = {}
             for k, v in batch.input_kwargs.items():
-                if k == "decoded_videos" and isinstance(v, torch.Tensor):
-                    sub.input_kwargs[k] = v[s:e]
-                elif isinstance(v, list):
+                if k == "decoded_videos" and isinstance(v, torch.Tensor) or isinstance(v, list):
                     sub.input_kwargs[k] = v[s:e]
                 else:
                     sub.input_kwargs[k] = v
@@ -519,7 +510,7 @@ def split_training_batch(batch: TrainingBatch, num_splits: int) -> list[Training
 
             sub.rl_transformer_forward_kwargs = _slice_kwargs(batch.rl_transformer_forward_kwargs, slice(s, e))
         if batch.raw_latent_shape is not None:
-            sub.raw_latent_shape = (sizes[i],) + tuple(batch.raw_latent_shape[1:])
+            sub.raw_latent_shape = (sizes[i], ) + tuple(batch.raw_latent_shape[1:])
         out_batches.append(sub)
     return out_batches
 
