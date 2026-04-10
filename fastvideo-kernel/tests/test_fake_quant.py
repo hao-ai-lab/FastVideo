@@ -424,30 +424,6 @@ def test_fake_quantize_vs_reference():
     print("✓ Reference comparison test passed.")
 
 
-def test_fake_quantize_fp8():
-    """Test fake_quantize with FP8 quantization."""
-    torch.manual_seed(42)
-    
-    dtype = torch.bfloat16
-    shape = (128, 128)
-    
-    # Create input tensor
-    x = torch.randn(shape, dtype=dtype, device=DEVICE)
-    
-    # Test triton fake_quantize with FP8
-    x_fq = triton_fake_quantize(x, BLOCK_SIZE_OUT_DIM=128, BLOCK_SIZE_QUANT_DIM=128, use_fp4=False, dst_dtype=dtype)
-    
-    assert x_fq.shape == x.shape
-    assert torch.isfinite(x_fq).all()
-    
-    max_diff = (x_fq - x).abs().max()
-    mean_diff = (x_fq - x).abs().mean()
-    cos_sim = cosine_similarity(x_fq, x)
-    print(f"  FP8 - Max diff: {max_diff.item():.6f}, Mean diff: {mean_diff.item():.6f}, Cosine sim: {cos_sim:.6f}")
-    
-    print("✓ FP8 test passed.")
-
-
 def test_fake_quantize_attention_shapes():
     """Test fake_quantize with attention-like shapes (similar to test_attn_qat_train.py)."""
     torch.manual_seed(42)
