@@ -4,14 +4,16 @@ import triton.language as tl
 from .nvfp4_utils import _compute_quant_and_scale, _compute_dequant
 
 @triton.jit
-def fake_quantize(src_tensor, valid_src_mask, BLOCK_SIZE_OUT_DIM: tl.constexpr, 
-                    BLOCK_SIZE_QUANT_DIM: tl.constexpr, 
+def fake_quantize(src_tensor, valid_src_mask, BLOCK_SIZE_OUT_DIM: tl.constexpr,
+                    BLOCK_SIZE_QUANT_DIM: tl.constexpr,
                     dst_dtype: tl.constexpr,
+                    mx_tensor_dtype: tl.constexpr = tl.uint8,
                     use_global_sf: tl.constexpr = True,
                     two_level_quant_P: tl.constexpr = False):
     high_prec_src_tensor = src_tensor
-    src_tensor, src_scale, src_s_dec = _compute_quant_and_scale(src_tensor=src_tensor, 
+    src_tensor, src_scale, src_s_dec = _compute_quant_and_scale(src_tensor=src_tensor,
                                                                 valid_src_mask=valid_src_mask,
+                                                                mx_tensor_dtype=mx_tensor_dtype,
                                                                 use_global_sf=use_global_sf,
                                                                 two_level_quant_P=two_level_quant_P)
     src_tensor = _compute_dequant(mx_tensor=src_tensor, 

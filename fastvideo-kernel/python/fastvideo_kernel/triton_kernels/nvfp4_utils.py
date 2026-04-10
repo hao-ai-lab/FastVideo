@@ -9,10 +9,24 @@ from triton.language.target_info import cuda_capability_geq
 MXFP_BLOCK_SIZE = tl.constexpr(16)
 
 @triton.jit
-def _compute_quant_and_scale(src_tensor, valid_src_mask, use_global_sf=True, two_level_quant_P=False):
+def _compute_quant_and_scale(
+    src_tensor,
+    valid_src_mask,
+    mx_tensor_dtype: tl.constexpr = tl.uint8,
+    use_global_sf=True,
+    two_level_quant_P=False,
+):
     BLOCK_SIZE_OUT_DIM: tl.constexpr = src_tensor.shape[0]
     BLOCK_SIZE_QUANT_DIM: tl.constexpr = src_tensor.shape[1]
     BLOCK_SIZE_QUANT_MX_SCALE: tl.constexpr = src_tensor.shape[1] // MXFP_BLOCK_SIZE
+    is_fp4: tl.constexpr = mx_tensor_dtype == tl.uint8
+
+    tl.static_assert(
+        is_fp4
+        or mx_tensor_dtype == tl.float8e4nv
+        or mx_tensor_dtype == tl.float8e5,
+        "mx_tensor_dtype must be uint8, float8e4nv, or float8e5",
+    )
 
     # Explicit cast to fp32 since most ops are not supported on bfloat16. We avoid needless conversions to and from bf16
     f32_tensor = src_tensor.to(tl.float32)
@@ -52,7 +66,7 @@ def _compute_quant_and_scale(src_tensor, valid_src_mask, use_global_sf=True, two
     quant_tensor = tl.where(valid_src_mask, quant_tensor, 0.0)
     dequant_scale = s_dec_b_e4m3.reshape([BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE])
 
-    if cuda_capability_geq(10, 0):
+    if is_fp4 and cuda_capability_geq(10, 0):
         # Convert scaled values to two f32 lanes and use PTX cvt to e2m1x2 with two f32 operands.
         pairs = tl.reshape(quant_tensor, [BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_DIM // 2, 2])
         lo_f, hi_f = tl.split(pairs)
@@ -74,7 +88,7 @@ def _compute_quant_and_scale(src_tensor, valid_src_mask, use_global_sf=True, two
             is_pure=True,
             pack=1,
         )
-    else:
+    elif is_fp4:
         quant_tensor = quant_tensor.to(tl.uint32, bitcast=True)
         signs = quant_tensor & 0x80000000
         exponents = (quant_tensor >> 23) & 0xFF
@@ -113,6 +127,8 @@ def _compute_quant_and_scale(src_tensor, valid_src_mask, use_global_sf=True, two
         e2m1_value = tl.reshape(e2m1_value, [BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_DIM // 2, 2])
         evens, odds = tl.split(e2m1_value)
         out_tensor = evens | (odds << 4)
+    else:
+        out_tensor = quant_tensor.to(mx_tensor_dtype)
 
     return out_tensor, dequant_scale, s_dec
 
