@@ -66,12 +66,9 @@ class FluxInputValidationStage(InputValidationStage):
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        if (batch.height is not None and batch.width is not None
-                and (batch.height % 16 != 0 or batch.width % 16 != 0)):
-            raise ValueError(
-                "FLUX expects height and width divisible by 16 "
-                f"(VAE latent grid × 2× packing); got {batch.height}×{batch.width}."
-            )
+        if (batch.height is not None and batch.width is not None and (batch.height % 16 != 0 or batch.width % 16 != 0)):
+            raise ValueError("FLUX expects height and width divisible by 16 "
+                             f"(VAE latent grid × 2× packing); got {batch.height}×{batch.width}.")
         return super().forward(batch, fastvideo_args)
 
 
@@ -81,10 +78,8 @@ class FluxConditioningStage(PipelineStage):
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         if len(batch.prompt_embeds) < 2:
-            raise ValueError(
-                "FluxConditioningStage expects 2 prompt_embeds (CLIP pooled, T5 sequence), "
-                f"got {len(batch.prompt_embeds)}"
-            )
+            raise ValueError("FluxConditioningStage expects 2 prompt_embeds (CLIP pooled, T5 sequence), "
+                             f"got {len(batch.prompt_embeds)}")
 
         device = get_local_torch_device()
         target_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
@@ -188,9 +183,7 @@ class FluxLatentPreparationStage(PipelineStage):
         batch_size *= batch.num_videos_per_prompt
 
         if isinstance(batch.generator, list) and len(batch.generator) != batch_size:
-            raise ValueError(
-                f"generator list length {len(batch.generator)} does not match batch_size {batch_size}"
-            )
+            raise ValueError(f"generator list length {len(batch.generator)} does not match batch_size {batch_size}")
 
         arch = fastvideo_args.pipeline_config.dit_config.arch_config
         in_channels = int(getattr(arch, "in_channels", 64))
@@ -280,7 +273,7 @@ class FluxDenoisingStage(PipelineStage):
 
         bs = packed.shape[0]
         if guidance_embeds:
-            guidance = torch.full((bs,), float(batch.guidance_scale), device=device, dtype=torch.float32)
+            guidance = torch.full((bs, ), float(batch.guidance_scale), device=device, dtype=torch.float32)
         else:
             guidance = None
 
@@ -297,16 +290,16 @@ class FluxDenoisingStage(PipelineStage):
 
             ts_ctx = int(t_scalar.reshape(-1)[0].item())
             with (
-                torch.autocast(
-                    device_type="cuda",
-                    dtype=target_dtype,
-                    enabled=autocast_enabled and device.type == "cuda",
-                ),
-                set_forward_context(
-                    current_timestep=ts_ctx,
-                    attn_metadata=None,
-                    forward_batch=batch,
-                ),
+                    torch.autocast(
+                        device_type="cuda",
+                        dtype=target_dtype,
+                        enabled=autocast_enabled and device.type == "cuda",
+                    ),
+                    set_forward_context(
+                        current_timestep=ts_ctx,
+                        attn_metadata=None,
+                        forward_batch=batch,
+                    ),
             ):
                 if use_true_cfg:
                     assert neg_enc is not None and neg_pooled is not None
@@ -405,9 +398,9 @@ class FluxDecodingStage(PipelineStage):
         use_cuda_autocast = autocast_enabled and vae_device.type == "cuda"
 
         with torch.autocast(
-            device_type="cuda",
-            dtype=vae_dtype,
-            enabled=use_cuda_autocast,
+                device_type="cuda",
+                dtype=vae_dtype,
+                enabled=use_cuda_autocast,
         ):
             if not autocast_enabled:
                 latents_4d = latents_4d.to(dtype=vae_dtype)
