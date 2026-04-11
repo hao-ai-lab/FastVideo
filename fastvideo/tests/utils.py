@@ -43,13 +43,32 @@ def _read_video_frames(path: str) -> torch.Tensor:
     return torch.stack(frames)
 
 
+def _read_image_as_single_frame_video(path: str) -> torch.Tensor:
+    """Read one image as a single-frame ``(1, C, H, W)`` uint8 tensor."""
+    from torchvision.io import read_image
+
+    img = read_image(path)
+    return img.unsqueeze(0)
+
+
+def _read_visual_frames(path: str) -> torch.Tensor:
+    """Read a video or a single image as ``(T, C, H, W)`` uint8."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in {".png", ".jpg", ".jpeg", ".webp"}:
+        return _read_image_as_single_frame_video(path)
+    return _read_video_frames(path)
+
+
 def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
     """
-    Compute SSIM between two videos.
+    Compute SSIM between two videos or single-frame image files.
+
+    Image paths (``.png``, ``.jpg``, ``.jpeg``, ``.webp``) are treated as
+    one-frame clips so T2I SSIM can share the same MS-SSIM path as video.
 
     Args:
-        video1_path: Path to the first video.
-        video2_path: Path to the second video.
+        video1_path: Path to the first video or image.
+        video2_path: Path to the second video or image.
         use_ms_ssim: Whether to use Multi-Scale Structural Similarity(MS-SSIM) instead of SSIM.
     """
     print(f"Computing SSIM between {video1_path} and {video2_path}...")
@@ -58,8 +77,8 @@ def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
     if not os.path.exists(video2_path):
         raise FileNotFoundError(f"Video2 not found: {video2_path}")
 
-    frames1 = _read_video_frames(video1_path)
-    frames2 = _read_video_frames(video2_path)
+    frames1 = _read_visual_frames(video1_path)
+    frames2 = _read_visual_frames(video2_path)
 
     # Ensure same number of frames
     min_frames = min(frames1.shape[0], frames2.shape[0])

@@ -68,6 +68,10 @@ class SamplingParam:
     num_inference_steps: int = 50
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
+    # Embedded guidance (FLUX): do not treat ``guidance_scale > 1`` as classic CFG.
+    use_embedded_guidance: bool = False
+    # Diffusers-style true CFG for FLUX when > 1 (requires negative prompt encoding).
+    true_cfg_scale: float = 1.0
     guidance_rescale: float = 0.0
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
