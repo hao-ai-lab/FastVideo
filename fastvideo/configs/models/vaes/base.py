@@ -13,6 +13,8 @@ from fastvideo.utils import StoreBoolean
 @dataclass
 class VAEArchConfig(ArchConfig):
     scaling_factor: float | torch.Tensor = 0
+    scale_factor_temporal: int = 1
+    scale_factor_spatial: int = 1
 
     temporal_compression_ratio: int = 4
     spatial_compression_ratio: int = 8
@@ -37,8 +39,12 @@ class VAEConfig(ModelConfig):
     use_tiling: bool = True
     use_temporal_tiling: bool = True
     use_parallel_tiling: bool = True
+    ltx2_spatial_tile_size_in_pixels: int | None = None
+    ltx2_spatial_tile_overlap_in_pixels: int | None = None
+    ltx2_temporal_tile_size_in_frames: int | None = None
+    ltx2_temporal_tile_overlap_in_frames: int | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.blend_num_frames = self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames
 
     @staticmethod

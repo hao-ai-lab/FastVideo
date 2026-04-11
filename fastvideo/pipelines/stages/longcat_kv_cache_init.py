@@ -6,6 +6,8 @@ This stage pre-computes K/V cache for conditioning frames.
 
 """
 
+from typing import Any
+
 import torch
 
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -27,7 +29,7 @@ class LongCatKVCacheInitStage(PipelineStage):
     - batch.latents contains ONLY noise latents
     """
 
-    def __init__(self, transformer):
+    def __init__(self, transformer: Any) -> None:
         super().__init__()
         self.transformer = transformer
 
@@ -57,6 +59,7 @@ class LongCatKVCacheInitStage(PipelineStage):
             return batch
 
         # Extract conditioning latents
+        assert batch.latents is not None, "latents must be initialized before KV-cache setup"
         cond_latents = batch.latents[:, :, :num_cond_latents].clone()
 
         logger.info("Initializing KV cache for %d conditioning latents, shape: %s", num_cond_latents,

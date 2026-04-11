@@ -133,6 +133,7 @@ class GameCraftDenoisingStage(DenoisingStage):
 
         # Get latents and embeddings
         latents = batch.latents
+        assert latents is not None, "latents must be initialized before GameCraft denoising"
         prompt_embeds = batch.prompt_embeds
         assert not torch.isnan(prompt_embeds[0]).any(), "prompt_embeds contains nan"
 

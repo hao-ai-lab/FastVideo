@@ -11,7 +11,6 @@ import ipaddress
 import json
 import math
 import multiprocessing
-from multiprocessing.context import BaseContext
 import os
 import signal
 import socket
@@ -796,8 +795,10 @@ def dict_to_3d_list(
     return result
 
 
-def set_random_seed(seed: int) -> None:
+def set_random_seed(seed: int | None) -> None:
     from fastvideo.platforms import current_platform
+    if seed is None:
+        return
     current_platform.seed_everything(seed)
 
 
@@ -845,7 +846,7 @@ def masks_like(tensor, zero=False, generator=None, p=0.2) -> tuple[list[torch.Te
 
 
 # adapted from: https://github.com/Wan-Video/Wan2.2/blob/main/wan/utils/utils.py
-def best_output_size(w, h, dw, dh, expected_area):
+def best_output_size(w: int, h: int, dw: int, dh: int, expected_area: int) -> tuple[int, int]:
     # float output size
     ratio = w / h
     ow = (expected_area * ratio)**0.5
@@ -1070,7 +1071,7 @@ def force_spawn() -> None:
         os.environ["FASTVIDEO_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 
-def get_mp_context() -> BaseContext:
+def get_mp_context() -> Any:
     """Get a multiprocessing context with a particular method (spawn or fork).
     By default we follow the value of the FASTVIDEO_WORKER_MULTIPROC_METHOD to
     determine the multiprocessing method (default is fork). However, under

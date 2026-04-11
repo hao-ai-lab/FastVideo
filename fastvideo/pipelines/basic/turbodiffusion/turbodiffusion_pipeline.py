@@ -33,7 +33,6 @@ class TurboDiffusionPipeline(LoRAPipeline, ComposedPipelineBase):
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
-
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         self.add_stage(stage_name="prompt_encoding_stage",

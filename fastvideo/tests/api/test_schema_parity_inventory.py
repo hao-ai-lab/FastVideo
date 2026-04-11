@@ -235,8 +235,8 @@ def test_cli_dest_inventory_matches_live_parsers() -> None:
 def test_review_gap_fields_are_explicitly_inventory_tracked() -> None:
     inventory = _load_inventory()
 
-    sampling_extensions = inventory["surfaces"]["sampling_param_extensions"]
-    assert "guidance_scale_2" in sampling_extensions["moved"]
+    sampling_base = inventory["surfaces"]["sampling_param_base"]
+    assert "guidance_scale_2" in sampling_base["moved"]
 
     image_request = inventory["surfaces"]["openai_image_request"]
     video_request = inventory["surfaces"]["openai_video_request"]

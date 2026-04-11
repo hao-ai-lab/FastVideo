@@ -31,7 +31,7 @@ class PipelineConfig:
     pipeline_config_path: str | None = None
 
     # Video generation parameters
-    embedded_cfg_scale: float = 6.0
+    embedded_cfg_scale: float | None = 6.0
     flow_shift: float | None = None
     flow_shift_sr: float | None = None
     disable_autocast: bool = False
@@ -40,7 +40,7 @@ class PipelineConfig:
     # Model configuration
     dit_config: DiTConfig = field(default_factory=DiTConfig)
     dit_precision: str = "bf16"
-    upsampler_config: UpsamplerConfig = field(default_factory=UpsamplerConfig)
+    upsampler_config: UpsamplerConfig | tuple[UpsamplerConfig, ...] = field(default_factory=UpsamplerConfig)
     upsampler_precision: str = "fp32"
 
     # VAE configuration
@@ -58,8 +58,7 @@ class PipelineConfig:
     text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (EncoderConfig(), ))
     text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp32", ))
     preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(default_factory=lambda: (preprocess_text, ))
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.tensor],
-                                  ...] = field(default_factory=lambda: (postprocess_text, ))
+    postprocess_text_funcs: tuple[Callable[..., Any], ...] = field(default_factory=lambda: (postprocess_text, ))
 
     # DMD parameters
     dmd_denoising_steps: list[int] | None = field(default=None)
@@ -70,6 +69,12 @@ class PipelineConfig:
 
     # Compilation
     # enable_torch_compile: bool = False
+
+    def __post_init__(self) -> None:
+        pass
+
+    def __getattr__(self, name: str) -> Any:
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser, prefix: str = "") -> FlexibleArgumentParser:

@@ -20,6 +20,7 @@ from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule,
 from torch.nn.modules.module import _IncompatibleKeys
 
 from fastvideo.logger import init_logger
+from fastvideo.layers.quantization import QuantizationMethods
 from fastvideo.models.loader.utils import (get_param_names_mapping,
                                            hf_to_custom_state_dict)
 from fastvideo.models.loader.weight_utils import safetensors_weights_iterator
@@ -75,6 +76,7 @@ def maybe_load_fsdp_model(
     pin_cpu_memory: bool = True,
     enable_torch_compile: bool = False,
     torch_compile_kwargs: dict[str, Any] | None = None,
+    transformer_quant: QuantizationMethods = None,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -157,6 +159,11 @@ def maybe_load_fsdp_model(
         # Avoid unintended computation graph accumulation during inference
         if isinstance(p, torch.nn.Parameter):
             p.requires_grad = False
+    if transformer_quant == "fp4":
+        from fastvideo.layers.quantization.fp4_config import convert_model_to_fp4
+
+        logger.info("Converting model to FP4 quantized runtime weights")
+        convert_model_to_fp4(model)
 
     compile_in_loader = enable_torch_compile and training_mode
     if compile_in_loader:

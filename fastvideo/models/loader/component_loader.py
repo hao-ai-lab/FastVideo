@@ -561,6 +561,7 @@ class TokenizerLoader(ComponentLoader):
                 # If parsing fails, fall through to AutoTokenizer below.
                 pass
 
+
         tokenizer = AutoTokenizer.from_pretrained(
             resolved_model_path,  # "<path to model>/tokenizer"
             # in v0, this was same string as encoder_name "ClipTextModel"
@@ -872,6 +873,9 @@ class TransformerLoader(ComponentLoader):
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = deepcopy(fastvideo_args.pipeline_config.dit_config)
         dit_config.update_model_arch(config)
+        if fastvideo_args.transformer_quant is not None:
+            quant_cls = get_quantization_config(fastvideo_args.transformer_quant)
+            dit_config.quant_config = quant_cls()
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
@@ -951,6 +955,7 @@ class TransformerLoader(ComponentLoader):
             training_mode=fastvideo_args.training_mode,
             enable_torch_compile=fastvideo_args.enable_torch_compile,
             torch_compile_kwargs=fastvideo_args.torch_compile_kwargs,
+            transformer_quant=fastvideo_args.transformer_quant,
         )
 
         total_params = sum(p.numel() for p in model.parameters())

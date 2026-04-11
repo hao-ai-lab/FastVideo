@@ -87,7 +87,7 @@ class NPUPlatform(Platform):
         return True
 
     @classmethod
-    def get_torch_device(cls):
+    def get_torch_device(cls) -> object:
         """
         Return torch.npu
         """

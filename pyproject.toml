@@ -23,13 +23,14 @@ dependencies = [
     # Machine Learning & Transformers
     "transformers==4.57.3",
     "tokenizers>=0.20.1",
-    "sentencepiece==0.2.0",
+    "sentencepiece==0.2.1",
     "timm==1.0.11",
     "peft>=0.15.0",
     "diffusers>=0.33.1",
     "torch>=2.10.0",
     "torchvision",
     "torchaudio",
+    "flashinfer-python",
 
     # Acceleration & Optimization
     "accelerate==1.0.1",
@@ -148,6 +149,7 @@ ignore_missing_imports = true
 disallow_untyped_calls = true
 check_untyped_defs = true
 follow_imports = "silent"
+
 
 [tool.codespell]
 skip = "./data,./wandb,ui/package-lock.json"

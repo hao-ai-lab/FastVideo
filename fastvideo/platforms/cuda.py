@@ -102,7 +102,7 @@ class CudaPlatformBase(Platform):
         return float(torch.cuda.max_memory_allocated(device))
 
     @classmethod
-    def get_torch_device(cls):
+    def get_torch_device(cls) -> object:
         """
         Return torch.cuda
         """
@@ -140,6 +140,31 @@ class CudaPlatformBase(Platform):
             except ImportError as e:
                 logger.info(e)
                 logger.info("Sage Attention 3 backend is not installed. Fall back to Flash Attention.")
+        elif selected_backend == AttentionBackendEnum.ATTN_QAT_INFER:
+            try:
+                from fastvideo.attention.backends.attn_qat_infer import (  # noqa: F401
+                    AttnQatInferBackend, is_attn_qat_infer_available,
+                )
+                if not is_attn_qat_infer_available():
+                    raise ImportError("attn_qat_infer could not be imported.")
+                logger.info("Using attn_qat_infer backend.")
+
+                return "fastvideo.attention.backends.attn_qat_infer.AttnQatInferBackend"
+            except ImportError as e:
+                logger.info(e)
+                logger.info("attn_qat_infer backend is not installed. Fall back to Flash Attention.")
+        elif selected_backend == AttentionBackendEnum.ATTN_QAT_TRAIN:
+            try:
+                from fastvideo_kernel.triton_kernels.attn_qat_train import attention  # noqa: F401
+
+                from fastvideo.attention.backends.attn_qat_train import (  # noqa: F401
+                    AttnQatTrainBackend)
+                logger.info("Using attn_qat_train backend.")
+
+                return "fastvideo.attention.backends.attn_qat_train.AttnQatTrainBackend"
+            except ImportError as e:
+                logger.info(e)
+                logger.info("attn_qat_train backend is not installed. Fall back to Flash Attention.")
         elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             try:
                 from fastvideo_kernel import video_sparse_attn  # noqa: F401

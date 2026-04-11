@@ -133,7 +133,6 @@ class VideoSparseAttentionBackend(AttentionBackend):
 class VideoSparseAttentionMetadata(AttentionMetadata):
     current_timestep: int
     dit_seq_shape: list[int]
-    VSA_sparsity: float
     num_tiles: list[int]
     total_seq_length: int
     tile_partition_indices: torch.LongTensor
@@ -144,10 +143,10 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
-    def prepare(self):
+    def prepare(self) -> None:
         pass
 
     def build(  # type: ignore

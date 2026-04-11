@@ -21,6 +21,8 @@ This page describes the various options for speeding up generation times in Fast
 - Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
+- Attn QAT Infer: `FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER`
+- Attn QAT Train: `FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN`
 - Video MoBA Attention: `FASTVIDEO_ATTENTION_BACKEND=VMOBA_ATTN`
 - Sparse Linear Attention: `FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
 - SageSLA Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_SLA_ATTN`
@@ -103,6 +105,14 @@ python setup.py install  # or pip install -e .
 
 ### Sage Attention 3
 
+FastVideo now exposes two SageAttention3-compatible backends with distinct
+environment variable values:
+
+- `SAGE_ATTN_THREE`: the regular upstream SageAttention3 backend imported from
+  the `sageattn3` package.
+- `ATTN_QAT_INFER`: the inference CUDA-kernel backend imported from the
+  in-repo `attn_qat_infer` package.
+
 **`SAGE_ATTN_THREE`**
 
 [SageAttention 3](https://github.com/thu-ml/SageAttention/tree/main/sageattention3_blackwell) is an advanced attention mechanism that leverages FP4 quantization and Blackwell GPU Tensor Cores for significant performance improvements.
@@ -116,6 +126,53 @@ python setup.py install  # or pip install -e .
 Note that Sage Attention 3 requires `python>=3.13`, `torch>=2.8.0`, `CUDA >=12.8`. If you are using `uv` and using `torch==2.8.0` make sure that `sentencepiece==0.2.1` in the pyproject.toml file.
 
 To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repository to install the package from source.
+
+### Attn QAT Infer
+
+**`ATTN_QAT_INFER`**
+
+This backend uses the `attn_qat_infer` implementation that lives in the
+`fastvideo-kernel` repository alongside the `fastvideo_kernel` Triton kernels.
+Use this backend when you want to run the dedicated FP4 inference CUDA kernel
+directly during inference.
+
+For the full Attention QAT guide, including Wan 2.1 14B checkpoint download,
+example editing steps, training launchers, and troubleshooting, see
+[Attention QAT](../attention/attn_qat/index.md).
+
+This backend currently assumes access to the in-repo `fastvideo-kernel`
+checkout or an equivalent editable/source install that exposes:
+
+- `attn_qat_infer`
+
+Example:
+
+```python
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "ATTN_QAT_INFER"
+```
+
+### QAT Attention
+
+**`ATTN_QAT_TRAIN`**
+
+This backend uses the FastVideoKernel Triton attention implementation from
+`fastvideo_kernel.triton_kernels.attn_qat_train`. Use it when you specifically
+want the training-oriented Triton attention path rather than the
+`attn_qat_infer` CUDA kernel path.
+
+The dedicated [Attention QAT](../attention/attn_qat/index.md) page covers when
+to use `ATTN_QAT_TRAIN` versus `ATTN_QAT_INFER`, the ready-made training
+launchers, and the end-to-end Wan 2.1 14B inference workflow.
+
+This backend currently assumes access to an install that exposes:
+
+- `fastvideo_kernel`
+
+Example:
+
+```python
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "ATTN_QAT_TRAIN"
+```
 
 ### V-MoBA / SLA / SageSLA
 

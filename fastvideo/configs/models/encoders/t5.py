@@ -41,7 +41,7 @@ class T5ArchConfig(TextEncoderArchConfig):
     text_len: int = 512
     dtype: str | None = None
     gradient_checkpointing: bool = False
-    stacked_params_mapping: list[tuple[str, str, str]] = field(default_factory=lambda: [
+    stacked_params_mapping: list[tuple[str, str, str | int]] = field(default_factory=lambda: [
         # (param_name, shard_name, shard_id)
         (".qkv_proj", ".q", "q"),
         (".qkv_proj", ".k", "k"),
@@ -51,7 +51,7 @@ class T5ArchConfig(TextEncoderArchConfig):
         default_factory=lambda: [_is_transformer_layer, _is_embeddings, _is_final_layernorm])
 
     # Referenced from https://github.com/huggingface/transformers/blob/main/src/transformers/models/t5/configuration_t5.py
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         super().__post_init__()
         act_info = self.feed_forward_proj.split("-")
         self.dense_act_fn: str = act_info[-1]

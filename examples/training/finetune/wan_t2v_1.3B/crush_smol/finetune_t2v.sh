@@ -1,27 +1,47 @@
 #!/bin/bash
+#SBATCH --job-name=wan_t2v_1.3B_finetune
+#SBATCH --partition=all
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:4
+#SBATCH --ntasks-per-node=1
+#SBATCH --output=logs/wan_t2v_1.3B_finetune.out
+#SBATCH --error=logs/wan_t2v_1.3B_finetune.err
+
+source .venv/bin/activate
+
 
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
+# export TRITON_PRINT_AUTOTUNING=1  # to print the best config
+export WANDB_API_KEY=YOUR_WANDB_API_KEY
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
-VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-NUM_GPUS=4
+DATA_DIR=data/Wan-Syn_77x448x832_600k
+VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json"
+NUM_GPUS=1
 # export CUDA_VISIBLE_DEVICES=4,5
+
+set -euo pipefail
+
+# ---- torchrun rendezvous (multi-node) ----
+# Launch ONE torchrun per node (via srun) and let torchrun spawn 4 workers per node.
+MASTER_ADDR="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)"
+MASTER_PORT="${MASTER_PORT:-29500}"
+export MASTER_ADDR MASTER_PORT
 
 
 # Training arguments
 training_args=(
-  --tracker_project_name "wan_t2v_finetune"
-  --output_dir "checkpoints/wan_t2v_finetune"
-  --max_train_steps 5000
+  --tracker_project_name "wan_t2v_finetune_qat"
+  --output_dir "checkpoints/wan_t2v_finetune_1.3B_77"
+  --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 8
+  --gradient_accumulation_steps 1
   --num_latent_t 20
-  --num_height 480
+  --num_height 448  
   --num_width 832
   --num_frames 77
   --enable_gradient_checkpointing_type "full"
@@ -30,7 +50,7 @@ training_args=(
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS 
-  --sp_size $NUM_GPUS 
+  --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
   --hsdp_shard_dim $NUM_GPUS
@@ -45,7 +65,7 @@ model_args=(
 # Dataset arguments
 dataset_args=(
   --data_path $DATA_DIR
-  --dataloader_num_workers 1
+  --dataloader_num_workers 4
 )
 
 # Validation arguments
@@ -54,16 +74,16 @@ validation_args=(
   --validation_dataset_file $VALIDATION_DATASET_FILE
   --validation_steps 200
   --validation_sampling_steps "50" 
-  --validation_guidance_scale "3.0"
+  --validation_guidance_scale "5.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 5e-5
+  --learning_rate 1e-6
   --mixed_precision "bf16"
   --weight_only_checkpointing_steps 1000
   --training_state_checkpointing_steps 1000
-  --weight_decay 1e-4
+  --weight_decay 0.01
   --max_grad_norm 1.0
 )
 
@@ -72,23 +92,24 @@ miscellaneous_args=(
   --inference_mode False
   --checkpoints_total_limit 3
   --training_cfg_rate 0.1
-  --multi_phased_distill_schedule "4000-1"
-  --not_apply_cfg_solver
   --dit_precision "fp32"
-  --num_euler_timesteps 50
   --ema_start_step 0
-  --enable_gradient_checkpointing_type "full"
-  # --resume_from_checkpoint "checkpoints/wan_t2v_finetune/checkpoint-2500"
+  --flow_shift 5
+  --seed 1000
 )
 
-torchrun \
-  --nnodes 1 \
-  --nproc_per_node $NUM_GPUS \
-    fastvideo/training/wan_training_pipeline.py \
-    "${parallel_args[@]}" \
-    "${model_args[@]}" \
-    "${dataset_args[@]}" \
-    "${training_args[@]}" \
-    "${optimizer_args[@]}" \
-    "${validation_args[@]}" \
-    "${miscellaneous_args[@]}"
+srun --nodes="$SLURM_NNODES" --ntasks="$SLURM_NNODES" --ntasks-per-node=1 \
+  torchrun \
+    --nnodes "$SLURM_NNODES" \
+    --nproc_per_node 4 \
+    --rdzv_backend c10d \
+    --rdzv_endpoint "${MASTER_ADDR}:${MASTER_PORT}" \
+    --rdzv_id "$SLURM_JOB_ID" \
+      fastvideo/training/wan_training_pipeline.py \
+      "${parallel_args[@]}" \
+      "${model_args[@]}" \
+      "${dataset_args[@]}" \
+      "${training_args[@]}" \
+      "${optimizer_args[@]}" \
+      "${validation_args[@]}" \
+      "${miscellaneous_args[@]}"

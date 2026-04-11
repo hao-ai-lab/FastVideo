@@ -29,6 +29,10 @@ class ModelBase(ABC):
     transformer: torch.nn.Module
     noise_scheduler: Any
     _trainable: bool
+    dataloader: Any
+    world_group: Any
+    sp_group: Any
+    vae: Any
 
     @property
     def device(self) -> torch.device:
@@ -76,6 +80,7 @@ class ModelBase(ABC):
         *,
         generator: torch.Generator,
         latents_source: Literal["data", "zeros"] = "data",
+        **kwargs: Any,
     ) -> TrainingBatch:
         """Convert a dataloader batch into forward primitives."""
 

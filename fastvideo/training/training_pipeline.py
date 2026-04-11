@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import asdict
+from contextlib import AbstractContextManager, nullcontext
 import math
 import os
 import shutil
@@ -35,13 +36,15 @@ from fastvideo.distributed import (cleanup_dist_env_and_memory, get_local_torch_
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+from fastvideo.attention.selector import global_force_attn_backend_context_manager
 from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch, LoRAPipeline, TrainingBatch)
-from fastvideo.platforms import current_platform
+from fastvideo.platforms import AttentionBackendEnum, current_platform
 from fastvideo.training.activation_checkpoint import (apply_activation_checkpointing)
 from fastvideo.training.trackers import (DummyTracker, TrackerType, initialize_trackers, Trackers)
 from fastvideo.training.training_utils import (clip_grad_norm_while_handling_failing_dtensor_cases,
                                                compute_density_for_timestep_sampling, count_trainable, get_scheduler,
-                                               get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint)
+                                               get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint,
+                                               swap_fp4_linear, traverse_swap_module)
 from fastvideo.utils import (is_vmoba_available, is_vsa_available, set_random_seed, shallow_asdict)
 
 try:
@@ -84,6 +87,24 @@ class TrainingPipeline(LoRAPipeline, ABC):
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError("create_pipeline_stages should not be called for training pipeline")
 
+    @staticmethod
+    def _should_force_generator_attn_qat_train(fastvideo_args: FastVideoArgs) -> bool:
+        if not isinstance(fastvideo_args, TrainingArgs):
+            return False
+        return (fastvideo_args.generator_4bit_attn or envs.FASTVIDEO_ATTENTION_BACKEND == "ATTN_QAT_TRAIN")
+
+    def load_modules(self,
+                     fastvideo_args: FastVideoArgs,
+                     loaded_modules: dict[str, torch.nn.Module] | None = None) -> dict[str, Any]:
+        force_generator_qat = self._should_force_generator_attn_qat_train(fastvideo_args)
+        load_context: AbstractContextManager[None] = nullcontext()
+        if force_generator_qat:
+            logger.info("Forcing generator attention backend to ATTN_QAT_TRAIN during module loading")
+            load_context = global_force_attn_backend_context_manager(AttentionBackendEnum.ATTN_QAT_TRAIN)
+
+        with load_context:
+            return super().load_modules(fastvideo_args, loaded_modules)
+
     def set_schemas(self) -> None:
         self.train_dataset_schema = pyarrow_schema_t2v
 
@@ -114,6 +135,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 self.transformer_2 = apply_activation_checkpointing(
                     self.transformer_2, checkpointing_type=training_args.enable_gradient_checkpointing_type)
 
+        if training_args.generator_4bit_linear:
+            num_swaps = traverse_swap_module(self.transformer, swap_fn=swap_fp4_linear)
+            logger.info("Swapped %s linear layers to the FP4 forward path in self.transformer", num_swaps)
         noise_scheduler = self.modules["scheduler"]
         self.set_trainable()
         params_to_optimize = self.transformer.parameters()
@@ -345,6 +369,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         patch_size = self.training_args.pipeline_config.dit_config.patch_size
         current_vsa_sparsity = training_batch.current_vsa_sparsity
         assert latents_shape is not None
+        assert isinstance(patch_size, tuple), f"Expected tuple patch_size, got {patch_size!r}"
         assert training_batch.timesteps is not None
         if envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
             if not vsa_available:
@@ -365,7 +390,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             moba_params = self.training_args.moba_config.copy()
             moba_params.update({
                 "current_timestep": training_batch.timesteps,
-                "raw_latent_shape": training_batch.raw_latent_shape[2:5],
+                "raw_latent_shape": latents_shape[2:5],
                 "patch_size": self.training_args.pipeline_config.dit_config.patch_size,
                 "device": get_local_torch_device(),
             })
@@ -466,6 +491,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
             training_batch = self._normalize_dit_input(training_batch)
             # Create noisy model input
             training_batch = self._prepare_dit_inputs(training_batch)
+            assert training_batch.latents is not None
+            assert training_batch.noisy_model_input is not None
+            assert training_batch.noise is not None
 
             # old sharding code, need to shard latents and noise but not input
             # Shard latents across sp groups
@@ -590,9 +618,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     "vsa_sparsity": current_vsa_sparsity,
                 }
                 try:
+                    assert training_batch.raw_latent_shape is not None
                     metrics["batch_size"] = int(training_batch.raw_latent_shape[0])
 
-                    patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
+                    patch_size = self.training_args.pipeline_config.dit_config.patch_size
+                    assert isinstance(patch_size, tuple), f"Expected tuple patch_size, got {patch_size!r}"
+                    patch_t, patch_h, patch_w = patch_size
                     seq_len = (training_batch.raw_latent_shape[2] // patch_t) * (
                         training_batch.raw_latent_shape[3] // patch_h) * (training_batch.raw_latent_shape[4] // patch_w)
                     if training_batch.encoder_hidden_states is not None:

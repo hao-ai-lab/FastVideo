@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 from fastvideo.fastvideo_args import ExecutionMode, FastVideoArgs
 from fastvideo.logger import init_logger
@@ -37,7 +37,7 @@ class WorkflowBase(ABC):
     the overall processing flow.
     """
 
-    def __init__(self, fastvideo_args: FastVideoArgs):
+    def __init__(self, fastvideo_args: FastVideoArgs) -> None:
         """
         Initialize the workflow with configuration arguments.
         
@@ -145,7 +145,7 @@ class WorkflowBase(ABC):
         pass
 
     @abstractmethod
-    def run(self):
+    def run(self) -> Any:
         """
         Execute the main workflow logic.
         
@@ -156,7 +156,7 @@ class WorkflowBase(ABC):
         pass
 
     @classmethod
-    def get_workflow_cls(cls, fastvideo_args: FastVideoArgs) -> Optional["WorkflowBase"]:
+    def get_workflow_cls(cls, fastvideo_args: FastVideoArgs) -> type["WorkflowBase"] | None:
         """
         Factory method to get the appropriate workflow class based on execution mode.
         

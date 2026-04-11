@@ -1,5 +1,4 @@
 import os
-from typing import cast
 
 from torch.utils.data import DataLoader
 
@@ -105,18 +104,18 @@ class PreprocessWorkflow(WorkflowBase):
         self.training_dataset_output_dir = training_dataset_output_dir
 
     @classmethod
-    def get_workflow_cls(cls, fastvideo_args: FastVideoArgs) -> "PreprocessWorkflow":
+    def get_workflow_cls(cls, fastvideo_args: FastVideoArgs) -> type["PreprocessWorkflow"]:
         is_ltx2_t2v = (fastvideo_args.workload_type == WorkloadType.T2V
                        and fastvideo_args.pipeline_config.__class__.__name__ == "LTX2T2VConfig")
         if is_ltx2_t2v:
             from fastvideo.workflow.preprocess.preprocess_workflow_ltx2_t2v import (PreprocessWorkflowLTX2T2V)
-            return cast(PreprocessWorkflow, PreprocessWorkflowLTX2T2V)
+            return PreprocessWorkflowLTX2T2V
         if fastvideo_args.workload_type == WorkloadType.T2V:
             from fastvideo.workflow.preprocess.preprocess_workflow_t2v import (PreprocessWorkflowT2V)
-            return cast(PreprocessWorkflow, PreprocessWorkflowT2V)
+            return PreprocessWorkflowT2V
         elif fastvideo_args.workload_type == WorkloadType.I2V:
             from fastvideo.workflow.preprocess.preprocess_workflow_i2v import (PreprocessWorkflowI2V)
-            return cast(PreprocessWorkflow, PreprocessWorkflowI2V)
+            return PreprocessWorkflowI2V
         else:
             raise ValueError(
                 f"Workload type: {fastvideo_args.workload_type} is not supported in preprocessing workflow.")

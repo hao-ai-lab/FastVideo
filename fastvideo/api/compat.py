@@ -107,6 +107,8 @@ def legacy_from_pretrained_to_config(
             engine[key] = value
         elif key == "override_text_encoder_quant":
             quantization["text_encoder_quant"] = value
+        elif key == "transformer_quant":
+            quantization["transformer_quant"] = value
         elif key == "workload_type":
             pipeline["workload_type"] = value
         elif key == "lora_path":

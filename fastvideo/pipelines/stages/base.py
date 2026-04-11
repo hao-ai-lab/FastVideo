@@ -35,6 +35,8 @@ class PipelineStage(ABC):
     for a specific part of the process, such as prompt encoding, latent preparation, etc.
     """
 
+    _streaming_ctx: object | None = None
+
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """
         Verify the input for the stage.
@@ -109,6 +111,18 @@ class PipelineStage(ABC):
             enable: Whether to enable logging.
         """
         self._enable_logging = enable
+
+    def streaming_reset(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        raise NotImplementedError(f"{type(self).__name__} does not support streaming_reset")
+
+    def streaming_step(self, *args: object, **kwargs: object) -> ForwardBatch:
+        raise NotImplementedError(f"{type(self).__name__} does not support streaming_step")
+
+    def streaming_clear(self) -> None:
+        raise NotImplementedError(f"{type(self).__name__} does not support streaming_clear")
+
+    def streaming_decode(self, *args: object, **kwargs: object) -> object:
+        raise NotImplementedError(f"{type(self).__name__} does not support streaming_decode")
 
     def __call__(
         self,

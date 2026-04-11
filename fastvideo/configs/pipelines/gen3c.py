@@ -22,7 +22,7 @@ class _Gen3CT5LargeArchConfig(T5LargeArchConfig):
     refactor [PR#1142](https://github.com/hao-ai-lab/FastVideo/pull/1142).
     """
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         super().__post_init__()
         self.tokenizer_kwargs["padding"] = "max_length"
 

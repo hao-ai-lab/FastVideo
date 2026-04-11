@@ -201,6 +201,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # - "VIDEO_SPARSE_ATTN": use Video Sparse Attention
     # - "SAGE_ATTN": use Sage Attention
     # - "SAGE_ATTN_THREE": use Sage Attention 3
+    # - "ATTN_QAT_INFER": use the in-repo attn_qat_infer inference backend
+    # - "ATTN_QAT_TRAIN": use the FastVideoKernel Triton attn_qat_train backend
     "FASTVIDEO_ATTENTION_BACKEND":
     lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
 

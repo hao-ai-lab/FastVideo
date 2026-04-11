@@ -158,6 +158,7 @@ class DistributedAttention_VSA(DistributedAttention):
         replicated_v: torch.Tensor | None = None,
         gate_compress: torch.Tensor | None = None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
+        attention_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
@@ -170,6 +171,7 @@ class DistributedAttention_VSA(DistributedAttention):
             replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
             replicated_k (Optional[torch.Tensor]): Replicated key tensor
             replicated_v (Optional[torch.Tensor]): Replicated value tensor
+            attention_mask (Optional[torch.Tensor]): Attention mask [batch_size, seq_len]
             
         Returns:
             Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:

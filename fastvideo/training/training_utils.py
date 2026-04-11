@@ -5,11 +5,13 @@ import os
 import time
 from collections.abc import Callable, Iterator
 from enum import Enum
+import types
 from typing import Any
 
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
+import torch.nn as nn
 from safetensors.torch import save_file
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
@@ -21,6 +23,40 @@ from fastvideo.training.checkpointing_utils import (ModelWrapper, OptimizerWrapp
 logger = init_logger(__name__)
 
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
+
+
+def swap_fp4_linear(obj: Any, obj_path: str) -> int:
+    """
+    Swap supported linear layers to use the FP4 forward path in-place.
+
+    Returns the number of layers updated on ``obj``.
+    """
+    from fastvideo.layers.fp4linear import fp4_linear_forward
+    from fastvideo.layers.linear import ReplicatedLinear
+
+    del obj_path  # Unused today, but kept for traverse_swap_module compatibility.
+
+    swaps_performed = 0
+
+    for attr_name in dir(obj):
+        if attr_name.startswith("_"):
+            continue
+
+        try:
+            attr_value = getattr(obj, attr_name)
+        except Exception:
+            continue
+
+        should_replace = False
+        if isinstance(attr_value, ReplicatedLinear):
+            should_replace = True
+
+        if should_replace:
+            layer = getattr(obj, attr_name)
+            layer.forward = types.MethodType(fp4_linear_forward, layer)
+            swaps_performed += 1
+
+    return swaps_performed
 
 
 def gather_state_dict_on_cpu_rank0(
@@ -1702,3 +1738,90 @@ class EMA_FSDP:
 
     def apply_to_model(self, module: torch.nn.Module) -> _ApplyEMACtx:
         return EMA_FSDP._ApplyEMACtx(self, module)
+
+
+def traverse_swap_module(
+    root: Any,
+    swap_fn: Callable[[Any, str], int],
+    *,
+    verbose: bool = False,
+    max_depth: int | None = None,
+) -> int:
+    """
+    Traverse `root` (e.g., your transformer) and apply `swap_fn` to every reachable object.
+    - Cycle-safe via `visited` set.
+    - Handles nn.Module submodules, regular attributes, and common containers (list/tuple/set/dict).
+
+    Args:
+        root: object graph root (e.g., transformer)
+        swap_fn: function(obj, obj_path) -> int (number of swaps it performed on `obj`)
+        verbose: print what gets swapped
+        max_depth: optional limit to traversal depth (0 = only root)
+
+    Returns:
+        Total number of swaps performed across the graph.
+    """
+    visited = set()
+
+    def is_traversable(x: Any) -> bool:
+        # Skip obvious non-containers / primitives / callables / modules
+        return not isinstance(
+            x,
+            str | bytes | bytearray | memoryview | int | float | bool | complex | types.BuiltinFunctionType
+            | types.FunctionType | types.MethodType | types.ModuleType,
+        )
+
+    def walk(obj: Any, obj_path: str, depth: int) -> int:
+        if max_depth is not None and depth > max_depth:
+            return 0
+
+        oid = id(obj)
+        if oid in visited:
+            return 0
+        visited.add(oid)
+
+        swaps = 0
+        # First, try to swap on the current object
+        swaps += swap_fn(obj, obj_path)
+
+        # Then, traverse children
+        # 1) PyTorch modules: prefer named_children() for proper module graph traversal
+        if isinstance(obj, nn.Module):
+
+            for name, child in obj.named_children():
+                if is_traversable(child):
+                    swaps += walk(child, f"{obj_path}.{name}", depth + 1)
+
+            # Also traverse non-module attributes living on the module
+            d = getattr(obj, "__dict__", None)
+            if isinstance(d, dict):
+                for k, v in d.items():
+                    # Avoid double-visiting known submodules (already covered by named_children)
+                    if is_traversable(v) and not isinstance(v, nn.Module):
+                        swaps += walk(v, f"{obj_path}.{k}", depth + 1)
+
+            return swaps
+
+        # 2) Generic Python objects: __dict__ attrs
+        d = getattr(obj, "__dict__", None)
+        if isinstance(d, dict):
+            for k, v in d.items():
+                if is_traversable(v):
+                    swaps += walk(v, f"{obj_path}.{k}", depth + 1)
+
+        # 3) Common containers
+        if isinstance(obj, list | tuple | set | frozenset):
+            for idx, v in enumerate(obj):
+                if is_traversable(v):
+                    swaps += walk(v, f"{obj_path}[{idx}]", depth + 1)
+        elif isinstance(obj, dict):
+            for k, v in obj.items():
+                if is_traversable(v):
+                    k_show = repr(k)
+                    if len(k_show) > 40:
+                        k_show = k_show[:37] + "..."
+                    swaps += walk(v, f"{obj_path}[{k_show}]", depth + 1)
+
+        return swaps
+
+    return walk(root, "root", 0)

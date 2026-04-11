@@ -20,6 +20,11 @@ cd fastvideo-kernel
 ./build.sh
 ```
 
+On supported Blackwell environments, the same install also packages
+`attn_qat_infer` and builds its `fp4attn_cuda` / `fp4quant_cuda`
+extensions directly from `fastvideo-kernel/attn_qat_infer/`. This path
+requires CUDA Toolkit 12.8+ and targets `sm_120a`.
+
 ### Rocm Build
 If you are in a rocm environment without the compilation toolchaine of CUDA.
 
@@ -56,6 +61,18 @@ After building/installing `fastvideo-kernel`, run:
 ```bash
 cd fastvideo-kernel
 python benchmarks/bench_vsa.py --batch_size 1 --num_heads 16 --head_dim 128 --q_seq_lens 49152 --topk 64
+```
+
+### Attn QAT Attention Benchmarks
+
+The Attn QAT microbenchmarks now live alongside the kernel package:
+
+```bash
+cd fastvideo-kernel
+python benchmarks/benchmark_flashattn2.py --batch-size 1 --num-heads 16 --seq-len 4096 --head-dim 128
+python benchmarks/benchmark_sageattn3.py --batch-size 1 --num-heads 16 --seq-len 4096 --head-dim 128
+python benchmarks/benchmark_blockscaled_fp4_attn.py --batch-size 1 --num-heads 16 --seq-len 4096 --head-dim 128
+python benchmarks/benchmark_combined.py --output benchmark_attention.png
 ```
 
 ### TurboDiffusion Kernels

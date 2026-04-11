@@ -24,15 +24,16 @@ class TextEncoderArchConfig(EncoderArchConfig):
     hidden_size: int = 0
     num_hidden_layers: int = 0
     num_attention_heads: int = 0
-    pad_token_id: int = 0
-    eos_token_id: int = 0
+    pad_token_id: int | None = 0
+    eos_token_id: int | None = 0
     text_len: int = 0
     hidden_state_skip_layer: int = 0
     decoder_start_token_id: int = 0
     output_past: bool = True
     scalable_attention: bool = True
     tie_word_embeddings: bool = False
-    stacked_params_mapping: list[tuple[str, str, str]] = field(
+    padding_side: str = "right"
+    stacked_params_mapping: list[tuple[str, str, str | int]] = field(
         default_factory=list)  # mapping from huggingface weight names to custom names
     tokenizer_kwargs: dict[str, Any] = field(default_factory=dict)
     _fsdp_shard_conditions: list = field(default_factory=lambda: [])
@@ -70,10 +71,10 @@ class EncoderConfig(ModelConfig):
 
 @dataclass
 class TextEncoderConfig(EncoderConfig):
-    arch_config: ArchConfig = field(default_factory=TextEncoderArchConfig)
+    arch_config: TextEncoderArchConfig = field(default_factory=TextEncoderArchConfig)
     is_chat_model: bool = False
 
 
 @dataclass
 class ImageEncoderConfig(EncoderConfig):
-    arch_config: ArchConfig = field(default_factory=ImageEncoderArchConfig)
+    arch_config: ImageEncoderArchConfig = field(default_factory=ImageEncoderArchConfig)

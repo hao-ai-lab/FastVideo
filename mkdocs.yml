@@ -152,6 +152,7 @@ nav:
     - DMD: distillation/dmd.md
   - Attention:
     - Overview: attention/index.md
+    - Attention QAT: attention/attn_qat/index.md
     - Video Sparse Attention: attention/vsa/index.md
     - Sliding Tile Attention (Archived): attention/sta/index.md
     - Backend Development: contributing/attention_backend.md

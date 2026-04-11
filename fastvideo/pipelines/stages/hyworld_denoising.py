@@ -143,6 +143,7 @@ class HYWorldDenoisingStage(DenoisingStage):
 
         # Get latents and embeddings
         latents = batch.latents
+        assert latents is not None, "latents must be initialized before HYWorld denoising"
         prompt_embeds = batch.prompt_embeds
         assert not torch.isnan(prompt_embeds[0]).any(), "prompt_embeds contains nan"
         if batch.do_classifier_free_guidance:
@@ -163,6 +164,8 @@ class HYWorldDenoisingStage(DenoisingStage):
         # Use conditional latents directly (prepared by HYWorldImageEncodingStage)
         # batch.image_latent is already [1, 33, T, H, W] with first frame encoded, rest zeros
         cond_latents = batch.image_latent
+        assert cond_latents is not None, "image_latent must be initialized before HYWorld denoising"
+        assert viewmats is not None and Ks is not None and action is not None
 
         # Calculate chunk configuration
         latent_frames = latents.shape[2]

@@ -228,6 +228,8 @@ def convert(
         checkpoint_dir,
         output_dir=checkpoint_dir,
     )
+    if resolved is None:
+        raise FileNotFoundError(f"Could not resolve checkpoint directory from {checkpoint_dir!r}")
     dcp_dir = resolved / "dcp"
     if not dcp_dir.is_dir():
         raise FileNotFoundError(f"Missing dcp/ under {resolved}")

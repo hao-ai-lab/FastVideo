@@ -17,6 +17,7 @@ Usage:
     # Enable debug logging
     GAMECRAFT_DEBUG_LOGS=1 pytest tests/local_tests/transformers/test_gamecraft_parity.py -v
 """
+import contextlib
 import os
 import sys
 from pathlib import Path
@@ -31,6 +32,21 @@ os.environ.setdefault("MASTER_PORT", "29514")
 os.environ.setdefault("DISABLE_SP", "1")  # Disable sequence parallelism for testing
 
 repo_root = Path(__file__).resolve().parents[3]
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_parallel_state():
+    """Keep local parity tests isolated when they initialize NCCL groups."""
+    from fastvideo.distributed.parallel_state import cleanup_dist_env_and_memory
+
+    with contextlib.suppress(Exception):
+        cleanup_dist_env_and_memory()
+
+    try:
+        yield
+    finally:
+        with contextlib.suppress(Exception):
+            cleanup_dist_env_and_memory()
 
 
 def _add_official_to_path():

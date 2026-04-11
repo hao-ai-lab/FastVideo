@@ -63,7 +63,8 @@ class SRDenoisingStage(PipelineStage):
             dtype=torch.float16,  # TODO(will): hack
             supported_attention_backends=(AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.VMOBA_ATTN,
                                           AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA,
-                                          AttentionBackendEnum.SAGE_ATTN_THREE)  # hack
+                                          AttentionBackendEnum.SAGE_ATTN_THREE, AttentionBackendEnum.ATTN_QAT_INFER,
+                                          AttentionBackendEnum.ATTN_QAT_TRAIN)  # hack
         )
 
     def add_noise_to_lq(self, lq_latents: torch.Tensor, strength: float = 0.7) -> torch.Tensor:
@@ -226,6 +227,7 @@ class SRDenoisingStage(PipelineStage):
                             self.attn_metadata_builder = self.attn_metadata_builder_cls()
                             # Prepare V-MoBA parameters from config
                             moba_params = fastvideo_args.moba_config.copy()
+                            assert batch.raw_latent_shape is not None, "raw_latent_shape must be set for V-MoBA SR"
                             moba_params.update({
                                 "current_timestep": i,
                                 "raw_latent_shape": batch.raw_latent_shape[2:5],

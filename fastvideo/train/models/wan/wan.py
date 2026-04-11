@@ -46,14 +46,19 @@ if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
 
+VideoSparseAttentionMetadataBuilder: type[Any] | None
+VideoMobaAttentionMetadataBuilder: type[Any] | None
+
 try:
     from fastvideo.attention.backends.video_sparse_attn import (
-        VideoSparseAttentionMetadataBuilder, )
+        VideoSparseAttentionMetadataBuilder as _VideoSparseAttentionMetadataBuilder, )
     from fastvideo.attention.backends.vmoba import (
-        VideoMobaAttentionMetadataBuilder, )
+        VideoMobaAttentionMetadataBuilder as _VideoMobaAttentionMetadataBuilder, )
+    VideoSparseAttentionMetadataBuilder = _VideoSparseAttentionMetadataBuilder
+    VideoMobaAttentionMetadataBuilder = _VideoMobaAttentionMetadataBuilder
 except Exception:
-    VideoSparseAttentionMetadataBuilder = None  # type: ignore[assignment]
-    VideoMobaAttentionMetadataBuilder = None  # type: ignore[assignment]
+    VideoSparseAttentionMetadataBuilder = None
+    VideoMobaAttentionMetadataBuilder = None
 
 
 class WanModel(ModelBase):
@@ -327,8 +332,8 @@ class WanModel(ModelBase):
     def _init_timestep_mechanics(self) -> None:
         assert self.training_config is not None
         tc = self.training_config
-        self.timestep_shift = float(tc.pipeline_config.flow_shift  # type: ignore[union-attr]
-                                    )
+        flow_shift = tc.pipeline_config.flow_shift
+        self.timestep_shift = float(0.0 if flow_shift is None else flow_shift)
         self.num_train_timestep = int(self.noise_scheduler.num_train_timesteps)
         # min/max timestep ratios now come from method_config;
         # default to full range.
@@ -485,6 +490,7 @@ class WanModel(ModelBase):
                                   "(or flash_attn>=2.7.4) is not "
                                   "correctly installed.")
             moba_params = tc.model.moba_config.copy()
+            assert training_batch.raw_latent_shape is not None
             moba_params.update({
                 "current_timestep": (training_batch.timesteps),
                 "raw_latent_shape": (training_batch.raw_latent_shape[2:5]),

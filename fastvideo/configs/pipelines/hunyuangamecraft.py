@@ -44,7 +44,7 @@ class HunyuanGameCraftPipelineConfig(PipelineConfig):
     # Denoising parameters
     # Official GameCraft does NOT use embedded guidance (passes guidance=None)
     # It uses standard CFG with guidance_scale=6.0 instead
-    embedded_cfg_scale = None
+    embedded_cfg_scale: float | None = None
     flow_shift: int = 5  # Official GameCraft uses flow_shift=5.0
 
     # Text encoding stage - same as HunyuanVideo
@@ -60,7 +60,7 @@ class HunyuanGameCraftPipelineConfig(PipelineConfig):
     vae_precision: str = "fp16"
     text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp16", "fp16"))
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # VAE only needs decoder for inference
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True

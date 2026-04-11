@@ -10,6 +10,8 @@ logger = init_logger(__name__)
 def main(fastvideo_args: FastVideoArgs) -> None:
     maybe_init_distributed_environment_and_model_parallel(1, 1)
     preprocess_workflow_cls = WorkflowBase.get_workflow_cls(fastvideo_args)
+    if preprocess_workflow_cls is None:
+        raise ValueError(f"No workflow found for mode {fastvideo_args.mode}")
     preprocess_workflow = preprocess_workflow_cls(fastvideo_args)
     preprocess_workflow.run()
 

@@ -41,9 +41,9 @@ class Cosmos25Config(PipelineConfig):
         in_channels=16,
         out_channels=16,
         num_layers=28,
-        patch_size=[1, 2, 2],
-        max_size=[128, 240, 240],
-        rope_scale=[1.0, 3.0, 3.0],
+        patch_size=(1, 2, 2),
+        max_size=(128, 240, 240),
+        rope_scale=(1.0, 3.0, 3.0),
         text_embed_dim=1024,
         mlp_ratio=4.0,
         adaln_lora_dim=256,
@@ -75,7 +75,7 @@ class Cosmos25Config(PipelineConfig):
     vae_tiling: bool = False
     vae_sp: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
         self._vae_latent_dim = 16

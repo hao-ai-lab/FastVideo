@@ -12,8 +12,15 @@ logger = init_logger(__name__)
 # 3. Any field in ArchConfig is fixed upon initialization, and should be hidden away from users
 @dataclass
 class ArchConfig:
-    stacked_params_mapping: list[tuple[str, str, str]] = field(
+    stacked_params_mapping: list[tuple[str, str, str | int]] = field(
         default_factory=list)  # mapping from huggingface weight names to custom names
+    output_hidden_states: bool = False
+
+    def __post_init__(self) -> None:
+        pass
+
+    def __getattr__(self, name: str) -> Any:
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
 
 @dataclass
@@ -24,19 +31,22 @@ class ModelConfig:
 
     # FastVideo-specific parameters here
 
-    def __getattr__(self, name):
+    def __post_init__(self) -> None:
+        pass
+
+    def __getattr__(self, name: str) -> Any:
         # Only called if 'name' is not found in ModelConfig directly
         if hasattr(self.arch_config, name):
             return getattr(self.arch_config, name)
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
-    def __getstate__(self):
+    def __getstate__(self) -> dict[str, Any]:
         # Return a dictionary of attributes to pickle
         # Convert to dict and exclude any problematic attributes
         state = self.__dict__.copy()
         return state
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: dict[str, Any]) -> None:
         # Restore instance attributes from the unpickled state
         self.__dict__.update(state)
 

@@ -271,6 +271,12 @@ class DistillationPipeline(TrainingPipeline):
         logger.info("Loading %s from custom path: %s", module_type, model_path)
         # Set flag to prevent custom weight loading for teacher/critic models
         training_args._loading_teacher_critic_model = True
+        suppressed_attn_backend = None
+        if self._should_force_generator_attn_qat_train(training_args) and \
+                envs.FASTVIDEO_ATTENTION_BACKEND == "ATTN_QAT_TRAIN":
+            suppressed_attn_backend = os.environ.pop("FASTVIDEO_ATTENTION_BACKEND", None)
+            logger.info("Temporarily disabling FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_TRAIN while loading %s",
+                        module_type)
 
         try:
             from fastvideo.models.loader.component_loader import (PipelineComponentLoader)
@@ -307,6 +313,8 @@ class DistillationPipeline(TrainingPipeline):
             logger.info("Successfully loaded %s from %s", module_type, component_path)
             return module
         finally:
+            if suppressed_attn_backend is not None:
+                os.environ["FASTVIDEO_ATTENTION_BACKEND"] = suppressed_attn_backend
             # Always clean up the flag
             if hasattr(training_args, '_loading_teacher_critic_model'):
                 delattr(training_args, '_loading_teacher_critic_model')

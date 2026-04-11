@@ -85,9 +85,6 @@ class TextEncodingStage(PipelineStage):
                 encoder_index=all_indices,
                 return_attention_mask=True,
             )
-            if self._last_audio_embeds is not None:
-                batch.extra["ltx2_audio_negative_embeds"] = self._last_audio_embeds
-
             assert batch.negative_prompt_embeds is not None
             for ne in neg_embeds_list:
                 batch.negative_prompt_embeds.append(ne)
@@ -186,7 +183,6 @@ class TextEncodingStage(PipelineStage):
         postprocess_funcs = fastvideo_args.pipeline_config.postprocess_text_funcs
         encoder_cfgs = fastvideo_args.pipeline_config.text_encoder_configs
         is_ltx2 = getattr(fastvideo_args.pipeline_config.dit_config, "prefix", "") == "ltx2"
-
         if return_type not in ("list", "dict", "stack"):
             raise ValueError(f"Invalid return_type '{return_type}'. Expected one of: 'list', 'dict', 'stack'")
 

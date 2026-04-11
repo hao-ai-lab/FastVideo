@@ -11,7 +11,7 @@ from __future__ import annotations
 import contextlib
 import os
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, cast
 
 import imageio
 import numpy as np
@@ -29,6 +29,7 @@ from fastvideo.distributed import (
 )
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
+from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.train.callbacks.callback import Callback
 from fastvideo.train.utils.instantiate import resolve_target
 from fastvideo.train.utils.moduleloader import (
@@ -272,7 +273,7 @@ class ValidationCallback(Callback):
             return self._pipeline
 
         tc = self.training_config
-        PipelineCls = resolve_target(self.pipeline_target)
+        PipelineCls = cast(type[ComposedPipelineBase], resolve_target(self.pipeline_target))
         flow_shift = getattr(
             tc.pipeline_config,
             "flow_shift",

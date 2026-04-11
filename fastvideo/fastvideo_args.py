@@ -172,6 +172,7 @@ class FastVideoArgs:
 
     override_text_encoder_safetensors: str | None = None  # path to safetensors file for text encoder override
     override_text_encoder_quant: QuantizationMethods = None
+    transformer_quant: QuantizationMethods = None
 
     override_transformer_cls_name: str | None = None
     init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
@@ -183,7 +184,7 @@ class FastVideoArgs:
     # dmd_denoising_steps: List[int] | None = field(default=None)
 
     # MoE parameters used by Wan2.2
-    boundary_ratio: float | None = 0.875
+    boundary_ratio: float = 0.875
 
     @property
     def training_mode(self) -> bool:
@@ -200,6 +201,9 @@ class FastVideoArgs:
                 raise
         self._apply_ltx2_vae_overrides()
         self.check_fastvideo_args()
+
+    def __getattr__(self, name: str) -> Any:
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def _apply_ltx2_vae_overrides(self) -> None:
         if self.pipeline_config is None:
@@ -461,8 +465,7 @@ class FastVideoArgs:
             "--use-fsdp-inference",
             action=StoreBoolean,
             help=
-            "Use FSDP for inference by sharding the model weights. FSDP helps reduce GPU memory usage but may introduce"
-            + " weight transfer overhead depending on the specific setup. Enable if run out of memory.",
+            "Use FSDP for inference by sharding the model weights. Latency is very low due to prefetch--enable if run out of memory.",
         )
         parser.add_argument(
             "--text-encoder-cpu-offload",
@@ -527,6 +530,13 @@ class FastVideoArgs:
             choices=QUANTIZATION_METHODS,
             default=FastVideoArgs.override_text_encoder_quant,
             help="Quantization method for text encoder override",
+        )
+        parser.add_argument(
+            "--transformer-quant",
+            type=str,
+            choices=QUANTIZATION_METHODS,
+            default=FastVideoArgs.transformer_quant,
+            help="Quantization method for transformer loading",
         )
         parser.add_argument(
             "--override-transformer-cls-name",
@@ -782,7 +792,8 @@ class TrainingArgs(FastVideoArgs):
     trackers: list[str] = dataclasses.field(default_factory=list)
     tracker_project_name: str = ""
     wandb_run_name: str = ""
-    seed: int | None = None
+    seed: int = 0
+    _loading_teacher_critic_model: bool = False
 
     # output
     output_dir: str = ""
@@ -855,6 +866,8 @@ class TrainingArgs(FastVideoArgs):
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
     warp_denoising_step: bool = False
+    generator_4bit_attn: bool = False
+    generator_4bit_linear: bool = False
 
     # Self-forcing specific arguments
     num_frame_per_block: int = 3

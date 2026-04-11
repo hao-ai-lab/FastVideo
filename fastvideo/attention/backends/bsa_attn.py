@@ -33,13 +33,11 @@ from fastvideo.logger import init_logger
 try:
     from fastvideo.attention.utils.flash_attn_no_pad import (
         flash_attn_varlen_func_impl, )
+
     FLASH_ATTN_AVAILABLE = True
 except ImportError:
-    try:
-        from flash_attn import flash_attn_varlen_func as flash_attn_varlen_func_impl
-        FLASH_ATTN_AVAILABLE = True
-    except ImportError:
-        FLASH_ATTN_AVAILABLE = False
+    flash_attn_varlen_func_impl = None
+    FLASH_ATTN_AVAILABLE = False
 
 logger = init_logger(__name__)
 

@@ -35,6 +35,7 @@ surfaces:
       prompt_txt: request.inputs.prompt_path
       override_text_encoder_safetensors: generator.pipeline.components.text_encoder_weights
       override_text_encoder_quant: generator.engine.quantization.text_encoder_quant
+      transformer_quant: generator.engine.quantization.transformer_quant
       override_transformer_cls_name: generator.pipeline.components.override_transformer_cls_name
       init_weights_from_safetensors: generator.pipeline.components.transformer_weights
       init_weights_from_safetensors_2: generator.pipeline.components.transformer_2_weights
@@ -345,6 +346,7 @@ surfaces:
       num_inference_steps: request.sampling.num_inference_steps
       num_inference_steps_sr: request.sampling.num_inference_steps_sr
       guidance_scale: request.sampling.guidance_scale
+      guidance_scale_2: request.sampling.guidance_scale_2
       guidance_rescale: request.sampling.guidance_rescale
       boundary_ratio: request.sampling.boundary_ratio
       sigmas: request.sampling.sigmas
@@ -364,15 +366,7 @@ surfaces:
       data_type: "Derived from the request shape and not a public input."
 
   sampling_param_extensions:
-    moved:
-      guidance_scale_2:
-        target: request.sampling.guidance_scale_2
-        sources:
-          - fastvideo.configs.sample.lingbotworld.LingBotWorld_SamplingParam
-          - fastvideo.configs.sample.lingbotworld.Wan2_2_I2V_A14B_SamplingParam
-          - fastvideo.configs.sample.wan.SelfForcingWan2_2_T2V_A14B_480P_SamplingParam
-          - fastvideo.configs.sample.wan.Wan2_2_I2V_A14B_SamplingParam
-          - fastvideo.configs.sample.wan.Wan2_2_T2V_A14B_SamplingParam
+    moved: {}
     profile_owned:
       action_list:
         target: request.extensions.hunyuangamecraft.action_list
@@ -597,6 +591,7 @@ cli:
       - text_encoder_cpu_offload
       - text_encoder_precisions
       - torch_compile_kwargs
+      - transformer_quant
       - tp_size
       - trust_remote_code
       - use_fsdp_inference
@@ -702,6 +697,7 @@ cli:
       - text_encoder_cpu_offload
       - text_encoder_precisions
       - torch_compile_kwargs
+      - transformer_quant
       - tp_size
       - trust_remote_code
       - use_fsdp_inference

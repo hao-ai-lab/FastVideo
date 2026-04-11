@@ -61,9 +61,10 @@ class DenoisingStage(PipelineStage):
         self.attn_backend = get_attn_backend(
             head_size=attn_head_size,
             dtype=torch.float16,  # TODO(will): hack
-            supported_attention_backends=(AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.BSA_ATTN,
-                                          AttentionBackendEnum.VMOBA_ATTN, AttentionBackendEnum.FLASH_ATTN,
-                                          AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.SAGE_ATTN_THREE)  # hack
+            supported_attention_backends=(
+                AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.BSA_ATTN, AttentionBackendEnum.VMOBA_ATTN,
+                AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.SAGE_ATTN_THREE,
+                AttentionBackendEnum.ATTN_QAT_INFER, AttentionBackendEnum.ATTN_QAT_TRAIN)  # hack
         )
 
     def forward(
@@ -205,6 +206,8 @@ class DenoisingStage(PipelineStage):
             temporal_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_temporal
             spatial_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
             patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
+            if not isinstance(patch_size, tuple):
+                raise ValueError(f"Expected 3D patch_size tuple for denoising, got {patch_size!r}")
             seq_len = ((F - 1) // temporal_scale + 1) * (batch.height // spatial_scale) * (
                 batch.width // spatial_scale) // (patch_size[1] * patch_size[2])
 
@@ -317,6 +320,7 @@ class DenoisingStage(PipelineStage):
                             self.attn_metadata_builder = self.attn_metadata_builder_cls()
                             # Prepare V-MoBA parameters from config
                             moba_params = fastvideo_args.moba_config.copy()
+                            assert batch.raw_latent_shape is not None, "raw_latent_shape must be set for V-MoBA"
                             moba_params.update({
                                 "current_timestep": i,
                                 "raw_latent_shape": batch.raw_latent_shape[2:5],
@@ -1139,9 +1143,9 @@ class DmdDenoisingStage(DenoisingStage):
 
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones([1], dtype=torch.long, device=pred_video.device)
-                        noise = torch.randn(video_raw_latent_shape,
-                                            dtype=pred_video.dtype,
-                                            generator=batch.generator[0]).to(self.device)
+                        noise_generator = batch.generator[0] if isinstance(batch.generator, list) else batch.generator
+                        noise = torch.randn(video_raw_latent_shape, dtype=pred_video.dtype,
+                                            generator=noise_generator).to(self.device)
                         latents = self.scheduler.add_noise(pred_video.flatten(0, 1), noise.flatten(0, 1),
                                                            next_timestep).unflatten(0, pred_video.shape[:2])
                     else:

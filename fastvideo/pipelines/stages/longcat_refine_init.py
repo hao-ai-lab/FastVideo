@@ -83,6 +83,8 @@ class LongCatRefineInitStage(PipelineStage):
         else:
             # Path-based refine: load video from disk (original design)
             logger.info("Initializing LongCat refinement from file: %s", refine_from)
+            if refine_from is None:
+                raise ValueError("refine_from must be provided when stage1_video is not set")
             stage1_video_path = Path(refine_from)
             if not stage1_video_path.exists():
                 raise FileNotFoundError(f"Stage1 video not found: {refine_from}")

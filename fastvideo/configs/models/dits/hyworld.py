@@ -85,7 +85,7 @@ class HYWorldArchConfig(DiTArchConfig):
     reverse_param_names_mapping: dict = field(default_factory=lambda: {})
 
     # Parameters from HY-WorldPlay config.json (loaded from checkpoint)
-    patch_size: list | tuple | int = field(default_factory=lambda: [1, 1, 1])
+    patch_size: tuple[int, int, int] = (1, 1, 1)
     # Base latent channels - will be expanded in __post_init__ if concat_condition=True
     in_channels: int = 32
     concat_condition: bool = True
@@ -120,7 +120,7 @@ class HYWorldArchConfig(DiTArchConfig):
     task_type: str = "i2v"
     exclude_lora_layers: list[str] = field(default_factory=lambda: ["img_in", "txt_in", "time_in", "vector_in"])
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         super().__post_init__()
         # Convert HY-WorldPlay naming to FastVideo naming conventions
         self.num_attention_heads: int = self.heads_num

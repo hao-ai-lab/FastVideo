@@ -4,7 +4,7 @@ GEN3C-specific pipeline stages, allowing us to keep conditioning/latent/denoisin
 separate from pipeline orchestration.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import torch
 from diffusers.utils.torch_utils import randn_tensor
@@ -109,14 +109,18 @@ class Gen3CConditioningStage(PipelineStage):
 
         height = getattr(batch, 'height', None) or getattr(pipeline_config, 'video_resolution', (720, 1280))[0]
         width = getattr(batch, 'width', None) or getattr(pipeline_config, 'video_resolution', (720, 1280))[1]
-        num_frames = getattr(batch, 'num_frames', None) or getattr(pipeline_config, 'num_frames', 121)
+        num_frames_value = getattr(batch, 'num_frames', None) or getattr(pipeline_config, 'num_frames', 121)
+        num_frames = int(cast(int, num_frames_value))
 
-        trajectory_type = (getattr(batch, 'trajectory_type', None) or batch_extra.get("trajectory_type")
-                           or getattr(pipeline_config, 'default_trajectory_type', 'left'))
-        movement_distance = (getattr(batch, 'movement_distance', None) or batch_extra.get("movement_distance")
-                             or getattr(pipeline_config, 'default_movement_distance', 0.3))
-        camera_rotation = (getattr(batch, 'camera_rotation', None) or batch_extra.get("camera_rotation")
-                           or getattr(pipeline_config, 'default_camera_rotation', 'center_facing'))
+        trajectory_type = str(
+            getattr(batch, 'trajectory_type', None) or batch_extra.get("trajectory_type")
+            or getattr(pipeline_config, 'default_trajectory_type', 'left'))
+        movement_distance_value = (getattr(batch, 'movement_distance', None) or batch_extra.get("movement_distance")
+                                   or getattr(pipeline_config, 'default_movement_distance', 0.3))
+        movement_distance = float(cast(float, movement_distance_value))
+        camera_rotation = str(
+            getattr(batch, 'camera_rotation', None) or batch_extra.get("camera_rotation")
+            or getattr(pipeline_config, 'default_camera_rotation', 'center_facing'))
 
         frame_buffer_max = getattr(pipeline_config, 'frame_buffer_max', 2)
         noise_aug_strength = getattr(pipeline_config, 'noise_aug_strength', 0.0)
@@ -488,6 +492,7 @@ class Gen3CDenoisingStage(DenoisingStage):
 
     def __init__(self, transformer, scheduler, pipeline=None) -> None:
         super().__init__(transformer, scheduler, pipeline)
+        self.callback_on_step_end_tensor_inputs: tuple[str, ...] = ()
 
     def _has_edm_preconditioning(self) -> bool:
         return hasattr(self.scheduler, "precondition_inputs")
@@ -582,6 +587,7 @@ class Gen3CDenoisingStage(DenoisingStage):
         autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         latents = batch.latents
+        assert latents is not None, "latents must be initialized before GEN3C denoising"
         num_inference_steps = batch.num_inference_steps
         guidance_scale = batch.guidance_scale
         fps = getattr(fastvideo_args.pipeline_config, 'fps', 24)
@@ -622,6 +628,7 @@ class Gen3CDenoisingStage(DenoisingStage):
                     ))
 
                 timestep = t.flatten().expand(latents.size(0))
+                assert batch.batch_size is not None and batch.height is not None and batch.width is not None
                 padding_mask = torch.zeros(
                     batch.batch_size,
                     1,
