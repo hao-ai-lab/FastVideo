@@ -22,8 +22,7 @@ def _flux_clip_pooled_postprocess(outputs: BaseEncoderOutput) -> torch.Tensor:
     """CLIP branch for FLUX: Diffusers uses pooled prompt embeddings only."""
     if outputs.pooler_output is None:
         raise RuntimeError(
-            "FLUX CLIP conditioning requires pooler_output. Ensure the CLIP text encoder returns pooled features."
-        )
+            "FLUX CLIP conditioning requires pooler_output. Ensure the CLIP text encoder returns pooled features.")
     return outputs.pooler_output
 
 
@@ -50,12 +49,10 @@ class FluxPipelineConfig(PipelineConfig):
     flow_shift: float | None = None
 
     text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (CLIPTextConfig(), T5LargeConfig()))
-    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
-        default_factory=lambda: (preprocess_text, preprocess_text)
-    )
+    preprocess_text_funcs: tuple[Callable[[str], str],
+                                 ...] = field(default_factory=lambda: (preprocess_text, preprocess_text))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(
-        default_factory=lambda: (_flux_clip_pooled_postprocess, _flux_t5_sequence_postprocess)
-    )
+        default_factory=lambda: (_flux_clip_pooled_postprocess, _flux_t5_sequence_postprocess))
 
     dit_precision: str = "bf16"
     vae_precision: str = "fp32"
@@ -70,9 +67,8 @@ class FluxPipelineConfig(PipelineConfig):
             te_cfgs[0].tokenizer_kwargs.setdefault("return_tensors", "pt")
         if len(te_cfgs) >= 2:
             cap = 512
-            te_cfgs[1].tokenizer_kwargs["max_length"] = min(
-                int(te_cfgs[1].tokenizer_kwargs.get("max_length", cap)), cap
-            )
+            te_cfgs[1].tokenizer_kwargs["max_length"] = min(int(te_cfgs[1].tokenizer_kwargs.get("max_length", cap)),
+                                                            cap)
             te_cfgs[1].tokenizer_kwargs.setdefault("padding", "max_length")
             te_cfgs[1].tokenizer_kwargs.setdefault("truncation", True)
             te_cfgs[1].tokenizer_kwargs.setdefault("return_tensors", "pt")
