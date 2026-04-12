@@ -364,10 +364,15 @@ class ParallelTiledVAE(ABC):
             if i > 0:
                 tile = tile[:, :, 1:, :, :]
             row.append(tile)
+        blend_latent_num_frames = max(
+            1,
+            self.blend_num_frames // self.temporal_compression_ratio,
+        )
         result_row = []
         for i, tile in enumerate(row):
             if i > 0:
-                tile = self.blend_t(row[i - 1], tile, self.blend_num_frames)
+                tile = self.blend_t(row[i - 1], tile,
+                                    blend_latent_num_frames)
                 result_row.append(
                     tile[:, :, :tile_latent_stride_num_frames, :, :])
             else:

@@ -55,13 +55,11 @@ def compress_kernel(
 
     x_offset = idx_bh * L * D
     xm_offset = idx_bh * ((L + BLOCK_L - 1) // BLOCK_L) * D
-    x = tl.load(X + x_offset + offs_l[:, None] * D + offs_d[None, :],
-                mask=offs_l[:, None] < L)
+    x = tl.load(X + x_offset + offs_l[:, None] * D + offs_d[None, :], mask=offs_l[:, None] < L)
 
     nx = min(BLOCK_L, L - idx_l * BLOCK_L)
     x_mean = tl.sum(x, axis=0, dtype=tl.float32) / nx
-    tl.store(XM + xm_offset + idx_l * D + offs_d,
-             x_mean.to(XM.dtype.element_ty))
+    tl.store(XM + xm_offset + idx_l * D + offs_d, x_mean.to(XM.dtype.element_ty))
 
 
 def mean_pool(x: torch.Tensor, BLK: int) -> torch.Tensor:
@@ -98,8 +96,7 @@ def get_block_map(
         lut: Top-k indices of shape (B, H, num_q_blocks, topk)
         topk: Number of key blocks selected
     """
-    arg_k = k - torch.mean(
-        k, dim=-2, keepdim=True)  # smooth-k technique from SageAttention
+    arg_k = k - torch.mean(k, dim=-2, keepdim=True)  # smooth-k technique from SageAttention
     pooled_qblocks = mean_pool(q, BLKQ)
     pooled_kblocks = mean_pool(arg_k, BLKK)
     pooled_score = pooled_qblocks @ pooled_kblocks.transpose(-1, -2)
@@ -300,11 +297,7 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
             topk_ratio = attn_metadata.topk_ratio  # type: ignore[union-attr]
 
         # Compute block-sparse attention pattern
-        sparse_map, lut, real_topk = get_block_map(q,
-                                                   k,
-                                                   topk_ratio=topk_ratio,
-                                                   BLKQ=self.BLKQ,
-                                                   BLKK=self.BLKK)
+        sparse_map, lut, real_topk = get_block_map(q, k, topk_ratio=topk_ratio, BLKQ=self.BLKQ, BLKK=self.BLKK)
 
         # Convert to compute dtype
         q = q.to(self.dtype)
@@ -312,8 +305,7 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         v = v.to(self.dtype)
 
         # Sparse attention
-        o_s = _attention.apply(q, k, v, sparse_map, lut, real_topk, self.BLKQ,
-                               self.BLKK)
+        o_s = _attention.apply(q, k, v, sparse_map, lut, real_topk, self.BLKQ, self.BLKK)
 
         # Linear attention with feature maps
         q_linear = self.feature_map_q(q).contiguous().to(self.dtype)
@@ -412,14 +404,10 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
         nn.Module.__init__(self)
 
         if not SAGESLA_ENABLED:
-            raise ImportError(
-                "SageSLA requires spas_sage_attn. "
-                "Install with: pip install git+https://github.com/thu-ml/SpargeAttn.git"
-            )
+            raise ImportError("SageSLA requires spas_sage_attn. "
+                              "Install with: pip install git+https://github.com/thu-ml/SpargeAttn.git")
 
-        assert head_size in [
-            64, 128
-        ], f"SageSLA requires head_size in [64, 128], got {head_size}"
+        assert head_size in [64, 128], f"SageSLA requires head_size in [64, 128], got {head_size}"
 
         self.num_heads = num_heads
         self.head_size = head_size
@@ -509,11 +497,7 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
             BLKQ, BLKK = 128, 64
 
         # Compute block-sparse attention pattern
-        sparse_map, lut, real_topk = get_block_map(q,
-                                                   k,
-                                                   topk_ratio=topk_ratio,
-                                                   BLKQ=BLKQ,
-                                                   BLKK=BLKK)
+        sparse_map, lut, real_topk = get_block_map(q, k, topk_ratio=topk_ratio, BLKQ=BLKQ, BLKK=BLKK)
 
         # Convert to compute dtype
         q = q.to(self.dtype)
@@ -526,47 +510,33 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
         scale = 1.0 / (headdim**0.5)
 
         # Quantize Q, K to INT8
-        q_int8, q_scale, k_int8, k_scale = get_vanilla_qk_quant(
-            q, k, km, BLKQ, BLKK)
+        q_int8, q_scale, k_int8, k_scale = get_vanilla_qk_quant(q, k, km, BLKQ, BLKK)
         lut_triton, valid_block_num = block_map_lut_triton(sparse_map)
 
         # Quantize V to FP8
         b, h_kv, kv_len, head_dim = v.shape
         padded_len = (kv_len + 127) // 128 * 128
-        v_transposed_permutted = torch.empty((b, h_kv, head_dim, padded_len),
-                                             dtype=v.dtype,
-                                             device=v.device)
+        v_transposed_permutted = torch.empty((b, h_kv, head_dim, padded_len), dtype=v.dtype, device=v.device)
         fused.transpose_pad_permute_cuda(v, v_transposed_permutted, 1)
-        v_fp8 = torch.empty(v_transposed_permutted.shape,
-                            dtype=torch.float8_e4m3fn,
-                            device=v.device)
-        v_scale = torch.empty((b, h_kv, head_dim),
-                              dtype=torch.float32,
-                              device=v.device)
-        fused.scale_fuse_quant_cuda(v_transposed_permutted, v_fp8, v_scale,
-                                    kv_len, 2.25, 1)
+        v_fp8 = torch.empty(v_transposed_permutted.shape, dtype=torch.float8_e4m3fn, device=v.device)
+        v_scale = torch.empty((b, h_kv, head_dim), dtype=torch.float32, device=v.device)
+        fused.scale_fuse_quant_cuda(v_transposed_permutted, v_fp8, v_scale, kv_len, 2.25, 1)
 
         # Sparse attention with quantized kernels
         o_s = torch.empty_like(q)
         if arch == "sm90":
             qattn.qk_int8_sv_f8_accum_f32_block_sparse_attn_inst_buf_fuse_v_scale_sm90(
-                q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num,
-                q_scale, k_scale, v_scale, 1, False, 1, scale)
+                q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num, q_scale, k_scale, v_scale, 1, False, 1, scale)
         else:
-            pvthreshold = torch.full((q.shape[-3], ),
-                                     1e6,
-                                     dtype=torch.float32,
-                                     device=q.device)
+            pvthreshold = torch.full((q.shape[-3], ), 1e6, dtype=torch.float32, device=q.device)
             if SAGE2PP_ENABLED:
                 qk_int8_sv_f8_accum_f16_block_sparse_attn_inst_buf_fuse_v_scale_with_pv_threshold(
-                    q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num,
-                    pvthreshold, q_scale, k_scale, v_scale, 1, False, 1, scale,
-                    0)
+                    q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num, pvthreshold, q_scale, k_scale, v_scale, 1,
+                    False, 1, scale, 0)
             else:
                 qattn.qk_int8_sv_f8_accum_f32_block_sparse_attn_inst_buf_fuse_v_scale_with_pv_threshold(
-                    q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num,
-                    pvthreshold, q_scale, k_scale, v_scale, 1, False, 1, scale,
-                    0)
+                    q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num, pvthreshold, q_scale, k_scale, v_scale, 1,
+                    False, 1, scale, 0)
         # ========== END SPARGE ==========
 
         # Linear attention with feature maps

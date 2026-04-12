@@ -59,7 +59,11 @@ if [ -z "${TEST_TYPE:-}" ]; then
 fi
 log "Test type: $TEST_TYPE"
 
-MODAL_ENV="BUILDKITE_REPO=$BUILDKITE_REPO BUILDKITE_COMMIT=$BUILDKITE_COMMIT BUILDKITE_PULL_REQUEST=$BUILDKITE_PULL_REQUEST IMAGE_VERSION=$IMAGE_VERSION"
+EFFECTIVE_PR=${BUILDKITE_PULL_REQUEST:-false}
+if [ "$EFFECTIVE_PR" = "false" ] && [ -n "${PR_NUMBER:-}" ]; then
+    EFFECTIVE_PR=$PR_NUMBER
+fi
+MODAL_ENV="BUILDKITE_REPO=$BUILDKITE_REPO BUILDKITE_COMMIT=$BUILDKITE_COMMIT BUILDKITE_PULL_REQUEST=$EFFECTIVE_PR IMAGE_VERSION=$IMAGE_VERSION"
 
 case "$TEST_TYPE" in
     "encoder")
@@ -118,6 +122,14 @@ case "$TEST_TYPE" in
     "lora_extraction")
         log "Running LoRA extraction tests..."
         MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_lora_extraction_tests"
+        ;;
+    "performance")
+        log "Running performance tests..."
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_performance_tests"
+        ;;
+    "api_server")
+        log "Running API server integration tests..."
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_api_server_tests"
         ;;
     *)
         log "Error: Unknown test type: $TEST_TYPE"

@@ -54,17 +54,13 @@ class AttentionMetadata:
     # Current step of diffusion process
     current_timestep: int
 
-    def asdict_zerocopy(self,
-                        skip_fields: set[str] | None = None) -> dict[str, Any]:
+    def asdict_zerocopy(self, skip_fields: set[str] | None = None) -> dict[str, Any]:
         """Similar to dataclasses.asdict, but avoids deepcopying."""
         if skip_fields is None:
             skip_fields = set()
         # Note that if we add dataclasses as fields, they will need
         # similar handling.
-        return {
-            field.name: getattr(self, field.name)
-            for field in fields(self) if field.name not in skip_fields
-        }
+        return {field.name: getattr(self, field.name) for field in fields(self) if field.name not in skip_fields}
 
 
 T = TypeVar("T", bound=AttentionMetadata)
@@ -125,8 +121,7 @@ class AttentionImpl(ABC, Generic[T]):
     ) -> None:
         raise NotImplementedError
 
-    def preprocess_qkv(self, qkv: torch.Tensor,
-                       attn_metadata: T) -> torch.Tensor:
+    def preprocess_qkv(self, qkv: torch.Tensor, attn_metadata: T) -> torch.Tensor:
         """Preprocess QKV tensor before performing attention operation.
 
         Default implementation returns the tensor unchanged.

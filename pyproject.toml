@@ -56,6 +56,7 @@ dependencies = [
     "flask",
     "flask_restful",
     "aiohttp",
+    "aiofiles",
     "huggingface_hub",
     "cloudpickle",
     "omegaconf",
@@ -79,6 +80,10 @@ dependencies = [
     "torchcodec",
     "ray>=2.49.1",
     "ftfy==6.3.1",
+
+    # Job Runner
+    "fastapi==0.129.0",
+    "uvicorn==0.41.0"
 ]
 
 [tool.uv]
@@ -111,6 +116,8 @@ explicit = true
 
 lint = [
     "pre-commit==4.0.1",
+    "types-aiofiles",
+    "types-requests",
 ]
 
 test = [
@@ -143,11 +150,11 @@ check_untyped_defs = true
 follow_imports = "silent"
 
 [tool.codespell]
-skip ="./data,./wandb"
+skip = "./data,./wandb,ui/package-lock.json"
 
 [tool.ruff]
-# Allow lines to be as long as 80.
-line-length = 80
+# Allow lines to be as long as 120.
+line-length = 120
 
 [tool.ruff.lint]
 select = [
@@ -184,10 +191,10 @@ ignore = [
 
 
 [tool.yapf]
-column_limit = 80
+column_limit = 120
 
 [tool.isort]
-line_length = 80
+line_length = 120
 use_parentheses = true
 skip_gitignore = true
 

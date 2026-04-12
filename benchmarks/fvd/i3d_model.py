@@ -19,16 +19,12 @@ class I3DFeatureExtractor(nn.Module):
     REPO_ID = 'flateon/FVD-I3D-torchscript'
     MODEL_FILENAME = 'i3d_torchscript.pt'
 
-    def __init__(self,
-                 device: str = 'cuda',
-                 cache_dir: str | Path | None = None):
+    def __init__(self, device: str = 'cuda', cache_dir: str | Path | None = None):
         super().__init__()
 
         self.device_str = device
         if device == 'cuda' and not torch.cuda.is_available():
-            print(
-                "Warning: CUDA requested but not available – falling back to CPU"
-            )
+            print("Warning: CUDA requested but not available – falling back to CPU")
             self.device = torch.device('cpu')
         else:
             self.device = torch.device(device)
@@ -51,9 +47,7 @@ class I3DFeatureExtractor(nn.Module):
 
         try:
             # Download model from Hugging Face Hub
-            model_path = hf_hub_download(repo_id=self.REPO_ID,
-                                         filename=self.MODEL_FILENAME,
-                                         cache_dir=self.cache_dir)
+            model_path = hf_hub_download(repo_id=self.REPO_ID, filename=self.MODEL_FILENAME, cache_dir=self.cache_dir)
 
             # Load directly to chosen device
             model = torch.jit.load(model_path, map_location=self.device)
@@ -61,10 +55,9 @@ class I3DFeatureExtractor(nn.Module):
             return model
 
         except Exception as e:
-            raise RuntimeError(
-                f"Failed to load I3D model from Hugging Face Hub. Error: {e}\n"
-                f"Ensure you have internet connection and huggingface_hub installed:\n"
-                f"pip install huggingface_hub") from e
+            raise RuntimeError(f"Failed to load I3D model from Hugging Face Hub. Error: {e}\n"
+                               f"Ensure you have internet connection and huggingface_hub installed:\n"
+                               f"pip install huggingface_hub") from e
 
     def preprocess(self, videos: torch.Tensor) -> torch.Tensor:
         """
@@ -88,10 +81,7 @@ class I3DFeatureExtractor(nn.Module):
         # Resize to 224x224 if needed
         if H != 224 or W != 224:
             videos = videos.reshape(B * T, C, H, W)
-            videos = F.interpolate(videos,
-                                   size=(224, 224),
-                                   mode='bilinear',
-                                   align_corners=False)
+            videos = F.interpolate(videos, size=(224, 224), mode='bilinear', align_corners=False)
             videos = videos.reshape(B, T, C, 224, 224)
 
         # Convert to [B, C, T, H, W] format
@@ -100,10 +90,7 @@ class I3DFeatureExtractor(nn.Module):
         return videos
 
     @torch.no_grad()
-    def extract_features(self,
-                         videos: torch.Tensor,
-                         batch_size: int = 32,
-                         verbose: bool = True) -> torch.Tensor:
+    def extract_features(self, videos: torch.Tensor, batch_size: int = 32, verbose: bool = True) -> torch.Tensor:
         """
         Extract I3D features
         
@@ -127,16 +114,11 @@ class I3DFeatureExtractor(nn.Module):
             batch = self.preprocess(batch)  # Now returns [B, C, T, H, W]
 
             # Use the HF model without rescale/resize (we handle it in preprocess)
-            features = self.model(batch,
-                                  rescale=False,
-                                  resize=False,
-                                  return_features=True)
+            features = self.model(batch, rescale=False, resize=False, return_features=True)
 
             all_features.append(features.cpu())
 
         return torch.cat(all_features, dim=0)
 
-    def __call__(self,
-                 videos: torch.Tensor,
-                 batch_size: int = 32) -> torch.Tensor:
+    def __call__(self, videos: torch.Tensor, batch_size: int = 32) -> torch.Tensor:
         return self.extract_features(videos, batch_size=batch_size)

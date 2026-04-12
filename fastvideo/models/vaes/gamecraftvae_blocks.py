@@ -41,10 +41,7 @@ class CausalConv3d(nn.Module):
     ):
         super().__init__()
         self.pad_mode = pad_mode
-        if isinstance(kernel_size, int):
-            k = kernel_size
-        else:
-            k = kernel_size[0]
+        k = kernel_size if isinstance(kernel_size, int) else kernel_size[0]
         if disable_causal:
             padding = (k // 2, k // 2, k // 2, k // 2, k // 2, k // 2)
         else:

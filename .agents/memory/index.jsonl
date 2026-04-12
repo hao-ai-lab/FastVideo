@@ -1,0 +1,4 @@
+{"name": "codebase-map", "description": "High-level structural index of the FastVideo-WorldModel repository", "path": "codebase-map/README.md", "status": "ready", "trust": "high"}
+{"name": "evaluation-registry", "description": "Catalog of all evaluation metrics with detailed explanations, implementation status, and usage guides", "path": "evaluation-registry/README.md", "status": "draft", "trust": "medium"}
+{"name": "experiment-journal", "description": "Living log of all experiments with hypotheses, configs, metrics, and insights", "path": "experiment-journal/README.md", "status": "draft", "trust": "medium"}
+{"name": "related-work", "description": "Index of related papers, repos, and blog posts with structured comparisons to FastVideo", "path": "related-work/README.md", "status": "draft", "trust": "low"}

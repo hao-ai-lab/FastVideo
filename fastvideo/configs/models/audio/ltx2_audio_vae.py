@@ -15,17 +15,14 @@ class LTX2AudioArchConfig(ArchConfig):
 
 @dataclass
 class LTX2AudioEncoderConfig(ModelConfig):
-    arch_config: ArchConfig = field(default_factory=lambda: LTX2AudioArchConfig(
-        architectures=["LTX2AudioEncoder"]))
+    arch_config: ArchConfig = field(default_factory=lambda: LTX2AudioArchConfig(architectures=["LTX2AudioEncoder"]))
 
 
 @dataclass
 class LTX2AudioDecoderConfig(ModelConfig):
-    arch_config: ArchConfig = field(default_factory=lambda: LTX2AudioArchConfig(
-        architectures=["LTX2AudioDecoder"]))
+    arch_config: ArchConfig = field(default_factory=lambda: LTX2AudioArchConfig(architectures=["LTX2AudioDecoder"]))
 
 
 @dataclass
 class LTX2VocoderConfig(ModelConfig):
-    arch_config: ArchConfig = field(default_factory=lambda: LTX2AudioArchConfig(
-        architectures=["LTX2Vocoder"]))
+    arch_config: ArchConfig = field(default_factory=lambda: LTX2AudioArchConfig(architectures=["LTX2Vocoder"]))

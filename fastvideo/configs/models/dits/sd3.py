@@ -16,8 +16,7 @@ class SD3Transformer2DArchConfig(DiTArchConfig):
     caption_projection_dim: int = 1536
     pooled_projection_dim: int = 2048
     pos_embed_max_size: int = 384
-    dual_attention_layers: list[int] = field(
-        default_factory=lambda: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+    dual_attention_layers: list[int] = field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
     qk_norm: str = "rms_norm"
     in_channels: int = 16
     out_channels: int = 16
@@ -26,6 +25,5 @@ class SD3Transformer2DArchConfig(DiTArchConfig):
 
 @dataclass
 class SD3DiTConfig(DiTConfig):
-    arch_config: DiTArchConfig = field(
-        default_factory=SD3Transformer2DArchConfig)
+    arch_config: DiTArchConfig = field(default_factory=SD3Transformer2DArchConfig)
     prefix: str = "sd3"

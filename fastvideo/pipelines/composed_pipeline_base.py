@@ -13,10 +13,8 @@ from typing import Any, cast
 import torch
 
 from fastvideo.configs.pipelines import PipelineConfig
-from fastvideo.distributed import (
-    maybe_init_distributed_environment_and_model_parallel, get_world_group)
-from fastvideo.distributed.communication_op import (
-    warmup_sequence_parallel_communication)
+from fastvideo.distributed import (maybe_init_distributed_environment_and_model_parallel, get_world_group)
+from fastvideo.distributed.communication_op import (warmup_sequence_parallel_communication)
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.profiler import get_or_create_profiler
@@ -24,8 +22,7 @@ from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages import PipelineStage
 import fastvideo.envs as envs
-from fastvideo.utils import (maybe_download_model,
-                             verify_model_config_and_directory)
+from fastvideo.utils import (maybe_download_model, verify_model_config_and_directory)
 
 logger = init_logger(__name__)
 
@@ -70,11 +67,9 @@ class ComposedPipelineBase(ABC):
             self._required_config_modules = required_config_modules
 
         if self._required_config_modules is None:
-            raise NotImplementedError(
-                "Subclass must set _required_config_modules")
+            raise NotImplementedError("Subclass must set _required_config_modules")
 
-        maybe_init_distributed_environment_and_model_parallel(
-            fastvideo_args.tp_size, fastvideo_args.sp_size)
+        maybe_init_distributed_environment_and_model_parallel(fastvideo_args.tp_size, fastvideo_args.sp_size)
 
         # Torch profiler. Enabled and configured through env vars:
         # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace
@@ -95,8 +90,7 @@ class ComposedPipelineBase(ABC):
             for name, module in self.trainable_transformer_modules.items():
                 logger.info("Setting %s to requires_grad=True", name)
                 if not isinstance(module, torch.nn.Module):
-                    logger.info(
-                        "Skipping %s because it is not a torch.nn.Module", name)
+                    logger.info("Skipping %s because it is not a torch.nn.Module", name)
                     continue
                 module.requires_grad_(True)
                 module.train()
@@ -116,8 +110,7 @@ class ComposedPipelineBase(ABC):
             if not name:
                 continue
             if any(cond(name, submodule) for cond in compile_conditions):
-                submodule.forward = torch.compile(submodule.forward,
-                                                  **compile_kwargs)
+                submodule.forward = torch.compile(submodule.forward, **compile_kwargs)
                 compiled_count += 1
         return compiled_count
 
@@ -149,8 +142,7 @@ class ComposedPipelineBase(ABC):
             return
 
         # Backward-compatible fallback: compile full module if no condition matched.
-        logger.info("Enabling torch.compile for %s with kwargs=%s", module_name,
-                    compile_kwargs)
+        logger.info("Enabling torch.compile for %s with kwargs=%s", module_name, compile_kwargs)
         self.modules[module_name] = torch.compile(module, **compile_kwargs)
 
     def post_init(self) -> None:
@@ -169,9 +161,7 @@ class ComposedPipelineBase(ABC):
         self.initialize_pipeline(self.fastvideo_args)
         if self.fastvideo_args.enable_torch_compile:
             if self.fastvideo_args.training_mode:
-                logger.info(
-                    "Torch Compile enabled via FSDP loader for training; skipping additional pipeline compile"
-                )
+                logger.info("Torch Compile enabled via FSDP loader for training; skipping additional pipeline compile")
             else:
                 fsdp_module_cls = None
                 try:
@@ -202,13 +192,10 @@ class ComposedPipelineBase(ABC):
             warmup_sequence_parallel_communication()
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
-        raise NotImplementedError(
-            "if training_mode is True, the pipeline must implement this method")
+        raise NotImplementedError("if training_mode is True, the pipeline must implement this method")
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
-        raise NotImplementedError(
-            "if log_validation is True, the pipeline must implement this method"
-        )
+        raise NotImplementedError("if log_validation is True, the pipeline must implement this method")
 
     @classmethod
     def from_pretrained(cls,
@@ -314,11 +301,9 @@ class ComposedPipelineBase(ABC):
         """
         return
 
-    def load_modules(
-        self,
-        fastvideo_args: FastVideoArgs,
-        loaded_modules: dict[str, torch.nn.Module] | None = None
-    ) -> dict[str, Any]:
+    def load_modules(self,
+                     fastvideo_args: FastVideoArgs,
+                     loaded_modules: dict[str, torch.nn.Module] | None = None) -> dict[str, Any]:
         """
         Load the modules from the config.
         loaded_modules: Optional[Dict[str, torch.nn.Module]] = None, 
@@ -333,25 +318,18 @@ class ComposedPipelineBase(ABC):
         model_index.pop("_diffusers_version")
         model_index.pop("_name_or_path", None)
         model_index.pop("workload_type", None)
-        if "boundary_ratio" in model_index and model_index[
-                "boundary_ratio"] is not None:
-            logger.info(
-                "MoE pipeline detected. Adding transformer_2 to self.required_config_modules..."
-            )
+        if "boundary_ratio" in model_index and model_index["boundary_ratio"] is not None:
+            logger.info("MoE pipeline detected. Adding transformer_2 to self.required_config_modules...")
             self.required_config_modules.append("transformer_2")
-            logger.info("MoE pipeline detected. Setting boundary ratio to %s",
-                        model_index["boundary_ratio"])
-            fastvideo_args.pipeline_config.dit_config.boundary_ratio = model_index[
-                "boundary_ratio"]
+            logger.info("MoE pipeline detected. Setting boundary ratio to %s", model_index["boundary_ratio"])
+            fastvideo_args.pipeline_config.dit_config.boundary_ratio = model_index["boundary_ratio"]
 
         model_index.pop("boundary_ratio", None)
         # used by Wan2.2 ti2v
         model_index.pop("expand_timesteps", None)
 
         # some sanity checks
-        assert len(
-            model_index
-        ) > 1, "model_index.json must contain at least one pipeline module"
+        assert len(model_index) > 1, "model_index.json must contain at least one pipeline module"
 
         for module_name in self.required_config_modules:
             if module_name not in model_index and module_name in self._extra_config_module_map:
@@ -360,8 +338,7 @@ class ComposedPipelineBase(ABC):
                     "model_index.json does not contain a %s module, but found {%s: %s} in _extra_config_module_map, adding to model_index.",
                     module_name, module_name, extra_module_value)
                 if extra_module_value in model_index:
-                    logger.info("Using module %s for %s", extra_module_value,
-                                module_name)
+                    logger.info("Using module %s for %s", extra_module_value, module_name)
                     model_index[module_name] = model_index[extra_module_value]
                     continue
                 else:
@@ -390,9 +367,8 @@ class ComposedPipelineBase(ABC):
                 continue
             transformers_or_diffusers = module_spec[0]
             if transformers_or_diffusers is None:
-                logger.warning(
-                    "Module %s in model_index.json has null value, removing from required_config_modules",
-                    module_name)
+                logger.warning("Module %s in model_index.json has null value, removing from required_config_modules",
+                               module_name)
                 if module_name in self.required_config_modules:
                     self.required_config_modules.remove(module_name)
                 continue
@@ -410,16 +386,14 @@ class ComposedPipelineBase(ABC):
             else:
                 load_module_name = module_name
 
-            component_model_path = os.path.join(self.model_path,
-                                                load_module_name)
+            component_model_path = os.path.join(self.model_path, load_module_name)
             module = PipelineComponentLoader.load_module(
                 module_name=load_module_name,
                 component_model_path=component_model_path,
                 transformers_or_diffusers=transformers_or_diffusers,
                 fastvideo_args=fastvideo_args,
             )
-            logger.info("Loaded module %s from %s", module_name,
-                        component_model_path)
+            logger.info("Loaded module %s from %s", module_name, component_model_path)
 
             if module_name in modules:
                 logger.warning("Overwriting module %s", module_name)
@@ -449,8 +423,7 @@ class ComposedPipelineBase(ABC):
             self.profiler.stop()
             # only print profiler results on rank 0
             if self.local_rank == 0:
-                print(self.profiler.key_averages().table(
-                    sort_by="self_cuda_time_total"))
+                print(self.profiler.key_averages().table(sort_by="self_cuda_time_total"))
 
     # TODO(will): don't hardcode no_grad
     @torch.no_grad()
@@ -472,8 +445,7 @@ class ComposedPipelineBase(ABC):
             self.post_init()
 
         # Execute each stage
-        logger.info("Running pipeline stages: %s",
-                    self._stage_name_mapping.keys())
+        logger.info("Running pipeline stages: %s", self._stage_name_mapping.keys())
         # logger.info("Batch: %s", batch)
         for stage in self.stages:
             batch = stage(batch, fastvideo_args)
@@ -482,5 +454,4 @@ class ComposedPipelineBase(ABC):
         return batch
 
     def train(self) -> None:
-        raise NotImplementedError(
-            "if training_mode is True, the pipeline must implement this method")
+        raise NotImplementedError("if training_mode is True, the pipeline must implement this method")

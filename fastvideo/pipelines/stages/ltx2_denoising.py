@@ -12,8 +12,7 @@ import torch
 from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
-from fastvideo.attention.backends.video_sparse_attn import (
-    VideoSparseAttentionMetadataBuilder)
+from fastvideo.attention.backends.video_sparse_attn import (VideoSparseAttentionMetadataBuilder)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -21,11 +20,9 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.logger import init_logger
-from fastvideo.models.dits.ltx2 import (
-    AudioLatentShape, DEFAULT_LTX2_AUDIO_CHANNELS,
-    DEFAULT_LTX2_AUDIO_DOWNSAMPLE, DEFAULT_LTX2_AUDIO_HOP_LENGTH,
-    DEFAULT_LTX2_AUDIO_MEL_BINS, DEFAULT_LTX2_AUDIO_SAMPLE_RATE,
-    VideoLatentShape)
+from fastvideo.models.dits.ltx2 import (AudioLatentShape, DEFAULT_LTX2_AUDIO_CHANNELS, DEFAULT_LTX2_AUDIO_DOWNSAMPLE,
+                                        DEFAULT_LTX2_AUDIO_HOP_LENGTH, DEFAULT_LTX2_AUDIO_MEL_BINS,
+                                        DEFAULT_LTX2_AUDIO_SAMPLE_RATE, VideoLatentShape)
 from fastvideo.utils import is_vsa_available
 
 BASE_SHIFT_ANCHOR = 1024
@@ -33,9 +30,7 @@ MAX_SHIFT_ANCHOR = 4096
 
 # Official distilled sigma schedule (8 denoising steps)
 # From LTX-2/packages/ltx-pipelines/src/ltx_pipelines/utils/constants.py
-DISTILLED_SIGMA_VALUES = [
-    1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0
-]
+DISTILLED_SIGMA_VALUES = [1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0]
 
 logger = init_logger(__name__)
 
@@ -55,13 +50,8 @@ def _ltx2_sigmas(
     terminal: float = 0.1,
 ) -> torch.Tensor:
     # Copied/following official LTX-2 scheduler (LTX2Scheduler.execute).
-    tokens = math.prod(
-        latent.shape[2:]) if latent is not None else MAX_SHIFT_ANCHOR
-    sigmas = torch.linspace(1.0,
-                            0.0,
-                            steps + 1,
-                            device=device,
-                            dtype=torch.float32)
+    tokens = math.prod(latent.shape[2:]) if latent is not None else MAX_SHIFT_ANCHOR
+    sigmas = torch.linspace(1.0, 0.0, steps + 1, device=device, dtype=torch.float32)
 
     mm = (max_shift - base_shift) / (MAX_SHIFT_ANCHOR - BASE_SHIFT_ANCHOR)
     b = base_shift - mm * BASE_SHIFT_ANCHOR
@@ -110,8 +100,7 @@ class LTX2DenoisingStage(PipelineStage):
         # Only load negative prompts if CFG is actually enabled
         if batch.do_classifier_free_guidance:
             if not batch.negative_prompt_embeds:
-                raise ValueError(
-                    "CFG is enabled but negative_prompt_embeds is empty")
+                raise ValueError("CFG is enabled but negative_prompt_embeds is empty")
             neg_prompt_embeds = batch.negative_prompt_embeds[0]
 
         # Ensure text conditioning is on the same device as latents.
@@ -125,12 +114,10 @@ class LTX2DenoisingStage(PipelineStage):
             neg_prompt_mask = neg_prompt_mask.to(latents.device)
 
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32
-                            ) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         # Use official distilled sigma schedule for 8 steps (distilled models)
-        use_distilled_sigmas = os.getenv("LTX2_USE_DISTILLED_SIGMAS",
-                                         "1") == "1"
+        use_distilled_sigmas = os.getenv("LTX2_USE_DISTILLED_SIGMAS", "1") == "1"
         if use_distilled_sigmas and batch.num_inference_steps == 8:
             sigmas = torch.tensor(
                 DISTILLED_SIGMA_VALUES,
@@ -147,8 +134,7 @@ class LTX2DenoisingStage(PipelineStage):
             logger.info("[LTX2] Using computed sigma schedule")
         if hasattr(self.transformer, "patchifier"):
             video_shape = VideoLatentShape.from_torch_shape(latents.shape)
-            token_count = self.transformer.patchifier.get_token_count(
-                video_shape)
+            token_count = self.transformer.patchifier.get_token_count(video_shape)
         else:
             token_count = 1
 
@@ -181,19 +167,14 @@ class LTX2DenoisingStage(PipelineStage):
             )
             audio_generator = None
             if fastvideo_args.ltx2_initial_latent_path and batch.seed is not None:
-                audio_generator = torch.Generator(
-                    device=latents.device).manual_seed(batch.seed)
+                audio_generator = torch.Generator(device=latents.device).manual_seed(batch.seed)
             elif batch.generator is not None:
-                if isinstance(batch.generator, list):
-                    audio_generator = batch.generator[0]
-                else:
-                    audio_generator = batch.generator
+                audio_generator = batch.generator[0] if isinstance(batch.generator, list) else batch.generator
             if audio_generator is not None and audio_generator.device.type != latents.device.type:
                 if batch.seed is None:
                     audio_generator = torch.Generator(device=latents.device)
                 else:
-                    audio_generator = torch.Generator(
-                        device=latents.device).manual_seed(batch.seed)
+                    audio_generator = torch.Generator(device=latents.device).manual_seed(batch.seed)
             audio_patch_shape = (
                 audio_shape.batch,
                 audio_shape.frames,
@@ -206,8 +187,7 @@ class LTX2DenoisingStage(PipelineStage):
                 dtype=latents.dtype,
             )
             if hasattr(self.transformer, "audio_patchifier"):
-                audio_latents = self.transformer.audio_patchifier.unpatchify(
-                    audio_latents_patch, audio_shape)
+                audio_latents = self.transformer.audio_patchifier.unpatchify(audio_latents_patch, audio_shape)
             else:
                 audio_latents = audio_latents_patch.view(
                     audio_shape.batch,
@@ -261,24 +241,20 @@ class LTX2DenoisingStage(PipelineStage):
             tuple(sigmas.shape),
             tuple(latents.shape),
         )
-        use_vsa = (vsa_available
-                   and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN")
-        vsa_metadata_builder = (VideoSparseAttentionMetadataBuilder()
-                                if use_vsa else None)
+        use_vsa = (vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN")
+        vsa_metadata_builder = (VideoSparseAttentionMetadataBuilder() if use_vsa else None)
 
         for step_index in tqdm(range(len(sigmas) - 1)):
             sigma = sigmas[step_index]
             sigma_next = sigmas[step_index + 1]
             timestep = timestep_template * sigma
-            audio_timestep = (audio_timestep_template * sigma
-                              if audio_timestep_template is not None else None)
+            audio_timestep = (audio_timestep_template * sigma if audio_timestep_template is not None else None)
             attn_metadata = None
             if vsa_metadata_builder is not None:
                 attn_metadata = vsa_metadata_builder.build(
                     current_timestep=step_index,
                     raw_latent_shape=latents.shape[2:5],
-                    patch_size=fastvideo_args.pipeline_config.dit_config.
-                    patch_size,
+                    patch_size=fastvideo_args.pipeline_config.dit_config.patch_size,
                     VSA_sparsity=fastvideo_args.VSA_sparsity,
                     device=latents.device,
                 )
@@ -362,10 +338,8 @@ class LTX2DenoisingStage(PipelineStage):
                             audio_hidden_states=audio_latents,
                             audio_encoder_hidden_states=(audio_context_p),
                             audio_timestep=audio_timestep,
-                            skip_video_self_attn_blocks=(
-                                stg_blocks_video if do_stg_video else None),
-                            skip_audio_self_attn_blocks=(
-                                stg_blocks_audio if do_stg_audio else None),
+                            skip_video_self_attn_blocks=(stg_blocks_video if do_stg_video else None),
+                            skip_audio_self_attn_blocks=(stg_blocks_audio if do_stg_audio else None),
                         )
                         if isinstance(ptb_outputs, tuple):
                             ptb_denoised, ptb_audio = ptb_outputs
@@ -373,17 +347,13 @@ class LTX2DenoisingStage(PipelineStage):
                             ptb_denoised = ptb_outputs
 
                     # Multi-modal guidance formula per stream.
-                    vid = (pos_denoised + (cfg_scale_video - 1) *
-                           (pos_denoised - neg_denoised) +
-                           (modality_scale_video - 1) *
-                           (pos_denoised - mod_denoised) + stg_scale_video *
+                    vid = (pos_denoised + (cfg_scale_video - 1) * (pos_denoised - neg_denoised) +
+                           (modality_scale_video - 1) * (pos_denoised - mod_denoised) + stg_scale_video *
                            (pos_denoised - ptb_denoised))
                     aud = None
                     if pos_audio is not None:
-                        aud = (pos_audio + (cfg_scale_audio - 1) *
-                               (pos_audio - neg_audio) +
-                               (modality_scale_audio - 1) *
-                               (pos_audio - mod_audio) + stg_scale_audio *
+                        aud = (pos_audio + (cfg_scale_audio - 1) * (pos_audio - neg_audio) +
+                               (modality_scale_audio - 1) * (pos_audio - mod_audio) + stg_scale_audio *
                                (pos_audio - ptb_audio))
 
                     # Guidance rescaling (prevents saturation).
@@ -399,36 +369,27 @@ class LTX2DenoisingStage(PipelineStage):
                     pos_denoised = vid
                     pos_audio = aud
 
-            sigma_value = sigma.to(torch.float32) if isinstance(
-                sigma, torch.Tensor) else torch.tensor(
-                    float(sigma),
-                    device=latents.device,
-                    dtype=torch.float32,
-                )
+            sigma_value = sigma.to(torch.float32) if isinstance(sigma, torch.Tensor) else torch.tensor(
+                float(sigma),
+                device=latents.device,
+                dtype=torch.float32,
+            )
             dt = sigma_next - sigma
-            velocity = ((latents.float() - pos_denoised.float()) /
-                        sigma_value).to(latents.dtype)
+            velocity = ((latents.float() - pos_denoised.float()) / sigma_value).to(latents.dtype)
 
-            latents = (latents.float() + velocity.float() * dt).to(
-                latents.dtype)
+            latents = (latents.float() + velocity.float() * dt).to(latents.dtype)
             if pos_audio is not None and audio_latents is not None:
-                audio_velocity = ((audio_latents.float() - pos_audio.float()) /
-                                  sigma_value).to(audio_latents.dtype)
-                audio_latents = (audio_latents.float() +
-                                 audio_velocity.float() * dt).to(
-                                     audio_latents.dtype)
+                audio_velocity = ((audio_latents.float() - pos_audio.float()) / sigma_value).to(audio_latents.dtype)
+                audio_latents = (audio_latents.float() + audio_velocity.float() * dt).to(audio_latents.dtype)
 
         batch.latents = latents
         batch.extra["ltx2_audio_latents"] = audio_latents
         logger.info("[LTX2] Denoising done.")
         return batch
 
-    def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
-        result.add_check("latents", batch.latents,
-                         [V.is_tensor, V.with_dims(5)])
+        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
-        result.add_check("num_inference_steps", batch.num_inference_steps,
-                         V.positive_int)
+        result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
         return result

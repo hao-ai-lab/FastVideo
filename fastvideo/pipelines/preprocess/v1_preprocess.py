@@ -4,22 +4,15 @@ from typing import Any
 
 from fastvideo import PipelineConfig
 from fastvideo.configs.models.vaes import WanVAEConfig
-from fastvideo.distributed import (
-    get_world_size, maybe_init_distributed_environment_and_model_parallel)
+from fastvideo.distributed import (get_world_size, maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.pipelines.preprocess.preprocess_pipeline_i2v import (
-    PreprocessPipeline_I2V)
-from fastvideo.pipelines.preprocess.preprocess_pipeline_ode_trajectory import (
-    PreprocessPipeline_ODE_Trajectory)
-from fastvideo.pipelines.preprocess.preprocess_pipeline_t2v import (
-    PreprocessPipeline_T2V)
-from fastvideo.pipelines.preprocess.preprocess_pipeline_text import (
-    PreprocessPipeline_Text)
-from fastvideo.pipelines.preprocess.matrixgame.matrixgame_preprocess_pipeline import (
-    PreprocessPipeline_MatrixGame)
-from fastvideo.pipelines.preprocess.preprocess_pipeline_sd35 import (
-    PreprocessPipeline_SD35)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_i2v import (PreprocessPipeline_I2V)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_ode_trajectory import (PreprocessPipeline_ODE_Trajectory)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_t2v import (PreprocessPipeline_T2V)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_text import (PreprocessPipeline_Text)
+from fastvideo.pipelines.preprocess.matrixgame.matrixgame_preprocess_pipeline import (PreprocessPipeline_MatrixGame)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_sd35 import (PreprocessPipeline_SD35)
 from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
@@ -74,13 +67,10 @@ def main(args) -> None:
     elif args.preprocess_task == "sd35":
         PreprocessPipeline = PreprocessPipeline_SD35
     else:
-        raise ValueError(
-            f"Invalid preprocess task: {args.preprocess_task}. "
-            f"Valid options: t2v, i2v, ode_trajectory, text_only, matrixgame, sd35"
-        )
+        raise ValueError(f"Invalid preprocess task: {args.preprocess_task}. "
+                         f"Valid options: t2v, i2v, ode_trajectory, text_only, matrixgame, sd35")
 
-    logger.info("Preprocess task: %s using %s", args.preprocess_task,
-                PreprocessPipeline.__name__)
+    logger.info("Preprocess task: %s using %s", args.preprocess_task, PreprocessPipeline.__name__)
 
     pipeline = PreprocessPipeline(args.model_path, fastvideo_args)
     pipeline.forward(batch=None, fastvideo_args=fastvideo_args, args=args)
@@ -97,8 +87,7 @@ if __name__ == "__main__":
         "--dataloader_num_workers",
         type=int,
         default=1,
-        help=
-        "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.",
+        help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.",
     )
     parser.add_argument(
         "--preprocess_video_batch_size",
@@ -107,46 +96,34 @@ if __name__ == "__main__":
         help="Batch size (per device) for the training dataloader.",
     )
     parser.add_argument("--samples_per_file", type=int, default=64)
-    parser.add_argument("--flush_frequency",
-                        type=int,
-                        default=256,
-                        help="how often to save to parquet files")
-    parser.add_argument("--num_latent_t",
-                        type=int,
-                        default=28,
-                        help="Number of latent timesteps.")
+    parser.add_argument("--flush_frequency", type=int, default=256, help="how often to save to parquet files")
+    parser.add_argument("--num_latent_t", type=int, default=28, help="Number of latent timesteps.")
     parser.add_argument("--max_height", type=int, default=480)
     parser.add_argument("--max_width", type=int, default=848)
     parser.add_argument("--video_length_tolerance_range", type=int, default=2.0)
     parser.add_argument("--group_frame", action="store_true")  # TODO
     parser.add_argument("--group_resolution", action="store_true")  # TODO
     parser.add_argument("--flow_shift", type=float, default=None)
-    parser.add_argument(
-        "--preprocess_task",
-        type=str,
-        default="t2v",
-        choices=["t2v", "i2v", "text_only", "ode_trajectory", "matrixgame", "sd35"],
-        help="Type of preprocessing task to run")
+    parser.add_argument("--preprocess_task",
+                        type=str,
+                        default="t2v",
+                        choices=["t2v", "i2v", "text_only", "ode_trajectory", "matrixgame", "sd35"],
+                        help="Type of preprocessing task to run")
     parser.add_argument("--train_fps", type=int, default=30)
     parser.add_argument("--use_image_num", type=int, default=0)
     parser.add_argument("--text_max_length", type=int, default=256)
     parser.add_argument("--speed_factor", type=float, default=1.0)
     parser.add_argument("--drop_short_ratio", type=float, default=1.0)
-    parser.add_argument("--do_temporal_sample",
-                        default=False,
-                        action="store_true")
+    parser.add_argument("--do_temporal_sample", default=False, action="store_true")
     # text encoder & vae & diffusion model
-    parser.add_argument("--text_encoder_name",
-                        type=str,
-                        default="google/t5-v1_1-xxl")
+    parser.add_argument("--text_encoder_name", type=str, default="google/t5-v1_1-xxl")
     parser.add_argument("--cache_dir", type=str, default="./cache_dir")
     parser.add_argument("--training_cfg_rate", type=float, default=0.0)
     parser.add_argument(
         "--output_dir",
         type=str,
         default=None,
-        help=
-        "The output directory where the model predictions and checkpoints will be written.",
+        help="The output directory where the model predictions and checkpoints will be written.",
     )
 
     args = parser.parse_args()

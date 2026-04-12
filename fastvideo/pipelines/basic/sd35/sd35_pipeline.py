@@ -44,15 +44,14 @@ class SD35Pipeline(LoRAPipeline, ComposedPipelineBase):
                 te_cfgs[i].tokenizer_kwargs.setdefault("truncation", True)
                 te_cfgs[i].tokenizer_kwargs.setdefault("return_tensors", "pt")
         if len(te_cfgs) >= 3:
-            te_cfgs[2].tokenizer_kwargs["max_length"] = min(
-                int(te_cfgs[2].tokenizer_kwargs.get("max_length", 256)), 256)
+            te_cfgs[2].tokenizer_kwargs["max_length"] = min(int(te_cfgs[2].tokenizer_kwargs.get("max_length", 256)),
+                                                            256)
             te_cfgs[2].tokenizer_kwargs.setdefault("padding", "max_length")
             te_cfgs[2].tokenizer_kwargs.setdefault("truncation", True)
             te_cfgs[2].tokenizer_kwargs.setdefault("return_tensors", "pt")
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
-        self.add_stage(stage_name="input_validation_stage",
-                       stage=InputValidationStage())
+        self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         self.add_stage(
             stage_name="text_encoding_stage",
@@ -72,14 +71,12 @@ class SD35Pipeline(LoRAPipeline, ComposedPipelineBase):
 
         self.add_stage(
             stage_name="timestep_preparation_stage",
-            stage=SD35TimestepPreparationStage(
-                scheduler=self.get_module("scheduler")),
+            stage=SD35TimestepPreparationStage(scheduler=self.get_module("scheduler")),
         )
 
         self.add_stage(
             stage_name="latent_preparation_stage",
-            stage=SD35LatentPreparationStage(
-                scheduler=self.get_module("scheduler"), ),
+            stage=SD35LatentPreparationStage(scheduler=self.get_module("scheduler"), ),
         )
 
         self.add_stage(

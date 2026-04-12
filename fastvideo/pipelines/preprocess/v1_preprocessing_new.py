@@ -1,5 +1,4 @@
-from fastvideo.distributed import (
-    maybe_init_distributed_environment_and_model_parallel)
+from fastvideo.distributed import (maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.utils import FlexibleArgumentParser

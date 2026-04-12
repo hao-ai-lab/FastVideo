@@ -53,8 +53,7 @@ class PipelineLoggingInfo:
 
     def get_total_execution_time(self) -> float:
         """Get total pipeline execution time."""
-        return sum(
-            stage.get('execution_time', 0) for stage in self.stages.values())
+        return sum(stage.get('execution_time', 0) for stage in self.stages.values())
 
 
 @dataclass
@@ -95,8 +94,7 @@ class ForwardBatch:
     t_thresh: float = 0.5
     spatial_refine_only: bool = False
     num_cond_frames: int = 0
-    stage1_video: list[
-        PIL.Image.Image] | None = None  # Loaded frames from refine_from
+    stage1_video: list[PIL.Image.Image] | None = None  # Loaded frames from refine_from
 
     # Primary encoder embeddings
     prompt_embeds: list[torch.Tensor] = field(default_factory=list)
@@ -140,17 +138,20 @@ class ForwardBatch:
     gt_latents: torch.Tensor | None = None  # Ground truth latents for conditioning [B, 16, T, H, W]
     conditioning_mask: torch.Tensor | None = None  # Mask for conditioning [B, 1, T, H, W]
     camera_trajectory: str | None = None  # Camera trajectory file/identifier
-    action_list: list[
-        str] | None = None  # List of actions (e.g., ['forward', 'left'])
+    action_list: list[str] | None = None  # List of actions (e.g., ['forward', 'left'])
     action_speed_list: list[float] | None = None  # Speed for each action
     # Camera control inputs (LingBotWorld)
     c2ws_plucker_emb: torch.Tensor | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
+
+    # Camera control inputs (GEN3C)
+    trajectory_type: str | None = None
+    movement_distance: float | None = None
+    camera_rotation: str | None = None
 
     # Latent dimensions
     height_latents: list[int] | int | None = None
     width_latents: list[int] | int | None = None
     num_frames: list[int] | int = 1  # Default for image models
-    num_frames_round_down: bool = False  # Whether to round down num_frames if it's not divisible by num_gpus
 
     # Original dimensions (before VAE scaling)
     height: list[int] | int | None = None
@@ -173,6 +174,9 @@ class ForwardBatch:
     guidance_rescale: float = 0.0
     eta: float = 0.0
     sigmas: list[float] | None = None
+
+    # TeaCache
+    enable_teacache: bool = False
 
     # LTX-2 multi-modal CFG parameters
     ltx2_cfg_scale_video: float = 1.0
@@ -215,15 +219,13 @@ class ForwardBatch:
     VSA_sparsity: float = 0.0
 
     # Logging info
-    logging_info: PipelineLoggingInfo = field(
-        default_factory=PipelineLoggingInfo)
+    logging_info: PipelineLoggingInfo = field(default_factory=PipelineLoggingInfo)
 
     def __post_init__(self):
         """Initialize dependent fields after dataclass initialization."""
 
         # Enable CFG for standard guidance_scale and LTX-2 text CFG scales.
-        ltx2_text_cfg_enabled = (self.ltx2_cfg_scale_video != 1.0
-                                 or self.ltx2_cfg_scale_audio != 1.0)
+        ltx2_text_cfg_enabled = (self.ltx2_cfg_scale_video != 1.0 or self.ltx2_cfg_scale_audio != 1.0)
         if self.guidance_scale > 1.0 or ltx2_text_cfg_enabled:
             self.do_classifier_free_guidance = True
         if self.negative_prompt_embeds is None:

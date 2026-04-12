@@ -31,9 +31,8 @@ class LTX2LatentPreparationStage(PipelineStage):
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        latent_num_frames = (
-            batch.num_frames - 1
-        ) // fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio + 1
+        latent_num_frames = (batch.num_frames -
+                             1) // fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio + 1
         if not batch.prompt_embeds:
             batch_size = 1
         elif isinstance(batch.prompt, list):
@@ -73,9 +72,8 @@ class LTX2LatentPreparationStage(PipelineStage):
 
         spatial_ratio = fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio
         if height % spatial_ratio != 0 or width % spatial_ratio != 0:
-            raise ValueError(
-                f"Height and width must be divisible by {spatial_ratio} "
-                f"but are {height} and {width}.")
+            raise ValueError(f"Height and width must be divisible by {spatial_ratio} "
+                             f"but are {height} and {width}.")
         shape = (
             batch_size,
             self.transformer.num_channels_latents,
@@ -85,14 +83,12 @@ class LTX2LatentPreparationStage(PipelineStage):
         )
 
         if isinstance(generator, list) and len(generator) != batch_size:
-            raise ValueError(
-                f"You have passed a list of generators of length {len(generator)}, "
-                f"but requested an effective batch size of {batch_size}.")
+            raise ValueError(f"You have passed a list of generators of length {len(generator)}, "
+                             f"but requested an effective batch size of {batch_size}.")
 
         if latents is None:
             if latent_path:
-                loaded_latents = self._load_initial_latent(
-                    latent_path, device, dtype)
+                loaded_latents = self._load_initial_latent(latent_path, device, dtype)
                 if loaded_latents is not None:
                     latents = loaded_latents
                 else:
@@ -141,8 +137,7 @@ class LTX2LatentPreparationStage(PipelineStage):
         logger.info("[LTX2] Loaded initial latent from %s", path)
         return latent.to(device=device, dtype=dtype)
 
-    def _save_initial_latent(self, latent_path: str,
-                             latents: torch.Tensor) -> None:
+    def _save_initial_latent(self, latent_path: str, latents: torch.Tensor) -> None:
         path = Path(latent_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
@@ -150,32 +145,26 @@ class LTX2LatentPreparationStage(PipelineStage):
         torch.save({"video_latent": latents.detach().cpu()}, path)
         logger.info("[LTX2] Saved initial latent to %s", path)
 
-    def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check(
             "prompt_or_embeds",
             None,
-            lambda _: V.string_or_list_strings(batch.prompt) or not batch.
-            prompt_embeds or V.list_not_empty(batch.prompt_embeds),
+            lambda _: V.string_or_list_strings(batch.prompt) or not batch.prompt_embeds or V.list_not_empty(
+                batch.prompt_embeds),
         )
         if batch.prompt_embeds:
-            result.add_check("prompt_embeds", batch.prompt_embeds,
-                             V.list_of_tensors)
-        result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt,
-                         V.positive_int)
-        result.add_check("generator", batch.generator,
-                         V.generator_or_list_generators)
+            result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors)
+        result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt, V.positive_int)
+        result.add_check("generator", batch.generator, V.generator_or_list_generators)
         result.add_check("num_frames", batch.num_frames, V.positive_int)
         result.add_check("height", batch.height, V.positive_int)
         result.add_check("width", batch.width, V.positive_int)
         result.add_check("latents", batch.latents, V.none_or_tensor)
         return result
 
-    def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
-        result.add_check("latents", batch.latents,
-                         [V.is_tensor, V.with_dims(5)])
+        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         result.add_check("raw_latent_shape", batch.raw_latent_shape, V.is_tuple)
         return result

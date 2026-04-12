@@ -34,8 +34,7 @@ def register_quantization_config(quantization: str):
 
     def _wrapper(quant_config_cls):
         if quantization in QUANTIZATION_METHODS:
-            raise ValueError(
-                f"The quantization method `{quantization}` is already exists.")
+            raise ValueError(f"The quantization method `{quantization}` is already exists.")
         if not issubclass(quant_config_cls, QuantizationConfig):
             raise ValueError("The quantization config must be a subclass of "
                              "`QuantizationConfig`.")

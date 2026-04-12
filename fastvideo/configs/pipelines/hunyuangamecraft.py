@@ -18,13 +18,10 @@ import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import HunyuanGameCraftConfig
-from fastvideo.configs.models.encoders import (BaseEncoderOutput,
-                                               CLIPTextConfig, LlamaConfig)
+from fastvideo.configs.models.encoders import (BaseEncoderOutput, CLIPTextConfig, LlamaConfig)
 from fastvideo.configs.models.vaes import GameCraftVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
-from fastvideo.configs.pipelines.hunyuan import (clip_postprocess_text,
-                                                 clip_preprocess_text,
-                                                 llama_postprocess_text,
+from fastvideo.configs.pipelines.hunyuan import (clip_postprocess_text, clip_preprocess_text, llama_postprocess_text,
                                                  llama_preprocess_text)
 
 
@@ -52,20 +49,16 @@ class HunyuanGameCraftPipelineConfig(PipelineConfig):
 
     # Text encoding stage - same as HunyuanVideo
     # Uses LLaMA-3-8B (via LLaVA) + CLIP
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (LlamaConfig(), CLIPTextConfig()))
-    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
-        default_factory=lambda: (llama_preprocess_text, clip_preprocess_text))
-    postprocess_text_funcs: tuple[
-        Callable[[BaseEncoderOutput], torch.Tensor],
-        ...] = field(default_factory=lambda:
-                     (llama_postprocess_text, clip_postprocess_text))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (LlamaConfig(), CLIPTextConfig()))
+    preprocess_text_funcs: tuple[Callable[[str], str],
+                                 ...] = field(default_factory=lambda: (llama_preprocess_text, clip_preprocess_text))
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
+                                  ...] = field(default_factory=lambda: (llama_postprocess_text, clip_postprocess_text))
 
     # Precision for each component
     dit_precision: str = "bf16"
     vae_precision: str = "fp16"
-    text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("fp16", "fp16"))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("fp16", "fp16"))
 
     def __post_init__(self):
         # VAE only needs decoder for inference

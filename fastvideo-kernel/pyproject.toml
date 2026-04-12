@@ -23,7 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "torch>=2.5.0",
-    "triton>=2.0.0",
+    "triton>=2.0.0; sys_platform == 'linux'",
 ]
 
 [project.urls]

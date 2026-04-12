@@ -30,8 +30,7 @@ class ForwardHook:
         """
         pass
 
-    def pre_forward(self, module: nn.Module, *args,
-                    **kwargs) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    def pre_forward(self, module: nn.Module, *args, **kwargs) -> tuple[tuple[Any, ...], dict[str, Any]]:
         """Called before the module's forward method is executed."""
         return args, kwargs
 
@@ -60,8 +59,7 @@ class ModuleHookManager:
             setattr(module, cls.module_hook_attribute, cls(module))
 
             def forward_hook_wrapper(mod: nn.Module, *args, **kwargs):
-                manager: ModuleHookManager = getattr(mod,
-                                                     cls.module_hook_attribute)
+                manager: ModuleHookManager = getattr(mod, cls.module_hook_attribute)
                 for hook in manager.forward_hooks.values():
                     args, kwargs = hook.pre_forward(mod, *args, **kwargs)
                 output = manager.original_forward(*args, **kwargs)
@@ -76,8 +74,7 @@ class ModuleHookManager:
     @staticmethod
     def remove_from_manager(module: nn.Module) -> None:
         if hasattr(module, ModuleHookManager.module_hook_attribute):
-            manager: ModuleHookManager = getattr(
-                module, ModuleHookManager.module_hook_attribute)
+            manager: ModuleHookManager = getattr(module, ModuleHookManager.module_hook_attribute)
             module.forward = manager.original_forward
             delattr(module, ModuleHookManager.module_hook_attribute)
 
@@ -85,22 +82,17 @@ class ModuleHookManager:
         if not hasattr(self.module, self.module_hook_attribute):
             raise ValueError("ModuleHookManager is not attached to the module.")
         if getattr(self.module, self.module_hook_attribute) is not self:
-            raise ValueError(
-                "ModuleHookManager attached to the module is different.")
+            raise ValueError("ModuleHookManager attached to the module is different.")
 
     def append_forward_hook(self, hook: ForwardHook):
         self._check_manager_attached()
         if hook.name() in self.forward_hooks:
-            raise ValueError(
-                f"Hook with name {hook.name()} is already registered.")
+            raise ValueError(f"Hook with name {hook.name()} is already registered.")
         # after python 3.7, dicts maintain insertion order
         self.forward_hooks[hook.name()] = hook
         hook.on_attach(self.module)
 
-    def replace_forward_hook(self,
-                             hook_name: str,
-                             new_hook: ForwardHook,
-                             run_on_attach: bool = True):
+    def replace_forward_hook(self, hook_name: str, new_hook: ForwardHook, run_on_attach: bool = True):
         self._check_manager_attached()
         if hook_name not in self.forward_hooks:
             raise ValueError(f"No hook with name {hook_name} found.")

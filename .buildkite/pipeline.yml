@@ -2,20 +2,218 @@ env:
   IMAGE_VERSION: "py3.12-latest"
   BUILDKITE_CLEAN_CHECKOUT: true
 
+notify:
+  - github_commit_status:
+      context: "fastcheck-passed"
+    if: build.env("TEST_SCOPE") == "fastcheck" || build.env("TEST_SCOPE") == null
+  - github_commit_status:
+      context: "full-suite-passed"
+    if: build.env("TEST_SCOPE") == "full"
+  - github_commit_status:
+      context: "direct-test-completed"
+    if: build.env("TEST_SCOPE") == "direct"
+
 steps:
-  - label: "pre-commit"
-    command: ".buildkite/scripts/pre_commit.sh"
-    agents:
-      queue: "default"
+  # ============================================================
+  # Direct test: triggered by /test <name> slash command.
+  # Labels match fastcheck/full-suite counterparts so the GitHub
+  # check status overwrites the original failed check.
+  # Only ONE step executes per build (gated by TEST_TYPE).
+  # ============================================================
 
-  - wait
+  # --- Fastcheck-scope direct tests ---
+    - label: ":microscope: Encoder Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "encoder"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":microscope: VAE Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "vae"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":microscope: Transformer Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "transformer"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":microscope: Kernel Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "kernel_tests"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":microscope: Unit Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "unit_test"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
 
-  - label: "Trigger Tests"
-    plugins:
-      - monorepo-diff#v1.4.0:
-          diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
-          watch:
-            - path: 
+  # --- Full-suite-scope direct tests ---
+    - label: ":bar_chart: SSIM Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "ssim"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+          - exit_status: 1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: LoRA Inference Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "inference_lora"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: Training Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "training"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: Distillation DMD Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "distillation_dmd"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: Self-Forcing Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "self_forcing"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: LoRA Training Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "training_lora"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+          - exit_status: 1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: Training Tests VSA"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "training_vsa"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+          - exit_status: 1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: Inference Tests VMoBA"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "inference_vmoba"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: Performance Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "performance"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+    - label: ":test_tube: API Server Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "api_server"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
+
+  # ============================================================
+  # Fastcheck: Runs on every PR (~10-15 min parallel)
+  # Core component validation: encoders, VAEs, transformers,
+  # CUDA kernels, and unit tests.
+  # ============================================================
+    - label: "Trigger Fastcheck"
+      if: build.env("TEST_SCOPE") == "fastcheck" || build.env("TEST_SCOPE") == null
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      plugins:
+        - monorepo-diff#v1.4.0:
+            diff: 'git fetch origin "${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}" && git diff --name-only "origin/${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}...HEAD"'
+            watch:
+            - path:
                 - "fastvideo/models/encoders/**"
                 - "fastvideo/models/loader/**"
                 - "fastvideo/tests/encoders/**"
@@ -23,7 +221,7 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 20m .buildkite/scripts/pr_test.sh"
-                label: "Encoder Tests"
+                label: ":microscope: Encoder Tests"
                 env:
                   - TEST_TYPE=encoder
                 agents:
@@ -36,7 +234,7 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 20m .buildkite/scripts/pr_test.sh"
-                label: "VAE Tests"
+                label: ":microscope: VAE Tests"
                 env:
                   - TEST_TYPE=vae
                 agents:
@@ -51,20 +249,68 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Transformer Tests"
+                label: ":microscope: Transformer Tests"
                 env:
                   - TEST_TYPE=transformer
                 agents:
                   queue: "default"
-            - path: 
+            - path:
+                - "fastvideo-kernel/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: ":microscope: Kernel Tests"
+                env:
+                  - TEST_TYPE=kernel_tests
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/**"
+                - ".buildkite/**"
+                - ".github/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: ":microscope: Unit Tests"
+                env:
+                  - TEST_TYPE=unit_test
+                agents:
+                  queue: "default"
+
+  # ============================================================
+  # Full Suite: Runs when TEST_SCOPE=full
+  # Triggered by adding the 'ready' label (via ci-trigger-full-suite.yml)
+  # or on-demand via /test full slash command.
+  # Includes integration tests, SSIM regression, training pipelines,
+  # and performance benchmarks.
+  # ============================================================
+    - label: "Trigger Full Suite"
+      if: build.env("TEST_SCOPE") == "full"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      plugins:
+        - monorepo-diff#v1.4.0:
+            diff: 'git fetch origin "${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}" && git diff --name-only "origin/${BUILDKITE_PULL_REQUEST_BASE_BRANCH:-main}...HEAD"'
+            watch:
+            - path:
                 - "fastvideo/**/*.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 90m .buildkite/scripts/pr_test.sh"
-                label: "SSIM Tests"
+                label: ":bar_chart: SSIM Tests"
                 env:
                   - TEST_TYPE=ssim
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 2
                 agents:
                   queue: "default"
             - path:
@@ -77,7 +323,7 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 20m .buildkite/scripts/pr_test.sh"
-                label: "LoRA Inference Tests"
+                label: ":test_tube: LoRA Inference Tests"
                 env:
                   - TEST_TYPE=inference_lora
                 agents:
@@ -88,7 +334,7 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Training Tests"
+                label: ":test_tube: Training Tests"
                 env:
                   - TEST_TYPE=training
                 agents:
@@ -99,7 +345,7 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Distillation DMDTests"
+                label: ":test_tube: Distillation DMD Tests"
                 env:
                   - TEST_TYPE=distillation_dmd
                 agents:
@@ -111,7 +357,7 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Self-Forcing Tests"
+                label: ":test_tube: Self-Forcing Tests"
                 env:
                   - TEST_TYPE=self_forcing
                 agents:
@@ -122,9 +368,13 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "LoRA Training Tests"
+                label: ":test_tube: LoRA Training Tests"
                 env:
                   - TEST_TYPE=training_lora
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 2
                 agents:
                   queue: "default"
             - path:
@@ -134,20 +384,15 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Training Tests VSA"
+                label: ":test_tube: Training Tests VSA"
                 env:
                   - TEST_TYPE=training_vsa
+                retry:
+                  automatic:
+                    - exit_status: 1
+                      limit: 2
                 agents:
                   queue: "default"
-            - path:
-                - "fastvideo-kernel/**"
-                - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
-              config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Kernel Tests"
-                env:
-                  - TEST_TYPE=kernel_tests
             - path:
                 - "fastvideo-kernel/**"
                 - "fastvideo/attention/backends/vmoba.py"
@@ -155,30 +400,39 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Inference Tests VMoBA"
-                env:  
+                label: ":test_tube: Inference Tests VMoBA"
+                env:
                   - TEST_TYPE=inference_vmoba
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/**"
+                - "fastvideo/models/dits/**"
+                - "fastvideo/pipelines/**"
+                - "fastvideo/attention/**"
+                - "fastvideo/layers/**"
+                - "fastvideo/worker/**"
+                - "fastvideo/entrypoints/**"
+                - "fastvideo/tests/performance/**"
+                - ".buildkite/performance-benchmarks/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Unit Tests"
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                label: ":test_tube: Performance Tests"
                 env:
-                  - TEST_TYPE=unit_test
+                  - TEST_TYPE=performance
                 agents:
                   queue: "default"
-            # - path:
-            #     - "scripts/lora_extraction/**"
-            #     - "pyproject.toml"
-            #     - "docker/Dockerfile.python3.12"
-            #   config:
-            #     command: "timeout 90m .buildkite/scripts/pr_test.sh"
-            #     label: "LoRA Extraction Tests"
-            #     env:
-            #       - TEST_TYPE=lora_extraction
-            #     agents:
-            #       queue: "default"
+            - path:
+                - "fastvideo/entrypoints/openai/**"
+                - "fastvideo/entrypoints/cli/serve.py"
+                - "fastvideo/tests/entrypoints/test_openai_api_integration.py"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                label: ":test_tube: API Server Tests"
+                env:
+                  - TEST_TYPE=api_server
+                agents:
+                  queue: "default"

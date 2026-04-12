@@ -66,8 +66,7 @@ class NewGELU(CustomOp):
     def forward_native(self, x: torch.Tensor) -> torch.Tensor:
         """PyTorch-native implementation equivalent to forward()."""
         c = math.sqrt(2.0 / math.pi)
-        return 0.5 * x * (1.0 + torch.tanh(c *
-                                           (x + 0.044715 * torch.pow(x, 3.0))))
+        return 0.5 * x * (1.0 + torch.tanh(c * (x + 0.044715 * torch.pow(x, 3.0))))
 
 
 @CustomOp.register("quick_gelu")
@@ -96,8 +95,7 @@ def get_act_fn(act_fn_name: str) -> nn.Module:
     """Get an activation function by name."""
     act_fn_name = act_fn_name.lower()
     if act_fn_name not in _ACTIVATION_REGISTRY:
-        raise ValueError(
-            f"Activation function {act_fn_name!r} is not supported.")
+        raise ValueError(f"Activation function {act_fn_name!r} is not supported.")
 
     return _ACTIVATION_REGISTRY[act_fn_name]()
 
@@ -112,7 +110,6 @@ def get_act_and_mul_fn(act_fn_name: str) -> nn.Module:
     """Get an activation-and-mul (i.e. SiluAndMul) function by name."""
     act_fn_name = act_fn_name.lower()
     if act_fn_name not in _ACTIVATION_AND_MUL_REGISTRY:
-        raise ValueError(
-            f"Activation function {act_fn_name!r} is not supported.")
+        raise ValueError(f"Activation function {act_fn_name!r} is not supported.")
 
     return _ACTIVATION_AND_MUL_REGISTRY[act_fn_name]()

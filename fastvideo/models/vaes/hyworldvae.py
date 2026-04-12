@@ -977,10 +977,7 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
         # encode() uses temporal caching by default (via _encode)
         posterior = self.encode(x)
 
-        if sample_posterior:
-            z = posterior.sample(generator=generator)
-        else:
-            z = posterior.mode()
+        z = posterior.sample(generator=generator) if sample_posterior else posterior.mode()
 
         # decode() uses temporal caching by default (via _decode)
         dec = self.decode(z)

@@ -55,49 +55,34 @@ class TimestepPreparationStage(PipelineStage):
 
         # Prepare extra kwargs for set_timesteps
         extra_set_timesteps_kwargs = {}
-        if n_tokens is not None and "n_tokens" in inspect.signature(
-                scheduler.set_timesteps).parameters:
+        if n_tokens is not None and "n_tokens" in inspect.signature(scheduler.set_timesteps).parameters:
             extra_set_timesteps_kwargs["n_tokens"] = n_tokens
 
         # Handle custom timesteps or sigmas
         if timesteps is not None and sigmas is not None:
             raise ValueError(
-                "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values"
-            )
+                "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
 
         if timesteps is not None:
-            accepts_timesteps = "timesteps" in inspect.signature(
-                scheduler.set_timesteps).parameters
+            accepts_timesteps = "timesteps" in inspect.signature(scheduler.set_timesteps).parameters
             if not accepts_timesteps:
                 raise ValueError(
                     f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                    f" timestep schedules. Please check whether you are using the correct scheduler."
-                )
+                    f" timestep schedules. Please check whether you are using the correct scheduler.")
             # Convert timesteps to CPU if it's a tensor (for numpy conversion in scheduler)
-            if isinstance(timesteps, torch.Tensor):
-                timesteps_for_scheduler = timesteps.cpu()
-            else:
-                timesteps_for_scheduler = timesteps
-            scheduler.set_timesteps(timesteps=timesteps_for_scheduler,
-                                    device=device,
-                                    **extra_set_timesteps_kwargs)
+            timesteps_for_scheduler = timesteps.cpu() if isinstance(timesteps, torch.Tensor) else timesteps
+            scheduler.set_timesteps(timesteps=timesteps_for_scheduler, device=device, **extra_set_timesteps_kwargs)
             timesteps = scheduler.timesteps
         elif sigmas is not None:
-            accept_sigmas = "sigmas" in inspect.signature(
-                scheduler.set_timesteps).parameters
+            accept_sigmas = "sigmas" in inspect.signature(scheduler.set_timesteps).parameters
             if not accept_sigmas:
                 raise ValueError(
                     f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                    f" sigmas schedules. Please check whether you are using the correct scheduler."
-                )
-            scheduler.set_timesteps(sigmas=sigmas,
-                                    device=device,
-                                    **extra_set_timesteps_kwargs)
+                    f" sigmas schedules. Please check whether you are using the correct scheduler.")
+            scheduler.set_timesteps(sigmas=sigmas, device=device, **extra_set_timesteps_kwargs)
             timesteps = scheduler.timesteps
         else:
-            scheduler.set_timesteps(num_inference_steps,
-                                    device=device,
-                                    **extra_set_timesteps_kwargs)
+            scheduler.set_timesteps(num_inference_steps, device=device, **extra_set_timesteps_kwargs)
             timesteps = scheduler.timesteps
 
         # Update batch with prepared timesteps
@@ -105,23 +90,19 @@ class TimestepPreparationStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify timestep preparation stage inputs."""
         result = VerificationResult()
-        result.add_check("num_inference_steps", batch.num_inference_steps,
-                         V.positive_int)
+        result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
         result.add_check("timesteps", batch.timesteps, V.none_or_tensor)
         result.add_check("sigmas", batch.sigmas, V.none_or_list)
         result.add_check("n_tokens", batch.n_tokens, V.none_or_positive_int)
         return result
 
-    def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify timestep preparation stage outputs."""
         result = VerificationResult()
-        result.add_check("timesteps", batch.timesteps,
-                         [V.is_tensor, V.with_dims(1)])
+        result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.with_dims(1)])
         return result
 
 
@@ -147,9 +128,7 @@ class Cosmos25TimestepPreparationStage(TimestepPreparationStage):
         elif "use_kerras_sigma" in sig.parameters:
             extra_kwargs["use_kerras_sigma"] = True
 
-        scheduler.set_timesteps(num_inference_steps,
-                                device=device,
-                                **extra_kwargs)
+        scheduler.set_timesteps(num_inference_steps, device=device, **extra_kwargs)
         batch.timesteps = scheduler.timesteps
         return batch
 
@@ -182,24 +161,19 @@ class SD35TimestepPreparationStage(TimestepPreparationStage):
 
         if "mu" in sig.parameters:
             cfg = getattr(self.scheduler, "config", None)
-            use_dynamic = bool(getattr(cfg, "use_dynamic_shifting",
-                                       False)) if cfg is not None else False
+            use_dynamic = bool(getattr(cfg, "use_dynamic_shifting", False)) if cfg is not None else False
 
             if use_dynamic:
                 arch = fastvideo_args.pipeline_config.dit_config.arch_config
                 vae_arch = fastvideo_args.pipeline_config.vae_config.arch_config
                 patch_size = getattr(arch, "patch_size", None)
-                spatial_ratio = getattr(vae_arch, "spatial_compression_ratio",
-                                        None)
+                spatial_ratio = getattr(vae_arch, "spatial_compression_ratio", None)
 
-                if not isinstance(patch_size, int) or not isinstance(
-                        spatial_ratio, int):
-                    raise TypeError(
-                        "SD3.5 dynamic shifting requires integer patch_size "
-                        "and spatial_compression_ratio.")
+                if not isinstance(patch_size, int) or not isinstance(spatial_ratio, int):
+                    raise TypeError("SD3.5 dynamic shifting requires integer patch_size "
+                                    "and spatial_compression_ratio.")
                 if batch.height is None or batch.width is None:
-                    raise ValueError(
-                        "height/width must be set before timesteps.")
+                    raise ValueError("height/width must be set before timesteps.")
 
                 h_lat = batch.height // spatial_ratio
                 w_lat = batch.width // spatial_ratio

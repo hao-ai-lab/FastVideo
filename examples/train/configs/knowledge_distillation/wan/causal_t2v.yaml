@@ -1,0 +1,89 @@
+# Knowledge Distillation: Wan 2.1 Causal T2V 1.3B
+#
+# Trains a causal student (1.3B) with per-frame block-quantized MSE loss
+# on teacher (14B) ODE trajectories. The resulting checkpoint serves as
+# the ode_init weight initialization for downstream Self-Forcing training.
+#
+# The same teacher_path_cache can be shared with kd_wan2.1_t2v_1.3B.yaml
+# since the cache stores teacher trajectories independent of the student.
+#
+# After training, export the ode_init checkpoint:
+#   python -m fastvideo.train.entrypoint.dcp_to_diffusers \
+#       --role student \
+#       --output_dir outputs/wan2.1_causal_kd_ode_init/diffusers \
+#       --checkpoint_dir outputs/wan2.1_causal_kd_ode_init/latest
+#
+# The exported model.safetensors can then be passed as:
+#   transformer_override_safetensor in a Self-Forcing config.
+#
+# Remove the 'teacher' block once the cache is complete to avoid
+# loading the 14B model on subsequent runs.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanCausalModel
+    init_from: wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers
+    trainable: true
+  teacher:                          # remove once cache is complete
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-14B-Diffusers
+    trainable: false
+    disable_custom_init_weights: true
+
+method:
+  _target_: fastvideo.train.methods.knowledge_distillation.kd.KDCausalMethod
+  teacher_path_cache: data/kd_cache/wan14b_4step
+  t_list: [999, 937, 833, 624, 0]   # student inference schedule (num_steps+1)
+  student_sample_steps: 4
+  teacher_inference_steps: 48       # teacher ODE steps; nearest indices selected for t_list
+  teacher_guidance_scale: 3.5       # CFG scale during teacher path generation
+  num_frames_per_block: 3           # frames sharing the same noise level (per-frame KD)
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+
+  data:
+    data_path: data/Wan-Syn_77x448x832_600k
+    dataloader_num_workers: 4
+    train_batch_size: 2
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 20
+    num_height: 448
+    num_width: 832
+    num_frames: 77
+
+  optimizer:
+    learning_rate: 7e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 10000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/wan2.1_causal_kd_ode_init
+    training_state_checkpointing_steps: 1000
+    checkpoints_total_limit: 3
+
+  tracker:
+    project_name: kd-wan
+    run_name: wan2.1_causal_kd_ode_init
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    max_grad_norm: 1.0
+
+pipeline:
+  flow_shift: 5

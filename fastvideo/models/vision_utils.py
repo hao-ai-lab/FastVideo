@@ -126,10 +126,7 @@ def load_image(
 
     image = PIL.ImageOps.exif_transpose(image)
 
-    if convert_method is not None:
-        image = convert_method(image)
-    else:
-        image = image.convert("RGB")
+    image = convert_method(image) if convert_method is not None else image.convert("RGB")
 
     return image
 
