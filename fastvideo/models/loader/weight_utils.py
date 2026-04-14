@@ -17,6 +17,21 @@ from tqdm.auto import tqdm
 
 from fastvideo.distributed.parallel_state import get_node_group
 from fastvideo.distributed import get_local_torch_device
+
+SAFETENSORS_TO_TORCH_DTYPE = {
+    'F16': torch.float16,
+    'BF16': torch.bfloat16,
+    'F32': torch.float32,
+    'F64': torch.float64,
+    'I8': torch.int8,
+    'I16': torch.int16,
+    'I32': torch.int32,
+    'I64': torch.int64,
+    'U8': torch.uint8,
+    'BOOL': torch.bool,
+    'F8_E4M3': torch.float8_e4m3fn,
+    'F8_E5M2': torch.float8_e5m2,
+}
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -153,8 +168,10 @@ def safetensors_weights_iterator(
                     if local_rank == 0:
                         param = f.get_tensor(name)
                     else:
-                        shape = f.get_slice(name).get_shape()
-                        param = torch.empty(shape, device=device)
+                        sl = f.get_slice(name)
+                        shape = sl.get_shape()
+                        dtype = SAFETENSORS_TO_TORCH_DTYPE[sl.get_dtype()]
+                        param = torch.empty(shape, device=device, dtype=dtype)
                     # broadcast to local ranks
                     # TODO(Wenxuan): scatter instead of broadcast
                     if node_group.world_size > 1:
@@ -175,6 +192,7 @@ def safetensors_weights_iterator(
         if async_broadcast:
             for handle in handles:
                 handle.wait()
+            handles.clear()
 
 
 def pt_weights_iterator(
