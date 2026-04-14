@@ -11,9 +11,11 @@ from pathlib import Path
 import filelock
 import huggingface_hub.constants
 import torch
+import torch.distributed as dist
 from safetensors.torch import safe_open
 from tqdm.auto import tqdm
 
+from fastvideo.distributed.parallel_state import get_node_group
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.logger import init_logger
 
@@ -119,12 +121,24 @@ _BAR_FORMAT = "{desc}: {percentage:3.0f}% Completed | {n_fmt}/{total_fmt} [{elap
 
 def safetensors_weights_iterator(
     hf_weights_files: list[str],
-    to_cpu: bool = True,
+    to_cpu: bool = False,
+    async_broadcast: bool = False
 ) -> Generator[tuple[str, torch.Tensor], None, None]:
-    """Iterate over the weights in the model safetensor files."""
-    enable_tqdm = not torch.distributed.is_initialized(
-    ) or torch.distributed.get_rank() == 0
-    device = "cpu" if to_cpu else str(get_local_torch_device())
+    """Iterate over the weights in the model safetensor files.
+    Args:
+        hf_weights_files: List of safetensor files to load.
+        to_cpu: Whether to load the weights to CPU. If False, will load to the GPU device bound to the current process.
+        async_broadcast: Whether to overlap loading from disk and broadcasting to other ranks. If True,
+            must iterate over all the weights before use. Only use if to_cpu is False.
+    """
+    node_group = get_node_group()
+    local_rank = node_group.local_rank
+    device = f"cuda:{local_rank}" if not to_cpu else "cpu"
+    enable_tqdm = not torch.distributed.is_initialized() or local_rank == 0
+    assert not (async_broadcast
+                and to_cpu), "Cannot broadcast weights when loading to CPU"
+
+    handles = []
     for st_file in tqdm(
             hf_weights_files,
             desc="Loading safetensors checkpoint shards",
@@ -133,18 +147,45 @@ def safetensors_weights_iterator(
     ):
         with safe_open(st_file, framework="pt", device=device) as f:
             for name in f.keys():  # noqa: SIM118
-                param = f.get_tensor(name)
+                if to_cpu:
+                    param = f.get_tensor(name)
+                else:
+                    if local_rank == 0:
+                        param = f.get_tensor(name)
+                    else:
+                        shape = f.get_slice(name).get_shape()
+                        param = torch.empty(shape, device=device)
+                    # broadcast to local ranks
+                    # TODO(Wenxuan): scatter instead of broadcast
+                    if node_group.world_size > 1:
+                        group = node_group.device_group
+                        if async_broadcast:
+                            handle = dist.broadcast(param,
+                                                    src=dist.get_global_rank(
+                                                        group, 0),
+                                                    async_op=True,
+                                                    group=group)
+                            handles.append(handle)
+                        else:
+                            dist.broadcast(param,
+                                           src=dist.get_global_rank(group, 0),
+                                           group=group)
                 yield name, param
+
+        if async_broadcast:
+            for handle in handles:
+                handle.wait()
 
 
 def pt_weights_iterator(
     hf_weights_files: list[str],
-    to_cpu: bool = True,
+    to_cpu: bool = True  # default to CPU for text encoder
 ) -> Generator[tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model bin/pt files."""
-    device = "cpu" if to_cpu else str(get_local_torch_device())
-    enable_tqdm = not torch.distributed.is_initialized(
-    ) or torch.distributed.get_rank() == 0
+    node_group = get_node_group()
+    local_rank = node_group.local_rank
+    device = f"cuda:{local_rank}" if not to_cpu else "cpu"
+    enable_tqdm = not torch.distributed.is_initialized() or local_rank == 0
     for bin_file in tqdm(
             hf_weights_files,
             desc="Loading pt checkpoint shards",
