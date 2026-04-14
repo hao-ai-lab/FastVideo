@@ -675,8 +675,7 @@ def init_node_group(local_rank: int, backend: str):
     node_ranks = is_the_same_node_as(cpu_group)
     node_size = len(node_ranks)
     all_node_ranks = [
-        list(range(i * node_size, (i + 1) * node_size))
-        for i in range(dist.get_world_size() // node_size)
+        list(range(i * node_size, (i + 1) * node_size)) for i in range(dist.get_world_size() // node_size)
     ]
     global _NODE
     _NODE = init_model_parallel_group(all_node_ranks, local_rank, backend)
@@ -762,7 +761,8 @@ def init_distributed_environment(
         assert _WORLD.world_size == torch.distributed.get_world_size(), (
             "world group already initialized with a different world size")
     # Init a group for each node
-    init_node_group(local_rank, backend)
+    if _NODE is None:
+        init_node_group(local_rank, backend)
 
 
 _SP: GroupCoordinator | None = None
@@ -978,6 +978,11 @@ def destroy_model_parallel() -> None:
     if _DP:
         _DP.destroy()
     _DP = None
+
+    global _NODE
+    if _NODE:
+        _NODE.destroy()
+    _NODE = None
 
 
 def destroy_distributed_environment() -> None:
