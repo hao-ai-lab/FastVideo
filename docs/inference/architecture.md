@@ -455,6 +455,6 @@ User: generator.generate_video(prompt, ...)
    `fastvideo/pipelines/stages/`, implement `forward()`, optionally
    implement `verify_input()`/`verify_output()`.
 
-7. **Verify** — Run `fastvideo generate --model-path <path> --prompt
-   "test" --num-inference-steps 2` to confirm the pipeline loads and
-   generates output.
+7. **Verify** — Run `fastvideo generate --config <config.yaml>` with a
+   minimal nested config to confirm the pipeline loads and generates
+   output.
