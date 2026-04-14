@@ -481,6 +481,8 @@ def test_serve_subcommand_rejects_non_default_default_request(tmp_path):
         match="ServeConfig.default_request is not wired",
     ):
         ServeSubcommand().cmd(args)
+
+
 def test_main_rejects_top_level_config_without_subcommand(tmp_path, monkeypatch):
     config_path = tmp_path / "run.yaml"
     config_path.write_text(
