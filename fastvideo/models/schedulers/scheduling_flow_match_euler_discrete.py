@@ -107,6 +107,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         num_train_timesteps: int = 1000,
         shift: float = 1.0,
         use_dynamic_shifting: bool = False,
+        use_reference_discrete_timesteps: bool = False,
         base_shift: float | None = 0.5,
         max_shift: float | None = 1.15,
         base_image_seq_len: int | None = 256,
@@ -350,7 +351,22 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             if timesteps_array is None:
                 t_max = self._sigma_to_t(self.sigma_max)
                 t_min = self._sigma_to_t(self.sigma_min)
-                timesteps_array = np.linspace(t_max, t_min, num_inference_steps)
+                if self.config.use_reference_discrete_timesteps:
+                    # Some reference schedulers (for example Z-Image) build a
+                    # num_steps+1 linspace and drop the terminal point.
+                    timesteps_array = np.linspace(
+                        t_max,
+                        t_min,
+                        num_inference_steps + 1,
+                        dtype=np.float32,
+                    )[:-1]
+                else:
+                    timesteps_array = np.linspace(
+                        t_max,
+                        t_min,
+                        num_inference_steps,
+                        dtype=np.float32,
+                    )
             sigmas_array = timesteps_array / self.config.num_train_timesteps
         else:
             sigmas_array = np.array(sigmas).astype(np.float32)
