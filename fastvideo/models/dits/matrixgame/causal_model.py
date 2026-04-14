@@ -278,6 +278,13 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 else self.local_attn_size * frame_seqlen
             )
 
+            if torch.is_grad_enabled():
+                kv_cache["k"] = kv_cache["k"].detach().clone()
+                kv_cache["v"] = kv_cache["v"].detach().clone()
+            else:
+                kv_cache["k"] = kv_cache["k"].detach()
+                kv_cache["v"] = kv_cache["v"].detach()
+
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
             global_end_index = (

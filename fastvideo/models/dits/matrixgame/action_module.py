@@ -150,6 +150,13 @@ def _update_kv_cache_and_attend(
         else int(kv_cache["local_end_index"])
     )
 
+    if torch.is_grad_enabled():
+        kv_cache["k"] = kv_cache["k"].detach().clone()
+        kv_cache["v"] = kv_cache["v"].detach().clone()
+    else:
+        kv_cache["k"] = kv_cache["k"].detach()
+        kv_cache["v"] = kv_cache["v"].detach()
+
     # Check if we need to evict tokens
     if (current_end > original_global_end_index) and (
         num_new_tokens + original_local_end_index > kv_cache_size
