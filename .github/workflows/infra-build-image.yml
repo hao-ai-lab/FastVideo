@@ -2,7 +2,7 @@ name: Build and Push Docker Images
 
 on:
   push:
-    branches: [main,docker-auto-rebuild]
+    branches: [main]
     paths:
       - 'docker/Dockerfile.*'
   workflow_dispatch:
