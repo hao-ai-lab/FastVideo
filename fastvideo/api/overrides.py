@@ -31,7 +31,7 @@ def parse_cli_overrides(overrides: list[str]) -> dict[str, Any]:
                 raise ValueError(f"Missing value for override {token!r}")
             raw_value = overrides[index]
 
-        parsed[key] = _cast_override_value(raw_value)
+        parsed[_normalize_override_key(key)] = _cast_override_value(raw_value)
         index += 1
 
     return parsed
@@ -92,6 +92,10 @@ def _cast_override_value(raw: str) -> Any:
             pass
 
     return raw
+
+
+def _normalize_override_key(key: str) -> str:
+    return key.replace("-", "_")
 
 
 __all__ = ["apply_overrides", "parse_cli_overrides"]

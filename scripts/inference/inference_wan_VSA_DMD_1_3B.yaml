@@ -1,0 +1,38 @@
+# Run with:
+#   FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN fastvideo generate --config scripts/inference/inference_wan_VSA_DMD_1_3B.yaml
+generator:
+  model_path: FastVideo/FastWan2.1-T2V-1.3B-Diffusers
+  engine:
+    num_gpus: 1
+    compile:
+      enabled: true
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      vae: false
+      pin_cpu_memory: false
+  pipeline:
+    experimental:
+      VSA_sparsity: 0.8
+      dmd_denoising_steps: [1000, 757, 522]
+request:
+  negative_prompt: >-
+    Bright tones, overexposed, static, blurred details, subtitles, style,
+    works, paintings, images, static, overall gray, worst quality, low
+    quality, JPEG compression residue, ugly, incomplete, extra fingers,
+    poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen
+    limbs, fused fingers, still picture, messy background, three legs, many
+    people in the background, walking backwards
+  inputs:
+    prompt_path: assets/prompt.txt
+  sampling:
+    seed: 1024
+    num_frames: 81
+    height: 480
+    width: 832
+    fps: 16
+    num_inference_steps: 3
+  output:
+    output_path: outputs_video_dmd_1.3B/

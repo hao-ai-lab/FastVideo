@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/entrypoints/cli/main.py
-
 from fastvideo.entrypoints.cli.cli_types import CLISubcommand
 from fastvideo.entrypoints.cli.generate import cmd_init as generate_cmd_init
 from fastvideo.utils import FlexibleArgumentParser
@@ -27,14 +26,17 @@ def main() -> None:
     for cmd in cmd_init():
         cmd.subparser_init(subparsers).set_defaults(dispatch_function=cmd.cmd)
         cmds[cmd.name] = cmd
-    args = parser.parse_args()
+
+    args, unknown = parser.parse_known_args()
+    if unknown and args.subparser not in {"generate", "serve"}:
+        parser.error(f"unrecognized arguments: {' '.join(unknown)}")
+    args._unknown = unknown
     if args.subparser in cmds:
         cmds[args.subparser].validate(args)
-
-    if hasattr(args, "dispatch_function"):
         args.dispatch_function(args)
-    else:
-        parser.print_help()
+        return
+
+    parser.print_help()
 
 
 if __name__ == "__main__":
