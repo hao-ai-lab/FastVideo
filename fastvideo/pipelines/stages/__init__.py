@@ -35,6 +35,7 @@ from fastvideo.pipelines.stages.gamecraft_denoising import GameCraftDenoisingSta
 from fastvideo.pipelines.stages.gen3c_stages import (Gen3CCFGPolicyStage, Gen3CConditioningStage, Gen3CDenoisingStage,
                                                      Gen3CLatentPreparationStage)
 from fastvideo.pipelines.stages.text_encoding import (Cosmos25TextEncodingStage, TextEncodingStage)
+from fastvideo.pipelines.stages.waypoint_stages import (WaypointTextEncodingStage)
 from fastvideo.pipelines.stages.timestep_preparation import (Cosmos25TimestepPreparationStage, TimestepPreparationStage)
 
 # LongCat stages
@@ -87,6 +88,7 @@ __all__ = [
     "GameCraftImageVAEEncodingStage",
     "TextEncodingStage",
     "Cosmos25TextEncodingStage",
+    "WaypointTextEncodingStage",
     # LongCat stages
     "LongCatVideoVAEEncodingStage",
     "LongCatKVCacheInitStage",

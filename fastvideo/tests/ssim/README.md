@@ -144,3 +144,31 @@ Wan2.1-I2V-14B-480P-Diffusers: {
 
 1. "An astronaut hatching from an egg, on the surface of the moon, the darkness and depth of space realised in the background. High quality, ultrarealistic detail and breath-taking movie-like camera shot."
     Image path: "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg"
+
+## Waypoint-1-Small (test_waypoint_similarity.py)
+
+Uses `VideoGenerator` (non-streaming, same pattern as MatrixGame). Run:
+`pytest fastvideo/tests/ssim/test_waypoint_similarity.py -vs`
+
+To update references, generate a video, inspect it, then:
+`python fastvideo/tests/ssim/reference_videos_cli.py copy-local --quality-tier default --device-folder <GPU>_reference_videos`
+
+Waypoint-1-Small-Diffusers (default): {
+  "num_gpus": 1,
+  "model_path": "FastVideo/Waypoint-1-Small-Diffusers",
+  "height": 368,
+  "width": 640,
+  "num_frames": 17,
+  "num_inference_steps": 4,
+  "seed": 1024
+}
+
+Waypoint-1-Small-Diffusers (full_quality): {
+  "num_gpus": 1,
+  "model_path": "FastVideo/Waypoint-1-Small-Diffusers",
+  "height": 368,
+  "width": 640,
+  "num_frames": 60,
+  "num_inference_steps": 4,
+  "seed": 1024
+}

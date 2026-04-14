@@ -42,6 +42,7 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "LingBotWorldTransformer3DModel": ("dits", "lingbotworld", "LingBotWorldTransformer3DModel"),
     "Gen3CTransformer3DModel": ("dits", "gen3c", "Gen3CTransformer3DModel"),
     "Kandinsky5Transformer3DModel": ("dits", "kandinsky5", "Kandinsky5Transformer3DModel"),
+    "WorldModel": ("dits", "waypoint_transformer", "WaypointWorldModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
@@ -58,6 +59,7 @@ _TEXT_ENCODER_MODELS = {
     ("encoders", "clip", "CLIPTextModelWithProjection"),
     "LlamaModel": ("encoders", "llama", "LlamaModel"),
     "UMT5EncoderModel": ("encoders", "t5", "UMT5EncoderModel"),
+    "UMT5ForConditionalGeneration": ("encoders", "t5", "UMT5EncoderModel"),
     "T5EncoderModel": ("encoders", "t5_hf", "T5EncoderModel"),
     "BertModel": ("encoders", "clip", "CLIPTextModel"),
     "Qwen2_5_VLTextModel": ("encoders", "qwen2_5", "Qwen2_5_VLTextModel"),

@@ -160,6 +160,10 @@ class ForwardBatch:
     width_sr: list[int] | int | None = None
     fps: list[int] | int | None = None
 
+    # Waypoint / streaming video encode (not used by all pipelines)
+    video_quality: int = 8
+    max_kv_cache_frames: int = 128
+
     # Timesteps
     timesteps: torch.Tensor | None = None
     timestep: torch.Tensor | float | int | None = None
