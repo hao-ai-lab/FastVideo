@@ -64,6 +64,8 @@ _TEXT_ENCODER_MODELS = {
     "Reason1TextEncoder": ("encoders", "reason1", "Reason1TextEncoder"),
     "Qwen2_5_VLForConditionalGeneration":
     ("encoders", "reason1", "Reason1TextEncoder"),
+    "Qwen3Model": ("encoders", "qwen3", "Qwen3Model"),
+    "Qwen3ForCausalLM": ("encoders", "qwen3", "Qwen3Model"),
     "LTX2GemmaTextEncoderModel": ("encoders", "gemma", "LTX2GemmaTextEncoderModel"),
 }
 
