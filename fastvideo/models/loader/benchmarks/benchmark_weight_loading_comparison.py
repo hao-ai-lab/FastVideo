@@ -20,14 +20,12 @@ Usage:
 """
 
 import argparse
-import glob
 import os
 import time
 
 import torch
 import torch.distributed as dist
 from safetensors.torch import safe_open
-from tqdm.auto import tqdm
 
 from fastvideo.distributed.parallel_state import (
     cleanup_dist_env_and_memory,
@@ -36,29 +34,15 @@ from fastvideo.distributed.parallel_state import (
 )
 from fastvideo.models.loader.weight_utils import (
     SAFETENSORS_TO_TORCH_DTYPE,
-    filter_duplicate_safetensors_files,
+    resolve_safetensors_files,
 )
-
-SAFE_WEIGHTS_INDEX_NAME = "model.safetensors.index.json"
-
-
-def resolve_safetensors_files(model_path: str) -> list[str]:
-    files = sorted(glob.glob(os.path.join(model_path, "*.safetensors")))
-    if not files:
-        raise FileNotFoundError(
-            f"No .safetensors files found in {model_path}")
-    index_file = os.path.join(model_path, SAFE_WEIGHTS_INDEX_NAME)
-    if os.path.exists(index_file):
-        files = filter_duplicate_safetensors_files(
-            files, model_path, SAFE_WEIGHTS_INDEX_NAME)
-    return files
 
 
 def load_independent(files: list[str], device: str):
     """Before-PR behavior: every rank reads every tensor from disk to GPU."""
     for st_file in files:
         with safe_open(st_file, framework="pt", device=device) as f:
-            for name in f.keys():
+            for name in f:
                 param = f.get_tensor(name)
                 yield name, param
 
@@ -70,7 +54,7 @@ def load_broadcast(files: list[str], device: str, node_group,
     handles = []
     for st_file in files:
         with safe_open(st_file, framework="pt", device=device) as f:
-            for name in f.keys():
+            for name in f:
                 if local_rank == 0:
                     param = f.get_tensor(name)
                 else:
