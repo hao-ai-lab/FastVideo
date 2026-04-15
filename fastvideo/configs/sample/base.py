@@ -104,16 +104,41 @@ class SamplingParam:
 
     @classmethod
     def from_pretrained(cls, model_path: str) -> "SamplingParam":
-        from fastvideo.registry import get_sampling_param_cls_for_name
-        sampling_cls = get_sampling_param_cls_for_name(model_path)
+        from fastvideo.registry import _get_config_info
+        config_info = _get_config_info(
+            model_path,
+            raise_on_missing=False,
+        )
+
+        if config_info is not None and config_info.default_profile:
+            return cls._from_profile(config_info.default_profile)
+
+        sampling_cls = (config_info.sampling_param_cls if config_info is not None else None)
+
         if sampling_cls is not None:
             sampling_param: SamplingParam = sampling_cls()
         else:
-            logger.warning("Couldn't find an optimal sampling param for %s. Using the default sampling param.",
-                           model_path)
+            logger.warning(
+                "Couldn't find an optimal sampling param "
+                "for %s. Using the default sampling param.",
+                model_path,
+            )
             sampling_param = cls()
 
         return sampling_param
+
+    @classmethod
+    def _from_profile(cls, profile_name: str) -> "SamplingParam":
+        from fastvideo.configs.sample.profiles import get_profile
+        profile = get_profile(profile_name)
+        if profile is None:
+            raise ValueError(f"Profile {profile_name!r} not found in "
+                             "profile registry")
+        instance = cls()
+        for key, value in profile.defaults.items():
+            setattr(instance, key, value)
+        instance.__post_init__()
+        return instance
 
     @staticmethod
     def add_cli_args(parser: Any) -> Any:

@@ -49,10 +49,6 @@ from fastvideo.configs.pipelines.wan import (
 )
 from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.sample.base import SamplingParam
-from fastvideo.configs.sample.cosmos import (
-    Cosmos_Predict2_2B_Video2World_SamplingParam, )
-from fastvideo.configs.sample.cosmos2_5 import Cosmos25SamplingParamBase
-from fastvideo.configs.sample.gen3c import Gen3C_Cosmos_7B_SamplingParam
 from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam, HunyuanSamplingParam)
 from fastvideo.configs.sample.hunyuan15 import (Hunyuan15_480P_SamplingParam,
                                                 Hunyuan15_480P_StepDistilled_I2V_SamplingParam,
@@ -138,6 +134,7 @@ class ConfigInfo:
     sampling_param_cls: type[SamplingParam] | None
     pipeline_config_cls: type[PipelineConfig]
     workload_types: tuple[WorkloadType, ...]
+    default_profile: str | None = None
 
 
 # The central registry mapping a model name to its configuration information
@@ -156,6 +153,7 @@ def register_configs(
     workload_types: tuple[WorkloadType, ...],
     hf_model_paths: list[str] | None = None,
     model_detectors: list[Callable[[str], bool]] | None = None,
+    default_profile: str | None = None,
 ) -> None:
     """Register config classes for a model family.
 
@@ -168,6 +166,7 @@ def register_configs(
         sampling_param_cls=sampling_param_cls,
         pipeline_config_cls=pipeline_config_cls,
         workload_types=workload_types,
+        default_profile=default_profile,
     )
 
     if hf_model_paths:
@@ -240,6 +239,14 @@ def _get_config_info(
 
 
 def _register_configs() -> None:
+    # Import profile modules so they self-register into the
+    # profile registry.  Deferred to here (rather than top-level)
+    # so that fastvideo.registry is sufficiently initialised when
+    # the transitive fastvideo.pipelines.__init__ import fires.
+    import importlib
+    importlib.import_module("fastvideo.pipelines.basic.cosmos.profiles")
+    importlib.import_module("fastvideo.pipelines.basic.gen3c.profiles")
+
     # LTX-2 (base)
     register_configs(
         sampling_param_cls=LTX2BaseSamplingParam,
@@ -430,7 +437,7 @@ def _register_configs() -> None:
 
     # GEN3C (must register before generic Cosmos detector)
     register_configs(
-        sampling_param_cls=Gen3C_Cosmos_7B_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=Gen3CConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
@@ -439,11 +446,12 @@ def _register_configs() -> None:
         model_detectors=[
             lambda path: "gen3c" in path.lower(),
         ],
+        default_profile="gen3c_cosmos_7b",
     )
 
     # Cosmos 2.5
     register_configs(
-        sampling_param_cls=Cosmos25SamplingParamBase,
+        sampling_param_cls=None,
         pipeline_config_cls=Cosmos25Config,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
@@ -456,11 +464,12 @@ def _register_configs() -> None:
                 "cosmos2.5",
             )),
         ],
+        default_profile="cosmos25_predict2_2b",
     )
 
     # Cosmos 2
     register_configs(
-        sampling_param_cls=Cosmos_Predict2_2B_Video2World_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=CosmosConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
@@ -470,6 +479,7 @@ def _register_configs() -> None:
             lambda path: "cosmos" in path.lower() and ("2.5" not in path.lower() and "2_5" not in path.lower() and "25"
                                                        not in path.lower() and "gen3c" not in path.lower()),
         ],
+        default_profile="cosmos_predict2_2b",
     )
 
     # TurboDiffusion
