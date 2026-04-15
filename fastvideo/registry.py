@@ -83,8 +83,6 @@ from fastvideo.configs.sample.wan import (
     WanT2V_14B_SamplingParam,
     WanT2V_1_3B_SamplingParam,
 )
-from fastvideo.configs.sample.sd35 import SD35SamplingParam
-
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index, verify_model_config_and_directory)
@@ -138,6 +136,7 @@ class ConfigInfo:
     sampling_param_cls: type[SamplingParam] | None
     pipeline_config_cls: type[PipelineConfig]
     workload_types: tuple[WorkloadType, ...]
+    default_profile: str | None = None
 
 
 # The central registry mapping a model name to its configuration information
@@ -156,6 +155,7 @@ def register_configs(
     workload_types: tuple[WorkloadType, ...],
     hf_model_paths: list[str] | None = None,
     model_detectors: list[Callable[[str], bool]] | None = None,
+    default_profile: str | None = None,
 ) -> None:
     """Register config classes for a model family.
 
@@ -168,6 +168,7 @@ def register_configs(
         sampling_param_cls=sampling_param_cls,
         pipeline_config_cls=pipeline_config_cls,
         workload_types=workload_types,
+        default_profile=default_profile,
     )
 
     if hf_model_paths:
@@ -624,8 +625,9 @@ def _register_configs() -> None:
     )
 
     # SD3.5
+    import fastvideo.pipelines.basic.sd35.profiles  # noqa: F401
     register_configs(
-        sampling_param_cls=SD35SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=SD35Config,
         workload_types=(WorkloadType.T2I, ),
         hf_model_paths=[
@@ -638,6 +640,7 @@ def _register_configs() -> None:
                 "stabilityai__stable-diffusion-3.5-medium",
             )),
         ],
+        default_profile="sd35_medium",
     )
 
 
