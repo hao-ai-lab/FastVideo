@@ -103,17 +103,55 @@ class SamplingParam:
         self.__post_init__()
 
     @classmethod
-    def from_pretrained(cls, model_path: str) -> "SamplingParam":
-        from fastvideo.registry import get_sampling_param_cls_for_name
-        sampling_cls = get_sampling_param_cls_for_name(model_path)
-        if sampling_cls is not None:
-            sampling_param: SamplingParam = sampling_cls()
-        else:
-            logger.warning("Couldn't find an optimal sampling param for %s. Using the default sampling param.",
-                           model_path)
-            sampling_param = cls()
+    def _from_profile(
+        cls,
+        profile_name: str,
+    ) -> "SamplingParam":
+        """Create a ``SamplingParam`` with profile defaults applied.
 
-        return sampling_param
+        Looks up *profile_name* in the registered profile tables,
+        creates a base ``SamplingParam()``, then delegates to
+        :meth:`update` so that ``__post_init__`` is called and
+        derived fields stay consistent.
+        """
+        from fastvideo.pipelines.basic.hunyuan.profiles import (
+            PROFILES as _hunyuan_profiles, )
+
+        # Merged lazily; extend this dict as more model families
+        # migrate to profile-based defaults.
+        all_profiles = _hunyuan_profiles
+
+        if profile_name not in all_profiles:
+            raise ValueError(f"Unknown profile '{profile_name}'. "
+                             f"Available: {sorted(all_profiles)}")
+
+        instance = cls()
+        instance.update(all_profiles[profile_name].defaults)
+        return instance
+
+    @classmethod
+    def from_pretrained(cls, model_path: str) -> "SamplingParam":
+        from fastvideo.registry import _get_config_info
+
+        config_info = _get_config_info(model_path, raise_on_missing=False)
+
+        if config_info is None:
+            logger.warning(
+                "Couldn't find an optimal sampling param "
+                "for %s. Using the default sampling param.",
+                model_path,
+            )
+            return cls()
+
+        # Profile-based path (preferred for new migrations).
+        if config_info.default_profile is not None:
+            return cls._from_profile(config_info.default_profile)
+
+        # Legacy path: use the registered subclass directly.
+        if config_info.sampling_param_cls is not None:
+            return config_info.sampling_param_cls()
+
+        return cls()
 
     @staticmethod
     def add_cli_args(parser: Any) -> Any:

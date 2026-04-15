@@ -53,7 +53,6 @@ from fastvideo.configs.sample.cosmos import (
     Cosmos_Predict2_2B_Video2World_SamplingParam, )
 from fastvideo.configs.sample.cosmos2_5 import Cosmos25SamplingParamBase
 from fastvideo.configs.sample.gen3c import Gen3C_Cosmos_7B_SamplingParam
-from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam, HunyuanSamplingParam)
 from fastvideo.configs.sample.hunyuan15 import (Hunyuan15_480P_SamplingParam,
                                                 Hunyuan15_480P_StepDistilled_I2V_SamplingParam,
                                                 Hunyuan15_720P_SamplingParam,
@@ -138,6 +137,7 @@ class ConfigInfo:
     sampling_param_cls: type[SamplingParam] | None
     pipeline_config_cls: type[PipelineConfig]
     workload_types: tuple[WorkloadType, ...]
+    default_profile: str | None = None
 
 
 # The central registry mapping a model name to its configuration information
@@ -156,6 +156,7 @@ def register_configs(
     workload_types: tuple[WorkloadType, ...],
     hf_model_paths: list[str] | None = None,
     model_detectors: list[Callable[[str], bool]] | None = None,
+    default_profile: str | None = None,
 ) -> None:
     """Register config classes for a model family.
 
@@ -168,6 +169,7 @@ def register_configs(
         sampling_param_cls=sampling_param_cls,
         pipeline_config_cls=pipeline_config_cls,
         workload_types=workload_types,
+        default_profile=default_profile,
     )
 
     if hf_model_paths:
@@ -317,7 +319,7 @@ def _register_configs() -> None:
 
     # Hunyuan (excludes gamecraft, hyworld, and versioned models)
     register_configs(
-        sampling_param_cls=HunyuanSamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=HunyuanConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
@@ -327,14 +329,16 @@ def _register_configs() -> None:
             lambda path: "hunyuan" in path.lower() and "gamecraft" not in path.lower() and "hyworld" not in path.lower(
             ) and "1.5" not in path.lower() and "1-5" not in path.lower()
         ],
+        default_profile="hunyuan_t2v",
     )
     register_configs(
-        sampling_param_cls=FastHunyuanSamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=FastHunyuanConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "FastVideo/FastHunyuan-diffusers",
         ],
+        default_profile="fast_hunyuan_t2v",
     )
 
     # HYWorld
