@@ -68,6 +68,7 @@ class SamplingParam:
     num_inference_steps: int = 50
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
+    guidance_scale_2: float | None = None
     guidance_rescale: float = 0.0
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
@@ -104,16 +105,58 @@ class SamplingParam:
 
     @classmethod
     def from_pretrained(cls, model_path: str) -> "SamplingParam":
+        sampling_param = cls._from_profile(model_path)
+        if sampling_param is not None:
+            return sampling_param
+
         from fastvideo.registry import get_sampling_param_cls_for_name
         sampling_cls = get_sampling_param_cls_for_name(model_path)
         if sampling_cls is not None:
-            sampling_param: SamplingParam = sampling_cls()
-        else:
-            logger.warning("Couldn't find an optimal sampling param for %s. Using the default sampling param.",
-                           model_path)
-            sampling_param = cls()
+            return sampling_cls()
 
-        return sampling_param
+        logger.warning(
+            "Couldn't find an optimal sampling param for %s."
+            " Using the default sampling param.",
+            model_path,
+        )
+        return cls()
+
+    @classmethod
+    def _from_profile(
+        cls,
+        model_path: str,
+    ) -> "SamplingParam | None":
+        """Build a SamplingParam from profile defaults.
+
+        Returns ``None`` when no profile is configured for
+        *model_path*, letting the caller fall back to the legacy
+        subclass lookup.
+        """
+        from fastvideo.registry import (
+            get_default_profile,
+            get_model_family,
+        )
+
+        try:
+            profile_name = get_default_profile(model_path)
+        except Exception:
+            return None
+        if profile_name is None:
+            return None
+
+        model_family = get_model_family(model_path)
+        if model_family is None:
+            return None
+
+        from fastvideo.api.profiles import get_profile
+
+        profile = get_profile(profile_name, model_family)
+        sp = cls()
+        for key, value in profile.defaults.items():
+            if hasattr(sp, key):
+                setattr(sp, key, value)
+        sp.__post_init__()
+        return sp
 
     @staticmethod
     def add_cli_args(parser: Any) -> Any:

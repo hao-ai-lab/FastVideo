@@ -345,6 +345,7 @@ surfaces:
       num_inference_steps: request.sampling.num_inference_steps
       num_inference_steps_sr: request.sampling.num_inference_steps_sr
       guidance_scale: request.sampling.guidance_scale
+      guidance_scale_2: request.sampling.guidance_scale_2
       guidance_rescale: request.sampling.guidance_rescale
       boundary_ratio: request.sampling.boundary_ratio
       sigmas: request.sampling.sigmas
@@ -364,15 +365,6 @@ surfaces:
       data_type: "Derived from the request shape and not a public input."
 
   sampling_param_extensions:
-    moved:
-      guidance_scale_2:
-        target: request.sampling.guidance_scale_2
-        sources:
-          - fastvideo.configs.sample.lingbotworld.LingBotWorld_SamplingParam
-          - fastvideo.configs.sample.lingbotworld.Wan2_2_I2V_A14B_SamplingParam
-          - fastvideo.configs.sample.wan.SelfForcingWan2_2_T2V_A14B_480P_SamplingParam
-          - fastvideo.configs.sample.wan.Wan2_2_I2V_A14B_SamplingParam
-          - fastvideo.configs.sample.wan.Wan2_2_T2V_A14B_SamplingParam
     profile_owned:
       action_list:
         target: request.extensions.hunyuangamecraft.action_list

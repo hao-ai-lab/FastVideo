@@ -22,6 +22,17 @@ from fastvideo.api.schema import (
 )
 from fastvideo.api.errors import ConfigValidationError
 from fastvideo.api.overrides import apply_overrides, parse_cli_overrides
+from fastvideo.api.profiles import (
+    PipelineProfile,
+    ProfileStageSpec,
+    get_all_profile_names,
+    get_profile,
+    get_profiles_for_family,
+    register_profile,
+    validate_profile_selection,
+    validate_stage_names,
+    validate_stage_overrides,
+)
 from fastvideo.api.parser import (
     config_to_dict,
     load_config,
@@ -54,6 +65,8 @@ __all__ = [
     "SamplingConfig",
     "ServeConfig",
     "ServerConfig",
+    "PipelineProfile",
+    "ProfileStageSpec",
     "apply_overrides",
     "config_to_dict",
     "load_config",
@@ -61,5 +74,12 @@ __all__ = [
     "load_run_config",
     "load_serve_config",
     "parse_cli_overrides",
+    "get_all_profile_names",
+    "get_profile",
+    "get_profiles_for_family",
     "parse_config",
+    "register_profile",
+    "validate_profile_selection",
+    "validate_stage_names",
+    "validate_stage_overrides",
 ]

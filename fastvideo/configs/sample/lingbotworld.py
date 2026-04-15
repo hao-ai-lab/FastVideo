@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass
-from fastvideo.configs.sample.wan import Wan2_2_I2V_A14B_SamplingParam
+
+from fastvideo.configs.sample.base import SamplingParam
 
 
 @dataclass
-class LingBotWorld_SamplingParam(Wan2_2_I2V_A14B_SamplingParam):
+class LingBotWorld_SamplingParam(SamplingParam):
     guidance_scale: float = 5.0  # high_noise
     guidance_scale_2: float = 5.0  # low_noise
     num_inference_steps: int = 70

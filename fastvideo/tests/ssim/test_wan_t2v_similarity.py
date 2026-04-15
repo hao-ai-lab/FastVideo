@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from fastvideo.configs.sample.wan import WanT2V_1_3B_SamplingParam
+from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
     resolve_inference_device_reference_folder,
@@ -41,7 +41,8 @@ WAN_T2V_PARAMS = {
     ),
     "text-encoder-precision": ("fp32",),
 }
-_WAN_T2V_FULL_QUALITY_DEFAULTS = WanT2V_1_3B_SamplingParam()
+_WAN_T2V_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
 WAN_T2V_FULL_QUALITY_PARAMS = {
     "num_gpus": WAN_T2V_PARAMS["num_gpus"],
     "model_path": WAN_T2V_PARAMS["model_path"],

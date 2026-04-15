@@ -69,20 +69,7 @@ from fastvideo.configs.sample.turbodiffusion import (
     TurboDiffusionT2V_1_3B_SamplingParam,
 )
 from fastvideo.configs.sample.wan import (
-    FastWanT2V480P_SamplingParam,
-    MatrixGame2_SamplingParam,
-    SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
-    SelfForcingWan2_2_T2V_A14B_480P_SamplingParam,
-    Wan2_1_Fun_1_3B_Control_SamplingParam,
-    Wan2_1_Fun_1_3B_InP_SamplingParam,
-    Wan2_2_I2V_A14B_SamplingParam,
-    Wan2_2_T2V_A14B_SamplingParam,
-    Wan2_2_TI2V_5B_SamplingParam,
-    WanI2V_14B_480P_SamplingParam,
-    WanI2V_14B_720P_SamplingParam,
-    WanT2V_14B_SamplingParam,
-    WanT2V_1_3B_SamplingParam,
-)
+    MatrixGame2_SamplingParam, )
 from fastvideo.configs.sample.sd35 import SD35SamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
@@ -138,6 +125,8 @@ class ConfigInfo:
     sampling_param_cls: type[SamplingParam] | None
     pipeline_config_cls: type[PipelineConfig]
     workload_types: tuple[WorkloadType, ...]
+    model_family: str | None = None
+    default_profile: str | None = None
 
 
 # The central registry mapping a model name to its configuration information
@@ -156,6 +145,8 @@ def register_configs(
     workload_types: tuple[WorkloadType, ...],
     hf_model_paths: list[str] | None = None,
     model_detectors: list[Callable[[str], bool]] | None = None,
+    model_family: str | None = None,
+    default_profile: str | None = None,
 ) -> None:
     """Register config classes for a model family.
 
@@ -168,6 +159,8 @@ def register_configs(
         sampling_param_cls=sampling_param_cls,
         pipeline_config_cls=pipeline_config_cls,
         workload_types=workload_types,
+        model_family=model_family,
+        default_profile=default_profile,
     )
 
     if hf_model_paths:
@@ -253,6 +246,7 @@ def _register_configs() -> None:
         model_detectors=[
             lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" not in path.lower(),
         ],
+        model_family="ltx2",
     )
     # LTX-2 (distilled)
     register_configs(
@@ -265,6 +259,7 @@ def _register_configs() -> None:
         model_detectors=[
             lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" in path.lower(),
         ],
+        model_family="ltx2",
     )
 
     # Hunyuan 1.5 (specific)
@@ -283,6 +278,7 @@ def _register_configs() -> None:
                 "hunyuanvideo_1.5",
             )),
         ],
+        model_family="hunyuan15",
     )
     register_configs(
         sampling_param_cls=Hunyuan15_480P_StepDistilled_I2V_SamplingParam,
@@ -291,6 +287,7 @@ def _register_configs() -> None:
         hf_model_paths=[
             "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v_step_distilled",
         ],
+        model_family="hunyuan15",
     )
     register_configs(
         sampling_param_cls=Hunyuan15_720P_SamplingParam,
@@ -299,6 +296,7 @@ def _register_configs() -> None:
         hf_model_paths=[
             "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v",
         ],
+        model_family="hunyuan15",
     )
     register_configs(
         sampling_param_cls=Hunyuan15_720P_Distilled_I2V_SamplingParam,
@@ -307,12 +305,14 @@ def _register_configs() -> None:
         hf_model_paths=[
             "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_i2v_distilled",
         ],
+        model_family="hunyuan15",
     )
     register_configs(
         sampling_param_cls=Hunyuan15_SR_1080P_SamplingParam,
         pipeline_config_cls=Hunyuan15SR1080PConfig,
         workload_types=(),
         hf_model_paths=["weizhou03/HunyuanVideo-1.5-Diffusers-1080p", "weizhou03/HunyuanVideo-1.5-Diffusers-1080p-2SR"],
+        model_family="hunyuan15",
     )
 
     # Hunyuan (excludes gamecraft, hyworld, and versioned models)
@@ -327,6 +327,7 @@ def _register_configs() -> None:
             lambda path: "hunyuan" in path.lower() and "gamecraft" not in path.lower() and "hyworld" not in path.lower(
             ) and "1.5" not in path.lower() and "1-5" not in path.lower()
         ],
+        model_family="hunyuan",
     )
     register_configs(
         sampling_param_cls=FastHunyuanSamplingParam,
@@ -335,6 +336,7 @@ def _register_configs() -> None:
         hf_model_paths=[
             "FastVideo/FastHunyuan-diffusers",
         ],
+        model_family="hunyuan",
     )
 
     # HYWorld
@@ -346,6 +348,7 @@ def _register_configs() -> None:
             "FastVideo/HY-WorldPlay-Bidirectional-Diffusers",
         ],
         model_detectors=[lambda path: "hyworld" in path.lower()],
+        model_family="hyworld",
     )
 
     # HunyuanGameCraft
@@ -357,6 +360,7 @@ def _register_configs() -> None:
             "FastVideo/HunyuanGameCraft-Diffusers",
         ],
         model_detectors=[lambda path: "gamecraft" in path.lower()],
+        model_family="gamecraft",
     )
     # LingBotWorld
     register_configs(
@@ -367,6 +371,7 @@ def _register_configs() -> None:
             "FastVideo/LingBot-World-Base-Cam-Diffusers",
         ],
         model_detectors=[lambda path: ("lingbotworld" in path.lower() or "lingbot-world" in path.lower())],
+        model_family="lingbotworld",
     )
 
     # Kandinsky5 Lite T2V
@@ -380,6 +385,7 @@ def _register_configs() -> None:
         model_detectors=[
             lambda path: any(token in path.lower() for token in ("kandinsky5", "kandinsky-5")),
         ],
+        model_family="kandinsky5",
     )
 
     # LongCat (T2V, I2V, VC use same config; workload varies by path)
@@ -392,6 +398,7 @@ def _register_configs() -> None:
             lambda path: "longcat" in path.lower() and "i2v" not in path.lower() and "imagetovideo" not in path.lower()
             and "vc" not in path.lower() and "videocontinuation" not in path.lower(),
         ],
+        model_family="longcat",
     )
     register_configs(
         sampling_param_cls=None,
@@ -401,6 +408,7 @@ def _register_configs() -> None:
         model_detectors=[
             lambda path: "longcatimagetovideo" in path.lower() or ("longcat" in path.lower() and "i2v" in path.lower()),
         ],
+        model_family="longcat",
     )
     register_configs(
         sampling_param_cls=None,
@@ -411,6 +419,7 @@ def _register_configs() -> None:
             lambda path: "longcatvideocontinuation" in path.lower() or
             ("longcat" in path.lower() and "vc" in path.lower()),
         ],
+        model_family="longcat",
     )
 
     # MatrixGame
@@ -426,6 +435,7 @@ def _register_configs() -> None:
         model_detectors=[
             lambda path: "matrix-game" in path.lower() or "matrixgame" in path.lower(),
         ],
+        model_family="matrixgame",
     )
 
     # GEN3C (must register before generic Cosmos detector)
@@ -439,6 +449,7 @@ def _register_configs() -> None:
         model_detectors=[
             lambda path: "gen3c" in path.lower(),
         ],
+        model_family="gen3c",
     )
 
     # Cosmos 2.5
@@ -456,6 +467,7 @@ def _register_configs() -> None:
                 "cosmos2.5",
             )),
         ],
+        model_family="cosmos25",
     )
 
     # Cosmos 2
@@ -470,6 +482,7 @@ def _register_configs() -> None:
             lambda path: "cosmos" in path.lower() and ("2.5" not in path.lower() and "2_5" not in path.lower() and "25"
                                                        not in path.lower() and "gen3c" not in path.lower()),
         ],
+        model_family="cosmos",
     )
 
     # TurboDiffusion
@@ -481,6 +494,7 @@ def _register_configs() -> None:
             "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",
         ],
         model_detectors=[lambda path: "turbodiffusion" in path.lower() or "turbowan" in path.lower()],
+        model_family="turbodiffusion",
     )
     register_configs(
         sampling_param_cls=TurboDiffusionT2V_14B_SamplingParam,
@@ -489,6 +503,7 @@ def _register_configs() -> None:
         hf_model_paths=[
             "loayrashid/TurboWan2.1-T2V-14B-Diffusers",
         ],
+        model_family="turbodiffusion",
     )
     register_configs(
         sampling_param_cls=TurboDiffusionI2V_A14B_SamplingParam,
@@ -497,62 +512,75 @@ def _register_configs() -> None:
         hf_model_paths=[
             "loayrashid/TurboWan2.2-I2V-A14B-Diffusers",
         ],
+        model_family="turbodiffusion",
     )
 
-    # Wan
+    # Wan — defaults provided by profiles (no sampling_param_cls needed)
     register_configs(
-        sampling_param_cls=WanT2V_1_3B_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=WanT2V480PConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         ],
         model_detectors=[lambda path: "wanpipeline" in path.lower()],
+        model_family="wan",
+        default_profile="wan_t2v_1_3b",
     )
     register_configs(
-        sampling_param_cls=WanT2V_14B_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=WanT2V720PConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "Wan-AI/Wan2.1-T2V-14B-Diffusers",
             "FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers",
         ],
+        model_family="wan",
+        default_profile="wan_t2v_14b",
     )
     register_configs(
-        sampling_param_cls=WanI2V_14B_480P_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=WanI2V480PConfig,
         workload_types=(WorkloadType.I2V, ),
         hf_model_paths=[
             "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
         ],
         model_detectors=[lambda path: "wanimagetovideo" in path.lower()],
+        model_family="wan",
+        default_profile="wan_i2v_14b_480p",
     )
     register_configs(
-        sampling_param_cls=WanI2V_14B_720P_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=WanI2V720PConfig,
         workload_types=(WorkloadType.I2V, ),
         hf_model_paths=[
             "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers",
         ],
+        model_family="wan",
+        default_profile="wan_i2v_14b_720p",
     )
     register_configs(
-        sampling_param_cls=Wan2_1_Fun_1_3B_InP_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=WanI2V480PConfig,
         workload_types=(WorkloadType.I2V, ),
         hf_model_paths=[
             "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers",
         ],
+        model_family="wan",
+        default_profile="wan_fun_1_3b_inp",
     )
     register_configs(
-        sampling_param_cls=Wan2_1_Fun_1_3B_Control_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=WANV2VConfig,
         workload_types=(),
         hf_model_paths=[
             "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers",
         ],
+        model_family="wan",
+        default_profile="wan_fun_1_3b_control",
     )
     register_configs(
-        sampling_param_cls=FastWanT2V480P_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=FastWan2_1_T2V_480P_Config,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
@@ -560,67 +588,83 @@ def _register_configs() -> None:
             "FastVideo/FastWan2.1-T2V-14B-480P-Diffusers",
         ],
         model_detectors=[lambda path: "wandmdpipeline" in path.lower()],
+        model_family="wan",
+        default_profile="fast_wan_t2v_480p",
     )
     register_configs(
-        sampling_param_cls=Wan2_2_TI2V_5B_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=Wan2_2_TI2V_5B_Config,
         workload_types=(WorkloadType.T2V, WorkloadType.I2V),
         hf_model_paths=[
             "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
         ],
+        model_family="wan",
+        default_profile="wan_2_2_ti2v_5b",
     )
     register_configs(
-        sampling_param_cls=Wan2_2_TI2V_5B_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=FastWan2_2_TI2V_5B_Config,
         workload_types=(WorkloadType.T2V, WorkloadType.I2V),
         hf_model_paths=[
             "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
             "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
         ],
+        model_family="wan",
+        default_profile="fast_wan_2_2_ti2v_5b",
     )
     register_configs(
-        sampling_param_cls=Wan2_2_T2V_A14B_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=Wan2_2_T2V_A14B_Config,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
         ],
+        model_family="wan",
+        default_profile="wan_2_2_t2v_a14b",
     )
     register_configs(
-        sampling_param_cls=Wan2_2_I2V_A14B_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=Wan2_2_I2V_A14B_Config,
         workload_types=(WorkloadType.I2V, ),
         hf_model_paths=[
             "Wan-AI/Wan2.2-I2V-A14B-Diffusers",
         ],
+        model_family="wan",
+        default_profile="wan_2_2_i2v_a14b",
     )
     register_configs(
-        sampling_param_cls=SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=SelfForcingWanT2V480PConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",
         ],
         model_detectors=[lambda path: "wancausaldmdpipeline" in path.lower()],
+        model_family="wan",
+        default_profile="sf_wan_t2v_1_3b",
     )
     # SFWan2.2: T2V and I2V variants by path
     register_configs(
-        sampling_param_cls=SelfForcingWan2_2_T2V_A14B_480P_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=SelfForcingWan2_2_T2V480PConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=["rand0nmr/SFWan2.2-T2V-A14B-Diffusers"],
         model_detectors=[
             lambda path: ("sfwan2.2" in path.lower() or "sfwan2_2" in path.lower()) and "i2v" not in path.lower(),
         ],
+        model_family="wan",
+        default_profile="sf_wan_2_2_t2v_a14b",
     )
     register_configs(
-        sampling_param_cls=SelfForcingWan2_2_T2V_A14B_480P_SamplingParam,
+        sampling_param_cls=None,
         pipeline_config_cls=SelfForcingWan2_2_T2V480PConfig,
         workload_types=(WorkloadType.I2V, ),
         hf_model_paths=["FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers"],
         model_detectors=[
             lambda path: ("sfwan2.2" in path.lower() or "sfwan2_2" in path.lower()) and "i2v" in path.lower(),
         ],
+        model_family="wan",
+        default_profile="sf_wan_2_2_i2v_a14b",
     )
 
     # SD3.5
@@ -638,6 +682,7 @@ def _register_configs() -> None:
                 "stabilityai__stable-diffusion-3.5-medium",
             )),
         ],
+        model_family="sd35",
     )
 
 
@@ -716,6 +761,74 @@ def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
 _register_configs()
 
 
+def _register_profiles() -> None:
+    from fastvideo.api.profiles import register_profile
+    from fastvideo.pipelines.basic.cosmos.profiles import (
+        ALL_PROFILES as COSMOS_PROFILES, )
+    from fastvideo.pipelines.basic.gamecraft.profiles import (
+        ALL_PROFILES as GAMECRAFT_PROFILES, )
+    from fastvideo.pipelines.basic.gen3c.profiles import (
+        ALL_PROFILES as GEN3C_PROFILES, )
+    from fastvideo.pipelines.basic.hunyuan.profiles import (
+        ALL_PROFILES as HUNYUAN_PROFILES, )
+    from fastvideo.pipelines.basic.hunyuan15.profiles import (
+        ALL_PROFILES as HUNYUAN15_PROFILES, )
+    from fastvideo.pipelines.basic.hyworld.profiles import (
+        ALL_PROFILES as HYWORLD_PROFILES, )
+    from fastvideo.pipelines.basic.lingbotworld.profiles import (
+        ALL_PROFILES as LINGBOTWORLD_PROFILES, )
+    from fastvideo.pipelines.basic.longcat.profiles import (
+        ALL_PROFILES as LONGCAT_PROFILES, )
+    from fastvideo.pipelines.basic.ltx2.profiles import (
+        ALL_PROFILES as LTX2_PROFILES, )
+    from fastvideo.pipelines.basic.matrixgame.profiles import (
+        ALL_PROFILES as MATRIXGAME_PROFILES, )
+    from fastvideo.pipelines.basic.sd35.profiles import (
+        ALL_PROFILES as SD35_PROFILES, )
+    from fastvideo.pipelines.basic.turbodiffusion.profiles import (
+        ALL_PROFILES as TURBODIFFUSION_PROFILES, )
+    from fastvideo.pipelines.basic.wan.profiles import (
+        ALL_PROFILES as WAN_PROFILES, )
+
+    all_profile_groups = (
+        COSMOS_PROFILES,
+        GAMECRAFT_PROFILES,
+        GEN3C_PROFILES,
+        HUNYUAN_PROFILES,
+        HUNYUAN15_PROFILES,
+        HYWORLD_PROFILES,
+        LINGBOTWORLD_PROFILES,
+        LONGCAT_PROFILES,
+        LTX2_PROFILES,
+        MATRIXGAME_PROFILES,
+        SD35_PROFILES,
+        TURBODIFFUSION_PROFILES,
+        WAN_PROFILES,
+    )
+    for group in all_profile_groups:
+        for profile in group:
+            register_profile(profile)
+
+
+_register_profiles()
+
+
+def get_model_family(model_path: str) -> str | None:
+    """Return the ``model_family`` string for a model path, or ``None``."""
+    config_info = _get_config_info(model_path, raise_on_missing=False)
+    if config_info is None:
+        return None
+    return config_info.model_family
+
+
+def get_default_profile(model_path: str) -> str | None:
+    """Return the ``default_profile`` name for a model path."""
+    config_info = _get_config_info(model_path, raise_on_missing=False)
+    if config_info is None:
+        return None
+    return config_info.default_profile
+
+
 def get_registered_model_paths() -> list[str]:
     """Return all registered HuggingFace model paths.
 
@@ -755,6 +868,8 @@ def get_registered_models_with_workloads(workload_type: str | None = None, ) -> 
 __all__ = [
     "ConfigInfo",
     "ModelInfo",
+    "get_default_profile",
+    "get_model_family",
     "get_model_info",
     "get_pipeline_config_cls_from_name",
     "get_registered_model_paths",
