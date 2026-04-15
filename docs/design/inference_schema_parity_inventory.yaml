@@ -361,80 +361,27 @@ surfaces:
       trajectory_type: request.extensions.gen3c.trajectory_type
       movement_distance: request.extensions.gen3c.movement_distance
       camera_rotation: request.extensions.gen3c.camera_rotation
+      prompt_attention_mask: request.extensions.hyworld.prompt_attention_mask
+      negative_attention_mask: request.extensions.hyworld.negative_attention_mask
+      camera_states: request.extensions.hunyuangamecraft.camera_states
+      camera_trajectory: request.extensions.hunyuangamecraft.camera_trajectory
+      action_list: request.extensions.hunyuangamecraft.action_list
+      action_speed_list: request.extensions.hunyuangamecraft.action_speed_list
+      gt_latents: request.extensions.hunyuangamecraft.gt_latents
+      conditioning_mask: request.extensions.hunyuangamecraft.conditioning_mask
+      ltx2_cfg_scale_video: request.extensions.ltx2.cfg_scale_video
+      ltx2_cfg_scale_audio: request.extensions.ltx2.cfg_scale_audio
+      ltx2_modality_scale_video: request.extensions.ltx2.modality_scale_video
+      ltx2_modality_scale_audio: request.extensions.ltx2.modality_scale_audio
+      ltx2_rescale_scale: request.extensions.ltx2.rescale_scale
+      ltx2_stg_scale_video: request.extensions.ltx2.stg_scale_video
+      ltx2_stg_scale_audio: request.extensions.ltx2.stg_scale_audio
+      ltx2_stg_blocks_video: request.extensions.ltx2.stg_blocks_video
+      ltx2_stg_blocks_audio: request.extensions.ltx2.stg_blocks_audio
     internal_only:
       data_type: "Derived from the request shape and not a public input."
 
-  sampling_param_extensions:
-    profile_owned:
-      action_list:
-        target: request.extensions.hunyuangamecraft.action_list
-        sources:
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraftSamplingParam
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft65FrameSamplingParam
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft129FrameSamplingParam
-      action_speed_list:
-        target: request.extensions.hunyuangamecraft.action_speed_list
-        sources:
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraftSamplingParam
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft65FrameSamplingParam
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft129FrameSamplingParam
-      camera_states:
-        target: request.extensions.hunyuangamecraft.camera_states
-        sources:
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraftSamplingParam
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft65FrameSamplingParam
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft129FrameSamplingParam
-      camera_trajectory:
-        target: request.extensions.hunyuangamecraft.camera_trajectory
-        sources:
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraftSamplingParam
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft65FrameSamplingParam
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft129FrameSamplingParam
-      conditioning_mask:
-        target: request.extensions.hunyuangamecraft.conditioning_mask
-        sources:
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraftSamplingParam
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft65FrameSamplingParam
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft129FrameSamplingParam
-      gt_latents:
-        target: request.extensions.hunyuangamecraft.gt_latents
-        sources:
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraftSamplingParam
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft65FrameSamplingParam
-          - fastvideo.configs.sample.hunyuangamecraft.HunyuanGameCraft129FrameSamplingParam
-      prompt_attention_mask:
-        target: request.extensions.hyworld.prompt_attention_mask
-        sources: [fastvideo.configs.sample.hyworld.HYWorld_SamplingParam]
-      negative_attention_mask:
-        target: request.extensions.hyworld.negative_attention_mask
-        sources: [fastvideo.configs.sample.hyworld.HYWorld_SamplingParam]
-      ltx2_cfg_scale_audio:
-        target: request.extensions.ltx2.cfg_scale_audio
-        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
-      ltx2_cfg_scale_video:
-        target: request.extensions.ltx2.cfg_scale_video
-        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
-      ltx2_modality_scale_audio:
-        target: request.extensions.ltx2.modality_scale_audio
-        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
-      ltx2_modality_scale_video:
-        target: request.extensions.ltx2.modality_scale_video
-        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
-      ltx2_rescale_scale:
-        target: request.extensions.ltx2.rescale_scale
-        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
-      ltx2_stg_blocks_audio:
-        target: request.extensions.ltx2.stg_blocks_audio
-        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
-      ltx2_stg_blocks_video:
-        target: request.extensions.ltx2.stg_blocks_video
-        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
-      ltx2_stg_scale_audio:
-        target: request.extensions.ltx2.stg_scale_audio
-        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
-      ltx2_stg_scale_video:
-        target: request.extensions.ltx2.stg_scale_video
-        sources: [fastvideo.configs.sample.ltx2.LTX2BaseSamplingParam]
+  sampling_param_extensions: {}
 
   openai_image_request:
     kept:

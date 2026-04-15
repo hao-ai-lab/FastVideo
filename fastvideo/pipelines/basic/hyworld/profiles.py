@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """HYWorld model family pipeline profiles."""
+import numpy as np
+
 from fastvideo.api.profiles import PipelineProfile, ProfileStageSpec
+
+_HYWORLD_SIGMAS = list(np.linspace(1.0, 0.0, 51).tolist()[:-1])
 
 _DENOISE_STAGE = ProfileStageSpec(
     name="denoise",
@@ -26,6 +30,9 @@ HYWORLD_T2V = PipelineProfile(
         "fps": 24,
         "guidance_scale": 6.0,
         "num_inference_steps": 50,
+        "negative_prompt": "",
+        "pose": "w-31",
+        "sigmas": _HYWORLD_SIGMAS,
     },
 )
 

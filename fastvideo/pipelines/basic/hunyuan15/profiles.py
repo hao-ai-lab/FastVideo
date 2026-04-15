@@ -1,6 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Hunyuan 1.5 model family pipeline profiles."""
+import numpy as np
+
 from fastvideo.api.profiles import PipelineProfile, ProfileStageSpec
+
+
+def _sigmas(n: int) -> list[float]:
+    """Precompute sigmas schedule for *n* inference steps."""
+    return np.linspace(1.0, 0.0, n + 1).tolist()[:-1]
+
 
 _DENOISE_STAGE = ProfileStageSpec(
     name="denoise",
@@ -39,6 +47,8 @@ HUNYUAN15_T2V_480P = PipelineProfile(
         "fps": 24,
         "guidance_scale": 6.0,
         "num_inference_steps": 50,
+        "negative_prompt": "",
+        "sigmas": _sigmas(50),
     },
 )
 
@@ -56,6 +66,8 @@ HUNYUAN15_T2V_720P = PipelineProfile(
         "fps": 24,
         "guidance_scale": 6.0,
         "num_inference_steps": 50,
+        "negative_prompt": "",
+        "sigmas": _sigmas(50),
     },
 )
 
@@ -77,6 +89,8 @@ HUNYUAN15_I2V_480P_DISTILLED = PipelineProfile(
         "fps": 24,
         "guidance_scale": 1.0,
         "num_inference_steps": 12,
+        "negative_prompt": "",
+        "sigmas": _sigmas(12),
     },
 )
 
@@ -94,6 +108,8 @@ HUNYUAN15_I2V_720P_DISTILLED = PipelineProfile(
         "fps": 24,
         "guidance_scale": 1.0,
         "num_inference_steps": 50,
+        "negative_prompt": "",
+        "sigmas": _sigmas(50),
     },
 )
 
@@ -115,6 +131,8 @@ HUNYUAN15_SR_1080P = PipelineProfile(
         "fps": 24,
         "guidance_scale": 1.0,
         "num_inference_steps": 12,
+        "negative_prompt": "",
+        "sigmas": _sigmas(12),
     },
     stage_defaults={
         "sr": {

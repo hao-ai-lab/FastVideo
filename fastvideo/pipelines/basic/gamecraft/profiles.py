@@ -26,6 +26,7 @@ GAMECRAFT_I2V = PipelineProfile(
         "fps": 24,
         "guidance_scale": 6.0,
         "num_inference_steps": 50,
+        "negative_prompt": "",
     },
 )
 

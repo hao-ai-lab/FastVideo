@@ -26,6 +26,9 @@ GEN3C_COSMOS_7B = PipelineProfile(
         "fps": 24,
         "guidance_scale": 1.0,
         "num_inference_steps": 35,
+        "trajectory_type": "left",
+        "movement_distance": 0.3,
+        "camera_rotation": "center_facing",
     },
 )
 

@@ -26,6 +26,7 @@ MATRIXGAME_I2V = PipelineProfile(
         "fps": 25,
         "guidance_scale": 1.0,
         "num_inference_steps": 3,
+        "negative_prompt": None,
     },
 )
 

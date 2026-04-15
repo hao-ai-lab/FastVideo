@@ -24,8 +24,10 @@ SD35_MEDIUM = PipelineProfile(
         "width": 512,
         "num_frames": 1,
         "fps": 1,
+        "seed": 0,
         "guidance_scale": 6.0,
         "num_inference_steps": 28,
+        "negative_prompt": "",
     },
 )
 

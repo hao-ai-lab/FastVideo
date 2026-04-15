@@ -26,6 +26,7 @@ TURBO_T2V_1_3B = PipelineProfile(
         "fps": 16,
         "guidance_scale": 1.0,
         "num_inference_steps": 4,
+        "negative_prompt": None,
     },
 )
 
@@ -43,6 +44,7 @@ TURBO_T2V_14B = PipelineProfile(
         "fps": 16,
         "guidance_scale": 1.0,
         "num_inference_steps": 4,
+        "negative_prompt": None,
     },
 )
 
@@ -60,6 +62,7 @@ TURBO_I2V_A14B = PipelineProfile(
         "fps": 16,
         "guidance_scale": 1.0,
         "num_inference_steps": 4,
+        "negative_prompt": None,
     },
 )
 

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from fastvideo.logger import init_logger
@@ -30,6 +30,16 @@ class SamplingParam:
 
     # Camera control inputs (HYWorld)
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
+    prompt_attention_mask: list = field(default_factory=list)
+    negative_attention_mask: list = field(default_factory=list)
+
+    # Camera/action control inputs (GameCraft)
+    camera_states: Any | None = None  # Plücker coordinates [B, T_video, 6, H, W]
+    camera_trajectory: str | None = None
+    action_list: list[str] | None = None
+    action_speed_list: list[float] | None = None
+    gt_latents: Any | None = None  # Ground truth latents [B, 16, T, H, W]
+    conditioning_mask: Any | None = None  # Mask [B, 1, T, H, W]
 
     # Camera control inputs (LingBotWorld)
     c2ws_plucker_emb: Any | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
@@ -80,6 +90,17 @@ class SamplingParam:
     trajectory_type: str | None = None
     movement_distance: float | None = None
     camera_rotation: str | None = None
+
+    # LTX2 multi-modal CFG and STG
+    ltx2_cfg_scale_video: float = 3.0
+    ltx2_cfg_scale_audio: float = 7.0
+    ltx2_modality_scale_video: float = 3.0
+    ltx2_modality_scale_audio: float = 3.0
+    ltx2_rescale_scale: float = 0.7
+    ltx2_stg_scale_video: float = 1.0
+    ltx2_stg_scale_audio: float = 1.0
+    ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
+    ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
 
     # Misc
     save_video: bool = True
