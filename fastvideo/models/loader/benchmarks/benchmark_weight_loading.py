@@ -15,7 +15,6 @@ Usage (multi-GPU, e.g. 4 GPUs):
 """
 
 import argparse
-import glob
 import os
 import time
 
@@ -29,26 +28,11 @@ from fastvideo.distributed.parallel_state import (
 )
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.weight_utils import (
-    filter_duplicate_safetensors_files,
+    resolve_safetensors_files,
     safetensors_weights_iterator,
 )
 
-SAFE_WEIGHTS_INDEX_NAME = "model.safetensors.index.json"
-
 logger = init_logger(__name__)
-
-
-def resolve_safetensors_files(model_path: str) -> list[str]:
-    """Discover safetensors files in a model directory."""
-    files = sorted(glob.glob(os.path.join(model_path, "*.safetensors")))
-    if not files:
-        raise FileNotFoundError(
-            f"No .safetensors files found in {model_path}")
-    index_file = os.path.join(model_path, SAFE_WEIGHTS_INDEX_NAME)
-    if os.path.exists(index_file):
-        files = filter_duplicate_safetensors_files(
-            files, model_path, SAFE_WEIGHTS_INDEX_NAME)
-    return files
 
 
 def benchmark_loading(

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/model_loader/weight_utils.py
 """Utilities for downloading and initializing model weights."""
+import glob
 import hashlib
 import json
 import os
@@ -16,7 +17,7 @@ from safetensors.torch import safe_open
 from tqdm.auto import tqdm
 
 from fastvideo.distributed.parallel_state import get_node_group
-from fastvideo.distributed import get_local_torch_device
+from fastvideo.logger import init_logger
 
 SAFETENSORS_TO_TORCH_DTYPE = {
     'F16': torch.float16,
@@ -32,7 +33,6 @@ SAFETENSORS_TO_TORCH_DTYPE = {
     'F8_E4M3': torch.float8_e4m3fn,
     'F8_E5M2': torch.float8_e5m2,
 }
-from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
@@ -104,6 +104,24 @@ def filter_duplicate_safetensors_files(hf_weights_files: list[str],
         f for f in hf_weights_files if f in weight_files_in_index
     ]
     return hf_weights_files
+
+
+SAFE_WEIGHTS_INDEX_NAME = "model.safetensors.index.json"
+
+
+def resolve_safetensors_files(model_path: str) -> list[str]:
+    """Discover safetensors files in a model directory."""
+    files = sorted(
+        glob.glob(os.path.join(model_path, "*.safetensors")))
+    if not files:
+        raise FileNotFoundError(
+            f"No .safetensors files found in {model_path}")
+    index_file = os.path.join(
+        model_path, SAFE_WEIGHTS_INDEX_NAME)
+    if os.path.exists(index_file):
+        files = filter_duplicate_safetensors_files(
+            files, model_path, SAFE_WEIGHTS_INDEX_NAME)
+    return files
 
 
 def filter_files_not_needed_for_inference(

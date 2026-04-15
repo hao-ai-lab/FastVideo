@@ -674,9 +674,13 @@ def init_node_group(local_rank: int, backend: str):
     cpu_group = get_world_group().cpu_group
     node_ranks = is_the_same_node_as(cpu_group)
     node_size = len(node_ranks)
-    all_node_ranks = [
-        list(range(i * node_size, (i + 1) * node_size)) for i in range(dist.get_world_size() // node_size)
-    ]
+    # NOTE: assumes all nodes have the same number of GPUs.
+    # Heterogeneous clusters are not supported.
+    world_size = dist.get_world_size()
+    assert world_size % node_size == 0, (f"World size ({world_size}) must be divisible by "
+                                         f"node size ({node_size}) — heterogeneous clusters "
+                                         f"are not supported.")
+    all_node_ranks = [list(range(i * node_size, (i + 1) * node_size)) for i in range(world_size // node_size)]
     global _NODE
     _NODE = init_model_parallel_group(all_node_ranks, local_rank, backend)
 
