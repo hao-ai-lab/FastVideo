@@ -124,7 +124,7 @@ def get_profile(
             f"{model_family!r}; "
             f"registered: {_format_registered(model_family)}",
         )
-    candidates.sort(key=lambda p: p.version)
+    candidates.sort(key=lambda p: [int(x) if x.isdigit() else x for x in p.version.split(".")])
     return candidates[-1]
 
 

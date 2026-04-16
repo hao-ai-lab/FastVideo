@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import copy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -130,13 +131,8 @@ class SamplingParam:
         if sampling_param is not None:
             return sampling_param
 
-        from fastvideo.registry import get_sampling_param_cls_for_name
-        sampling_cls = get_sampling_param_cls_for_name(model_path)
-        if sampling_cls is not None:
-            return sampling_cls()
-
         logger.warning(
-            "Couldn't find an optimal sampling param for %s."
+            "Couldn't find a profile for %s."
             " Using the default sampling param.",
             model_path,
         )
@@ -160,7 +156,7 @@ class SamplingParam:
 
         try:
             profile_name = get_default_profile(model_path)
-        except Exception:
+        except (ValueError, RuntimeError):
             return None
         if profile_name is None:
             return None
@@ -175,7 +171,7 @@ class SamplingParam:
         sp = cls()
         for key, value in profile.defaults.items():
             if hasattr(sp, key):
-                setattr(sp, key, value)
+                setattr(sp, key, copy.deepcopy(value))
         sp.__post_init__()
         return sp
 
