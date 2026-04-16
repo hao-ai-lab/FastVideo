@@ -26,7 +26,7 @@ Minimal usage (from `examples/inference/basic/basic.py`):
 
 ```python
 from fastvideo import VideoGenerator
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 
 model_id = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # or official_weights/<model_name>/
 generator = VideoGenerator.from_pretrained(model_id, num_gpus=1)

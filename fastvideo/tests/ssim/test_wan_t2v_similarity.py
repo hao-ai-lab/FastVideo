@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from fastvideo.configs.sample.base import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
     resolve_inference_device_reference_folder,

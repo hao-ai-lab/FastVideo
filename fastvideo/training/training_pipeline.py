@@ -27,7 +27,7 @@ try:
     from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
 except Exception:
     pass
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.dataset import build_parquet_map_style_dataloader
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
 from fastvideo.dataset.validation_dataset import ValidationDataset

@@ -42,6 +42,7 @@ from fastvideo.api.parser import (
     parse_config,
 )
 from fastvideo.api.results import GenerationResult
+from fastvideo.api.sampling_param import SamplingParam
 
 __all__ = [
     "CompileConfig",
@@ -63,6 +64,7 @@ __all__ = [
     "RequestRuntimeConfig",
     "RunConfig",
     "SamplingConfig",
+    "SamplingParam",
     "ServeConfig",
     "ServerConfig",
     "PipelineProfile",

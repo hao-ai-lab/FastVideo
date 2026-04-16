@@ -12,7 +12,7 @@ from fastvideo.entrypoints.cli.inference_config import (
     build_generate_run_config,
     build_serve_config,
 )
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.cli.serve import ServeSubcommand
 from fastvideo.entrypoints.openai import api_server
 from fastvideo.entrypoints.video_generator import VideoGenerator

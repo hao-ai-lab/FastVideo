@@ -10,7 +10,7 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 
 import fastvideo.envs as envs
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.distributed import (
     get_sp_group,
     get_world_group,

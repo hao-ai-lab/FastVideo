@@ -20,7 +20,7 @@ import torchvision
 from einops import rearrange
 from torch.utils.data import DataLoader
 
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.dataset.validation_dataset import (
     ValidationDataset, )
 from fastvideo.distributed import (

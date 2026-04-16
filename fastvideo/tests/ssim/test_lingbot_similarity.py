@@ -14,7 +14,7 @@ import pytest
 import torch
 
 from fastvideo import VideoGenerator
-from fastvideo.configs.sample.base import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.lingbotworld.cam_utils import prepare_camera_embedding
 from fastvideo.tests.ssim.reference_utils import (

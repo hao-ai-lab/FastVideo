@@ -18,7 +18,7 @@ import torch
 import pytest
 
 from fastvideo import VideoGenerator
-from fastvideo.configs.sample.base import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.reference_utils import (
     build_generated_output_dir,

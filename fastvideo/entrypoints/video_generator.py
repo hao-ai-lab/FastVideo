@@ -35,7 +35,7 @@ from fastvideo.api.compat import (
 )
 from fastvideo.api.results import GenerationResult
 from fastvideo.api.schema import GenerationRequest, GeneratorConfig
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch

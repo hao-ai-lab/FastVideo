@@ -5,7 +5,7 @@ import time
 
 import gradio as gr
 from fastvideo.entrypoints.video_generator import VideoGenerator
-from fastvideo.configs.sample.base import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from copy import deepcopy
 
 

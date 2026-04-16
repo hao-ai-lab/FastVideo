@@ -5,7 +5,7 @@ import torch
 import pytest
 
 from fastvideo import VideoGenerator
-from fastvideo.configs.sample.base import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.matrixgame.utils import create_action_presets
 from fastvideo.tests.ssim.reference_utils import (

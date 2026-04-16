@@ -1,5 +1,5 @@
-from fastvideo.configs.sample.base import SamplingParam
+# SPDX-License-Identifier: Apache-2.0
+# Backward-compatible re-export. Canonical location is fastvideo.api.sampling_param.
+from fastvideo.api.sampling_param import SamplingParam
 
-__all__ = [
-    "SamplingParam",
-]
+__all__ = ["SamplingParam"]

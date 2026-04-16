@@ -22,7 +22,7 @@ from fastvideo.api.schema import (
     RequestRuntimeConfig,
     SamplingConfig,
 )
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.utils import shallow_asdict
 

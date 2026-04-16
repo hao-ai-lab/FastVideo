@@ -12,7 +12,7 @@ import yaml
 
 from fastvideo.api import RunConfig, ServeConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
-from fastvideo.configs.sample.base import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.cli.generate import GenerateSubcommand
 from fastvideo.entrypoints.cli.serve import ServeSubcommand
 from fastvideo.entrypoints.openai import image_api, video_api

@@ -48,7 +48,7 @@ from fastvideo.configs.pipelines.wan import (
     WanT2V720PConfig,
 )
 from fastvideo.configs.pipelines.sd35 import SD35Config
-from fastvideo.configs.sample.base import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
