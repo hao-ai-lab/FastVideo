@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Hunyuan 1.5 model family pipeline profiles."""
+"""Hunyuan 1.5 model family pipeline presets."""
 import numpy as np
 
-from fastvideo.api.profiles import PipelineProfile, ProfileStageSpec
+from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
 
 def _sigmas(n: int) -> list[float]:
@@ -10,7 +10,7 @@ def _sigmas(n: int) -> list[float]:
     return np.linspace(1.0, 0.0, n + 1).tolist()[:-1]
 
 
-_DENOISE_STAGE = ProfileStageSpec(
+_DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Main denoising pass",
@@ -20,7 +20,7 @@ _DENOISE_STAGE = ProfileStageSpec(
     }),
 )
 
-_SR_STAGE = ProfileStageSpec(
+_SR_STAGE = PresetStageSpec(
     name="sr",
     kind="super_resolution",
     description="Super-resolution upscaling pass",
@@ -30,16 +30,16 @@ _SR_STAGE = ProfileStageSpec(
 )
 
 # -------------------------------------------------------------------
-# Hunyuan 1.5 T2V profiles
+# Hunyuan 1.5 T2V presets
 # -------------------------------------------------------------------
 
-HUNYUAN15_T2V_480P = PipelineProfile(
+HUNYUAN15_T2V_480P = InferencePreset(
     name="hunyuan15_t2v_480p",
-    version="1",
+    version=1,
     model_family="hunyuan15",
     description="HunyuanVideo 1.5 T2V at 480p",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 480,
         "width": 848,
@@ -52,13 +52,13 @@ HUNYUAN15_T2V_480P = PipelineProfile(
     },
 )
 
-HUNYUAN15_T2V_720P = PipelineProfile(
+HUNYUAN15_T2V_720P = InferencePreset(
     name="hunyuan15_t2v_720p",
-    version="1",
+    version=1,
     model_family="hunyuan15",
     description="HunyuanVideo 1.5 T2V at 720p",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 720,
         "width": 1280,
@@ -72,16 +72,16 @@ HUNYUAN15_T2V_720P = PipelineProfile(
 )
 
 # -------------------------------------------------------------------
-# Hunyuan 1.5 I2V profiles
+# Hunyuan 1.5 I2V presets
 # -------------------------------------------------------------------
 
-HUNYUAN15_I2V_480P_DISTILLED = PipelineProfile(
+HUNYUAN15_I2V_480P_DISTILLED = InferencePreset(
     name="hunyuan15_i2v_480p_distilled",
-    version="1",
+    version=1,
     model_family="hunyuan15",
     description="HunyuanVideo 1.5 I2V 480p step-distilled",
     workload_type="i2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 720,
         "width": 1280,
@@ -94,13 +94,13 @@ HUNYUAN15_I2V_480P_DISTILLED = PipelineProfile(
     },
 )
 
-HUNYUAN15_I2V_720P_DISTILLED = PipelineProfile(
+HUNYUAN15_I2V_720P_DISTILLED = InferencePreset(
     name="hunyuan15_i2v_720p_distilled",
-    version="1",
+    version=1,
     model_family="hunyuan15",
     description="HunyuanVideo 1.5 I2V 720p distilled",
     workload_type="i2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 720,
         "width": 1280,
@@ -114,16 +114,16 @@ HUNYUAN15_I2V_720P_DISTILLED = PipelineProfile(
 )
 
 # -------------------------------------------------------------------
-# Hunyuan 1.5 SR profile (two-stage)
+# Hunyuan 1.5 SR preset (two-stage)
 # -------------------------------------------------------------------
 
-HUNYUAN15_SR_1080P = PipelineProfile(
+HUNYUAN15_SR_1080P = InferencePreset(
     name="hunyuan15_sr_1080p",
-    version="1",
+    version=1,
     model_family="hunyuan15",
     description="HunyuanVideo 1.5 SR to 1080p (two-stage)",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, _SR_STAGE),
+    stage_schemas=(_DENOISE_STAGE, _SR_STAGE),
     defaults={
         "height": 480,
         "width": 848,
@@ -143,7 +143,7 @@ HUNYUAN15_SR_1080P = PipelineProfile(
     },
 )
 
-ALL_PROFILES = (
+ALL_PRESETS = (
     HUNYUAN15_T2V_480P,
     HUNYUAN15_T2V_720P,
     HUNYUAN15_I2V_480P_DISTILLED,

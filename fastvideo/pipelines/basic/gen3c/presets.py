@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""GEN3C model family pipeline profiles."""
-from fastvideo.api.profiles import PipelineProfile, ProfileStageSpec
+"""GEN3C model family pipeline presets."""
+from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
-_DENOISE_STAGE = ProfileStageSpec(
+_DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Camera-controlled denoising pass",
@@ -12,13 +12,13 @@ _DENOISE_STAGE = ProfileStageSpec(
     }),
 )
 
-GEN3C_COSMOS_7B = PipelineProfile(
+GEN3C_COSMOS_7B = InferencePreset(
     name="gen3c_cosmos_7b",
-    version="1",
+    version=1,
     model_family="gen3c",
     description="GEN3C Cosmos 7B",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 704,
         "width": 1280,
@@ -32,4 +32,4 @@ GEN3C_COSMOS_7B = PipelineProfile(
     },
 )
 
-ALL_PROFILES = (GEN3C_COSMOS_7B, )
+ALL_PRESETS = (GEN3C_COSMOS_7B, )

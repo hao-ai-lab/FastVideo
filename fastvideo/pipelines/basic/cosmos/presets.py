@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Cosmos model family pipeline profiles.
+"""Cosmos model family pipeline presets.
 
 Covers both Cosmos Predict2 and Cosmos Predict2.5, which share the
 same pipeline directory but have distinct model families.
 """
-from fastvideo.api.profiles import PipelineProfile, ProfileStageSpec
+from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
-_DENOISE_STAGE = ProfileStageSpec(
+_DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Main denoising pass",
@@ -30,13 +30,13 @@ _COSMOS_NEGATIVE_PROMPT = ("The video captures a series of frames showing ugly s
                            "unconvincing visuals, poorly edited content, jump cuts, visual "
                            "noise, and flickering. Overall, the video is of poor quality.")
 
-COSMOS_PREDICT2_2B = PipelineProfile(
+COSMOS_PREDICT2_2B = InferencePreset(
     name="cosmos_predict2_2b",
-    version="1",
+    version=1,
     model_family="cosmos",
     description="Cosmos Predict2 2B Video2World",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 704,
         "width": 1280,
@@ -62,13 +62,13 @@ _COSMOS25_NEGATIVE_PROMPT = ("The video captures a series of frames showing ugly
                              "unconvincing visuals, poorly edited content, jump cuts, visual "
                              "noise, and flickering. Overall, the video is of poor quality.")
 
-COSMOS25_PREDICT2_2B = PipelineProfile(
+COSMOS25_PREDICT2_2B = InferencePreset(
     name="cosmos25_predict2_2b",
-    version="1",
+    version=1,
     model_family="cosmos25",
     description="Cosmos Predict2.5 2B",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "seed": 0,
         "height": 704,
@@ -81,4 +81,4 @@ COSMOS25_PREDICT2_2B = PipelineProfile(
     },
 )
 
-ALL_PROFILES = (COSMOS_PREDICT2_2B, COSMOS25_PREDICT2_2B)
+ALL_PRESETS = (COSMOS_PREDICT2_2B, COSMOS25_PREDICT2_2B)

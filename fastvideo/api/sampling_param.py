@@ -121,55 +121,48 @@ class SamplingParam:
             if hasattr(self, key):
                 setattr(self, key, value)
             else:
-                logger.exception("%s has no attribute %s", type(self).__name__, key)
+                logger.warning("%s has no attribute %s", type(self).__name__, key)
 
         self.__post_init__()
 
     @classmethod
     def from_pretrained(cls, model_path: str) -> "SamplingParam":
-        sampling_param = cls._from_profile(model_path)
+        sampling_param = cls._from_preset(model_path)
         if sampling_param is not None:
             return sampling_param
 
         logger.warning(
-            "Couldn't find a profile for %s."
+            "Couldn't find a preset for %s."
             " Using the default sampling param.",
             model_path,
         )
         return cls()
 
     @classmethod
-    def _from_profile(
+    def _from_preset(
         cls,
         model_path: str,
     ) -> "SamplingParam | None":
-        """Build a SamplingParam from profile defaults.
+        """Build a SamplingParam from preset defaults.
 
-        Returns ``None`` when no profile is configured for
+        Returns ``None`` when no preset is configured for
         *model_path*, letting the caller fall back to the legacy
         subclass lookup.
         """
-        from fastvideo.registry import (
-            get_default_profile,
-            get_model_family,
-        )
+        from fastvideo.registry import get_preset_selection
 
         try:
-            profile_name = get_default_profile(model_path)
+            preset_name, model_family = get_preset_selection(model_path)
         except (ValueError, RuntimeError):
             return None
-        if profile_name is None:
+        if preset_name is None or model_family is None:
             return None
 
-        model_family = get_model_family(model_path)
-        if model_family is None:
-            return None
+        from fastvideo.api.presets import get_preset
 
-        from fastvideo.api.profiles import get_profile
-
-        profile = get_profile(profile_name, model_family)
+        preset = get_preset(preset_name, model_family)
         sp = cls()
-        for key, value in profile.defaults.items():
+        for key, value in preset.defaults.items():
             if hasattr(sp, key):
                 setattr(sp, key, copy.deepcopy(value))
         sp.__post_init__()

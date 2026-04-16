@@ -249,7 +249,7 @@ def test_review_gap_fields_are_explicitly_inventory_tracked() -> None:
 
 def test_inventory_targets_exist_in_typed_schema() -> None:
     inventory = _load_inventory()
-    target_statuses = {"moved", "profile_owned"}
+    target_statuses = {"moved", "preset_owned"}
 
     for surface in inventory["surfaces"].values():
         for status, entries in surface.items():

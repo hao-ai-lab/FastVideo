@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TurboDiffusion model family pipeline profiles."""
-from fastvideo.api.profiles import PipelineProfile, ProfileStageSpec
+"""TurboDiffusion model family pipeline presets."""
+from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
-_DENOISE_STAGE = ProfileStageSpec(
+_DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Fast few-step denoising pass",
@@ -12,13 +12,13 @@ _DENOISE_STAGE = ProfileStageSpec(
     }),
 )
 
-TURBO_T2V_1_3B = PipelineProfile(
+TURBO_T2V_1_3B = InferencePreset(
     name="turbo_t2v_1_3b",
-    version="1",
+    version=1,
     model_family="turbodiffusion",
     description="TurboWan 2.1 T2V 1.3B (4-step)",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 480,
         "width": 832,
@@ -30,13 +30,13 @@ TURBO_T2V_1_3B = PipelineProfile(
     },
 )
 
-TURBO_T2V_14B = PipelineProfile(
+TURBO_T2V_14B = InferencePreset(
     name="turbo_t2v_14b",
-    version="1",
+    version=1,
     model_family="turbodiffusion",
     description="TurboWan 2.1 T2V 14B (4-step)",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 720,
         "width": 1280,
@@ -48,13 +48,13 @@ TURBO_T2V_14B = PipelineProfile(
     },
 )
 
-TURBO_I2V_A14B = PipelineProfile(
+TURBO_I2V_A14B = InferencePreset(
     name="turbo_i2v_a14b",
-    version="1",
+    version=1,
     model_family="turbodiffusion",
     description="TurboWan 2.2 I2V A14B (4-step)",
     workload_type="i2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 720,
         "width": 1280,
@@ -66,7 +66,7 @@ TURBO_I2V_A14B = PipelineProfile(
     },
 )
 
-ALL_PROFILES = (
+ALL_PRESETS = (
     TURBO_T2V_1_3B,
     TURBO_T2V_14B,
     TURBO_I2V_A14B,

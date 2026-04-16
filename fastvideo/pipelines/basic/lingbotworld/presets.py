@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""LingBotWorld model family pipeline profiles."""
-from fastvideo.api.profiles import PipelineProfile, ProfileStageSpec
+"""LingBotWorld model family pipeline presets."""
+from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
-_DENOISE_STAGE = ProfileStageSpec(
+_DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Dual-guidance denoising pass",
@@ -14,13 +14,13 @@ _DENOISE_STAGE = ProfileStageSpec(
     }),
 )
 
-LINGBOTWORLD_I2V = PipelineProfile(
+LINGBOTWORLD_I2V = InferencePreset(
     name="lingbotworld_i2v",
-    version="1",
+    version=1,
     model_family="lingbotworld",
     description="LingBot-World I2V with dual guidance",
     workload_type="i2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "guidance_scale":
         5.0,
@@ -41,4 +41,4 @@ LINGBOTWORLD_I2V = PipelineProfile(
     },
 )
 
-ALL_PROFILES = (LINGBOTWORLD_I2V, )
+ALL_PRESETS = (LINGBOTWORLD_I2V, )

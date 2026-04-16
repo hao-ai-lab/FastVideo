@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""LTX2 model family pipeline profiles."""
-from fastvideo.api.profiles import PipelineProfile, ProfileStageSpec
+"""LTX2 model family pipeline presets."""
+from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
 _LTX2_NEGATIVE_PROMPT = ("blurry, out of focus, overexposed, underexposed, low contrast, "
                          "washed out colors, excessive noise, grainy texture, poor lighting, "
@@ -20,7 +20,7 @@ _LTX2_NEGATIVE_PROMPT = ("blurry, out of focus, overexposed, underexposed, low c
                          "inconsistent framing, tilted camera, flat lighting, inconsistent "
                          "tone, cinematic oversaturation, stylized filters, or AI artifacts.")
 
-_DENOISE_STAGE = ProfileStageSpec(
+_DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Main denoising pass",
@@ -30,13 +30,13 @@ _DENOISE_STAGE = ProfileStageSpec(
     }),
 )
 
-LTX2_BASE = PipelineProfile(
+LTX2_BASE = InferencePreset(
     name="ltx2_base",
-    version="1",
+    version=1,
     model_family="ltx2",
     description="LTX-2 base at 512x768",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "seed": 10,
         "height": 512,
@@ -58,13 +58,13 @@ LTX2_BASE = PipelineProfile(
     },
 )
 
-LTX2_DISTILLED = PipelineProfile(
+LTX2_DISTILLED = InferencePreset(
     name="ltx2_distilled",
-    version="1",
+    version=1,
     model_family="ltx2",
     description="LTX-2 distilled at 1024x1536",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "seed": 10,
         "height": 1024,
@@ -77,4 +77,4 @@ LTX2_DISTILLED = PipelineProfile(
     },
 )
 
-ALL_PROFILES = (LTX2_BASE, LTX2_DISTILLED)
+ALL_PRESETS = (LTX2_BASE, LTX2_DISTILLED)

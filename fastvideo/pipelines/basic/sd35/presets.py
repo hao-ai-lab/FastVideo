@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stable Diffusion 3.5 model family pipeline profiles."""
-from fastvideo.api.profiles import PipelineProfile, ProfileStageSpec
+"""Stable Diffusion 3.5 model family pipeline presets."""
+from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
-_DENOISE_STAGE = ProfileStageSpec(
+_DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Main denoising pass",
@@ -12,13 +12,13 @@ _DENOISE_STAGE = ProfileStageSpec(
     }),
 )
 
-SD35_MEDIUM = PipelineProfile(
+SD35_MEDIUM = InferencePreset(
     name="sd35_medium",
-    version="1",
+    version=1,
     model_family="sd35",
     description="Stable Diffusion 3.5 Medium (text-to-image)",
     workload_type="t2i",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 512,
         "width": 512,
@@ -31,4 +31,4 @@ SD35_MEDIUM = PipelineProfile(
     },
 )
 
-ALL_PROFILES = (SD35_MEDIUM, )
+ALL_PRESETS = (SD35_MEDIUM, )

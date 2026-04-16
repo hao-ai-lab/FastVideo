@@ -157,10 +157,10 @@ def legacy_from_pretrained_to_config(
 def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, Any], ) -> FastVideoArgs:
     normalized = normalize_generator_config(config)
     unsupported = []
-    if normalized.pipeline.profile is not None:
-        unsupported.append("pipeline.profile")
-    if normalized.pipeline.profile_version is not None:
-        unsupported.append("pipeline.profile_version")
+    if normalized.pipeline.preset is not None:
+        unsupported.append("pipeline.preset")
+    if normalized.pipeline.preset_version is not None:
+        unsupported.append("pipeline.preset_version")
     if normalized.pipeline.components.config_root is not None:
         unsupported.append("pipeline.components.config_root")
     if normalized.pipeline.components.vae_weights is not None:
@@ -220,7 +220,7 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
     if components.transformer_2_weights is not None:
         kwargs["init_weights_from_safetensors_2"] = components.transformer_2_weights
 
-    kwargs.update(deepcopy(normalized.pipeline.profile_overrides))
+    kwargs.update(deepcopy(normalized.pipeline.preset_overrides))
     kwargs.update(deepcopy(normalized.pipeline.experimental))
     return FastVideoArgs.from_kwargs(**kwargs)
 

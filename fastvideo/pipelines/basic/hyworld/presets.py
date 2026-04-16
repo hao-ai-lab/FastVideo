@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""HYWorld model family pipeline profiles."""
+"""HYWorld model family pipeline presets."""
 import numpy as np
 
-from fastvideo.api.profiles import PipelineProfile, ProfileStageSpec
+from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
 _HYWORLD_SIGMAS = list(np.linspace(1.0, 0.0, 51).tolist()[:-1])
 
-_DENOISE_STAGE = ProfileStageSpec(
+_DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Camera-controlled denoising pass",
@@ -16,13 +16,13 @@ _DENOISE_STAGE = ProfileStageSpec(
     }),
 )
 
-HYWORLD_T2V = PipelineProfile(
+HYWORLD_T2V = InferencePreset(
     name="hyworld_t2v",
-    version="1",
+    version=1,
     model_family="hyworld",
     description="HY-WorldPlay bidirectional at 480p",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 480,
         "width": 832,
@@ -36,4 +36,4 @@ HYWORLD_T2V = PipelineProfile(
     },
 )
 
-ALL_PROFILES = (HYWORLD_T2V, )
+ALL_PRESETS = (HYWORLD_T2V, )

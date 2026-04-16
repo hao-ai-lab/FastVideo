@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""HunyuanGameCraft model family pipeline profiles."""
-from fastvideo.api.profiles import PipelineProfile, ProfileStageSpec
+"""HunyuanGameCraft model family pipeline presets."""
+from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
-_DENOISE_STAGE = ProfileStageSpec(
+_DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Action-controlled denoising pass",
@@ -12,13 +12,13 @@ _DENOISE_STAGE = ProfileStageSpec(
     }),
 )
 
-GAMECRAFT_I2V = PipelineProfile(
+GAMECRAFT_I2V = InferencePreset(
     name="gamecraft_i2v",
-    version="1",
+    version=1,
     model_family="gamecraft",
     description="HunyuanGameCraft I2V at 704x1280",
     workload_type="i2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 704,
         "width": 1280,
@@ -30,4 +30,4 @@ GAMECRAFT_I2V = PipelineProfile(
     },
 )
 
-ALL_PROFILES = (GAMECRAFT_I2V, )
+ALL_PRESETS = (GAMECRAFT_I2V, )

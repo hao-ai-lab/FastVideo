@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""LongCat model family pipeline profiles."""
-from fastvideo.api.profiles import PipelineProfile, ProfileStageSpec
+"""LongCat model family pipeline presets."""
+from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
-_DENOISE_STAGE = ProfileStageSpec(
+_DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Main denoising pass",
@@ -12,13 +12,13 @@ _DENOISE_STAGE = ProfileStageSpec(
     }),
 )
 
-LONGCAT_T2V = PipelineProfile(
+LONGCAT_T2V = InferencePreset(
     name="longcat_t2v",
-    version="1",
+    version=1,
     model_family="longcat",
     description="LongCat-Video T2V at 480p",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 480,
         "width": 848,
@@ -29,13 +29,13 @@ LONGCAT_T2V = PipelineProfile(
     },
 )
 
-LONGCAT_I2V = PipelineProfile(
+LONGCAT_I2V = InferencePreset(
     name="longcat_i2v",
-    version="1",
+    version=1,
     model_family="longcat",
     description="LongCat-Video I2V at 480p",
     workload_type="i2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 480,
         "width": 848,
@@ -46,12 +46,12 @@ LONGCAT_I2V = PipelineProfile(
     },
 )
 
-LONGCAT_VC = PipelineProfile(
+LONGCAT_VC = InferencePreset(
     name="longcat_vc",
-    version="1",
+    version=1,
     model_family="longcat",
     description="LongCat-Video continuation at 480p",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 480,
         "width": 848,
@@ -62,4 +62,4 @@ LONGCAT_VC = PipelineProfile(
     },
 )
 
-ALL_PROFILES = (LONGCAT_T2V, LONGCAT_I2V, LONGCAT_VC)
+ALL_PRESETS = (LONGCAT_T2V, LONGCAT_I2V, LONGCAT_VC)

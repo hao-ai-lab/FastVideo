@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Hunyuan model family pipeline profiles."""
-from fastvideo.api.profiles import PipelineProfile, ProfileStageSpec
+"""Hunyuan model family pipeline presets."""
+from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
-_DENOISE_STAGE = ProfileStageSpec(
+_DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Main denoising pass",
@@ -12,13 +12,13 @@ _DENOISE_STAGE = ProfileStageSpec(
     }),
 )
 
-HUNYUAN_T2V = PipelineProfile(
+HUNYUAN_T2V = InferencePreset(
     name="hunyuan_t2v",
-    version="1",
+    version=1,
     model_family="hunyuan",
     description="HunyuanVideo T2V at 720p",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 720,
         "width": 1280,
@@ -29,13 +29,13 @@ HUNYUAN_T2V = PipelineProfile(
     },
 )
 
-FAST_HUNYUAN_T2V = PipelineProfile(
+FAST_HUNYUAN_T2V = InferencePreset(
     name="fast_hunyuan_t2v",
-    version="1",
+    version=1,
     model_family="hunyuan",
     description="FastHunyuan T2V at 720p",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 720,
         "width": 1280,
@@ -46,4 +46,4 @@ FAST_HUNYUAN_T2V = PipelineProfile(
     },
 )
 
-ALL_PROFILES = (HUNYUAN_T2V, FAST_HUNYUAN_T2V)
+ALL_PRESETS = (HUNYUAN_T2V, FAST_HUNYUAN_T2V)

@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Wan model family pipeline profiles.
+"""Wan model family pipeline presets.
 
-Each profile is a named inference preset that declares the user-facing
+Each preset is a named inference preset that declares the user-facing
 stage topology, default sampling values, and which per-stage overrides
-are allowed.  Profiles are registered explicitly from
-:func:`fastvideo.registry._register_profiles`.
+are allowed.  Presets are registered explicitly from
+:func:`fastvideo.registry._register_presets`.
 """
-from fastvideo.api.profiles import PipelineProfile, ProfileStageSpec
+from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
 # -------------------------------------------------------------------
 # Shared negative prompts
@@ -30,7 +30,7 @@ _NEGATIVE_PROMPT_CN = ("色调艳丽，过曝，静态，细节模糊不清，�
 # Shared stage specs
 # -------------------------------------------------------------------
 
-_DENOISE_STAGE = ProfileStageSpec(
+_DENOISE_STAGE = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Main denoising pass",
@@ -41,16 +41,16 @@ _DENOISE_STAGE = ProfileStageSpec(
 )
 
 # -------------------------------------------------------------------
-# Wan 2.1 T2V profiles
+# Wan 2.1 T2V presets
 # -------------------------------------------------------------------
 
-WAN_T2V_1_3B = PipelineProfile(
+WAN_T2V_1_3B = InferencePreset(
     name="wan_t2v_1_3b",
-    version="1",
+    version=1,
     model_family="wan",
     description="Wan 2.1 T2V 1.3B at 480p",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 480,
         "width": 832,
@@ -62,13 +62,13 @@ WAN_T2V_1_3B = PipelineProfile(
     },
 )
 
-WAN_T2V_14B = PipelineProfile(
+WAN_T2V_14B = InferencePreset(
     name="wan_t2v_14b",
-    version="1",
+    version=1,
     model_family="wan",
     description="Wan 2.1 T2V 14B at 720p",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 720,
         "width": 1280,
@@ -81,16 +81,16 @@ WAN_T2V_14B = PipelineProfile(
 )
 
 # -------------------------------------------------------------------
-# Wan 2.1 I2V profiles
+# Wan 2.1 I2V presets
 # -------------------------------------------------------------------
 
-WAN_I2V_14B_480P = PipelineProfile(
+WAN_I2V_14B_480P = InferencePreset(
     name="wan_i2v_14b_480p",
-    version="1",
+    version=1,
     model_family="wan",
     description="Wan 2.1 I2V 14B at 480p",
     workload_type="i2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 480,
         "width": 832,
@@ -102,13 +102,13 @@ WAN_I2V_14B_480P = PipelineProfile(
     },
 )
 
-WAN_I2V_14B_720P = PipelineProfile(
+WAN_I2V_14B_720P = InferencePreset(
     name="wan_i2v_14b_720p",
-    version="1",
+    version=1,
     model_family="wan",
     description="Wan 2.1 I2V 14B at 720p",
     workload_type="i2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 720,
         "width": 1280,
@@ -121,10 +121,10 @@ WAN_I2V_14B_720P = PipelineProfile(
 )
 
 # -------------------------------------------------------------------
-# Wan 2.2 profiles
+# Wan 2.2 presets
 # -------------------------------------------------------------------
 
-_DENOISE_STAGE_WAN22 = ProfileStageSpec(
+_DENOISE_STAGE_WAN22 = PresetStageSpec(
     name="denoise",
     kind="denoising",
     description="Wan 2.2 two-guidance-scale denoising",
@@ -136,13 +136,13 @@ _DENOISE_STAGE_WAN22 = ProfileStageSpec(
     }),
 )
 
-WAN_2_2_T2V_A14B = PipelineProfile(
+WAN_2_2_T2V_A14B = InferencePreset(
     name="wan_2_2_t2v_a14b",
-    version="1",
+    version=1,
     model_family="wan",
     description="Wan 2.2 T2V A14B with dual guidance scales",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE_WAN22, ),
+    stage_schemas=(_DENOISE_STAGE_WAN22, ),
     defaults={
         "guidance_scale": 4.0,
         "guidance_scale_2": 3.0,
@@ -152,13 +152,13 @@ WAN_2_2_T2V_A14B = PipelineProfile(
     },
 )
 
-WAN_2_2_I2V_A14B = PipelineProfile(
+WAN_2_2_I2V_A14B = InferencePreset(
     name="wan_2_2_i2v_a14b",
-    version="1",
+    version=1,
     model_family="wan",
     description="Wan 2.2 I2V A14B with dual guidance scales",
     workload_type="i2v",
-    stages=(_DENOISE_STAGE_WAN22, ),
+    stage_schemas=(_DENOISE_STAGE_WAN22, ),
     defaults={
         "guidance_scale": 3.5,
         "guidance_scale_2": 3.5,
@@ -169,16 +169,16 @@ WAN_2_2_I2V_A14B = PipelineProfile(
 )
 
 # -------------------------------------------------------------------
-# Wan 2.1 Fun / Control profiles
+# Wan 2.1 Fun / Control presets
 # -------------------------------------------------------------------
 
-WAN_FUN_1_3B_INP = PipelineProfile(
+WAN_FUN_1_3B_INP = InferencePreset(
     name="wan_fun_1_3b_inp",
-    version="1",
+    version=1,
     model_family="wan",
-    description="Wan 2.1 Fun 1.3B InP (image-to-prompt)",
+    description="Wan 2.1 Fun 1.3B InP (image-to-video inpainting)",
     workload_type="i2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 480,
         "width": 832,
@@ -190,12 +190,12 @@ WAN_FUN_1_3B_INP = PipelineProfile(
     },
 )
 
-WAN_FUN_1_3B_CONTROL = PipelineProfile(
+WAN_FUN_1_3B_CONTROL = InferencePreset(
     name="wan_fun_1_3b_control",
-    version="1",
+    version=1,
     model_family="wan",
     description="Wan 2.1 Fun 1.3B Control (V2V)",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 832,
         "width": 480,
@@ -207,16 +207,16 @@ WAN_FUN_1_3B_CONTROL = PipelineProfile(
 )
 
 # -------------------------------------------------------------------
-# FastWan (DMD) profiles
+# FastWan (DMD) presets
 # -------------------------------------------------------------------
 
-FAST_WAN_T2V_480P = PipelineProfile(
+FAST_WAN_T2V_480P = InferencePreset(
     name="fast_wan_t2v_480p",
-    version="1",
+    version=1,
     model_family="wan",
     description="FastWan 2.1 T2V DMD at 480p (3-step)",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 448,
         "width": 832,
@@ -229,16 +229,16 @@ FAST_WAN_T2V_480P = PipelineProfile(
 )
 
 # -------------------------------------------------------------------
-# Wan 2.2 TI2V 5B profiles
+# Wan 2.2 TI2V 5B presets
 # -------------------------------------------------------------------
 
-WAN_2_2_TI2V_5B = PipelineProfile(
+WAN_2_2_TI2V_5B = InferencePreset(
     name="wan_2_2_ti2v_5b",
-    version="1",
+    version=1,
     model_family="wan",
     description="Wan 2.2 TI2V 5B",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 704,
         "width": 1280,
@@ -250,13 +250,13 @@ WAN_2_2_TI2V_5B = PipelineProfile(
     },
 )
 
-FAST_WAN_2_2_TI2V_5B = PipelineProfile(
+FAST_WAN_2_2_TI2V_5B = InferencePreset(
     name="fast_wan_2_2_ti2v_5b",
-    version="1",
+    version=1,
     model_family="wan",
     description="FastWan 2.2 TI2V 5B DMD",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 704,
         "width": 1280,
@@ -269,16 +269,16 @@ FAST_WAN_2_2_TI2V_5B = PipelineProfile(
 )
 
 # -------------------------------------------------------------------
-# Self-Forcing (causal) profiles
+# Self-Forcing (causal) presets
 # -------------------------------------------------------------------
 
-SF_WAN_T2V_1_3B = PipelineProfile(
+SF_WAN_T2V_1_3B = InferencePreset(
     name="sf_wan_t2v_1_3b",
-    version="1",
+    version=1,
     model_family="wan",
     description="Self-Forcing Wan 2.1 T2V 1.3B (causal)",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE, ),
+    stage_schemas=(_DENOISE_STAGE, ),
     defaults={
         "height": 480,
         "width": 832,
@@ -290,13 +290,13 @@ SF_WAN_T2V_1_3B = PipelineProfile(
     },
 )
 
-SF_WAN_2_2_T2V_A14B = PipelineProfile(
+SF_WAN_2_2_T2V_A14B = InferencePreset(
     name="sf_wan_2_2_t2v_a14b",
-    version="1",
+    version=1,
     model_family="wan",
     description="Self-Forcing Wan 2.2 T2V A14B (causal)",
     workload_type="t2v",
-    stages=(_DENOISE_STAGE_WAN22, ),
+    stage_schemas=(_DENOISE_STAGE_WAN22, ),
     defaults={
         "height": 448,
         "width": 832,
@@ -309,13 +309,13 @@ SF_WAN_2_2_T2V_A14B = PipelineProfile(
     },
 )
 
-SF_WAN_2_2_I2V_A14B = PipelineProfile(
+SF_WAN_2_2_I2V_A14B = InferencePreset(
     name="sf_wan_2_2_i2v_a14b",
-    version="1",
+    version=1,
     model_family="wan",
     description="Self-Forcing Wan 2.2 I2V A14B (causal)",
     workload_type="i2v",
-    stages=(_DENOISE_STAGE_WAN22, ),
+    stage_schemas=(_DENOISE_STAGE_WAN22, ),
     defaults={
         "height": 448,
         "width": 832,
@@ -328,8 +328,8 @@ SF_WAN_2_2_I2V_A14B = PipelineProfile(
     },
 )
 
-# Collect all profiles for bulk registration.
-ALL_PROFILES = (
+# Collect all presets for bulk registration.
+ALL_PRESETS = (
     WAN_T2V_1_3B,
     WAN_T2V_14B,
     WAN_I2V_14B_480P,
