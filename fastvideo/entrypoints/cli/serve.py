@@ -6,7 +6,7 @@ import os
 from typing import cast
 
 from fastvideo.api.compat import generator_config_to_fastvideo_args
-from fastvideo.api.request_metadata import EXPLICIT_REQUEST_ATTR
+from fastvideo.api.request_metadata import get_explicit_paths
 from fastvideo.entrypoints.cli.cli_types import CLISubcommand
 from fastvideo.entrypoints.cli.inference_config import build_serve_config
 from fastvideo.logger import init_logger
@@ -30,12 +30,7 @@ class ServeSubcommand(CLISubcommand):
                 args,
                 overrides=getattr(args, "_unknown", None),
             )
-        explicit_raw = getattr(
-            serve_config.default_request,
-            EXPLICIT_REQUEST_ATTR,
-            None,
-        )
-        if explicit_raw:
+        if get_explicit_paths(serve_config.default_request):
             raise NotImplementedError("ServeConfig.default_request is not wired into the OpenAI "
                                       "server yet")
 
