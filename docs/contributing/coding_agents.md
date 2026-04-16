@@ -44,7 +44,7 @@ FastVideo maps a Diffusers-style repo into a pipeline like:
 - `fastvideo/configs/models/*`: arch configs and `param_names_mapping` for
   weight name translation.
 - `fastvideo/configs/pipelines/*`: pipeline wiring (component classes + names).
-- `fastvideo/configs/sample/*`: default runtime sampling parameters.
+- `fastvideo/api/sampling_param.py`: runtime sampling parameters.
 - `fastvideo/pipelines/basic/*`: end-to-end pipeline logic built from stages.
 - `model_index.json`: the HF repo entrypoint that maps component names to
   classes and weight files.
@@ -319,7 +319,8 @@ Purpose:
 
 - `fastvideo/configs/pipelines/` describes pipeline wiring and model module
   names.
-- `fastvideo/configs/sample/` defines default runtime parameters.
+- `fastvideo/api/sampling_param.py` defines runtime sampling parameters.
+  Defaults come from profiles in `fastvideo/pipelines/basic/<family>/profiles.py`.
 
 Action:
 
@@ -474,7 +475,7 @@ FastVideo integration.
 3. Pipeline wiring.
    - Pipeline: `fastvideo/pipelines/basic/wan/wan_pipeline.py`
    - Pipeline config: `fastvideo/configs/pipelines/wan.py`
-   - Sampling defaults: `fastvideo/configs/sample/wan.py`
+   - Sampling defaults: `fastvideo/pipelines/basic/wan/profiles.py`
 
 4. Minimal example.
    - Script: `examples/inference/basic/basic.py`

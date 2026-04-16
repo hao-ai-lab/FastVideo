@@ -50,6 +50,8 @@ def _get_extra_dataclass_fields(package_name: str, base_cls: type) -> set[str]:
     package = importlib.import_module(package_name)
     base_fields = {f.name for f in dataclasses.fields(base_cls)}
     extras: set[str] = set()
+    if not hasattr(package, "__path__"):
+        return extras
     for _, modname, _ in pkgutil.iter_modules(package.__path__):
         if modname == "__pycache__":
             continue
@@ -195,7 +197,7 @@ def test_sampling_param_base_fields_are_classified() -> None:
 
 def test_sampling_param_extension_fields_are_classified() -> None:
     inventory = _load_inventory()
-    expected = _get_extra_dataclass_fields("fastvideo.configs.sample", SamplingParam)
+    expected = _get_extra_dataclass_fields("fastvideo.api.sampling_param", SamplingParam)
     actual = _flatten_status_section(
         inventory["surfaces"]["sampling_param_extensions"],
         set(inventory["status_definitions"]),

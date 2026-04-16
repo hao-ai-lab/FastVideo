@@ -12,7 +12,7 @@ FastVideo maps a Diffusers-style repo into a pipeline like this:
 - `fastvideo/configs/models/*`: arch configs and `param_names_mapping` for
   weight name translation.
 - `fastvideo/configs/pipelines/*`: pipeline wiring (component classes + names).
-- `fastvideo/configs/sample/*`: default runtime sampling parameters.
+- `fastvideo/api/sampling_param.py`: runtime sampling parameters.
 - `fastvideo/pipelines/basic/*`: end-to-end pipelines.
 - `fastvideo/pipelines/stages/*`: reusable pipeline stages.
 - `fastvideo/models/loader/*`: component loaders for Diffusers-style repos.
@@ -49,8 +49,9 @@ runtime parameters consistent:
 - `fastvideo/configs/models/`: architecture definitions, layer shapes, and
   `param_names_mapping` rules for key renaming.
 - `fastvideo/configs/pipelines/`: pipeline wiring and required components.
-- `fastvideo/configs/sample/`: default sampling parameters (steps, frames,
-  guidance scale, resolution, fps).
+- `fastvideo/api/sampling_param.py`: sampling parameters (steps, frames,
+  guidance scale, resolution, fps). Defaults come from profiles in
+  `fastvideo/pipelines/basic/<family>/profiles.py`.
 - `fastvideo/registry.py`: unified registry for pipeline config + sampling
   defaults and model metadata resolution, defined via explicit
   `register_configs(...)` blocks (no separate dict registries).
@@ -142,7 +143,7 @@ How this maps to FastVideo:
 - `T5TokenizerFast` -> loaded via HF in `fastvideo/models/loader/`
 - `UniPCMultistepScheduler` -> loaded via Diffusers scheduler utilities
 - Pipeline defaults -> `fastvideo/configs/pipelines/wan.py`
-- Sampling defaults -> `fastvideo/configs/sample/wan.py`
+- Sampling defaults -> `fastvideo/pipelines/basic/wan/profiles.py`
 
 ## Pipeline system
 

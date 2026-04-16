@@ -89,7 +89,7 @@ GEN3C defaults in FastVideo:
 
 These values are defined in:
 
-- `fastvideo/configs/sample/gen3c.py`
+- `fastvideo/pipelines/basic/gen3c/profiles.py`
 - `fastvideo/configs/pipelines/gen3c.py`
 
 and align with the official GEN3C inference defaults in:

@@ -128,19 +128,14 @@ Concrete hierarchy: `DiTConfig` → `DiTArchConfig`, `VAEConfig` →
 - `dump_to_json()` / `load_from_json()` — JSON persistence. Callable
   fields and `arch_config` are excluded from dumps.
 
-### SamplingParam (`fastvideo/configs/sample/`)
+### SamplingParam (`fastvideo/api/sampling_param.py`)
 
 Generation parameters separate from pipeline config. Each model family
-provides defaults:
+provides defaults via a profile (see `fastvideo/pipelines/basic/<family>/profiles.py`):
 
 ```python
-@dataclass
-class WanT2V_1_3B_SamplingParam(SamplingParam):
-    height: int = 480
-    width: int = 832
-    num_frames: int = 81
-    guidance_scale: float = 3.0
-    num_inference_steps: int = 50
+sp = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+# sp.height == 480, sp.width == 832, sp.num_frames == 81, etc.
 ```
 
 ## Component Loading
@@ -430,9 +425,9 @@ User: generator.generate_video(prompt, ...)
    `fastvideo/configs/pipelines/<model>.py`. Set DiT/VAE/encoder configs,
    flow_shift, precision defaults.
 
-2. **Sampling param** — Create a `SamplingParam` subclass in
-   `fastvideo/configs/sample/<model>.py`. Set default height, width,
-   num_frames, guidance_scale, num_inference_steps.
+2. **Sampling param profile** — Create a profile in
+   `fastvideo/pipelines/basic/<model>/profiles.py` with default height,
+   width, num_frames, guidance_scale, num_inference_steps.
 
 3. **Register configs** — In `fastvideo/registry.py`, add a
    `register_configs()` call inside `_register_configs()` with
