@@ -12,7 +12,7 @@ import yaml
 
 from fastvideo.api import RunConfig, ServeConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
-from fastvideo.configs.sample.base import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.cli.generate import GenerateSubcommand
 from fastvideo.entrypoints.cli.serve import ServeSubcommand
 from fastvideo.entrypoints.openai import image_api, video_api
@@ -50,6 +50,8 @@ def _get_extra_dataclass_fields(package_name: str, base_cls: type) -> set[str]:
     package = importlib.import_module(package_name)
     base_fields = {f.name for f in dataclasses.fields(base_cls)}
     extras: set[str] = set()
+    if not hasattr(package, "__path__"):
+        return extras
     for _, modname, _ in pkgutil.iter_modules(package.__path__):
         if modname == "__pycache__":
             continue
@@ -195,7 +197,7 @@ def test_sampling_param_base_fields_are_classified() -> None:
 
 def test_sampling_param_extension_fields_are_classified() -> None:
     inventory = _load_inventory()
-    expected = _get_extra_dataclass_fields("fastvideo.configs.sample", SamplingParam)
+    expected = _get_extra_dataclass_fields("fastvideo.api.sampling_param", SamplingParam)
     actual = _flatten_status_section(
         inventory["surfaces"]["sampling_param_extensions"],
         set(inventory["status_definitions"]),
@@ -235,8 +237,8 @@ def test_cli_dest_inventory_matches_live_parsers() -> None:
 def test_review_gap_fields_are_explicitly_inventory_tracked() -> None:
     inventory = _load_inventory()
 
-    sampling_extensions = inventory["surfaces"]["sampling_param_extensions"]
-    assert "guidance_scale_2" in sampling_extensions["moved"]
+    sampling_base = inventory["surfaces"]["sampling_param_base"]
+    assert "guidance_scale_2" in sampling_base["moved"]
 
     image_request = inventory["surfaces"]["openai_image_request"]
     video_request = inventory["surfaces"]["openai_video_request"]
@@ -247,7 +249,7 @@ def test_review_gap_fields_are_explicitly_inventory_tracked() -> None:
 
 def test_inventory_targets_exist_in_typed_schema() -> None:
     inventory = _load_inventory()
-    target_statuses = {"moved", "profile_owned"}
+    target_statuses = {"moved", "preset_owned"}
 
     for surface in inventory["surfaces"].values():
         for status, entries in surface.items():

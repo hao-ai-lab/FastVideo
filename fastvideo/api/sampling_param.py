@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-from dataclasses import dataclass
+import copy
+from dataclasses import dataclass, field, fields
 from typing import Any
 
 from fastvideo.logger import init_logger
@@ -30,6 +31,16 @@ class SamplingParam:
 
     # Camera control inputs (HYWorld)
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
+    prompt_attention_mask: list = field(default_factory=list)
+    negative_attention_mask: list = field(default_factory=list)
+
+    # Camera/action control inputs (GameCraft)
+    camera_states: Any | None = None  # Plücker coordinates [B, T_video, 6, H, W]
+    camera_trajectory: str | None = None
+    action_list: list[str] | None = None
+    action_speed_list: list[float] | None = None
+    gt_latents: Any | None = None  # Ground truth latents [B, 16, T, H, W]
+    conditioning_mask: Any | None = None  # Mask [B, 1, T, H, W]
 
     # Camera control inputs (LingBotWorld)
     c2ws_plucker_emb: Any | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
@@ -68,6 +79,7 @@ class SamplingParam:
     num_inference_steps: int = 50
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
+    guidance_scale_2: float | None = None
     guidance_rescale: float = 0.0
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
@@ -79,6 +91,17 @@ class SamplingParam:
     trajectory_type: str | None = None
     movement_distance: float | None = None
     camera_rotation: str | None = None
+
+    # LTX2 multi-modal CFG and STG
+    ltx2_cfg_scale_video: float = 3.0
+    ltx2_cfg_scale_audio: float = 7.0
+    ltx2_modality_scale_video: float = 3.0
+    ltx2_modality_scale_audio: float = 3.0
+    ltx2_rescale_scale: float = 0.7
+    ltx2_stg_scale_video: float = 1.0
+    ltx2_stg_scale_audio: float = 1.0
+    ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
+    ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
 
     # Misc
     save_video: bool = True
@@ -94,26 +117,58 @@ class SamplingParam:
             raise ValueError("prompt_path must be a txt file")
 
     def update(self, source_dict: dict[str, Any]) -> None:
+        valid_fields = {f.name for f in fields(self)}
         for key, value in source_dict.items():
-            if hasattr(self, key):
+            if key in valid_fields:
                 setattr(self, key, value)
             else:
-                logger.exception("%s has no attribute %s", type(self).__name__, key)
+                logger.error("%s has no field %s", type(self).__name__, key)
 
         self.__post_init__()
 
     @classmethod
     def from_pretrained(cls, model_path: str) -> "SamplingParam":
-        from fastvideo.registry import get_sampling_param_cls_for_name
-        sampling_cls = get_sampling_param_cls_for_name(model_path)
-        if sampling_cls is not None:
-            sampling_param: SamplingParam = sampling_cls()
-        else:
-            logger.warning("Couldn't find an optimal sampling param for %s. Using the default sampling param.",
-                           model_path)
-            sampling_param = cls()
+        sampling_param = cls._from_preset(model_path)
+        if sampling_param is not None:
+            return sampling_param
 
-        return sampling_param
+        logger.warning(
+            "Couldn't find a preset for %s."
+            " Using the default sampling param.",
+            model_path,
+        )
+        return cls()
+
+    @classmethod
+    def _from_preset(
+        cls,
+        model_path: str,
+    ) -> "SamplingParam | None":
+        """Build a SamplingParam from preset defaults.
+
+        Returns ``None`` when no preset is configured for
+        *model_path*, letting the caller fall back to the legacy
+        subclass lookup.
+        """
+        from fastvideo.registry import get_preset_selection
+
+        try:
+            preset_name, model_family = get_preset_selection(model_path)
+        except (ValueError, RuntimeError):
+            return None
+        if preset_name is None or model_family is None:
+            return None
+
+        from fastvideo.api.presets import get_preset
+
+        preset = get_preset(preset_name, model_family)
+        sp = cls()
+        valid_fields = {f.name for f in fields(cls)}
+        for key, value in preset.defaults.items():
+            if key in valid_fields:
+                setattr(sp, key, copy.deepcopy(value))
+        sp.__post_init__()
+        return sp
 
     @staticmethod
     def add_cli_args(parser: Any) -> Any:

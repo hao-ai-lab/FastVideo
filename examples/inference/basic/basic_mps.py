@@ -1,5 +1,5 @@
 from fastvideo import VideoGenerator, PipelineConfig
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 
 def main():
     config = PipelineConfig.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")

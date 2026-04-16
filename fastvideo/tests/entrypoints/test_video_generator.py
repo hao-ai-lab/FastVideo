@@ -12,7 +12,7 @@ from fastvideo.api import (
     SamplingConfig,
     load_run_config,
 )
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.fastvideo_args import WorkloadType
 

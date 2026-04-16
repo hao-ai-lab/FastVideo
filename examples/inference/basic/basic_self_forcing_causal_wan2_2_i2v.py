@@ -2,7 +2,7 @@
 
 from fastvideo import VideoGenerator, SamplingParam
 import json
-# from fastvideo.configs.sample import SamplingParam
+# from fastvideo.api.sampling_param import SamplingParam
 
 OUTPUT_PATH = "video_samples_self_forcing_causal_wan2_2_14B_i2v"
 def main():

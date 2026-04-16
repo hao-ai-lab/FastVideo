@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Cosmos model family pipeline presets.
+
+Covers both Cosmos Predict2 and Cosmos Predict2.5, which share the
+same pipeline directory but have distinct model families.
+"""
+from fastvideo.api.presets import InferencePreset, PresetStageSpec
+
+_DENOISE_STAGE = PresetStageSpec(
+    name="denoise",
+    kind="denoising",
+    description="Main denoising pass",
+    allowed_overrides=frozenset({
+        "num_inference_steps",
+        "guidance_scale",
+    }),
+)
+
+# -------------------------------------------------------------------
+# Cosmos Predict2
+# -------------------------------------------------------------------
+
+_COSMOS_NEGATIVE_PROMPT = ("The video captures a series of frames showing ugly scenes, "
+                           "static with no motion, motion blur, over-saturation, shaky "
+                           "footage, low resolution, grainy texture, pixelated images, "
+                           "poorly lit areas, underexposed and overexposed scenes, poor "
+                           "color balance, washed out colors, choppy sequences, jerky "
+                           "movements, low frame rate, artifacting, color banding, "
+                           "unnatural transitions, outdated special effects, fake elements, "
+                           "unconvincing visuals, poorly edited content, jump cuts, visual "
+                           "noise, and flickering. Overall, the video is of poor quality.")
+
+COSMOS_PREDICT2_2B = InferencePreset(
+    name="cosmos_predict2_2b",
+    version=1,
+    model_family="cosmos",
+    description="Cosmos Predict2 2B Video2World",
+    workload_type="t2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "height": 704,
+        "width": 1280,
+        "num_frames": 93,
+        "fps": 16,
+        "guidance_scale": 7.0,
+        "num_inference_steps": 35,
+        "negative_prompt": _COSMOS_NEGATIVE_PROMPT,
+    },
+)
+
+# -------------------------------------------------------------------
+# Cosmos Predict2.5
+# -------------------------------------------------------------------
+
+_COSMOS25_NEGATIVE_PROMPT = ("The video captures a series of frames showing ugly scenes, "
+                             "static with no motion, motion blur, over-saturation, shaky "
+                             "footage, low resolution, grainy texture, pixelated images, "
+                             "poorly lit areas, underexposed and overexposed scenes, poor "
+                             "color balance, washed out colors, choppy sequences, jerky "
+                             "movements, low frame rate, artifacting, color banding, "
+                             "unnatural transitions, outdated special effects, fake elements, "
+                             "unconvincing visuals, poorly edited content, jump cuts, visual "
+                             "noise, and flickering. Overall, the video is of poor quality.")
+
+COSMOS25_PREDICT2_2B = InferencePreset(
+    name="cosmos25_predict2_2b",
+    version=1,
+    model_family="cosmos25",
+    description="Cosmos Predict2.5 2B",
+    workload_type="t2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "seed": 0,
+        "height": 704,
+        "width": 1280,
+        "num_frames": 77,
+        "fps": 24,
+        "guidance_scale": 7.0,
+        "num_inference_steps": 35,
+        "negative_prompt": _COSMOS25_NEGATIVE_PROMPT,
+    },
+)
+
+ALL_PRESETS = (COSMOS_PREDICT2_2B, COSMOS25_PREDICT2_2B)

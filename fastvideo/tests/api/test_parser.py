@@ -23,7 +23,7 @@ def test_parse_config_builds_nested_typed_config() -> None:
             "model_path": "/models/ltx2",
             "pipeline": {
                 "workload_type": "t2v",
-                "profile": "ltx2_two_stage",
+                "preset": "ltx2_two_stage",
             },
         },
         "request": {
@@ -51,7 +51,7 @@ def test_parse_config_builds_nested_typed_config() -> None:
 
     config = parse_config(RunConfig, raw)
 
-    assert config.generator.pipeline.profile == "ltx2_two_stage"
+    assert config.generator.pipeline.preset == "ltx2_two_stage"
     assert config.request.prompt == ["a fox", "a wolf"]
     assert config.request.state == ContinuationState(
         kind="ltx2_continuation",
@@ -114,8 +114,8 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
             },
             "pipeline": {
                 "workload_type": None,
-                "profile": None,
-                "profile_version": None,
+                "preset": None,
+                "preset_version": None,
                 "components": {
                     "config_root": None,
                     "pipeline_config_path": None,
@@ -128,7 +128,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                     "override_pipeline_cls_name": None,
                     "override_transformer_cls_name": None,
                 },
-                "profile_overrides": {},
+                "preset_overrides": {},
                 "experimental": {},
             },
         },

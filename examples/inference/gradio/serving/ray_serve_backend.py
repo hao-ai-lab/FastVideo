@@ -185,7 +185,7 @@ class BaseModelDeployment:
 
     def _initialize_generator(self, config: Dict[str, Any]) -> None:
         from fastvideo.entrypoints.video_generator import VideoGenerator
-        from fastvideo.configs.sample.base import SamplingParam
+        from fastvideo.api.sampling_param import SamplingParam
 
         print(f"Initializing model: {self.model_path}")
         self.generator = VideoGenerator.from_pretrained(

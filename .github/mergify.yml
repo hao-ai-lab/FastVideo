@@ -105,7 +105,7 @@ pull_request_rules:
           - files~=^fastvideo/pipelines/samplers/
           - files~=^fastvideo/entrypoints/
           - files~=^fastvideo/worker/
-          - files~=^fastvideo/configs/sample/
+          - files~=^fastvideo/api/sampling_param
           - files~=^fastvideo/configs/pipelines/
           - files~=^examples/inference/
       - -closed

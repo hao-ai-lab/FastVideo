@@ -14,7 +14,7 @@ import pytest
 import torch
 
 from fastvideo import VideoGenerator
-from fastvideo.configs.sample.lingbotworld import LingBotWorld_SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.lingbotworld.cam_utils import prepare_camera_embedding
 from fastvideo.tests.ssim.reference_utils import (
@@ -90,7 +90,8 @@ LINGBOT_PARAMS = {
         "皮肤，肢体，面部特征，汽车，电线"
     ),
 }
-_LINGBOT_FULL_QUALITY_DEFAULTS = LingBotWorld_SamplingParam()
+_LINGBOT_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
+    LINGBOT_PARAMS["model_path"])
 LINGBOT_FULL_QUALITY_PARAMS = {
     "model_path": LINGBOT_PARAMS["model_path"],
     "num_gpus": LINGBOT_PARAMS["num_gpus"],

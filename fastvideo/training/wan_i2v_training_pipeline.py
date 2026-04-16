@@ -5,7 +5,7 @@ from typing import Any
 
 import torch
 
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_i2v
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs

@@ -22,6 +22,17 @@ from fastvideo.api.schema import (
 )
 from fastvideo.api.errors import ConfigValidationError
 from fastvideo.api.overrides import apply_overrides, parse_cli_overrides
+from fastvideo.api.presets import (
+    InferencePreset,
+    PresetStageSpec,
+    get_all_preset_names,
+    get_preset,
+    get_presets_for_family,
+    register_preset,
+    validate_preset_selection,
+    validate_stage_names,
+    validate_stage_overrides,
+)
 from fastvideo.api.parser import (
     config_to_dict,
     load_config,
@@ -31,6 +42,7 @@ from fastvideo.api.parser import (
     parse_config,
 )
 from fastvideo.api.results import GenerationResult
+from fastvideo.api.sampling_param import SamplingParam
 
 __all__ = [
     "CompileConfig",
@@ -52,8 +64,11 @@ __all__ = [
     "RequestRuntimeConfig",
     "RunConfig",
     "SamplingConfig",
+    "SamplingParam",
     "ServeConfig",
     "ServerConfig",
+    "InferencePreset",
+    "PresetStageSpec",
     "apply_overrides",
     "config_to_dict",
     "load_config",
@@ -61,5 +76,12 @@ __all__ = [
     "load_run_config",
     "load_serve_config",
     "parse_cli_overrides",
+    "get_all_preset_names",
+    "get_preset",
+    "get_presets_for_family",
     "parse_config",
+    "register_preset",
+    "validate_preset_selection",
+    "validate_stage_names",
+    "validate_stage_overrides",
 ]

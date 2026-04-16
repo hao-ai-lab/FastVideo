@@ -18,9 +18,7 @@ import torch
 import pytest
 
 from fastvideo import VideoGenerator
-from fastvideo.configs.sample.hunyuangamecraft import (
-    HunyuanGameCraftSamplingParam,
-)
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.reference_utils import (
     build_generated_output_dir,
@@ -91,7 +89,8 @@ GAMECRAFT_T2V_PARAMS = {
     "negative_prompt": "",
 }
 
-_GAMECRAFT_FULL_QUALITY_DEFAULTS = HunyuanGameCraftSamplingParam()
+_GAMECRAFT_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
+    _GAMECRAFT_MODEL_PATH)
 GAMECRAFT_T2V_FULL_QUALITY_PARAMS = {
     "num_gpus": GAMECRAFT_T2V_PARAMS["num_gpus"],
     "model_path": GAMECRAFT_T2V_PARAMS["model_path"],

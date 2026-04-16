@@ -73,10 +73,10 @@ class ComponentConfig:
 @dataclass
 class PipelineSelection:
     workload_type: Literal["t2v", "i2v", "t2i", "i2i"] | None = None
-    profile: str | None = None
-    profile_version: str | None = None
+    preset: str | None = None
+    preset_version: int | None = None
     components: ComponentConfig = field(default_factory=ComponentConfig)
-    profile_overrides: dict[str, Any] = field(default_factory=dict)
+    preset_overrides: dict[str, Any] = field(default_factory=dict)
     experimental: dict[str, Any] = field(default_factory=dict)
 
 
