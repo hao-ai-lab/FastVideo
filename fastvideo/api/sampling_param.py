@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any
 
 from fastvideo.logger import init_logger
@@ -117,11 +117,12 @@ class SamplingParam:
             raise ValueError("prompt_path must be a txt file")
 
     def update(self, source_dict: dict[str, Any]) -> None:
+        valid_fields = {f.name for f in fields(self)}
         for key, value in source_dict.items():
-            if hasattr(self, key):
+            if key in valid_fields:
                 setattr(self, key, value)
             else:
-                logger.warning("%s has no attribute %s", type(self).__name__, key)
+                logger.error("%s has no field %s", type(self).__name__, key)
 
         self.__post_init__()
 
@@ -162,8 +163,9 @@ class SamplingParam:
 
         preset = get_preset(preset_name, model_family)
         sp = cls()
+        valid_fields = {f.name for f in fields(cls)}
         for key, value in preset.defaults.items():
-            if hasattr(sp, key):
+            if key in valid_fields:
                 setattr(sp, key, copy.deepcopy(value))
         sp.__post_init__()
         return sp
