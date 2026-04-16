@@ -45,6 +45,15 @@ def apply_overrides(config: Mapping[str, Any], overrides: Mapping[str, Any]) -> 
     return merged
 
 
+def normalize_overrides(overrides: list[str] | Mapping[str, Any] | None, ) -> dict[str, Any] | None:
+    """Normalize a CLI list or mapping of overrides into a flat dict."""
+    if not overrides:
+        return None
+    if isinstance(overrides, list):
+        return parse_cli_overrides(overrides)
+    return dict(overrides)
+
+
 def _apply_single_override(config: dict[str, Any], dotted_key: str, value: Any) -> None:
     parts = dotted_key.split(".")
     if not all(parts):
@@ -98,4 +107,4 @@ def _normalize_override_key(key: str) -> str:
     return key.replace("-", "_")
 
 
-__all__ = ["apply_overrides", "parse_cli_overrides"]
+__all__ = ["apply_overrides", "normalize_overrides", "parse_cli_overrides"]
