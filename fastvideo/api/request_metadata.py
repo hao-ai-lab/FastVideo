@@ -1,24 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
 """Track which GenerationRequest fields the user explicitly provided.
 
-This module solves a specific problem: when translating a GenerationRequest into
-a legacy SamplingParam, we need to distinguish user-provided values (which
-should override model defaults) from schema defaults (which should NOT override
-model defaults).
+When translating a GenerationRequest into a legacy SamplingParam we must
+distinguish user-provided values (which should override model defaults)
+from schema defaults (which should NOT override model defaults).
 
-The approach:
-1. At bind time, store the original raw dict and a baseline snapshot.
-2. Patch __setattr__ on tracked dataclass types to record dirty field paths.
-3. At access time, do a lazy 3-way merge: raw + baseline + current state,
-   with dirty paths forcing inclusion even when current == baseline.
+The mechanism: a single ``_fastvideo_explicit_paths`` set stored on the
+root ``GenerationRequest``. It holds dotted leaf paths (e.g.
+``"sampling.guidance_scale"``) the user has touched, either via raw
+config at bind time or via attribute assignment at runtime. A patched
+``__setattr__`` on the request dataclass types records assignments into
+this set.
+
+The set holds leaf paths only. Nested dataclass or mapping assignments
+are flattened to their leaves at record time.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
-from copy import deepcopy
+from collections.abc import Callable, Mapping
 import dataclasses
 from typing import Any, cast
-from collections.abc import Callable
 
 from fastvideo.api.schema import (
     ContinuationState,
@@ -33,12 +34,12 @@ from fastvideo.api.schema import (
     ServeConfig,
 )
 
-EXPLICIT_REQUEST_ATTR = "_fastvideo_explicit_request"
-ORIGINAL_REQUEST_STATE_ATTR = "_fastvideo_original_request_state"
+EXPLICIT_PATHS_ATTR = "_fastvideo_explicit_paths"
+
 _TRACKING_ROOT_ATTR = "_fastvideo_request_tracking_root"
 _TRACKING_PATH_ATTR = "_fastvideo_request_tracking_path"
 _TRACKING_PATCHED_ATTR = "_fastvideo_request_tracking_patched"
-_DIRTY_PATHS_ATTR = "_fastvideo_dirty_paths"
+
 _TRACKED_REQUEST_TYPES = (
     GenerationRequest,
     InputConfig,
@@ -55,14 +56,20 @@ def bind_generation_request_raw(
     request: GenerationRequest,
     raw: Mapping[str, Any] | None,
 ) -> GenerationRequest:
+    """Install explicit-path tracking on *request*.
+
+    *raw* is the parsed config dict (YAML/JSON/kwargs); every leaf key
+    in it becomes an explicit path. Subsequent attribute assignments on
+    *request* or its nested dataclasses are recorded automatically via a
+    patched ``__setattr__``.
+    """
     _ensure_request_tracking()
-    # Disable dirty tracking during bind so tree walk doesn't record paths.
-    object.__setattr__(request, _DIRTY_PATHS_ATTR, None)
-    object.__setattr__(request, EXPLICIT_REQUEST_ATTR, deepcopy(dict(raw or {})))
-    object.__setattr__(request, ORIGINAL_REQUEST_STATE_ATTR, _serialize_config(request))
+    # Disable recording while we walk the tree to install roots.
+    object.__setattr__(request, EXPLICIT_PATHS_ATTR, None)
     _set_tracking_roots(request, request, "")
-    # Enable dirty tracking.
-    object.__setattr__(request, _DIRTY_PATHS_ATTR, set())
+    paths: set[str] = set()
+    _record_value_paths(raw or {}, "", paths)
+    object.__setattr__(request, EXPLICIT_PATHS_ATTR, paths)
     return request
 
 
@@ -73,6 +80,8 @@ def bind_run_config_raw(
     request_raw = raw.get("request")
     if isinstance(request_raw, Mapping):
         bind_generation_request_raw(config.request, request_raw)
+    else:
+        bind_generation_request_raw(config.request, {})
     return config
 
 
@@ -83,87 +92,72 @@ def bind_serve_config_raw(
     default_request_raw = raw.get("default_request")
     if isinstance(default_request_raw, Mapping):
         bind_generation_request_raw(config.default_request, default_request_raw)
-    elif "default_request" not in raw:
+    else:
         bind_generation_request_raw(config.default_request, {})
     return config
 
 
-def refresh_generation_request_raw(request: GenerationRequest, ) -> dict[str, Any] | None:
-    raw = getattr(request, EXPLICIT_REQUEST_ATTR, None)
-    baseline = getattr(request, ORIGINAL_REQUEST_STATE_ATTR, None)
-    if not isinstance(raw, Mapping) or not isinstance(baseline, Mapping):
-        return None
+def get_explicit_paths(request: GenerationRequest) -> frozenset[str]:
+    """Return a snapshot of the explicit paths set on *request*."""
+    paths = getattr(request, EXPLICIT_PATHS_ATTR, None)
+    if isinstance(paths, set | frozenset):
+        return frozenset(paths)
+    return frozenset()
 
-    dirty = getattr(request, _DIRTY_PATHS_ATTR, None) or frozenset()
-    current = _serialize_config(request)
-    merged = deepcopy(dict(raw))
-    _merge_request_mutations(merged, dict(baseline), current, dirty)
 
-    object.__setattr__(request, EXPLICIT_REQUEST_ATTR, merged)
-    object.__setattr__(request, ORIGINAL_REQUEST_STATE_ATTR, current)
-    object.__setattr__(request, _DIRTY_PATHS_ATTR, set())
-    return merged
+def reset_tracking_roots(request: GenerationRequest) -> None:
+    """Re-install tracking roots after a deepcopy or manual clone.
+
+    The paths set itself deepcopies correctly; we only need to repoint
+    the tracking root on nested dataclasses at the new root.
+    """
+    _ensure_request_tracking()
+    _set_tracking_roots(request, request, "")
 
 
 # ---------------------------------------------------------------------------
-# 3-way merge: raw + baseline + current, with dirty-path forcing
+# Path recording
 # ---------------------------------------------------------------------------
 
-_MISSING = object()
 
-
-def _merge_request_mutations(
-    merged: dict[str, Any],
-    baseline: Mapping[str, Any],
-    current: Mapping[str, Any],
-    dirty: frozenset[str] | set[str],
-    path_prefix: str = "",
-    force_dirty: bool = False,
+def _record_value_paths(
+    value: Any,
+    prefix: str,
+    out: set[str],
 ) -> None:
-    # Remove keys that were deleted from the current state.
-    for key in set(merged) | set(baseline):
-        if key not in current:
-            merged.pop(key, None)
+    """Add every leaf path under *value* to *out*.
 
-    for key in current:
-        current_path = f"{path_prefix}.{key}" if path_prefix else key
-        current_value = current[key]
-        baseline_value = baseline.get(key, _MISSING)
-        merged_value = merged.get(key, _MISSING)
-
-        # If this exact path was dirtied (e.g. whole section replaced),
-        # propagate to all children.
-        child_force = force_dirty or current_path in dirty
-
-        # Recurse into nested mappings.
-        if isinstance(current_value, Mapping) and isinstance(baseline_value, Mapping):
-            nested = (deepcopy(dict(merged_value)) if isinstance(merged_value, Mapping) else {})
-            _merge_request_mutations(
-                nested,
-                baseline_value,
-                current_value,
-                dirty,
-                current_path,
-                child_force,
-            )
-            if nested:
-                merged[key] = nested
-            else:
-                merged.pop(key, None)
-            continue
-
-        # A field is explicitly set if:
-        # - it's new (not in baseline),
-        # - it changed from baseline,
-        # - its path was touched by __setattr__ (dirty), or
-        # - an ancestor path was dirty (whole section replaced).
-        is_dirty = child_force or current_path in dirty
-        if baseline_value is _MISSING or current_value != baseline_value or is_dirty:
-            merged[key] = deepcopy(current_value)
+    A leaf is any terminal value (non-dataclass, non-mapping, or empty
+    mapping/dataclass). ``prefix`` is the dotted path at which *value*
+    sits. When called with an empty ``prefix`` (the root), leaves are
+    recorded at their own key.
+    """
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        dc_fields = dataclasses.fields(value)
+        if not dc_fields:
+            if prefix:
+                out.add(prefix)
+            return
+        for field in dc_fields:
+            child = getattr(value, field.name)
+            path = f"{prefix}.{field.name}" if prefix else field.name
+            _record_value_paths(child, path, out)
+        return
+    if isinstance(value, Mapping):
+        if not value:
+            if prefix:
+                out.add(prefix)
+            return
+        for key, child in value.items():
+            path = f"{prefix}.{key}" if prefix else key
+            _record_value_paths(child, path, out)
+        return
+    if prefix:
+        out.add(prefix)
 
 
 # ---------------------------------------------------------------------------
-# __setattr__ patching for dirty-path recording
+# __setattr__ patching
 # ---------------------------------------------------------------------------
 
 
@@ -187,15 +181,22 @@ def _patch_tracking_setattr(config_type: type[Any]) -> None:
             original_setattr(self, name, value)
             return
 
-        root = getattr(self, _TRACKING_ROOT_ATTR, None)
-        if root is not None:
-            dirty = getattr(root, _DIRTY_PATHS_ATTR, None)
-            if isinstance(dirty, set):
-                prefix = getattr(self, _TRACKING_PATH_ATTR, "")
-                path = f"{prefix}.{name}" if prefix else name
-                dirty.add(path)
-
         original_setattr(self, name, value)
+
+        root = getattr(self, _TRACKING_ROOT_ATTR, None)
+        if root is None:
+            return
+        paths = getattr(root, EXPLICIT_PATHS_ATTR, None)
+        if not isinstance(paths, set):
+            return
+
+        prefix = getattr(self, _TRACKING_PATH_ATTR, "")
+        path = f"{prefix}.{name}" if prefix else name
+        # Wholesale dataclass replacement: install roots on the new
+        # instance so its future mutations are tracked too.
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            _set_tracking_roots(root, value, path)
+        _record_value_paths(value, path, paths)
 
     type.__setattr__(config_type, "__setattr__", _tracking_setattr)
     setattr(config_type, _TRACKING_PATCHED_ATTR, True)
@@ -222,26 +223,11 @@ def _set_tracking_roots(
             _set_tracking_roots(root, child, child_path)
 
 
-# ---------------------------------------------------------------------------
-# Serialization helper
-# ---------------------------------------------------------------------------
-
-
-def _serialize_config(config: Any) -> Any:
-    if dataclasses.is_dataclass(config) and not isinstance(config, type):
-        return {field.name: _serialize_config(getattr(config, field.name)) for field in dataclasses.fields(config)}
-    if isinstance(config, list):
-        return [_serialize_config(item) for item in config]
-    if isinstance(config, dict):
-        return {key: _serialize_config(value) for key, value in config.items()}
-    return deepcopy(config)
-
-
 __all__ = [
-    "EXPLICIT_REQUEST_ATTR",
-    "ORIGINAL_REQUEST_STATE_ATTR",
+    "EXPLICIT_PATHS_ATTR",
     "bind_generation_request_raw",
     "bind_run_config_raw",
     "bind_serve_config_raw",
-    "refresh_generation_request_raw",
+    "get_explicit_paths",
+    "reset_tracking_roots",
 ]

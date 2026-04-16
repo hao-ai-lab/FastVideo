@@ -7,12 +7,13 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
-from fastvideo.api.overrides import apply_overrides, parse_cli_overrides
+from fastvideo.api.overrides import apply_overrides, normalize_overrides
 from fastvideo.api.parser import config_to_dict, load_raw_config, parse_config
 from fastvideo.api.request_metadata import (
-    EXPLICIT_REQUEST_ATTR,
+    EXPLICIT_PATHS_ATTR,
     bind_generation_request_raw,
-    refresh_generation_request_raw,
+    get_explicit_paths,
+    reset_tracking_roots,
 )
 from fastvideo.api.schema import (
     GenerationRequest,
@@ -50,7 +51,7 @@ def load_generator_config_from_file(
     overrides: list[str] | Mapping[str, Any] | None = None,
 ) -> GeneratorConfig:
     raw = load_raw_config(path)
-    normalized_overrides = _normalize_overrides(overrides)
+    normalized_overrides = normalize_overrides(overrides)
 
     if _looks_like_run_or_serve_config(raw):
         if normalized_overrides:
@@ -228,9 +229,9 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
 def normalize_generation_request(request: GenerationRequest | Mapping[str, Any], ) -> GenerationRequest:
     normalized = (request if isinstance(request, GenerationRequest) else parse_config(GenerationRequest, request))
 
-    if hasattr(normalized, EXPLICIT_REQUEST_ATTR):
-        refresh_generation_request_raw(normalized)
-    else:
+    if not hasattr(normalized, EXPLICIT_PATHS_ATTR):
+        # Request wasn't bound through the parser (e.g. constructed
+        # directly). Treat every currently-set field as explicit.
         bind_generation_request_raw(normalized, _serialize_generation_request(normalized))
     return normalized
 
@@ -279,7 +280,12 @@ def request_to_sampling_param(
     for key, value in updates.items():
         if hasattr(sampling_param, key):
             setattr(sampling_param, key, deepcopy(value))
-        elif key in _REQUEST_PIPELINE_OVERRIDE_FIELDS or _is_supported_as_default_only(key, value):
+        elif key in _REQUEST_PIPELINE_OVERRIDE_FIELDS:
+            continue
+        elif value == _SCHEMA_DEFAULT_UPDATES.get(key, _MISSING):
+            # Schema-default field that isn't on SamplingParam; tolerated
+            # because direct GenerationRequest(...) construction has no
+            # way to distinguish "user set" from "schema default".
             continue
         else:
             raise ValueError(f"Request field {key!r} is not supported by sampling params for {model_path}")
@@ -296,24 +302,18 @@ def expand_request_prompt_batch(request: GenerationRequest, ) -> list[Generation
     requests: list[GenerationRequest] = []
     for index, prompt in enumerate(request.prompt):
         single_request = deepcopy(request)
+        # deepcopy preserves the tracking-root cycle, but re-pin roots
+        # defensively so that subsequent setattrs record on the copy.
+        reset_tracking_roots(single_request)
         single_request.prompt = prompt
         _fan_out_batched_input_value(request, single_request, "image_path", index)
         _fan_out_batched_input_value(request, single_request, "video_path", index)
-        _fan_out_explicit_request_metadata(request, single_request, index, prompt)
         requests.append(single_request)
     return requests
 
 
 def _looks_like_run_or_serve_config(raw: Mapping[str, Any]) -> bool:
     return isinstance(raw.get("generator"), Mapping)
-
-
-def _normalize_overrides(overrides: list[str] | Mapping[str, Any] | None, ) -> dict[str, Any] | None:
-    if not overrides:
-        return None
-    if isinstance(overrides, list):
-        return parse_cli_overrides(overrides)
-    return dict(overrides)
 
 
 def _sampling_param_to_request_raw(sampling_param: SamplingParam | None, ) -> dict[str, Any]:
@@ -361,11 +361,57 @@ def request_to_pipeline_overrides(request: GenerationRequest) -> dict[str, Any]:
 
 
 def _explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
-    raw = getattr(request, EXPLICIT_REQUEST_ATTR, None)
-    if raw is None:
-        raw = _serialize_generation_request(request)
-
+    assert hasattr(request,
+                   EXPLICIT_PATHS_ATTR), ("GenerationRequest reached _explicit_request_updates without tracking; "
+                                          "every entry point must route through normalize_generation_request "
+                                          "or parse_config first")
+    paths = get_explicit_paths(request)
+    raw = _build_sparse_raw_from_paths(request, paths)
     return _extract_request_updates(raw)
+
+
+def _build_sparse_raw_from_paths(
+    request: GenerationRequest,
+    paths: frozenset[str],
+) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for path in paths:
+        parts = path.split(".")
+        value = _read_dotted_path(request, parts)
+        if value is _MISSING:
+            continue
+        _set_dotted_path(result, parts, deepcopy(value))
+    return result
+
+
+def _read_dotted_path(obj: Any, parts: list[str]) -> Any:
+    for part in parts:
+        if is_dataclass(obj) and not isinstance(obj, type):
+            if not hasattr(obj, part):
+                return _MISSING
+            obj = getattr(obj, part)
+        elif isinstance(obj, Mapping):
+            if part not in obj:
+                return _MISSING
+            obj = obj[part]
+        else:
+            return _MISSING
+    return obj
+
+
+def _set_dotted_path(
+    target: dict[str, Any],
+    parts: list[str],
+    value: Any,
+) -> None:
+    cursor = target
+    for part in parts[:-1]:
+        nxt = cursor.get(part)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            cursor[part] = nxt
+        cursor = nxt
+    cursor[parts[-1]] = value
 
 
 def _extract_request_updates(raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -411,6 +457,9 @@ def _serialize_generation_request(request: GenerationRequest) -> dict[str, Any]:
     return deepcopy(config_to_dict(request))
 
 
+_SCHEMA_DEFAULT_UPDATES = _extract_request_updates(config_to_dict(GenerationRequest()))
+
+
 def _fan_out_batched_input_value(
     source_request: GenerationRequest,
     target_request: GenerationRequest,
@@ -424,29 +473,6 @@ def _fan_out_batched_input_value(
     setattr(target_request.inputs, field_name, deepcopy(value[index]))
 
 
-def _fan_out_explicit_request_metadata(
-    source_request: GenerationRequest,
-    target_request: GenerationRequest,
-    index: int,
-    prompt: str,
-) -> None:
-    raw = getattr(source_request, EXPLICIT_REQUEST_ATTR, None)
-    if raw is None:
-        return
-
-    raw = deepcopy(raw)
-    raw["prompt"] = prompt
-    inputs = raw.get("inputs")
-    if isinstance(inputs, dict):
-        for field_name in ("image_path", "video_path"):
-            value = inputs.get(field_name)
-            if isinstance(value, list):
-                _validate_batched_input_length(source_request.prompt, value, field_name)
-                inputs[field_name] = deepcopy(value[index])
-
-    setattr(target_request, EXPLICIT_REQUEST_ATTR, raw)
-
-
 def _validate_batched_input_length(
     prompts: str | list[str] | None,
     values: list[Any],
@@ -457,43 +483,6 @@ def _validate_batched_input_length(
     if len(values) != len(prompts):
         raise ValueError(f"GenerationRequest.inputs.{field_name} must have the same length as request.prompt")
 
-
-def _is_supported_as_default_only(key: str, value: Any) -> bool:
-    default_value = _DEFAULT_REQUEST_UPDATES.get(key, _MISSING)
-    return default_value is not _MISSING and _values_equal(value, default_value)
-
-
-def _collect_non_default_fields(
-    value: Any,
-    default: Any,
-) -> dict[str, Any]:
-    if not (is_dataclass(value) and is_dataclass(default)):
-        return {}
-
-    result: dict[str, Any] = {}
-    for field in fields(value):
-        current = getattr(value, field.name)
-        default_value = getattr(default, field.name)
-        if is_dataclass(current) and is_dataclass(default_value):
-            nested = _collect_non_default_fields(current, default_value)
-            if nested:
-                result[field.name] = nested
-            continue
-        if not _values_equal(current, default_value):
-            result[field.name] = deepcopy(current)
-    return result
-
-
-def _values_equal(left: Any, right: Any) -> bool:
-    if left is right:
-        return True
-    try:
-        return bool(left == right)
-    except Exception:
-        return False
-
-
-_DEFAULT_REQUEST_UPDATES = _extract_request_updates(config_to_dict(GenerationRequest()))
 
 __all__ = [
     "generator_config_to_fastvideo_args",
