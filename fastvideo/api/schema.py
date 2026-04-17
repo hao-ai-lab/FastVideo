@@ -198,7 +198,8 @@ class GpuPoolConfig:
 
 @dataclass
 class PromptEnhancerConfig:
-    provider: Literal["cerebras_ifm", "cerebras", "groq"] = "cerebras_ifm"
+    enabled: bool = False
+    provider: Literal["cerebras", "groq"] = "cerebras"
     model: str = "gpt-oss-120b"
     timeout_ms: int = 20000
     system_prompt_dir: str | None = None
@@ -217,8 +218,8 @@ class StreamingConfig:
     stream_mode: Literal["av_fmp4", "legacy_jpeg"] = "av_fmp4"
     warmup: WarmupConfig = field(default_factory=WarmupConfig)
     pool: GpuPoolConfig = field(default_factory=GpuPoolConfig)
-    prompt: PromptEnhancerConfig | None = None
-    safety: PromptSafetyConfig | None = None
+    prompt: PromptEnhancerConfig = field(default_factory=PromptEnhancerConfig)
+    safety: PromptSafetyConfig = field(default_factory=PromptSafetyConfig)
 
 
 @dataclass

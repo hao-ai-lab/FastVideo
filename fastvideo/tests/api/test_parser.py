@@ -277,8 +277,9 @@ def test_serve_config_streaming_round_trip_through_config_to_dict() -> None:
     dumped = config_to_dict(loaded)
     assert dumped["streaming"]["session_timeout_seconds"] == 600
     assert dumped["streaming"]["warmup"]["enabled"] is True
-    assert dumped["streaming"]["prompt"] is None
-    assert dumped["streaming"]["safety"] is None
+    assert dumped["streaming"]["prompt"]["enabled"] is False
+    assert dumped["streaming"]["prompt"]["provider"] == "cerebras"
+    assert dumped["streaming"]["safety"]["enabled"] is False
 
 
 def test_load_serve_config_with_streaming_from_yaml(tmp_path) -> None:
