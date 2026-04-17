@@ -83,6 +83,8 @@ def legacy_from_pretrained_to_config(
     components: dict[str, Any] = {}
     quantization: dict[str, Any] = {}
     experimental: dict[str, Any] = {}
+    preset_overrides: dict[str, Any] = {}
+    preset_refine: dict[str, Any] = {}
 
     for key, value in kwargs.items():
         if key == "revision":
@@ -118,6 +120,22 @@ def legacy_from_pretrained_to_config(
                 compile_config["extras"] = remaining
         elif key == "ltx2_vae_tiling":
             pipeline["vae_tiling"] = value
+        elif key == "config_model_path":
+            components["config_root"] = value
+        elif key == "ltx2_refine_enabled":
+            preset_refine["enabled"] = value
+        elif key == "ltx2_refine_upsampler_path":
+            # Empty string means "no upsampler"; keep typed None.
+            components["upsampler_weights"] = value or None
+        elif key == "ltx2_refine_lora_path":
+            # Empty string means "no refine LoRA"; keep typed None.
+            components["lora_path"] = value or None
+        elif key == "ltx2_refine_add_noise":
+            preset_refine["add_noise"] = value
+        elif key == "ltx2_refine_num_inference_steps":
+            preset_refine["num_inference_steps"] = value
+        elif key == "ltx2_refine_guidance_scale":
+            preset_refine["guidance_scale"] = value
         elif key in {"enable_stage_verification", "use_fsdp_inference", "disable_autocast"}:
             engine[key] = value
         elif key == "override_text_encoder_quant":
@@ -157,6 +175,10 @@ def legacy_from_pretrained_to_config(
 
     if components:
         pipeline["components"] = components
+    if preset_refine:
+        preset_overrides["refine"] = preset_refine
+    if preset_overrides:
+        pipeline["preset_overrides"] = preset_overrides
     if experimental:
         pipeline["experimental"] = experimental
     if pipeline:
@@ -172,12 +194,8 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         unsupported.append("pipeline.preset")
     if normalized.pipeline.preset_version is not None:
         unsupported.append("pipeline.preset_version")
-    if normalized.pipeline.components.config_root is not None:
-        unsupported.append("pipeline.components.config_root")
     if normalized.pipeline.components.vae_weights is not None:
         unsupported.append("pipeline.components.vae_weights")
-    if normalized.pipeline.components.upsampler_weights is not None:
-        unsupported.append("pipeline.components.upsampler_weights")
     if unsupported:
         joined = ", ".join(unsupported)
         raise NotImplementedError(f"VideoGenerator compatibility adapter does not support {joined} yet")
@@ -232,8 +250,19 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         kwargs["init_weights_from_safetensors"] = components.transformer_weights
     if components.transformer_2_weights is not None:
         kwargs["init_weights_from_safetensors_2"] = components.transformer_2_weights
+    if components.config_root is not None:
+        kwargs["config_model_path"] = components.config_root
+    if components.upsampler_weights is not None:
+        kwargs["ltx2_refine_upsampler_path"] = components.upsampler_weights
 
-    kwargs.update(deepcopy(normalized.pipeline.preset_overrides))
+    preset_overrides = deepcopy(normalized.pipeline.preset_overrides)
+    # preset_overrides.refine -> flat ltx2_refine_* kwargs for FastVideoArgs.
+    refine = preset_overrides.pop("refine", None)
+    if isinstance(refine, Mapping):
+        for key in ("enabled", "add_noise", "num_inference_steps", "guidance_scale"):
+            if key in refine:
+                kwargs[f"ltx2_refine_{key}"] = refine[key]
+    kwargs.update(preset_overrides)
     kwargs.update(deepcopy(normalized.pipeline.experimental))
     return FastVideoArgs.from_kwargs(**kwargs)
 
