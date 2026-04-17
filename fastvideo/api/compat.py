@@ -275,7 +275,7 @@ def request_to_sampling_param(
         raise NotImplementedError("GenerationRequest.state is not wired into VideoGenerator yet")
 
     sampling_param = SamplingParam.from_pretrained(model_path)
-    updates = _explicit_request_updates(request)
+    updates = explicit_request_updates(request)
 
     for key, value in updates.items():
         if hasattr(sampling_param, key):
@@ -354,15 +354,32 @@ def _apply_request_field(
 
 def request_to_pipeline_overrides(request: GenerationRequest) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
-    for key, value in _explicit_request_updates(request).items():
+    for key, value in explicit_request_updates(request).items():
         if key in _REQUEST_PIPELINE_OVERRIDE_FIELDS:
             overrides[key] = deepcopy(value)
     return overrides
 
 
-def _explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
+def explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
+    """Project a ``GenerationRequest`` down to *explicitly set* fields only.
+
+    Returns a flat kwargs dict suitable for merging into a generator call.
+    The projection uses ``_fastvideo_explicit_paths`` (populated during
+    ``parse_config`` / raw binding) so schema defaults on the dataclass
+    are **not** emitted — only paths the caller/operator actually wrote.
+
+    This is what makes ``ServeConfig.default_request`` work as an
+    operator-pinned baseline rather than a full override: a YAML with just
+    ``sampling.seed: 42`` yields ``{"seed": 42}``, not the full sampling
+    config with its 15 schema defaults.
+
+    Precondition: the request must carry ``_fastvideo_explicit_paths`` —
+    populated by :func:`fastvideo.api.parser.parse_config` or
+    :func:`fastvideo.api.compat.normalize_generation_request`. Calling on
+    a raw ``GenerationRequest()`` asserts.
+    """
     assert hasattr(request,
-                   EXPLICIT_PATHS_ATTR), ("GenerationRequest reached _explicit_request_updates without tracking; "
+                   EXPLICIT_PATHS_ATTR), ("GenerationRequest reached explicit_request_updates without tracking; "
                                           "every entry point must route through normalize_generation_request "
                                           "or parse_config first")
     paths = get_explicit_paths(request)
@@ -485,6 +502,7 @@ def _validate_batched_input_length(
 
 
 __all__ = [
+    "explicit_request_updates",
     "generator_config_to_fastvideo_args",
     "legacy_from_pretrained_to_config",
     "legacy_generate_call_to_request",

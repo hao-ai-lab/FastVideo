@@ -444,11 +444,12 @@ def test_serve_subcommand_dispatches_via_typed_config(tmp_path, monkeypatch):
         captured["config"] = config
         return SimpleNamespace(model_path=config.model_path)
 
-    def fake_run_server(fastvideo_args, host, port, output_dir):
+    def fake_run_server(fastvideo_args, host, port, output_dir, default_request):
         captured["fastvideo_args"] = fastvideo_args
         captured["host"] = host
         captured["port"] = port
         captured["output_dir"] = output_dir
+        captured["default_request"] = default_request
 
     monkeypatch.setattr(
         "fastvideo.entrypoints.cli.serve.generator_config_to_fastvideo_args",
@@ -465,22 +466,37 @@ def test_serve_subcommand_dispatches_via_typed_config(tmp_path, monkeypatch):
     assert captured["output_dir"] == "serve-outputs/"
 
 
-def test_serve_subcommand_rejects_non_default_default_request(tmp_path):
+def test_serve_subcommand_forwards_default_request(tmp_path, monkeypatch):
     config_path = tmp_path / "serve-default-request.yaml"
     config_path.write_text(
         "generator:\n"
         "  model_path: serve-model\n"
         "default_request:\n"
-        "  prompt: hello\n",
+        "  prompt: hello\n"
+        "  sampling:\n"
+        "    seed: 42\n",
         encoding="utf-8",
     )
     args, _ = _parse_serve_args(["--config", str(config_path)])
+    captured: dict[str, object] = {}
 
-    with pytest.raises(
-        NotImplementedError,
-        match="ServeConfig.default_request is not wired",
-    ):
-        ServeSubcommand().cmd(args)
+    def fake_generator_config_to_fastvideo_args(config):
+        return SimpleNamespace(model_path=config.model_path)
+
+    def fake_run_server(fastvideo_args, host, port, output_dir, default_request):
+        captured["default_request"] = default_request
+
+    monkeypatch.setattr(
+        "fastvideo.entrypoints.cli.serve.generator_config_to_fastvideo_args",
+        fake_generator_config_to_fastvideo_args,
+    )
+    monkeypatch.setattr(api_server, "run_server", fake_run_server)
+
+    ServeSubcommand().cmd(args)
+
+    default_request = captured["default_request"]
+    assert default_request.prompt == "hello"
+    assert default_request.sampling.seed == 42
 
 
 def test_main_rejects_top_level_config_without_subcommand(tmp_path, monkeypatch):

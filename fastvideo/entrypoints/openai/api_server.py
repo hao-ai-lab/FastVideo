@@ -8,6 +8,8 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from fastvideo.api.presets import validate_preset_selection
+from fastvideo.api.schema import GenerationRequest
 from fastvideo.entrypoints.openai.state import (
     DEFAULT_OUTPUT_DIR,
     clear_state,
@@ -16,6 +18,7 @@ from fastvideo.entrypoints.openai.state import (
 from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.registry import get_preset_selection
 
 logger = init_logger(__name__)
 
@@ -23,17 +26,40 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8000
 
 
+def _validate_default_request_against_preset(
+    default_request: GenerationRequest,
+    model_path: str,
+) -> None:
+    """Validate ``default_request.stage_overrides`` against the model's preset.
+
+    Called once at server startup from :func:`run_server`. The
+    ``default_request`` is static server config, so validation results are
+    invariant across requests — there's no reason to re-run per request.
+    """
+    if not default_request.stage_overrides:
+        return
+    preset_name, model_family = get_preset_selection(model_path)
+    if preset_name is None or model_family is None:
+        return
+    validate_preset_selection(
+        preset_name,
+        model_family,
+        stage_overrides=default_request.stage_overrides,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Load model on startup, clean up on shutdown"""
     args: FastVideoArgs = app.state.fastvideo_args
     output_dir: str = app.state.output_dir
+    default_request: GenerationRequest | None = getattr(app.state, "default_request", None)
 
     logger.info("Loading model from %s ...", args.model_path)
     generator = VideoGenerator.from_fastvideo_args(args)
     logger.info("Model loaded successfully.")
 
-    set_state(generator, args, output_dir)
+    set_state(generator, args, output_dir, default_request=default_request)
 
     yield  # server is running
 
@@ -46,6 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(
     fastvideo_args: FastVideoArgs,
     output_dir: str = DEFAULT_OUTPUT_DIR,
+    default_request: GenerationRequest | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with all routers mounted"""
 
@@ -56,6 +83,7 @@ def create_app(
     )
     app.state.fastvideo_args = fastvideo_args
     app.state.output_dir = output_dir
+    app.state.default_request = default_request
 
     app.add_middleware(
         CORSMiddleware,
@@ -108,9 +136,17 @@ def run_server(
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     output_dir: str = DEFAULT_OUTPUT_DIR,
+    default_request: GenerationRequest | None = None,
 ):
     """Create the app and run it with uvicorn"""
-    app = create_app(fastvideo_args, output_dir=output_dir)
+    if default_request is not None:
+        _validate_default_request_against_preset(default_request, fastvideo_args.model_path)
+
+    app = create_app(
+        fastvideo_args,
+        output_dir=output_dir,
+        default_request=default_request,
+    )
 
     logger.info("Starting FastVideo server on %s:%d", host, port)
     logger.info("Model: %s", fastvideo_args.model_path)

@@ -182,6 +182,25 @@ class RunConfig:
 
 @dataclass
 class ServeConfig:
+    """Typed serve config loaded from ``fastvideo serve --config``.
+
+    ``default_request`` is a full :class:`GenerationRequest` — the same type
+    clients POST to ``/v1/videos``. At request time the server merges it into
+    the incoming body as the operator-pinned baseline.
+
+    Important nuance: only fields the operator **explicitly wrote** in the
+    serve YAML/JSON count as defaults. Although the in-memory object is
+    fully populated (schema defaults fill every unset field), the merge
+    walks ``_fastvideo_explicit_paths`` — populated during parse — so
+    unset fields are *not* forced onto requests. Per-request precedence:
+
+        body (client-explicit) > default_request (operator-explicit)
+                               > hardcoded fallback (e.g. ``fps=24``)
+
+    See :func:`fastvideo.api.compat.explicit_request_updates` for the
+    projection and ``entrypoints/openai/video_api.py::_build_generation_kwargs``
+    for the merge.
+    """
     generator: GeneratorConfig
     server: ServerConfig = field(default_factory=ServerConfig)
     default_request: GenerationRequest = field(default_factory=GenerationRequest)

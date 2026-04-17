@@ -6,7 +6,6 @@ import os
 from typing import cast
 
 from fastvideo.api.compat import generator_config_to_fastvideo_args
-from fastvideo.api.request_metadata import get_explicit_paths
 from fastvideo.entrypoints.cli.cli_types import CLISubcommand
 from fastvideo.entrypoints.cli.inference_config import build_serve_config
 from fastvideo.logger import init_logger
@@ -30,9 +29,6 @@ class ServeSubcommand(CLISubcommand):
                 args,
                 overrides=getattr(args, "_unknown", None),
             )
-        if get_explicit_paths(serve_config.default_request):
-            raise NotImplementedError("ServeConfig.default_request is not wired into the OpenAI "
-                                      "server yet")
 
         from fastvideo.entrypoints.openai.api_server import (
             run_server, )
@@ -50,6 +46,7 @@ class ServeSubcommand(CLISubcommand):
             host=serve_config.server.host,
             port=serve_config.server.port,
             output_dir=serve_config.server.output_dir,
+            default_request=serve_config.default_request,
         )
 
     def validate(self, args: argparse.Namespace) -> None:
