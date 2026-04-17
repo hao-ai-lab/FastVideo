@@ -334,7 +334,7 @@ class TestLtx2Presets:
         import fastvideo.registry  # noqa: F401
         presets = get_presets_for_family("ltx2")
         names = {p.name for p in presets}
-        assert names == {"ltx2_base", "ltx2_distilled"}
+        assert names == {"ltx2_base", "ltx2_distilled", "ltx2_two_stage"}
 
     def test_ltx2_base_lookup(self) -> None:
         import fastvideo.registry  # noqa: F401
@@ -348,6 +348,43 @@ class TestLtx2Presets:
         p = get_preset("ltx2_distilled", "ltx2")
         assert p.defaults["num_inference_steps"] == 8
         assert p.defaults["guidance_scale"] == 1.0
+
+    def test_ltx2_two_stage_is_two_stage(self) -> None:
+        import fastvideo.registry  # noqa: F401
+        p = get_preset("ltx2_two_stage", "ltx2")
+        assert len(p.stage_schemas) == 2
+        assert p.stage_schemas[0].name == "denoise"
+        assert p.stage_schemas[1].name == "refine"
+        assert p.stage_schemas[1].kind == "refinement"
+
+    def test_ltx2_two_stage_stage_defaults(self) -> None:
+        import fastvideo.registry  # noqa: F401
+        p = get_preset("ltx2_two_stage", "ltx2")
+        refine = p.stage_defaults["refine"]
+        # stage-2 refine only supports 2 or 3 denoising steps; preset
+        # defaults to 2 (matches gpu_pool.py load_kwargs).
+        assert refine["num_inference_steps"] == 2
+        assert refine["guidance_scale"] == 1.0
+
+    def test_ltx2_two_stage_refine_overrides_valid(self) -> None:
+        import fastvideo.registry  # noqa: F401
+        p = get_preset("ltx2_two_stage", "ltx2")
+        validate_stage_overrides(
+            p, {"refine": {"num_inference_steps": 3}})
+        validate_stage_overrides(
+            p, {"refine": {"guidance_scale": 1.0}})
+        validate_stage_overrides(
+            p, {"refine": {"image_crf": 18}})
+        validate_stage_overrides(
+            p, {"refine": {"video_position_offset_sec": 2.5}})
+
+    def test_ltx2_two_stage_rejects_unknown_refine_override(self) -> None:
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.api.errors import ConfigValidationError
+        p = get_preset("ltx2_two_stage", "ltx2")
+        with pytest.raises(ConfigValidationError):
+            validate_stage_overrides(
+                p, {"refine": {"bogus_field": 1}})
 
 
 # -------------------------------------------------------------------

@@ -30,6 +30,18 @@ _DENOISE_STAGE = PresetStageSpec(
     }),
 )
 
+_REFINE_STAGE = PresetStageSpec(
+    name="refine",
+    kind="refinement",
+    description="Latent-upsample + second-pass refine",
+    allowed_overrides=frozenset({
+        "num_inference_steps",
+        "guidance_scale",
+        "image_crf",
+        "video_position_offset_sec",
+    }),
+)
+
 LTX2_BASE = InferencePreset(
     name="ltx2_base",
     version=1,
@@ -77,4 +89,36 @@ LTX2_DISTILLED = InferencePreset(
     },
 )
 
-ALL_PRESETS = (LTX2_BASE, LTX2_DISTILLED)
+# Two-stage distilled flow: half-res denoise (stage 1) followed by
+# spatial-upsample + second denoise (stage 2 "refine"). Stage-2
+# sigmas are fixed in fastvideo.pipelines.stages.ltx2_refine — only
+# num_inference_steps (2 or 3) and guidance_scale are user-tunable.
+# Refine wiring (upsampler weights, optional LoRA, enable/add-noise)
+# lives on generator.pipeline.preset_overrides.refine at init-time;
+# per-request tuning goes through request.stage_overrides.refine.
+LTX2_TWO_STAGE = InferencePreset(
+    name="ltx2_two_stage",
+    version=1,
+    model_family="ltx2",
+    description="LTX-2 distilled with 2x spatial refine (stage 1 half-res + stage 2 upsample+denoise)",
+    workload_type="t2v",
+    stage_schemas=(_DENOISE_STAGE, _REFINE_STAGE),
+    defaults={
+        "seed": 10,
+        "height": 1024,
+        "width": 1536,
+        "num_frames": 121,
+        "fps": 24,
+        "guidance_scale": 1.0,
+        "num_inference_steps": 8,
+        "negative_prompt": "",
+    },
+    stage_defaults={
+        "refine": {
+            "num_inference_steps": 2,
+            "guidance_scale": 1.0,
+        },
+    },
+)
+
+ALL_PRESETS = (LTX2_BASE, LTX2_DISTILLED, LTX2_TWO_STAGE)
