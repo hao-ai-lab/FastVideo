@@ -30,10 +30,19 @@ class ServeSubcommand(CLISubcommand):
                 overrides=getattr(args, "_unknown", None),
             )
 
+        logger.info("CLI serve config: %s", serve_config)
+
+        # A `streaming:` block selects the WebSocket/Dynamo runtime;
+        # its deps stay out of REST-only deployments via lazy import.
+        if serve_config.streaming is not None:
+            from fastvideo.entrypoints.streaming.server import (
+                run_server as run_streaming_server, )
+            run_streaming_server(serve_config)
+            return
+
         from fastvideo.entrypoints.openai.api_server import (
             run_server, )
 
-        logger.info("CLI serve config: %s", serve_config)
         logger.info(
             "Server will listen on %s:%d",
             serve_config.server.host,

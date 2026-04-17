@@ -181,6 +181,8 @@ class SortedHelpFormatter(argparse.HelpFormatter):
 class FlexibleArgumentParser(argparse.ArgumentParser):
     """ArgumentParser that allows both underscore and dash in names."""
 
+    _DEFER_CONFIG_SUBCOMMANDS = frozenset({"generate", "serve"})
+
     def __init__(self, *args, **kwargs) -> None:
         # Set the default 'formatter_class' to SortedHelpFormatter
         if 'formatter_class' not in kwargs:
@@ -257,9 +259,9 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         if getattr(self, "defer_config_loading", False):
             return True
         subcommand = next((arg for arg in args if not arg.startswith('-')), None)
-        if subcommand in {"generate", "serve"}:
+        if subcommand in self._DEFER_CONFIG_SUBCOMMANDS:
             return True
-        return self.prog.split()[-1] in {"generate", "serve"}
+        return self.prog.split()[-1] in self._DEFER_CONFIG_SUBCOMMANDS
 
     def _pull_args_from_config(self, args: list[str]) -> list[str]:
         """Method to pull arguments specified in the config file
