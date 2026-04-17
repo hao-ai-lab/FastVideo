@@ -15,6 +15,7 @@ from fastvideo.entrypoints.cli.inference_config import (
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.cli.serve import ServeSubcommand
 from fastvideo.entrypoints.openai import api_server
+from fastvideo.entrypoints.streaming import server as streaming_server
 from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.utils import FlexibleArgumentParser
 
@@ -516,3 +517,33 @@ def test_main_rejects_top_level_config_without_subcommand(tmp_path, monkeypatch)
 
     with pytest.raises(SystemExit):
         cli_main.main()
+
+
+def test_serve_cmd_dispatches_to_streaming_when_streaming_block_set(tmp_path):
+    config_path = tmp_path / "serve-streaming.yaml"
+    config_path.write_text(
+        "generator:\n"
+        "  model_path: stream-model\n"
+        "streaming:\n"
+        "  stream_mode: av_fmp4\n",
+        encoding="utf-8",
+    )
+    args, _ = _parse_serve_args(["--config", str(config_path)])
+
+    with pytest.raises(NotImplementedError,
+                       match="streaming server is not implemented"):
+        ServeSubcommand().cmd(args)
+
+
+def test_streaming_run_server_rejects_missing_streaming_block():
+    from fastvideo.api.schema import GeneratorConfig, ServeConfig
+
+    config = ServeConfig(
+        generator=GeneratorConfig(model_path="x"),
+        streaming=None,
+    )
+    with pytest.raises(
+        ValueError,
+        match="ServeConfig.streaming must be set",
+    ):
+        streaming_server.run_server(config)
