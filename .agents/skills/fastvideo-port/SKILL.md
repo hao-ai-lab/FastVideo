@@ -65,11 +65,47 @@ proceeding — alignment tests cannot run without the weights.
 | `reference_video` | No | Path to reference video from official repo for SSIM comparison |
 | `reference_prompt` | No | Text prompt used to generate the reference video |
 
+## Recommended patterns
+
+Before writing any code, note these opinionated defaults. They exist because
+the alternatives were tried and caused problems.
+
+| Decision | Recommended | Avoid | Why |
+|----------|-------------|-------|-----|
+| Training pipeline | Subclass `TrainingPipeline` directly | Wrapping or delegating | Wrapping hides override points; base class hooks (`_sample_timesteps`, `_build_input_kwargs`) only work via subclassing |
+| Attention in DiT | `DistributedAttention` for self-attn, `LocalAttention` for cross-attn | Mixing or using raw `nn.MultiheadAttention` | FSDP2 sharding and SP only work with FastVideo attention wrappers |
+| Projection layers | `ReplicatedLinear` | `nn.Linear` | `get_lora_layer()` is invisible to `nn.Linear`; LoRA silently has zero effect |
+| Alignment backend | `FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA` | Flash/Triton during tests | Non-SDPA backends give numerically different outputs, making false failures |
+| Port order | VAE → text encoder → DiT → pipeline | DiT first | VAE and encoder are simpler; getting them aligned first reduces variables when debugging the DiT |
+| dtype during alignment | `float32` first, then `bfloat16` | `bfloat16` from the start | fp32 failures are easier to diagnose; bf16 can pass fp32 bugs through |
+
+## Hard stop conditions
+
+If you hit any of these, **stop immediately and fix the root cause** before
+continuing. Going further just buries the problem.
+
+| Symptom | What it means | What to do |
+|---------|--------------|------------|
+| `load_state_dict` reports >10% unexpected or missing keys | `param_names_mapping` is structurally wrong — probably a prefix mismatch | Re-run `auto_mapper.py`, diff key lists, fix prefix rules before alignment |
+| Alignment test fails with dtype error (`expected BFloat16 but found Float`) | Models loaded in different dtypes | Check both `.to(dtype)` calls; don't proceed, you'll get false failures |
+| Alignment `max_abs_diff > 0.1` on first layer | Weights didn't load correctly, not a code bug | Print `state_dict` norms on both sides; if they differ, the mapping is wrong |
+| SSIM < 0.5 despite passing alignment tests | Pipeline wiring bug — noising/denoising schedule mismatch | Check scheduler shift, sigma format, and timestep range before debugging model code |
+| `get_lora_layer()` returns `None` on any projection | `nn.Linear` used instead of `ReplicatedLinear` | Fix before any training run; alignment tests won't catch this |
+| Official repo inference crashes in reference video generation | Environment / dependency issue | Fix this first — you need a valid reference video before SSIM means anything |
+
 ## Steps
 
 ### 0. Reconnaissance — understand the model before writing code
 
-Run `recon.py` first to get a structured JSON summary without manually reading
+**First, run the prereq check:**
+```bash
+bash .agents/skills/fastvideo-port/scripts/check_prereqs.sh \
+    --model <model_name> \
+    --hf_ids "<text_encoder_hf_id> <vae_hf_id>"
+```
+Fix any hard failures before continuing. Warnings are fine to proceed with.
+
+**Then run `recon.py`** to get a structured JSON summary without manually reading
 the repo:
 
 ```bash
@@ -466,5 +502,5 @@ python .agents/skills/fastvideo-port/scripts/eval_harness.py \
 
 | Date | Change |
 |------|--------|
-| 2026-04-17 | Added recon.py + auto_mapper.py to Steps 0 and 1; added 8 lessons from Cosmos 2.5 port; added eval harness section |
+| 2026-04-17 | Added recommended patterns table, hard stop conditions, check_prereqs.sh; recon.py + auto_mapper.py wired into steps; 8 lessons from Cosmos 2.5 port; eval harness section |
 | 2026-04-16 | Initial version; daVinci-MagiHuman as worked example |
