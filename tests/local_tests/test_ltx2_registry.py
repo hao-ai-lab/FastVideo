@@ -12,7 +12,7 @@ from fastvideo.registry import (
     get_pipeline_config_cls_from_name,
     get_sampling_param_cls_for_name,
 )
-from fastvideo.configs.pipelines.ltx2 import LTX2T2VConfig
+from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
 
 
 @pytest.mark.parametrize(
