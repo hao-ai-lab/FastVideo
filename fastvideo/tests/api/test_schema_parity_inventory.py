@@ -46,24 +46,42 @@ def _flatten_status_section(section: dict, valid_statuses: set[str]) -> set[str]
     return names
 
 
-def _get_extra_dataclass_fields(package_name: str, base_cls: type) -> set[str]:
-    package = importlib.import_module(package_name)
+def _get_extra_dataclass_fields(
+    package_names: str | tuple[str, ...],
+    base_cls: type,
+) -> set[str]:
+    """Collect dataclass fields declared on ``base_cls`` subclasses found
+    under any of the given package roots.
+
+    Accepts either a single package name (string) or a tuple of package
+    roots — the latter supports the PR 6 colocation where each model
+    family's ``PipelineConfig`` subclass moves from
+    ``fastvideo.configs.pipelines.<family>`` to
+    ``fastvideo.pipelines.basic.<family>.pipeline_configs``.
+    """
+    if isinstance(package_names, str):
+        package_names = (package_names, )
+
     base_fields = {f.name for f in dataclasses.fields(base_cls)}
     extras: set[str] = set()
-    if not hasattr(package, "__path__"):
-        return extras
-    for _, modname, _ in pkgutil.iter_modules(package.__path__):
-        if modname == "__pycache__":
+
+    for package_name in package_names:
+        package = importlib.import_module(package_name)
+        if not hasattr(package, "__path__"):
             continue
-        module = importlib.import_module(f"{package_name}.{modname}")
-        for obj in vars(module).values():
-            if (
-                isinstance(obj, type)
-                and dataclasses.is_dataclass(obj)
-                and issubclass(obj, base_cls)
-                and obj is not base_cls
-            ):
-                extras.update(f.name for f in dataclasses.fields(obj) if f.name not in base_fields)
+        for _, modname, is_pkg in pkgutil.walk_packages(
+                package.__path__, prefix=f"{package_name}."):
+            if modname.endswith(".__pycache__"):
+                continue
+            module = importlib.import_module(modname)
+            for obj in vars(module).values():
+                if (isinstance(obj, type)
+                        and dataclasses.is_dataclass(obj)
+                        and issubclass(obj, base_cls)
+                        and obj is not base_cls):
+                    extras.update(
+                        f.name for f in dataclasses.fields(obj)
+                        if f.name not in base_fields)
     return extras
 
 
@@ -177,7 +195,10 @@ def test_pipeline_config_base_fields_are_classified() -> None:
 
 def test_pipeline_config_extension_fields_are_classified() -> None:
     inventory = _load_inventory()
-    expected = _get_extra_dataclass_fields("fastvideo.configs.pipelines", PipelineConfig)
+    expected = _get_extra_dataclass_fields(
+        ("fastvideo.configs.pipelines", "fastvideo.pipelines.basic"),
+        PipelineConfig,
+    )
     actual = _flatten_status_section(
         inventory["surfaces"]["pipeline_config_extensions"],
         set(inventory["status_definitions"]),
