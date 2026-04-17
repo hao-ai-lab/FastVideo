@@ -25,10 +25,6 @@ from fastvideo.pipelines.stages.latent_preparation import (Cosmos25LatentPrepara
                                                            Cosmos25AutoLatentPreparationStage,
                                                            Cosmos25T2WLatentPreparationStage,
                                                            Cosmos25V2WLatentPreparationStage, LatentPreparationStage)
-# LTX-2 stages were relocated to fastvideo.pipelines.basic.ltx2.stages
-# in PR 6 (family colocation). Re-exported here for backward
-# compatibility with existing `from fastvideo.pipelines.stages import
-# LTX2*` callers.
 from fastvideo.pipelines.basic.ltx2.stages import (
     LTX2AudioDecodingStage,
     LTX2DenoisingStage,

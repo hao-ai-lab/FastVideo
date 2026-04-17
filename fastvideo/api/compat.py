@@ -26,6 +26,10 @@ from fastvideo.api.schema import (
 )
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.pipelines.basic.ltx2.stage_overrides import (
+    refine_preset_override_fields,
+    refine_stage_override_fields,
+)
 from fastvideo.utils import shallow_asdict
 
 _INPUT_FIELD_NAMES = {field.name for field in fields(InputConfig)}
@@ -41,6 +45,8 @@ _REQUEST_PIPELINE_OVERRIDE_FIELDS = frozenset({
 })
 # torch.compile kwargs that map to first-class CompileConfig fields.
 _COMPILE_TYPED_KEYS = ("backend", "fullgraph", "mode", "dynamic")
+# LTX-2 refine flat kwargs (init + per-request) known to FastVideoArgs.
+_LTX2_REFINE_FLAT_KEYS = (refine_preset_override_fields() | refine_stage_override_fields())
 
 
 def normalize_generator_config(config: GeneratorConfig | Mapping[str, Any], ) -> GeneratorConfig:
@@ -256,10 +262,9 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         kwargs["ltx2_refine_upsampler_path"] = components.upsampler_weights
 
     preset_overrides = deepcopy(normalized.pipeline.preset_overrides)
-    # preset_overrides.refine -> flat ltx2_refine_* kwargs for FastVideoArgs.
     refine = preset_overrides.pop("refine", None)
     if isinstance(refine, Mapping):
-        for key in ("enabled", "add_noise", "num_inference_steps", "guidance_scale"):
+        for key in _LTX2_REFINE_FLAT_KEYS:
             if key in refine:
                 kwargs[f"ltx2_refine_{key}"] = refine[key]
     kwargs.update(preset_overrides)

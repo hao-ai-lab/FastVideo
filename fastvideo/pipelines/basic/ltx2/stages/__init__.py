@@ -1,11 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""LTX-2 family pipeline stages.
-
-Co-located with the pipeline implementation (see PR 6) so each model
-family is self-contained under ``fastvideo/pipelines/basic/<family>/``.
-Re-exported from :mod:`fastvideo.pipelines.stages` for backward
-compatibility with existing import paths.
-"""
+"""LTX-2 family pipeline stages."""
 from fastvideo.pipelines.basic.ltx2.stages.ltx2_audio_decoding import (
     LTX2AudioDecodingStage, )
 from fastvideo.pipelines.basic.ltx2.stages.ltx2_denoising import (

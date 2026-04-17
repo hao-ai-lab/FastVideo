@@ -183,6 +183,61 @@ class TestGpuPoolReverseTranslation:
         assert "refine" not in args_kwargs
 
 
+class TestRefineFlattenCoversAllTypedFields:
+    """Every field on LTX2Refine{Preset,Stage}Override must survive the
+    round-trip through preset_overrides.refine back to ltx2_refine_*
+    kwargs. Guards against the hardcoded-key-tuple regression where
+    image_crf / video_position_offset_sec silently dropped."""
+
+    def test_all_fields_reemitted(self, monkeypatch) -> None:
+        from fastvideo import fastvideo_args as fva
+        from fastvideo.api.compat import (
+            generator_config_to_fastvideo_args,
+        )
+        from fastvideo.api.schema import GeneratorConfig, PipelineSelection
+        from fastvideo.pipelines.basic.ltx2.stage_overrides import (
+            refine_preset_override_fields,
+            refine_stage_override_fields,
+        )
+
+        captured: dict[str, object] = {}
+
+        class _Captured:
+
+            def __init__(self, **kw):
+                self.kwargs = kw
+
+        def _capture(**kw):
+            captured.update(kw)
+            return _Captured(**kw)
+
+        monkeypatch.setattr(fva.FastVideoArgs, "from_kwargs", _capture)
+
+        refine_payload = {
+            # Preset-override fields.
+            "enabled": True,
+            "add_noise": False,
+            # Stage-override fields.
+            "num_inference_steps": 3,
+            "guidance_scale": 1.5,
+            "image_crf": 18,
+            "video_position_offset_sec": 2.5,
+        }
+        all_fields = (refine_preset_override_fields()
+                      | refine_stage_override_fields())
+        assert set(refine_payload) == all_fields, (
+            "payload must cover every typed field to exercise the flatten loop")
+
+        config = GeneratorConfig(
+            model_path="/models/ltx2",
+            pipeline=PipelineSelection(preset_overrides={"refine": refine_payload}),
+        )
+        generator_config_to_fastvideo_args(config)
+
+        for key, value in refine_payload.items():
+            assert captured[f"ltx2_refine_{key}"] == value
+
+
 class TestCompileExtrasPreserved:
     """Additional torch.compile kwargs beyond the four typed fields
     round-trip through ``CompileConfig.extras``."""

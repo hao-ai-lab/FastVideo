@@ -9,10 +9,9 @@ from fastvideo.api.presets import get_preset, validate_stage_overrides
 from fastvideo.pipelines.basic.ltx2.stage_overrides import (
     LTX2RefinePresetOverride,
     LTX2RefineStageOverride,
+    refine_override_to_dict,
     refine_preset_override_fields,
-    refine_preset_override_to_dict,
     refine_stage_override_fields,
-    refine_stage_override_to_dict,
 )
 
 
@@ -39,7 +38,7 @@ class TestRefineStageOverrideDataclass:
 
     def test_to_dict_drops_none(self) -> None:
         override = LTX2RefineStageOverride(num_inference_steps=3)
-        assert refine_stage_override_to_dict(override) == {
+        assert refine_override_to_dict(override) == {
             "num_inference_steps": 3,
         }
 
@@ -50,7 +49,7 @@ class TestRefineStageOverrideDataclass:
             image_crf=18,
             video_position_offset_sec=0.0,
         )
-        assert refine_stage_override_to_dict(override) == {
+        assert refine_override_to_dict(override) == {
             "num_inference_steps": 2,
             "guidance_scale": 1.0,
             "image_crf": 18,
@@ -75,13 +74,13 @@ class TestRefinePresetOverrideDataclass:
 
     def test_to_dict_drops_none(self) -> None:
         override = LTX2RefinePresetOverride(enabled=True)
-        assert refine_preset_override_to_dict(override) == {
+        assert refine_override_to_dict(override) == {
             "enabled": True,
         }
 
     def test_to_dict_with_all_fields(self) -> None:
         override = LTX2RefinePresetOverride(enabled=True, add_noise=False)
-        assert refine_preset_override_to_dict(override) == {
+        assert refine_override_to_dict(override) == {
             "enabled": True,
             "add_noise": False,
         }
@@ -112,7 +111,7 @@ class TestStageOverridesMirrorPresetSchema:
             guidance_scale=1.0,
         )
         validate_stage_overrides(
-            preset, {"refine": refine_stage_override_to_dict(override)})
+            preset, {"refine": refine_override_to_dict(override)})
 
     def test_unknown_field_rejected(self) -> None:
         import fastvideo.registry  # noqa: F401
