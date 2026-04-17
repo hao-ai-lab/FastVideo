@@ -16,6 +16,7 @@ from fastvideo.api.request_metadata import (
     reset_tracking_roots,
 )
 from fastvideo.api.schema import (
+    CompileConfig,
     GenerationRequest,
     GeneratorConfig,
     InputConfig,
@@ -38,6 +39,8 @@ _LEGACY_REQUEST_ALIASES = {
 _REQUEST_PIPELINE_OVERRIDE_FIELDS = frozenset({
     "embedded_cfg_scale",
 })
+# torch.compile kwargs that map to first-class CompileConfig fields.
+_COMPILE_TYPED_KEYS = ("backend", "fullgraph", "mode", "dynamic")
 
 
 def normalize_generator_config(config: GeneratorConfig | Mapping[str, Any], ) -> GeneratorConfig:
@@ -107,7 +110,14 @@ def legacy_from_pretrained_to_config(
         elif key == "enable_torch_compile":
             compile_config["enabled"] = value
         elif key == "torch_compile_kwargs":
-            compile_config["kwargs"] = deepcopy(value)
+            remaining: dict[str, Any] = (dict(deepcopy(value)) if isinstance(value, Mapping) else {})
+            for first_class in _COMPILE_TYPED_KEYS:
+                if first_class in remaining:
+                    compile_config[first_class] = remaining.pop(first_class)
+            if remaining:
+                compile_config["extras"] = remaining
+        elif key == "ltx2_vae_tiling":
+            pipeline["vae_tiling"] = value
         elif key in {"enable_stage_verification", "use_fsdp_inference", "disable_autocast"}:
             engine[key] = value
         elif key == "override_text_encoder_quant":
@@ -191,13 +201,15 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         "vae_cpu_offload": engine.offload.vae,
         "pin_cpu_memory": engine.offload.pin_cpu_memory,
         "enable_torch_compile": engine.compile.enabled,
-        "torch_compile_kwargs": deepcopy(engine.compile.kwargs),
+        "torch_compile_kwargs": _compile_config_to_torch_kwargs(engine.compile),
         "enable_stage_verification": engine.enable_stage_verification,
         "use_fsdp_inference": engine.use_fsdp_inference,
         "disable_autocast": engine.disable_autocast,
     }
     if normalized.pipeline.workload_type is not None:
         kwargs["workload_type"] = normalized.pipeline.workload_type
+    if normalized.pipeline.vae_tiling is not None:
+        kwargs["ltx2_vae_tiling"] = normalized.pipeline.vae_tiling
 
     quantization = engine.quantization
     if quantization is not None and quantization.text_encoder_quant is not None:
@@ -314,6 +326,25 @@ def expand_request_prompt_batch(request: GenerationRequest, ) -> list[Generation
 
 def _looks_like_run_or_serve_config(raw: Mapping[str, Any]) -> bool:
     return isinstance(raw.get("generator"), Mapping)
+
+
+def _compile_config_to_torch_kwargs(compile_config: CompileConfig, ) -> dict[str, Any]:
+    """Flatten typed ``CompileConfig`` back to a ``torch_compile_kwargs``
+    dict that the legacy ``FastVideoArgs`` path still expects.
+
+    Typed first-class fields (:attr:`backend`, :attr:`fullgraph`,
+    :attr:`mode`, :attr:`dynamic`) are only emitted when the user set
+    them explicitly (non-``None``). ``extras`` is merged on top for any
+    uncommon kwargs.
+    """
+    out: dict[str, Any] = {}
+    for key in _COMPILE_TYPED_KEYS:
+        value = getattr(compile_config, key)
+        if value is not None:
+            out[key] = value
+    if compile_config.extras:
+        out.update(deepcopy(compile_config.extras))
+    return out
 
 
 def _sampling_param_to_request_raw(sampling_param: SamplingParam | None, ) -> dict[str, Any]:

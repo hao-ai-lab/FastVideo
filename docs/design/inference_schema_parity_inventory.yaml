@@ -29,7 +29,7 @@ surfaces:
       vae_cpu_offload: generator.engine.offload.vae
       pin_cpu_memory: generator.engine.offload.pin_cpu_memory
       enable_torch_compile: generator.engine.compile.enabled
-      torch_compile_kwargs: generator.engine.compile.kwargs
+      torch_compile_kwargs: generator.engine.compile.backend,fullgraph,mode,dynamic,extras
       disable_autocast: generator.engine.disable_autocast
       enable_stage_verification: generator.engine.enable_stage_verification
       prompt_txt: request.inputs.prompt_path
@@ -40,8 +40,8 @@ surfaces:
       init_weights_from_safetensors_2: generator.pipeline.components.transformer_2_weights
       override_pipeline_cls_name: generator.pipeline.components.override_pipeline_cls_name
       boundary_ratio: request.sampling.boundary_ratio
+      ltx2_vae_tiling: generator.pipeline.vae_tiling
     preset_owned:
-      ltx2_vae_tiling: generator.pipeline.preset_overrides.ltx2.vae_tiling
       ltx2_vae_spatial_tile_size_in_pixels: generator.pipeline.preset_overrides.ltx2.vae.spatial_tile_size_in_pixels
       ltx2_vae_spatial_tile_overlap_in_pixels: generator.pipeline.preset_overrides.ltx2.vae.spatial_tile_overlap_in_pixels
       ltx2_vae_temporal_tile_size_in_frames: generator.pipeline.preset_overrides.ltx2.vae.temporal_tile_size_in_frames
