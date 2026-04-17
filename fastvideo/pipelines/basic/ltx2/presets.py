@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """LTX2 model family pipeline presets."""
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
+from fastvideo.pipelines.basic.ltx2.stage_overrides import (
+    refine_stage_override_fields, )
 
 _LTX2_NEGATIVE_PROMPT = ("blurry, out of focus, overexposed, underexposed, low contrast, "
                          "washed out colors, excessive noise, grainy texture, poor lighting, "
@@ -34,12 +36,9 @@ _REFINE_STAGE = PresetStageSpec(
     name="refine",
     kind="refinement",
     description="Latent-upsample + second-pass refine",
-    allowed_overrides=frozenset({
-        "num_inference_steps",
-        "guidance_scale",
-        "image_crf",
-        "video_position_offset_sec",
-    }),
+    # Mirrors LTX2RefineStageOverride fields so the typed dataclass
+    # stays in lockstep with preset validation.
+    allowed_overrides=refine_stage_override_fields(),
 )
 
 LTX2_BASE = InferencePreset(
