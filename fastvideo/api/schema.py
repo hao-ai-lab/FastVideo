@@ -33,8 +33,24 @@ class OffloadConfig:
 
 @dataclass
 class CompileConfig:
+    """Typed ``torch.compile`` configuration.
+
+    ``backend``, ``fullgraph``, ``mode``, and ``dynamic`` are the four
+    ``torch.compile`` knobs that the FastVideo-internal ltx2-streaming
+    ``gpu_pool`` hard-codes in its ``torch_compile_kwargs`` dict. They
+    are promoted to first-class fields here so downstream tooling
+    (streaming server, Dynamo adapter) can reason about them without
+    string-keyed dict access. ``extras`` holds any additional
+    ``torch.compile`` kwargs the runtime accepts (e.g. ``options``,
+    ``disable``).
+    """
+
     enabled: bool = False
-    kwargs: dict[str, Any] = field(default_factory=dict)
+    backend: str | None = None
+    fullgraph: bool | None = None
+    mode: str | None = None
+    dynamic: bool | None = None
+    extras: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -76,6 +92,12 @@ class PipelineSelection:
     preset: str | None = None
     preset_version: int | None = None
     components: ComponentConfig = field(default_factory=ComponentConfig)
+    vae_tiling: bool | None = None
+    """Toggle VAE tiling (tile-based VAE decode to reduce peak memory).
+    ``None`` leaves the model's default in place; explicit ``True`` /
+    ``False`` overrides. Shared across model families that expose VAE
+    tiling (LTX-2, most Wan configs, etc.); legacy ``ltx2_vae_tiling``
+    maps here."""
     preset_overrides: dict[str, Any] = field(default_factory=dict)
     experimental: dict[str, Any] = field(default_factory=dict)
 
