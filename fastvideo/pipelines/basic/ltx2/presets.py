@@ -36,8 +36,6 @@ _REFINE_STAGE = PresetStageSpec(
     name="refine",
     kind="refinement",
     description="Latent-upsample + second-pass refine",
-    # Mirrors LTX2RefineStageOverride fields so the typed dataclass
-    # stays in lockstep with preset validation.
     allowed_overrides=refine_stage_override_fields(),
 )
 
@@ -88,13 +86,6 @@ LTX2_DISTILLED = InferencePreset(
     },
 )
 
-# Two-stage distilled flow: half-res denoise (stage 1) followed by
-# spatial-upsample + second denoise (stage 2 "refine"). Stage-2
-# sigmas are fixed in fastvideo.pipelines.stages.ltx2_refine — only
-# num_inference_steps (2 or 3) and guidance_scale are user-tunable.
-# Refine wiring (upsampler weights, optional LoRA, enable/add-noise)
-# lives on generator.pipeline.preset_overrides.refine at init-time;
-# per-request tuning goes through request.stage_overrides.refine.
 LTX2_TWO_STAGE = InferencePreset(
     name="ltx2_two_stage",
     version=1,
