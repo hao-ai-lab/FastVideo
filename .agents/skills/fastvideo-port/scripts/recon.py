@@ -93,27 +93,39 @@ def gh_get(path: str, token: str | None = None) -> dict | list:
         return json.loads(r.read())
 
 
-def gh_raw(repo: str, path: str, ref: str = "main") -> str | None:
+def get_default_branch(repo: str, token: str | None = None) -> str:
+    try:
+        info = gh_get(f"repos/{repo}", token)
+        return info.get("default_branch", "main")
+    except Exception:
+        return "main"
+
+
+def gh_raw(repo: str, path: str, ref: str = "main", token: str | None = None) -> str | None:
     url = f"https://raw.githubusercontent.com/{repo}/{ref}/{path}"
     try:
         with urlopen(url, timeout=15) as r:
             return r.read().decode("utf-8", errors="ignore")
     except Exception:
-        # Try HEAD branch
-        try:
-            url2 = url.replace(f"/{ref}/", "/HEAD/")
-            with urlopen(url2, timeout=10) as r:
-                return r.read().decode("utf-8", errors="ignore")
-        except Exception:
-            return None
+        if ref == "main":
+            # Try the repo's actual default branch (may be "master" or something else)
+            try:
+                default = get_default_branch(repo, token)
+                if default != ref:
+                    url2 = f"https://raw.githubusercontent.com/{repo}/{default}/{path}"
+                    with urlopen(url2, timeout=10) as r:
+                        return r.read().decode("utf-8", errors="ignore")
+            except Exception:
+                pass
+        return None
 
 
 def parse_repo_url(url: str) -> str:
     """Extract 'owner/repo' from a GitHub URL."""
-    m = re.search(r"github\.com[:/]([^/]+/[^/\s\.]+)", url)
+    m = re.search(r"github\.com[:/]([^/\s?#]+/[^/\s?#]+)", url)
     if not m:
         raise ValueError(f"Cannot parse GitHub URL: {url}")
-    return m.group(1).rstrip("/")
+    return m.group(1).removesuffix(".git").rstrip("/")
 
 
 def list_python_files(repo: str, token: str | None = None, max_files: int = 200) -> list[str]:
@@ -155,12 +167,13 @@ def extract_architecture(source: str) -> dict:
                 result[key] = int(m.group(1))
 
     # Attention type heuristic
-    if "cross_attn" in source or "cross_attention" in source:
-        if "self_attn" in source or "self_attention" in source:
+    source_lc = source.lower()
+    if "cross_attn" in source_lc or "cross_attention" in source_lc:
+        if "self_attn" in source_lc or "self_attention" in source_lc:
             result["attention_type"] = "self+cross"
         else:
             result["attention_type"] = "cross_attn"
-    elif "self_attn" in source or "SelfAttention" in source:
+    elif "self_attn" in source_lc or "selfattention" in source_lc:
         result["attention_type"] = "self_attn"
 
     # Conditioning
