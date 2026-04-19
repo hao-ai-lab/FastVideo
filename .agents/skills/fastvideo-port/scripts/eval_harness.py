@@ -136,7 +136,8 @@ def extract_lesson_candidates(diff: str, missing_files: list[str]) -> list[dict]
                         "what_happened": f"Agent implementation differs from ground truth in `{current_file}`.",
                         "diff_preview": "\n".join(current_hunk[:20]),
                     })
-            current_file = line.split(" b/")[-1] if " b/" in line else line
+            m = re.search(r"^diff --git a/.+ b/(.+)$", line)
+            current_file = m.group(1) if m else line
             current_hunk = []
         else:
             current_hunk.append(line)

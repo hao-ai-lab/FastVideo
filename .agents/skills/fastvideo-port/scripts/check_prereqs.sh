@@ -108,10 +108,13 @@ if [[ -n "$HF_IDS" ]]; then
   echo ""
   echo "[ HF Model Access ]"
   for hf_id in $HF_IDS; do
-    GATED=$(python - <<PY 2>/dev/null || echo "error"
+    GATED=$(HF_ID="$hf_id" python - <<'PY' 2>/dev/null || echo "error"
+import os
 from huggingface_hub import model_info
 try:
-    info = model_info("$hf_id", token="${HF_TOKEN:-None}")
+    hf_id = os.environ.get("HF_ID")
+    token = os.environ.get("HF_TOKEN")
+    info = model_info(hf_id, token=token)
     gated = getattr(info, "gated", False)
     print("gated" if gated else "open")
 except Exception as e:
