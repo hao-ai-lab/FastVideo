@@ -161,6 +161,11 @@ nav:
   - Design:
     - Overview: design/overview.md
     - Training Architecture: design/training_architecture.md
+    - Server Contracts:
+      - Overview: design/server_contracts/index.md
+      - OpenAI HTTP: design/server_contracts/openai.md
+      - Streaming WebSocket: design/server_contracts/streaming.md
+      - Dynamo Integration: design/server_contracts/dynamo.md
   - Developer Guide:
     - Overview: contributing/overview.md
     - Developer Environment:
