@@ -39,6 +39,8 @@ from fastvideo.utils import (
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.module_state import (
     apply_trainable, )
+from fastvideo.train.utils.lora import (
+    enable_lora_training, )
 from fastvideo.train.utils.moduleloader import (
     load_module_from_path, )
 
@@ -73,9 +75,19 @@ class WanModel(ModelBase):
         | None = None,
         transformer_override_safetensor: str
         | None = None,
+        lora_rank: int | None = None,
+        lora_alpha: int | None = None,
+        lora_target_modules: list[str] | None = None,
     ) -> None:
         self._init_from = str(init_from)
         self._trainable = bool(trainable)
+        self._lora_rank = (int(lora_rank) if lora_rank is not None else None)
+        self._lora_alpha = (int(lora_alpha) if lora_alpha is not None else None)
+        self._lora_target_modules = (
+            list(lora_target_modules)
+            if lora_target_modules is not None else None
+        )
+        self._num_lora_layers = 0
 
         self.transformer = self._load_transformer(
             init_from=self._init_from,
@@ -125,7 +137,6 @@ class WanModel(ModelBase):
             override_transformer_cls_name=(self._transformer_cls_name),
             transformer_override_safetensor=(transformer_override_safetensor),
         )
-        transformer = apply_trainable(transformer, trainable=trainable)
         # Fall back to training_config.model if not set on the
         # model YAML section directly.
         ckpt_type = (enable_gradient_checkpointing_type or getattr(
@@ -138,6 +149,20 @@ class WanModel(ModelBase):
                 transformer,
                 checkpointing_type=ckpt_type,
             )
+        if self._lora_rank is not None:
+            if not trainable:
+                raise ValueError(
+                    "LoRA training requires trainable=true "
+                    "for the role model"
+                )
+            self._num_lora_layers = enable_lora_training(
+                transformer,
+                lora_rank=self._lora_rank,
+                lora_alpha=self._lora_alpha,
+                lora_target_modules=self._lora_target_modules,
+            )
+            return transformer
+        transformer = apply_trainable(transformer, trainable=trainable)
         return transformer
 
     # ------------------------------------------------------------------
@@ -157,18 +182,27 @@ class WanModel(ModelBase):
         self._init_timestep_mechanics()
 
         from fastvideo.dataset.dataloader.schema import (
+            pyarrow_schema_i2v,
             pyarrow_schema_t2v, )
         from fastvideo.train.utils.dataloader import (
+            build_parquet_i2v_train_dataloader,
             build_parquet_t2v_train_dataloader, )
 
         text_len = (
             training_config.pipeline_config.text_encoder_configs[  # type: ignore[union-attr]
                 0].arch_config.text_len)
-        self.dataloader = build_parquet_t2v_train_dataloader(
-            training_config.data,
-            text_len=int(text_len),
-            parquet_schema=pyarrow_schema_t2v,
-        )
+        if self._uses_image_conditioning():
+            self.dataloader = build_parquet_i2v_train_dataloader(
+                training_config.data,
+                text_len=int(text_len),
+                parquet_schema=pyarrow_schema_i2v,
+            )
+        else:
+            self.dataloader = build_parquet_t2v_train_dataloader(
+                training_config.data,
+                text_len=int(text_len),
+                parquet_schema=pyarrow_schema_t2v,
+            )
         self.start_step = 0
 
     @property
@@ -184,7 +218,10 @@ class WanModel(ModelBase):
         return timestep.clamp(self.min_timestep, self.max_timestep)
 
     def on_train_start(self) -> None:
-        self.ensure_negative_conditioning()
+        # Negative-prompt embeddings are only needed by methods that request
+        # unconditional passes. Build them lazily to avoid spinning up an extra
+        # prompt pipeline during finetune startup on memory-constrained GPUs.
+        return
 
     # ------------------------------------------------------------------
     # Runtime primitives
@@ -197,7 +234,6 @@ class WanModel(ModelBase):
         generator: torch.Generator,
         latents_source: Literal["data", "zeros"] = "data",
     ) -> TrainingBatch:
-        self.ensure_negative_conditioning()
         assert self.training_config is not None
         tc = self.training_config
 
@@ -208,6 +244,9 @@ class WanModel(ModelBase):
         encoder_hidden_states = raw_batch["text_embedding"]
         encoder_attention_mask = raw_batch["text_attention_mask"]
         infos = raw_batch.get("info_list")
+        image_embeds = raw_batch.get("clip_feature")
+        image_latents = raw_batch.get("first_frame_latent")
+        preprocessed_image = raw_batch.get("pil_image")
 
         if latents_source == "zeros":
             batch_size = encoder_hidden_states.shape[0]
@@ -242,6 +281,24 @@ class WanModel(ModelBase):
         training_batch.encoder_hidden_states = (encoder_hidden_states.to(device, dtype=dtype))
         training_batch.encoder_attention_mask = (encoder_attention_mask.to(device, dtype=dtype))
         training_batch.infos = infos
+        if self._uses_image_conditioning():
+            if image_embeds is None or image_latents is None:
+                raise ValueError(
+                    "Wan image-conditioned training requires "
+                    "clip_feature and first_frame_latent in the batch. "
+                    "Please use an I2V/TI2V preprocessed parquet dataset."
+                )
+            training_batch.image_embeds = image_embeds.to(device, dtype=dtype)
+            training_batch.image_latents = image_latents[
+                :,
+                :,
+                :tc.data.num_latent_t,
+            ].to(device, dtype=dtype)
+            if torch.is_tensor(preprocessed_image) and preprocessed_image.numel() > 0:
+                training_batch.preprocessed_image = preprocessed_image.to(
+                    device,
+                    dtype=dtype,
+                )
 
         training_batch.latents = normalize_dit_input("wan", training_batch.latents, self.vae)
         training_batch = self._prepare_dit_inputs(training_batch, generator)
@@ -334,6 +391,67 @@ class WanModel(ModelBase):
         # default to full range.
         self.min_timestep = 0
         self.max_timestep = self.num_train_timestep
+
+    def _uses_image_conditioning(self) -> bool:
+        if self.training_config is None:
+            return False
+        pipeline_config = getattr(self.training_config, "pipeline_config", None)
+        if bool(getattr(pipeline_config, "ti2v_task", False)):
+            return False
+        model_id = str(getattr(self.training_config, "model_path", "") or self._init_from)
+        model_id_upper = model_id.upper()
+        return "-I2V-" in model_id_upper and "-TI2V-" not in model_id_upper
+
+    def _augment_noisy_input_with_image_condition(
+        self,
+        noisy_model_input: torch.Tensor,
+        image_latents: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert self.training_config is not None
+        temporal_compression_ratio = int(
+            self.training_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio  # type: ignore[union-attr]
+        )
+        num_frames = (
+            (self.training_config.data.num_latent_t - 1)
+            * temporal_compression_ratio + 1
+        )
+
+        batch_size, _, _, latent_height, latent_width = image_latents.shape
+        mask_lat_size = torch.ones(
+            batch_size,
+            1,
+            num_frames,
+            latent_height,
+            latent_width,
+            device=image_latents.device,
+            dtype=image_latents.dtype,
+        )
+        mask_lat_size[:, :, 1:] = 0
+
+        first_frame_mask = mask_lat_size[:, :, :1]
+        first_frame_mask = torch.repeat_interleave(
+            first_frame_mask,
+            dim=2,
+            repeats=temporal_compression_ratio,
+        )
+        mask_lat_size = torch.cat(
+            [first_frame_mask, mask_lat_size[:, :, 1:]],
+            dim=2,
+        )
+        mask_lat_size = mask_lat_size.view(
+            batch_size,
+            -1,
+            temporal_compression_ratio,
+            latent_height,
+            latent_width,
+        )
+        mask_lat_size = mask_lat_size.transpose(1, 2).contiguous()
+
+        augmented = torch.cat(
+            [noisy_model_input, mask_lat_size, image_latents],
+            dim=1,
+        )
+        return augmented, mask_lat_size
 
     def ensure_negative_conditioning(self) -> None:
         if self.negative_prompt_embeds is not None:
@@ -531,6 +649,27 @@ class WanModel(ModelBase):
             dtype=latents.dtype,
         )
         noisy_model_input = ((1.0 - sigmas) * latents + sigmas * noise)
+        conditional_dict: dict[str, torch.Tensor] = {
+            "encoder_hidden_states": (training_batch.encoder_hidden_states),
+            "encoder_attention_mask": (training_batch.encoder_attention_mask),
+        }
+
+        if self._uses_image_conditioning():
+            image_latents = training_batch.image_latents
+            image_embeds = training_batch.image_embeds
+            if image_latents is None or image_embeds is None:
+                raise RuntimeError(
+                    "Image-conditioned Wan training requires "
+                    "image_latents and image_embeds in TrainingBatch."
+                )
+            noisy_model_input, mask_lat_size = (
+                self._augment_noisy_input_with_image_condition(
+                    noisy_model_input,
+                    image_latents,
+                )
+            )
+            training_batch.mask_lat_size = mask_lat_size
+            conditional_dict["encoder_hidden_states_image"] = image_embeds
 
         training_batch.noisy_model_input = (noisy_model_input)
         training_batch.timesteps = timesteps
@@ -538,10 +677,7 @@ class WanModel(ModelBase):
         training_batch.noise = noise
         training_batch.raw_latent_shape = latents.shape
 
-        training_batch.conditional_dict = {
-            "encoder_hidden_states": (training_batch.encoder_hidden_states),
-            "encoder_attention_mask": (training_batch.encoder_attention_mask),
-        }
+        training_batch.conditional_dict = conditional_dict
 
         if (self.negative_prompt_embeds is not None and self.negative_prompt_attention_mask is not None):
             neg_embeds = self.negative_prompt_embeds
@@ -550,10 +686,15 @@ class WanModel(ModelBase):
                 neg_embeds = neg_embeds.expand(batch_size, *neg_embeds.shape[1:]).contiguous()
             if (neg_mask.shape[0] == 1 and batch_size > 1):
                 neg_mask = neg_mask.expand(batch_size, *neg_mask.shape[1:]).contiguous()
-            training_batch.unconditional_dict = {
+            unconditional_dict: dict[str, torch.Tensor] = {
                 "encoder_hidden_states": neg_embeds,
                 "encoder_attention_mask": neg_mask,
             }
+            if "encoder_hidden_states_image" in conditional_dict:
+                unconditional_dict["encoder_hidden_states_image"] = (
+                    conditional_dict["encoder_hidden_states_image"]
+                )
+            training_batch.unconditional_dict = unconditional_dict
 
         training_batch.latents = (training_batch.latents.permute(0, 2, 1, 3, 4))
         return training_batch
@@ -562,18 +703,26 @@ class WanModel(ModelBase):
         self,
         noise_input: torch.Tensor,
         timestep: torch.Tensor,
-        text_dict: dict[str, torch.Tensor] | None,
+        text_dict: dict[str, Any] | None,
     ) -> dict[str, Any]:
         if text_dict is None:
             raise ValueError("text_dict cannot be None for "
                              "Wan distillation")
-        return {
+        kwargs: dict[str, Any] = {
             "hidden_states": noise_input.permute(0, 2, 1, 3, 4),
             "encoder_hidden_states": text_dict["encoder_hidden_states"],
             "encoder_attention_mask": text_dict["encoder_attention_mask"],
             "timestep": timestep,
             "return_dict": False,
         }
+        encoder_hidden_states_image = text_dict.get(
+            "encoder_hidden_states_image",
+        )
+        if encoder_hidden_states_image is not None:
+            kwargs["encoder_hidden_states_image"] = (
+                encoder_hidden_states_image
+            )
+        return kwargs
 
     def _get_transformer(self, timestep: torch.Tensor) -> torch.nn.Module:
         return self.transformer
@@ -584,12 +733,43 @@ class WanModel(ModelBase):
         *,
         cfg_uncond: dict[str, Any] | None,
     ) -> dict[str, torch.Tensor]:
+        def _build_negative_prompt_dict() -> dict[str, torch.Tensor]:
+            self.ensure_negative_conditioning()
+            neg_embeds = self.negative_prompt_embeds
+            neg_mask = self.negative_prompt_attention_mask
+            if neg_embeds is None or neg_mask is None:
+                raise RuntimeError(
+                    "Negative prompt conditioning is unavailable "
+                    "after ensure_negative_conditioning()."
+                )
+            batch_size = 1
+            if batch.encoder_hidden_states is not None:
+                batch_size = int(batch.encoder_hidden_states.shape[0])
+            if neg_embeds.shape[0] == 1 and batch_size > 1:
+                neg_embeds = neg_embeds.expand(
+                    batch_size,
+                    *neg_embeds.shape[1:],
+                ).contiguous()
+            if neg_mask.shape[0] == 1 and batch_size > 1:
+                neg_mask = neg_mask.expand(
+                    batch_size,
+                    *neg_mask.shape[1:],
+                ).contiguous()
+            out: dict[str, torch.Tensor] = {
+                "encoder_hidden_states": neg_embeds,
+                "encoder_attention_mask": neg_mask,
+            }
+            cond = getattr(batch, "conditional_dict", None)
+            if cond is not None:
+                image_hidden_states = cond.get("encoder_hidden_states_image")
+                if torch.is_tensor(image_hidden_states):
+                    out["encoder_hidden_states_image"] = image_hidden_states
+            return out
+
         if cfg_uncond is None:
             text_dict = getattr(batch, "unconditional_dict", None)
             if text_dict is None:
-                raise RuntimeError("Missing unconditional_dict; "
-                                   "ensure_negative_conditioning() "
-                                   "may have failed")
+                return _build_negative_prompt_dict()
             return text_dict
 
         on_missing_raw = cfg_uncond.get("on_missing", "error")
@@ -637,9 +817,7 @@ class WanModel(ModelBase):
         if text_policy in {"negative_prompt"}:
             text_dict = getattr(batch, "unconditional_dict", None)
             if text_dict is None:
-                raise RuntimeError("Missing unconditional_dict; "
-                                   "ensure_negative_conditioning() "
-                                   "may have failed")
+                return _build_negative_prompt_dict()
             return text_dict
         if text_policy == "keep":
             if batch.conditional_dict is None:
@@ -656,10 +834,14 @@ class WanModel(ModelBase):
             if not torch.is_tensor(enc) or not torch.is_tensor(mask):
                 raise TypeError("conditional_dict must contain "
                                 "tensor text inputs")
-            return {
+            zero_dict: dict[str, torch.Tensor] = {
                 "encoder_hidden_states": (torch.zeros_like(enc)),
                 "encoder_attention_mask": (torch.zeros_like(mask)),
             }
+            image_hidden_states = cond.get("encoder_hidden_states_image")
+            if torch.is_tensor(image_hidden_states):
+                zero_dict["encoder_hidden_states_image"] = image_hidden_states
+            return zero_dict
         if text_policy == "drop":
             raise ValueError("cfg_uncond.text=drop is not supported "
                              "for Wan. Use "

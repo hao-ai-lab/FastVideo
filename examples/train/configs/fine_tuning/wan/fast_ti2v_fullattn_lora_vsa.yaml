@@ -1,0 +1,89 @@
+# FastWan 2.2 TI2V 5B FullAttn LoRA finetune with VSA.
+#
+# Notes:
+# - This model still uses T2V-style preprocessed parquet data in the new
+#   training stack.
+# - Validation/inference should use WanPipeline rather than the I2V pipeline;
+#   TI2V behavior is activated by the model pipeline config and the provided
+#   video_path / image_path from validation data.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers
+    trainable: true
+    lora_rank: 16
+    lora_alpha: 32
+    lora_target_modules:
+      - to_q
+      - to_k
+      - to_v
+      - to_out
+      - to_gate_compress
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  dit_precision: bf16
+
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 1
+
+  data:
+    data_path: data/crush-smol_processed_ti2v/combined_parquet_dataset
+    dataloader_num_workers: 2
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 20
+    num_height: 480
+    num_width: 832
+    num_frames: 77
+
+  optimizer:
+    learning_rate: 1.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 10
+    gradient_accumulation_steps: 5
+
+  checkpoint:
+    output_dir: outputs/fast_wan_ti2v_fullattn_lora_vsa
+    training_state_checkpointing_steps: 5
+    checkpoints_total_limit: 2
+    resume_from_checkpoint: null
+
+  tracker:
+    project_name: fastvideo
+    run_name: fast_wan_ti2v_fullattn_lora_vsa
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+  vsa:
+    sparsity: 0.8
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.wan.wan_pipeline.WanPipeline
+    dataset_file: examples/training/finetune/wan_i2v_14B_480p/crush_smol/validation.json
+    every_steps: 0
+    sampling_steps: [3]
+    guidance_scale: 5.0
+
+pipeline:
+  flow_shift: 5
