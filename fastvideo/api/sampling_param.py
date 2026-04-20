@@ -107,6 +107,14 @@ class SamplingParam:
     ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
     ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
 
+    # Continuation state carried across streaming/multi-segment calls (LTX-2).
+    # Concrete type is fastvideo.api.schema.ContinuationState; kept as Any
+    # to avoid circular imports at dataclass definition time.
+    continuation_state: Any | None = None
+    # When True, the pipeline returns a ContinuationState on the result so
+    # the caller can resume from the generated segment.
+    return_continuation_state: bool = False
+
     # Misc
     save_video: bool = True
     return_frames: bool = True

@@ -354,6 +354,8 @@ surfaces:
       return_frames: request.output.return_frames
       return_trajectory_latents: request.runtime.return_trajectory_latents
       return_trajectory_decoded: request.runtime.return_trajectory_decoded
+      continuation_state: request.state
+      return_continuation_state: request.output.return_state
     preset_owned:
       t_thresh: request.stage_overrides.refine.t_thresh
       spatial_refine_only: request.stage_overrides.refine.spatial_refine_only
