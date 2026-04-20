@@ -2,7 +2,6 @@
 """Single-generator FastAPI + WebSocket streaming server."""
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import os
 import time
@@ -51,6 +50,11 @@ from fastvideo.entrypoints.streaming.session import (
 )
 from fastvideo.entrypoints.streaming.session_init_image import (
     persist_session_init_image, )
+from fastvideo.entrypoints.streaming.gpu_pool import (
+    GpuPool,
+    InProcessGpuPool,
+    PoolAcquireTimeout,
+)
 from fastvideo.entrypoints.streaming.session_store import (
     InMemorySessionStore,
     SessionStore,
@@ -75,25 +79,37 @@ class _GeneratorProto(Protocol):
 @dataclass
 class ServerState:
     serve_config: ServeConfig
-    generator: _GeneratorProto
+    pool: GpuPool
     sessions: SessionManager
     session_store: SessionStore
 
 
 def build_app(
     serve_config: ServeConfig,
-    generator: _GeneratorProto,
+    generator: _GeneratorProto | None = None,
     *,
+    pool: GpuPool | None = None,
     session_store: SessionStore | None = None,
 ) -> FastAPI:
     """Build the FastAPI app used by :func:`run_server`.
 
     Exposed so tests can drive the WebSocket endpoint in-process via
     ``starlette.testclient.TestClient(app).websocket_connect(...)``.
+
+    Exactly one of ``generator`` (backed by :class:`InProcessGpuPool`)
+    or ``pool`` (for the subprocess-backed production shape) must be
+    given.
     """
     if serve_config.streaming is None:
         raise ValueError("ServeConfig.streaming must be set to launch the streaming "
                          "server; got None. Add a `streaming:` block to your serve config.")
+    if (generator is None) == (pool is None):
+        raise ValueError("build_app requires exactly one of `generator` or `pool`")
+
+    store = session_store or InMemorySessionStore()
+    if pool is None:
+        assert generator is not None
+        pool = InProcessGpuPool(generator, session_store=store)
 
     sessions = SessionManager(
         segment_cap=serve_config.streaming.generation_segment_cap,
@@ -101,9 +117,9 @@ def build_app(
     )
     state = ServerState(
         serve_config=serve_config,
-        generator=generator,
+        pool=pool,
         sessions=sessions,
-        session_store=session_store or InMemorySessionStore(),
+        session_store=store,
     )
 
     app = FastAPI(title="FastVideo Streaming")
@@ -135,6 +151,8 @@ def build_app(
             with contextlib.suppress(InvalidSessionTransition):
                 session.transition(SessionState.ERROR)
         finally:
+            with contextlib.suppress(Exception):
+                await state.pool.release(session.id)
             _cleanup_session(session, state)
 
     app.state.server_state = state
@@ -178,10 +196,22 @@ async def _handle_session(
     await _apply_session_init(session, init, state)
     await _send_json(websocket, QueueStatus(position=0, queue_depth=0))
     session.transition(SessionState.GPU_BINDING)
-    await _send_json(websocket, GpuAssigned(
-        gpu_id=0,
-        session_timeout=state.sessions.session_timeout_seconds,
-    ))
+    try:
+        assignment = await state.pool.acquire(
+            session.id,
+            timeout=float(state.sessions.session_timeout_seconds),
+        )
+    except PoolAcquireTimeout as exc:
+        await _send_error(websocket, "gpu_unavailable", str(exc), retryable=True)
+        with contextlib.suppress(InvalidSessionTransition):
+            session.transition(SessionState.TIMEOUT)
+        return
+    session.gpu_id = assignment.gpu_id
+    await _send_json(websocket,
+                     GpuAssigned(
+                         gpu_id=assignment.gpu_id,
+                         session_timeout=state.sessions.session_timeout_seconds,
+                     ))
     session.transition(SessionState.ACTIVE)
     await _send_json(websocket, _build_stream_start(session, state))
 
@@ -327,15 +357,13 @@ async def _run_segment(
         ))
 
     start = time.perf_counter()
-    loop = asyncio.get_running_loop()
-    # TODO: executor-wrapped generate() cannot be cancelled, so a
-    # client disconnect mid-segment leaves the GPU work running to
-    # completion. Real cancellation needs the generate_async API.
+    # TODO: pool.run() runs to completion even if the client disconnects
+    # mid-segment. Real cancellation needs the generate_async API.
     try:
-        result = await loop.run_in_executor(None, state.generator.generate, request)
+        result = await state.pool.run(session.id, request)
     except Exception as exc:
-        logger.exception("session %s: generator failed", session.id[:8])
-        await _send_error(websocket, "worker_failed", f"generator.generate failed: {exc}", retryable=True)
+        logger.exception("session %s: pool.run failed", session.id[:8])
+        await _send_error(websocket, "worker_failed", f"pool.run failed: {exc}", retryable=True)
         with contextlib.suppress(InvalidSessionTransition):
             session.transition(SessionState.ERROR)
         return
