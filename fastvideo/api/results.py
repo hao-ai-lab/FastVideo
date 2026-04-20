@@ -98,4 +98,72 @@ class GenerationResult:
         return result
 
 
-__all__ = ["GenerationResult"]
+# Alias the canonical result type; matches the public docs.
+VideoResult = GenerationResult
+
+
+@dataclass
+class VideoProgressEvent:
+    """Per-step progress event emitted by :meth:`VideoGenerator.generate_async`.
+
+    Consumers treat these as best-effort telemetry; ``total_steps`` is
+    the count the pipeline reported at the start of the run, not a
+    rolling estimate.
+    """
+
+    step: int
+    total_steps: int
+    stage: str = "denoise"
+    """Logical stage name (``denoise`` | ``refine`` | ``decode`` | …)."""
+
+
+@dataclass
+class VideoPartialEvent:
+    """Chunk of decoded frames ready for streaming.
+
+    Emitted only on the streaming path; the aggregated code path never
+    yields partials. ``frames`` is a numpy ``(N, H, W, 3)`` uint8
+    ndarray; ``index`` is a monotonic chunk index starting at 0.
+    """
+
+    frames: Any
+    index: int
+
+
+@dataclass
+class VideoFinalEvent:
+    """Terminal event carrying the generated video and metadata.
+
+    Exactly one ``VideoFinalEvent`` is emitted per request. When
+    ``request.output.return_state`` is True the event also carries the
+    :class:`ContinuationState` the caller needs to resume.
+    """
+
+    video_bytes: bytes | None = None
+    tensor: Any | None = None
+    frames: Any | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    continuation_state: ContinuationState | None = None
+    result: VideoResult | None = None
+    """The full :class:`VideoResult` for callers that want everything.
+
+    Streaming consumers typically only care about ``frames`` /
+    ``continuation_state``; keeping the full result here avoids a
+    second code path."""
+
+
+VideoEvent = VideoProgressEvent | VideoPartialEvent | VideoFinalEvent
+"""Union of every event :meth:`VideoGenerator.generate_async` yields.
+
+Consumers match by ``isinstance`` rather than ``type`` so subclasses
+(e.g. a future ``VideoAudioSegmentEvent``) slot in without breaking
+existing code."""
+
+__all__ = [
+    "GenerationResult",
+    "VideoEvent",
+    "VideoFinalEvent",
+    "VideoPartialEvent",
+    "VideoProgressEvent",
+    "VideoResult",
+]
