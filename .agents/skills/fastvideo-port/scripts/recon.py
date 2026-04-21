@@ -38,7 +38,6 @@ import json
 import re
 import sys
 from urllib.request import urlopen, Request
-from urllib.error import HTTPError
 
 GITHUB_API = "https://api.github.com"
 
