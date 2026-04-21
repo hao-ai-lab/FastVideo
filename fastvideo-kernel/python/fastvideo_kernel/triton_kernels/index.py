@@ -1,8 +1,9 @@
 ## pytorch sdpa version of block sparse ##
+from typing import Optional, Tuple
+
 import triton
 import triton.language as tl
 import torch
-
 
 @triton.jit
 def topk_index_to_map_kernel(
@@ -153,3 +154,116 @@ def map_to_index(block_map: torch.Tensor):
     )
 
     return index, index_num
+
+
+@triton.jit
+def _invert_indices_kernel(
+    q2k_idx_ptr,
+    q2k_num_ptr,
+    k2q_idx_ptr,
+    k2q_num_ptr,
+    q2k_idx_b, q2k_idx_h, q2k_idx_q, q2k_idx_k,
+    q2k_num_b, q2k_num_h, q2k_num_q,
+    k2q_idx_b, k2q_idx_h, k2q_idx_k, k2q_idx_q,
+    k2q_num_b, k2q_num_h, k2q_num_k,
+    MAX_KV_PER_Q: tl.constexpr,
+):
+    # One program per (b, h, q): reserve a slot in k2q via atomicAdd, write q.
+    pid_b = tl.program_id(0)
+    pid_h = tl.program_id(1)
+    pid_q = tl.program_id(2)
+
+    n = tl.load(
+        q2k_num_ptr
+        + pid_b * q2k_num_b
+        + pid_h * q2k_num_h
+        + pid_q * q2k_num_q
+    )
+
+    q2k_row = (
+        q2k_idx_ptr
+        + pid_b * q2k_idx_b
+        + pid_h * q2k_idx_h
+        + pid_q * q2k_idx_q
+    )
+
+    for i in tl.range(0, MAX_KV_PER_Q):
+        if i < n:
+            kv = tl.load(q2k_row + i * q2k_idx_k)
+            count_ptr = (
+                k2q_num_ptr
+                + pid_b * k2q_num_b
+                + pid_h * k2q_num_h
+                + kv * k2q_num_k
+            )
+            pos = tl.atomic_add(count_ptr, 1)
+            tl.store(
+                k2q_idx_ptr
+                + pid_b * k2q_idx_b
+                + pid_h * k2q_idx_h
+                + kv * k2q_idx_k
+                + pos * k2q_idx_q,
+                pid_q,
+            )
+
+
+def invert_indices(
+    q2k_idx: torch.Tensor,
+    q2k_num: torch.Tensor,
+    num_kv_blocks: int,
+    max_q_per_kv: Optional[int] = None,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Transpose a Q->KV index list into a K->Q one via atomic compaction (GPU)."""
+    if q2k_idx.dim() != 4:
+        raise ValueError(
+            f"q2k_idx must be [B, H, Nq, Mk], got shape={tuple(q2k_idx.shape)}"
+        )
+    if q2k_num.dim() != 3:
+        raise ValueError(
+            f"q2k_num must be [B, H, Nq], got shape={tuple(q2k_num.shape)}"
+        )
+    if not q2k_idx.is_cuda or not q2k_num.is_cuda:
+        raise RuntimeError("invert_indices requires CUDA tensors.")
+
+    B, H, Nq, Mk = q2k_idx.shape
+    if q2k_num.shape != (B, H, Nq):
+        raise ValueError(
+            f"q2k_num shape {tuple(q2k_num.shape)} does not match q2k_idx "
+            f"[B, H, Nq] = {(B, H, Nq)}"
+        )
+
+    q2k_idx = q2k_idx.contiguous()
+    q2k_num = q2k_num.contiguous()
+    if q2k_idx.dtype != torch.int32:
+        q2k_idx = q2k_idx.to(torch.int32)
+    if q2k_num.dtype != torch.int32:
+        q2k_num = q2k_num.to(torch.int32)
+
+    if max_q_per_kv is None:
+        max_q_per_kv = Nq
+
+    k2q_idx = torch.empty(
+        (B, H, num_kv_blocks, max_q_per_kv),
+        dtype=torch.int32,
+        device=q2k_idx.device,
+    )
+    k2q_num = torch.zeros(
+        (B, H, num_kv_blocks),
+        dtype=torch.int32,
+        device=q2k_idx.device,
+    )
+
+    grid = (B, H, Nq)
+    _invert_indices_kernel[grid](
+        q2k_idx,
+        q2k_num,
+        k2q_idx,
+        k2q_num,
+        q2k_idx.stride(0), q2k_idx.stride(1), q2k_idx.stride(2), q2k_idx.stride(3),
+        q2k_num.stride(0), q2k_num.stride(1), q2k_num.stride(2),
+        k2q_idx.stride(0), k2q_idx.stride(1), k2q_idx.stride(2), k2q_idx.stride(3),
+        k2q_num.stride(0), k2q_num.stride(1), k2q_num.stride(2),
+        MAX_KV_PER_Q=Mk,
+    )
+
+    return k2q_idx, k2q_num

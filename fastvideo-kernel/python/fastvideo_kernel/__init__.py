@@ -5,6 +5,11 @@ from fastvideo_kernel.ops import (
     video_sparse_attn,
 )
 
+from fastvideo_kernel.block_sparse_attn import (
+    block_sparse_attn,
+    block_sparse_attn_from_indices,
+)
+
 from fastvideo_kernel.vmoba import (
     moba_attn_varlen,
     process_moba_input,
@@ -22,6 +27,8 @@ from fastvideo_kernel.turbodiffusion_ops import (
 __all__ = [
     "sliding_tile_attention",
     "video_sparse_attn",
+    "block_sparse_attn",
+    "block_sparse_attn_from_indices",
     "moba_attn_varlen",
     "process_moba_input",
     "process_moba_output",
