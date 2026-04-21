@@ -124,19 +124,28 @@ command. Capture that `<SUBDIR>` — you need it for step 3.
 ### 3. Download generated videos locally
 
 ```bash
-modal volume get hf-model-weights \
+modal volume get --force hf-model-weights \
     ssim_generated_videos/default/"$SUBDIR"/generated_videos \
     ./generated_videos_modal/default
 ```
 
+`--force` is required when the parent `./generated_videos_modal/default`
+already exists; without it, `modal volume get` errors with `[Errno 21] Is a
+directory`. Safe to pass on the first run too.
+
 After this, the mp4s live at
-`./generated_videos_modal/default/L40S_reference_videos/<model_id>/<backend>/<prompt>.mp4`.
+`./generated_videos_modal/default/generated_videos/L40S_reference_videos/<model_id>/<backend>/<prompt>.mp4`.
+The extra `generated_videos/` level comes from the volume layout in
+`_sync_generated_videos_to_volume` (`ssim_test.py`) — the command copies
+`<repo>/fastvideo/tests/ssim/generated_videos/<tier>` to
+`ssim_generated_videos/<tier>/<SUBDIR>/generated_videos/`, and `modal volume
+get` preserves that trailing `generated_videos/` segment.
 
 ### 4. PAUSE — user reviews quality
 
 Print the list of downloaded mp4s and their paths, then stop. Tell the user:
 
-> "Generated videos downloaded to `./generated_videos_modal/default/L40S_reference_videos/`. Please open them and confirm the quality looks correct. Reply **`upload`** to continue, or anything else to abort."
+> "Generated videos downloaded to `./generated_videos_modal/default/generated_videos/L40S_reference_videos/`. Please open them and confirm the quality looks correct. Reply **`upload`** to continue, or anything else to abort."
 
 Do not proceed until the user explicitly says `upload`. If they abort, leave
 everything on disk so they can inspect further — no cleanup.
@@ -150,13 +159,14 @@ in step 1:
 python fastvideo/tests/ssim/reference_videos_cli.py copy-local \
     --quality-tier default \
     --device-folder L40S_reference_videos \
-    --generated-dir ./generated_videos_modal/default/L40S_reference_videos
+    --generated-dir ./generated_videos_modal/default/generated_videos/L40S_reference_videos
 ```
 
-(The `--generated-dir` points at the device-folder root; `copy-local` walks
-all `<model>/<backend>/*.mp4` underneath it. Since the Modal run was scoped
-to a single test file via `--test-files`, only that test's model(s) are
-present — so the copy is implicitly per-test.)
+(The `--generated-dir` points at the device-folder root inside the
+downloaded tree; `copy-local` walks all `<model>/<backend>/*.mp4`
+underneath it. Since the Modal run was scoped to a single test file via
+`--test-files`, only that test's model(s) are present — so the copy is
+implicitly per-test.)
 
 Result: `fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos/<model_id>/<backend>/<prompt>.mp4`.
 
@@ -237,3 +247,4 @@ it will auto-download the refs they just uploaded.
 |------|--------|
 | 2026-04-17 | Initial version (Modal sync-to-volume flow). |
 | 2026-04-21 | Rewrite: single-test scope, explicit user-review pause, per-`model_id` upload, HF overwrite guard. Dropped `scripts/seed_ssim.sh`. |
+| 2026-04-21 | Post-first-run fixes: `modal volume get` needs `--force` when parent exists; download tree has an extra `generated_videos/` level so `--generated-dir` must reflect it. |
