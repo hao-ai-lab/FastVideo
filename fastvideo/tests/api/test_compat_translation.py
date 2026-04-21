@@ -155,6 +155,51 @@ class TestLegacyLtx2VaeTilingTranslation:
         assert "ltx2_vae_tiling" not in args.kwargs
 
 
+class TestLegacyTextEncoderCompileTranslation:
+    """``enable_torch_compile_text_encoder`` flat kwarg promotes to
+    ``generator.engine.compile.text_encoder_enabled``; reverse direction
+    emits the legacy name back onto the FastVideoArgs kwargs dict so
+    realtime-runtime consumers can read it before FastVideoArgs filters
+    unknown fields."""
+
+    def test_forward_routes_to_compile_text_encoder_enabled(self) -> None:
+        config = legacy_from_pretrained_to_config(
+            "/models/ltx2",
+            {"enable_torch_compile_text_encoder": True},
+        )
+        assert config.engine.compile.text_encoder_enabled is True
+
+    def test_false_round_trips(self) -> None:
+        config = legacy_from_pretrained_to_config(
+            "/models/ltx2",
+            {"enable_torch_compile_text_encoder": False},
+        )
+        assert config.engine.compile.text_encoder_enabled is False
+
+    def test_unset_stays_none(self) -> None:
+        config = legacy_from_pretrained_to_config("/models/ltx2", {})
+        assert config.engine.compile.text_encoder_enabled is None
+
+    def test_reverse_emits_legacy_name(self, monkeypatch) -> None:
+        _stub_fastvideo_args_from_kwargs(monkeypatch)
+        config = GeneratorConfig(
+            model_path="/models/ltx2",
+            engine=_engine_with_compile(
+                CompileConfig(text_encoder_enabled=True)),
+        )
+        args = generator_config_to_fastvideo_args(config)
+        assert args.kwargs["enable_torch_compile_text_encoder"] is True
+
+    def test_reverse_unset_skips_key(self, monkeypatch) -> None:
+        _stub_fastvideo_args_from_kwargs(monkeypatch)
+        config = GeneratorConfig(
+            model_path="/models/ltx2",
+            engine=_engine_with_compile(CompileConfig()),
+        )
+        args = generator_config_to_fastvideo_args(config)
+        assert "enable_torch_compile_text_encoder" not in args.kwargs
+
+
 # -------------------------------------------------------------------
 # Helpers
 # -------------------------------------------------------------------

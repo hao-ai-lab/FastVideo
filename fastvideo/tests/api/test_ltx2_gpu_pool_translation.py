@@ -27,10 +27,19 @@ from fastvideo.api.compat import (
 
 # Mirrors FastVideo-internal/ui/ltx2-streaming/server/gpu_pool.py
 # :lines 233-260 (load_kwargs constructed for VideoGenerator.from_pretrained).
-# Skipped here because they are opaque Python objects that legitimately
-# belong in experimental:
-#   - pipeline_config=<PipelineConfig instance>
-#   - enable_torch_compile_text_encoder (not in public FastVideoArgs)
+#
+# One item from gpu_pool.py's load_kwargs is deliberately excluded:
+#   - ``pipeline_config=<PipelineConfig instance>`` — an opaque Python
+#     object; internal mutates it in place (``dit_config.quant_config =
+#     FP4Config()``). The typed path for quantization is tracked in
+#     "Known Technical Debt" in PR plan.md; ``pipeline_config`` as an
+#     instance legitimately belongs in ``pipeline.experimental``.
+#
+# ``enable_torch_compile_text_encoder`` IS included below: its typed
+# home is ``CompileConfig.text_encoder_enabled`` (added post-review).
+# The legacy ``FastVideoArgs`` path does not yet consume it; the
+# realtime runtime (PR 7.6) reads it off the kwargs dict before
+# FastVideoArgs filtering.
 GPU_POOL_LOAD_KWARGS = {
     "config_model_path": "/models/ltx2-distilled/config",
     "num_gpus": 1,
@@ -48,6 +57,7 @@ GPU_POOL_LOAD_KWARGS = {
     "ltx2_refine_guidance_scale": 1.0,
     "ltx2_refine_add_noise": True,
     "enable_torch_compile": True,
+    "enable_torch_compile_text_encoder": True,
     "torch_compile_kwargs": {
         "backend": "inductor",
         "fullgraph": True,
@@ -84,6 +94,7 @@ class TestGpuPoolForwardTranslation:
     def test_compile_config_typed_fields_extracted(self, config) -> None:
         compile_config = config.engine.compile
         assert compile_config.enabled is True
+        assert compile_config.text_encoder_enabled is True
         assert compile_config.backend == "inductor"
         assert compile_config.fullgraph is True
         assert compile_config.mode == "max-autotune-no-cudagraphs"
@@ -175,6 +186,12 @@ class TestGpuPoolReverseTranslation:
 
     def test_vae_tiling_reemitted_with_legacy_name(self, args_kwargs) -> None:
         assert args_kwargs["ltx2_vae_tiling"] is False
+
+    def test_text_encoder_compile_reemitted(self, args_kwargs) -> None:
+        # Present in the captured kwargs dict even though
+        # ``FastVideoArgs.from_kwargs`` will filter it out — realtime
+        # runtime upstream (PR 7.6) reads it off this dict.
+        assert args_kwargs["enable_torch_compile_text_encoder"] is True
 
     def test_no_stray_refine_dict(self, args_kwargs) -> None:
         """preset_overrides.refine must flatten to ltx2_refine_* kwargs

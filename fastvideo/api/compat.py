@@ -117,6 +117,8 @@ def legacy_from_pretrained_to_config(
             offload["pin_cpu_memory"] = value
         elif key == "enable_torch_compile":
             compile_config["enabled"] = value
+        elif key == "enable_torch_compile_text_encoder":
+            compile_config["text_encoder_enabled"] = value
         elif key == "torch_compile_kwargs":
             remaining: dict[str, Any] = (dict(deepcopy(value)) if isinstance(value, Mapping) else {})
             for first_class in _COMPILE_TYPED_KEYS:
@@ -234,6 +236,12 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         kwargs["workload_type"] = normalized.pipeline.workload_type
     if normalized.pipeline.vae_tiling is not None:
         kwargs["ltx2_vae_tiling"] = normalized.pipeline.vae_tiling
+    if engine.compile.text_encoder_enabled is not None:
+        # ``FastVideoArgs.from_kwargs`` filters to declared fields, so
+        # this is a no-op on the current legacy path. Emit anyway so the
+        # realtime runtime (PR 7.6) — which reads from the kwargs dict
+        # before FastVideoArgs filtering — can pick it up once wired.
+        kwargs["enable_torch_compile_text_encoder"] = (engine.compile.text_encoder_enabled)
 
     quantization = engine.quantization
     if quantization is not None and quantization.text_encoder_quant is not None:

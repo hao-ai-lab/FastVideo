@@ -41,6 +41,12 @@ class CompileConfig:
     """
 
     enabled: bool = False
+    text_encoder_enabled: bool | None = None
+    """Whether ``torch.compile`` is applied to the text encoder. ``None``
+    keeps the runtime default. The public ``FastVideoArgs`` adapter does
+    not yet consume this flag; reserved so the realtime runtime upstream
+    (PR 7.6) has a typed home for its ``enable_torch_compile_text_encoder``
+    kwarg without routing through ``pipeline.experimental``."""
     backend: str | None = None
     fullgraph: bool | None = None
     mode: str | None = None

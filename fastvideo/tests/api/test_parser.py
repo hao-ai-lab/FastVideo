@@ -113,6 +113,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 },
                 "compile": {
                     "enabled": False,
+                    "text_encoder_enabled": None,
                     "backend": None,
                     "fullgraph": None,
                     "mode": None,
