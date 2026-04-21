@@ -1,6 +1,6 @@
 ---
 name: seed-ssim-references
-description: Run a new (or updated) SSIM test on Modal, capture the generated videos, and upload them to the HF reference repo so the test can act as a regression guard. Use when a `fastvideo/tests/ssim/test_*.py` file has been added and has no reference video yet on `FastVideo/ssim-reference-videos`.
+description: Seed HF reference videos for a single newly-added SSIM test. Runs the test on Modal L40S, downloads the generated mp4s via `modal volume get`, pauses for the user to eyeball quality, then uploads only that test's files to `FastVideo/ssim-reference-videos`. Use when a new `fastvideo/tests/ssim/test_*_similarity.py` has just been added and has no references on HF yet.
 ---
 
 # Seed SSIM Reference Videos
@@ -8,205 +8,232 @@ description: Run a new (or updated) SSIM test on Modal, capture the generated vi
 ## Purpose
 
 A brand-new SSIM test in `fastvideo/tests/ssim/` fails forever until its
-reference videos exist on the HF dataset (`FastVideo/ssim-reference-videos` by
-default). This skill runs the test on Modal's L40S pool, pulls the generated
-videos back locally, moves them into the `reference_videos/` layout, and
-uploads to HF. After it runs, re-executing the same test on CI (or locally
-with the references downloaded) should pass.
+reference videos exist on the HF dataset (`FastVideo/ssim-reference-videos`).
+This skill:
 
-Use this skill when:
-- A `test_*_similarity.py` file has just landed on `main` and the HF repo
-  still reports "Reference video folder does not exist" for it.
-- An existing SSIM test's config changed (resolution, steps, prompt) and its
-  references need to be regenerated.
+1. Runs the test on Modal's L40S pool to generate the videos.
+2. Downloads them to the local repo via `modal volume get`.
+3. Pauses so the user can eyeball the mp4s and confirm quality.
+4. Uploads only the new test's files to HF, with a guard that refuses to
+   overwrite anything already present.
 
-Do not use this skill for regular CI runs — once the references exist, normal
-`pytest` is enough.
+The skill is run **manually**, once per new test. Before invoking it, the user
+has already sanity-tested the new test locally — it launches `VideoGenerator`
+and writes an mp4 without crashing. The skill does not re-test locally; it
+goes straight to Modal L40S (which is what CI uses).
 
-## Prerequisites
+## When to use
 
-- `modal` CLI installed and authenticated (`modal token set ...`).
-- HF API token with write access to `FastVideo/ssim-reference-videos`, exposed
-  via one of: `HF_API_KEY`, `HUGGINGFACE_HUB_TOKEN`, `HF_TOKEN`.
-- The test file under review already:
-  - declares `REQUIRED_GPUS` at module scope (so the Modal orchestrator
-    schedules correctly);
-  - exposes `<NAME>_MODEL_TO_PARAMS` (so CI can split one subprocess per
-    model id);
-  - registers in `fastvideo/tests/ssim/` using the shared helpers
-    (`resolve_inference_device_reference_folder`,
-    `run_text_to_video_similarity_test`, etc.).
-- The `ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:<IMAGE_VERSION>` container
-  tag is pullable (set `IMAGE_VERSION` or accept the `latest` default).
+- A new `test_*_similarity.py` file has been added in `fastvideo/tests/ssim/`
+  and the HF dataset has no `reference_videos/default/L40S_reference_videos/<model_id>/`
+  subtree for it yet.
+
+## When not to use
+
+- Regular CI runs — once refs exist, `pytest fastvideo/tests/ssim/` downloads
+  them automatically.
+- Re-seeding an existing test. That requires `--force` on the upload step, and
+  is out of scope here; treat as a separate, deliberate operation.
 
 ## Inputs
 
+The skill has **one required input**: the path to the new SSIM test file.
+Prompt the user for it if they didn't supply it.
+
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `test_file` | Yes | Path to the new test file, e.g. `fastvideo/tests/ssim/test_ltx2_similarity.py`. |
-| `model_ids` | No | Comma-separated subset of the test's model ids. Defaults to all. |
-| `quality_tier` | No | `default` (CI-friendly) or `full_quality`. Seed both if the test ships both. Default `default`. |
-| `commit` | No | Git commit to run against. Defaults to local `HEAD`. |
-| `git_repo` | No | Git repo URL. Defaults to `origin` remote of the local clone. |
-| `reference_repo` | No | Target HF dataset repo. Defaults to `FastVideo/ssim-reference-videos`. |
-| `device_folder` | No | Reference subfolder name, e.g. `L40S_reference_videos`. Defaults to `L40S_reference_videos` (the Modal runner's GPU). |
+| `test_file` | Yes | e.g. `fastvideo/tests/ssim/test_ltx2_similarity.py`. The skill's first action is to ask for this if missing. |
+
+Everything else is fixed:
+
+- Modal runner GPU: **L40S** (hardcoded in `fastvideo/tests/modal/ssim_test.py`).
+- Device folder: `L40S_reference_videos`.
+- Quality tier: `default` (the tier CI runs). The `full_quality` tier is not
+  seeded by this skill.
+- HF repo: `FastVideo/ssim-reference-videos` (dataset).
+- Multi-model test files: all model ids in `*_MODEL_TO_PARAMS` are seeded
+  together; the Modal run produces one mp4 per (model, prompt, backend) and
+  the upload scopes by `--model-id`, looping if there is more than one.
+
+## Prerequisites
+
+The user has confirmed:
+
+- `modal` CLI authenticated.
+- `HF_API_KEY` (or `HUGGINGFACE_HUB_TOKEN` / `HF_TOKEN`) exported with write
+  access to `FastVideo/ssim-reference-videos`.
+- The test file runs locally end-to-end (generates an mp4; SSIM assertion
+  failure due to missing reference is expected and fine).
+
+Fail fast if the token env var is missing.
 
 ## Steps
 
-### 1. Verify preconditions
+### 1. Ask for the test file
 
-- Confirm `test_file` exists and matches `test_*_similarity.py`.
-- Grep for `REQUIRED_GPUS` and `*_MODEL_TO_PARAMS` in the file — if missing,
-  stop and direct the user to add them (see `fastvideo/tests/ssim/README.md`
-  "Adding a New SSIM Test").
-- Confirm `HF_API_KEY` (or equivalent) is exported.
-- Confirm `modal token current` succeeds.
+If the user didn't name one, ask: *"Which SSIM test file do you want to seed
+references for? (e.g. `fastvideo/tests/ssim/test_ltx2_similarity.py`)"*.
 
-### 2. Run the test on Modal with video export enabled
+Validate:
 
-Run from the repo root:
+- Path exists and matches `fastvideo/tests/ssim/test_*_similarity.py`.
+- File defines a `*_MODEL_TO_PARAMS` dict — grep it to extract the set of
+  model ids. Those ids drive step 5.
 
-```bash
-bash .agents/skills/seed-ssim-references/scripts/seed_ssim.sh \
-  --test-file fastvideo/tests/ssim/test_ltx2_similarity.py \
-  --quality-tier default
-```
+If either check fails, stop and tell the user what's wrong.
 
-The script is a thin wrapper that:
+### 2. Run the test on Modal L40S
 
-1. Computes `git_repo` and `git_commit` if not supplied.
-2. Invokes:
-  
-```
-   modal run fastvideo/tests/modal/ssim_test.py \
-     --test-files=<test_file> \
-     --sync-generated-to-volume \
-     --skip-reference-download \
-     --no-fail-fast \
-     [--full-quality]
-   ```
-  
-`--skip-reference-download` prevents the conftest from pre-pulling
-   (there are no references yet); `--no-fail-fast` lets generation finish
-   before `_assert_similarity` raises; `--sync-generated-to-volume` copies
-   the generated videos to the Modal volume `hf-model-weights`.
-3. Captures the Modal volume path printed at the end of the run — it looks
-   like `ssim_generated_videos/<tier>/<timestamp>_<short_commit>/generated_videos`.
-
-### 3. Pull the generated videos back
-
-Using the path printed in step 2:
+Pick a subdir name so repeated runs don't collide:
 
 ```bash
-modal volume get hf-model-weights \
-  ssim_generated_videos/<tier>/<subdir>/generated_videos \
-  ./generated_videos_modal/<tier>
+SHORT_COMMIT=$(git rev-parse --short=12 HEAD)
+TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
+SUBDIR="${TIMESTAMP}_${SHORT_COMMIT}"
 ```
 
-### 4. Copy into the `reference_videos/` layout
-
-```bash
-python fastvideo/tests/ssim/reference_videos_cli.py copy-local \
-  --quality-tier <tier> \
-  --generated-dir ./generated_videos_modal/<tier>/L40S_reference_videos \
-  --device-folder L40S_reference_videos
-```
-
-This produces `fastvideo/tests/ssim/reference_videos/<tier>/L40S_reference_videos/<model>/<backend>/<prompt>.mp4`.
-
-### 5. Upload to HF
-
-```bash
-python fastvideo/tests/ssim/reference_videos_cli.py upload \
-  --quality-tier <tier> \
-  --device-folder L40S_reference_videos
-```
-
-The CLI reads the HF token from `HF_API_KEY` / `HUGGINGFACE_HUB_TOKEN` /
-`HF_TOKEN` and fails fast if none are set. Override the target repo with
-`FASTVIDEO_SSIM_REFERENCE_HF_REPO=<org/repo>` if you need a non-default
-destination.
-
-### 6. Verify
-
-Re-run the test locally (or on Modal) **without** `--skip-reference-download`:
+Then launch the Modal run:
 
 ```bash
 modal run fastvideo/tests/modal/ssim_test.py \
-  --test-files=fastvideo/tests/ssim/test_ltx2_similarity.py
+    --git-repo="$(git config --get remote.origin.url)" \
+    --git-commit="$(git rev-parse HEAD)" \
+    --hf-api-key="$HF_API_KEY" \
+    --test-files="<test_file>" \
+    --sync-generated-to-volume \
+    --generated-volume-subdir="$SUBDIR" \
+    --skip-reference-download \
+    --no-fail-fast
 ```
 
-The conftest will now auto-download the references you just uploaded and the
-SSIM comparison should pass. If it still fails, compare the local generated
-video against the uploaded reference to see whether the threshold needs
-adjusting.
+Flag rationale:
+- `--skip-reference-download`: no refs exist yet, so conftest must not try to
+  pull them.
+- `--no-fail-fast`: lets the test finish generation before `_assert_similarity`
+  raises `FileNotFoundError: Reference video folder does not exist`. The
+  expected failure is what we want — the mp4 has already been written.
+- `--sync-generated-to-volume` + `--generated-volume-subdir`: copies the
+  generated mp4s to the `hf-model-weights` Modal volume under
+  `ssim_generated_videos/default/<SUBDIR>/generated_videos/` so we can pull
+  them locally.
 
-### 7. Seed the full-quality tier if applicable
+The Modal run will end with a nonzero exit (expected) and print a
+`modal volume get hf-model-weights ssim_generated_videos/default/<SUBDIR>/generated_videos ./generated_videos_modal/default`
+command. Capture that `<SUBDIR>` — you need it for step 3.
 
-If the test ships both tiers, repeat steps 2-5 with `--quality-tier
-full_quality` (which passes `--full-quality` to the Modal run).
+### 3. Download generated videos locally
 
-## Outputs
-
-- Generated videos on the Modal volume `hf-model-weights` under
-  `ssim_generated_videos/<tier>/<subdir>/generated_videos/...`.
-- Local copies under `./generated_videos_modal/<tier>/...`.
-- Local references under `fastvideo/tests/ssim/reference_videos/<tier>/L40S_reference_videos/...`.
-- Uploaded references on HF at `<reference_repo>` (default
-  `FastVideo/ssim-reference-videos`).
-
-## Example Usage
-
-Seed the new LTX-2 test (PR #1240) on main, default tier only:
-
-```
-Prompt: "Seed SSIM references for fastvideo/tests/ssim/test_ltx2_similarity.py"
-  test_file: fastvideo/tests/ssim/test_ltx2_similarity.py
-  quality_tier: default
+```bash
+modal volume get hf-model-weights \
+    ssim_generated_videos/default/"$SUBDIR"/generated_videos \
+    ./generated_videos_modal/default
 ```
 
-Seed both tiers for an existing test whose config just changed:
+After this, the mp4s live at
+`./generated_videos_modal/default/L40S_reference_videos/<model_id>/<backend>/<prompt>.mp4`.
 
+### 4. PAUSE — user reviews quality
+
+Print the list of downloaded mp4s and their paths, then stop. Tell the user:
+
+> "Generated videos downloaded to `./generated_videos_modal/default/L40S_reference_videos/`. Please open them and confirm the quality looks correct. Reply **`upload`** to continue, or anything else to abort."
+
+Do not proceed until the user explicitly says `upload`. If they abort, leave
+everything on disk so they can inspect further — no cleanup.
+
+### 5. Copy into the local reference layout
+
+Scoped copy — only the new test's mp4s. Loop over each `<model_id>` extracted
+in step 1:
+
+```bash
+python fastvideo/tests/ssim/reference_videos_cli.py copy-local \
+    --quality-tier default \
+    --device-folder L40S_reference_videos \
+    --generated-dir ./generated_videos_modal/default/L40S_reference_videos
 ```
-Prompt: "Re-seed test_wan_t2v_similarity.py; I bumped num_frames from 45 to 49"
-  test_file: fastvideo/tests/ssim/test_wan_t2v_similarity.py
-  quality_tier: default, then full_quality
+
+(The `--generated-dir` points at the device-folder root; `copy-local` walks
+all `<model>/<backend>/*.mp4` underneath it. Since the Modal run was scoped
+to a single test file via `--test-files`, only that test's model(s) are
+present — so the copy is implicitly per-test.)
+
+Result: `fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos/<model_id>/<backend>/<prompt>.mp4`.
+
+### 6. Upload to HF — scoped per model_id, with overwrite guard
+
+For each `<model_id>`:
+
+```bash
+python fastvideo/tests/ssim/reference_videos_cli.py upload \
+    --quality-tier default \
+    --device-folder L40S_reference_videos \
+    --model-id "<model_id>"
 ```
 
-## Troubleshooting
+The upload command:
 
-- **"Hugging Face token is required"** — export `HF_API_KEY` in the shell
-  that runs `modal run`. Modal passes it through as a secret.
-- **"No generated_videos directory found for quality tier"** — the test
-  didn't actually run inside the Modal container. Most common cause:
-  `REQUIRED_GPUS` larger than the partition has (the orchestrator skips
-  oversized tasks). Check the Modal logs under
-  `Partition <i>: running <x>/<y> tasks`.
-- **`ensure_reference_videos_available` still fails after upload** — the
-  HF dataset has caching; add a short sleep before step 6 or pass
-  `--skip-reference-download` and rely on local `reference_videos/` for
-  the first verification run.
-- **Test passes locally but fails on Modal** — the Modal runner is L40S;
-  if you generated references on a different GPU SKU, use the right
-  `--device-folder` name (`A40_reference_videos`, `H100_reference_videos`,
-  etc.).
+- Uploads **only** `reference_videos/default/L40S_reference_videos/<model_id>/`.
+- **Refuses** if any file already exists at that path on HF (this is the
+  guard — seeding a new test should never clobber existing refs). To override,
+  the user must re-run with `--force`. If the guard fires, stop and report
+  exactly which files exist; do not silently `--force`.
+
+Reads the HF token from `HF_API_KEY` / `HUGGINGFACE_HUB_TOKEN` / `HF_TOKEN`.
+
+### 7. Report success
+
+List what was uploaded (paths in repo) and remind the user to push any
+related code changes. Do **not** auto-verify by re-running Modal — the user
+can run `pytest fastvideo/tests/ssim/<test_file>` later to confirm end-to-end;
+it will auto-download the refs they just uploaded.
+
+## Failure modes and how to handle them
+
+- **`HF_API_KEY` unset.** Stop before step 2. The Modal run needs it (passed
+  via `--hf-api-key`), and step 6 needs it for upload.
+- **Modal run fails before generation.** No mp4s on the volume — nothing to
+  download. Fix the test locally (`pytest fastvideo/tests/ssim/<test_file>`)
+  and retry from step 2.
+- **`./generated_videos_modal/default/L40S_reference_videos/` missing after
+  `modal volume get`.** The run didn't produce videos (most likely the test
+  crashed before writing, or `REQUIRED_GPUS` exceeded the partition capacity
+  — see Modal logs).
+- **Upload guard fires (files already exist).** The test name / model id
+  collides with something already on HF. Verify the user actually wants to
+  replace existing refs; if so, re-run the upload with `--force`. If not,
+  rename the model id in `*_MODEL_TO_PARAMS` and re-seed.
+- **Quality looks wrong in step 4.** Abort. The mp4s stay on disk for
+  inspection. The fix is usually in the test's params (resolution, steps,
+  seed) — edit the test, then re-run the skill.
+
+## Design notes (for future skill maintainers)
+
+- The skill deliberately runs on Modal, **not** locally, because the CI
+  runner is L40S. Seeding from a different GPU SKU produces refs that CI's
+  L40S runs can't match (SSIM drifts across SKUs).
+- The skill is default-tier only. `full_quality` refs are seeded by a
+  separate, deliberate operation — they double runtime and aren't what CI
+  gates on.
+- The overwrite guard in `reference_videos_cli.py upload` is default-on
+  specifically because this skill exists. Re-seeding is a distinct operation
+  that requires explicit `--force`.
 
 ## References
 
-- `fastvideo/tests/modal/ssim_test.py` (`run_ssim_tests` local entrypoint,
-  `run_ssim_partition` Modal function, `--sync-generated-to-volume` flow).
-- `fastvideo/tests/ssim/reference_videos_cli.py` (`copy-local`, `upload`,
-  `download` subcommands, HF repo conventions).
-- `fastvideo/tests/ssim/inference_similarity_utils.py`
-  (`run_text_to_video_similarity_test` + `_build_init_kwargs` — what each
-  test config ends up passing to `VideoGenerator.from_pretrained`).
-- `fastvideo/tests/ssim/conftest.py` (`--skip-ssim-reference-download`,
-  `--ssim-full-quality`, `--ssim-reference-repo` pytest options).
-- `fastvideo/tests/ssim/README.md` ("Adding a New SSIM Test" checklist,
-  reference videos layout, HF repo layout).
+- `fastvideo/tests/modal/ssim_test.py` — Modal orchestrator; see
+  `--sync-generated-to-volume`, `--generated-volume-subdir`,
+  `--skip-reference-download`, `--no-fail-fast`.
+- `fastvideo/tests/ssim/reference_videos_cli.py` — `copy-local`, `upload`
+  (with `--model-id`, `--force`), `download`, `ensure` subcommands.
+- `fastvideo/tests/ssim/README.md` — reference layout, HF repo conventions.
+- `fastvideo/tests/ssim/inference_similarity_utils.py` —
+  `run_text_to_video_similarity_test` + `_build_init_kwargs`: what each test
+  config passes to `VideoGenerator.from_pretrained`.
 
 ## Changelog
 
 | Date | Change |
 |------|--------|
-| 2026-04-17 | Initial version. Documents the `--sync-generated-to-volume` seeding flow introduced by `ssim_test.py`. |
+| 2026-04-17 | Initial version (Modal sync-to-volume flow). |
+| 2026-04-21 | Rewrite: single-test scope, explicit user-review pause, per-`model_id` upload, HF overwrite guard. Dropped `scripts/seed_ssim.sh`. |
