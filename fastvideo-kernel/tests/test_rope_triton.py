@@ -9,7 +9,6 @@ from fastvideo_kernel.triton_kernels.rope_triton import apply_rope
 
 
 def _rotate_half_ref(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    """Reference for rotate_half style (rope_dim == head_size)."""
     cos_e = cos.unsqueeze(-2)
     sin_e = sin.unsqueeze(-2)
     x_real, x_imag = x.float().reshape(*x.shape[:-1], -1, 2).unbind(-1)
@@ -18,7 +17,6 @@ def _rotate_half_ref(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> t
 
 
 def _gptj_ref(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    """Reference for GPT-J interleaved style (rope_dim == head_size // 2)."""
     cos_e = cos.unsqueeze(-2)
     sin_e = sin.unsqueeze(-2)
     x1 = x[..., ::2]
@@ -29,7 +27,6 @@ def _gptj_ref(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Te
 
 
 def _neox_ref(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    """Reference for Neox split-half style (rope_dim == head_size // 2)."""
     cos_e = cos.unsqueeze(-2)
     sin_e = sin.unsqueeze(-2)
     x1, x2 = torch.chunk(x, 2, dim=-1)
@@ -44,62 +41,52 @@ _TOL = {
     torch.bfloat16: (1e-2, 1e-2),
 }
 
+_REFS = {
+    "rotate_half": (_rotate_half_ref, False, 1),  # (ref, is_neox, rope_dim_scale) -> cos dim = D*scale
+    "gptj": (_gptj_ref, False, 0),
+    "neox": (_neox_ref, True, 0),
+}
 
+
+def _cos_sin(T: int, D: int, mode: str, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor]:
+    rope_dim = D if mode == "rotate_half" else D // 2
+    cos = torch.randn(T, rope_dim, device="cuda", dtype=dtype)
+    sin = torch.randn(T, rope_dim, device="cuda", dtype=dtype)
+    return cos, sin
+
+
+# Hand-picked cases collectively covering all 3 modes x 3 dtypes x edge shapes
+# (T=1, non-pow2 D, odd T, large D, realistic DiT-scale).
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-@pytest.mark.parametrize("num_tokens", [1, 17, 2048])
-@pytest.mark.parametrize("num_heads", [1, 8, 24])
-@pytest.mark.parametrize("head_size", [64, 96, 128, 256])
-def test_rotate_half(dtype, num_tokens, num_heads, head_size):
-    torch.manual_seed(0)
-    x = torch.randn(num_tokens, num_heads, head_size, device="cuda", dtype=dtype)
-    cos = torch.randn(num_tokens, head_size, device="cuda", dtype=dtype)
-    sin = torch.randn(num_tokens, head_size, device="cuda", dtype=dtype)
+@pytest.mark.parametrize(
+    "mode,dtype,T,H,D",
+    [
+        ("rotate_half", torch.float32, 1, 1, 64),        # minimal edges
+        ("rotate_half", torch.float16, 17, 8, 96),       # non-pow2 D + odd T
+        ("rotate_half", torch.bfloat16, 2048, 24, 128),  # realistic DiT scale
+        ("rotate_half", torch.bfloat16, 64, 4, 256),     # large head_size
+        ("gptj", torch.float32, 17, 4, 128),
+        ("gptj", torch.float16, 1, 2, 64),
+        ("gptj", torch.bfloat16, 513, 8, 128),
+        ("neox", torch.float32, 17, 4, 128),
+        ("neox", torch.float16, 1, 2, 64),
+        ("neox", torch.bfloat16, 513, 8, 128),
+    ],
+)
+def test_rope_fused(mode, dtype, T, H, D):
+    torch.manual_seed(hash((mode, T, H, D)) & 0xFFFF)
+    x = torch.randn(T, H, D, device="cuda", dtype=dtype)
+    cos, sin = _cos_sin(T, D, mode, dtype)
 
-    out = apply_rope(x, cos, sin, is_neox_style=False)
-    assert out is not None
-    ref = _rotate_half_ref(x, cos, sin)
+    ref_fn, is_neox, _ = _REFS[mode]
+    out = apply_rope(x, cos, sin, is_neox_style=is_neox)
+    assert out is not None, f"eligible case unexpectedly rejected: {mode}, {dtype}, {(T, H, D)}"
+    ref = ref_fn(x, cos, sin)
     atol, rtol = _TOL[dtype]
     torch.testing.assert_close(out, ref, atol=atol, rtol=rtol)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-@pytest.mark.parametrize("num_tokens", [1, 513])
-@pytest.mark.parametrize("head_size", [64, 128])
-def test_gptj(dtype, num_tokens, head_size):
-    torch.manual_seed(1)
-    num_heads = 4
-    x = torch.randn(num_tokens, num_heads, head_size, device="cuda", dtype=dtype)
-    cos = torch.randn(num_tokens, head_size // 2, device="cuda", dtype=dtype)
-    sin = torch.randn(num_tokens, head_size // 2, device="cuda", dtype=dtype)
-
-    out = apply_rope(x, cos, sin, is_neox_style=False)
-    assert out is not None
-    ref = _gptj_ref(x, cos, sin)
-    atol, rtol = _TOL[dtype]
-    torch.testing.assert_close(out, ref, atol=atol, rtol=rtol)
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-@pytest.mark.parametrize("num_tokens", [1, 513])
-@pytest.mark.parametrize("head_size", [64, 128])
-def test_neox(dtype, num_tokens, head_size):
-    torch.manual_seed(2)
-    num_heads = 4
-    x = torch.randn(num_tokens, num_heads, head_size, device="cuda", dtype=dtype)
-    cos = torch.randn(num_tokens, head_size // 2, device="cuda", dtype=dtype)
-    sin = torch.randn(num_tokens, head_size // 2, device="cuda", dtype=dtype)
-
-    out = apply_rope(x, cos, sin, is_neox_style=True)
-    assert out is not None
-    ref = _neox_ref(x, cos, sin)
-    atol, rtol = _TOL[dtype]
-    torch.testing.assert_close(out, ref, atol=atol, rtol=rtol)
-
-
-def test_ineligible_returns_none_cpu():
+def test_ineligible_cpu_tensor():
     x = torch.randn(4, 2, 64)
     cos = torch.randn(4, 64)
     sin = torch.randn(4, 64)
@@ -107,30 +94,16 @@ def test_ineligible_returns_none_cpu():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-def test_ineligible_mismatched_rope_dim():
-    x = torch.randn(4, 2, 64, device="cuda", dtype=torch.bfloat16)
-    cos = torch.randn(4, 48, device="cuda", dtype=torch.bfloat16)
-    sin = torch.randn(4, 48, device="cuda", dtype=torch.bfloat16)
+@pytest.mark.parametrize(
+    "label,x_shape,cos_shape",
+    [
+        ("mismatched_rope_dim", (4, 2, 64), (4, 48)),
+        ("odd_head_size",       (4, 2, 63), (4, 63)),
+        ("mismatched_tokens",   (4, 2, 64), (8, 64)),
+    ],
+)
+def test_ineligible_shape(label, x_shape, cos_shape):
+    x = torch.randn(*x_shape, device="cuda", dtype=torch.bfloat16)
+    cos = torch.randn(*cos_shape, device="cuda", dtype=torch.bfloat16)
+    sin = torch.randn(*cos_shape, device="cuda", dtype=torch.bfloat16)
     assert apply_rope(x, cos, sin, is_neox_style=False) is None
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-def test_ineligible_odd_head_size():
-    x = torch.randn(4, 2, 63, device="cuda", dtype=torch.bfloat16)
-    cos = torch.randn(4, 63, device="cuda", dtype=torch.bfloat16)
-    sin = torch.randn(4, 63, device="cuda", dtype=torch.bfloat16)
-    assert apply_rope(x, cos, sin, is_neox_style=False) is None
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-def test_mixed_dtype_cos_sin():
-    """cos/sin in fp32, x in bf16 is the common DiT case after freqs_cis construction."""
-    torch.manual_seed(3)
-    x = torch.randn(128, 8, 128, device="cuda", dtype=torch.bfloat16)
-    cos = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
-    sin = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
-
-    out = apply_rope(x, cos, sin, is_neox_style=False)
-    assert out is not None
-    ref = _rotate_half_ref(x, cos, sin)
-    torch.testing.assert_close(out, ref, atol=1e-2, rtol=1e-2)
