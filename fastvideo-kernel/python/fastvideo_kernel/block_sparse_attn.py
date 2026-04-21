@@ -76,6 +76,17 @@ def _invert_indices_for_backward(
     return invert_indices(q2k_idx, q2k_num, num_kv_blocks=num_kv_blocks)
 
 
+def _as_int32_contig(t: torch.Tensor, name: str) -> torch.Tensor:
+    """Return `t` as a contiguous int32 tensor, raising a clear error on CPU input."""
+    if not t.is_cuda:
+        raise RuntimeError(f"{name} must be a CUDA tensor, got device={t.device}")
+    if t.dtype != torch.int32:
+        t = t.to(torch.int32)
+    if not t.is_contiguous():
+        t = t.contiguous()
+    return t
+
+
 # ---------------------------------------------------------------------------
 # Triton backend custom ops (index-native)
 # ---------------------------------------------------------------------------
@@ -151,11 +162,13 @@ def block_sparse_attn_backward_triton(
     k2q_idx, k2q_num = _invert_indices_for_backward(
         q2k_idx, q2k_num, num_kv_blocks
     )
+    # q/k/v are saved from the user-facing inputs and may be non-contiguous;
+    # o/M are kernel outputs so are already contiguous.
     dq, dk, dv = triton_block_sparse_attn_backward(
         grad_output.contiguous(),
-        q,
-        k,
-        v,
+        q.contiguous(),
+        k.contiguous(),
+        v.contiguous(),
         o,
         M,
         q2k_idx,
@@ -232,7 +245,7 @@ def block_sparse_attn_sm90(
         v_padded.contiguous(),
         q2k_idx,
         q2k_num,
-        variable_block_sizes.int(),
+        variable_block_sizes,
     )
     return o_padded, lse_padded
 
@@ -280,16 +293,17 @@ def block_sparse_attn_backward_sm90(
         q2k_idx, q2k_num, num_kv_blocks
     )
 
+    # q/k/v are saved from user-facing inputs; o/lse are kernel outputs.
     dq, dk, dv = block_sparse_bwd(
-        q_padded,
-        k_padded,
-        v_padded,
+        q_padded.contiguous(),
+        k_padded.contiguous(),
+        v_padded.contiguous(),
         o_padded,
         lse_padded,
         grad_output_padded.contiguous(),
         k2q_idx,
         k2q_num,
-        variable_block_sizes.int(),
+        variable_block_sizes,
     )
     # C++ kernel returns fp32 grads; cast back to the input dtype.
     out_dtype = grad_output_padded.dtype
@@ -347,6 +361,12 @@ def block_sparse_attn_from_indices(
     variable_block_sizes: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Block-sparse attention with autograd, taking compact per-row KV indices."""
+    # Normalize index tensors once at the public boundary so the custom ops
+    # and their fakes can assume int32/contiguous. No-op on well-formed input.
+    q2k_idx = _as_int32_contig(q2k_idx, "q2k_idx")
+    q2k_num = _as_int32_contig(q2k_num, "q2k_num")
+    variable_block_sizes = _as_int32_contig(variable_block_sizes, "variable_block_sizes")
+
     block_sparse_fwd, block_sparse_bwd = _get_sm90_ops()
     use_sm90 = (
         (not _force_triton())

@@ -1,5 +1,5 @@
 ## pytorch sdpa version of block sparse ##
-from typing import Optional, Tuple
+from typing import Tuple
 
 import triton
 import triton.language as tl
@@ -211,7 +211,6 @@ def invert_indices(
     q2k_idx: torch.Tensor,
     q2k_num: torch.Tensor,
     num_kv_blocks: int,
-    max_q_per_kv: Optional[int] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Transpose a Q->KV index list into a K->Q one via atomic compaction (GPU)."""
     if q2k_idx.dim() != 4:
@@ -239,11 +238,10 @@ def invert_indices(
     if q2k_num.dtype != torch.int32:
         q2k_num = q2k_num.to(torch.int32)
 
-    if max_q_per_kv is None:
-        max_q_per_kv = Nq
-
+    # Any KV block is attended by at most Nq Q blocks (one per Q row), so
+    # `Nq` is a tight upper bound on the compacted K->Q slots.
     k2q_idx = torch.empty(
-        (B, H, num_kv_blocks, max_q_per_kv),
+        (B, H, num_kv_blocks, Nq),
         dtype=torch.int32,
         device=q2k_idx.device,
     )
