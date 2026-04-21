@@ -114,7 +114,21 @@ python .agents/skills/fastvideo-port/scripts/recon.py $ARGUMENTS \
 cat recon_<model_name>.json
 ```
 
-Then verify/supplement the output by reading the README and key model files.
+**Manually verify the recon output** — several fields are regex-derived and
+frequently wrong. For each model file in `recon.model_files`, fetch and read
+it (use `gh_raw` in recon.py, or read the GitHub URL directly). Cross-check:
+
+| Field | Common failure | How to verify |
+|-------|---------------|---------------|
+| `num_layers` | Regex hits a loop variable (`range(1)`) not the config | Search for `num_layers`, `depth`, `n_layers` in config/init args |
+| `class_name` | Hits a helper class, not the top-level DiT | Find the class that takes `x`, `timestep`, `encoder_hidden_states` as forward args |
+| `text_encoders` | Over-matches (e.g. both "t5" and "t5gemma" as separate entries) | Read the encoder loading code — one model ID is actually used |
+| `scheduler.type` | README mentions DDIM in background context | Check the actual noise schedule in the sampling loop |
+| `hf_repo` | Matches a HuggingFace Space, not a weights repo | Verify it has model card + weight files, not just a demo |
+
+After reading the source, correct `recon_<model_name>.json` manually and save
+it — the corrected JSON is the source of truth for Phase 1.
+
 Answer all questions from `coding_agents.md § "questions to ask yourself"`:
 
 **Checklist:**
