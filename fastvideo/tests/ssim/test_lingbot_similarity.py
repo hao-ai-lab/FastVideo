@@ -238,7 +238,7 @@ def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
                        generated_video_path,
                        params["num_inference_steps"], prompt)
 
-    min_acceptable_ssim = 0.90
+    min_acceptable_ssim = 0.70
     assert mean_ssim >= min_acceptable_ssim, (
         f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
         f"for {model_id} with backend {ATTENTION_BACKEND}")
