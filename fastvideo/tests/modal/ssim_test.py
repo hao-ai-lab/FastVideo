@@ -480,10 +480,10 @@ def _prepare_ssim_workspace(
     {checkout_command}
     rm -rf fastvideo/tests/ssim/reference_videos
     git_retry git submodule update --init --recursive
+    uv pip install -e .[test]
     cd fastvideo-kernel
     ./build.sh
     cd ..
-    uv pip install -e .[test]
     uv pip install git+https://github.com/microsoft/MoGe.git
     export HF_HOME='/root/data/.cache'
     hf auth login --token "$HF_API_KEY"

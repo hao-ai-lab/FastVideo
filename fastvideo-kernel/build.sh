@@ -61,7 +61,16 @@ has_cmake_arg() {
 }
 
 detect_with_torch() {
-    uv run --active --no-project python -c "import torch
+    # Prefer the active venv's python directly over `uv run --active --no-project`,
+    # which on some uv versions provisions its own interpreter and misses packages
+    # installed into VIRTUAL_ENV.
+    local py
+    if [[ -n "${VIRTUAL_ENV:-}" && -x "${VIRTUAL_ENV}/bin/python" ]]; then
+        py="${VIRTUAL_ENV}/bin/python"
+    else
+        py="$(command -v python3 || command -v python)"
+    fi
+    "${py}" -c "import torch
 if not torch.cuda.is_available():
     raise RuntimeError('torch.cuda.is_available() is false')
 mj, mn = torch.cuda.get_device_capability(0)
