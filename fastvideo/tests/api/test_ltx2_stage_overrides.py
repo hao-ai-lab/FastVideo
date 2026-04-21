@@ -9,9 +9,9 @@ from fastvideo.api.presets import get_preset, validate_stage_overrides
 from fastvideo.pipelines.basic.ltx2.stage_overrides import (
     LTX2RefinePresetOverride,
     LTX2RefineStageOverride,
+    REFINE_PRESET_OVERRIDE_FIELDS,
+    REFINE_STAGE_OVERRIDE_FIELDS,
     refine_override_to_dict,
-    refine_preset_override_fields,
-    refine_stage_override_fields,
 )
 
 
@@ -57,7 +57,7 @@ class TestRefineStageOverrideDataclass:
         }
 
     def test_fields_accessor_matches_dataclass(self) -> None:
-        assert refine_stage_override_fields() == frozenset({
+        assert REFINE_STAGE_OVERRIDE_FIELDS == frozenset({
             "num_inference_steps",
             "guidance_scale",
             "image_crf",
@@ -86,7 +86,7 @@ class TestRefinePresetOverrideDataclass:
         }
 
     def test_fields_accessor_matches_dataclass(self) -> None:
-        assert refine_preset_override_fields() == frozenset({
+        assert REFINE_PRESET_OVERRIDE_FIELDS == frozenset({
             "enabled",
             "add_noise",
         })
@@ -101,7 +101,7 @@ class TestStageOverridesMirrorPresetSchema:
         preset = get_preset("ltx2_two_stage", "ltx2")
         refine_schema = next(
             s for s in preset.stage_schemas if s.name == "refine")
-        assert refine_schema.allowed_overrides == refine_stage_override_fields()
+        assert refine_schema.allowed_overrides == REFINE_STAGE_OVERRIDE_FIELDS
 
     def test_roundtrip_through_validate_stage_overrides(self) -> None:
         import fastvideo.registry  # noqa: F401

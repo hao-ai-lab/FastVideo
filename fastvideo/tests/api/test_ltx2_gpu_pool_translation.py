@@ -4,14 +4,8 @@
 Mirrors the ``load_kwargs`` dict that the FastVideo-internal
 ``ui/ltx2-streaming/server/gpu_pool.py`` passes to
 ``VideoGenerator.from_pretrained(**load_kwargs)`` and asserts that the
-public typed ``GeneratorConfig`` surface (introduced across PRs 0-6)
-can represent it end-to-end, with no fields silently falling through
-to ``pipeline.experimental``.
-
-This is the parity guard PR 7.6 depends on: the public gpu_pool
-upstream must be able to construct a typed ``GeneratorConfig`` without
-knowing any legacy LTX-2 kwarg name, and downstream Dynamo
-(``FastVideoArgGroup``) must be able to do the same.
+public typed ``GeneratorConfig`` surface can represent it end-to-end,
+with no fields silently falling through to ``pipeline.experimental``.
 """
 from __future__ import annotations
 
@@ -122,11 +116,9 @@ class TestGpuPoolForwardTranslation:
 
 class TestGpuPoolReverseTranslation:
     """typed GeneratorConfig -> FastVideoArgs kwargs reproduces the
-    original gpu_pool flat-kwarg shape.
-
-    This is what lets PR 7.6 wire the public ``gpu_pool`` through
-    ``generator_config_to_fastvideo_args`` without the runtime noticing.
-    """
+    original gpu_pool flat-kwarg shape, so callers can wire a public
+    ``gpu_pool`` through ``generator_config_to_fastvideo_args`` without
+    the runtime noticing."""
 
     @pytest.fixture
     def args_kwargs(self, monkeypatch):
@@ -196,9 +188,7 @@ class TestRefineFlattenCoversAllTypedFields:
         )
         from fastvideo.api.schema import GeneratorConfig, PipelineSelection
         from fastvideo.pipelines.basic.ltx2.stage_overrides import (
-            refine_preset_override_fields,
-            refine_stage_override_fields,
-        )
+            REFINE_FLAT_KEYS, )
 
         captured: dict[str, object] = {}
 
@@ -223,9 +213,7 @@ class TestRefineFlattenCoversAllTypedFields:
             "image_crf": 18,
             "video_position_offset_sec": 2.5,
         }
-        all_fields = (refine_preset_override_fields()
-                      | refine_stage_override_fields())
-        assert set(refine_payload) == all_fields, (
+        assert set(refine_payload) == REFINE_FLAT_KEYS, (
             "payload must cover every typed field to exercise the flatten loop")
 
         config = GeneratorConfig(

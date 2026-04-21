@@ -27,8 +27,6 @@ class LTX2RefinePresetOverride:
 class LTX2RefineStageOverride:
     """Per-request refine tuning under ``stage_overrides.refine``."""
 
-    # Stage-2 refine only validates 2 (reduced) and 3 (official distilled)
-    # sigma schedules; other values raise at pipeline construction.
     num_inference_steps: int | None = None
     guidance_scale: float | None = None
     image_crf: int | None = None
@@ -42,18 +40,15 @@ def refine_override_to_dict(override: LTX2RefinePresetOverride | LTX2RefineStage
     return {k: v for k, v in asdict(override).items() if v is not None}
 
 
-def refine_preset_override_fields() -> frozenset[str]:
-    return frozenset(f.name for f in fields(LTX2RefinePresetOverride))
-
-
-def refine_stage_override_fields() -> frozenset[str]:
-    return frozenset(f.name for f in fields(LTX2RefineStageOverride))
-
+REFINE_PRESET_OVERRIDE_FIELDS: frozenset[str] = frozenset(f.name for f in fields(LTX2RefinePresetOverride))
+REFINE_STAGE_OVERRIDE_FIELDS: frozenset[str] = frozenset(f.name for f in fields(LTX2RefineStageOverride))
+REFINE_FLAT_KEYS: frozenset[str] = (REFINE_PRESET_OVERRIDE_FIELDS | REFINE_STAGE_OVERRIDE_FIELDS)
 
 __all__ = [
     "LTX2RefinePresetOverride",
     "LTX2RefineStageOverride",
+    "REFINE_FLAT_KEYS",
+    "REFINE_PRESET_OVERRIDE_FIELDS",
+    "REFINE_STAGE_OVERRIDE_FIELDS",
     "refine_override_to_dict",
-    "refine_preset_override_fields",
-    "refine_stage_override_fields",
 ]

@@ -2,7 +2,7 @@
 """LTX2 model family pipeline presets."""
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 from fastvideo.pipelines.basic.ltx2.stage_overrides import (
-    refine_stage_override_fields, )
+    REFINE_STAGE_OVERRIDE_FIELDS, )
 
 _LTX2_NEGATIVE_PROMPT = ("blurry, out of focus, overexposed, underexposed, low contrast, "
                          "washed out colors, excessive noise, grainy texture, poor lighting, "
@@ -36,7 +36,7 @@ _REFINE_STAGE = PresetStageSpec(
     name="refine",
     kind="refinement",
     description="Latent-upsample + second-pass refine",
-    allowed_overrides=refine_stage_override_fields(),
+    allowed_overrides=REFINE_STAGE_OVERRIDE_FIELDS,
 )
 
 LTX2_BASE = InferencePreset(

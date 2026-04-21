@@ -71,7 +71,13 @@ def _get_extra_dataclass_fields(
             continue
         for _, modname, is_pkg in pkgutil.walk_packages(
                 package.__path__, prefix=f"{package_name}."):
-            if modname.endswith(".__pycache__"):
+            # Flat ``configs.pipelines.<family>`` modules carry the config
+            # directly; colocated ``basic.<family>.pipeline_configs``
+            # submodules do too. Everything else under ``basic`` is heavy
+            # model code we don't need to import for a schema check.
+            basename = modname.rsplit(".", 1)[-1]
+            is_flat = modname.startswith("fastvideo.configs.pipelines.")
+            if not is_flat and basename != "pipeline_configs":
                 continue
             module = importlib.import_module(modname)
             for obj in vars(module).values():

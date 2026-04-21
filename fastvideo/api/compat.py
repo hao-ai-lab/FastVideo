@@ -26,10 +26,7 @@ from fastvideo.api.schema import (
 )
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.pipelines.basic.ltx2.stage_overrides import (
-    refine_preset_override_fields,
-    refine_stage_override_fields,
-)
+from fastvideo.pipelines.basic.ltx2.stage_overrides import REFINE_FLAT_KEYS
 from fastvideo.utils import shallow_asdict
 
 _INPUT_FIELD_NAMES = {field.name for field in fields(InputConfig)}
@@ -43,10 +40,7 @@ _LEGACY_REQUEST_ALIASES = {
 _REQUEST_PIPELINE_OVERRIDE_FIELDS = frozenset({
     "embedded_cfg_scale",
 })
-# torch.compile kwargs that map to first-class CompileConfig fields.
 _COMPILE_TYPED_KEYS = ("backend", "fullgraph", "mode", "dynamic")
-# LTX-2 refine flat kwargs (init + per-request) known to FastVideoArgs.
-_LTX2_REFINE_FLAT_KEYS = (refine_preset_override_fields() | refine_stage_override_fields())
 
 
 def normalize_generator_config(config: GeneratorConfig | Mapping[str, Any], ) -> GeneratorConfig:
@@ -118,7 +112,7 @@ def legacy_from_pretrained_to_config(
         elif key == "enable_torch_compile":
             compile_config["enabled"] = value
         elif key == "torch_compile_kwargs":
-            remaining: dict[str, Any] = (dict(deepcopy(value)) if isinstance(value, Mapping) else {})
+            remaining: dict[str, Any] = (dict(value) if isinstance(value, Mapping) else {})
             for first_class in _COMPILE_TYPED_KEYS:
                 if first_class in remaining:
                     compile_config[first_class] = remaining.pop(first_class)
@@ -264,7 +258,7 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
     preset_overrides = deepcopy(normalized.pipeline.preset_overrides)
     refine = preset_overrides.pop("refine", None)
     if isinstance(refine, Mapping):
-        for key in _LTX2_REFINE_FLAT_KEYS:
+        for key in REFINE_FLAT_KEYS:
             if key in refine:
                 kwargs[f"ltx2_refine_{key}"] = refine[key]
     kwargs.update(preset_overrides)
@@ -363,14 +357,9 @@ def _looks_like_run_or_serve_config(raw: Mapping[str, Any]) -> bool:
 
 
 def _compile_config_to_torch_kwargs(compile_config: CompileConfig, ) -> dict[str, Any]:
-    """Flatten typed ``CompileConfig`` back to a ``torch_compile_kwargs``
-    dict that the legacy ``FastVideoArgs`` path still expects.
-
-    Typed first-class fields (:attr:`backend`, :attr:`fullgraph`,
-    :attr:`mode`, :attr:`dynamic`) are only emitted when the user set
-    them explicitly (non-``None``). ``extras`` is merged on top for any
-    uncommon kwargs.
-    """
+    """Flatten typed ``CompileConfig`` back to the legacy
+    ``torch_compile_kwargs`` dict, emitting only explicitly-set typed
+    fields and merging ``extras`` on top."""
     out: dict[str, Any] = {}
     for key in _COMPILE_TYPED_KEYS:
         value = getattr(compile_config, key)
