@@ -43,7 +43,7 @@ def main(args) -> None:
         num_gpus=get_world_size(),
         dit_cpu_offload=False,
         vae_cpu_offload=False,
-        text_encoder_cpu_offload=False,
+        text_encoder_cpu_offload=True,
         pipeline_config=pipeline_config,
     )
     if args.preprocess_task == "t2v":
