@@ -251,6 +251,8 @@ def upload_reference_videos(
     reference_dirs_by_tier: Sequence[tuple[str, Path]],
     token: str,
     private: bool,
+    model_id: str | None = None,
+    force: bool = False,
 ) -> None:
     HfApi, _ = _load_hf_sdk()
     api = HfApi(token=token)
@@ -261,15 +263,44 @@ def upload_reference_videos(
         exist_ok=True,
     )
 
+    try:
+        existing_repo_files = set(
+            api.list_repo_files(repo_id=repo_id, repo_type=repo_type))
+    except Exception:
+        # Fresh repo or list failure — treat as empty so upload can proceed.
+        existing_repo_files = set()
+
     for quality_tier, reference_dir in reference_dirs_by_tier:
         if not reference_dir.exists():
             raise FileNotFoundError(f"Reference directory not found: {reference_dir}")
-        path_in_repo = f"{REFERENCE_VIDEOS_DIRNAME}/{quality_tier}/{reference_dir.name}"
-        print(f"Uploading {reference_dir.name} ({quality_tier}) to {repo_id} ...")
+        base_in_repo = f"{REFERENCE_VIDEOS_DIRNAME}/{quality_tier}/{reference_dir.name}"
+        if model_id:
+            folder_path = reference_dir / model_id
+            if not folder_path.exists():
+                raise FileNotFoundError(
+                    f"Model subfolder not found for upload: {folder_path}")
+            path_in_repo = f"{base_in_repo}/{model_id}"
+        else:
+            folder_path = reference_dir
+            path_in_repo = base_in_repo
+
+        conflicts = sorted(
+            f for f in existing_repo_files
+            if f.startswith(f"{path_in_repo}/") or f == path_in_repo)
+        if conflicts and not force:
+            preview = "\n".join(f"  - {c}" for c in conflicts[:10])
+            more = f"\n  ... and {len(conflicts) - 10} more" if len(conflicts) > 10 else ""
+            raise RuntimeError(
+                f"Refusing to overwrite existing HF files under {path_in_repo} "
+                f"({len(conflicts)} file(s) already present):\n{preview}{more}\n"
+                f"Re-run with --force to overwrite.")
+
+        target_desc = f"{reference_dir.name}/{model_id}" if model_id else reference_dir.name
+        print(f"Uploading {target_desc} ({quality_tier}) to {repo_id}/{path_in_repo} ...")
         api.upload_folder(
             repo_id=repo_id,
             repo_type=repo_type,
-            folder_path=str(reference_dir),
+            folder_path=str(folder_path),
             path_in_repo=path_in_repo,
             token=token,
         )
@@ -500,6 +531,22 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Create/use a private repo instead of public.",
     )
+    upload_parser.add_argument(
+        "--model-id",
+        default=None,
+        help=(
+            "Restrict upload to a single model subfolder "
+            "(reference_videos/<tier>/<device>/<model_id>). "
+            "Use when seeding references for a single new test."),
+    )
+    upload_parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Allow overwriting files that already exist at the target path on "
+            "Hugging Face. Off by default so seeding a new test cannot "
+            "clobber existing references."),
+    )
 
     ensure_parser = subparsers.add_parser(
         "ensure",
@@ -607,6 +654,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             reference_dirs_by_tier=reference_dirs_by_tier,
             token=token,
             private=args.private,
+            model_id=args.model_id,
+            force=args.force,
         )
         print("Upload complete.")
         return 0
