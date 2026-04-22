@@ -594,6 +594,21 @@ class TestPresetDefaultTypes:
     runtime type — see the CFG branch in
     ``pipelines/stages/text_encoding.py:81``."""
 
+    def test_ltx2_cfg_defaults_are_off(self) -> None:
+        """SamplingParam's LTX-2 CFG class defaults must be 1.0 (CFG
+        off). ``ForwardBatch.__post_init__`` force-enables
+        ``do_classifier_free_guidance`` when either
+        ``ltx2_cfg_scale_video`` or ``ltx2_cfg_scale_audio`` is != 1.0,
+        so any non-1.0 default silently forces CFG on for every model
+        family that doesn't explicitly override these fields. Guard
+        against the regression that surfaced as the TurboDiffusion I2V
+        SSIM crash (``text_encoding.py:81`` assertion on
+        ``negative_prompt``)."""
+        from fastvideo.api.sampling_param import SamplingParam
+        sp = SamplingParam()
+        assert sp.ltx2_cfg_scale_video == 1.0
+        assert sp.ltx2_cfg_scale_audio == 1.0
+
     def test_no_preset_sets_negative_prompt_to_none(self) -> None:
         import fastvideo.registry  # noqa: F401
         from fastvideo.api.presets import get_preset
