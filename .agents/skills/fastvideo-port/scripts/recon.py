@@ -12,12 +12,13 @@ Output JSON shape:
 {
   "repo": "owner/name",
   "model_files": ["path/to/model.py", ...],
+  "config_files": ["path/to/config.py", ...],
   "architecture": {
     "class_name": "ModelClass",
     "num_layers": N,
     "hidden_dim": D,
     "num_heads": H,
-    "attention_type": "self_attn | cross_attn | unified",
+    "attention_type": "self_attn | cross_attn | self+cross",
     "conditioning": ["text", "image", "audio", ...],
     "input_channels": N,
     "patch_size": N
@@ -35,14 +36,13 @@ Output JSON shape:
 """
 import argparse
 import json
+import os
 import re
 import sys
 from urllib.request import urlopen, Request
-from urllib.error import HTTPError
 
 GITHUB_API = "https://api.github.com"
 
-# Patterns that suggest model definition files
 MODEL_FILE_PATTERNS = [
     r"model[s]?\.py$",
     r"dit\.py$",
@@ -53,33 +53,71 @@ MODEL_FILE_PATTERNS = [
     r"architecture\.py$",
 ]
 
-# Patterns to extract architecture info from Python source
-LAYER_PATTERNS = [
+CONFIG_FILE_PATTERNS = [
+    r"config\.py$",
+    r"configs?\.py$",
+    r"configuration\.py$",
+    r"args\.py$",
+    r"params\.py$",
+    r"settings\.py$",
+    r"config\.json$",
+]
+
+# Ordered from most to least specific — first match wins per key
+ARCH_PATTERNS: list[tuple[str, str]] = [
+    # Pydantic Field(default=N, ...) — most reliable source
+    (r"num_layers\s*:\s*int\s*=\s*Field\s*\(\s*default\s*=\s*(\d+)", "num_layers"),
+    (r"num_hidden_layers\s*:\s*int\s*=\s*Field\s*\(\s*default\s*=\s*(\d+)", "num_layers"),
+    (r"depth\s*:\s*int\s*=\s*Field\s*\(\s*default\s*=\s*(\d+)", "num_layers"),
+    (r"hidden_size\s*:\s*int\s*=\s*Field\s*\(\s*default\s*=\s*(\d+)", "hidden_dim"),
+    (r"hidden_dim\s*:\s*int\s*=\s*Field\s*\(\s*default\s*=\s*(\d+)", "hidden_dim"),
+    (r"d_model\s*:\s*int\s*=\s*Field\s*\(\s*default\s*=\s*(\d+)", "hidden_dim"),
+    (r"embed_dim\s*:\s*int\s*=\s*Field\s*\(\s*default\s*=\s*(\d+)", "hidden_dim"),
+    (r"num_attention_heads\s*:\s*int\s*=\s*Field\s*\(\s*default\s*=\s*(\d+)", "num_heads"),
+    (r"num_heads\s*:\s*int\s*=\s*Field\s*\(\s*default\s*=\s*(\d+)", "num_heads"),
+    (r"head_dim\s*:\s*int\s*=\s*Field\s*\(\s*default\s*=\s*(\d+)", "head_dim"),
+    (r"num_query_groups\s*:\s*int\s*=\s*Field\s*\(\s*default\s*=\s*(\d+)", "num_query_groups"),
+    (r"patch_size\s*:\s*int\s*=\s*Field\s*\(\s*default\s*=\s*(\d+)", "patch_size"),
+    (r"in_channels\s*:\s*int\s*=\s*Field\s*\(\s*default\s*=\s*(\d+)", "input_channels"),
+    # Dataclass / plain assignment fallbacks
     (r"num_layers\s*[=:]\s*(\d+)", "num_layers"),
     (r"num_hidden_layers\s*[=:]\s*(\d+)", "num_layers"),
     (r"depth\s*[=:]\s*(\d+)", "num_layers"),
-    (r"hidden_(?:size|dim)\s*[=:]\s*(\d+)", "hidden_dim"),
+    (r"hidden_size\s*[=:]\s*(\d+)", "hidden_dim"),
+    (r"hidden_dim\s*[=:]\s*(\d+)", "hidden_dim"),
     (r"d_model\s*[=:]\s*(\d+)", "hidden_dim"),
     (r"embed_dim\s*[=:]\s*(\d+)", "hidden_dim"),
-    (r"num_(?:attention_)?heads\s*[=:]\s*(\d+)", "num_heads"),
+    (r"num_attention_heads\s*[=:]\s*(\d+)", "num_heads"),
+    (r"num_heads_q\s*[=:]\s*(\d+)", "num_heads"),
     (r"in_channels\s*[=:]\s*(\d+)", "input_channels"),
-    (r"patch_size\s*[=:]\s*(\d+)", "patch_size"),
 ]
 
-TEXT_ENCODER_HINTS = {
-    "t5": "google/t5-v1_1-xxl",
-    "t5gemma": "google/t5gemma-9b",
-    "clip": "openai/clip-vit-large-patch14",
-    "qwen2": "Qwen/Qwen2.5-VL-7B-Instruct",
-    "llama": "meta-llama/Llama-3.1-8B",
-    "gemma": "google/gemma-2-9b",
-}
+# Scheduler shift: look for Field(default=N) form first
+SCHEDULER_SHIFT_PATTERNS = [
+    r"shift\s*:\s*float\s*=\s*Field\s*\(\s*default\s*=\s*([\d.]+)",
+    r"flow_shift\s*[=:]\s*([\d.]+)",
+    r"\bshift\s*=\s*([\d.]+)",
+]
+
+# Text encoder: ordered most-specific to least; first key that appears wins
+TEXT_ENCODER_HINTS: list[tuple[str, str]] = [
+    ("t5gemma", "google/t5gemma-9b"),
+    ("t5_gemma", "google/t5gemma-9b"),
+    ("t5-gemma", "google/t5gemma-9b"),
+    ("qwen2_5_vl", "Qwen/Qwen2.5-VL-7B-Instruct"),
+    ("qwen2_vl", "Qwen/Qwen2-VL-7B-Instruct"),
+    ("qwen2", "Qwen/Qwen2.5-VL-7B-Instruct"),
+    ("llama", "meta-llama/Llama-3.1-8B"),
+    ("gemma", "google/gemma-2-9b"),
+    ("clip", "openai/clip-vit-large-patch14"),
+    ("t5", "google/t5-v1_1-xxl"),
+]
 
 VAE_HINTS = {
     "wan": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    "causal_vae": None,
     "ae": None,
     "vae": None,
-    "causal_vae": None,
 }
 
 
@@ -108,7 +146,6 @@ def gh_raw(repo: str, path: str, ref: str = "main", token: str | None = None) ->
             return r.read().decode("utf-8", errors="ignore")
     except Exception:
         if ref == "main":
-            # Try the repo's actual default branch (may be "master" or something else)
             try:
                 default = get_default_branch(repo, token)
                 if default != ref:
@@ -121,109 +158,188 @@ def gh_raw(repo: str, path: str, ref: str = "main", token: str | None = None) ->
 
 
 def parse_repo_url(url: str) -> str:
-    """Extract 'owner/repo' from a GitHub URL."""
     m = re.search(r"github\.com[:/]([^/\s?#]+/[^/\s?#]+)", url)
     if not m:
         raise ValueError(f"Cannot parse GitHub URL: {url}")
     return m.group(1).removesuffix(".git").rstrip("/")
 
 
-def list_python_files(repo: str, token: str | None = None, max_files: int = 200) -> list[str]:
-    """Return all .py file paths in the repo (up to max_files)."""
+def list_all_files(repo: str, token: str | None = None, max_files: int = 400) -> list[str]:
     try:
         tree = gh_get(f"repos/{repo}/git/trees/HEAD?recursive=1", token)
-        files = [
-            item["path"] for item in tree.get("tree", [])
-            if item["type"] == "blob" and item["path"].endswith(".py")
-        ]
-        return files[:max_files]
+        return [item["path"] for item in tree.get("tree", []) if item["type"] == "blob"][:max_files]
     except Exception as e:
         print(f"[warn] Could not list files: {e}", file=sys.stderr)
         return []
 
 
 def find_model_files(all_files: list[str]) -> list[str]:
-    """Return files likely to contain model definitions."""
     hits = []
     for f in all_files:
         fname = f.split("/")[-1].lower()
         if any(re.search(p, fname) for p in MODEL_FILE_PATTERNS):
             hits.append(f)
-    # Also grab any file with "model" in the path under common dirs
     for f in all_files:
-        if "/models/" in f or "/model/" in f:
+        if ("/models/" in f or "/model/" in f) and f.endswith(".py"):
             if f not in hits:
                 hits.append(f)
-    return hits[:10]  # cap at 10 to avoid huge context
+    return hits[:10]
 
 
-def extract_architecture(source: str) -> dict:
-    """Pull numeric architecture params out of Python source."""
-    result = {}
-    for pattern, key in LAYER_PATTERNS:
+def find_config_files(all_files: list[str]) -> list[str]:
+    """Find Python config files and JSON example configs."""
+    hits = []
+    for f in all_files:
+        fname = f.split("/")[-1].lower()
+        if any(re.search(p, fname) for p in CONFIG_FILE_PATTERNS):
+            hits.append(f)
+    # Also grab any JSON under example/ or examples/ directories
+    for f in all_files:
+        if re.search(r"^example[s]?/.*\.json$", f):
+            if f not in hits:
+                hits.append(f)
+    return hits[:10]
+
+
+def extract_architecture(source: str, from_config: bool = False) -> dict:
+    """Extract architecture params. Config files get priority (from_config=True)."""
+    result: dict = {}
+    for pattern, key in ARCH_PATTERNS:
         if key not in result:
             m = re.search(pattern, source)
             if m:
                 result[key] = int(m.group(1))
 
-    # Attention type heuristic
-    source_lc = source.lower()
-    if "cross_attn" in source_lc or "cross_attention" in source_lc:
-        if "self_attn" in source_lc or "self_attention" in source_lc:
-            result["attention_type"] = "self+cross"
-        else:
-            result["attention_type"] = "cross_attn"
-    elif "self_attn" in source_lc or "selfattention" in source_lc:
-        result["attention_type"] = "self_attn"
+    # Attention type heuristic (only from model source, not config)
+    if not from_config:
+        source_lc = source.lower()
+        if "cross_attn" in source_lc or "cross_attention" in source_lc:
+            if "self_attn" in source_lc or "self_attention" in source_lc:
+                result["attention_type"] = "self+cross"
+            else:
+                result["attention_type"] = "cross_attn"
+        elif "self_attn" in source_lc or "selfattention" in source_lc:
+            result["attention_type"] = "self_attn"
 
-    # Conditioning
-    cond = []
-    if re.search(r"text_embed|encoder_hidden|text_enc", source):
-        cond.append("text")
-    if re.search(r"image_embed|image_cond|reference_image", source):
-        cond.append("image")
-    if re.search(r"audio_embed|audio_cond|audio_enc", source):
-        cond.append("audio")
-    if cond:
-        result["conditioning"] = cond
+        # Conditioning signals
+        cond = []
+        if re.search(r"text_embed|encoder_hidden|text_enc|text_in_channels", source):
+            cond.append("text")
+        if re.search(r"image_embed|image_cond|reference_image", source):
+            cond.append("image")
+        if re.search(r"audio_embed|audio_cond|audio_enc|audio_in_channels", source):
+            cond.append("audio")
+        if cond:
+            result["conditioning"] = cond
 
-    # Top-level class name
-    m = re.search(r"^class\s+(\w+)\(.*(?:Module|Model|Transformer|DiT)", source, re.MULTILINE)
-    if m:
-        result["class_name"] = m.group(1)
+        # Top-level DiT class: prefer names that suggest a top-level model,
+        # skip known sub-module helpers (Attention, MLP, Norm, Embed, Layer, Block)
+        HELPER_WORDS = {"attention", "mlp", "ffn", "norm", "embed", "layer",
+                        "block", "head", "proj", "router", "dispatcher",
+                        "adapter", "linear", "function", "config", "enum"}
+        preferred: str | None = None
+        fallback: str | None = None
+        for m in re.finditer(r"^class\s+(\w+)\([^)]*(?:(?:nn\.|torch\.nn\.)?Module|Model|Transformer|DiT)[^)]*\)", source, re.MULTILINE):
+            cls_name = m.group(1)
+            cls_lower = cls_name.lower()
+            if any(w in cls_lower for w in HELPER_WORDS):
+                continue
+            cls_idx = m.start()
+            snippet = source[cls_idx:cls_idx + 4000]
+            if not re.search(r"def forward\s*\(\s*self\s*,\s*\w+\s*:", snippet):
+                continue
+            # Strongly prefer names that suggest a top-level model
+            if re.search(r"(?:DiT|Model|Pipeline|Net)$", cls_name):
+                preferred = cls_name
+                break
+            if fallback is None:
+                fallback = cls_name
+        top_cls = preferred or fallback
+        if top_cls:
+            result["class_name"] = top_cls
 
     return result
 
 
-def detect_components(readme: str, all_source: str) -> dict:
-    """Detect text encoders, VAE, and scheduler from README + source."""
-    text_encoders = []
-    lower = (readme + all_source).lower()
+def extract_arch_from_json_config(source: str) -> dict:
+    """Extract architecture fields from JSON example configs."""
+    result: dict = {}
+    try:
+        data = json.loads(source)
+    except Exception:
+        return result
 
-    for key, hf_id in TEXT_ENCODER_HINTS.items():
-        if key in lower:
-            text_encoders.append({"name": key, "hf_id": hf_id})
+    def walk(obj: object) -> None:
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if isinstance(v, int):
+                    if k in ("num_layers", "depth", "num_hidden_layers"):
+                        result.setdefault("num_layers", v)
+                    elif k in ("hidden_size", "hidden_dim", "d_model", "embed_dim"):
+                        result.setdefault("hidden_dim", v)
+                    elif k in ("num_heads", "num_attention_heads", "num_heads_q"):
+                        result.setdefault("num_heads", v)
+                    elif k == "head_dim":
+                        result.setdefault("head_dim", v)
+                    elif k == "num_query_groups":
+                        result.setdefault("num_query_groups", v)
+                elif isinstance(v, (dict, list)):
+                    walk(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                walk(item)
+
+    walk(data)
+    return result
+
+
+def detect_text_encoder(all_source: str, readme: str) -> list[dict]:
+    """Return at most one text encoder entry — most specific match wins."""
+    combined = all_source + readme
+    combined_lc = combined.lower()
+    for key, hf_id in TEXT_ENCODER_HINTS:
+        if key.lower() in combined_lc:
+            return [{"name": key, "hf_id": hf_id}]
+    return []
+
+
+def detect_components(readme: str, all_source: str, config_source: str) -> dict:
+    text_encoders = detect_text_encoder(all_source + config_source, readme)
 
     vae = None
+    combined_lc = (readme + all_source + config_source).lower()
     for key in VAE_HINTS:
-        if key in lower:
+        if key in combined_lc:
             vae = {"name": key, "hf_id": VAE_HINTS[key]}
-            # Try to find latent channels
-            m = re.search(r"latent_channels\s*[=:]\s*(\d+)", all_source)
+            m = re.search(r"latent_channels\s*[=:]\s*(\d+)", all_source + config_source)
             if m:
                 vae["latent_channels"] = int(m.group(1))
             break
 
-    scheduler = {}
-    if "flow" in lower or "flow_match" in lower:
+    # Scheduler: prefer flow_matching (check config source first)
+    scheduler: dict = {}
+    all_text = config_source + all_source + readme
+    all_lc = all_text.lower()
+
+    shift_val = None
+    for pat in SCHEDULER_SHIFT_PATTERNS:
+        m = re.search(pat, all_text)
+        if m:
+            shift_val = float(m.group(1))
+            break
+
+    if "flow_match" in all_lc or "flow match" in all_lc or "flowmatch" in all_lc:
         scheduler["type"] = "flow_matching"
-    elif "ddim" in lower:
+    elif shift_val is not None and shift_val > 0:
+        # A non-zero shift parameter is a strong signal for flow matching
+        scheduler["type"] = "flow_matching"
+    elif "ddim" in all_lc:
         scheduler["type"] = "ddim"
-    elif "ddpm" in lower:
+    elif "ddpm" in all_lc:
         scheduler["type"] = "ddpm"
-    m = re.search(r"shift\s*[=:]\s*([\d.]+)", all_source)
-    if m:
-        scheduler["shift"] = float(m.group(1))
+
+    if shift_val is not None:
+        scheduler["shift"] = shift_val
 
     return {
         "text_encoders": text_encoders,
@@ -232,12 +348,13 @@ def detect_components(readme: str, all_source: str) -> dict:
     }
 
 
-def detect_hf_repo(readme: str, repo: str) -> tuple[str | None, bool]:
-    """Try to find the HuggingFace repo ID and whether it's Diffusers format."""
-    m = re.search(r"huggingface\.co/([A-Za-z0-9_\-]+/[A-Za-z0-9_\-\.]+)", readme)
-    hf_id = m.group(1) if m else None
-    diffusers = bool(re.search(r"diffusers|from_pretrained|DiffusionPipeline", readme))
-    return hf_id, diffusers
+def detect_hf_repo(readme: str) -> tuple[str | None, bool]:
+    # Exclude HuggingFace Spaces — those are demos, not weight repos
+    for m in re.finditer(r"huggingface\.co/([A-Za-z0-9_\-]+/[A-Za-z0-9_\-\.]+)", readme):
+        candidate = m.group(1)
+        if not candidate.startswith("spaces/"):
+            return candidate, bool(re.search(r"diffusers|from_pretrained|DiffusionPipeline", readme))
+    return None, bool(re.search(r"diffusers|from_pretrained|DiffusionPipeline", readme))
 
 
 def detect_tasks(readme: str) -> list[str]:
@@ -253,52 +370,69 @@ def detect_tasks(readme: str) -> list[str]:
         tasks.append("t2w")
     if "audio" in lower:
         tasks.append("audio-driven")
-    return tasks or ["t2v"]  # default assumption
+    return tasks or ["t2v"]
 
 
 def main():
     parser = argparse.ArgumentParser(description="Recon a GitHub repo for FastVideo porting")
     parser.add_argument("repo_url", help="GitHub URL, e.g. https://github.com/org/repo")
     parser.add_argument("--output", "-o", default=None, help="JSON output file (default: stdout)")
-    parser.add_argument("--token", default=None, help="GitHub personal access token (optional)")
+    parser.add_argument("--token", default=None,
+                        help="GitHub personal access token (overrides GITHUB_TOKEN env var)")
     args = parser.parse_args()
 
+    token = args.token or os.environ.get("GITHUB_TOKEN")
     repo = parse_repo_url(args.repo_url)
     print(f"[recon] Analyzing {repo} ...", file=sys.stderr)
 
-    # 1. Fetch README
-    readme = gh_raw(repo, "README.md") or gh_raw(repo, "readme.md") or ""
+    readme = gh_raw(repo, "README.md", token=token) or gh_raw(repo, "readme.md", token=token) or ""
     print(f"[recon] README: {len(readme)} chars", file=sys.stderr)
 
-    # 2. List Python files and find model files
-    all_files = list_python_files(repo, args.token)
-    print(f"[recon] Found {len(all_files)} Python files", file=sys.stderr)
-    model_files = find_model_files(all_files)
-    print(f"[recon] Model files: {model_files}", file=sys.stderr)
+    all_files = list_all_files(repo, token)
+    py_files = [f for f in all_files if f.endswith(".py")]
+    print(f"[recon] Found {len(py_files)} Python files, {len(all_files)} total", file=sys.stderr)
 
-    # 3. Fetch and analyze model source
-    arch = {}
+    model_files = find_model_files(all_files)
+    config_files = find_config_files(all_files)
+    print(f"[recon] Model files: {model_files}", file=sys.stderr)
+    print(f"[recon] Config files: {config_files}", file=sys.stderr)
+
+    # Fetch and extract from config files first (higher priority for numeric values)
+    arch: dict = {}
+    all_config_source = ""
+    for cf in config_files:
+        src = gh_raw(repo, cf, token=token)
+        if not src:
+            continue
+        all_config_source += src
+        if cf.endswith(".json"):
+            extracted = extract_arch_from_json_config(src)
+        else:
+            extracted = extract_architecture(src, from_config=True)
+        for k, v in extracted.items():
+            if k not in arch:
+                arch[k] = v
+
+    # Fetch model source (lower priority for numeric values, primary for attention/class/conditioning)
     all_model_source = ""
     for mf in model_files:
-        src = gh_raw(repo, mf)
-        if src:
-            all_model_source += src
-            extracted = extract_architecture(src)
-            # Take first non-None value for each key
-            for k, v in extracted.items():
-                if k not in arch:
-                    arch[k] = v
+        src = gh_raw(repo, mf, token=token)
+        if not src:
+            continue
+        all_model_source += src
+        extracted = extract_architecture(src, from_config=False)
+        for k, v in extracted.items():
+            if k not in arch:
+                arch[k] = v
 
-    # 4. Detect components
-    components = detect_components(readme, all_model_source)
-
-    # 5. HF repo + tasks
-    hf_repo, diffusers_fmt = detect_hf_repo(readme, repo)
+    components = detect_components(readme, all_model_source, all_config_source)
+    hf_repo, diffusers_fmt = detect_hf_repo(readme)
     tasks = detect_tasks(readme)
 
     result = {
         "repo": repo,
         "model_files": model_files,
+        "config_files": config_files,
         "architecture": arch,
         "components": components,
         "hf_repo": hf_repo,
@@ -306,8 +440,8 @@ def main():
         "tasks": tasks,
         "notes": [
             "Auto-generated by recon.py — verify all fields manually.",
-            "num_layers/hidden_dim extracted via regex; may miss dynamic configs.",
-            f"README length: {len(readme)} chars, model source: {len(all_model_source)} chars scanned.",
+            "Numeric fields extracted from config files first (Pydantic Field defaults), then model source.",
+            f"README: {len(readme)} chars, model source: {len(all_model_source)} chars, config source: {len(all_config_source)} chars.",
         ]
     }
 

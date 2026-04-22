@@ -29,7 +29,6 @@ Output files in --output_dir:
 """
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -142,10 +141,22 @@ def extract_lesson_candidates(diff: str, missing_files: list[str]) -> list[dict]
         else:
             current_hunk.append(line)
 
+    # Flush the last file's hunk
+    if current_file and current_hunk:
+        hunk_text = "\n".join(current_hunk)
+        if len(current_hunk) > 5:
+            candidates.append({
+                "title": f"Diff in {current_file}",
+                "category": classify_diff_hunk(hunk_text),
+                "severity": "minor",
+                "what_happened": f"Agent implementation differs from ground truth in `{current_file}`.",
+                "diff_preview": "\n".join(current_hunk[:20]),
+            })
+
     return candidates
 
 
-def format_lesson_md(candidate: dict, model_name: str) -> str:
+def format_lesson_md(candidate: dict, model_name: str) -> tuple[str, str]:
     today = date.today().isoformat()
     slug = re.sub(r"[^a-z0-9]+", "-", candidate["title"].lower())[:50]
     filename = f"{today}_{slug}.md"

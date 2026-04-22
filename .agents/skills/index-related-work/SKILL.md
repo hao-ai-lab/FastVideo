@@ -76,7 +76,6 @@ If not, create it:
 - Updated catalog.
 
 ## Example Usage
-
 ```
 Index the Self-Forcing paper:
 
