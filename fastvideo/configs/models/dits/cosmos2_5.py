@@ -139,7 +139,23 @@ class Cosmos25ArchConfig(DiTArchConfig):
 
 
 @dataclass
+class Cosmos25_14BArchConfig(Cosmos25ArchConfig):
+    """Configuration for Cosmos 2.5 14B architecture."""
+    num_attention_heads: int = 40
+    attention_head_dim: int = 128  # 5120 / 40
+    num_layers: int = 36
+
+
+@dataclass
 class Cosmos25VideoConfig(DiTConfig):
     """Configuration for Cosmos 2.5 video generation model."""
     arch_config: DiTArchConfig = field(default_factory=Cosmos25ArchConfig)
+    prefix: str = "Cosmos25"
+
+
+@dataclass
+class Cosmos25_14BVideoConfig(DiTConfig):
+    """Configuration for Cosmos 2.5 14B video generation model."""
+    arch_config: DiTArchConfig = field(
+        default_factory=Cosmos25_14BArchConfig)
     prefix: str = "Cosmos25"
