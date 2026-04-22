@@ -94,23 +94,26 @@ def _gelu7(x: torch.Tensor) -> torch.Tensor:
 # ---------------------------------------------------------------------------
 
 class ModalityRMSNorm(nn.Module):
-    """RMSNorm with optional per-modality weights (for sandwich layers)."""
+    """RMSNorm matching official MultiModalityRMSNorm weight layout.
+
+    Weight shape: [dim * num_modalities] — stacked flat, zero-initialized.
+    Forward: x * (weight_slice + 1)  (residual parameterization).
+    """
 
     def __init__(self, hidden_size: int, num_modalities: int = 1, eps: float = 1e-6):
         super().__init__()
         self.eps = eps
+        self.hidden_size = hidden_size
         self.num_modalities = num_modalities
-        # weight shape: [num_modalities, hidden_size] for MoE layers, [hidden_size] for shared
-        if num_modalities > 1:
-            self.weight = nn.Parameter(torch.ones(num_modalities, hidden_size))
-        else:
-            self.weight = nn.Parameter(torch.ones(hidden_size))
+        # Matches official: [dim * num_modality], init=zeros
+        self.weight = nn.Parameter(torch.zeros(hidden_size * num_modalities))
 
     def _rms_norm(self, x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
         orig_dtype = x.dtype
         x = x.float()
         rms = x.pow(2).mean(-1, keepdim=True).add(self.eps).rsqrt()
-        return (x * rms).to(orig_dtype) * w
+        # Residual: x * (w + 1)
+        return (x * rms * (w.float() + 1)).to(orig_dtype)
 
     def forward(
         self,
@@ -119,11 +122,13 @@ class ModalityRMSNorm(nn.Module):
     ) -> torch.Tensor:
         if self.num_modalities == 1 or modality_ids is None:
             return self._rms_norm(x, self.weight)
+        # Slice expert weights: [dim * num_mod] → chunks of [dim]
+        w_chunks = self.weight.chunk(self.num_modalities, dim=0)
         out = torch.empty_like(x)
         for m in range(self.num_modalities):
             mask = modality_ids == m
             if mask.any():
-                out[mask] = self._rms_norm(x[mask], self.weight[m])
+                out[mask] = self._rms_norm(x[mask], w_chunks[m])
         return out
 
 
