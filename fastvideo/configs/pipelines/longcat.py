@@ -11,8 +11,36 @@ import torch
 from fastvideo.configs.models import DiTConfig, VAEConfig
 from fastvideo.configs.models.dits.base import DiTArchConfig
 from fastvideo.configs.models.encoders import BaseEncoderOutput, T5Config
+from fastvideo.configs.models.encoders.base import TextEncoderArchConfig
+from fastvideo.configs.models.encoders.t5 import T5ArchConfig
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
+
+
+@dataclass
+class LongCatT5ArchConfig(T5ArchConfig):
+    """T5 arch config that pads tokenizer output to ``max_length``.
+
+    LongCat's denoising stage (``longcat_denoising.py``) concatenates the
+    positive and negative attention masks along the batch dimension for
+    CFG. That only works if both masks have the same sequence length.
+    Commit ``cd1b7cf1`` ("SP Mask --> original seq len", 2026-03-03)
+    removed ``"padding": "max_length"`` from the shared
+    :class:`T5ArchConfig` tokenizer_kwargs so other DiTs could run with
+    variable-length masks, but LongCat's CFG path still needs uniform
+    length. Restoring ``max_length`` padding here keeps that contract
+    for LongCat without affecting Wan/HY15/SD35/GEN3C/TurboDiffusion
+    which share :class:`T5ArchConfig`.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.tokenizer_kwargs["padding"] = "max_length"
+
+
+@dataclass
+class LongCatT5Config(T5Config):
+    arch_config: TextEncoderArchConfig = field(default_factory=LongCatT5ArchConfig)
 
 
 @dataclass
@@ -103,8 +131,12 @@ class LongCatT2V480PConfig(PipelineConfig):
     vae_precision: str = "bf16"
     text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
 
-    # Text encoding (UMT5 uses T5-like config; postprocess to fixed 512)
-    text_encoder_configs: tuple[T5Config, ...] = field(default_factory=lambda: (T5Config(), ))
+    # Text encoding (UMT5 uses T5-like config; postprocess to fixed 512).
+    # LongCatT5Config forces tokenizer padding="max_length" so positive
+    # and negative prompt attention masks have the same seq length — the
+    # longcat_denoising CFG concat (line ~98) requires it. See
+    # LongCatT5ArchConfig for the full rationale.
+    text_encoder_configs: tuple[T5Config, ...] = field(default_factory=lambda: (LongCatT5Config(), ))
     preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(default_factory=lambda: (longcat_preprocess_text, ))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
                                   ...] = field(default_factory=lambda: (umt5_postprocess_text, ))
