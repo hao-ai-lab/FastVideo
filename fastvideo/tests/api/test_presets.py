@@ -585,3 +585,34 @@ class TestPresetCountIntegrity:
         import fastvideo.registry  # noqa: F401
         names = get_all_preset_names()
         assert len(names) >= 37
+
+
+class TestPresetDefaultTypes:
+    """Preset ``defaults`` values must match the types on
+    :class:`SamplingParam`. Assigning ``None`` to a typed-``str`` field
+    (e.g. ``negative_prompt``) breaks downstream stages that assert the
+    runtime type — see the CFG branch in
+    ``pipelines/stages/text_encoding.py:81``."""
+
+    def test_no_preset_sets_negative_prompt_to_none(self) -> None:
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.api.presets import get_preset
+        offenders: list[str] = []
+        for preset_name in get_all_preset_names():
+            # get_preset needs a family; iterate via model_family on each.
+            # Look up family via the registered preset objects.
+            from fastvideo.api.presets import _PRESET_REGISTRY
+            for registered in _PRESET_REGISTRY.values():
+                if registered.name != preset_name:
+                    continue
+                preset = get_preset(registered.name, registered.model_family)
+                if "negative_prompt" in preset.defaults and (
+                        preset.defaults["negative_prompt"] is None):
+                    offenders.append(
+                        f"{registered.model_family}/{registered.name}")
+                break
+        assert not offenders, (
+            "These presets set negative_prompt=None, which violates "
+            "SamplingParam.negative_prompt's typed str contract and "
+            "crashes the CFG path in text_encoding. Use \"\" instead:\n"
+            + "\n".join(f"  - {p}" for p in offenders))
