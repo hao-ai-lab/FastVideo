@@ -134,8 +134,10 @@ Answer all questions from `coding_agents.md § "questions to ask yourself"`:
 **Checklist:**
 - [ ] What is the DiT architecture? (layers, hidden dim, attention type,
       conditioning mechanism)
+- [ ] **Is the model timestep-free?** (no `adaln`/`time_embed` in DiT forward) — if so, `DenoisingStage` won't work; create a custom stage. See lesson `2026-04-22_timestep-free-dit-needs-custom-denoising-stage.md`.
 - [ ] What text encoder(s) are used? (T5, CLIP, VLM, custom)
-- [ ] What VAE is used? (latent channels, spatial compression factor)
+- [ ] What VAE is used? (latent channels, z_dim, spatial/temporal compression)
+- [ ] **Does the VAE publish per-channel normalization stats?** (`latent_mean`/`latent_std`) — if absent, stub zeros/ones and flag. See lesson `2026-04-22_vae-normalization-stats-may-not-exist-for-new-z-dim.md`.
 - [ ] Is there a Diffusers-format HF repo? Run:
       `python scripts/huggingface/download_hf.py --repo_id <hf_id> --local_dir official_weights/<model_name>`
 - [ ] If no HF repo: clone official repo and download raw checkpoints manually.
@@ -185,6 +187,10 @@ For each component (DiT, VAE, text encoder) in dependency order:
     ```
 
 **Draft param_names_mapping from source (no weights needed):**
+
+First, check if `param_names_mapping = {}` — if the official model already uses
+the same attribute names as FastVideo, no rules are needed. Diff a few key names
+to confirm before writing any.
 
 Before running `auto_mapper.py` (which requires local weights), derive an
 initial mapping by reading the official model source:
@@ -471,6 +477,8 @@ Read all files in `.agents/lessons/` before starting. Key ones:
 | `2026-04-09_preprocessing-entrypoint-not-always-ported.md` | check `v1_preprocessing_new.py` |
 | `2026-04-09_scheduler-shift-not-wired-to-training.md` | `train()` overwrites scheduler |
 | `2026-04-20_moe-stacked-weights-must-match-official-layout.md` | mirror stacked `[N*out, in]` for checkpoint compat |
+| `2026-04-22_timestep-free-dit-needs-custom-denoising-stage.md` | timestep-free DiT → custom denoising stage required |
+| `2026-04-22_vae-normalization-stats-may-not-exist-for-new-z-dim.md` | stub zeros/ones when VAE stats not published |
 
 ## Eval harness
 
@@ -488,10 +496,4 @@ To improve this skill after completing a port, see `eval-harness.md`.
 - `scripts/checkpoint_conversion/create_hf_repo.py` — HF repo creation helper
 - `scripts/huggingface/download_hf.py` — HF download helper
 
-## Changelog
-
-| Date | Change |
-|------|--------|
-| 2026-04-21 | Fix param_names_mapping format (dict not list of tuples); add source-code-first key derivation workflow; recon output verification table; MoE stacked weight lesson |
-| 2026-04-17 | Added recommended patterns table, hard stop conditions, check_prereqs.sh; recon.py + auto_mapper.py wired into steps; 8 lessons from Cosmos 2.5 port; eval harness section |
-| 2026-04-16 | Initial version; daVinci-MagiHuman as worked example |
+<!-- changelog in git log -->
