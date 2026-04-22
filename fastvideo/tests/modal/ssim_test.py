@@ -53,9 +53,30 @@ RAW_GENERATED_VOLUME_ROOT = "ssim_generated_videos"
 DEFAULT_OUTPUT_QUALITY_TIER = "default"
 FULL_OUTPUT_QUALITY_TIER = "full_quality"
 MODAL_DEVICE_REFERENCE_FOLDER = "L40S_reference_videos"
+
+# 14B image-to-video models that dominate SSIM wall-clock. They are split
+# onto a dedicated "heavy" partition with a longer timeout so they don't
+# starve the faster tasks on the normal partitions.
+SSIM_HEAVY_MODEL_IDS = frozenset({
+    "TurboWan2.2-I2V-A14B-Diffusers",
+    "Wan2.1-I2V-14B-480P-Diffusers",
+})
+# Heavy partition timeout (2.5h). Bumped from the 1.5h default so the
+# 14B I2V generations have headroom even when the HF cache is cold.
+SSIM_HEAVY_TIMEOUT_S = 9000
+
 SSIM_COMMON_KWARGS = dict(
     image=image,
     timeout=5400,
+    # ``hf-model-weights`` is mounted at ``/root/data`` on every partition;
+    # ``_spawn_ssim_task`` points ``HF_HOME`` at ``/root/data/.cache`` so
+    # every cached model (TurboWan2.2-I2V-A14B, Wan2.1-I2V-14B, LongCat,
+    # etc.) is served straight from the volume — no per-run re-download.
+    volumes={"/root/data": model_vol},
+)
+SSIM_HEAVY_KWARGS = dict(
+    image=image,
+    timeout=SSIM_HEAVY_TIMEOUT_S,
     volumes={"/root/data": model_vol},
 )
 
@@ -111,6 +132,11 @@ class _PartitionResult:
     partition_index: int
     task_summaries: list[_TaskSummary]
     exit_code: int
+    weight_class: str = "normal"
+
+    @property
+    def label(self) -> str:
+        return f"{self.weight_class[0].upper()}P{self.partition_index}"
 
 
 def _split_csv_values(csv_values: str) -> set[str]:
@@ -418,13 +444,35 @@ def _discover_ssim_tasks(
     return sorted(tasks, key=lambda task: task.sort_key)
 
 
+def _is_heavy_task(task: SSIMTask) -> bool:
+    return task.model_id in SSIM_HEAVY_MODEL_IDS
+
+
 def _partition_tasks(
     tasks: list[SSIMTask],
     partition_index: int,
     num_partitions: int = 2,
+    weight_class: str = "normal",
 ) -> list[SSIMTask]:
-    """Split tasks into N groups via round-robin on sorted order."""
-    return tasks[partition_index::num_partitions]
+    """Filter tasks by weight class, then split into N groups via
+    round-robin on sorted order.
+
+    ``weight_class``:
+    - ``"normal"``: excludes :data:`SSIM_HEAVY_MODEL_IDS` — these go to the
+      dedicated heavy partition.
+    - ``"heavy"``: only the heavy tasks; typically run with
+      ``num_partitions=1`` on a partition with a longer timeout.
+    - ``"all"``: legacy behavior — no filtering.
+    """
+    if weight_class == "normal":
+        filtered = [task for task in tasks if not _is_heavy_task(task)]
+    elif weight_class == "heavy":
+        filtered = [task for task in tasks if _is_heavy_task(task)]
+    elif weight_class == "all":
+        filtered = tasks
+    else:
+        raise ValueError(f"Unknown weight_class: {weight_class!r}")
+    return filtered[partition_index::num_partitions]
 
 
 def _build_checkout_command(git_commit: str, pr_number: str | None) -> str:
@@ -794,22 +842,22 @@ def _print_combined_results(
         if result is None:
             continue
         for s in result.task_summaries:
-            label = f"[P{result.partition_index}] {s.test_name}"
+            label = f"[{result.label}] {s.test_name}"
             if s.status == "passed":
                 passed.append(label)
             elif s.status == "failed":
                 failed.append(label)
                 if first_failure is None:
-                    first_failure = (result.partition_index, s)
+                    first_failure = (result.label, s)
             elif s.status == "terminated":
                 terminated.append(label)
             elif s.status == "skipped":
                 skipped.append(label)
 
     if first_failure is not None:
-        pi, s = first_failure
+        partition_label, s = first_failure
         print(f"\n{'=' * 60}")
-        print(f"Partition: {pi}")
+        print(f"Partition: {partition_label}")
         print(f"Task: {s.test_name}")
         print(f"GPUs: {s.required_gpus}")
         print(f"Status: {s.status}")
@@ -822,10 +870,12 @@ def _print_combined_results(
         if result is None:
             count = 0
             status = "cancelled"
+            label = f"slot {i}"
         else:
             count = len(result.task_summaries)
             status = "passed" if result.exit_code == 0 else "failed"
-        print(f"  Partition {i}: {status} ({count} tasks)")
+            label = f"{result.weight_class} partition {result.partition_index}"
+        print(f"  {label}: {status} ({count} tasks)")
     print(f"  passed: {len(passed)}")
     print(f"  failed: {len(failed)}")
     print(f"  terminated: {len(terminated)}")
@@ -842,24 +892,28 @@ def _print_combined_results(
     return 1 if has_failures else 0
 
 
-@app.function(gpu=f"L40S:{SSIM_NUM_GPUS}", **SSIM_COMMON_KWARGS)
-def run_ssim_partition(
+def _run_ssim_partition_body(
+    *,
     partition_index: int,
     num_partitions: int,
+    weight_class: str,
     git_repo: str,
     git_commit: str,
-    pr_number: str = "false",
-    hf_api_key: str = "",
-    test_files_csv: str = "",
-    model_ids_csv: str = "",
-    ssim_full_quality: bool = False,
-    ssim_reference_repo: str = "",
-    skip_ssim_reference_download: bool = False,
-    pytest_k: str = "",
-    sync_generated_to_volume: bool = False,
-    generated_volume_subdir: str = "",
-    fail_fast: bool = True,
+    pr_number: str,
+    hf_api_key: str,
+    test_files_csv: str,
+    model_ids_csv: str,
+    ssim_full_quality: bool,
+    ssim_reference_repo: str,
+    skip_ssim_reference_download: bool,
+    pytest_k: str,
+    sync_generated_to_volume: bool,
+    generated_volume_subdir: str,
+    fail_fast: bool,
 ) -> _PartitionResult:
+    """Shared partition body used by both the normal and heavy Modal
+    wrappers. Only the decorator (timeout, GPU allocation) differs
+    between the two; the scheduling logic is identical."""
     selected_test_files = _split_csv_values(test_files_csv)
     selected_model_ids = _split_csv_values(model_ids_csv)
     repo_root, tasks = _prepare_ssim_workspace(
@@ -870,15 +924,22 @@ def run_ssim_partition(
         selected_test_files=selected_test_files,
         selected_model_ids=selected_model_ids,
     )
-    partition = _partition_tasks(tasks, partition_index, num_partitions)
+    partition = _partition_tasks(
+        tasks,
+        partition_index,
+        num_partitions,
+        weight_class=weight_class,
+    )
+    partition_label = f"{weight_class} partition {partition_index}"
     if not partition:
-        print(f"Partition {partition_index}: no tasks assigned.")
+        print(f"{partition_label}: no tasks assigned.")
         return _PartitionResult(
             partition_index=partition_index,
             task_summaries=[],
             exit_code=0,
+            weight_class=weight_class,
         )
-    print(f"Partition {partition_index}: running {len(partition)}/{len(tasks)} tasks")
+    print(f"{partition_label}: running {len(partition)}/{len(tasks)} tasks")
     pytest_extra_args = _build_pytest_extra_args(
         ssim_full_quality=ssim_full_quality,
         ssim_reference_repo=ssim_reference_repo,
@@ -908,10 +969,96 @@ def run_ssim_partition(
         partition_index=partition_index,
         task_summaries=summaries,
         exit_code=1 if has_failures else 0,
+        weight_class=weight_class,
     )
 
 
-NUM_PARTITIONS = 2
+@app.function(gpu=f"L40S:{SSIM_NUM_GPUS}", **SSIM_COMMON_KWARGS)
+def run_ssim_partition(
+    partition_index: int,
+    num_partitions: int,
+    git_repo: str,
+    git_commit: str,
+    pr_number: str = "false",
+    hf_api_key: str = "",
+    test_files_csv: str = "",
+    model_ids_csv: str = "",
+    ssim_full_quality: bool = False,
+    ssim_reference_repo: str = "",
+    skip_ssim_reference_download: bool = False,
+    pytest_k: str = "",
+    sync_generated_to_volume: bool = False,
+    generated_volume_subdir: str = "",
+    fail_fast: bool = True,
+) -> _PartitionResult:
+    """Normal partition — runs every SSIM task except those in
+    :data:`SSIM_HEAVY_MODEL_IDS`, which are handled by
+    :func:`run_ssim_heavy_partition`."""
+    return _run_ssim_partition_body(
+        partition_index=partition_index,
+        num_partitions=num_partitions,
+        weight_class="normal",
+        git_repo=git_repo,
+        git_commit=git_commit,
+        pr_number=pr_number,
+        hf_api_key=hf_api_key,
+        test_files_csv=test_files_csv,
+        model_ids_csv=model_ids_csv,
+        ssim_full_quality=ssim_full_quality,
+        ssim_reference_repo=ssim_reference_repo,
+        skip_ssim_reference_download=skip_ssim_reference_download,
+        pytest_k=pytest_k,
+        sync_generated_to_volume=sync_generated_to_volume,
+        generated_volume_subdir=generated_volume_subdir,
+        fail_fast=fail_fast,
+    )
+
+
+@app.function(gpu=f"L40S:{SSIM_NUM_GPUS}", **SSIM_HEAVY_KWARGS)
+def run_ssim_heavy_partition(
+    partition_index: int,
+    num_partitions: int,
+    git_repo: str,
+    git_commit: str,
+    pr_number: str = "false",
+    hf_api_key: str = "",
+    test_files_csv: str = "",
+    model_ids_csv: str = "",
+    ssim_full_quality: bool = False,
+    ssim_reference_repo: str = "",
+    skip_ssim_reference_download: bool = False,
+    pytest_k: str = "",
+    sync_generated_to_volume: bool = False,
+    generated_volume_subdir: str = "",
+    fail_fast: bool = True,
+) -> _PartitionResult:
+    """Heavy partition — 14B image-to-video models listed in
+    :data:`SSIM_HEAVY_MODEL_IDS`. Same GPU shape as a normal partition
+    but with :data:`SSIM_HEAVY_TIMEOUT_S` (2.5h) instead of the 1.5h
+    default, so the expensive I2V generations don't get killed by
+    Modal's timeout before the HF cache warms up."""
+    return _run_ssim_partition_body(
+        partition_index=partition_index,
+        num_partitions=num_partitions,
+        weight_class="heavy",
+        git_repo=git_repo,
+        git_commit=git_commit,
+        pr_number=pr_number,
+        hf_api_key=hf_api_key,
+        test_files_csv=test_files_csv,
+        model_ids_csv=model_ids_csv,
+        ssim_full_quality=ssim_full_quality,
+        ssim_reference_repo=ssim_reference_repo,
+        skip_ssim_reference_download=skip_ssim_reference_download,
+        pytest_k=pytest_k,
+        sync_generated_to_volume=sync_generated_to_volume,
+        generated_volume_subdir=generated_volume_subdir,
+        fail_fast=fail_fast,
+    )
+
+
+NUM_NORMAL_PARTITIONS = 2
+NUM_HEAVY_PARTITIONS = 1
 
 
 @app.local_entrypoint()
@@ -973,14 +1120,25 @@ def run_ssim_tests(
         generated_volume_subdir=resolved_subdir,
         fail_fast=not no_fail_fast,
     )
+    # Normal partitions round-robin every non-heavy task; heavy partition
+    # handles only the 14B I2V models (see SSIM_HEAVY_MODEL_IDS) with a
+    # longer timeout so it doesn't starve the fast tail.
     futures = [
         run_ssim_partition.spawn(
             partition_index=i,
-            num_partitions=NUM_PARTITIONS,
+            num_partitions=NUM_NORMAL_PARTITIONS,
             **common_kwargs,
         )
-        for i in range(NUM_PARTITIONS)
+        for i in range(NUM_NORMAL_PARTITIONS)
     ]
+    futures.extend(
+        run_ssim_heavy_partition.spawn(
+            partition_index=i,
+            num_partitions=NUM_HEAVY_PARTITIONS,
+            **common_kwargs,
+        )
+        for i in range(NUM_HEAVY_PARTITIONS)
+    )
     results: list[_PartitionResult | None] = [f.get() for f in futures]
 
     exit_code = _print_combined_results(results)
