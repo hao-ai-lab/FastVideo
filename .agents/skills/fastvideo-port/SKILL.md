@@ -174,8 +174,35 @@ For each component (DiT, VAE, text encoder) in dependency order:
   - `ReplicatedLinear` (not `nn.Linear`) for any projection layer that LoRA
     should be able to target.
 - Create `fastvideo/configs/models/dits/<model_name>.py` with:
-  - `param_names_mapping`: ordered list of `(regex_pattern, replacement)`
-    tuples that translate official `state_dict` keys → FastVideo keys.
+  - `param_names_mapping`: dict mapping regex patterns to replacement strings
+    (Python insertion order = application order) that translate official
+    `state_dict` keys → FastVideo keys. Example:
+    ```python
+    param_names_mapping: dict = field(default_factory=lambda: {
+        r"^block\.layers\.(\d+)\.(.*)$": r"layers.\1.\2",
+        r"^final_linear\.(.*)$": r"final_proj.\1",
+    })
+    ```
+
+**Draft param_names_mapping from source (no weights needed):**
+
+Before running `auto_mapper.py` (which requires local weights), derive an
+initial mapping by reading the official model source:
+
+1. In the official repo, find the top-level model class. Note every `self.<attr>`
+   that holds a sub-module (e.g. `self.block`, `self.layers`, `self.final_norm`).
+   These become the key *prefixes* in `official.state_dict()`.
+2. Do the same for your FastVideo class — those are the target key prefixes.
+3. Write one regex rule per differing prefix, plus any leaf-name differences
+   (e.g. `linear_video` → `proj_video`).
+4. Common pattern — official uses descriptive container names that FastVideo
+   flattens:
+   - `block.layers.N.attn` → `layers.N.attn`
+   - `video_embedder` → `video_proj`
+   - `final_linear` → `final_proj`
+
+This source-code pass typically covers 70–80% of keys. Run `auto_mapper.py`
+for the remainder once weights are available.
 
 **Quick key diff workflow:**
 ```bash
@@ -421,84 +448,33 @@ PR description must include:
 
 ---
 
-## Worked Example: daVinci-MagiHuman
+## Worked examples
 
-**Repo:** https://github.com/GAIR-NLP/daVinci-MagiHuman  
-**Architecture:** 15B unified single-stream Transformer (not a standard DiT).
-Text, video, and audio processed jointly via self-attention only. No
-cross-attention.
+See `.agents/skills/fastvideo-port/examples/` for full worked examples.
+- `examples/cosmos2_5.md` — standard cross-attention DiT; `net.*` prefix
+  stripping, AdaLN-LoRA, Reason1 VLM encoder with layer-concat postprocessing.
+- `examples/davinci-magihuman.md` — 15B unified Transformer with audio
+  conditioning, sandwich weight sharing, MoELinear stacked weights, and
+  two-stage inference.
 
-Key architecture details:
-- 40 layers total; first 4 and last 4 use modality-specific projections;
-  middle 32 layers share parameters across modalities (sandwich design).
-- Per-head scalar gating (sigmoid) for stability.
-- Two-stage inference: low-res generation → latent-space super-resolution.
-- Text encoder: `t5gemma-9b` (Google).
-- Audio model: `stable-audio-open-1.0` (Stability AI).
-- VAE: `Wan2.2-TI2V-5B` latent space + custom lightweight turbo VAE decoder.
+## Known pitfalls
 
-**Non-standard aspects requiring attention:**
-- Unified sequence model — `DistributedAttention` applies to the full
-  joint token sequence, not just video patches.
-- Sandwich weight sharing requires explicit module aliasing in FastVideo
-  (middle 32 layers share the same `nn.Module` instance).
-- Audio conditioning is a new modality type; may require a new pipeline
-  stage (`AudioEncodingStage`).
-- Two-stage pipeline requires two `DenoiseStage` calls or a custom stage.
-- `stable-audio-open-1.0` weights are Apache-licensed; confirm redistribution
-  rights before uploading a converted HF repo under `fastvideo/`.
+Read all files in `.agents/lessons/` before starting. Key ones:
 
-**Recommended port order:**
-1. VAE (reuse `WanVAE` with Wan2.2-TI2V-5B weights — likely same arch).
-2. Text encoder (T5Gemma-9B — check if FastVideo has T5 support already).
-3. DiT forward pass, T2V only (skip audio conditioning first).
-4. Audio encoder (second pass once T2V parity passes).
-5. Super-resolution stage.
+| Lesson file | TL;DR |
+|-------------|-------|
+| `2026-04-09_lora-requires-replicated-linear.md` | `nn.Linear` is invisible to LoRA |
+| `2026-04-09_fp32-bf16-dtype-mismatch-at-projection.md` | cast at projection when `--dit_precision fp32` |
+| `2026-04-09_hardcoded-text-encoder-shape-in-utils.md` | hardcoded (512, 4096) breaks non-T5-XXL |
+| `2026-04-09_multimodal-processor-needs-inner-tokenizer.md` | unwrap `processor.tokenizer` |
+| `2026-04-09_bf16-embeddings-need-float-before-numpy.md` | `.cpu().float().numpy()` not `.cpu().numpy()` |
+| `2026-04-09_preprocessing-entrypoint-not-always-ported.md` | check `v1_preprocessing_new.py` |
+| `2026-04-09_scheduler-shift-not-wired-to-training.md` | `train()` overwrites scheduler |
+| `2026-04-20_moe-stacked-weights-must-match-official-layout.md` | mirror stacked `[N*out, in]` for checkpoint compat |
 
----
+## Eval harness
 
-## Known pitfalls (from Cosmos 2.5 port)
-
-Read `.agents/lessons/` before starting. Key lessons from the first real port:
-
-- **ReplicatedLinear required for LoRA** — `nn.Linear` is invisible to
-  `get_lora_layer()`; alignment tests pass but LoRA has zero effect.
-  See `2026-04-09_lora-requires-replicated-linear.md`.
-- **dtype mismatch fp32/bf16** — cast inputs at projection layers when
-  `--dit_precision fp32` is used. See `2026-04-09_fp32-bf16-dtype-mismatch-at-projection.md`.
-- **Hardcoded (512, 4096) in utils.py** — breaks any non-T5-XXL encoder.
-  See `2026-04-09_hardcoded-text-encoder-shape-in-utils.md`.
-- **VLM processor needs inner tokenizer** — unwrap `processor.tokenizer` for
-  text-only encoding. See `2026-04-09_multimodal-processor-needs-inner-tokenizer.md`.
-- **bf16 embeddings crash numpy** — `.cpu().float().numpy()` not `.cpu().numpy()`.
-  See `2026-04-09_bf16-embeddings-need-float-before-numpy.md`.
-- **Preprocessing entrypoint** — check whether model is ported to
-  `v1_preprocessing_new.py` before writing example scripts.
-  See `2026-04-09_preprocessing-entrypoint-not-always-ported.md`.
-- **Scheduler shift ignored during training** — `train()` overwrites
-  `self.noise_scheduler`; see `2026-04-09_scheduler-shift-not-wired-to-training.md`.
-
-## Eval harness (training loop)
-
-To improve the skill, run the eval harness against a known-good port:
-
-```bash
-# Step 1: create eval branch from pre-port commit
-python .agents/skills/fastvideo-port/scripts/eval_harness.py \
-    --ground_truth_branch feat/cosmos25-training \
-    --pre_port_commit <hash_before_cosmos_work> \
-    --model_name cosmos2_5
-
-# Step 2: run the port skill on the eval branch, then diff
-python .agents/skills/fastvideo-port/scripts/eval_harness.py \
-    --ground_truth_branch feat/cosmos25-training \
-    --agent_branch eval/cosmos25-port-test \
-    --diff_only --model_name cosmos2_5 \
-    --output_dir eval_results/cosmos25/
-
-# Step 3: review lesson candidates in eval_results/cosmos25/lesson_candidates/
-# Promote good ones to .agents/lessons/
-```
+To improve this skill after completing a port, see `eval-harness.md`.
 
 ## References
 
@@ -516,5 +492,6 @@ python .agents/skills/fastvideo-port/scripts/eval_harness.py \
 
 | Date | Change |
 |------|--------|
+| 2026-04-21 | Fix param_names_mapping format (dict not list of tuples); add source-code-first key derivation workflow; recon output verification table; MoE stacked weight lesson |
 | 2026-04-17 | Added recommended patterns table, hard stop conditions, check_prereqs.sh; recon.py + auto_mapper.py wired into steps; 8 lessons from Cosmos 2.5 port; eval harness section |
 | 2026-04-16 | Initial version; daVinci-MagiHuman as worked example |
