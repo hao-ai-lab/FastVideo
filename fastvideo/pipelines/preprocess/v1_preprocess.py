@@ -27,9 +27,7 @@ def main(args) -> None:
 
     kwargs: dict[str, Any] = {}
     if args.preprocess_task == "text_only":
-        kwargs = {
-            "text_encoder_cpu_offload": False,
-        }
+        kwargs = {}
     else:
         # Full config for video/image processing
         kwargs = {
@@ -43,7 +41,7 @@ def main(args) -> None:
         num_gpus=get_world_size(),
         dit_cpu_offload=False,
         vae_cpu_offload=False,
-        text_encoder_cpu_offload=True,
+        text_encoder_cpu_offload=bool(args.text_encoder_cpu_offload),
         pipeline_config=pipeline_config,
     )
     if args.preprocess_task == "t2v":
@@ -109,6 +107,16 @@ if __name__ == "__main__":
     parser.add_argument("--do_temporal_sample", default=False, action="store_true")
     # text encoder & vae & diffusion model
     parser.add_argument("--text_encoder_name", type=str, default="google/t5-v1_1-xxl")
+    parser.add_argument(
+        "--text_encoder_cpu_offload",
+        action="store_true",
+        default=False,
+        help=(
+            "Offload the text encoder with FSDP CPU offload during "
+            "preprocessing. This saves GPU memory but uses torch.no_grad() "
+            "instead of torch.inference_mode() for compatibility."
+        ),
+    )
     parser.add_argument("--cache_dir", type=str, default="./cache_dir")
     parser.add_argument("--training_cfg_rate", type=float, default=0.0)
     parser.add_argument(

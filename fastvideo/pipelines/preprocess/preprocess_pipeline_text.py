@@ -56,7 +56,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
             if data is None:
                 continue
 
-            with torch.no_grad():
+            with self._preprocess_inference_context(fastvideo_args):
                 # For text-only processing, we only need text data
                 # Filter out samples without text
                 valid_indices = []
