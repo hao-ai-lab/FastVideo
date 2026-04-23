@@ -611,21 +611,12 @@ class TestPresetDefaultTypes:
 
     def test_no_preset_sets_negative_prompt_to_none(self) -> None:
         import fastvideo.registry  # noqa: F401
-        from fastvideo.api.presets import get_preset
-        offenders: list[str] = []
-        for preset_name in get_all_preset_names():
-            # get_preset needs a family; iterate via model_family on each.
-            # Look up family via the registered preset objects.
-            from fastvideo.api.presets import _PRESET_REGISTRY
-            for registered in _PRESET_REGISTRY.values():
-                if registered.name != preset_name:
-                    continue
-                preset = get_preset(registered.name, registered.model_family)
-                if "negative_prompt" in preset.defaults and (
-                        preset.defaults["negative_prompt"] is None):
-                    offenders.append(
-                        f"{registered.model_family}/{registered.name}")
-                break
+        from fastvideo.api.presets import _PRESET_REGISTRY
+        offenders = [
+            f"{preset.model_family}/{preset.name}"
+            for preset in _PRESET_REGISTRY.values()
+            if preset.defaults.get("negative_prompt", "") is None
+        ]
         assert not offenders, (
             "These presets set negative_prompt=None, which violates "
             "SamplingParam.negative_prompt's typed str contract and "

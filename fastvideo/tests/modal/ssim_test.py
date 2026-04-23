@@ -7,7 +7,9 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
+
+WeightClass = Literal["normal", "heavy", "all"]
 
 import modal
 
@@ -54,24 +56,20 @@ DEFAULT_OUTPUT_QUALITY_TIER = "default"
 FULL_OUTPUT_QUALITY_TIER = "full_quality"
 MODAL_DEVICE_REFERENCE_FOLDER = "L40S_reference_videos"
 
-# 14B image-to-video models that dominate SSIM wall-clock. They are split
-# onto a dedicated "heavy" partition with a longer timeout so they don't
-# starve the faster tasks on the normal partitions.
+# 14B I2V models that dominate wall-clock; routed to a dedicated
+# heavy partition with a longer timeout so they don't starve the
+# rest.
 SSIM_HEAVY_MODEL_IDS = frozenset({
     "TurboWan2.2-I2V-A14B-Diffusers",
     "Wan2.1-I2V-14B-480P-Diffusers",
 })
-# Heavy partition timeout (2.5h). Bumped from the 1.5h default so the
-# 14B I2V generations have headroom even when the HF cache is cold.
 SSIM_HEAVY_TIMEOUT_S = 9000
 
 SSIM_COMMON_KWARGS = dict(
     image=image,
     timeout=5400,
-    # ``hf-model-weights`` is mounted at ``/root/data`` on every partition;
-    # ``_spawn_ssim_task`` points ``HF_HOME`` at ``/root/data/.cache`` so
-    # every cached model (TurboWan2.2-I2V-A14B, Wan2.1-I2V-14B, LongCat,
-    # etc.) is served straight from the volume — no per-run re-download.
+    # HF_HOME in _spawn_ssim_task points at /root/data/.cache; cached
+    # model weights are served straight from hf-model-weights.
     volumes={"/root/data": model_vol},
 )
 SSIM_HEAVY_KWARGS = dict(
@@ -132,11 +130,7 @@ class _PartitionResult:
     partition_index: int
     task_summaries: list[_TaskSummary]
     exit_code: int
-    weight_class: str = "normal"
-
-    @property
-    def label(self) -> str:
-        return f"{self.weight_class[0].upper()}P{self.partition_index}"
+    weight_class: WeightClass = "normal"
 
 
 def _split_csv_values(csv_values: str) -> set[str]:
@@ -452,14 +446,13 @@ def _partition_tasks(
     tasks: list[SSIMTask],
     partition_index: int,
     num_partitions: int = 2,
-    weight_class: str = "normal",
+    weight_class: WeightClass = "normal",
 ) -> list[SSIMTask]:
     """Filter tasks by weight class, then split into N groups via
     round-robin on sorted order.
 
-    ``weight_class``:
-    - ``"normal"``: excludes :data:`SSIM_HEAVY_MODEL_IDS` — these go to the
-      dedicated heavy partition.
+    - ``"normal"``: excludes :data:`SSIM_HEAVY_MODEL_IDS` — those go to
+      the dedicated heavy partition.
     - ``"heavy"``: only the heavy tasks; typically run with
       ``num_partitions=1`` on a partition with a longer timeout.
     - ``"all"``: legacy behavior — no filtering.
@@ -468,10 +461,8 @@ def _partition_tasks(
         filtered = [task for task in tasks if not _is_heavy_task(task)]
     elif weight_class == "heavy":
         filtered = [task for task in tasks if _is_heavy_task(task)]
-    elif weight_class == "all":
+    else:  # "all"
         filtered = tasks
-    else:
-        raise ValueError(f"Unknown weight_class: {weight_class!r}")
     return filtered[partition_index::num_partitions]
 
 
@@ -841,14 +832,15 @@ def _print_combined_results(
     for result in partition_results:
         if result is None:
             continue
+        partition_label = f"{result.weight_class} partition {result.partition_index}"
         for s in result.task_summaries:
-            label = f"[{result.label}] {s.test_name}"
+            label = f"[{partition_label}] {s.test_name}"
             if s.status == "passed":
                 passed.append(label)
             elif s.status == "failed":
                 failed.append(label)
                 if first_failure is None:
-                    first_failure = (result.label, s)
+                    first_failure = (partition_label, s)
             elif s.status == "terminated":
                 terminated.append(label)
             elif s.status == "skipped":
@@ -896,7 +888,7 @@ def _run_ssim_partition_body(
     *,
     partition_index: int,
     num_partitions: int,
-    weight_class: str,
+    weight_class: WeightClass,
     git_repo: str,
     git_commit: str,
     pr_number: str,

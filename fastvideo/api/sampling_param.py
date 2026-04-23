@@ -92,22 +92,11 @@ class SamplingParam:
     movement_distance: float | None = None
     camera_rotation: str | None = None
 
-    # LTX2 multi-modal CFG and STG.
-    #
-    # ``ltx2_cfg_scale_video`` / ``ltx2_cfg_scale_audio`` default to
-    # ``1.0`` (CFG off) rather than the LTX-2-specific on-values so
-    # non-LTX2 models don't silently trip the CFG-force in
-    # ``ForwardBatch.__post_init__`` (``ltx2_cfg_scale_video != 1.0 or
-    # ltx2_cfg_scale_audio != 1.0`` → ``do_classifier_free_guidance = True``).
-    # LTX-2 presets that need text-CFG on (e.g. ``ltx2_base``) set these
-    # explicitly in their ``defaults`` dict.
-    #
-    # The other LTX-2 multi-modal knobs (``ltx2_modality_scale_*``,
-    # ``ltx2_rescale_scale``, ``ltx2_stg_*``) keep their LTX-2 on-values
-    # as class defaults because they are only read by LTX-2 pipeline
-    # stages — no cross-family leak path. They remain "model-specific
-    # fields in shared schema" tech debt (see PR plan.md) to be migrated
-    # to preset-owned overrides.
+    # LTX-2 multi-modal CFG and STG.
+    # cfg_scale defaults are 1.0 (CFG off) so ``ForwardBatch.__post_init__``
+    # doesn't force ``do_classifier_free_guidance`` on non-LTX-2 models that
+    # never override these fields. LTX-2 presets that need text-CFG on set
+    # them in their ``defaults`` dict (e.g. ``ltx2_base``).
     ltx2_cfg_scale_video: float = 1.0
     ltx2_cfg_scale_audio: float = 1.0
     ltx2_modality_scale_video: float = 3.0
