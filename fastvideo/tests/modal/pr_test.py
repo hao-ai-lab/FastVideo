@@ -15,6 +15,7 @@ image = (modal.Image.from_registry(
     image_tag, add_python="3.12"
 ).run_commands("rm -rf /FastVideo").apt_install(
     "cmake", "pkg-config", "build-essential", "curl", "libssl-dev", "ffmpeg"
+).pip_install("huggingface_hub"
 ).run_commands(
     "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
 ).run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc").env({
@@ -235,16 +236,16 @@ def run_lora_extraction_tests():
               timeout=1800,
               secrets=[
                   modal.Secret.from_dict(
-                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
+                      {"HF_API_KEY": os.environ.get("HF_API_KEY", ""),
+                       "HF_REPO_ID": "FastVideo/performance-tracking"})
               ],
               volumes={
                   "/root/data": model_vol,
-                  "/root/data/performance-tracking": performance_tracking_vol,
               })
 def run_performance_tests():
     run_test(
         "export HF_HOME='/root/data/.cache' && "
-        "export PERFORMANCE_TRACKING_ROOT='/root/data/performance-tracking' && "
+        "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
         "hf auth login --token $HF_API_KEY && "
         "pytest ./fastvideo/tests/performance -vs && "
         "python ./fastvideo/tests/performance/compare_baseline.py"
