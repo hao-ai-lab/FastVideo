@@ -629,9 +629,10 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
             encoder_output = self.vae.encode(video_condition)
 
         generator = batch.generator
-        if generator is None:
-            raise ValueError("Generator must be provided")
-        latent_condition = self.retrieve_latents(encoder_output, generator)
+        sample_mode = "argmax" if fastvideo_args.pipeline_config.lucy_edit_task else "sample"
+        if sample_mode == "sample" and generator is None:
+            raise ValueError("Generator must be provided for sampled video VAE encoding")
+        latent_condition = self.retrieve_latents(encoder_output, generator, sample_mode=sample_mode)
 
         if (hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None):
             if isinstance(self.vae.shift_factor, torch.Tensor):
