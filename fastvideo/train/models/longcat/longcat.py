@@ -23,6 +23,12 @@ class LongCatModel(WanModel):
     _transformer_cls_name: str = "LongCatTransformer3DModel"
     _prompt_pipeline_cls: ClassVar[type[LongCatPipeline]] = LongCatPipeline
 
+    @staticmethod
+    def _normalize_flow_shift(flow_shift: float) -> float:
+        # LongCat's released scheduler uses shift=12.0. A value of 0.0
+        # collapses almost all FlowMatch training timesteps to zero.
+        return 12.0 if float(flow_shift) == 0.0 else float(flow_shift)
+
     def __init__(
         self,
         *,
@@ -30,7 +36,7 @@ class LongCatModel(WanModel):
         training_config: TrainingConfig,
         trainable: bool = True,
         disable_custom_init_weights: bool = False,
-        flow_shift: float = 0.0,
+        flow_shift: float = 12.0,
         enable_gradient_checkpointing_type: str | None = None,
         transformer_override_safetensor: str | None = None,
     ) -> None:
@@ -39,7 +45,7 @@ class LongCatModel(WanModel):
             training_config=training_config,
             trainable=trainable,
             disable_custom_init_weights=disable_custom_init_weights,
-            flow_shift=flow_shift,
+            flow_shift=self._normalize_flow_shift(flow_shift),
             enable_gradient_checkpointing_type=enable_gradient_checkpointing_type,
             transformer_override_safetensor=transformer_override_safetensor,
         )
@@ -48,7 +54,7 @@ class LongCatModel(WanModel):
         assert self.training_config is not None
         tc = self.training_config
         flow_shift = getattr(tc.pipeline_config, "flow_shift", 0.0)  # type: ignore[union-attr]
-        self.timestep_shift = float(flow_shift or 0.0)
+        self.timestep_shift = self._normalize_flow_shift(float(flow_shift))
         self.num_train_timestep = int(self.noise_scheduler.num_train_timesteps)
         self.min_timestep = 0
         self.max_timestep = self.num_train_timestep
