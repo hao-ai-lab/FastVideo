@@ -532,17 +532,14 @@ class ImageVAEEncodingStage(PipelineStage):
             if image.dtype == torch.uint8:
                 image = image.float() / 255.0
             elif not image.dtype.is_floating_point:
-                raise ValueError(
-                    f"preprocess() expected uint8 or float tensor, got {image.dtype}")
+                raise ValueError(f"preprocess() expected uint8 or float tensor, got {image.dtype}")
             image_min = image.min()
             image_max = image.max()
             if image_max > 1.0 + 1e-4 or image_min < -1.0 - 1e-4:
-                raise ValueError(
-                    "preprocess() expected tensor in [0, 1] or [-1, 1], got "
-                    f"range [{image_min.item():.3f}, {image_max.item():.3f}]")
+                raise ValueError("preprocess() expected tensor in [0, 1] or [-1, 1], got "
+                                 f"range [{image_min.item():.3f}, {image_max.item():.3f}]")
         else:
-            raise TypeError(
-                f"preprocess() expected PIL.Image or torch.Tensor, got {type(image)}")
+            raise TypeError(f"preprocess() expected PIL.Image or torch.Tensor, got {type(image)}")
 
         do_normalize = True
         if image.min() < 0:
