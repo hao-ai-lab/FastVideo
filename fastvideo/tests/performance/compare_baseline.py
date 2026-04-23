@@ -29,6 +29,12 @@ TRACKING_ROOT = os.environ.get(
 MAX_REGRESSION = float(os.environ.get("PERF_MAX_REGRESSION", "0.15"))
 
 
+def _should_persist_tracking() -> bool:
+    test_scope = os.environ.get("TEST_SCOPE", "")
+    branch = os.environ.get("BUILDKITE_BRANCH", "")
+    return test_scope == "full" and branch == "main"
+
+
 def _sanitize(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", value)
 
@@ -89,13 +95,20 @@ def _write_tracking_record(record: dict[str, Any]) -> str:
     return out_path
 
 
-def _load_baseline_records(model_id: str, current_path: str) -> list[dict[str, Any]]:
+def _load_baseline_records(model_id: str,
+                           current_path: str | None = None) -> list[dict[str,
+                                                                     Any]]:
     model_dir = os.path.join(TRACKING_ROOT, _sanitize(model_id))
     if not os.path.exists(model_dir):
         return []
 
     all_paths = sorted(glob.glob(os.path.join(model_dir, "*.json")))
-    prior_paths = [p for p in all_paths if os.path.abspath(p) != os.path.abspath(current_path)]
+    prior_paths = all_paths
+    if current_path:
+        prior_paths = [
+            p for p in all_paths
+            if os.path.abspath(p) != os.path.abspath(current_path)
+        ]
 
     baseline: list[dict[str, Any]] = []
     for path in prior_paths:
@@ -235,11 +248,19 @@ def main() -> int:
 
     all_failures: list[str] = []
     summary_rows: list[dict[str, Any]] = []
+    persist_tracking = _should_persist_tracking()
+
+    if persist_tracking:
+        print("Tracking persistence enabled: full-suite run on main branch")
+    else:
+        print("Tracking persistence disabled: only full-suite runs on main branch are persisted")
 
     for raw in current_results:
         record = _normalize_record(raw)
-        current_path = _write_tracking_record(record)
-        print(f"Tracked performance record: {current_path}")
+        current_path = None
+        if persist_tracking:
+            current_path = _write_tracking_record(record)
+            print(f"Tracked performance record: {current_path}")
 
         baseline_records = _load_baseline_records(record["model_id"], current_path)
         baseline_records = _filter_by_gpu_type(baseline_records, record["gpu_type"])
