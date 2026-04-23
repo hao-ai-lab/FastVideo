@@ -65,9 +65,17 @@ SSIM_HEAVY_MODEL_IDS = frozenset({
 })
 SSIM_HEAVY_TIMEOUT_S = 9000
 
+# Host-RAM reservation: Modal's default allocation on L40S:4 (~96-192 GB,
+# depending on contention) occasionally falls short for the 14B I2V tasks,
+# producing SIGKILL/exit 137 mid-run. Explicit (request, limit) MiB tuples
+# give a guaranteed floor and a hard ceiling so OOM behavior is predictable.
+SSIM_NORMAL_MEMORY_MIB = (65536, 131072)   # 64 GiB request, 128 GiB limit
+SSIM_HEAVY_MEMORY_MIB = (131072, 196608)   # 128 GiB request, 192 GiB limit
+
 SSIM_COMMON_KWARGS = dict(
     image=image,
     timeout=5400,
+    memory=SSIM_NORMAL_MEMORY_MIB,
     # HF_HOME in _spawn_ssim_task points at /root/data/.cache; cached
     # model weights are served straight from hf-model-weights.
     volumes={"/root/data": model_vol},
@@ -75,6 +83,7 @@ SSIM_COMMON_KWARGS = dict(
 SSIM_HEAVY_KWARGS = dict(
     image=image,
     timeout=SSIM_HEAVY_TIMEOUT_S,
+    memory=SSIM_HEAVY_MEMORY_MIB,
     volumes={"/root/data": model_vol},
 )
 
