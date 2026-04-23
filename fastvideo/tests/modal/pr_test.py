@@ -5,6 +5,8 @@ import modal
 app = modal.App()
 
 model_vol = modal.Volume.from_name("hf-model-weights")
+performance_tracking_vol = modal.Volume.from_name(
+    "fastvideo-performance-tracking", create_if_missing=True)
 image_version = os.getenv("IMAGE_VERSION")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
 print(f"Using image: {image_tag}")
@@ -24,6 +26,10 @@ image = (modal.Image.from_registry(
     os.environ.get("BUILDKITE_COMMIT", ""),
     "BUILDKITE_PULL_REQUEST":
     os.environ.get("BUILDKITE_PULL_REQUEST", ""),
+    "BUILDKITE_BRANCH":
+    os.environ.get("BUILDKITE_BRANCH", ""),
+    "TEST_SCOPE":
+    os.environ.get("TEST_SCOPE", ""),
     "IMAGE_VERSION":
     os.environ.get("IMAGE_VERSION", ""),
 }))
@@ -231,10 +237,14 @@ def run_lora_extraction_tests():
                   modal.Secret.from_dict(
                       {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
               ],
-              volumes={"/root/data": model_vol})
+              volumes={
+                  "/root/data": model_vol,
+                  "/root/data/performance-tracking": performance_tracking_vol,
+              })
 def run_performance_tests():
     run_test(
         "export HF_HOME='/root/data/.cache' && "
+        "export PERFORMANCE_TRACKING_ROOT='/root/data/performance-tracking' && "
         "hf auth login --token $HF_API_KEY && "
         "pytest ./fastvideo/tests/performance -vs && "
         "python ./fastvideo/tests/performance/compare_baseline.py"
