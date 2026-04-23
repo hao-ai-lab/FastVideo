@@ -33,8 +33,25 @@ class OffloadConfig:
 
 @dataclass
 class CompileConfig:
+    """Typed ``torch.compile`` configuration.
+
+    ``backend``/``fullgraph``/``mode``/``dynamic`` are the four most
+    common ``torch.compile`` knobs. ``extras`` holds any remaining
+    ``torch.compile`` kwargs (e.g. ``options``, ``disable``).
+    """
+
     enabled: bool = False
-    kwargs: dict[str, Any] = field(default_factory=dict)
+    text_encoder_enabled: bool | None = None
+    """Whether ``torch.compile`` is applied to the text encoder. ``None``
+    keeps the runtime default. The public ``FastVideoArgs`` adapter does
+    not yet consume this flag; reserved so the realtime runtime upstream
+    (PR 7.6) has a typed home for its ``enable_torch_compile_text_encoder``
+    kwarg without routing through ``pipeline.experimental``."""
+    backend: str | None = None
+    fullgraph: bool | None = None
+    mode: str | None = None
+    dynamic: bool | None = None
+    extras: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -76,6 +93,8 @@ class PipelineSelection:
     preset: str | None = None
     preset_version: int | None = None
     components: ComponentConfig = field(default_factory=ComponentConfig)
+    vae_tiling: bool | None = None
+    """Tile-based VAE decode. ``None`` keeps the model's default."""
     preset_overrides: dict[str, Any] = field(default_factory=dict)
     experimental: dict[str, Any] = field(default_factory=dict)
 

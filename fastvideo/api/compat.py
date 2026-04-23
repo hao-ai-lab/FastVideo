@@ -16,6 +16,7 @@ from fastvideo.api.request_metadata import (
     reset_tracking_roots,
 )
 from fastvideo.api.schema import (
+    CompileConfig,
     GenerationRequest,
     GeneratorConfig,
     InputConfig,
@@ -25,6 +26,10 @@ from fastvideo.api.schema import (
 )
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.pipelines.basic.ltx2.stage_overrides import (
+    refine_preset_override_fields,
+    refine_stage_override_fields,
+)
 from fastvideo.utils import shallow_asdict
 
 _INPUT_FIELD_NAMES = {field.name for field in fields(InputConfig)}
@@ -38,6 +43,10 @@ _LEGACY_REQUEST_ALIASES = {
 _REQUEST_PIPELINE_OVERRIDE_FIELDS = frozenset({
     "embedded_cfg_scale",
 })
+# torch.compile kwargs that map to first-class CompileConfig fields.
+_COMPILE_TYPED_KEYS = ("backend", "fullgraph", "mode", "dynamic")
+# LTX-2 refine flat kwargs (init + per-request) known to FastVideoArgs.
+_LTX2_REFINE_FLAT_KEYS = (refine_preset_override_fields() | refine_stage_override_fields())
 
 
 def normalize_generator_config(config: GeneratorConfig | Mapping[str, Any], ) -> GeneratorConfig:
@@ -80,6 +89,8 @@ def legacy_from_pretrained_to_config(
     components: dict[str, Any] = {}
     quantization: dict[str, Any] = {}
     experimental: dict[str, Any] = {}
+    preset_overrides: dict[str, Any] = {}
+    preset_refine: dict[str, Any] = {}
 
     for key, value in kwargs.items():
         if key == "revision":
@@ -106,8 +117,33 @@ def legacy_from_pretrained_to_config(
             offload["pin_cpu_memory"] = value
         elif key == "enable_torch_compile":
             compile_config["enabled"] = value
+        elif key == "enable_torch_compile_text_encoder":
+            compile_config["text_encoder_enabled"] = value
         elif key == "torch_compile_kwargs":
-            compile_config["kwargs"] = deepcopy(value)
+            remaining: dict[str, Any] = (dict(deepcopy(value)) if isinstance(value, Mapping) else {})
+            for first_class in _COMPILE_TYPED_KEYS:
+                if first_class in remaining:
+                    compile_config[first_class] = remaining.pop(first_class)
+            if remaining:
+                compile_config["extras"] = remaining
+        elif key == "ltx2_vae_tiling":
+            pipeline["vae_tiling"] = value
+        elif key == "config_model_path":
+            components["config_root"] = value
+        elif key == "ltx2_refine_enabled":
+            preset_refine["enabled"] = value
+        elif key == "ltx2_refine_upsampler_path":
+            # Empty string means "no upsampler"; keep typed None.
+            components["upsampler_weights"] = value or None
+        elif key == "ltx2_refine_lora_path":
+            # Empty string means "no refine LoRA"; keep typed None.
+            components["lora_path"] = value or None
+        elif key == "ltx2_refine_add_noise":
+            preset_refine["add_noise"] = value
+        elif key == "ltx2_refine_num_inference_steps":
+            preset_refine["num_inference_steps"] = value
+        elif key == "ltx2_refine_guidance_scale":
+            preset_refine["guidance_scale"] = value
         elif key in {"enable_stage_verification", "use_fsdp_inference", "disable_autocast"}:
             engine[key] = value
         elif key == "override_text_encoder_quant":
@@ -147,6 +183,10 @@ def legacy_from_pretrained_to_config(
 
     if components:
         pipeline["components"] = components
+    if preset_refine:
+        preset_overrides["refine"] = preset_refine
+    if preset_overrides:
+        pipeline["preset_overrides"] = preset_overrides
     if experimental:
         pipeline["experimental"] = experimental
     if pipeline:
@@ -162,12 +202,8 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         unsupported.append("pipeline.preset")
     if normalized.pipeline.preset_version is not None:
         unsupported.append("pipeline.preset_version")
-    if normalized.pipeline.components.config_root is not None:
-        unsupported.append("pipeline.components.config_root")
     if normalized.pipeline.components.vae_weights is not None:
         unsupported.append("pipeline.components.vae_weights")
-    if normalized.pipeline.components.upsampler_weights is not None:
-        unsupported.append("pipeline.components.upsampler_weights")
     if unsupported:
         joined = ", ".join(unsupported)
         raise NotImplementedError(f"VideoGenerator compatibility adapter does not support {joined} yet")
@@ -191,13 +227,21 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         "vae_cpu_offload": engine.offload.vae,
         "pin_cpu_memory": engine.offload.pin_cpu_memory,
         "enable_torch_compile": engine.compile.enabled,
-        "torch_compile_kwargs": deepcopy(engine.compile.kwargs),
+        "torch_compile_kwargs": _compile_config_to_torch_kwargs(engine.compile),
         "enable_stage_verification": engine.enable_stage_verification,
         "use_fsdp_inference": engine.use_fsdp_inference,
         "disable_autocast": engine.disable_autocast,
     }
     if normalized.pipeline.workload_type is not None:
         kwargs["workload_type"] = normalized.pipeline.workload_type
+    if normalized.pipeline.vae_tiling is not None:
+        kwargs["ltx2_vae_tiling"] = normalized.pipeline.vae_tiling
+    if engine.compile.text_encoder_enabled is not None:
+        # ``FastVideoArgs.from_kwargs`` filters to declared fields, so
+        # this is a no-op on the current legacy path. Emit anyway so the
+        # realtime runtime (PR 7.6) — which reads from the kwargs dict
+        # before FastVideoArgs filtering — can pick it up once wired.
+        kwargs["enable_torch_compile_text_encoder"] = (engine.compile.text_encoder_enabled)
 
     quantization = engine.quantization
     if quantization is not None and quantization.text_encoder_quant is not None:
@@ -220,8 +264,18 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         kwargs["init_weights_from_safetensors"] = components.transformer_weights
     if components.transformer_2_weights is not None:
         kwargs["init_weights_from_safetensors_2"] = components.transformer_2_weights
+    if components.config_root is not None:
+        kwargs["config_model_path"] = components.config_root
+    if components.upsampler_weights is not None:
+        kwargs["ltx2_refine_upsampler_path"] = components.upsampler_weights
 
-    kwargs.update(deepcopy(normalized.pipeline.preset_overrides))
+    preset_overrides = deepcopy(normalized.pipeline.preset_overrides)
+    refine = preset_overrides.pop("refine", None)
+    if isinstance(refine, Mapping):
+        for key in _LTX2_REFINE_FLAT_KEYS:
+            if key in refine:
+                kwargs[f"ltx2_refine_{key}"] = refine[key]
+    kwargs.update(preset_overrides)
     kwargs.update(deepcopy(normalized.pipeline.experimental))
     return FastVideoArgs.from_kwargs(**kwargs)
 
@@ -314,6 +368,25 @@ def expand_request_prompt_batch(request: GenerationRequest, ) -> list[Generation
 
 def _looks_like_run_or_serve_config(raw: Mapping[str, Any]) -> bool:
     return isinstance(raw.get("generator"), Mapping)
+
+
+def _compile_config_to_torch_kwargs(compile_config: CompileConfig, ) -> dict[str, Any]:
+    """Flatten typed ``CompileConfig`` back to a ``torch_compile_kwargs``
+    dict that the legacy ``FastVideoArgs`` path still expects.
+
+    Typed first-class fields (:attr:`backend`, :attr:`fullgraph`,
+    :attr:`mode`, :attr:`dynamic`) are only emitted when the user set
+    them explicitly (non-``None``). ``extras`` is merged on top for any
+    uncommon kwargs.
+    """
+    out: dict[str, Any] = {}
+    for key in _COMPILE_TYPED_KEYS:
+        value = getattr(compile_config, key)
+        if value is not None:
+            out[key] = value
+    if compile_config.extras:
+        out.update(deepcopy(compile_config.extras))
+    return out
 
 
 def _sampling_param_to_request_raw(sampling_param: SamplingParam | None, ) -> dict[str, Any]:

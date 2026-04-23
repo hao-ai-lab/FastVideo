@@ -92,9 +92,13 @@ class SamplingParam:
     movement_distance: float | None = None
     camera_rotation: str | None = None
 
-    # LTX2 multi-modal CFG and STG
-    ltx2_cfg_scale_video: float = 3.0
-    ltx2_cfg_scale_audio: float = 7.0
+    # LTX-2 multi-modal CFG and STG.
+    # cfg_scale defaults are 1.0 (CFG off) so ``ForwardBatch.__post_init__``
+    # doesn't force ``do_classifier_free_guidance`` on non-LTX-2 models that
+    # never override these fields. LTX-2 presets that need text-CFG on set
+    # them in their ``defaults`` dict (e.g. ``ltx2_base``).
+    ltx2_cfg_scale_video: float = 1.0
+    ltx2_cfg_scale_audio: float = 1.0
     ltx2_modality_scale_video: float = 3.0
     ltx2_modality_scale_audio: float = 3.0
     ltx2_rescale_scale: float = 0.7
