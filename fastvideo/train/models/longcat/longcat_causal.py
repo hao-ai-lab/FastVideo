@@ -26,7 +26,7 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
         training_config: TrainingConfig,
         trainable: bool = True,
         disable_custom_init_weights: bool = False,
-        flow_shift: float = 0.0,
+        flow_shift: float = 12.0,
         enable_gradient_checkpointing_type: str | None = None,
         transformer_override_safetensor: str | None = None,
     ) -> None:
