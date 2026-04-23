@@ -85,4 +85,6 @@ callbacks:
     max_grad_norm: 1.0
 
 pipeline:
-  flow_shift: 0
+  # Match the released LongCat scheduler config. flow_shift=0.0 collapses
+  # FlowMatch training timesteps to zero in FastVideo's scheduler.
+  flow_shift: 12.0
