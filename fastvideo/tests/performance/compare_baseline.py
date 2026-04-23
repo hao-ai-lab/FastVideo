@@ -14,9 +14,13 @@ import os
 import re
 import statistics
 import sys
+from huggingface_hub import HfApi, snapshot_download
 from datetime import datetime, timezone
 from typing import Any
 
+# Use the env var passed by Modal, fallback to a default if needed
+HF_REPO_ID = os.environ.get("HF_REPO_ID", "FastVideo/performance-tracking")
+HF_TOKEN = os.environ.get("HF_API_KEY")
 
 RESULTS_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -78,6 +82,7 @@ def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
         "latency": latency,
         "throughput": throughput,
         "memory": memory,
+        "success": True,
     }
 
 
@@ -94,27 +99,66 @@ def _write_tracking_record(record: dict[str, Any]) -> str:
 
     return out_path
 
+def _sync_baselines_from_hf():
+    """Download existing records from HF to local temp for comparison."""
+    if not HF_REPO_ID:
+        print("No HF_REPO_ID found, skipping baseline sync.")
+        return
+    
+    print(f"Syncing baselines from {HF_REPO_ID}...")
+    try:
+        snapshot_download(
+            repo_id=HF_REPO_ID,
+            repo_type="dataset",
+            local_dir=TRACKING_ROOT,
+            token=HF_TOKEN,
+            # We only care about the JSON files
+            allow_patterns="*.json"
+        )
+    except Exception as e:
+        # If the repo is empty or doesn't exist yet, we just start fresh
+        print(f"Note: Could not sync from HF (may be an empty repo): {e}")
 
-def _load_baseline_records(model_id: str,
-                           current_path: str | None = None) -> list[dict[str,
-                                                                     Any]]:
+def _upload_to_hf(local_path: str, record: dict[str, Any]):
+    """Uploads result to the FastVideo organization repo."""
+    if not HF_TOKEN:
+        print("HF_API_KEY not found. Skipping upload.")
+        return
+
+    api = HfApi(token=HF_TOKEN)
+    
+    # Store in folders by model_id: e.g., "fastvideo-v1/2026-04-23_commitsha.json"
+    path_in_repo = f"{_sanitize(record['model_id'])}/{os.path.basename(local_path)}"
+    
+    try:
+        api.upload_file(
+            path_or_fileobj=local_path,
+            path_in_repo=path_in_repo,
+            repo_id=HF_REPO_ID,
+            repo_type="dataset",
+            commit_message=f"Perf: {record['model_id']} at {record['commit_sha'][:7]}"
+        )
+        print(f"Successfully synced to FastVideo/performance-tracking: {path_in_repo}")
+    except Exception as e:
+        print(f"HF Sync failed: {e}")
+
+def _load_baseline_records(model_id: str) -> list[dict[str, Any]]:
     model_dir = os.path.join(TRACKING_ROOT, _sanitize(model_id))
     if not os.path.exists(model_dir):
         return []
 
+    # Get all historical JSONs synced from HF
     all_paths = sorted(glob.glob(os.path.join(model_dir, "*.json")))
-    prior_paths = all_paths
-    if current_path:
-        prior_paths = [
-            p for p in all_paths
-            if os.path.abspath(p) != os.path.abspath(current_path)
-        ]
-
+    
     baseline: list[dict[str, Any]] = []
-    for path in prior_paths:
+    for path in all_paths:
         try:
             with open(path, encoding="utf-8") as f:
-                baseline.append(json.load(f))
+                data = json.load(f)
+                # IMPORTANT: Only use successful runs for the baseline mean
+                # This prevents "Performance Drift"
+                if data.get("success", True): 
+                    baseline.append(data)
         except (OSError, json.JSONDecodeError):
             continue
     return baseline
@@ -192,6 +236,38 @@ def _compact_value(value: float | None, precision: int = 3) -> str:
         return "n/a"
     return f"{value:.{precision}f}"
 
+def _build_summary_row(
+    record: dict[str, Any], 
+    baseline_records: list[dict[str, Any]], 
+    has_failed: bool
+) -> dict[str, Any]:
+    """Formats a single benchmark result into a row for the Markdown summary table."""
+    
+    latency_base = _safe_float(_mean_metric(baseline_records, "latency"))
+    throughput_base = _safe_float(_mean_metric(baseline_records, "throughput"))
+    memory_base = _safe_float(_mean_metric(baseline_records, "memory"))
+    
+    # Calculate percentages for the 'Worst Regression' column
+    latency_reg = _metric_delta_percent("latency", record, baseline_records)
+    throughput_reg = _metric_delta_percent("throughput", record, baseline_records)
+    memory_reg = _metric_delta_percent("memory", record, baseline_records)
+    
+    regressions = [v for v in (latency_reg, throughput_reg, memory_reg) if v is not None]
+    worst_regression_pct = max(regressions) if regressions else None
+
+    return {
+        "model_id": record["model_id"],
+        "gpu_type": record["gpu_type"],
+        "baseline_n": len(baseline_records),
+        "latency_curr": _safe_float(record.get("latency")),
+        "latency_base": latency_base,
+        "throughput_curr": _safe_float(record.get("throughput")),
+        "throughput_base": throughput_base,
+        "memory_curr": _safe_float(record.get("memory")),
+        "memory_base": memory_base,
+        "worst_regression_pct": worst_regression_pct,
+        "failed": has_failed,
+    }
 
 def _build_markdown_summary(
     summary_rows: list[dict[str, Any]],
@@ -207,18 +283,9 @@ def _build_markdown_summary(
     ]
 
     for row in summary_rows:
-        latency = (
-            f"{_compact_value(row['latency_curr'])}/{_compact_value(row['latency_base'])}"
-            if row["latency_base"] is not None else "n/a"
-        )
-        throughput = (
-            f"{_compact_value(row['throughput_curr'])}/{_compact_value(row['throughput_base'])}"
-            if row["throughput_base"] is not None else "n/a"
-        )
-        memory = (
-            f"{_compact_value(row['memory_curr'], 1)}/{_compact_value(row['memory_base'], 1)}"
-            if row["memory_base"] is not None else "n/a"
-        )
+        latency = f"{_compact_value(row['latency_curr'])} / {_compact_value(row['latency_base'])}"
+        throughput = f"{_compact_value(row['throughput_curr'])} / {_compact_value(row['throughput_base'])}"
+        memory = f"{_compact_value(row['memory_curr'], 1)} / {_compact_value(row['memory_base'], 1)}"
 
         worst_reg = "n/a" if row["worst_regression_pct"] is None else f"{row['worst_regression_pct']:.1f}%"
         status = "FAIL" if row["failed"] else "PASS"
@@ -230,24 +297,39 @@ def _build_markdown_summary(
 
     return "\n".join(lines) + "\n"
 
-
 def _emit_markdown_summary(markdown: str) -> None:
     print("\n" + markdown)
+    
+    # 1. Existing GitHub logic (safe to keep)
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
         with open(summary_path, "a", encoding="utf-8") as f:
-            f.write(markdown)
-            f.write("\n")
+            f.write(markdown + "\n")
 
+    # 2. Buildkite Annotation logic
+    # This makes the table appear at the top of the Buildkite build page
+    if os.environ.get("BUILDKITE"):
+        import subprocess
+        try:
+            subprocess.run(
+                ["buildkite-agent", "annotate", markdown, "--style", "info", "--context", "perf-summary"],
+                input=markdown.encode(),
+                check=False
+            )
+        except Exception as e:
+            print(f"Failed to emit Buildkite annotation: {e}")
 
 def main() -> int:
+    # Pull the current state of the world from HF
+    _sync_baselines_from_hf()
+
     current_results = _load_current_results()
     if not current_results:
         print(f"No performance result files found in {RESULTS_DIR}")
         return 0
 
-    all_failures: list[str] = []
-    summary_rows: list[dict[str, Any]] = []
+    all_failures = []
+    summary_rows = []
     persist_tracking = _should_persist_tracking()
 
     if persist_tracking:
@@ -257,50 +339,38 @@ def main() -> int:
 
     for raw in current_results:
         record = _normalize_record(raw)
-        current_path = None
-        if persist_tracking:
-            current_path = _write_tracking_record(record)
-            print(f"Tracked performance record: {current_path}")
 
-        baseline_records = _load_baseline_records(record["model_id"], current_path)
+        baseline_records = _load_baseline_records(record["model_id"])
         baseline_records = _filter_by_gpu_type(baseline_records, record["gpu_type"])
         baseline_records = baseline_records[-5:]
 
-        latency_base = _mean_metric(baseline_records, "latency")
-        throughput_base = _mean_metric(baseline_records, "throughput")
-        memory_base = _mean_metric(baseline_records, "memory")
-        latency_reg = _metric_delta_percent("latency", record, baseline_records)
-        throughput_reg = _metric_delta_percent("throughput", record,
-                                               baseline_records)
-        memory_reg = _metric_delta_percent("memory", record, baseline_records)
-        regressions = [
-            v for v in (latency_reg, throughput_reg, memory_reg) if v is not None
-        ]
-        worst_regression_pct = max(regressions) if regressions else None
-
-        summary_row = {
-            "model_id": record["model_id"],
-            "gpu_type": record["gpu_type"],
-            "baseline_n": len(baseline_records),
-            "latency_curr": _safe_float(record.get("latency")),
-            "latency_base": latency_base,
-            "throughput_curr": _safe_float(record.get("throughput")),
-            "throughput_base": throughput_base,
-            "memory_curr": _safe_float(record.get("memory")),
-            "memory_base": memory_base,
-            "worst_regression_pct": worst_regression_pct,
-            "failed": False,
-        }
-
-        if not baseline_records:
-            print(f"No baseline records for {record['model_id']}; skipping regression check")
-            summary_rows.append(summary_row)
-            continue
-
         failures = _check_regressions(record, baseline_records, MAX_REGRESSION)
-        summary_row["failed"] = bool(failures)
+
+        # Tag the current record based on the failure.
+        if not baseline_records:
+            # INITIALIZATION CASE: First run for this model/GPU
+            print(f"No baseline for {record['model_id']} on {record['gpu_type']}. Initializing...")
+            failures = []
+            record["success"] = True  # The first run is always "successful"
+        else:
+            # COMPARISON CASE: Compare against the mean of the last 5 good runs
+            failures = _check_regressions(record, baseline_records, MAX_REGRESSION)
+            if failures:
+                record["success"] = False
+                all_failures.extend(failures)
+            else:
+                record["success"] = True
+    
+        # 5. Persist to HF if we are on main
+        if persist_tracking:
+            # This writes the JSON with the "success" field to /tmp
+            current_path = _write_tracking_record(record)
+            # This pushes it to the FastVideo/performance-tracking repo
+            _upload_to_hf(current_path, record)
+
+        
+        summary_row = _build_summary_row(record, baseline_records, bool(failures))
         summary_rows.append(summary_row)
-        all_failures.extend(failures)
 
     markdown = _build_markdown_summary(summary_rows, MAX_REGRESSION)
     _emit_markdown_summary(markdown)
