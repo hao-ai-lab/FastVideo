@@ -28,16 +28,16 @@ RESULTS_DIR = os.path.join(
 )
 TRACKING_ROOT = os.environ.get(
     "PERFORMANCE_TRACKING_ROOT",
-    "/root/data/performance-tracking",
+    "/tmp/perf-tracking",
 )
 MAX_REGRESSION = float(os.environ.get("PERF_MAX_REGRESSION", "0.15"))
 
 
 def _should_persist_tracking() -> bool:
-    test_scope = os.environ.get("TEST_SCOPE", "")
-    branch = os.environ.get("BUILDKITE_BRANCH", "")
-    return test_scope == "full" and branch == "main"
-
+    # test_scope = os.environ.get("TEST_SCOPE", "")
+    # branch = os.environ.get("BUILDKITE_BRANCH", "")
+    # return test_scope == "full" and branch == "main"
+    return True # only for testing purpose.
 
 def _sanitize(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", value)
