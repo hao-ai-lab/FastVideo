@@ -234,7 +234,10 @@ def run_lora_extraction_tests():
               volumes={"/root/data": model_vol})
 def run_performance_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/performance -vs"
+        "export HF_HOME='/root/data/.cache' && "
+        "hf auth login --token $HF_API_KEY && "
+        "pytest ./fastvideo/tests/performance -vs && "
+        "python ./fastvideo/tests/performance/compare_baseline.py"
     )
 
 
