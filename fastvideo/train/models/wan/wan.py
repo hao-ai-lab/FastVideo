@@ -39,8 +39,6 @@ from fastvideo.utils import (
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.module_state import (
     apply_trainable, )
-from fastvideo.train.utils.lora import (
-    enable_lora_training, )
 from fastvideo.train.utils.moduleloader import (
     load_module_from_path, )
 
@@ -79,15 +77,13 @@ class WanModel(ModelBase):
         lora_alpha: int | None = None,
         lora_target_modules: list[str] | None = None,
     ) -> None:
-        self._init_from = str(init_from)
-        self._trainable = bool(trainable)
-        self._lora_rank = (int(lora_rank) if lora_rank is not None else None)
-        self._lora_alpha = (int(lora_alpha) if lora_alpha is not None else None)
-        self._lora_target_modules = (
-            list(lora_target_modules)
-            if lora_target_modules is not None else None
+        super().__init__(
+            trainable=trainable,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+            lora_target_modules=lora_target_modules,
         )
-        self._num_lora_layers = 0
+        self._init_from = str(init_from)
 
         self.transformer = self._load_transformer(
             init_from=self._init_from,
@@ -149,18 +145,7 @@ class WanModel(ModelBase):
                 transformer,
                 checkpointing_type=ckpt_type,
             )
-        if self._lora_rank is not None:
-            if not trainable:
-                raise ValueError(
-                    "LoRA training requires trainable=true "
-                    "for the role model"
-                )
-            self._num_lora_layers = enable_lora_training(
-                transformer,
-                lora_rank=self._lora_rank,
-                lora_alpha=self._lora_alpha,
-                lora_target_modules=self._lora_target_modules,
-            )
+        if self._enable_lora_if_configured(transformer):
             return transformer
         transformer = apply_trainable(transformer, trainable=trainable)
         return transformer

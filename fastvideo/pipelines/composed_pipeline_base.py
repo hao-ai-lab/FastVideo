@@ -226,16 +226,13 @@ class ComposedPipelineBase(ABC):
                 setattr(fastvideo_args, key, value)
 
             fastvideo_args.dit_cpu_offload = False
-            # We hijack dit_precision to act as the master weight precision at
-            # load time. FSDP2 MixedPrecisionPolicy still controls compute /
-            # reduction precision during training.
-            allowed_training_precisions = {"fp32", "bf16"}
-            if fastvideo_args.pipeline_config.dit_precision not in allowed_training_precisions:
-                raise ValueError(
-                    "Training currently supports only "
-                    f"{sorted(allowed_training_precisions)} master weights, got "
-                    f"{fastvideo_args.pipeline_config.dit_precision!r}"
-                )
+            # we hijack the precision to be the master weight type so that the
+            # model is loaded with the correct precision. Subsequently we will
+            # use FSDP2's MixedPrecisionPolicy to set the precision for the
+            # fwd, bwd, and other operations' precision.
+            assert fastvideo_args.pipeline_config.dit_precision == 'fp32', (
+                'only fp32 is supported for training'
+            )
 
         logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
 
