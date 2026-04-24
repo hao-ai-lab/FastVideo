@@ -17,6 +17,8 @@ import torch
 if TYPE_CHECKING:
     from torchcodec.decoders import VideoDecoder
 
+    from fastvideo.api.schema import ContinuationState
+
 import time
 from collections import OrderedDict
 
@@ -205,6 +207,9 @@ class ForwardBatch:
     trajectory_timesteps: list[torch.Tensor] | None = None
     trajectory_latents: torch.Tensor | None = None
     trajectory_decoded: list[torch.Tensor] | None = None
+
+    continuation_state: "ContinuationState | None" = None
+    return_continuation_state: bool = False
 
     # Extra parameters that might be needed by specific pipeline implementations
     extra: dict[str, Any] = field(default_factory=dict)

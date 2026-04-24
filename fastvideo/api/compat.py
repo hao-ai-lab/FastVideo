@@ -17,6 +17,7 @@ from fastvideo.api.request_metadata import (
 )
 from fastvideo.api.schema import (
     CompileConfig,
+    ContinuationState,
     GenerationRequest,
     GeneratorConfig,
     InputConfig,
@@ -325,10 +326,13 @@ def request_to_sampling_param(
 ) -> SamplingParam:
     if request.plan is not None:
         raise NotImplementedError("GenerationRequest.plan is not wired into VideoGenerator yet")
-    if request.state is not None:
-        raise NotImplementedError("GenerationRequest.state is not wired into VideoGenerator yet")
 
     sampling_param = SamplingParam.from_pretrained(model_path)
+    if request.state is not None:
+        _validate_continuation_state(request.state)
+        sampling_param.continuation_state = request.state
+    if request.output.return_state:
+        sampling_param.return_continuation_state = True
     updates = explicit_request_updates(request)
 
     for key, value in updates.items():
@@ -549,6 +553,37 @@ def _serialize_generation_request(request: GenerationRequest) -> dict[str, Any]:
 
 _SCHEMA_DEFAULT_UPDATES = _extract_request_updates(config_to_dict(GenerationRequest()))
 
+_KNOWN_CONTINUATION_KINDS: set[str] = set()
+
+
+def register_continuation_kind(kind: str) -> None:
+    """Register a :class:`ContinuationState.kind` as recognized.
+
+    PR 7 wires the envelope through; per-kind payload deserializers live
+    with each model family (e.g. ``fastvideo.pipelines.basic.ltx2.
+    continuation.LTX2ContinuationState``). The registry lets the
+    public-API compat layer validate the kind early, before the state
+    reaches the pipeline.
+    """
+    if not isinstance(kind, str) or not kind:
+        raise ValueError("ContinuationState kind must be a non-empty string")
+    _KNOWN_CONTINUATION_KINDS.add(kind)
+
+
+def _validate_continuation_state(state: ContinuationState) -> None:
+    if not isinstance(state.kind, str) or not state.kind:
+        raise ValueError("GenerationRequest.state.kind must be a non-empty string; got "
+                         f"{state.kind!r}")
+    if not isinstance(state.payload, Mapping):
+        raise ValueError(f"GenerationRequest.state.payload must be a mapping; got "
+                         f"{type(state.payload).__name__}")
+    if state.kind not in _KNOWN_CONTINUATION_KINDS:
+        known = sorted(_KNOWN_CONTINUATION_KINDS)
+        raise ValueError(f"Unknown ContinuationState kind {state.kind!r}; registered "
+                         f"kinds: {known}. Import the model family that owns this kind "
+                         "(e.g. `import fastvideo.pipelines.basic.ltx2.continuation`) "
+                         "to register it, or drop the state field.")
+
 
 def _fan_out_batched_input_value(
     source_request: GenerationRequest,
@@ -582,6 +617,7 @@ __all__ = [
     "load_generator_config_from_file",
     "normalize_generation_request",
     "normalize_generator_config",
+    "register_continuation_kind",
     "request_to_pipeline_overrides",
     "request_to_sampling_param",
 ]
