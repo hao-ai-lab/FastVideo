@@ -174,6 +174,10 @@ def run_server(serve_config: ServeConfig, *, generator: _GeneratorProto | None =
     ``serve_config.generator`` unless ``generator`` is provided, then
     serves ``build_app(...)`` via uvicorn.
     """
+    if serve_config.streaming is None:
+        raise ValueError("ServeConfig.streaming must be set to launch the streaming server; "
+                         "got None. Add a `streaming:` block to your serve config.")
+
     import uvicorn
 
     if generator is None:
