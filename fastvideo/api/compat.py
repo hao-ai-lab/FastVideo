@@ -577,7 +577,7 @@ def _validate_continuation_state(state: ContinuationState) -> None:
     if not isinstance(state.payload, Mapping):
         raise ValueError(f"GenerationRequest.state.payload must be a mapping; got "
                          f"{type(state.payload).__name__}")
-    if _KNOWN_CONTINUATION_KINDS and state.kind not in _KNOWN_CONTINUATION_KINDS:
+    if state.kind not in _KNOWN_CONTINUATION_KINDS:
         known = sorted(_KNOWN_CONTINUATION_KINDS)
         raise ValueError(f"Unknown ContinuationState kind {state.kind!r}; registered "
                          f"kinds: {known}. Import the model family that owns this kind "

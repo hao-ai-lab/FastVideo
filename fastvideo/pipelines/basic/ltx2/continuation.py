@@ -328,12 +328,25 @@ def _pack_frame_blobs(encoded: list[bytes]) -> bytes:
 
 
 def _unpack_frame_blobs(raw: bytes) -> list[bytes]:
+    if len(raw) < 4:
+        raise ValueError("frame blob truncated: missing count header")
     count = int.from_bytes(raw[:4], "big")
+    # Each frame contributes at least a 4-byte length prefix, so a
+    # declared count larger than (len(raw) - 4) // 4 cannot fit and
+    # would otherwise cause an O(count) allocation loop on malformed
+    # input.
+    if count > (len(raw) - 4) // 4:
+        raise ValueError(f"frame blob declares {count} frames but buffer holds at most "
+                         f"{(len(raw) - 4) // 4}")
     out: list[bytes] = []
     cursor = 4
-    for _ in range(count):
+    for index in range(count):
+        if cursor + 4 > len(raw):
+            raise ValueError(f"frame blob truncated at frame {index} length header")
         length = int.from_bytes(raw[cursor:cursor + 4], "big")
         cursor += 4
+        if cursor + length > len(raw):
+            raise ValueError(f"frame blob truncated at frame {index} payload")
         out.append(raw[cursor:cursor + length])
         cursor += length
     return out
