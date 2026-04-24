@@ -92,3 +92,11 @@ preprocess_output_text/
 .sisyphus/
 openspec/
 fastvideo/tests/ssim/reference_videos/**
+
+# Local clones of upstream repos used only for parity testing.
+/stable-audio-tools/
+/daVinci-MagiHuman/
+
+# Converted model weights (produced by scripts/checkpoint_conversion/*).
+# Tens of GB; should live on HF, not in git.
+/converted_weights/

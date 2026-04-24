@@ -27,6 +27,10 @@ from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
+from fastvideo.pipelines.basic.magi_human.pipeline_configs import (
+    MagiHumanDistillT2VConfig,
+    MagiHumanT2VConfig,
+)
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
     TurboDiffusionT2V_14B_Config,
@@ -282,6 +286,38 @@ def _register_configs() -> None:
         ],
         model_family="stable_audio",
         default_preset="stable_audio_open_small",
+    )
+
+    # daVinci-MagiHuman (base T2V)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanT2VConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "GAIR/daVinci-MagiHuman",
+            "FastVideo/MagiHuman-Base-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower())
+                          and "distill" not in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_base_t2v",
+    )
+    # daVinci-MagiHuman (DMD-2 distilled T2V)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanDistillT2VConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "FastVideo/MagiHuman-Distilled-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower())
+                          and "distill" in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_distill_t2v",
     )
 
     # Hunyuan 1.5 (specific)
@@ -824,6 +860,8 @@ def _register_presets() -> None:
         ALL_PRESETS as LONGCAT_PRESETS, )
     from fastvideo.pipelines.basic.ltx2.presets import (
         ALL_PRESETS as LTX2_PRESETS, )
+    from fastvideo.pipelines.basic.magi_human.presets import (
+        ALL_PRESETS as MAGI_HUMAN_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame.presets import (
         ALL_PRESETS as MATRIXGAME_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
@@ -845,6 +883,7 @@ def _register_presets() -> None:
         LINGBOTWORLD_PRESETS,
         LONGCAT_PRESETS,
         LTX2_PRESETS,
+        MAGI_HUMAN_PRESETS,
         MATRIXGAME_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
