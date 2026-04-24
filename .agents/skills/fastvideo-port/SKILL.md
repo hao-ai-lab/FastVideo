@@ -479,6 +479,9 @@ Read all files in `.agents/lessons/` before starting. Key ones:
 | `2026-04-20_moe-stacked-weights-must-match-official-layout.md` | mirror stacked `[N*out, in]` for checkpoint compat |
 | `2026-04-22_timestep-free-dit-needs-custom-denoising-stage.md` | timestep-free DiT → custom denoising stage required |
 | `2026-04-22_vae-normalization-stats-may-not-exist-for-new-z-dim.md` | stub zeros/ones when VAE stats not published |
+| `2026-04-24_gqa-bypass-distributed-attention.md` | GQA (num_heads_q ≠ num_heads_kv): use `enable_gqa=True` in SDPA, never `repeat_interleave` |
+| `2026-04-24_cfg-uncond-coords-must-match-token-count.md` | CFG uncond pass: rebuild coords from null_text_tokens length, never reuse cond coords |
+| `2026-04-24_scheduler-double-increment.md` | shared scheduler + multiple modalities → only one calls `scheduler.step()`; others do manual Euler |
 
 ## Eval harness
 

@@ -71,6 +71,62 @@ intermediate = hidden_size * 4  # = 20480
 
 The `// 4 * 4` rounding is required — off-by-one silently produces wrong shapes.
 
+## Runtime pitfalls discovered during inference port
+
+### GQA attention — use `enable_gqa=True`, never `repeat_interleave`
+`DaVinciAttention` has `num_heads_q=40, num_heads_kv=8` (GQA, groups=5).
+`DistributedAttention` assumes equal head counts and fails. Expanding k/v with
+`repeat_interleave` before SDPA triggers internal device-side asserts in
+PyTorch's flash attention kernel (async — error surfaces at the *next* CUDA
+op, making it look like an unrelated OOB). The correct fix:
+
+```python
+q_sd = q_4d.permute(0, 2, 1, 3).contiguous()  # [1, H_q, S, D]
+k_sd = k_4d.permute(0, 2, 1, 3).contiguous()  # [1, H_kv, S, D]
+v_sd = v_4d.permute(0, 2, 1, 3).contiguous()  # [1, H_kv, S, D]
+sdpa_kwargs = {}
+if num_heads_kv != num_heads_q:
+    sdpa_kwargs["enable_gqa"] = True
+attn_out = F.scaled_dot_product_attention(q_sd, k_sd, v_sd, **sdpa_kwargs)
+attn_out = attn_out.permute(0, 2, 1, 3).squeeze(0)
+```
+
+`.contiguous()` is required after `.permute()` — flash attention 2 requires
+contiguous inputs. See lesson `2026-04-24_gqa-bypass-distributed-attention.md`.
+
+### CFG unconditional coords must be rebuilt per pass
+The negative prompt encodes to a different token count than the positive
+prompt. `text_coords` (built for the positive prompt) must **not** be reused
+for the unconditional forward pass. Always:
+
+```python
+null_text_coords = _build_text_coords(null_text_tokens.shape[0], device)
+```
+
+Reusing cond coords causes `coords.shape[0] < mod.shape[0]`, which manifests
+as `vectorized_gather_kernel: ind out of bounds` at `rope[perm]` — an
+apparently unrelated gather error. See lesson
+`2026-04-24_cfg-uncond-coords-must-match-token-count.md`.
+
+### Shared scheduler + audio latents — manual Euler for secondary modality
+The denoising loop steps both video and audio latents. Both share one
+`FlowMatchEulerDiscreteScheduler` instance. Calling `scheduler.step()` twice
+per iteration double-increments `_step_index`, exhausting sigmas after N/2
+iterations (OOB at `sigmas[step_index + 1]`). Fix: capture `dt` before the
+video step, then do the audio update as a manual Euler step:
+
+```python
+s_idx = self.scheduler.step_index
+_is_last = (s_idx + 1 >= len(self.scheduler.sigmas))
+_dt = (self.scheduler.sigmas[s_idx + 1] - self.scheduler.sigmas[s_idx]
+       if not _is_last else 0.0)
+latents = self.scheduler.step(velocity, t, latents, ...)[0]  # only call once
+if not _is_last:
+    audio_latents = (audio_latents + _dt * audio_velocity).to(dtype)
+```
+
+See lesson `2026-04-24_scheduler-double-increment.md`.
+
 ## Credentials required
 
 - `HF_TOKEN` with access to `google/t5gemma-9b` (gated).
