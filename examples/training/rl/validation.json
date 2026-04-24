@@ -1,0 +1,23 @@
+{
+    "data": [
+      {
+        "caption": "A realistic photograph of a fast food drive-thru menu board at dusk, featuring a bold and colorful advertisement that reads \"Try Our New Burger\" with an appetizing image of the burger below, set against the backdrop of a busy suburban street.",
+        "image_path": null,
+        "video_path": null,
+        "num_inference_steps": 50,
+        "height": 240,
+        "width": 416,
+        "num_frames": 33
+      },
+      {
+        "caption": "A detailed, vintage-style alien abduction pamphlet titled \"Probing FAQs\", featuring illustrations of extraterrestrial beings and spacecraft, alongside text explaining common questions and procedures. The design is sleek and informative, with a slightly eerie, sci-fi aesthetic.",
+        "image_path": null,
+        "video_path": null,
+        "num_inference_steps": 50,
+        "height": 240,
+        "width": 416,
+        "num_frames": 33
+      }
+    ]
+  }
+  

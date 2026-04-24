@@ -85,6 +85,13 @@ docs/distillation/examples/
 dmd_t2v_output/
 preprocess_output_text/
 
+# Align-debug: ignore only mp4 in align_logs; allow .txt log files to be tracked
+align_logs/**/*.mp4
+flow_grpo/align_logs/**/*.mp4
+!align_logs/fv_logs/*.txt
+!align_logs/flow_logs/*.txt
+!flow_grpo/align_logs/flow_logs/*.txt
+
 # Next.js / Node artifacts under ui/: see ui/.gitignore
 
 .claude/
