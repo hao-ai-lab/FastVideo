@@ -1,28 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Single-generator FastAPI + WebSocket streaming server.
-
-Minimum-viable implementation for PR 7.5:
-
-* one ``VideoGenerator`` for the process (GPU pool lands in PR 7.6)
-* one ``/v1/stream`` WebSocket endpoint accepting a
-  ``session_init_v2`` opening frame plus subsequent
-  ``segment_prompt_source`` frames
-* fMP4 output through :class:`FragmentedMP4Encoder`
-* continuation state held by :class:`InMemorySessionStore`, exportable
-  via a ``snapshot_state`` client frame
-
-Prompt enhancement (PR 7.7), auxiliaries (PR 7.8), router (PR 7.9),
-and the async-event pipeline (PR 7.10) are explicitly out of scope.
-This server runs a synchronous ``generator.generate(request)`` under
-``asyncio.to_thread`` until PR 7.10's ``generate_async`` lands.
-"""
+"""Single-generator FastAPI + WebSocket streaming server."""
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -36,9 +21,13 @@ from fastvideo.api.schema import (
     ServeConfig,
 )
 from fastvideo.entrypoints.streaming.protocol import (
+    AutoExtensionUpdated,
     ContinuationStateSnapshot,
+    EnhancementUpdated,
     ErrorMessage,
+    GenerationPausedUpdated,
     GpuAssigned,
+    LoopGenerationUpdated,
     Ltx2SegmentComplete,
     Ltx2SegmentStart,
     Ltx2StreamComplete,
@@ -46,6 +35,7 @@ from fastvideo.entrypoints.streaming.protocol import (
     MediaInit,
     MediaSegmentComplete,
     QueueStatus,
+    SeedPromptsUpdated,
     SegmentPromptSource,
     SessionInitV2,
     SnapshotState,
@@ -70,33 +60,20 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-# ---------------------------------------------------------------------------
-# Generator protocol (tiny abstraction so tests can inject a mock)
-# ---------------------------------------------------------------------------
+# RFC 6455 WebSocket close codes used by the server.
+_WS_CLOSE_UNSUPPORTED_DATA = 1003
+_WS_CLOSE_TRY_AGAIN_LATER = 1013
 
 
-class _GeneratorProto:
-    """Subset of :class:`fastvideo.VideoGenerator` the server calls.
+class _GeneratorProto(Protocol):
+    """Subset of :class:`fastvideo.VideoGenerator` the server calls."""
 
-    Implementations just need to return a mapping with ``"frames"``
-    (list of RGB uint8 HxWx3 ndarrays) and ``"audio_sample_rate"``.
-    The real ``VideoGenerator.generate`` satisfies this today; tests
-    wire in a fake for CPU-only runs.
-    """
-
-    def generate(self, request: GenerationRequest) -> Any:  # pragma: no cover
-        raise NotImplementedError
-
-
-# ---------------------------------------------------------------------------
-# App factory
-# ---------------------------------------------------------------------------
+    def generate(self, request: GenerationRequest) -> Any:
+        ...
 
 
 @dataclass
 class ServerState:
-    """Wiring the FastAPI app hands to each request handler."""
-
     serve_config: ServeConfig
     generator: _GeneratorProto
     sessions: SessionManager
@@ -145,12 +122,8 @@ def build_app(
         try:
             session = state.sessions.create()
         except SessionRejected as exc:
-            await _send_json(websocket, ErrorMessage(
-                code="session_rejected",
-                message=str(exc),
-                retryable=False,
-            ))
-            await websocket.close(code=1013, reason="session_rejected")
+            await _send_error(websocket, "session_rejected", str(exc), retryable=False)
+            await websocket.close(code=_WS_CLOSE_TRY_AGAIN_LATER, reason="session_rejected")
             return
 
         try:
@@ -159,9 +132,10 @@ def build_app(
             logger.info("session %s: client disconnected", session.id[:8])
         except Exception:  # pragma: no cover - defensive catch-all
             logger.exception("session %s: unhandled error", session.id[:8])
-            session.state = SessionState.ERROR
+            with contextlib.suppress(InvalidSessionTransition):
+                session.transition(SessionState.ERROR)
         finally:
-            state.sessions.close(session.id)
+            _cleanup_session(session, state)
 
     app.state.server_state = state
     return app
@@ -192,11 +166,6 @@ def run_server(serve_config: ServeConfig, *, generator: _GeneratorProto | None =
     )
 
 
-# ---------------------------------------------------------------------------
-# Session handler
-# ---------------------------------------------------------------------------
-
-
 async def _handle_session(
     websocket: WebSocket,
     session: Session,
@@ -209,12 +178,10 @@ async def _handle_session(
     await _apply_session_init(session, init, state)
     await _send_json(websocket, QueueStatus(position=0, queue_depth=0))
     session.transition(SessionState.GPU_BINDING)
-    await _send_json(
-        websocket,
-        GpuAssigned(
-            gpu_id=0,  # single-generator skeleton — GPU pool arrives in PR 7.6
-            session_timeout=state.sessions.session_timeout_seconds,
-        ))
+    await _send_json(websocket, GpuAssigned(
+        gpu_id=0,
+        session_timeout=state.sessions.session_timeout_seconds,
+    ))
     session.transition(SessionState.ACTIVE)
     await _send_json(websocket, _build_stream_start(session, state))
 
@@ -236,28 +203,24 @@ async def _read_init_message(
     try:
         parsed = parse_client_message(raw)
     except Exception as exc:
-        await _send_json(
-            websocket,
-            ErrorMessage(
-                code="invalid_message",
-                message=f"opening frame failed validation: {exc}",
-                retryable=False,
-            ))
-        await websocket.close(code=1003, reason="invalid_init")
-        session.state = SessionState.REJECTED
+        await _reject_init(websocket, session, f"opening frame failed validation: {exc}", "invalid_init")
         return None
     if not isinstance(parsed, SessionInitV2):
-        await _send_json(
-            websocket,
-            ErrorMessage(
-                code="invalid_message",
-                message="first frame must be session_init_v2",
-                retryable=False,
-            ))
-        await websocket.close(code=1003, reason="expected_session_init_v2")
-        session.state = SessionState.REJECTED
+        await _reject_init(websocket, session, "first frame must be session_init_v2", "expected_session_init_v2")
         return None
     return parsed
+
+
+async def _reject_init(
+    websocket: WebSocket,
+    session: Session,
+    message: str,
+    close_reason: str,
+) -> None:
+    await _send_error(websocket, "invalid_message", message, retryable=False)
+    await websocket.close(code=_WS_CLOSE_UNSUPPORTED_DATA, reason=close_reason)
+    with contextlib.suppress(InvalidSessionTransition):
+        session.transition(SessionState.REJECTED)
 
 
 async def _apply_session_init(
@@ -276,7 +239,8 @@ async def _apply_session_init(
     session.stream_mode = init.stream_mode
 
     if init.initial_image is not None:
-        image = persist_session_init_image(init.initial_image)
+        # Decode + disk write off the event loop; payload is up to 32 MiB.
+        image = await asyncio.to_thread(persist_session_init_image, init.initial_image)
         if image is not None:
             session.metadata["session_init_image"] = image.path
 
@@ -306,23 +270,16 @@ async def _run_segment_loop(
         try:
             parsed = parse_client_message(raw)
         except Exception as exc:
-            await _send_json(websocket, ErrorMessage(
-                code="invalid_message",
-                message=str(exc),
-                retryable=True,
-            ))
+            await _send_error(websocket, "invalid_message", str(exc), retryable=True)
             continue
 
         if isinstance(parsed, SnapshotState):
             snap = state.session_store.snapshot(session.id)
             if snap is None:
-                await _send_json(
-                    websocket,
-                    ErrorMessage(
-                        code="internal_error",
-                        message="no continuation state available for session",
-                        retryable=False,
-                    ))
+                await _send_error(websocket,
+                                  "internal_error",
+                                  "no continuation state available for session",
+                                  retryable=False)
                 continue
             await _send_json(websocket, ContinuationStateSnapshot(state={"kind": snap.kind, "payload": snap.payload}, ))
             continue
@@ -331,13 +288,9 @@ async def _run_segment_loop(
             await _run_segment(websocket, session, state, parsed)
             continue
 
-        # Settings toggles from the catalogue — minimum wiring for PR 7.5.
-        if hasattr(parsed, "enabled"):
-            _apply_toggle(session, parsed)
-            continue
-
-        # Unknown but valid type — silently ignore per the additive
-        # evolution rule (documented in streaming.md).
+        # Silently ignore unknown-but-valid types (additive-evolution
+        # rule in streaming.md).
+        _apply_toggle(session, parsed)
 
 
 async def _run_segment(
@@ -362,30 +315,22 @@ async def _run_segment(
         result = await loop.run_in_executor(None, state.generator.generate, request)
     except Exception as exc:
         logger.exception("session %s: generator failed", session.id[:8])
-        await _send_json(
-            websocket, ErrorMessage(
-                code="worker_failed",
-                message=f"generator.generate failed: {exc}",
-                retryable=True,
-            ))
-        session.state = SessionState.ERROR
+        await _send_error(websocket, "worker_failed", f"generator.generate failed: {exc}", retryable=True)
+        with contextlib.suppress(InvalidSessionTransition):
+            session.transition(SessionState.ERROR)
         return
     elapsed_ms = (time.perf_counter() - start) * 1000.0
 
     frames = _extract_frames(result)
     if not frames:
-        await _send_json(websocket,
-                         ErrorMessage(
-                             code="worker_failed",
-                             message="generator returned no frames",
-                             retryable=True,
-                         ))
-        session.state = SessionState.ERROR
+        await _send_error(websocket, "worker_failed", "generator returned no frames", retryable=True)
+        with contextlib.suppress(InvalidSessionTransition):
+            session.transition(SessionState.ERROR)
         return
 
-    # Emit step_complete events for observability even without a real
-    # step-level progress source (PR 7.10 replaces this with events
-    # from generate_async).
+    # Synchronous generator call has no per-step hook; emit one
+    # terminal StepComplete so observability wiring still sees the
+    # segment finish.
     total = request.sampling.num_inference_steps
     await _send_json(websocket, StepComplete(
         segment_idx=segment_idx,
@@ -429,7 +374,6 @@ async def _run_segment(
         state.session_store.store(session.id, new_state)
 
     session.segment_idx += 1
-    session.generated_segment_count += 1
     with contextlib.suppress(InvalidSessionTransition):
         session.transition(SessionState.ACTIVE)
 
@@ -440,11 +384,6 @@ async def _run_segment(
             generation_time_ms=elapsed_ms,
             e2e_latency_ms=elapsed_ms,
         ))
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _build_stream_start(
@@ -507,16 +446,16 @@ def _coerce_state(raw: dict[str, Any]) -> ContinuationState | None:
 
 
 def _apply_toggle(session: Session, message: Any) -> None:
-    enabled = bool(getattr(message, "enabled", False))
-    name = getattr(message, "type", "")
-    if name == "enhancement_updated":
-        session.enhancement_enabled = enabled
-    elif name == "auto_extension_updated":
-        session.auto_extension_enabled = enabled
-    elif name == "loop_generation_updated":
-        session.loop_generation_enabled = enabled
-    elif name == "generation_paused_updated":
-        session.generation_paused = enabled
+    if isinstance(message, EnhancementUpdated):
+        session.enhancement_enabled = message.enabled
+    elif isinstance(message, AutoExtensionUpdated):
+        session.auto_extension_enabled = message.enabled
+    elif isinstance(message, LoopGenerationUpdated):
+        session.loop_generation_enabled = message.enabled
+    elif isinstance(message, GenerationPausedUpdated):
+        session.generation_paused = message.paused
+    elif isinstance(message, SeedPromptsUpdated):
+        session.curated_prompts = list(message.seed_prompts)
 
 
 def _extract_frames(result: Any) -> list:
@@ -541,6 +480,28 @@ def _extract_state(result: Any) -> ContinuationState | None:
 async def _send_json(websocket: WebSocket, message: Any) -> None:
     payload = (message.model_dump(mode="json", exclude_none=True) if hasattr(message, "model_dump") else message)
     await websocket.send_json(payload)
+
+
+async def _send_error(
+    websocket: WebSocket,
+    code: str,
+    message: str,
+    *,
+    retryable: bool,
+) -> None:
+    await _send_json(
+        websocket,
+        ErrorMessage(code=code, message=message, retryable=retryable),
+    )
+
+
+def _cleanup_session(session: Session, state: ServerState) -> None:
+    state.sessions.close(session.id)
+    state.session_store.drop(session.id)
+    init_image_path = session.metadata.get("session_init_image")
+    if isinstance(init_image_path, str):
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(init_image_path)
 
 
 __all__ = [

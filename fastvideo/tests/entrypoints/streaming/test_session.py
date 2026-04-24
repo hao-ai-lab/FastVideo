@@ -70,7 +70,7 @@ class TestSessionStateMachine:
 
     def test_segment_cap(self):
         s = Session()
-        s.generated_segment_count = 5
+        s.segment_idx = 5
         assert s.segment_cap_reached(5) is True
         assert s.segment_cap_reached(6) is False
 

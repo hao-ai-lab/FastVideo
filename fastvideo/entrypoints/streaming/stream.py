@@ -3,24 +3,10 @@
 
 The client's Media Source Extensions player needs a continuous fMP4
 byte stream: first an *initialization segment* (``ftyp`` + ``moov``),
-then one or more *media segments* (``moof`` + ``mdat``). We build that
-by piping raw RGB frames into an ffmpeg subprocess configured for
-fragmented output and reading the resulting bytes back out.
-
-ffmpeg flags used:
-
-    -f rawvideo -pix_fmt rgb24 -s WxH -r <fps> -i -
-    -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p
-    -movflags empty_moov+default_base_moof+frag_keyframe+faststart
-    -f mp4 -
-
-The "empty_moov" + "default_base_moof" combination is what makes the
-output valid MSE input: the first flush emits the init segment, and
-subsequent writes emit fragments.
-
-This module is intentionally minimal. PR 7.6 adds the audio re-encode
-path and tiling; PR 7.8 adds the legacy JPEG fallback. This PR 7.5
-skeleton only covers the video-only fMP4 happy path.
+then one or more *media segments* (``moof`` + ``mdat``). We pipe raw
+RGB frames into an ffmpeg subprocess configured for fragmented output
+via ``-movflags empty_moov+default_base_moof+frag_keyframe+faststart``
+and stream the bytes back out.
 """
 from __future__ import annotations
 
@@ -30,7 +16,7 @@ import subprocess
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import numpy as np
@@ -44,7 +30,7 @@ class FragmentedMP4Chunk:
     fed into the client's ``SourceBuffer`` first) or a media fragment.
     """
 
-    kind: str  # "init" | "media"
+    kind: Literal["init", "media"]
     data: bytes
     stream_id: str
     segment_idx: int
@@ -129,11 +115,14 @@ class FragmentedMP4Encoder:
             *self._extra_args,
             "-",
         ]
+        # stderr → DEVNULL: with -loglevel error on, the only thing
+        # stderr would carry is unsolicited warnings. Piping without a
+        # reader deadlocks ffmpeg once the pipe buffer (~64 KiB) fills.
         self._proc = subprocess.Popen(  # noqa: S603
             args,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             bufsize=0,
         )
 
@@ -147,14 +136,16 @@ class FragmentedMP4Encoder:
         assert self._proc is not None and self._proc.stdin is not None
         proc = self._proc
 
+        loop = asyncio.get_running_loop()
+
         async def _writer() -> None:
             try:
                 if hasattr(frames, "__aiter__"):
                     async for frame in frames:  # type: ignore[union-attr]
-                        _write_frame(proc.stdin, frame)
+                        await loop.run_in_executor(None, _write_frame, proc.stdin, frame)
                 else:
                     for frame in frames:  # type: ignore[assignment]
-                        _write_frame(proc.stdin, frame)
+                        await loop.run_in_executor(None, _write_frame, proc.stdin, frame)
             finally:
                 with contextlib.suppress(BrokenPipeError):
                     proc.stdin.close()
@@ -163,7 +154,6 @@ class FragmentedMP4Encoder:
         try:
             reader = proc.stdout
             assert reader is not None
-            loop = asyncio.get_running_loop()
             # Read in reasonably-sized chunks; MSE tolerates any size
             # but we don't want to starve the event loop.
             chunk_size = 64 * 1024
@@ -171,7 +161,7 @@ class FragmentedMP4Encoder:
                 data = await loop.run_in_executor(None, reader.read, chunk_size)
                 if not data:
                     break
-                kind = "init" if not self._init_emitted else "media"
+                kind: Literal["init", "media"] = "init" if not self._init_emitted else "media"
                 self._init_emitted = True
                 yield FragmentedMP4Chunk(
                     kind=kind,

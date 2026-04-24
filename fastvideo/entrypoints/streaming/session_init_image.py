@@ -1,19 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Persist the initial-image blob attached to a streaming session.
-
-The client may include an ``initial_image`` field on
-``session_init_v2`` to seed an i2v session with a starting frame. The
-payload is base64-encoded PNG / JPEG bytes. We decode, validate, and
-persist to a temp file so the downstream pipeline can read it as an
-ordinary ``image_path``.
-"""
+"""Persist the initial-image blob attached to a streaming session."""
 from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import os
 import tempfile
-import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,8 +24,8 @@ _MAX_IMAGE_BYTES = 32 * 1024 * 1024  # 32 MiB cap
 class SessionInitImage:
     """Location of the persisted init image.
 
-    Callers pass ``path`` to
-    ``InputConfig.image_path``; ``display_name`` is only used for logs.
+    Callers pass ``path`` to ``InputConfig.image_path``; ``display_name``
+    is only used for logs.
     """
 
     path: str
@@ -83,11 +76,14 @@ def persist_session_init_image(
 
     ext = _ACCEPTED_MIMES[mime]
     display_name = _sanitize_display_name(payload.get("name")) or f"init{ext}"
-    target_dir = output_dir or tempfile.gettempdir()
-    os.makedirs(target_dir, exist_ok=True)
-    path = os.path.join(target_dir, f"fastvideo-init-{uuid.uuid4().hex}{ext}")
-    with open(path, "wb") as f:
-        f.write(data)
+    fd, path = tempfile.mkstemp(prefix="fastvideo-init-", suffix=ext, dir=output_dir)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+    except Exception:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(path)
+        raise
     return SessionInitImage(path=path, display_name=display_name, mime=mime)
 
 

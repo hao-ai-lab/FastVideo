@@ -1,15 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Per-connection session lifecycle for the streaming server.
 
-Each WebSocket opens exactly one :class:`Session`. The session tracks
-its state-machine position, the client's preset + curated prompts, and
-the per-segment history. Sessions are managed by
-:class:`SessionManager`, which enforces the ``generation_segment_cap``
-and ``session_timeout_seconds`` budgets set on
-:class:`fastvideo.api.StreamingConfig`.
-
-No concurrency primitives (queues, GPU acquisition) live here — that's
-the gpu_pool / server-level concern. The session is a plain state bag.
+Each WebSocket opens exactly one :class:`Session`. :class:`SessionManager`
+enforces the ``generation_segment_cap`` and ``session_timeout_seconds``
+budgets from :class:`fastvideo.api.StreamingConfig`.
 """
 from __future__ import annotations
 
@@ -84,14 +78,6 @@ class InvalidSessionTransition(RuntimeError):
 
 @dataclass
 class Session:
-    """Per-WebSocket session state.
-
-    The session is created the moment the WebSocket opens and destroyed
-    when it closes. All mutable session-scoped data lives here so the
-    server handler can pass one object through its helpers instead of
-    carrying ten locals.
-    """
-
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     state: SessionState = SessionState.INITIALIZING
     created_at: float = field(default_factory=time.monotonic)
@@ -102,11 +88,8 @@ class Session:
     preset_label: str | None = None
 
     curated_prompts: list[str] = field(default_factory=list)
-    locked_segment_prompts: list[str] = field(default_factory=list)
 
     segment_idx: int = 0
-    generated_segment_count: int = 0
-    loop_iteration: int = 0
 
     enhancement_enabled: bool = False
     auto_extension_enabled: bool = False
@@ -118,8 +101,6 @@ class Session:
     gpu_id: int | None = None
 
     continuation_state: ContinuationState | None = None
-    """Latest continuation state held server-side. Updated after each
-    segment completes; exported via ``snapshot_state`` client messages."""
 
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -138,23 +119,17 @@ class Session:
         self.last_activity = time.monotonic()
 
     def touch(self) -> None:
-        """Reset the activity timer (called on every client frame)."""
         self.last_activity = time.monotonic()
 
     def is_active(self) -> bool:
         return self.state is SessionState.ACTIVE
 
     def segment_cap_reached(self, cap: int) -> bool:
-        return self.generated_segment_count >= cap
+        return self.segment_idx >= cap
 
 
 class SessionManager:
-    """Registers sessions and enforces per-server session limits.
-
-    PR 7.5 ships the single-generator case (no GPU pool yet), so the
-    manager tracks only in-flight session count. PR 7.6 will swap the
-    GPU binding half of ``acquire()`` for a real pool.
-    """
+    """Registers sessions and enforces per-server session limits."""
 
     def __init__(
         self,
