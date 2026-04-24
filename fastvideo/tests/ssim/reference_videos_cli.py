@@ -13,6 +13,12 @@ from pathlib import Path
 
 
 VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv")
+# Additional artefact types stored under the same reference folders. Latent
+# tensors (`.pt`) back the latent-slice regression tests used by flaky
+# pixel-space models (e.g. LTX-2 distilled). Keeping them in the same upload
+# flow means seeding a new test only requires one HF round-trip.
+LATENT_EXTENSIONS = (".pt",)
+REFERENCE_EXTENSIONS = VIDEO_EXTENSIONS + LATENT_EXTENSIONS
 HF_TOKEN_ENV_KEYS = ("HF_API_KEY", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
 HF_REPO_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO"
 HF_REPO_TYPE_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO_TYPE"
@@ -45,6 +51,17 @@ def _default_repo_type() -> str:
 def _iter_video_files(root: Path) -> Iterable[Path]:
     for path in root.rglob("*"):
         if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS:
+            yield path
+
+
+def _iter_reference_files(root: Path) -> Iterable[Path]:
+    """Yield video files and latent `.pt` references under `root`.
+
+    Used by copy-local and the "has local references" marker probe so that
+    latent-only tests (no mp4) still satisfy readiness checks.
+    """
+    for path in root.rglob("*"):
+        if path.is_file() and path.suffix.lower() in REFERENCE_EXTENSIONS:
             yield path
 
 
@@ -139,7 +156,7 @@ def _has_local_reference_videos(base_dir: Path, quality_tier: str) -> bool:
         return False
     tier_root = _reference_tier_root(base_dir, quality_tier)
     for ref_dir in _discover_reference_dirs(tier_root):
-        for _ in _iter_video_files(ref_dir):
+        for _ in _iter_reference_files(ref_dir):
             return True
     return False
 
@@ -173,14 +190,14 @@ def copy_generated_to_reference(
         raise FileNotFoundError(f"Generated directory not found: {generated_dir}")
 
     copied = 0
-    for video_file in _iter_video_files(generated_dir):
-        rel = video_file.relative_to(generated_dir)
+    for ref_file in _iter_reference_files(generated_dir):
+        rel = ref_file.relative_to(generated_dir)
         dst = reference_dir / rel
         if dry_run:
-            print(f"[dry-run] {video_file} -> {dst}")
+            print(f"[dry-run] {ref_file} -> {dst}")
         else:
             dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(video_file, dst)
+            shutil.copy2(ref_file, dst)
             print(f"Copied: {rel}")
         copied += 1
     return copied
