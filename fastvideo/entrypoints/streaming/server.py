@@ -2,6 +2,7 @@
 """Single-generator FastAPI + WebSocket streaming server."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import time
