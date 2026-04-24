@@ -190,6 +190,12 @@ class ForwardBatch:
     ltx2_stg_blocks_video: list[int] = field(default_factory=list)
     ltx2_stg_blocks_audio: list[int] = field(default_factory=list)
 
+    # Continuation state carried across streaming/multi-segment calls.
+    # Spread from SamplingParam via shallow_asdict; PR 7.6's gpu_pool
+    # upstream is the first runtime that reads/writes it.
+    continuation_state: Any | None = None
+    return_continuation_state: bool = False
+
     n_tokens: int | None = None
 
     # Other parameters that may be needed by specific schedulers
