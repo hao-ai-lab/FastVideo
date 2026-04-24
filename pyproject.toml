@@ -151,6 +151,8 @@ follow_imports = "silent"
 
 [tool.codespell]
 skip = "./data,./wandb,ui/package-lock.json"
+# "TReAD" is daVinci-MagiHuman's acronym (Token Routing and Early Drop).
+ignore-words-list = "TReAD,tread"
 
 [tool.ruff]
 # Allow lines to be as long as 120.
