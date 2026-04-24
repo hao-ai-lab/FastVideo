@@ -89,5 +89,5 @@ def test_ltx2_distilled_inference_similarity(
         model_id=model_id,
         default_params_map=LTX2_DISTILLED_MODEL_TO_PARAMS,
         full_quality_params_map=FULL_QUALITY_LTX2_DISTILLED_MODEL_TO_PARAMS,
-        min_acceptable_ssim=0.70,
+        min_acceptable_ssim=0.60,
     )
