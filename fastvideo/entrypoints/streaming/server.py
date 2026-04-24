@@ -171,7 +171,7 @@ async def _handle_session(
     session: Session,
     state: ServerState,
 ) -> None:
-    init = await _read_init_message(websocket, session)
+    init = await _read_init_message(websocket, session, state)
     if init is None:
         return
 
@@ -195,9 +195,18 @@ async def _handle_session(
 async def _read_init_message(
     websocket: WebSocket,
     session: Session,
+    state: ServerState,
 ) -> SessionInitV2 | None:
     try:
-        raw = await websocket.receive_json()
+        raw = await asyncio.wait_for(
+            websocket.receive_json(),
+            timeout=state.sessions.session_timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        logger.info("session %s: init timeout", session.id[:8])
+        with contextlib.suppress(InvalidSessionTransition):
+            session.transition(SessionState.TIMEOUT)
+        return None
     except WebSocketDisconnect:
         return None
     try:
@@ -262,7 +271,15 @@ async def _run_segment_loop(
             return
 
         try:
-            raw = await websocket.receive_json()
+            raw = await asyncio.wait_for(
+                websocket.receive_json(),
+                timeout=state.sessions.session_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            logger.info("session %s: idle timeout", session.id[:8])
+            with contextlib.suppress(InvalidSessionTransition):
+                session.transition(SessionState.TIMEOUT)
+            return
         except WebSocketDisconnect:
             return
         session.touch()
@@ -311,6 +328,9 @@ async def _run_segment(
 
     start = time.perf_counter()
     loop = asyncio.get_running_loop()
+    # TODO: executor-wrapped generate() cannot be cancelled, so a
+    # client disconnect mid-segment leaves the GPU work running to
+    # completion. Real cancellation needs the generate_async API.
     try:
         result = await loop.run_in_executor(None, state.generator.generate, request)
     except Exception as exc:

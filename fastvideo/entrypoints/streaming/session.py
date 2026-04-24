@@ -179,6 +179,12 @@ class SessionManager:
         The caller is responsible for actually closing them — this
         method only *identifies* dead sessions so the server can emit
         ``session_timeout`` frames before dropping the WebSocket.
+
+        TODO: unused until a background driver calls it. Per-connection
+        idle enforcement currently happens via asyncio.wait_for on
+        receive_json; this helper catches sessions stuck before any
+        receive (e.g. future QUEUED state) and is expected to be wired
+        into the GPU-pool reaper.
         """
         now = now if now is not None else time.monotonic()
         dead: list[str] = []
