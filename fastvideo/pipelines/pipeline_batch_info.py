@@ -17,6 +17,8 @@ import torch
 if TYPE_CHECKING:
     from torchcodec.decoders import VideoDecoder
 
+    from fastvideo.api.schema import ContinuationState
+
 import time
 from collections import OrderedDict
 
@@ -143,6 +145,11 @@ class ForwardBatch:
     # Camera control inputs (LingBotWorld)
     c2ws_plucker_emb: torch.Tensor | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
 
+    # Camera control inputs (GEN3C)
+    trajectory_type: str | None = None
+    movement_distance: float | None = None
+    camera_rotation: str | None = None
+
     # Latent dimensions
     height_latents: list[int] | int | None = None
     width_latents: list[int] | int | None = None
@@ -169,6 +176,9 @@ class ForwardBatch:
     guidance_rescale: float = 0.0
     eta: float = 0.0
     sigmas: list[float] | None = None
+
+    # TeaCache
+    enable_teacache: bool = False
 
     # LTX-2 multi-modal CFG parameters
     ltx2_cfg_scale_video: float = 1.0
@@ -197,6 +207,9 @@ class ForwardBatch:
     trajectory_timesteps: list[torch.Tensor] | None = None
     trajectory_latents: torch.Tensor | None = None
     trajectory_decoded: list[torch.Tensor] | None = None
+
+    continuation_state: "ContinuationState | None" = None
+    return_continuation_state: bool = False
 
     # Extra parameters that might be needed by specific pipeline implementations
     extra: dict[str, Any] = field(default_factory=dict)

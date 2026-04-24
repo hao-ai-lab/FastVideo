@@ -181,6 +181,8 @@ class SortedHelpFormatter(argparse.HelpFormatter):
 class FlexibleArgumentParser(argparse.ArgumentParser):
     """ArgumentParser that allows both underscore and dash in names."""
 
+    _DEFER_CONFIG_SUBCOMMANDS = frozenset({"generate", "serve"})
+
     def __init__(self, *args, **kwargs) -> None:
         # Set the default 'formatter_class' to SortedHelpFormatter
         if 'formatter_class' not in kwargs:
@@ -189,10 +191,17 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
 
     def parse_args(  # type: ignore[override]
             self, args=None, namespace=None) -> argparse.Namespace:
+        namespace, unknown = self.parse_known_args(args, namespace)
+        if unknown:
+            self.error(f"unrecognized arguments: {' '.join(unknown)}")
+        return namespace
+
+    def parse_known_args(  # type: ignore[override]
+            self, args=None, namespace=None) -> tuple[argparse.Namespace, list[str]]:
         if args is None:
             args = sys.argv[1:]
 
-        if '--config' in args:
+        if '--config' in args and not self._should_defer_config_loading(args):
             args = self._pull_args_from_config(args)
 
         # Convert underscores to dashes and vice versa in argument names
@@ -201,10 +210,16 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
             if arg.startswith('--'):
                 if '=' in arg:
                     key, value = arg.split('=', 1)
-                    key = '--' + key[len('--'):].replace('_', '-')
+                    normalized_key = key[len('--'):]
+                    if '.' not in normalized_key:
+                        normalized_key = normalized_key.replace('_', '-')
+                    key = '--' + normalized_key
                     processed_args.append(f'{key}={value}')
                 else:
-                    processed_args.append('--' + arg[len('--'):].replace('_', '-'))
+                    normalized_key = arg[len('--'):]
+                    if '.' not in normalized_key:
+                        normalized_key = normalized_key.replace('_', '-')
+                    processed_args.append('--' + normalized_key)
             elif arg.startswith('-O') and arg != '-O' and len(arg) == 2:
                 # allow -O flag to be used without space, e.g. -O3
                 processed_args.append('-O')
@@ -212,7 +227,7 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
             else:
                 processed_args.append(arg)
 
-        namespace = super().parse_args(processed_args, namespace)
+        namespace, unknown = super().parse_known_args(processed_args, namespace)
 
         # Track which arguments were explicitly provided
         namespace._provided = set()
@@ -238,7 +253,15 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
             else:
                 i += 1
 
-        return namespace  # type: ignore[no-any-return]
+        return namespace, unknown  # type: ignore[no-any-return]
+
+    def _should_defer_config_loading(self, args: list[str]) -> bool:
+        if getattr(self, "defer_config_loading", False):
+            return True
+        subcommand = next((arg for arg in args if not arg.startswith('-')), None)
+        if subcommand in self._DEFER_CONFIG_SUBCOMMANDS:
+            return True
+        return self.prog.split()[-1] in self._DEFER_CONFIG_SUBCOMMANDS
 
     def _pull_args_from_config(self, args: list[str]) -> list[str]:
         """Method to pull arguments specified in the config file

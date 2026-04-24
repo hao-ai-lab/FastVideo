@@ -33,7 +33,7 @@ The following two classes `PipelineConfig` and `SamplingParam` are used to confi
 
 ### SamplingParam
 
-::: fastvideo.configs.sample.base.SamplingParam
+::: fastvideo.api.sampling_param.SamplingParam
     options:
       show_root_heading: true
       show_source: false

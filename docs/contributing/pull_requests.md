@@ -104,8 +104,9 @@ distillation, self-forcing, VSA, VMoBA, performance benchmarks, and API server t
 8. If all Full Suite tests pass and all merge conditions are met (approval, valid title,
    pre-commit green, fastcheck green, no draft, no conflicts), Mergify squash-merges to
    `main` automatically. Your branch is deleted.
-9. If a Full Suite test fails, Mergify removes the `ready` label and posts a comment with a
-   link to the Buildkite build. Fix the issue, push, and comment `/merge` again.
+9. If a Full Suite test fails, check the Buildkite build log for the failing step. Fix the
+   issue, push, and comment `/merge` again. You can also re-run individual failed tests
+   with `/test <name>` — see below.
 
 !!! note
     Only contributors with write permission to the repository can trigger slash commands.
@@ -149,9 +150,14 @@ Comment on your PR to trigger specific tests independently of the auto-merge flo
 /test vmoba            # VMoBA inference tests
 /test performance      # Performance benchmarks
 /test api              # API server integration tests
+/test pre-commit       # Pre-commit checks on PR code
 ```
 
 The workflow reacts with a 🚀 emoji to confirm the command was received.
+
+When you re-run an individual test with `/test <name>`, the new result overwrites the
+original failed check (same Buildkite check name). Once all tests in a tier pass, the
+`fastcheck-passed` or `full-suite-passed` status is automatically updated.
 
 ---
 
@@ -199,9 +205,8 @@ Mergify removes the `needs-rebase` label automatically once conflicts are resolv
 
 ### Full Suite failed after `/merge`
 
-The Full Suite found a regression. Mergify removes the `ready` label and posts a comment
-linking to the Buildkite build. Check the failing step's output for assertion errors or
-tracebacks.
+The Full Suite found a regression. Check the failing Buildkite step's output for assertion
+errors or tracebacks.
 
 Common causes:
 

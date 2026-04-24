@@ -62,9 +62,9 @@ This page contains the complete API reference for the FastVideo library.
       show_root_toc_entry: true
       heading_level: 4
 
-#### fastvideo.configs.sample
+#### fastvideo.api.sampling_param
 
-::: fastvideo.configs.sample
+::: fastvideo.api.sampling_param
     options:
       show_source: true
       show_root_heading: true

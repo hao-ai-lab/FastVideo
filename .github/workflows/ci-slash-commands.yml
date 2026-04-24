@@ -199,6 +199,8 @@ jobs:
       needs.parse-command.outputs.has_write == 'true'
       && needs.parse-command.outputs.test_scope == 'precommit'
     uses: ./.github/workflows/ci-precommit.yml
+    with:
+      ref: refs/pull/${{ github.event.issue.number }}/merge
 
   post-precommit-status:
     needs: [parse-command, pre-commit]

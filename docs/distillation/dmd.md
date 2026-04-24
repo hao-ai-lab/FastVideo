@@ -16,7 +16,8 @@ Both models are trained on **61×448×832** resolution but support generating vi
 First install [VSA](../attention/vsa/index.md). Set `MODEL_BASE` to your own model path and run:
 
 ```bash
-bash scripts/inference/v1_inference_wan_dmd.sh
+FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN \
+  fastvideo generate --config scripts/inference/inference_wan_VSA_DMD_1_3B.yaml
 ```
 
 ## 🗂️ Dataset

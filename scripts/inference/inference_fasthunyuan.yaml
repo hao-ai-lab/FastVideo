@@ -1,0 +1,24 @@
+# Run with:
+#   FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN fastvideo generate --config scripts/inference/inference_fasthunyuan.yaml
+generator:
+  model_path: FastVideo/FastHunyuan-Diffusers
+  engine:
+    num_gpus: 4
+    parallelism:
+      tp_size: 1
+      sp_size: 4
+  pipeline:
+    experimental:
+      embedded_cfg_scale: 6
+      flow_shift: 17
+request:
+  prompt: A beautiful woman in a red dress walking down a street
+  sampling:
+    seed: 1024
+    num_frames: 125
+    height: 720
+    width: 1280
+    num_inference_steps: 6
+    guidance_scale: 1
+  output:
+    output_path: outputs_video/
