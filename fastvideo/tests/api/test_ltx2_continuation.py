@@ -111,6 +111,20 @@ class TestRoundTrip:
             ))
         assert restored.segment_index == 3
 
+    def test_bf16_audio_latents_preserved(self):
+        """safetensors serialization must preserve bf16 dtype (numpy
+        has no bf16, so a raw-bytes path would silently promote)."""
+        state = LTX2ContinuationState(
+            segment_index=0,
+            audio_latents=torch.randn(1, 4, 16, 64, dtype=torch.bfloat16),
+        )
+        envelope = state.to_continuation_state()
+        restored = LTX2ContinuationState.from_continuation_state(envelope)
+        assert restored.audio_latents is not None
+        assert restored.audio_latents.dtype == torch.bfloat16
+        torch.testing.assert_close(
+            restored.audio_latents, state.audio_latents)
+
 
 class TestBlobIndirection:
     """Large tensors live in the :class:`BlobStore` instead of the payload."""
@@ -125,7 +139,7 @@ class TestBlobIndirection:
         assert "blob_id" in envelope.payload["video"]
         assert "blob_id" in envelope.payload["audio"]
         assert "frames_b64" not in envelope.payload["video"]
-        assert "data_b64" not in envelope.payload["audio"]
+        assert "safetensors_b64" not in envelope.payload["audio"]
         assert len(blob_store) == 2
 
     def test_blob_roundtrip_reconstructs_tensors(self):
@@ -166,7 +180,7 @@ class TestBlobIndirection:
             inline_threshold_bytes=10 * 1024 * 1024,  # 10 MiB
         )
         assert "frames_b64" in envelope.payload["video"]
-        assert "data_b64" in envelope.payload["audio"]
+        assert "safetensors_b64" in envelope.payload["audio"]
         assert len(blob_store) == 0
 
 

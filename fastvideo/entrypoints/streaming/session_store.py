@@ -63,7 +63,14 @@ class _BlobRecord:
 
 
 class InMemoryBlobStore(BlobStore):
-    """Thread-safe in-memory :class:`BlobStore` for single-process servers."""
+    """Thread-safe in-memory :class:`BlobStore` for single-process servers.
+
+    No eviction policy — callers are responsible for calling
+    :meth:`drop` when a blob's owning state is replaced or a session
+    ends. A redis- or filesystem-backed :class:`BlobStore` should
+    replace this when the streaming server lands as a real service
+    (PR 7.5+).
+    """
 
     def __init__(self) -> None:
         self._blobs: dict[str, _BlobRecord] = {}
@@ -143,6 +150,12 @@ class InMemorySessionStore(SessionStore):
 
     Default implementation used by single-process deployments; a future
     Redis-backed store can be dropped in without changes to the server.
+
+    No eviction / TTL / bounded capacity — sessions only leave via
+    :meth:`drop`. The live streaming server (PR 7.5+) is responsible
+    for bounding growth and for dropping any :class:`BlobStore` blobs
+    referenced by a state when that state is replaced or a session
+    ends; this class does not know about blobs.
     """
 
     def __init__(self) -> None:

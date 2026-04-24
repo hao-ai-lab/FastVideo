@@ -2,24 +2,19 @@
 """Typed continuation state for the LTX-2 streaming pipeline.
 
 Segment N+1 conditions on segment N's trailing decoded frames and
-denoised audio latents. Historically (``FastVideo-internal/ui/
-ltx2-streaming/server/gpu_pool.py``) this state lived on the GPU as
-hidden per-worker globals (``ltx2_continuation_images``,
-``ltx2_continuation_audio_latents``); there was no way for a client to
-snapshot it, migrate it, or round-trip it through an HTTP/RPC boundary.
-
-PR 7 lifts the state into a typed, JSON-serializable object. The typed
-class lives here because the payload shape is model-specific; the
-envelope (``ContinuationState(kind, payload)``) is shared public API.
+denoised audio latents. The streaming runtime used to hold this state as
+per-worker globals; lifting it into a typed, JSON-serializable object
+lets clients snapshot, migrate, or round-trip it through an HTTP/RPC
+boundary. The envelope ``ContinuationState(kind, payload)`` is the
+shared public API; the typed class here owns the LTX-2 payload shape.
 
 Serialization contract:
 
-* Video frames are encoded as PNG bytes (lossless, indexable) and then
-  base64'd; optionally a :class:`BlobStore` can hold them by id instead.
-* Audio latents are encoded as ``{dtype, shape, bytes}`` (base64'd raw
-  buffer) or referenced via a blob id.
-* Either way the returned payload is a plain JSON-serializable dict so
-  the state survives a Dynamo RPC or an HTTP round-trip.
+* Video frames → PNG bytes + base64, or a :class:`BlobStore` id.
+* Audio latents → a self-describing safetensors blob + base64, or a
+  :class:`BlobStore` id. safetensors preserves ``bfloat16``, which a
+  raw-numpy round-trip cannot.
+* The returned payload is always a plain JSON-serializable dict.
 """
 from __future__ import annotations
 
@@ -264,22 +259,14 @@ class LTX2ContinuationState:
             return {"blob_id": self.audio_latents_blob_id}
         if self.audio_latents is None:
             return None
-        dtype, shape, raw = _tensor_to_bytes(self.audio_latents)
+        raw = _tensor_to_safetensors_bytes(self.audio_latents)
         if blob_store is not None and len(raw) > inline_threshold_bytes:
             blob_id = blob_store.put(
                 raw,
-                mime="application/x-fastvideo-tensor+raw",
+                mime="application/x-fastvideo-tensor+safetensors",
             )
-            return {
-                "blob_id": blob_id,
-                "dtype": dtype,
-                "shape": list(shape),
-            }
-        return {
-            "dtype": dtype,
-            "shape": list(shape),
-            "data_b64": base64.b64encode(raw).decode("ascii"),
-        }
+            return {"blob_id": blob_id}
+        return {"safetensors_b64": base64.b64encode(raw).decode("ascii")}
 
     @staticmethod
     def _decode_audio_latents(
@@ -288,21 +275,17 @@ class LTX2ContinuationState:
         *,
         blob_store: BlobStore | None,
     ) -> None:
-        dtype = audio.get("dtype")
-        shape_raw = audio.get("shape")
-        shape = tuple(int(d) for d in shape_raw) if isinstance(shape_raw, list | tuple) else None
         blob_id = audio.get("blob_id")
         if isinstance(blob_id, str):
-            if blob_store is None or dtype is None or shape is None:
+            if blob_store is None:
                 out.audio_latents_blob_id = blob_id
                 return
             raw = blob_store.get(blob_id)
-            out.audio_latents = _bytes_to_tensor(raw, dtype, shape)
+            out.audio_latents = _safetensors_bytes_to_tensor(raw)
             return
-        data_b64 = audio.get("data_b64")
-        if isinstance(data_b64, str) and dtype is not None and shape is not None:
-            raw = base64.b64decode(data_b64)
-            out.audio_latents = _bytes_to_tensor(raw, dtype, shape)
+        data_b64 = audio.get("safetensors_b64")
+        if isinstance(data_b64, str):
+            out.audio_latents = _safetensors_bytes_to_tensor(base64.b64decode(data_b64))
 
 
 def _encode_png(frame: np.ndarray) -> bytes:
@@ -351,71 +334,33 @@ def _unpack_frame_blobs(raw: bytes) -> list[bytes]:
     for _ in range(count):
         length = int.from_bytes(raw[cursor:cursor + 4], "big")
         cursor += 4
-        out.append(bytes(raw[cursor:cursor + length]))
+        out.append(raw[cursor:cursor + length])
         cursor += length
     return out
 
 
-def _tensor_to_bytes(tensor: Any) -> tuple[str, tuple[int, ...], bytes]:
-    """Serialize a torch tensor (or numpy array) to ``(dtype, shape, raw)``.
+def _tensor_to_safetensors_bytes(tensor: Any) -> bytes:
+    """Serialize a torch tensor to a self-describing safetensors blob.
 
-    Avoids a hard ``torch`` import at module load time."""
+    Uses the in-memory safetensors API so the wire format preserves
+    dtype (including ``bfloat16``, which a raw-numpy path cannot) and
+    shape without needing sidecar metadata.
+    """
+    import torch
+    from safetensors.torch import save as st_save
+
+    if isinstance(tensor, torch.Tensor):
+        return st_save({"t": tensor.detach().cpu()})
     import numpy as np
-
-    try:
-        import torch
-    except ImportError:  # pragma: no cover - torch is a core dep
-        torch = None  # type: ignore[assignment]
-
-    if torch is not None and isinstance(tensor, torch.Tensor):
-        detached = tensor.detach().cpu().contiguous()
-        dtype = str(detached.dtype).removeprefix("torch.")
-        shape = tuple(detached.shape)
-        raw = detached.numpy().tobytes()
-        return dtype, shape, raw
     if isinstance(tensor, np.ndarray):
-        contiguous = np.ascontiguousarray(tensor)
-        dtype = str(contiguous.dtype)
-        shape = tuple(contiguous.shape)
-        raw = contiguous.tobytes()
-        return dtype, shape, raw
+        return st_save({"t": torch.from_numpy(np.ascontiguousarray(tensor))})
     raise TypeError("LTX2 audio_latents must be a torch.Tensor or numpy.ndarray, got "
                     f"{type(tensor).__name__}")
 
 
-def _bytes_to_tensor(
-    raw: bytes,
-    dtype: str,
-    shape: tuple[int, ...],
-) -> Any:
-    import numpy as np
-
-    np_dtype = _torch_dtype_to_numpy(dtype)
-    array = np.frombuffer(raw, dtype=np_dtype).reshape(shape).copy()
-    try:
-        import torch
-
-        return torch.from_numpy(array)
-    except ImportError:  # pragma: no cover - torch is a core dep
-        return array
-
-
-_TORCH_TO_NUMPY_DTYPE = {
-    "float32": "float32",
-    "float64": "float64",
-    "float16": "float16",
-    "bfloat16": "float32",  # numpy has no bf16; promote on hydrate
-    "int64": "int64",
-    "int32": "int32",
-    "int16": "int16",
-    "int8": "int8",
-    "uint8": "uint8",
-    "bool": "bool",
-}
-
-
-def _torch_dtype_to_numpy(dtype: str) -> str:
-    return _TORCH_TO_NUMPY_DTYPE.get(dtype, dtype)
+def _safetensors_bytes_to_tensor(raw: bytes) -> Any:
+    from safetensors.torch import load as st_load
+    return st_load(raw)["t"]
 
 
 register_continuation_kind(LTX2_CONTINUATION_KIND)
