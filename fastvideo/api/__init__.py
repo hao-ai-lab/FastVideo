@@ -48,6 +48,7 @@ from fastvideo.api.parser import (
 )
 from fastvideo.api.results import GenerationResult
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.api.davinci_magihuman import DaVinciMagiHumanSamplingParam
 
 __all__ = [
     "CompileConfig",
@@ -72,6 +73,7 @@ __all__ = [
     "RequestRuntimeConfig",
     "RunConfig",
     "SamplingConfig",
+    "DaVinciMagiHumanSamplingParam",
     "SamplingParam",
     "ServeConfig",
     "ServerConfig",

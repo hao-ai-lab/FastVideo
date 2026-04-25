@@ -49,6 +49,8 @@ from fastvideo.configs.pipelines.wan import (
 )
 from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.api.davinci_magihuman import DaVinciMagiHumanSamplingParam
+from fastvideo.configs.pipelines.davinci_magihuman import DaVinciMagiHumanPipelineConfig
 
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
@@ -105,6 +107,7 @@ class ConfigInfo:
     workload_types: tuple[WorkloadType, ...]
     model_family: str | None = None
     default_preset: str | None = None
+    pipeline_cls_name: str | None = None
 
 
 # The central registry mapping a model name to its configuration information
@@ -125,11 +128,14 @@ def register_configs(
     model_detectors: list[Callable[[str], bool]] | None = None,
     model_family: str | None = None,
     default_preset: str | None = None,
+    pipeline_cls_name: str | None = None,
 ) -> None:
     """Register config classes for a model family.
 
     workload_types declares which UI workload options this config supports.
     Use () for configs not exposed as workload options.
+    pipeline_cls_name: optional pipeline class name for non-Diffusers checkpoints
+    that lack model_index.json.
     """
     model_id = str(len(_CONFIG_REGISTRY))
 
@@ -139,6 +145,7 @@ def register_configs(
         workload_types=workload_types,
         model_family=model_family,
         default_preset=default_preset,
+        pipeline_cls_name=pipeline_cls_name,
     )
 
     if hf_model_paths:
@@ -686,6 +693,26 @@ def _register_configs() -> None:
         default_preset="sd35_medium",
     )
 
+    # daVinci-MagiHuman
+    register_configs(
+        sampling_param_cls=DaVinciMagiHumanSamplingParam,
+        pipeline_config_cls=DaVinciMagiHumanPipelineConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "GAIR/daVinci-MagiHuman",
+            "/weights/davinci/base",
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in (
+                "davinci",
+                "magihuman",
+                "davinci-magihuman",
+                "gair__davinci",
+            )),
+        ],
+        pipeline_cls_name="DaVinciMagiHumanPipeline",
+    )
+
 
 # --- Part 3: Main Resolver ---
 
@@ -714,12 +741,18 @@ def get_model_info(
     if workload_type is None:
         workload_type = WorkloadType.T2V
 
-    if os.path.exists(model_path):
-        config = verify_model_config_and_directory(model_path)
+    # For non-Diffusers checkpoints registered with pipeline_cls_name, skip
+    # model_index.json entirely and use the registry-supplied class name.
+    _pre_config_info = _get_config_info(model_path, raise_on_missing=False)
+    if _pre_config_info is not None and _pre_config_info.pipeline_cls_name is not None:
+        pipeline_name = _pre_config_info.pipeline_cls_name
     else:
-        config = maybe_download_model_index(model_path)
+        if os.path.exists(model_path):
+            config = verify_model_config_and_directory(model_path)
+        else:
+            config = maybe_download_model_index(model_path)
+        pipeline_name = config.get("_class_name")
 
-    pipeline_name = config.get("_class_name")
     if override_pipeline_cls_name:
         logger.info("Overriding pipeline class name from %s to %s", pipeline_name, override_pipeline_cls_name)
         pipeline_name = override_pipeline_cls_name
