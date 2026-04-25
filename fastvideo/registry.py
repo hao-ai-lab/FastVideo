@@ -472,6 +472,7 @@ def _register_configs() -> None:
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=Cosmos25_14BConfig,
+        workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "nvidia/Cosmos-Predict2.5-14B",
         ],
