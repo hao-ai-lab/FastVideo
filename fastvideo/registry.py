@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any
 
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
-from fastvideo.configs.pipelines.davinci_magihuman import DaVinciMagiHumanT2VConfig
 from fastvideo.configs.pipelines.cosmos2_5 import (
     Cosmos25Config,
     Cosmos25_14BConfig,
@@ -686,28 +685,6 @@ def _register_configs() -> None:
         ],
         model_family="wan",
         default_preset="sf_wan_2_2_i2v_a14b",
-    )
-
-    # daVinci-MagiHuman
-    register_configs(
-        sampling_param_cls=DaVinciMagiHumanT2V_SamplingParam,
-        pipeline_config_cls=DaVinciMagiHumanT2VConfig,
-        workload_types=(WorkloadType.T2V,),
-        model_detectors=[
-            lambda path: any(token in path.lower() for token in (
-                "davinci-magihuman", "davinci_magihuman", "magihuman",
-            )),
-        ],
-    )
-    register_configs(
-        sampling_param_cls=DaVinciMagiHumanT2V_Distilled_SamplingParam,
-        pipeline_config_cls=DaVinciMagiHumanT2VConfig,
-        workload_types=(WorkloadType.T2V,),
-        model_detectors=[
-            lambda path: any(token in path.lower() for token in (
-                "davinci-magihuman-distill", "magihuman-distill",
-            )),
-        ],
     )
 
     # SD3.5
