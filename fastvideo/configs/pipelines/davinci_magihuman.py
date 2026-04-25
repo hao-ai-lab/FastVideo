@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
-from fastvideo.configs.models.dits.davinci_magihuman import (
-    DaVinciMagiHumanArchConfig, DaVinciMagiHumanConfig)
+from fastvideo.configs.models.dits.davinci_magihuman import (DaVinciMagiHumanArchConfig, DaVinciMagiHumanConfig)
 from fastvideo.configs.models.encoders.base import BaseEncoderOutput
 from fastvideo.configs.models.encoders.t5gemma import T5GemmaConfig
 from fastvideo.configs.models.vaes.davinci_vae import DaVinciVAEConfig
@@ -27,25 +26,21 @@ class DaVinciMagiHumanPipelineConfig(PipelineConfig):
     """Configuration for daVinci-MagiHuman text-to-video pipeline."""
 
     dit_config: DiTConfig = field(
-        default_factory=lambda: DaVinciMagiHumanConfig(
-            arch_config=DaVinciMagiHumanArchConfig()))
+        default_factory=lambda: DaVinciMagiHumanConfig(arch_config=DaVinciMagiHumanArchConfig()))
 
     vae_config: VAEConfig = field(default_factory=DaVinciVAEConfig)
 
     # T5Gemma-9B text encoder (google/t5gemma-9b — gated on HuggingFace)
-    text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (T5GemmaConfig(),))
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (T5GemmaConfig(), ))
 
-    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
-        default_factory=lambda: (_identity_preprocess_text,))
-    postprocess_text_funcs: tuple[
-        Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(
-        default_factory=lambda: (_identity_postprocess_text,))
+    preprocess_text_funcs: tuple[Callable[[str], str],
+                                 ...] = field(default_factory=lambda: (_identity_preprocess_text, ))
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
+                                  ...] = field(default_factory=lambda: (_identity_postprocess_text, ))
 
     dit_precision: str = "bf16"
     vae_precision: str = "bf16"
-    text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("bf16",))
+    text_encoder_precisions: tuple[str, ...] = field(default_factory=lambda: ("bf16", ))
 
     # Flow matching with shift=5.0 (same as Cosmos 2.5 and Wan)
     flow_shift: float = 5.0

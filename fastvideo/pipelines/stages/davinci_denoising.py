@@ -9,7 +9,6 @@ Audio fallback: torch.randn when no audio is provided (T2V mode).
 from __future__ import annotations
 
 import weakref
-from typing import Optional
 
 import torch
 from tqdm.auto import tqdm
@@ -18,8 +17,7 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
+from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 
@@ -39,10 +37,10 @@ _FLOW_SHIFT = 5.0
 # Dynamic CFG threshold (daVinci paper, Section 3.4)
 _CFG_THRESHOLD = 500.0
 
-
 # ---------------------------------------------------------------------------
 # Patchify / unpatchify helpers
 # ---------------------------------------------------------------------------
+
 
 def _patchify(
     latents: torch.Tensor,
@@ -67,15 +65,12 @@ def _patchify(
     t_idx = torch.arange(Tp, device=latents.device, dtype=torch.float32)
     h_idx = torch.arange(Hp, device=latents.device, dtype=torch.float32)
     w_idx = torch.arange(Wp, device=latents.device, dtype=torch.float32)
-    grid = torch.stack(
-        torch.meshgrid(t_idx, h_idx, w_idx, indexing="ij"), dim=-1
-    ).reshape(-1, 3)  # (Tp*Hp*Wp, 3)
+    grid = torch.stack(torch.meshgrid(t_idx, h_idx, w_idx, indexing="ij"), dim=-1).reshape(-1, 3)  # (Tp*Hp*Wp, 3)
     grid = grid.repeat(B, 1)  # (B*Tp*Hp*Wp, 3)
 
     # 9-dim: (t,h,w, Tp,Hp,Wp, ref_Tp,ref_Hp,ref_Wp) — refs = sizes for T2V
-    sizes = torch.tensor(
-        [Tp, Hp, Wp], device=latents.device, dtype=torch.float32
-    ).unsqueeze(0).expand(B * Tp * Hp * Wp, -1)
+    sizes = torch.tensor([Tp, Hp, Wp], device=latents.device,
+                         dtype=torch.float32).unsqueeze(0).expand(B * Tp * Hp * Wp, -1)
     coords_9 = torch.cat([grid, sizes, sizes], dim=-1)
 
     return tokens, coords_9, (B, Tp, Hp, Wp)
@@ -95,51 +90,36 @@ def _unpatchify(
     return x.reshape(B, z_dim, Tp * pt, Hp * ph, Wp * pw)
 
 
-def _build_text_coords(
-    n_t: int, device: torch.device
-) -> torch.Tensor:
+def _build_text_coords(n_t: int, device: torch.device) -> torch.Tensor:
     """9-dim coords for text tokens.
 
     Text uses negative t-offsets so positions never collide with video.
     coords: (i - n_t, 0, 0,  n_t, 1, 1,  1, 1, 1)
     """
     indices = torch.arange(n_t, device=device, dtype=torch.float32)
-    xyz = torch.stack(
-        [indices - n_t,
-         torch.zeros(n_t, device=device),
-         torch.zeros(n_t, device=device)], dim=-1
-    )
-    sizes = torch.tensor([n_t, 1, 1], device=device, dtype=torch.float32
-                         ).unsqueeze(0).expand(n_t, -1)
+    xyz = torch.stack([indices - n_t, torch.zeros(n_t, device=device), torch.zeros(n_t, device=device)], dim=-1)
+    sizes = torch.tensor([n_t, 1, 1], device=device, dtype=torch.float32).unsqueeze(0).expand(n_t, -1)
     refs = torch.ones(n_t, 3, device=device, dtype=torch.float32)
     return torch.cat([xyz, sizes, refs], dim=-1)  # (n_t, 9)
 
 
-def _build_audio_coords(
-    n_a: int, device: torch.device
-) -> torch.Tensor:
+def _build_audio_coords(n_a: int, device: torch.device) -> torch.Tensor:
     """9-dim coords for audio tokens (v2-style ref)."""
     ref_t = float((n_a - 1) // 4 + 1)
     indices = torch.arange(n_a, device=device, dtype=torch.float32)
-    xyz = torch.stack(
-        [indices,
-         torch.zeros(n_a, device=device),
-         torch.zeros(n_a, device=device)], dim=-1
-    )
-    sizes = torch.tensor([n_a, 1, 1], device=device, dtype=torch.float32
-                         ).unsqueeze(0).expand(n_a, -1)
-    refs = torch.tensor([ref_t, 1.0, 1.0], device=device, dtype=torch.float32
-                        ).unsqueeze(0).expand(n_a, -1)
+    xyz = torch.stack([indices, torch.zeros(n_a, device=device), torch.zeros(n_a, device=device)], dim=-1)
+    sizes = torch.tensor([n_a, 1, 1], device=device, dtype=torch.float32).unsqueeze(0).expand(n_a, -1)
+    refs = torch.tensor([ref_t, 1.0, 1.0], device=device, dtype=torch.float32).unsqueeze(0).expand(n_a, -1)
     return torch.cat([xyz, sizes, refs], dim=-1)  # (n_a, 9)
 
 
 def _pack_tokens(
-    video_tokens: torch.Tensor,    # (N_v, 192)
-    video_coords: torch.Tensor,    # (N_v, 9)
-    audio_tokens: torch.Tensor,    # (N_a, 64)
-    audio_coords: torch.Tensor,    # (N_a, 9)
-    text_tokens: torch.Tensor,     # (N_t, 3584)
-    text_coords: torch.Tensor,     # (N_t, 9)
+        video_tokens: torch.Tensor,  # (N_v, 192)
+        video_coords: torch.Tensor,  # (N_v, 9)
+        audio_tokens: torch.Tensor,  # (N_a, 64)
+        audio_coords: torch.Tensor,  # (N_a, 9)
+        text_tokens: torch.Tensor,  # (N_t, 3584)
+        text_coords: torch.Tensor,  # (N_t, 9)
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int, int, int]:
     """Pack all modalities into the format expected by DaVinciMagiHuman.forward.
 
@@ -152,8 +132,7 @@ def _pack_tokens(
         n_v, n_a, n_t: token counts per modality
     """
     device = video_tokens.device
-    n_v, n_a, n_t = (video_tokens.shape[0], audio_tokens.shape[0],
-                     text_tokens.shape[0])
+    n_v, n_a, n_t = (video_tokens.shape[0], audio_tokens.shape[0], text_tokens.shape[0])
     S = n_v + n_a + n_t
     max_in = _TEXT_IN_CHANNELS  # 3584
 
@@ -165,9 +144,9 @@ def _pack_tokens(
     coords = torch.cat([video_coords, audio_coords, text_coords], dim=0)
 
     mod = torch.cat([
-        torch.zeros(n_v, dtype=torch.long, device=device),   # video
-        torch.ones(n_a, dtype=torch.long, device=device),    # audio
-        torch.full((n_t,), 2, dtype=torch.long, device=device),  # text
+        torch.zeros(n_v, dtype=torch.long, device=device),  # video
+        torch.ones(n_a, dtype=torch.long, device=device),  # audio
+        torch.full((n_t, ), 2, dtype=torch.long, device=device),  # text
     ])
     return hidden, coords, mod, n_v, n_a, n_t
 
@@ -175,6 +154,7 @@ def _pack_tokens(
 # ---------------------------------------------------------------------------
 # Denoising stage
 # ---------------------------------------------------------------------------
+
 
 class DaVinciDenoisingStage(PipelineStage):
     """Flow-matching denoising for daVinci-MagiHuman.
@@ -189,14 +169,13 @@ class DaVinciDenoisingStage(PipelineStage):
     def __init__(
         self,
         transformer,
-        scheduler: Optional[FlowMatchEulerDiscreteScheduler] = None,
+        scheduler: FlowMatchEulerDiscreteScheduler | None = None,
         pipeline=None,
         n_audio_tokens: int = _DEFAULT_AUDIO_TOKENS,
     ) -> None:
         super().__init__()
         self.transformer = transformer
-        self.scheduler = scheduler or FlowMatchEulerDiscreteScheduler(
-            shift=_FLOW_SHIFT)
+        self.scheduler = scheduler or FlowMatchEulerDiscreteScheduler(shift=_FLOW_SHIFT)
         self.n_audio_tokens = n_audio_tokens
         self.pipeline = weakref.ref(pipeline) if pipeline else None
 
@@ -212,8 +191,7 @@ class DaVinciDenoisingStage(PipelineStage):
         pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["transformer"]:
             loader = TransformerLoader()
-            self.transformer = loader.load(
-                fastvideo_args.model_paths["transformer"], fastvideo_args)
+            self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
             fastvideo_args.model_loaded["transformer"] = True
@@ -224,12 +202,10 @@ class DaVinciDenoisingStage(PipelineStage):
 
         # -- dtype --
         if hasattr(self.transformer, "module"):
-            target_dtype = next(
-                self.transformer.module.parameters()).dtype
+            target_dtype = next(self.transformer.module.parameters()).dtype
         else:
             target_dtype = next(self.transformer.parameters()).dtype
-        autocast_enabled = (target_dtype != torch.float32 and
-                            not fastvideo_args.disable_autocast)
+        autocast_enabled = (target_dtype != torch.float32 and not fastvideo_args.disable_autocast)
 
         device = latents.device
         num_inference_steps = batch.num_inference_steps
@@ -241,21 +217,18 @@ class DaVinciDenoisingStage(PipelineStage):
         # -- Text embeddings: (B, N_t, 3584) --
         # prompt_embeds is a list; index 0 = conditional embedding
         prompt_embeds = batch.prompt_embeds[0].to(device, dtype=target_dtype)
-        B = latents.shape[0]
         # Flatten batch dim: (B*N_t, 3584). Inference typically B=1.
         text_tokens = prompt_embeds.reshape(-1, _TEXT_IN_CHANNELS)
         n_t = text_tokens.shape[0]
         text_coords = _build_text_coords(n_t, device)
 
         # Null text for CFG uncond pass: zeros of the same shape
-        do_cfg = (batch.do_classifier_free_guidance and
-                  guidance_scale > 1.0)
+        do_cfg = (batch.do_classifier_free_guidance and guidance_scale > 1.0)
         null_text_tokens = torch.zeros_like(text_tokens)
 
         # -- Negative prompt embeds for CFG --
         if do_cfg and batch.negative_prompt_embeds:
-            neg_embeds = batch.negative_prompt_embeds[0].to(
-                device, dtype=target_dtype)
+            neg_embeds = batch.negative_prompt_embeds[0].to(device, dtype=target_dtype)
             null_text_tokens = neg_embeds.reshape(-1, _TEXT_IN_CHANNELS)
 
         # Build coords for null_text separately — negative prompt may have a
@@ -265,48 +238,36 @@ class DaVinciDenoisingStage(PipelineStage):
 
         # -- Audio latents (initialise as noise; denoised in parallel) --
         n_a = self.n_audio_tokens
-        audio_latents = torch.randn(
-            n_a, _AUDIO_IN_CHANNELS, device=device, dtype=target_dtype)
+        audio_latents = torch.randn(n_a, _AUDIO_IN_CHANNELS, device=device, dtype=target_dtype)
         audio_coords = _build_audio_coords(n_a, device)
 
         # -- Extra step kwargs for scheduler --
-        extra_step_kwargs = self.prepare_extra_func_kwargs(
-            self.scheduler.step, {"generator": batch.generator})
+        extra_step_kwargs = self.prepare_extra_func_kwargs(self.scheduler.step, {"generator": batch.generator})
 
         with self.progress_bar(total=num_inference_steps) as pbar:
             for i, t in enumerate(timesteps):
                 # ---- Patchify current noisy video latents ----
-                vid_tokens, vid_coords, patchify_shape = _patchify(
-                    latents.to(target_dtype))
+                vid_tokens, vid_coords, patchify_shape = _patchify(latents.to(target_dtype))
 
                 # ---- Conditional forward ----
                 with (
-                    set_forward_context(current_timestep=int(t),
-                                        attn_metadata=None,
-                                        forward_batch=batch),
-                    torch.autocast(device_type="cuda",
-                                   dtype=target_dtype,
-                                   enabled=autocast_enabled),
+                        set_forward_context(current_timestep=int(t), attn_metadata=None, forward_batch=batch),
+                        torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled),
                 ):
-                    cond_out = self._forward_packed(
-                        vid_tokens, vid_coords, audio_latents, audio_coords,
-                        text_tokens, text_coords, target_dtype)
+                    cond_out = self._forward_packed(vid_tokens, vid_coords, audio_latents, audio_coords, text_tokens,
+                                                    text_coords, target_dtype)
 
                     if do_cfg:
-                        uncond_out = self._forward_packed(
-                            vid_tokens, vid_coords, audio_latents,
-                            audio_coords, null_text_tokens, null_text_coords,
-                            target_dtype)
+                        uncond_out = self._forward_packed(vid_tokens, vid_coords, audio_latents, audio_coords,
+                                                          null_text_tokens, null_text_coords, target_dtype)
 
                         # Dynamic CFG threshold (daVinci paper §3.4)
-                        eff_scale = (guidance_scale
-                                     if float(t) > _CFG_THRESHOLD else 2.0)
+                        eff_scale = (guidance_scale if float(t) > _CFG_THRESHOLD else 2.0)
                         n_v = vid_tokens.shape[0]
                         # Apply guidance only to video tokens
                         cond_vid = cond_out[:n_v, :_VIDEO_IN_CHANNELS]
                         uncond_vid = uncond_out[:n_v, :_VIDEO_IN_CHANNELS]
-                        guided_vid = (uncond_vid +
-                                      eff_scale * (cond_vid - uncond_vid))
+                        guided_vid = (uncond_vid + eff_scale * (cond_vid - uncond_vid))
                         # Reconstruct output with guided video portion
                         cond_out = cond_out.clone()
                         cond_out[:n_v, :_VIDEO_IN_CHANNELS] = guided_vid
@@ -326,24 +287,17 @@ class DaVinciDenoisingStage(PipelineStage):
                 s_idx = self.scheduler.step_index
                 _sigmas = self.scheduler.sigmas
                 _is_last = (s_idx + 1 >= len(_sigmas))
-                _sigma_next = (
-                    _sigmas[0].new_zeros(()) if _is_last
-                    else _sigmas[s_idx + 1])
+                _sigma_next = (_sigmas[0].new_zeros(()) if _is_last else _sigmas[s_idx + 1])
                 _dt = _sigma_next - _sigmas[s_idx]
 
-                latents = self.scheduler.step(
-                    velocity, t, latents,
-                    **extra_step_kwargs, return_dict=False)[0]
+                latents = self.scheduler.step(velocity, t, latents, **extra_step_kwargs, return_dict=False)[0]
 
                 # ---- Update audio latents in-place (manual Euler) ----
                 # Avoids a second scheduler.step() call that would
                 # double-increment step_index. Skip at terminal sigma.
                 if not _is_last:
-                    audio_velocity = cond_out[
-                        n_v:n_v + n_a, :_AUDIO_IN_CHANNELS]
-                    audio_latents = (
-                        audio_latents + _dt * audio_velocity
-                    ).to(target_dtype)
+                    audio_velocity = cond_out[n_v:n_v + n_a, :_AUDIO_IN_CHANNELS]
+                    audio_latents = (audio_latents + _dt * audio_velocity).to(target_dtype)
 
                 pbar.update()
 
@@ -366,14 +320,17 @@ class DaVinciDenoisingStage(PipelineStage):
     ) -> torch.Tensor:
         """Pack tokens and call the DiT once.  Returns the raw model output [S, 192]."""
         hidden, coords, mod, n_v, n_a, n_t = _pack_tokens(
-            vid_tokens, vid_coords,
-            audio_tokens, audio_coords,
-            text_tokens, text_coords,
+            vid_tokens,
+            vid_coords,
+            audio_tokens,
+            audio_coords,
+            text_tokens,
+            text_coords,
         )
         out = self.transformer(
             hidden_states=hidden.to(dtype),
             encoder_hidden_states=None,  # unused by daVinci
-            timestep=None,               # timestep-free
+            timestep=None,  # timestep-free
             coords_mapping=coords,
             modality_mapping=mod,
         )

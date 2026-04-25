@@ -12,8 +12,7 @@ from transformers import AutoModel, AutoTokenizer
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
+from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import (
     ConditioningStage,
@@ -67,8 +66,7 @@ class DaVinciMagiHumanPipeline(ComposedPipelineBase):
 
         # 2. Tokenizer
         logger.info("Loading tokenizer from %s", _T5GEMMA_PATH)
-        modules["tokenizer"] = AutoTokenizer.from_pretrained(
-            _T5GEMMA_PATH, local_files_only=True)
+        modules["tokenizer"] = AutoTokenizer.from_pretrained(_T5GEMMA_PATH, local_files_only=True)
         logger.info("Loaded tokenizer")
 
         # 3. Text encoder (T5Gemma — standard transformers T5 API)
@@ -90,8 +88,7 @@ class DaVinciMagiHumanPipeline(ComposedPipelineBase):
 
         # 4. Transformer (DiT) — load safetensors with param remapping
         logger.info("Loading daVinci DiT from %s", self.model_path)
-        from fastvideo.configs.models.dits.davinci_magihuman import (
-            DaVinciMagiHumanArchConfig, DaVinciMagiHumanConfig)
+        from fastvideo.configs.models.dits.davinci_magihuman import (DaVinciMagiHumanArchConfig, DaVinciMagiHumanConfig)
         from fastvideo.models.dits.davinci_magihuman import DaVinciMagiHuman
 
         arch_config = DaVinciMagiHumanArchConfig()
@@ -102,11 +99,9 @@ class DaVinciMagiHumanPipeline(ComposedPipelineBase):
         with torch.no_grad():
             transformer = DaVinciMagiHuman(dit_config, hf_config={})
 
-        shard_files = sorted(
-            glob.glob(os.path.join(self.model_path, "*.safetensors")))
+        shard_files = sorted(glob.glob(os.path.join(self.model_path, "*.safetensors")))
         if not shard_files:
-            raise FileNotFoundError(
-                f"No safetensors found in {self.model_path}")
+            raise FileNotFoundError(f"No safetensors found in {self.model_path}")
         logger.info("Loading %d safetensors shards", len(shard_files))
 
         sd: dict[str, torch.Tensor] = {}
@@ -115,8 +110,7 @@ class DaVinciMagiHumanPipeline(ComposedPipelineBase):
 
         # Apply param_names_mapping (FastVideo loader does this; direct
         # load_state_dict does not — must apply manually).
-        param_map: dict[str, str] = getattr(transformer, "param_names_mapping",
-                                             {})
+        param_map: dict[str, str] = getattr(transformer, "param_names_mapping", {})
         if param_map:
             remapped: dict[str, torch.Tensor] = {}
             for k, v in sd.items():
@@ -127,8 +121,7 @@ class DaVinciMagiHumanPipeline(ComposedPipelineBase):
             sd = remapped
 
         missing, unexpected = transformer.load_state_dict(sd, strict=False)
-        logger.info("DiT load_state_dict: %d missing, %d unexpected",
-                    len(missing), len(unexpected))
+        logger.info("DiT load_state_dict: %d missing, %d unexpected", len(missing), len(unexpected))
         if missing:
             logger.warning("Missing keys (first 5): %s", missing[:5])
         transformer = transformer.to(dtype=dit_dtype).cuda().eval()
@@ -139,10 +132,8 @@ class DaVinciMagiHumanPipeline(ComposedPipelineBase):
         #    Weights not available on this pod; stub with correct architecture +
         #    random weights so the decoding stage doesn't crash.
         #    TODO: download Wan2.2-TI2V-5B VAE checkpoint.
-        logger.warning(
-            "VAE: using random-weight Wan stub (no Wan2.2 checkpoint on pod). "
-            "Output video will be noise — denoising correctness can still be verified."
-        )
+        logger.warning("VAE: using random-weight Wan stub (no Wan2.2 checkpoint on pod). "
+                       "Output video will be noise — denoising correctness can still be verified.")
         from fastvideo.models.vaes.wanvae import AutoencoderKLWan
         from fastvideo.configs.models.vaes.davinci_vae import DaVinciVAEConfig
 

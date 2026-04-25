@@ -10,7 +10,7 @@ class DaVinciMagiHumanSamplingParam(SamplingParam):
     # 720p at 4s (temporal stride 4 → 33 latent frames = ~4.1s at 8fps latent)
     height: int = 720
     width: int = 1280
-    num_frames: int = 33   # latent frames (output frames = 33*4 - 3 ≈ 129)
+    num_frames: int = 33  # latent frames (output frames = 33*4 - 3 ≈ 129)
     fps: int = 24
     seed: int = 0
 
