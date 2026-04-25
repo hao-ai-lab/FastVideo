@@ -1,7 +1,5 @@
 from fastvideo.configs.models.dits.cosmos import CosmosVideoConfig
 from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25VideoConfig
-from fastvideo.configs.models.dits.davinci_magihuman import (
-    DaVinciMagiHumanArchConfig, DaVinciMagiHumanConfig)
 from fastvideo.configs.models.dits.hunyuangamecraft import HunyuanGameCraftConfig
 from fastvideo.configs.models.dits.hunyuanvideo import HunyuanVideoConfig
 from fastvideo.configs.models.dits.hunyuanvideo15 import HunyuanVideo15Config
@@ -16,5 +14,4 @@ __all__ = [
     "WanVideoConfig", "CosmosVideoConfig", "Cosmos25VideoConfig",
     "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig",
     "Kandinsky5VideoConfig",
-    "DaVinciMagiHumanArchConfig", "DaVinciMagiHumanConfig",
 ]
