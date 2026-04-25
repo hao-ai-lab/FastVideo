@@ -655,6 +655,7 @@ class VideoGenerator:
 
         save_video_to_disk = batch.save_video and not is_latent_output
         if save_video_to_disk:
+            assert frames is not None  # implied by not is_latent_output
             if self._is_image_workload():
                 # Image workloads (t2i, i2i, …): save the first frame as PNG.
                 imageio.imwrite(output_path, frames[0])
