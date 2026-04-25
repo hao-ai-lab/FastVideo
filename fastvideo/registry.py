@@ -470,7 +470,7 @@ def _register_configs() -> None:
 
     # Cosmos 2.5 (14B)
     register_configs(
-        sampling_param_cls=Cosmos25SamplingParamBase,
+        sampling_param_cls=None,
         pipeline_config_cls=Cosmos25_14BConfig,
         hf_model_paths=[
             "nvidia/Cosmos-Predict2.5-14B",
