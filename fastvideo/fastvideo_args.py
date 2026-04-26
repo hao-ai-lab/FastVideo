@@ -844,6 +844,13 @@ class TrainingArgs(FastVideoArgs):
     dfake_gen_update_ratio: int = 5  # self-forcing: how often to train generator vs critic
     min_timestep_ratio: float = 0.2
     max_timestep_ratio: float = 0.98
+    # CFG scale applied to the real (teacher) score in the DMD loss, using the
+    # parameterization `x = x_cond + w * (x_cond - x_uncond)`. This differs
+    # from the Ho & Salimans form `x_uncond + w * (x_cond - x_uncond)` by an
+    # offset of 1: `w_here = w_standard - 1`. So `w=0` recovers the
+    # conditional output, `w=-1` recovers the unconditional output, and the
+    # default 3.5 corresponds to a standard CFG scale of 4.5. Matches the
+    # original DMD2 reference implementation.
     real_score_guidance_scale: float = 3.5
     fake_score_learning_rate: float = 0.0  # separate learning rate for fake_score_transformer, if 0.0, use learning_rate
     fake_score_lr_scheduler: str = "constant"  # separate lr scheduler for fake_score_transformer, if not set, use lr_scheduler
@@ -1101,10 +1108,14 @@ class TrainingArgs(FastVideoArgs):
                             type=float,
                             default=TrainingArgs.max_timestep_ratio,
                             help="Maximum step ratio")
-        parser.add_argument("--real-score-guidance-scale",
-                            type=float,
-                            default=TrainingArgs.real_score_guidance_scale,
-                            help="Teacher guidance scale")
+        parser.add_argument(
+            "--real-score-guidance-scale",
+            type=float,
+            default=TrainingArgs.real_score_guidance_scale,
+            help=("Teacher CFG scale for the real score in the DMD loss. Uses "
+                  "the parameterization x_cond + w * (x_cond - x_uncond), so "
+                  "w=0 -> cond, w=-1 -> uncond, and the relation to standard "
+                  "CFG is w_standard = w + 1 (default 3.5 == standard 4.5)."))
         parser.add_argument("--fake-score-learning-rate",
                             type=float,
                             default=TrainingArgs.fake_score_learning_rate,
