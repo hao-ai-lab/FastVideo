@@ -33,15 +33,11 @@ class _StaticProvider:
 @dataclass
 class _FailingProvider:
     name: str
-    err_cls: type = LLMProviderError
     message: str = "boom"
+    retryable: bool = True
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
-        raise self.err_cls(self.message)
-
-
-class _NonRetryableError(LLMProviderError):
-    retryable = False
+        raise LLMProviderError(self.message, retryable=self.retryable)
 
 
 class TestConstruction:
@@ -100,13 +96,12 @@ class TestEnhance:
     def test_enhance_stops_on_non_retryable_error(self):
         enh = PromptEnhancer(
             providers=[
-                _FailingProvider("a", err_cls=_NonRetryableError,
-                                  message="hard-fail"),
+                _FailingProvider("a", message="hard-fail", retryable=False),
                 _StaticProvider("b", "should-not-be-reached"),
             ],
             model="m",
         )
-        with pytest.raises(_NonRetryableError, match="hard-fail"):
+        with pytest.raises(LLMProviderError, match="hard-fail"):
             asyncio.run(enh.enhance("x"))
 
     def test_enhance_raises_when_all_providers_fail(self):

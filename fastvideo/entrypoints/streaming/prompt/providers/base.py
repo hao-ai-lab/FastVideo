@@ -41,17 +41,23 @@ class LLMResponse:
 class LLMProviderError(RuntimeError):
     """Raised when an LLM provider fails a request.
 
-    The enhancer treats this as a retryable error unless the concrete
-    subclass overrides :attr:`retryable`.
+    ``retryable`` controls whether the enhancer falls back to the next
+    provider. It is settable per-instance so the same exception type
+    can describe retryable transport errors (5xx, 429) and
+    non-retryable client errors (4xx auth/bad-request) without forcing
+    a separate subclass for every status family.
     """
 
-    retryable: bool = True
+    def __init__(self, message: str, *, retryable: bool = True) -> None:
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class LLMTimeoutError(LLMProviderError):
-    """Raised when an LLM provider times out."""
+    """Raised when an LLM provider times out — always retryable."""
 
-    retryable: bool = True
+    def __init__(self, message: str) -> None:
+        super().__init__(message, retryable=True)
 
 
 @runtime_checkable
