@@ -197,7 +197,7 @@ def upload_artifact(path: str):
         ["buildkite-agent", "artifact", "upload", path],
         check=True,
     )
-    
+
 # -----------------------------
 # 7. Main
 # -----------------------------
@@ -215,15 +215,39 @@ def main():
     figs = build_plots(df)
     html = render_html(figs)
 
-    output_file = f"dashboard_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+    # Get the commit SHA from environment (passed via MODAL_ENV in your shell script)
+    commit_sha = os.environ.get("BUILDKITE_COMMIT", "unknown")[:7]
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    report_dir = "/root/data/perf_reports"
+    os.makedirs(report_dir, exist_ok=True)
+
+    # Include the SHA in the filename!
+    # Example: dashboard_a1b2c3d_20240426_032528.html
+    filename = f"dashboard_{commit_sha}_{timestamp}.html"
+    output_file = os.path.join(report_dir, filename)
+
     with open(output_file, "w") as f:
         f.write(html)
 
-    annotate_buildkite(html)
     print(f"Dashboard generated: {output_file}")
 
-    upload_artifact(output_file)
-    print(f"Dashboard uploaded as Buildkite artifact: {output_file}")
+    # report_dir = "/root/data/perf_reports"
+
+    # # 2. Create the directory (if it doesn't exist)
+    # os.makedirs(report_dir, exist_ok=True)
+
+    # # 3. Define the full file path
+    # output_file = os.path.join(report_dir, f"dashboard_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
+
+    # with open(output_file, "w") as f:
+    #     f.write(html)
+
+    # annotate_buildkite(html)
+    # print(f"Dashboard generated: {output_file}")
+
+    # upload_artifact(output_file)
+    # print(f"Dashboard uploaded as Buildkite artifact: {output_file}")
 
 if __name__ == "__main__":
     main()
