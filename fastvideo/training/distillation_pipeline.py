@@ -666,6 +666,10 @@ class DistillationPipeline(TrainingPipeline):
                                                               scheduler=self.noise_scheduler).unflatten(
                                                                   0, real_score_pred_noise_uncond.shape[:2])
 
+            # CFG on the real-score teacher. Uses the DMD2 parameterization
+            # x_cond + w * (x_cond - x_uncond), which is offset by 1 from the
+            # Ho & Salimans form x_uncond + w * (x_cond - x_uncond):
+            # w=0 -> cond, w=-1 -> uncond, w_standard = w + 1.
             real_score_pred_video = pred_real_video_cond + (pred_real_video_cond -
                                                             pred_real_video_uncond) * self.real_score_guidance_scale
 
