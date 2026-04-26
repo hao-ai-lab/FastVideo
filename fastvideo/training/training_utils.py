@@ -820,9 +820,7 @@ def normalize_dit_input(model_type, latents, vae) -> torch.Tensor:
             lm = torch.tensor(vae.latents_mean)
             ls = torch.tensor(vae.latents_std)
         else:
-            raise ValueError(
-                "Cannot find latents_mean/latents_std on VAE"
-            )
+            raise ValueError("Cannot find latents_mean/latents_std on VAE")
         latents_mean = lm.view(1, -1, 1, 1, 1).to(device=latents.device)
         latents_std = ls.view(1, -1, 1, 1, 1).to(device=latents.device)
         latents = ((latents.float() - latents_mean) / latents_std).to(latents)

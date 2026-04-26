@@ -88,8 +88,7 @@ def main() -> None:
 
     t5_cfg = T5LargeConfig()
     tok_kwargs = dict(t5_cfg.tokenizer_kwargs)
-    tokenizer = AutoTokenizer.from_pretrained(
-        os.path.join(model_path, "tokenizer"))
+    tokenizer = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
     text_encoder = T5EncoderModel.from_pretrained(
         os.path.join(model_path, "text_encoder"),
         torch_dtype=torch.bfloat16,
@@ -107,8 +106,7 @@ def main() -> None:
         print(f"  Caption: {caption[:80]}...")
 
         # Encode video
-        video = load_video(video_path,
-                           NUM_FRAMES).to(device=device, dtype=torch.float16)
+        video = load_video(video_path, NUM_FRAMES).to(device=device, dtype=torch.float16)
         print(f"  Video shape: {video.shape}")
 
         with torch.no_grad():
@@ -140,8 +138,7 @@ def main() -> None:
             "vae_latent_dtype": str(latent.dtype).replace("torch.", ""),
             "text_embedding_bytes": text_embedding.numpy().tobytes(),
             "text_embedding_shape": list(text_embedding.shape),
-            "text_embedding_dtype": str(text_embedding.dtype).replace(
-                "torch.", ""),
+            "text_embedding_dtype": str(text_embedding.dtype).replace("torch.", ""),
             "file_name": video_name,
             "caption": caption,
             "media_type": "video",
@@ -168,8 +165,7 @@ def main() -> None:
 
     # Extract first frame from first video as V2W conditioning image
     import cv2
-    first_video = os.path.join(
-        DATA_DIR, "videos", caption_data[0]["path"])
+    first_video = os.path.join(DATA_DIR, "videos", caption_data[0]["path"])
     cap = cv2.VideoCapture(first_video)
     ret, frame = cap.read()
     cap.release()

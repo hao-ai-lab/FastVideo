@@ -78,19 +78,15 @@ def main() -> None:
         subfolder="vae",
         torch_dtype=torch.float16,
     ).to(device).eval()
-    print(
-        f"VAE loaded "
-        f"({sum(p.numel() for p in vae.parameters())/1e6:.0f}M)"
-    )
+    print(f"VAE loaded "
+          f"({sum(p.numel() for p in vae.parameters())/1e6:.0f}M)")
 
     # --- Load Reason1 (Qwen2.5-VL) text encoder ---
     print("Loading Reason1 text encoder...")
     from fastvideo.configs.pipelines.cosmos2_5 import (
-        Cosmos25Config,
-    )
+        Cosmos25Config, )
     from fastvideo.models.encoders.reason1 import (
-        Reason1TextEncoder,
-    )
+        Reason1TextEncoder, )
     pipeline_cfg = Cosmos25Config()
     text_enc_cfg = pipeline_cfg.text_encoder_configs[0]
     text_enc_path = os.path.join(model_path, "text_encoder")
@@ -108,9 +104,7 @@ def main() -> None:
     import glob
     from safetensors.torch import load_file
     sd: dict[str, torch.Tensor] = {}
-    for sf in sorted(
-        glob.glob(os.path.join(text_enc_path, "*.safetensors"))
-    ):
+    for sf in sorted(glob.glob(os.path.join(text_enc_path, "*.safetensors"))):
         sd.update(load_file(sf, device=str(device)))
     sd = {k: v.to(torch.bfloat16) for k, v in sd.items()}
     text_encoder.load_state_dict(sd, strict=False, assign=True)
@@ -131,9 +125,7 @@ def main() -> None:
         print(f"  Caption: {caption[:80]}...")
 
         # Encode video
-        video = load_video(
-            video_path, NUM_FRAMES
-        ).to(device=device, dtype=torch.float16)
+        video = load_video(video_path, NUM_FRAMES).to(device=device, dtype=torch.float16)
         print(f"  Video shape: {video.shape}")
 
         with torch.no_grad():
@@ -144,7 +136,8 @@ def main() -> None:
         # Encode text with Reason1 (Qwen2.5-VL)
         with torch.no_grad():
             text_embedding = text_encoder.compute_text_embeddings(
-                [caption], device=device,
+                [caption],
+                device=device,
             )
             text_embedding = text_embedding.squeeze(0).float().cpu()
         print(f"  Text embedding shape: {text_embedding.shape}")
@@ -153,16 +146,10 @@ def main() -> None:
             "id": record_id,
             "vae_latent_bytes": latent.numpy().tobytes(),
             "vae_latent_shape": list(latent.shape),
-            "vae_latent_dtype": str(latent.dtype).replace(
-                "torch.", ""
-            ),
-            "text_embedding_bytes": (
-                text_embedding.numpy().tobytes()
-            ),
+            "vae_latent_dtype": str(latent.dtype).replace("torch.", ""),
+            "text_embedding_bytes": (text_embedding.numpy().tobytes()),
             "text_embedding_shape": list(text_embedding.shape),
-            "text_embedding_dtype": str(
-                text_embedding.dtype
-            ).replace("torch.", ""),
+            "text_embedding_dtype": str(text_embedding.dtype).replace("torch.", ""),
             "file_name": video_name,
             "caption": caption,
             "media_type": "video",
@@ -180,7 +167,8 @@ def main() -> None:
 
     # Write parquet
     table = pa.table(
-        {k: [r[k] for r in records] for k in records[0]},
+        {k: [r[k] for r in records]
+         for k in records[0]},
         schema=pyarrow_schema_t2v,
     )
     output_path = os.path.join(OUTPUT_DIR, "data_00000.parquet")
@@ -198,11 +186,7 @@ def main() -> None:
         json.dump(val_prompts, f, indent=2)
     print(f"Wrote validation prompts to {val_path}")
 
-    print(
-        "\nDone! Use data_path: "
-        + OUTPUT_DIR
-        + " in training config."
-    )
+    print("\nDone! Use data_path: " + OUTPUT_DIR + " in training config.")
 
 
 if __name__ == "__main__":

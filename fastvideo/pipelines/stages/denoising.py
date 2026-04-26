@@ -540,16 +540,14 @@ class CosmosDenoisingStage(DenoisingStage):
         batch: ForwardBatch,
     ) -> torch.Tensor:
         with set_forward_context(
-            current_timestep=step_index,
-            attn_metadata=None,
-            forward_batch=batch,
+                current_timestep=step_index,
+                attn_metadata=None,
+                forward_batch=batch,
         ):
             return self.transformer(
                 hidden_states=hidden_states.to(target_dtype),
                 timestep=timestep.to(target_dtype),
-                encoder_hidden_states=encoder_hidden_states.to(
-                    target_dtype
-                ),
+                encoder_hidden_states=encoder_hidden_states.to(target_dtype),
                 fps=24,
                 condition_mask=condition_mask,
                 padding_mask=padding_mask,
@@ -573,149 +571,109 @@ class CosmosDenoisingStage(DenoisingStage):
             fastvideo_args.model_loaded["transformer"] = True
 
         if hasattr(self.transformer, "module"):
-            transformer_dtype = next(
-                self.transformer.module.parameters()
-            ).dtype
+            transformer_dtype = next(self.transformer.module.parameters()).dtype
         else:
-            transformer_dtype = next(
-                self.transformer.parameters()
-            ).dtype
+            transformer_dtype = next(self.transformer.parameters()).dtype
         target_dtype = transformer_dtype
-        autocast_enabled = (
-            target_dtype != torch.float32
-            and not fastvideo_args.disable_autocast
-        )
+        autocast_enabled = (target_dtype != torch.float32 and not fastvideo_args.disable_autocast)
 
         latents = batch.latents
         num_inference_steps = batch.num_inference_steps
         guidance_scale = batch.guidance_scale
-        do_cfg = (
-            batch.do_classifier_free_guidance
-            and batch.negative_prompt_embeds is not None
-        )
+        do_cfg = (batch.do_classifier_free_guidance and batch.negative_prompt_embeds is not None)
 
-        sigma_data = float(
-            getattr(self.scheduler.config, "sigma_data", 1.0)
-        )
+        sigma_data = float(getattr(self.scheduler.config, "sigma_data", 1.0))
 
         self.scheduler.set_timesteps(
-            num_inference_steps, device=latents.device,
+            num_inference_steps,
+            device=latents.device,
         )
         timesteps = self.scheduler.timesteps
 
         # Clamp terminal sigma to sigma_min (avoid zero).
-        if (
-            hasattr(self.scheduler.config, "final_sigmas_type")
-            and self.scheduler.config.final_sigmas_type
-            == "sigma_min"
-            and len(self.scheduler.sigmas) > 1
-        ):
+        if (hasattr(self.scheduler.config, "final_sigmas_type")
+                and self.scheduler.config.final_sigmas_type == "sigma_min" and len(self.scheduler.sigmas) > 1):
             self.scheduler.sigmas[-1] = self.scheduler.sigmas[-2]
 
         conditioning_latents = getattr(
-            batch, "conditioning_latents", None,
+            batch,
+            "conditioning_latents",
+            None,
         )
         cond_indicator = getattr(batch, "cond_indicator", None)
         uncond_indicator = getattr(
-            batch, "uncond_indicator", None,
+            batch,
+            "uncond_indicator",
+            None,
         )
 
         augment_sigma = torch.tensor(
-            [0.001], device=latents.device, dtype=torch.float32,
+            [0.001],
+            device=latents.device,
+            dtype=torch.float32,
         )
 
         padding_mask = torch.zeros(
-            1, 1, batch.height, batch.width,
-            device=latents.device, dtype=target_dtype,
+            1,
+            1,
+            batch.height,
+            batch.width,
+            device=latents.device,
+            dtype=target_dtype,
         )
 
-        condition_mask = (
-            batch.cond_mask.to(target_dtype)
-            if hasattr(batch, "cond_mask")
-            and batch.cond_mask is not None
-            else None
-        )
-        uncond_condition_mask = (
-            batch.uncond_mask.to(target_dtype)
-            if hasattr(batch, "uncond_mask")
-            and batch.uncond_mask is not None
-            else condition_mask
-        )
+        condition_mask = (batch.cond_mask.to(target_dtype)
+                          if hasattr(batch, "cond_mask") and batch.cond_mask is not None else None)
+        uncond_condition_mask = (batch.uncond_mask.to(target_dtype)
+                                 if hasattr(batch, "uncond_mask") and batch.uncond_mask is not None else condition_mask)
         if condition_mask is None:
             b, c, tf, h, w = latents.shape
             condition_mask = torch.zeros(
-                b, 1, tf, h, w,
-                device=latents.device, dtype=target_dtype,
+                b,
+                1,
+                tf,
+                h,
+                w,
+                device=latents.device,
+                dtype=target_dtype,
             )
             uncond_condition_mask = condition_mask
 
-        with self.progress_bar(
-            total=num_inference_steps,
-        ) as progress_bar:
+        with self.progress_bar(total=num_inference_steps, ) as progress_bar:
             for i, t in enumerate(timesteps):
                 if hasattr(self, "interrupt") and self.interrupt:
                     continue
 
                 sigma = self.scheduler.sigmas[i]
-                is_aug_greater = bool(
-                    augment_sigma >= sigma
-                )
+                is_aug_greater = bool(augment_sigma >= sigma)
 
                 # EDM preconditioning coefficients.
-                c_in = 1.0 / (
-                    sigma**2 + sigma_data**2
-                ) ** 0.5
-                c_in_aug = 1.0 / (
-                    augment_sigma**2 + sigma_data**2
-                ) ** 0.5
-                c_skip = sigma_data**2 / (
-                    sigma**2 + sigma_data**2
-                )
-                c_out = (
-                    sigma
-                    * sigma_data
-                    / (sigma**2 + sigma_data**2) ** 0.5
-                )
+                c_in = 1.0 / (sigma**2 + sigma_data**2)**0.5
+                c_in_aug = 1.0 / (augment_sigma**2 + sigma_data**2)**0.5
+                c_skip = sigma_data**2 / (sigma**2 + sigma_data**2)
+                c_out = (sigma * sigma_data / (sigma**2 + sigma_data**2)**0.5)
 
                 # The model expects timestep = sigma * 1000
                 # (FlowMatchEulerDiscreteScheduler convention).
-                timestep_expanded = t.expand(
-                    latents.shape[0],
-                ).to(target_dtype)
+                timestep_expanded = t.expand(latents.shape[0], ).to(target_dtype)
 
                 with torch.autocast(
-                    device_type="cuda",
-                    dtype=target_dtype,
-                    enabled=autocast_enabled,
+                        device_type="cuda",
+                        dtype=target_dtype,
+                        enabled=autocast_enabled,
                 ):
                     # --- Conditioning frame injection ---
-                    cur_ci = (
-                        cond_indicator * 0
-                        if cond_indicator is not None
-                        and is_aug_greater
-                        else cond_indicator
-                    )
+                    cur_ci = (cond_indicator * 0 if cond_indicator is not None and is_aug_greater else cond_indicator)
 
                     cond_latent = latents.clone()
-                    if (
-                        cur_ci is not None
-                        and conditioning_latents is not None
-                    ):
+                    if (cur_ci is not None and conditioning_latents is not None):
                         cn = torch.randn_like(
-                            latents, dtype=torch.float32,
+                            latents,
+                            dtype=torch.float32,
                         )
-                        cf = (
-                            conditioning_latents
-                            + cn
-                            * augment_sigma[
-                                :, None, None, None, None
-                            ]
-                        )
+                        cf = (conditioning_latents + cn * augment_sigma[:, None, None, None, None])
                         cf = cf * c_in_aug / c_in
-                        cond_latent = (
-                            cur_ci * cf
-                            + (1 - cur_ci) * cond_latent
-                        )
+                        cond_latent = (cur_ci * cf + (1 - cur_ci) * cond_latent)
 
                     # Manual EDM input scaling.
                     model_input = cond_latent * c_in
@@ -732,93 +690,54 @@ class CosmosDenoisingStage(DenoisingStage):
                     )
 
                     # EDM output → x0 prediction.
-                    cond_x0 = (
-                        c_skip * latents
-                        + c_out * noise_pred_cond.float()
-                    )
-                    if (
-                        cur_ci is not None
-                        and conditioning_latents is not None
-                    ):
-                        cond_x0 = (
-                            cur_ci * conditioning_latents
-                            + (1 - cur_ci) * cond_x0
-                        )
+                    cond_x0 = (c_skip * latents + c_out * noise_pred_cond.float())
+                    if (cur_ci is not None and conditioning_latents is not None):
+                        cond_x0 = (cur_ci * conditioning_latents + (1 - cur_ci) * cond_x0)
 
                     # --- CFG: unconditional pass ---
                     if do_cfg:
-                        cur_ui = (
-                            uncond_indicator * 0
-                            if uncond_indicator is not None
-                            and is_aug_greater
-                            else uncond_indicator
-                        )
+                        cur_ui = (uncond_indicator *
+                                  0 if uncond_indicator is not None and is_aug_greater else uncond_indicator)
 
                         uncond_latent = latents.clone()
-                        if (
-                            cur_ui is not None
-                            and conditioning_latents is not None
-                        ):
+                        if (cur_ui is not None and conditioning_latents is not None):
                             un = torch.randn_like(
-                                latents, dtype=torch.float32,
+                                latents,
+                                dtype=torch.float32,
                             )
-                            uf = (
-                                conditioning_latents
-                                + un
-                                * augment_sigma[
-                                    :, None, None, None, None
-                                ]
-                            )
+                            uf = (conditioning_latents + un * augment_sigma[:, None, None, None, None])
                             uf = uf * c_in_aug / c_in
-                            uncond_latent = (
-                                cur_ui * uf
-                                + (1 - cur_ui) * uncond_latent
-                            )
+                            uncond_latent = (cur_ui * uf + (1 - cur_ui) * uncond_latent)
 
                         uncond_input = uncond_latent * c_in
 
-                        noise_pred_uncond = (
-                            self._run_transformer(
-                                uncond_input,
-                                timestep_expanded,
-                                batch.negative_prompt_embeds[0],
-                                uncond_condition_mask,
-                                padding_mask,
-                                target_dtype,
-                                i,
-                                batch,
-                            )
-                        )
+                        noise_pred_uncond = (self._run_transformer(
+                            uncond_input,
+                            timestep_expanded,
+                            batch.negative_prompt_embeds[0],
+                            uncond_condition_mask,
+                            padding_mask,
+                            target_dtype,
+                            i,
+                            batch,
+                        ))
 
-                        uncond_x0 = (
-                            c_skip * latents
-                            + c_out * noise_pred_uncond.float()
-                        )
-                        if (
-                            cur_ui is not None
-                            and conditioning_latents is not None
-                        ):
-                            uncond_x0 = (
-                                cur_ui * conditioning_latents
-                                + (1 - cur_ui) * uncond_x0
-                            )
+                        uncond_x0 = (c_skip * latents + c_out * noise_pred_uncond.float())
+                        if (cur_ui is not None and conditioning_latents is not None):
+                            uncond_x0 = (cur_ui * conditioning_latents + (1 - cur_ui) * uncond_x0)
 
-                        final_x0 = (
-                            cond_x0
-                            + guidance_scale
-                            * (cond_x0 - uncond_x0)
-                        )
+                        final_x0 = (cond_x0 + guidance_scale * (cond_x0 - uncond_x0))
                     else:
                         final_x0 = cond_x0
 
                 # Convert x0 to velocity for
                 # FlowMatchEulerDiscreteScheduler.
-                velocity = (
-                    latents - final_x0
-                ) / sigma.clamp(min=1e-6)
+                velocity = (latents - final_x0) / sigma.clamp(min=1e-6)
 
                 latents = self.scheduler.step(
-                    velocity, t, latents,
+                    velocity,
+                    t,
+                    latents,
                     return_dict=False,
                 )[0]
 
@@ -879,16 +798,12 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
             if p.dtype != torch.float32:
                 target_dtype = p.dtype
                 break
-        autocast_enabled = (
-            target_dtype != torch.float32
-        ) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         latents = batch.latents
         if latents is None:
-            raise ValueError(
-                "latents must be provided for "
-                "Cosmos25DenoisingStage"
-            )
+            raise ValueError("latents must be provided for "
+                             "Cosmos25DenoisingStage")
         guidance_scale = batch.guidance_scale
 
         if batch.timesteps is None:

@@ -15,7 +15,6 @@ FlowMatchEulerDiscreteScheduler.  Differences:
 from __future__ import annotations
 
 import copy
-import gc
 from typing import Any, Literal, TYPE_CHECKING
 
 import torch
@@ -165,12 +164,11 @@ class CosmosModel(WanModel):
         if conditional:
             text_dict = batch.conditional_dict
             if text_dict is None:
-                raise RuntimeError(
-                    "Missing conditional_dict in TrainingBatch"
-                )
+                raise RuntimeError("Missing conditional_dict in TrainingBatch")
         else:
             text_dict = self._get_uncond_text_dict(
-                batch, cfg_uncond=cfg_uncond,
+                batch,
+                cfg_uncond=cfg_uncond,
             )
 
         if attn_kind == "dense":
@@ -206,14 +204,16 @@ class CosmosModel(WanModel):
         cosmos_timestep = sigma_1d
 
         with (
-            torch.autocast(device_type, dtype=dtype),
-            set_forward_context(
-                current_timestep=batch.timesteps,
-                attn_metadata=attn_metadata,
-            ),
+                torch.autocast(device_type, dtype=dtype),
+                set_forward_context(
+                    current_timestep=batch.timesteps,
+                    attn_metadata=attn_metadata,
+                ),
         ):
             input_kwargs = self._build_distill_input_kwargs(
-                noisy_latents, cosmos_timestep, text_dict,
+                noisy_latents,
+                cosmos_timestep,
+                text_dict,
             )
             transformer = self._get_transformer(timestep)
             model_output = transformer(**input_kwargs)
@@ -238,22 +238,27 @@ class CosmosModel(WanModel):
         - fps tensor
         """
         if text_dict is None:
-            raise ValueError(
-                "text_dict cannot be None for Cosmos forward"
-            )
+            raise ValueError("text_dict cannot be None for Cosmos forward")
 
         b, c, t, h, w = noise_input.shape
 
         # For T2W fine-tuning: no conditioning frames.
         condition_mask = torch.zeros(
-            b, 1, t, h, w,
+            b,
+            1,
+            t,
+            h,
+            w,
             device=noise_input.device,
             dtype=noise_input.dtype,
         )
 
         # Padding mask: zeros (no padding).
         padding_mask = torch.zeros(
-            1, 1, h, w,
+            1,
+            1,
+            h,
+            w,
             device=noise_input.device,
             dtype=noise_input.dtype,
         )
@@ -264,9 +269,7 @@ class CosmosModel(WanModel):
 
         return {
             "hidden_states": noise_input,
-            "encoder_hidden_states": (
-                text_dict["encoder_hidden_states"]
-            ),
+            "encoder_hidden_states": (text_dict["encoder_hidden_states"]),
             "timestep": timestep,
             "condition_mask": condition_mask,
             "padding_mask": padding_mask,
@@ -295,7 +298,8 @@ class CosmosModel(WanModel):
         # with standard flow-matching interpolation:
         #   x_t = (1 - sigma) * x_0 + sigma * noise
         training_batch = super()._prepare_dit_inputs(
-            training_batch, generator,
+            training_batch,
+            generator,
         )
         return training_batch
 
@@ -329,12 +333,17 @@ class CosmosModel(WanModel):
         num_tokens = 512  # Reason1 default padding length
 
         neg_embeds = torch.zeros(
-            1, num_tokens, embed_dim,
-            device=device, dtype=dtype,
+            1,
+            num_tokens,
+            embed_dim,
+            device=device,
+            dtype=dtype,
         )
         neg_mask = torch.ones(
-            1, num_tokens,
-            device=device, dtype=dtype,
+            1,
+            num_tokens,
+            device=device,
+            dtype=dtype,
         )
 
         self.negative_prompt_embeds = neg_embeds
