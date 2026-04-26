@@ -118,6 +118,19 @@ class SamplingParam:
     audio_start_in_s: float | None = None
     audio_end_in_s: float | None = None
 
+    # Stable Audio audio-to-audio (variation): a `[B, C, samples]` waveform
+    # at the model's sampling rate; the pipeline encodes via VAE and uses
+    # it as the starting latent. `init_noise_level` is the upstream
+    # `sigma_max` override (lower = closer to init, higher = more freedom).
+    init_audio: Any = None
+    init_noise_level: float | None = None
+
+    # Stable Audio inpainting (RePaint-style): `inpaint_audio` is the
+    # reference clip, `inpaint_mask` is a [samples] tensor in {0, 1} where
+    # 1 means *keep the reference* and 0 means *regenerate*.
+    inpaint_audio: Any = None
+    inpaint_mask: Any = None
+
     # Continuation state carried across streaming/multi-segment calls.
     continuation_state: ContinuationState | None = None
     # When True, the pipeline returns a ContinuationState on the result so

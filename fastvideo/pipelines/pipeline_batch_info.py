@@ -198,6 +198,14 @@ class ForwardBatch:
     audio_start_in_s: float | None = None
     audio_end_in_s: float | None = None
 
+    # Stable Audio A2A variation + inpainting payloads (parallel to
+    # `SamplingParam`). `Any` because we accept torch tensors or numpy
+    # arrays the user supplies; the latent-prep stage normalises shapes.
+    init_audio: Any = None
+    init_noise_level: float | None = None
+    inpaint_audio: Any = None
+    inpaint_mask: Any = None
+
     n_tokens: int | None = None
 
     # Other parameters that may be needed by specific schedulers

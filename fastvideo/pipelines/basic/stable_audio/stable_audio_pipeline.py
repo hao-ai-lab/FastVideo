@@ -162,9 +162,12 @@ class StableAudioPipeline(ComposedPipelineBase):
             stage_name="latent_preparation_stage",
             stage=StableAudioLatentPreparationStage(
                 io_channels=64,
-                sample_size=int(pc.sampling_rate * pc.audio_end_in_s) if False else 2097152,
                 # Stable Audio uses fixed sample_size=2097152 (~47.5s) at the
                 # latent input; the requested duration is sliced post-decode.
+                sample_size=2097152,
+                vae=self.get_module("vae"),
+                sample_rate=pc.sampling_rate,
+                audio_channels=pc.audio_channels,
             ),
         )
 

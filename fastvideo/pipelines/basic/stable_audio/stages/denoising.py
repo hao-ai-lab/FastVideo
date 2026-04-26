@@ -106,13 +106,19 @@ class StableAudioDenoisingStage(PipelineStage):
         adapter = _DiTAdapter(self.transformer)
         denoiser = K.external.VDenoiser(adapter)
 
-        sigmas = K.sampling.get_sigmas_polyexponential(steps,
-                                                       self._SIGMA_MIN,
-                                                       self._SIGMA_MAX,
-                                                       self._RHO,
-                                                       device=device)
-        # Upstream scales the initial noise by sigmas[0] inside `sample_k`.
-        x = batch.latents * sigmas[0]
+        # If the user gave us an init latent (audio-to-audio variation),
+        # the sampler should start at `sigma_max = init_noise_level` instead
+        # of the full self._SIGMA_MAX. This matches upstream
+        # `generate_diffusion_cond`'s `sampler_kwargs["sigma_max"]` override.
+        init_latent = ext.get("init_latent")
+        sigma_max = (float(ext.get("init_noise_level", self._SIGMA_MAX))
+                     if init_latent is not None else self._SIGMA_MAX)
+
+        sigmas = K.sampling.get_sigmas_polyexponential(steps, self._SIGMA_MIN, sigma_max, self._RHO, device=device)
+        # Upstream scales the initial noise by sigmas[0] inside `sample_k`,
+        # then adds `init_data` if provided.
+        noise_latent = batch.latents * sigmas[0]
+        x = init_latent + noise_latent if init_latent is not None else noise_latent
 
         extra_args = {
             "cross_attn_cond": ext["cross_attn_cond"],
@@ -126,11 +132,62 @@ class StableAudioDenoisingStage(PipelineStage):
         if ext.get("negative_global_embed") is not None:
             extra_args["negative_global_cond"] = ext["negative_global_embed"]
 
+        # RePaint-style inpainting hook: if a binary mask + reference latent
+        # are supplied, blend (renoised reference) into x at every step in
+        # the kept region (mask == 1). This works on any v-prediction
+        # diffusion model — it does not require an inpaint-trained
+        # checkpoint. Stable Audio Open 1.0 is `diffusion_cond` (not
+        # `diffusion_cond_inpaint`), so this is the only inpainting path
+        # available without a different checkpoint.
+        inpaint_mask = ext.get("inpaint_mask_latent")  # [1, 1, latent_seq] or None
+        inpaint_ref = ext.get("inpaint_reference_latent")  # [1, C, latent_seq] or None
+        callback = None
+        if inpaint_mask is not None and inpaint_ref is not None:
+            callback = _make_inpaint_callback(inpaint_ref, inpaint_mask, sigmas)
+
         # `LocalAttention` (used inside our native StableAudioDiT) needs an
         # active forward context to read `attn_metadata`. Wrap the whole
         # sampling loop — every DiT call sees `attn_metadata=None`, which is
         # what the SDPA / FlashAttn backends accept for unconditioned compute.
         with set_forward_context(current_timestep=0, attn_metadata=None):
-            sampled = K.sampling.sample_dpmpp_3m_sde(denoiser, x, sigmas, disable=False, extra_args=extra_args)
+            sampled = K.sampling.sample_dpmpp_3m_sde(denoiser,
+                                                     x,
+                                                     sigmas,
+                                                     disable=False,
+                                                     extra_args=extra_args,
+                                                     callback=callback)
+
+        # Final mask blend so the kept region of the inpaint reference is
+        # exactly preserved in the returned latent.
+        if inpaint_mask is not None and inpaint_ref is not None:
+            sampled = inpaint_ref * inpaint_mask + sampled * (1 - inpaint_mask)
         batch.latents = sampled
         return batch
+
+
+def _make_inpaint_callback(reference_latent: torch.Tensor, mask: torch.Tensor, sigmas: torch.Tensor):
+    """Build a k-diffusion sampler callback that performs RePaint blending
+    after every step.
+
+    At step `i` (current sigma = `sigmas[i]`), the callback:
+      1. Re-noises the reference latent to `sigma = sigmas[i+1]` (the sigma
+         the next denoise step will see).
+      2. Replaces the kept region (mask == 1) of the in-flight latent
+         `state['x']` with the renoised reference.
+
+    This pulls the kept region back onto the trajectory the model expects,
+    which is what makes RePaint-style inpainting converge on
+    non-inpaint-trained models.
+    """
+
+    def cb(info: dict) -> None:
+        i = int(info["i"])
+        next_i = min(i + 1, len(sigmas) - 1)
+        sigma_next = float(sigmas[next_i])
+        # Renoise the reference to the *next* sigma.
+        noisy_ref = reference_latent + torch.randn_like(reference_latent) * sigma_next
+        # Blend in-place — k_diffusion samplers respect mutated state['x'].
+        x = info["x"]
+        x.copy_(noisy_ref * mask + x * (1 - mask))
+
+    return cb

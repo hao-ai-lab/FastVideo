@@ -252,6 +252,7 @@ def _register_configs() -> None:
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "stabilityai/stable-audio-open-1.0",
+            "stabilityai/stable-audio-open-small",
         ],
         model_detectors=[
             lambda path: "stable-audio-open" in path.lower() or "stableaudio" in path.lower(),

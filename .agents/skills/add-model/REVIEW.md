@@ -1180,6 +1180,78 @@ in the PR description."
 
 ---
 
+## 31. `examples/inference/basic/basic_<family>*.py` should lead with user-story docstrings
+
+**Where in the skill:** Files-table row 17 ("`examples/inference/basic/basic_<family>.py`
+— User-runnable example for manual quality verification"); no guidance on
+*how* to document the example.
+
+**What we found (during the will/stable-audio Tier-1 build, 2026-04-26):**
+The user explicitly requested that each variant example (T2A, audio-to-
+audio, inpainting, small-variant) lead with a docstring written in
+**user-story form** — concrete who/why scenarios that motivate why the
+variant exists, not just a what-the-code-does summary. This converts
+each example into a self-contained explainer that:
+
+  * answers "why would someone reach for this entry point" up front;
+  * names the personas (musician, sound designer, UI builder, …) and
+    their pain;
+  * documents the tunable knobs in their narrative role ("creative
+    dials"), not as a parameter table;
+  * cross-references the upstream API call the variant mirrors so a
+    reader can move between FastVideo and the upstream repo without
+    a translation step.
+
+The result reads like product documentation aimed at the *next porter
+or end user*, not like API docs aimed at the implementor. This is
+unusually high-leverage for variants whose purpose is non-obvious (e.g.
+"inpainting" means very different things to different audiences) and
+for examples that exist primarily to communicate intent (a pipeline
+variant has zero discoverability if the example just says
+"`generator.generate_video(...)`").
+
+Concrete pattern (3-section docstring):
+
+  1. **One or more "User story (<persona>):"** blocks — first-person
+     ("I have…", "I want…") quoted scenarios. 2–4 sentences each.
+     Cover at least one professional and one tinkering use case.
+  2. **"How it works:"** — short prose explanation of what the
+     variant does in pipeline terms (encode, mask, blend, sample),
+     plus a 1-line cross-reference to the upstream entry point or
+     algorithm name (RePaint, dpmpp-3m-sde, etc.).
+  3. **"Tunable knobs (the 'creative dials'):"** — for variants with
+     a sensitivity knob (init_noise_level, mask coverage, sampler_type,
+     etc.), a 2-column micro-table mapping value → effect in narrative
+     terms ("0.5 — keep most of the reference; 5.0 — heavy reroll;
+     500.0 — equivalent to no reference").
+
+  Plus a closing **"Prerequisites:"** line that names the access /
+  install asks (HF gated repo, optional inference deps).
+
+**Examples in-tree** (will/stable-audio branch as of commit `<TBD>`):
+  * `examples/inference/basic/basic_stable_audio.py` (T2A baseline)
+  * `examples/inference/basic/basic_stable_audio_a2a.py` (variation)
+  * `examples/inference/basic/basic_stable_audio_inpaint.py` (RePaint
+    inpainting / loop extension)
+  * `examples/inference/basic/basic_stable_audio_small.py` (size variant)
+
+**Action on the skill:**
+
+- (a) Update Files-table row 17 wording: *"`examples/inference/basic/basic_<family>*.py`
+  — User-runnable example **with a user-story-shaped docstring**
+  (persona + how-it-works + tunable-knobs sections). One per
+  pipeline variant the family supports."*
+- (b) Add a new pitfall in step 17 / final-checklist: *"An example
+  whose docstring only restates the code is a missed opportunity.
+  Lead with at least one 'User story (<persona>):' block — concrete
+  scenario in the persona's voice — so the next porter / end user
+  can decide whether this is the entry point they want without
+  reading the source."*
+- (c) Cross-reference the will/stable-audio examples as the canonical
+  shape (concrete, narrative, knob-aware).
+
+---
+
 ## 30. Hard ban on `from diffusers import` and `from transformers import` (model classes) at runtime
 
 **Where in the skill:** "Decide what to reuse" (step 3); "Files you will
@@ -1334,6 +1406,7 @@ the convention.
 | 28 | `WorkloadType` enum has no audio variants | High | Pre-extend with T2A/A2A/AV + document in Inputs table. (From will/stable-audio rerun.) |
 | 29 | VAE file naming: arch name vs family name is ambiguous | Low | Update row 4/5 wording: name after arch when shared, family when family-specific. (From will/stable-audio rerun.) |
 | 30 | **Hard ban on `from diffusers/transformers import` of model classes at runtime** | **Critical** | Codify the rule, update step 3 / step 6 / step 13(a), drop the "interim diffusers comparison" framing. (From will/stable-audio rerun, user-corrected — direct quote: "remove all use of diffusers version".) |
+| 31 | User-story-shaped docstrings on every `examples/inference/basic/basic_<family>*.py` | Medium | Update Files-table row 17 + add a pitfall: docstring leads with `User story (<persona>):` blocks → How it works → Tunable knobs ("creative dials"). (From will/stable-audio Tier-1 build, user request: "I love the user story style ... document each in docstring at top of corresponding basic example script".) |
 
 None of these block a new porter from using the skill today; they're
 polish / consistency items that need a codebase-owner call.

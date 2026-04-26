@@ -48,4 +48,29 @@ STABLE_AUDIO_OPEN_1_0_BASE = InferencePreset(
     },
 )
 
-ALL_PRESETS = (STABLE_AUDIO_OPEN_1_0_BASE, )
+# `stable-audio-open-small` is a separate gated Stability AI checkpoint
+# that ships the same Oobleck VAE + a smaller / faster DiT. As of
+# 2026-04-26 our HF token does not have access, so the auto-loader has
+# not been verified end-to-end. The preset is registered so users with
+# access can try it immediately; if the architecture sizing differs from
+# the base model, `from_official_state_dict` will surface a clear
+# state-dict mismatch and we'll patch the DiT defaults to match.
+STABLE_AUDIO_OPEN_SMALL = InferencePreset(
+    name="stable_audio_open_small",
+    version=1,
+    model_family="stable_audio",
+    description=("Stability AI Stable Audio Open Small. Lower-latency variant of "
+                 "Stable Audio Open 1.0 — same Oobleck VAE, smaller/faster DiT. "
+                 "Gated repo (`stabilityai/stable-audio-open-small`); request "
+                 "access on HF before use."),
+    workload_type="t2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "seed": 0,
+        "guidance_scale": 7.0,
+        "num_inference_steps": 100,
+        "negative_prompt": "",
+    },
+)
+
+ALL_PRESETS = (STABLE_AUDIO_OPEN_1_0_BASE, STABLE_AUDIO_OPEN_SMALL)
