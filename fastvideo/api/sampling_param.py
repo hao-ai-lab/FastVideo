@@ -117,6 +117,18 @@ class SamplingParam:
     ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
     ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
 
+    # LTX-2 image / video / continuation conditioning. These flow from
+    # generate_video(...) kwargs through ``sampling_param.update(kwargs)``
+    # onto the ForwardBatch fields of the same name. ``ltx2_image_crf``
+    # gates the conditioning-image H.264 re-encode; the streaming
+    # session controller passes ``ltx2_image_crf=0.0`` because it
+    # conditions on already-decoded VAE-quality frames.
+    ltx2_images: list[tuple[str, int, float]] | None = None
+    ltx2_image_crf: float = 33.0
+    ltx2_conditioning_latent_stage1: Any | None = None
+    ltx2_conditioning_latent_stage2: Any | None = None
+    ltx2_video_conditions: list[tuple[list[str], int, float]] | None = None
+
     # Continuation state carried across streaming/multi-segment calls.
     continuation_state: ContinuationState | None = None
     # When True, the pipeline returns a ContinuationState on the result so

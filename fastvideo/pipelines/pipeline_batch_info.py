@@ -79,6 +79,27 @@ class ForwardBatch:
     image_embeds: list[torch.Tensor] = field(default_factory=list)
     pil_image: torch.Tensor | PIL.Image.Image | None = None
     preprocessed_image: torch.Tensor | None = None
+    # LTX-2 image conditioning. Each entry is (path, frame_idx, strength)
+    # — strength 1.0 anchors the latent at frame_idx exactly to the
+    # encoded image; <1.0 mixes denoised content with the conditioning
+    # image. ``ltx2_image_crf`` controls the H.264 CRF re-encode applied
+    # to the image before VAE encoding (matches official LTX-2 quality
+    # adaptation; 0.0 disables the re-encode).
+    ltx2_images: list[tuple[str, int, float]] | None = None
+    ltx2_image_crf: float = 33.0
+    # Stage-specific continuation latents — populated by the streaming
+    # session controller between segments. ``stage1`` is the last latent
+    # from the previous segment's stage-1 denoise (half-res); ``stage2``
+    # is the last latent from the previous segment's stage-2 refine
+    # (full-res). The image-conditioning builder reads whichever the
+    # current pass needs (``base_clean_latent is None`` -> stage1).
+    ltx2_conditioning_latent_stage1: torch.Tensor | None = None
+    ltx2_conditioning_latent_stage2: torch.Tensor | None = None
+    # Video-clip conditioning: list of (frame_paths, frame_idx, strength)
+    # — multi-frame VAE-encoded conditioning so the resulting latent
+    # captures temporal/motion info (used by the streaming server's
+    # mid-roll continuation flow).
+    ltx2_video_conditions: list[tuple[list[str], int, float]] | None = None
 
     # Text inputs
     prompt: str | list[str] | None = None
