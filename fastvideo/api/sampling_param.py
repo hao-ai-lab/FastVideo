@@ -112,6 +112,12 @@ class SamplingParam:
     ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
     ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
 
+    # Stable Audio (T2A): clip start/end in seconds. Honored by
+    # `StableAudioConditioningStage` + `StableAudioDecodingStage`. Other
+    # families ignore them.
+    audio_start_in_s: float | None = None
+    audio_end_in_s: float | None = None
+
     # Continuation state carried across streaming/multi-segment calls.
     continuation_state: ContinuationState | None = None
     # When True, the pipeline returns a ContinuationState on the result so
