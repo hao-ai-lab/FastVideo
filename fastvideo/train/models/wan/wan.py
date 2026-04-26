@@ -36,6 +36,7 @@ from fastvideo.train.utils.module_state import (
     apply_trainable, )
 from fastvideo.train.utils.moduleloader import (
     load_module_from_path, )
+from fastvideo.train.utils.negative_prompt import encode_negative_prompt
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
@@ -336,62 +337,15 @@ class WanModel(ModelBase):
 
         assert self.training_config is not None
         tc = self.training_config
-        device = self.device
-        dtype = self._get_training_dtype()
-
-        # Every rank encodes the negative prompt independently. This avoids
-        # the NCCL deadlock that occurred when only rank 0 constructed the
-        # full inference pipeline. We go through TextEncoderLoader so the
-        # encoder class is resolved from pipeline_config (i.e. UMT5 for Wan,
-        # not vanilla T5) and the same tokenizer / postprocess_text used at
-        # inference time are reused.
-        import os
-
-        from transformers import AutoTokenizer
-
-        from fastvideo.models.loader.component_loader import TextEncoderLoader
-        from fastvideo.train.utils.moduleloader import make_inference_args
-        from fastvideo.utils import maybe_download_model
-
-        model_path = maybe_download_model(tc.model_path)
-
-        sampling_param = SamplingParam.from_pretrained(model_path)
-        negative_prompt = sampling_param.negative_prompt
-
-        encoder_config = tc.pipeline_config.text_encoder_configs[0]
-        postprocess_text = tc.pipeline_config.postprocess_text_funcs[0]
-        tok_kwargs = dict(encoder_config.tokenizer_kwargs)
-
-        inference_args = make_inference_args(tc, model_path=model_path)
-        # The negative-prompt encoder is small and only used once at startup;
-        # keep it on-device and skip CPU offload to avoid initializing FSDP
-        # device meshes (which would re-introduce collective communication).
-        inference_args.text_encoder_cpu_offload = False
-
-        loader = TextEncoderLoader()
-        text_encoder = loader.load(
-            os.path.join(model_path, "text_encoder"),
-            inference_args,
-        ).to(device).eval()
-        tokenizer = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
-
-        with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
-            text_inputs = tokenizer(negative_prompt, **tok_kwargs).to(device)
-            outputs = text_encoder(
-                input_ids=text_inputs.input_ids,
-                attention_mask=text_inputs.attention_mask,
-            )
-            # postprocess_text reads outputs.attention_mask; the FastVideo
-            # encoders already set it, but be explicit to match the inference
-            # path (where TextEncodingStage assigns it).
-            outputs.attention_mask = text_inputs["attention_mask"]
-            neg_embeds = postprocess_text(outputs).to(device=device, dtype=dtype)
-            neg_mask = text_inputs["attention_mask"].to(device=device, dtype=dtype)
-
-        del text_encoder, tokenizer
-
-        self.negative_prompt_embeds = neg_embeds
-        self.negative_prompt_attention_mask = neg_mask
+        sampling_param = SamplingParam.from_pretrained(tc.model_path)
+        embeds, mask = encode_negative_prompt(
+            tc,
+            prompt=sampling_param.negative_prompt,
+            device=self.device,
+            dtype=self._get_training_dtype(),
+        )
+        self.negative_prompt_embeds = embeds
+        self.negative_prompt_attention_mask = mask
 
     def _sample_timesteps(
         self,
