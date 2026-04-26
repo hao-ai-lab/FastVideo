@@ -1,6 +1,6 @@
 import math
 import torch
-from .block_sparse_attn import block_sparse_attn
+from .block_sparse_attn import block_sparse_attn, block_sparse_attn_from_indices
 from .triton_kernels.st_attn_triton import sliding_tile_attention_triton
 
 # Try to load the C++ extension
@@ -125,13 +125,18 @@ def video_sparse_attn(
     out_c = out_c.repeat(1, 1, 1, block_elements,
                          1).view(batch, heads, q_seq_len, dim)
 
-    # Sparse branch
+    # Sparse branch: feed top-k indices directly, skipping the bool-mask round-trip.
     topk_idx = torch.topk(scores, topk, dim=-1).indices
-    mask = torch.zeros_like(scores,
-                            dtype=torch.bool).scatter_(-1, topk_idx, True)
-
-    # out_s = block_sparse_attn(q, k, v, mask, variable_block_sizes)[0]
-    out_s = block_sparse_attn(q, k, v, mask, variable_block_sizes)[0]
+    q2k_idx = topk_idx.to(torch.int32).contiguous()
+    q2k_num = torch.full(
+        (batch, heads, q_num_blocks),
+        topk,
+        dtype=torch.int32,
+        device=q.device,
+    )
+    out_s = block_sparse_attn_from_indices(
+        q, k, v, q2k_idx, q2k_num, variable_block_sizes
+    )[0]
 
     if compress_attn_weight is not None:
         return out_c * compress_attn_weight + out_s
