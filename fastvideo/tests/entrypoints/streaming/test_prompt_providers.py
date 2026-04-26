@@ -178,7 +178,7 @@ class TestCerebrasProvider:
             asyncio.run(provider.complete(
                 LLMRequest(messages=[], model="m")))
 
-    def test_4xx_raises_provider_error(self, monkeypatch):
+    def test_4xx_raises_non_retryable_provider_error(self, monkeypatch):
         _install_fake_httpx(
             monkeypatch,
             response=_FakeResponse(
@@ -188,7 +188,58 @@ class TestCerebrasProvider:
             ),
         )
         provider = CerebrasProvider(api_key="k")
-        with pytest.raises(LLMProviderError, match="401"):
+        with pytest.raises(LLMProviderError, match="401") as excinfo:
+            asyncio.run(provider.complete(
+                LLMRequest(messages=[], model="m")))
+        assert excinfo.value.retryable is False
+
+    def test_429_raises_retryable_provider_error(self, monkeypatch):
+        _install_fake_httpx(
+            monkeypatch,
+            response=_FakeResponse(
+                status_code=429,
+                payload={},
+                text="rate limited",
+            ),
+        )
+        provider = CerebrasProvider(api_key="k")
+        with pytest.raises(LLMProviderError, match="429") as excinfo:
+            asyncio.run(provider.complete(
+                LLMRequest(messages=[], model="m")))
+        assert excinfo.value.retryable is True
+
+    def test_5xx_raises_retryable_provider_error(self, monkeypatch):
+        _install_fake_httpx(
+            monkeypatch,
+            response=_FakeResponse(
+                status_code=503,
+                payload={},
+                text="service unavailable",
+            ),
+        )
+        provider = CerebrasProvider(api_key="k")
+        with pytest.raises(LLMProviderError, match="503") as excinfo:
+            asyncio.run(provider.complete(
+                LLMRequest(messages=[], model="m")))
+        assert excinfo.value.retryable is True
+
+    def test_non_json_body_raises_provider_error(self, monkeypatch):
+        # Simulate a proxy/load-balancer HTML error page slipping in
+        # with a 200 status: response.json() raises, and the provider
+        # must wrap it in an LLMProviderError instead of bubbling.
+        class _BadJsonResponse:
+            status_code = 200
+            text = "<html>oops</html>"
+
+            def json(self):
+                raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+        _install_fake_httpx(
+            monkeypatch,
+            response=_BadJsonResponse(),  # type: ignore[arg-type]
+        )
+        provider = CerebrasProvider(api_key="k")
+        with pytest.raises(LLMProviderError, match="non-JSON"):
             asyncio.run(provider.complete(
                 LLMRequest(messages=[], model="m")))
 

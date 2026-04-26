@@ -22,7 +22,7 @@ from __future__ import annotations
 import enum
 import os
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from fastvideo.entrypoints.streaming.prompt.providers.base import (
     LLMMessage,
@@ -163,15 +163,9 @@ class PromptEnhancer:
             try:
                 response = await provider.complete(request)
                 if idx > 0:
-                    # Rebuild so the response records that a fallback
-                    # was used (without reaching into provider state).
-                    response = LLMResponse(
-                        content=response.content,
-                        provider=response.provider,
-                        model=response.model,
-                        latency_ms=response.latency_ms,
-                        fallback_used=True,
-                    )
+                    # Mark the fallback flag without losing any other
+                    # response fields the provider populated.
+                    response = replace(response, fallback_used=True)
                 return response
             except LLMProviderError as exc:
                 logger.warning("prompt %s: provider %s failed: %s; trying next", operation.value, provider.name, exc)
