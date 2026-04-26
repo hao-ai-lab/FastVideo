@@ -38,8 +38,42 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-import torch
+
+def _bootstrap_fastvideo_source() -> None:
+    """If FASTVIDEO_FROM is set in the environment, prepend that path to
+    sys.path **and** strip any editable-install finders from
+    ``sys.meta_path`` so the named source wins over a .pth-installed
+    sibling. This lets us point the same harness at either
+    ``../FastVideo`` or ``../FastVideo-internal`` without juggling
+    venvs."""
+    src = os.environ.get("FASTVIDEO_FROM")
+    if not src:
+        return
+    src = os.path.abspath(src)
+    if not os.path.isdir(src):
+        raise SystemExit(f"FASTVIDEO_FROM={src!r} is not a directory")
+
+    # Remove editable-install finders that would otherwise win over
+    # PYTHONPATH. uv-installed editables register a custom finder
+    # named like ``__editable___fastvideo_0_1_7_finder``.
+    sys.meta_path = [
+        finder for finder in sys.meta_path
+        if "__editable___fastvideo" not in type(finder).__module__
+    ]
+    # Drop pre-resolved fastvideo modules from any earlier import.
+    for name in [k for k in sys.modules if k == "fastvideo" or k.startswith("fastvideo.")]:
+        sys.modules.pop(name, None)
+    # Drop the corresponding .pth-pointed paths from sys.path so the
+    # editable repo doesn't shadow the explicit source.
+    sys.path = [p for p in sys.path if not p.endswith(".egg-info")]
+    sys.path.insert(0, src)
+
+
+_bootstrap_fastvideo_source()
+
+
+import numpy as np  # noqa: E402  (after bootstrap so torch picks up the right env)
+import torch  # noqa: E402
 
 # Pinned alignment fixture — matches basic_ltx2_upscale.py upstream.
 PROMPT = (
@@ -101,6 +135,11 @@ def _run_legacy(args: argparse.Namespace) -> RunResult:
         ltx2_vae_tiling=False,
     )
 
+    # Pin the LTX-2-specific sampling knobs explicitly so both
+    # internal and public runs use identical denoising mechanics —
+    # otherwise the public LTX2_BASE preset's modality/rescale/stg
+    # defaults (3.0 / 0.7 / 1.0) would diverge from internal's
+    # ForwardBatch defaults (1.0 / 0.0 / 0.0).
     result = generator.generate_video(
         prompt=PROMPT,
         output_path=str(args.output) + ".legacy.mp4",
@@ -113,6 +152,13 @@ def _run_legacy(args: argparse.Namespace) -> RunResult:
         height=args.height,
         width=args.width,
         num_frames=args.frames,
+        ltx2_cfg_scale_video=1.0,
+        ltx2_cfg_scale_audio=1.0,
+        ltx2_modality_scale_video=1.0,
+        ltx2_modality_scale_audio=1.0,
+        ltx2_rescale_scale=0.0,
+        ltx2_stg_scale_video=0.0,
+        ltx2_stg_scale_audio=0.0,
     )
     generator.shutdown()
     frames = _result_frames(result)
@@ -160,6 +206,11 @@ def _run_typed(args: argparse.Namespace) -> RunResult:
 
     generator = VideoGenerator.from_pretrained(config=config)
 
+    # The typed SamplingConfig doesn't expose the LTX-2-specific
+    # modality/rescale/stg knobs, so route them through experimental
+    # so the legacy pipeline batch builder picks them up. This keeps
+    # the typed run's denoising mechanics identical to the legacy
+    # run's (and therefore to the internal reference).
     request = GenerationRequest(
         prompt=PROMPT,
         sampling=SamplingConfig(
@@ -177,6 +228,20 @@ def _run_typed(args: argparse.Namespace) -> RunResult:
             return_frames=True,
         ),
     )
+    # Set the LTX-2 sampling overrides on the request via attribute so
+    # the legacy SamplingParam translation picks them up alongside the
+    # typed fields. (Until the typed SamplingConfig grows these
+    # fields, this is the canonical override path on the public side.)
+    for attr, value in {
+            "ltx2_cfg_scale_video": 1.0,
+            "ltx2_cfg_scale_audio": 1.0,
+            "ltx2_modality_scale_video": 1.0,
+            "ltx2_modality_scale_audio": 1.0,
+            "ltx2_rescale_scale": 0.0,
+            "ltx2_stg_scale_video": 0.0,
+            "ltx2_stg_scale_audio": 0.0,
+    }.items():
+        setattr(request, attr, value)
 
     result = generator.generate(request)
     generator.shutdown()
