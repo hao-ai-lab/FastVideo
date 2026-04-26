@@ -15,7 +15,7 @@ image = (modal.Image.from_registry(
     image_tag, add_python="3.12"
 ).run_commands("rm -rf /FastVideo").apt_install(
     "cmake", "pkg-config", "build-essential", "curl", "libssl-dev", "ffmpeg"
-).pip_install("huggingface_hub"
+).pip_install("huggingface_hub", "pandas", "plotly"
 ).run_commands(
     "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
 ).run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc").env({
@@ -247,7 +247,8 @@ def run_performance_tests():
         "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
         "hf auth login --token $HF_API_KEY && "
         "pytest ./fastvideo/tests/performance -vs && "
-        "python ./fastvideo/tests/performance/compare_baseline.py"
+        "python ./fastvideo/tests/performance/compare_baseline.py && "
+        "python ./fastvideo/tests/performance/dashboard.py"
     )
 
 
