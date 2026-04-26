@@ -368,7 +368,7 @@ class SubprocessGpuPool(GpuPool):
             pending = self._pending.pop(job_id, None)
             if pending is None:
                 continue
-            if "error" in msg:
+            if msg.get("kind") == "error":
                 pending.future.set_exception(RuntimeError(msg["error"]))
             else:
                 pending.future.set_result(msg.get("result"))
