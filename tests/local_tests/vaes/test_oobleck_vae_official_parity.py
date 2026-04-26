@@ -40,8 +40,6 @@ from torch.testing import assert_close
 
 def _stable_audio_tools_available() -> bool:
     try:
-        from tests.local_tests.helpers.stable_audio_upstream import install_stubs
-        install_stubs()
         from stable_audio_tools.models.autoencoders import OobleckEncoder  # noqa
         return True
     except Exception:
@@ -62,9 +60,6 @@ def _stable_audio_tools_available() -> bool:
     ),
 )
 def test_oobleck_official_parity():
-    from tests.local_tests.helpers.stable_audio_upstream import install_stubs
-    install_stubs()
-
     from stable_audio_tools.models.autoencoders import OobleckDecoder, OobleckEncoder
     from fastvideo.models.vaes.oobleck import OobleckVAE
 
