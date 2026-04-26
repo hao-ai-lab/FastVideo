@@ -1,5 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Presets for Stable Audio Open 1.0 text-to-audio."""
+"""Presets for Stable Audio Open 1.0 text-to-audio.
+
+Sampling defaults match the published HF model-card example block:
+  https://huggingface.co/stabilityai/stable-audio-open-1.0
+
+  steps         = 100              -> num_inference_steps
+  cfg_scale     = 7                -> guidance_scale
+  sampler_type  = dpmpp-3m-sde     (StableAudioDenoisingStage hard-coded)
+  sigma_min     = 0.3              (StableAudioDenoisingStage._SIGMA_MIN)
+  sigma_max     = 500              (StableAudioDenoisingStage._SIGMA_MAX)
+  rho           = 1.0              (StableAudioDenoisingStage._RHO)
+  seconds_start = 0                -> audio_start_in_s
+
+Note: the generic stable_audio_tools `interface/diffusion_cond.py`
+defaults are different (cfg=6, sigma_min=0.03, sigma_max=1000) — those
+are the *library* defaults for arbitrary diffusion_cond models, not
+the published Stable Audio Open 1.0 defaults. We track the latter.
+"""
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
 _DENOISE_STAGE = PresetStageSpec(
