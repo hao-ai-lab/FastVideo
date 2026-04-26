@@ -3,6 +3,7 @@
 Latent preparation stage for LTX-2 pipelines.
 """
 
+import math
 from pathlib import Path
 
 import torch
@@ -11,28 +12,73 @@ from diffusers.utils.torch_utils import randn_tensor
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.models.dits.ltx2 import VideoLatentShape
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
+from fastvideo.pipelines.basic.ltx2.stages.ltx2_image_conditioning import (LTX2_VIDEO_CLEAN_LATENT_KEY,
+                                                                           LTX2_VIDEO_DENOISE_MASK_KEY,
+                                                                           apply_ltx2_gaussian_noiser,
+                                                                           build_ltx2_image_conditioning)
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 logger = init_logger(__name__)
 
 
+def _randn_ltx2_video_latents(
+    *,
+    shape: tuple[int, int, int, int, int],
+    transformer,
+    generator,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    """Match official LTX-2 video noise sampling order.
+
+    Official code builds a patchified latent state first, then samples noise in
+    token order. FastVideo stores latents in [B, C, T, H, W], so we sample in
+    token order here and unpatchify back to native layout.
+    """
+    patchifier = getattr(transformer, "patchifier", None)
+    if patchifier is None or not callable(getattr(patchifier, "unpatchify", None)):
+        return randn_tensor(
+            shape,
+            generator=generator,
+            device=device,
+            dtype=dtype,
+        )
+
+    video_shape = VideoLatentShape.from_torch_shape(torch.Size(shape))
+
+    patch_volume = math.prod(getattr(patchifier, "patch_size", (1, 1, 1)))
+    patch_shape = (
+        shape[0],
+        patchifier.get_token_count(video_shape),
+        shape[1] * patch_volume,
+    )
+    patch_noise = torch.randn(
+        patch_shape,
+        generator=generator,
+        device=device,
+        dtype=dtype,
+    )
+    return patchifier.unpatchify(patch_noise, video_shape)
+
+
 class LTX2LatentPreparationStage(PipelineStage):
     """Prepare initial LTX-2 latents without relying on a diffusers scheduler."""
 
-    def __init__(self, transformer) -> None:
+    def __init__(self, transformer, vae) -> None:
         super().__init__()
         self.transformer = transformer
+        self.vae = vae
 
     def forward(
         self,
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        latent_num_frames = (batch.num_frames -
-                             1) // fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio + 1
+        latent_num_frames = self._adjust_video_length(batch, fastvideo_args)
         if not batch.prompt_embeds:
             batch_size = 1
         elif isinstance(batch.prompt, list):
@@ -61,6 +107,22 @@ class LTX2LatentPreparationStage(PipelineStage):
         dtype = batch.prompt_embeds[0].dtype
         device = get_local_torch_device()
         generator = batch.generator
+        if generator is not None:
+            if isinstance(generator, list):
+                if generator and generator[0].device.type != device.type:
+                    seeds = batch.seeds
+                    if seeds is None and batch.seed is not None:
+                        seeds = [batch.seed + i for i in range(len(generator))]
+                    if seeds is not None:
+                        generator = [torch.Generator(device=device).manual_seed(seed) for seed in seeds]
+                        batch.generator = generator
+            else:
+                if generator.device.type != device.type:
+                    if batch.seed is not None:
+                        generator = torch.Generator(device=device).manual_seed(batch.seed)
+                    else:
+                        generator = torch.Generator(device=device)
+                    batch.generator = generator
         latents = batch.latents
         num_frames = latent_num_frames if latent_num_frames is not None else batch.num_frames
         height = batch.height
@@ -92,16 +154,18 @@ class LTX2LatentPreparationStage(PipelineStage):
                 if loaded_latents is not None:
                     latents = loaded_latents
                 else:
-                    latents = randn_tensor(
-                        shape,
+                    latents = _randn_ltx2_video_latents(
+                        shape=shape,
+                        transformer=self.transformer,
                         generator=generator,
                         device=device,
                         dtype=dtype,
                     )
                     self._save_initial_latent(latent_path, latents)
             else:
-                latents = randn_tensor(
-                    shape,
+                latents = _randn_ltx2_video_latents(
+                    shape=shape,
+                    transformer=self.transformer,
                     generator=generator,
                     device=device,
                     dtype=dtype,
@@ -109,9 +173,41 @@ class LTX2LatentPreparationStage(PipelineStage):
         else:
             latents = latents.to(device)
 
+        image_conditioning = build_ltx2_image_conditioning(
+            batch=batch,
+            latents=latents,
+            vae=self.vae,
+            height=height,
+            width=width,
+        )
+        if image_conditioning is None:
+            batch.extra.pop(LTX2_VIDEO_CLEAN_LATENT_KEY, None)
+            batch.extra.pop(LTX2_VIDEO_DENOISE_MASK_KEY, None)
+        else:
+            latents = apply_ltx2_gaussian_noiser(
+                noise=latents,
+                clean_latent=image_conditioning.clean_latent,
+                denoise_mask=image_conditioning.denoise_mask,
+                noise_scale=1.0,
+            )
+            batch.extra[LTX2_VIDEO_CLEAN_LATENT_KEY] = (image_conditioning.clean_latent)
+            batch.extra[LTX2_VIDEO_DENOISE_MASK_KEY] = (image_conditioning.denoise_mask)
+            logger.info(
+                "[LTX2] Applied conditioning for stage-1: images=%d latent=%s.",
+                len(image_conditioning.images),
+                image_conditioning.latent_conditioned,
+            )
+
         batch.latents = latents
         batch.raw_latent_shape = shape
         return batch
+
+    def _adjust_video_length(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> int | None:
+        if not fastvideo_args.pipeline_config.vae_config.use_temporal_scaling_frames:
+            return None
+        temporal_scale_factor = (fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
+        video_length = batch.num_frames
+        return int((video_length - 1) // temporal_scale_factor + 1)
 
     def _load_initial_latent(
         self,
