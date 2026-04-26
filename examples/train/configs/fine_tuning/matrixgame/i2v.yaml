@@ -1,0 +1,72 @@
+# MatrixGame I2V finetune.
+
+models:
+  student:
+    _target_: fastvideo.train.models.matrixgame.matrixgame.MatrixGameModel
+    init_from: ./mg_bidirectional_Solaris
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 1
+
+  data:
+    data_path: /home/hal-kaiqin/solaris_dataset_unzip/solaris
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 21
+    num_height: 448
+    num_width: 832
+    num_frames: 81
+
+  optimizer:
+    learning_rate: 1.0e-6
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 1
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/matrixgame_i2v_finetune
+    training_state_checkpointing_steps: 100
+    checkpoints_total_limit: 3
+    resume_from_checkpoint: latest
+
+  # tracker:
+  #   project_name: fastvideo
+  #   run_name: matrixgame_i2v_finetune
+  tracker:
+    trackers: [none]
+    project_name: ""
+    run_name: ""
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.matrixgame.matrixgame_i2v_pipeline.MatrixGamePipeline
+    dataset_file: examples/distill/MatrixGame2.0/validation_1.json
+    every_steps: 100
+    sampling_steps: [50]
+    guidance_scale: 5.0
+
+pipeline:
+  flow_shift: 3
