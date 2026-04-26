@@ -78,6 +78,7 @@ training:
     run_name: longcat_self_forcing
 
   model:
+    # LongCat student rollout uses checkpoint-safe KV cache snapshots.
     enable_gradient_checkpointing_type: full
 
 callbacks:
