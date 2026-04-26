@@ -161,6 +161,21 @@ class FastVideoArgs:
     ltx2_vae_temporal_tile_size_in_frames: int | None = None
     ltx2_vae_temporal_tile_overlap_in_frames: int | None = None
     ltx2_initial_latent_path: str | None = None
+    ltx2_audio_latent_path: str | None = None
+    # LTX-2 stage-2 spatial refinement (the SR pipeline). When enabled the
+    # transformer runs once at half resolution, the latents are upsampled
+    # by the LTX2 latent upsampler, then a short stage-2 distilled
+    # denoising pass refines the upsampled latents. Behaviour is opt-in
+    # and isolated to LTX-2 today.
+    ltx2_refine_enabled: bool = False
+    ltx2_refine_upsampler_path: str | None = None
+    ltx2_refine_transformer_path: str | None = None
+    ltx2_refine_lora_path: str | None = None
+    ltx2_refine_num_inference_steps: int = 3
+    ltx2_refine_guidance_scale: float = 1.0
+    ltx2_refine_add_noise: bool = True
+    ltx2_refine_noise_path: str | None = None
+    ltx2_refine_audio_noise_path: str | None = None
 
     # model paths for correct deallocation
     model_paths: dict[str, str] = field(default_factory=dict)
