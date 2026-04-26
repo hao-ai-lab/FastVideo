@@ -25,6 +25,14 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
+# Synthetic warmup dimensions: small enough to keep boot fast, big enough
+# to exercise the real shape-dependent compile paths. Keep in sync with
+# WarmupConfig if these become user-tunable.
+_WARMUP_NUM_FRAMES = 8
+_WARMUP_HEIGHT = 256
+_WARMUP_WIDTH = 256
+_WARMUP_NUM_INFERENCE_STEPS = 1
+
 
 def worker_main(
     *,
@@ -74,7 +82,7 @@ def worker_main(
             })
         except Exception as exc:
             result_queue.put({
-                "kind": "result",
+                "kind": "error",
                 "job_id": job_id,
                 "error": repr(exc),
             })
@@ -89,14 +97,13 @@ def _warmup_worker(
     Segment 1 is a fresh start (no continuation state) and exercises
     the initial-segment graph. Segment 2 feeds segment 1's continuation
     state back in so the conditioning branch is also compiled before
-    the first user request lands. Mirrors the internal
-    ``gpu_pool.py``'s ``run_startup_warmup`` (segment 1 + segment 2).
+    the first user request lands.
     """
     sampling = SamplingConfig(
-        num_frames=8,
-        height=256,
-        width=256,
-        num_inference_steps=1,
+        num_frames=_WARMUP_NUM_FRAMES,
+        height=_WARMUP_HEIGHT,
+        width=_WARMUP_WIDTH,
+        num_inference_steps=_WARMUP_NUM_INFERENCE_STEPS,
     )
     seg1 = GenerationRequest(
         prompt=warmup_config.prompt,

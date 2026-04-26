@@ -180,7 +180,7 @@ class _ThreadWorker:
                 })
             except Exception as exc:  # pragma: no cover - defensive
                 self._result_queue.put({
-                    "kind": "result",
+                    "kind": "error",
                     "job_id": item["job_id"],
                     "error": repr(exc),
                 })
