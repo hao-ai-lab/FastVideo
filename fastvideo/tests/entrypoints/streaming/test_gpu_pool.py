@@ -200,6 +200,7 @@ def _thread_worker_factory(generator_builder):
         result_queue: mp.Queue = ctx.Queue()
         shutdown_event = threading.Event()
         ready = threading.Event()
+        boot_ok = threading.Event()
         mp_shutdown = ctx.Event()
 
         generator = generator_builder(gpu_id)
@@ -212,7 +213,8 @@ def _thread_worker_factory(generator_builder):
         worker.start()
 
         # Drain the ready sentinel from the queue in the same way the
-        # real factory does (thread waiter populates ``ready``).
+        # real factory does (thread waiter populates ``ready`` /
+        # ``boot_ok``).
         def _await_ready() -> None:
             while True:
                 try:
@@ -222,6 +224,10 @@ def _thread_worker_factory(generator_builder):
                         return
                     continue
                 if msg.get("kind") == "ready":
+                    boot_ok.set()
+                    ready.set()
+                    return
+                if msg.get("kind") == "error":
                     ready.set()
                     return
 
@@ -251,6 +257,7 @@ def _thread_worker_factory(generator_builder):
             gpu_id=gpu_id,
             worker_id=f"gpu{gpu_id}-fake",
             ready=ready,
+            boot_ok=boot_ok,
             shutdown_event=mp_shutdown,
         )
 
@@ -372,5 +379,85 @@ class TestSubprocessGpuPool:
             pool = await pool_factory(num_workers=2)
             await pool.shutdown()
             await pool.shutdown()  # no raise
+
+        asyncio.run(run())
+
+
+class TestSubprocessGpuPoolFailureModes:
+    """Coverage for boot/runtime failures the pool has to absorb."""
+
+    def test_failed_boot_excluded_from_available(self):
+        """A worker whose factory leaves ``boot_ok`` unset must not be
+        handed out by ``acquire``. Otherwise a session lands on a dead
+        worker and ``run`` blocks forever on the missing result."""
+
+        def factory_with_one_failure(*, gpu_id, generator_config, warmup_config):
+            ctx = mp.get_context("spawn")
+            job_queue: mp.Queue = ctx.Queue()
+            result_queue: mp.Queue = ctx.Queue()
+            ready = threading.Event()
+            boot_ok = threading.Event()
+            mp_shutdown = ctx.Event()
+            ready.set()
+            # gpu_id 0 boots fine; gpu_id 1 fails (boot_ok stays clear).
+            if gpu_id == 0:
+                boot_ok.set()
+
+            class _AliveProcess:
+                def is_alive(self) -> bool:
+                    return True
+                def join(self, timeout: float | None = None) -> None:
+                    return
+                def kill(self) -> None:
+                    return
+
+            return _WorkerHandle(
+                process=_AliveProcess(),  # type: ignore[arg-type]
+                job_queue=job_queue,
+                result_queue=result_queue,
+                gpu_id=gpu_id,
+                worker_id=f"gpu{gpu_id}",
+                ready=ready,
+                boot_ok=boot_ok,
+                shutdown_event=mp_shutdown,
+            )
+
+        async def run():
+            pool = SubprocessGpuPool(
+                generator_config=GeneratorConfig(model_path="/m"),
+                pool_config=GpuPoolConfig(num_workers=2),
+                warmup_config=WarmupConfig(enabled=False),
+                worker_factory=factory_with_one_failure,
+            )
+            await pool.start()
+            try:
+                # Only worker 0 booted; only one slot should be available.
+                assert pool.health().available_workers == 1
+                a = await pool.acquire("sess-a", timeout=0.1)
+                assert a.worker_id == "gpu0"
+                with pytest.raises(PoolAcquireTimeout):
+                    await pool.acquire("sess-b", timeout=0.1)
+            finally:
+                await pool.shutdown()
+
+        asyncio.run(run())
+
+    def test_release_skips_dead_worker(self, pool_factory):
+        """If a worker died while bound, releasing the session must not
+        return its slot to the available queue — a later acquire would
+        hand the dead slot to a new session."""
+
+        async def run():
+            pool = await pool_factory(num_workers=1)
+            try:
+                await pool.acquire("sess-a")
+                # Simulate the worker dying mid-session.
+                pool._workers[0].process._stop.set()
+                pool._workers[0].process._worker.join(timeout=1.0)
+                await pool.release("sess-a")
+                # Available queue must remain empty.
+                assert pool.health().available_workers == 0
+            finally:
+                await pool.shutdown()
 
         asyncio.run(run())

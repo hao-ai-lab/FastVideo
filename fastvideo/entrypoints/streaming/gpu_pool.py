@@ -207,6 +207,10 @@ class _WorkerHandle:
     gpu_id: int
     worker_id: str
     ready: threading.Event
+    # ``ready`` flips on either successful boot or boot failure so the
+    # parent stops waiting; ``boot_ok`` is set only on a real ready
+    # acknowledgement and is what gates pool admission.
+    boot_ok: threading.Event
     shutdown_event: Any  # mp.Event is a factory, not a type — Any keeps mypy sane
 
 
@@ -215,6 +219,7 @@ class _PendingJob:
     job_id: str
     future: Future
     session_id: str
+    worker_id: str
 
 
 class SubprocessGpuPool(GpuPool):
@@ -280,8 +285,17 @@ class SubprocessGpuPool(GpuPool):
             task = asyncio.create_task(self._drain_results(handle))
             self._result_reader_tasks.append(task)
 
-        for idx in range(num_workers):
-            await self._available.put(idx)
+        # Only admit workers that successfully booted. Anything that
+        # failed boot (timeout, crash, error sentinel) stays out of the
+        # available queue so we never assign a session to it.
+        for idx, handle in enumerate(self._workers):
+            if handle.boot_ok.is_set():
+                await self._available.put(idx)
+            else:
+                logger.error(
+                    "pool: worker %s failed to boot; skipping",
+                    handle.worker_id,
+                )
 
     async def acquire(
         self,
@@ -314,8 +328,29 @@ class SubprocessGpuPool(GpuPool):
         handle = self._worker_by_id[assignment.worker_id]
         job_id = uuid.uuid4().hex
         future: Future = Future()
-        self._pending[job_id] = _PendingJob(job_id=job_id, future=future, session_id=session_id)
-        handle.job_queue.put({"job_id": job_id, "request": request})
+        self._pending[job_id] = _PendingJob(
+            job_id=job_id,
+            future=future,
+            session_id=session_id,
+            worker_id=handle.worker_id,
+        )
+        # mp.Queue.put can block if the underlying pipe buffer is full;
+        # offload to a thread so the event loop keeps serving other
+        # sessions. If the put itself fails, drop the pending entry so
+        # _drain_results doesn't dangle a future forever.
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(
+                None,
+                handle.job_queue.put,
+                {
+                    "job_id": job_id,
+                    "request": request
+                },
+            )
+        except Exception:
+            self._pending.pop(job_id, None)
+            raise
         return await asyncio.wrap_future(future)
 
     async def release(self, session_id: str) -> None:
@@ -324,19 +359,35 @@ class SubprocessGpuPool(GpuPool):
         if assignment is None:
             return
         idx = next((i for i, h in enumerate(self._workers) if h.worker_id == assignment.worker_id), None)
-        if idx is not None:
-            await self._available.put(idx)
+        if idx is None:
+            return
+        # Don't return a dead worker to the pool; otherwise the next
+        # acquire will hand a session to a process that can't run jobs.
+        if not self._workers[idx].process.is_alive():
+            logger.warning(
+                "pool: worker %s died; not returning to available queue",
+                self._workers[idx].worker_id,
+            )
+            return
+        await self._available.put(idx)
 
     async def shutdown(self) -> None:
-        for handle in self._workers:
+        loop = asyncio.get_running_loop()
+
+        # Signal all workers in parallel; .put may block on a full pipe,
+        # so off-load it the same way run() does.
+        async def _signal(handle: _WorkerHandle) -> None:
             try:
                 handle.shutdown_event.set()
-                handle.job_queue.put(None)
+                await loop.run_in_executor(None, handle.job_queue.put, None)
             except Exception:  # pragma: no cover - best-effort cleanup
                 pass
-        loop = asyncio.get_running_loop()
+
+        await asyncio.gather(*(_signal(h) for h in self._workers))
+        # Join in parallel so total shutdown is bounded by the slowest
+        # worker, not the sum of all timeouts.
+        await asyncio.gather(*(loop.run_in_executor(None, handle.process.join, 5.0) for handle in self._workers))
         for handle in self._workers:
-            await loop.run_in_executor(None, handle.process.join, 5.0)
             if handle.process.is_alive():
                 handle.process.kill()
         for task in self._result_reader_tasks:
@@ -354,24 +405,35 @@ class SubprocessGpuPool(GpuPool):
 
     async def _drain_results(self, handle: _WorkerHandle) -> None:
         loop = asyncio.get_running_loop()
-        while not handle.shutdown_event.is_set():
-            try:
-                msg = await loop.run_in_executor(None, _safe_queue_get, handle.result_queue, 0.5)
-            except Exception:
-                logger.exception("pool: worker %s result reader failed", handle.worker_id)
-                return
-            if msg is None:
-                continue
-            job_id = msg.get("job_id")
-            if job_id is None:
-                continue
-            pending = self._pending.pop(job_id, None)
-            if pending is None:
-                continue
-            if msg.get("kind") == "error":
-                pending.future.set_exception(RuntimeError(msg["error"]))
-            else:
-                pending.future.set_result(msg.get("result"))
+        try:
+            while not handle.shutdown_event.is_set():
+                try:
+                    msg = await loop.run_in_executor(None, _safe_queue_get, handle.result_queue, 0.5)
+                except Exception:
+                    logger.exception("pool: worker %s result reader failed", handle.worker_id)
+                    return
+                if msg is None:
+                    continue
+                job_id = msg.get("job_id")
+                if job_id is None:
+                    continue
+                pending = self._pending.pop(job_id, None)
+                if pending is None:
+                    continue
+                if msg.get("kind") == "error":
+                    pending.future.set_exception(RuntimeError(msg["error"]))
+                else:
+                    pending.future.set_result(msg.get("result"))
+        finally:
+            # If we exit for any reason — shutdown, exception, cancel —
+            # surface that to any in-flight jobs on this worker so their
+            # await never hangs on a future no one will resolve.
+            for jid in [jid for jid, job in self._pending.items() if job.worker_id == handle.worker_id]:
+                pending = self._pending.pop(jid, None)
+                if pending is not None and not pending.future.done():
+                    pending.future.set_exception(
+                        RuntimeError(f"worker {handle.worker_id} result reader exited "
+                                     "with pending jobs"))
 
 
 def _safe_queue_get(q: mp.Queue, timeout: float) -> Any | None:
@@ -415,6 +477,7 @@ def _default_worker_factory(
     job_queue: mp.Queue = ctx.Queue()
     result_queue: mp.Queue = ctx.Queue()
     ready = threading.Event()
+    boot_ok = threading.Event()
     shutdown_event = ctx.Event()
     worker_id = f"gpu{gpu_id}-{uuid.uuid4().hex[:6]}"
     process = ctx.Process(
@@ -434,7 +497,10 @@ def _default_worker_factory(
 
     # Block the parent-side ``ready`` flag until the worker posts a
     # ready acknowledgement on the result queue. We drain that single
-    # sentinel here; subsequent results belong to jobs.
+    # sentinel here; subsequent results belong to jobs. ``boot_ok``
+    # only flips on a real ready; on error we set ``ready`` to unblock
+    # the parent's wait but leave ``boot_ok`` clear so the pool keeps
+    # the worker out of the available queue.
     def _await_ready() -> None:
         while not shutdown_event.is_set():
             try:
@@ -442,11 +508,12 @@ def _default_worker_factory(
             except queue.Empty:
                 continue
             if isinstance(msg, dict) and msg.get("kind") == "ready":
+                boot_ok.set()
                 ready.set()
                 return
             if isinstance(msg, dict) and msg.get("kind") == "error":
                 logger.error("pool: worker %s failed to boot: %s", worker_id, msg.get("error"))
-                ready.set()  # unblock parent so it can observe the failure
+                ready.set()
                 return
 
     threading.Thread(target=_await_ready, daemon=True).start()
@@ -458,6 +525,7 @@ def _default_worker_factory(
         gpu_id=gpu_id,
         worker_id=worker_id,
         ready=ready,
+        boot_ok=boot_ok,
         shutdown_event=shutdown_event,
     )
 
