@@ -211,6 +211,27 @@ def _get_config_info(
 
 
 def _register_configs() -> None:
+    # LTX-2 (distilled) — registered FIRST so its detector wins over
+    # the base detector when both fire. The detector loop in
+    # ``get_model_name_for_path`` ORs the path-based check with a
+    # pipeline-name check (``ltx2pipeline``) which the base detector's
+    # "distilled not in path" predicate matches as True (the
+    # pipeline_name string contains no "distilled" marker), so the
+    # less-specific BASE detector would otherwise win when the
+    # input is the absolute path of the distilled checkpoint.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LTX2T2VConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "FastVideo/LTX2-Distilled-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" in path.lower(),
+        ],
+        model_family="ltx2",
+        default_preset="ltx2_distilled",
+    )
     # LTX-2 (base)
     register_configs(
         sampling_param_cls=None,
@@ -226,20 +247,6 @@ def _register_configs() -> None:
         ],
         model_family="ltx2",
         default_preset="ltx2_base",
-    )
-    # LTX-2 (distilled)
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=LTX2T2VConfig,
-        workload_types=(WorkloadType.T2V, ),
-        hf_model_paths=[
-            "FastVideo/LTX2-Distilled-Diffusers",
-        ],
-        model_detectors=[
-            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" in path.lower(),
-        ],
-        model_family="ltx2",
-        default_preset="ltx2_distilled",
     )
 
     # Hunyuan 1.5 (specific)
