@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """Presets for the daVinci-MagiHuman pipelines.
 
-Scope of this file: the base T2V variant only. Distill / SR variants
-live behind their own presets once ported.
+Scope of this file: the base AV (audio + video) variant and its DMD-2
+distilled twin. SR variants live behind their own presets once ported.
 """
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
-# Mirrors the reference `MagiEvaluator.negative_prompt` (video-side only —
-# we do not emit audio in the base T2V pipeline).
+# Mirrors the video-side block of `MagiEvaluator.negative_prompt`. The
+# upstream reference (`daVinci-MagiHuman/inference/pipeline/video_generate.py:222-224`)
+# concatenates three blocks — video, audio, and speech — into a single
+# negative prompt that conditions BOTH the video and audio CFG paths.
+# This preset currently surfaces only the video block; extending to the
+# full upstream concatenation is tracked as a follow-up parity item.
 _MAGI_HUMAN_NEGATIVE_PROMPT = ("Bright tones, overexposed, static, blurred details, subtitles, style, "
                                "works, paintings, images, static, overall gray, worst quality, low "
                                "quality, JPEG compression residue, ugly, incomplete, extra fingers, "
@@ -25,13 +29,13 @@ _DENOISE_STAGE = PresetStageSpec(
     }),
 )
 
-MAGI_HUMAN_BASE_T2V = InferencePreset(
-    name="magi_human_base_t2v",
+MAGI_HUMAN_BASE = InferencePreset(
+    name="magi_human_base",
     version=1,
     model_family="magi_human",
-    description=("daVinci-MagiHuman base text-to-video at 448x256, 4s @ 25 fps. "
-                 "Generated audio is discarded in this pipeline; use the upstream "
-                 "reference for full audio-visual generation."),
+    description=("daVinci-MagiHuman base text-to-AV at 448x256, 4s @ 25 fps. "
+                 "Produces an mp4 with muxed audio + video. workload_type "
+                 "is `t2v` because the framework enum has no `t2av` variant yet."),
     workload_type="t2v",
     stage_schemas=(_DENOISE_STAGE, ),
     defaults={
@@ -48,13 +52,13 @@ MAGI_HUMAN_BASE_T2V = InferencePreset(
     },
 )
 
-MAGI_HUMAN_DISTILL_T2V = InferencePreset(
-    name="magi_human_distill_t2v",
+MAGI_HUMAN_DISTILL = InferencePreset(
+    name="magi_human_distill",
     version=1,
     model_family="magi_human",
-    description=("daVinci-MagiHuman DMD-2 distilled text-to-video at 448x256, 4s @ "
-                 "25 fps. 8-step inference, no classifier-free guidance. Generated "
-                 "audio is discarded."),
+    description=("daVinci-MagiHuman DMD-2 distilled text-to-AV at 448x256, 4s @ "
+                 "25 fps. 8-step inference, no classifier-free guidance. Produces "
+                 "an mp4 with muxed audio + video."),
     workload_type="t2v",
     stage_schemas=(_DENOISE_STAGE, ),
     defaults={
@@ -71,4 +75,4 @@ MAGI_HUMAN_DISTILL_T2V = InferencePreset(
     },
 )
 
-ALL_PRESETS = (MAGI_HUMAN_BASE_T2V, MAGI_HUMAN_DISTILL_T2V)
+ALL_PRESETS = (MAGI_HUMAN_BASE, MAGI_HUMAN_DISTILL)

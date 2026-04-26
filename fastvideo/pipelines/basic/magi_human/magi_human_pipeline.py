@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""MagiHuman base T2V pipeline.
+"""MagiHuman base text-to-AV pipeline.
 
 Top-level composition for the daVinci-MagiHuman base model. Wires:
 
@@ -7,9 +7,10 @@ Top-level composition for the daVinci-MagiHuman base model. Wires:
         -> MagiHumanLatentPreparationStage
         -> MagiHumanDenoisingStage
         -> DecodingStage (Wan 2.2 TI2V-5B VAE decode for video)
+        -> MagiHumanAudioDecodingStage (Stable Audio Open 1.0 VAE decode)
 
-The DiT's audio path still runs (the checkpoint was trained jointly), but
-we do not decode or emit audio — this is a T2V-only first cut.
+The base checkpoint is a joint audio-visual generator; both the video
+and audio paths run in the denoising loop and both are decoded.
 
 `load_modules` is overridden because T5-Gemma (`google/t5gemma-9b-9b-ul2`)
 is a gated 18 GB Google repo we intentionally do NOT bundle inside the
@@ -68,7 +69,7 @@ def _ensure_hf_token_env() -> str | None:
 
 
 class MagiHumanPipeline(ComposedPipelineBase):
-    """Base MagiHuman T2V pipeline (no LoRA, no distill, no SR)."""
+    """Base MagiHuman text-to-AV pipeline (no LoRA, no distill, no SR)."""
 
     _required_config_modules = [
         "text_encoder",

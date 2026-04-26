@@ -34,7 +34,7 @@ class MagiHumanArchConfig(DiTArchConfig):
     (VAE stride, fps, num_inference_steps, CFG scales, flow_shift,
     t5_gemma_target_length) and data-proxy knobs (coords_style,
     frame_receptive_field, ref_audio_offset, text_offset) live on
-    `MagiHumanT2VConfig`, NOT here.
+    `MagiHumanBaseConfig`, NOT here.
 
     `param_names_mapping` is intentionally empty: the FastVideo implementation
     keeps the same module tree as the reference (`adapter.*`,

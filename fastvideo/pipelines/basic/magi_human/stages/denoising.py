@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Joint-modality denoising stage for daVinci-MagiHuman base T2V.
+"""Joint-modality denoising stage for daVinci-MagiHuman base text-to-AV.
 
 Runs the FlowUniPC denoise loop with CFG=2 over video + audio latents
 jointly. Text embeddings are already pad-or-trimmed to `t5_gemma_target_length`

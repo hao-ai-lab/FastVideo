@@ -28,8 +28,8 @@ from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
 from fastvideo.pipelines.basic.magi_human.pipeline_configs import (
-    MagiHumanDistillT2VConfig,
-    MagiHumanT2VConfig,
+    MagiHumanBaseConfig,
+    MagiHumanDistillConfig,
 )
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
@@ -288,10 +288,12 @@ def _register_configs() -> None:
         default_preset="stable_audio_open_small",
     )
 
-    # daVinci-MagiHuman (base T2V)
+    # daVinci-MagiHuman (base text-to-AV).
+    # NOTE: WorkloadType has no T2AV variant yet; using T2V as the
+    # placeholder until the enum is extended (same as Stable Audio).
     register_configs(
         sampling_param_cls=None,
-        pipeline_config_cls=MagiHumanT2VConfig,
+        pipeline_config_cls=MagiHumanBaseConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "GAIR/daVinci-MagiHuman",
@@ -302,12 +304,12 @@ def _register_configs() -> None:
                           and "distill" not in path.lower()),
         ],
         model_family="magi_human",
-        default_preset="magi_human_base_t2v",
+        default_preset="magi_human_base",
     )
-    # daVinci-MagiHuman (DMD-2 distilled T2V)
+    # daVinci-MagiHuman (DMD-2 distilled text-to-AV)
     register_configs(
         sampling_param_cls=None,
-        pipeline_config_cls=MagiHumanDistillT2VConfig,
+        pipeline_config_cls=MagiHumanDistillConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "FastVideo/MagiHuman-Distilled-Diffusers",
@@ -317,7 +319,7 @@ def _register_configs() -> None:
                           and "distill" in path.lower()),
         ],
         model_family="magi_human",
-        default_preset="magi_human_distill_t2v",
+        default_preset="magi_human_distill",
     )
 
     # Hunyuan 1.5 (specific)

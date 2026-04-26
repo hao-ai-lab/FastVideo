@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Latent preparation stage for daVinci-MagiHuman base T2V.
+"""Latent preparation stage for daVinci-MagiHuman base text-to-AV.
 
 Produces:
   - random video latent of shape `[1, z_dim, latent_T, latent_H, latent_W]`,
-  - random audio latent of shape `[1, num_frames, 64]` (even in pure T2V,
-    the DiT is trained to jointly denoise audio),
+  - random audio latent of shape `[1, num_frames, 64]` (the DiT jointly
+    denoises both modalities),
   - padded T5-Gemma text embedding (target length 640) plus the original
     (pre-pad) context length, which the UniPC + CFG loop needs so the
     unconditional path sees the same padded length.

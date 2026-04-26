@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""PipelineConfig for the daVinci-MagiHuman base T2V pipeline."""
+"""PipelineConfig for the daVinci-MagiHuman base text-to-AV pipeline."""
 
 from __future__ import annotations
 
@@ -35,15 +35,15 @@ def t5gemma_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
 
 
 @dataclass
-class MagiHumanT2VConfig(PipelineConfig):
-    """Base MagiHuman audio-visual pipeline config (text → video + audio).
+class MagiHumanBaseConfig(PipelineConfig):
+    """Base MagiHuman text-to-AV pipeline config (prompt → video + audio).
 
     MagiHuman's base model is a joint audio-visual generator. This config
     wires up both the video VAE (Wan 2.2 TI2V-5B) and the audio VAE
     (Stable Audio Open 1.0); the pipeline produces an mp4 with a muxed
-    audio track. The class name keeps the historical `T2VConfig` suffix
-    for backwards compatibility with the registry entries, but the
-    output is AV.
+    audio track. The framework's `WorkloadType` enum has no `T2AV`
+    variant yet, so the registry entry uses `WorkloadType.T2V` as a
+    placeholder.
     """
 
     # DiT
@@ -94,15 +94,15 @@ class MagiHumanT2VConfig(PipelineConfig):
     text_offset: int = 0
 
     def __post_init__(self) -> None:
-        # Base T2V does not need the VAE encoder (no reference-image
+        # Base text-to-AV does not need the VAE encoder (no reference-image
         # conditioning). Keep decoder only to save memory.
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
 
 
 @dataclass
-class MagiHumanDistillT2VConfig(MagiHumanT2VConfig):
-    """DMD-2 distilled MagiHuman T2V pipeline config.
+class MagiHumanDistillConfig(MagiHumanBaseConfig):
+    """DMD-2 distilled MagiHuman text-to-AV pipeline config.
 
     Same arch as base (identical 331 keys, same shapes, same module tree),
     but trained via DMD-2 for 8-step inference without classifier-free
