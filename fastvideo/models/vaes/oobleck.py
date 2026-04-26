@@ -1,22 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""First-class FastVideo port of Stable Audio Open 1.0's "Oobleck" VAE.
+"""Stable Audio Open 1.0 "Oobleck" VAE.
 
-Architecture ported from HuggingFace Diffusers'
-`diffusers.models.autoencoders.autoencoder_oobleck.AutoencoderOobleck`
-(Apache-2.0), stripped of the `ConfigMixin` / `ModelMixin` /
-`AutoencoderMixin` inheritance so FastVideo doesn't pull `diffusers`
-as a runtime dependency to decode audio latents. The module tree is
-bit-identical, so weights published in
-`stabilityai/stable-audio-open-1.0/vae/` load into `OobleckVAE` via a
-plain `state_dict`.
+5-stage Conv1d autoencoder with Snake activations + diagonal-Gaussian
+bottleneck. Loads `stabilityai/stable-audio-open-1.0/vae/` weights
+directly via `OobleckVAE.from_pretrained(...)`.
 
-Interface matches what FastVideo pipelines need:
-
-    vae = OobleckVAE.from_pretrained(<hf_repo_id_or_local_path>, subfolder="vae")
-    waveform = vae.decode(latent)     # (B, audio_channels, samples)
-    latent = vae.encode(waveform).sample()  # or .mode()
-    vae.sampling_rate                 # int
-
+    vae = OobleckVAE.from_pretrained("stabilityai/stable-audio-open-1.0", subfolder="vae")
+    waveform = vae.decode(latent)            # (B, audio_channels, samples)
+    latent   = vae.encode(waveform).sample()  # or .mode()
 """
 from __future__ import annotations
 
@@ -29,12 +20,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn.utils import weight_norm
-
-
-# ---------------------------------------------------------------------------
-# Module primitives (identical to Diffusers' Oobleck impl, which is
-# itself a re-export of stable-audio-tools).
-# ---------------------------------------------------------------------------
 
 
 class Snake1d(nn.Module):
@@ -119,7 +104,7 @@ class OobleckDecoderBlock(nn.Module):
 
 
 class OobleckDiagonalGaussianDistribution:
-    """Matches diffusers' `OobleckDiagonalGaussianDistribution` API."""
+    """Diagonal-Gaussian VAE posterior with `softplus(scale) + 1e-4` std."""
 
     def __init__(self, parameters: torch.Tensor, deterministic: bool = False):
         self.parameters = parameters
@@ -224,12 +209,7 @@ class OobleckDecoder(nn.Module):
 
 
 class OobleckVAE(nn.Module):
-    """First-class Stable Audio Open 1.0 VAE.
-
-    Same architecture as `diffusers.AutoencoderOobleck`, so weights
-    published in Stability's `stabilityai/stable-audio-open-1.0/vae/`
-    (safetensors + config.json) load directly via `from_pretrained`.
-    """
+    """Stable Audio Open 1.0 VAE."""
 
     def __init__(
         self,

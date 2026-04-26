@@ -1,20 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stable Audio Open 1.0 DiT — first-class FastVideo port.
+"""Stable Audio Open 1.0 DiT.
 
-Vendored from the official Stability-AI/stable-audio-tools repo
-(`stable_audio_tools/models/dit.py + transformer.py +
-blocks.py:FourierFeatures`) under Apache-2.0.  Stripped to the subset
-the published model uses: continuous-transformer with rotary position
-embeddings, cross-attention conditioning, prepend global conditioning.
-
-Layer reuse (matches Wan2.1 / LTX-2 conventions, REVIEW item 11 / 22c):
-  * `nn.Linear`              → `fastvideo.layers.linear.ReplicatedLinear`
-  * `nn.LayerNorm`           → `fastvideo.layers.layernorm.FP32LayerNorm`
-  * raw flash_attn / SDPA    → `fastvideo.attention.LocalAttention`
-
-Replaces the previous diffusers `StableAudioDiTModel` reuse so the
-pipeline owns the numerical behaviour end-to-end (no
-`from diffusers import ...` at runtime; see REVIEW item 30).
+Continuous transformer with rotary self-attention, GQA cross-attention,
+and prepend global conditioning. 24 layers, embed_dim=1536, head_dim=64.
 """
 from __future__ import annotations
 
@@ -34,13 +22,8 @@ from fastvideo.platforms import AttentionBackendEnum
 _SUPPORTED_BACKENDS = (AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
 
 
-# ---------------------------------------------------------------------------
-# Fourier timestep features (no FastVideo equivalent — random-Fourier
-# learned freqs, not the standard sinusoidal time embedding).
-# ---------------------------------------------------------------------------
-
-
 class FourierFeatures(nn.Module):
+    """Random-Fourier learned-frequency timestep encoder."""
 
     def __init__(self, in_features: int, out_features: int, std: float = 1.0) -> None:
         super().__init__()
@@ -52,13 +35,9 @@ class FourierFeatures(nn.Module):
         return torch.cat([f.cos(), f.sin()], dim=-1)
 
 
-# ---------------------------------------------------------------------------
-# Rotary position embeddings — partial-rotary halves-swap layout (upstream
-# variant). FastVideo's `_apply_rotary_emb` uses the interleaved-pair
-# (`unbind(-1)`) convention; Stable Audio uses the halves-swap
-# (`unbind(-2)` w/ `[-x2, x1]` cat) convention. Different math, kept
-# local so the upstream weights load with bit-identical numerics.
-# ---------------------------------------------------------------------------
+# Partial-rotary with halves-swap (`unbind(-2)`, `[-x2, x1]`). Different
+# from FastVideo's `_apply_rotary_emb` (interleaved pairs, `unbind(-1)`),
+# so kept local.
 
 
 class RotaryEmbedding(nn.Module):
@@ -94,10 +73,7 @@ def _apply_rotary_pos_emb(t: torch.Tensor, freqs: torch.Tensor) -> torch.Tensor:
     return torch.cat((t_rot.to(out_dtype), t_unrot.to(out_dtype)), dim=-1)
 
 
-# ---------------------------------------------------------------------------
-# Feed-forward (SwiGLU) — built on `ReplicatedLinear` (FastVideo's
-# `fastvideo.layers.mlp.MLP` is non-gated, so we keep our own GLU).
-# ---------------------------------------------------------------------------
+# SwiGLU FF — local because `fastvideo.layers.mlp.MLP` is non-gated.
 
 
 class _GLU(nn.Module):
@@ -114,9 +90,8 @@ class _GLU(nn.Module):
 
 
 class FeedForward(nn.Module):
-    """`linear_in (GLU) → Identity → linear_out → Identity` so positional
-    checkpoint keys (`ff.0`, `ff.2`) line up with upstream's Sequential.
-    """
+    # Sequential layout `(GLU, Identity, Linear, Identity)` keeps the
+    # checkpoint keys at indices 0 and 2.
 
     def __init__(self, dim: int, mult: int = 4, zero_init_output: bool = True) -> None:
         super().__init__()
@@ -137,12 +112,8 @@ class FeedForward(nn.Module):
         return x
 
 
-# ---------------------------------------------------------------------------
-# Attention: ReplicatedLinear projections + LocalAttention compute.
-# Cross-attention is GQA (24 query heads, 12 KV heads) — LocalAttention's
-# SDPA backend handles GQA via `enable_gqa=True` and FlashAttn handles it
-# natively.
-# ---------------------------------------------------------------------------
+# Cross-attention is GQA (24 query heads, 12 KV heads); both backends
+# (FlashAttn, SDPA with `enable_gqa=True`) handle it.
 
 
 class Attention(nn.Module):
@@ -187,10 +158,9 @@ class Attention(nn.Module):
         if rotary_pos_emb is not None:
             freqs, _ = rotary_pos_emb
             v_dtype = v.dtype
-            # The upstream rotary is partial (rot_dim < head_dim) and uses
-            # the halves-swap convention — apply outside LocalAttention so
-            # we can keep the bit-identical math.
-            #   q,k arrive as [B, S, H, D]; the helper expects [B, H, S, D].
+            # Partial rotary (rot_dim < head_dim) with halves-swap, so
+            # apply outside LocalAttention. q,k come in as [B, S, H, D];
+            # transpose to [B, H, S, D] for the helper.
             q_t = q.transpose(1, 2)
             k_t = k.transpose(1, 2)
             if q_t.shape[-2] >= k_t.shape[-2]:
@@ -206,11 +176,6 @@ class Attention(nn.Module):
         out = rearrange(out, "b n h d -> b n (h d)")
         out, _ = self.to_out(out)
         return out
-
-
-# ---------------------------------------------------------------------------
-# Transformer block (rotary self-attn + cross-attn + SwiGLU FF)
-# ---------------------------------------------------------------------------
 
 
 class TransformerBlock(nn.Module):
@@ -238,11 +203,6 @@ class TransformerBlock(nn.Module):
             x = x + self.cross_attn(self.cross_attend_norm(x), context=context)
         x = x + self.ff(self.ff_norm(x))
         return x
-
-
-# ---------------------------------------------------------------------------
-# ContinuousTransformer
-# ---------------------------------------------------------------------------
 
 
 class ContinuousTransformer(nn.Module):
@@ -279,19 +239,8 @@ class ContinuousTransformer(nn.Module):
         return x
 
 
-# ---------------------------------------------------------------------------
-# StableAudioDiT
-# ---------------------------------------------------------------------------
-
-
 class StableAudioDiT(nn.Module):
-    """Stable Audio Open 1.0 diffusion transformer.
-
-    Defaults match `stabilityai/stable-audio-open-1.0`'s
-    `model_config.json["model"]["diffusion"]`:
-        io_channels=64, embed_dim=1536, depth=24, num_heads=24,
-        cond_token_dim=768, global_cond_dim=1536, project_cond_tokens=False
-    """
+    """Stable Audio Open 1.0 diffusion transformer."""
 
     def __init__(self, io_channels: int = 64, embed_dim: int = 1536, depth: int = 24,
                  num_heads: int = 24, cond_token_dim: int = 768, global_cond_dim: int = 1536,
@@ -300,8 +249,6 @@ class StableAudioDiT(nn.Module):
         self.cond_token_dim = cond_token_dim
         timestep_features_dim = 256
         self.timestep_features = FourierFeatures(1, timestep_features_dim)
-        # to_timestep_embed is a 2-layer MLP-like Sequential. Keep as
-        # nn.Sequential of ReplicatedLinear to preserve checkpoint key layout.
         self.to_timestep_embed = nn.Sequential(
             ReplicatedLinear(timestep_features_dim, embed_dim, bias=True),
             nn.SiLU(),
@@ -349,7 +296,7 @@ class StableAudioDiT(nn.Module):
 
     def forward(self, x: torch.Tensor, t: torch.Tensor, *, cross_attn_cond: torch.Tensor,
                 global_embed: torch.Tensor) -> torch.Tensor:
-        """Single-batch forward — CFG batching is done by the caller."""
+        """Forward over a single batch. CFG batching is the caller's job."""
         model_dtype = next(self.parameters()).dtype
         x = x.to(model_dtype)
         t = t.to(model_dtype)
@@ -371,22 +318,15 @@ class StableAudioDiT(nn.Module):
     @classmethod
     def from_official_state_dict(cls, state_dict: dict[str, torch.Tensor],
                                  prefix: str = "model.model.") -> "StableAudioDiT":
-        """Load from the official `model.safetensors`. The diffusion model
-        lives under `model.model.*` (`ConditionedDiffusionModelWrapper.model`
-        → `DiTWrapper.model`).
-
-        Two key remaps:
-          * `<norm>.gamma`  →  `<norm>.weight`   (FP32LayerNorm uses
-            nn.LayerNorm naming; upstream's bias-free LayerNorm uses
-            x-transformers naming)
-          * `<norm>.beta`   →  `<norm>.bias`
+        """Load from the published `model.safetensors`. DiT weights live
+        under the `model.model.*` prefix; LayerNorm keys are remapped
+        from `gamma`/`beta` to `weight`/`bias` (nn.LayerNorm convention).
         """
         cfg: dict[str, Any] = dict(io_channels=64, embed_dim=1536, depth=24, num_heads=24,
                                    cond_token_dim=768, global_cond_dim=1536,
                                    project_cond_tokens=False, project_global_cond=True)
         model = cls(**cfg)
         own = {k[len(prefix):]: v for k, v in state_dict.items() if k.startswith(prefix)}
-        # Remap LayerNorm key names: gamma/beta → weight/bias.
         remapped: dict[str, torch.Tensor] = {}
         for k, v in own.items():
             if k.endswith(".gamma"):

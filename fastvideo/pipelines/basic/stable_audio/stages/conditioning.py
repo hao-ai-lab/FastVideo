@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stable Audio conditioning stage — native StableAudioMultiConditioner path."""
+"""Stable Audio conditioning stage."""
 from __future__ import annotations
 
 import torch
@@ -11,17 +11,9 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 
 
 class StableAudioConditioningStage(PipelineStage):
-    """Run T5 + NumberConditioner via the native MultiConditioner and
-    package the result for the denoising loop.
-
-    Stashes on `batch.extra`:
-      * `cross_attn_cond`            — cat([prompt, seconds_start, seconds_total], dim=1)
-      * `cross_attn_mask`            — same layout, [B, L_total]
-      * `global_embed`               — cat([seconds_start, seconds_total], dim=-1)
-      * `negative_cross_attn_cond`   — same as positive but for the negative prompt
-      * `negative_cross_attn_mask`
-      * `do_cfg`                     — bool
-      * `audio_start_in_s`, `audio_end_in_s`
+    """Run the conditioner over the prompt + duration and stash the
+    DiT-ready (cross_attn_cond, cross_attn_mask, global_embed) triple
+    on `batch.extra` (plus the negative-prompt triple when CFG is on).
     """
 
     def __init__(self, conditioner) -> None:

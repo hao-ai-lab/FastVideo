@@ -1,21 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Presets for Stable Audio Open 1.0 text-to-audio.
+"""Stable Audio presets.
 
-Sampling defaults match the published HF model-card example block:
-  https://huggingface.co/stabilityai/stable-audio-open-1.0
-
-  steps         = 100              -> num_inference_steps
-  cfg_scale     = 7                -> guidance_scale
-  sampler_type  = dpmpp-3m-sde     (StableAudioDenoisingStage hard-coded)
-  sigma_min     = 0.3              (StableAudioDenoisingStage._SIGMA_MIN)
-  sigma_max     = 500              (StableAudioDenoisingStage._SIGMA_MAX)
-  rho           = 1.0              (StableAudioDenoisingStage._RHO)
-  seconds_start = 0                -> audio_start_in_s
-
-Note: the generic stable_audio_tools `interface/diffusion_cond.py`
-defaults are different (cfg=6, sigma_min=0.03, sigma_max=1000) — those
-are the *library* defaults for arbitrary diffusion_cond models, not
-the published Stable Audio Open 1.0 defaults. We track the latter.
+Sampling defaults track the published HF model card
+(https://huggingface.co/stabilityai/stable-audio-open-1.0):
+100 steps, CFG=7, dpmpp-3m-sde, sigma_min=0.3, sigma_max=500, rho=1.0.
 """
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
@@ -29,9 +17,7 @@ _DENOISE_STAGE = PresetStageSpec(
     }),
 )
 
-# Sampling defaults shared across both checkpoints (see module docstring
-# for provenance). audio_end_in_s / audio_start_in_s are pipeline-call
-# kwargs; not surfaced here to keep them explicit.
+# `audio_start_in_s` / `audio_end_in_s` are call-kwargs, kept off here.
 _SHARED_DEFAULTS = {
     "seed": 0,
     "guidance_scale": 7.0,
@@ -51,13 +37,9 @@ STABLE_AUDIO_OPEN_1_0_BASE = InferencePreset(
     defaults=dict(_SHARED_DEFAULTS),
 )
 
-# `stable-audio-open-small` is a separate gated Stability AI checkpoint
-# that ships the same Oobleck VAE + a smaller / faster DiT. As of
-# 2026-04-26 our HF token does not have access, so the auto-loader has
-# not been verified end-to-end. The preset is registered so users with
-# access can try it immediately; if the architecture sizing differs from
-# the base model, `from_official_state_dict` will surface a clear
-# state-dict mismatch and we'll patch the DiT defaults to match.
+# Gated repo `stabilityai/stable-audio-open-small` — same VAE, smaller
+# DiT. Registered for users with HF access; load-time state-dict
+# mismatch will surface clearly if the DiT sizing differs from the base.
 STABLE_AUDIO_OPEN_SMALL = InferencePreset(
     name="stable_audio_open_small",
     version=1,

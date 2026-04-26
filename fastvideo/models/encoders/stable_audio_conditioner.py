@@ -1,15 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stable Audio Open 1.0 conditioner — first-class FastVideo port of the
-official `stable_audio_tools.models.conditioners` MultiConditioner +
-T5Conditioner + NumberConditioner subset.
+"""Stable Audio Open 1.0 conditioner.
 
-Vendored from `Stability-AI/stable-audio-tools` under Apache-2.0,
-stripped to the conditioners the published 1.0 model actually uses
-(prompt -> T5; seconds_start / seconds_total -> NumberConditioner).
-
-Replaces the previous `diffusers.StableAudioProjectionModel` reuse so
-the pipeline owns the conditioning pathway end-to-end (no
-`from diffusers import ...` at runtime; see REVIEW item 30).
+T5-base text encoder + two NumberConditioners (`seconds_start`,
+`seconds_total`), wrapped by `StableAudioMultiConditioner` which
+produces the cross-attention and global-conditioning tensors the DiT
+expects.
 """
 from __future__ import annotations
 
@@ -20,13 +15,7 @@ import torch.nn as nn
 from einops import rearrange
 
 
-# ---------------------------------------------------------------------------
-# Number embedder: LearnedPositionalEmbedding + Linear head
-# ---------------------------------------------------------------------------
-
-
 class _LearnedPositionalEmbedding(nn.Module):
-    """Upstream `adp.LearnedPositionalEmbedding`."""
 
     def __init__(self, dim: int) -> None:
         super().__init__()
@@ -41,13 +30,11 @@ class _LearnedPositionalEmbedding(nn.Module):
 
 
 def _time_positional_embedding(dim: int, out_features: int) -> nn.Sequential:
-    """Upstream `adp.TimePositionalEmbedding`."""
     return nn.Sequential(_LearnedPositionalEmbedding(dim),
                          nn.Linear(in_features=dim + 1, out_features=out_features))
 
 
 class NumberEmbedder(nn.Module):
-    """Upstream `adp.NumberEmbedder`."""
 
     def __init__(self, features: int, dim: int = 256) -> None:
         super().__init__()
@@ -64,11 +51,6 @@ class NumberEmbedder(nn.Module):
         return out.view(*shape, self.features)
 
 
-# ---------------------------------------------------------------------------
-# Conditioner base + T5 + Number
-# ---------------------------------------------------------------------------
-
-
 class _Conditioner(nn.Module):
 
     def __init__(self, dim: int, output_dim: int, project_out: bool = False) -> None:
@@ -80,13 +62,9 @@ class _Conditioner(nn.Module):
 
 
 class T5Conditioner(_Conditioner):
-    """T5 text conditioner.
-
-    Loads `t5-base` via HuggingFace `transformers` (the upstream code
-    does the same — `transformers` is a *tokenizer + pure-PyTorch model*
-    library, not a model-class shortcut like `from diffusers`). Pads to
-    `model_max_length` (=128 for the SA repo's tokenizer) and produces a
-    masked last-hidden-state.
+    """T5 text conditioner. Pads to `model_max_length` (=128 for the SA
+    repo's tokenizer, NOT the standard 512) and emits a masked
+    last-hidden-state.
     """
 
     T5_MODEL_DIMS = {"t5-base": 768}
@@ -97,9 +75,8 @@ class T5Conditioner(_Conditioner):
         from transformers import AutoTokenizer, T5EncoderModel
         self.max_length = max_length
         self.tokenizer = AutoTokenizer.from_pretrained(t5_model_name)
-        # Match upstream: keep the T5 weights non-trainable and outside the
-        # parent module's `parameters()` so the SA checkpoint loader doesn't
-        # see them.
+        # Hide T5 from `parameters()` so the SA checkpoint loader doesn't
+        # try to match its keys (T5 is fetched fresh from HF here).
         model = T5EncoderModel.from_pretrained(t5_model_name).eval().requires_grad_(False)
         self.__dict__["model"] = model
 
@@ -141,13 +118,8 @@ class NumberConditioner(_Conditioner):
         return float_embeds, torch.ones(float_embeds.shape[0], 1, device=device)
 
 
-# ---------------------------------------------------------------------------
-# MultiConditioner with the SA conditioning config baked in
-# ---------------------------------------------------------------------------
-
-
 class StableAudioMultiConditioner(nn.Module):
-    """Hardcoded for SA-Open-1.0:
+    """SA-Open-1.0 conditioner config:
         prompt        -> T5Conditioner(t5-base, max_length=128)
         seconds_start -> NumberConditioner(min=0, max=512)
         seconds_total -> NumberConditioner(min=0, max=512)
@@ -178,10 +150,8 @@ class StableAudioMultiConditioner(nn.Module):
     def get_conditioning_inputs(
         self, cond: dict[str, tuple[torch.Tensor, torch.Tensor]]
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Replicates `ConditionedDiffusionModelWrapper.get_conditioning_inputs`:
-        cross-attn = cat([prompt; seconds_start; seconds_total], dim=1)
-        global    = cat([seconds_start[:, 0]; seconds_total[:, 0]], dim=-1)
-        Returns (cross_attn_cond, cross_attn_mask, global_embed).
+        """Pack conditioner outputs into the (cross_attn_cond,
+        cross_attn_mask, global_embed) triple the DiT consumes.
         """
         prompt_emb, prompt_mask = cond["prompt"]
         ss_emb, ss_mask = cond["seconds_start"]
@@ -194,10 +164,9 @@ class StableAudioMultiConditioner(nn.Module):
     @classmethod
     def from_official_state_dict(cls, state_dict: dict[str, torch.Tensor],
                                  prefix: str = "conditioner.") -> "StableAudioMultiConditioner":
-        """Load number-conditioner weights from the official `model.safetensors`.
-        T5 weights are NOT in that checkpoint — the upstream checkpoint
-        intentionally omits them (`__dict__["model"] = ...` keeps T5 out
-        of `parameters()`); T5-base is fetched fresh from HF in __init__.
+        """Load number-conditioner weights from the published checkpoint.
+        T5 weights are absent there by design and get pulled fresh from
+        HF in __init__.
         """
         mc = cls()
         own_state = mc.state_dict()
@@ -208,7 +177,7 @@ class StableAudioMultiConditioner(nn.Module):
             stripped = k[len(prefix):]
             if stripped in own_state:
                 loaded[stripped] = v
-        # T5 weights legitimately missing — they're loaded by HF in __init__.
+        # T5 keys are intentionally absent from the checkpoint.
         missing = [k for k in own_state.keys() if k not in loaded
                    and not k.startswith("conditioners.prompt.")]
         unexpected = [k for k in loaded.keys() if k not in own_state]

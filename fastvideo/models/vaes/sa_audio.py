@@ -1,30 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Pipeline-glue wrapper around the first-class `OobleckVAE` port.
+"""Lazy-loading pipeline wrapper around `OobleckVAE`.
 
-`OobleckVAE` itself (in `fastvideo/models/vaes/oobleck.py`) is the
-plain VAE — instantiate it via `OobleckVAE.from_pretrained(...)` and
-call `.encode(waveform)` / `.decode(latent)` directly. Most callers
-should use `OobleckVAE` directly.
+Two reasons this exists rather than using `OobleckVAE` directly:
 
-This wrapper exists for two specific scenarios:
+  1. The underlying VAE is fetched on first `encode`/`decode` call, not
+     at construction — lets pipelines build the module tree on CPU
+     before knowing the target device.
+  2. The lazy VAE's params are hidden from `named_parameters()` so the
+     FastVideo pipeline-component loader doesn't try to match Oobleck's
+     safetensors against the host pipeline's converted-repo state dict.
 
-  1. **Pipelines that want lazy-load semantics** — the underlying VAE
-     is fetched from `stabilityai/stable-audio-open-1.0/vae/` on the
-     first `encode`/`decode` call, not at construction time. Useful
-     for pipelines that build the module tree on CPU before knowing
-     the target device.
-  2. **Pipelines whose weight loader walks `named_parameters()`** —
-     the lazy-loaded VAE's params are hidden from the parent
-     traversal so FastVideo's pipeline-component loader doesn't try
-     to match Oobleck's safetensors against the host pipeline's
-     converted-repo state dict.
-
-Interface:
-
-    model = SAAudioVAEModel(config)            # nothing fetched yet
-    waveform = model.decode(audio_latent)      # (B, channels, samples) — fetches on call
-    latent = model.encode(waveform)            # (B, decoder_input_channels, L)
-    model.sampling_rate                        # int, e.g. 44100
+For standalone use prefer `OobleckVAE.from_pretrained(...)` directly.
 """
 from __future__ import annotations
 
@@ -52,11 +38,8 @@ class SAAudioVAEModel(nn.Module):
         self._oobleck_vae = None
 
     def named_parameters(self, prefix: str = "", recurse: bool = True):
-        # Hide the lazy-loaded VAE from the parent weight loader. The
-        # FastVideo pipeline-component loader walks named_parameters() to
-        # match against the host pipeline's converted-repo state dict;
-        # Oobleck weights live in a separate HF repo (Stable Audio Open
-        # 1.0) and shouldn't be expected there.
+        # Hide the lazy-loaded VAE — its weights are fetched separately
+        # and shouldn't appear in the host pipeline's loader sweep.
         for name, param in super().named_parameters(prefix=prefix, recurse=recurse):
             if name.startswith("_oobleck_vae.") or name == "_oobleck_vae":
                 continue
@@ -118,12 +101,10 @@ class SAAudioVAEModel(nn.Module):
         return out
 
     def encode(self, waveform: torch.Tensor, sample_posterior: bool = False) -> torch.Tensor:
-        """Encode a waveform (`[B, audio_channels, samples]`) -> latent
-        (`[B, decoder_input_channels, L]`).
+        """Encode `[B, C_audio, samples]` -> latent `[B, C_latent, L]`.
 
-        sample_posterior=False (default): deterministic mean (`.mode()`).
-        sample_posterior=True: stochastic sample matching upstream
-        `vae_sample(mean, scale)` (= `mean + softplus(scale)*randn`).
+        `sample_posterior=False` (default): deterministic mean.
+        `sample_posterior=True`: stochastic sample (`mean + softplus(scale) * randn`).
         """
         model = self.oobleck_vae
         model = self._move_to_input_device(model, waveform)
