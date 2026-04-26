@@ -10,6 +10,8 @@ from fastvideo.configs.models.dits.hyworld import HYWorldConfig
 from fastvideo.configs.models.dits.kandinsky5 import Kandinsky5VideoConfig
 
 __all__ = [
-    "HunyuanVideoConfig", "HunyuanVideo15Config", "HunyuanGameCraftConfig", "WanVideoConfig", "CosmosVideoConfig",
-    "Cosmos25VideoConfig", "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig"
+    "HunyuanVideoConfig", "HunyuanVideo15Config", "HunyuanGameCraftConfig",
+    "WanVideoConfig", "CosmosVideoConfig", "Cosmos25VideoConfig",
+    "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig",
+    "Kandinsky5VideoConfig",
 ]

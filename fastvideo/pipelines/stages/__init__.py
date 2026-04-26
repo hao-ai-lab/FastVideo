@@ -44,6 +44,9 @@ from fastvideo.pipelines.stages.longcat_video_vae_encoding import LongCatVideoVA
 from fastvideo.pipelines.stages.longcat_kv_cache_init import LongCatKVCacheInitStage
 from fastvideo.pipelines.stages.longcat_vc_denoising import LongCatVCDenoisingStage
 
+# daVinci stages
+from fastvideo.pipelines.stages.davinci_denoising import DaVinciDenoisingStage
+
 __all__ = [
     "PipelineStage",
     "InputValidationStage",
@@ -93,4 +96,6 @@ __all__ = [
     "LongCatVideoVAEEncodingStage",
     "LongCatKVCacheInitStage",
     "LongCatVCDenoisingStage",
+    # daVinci
+    "DaVinciDenoisingStage",
 ]
