@@ -79,6 +79,10 @@ class SAAudioVAEModel(nn.Module):
     def sa_audio_vae_model(self):
         return self.oobleck_vae
 
+    @property
+    def hop_length(self) -> int:
+        return int(self.oobleck_vae.hop_length)
+
     def _move_to_input_device(self, model, ref: torch.Tensor):
         if ref is None:
             return model

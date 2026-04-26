@@ -75,7 +75,6 @@ class StableAudioLatentPreparationStage(PipelineStage):
 
         if init_audio is not None:
             batch.extra["init_latent"] = self._encode_audio_reference(init_audio, device)
-            # `init_noise_level` is read straight off `batch` by denoise.
 
         if inpaint_audio is not None and inpaint_mask is not None:
             batch.extra["inpaint_reference_latent"] = self._encode_audio_reference(inpaint_audio, device)
@@ -83,11 +82,7 @@ class StableAudioLatentPreparationStage(PipelineStage):
         return batch
 
     def _hop_length(self) -> int:
-        """Resolve the VAE's audio-to-latent downsampling ratio."""
-        v = self.vae
-        if hasattr(v, "oobleck_vae"):
-            return int(v.oobleck_vae.hop_length)
-        return int(getattr(v, "hop_length", 2048))
+        return int(self.vae.hop_length)
 
     def _encode_audio_reference(self, audio, device: torch.device) -> torch.Tensor:
         """Pad/truncate to `sample_size` and encode via the VAE.

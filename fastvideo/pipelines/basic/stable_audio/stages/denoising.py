@@ -6,6 +6,8 @@ adapter only does `cat([x, x])` + DiT call per step.
 """
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn as nn
 
@@ -49,32 +51,30 @@ class StableAudioDenoisingStage(PipelineStage):
     _SIGMA_MIN = 0.3
     _SIGMA_MAX = 500.0
     _RHO = 1.0
+    _LOG_SIGMA_MIN = math.log(_SIGMA_MIN)
+    _LOG_SIGMA_MAX = math.log(_SIGMA_MAX)
 
     def __init__(self, transformer) -> None:
         super().__init__()
         self.transformer = transformer
 
     def _resolve_sigma_max(self, batch) -> float:
-        """Map A2A intent (`init_audio_strength` 0..1, or raw
-        `init_noise_level`) to the sigma_max the SDE starts from.
+        """Map A2A intent to `sigma_max`.
 
-        `init_audio_strength` is log-interpolated between SIGMA_MIN
-        (full preservation) and SIGMA_MAX (full T2A) so equal-spaced
-        strength values map to perceptually equal-spaced amounts of
-        renoise. `init_noise_level` if set wins (legacy).
+        Public knob is `init_audio_strength` (0..1, higher = closer to
+        source), log-interpolated between SIGMA_MIN (= preservation) and
+        SIGMA_MAX (= full T2A). Raw `init_noise_level` is the legacy
+        sigma_max override; passing both is an error.
         """
         raw = getattr(batch, "init_noise_level", None)
+        strength = getattr(batch, "init_audio_strength", None)
+        if raw is not None and strength is not None:
+            raise ValueError("Pass `init_audio_strength` (0..1) OR `init_noise_level` "
+                             "(raw sigma_max), not both.")
         if raw is not None:
             return float(raw)
-        strength = getattr(batch, "init_audio_strength", None)
-        if strength is None:
-            # Default: roughly the cello-for-piano timbre-swap sweet spot.
-            strength = 0.6
-        s = max(0.0, min(1.0, float(strength)))
-        # log-interp: sigma_max(s=0) = SIGMA_MAX, sigma_max(s=1) = SIGMA_MIN.
-        import math
-        log_min, log_max = math.log(self._SIGMA_MIN), math.log(self._SIGMA_MAX)
-        return float(math.exp(log_max - s * (log_max - log_min)))
+        s = max(0.0, min(1.0, float(strength) if strength is not None else 0.6))
+        return float(math.exp(self._LOG_SIGMA_MAX - s * (self._LOG_SIGMA_MAX - self._LOG_SIGMA_MIN)))
 
     def verify_input(self, batch, fastvideo_args):
         return VerificationResult()
@@ -92,11 +92,6 @@ class StableAudioDenoisingStage(PipelineStage):
 
         import k_diffusion as K
 
-        # A2A: start the SDE at a smaller `sigma_max` so the sampler
-        # stays close to the encoded reference. Two ways to specify it:
-        #   * `init_audio_strength` in [0, 1] (preferred, matches the
-        #     commercial UI convention; higher = closer to source).
-        #   * `init_noise_level` raw `sigma_max` override (legacy).
         init_latent = ext.get("init_latent")
         sigma_max = self._resolve_sigma_max(batch) if init_latent is not None else self._SIGMA_MAX
 
