@@ -24,10 +24,18 @@ class LongCatModel(WanModel):
     _prompt_pipeline_cls: ClassVar[type[LongCatPipeline]] = LongCatPipeline
 
     @staticmethod
-    def _normalize_flow_shift(flow_shift: float) -> float:
-        # LongCat's released scheduler uses shift=12.0. A value of 0.0
-        # collapses almost all FlowMatch training timesteps to zero.
-        return 12.0 if float(flow_shift) == 0.0 else float(flow_shift)
+    def _validate_flow_shift(flow_shift: float | None) -> float:
+        if flow_shift is None:
+            return 12.0
+
+        validated = float(flow_shift)
+        if validated == 0.0:
+            raise ValueError(
+                "LongCat training does not support flow_shift=0.0 because "
+                "it collapses FlowMatch training timesteps. Use 12.0 to "
+                "match the released LongCat scheduler config."
+            )
+        return validated
 
     def __init__(
         self,
@@ -45,7 +53,7 @@ class LongCatModel(WanModel):
             training_config=training_config,
             trainable=trainable,
             disable_custom_init_weights=disable_custom_init_weights,
-            flow_shift=self._normalize_flow_shift(flow_shift),
+            flow_shift=self._validate_flow_shift(flow_shift),
             enable_gradient_checkpointing_type=enable_gradient_checkpointing_type,
             transformer_override_safetensor=transformer_override_safetensor,
         )
@@ -53,8 +61,8 @@ class LongCatModel(WanModel):
     def _init_timestep_mechanics(self) -> None:
         assert self.training_config is not None
         tc = self.training_config
-        flow_shift = getattr(tc.pipeline_config, "flow_shift", 0.0)  # type: ignore[union-attr]
-        self.timestep_shift = self._normalize_flow_shift(float(flow_shift))
+        flow_shift = getattr(tc.pipeline_config, "flow_shift", None)  # type: ignore[union-attr]
+        self.timestep_shift = self._validate_flow_shift(flow_shift)
         self.num_train_timestep = int(self.noise_scheduler.num_train_timesteps)
         self.min_timestep = 0
         self.max_timestep = self.num_train_timestep
