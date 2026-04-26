@@ -1090,6 +1090,137 @@ template avoids the rediscovery cost.
 
 ---
 
+## 27. "Official repo" can be plural; pick the one that matches the published weights
+
+**Where in the skill:** Step 1 prerequisite ("Official reference
+repository"); step 5 ("Clone the official reference repo locally");
+"Parity test pattern" section.
+
+**What I found (during the will/stable-audio rerun, 2026-04-25):** The
+skill assumes a single "official repo" the porter clones for parity.
+Stable Audio Open 1.0 has *two* first-party Python implementations:
+
+  1. `Stability-AI/stable-audio-tools` (the canonical training/inference
+     repo from Stability) — `OobleckEncoder`/`OobleckDecoder` classes
+     in `stable_audio_tools/models/autoencoders.py`. Defaults are
+     `c_mults=[1,2,4,8]`, `strides=[2,4,8,8]`, `latent_dim=32`,
+     `final_tanh=True`. Highly configurable (dozens of
+     `c_mults`/`strides`/`use_snake`/`final_tanh` permutations).
+  2. `huggingface/diffusers::AutoencoderOobleck` (Stability-blessed
+     port to the diffusers library). Defaults are
+     `downsampling_ratios=[2,4,4,8,8]`, `channel_multiples=[1,2,4,8,16]`,
+     `decoder_input_channels=64`, no tanh. Fixed architecture per
+     class.
+
+These are **structurally different VAEs** with the same name. The
+published Stable Audio Open 1.0 HF weights
+(`stabilityai/stable-audio-open-1.0/vae/`) were trained with the
+diffusers-shape variant (5 downsampling stages, latent_dim=64, no
+tanh). So:
+
+- Comparing against `diffusers.AutoencoderOobleck` parity-tests the
+  published weights through the architecture they were trained for.
+- Comparing against `stable-audio-tools.OobleckEncoder` would require
+  instantiating it with the right configurable defaults (5 stages,
+  64-dim, etc.) — a non-trivial setup that just rebuilds what
+  diffusers already exposes as a fixed class.
+
+The will/stable-audio branch chose the diffusers route (parity is
+exact, fp32 diff=0 on encode + decode). Defensible — but the skill's
+literal text says "compare against the official repo" and we didn't.
+
+**Options:**
+
+- (a) Reword step 1 / step 5 to acknowledge "official repo can be
+  plural — pick the one whose architecture matches the published
+  weights you're loading. If the canonical research-code repo and a
+  Stability/Google/Meta-blessed library port both exist, prefer the
+  library port for parity (less per-config setup, more deterministic)
+  and document the choice in the parity test docstring."
+- (b) Require both: parity vs library port + spot-check vs research
+  repo.
+
+**My guess:** (a). (b) doubles maintenance for a tiny coverage gain.
+
+---
+
+## 28. `WorkloadType` enum has no audio variants
+
+**Where in the skill:** Step 11 ("Register in `fastvideo/registry.py`")
++ "Inputs" table (says workload types are `T2V`/`I2V`/`V2V`/`T2I`).
+
+**What I found (during the will/stable-audio rerun):** The skill's
+`workload_types` parameter only enumerates video variants. For Stable
+Audio Open 1.0 (text-to-audio), there's no defined `WorkloadType.T2A`
+or analogous enum value, so a downstream PR adding the full T2A
+pipeline (PR #1080) will need either:
+
+  1. Extend `WorkloadType` enum with `T2A`, `A2A`, `AV`, etc.
+  2. Use `()` (empty tuple) per the skill's note "Use `()` for
+     configs not exposed as a public workload."
+
+Option (2) is what the skill currently allows but it has a real cost:
+the pipeline is then invisible in any UI / discovery layer that
+filters by workload type. That's wrong for a first-class T2A pipeline.
+
+This is companion to REVIEW item 25 (audio is video-shaped throughout
+the skill) — more specifically calls out the enum.
+
+**Options:**
+
+- (a) Pre-extend `WorkloadType` with the audio variants (`T2A`, `A2A`,
+  `AV`) + document them in the skill's "Inputs" table. Makes the
+  enum future-proof for both the in-flight T2A PR and any AV
+  pipeline (MagiHuman base needs `AV`).
+- (b) Leave to the first audio-PR author to add them.
+
+**My guess:** (a). The skill's "Inputs" table should at minimum
+mention "audio variants are TODO; for now, use `()` and explain
+in the PR description."
+
+---
+
+## 29. VAE file naming: arch name vs family name is ambiguous
+
+**Where in the skill:** Files-table rows 4 + 5 say `<family>vae.py`.
+
+**What I found (during the will/stable-audio rerun):** Existing VAEs
+are named after the **family**:
+
+- `fastvideo/models/vaes/wanvae.py`
+- `fastvideo/models/vaes/hunyuanvae.py`
+- `fastvideo/models/vaes/ltx2vae.py`
+- `fastvideo/models/vaes/cosmos2_5vae.py`
+- `fastvideo/models/vaes/gen3cvae.py`
+
+For Stable Audio, "family-name VAE" would be `stable_audiovae.py`
+(awkward read, multi-word + suffix). The VAE has its own published
+arch name — "Oobleck" — so I went with `fastvideo/models/vaes/oobleck.py`.
+Cleaner read, but inconsistent with the family-name convention.
+
+The right rule depends on whether the VAE is family-specific (one
+family ever uses it → name after family) or arch-shared (multiple
+families could use it → name after arch). Oobleck is the latter case
+(currently used by Stable Audio Open 1.0; could be reused by Stable
+Audio v2, AudioLDM-derivatives, etc.).
+
+**Options:**
+
+- (a) Update the skill's row 4/5 wording to:
+  *"`fastvideo/models/vaes/<arch_or_family>.py` — name after the VAE's
+  arch when it has one (e.g. `oobleck.py` for Stability's audio VAE,
+  `autoencoder_kl.py` for the SD-family KL-VAE), otherwise after the
+  family (e.g. `wanvae.py`)."*
+- (b) Standardize all VAE files on the family name; rename `oobleck.py`
+  → `stable_audiovae.py` for consistency. (Costly retrofit.)
+
+**My guess:** (a). The arch-name pattern already exists in
+`fastvideo/models/vaes/autoencoder_kl.py`; codifying it lets new
+contributions pick the right name without trying to reverse-engineer
+the convention.
+
+---
+
 ## Summary
 
 | # | Topic | Severity | Action |
@@ -1123,6 +1254,9 @@ template avoids the rediscovery cost.
 | 24 | Component-bucket → config-base inheritance is implicit | Medium | Add a "Bucket → config base" table to step 6 + Quick reuse audit. (From will/stable-audio audit.) |
 | 25 | **Audio is a first-class workload but skill is video-shaped** | **High** | Add a "Modalities other than video" section + audio variant of the canonical stage diagram + cross-ref PR #1080. (From will/stable-audio audit.) |
 | 26 | Pipeline-glue wrappers vs. plain VAE/encoder classes | Medium | Add Files-table row 5b (`<family>_loader.py`) + template snippet in the subagent prompt. (From will/stable-audio audit.) |
+| 27 | "Official repo" can be plural — pick the one matching published weights | Medium | Reword step 1 / step 5 to acknowledge multi-implementation case. (From will/stable-audio rerun.) |
+| 28 | `WorkloadType` enum has no audio variants | High | Pre-extend with T2A/A2A/AV + document in Inputs table. (From will/stable-audio rerun.) |
+| 29 | VAE file naming: arch name vs family name is ambiguous | Low | Update row 4/5 wording: name after arch when shared, family when family-specific. (From will/stable-audio rerun.) |
 
 None of these block a new porter from using the skill today; they're
 polish / consistency items that need a codebase-owner call.

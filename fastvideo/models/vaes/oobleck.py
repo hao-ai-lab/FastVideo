@@ -17,11 +17,6 @@ Interface matches what FastVideo pipelines need:
     latent = vae.encode(waveform).sample()  # or .mode()
     vae.sampling_rate                 # int
 
-PR #1080 (`happy-harvey/FastVideo:harvey/audio_dev`) is adding a broader
-first-class Stable Audio stack (T2A pipeline, full DiT, conditioners).
-When it merges, this file should be revisited to either delegate to
-that module's `StableAudioPretransform` or, at minimum, align its
-interface.
 """
 from __future__ import annotations
 
