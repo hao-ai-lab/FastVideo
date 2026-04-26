@@ -45,72 +45,30 @@ rate. Conventions:
 
 Prerequisites: same as `basic_stable_audio.py`.
 """
-from pathlib import Path
-
-import torch
-import torchaudio
-
 from fastvideo import VideoGenerator
 
 PROMPT = "Steady lo-fi hip hop drum loop with vinyl crackle."
-REFERENCE_AUDIO_PATH: str | None = None  # set to a wav/mp3 to extend a real loop
-KEEP_SECONDS = 6.0       # the first KEEP_SECONDS of the reference are preserved
-TOTAL_SECONDS = 12.0     # extend to this duration
-
-
-def _load_reference(path: str, target_sr: int) -> torch.Tensor:
-    waveform, sr = torchaudio.load(path)
-    if sr != target_sr:
-        waveform = torchaudio.functional.resample(waveform, sr, target_sr)
-    if waveform.dim() == 2:
-        waveform = waveform.unsqueeze(0)
-    return waveform.float()
-
-
-def _synthetic_loop(target_sr: int, seconds: float) -> torch.Tensor:
-    """Stand-in reference: a 6s of stereo amplitude-modulated noise that
-    sounds vaguely like a beat. Replace with a real loop in production.
-    """
-    n = int(seconds * target_sr)
-    base = torch.randn(2, n) * 0.1
-    # Periodic envelope to fake a beat (~ 4 Hz pulse).
-    env = 0.5 + 0.5 * torch.sin(2 * torch.pi * 4 * torch.linspace(0, seconds, n))
-    return (base * env).unsqueeze(0).contiguous()
+# Path to any audio-bearing file (wav, mp3, mp4, m4a, flac, ...). Set
+# to `None` and the model will continue from silence (rarely useful;
+# point this at a real loop you want to extend).
+REFERENCE_AUDIO_PATH: str | None = None
+KEEP_SECONDS = 6.0       # first KEEP_SECONDS preserved exactly
+TOTAL_SECONDS = 12.0     # extend the loop to this duration
 
 
 def main() -> None:
-    sample_rate = 44100
-    if REFERENCE_AUDIO_PATH is not None and Path(REFERENCE_AUDIO_PATH).exists():
-        ref = _load_reference(REFERENCE_AUDIO_PATH, sample_rate)
-    else:
-        print("No REFERENCE_AUDIO_PATH set; using a synthetic AM-noise loop.")
-        ref = _synthetic_loop(sample_rate, KEEP_SECONDS)
-
-    # Build the mask in the audio domain at the model's sample rate.
-    # `KEEP_SECONDS` of 1.0s, then zeros up to TOTAL_SECONDS.
-    keep_samples = int(KEEP_SECONDS * sample_rate)
-    total_samples = int(TOTAL_SECONDS * sample_rate)
-    mask = torch.zeros(total_samples, dtype=torch.float32)
-    mask[:keep_samples] = 1.0
-
-    # Pad the reference up to total_samples so encoding aligns. The kept
-    # region is the only thing the mask preserves; the rest is freely
-    # regenerated regardless of what's in the padded region.
-    padded_ref = torch.zeros((1, ref.shape[1], total_samples), dtype=torch.float32)
-    padded_ref[..., :ref.shape[-1]] = ref
-
     generator = VideoGenerator.from_pretrained(
         "stabilityai/stable-audio-open-1.0",
         num_gpus=1,
     )
-    output_path = "outputs_audio/stable_audio_inpaint/output_inpaint.mp4"
     generator.generate_video(
         prompt=PROMPT,
-        output_path=output_path,
+        output_path="outputs_audio/stable_audio_inpaint/output_inpaint.mp4",
         save_video=True,
         audio_end_in_s=TOTAL_SECONDS,
-        inpaint_audio=padded_ref,
-        inpaint_mask=mask,
+        inpaint_audio=REFERENCE_AUDIO_PATH,
+        # Tuple form: keep first KEEP_SECONDS, regenerate the rest.
+        inpaint_mask=(KEEP_SECONDS, TOTAL_SECONDS),
     )
     generator.shutdown()
 

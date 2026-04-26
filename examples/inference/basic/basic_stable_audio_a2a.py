@@ -34,62 +34,26 @@ Tunable knobs (the "creative dials"):
 
 Prerequisites: same as `basic_stable_audio.py`.
 """
-from pathlib import Path
-
-import torch
-import torchaudio
-
 from fastvideo import VideoGenerator
 
 PROMPT = "Lo-fi hip hop instrumental with vinyl crackle and gentle piano."
-INIT_AUDIO_PATH: str | None = None  # set to a wav/mp3 to use a real reference
+# Path to any audio-bearing file (wav, mp3, mp4, m4a, flac, ...). Set to
+# `None` to skip A2A and run plain T2A.
+INIT_AUDIO_PATH: str | None = "/home/william5lin/FastVideo2/outputs_audio/stable_audio_basic/output_stable_audio_2.mp4"
 INIT_NOISE_LEVEL = 1.0
 
 
-def _load_reference(path: str, target_sr: int) -> torch.Tensor:
-    """Load a wav/mp3 and resample to the model's sample rate.
-
-    Returns shape `[1, channels, samples]` ready for the pipeline.
-    """
-    waveform, sr = torchaudio.load(path)
-    if sr != target_sr:
-        waveform = torchaudio.functional.resample(waveform, sr, target_sr)
-    if waveform.dim() == 2:
-        waveform = waveform.unsqueeze(0)  # [1, C, S]
-    return waveform.float()
-
-
-def _synthetic_reference(target_sr: int) -> torch.Tensor:
-    """Stand-in reference for users who don't have a wav handy: a 6-second
-    sine sweep from 220 Hz to 880 Hz, stereo. Replace with a real clip
-    in production.
-    """
-    n = 6 * target_sr
-    t = torch.linspace(0, n / target_sr, n)
-    freqs = torch.linspace(220.0, 880.0, n)
-    mono = torch.sin(2 * torch.pi * freqs * t) * 0.3
-    return mono.unsqueeze(0).repeat(2, 1).unsqueeze(0).contiguous()
-
-
 def main() -> None:
-    sample_rate = 44100
-    if INIT_AUDIO_PATH is not None and Path(INIT_AUDIO_PATH).exists():
-        init_audio = _load_reference(INIT_AUDIO_PATH, sample_rate)
-    else:
-        print("No INIT_AUDIO_PATH set; using a synthetic sine-sweep reference.")
-        init_audio = _synthetic_reference(sample_rate)
-
     generator = VideoGenerator.from_pretrained(
         "stabilityai/stable-audio-open-1.0",
         num_gpus=1,
     )
-    output_path = "outputs_audio/stable_audio_a2a/output_a2a.mp4"
     generator.generate_video(
         prompt=PROMPT,
-        output_path=output_path,
+        output_path="outputs_audio/stable_audio_a2a/output_a2a.mp4",
         save_video=True,
         audio_end_in_s=6.0,
-        init_audio=init_audio,
+        init_audio=INIT_AUDIO_PATH,
         init_noise_level=INIT_NOISE_LEVEL,
     )
     generator.shutdown()

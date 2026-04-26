@@ -1180,6 +1180,249 @@ in the PR description."
 
 ---
 
+## 36. Strip narrative comments from production code; keep only WHY
+
+**Where in the skill:** Throughout (no current guidance on comment style).
+
+**What we found (during the will/stable-audio comment-trim pass,
+2026-04-26):** A pattern emerged of comments narrating *provenance*
+("Vendored from upstream X", "Mirrors upstream Y"), *change history*
+("we removed Z because..."), and *recapitulating upstream class names*
+that don't help anyone reading the code in isolation. Roughly 295 net
+lines came out of 11 SA pipeline files without removing any
+*useful* signal.
+
+**The rule (now codified):**
+
+> Comments in production code (`fastvideo/...`) explain **why**, not
+> **what** or **where it came from**. Strip:
+>   * "Vendored from <upstream>" / "Mirrors upstream X"
+>   * "Matches upstream Y" / restatements of upstream class names
+>   * Session-history narration ("Previously this was X, we moved
+>     it because Y", "removed in commit ...")
+>   * Cross-reference comments to REVIEW item N (the relevance lives
+>     in REVIEW.md, not in the code)
+>   * Section-divider banner comments (`# ---- Foo ---- #`)
+>   * Restating the function/class name in the docstring
+>
+> Keep:
+>   * Non-obvious WHY (hidden constraints, surprising defaults,
+>     workaround citations)
+>   * One-line module/class summaries
+>   * Pitfalls a future reader would hit (e.g. "model_max_length=128
+>     is unusual for T5", "this depends on k_diffusion's mutate-state
+>     contract")
+
+**Action on the skill:** Add a "Comment style" pitfall in step 6 +
+step 17 — `examples/...` lead with user-story docstrings (item 31),
+production code stays comment-thin and WHY-focused.
+
+---
+
+## 35. Examples must accept paths, not require user-written decode glue
+
+**Where in the skill:** Files-table row 17 (basic example scripts);
+no current guidance on what *kind* of inputs the pipeline should
+accept directly vs. preprocess at the example layer.
+
+**What happened (during the will/stable-audio polish, 2026-04-26):**
+The first cut of `basic_stable_audio_a2a.py` exposed `init_audio` as
+a `torch.Tensor` and made the example carry a 25-line `_load_reference`
+helper that called `torchaudio.load(...)`. A user pointed at an mp4 of
+a previous T2A run as the reference clip; the example crashed because
+`torchaudio.load` on container formats (`.mp4` / `.m4a`) routes through
+`torchcodec`, which pulls in the CUDA NVRTC stack we don't otherwise
+need. Worse: the example required the user to know about resampling,
+batch-dim normalization, channel layout — boilerplate that has nothing
+to do with the use case.
+
+**Lesson:** the basic example is the *entry-point UX*. Anything more
+than 5–10 lines of glue means we've pushed pipeline responsibilities
+out to the user. Decode + resample + shape-norm belong inside the
+pipeline (or a small shared helper it owns), not in
+`examples/inference/basic/`.
+
+**Concrete rules now codified for this family (and the pattern to
+copy for other media-input pipelines):**
+
+  * Wherever the pipeline accepts a media tensor (audio waveform,
+    image, init video, mask), it should also accept a **file path**
+    pointing at any container/codec the standard FastVideo deps can
+    decode (PyAV is already a dep — it's used for muxing). The
+    pipeline does the resample + shape-norm internally.
+  * Where a structured input has a common "fill in the obvious" form
+    (e.g. inpaint mask = "keep first K seconds, regenerate the
+    rest"), accept a small DSL form (a tuple here) alongside the
+    raw-tensor form. Saves the user from building a `[samples]`
+    tensor by hand.
+  * Examples become 5–15 lines of constants + one `generate_video(...)`
+    call. The user-story docstring (item 31) is the only narrative.
+
+**Concrete bug avoided / fixed:** `torchaudio.load` ↔ `torchcodec` ↔
+NVRTC dependency chain — surfaced as `OSError: libnvrtc.so.13: cannot
+open shared object file`. PyAV (already a FastVideo dep) handles all
+the same formats without that chain.
+
+**Action on the skill:**
+
+- (a) Add a Files-table note on row 17: examples should be **5–15
+  LOC of constants + a single pipeline call**. If the example needs
+  more than that, the missing convenience belongs *in the pipeline*.
+- (b) Add a pitfall: *"`torchaudio.load` on container formats (mp4,
+  m4a) routes through `torchcodec` and needs the CUDA NVRTC runtime.
+  For audio-bearing files use PyAV (already a FastVideo dep — used
+  for muxing). For image inputs, use `imageio` (also a dep). Don't
+  reach for `torchaudio` / `torchvision` IO unless the file is
+  guaranteed to be a wav / png with no exotic container."*
+- (c) Add a small reusable file-decode helper (e.g.
+  `fastvideo/utils/audio_io.py`) once a second pipeline needs it —
+  for now Stable Audio owns its `_decode_audio_file` inline in the
+  latent-prep stage.
+
+---
+
+## 34. Single-class kwargs-driven pipeline shape (when modes share weights)
+
+**Where in the skill:** "Adding an I2V variant" section frames variants
+as separate pipeline files. No guidance for the case where modes share
+*everything* and only differ in kwargs.
+
+**What we found (during the will/stable-audio Tier-1 build,
+2026-04-26):** Stable Audio's three end-user modes (T2A, A2A,
+RePaint inpainting) share the same DiT, conditioner, VAE, and sampler
+— the per-mode branching is ~30 LOC of stage-internal `if/else`. The
+upstream API is also single-function kwargs-driven. Splitting into
+three pipeline classes would force `from_pretrained` re-loads of 1B+
+params per mode switch, duplicate ~600 LOC of `load_modules` / stage
+wiring / preset / registry, and require the user to instantiate a
+different `VideoGenerator` per mode — none of which match the user's
+mental model ("one model, different requests").
+
+**The rule (codified in the SA pipeline class docstring):** keep one
+pipeline class for modes that share weights / components / stage
+chain; mode-select via call kwargs. Document the kwargs contract in
+the class docstring + add loud-fail validation (e.g. `inpaint_mask`
+without `inpaint_audio` should raise, not silently fall through to
+T2A).
+
+**Triggers to revisit (split into per-mode classes):**
+  1. A new published checkpoint genuinely needs different
+     `_required_config_modules` (e.g. Stability publishes an
+     inpaint-trained `diffusion_cond_inpaint` variant with extra
+     conditioning).
+  2. `WorkloadType` enum gains audio variants (item 28); each preset
+     wants its own workload tag.
+  3. Per-mode forward signatures diverge enough that kwarg-overloading
+     hides bugs (rather than just looking inelegant).
+  4. The branches inside stages stop being light if/else and become
+     full alternative flows.
+
+**Contrast with Wan I2V split** (which IS justified): I2V there has
+a different `image_encoder` module in `_required_config_modules`, a
+different HF repo (`Wan2.1-I2V-14B-720P-Diffusers`), and a required
+`image_path` argument. None of that applies to SA modes today.
+
+**Action on the skill:**
+
+- (a) Add a "Single-class kwargs-driven variants" subsection to
+  "Adding an I2V variant" with the four split-triggers above.
+- (b) Add a pitfall: *"Don't split into per-mode pipeline classes
+  reflexively — splitting forces param reloads per mode switch and
+  duplicates ~600 LOC of glue. Split when components or
+  `_required_config_modules` actually differ across modes, not just
+  the call signature."*
+
+---
+
+## 33. Hot-path/kwarg refactors after the first parity-clean cut
+
+**Where in the skill:** Step 13 (handoff). No mention of revisiting
+hot-path allocations once parity is locked in.
+
+**What we found (during the will/stable-audio /simplify pass,
+2026-04-26):** A 3-agent code review surfaced several issues that
+all stemmed from the same pattern — **the first parity-clean cut
+prioritized *correctness verification* over *per-call efficiency***,
+and small things compounded:
+
+  * `null_embed = torch.zeros_like(cross_attn_cond)` allocated **per
+    sampler step** (~100 fresh allocs per `generate_video()` call on
+    a `[B, L, D]` tensor). Side-effect: hoisting it outside the loop
+    improved A2A diff_max from 0.37 → 0.030 — the per-step
+    recomputation was apparently introducing *more variance* than
+    just allocations.
+  * `torch.backends.{cuda.matmul.allow_tf32, cudnn.allow_tf32,
+    allow_fp16_reduced_precision_reduction, cudnn.benchmark}` set in
+    a *per-call* stage instead of one-shot in `load_modules`. Mid-run
+    flips can invalidate the cuDNN algorithm cache.
+  * `torch.randn_like(reference_latent)` called per RePaint step
+    (~25 MB alloc churn / call). Pre-allocating one
+    `noise_buf = torch.empty_like(...)` + `noise_buf.normal_()` saves
+    the churn AND avoids ~100 RNG kernel launches.
+  * Dead writes to `batch.extra` (`seed`, `downsampling_ratio`,
+    `sample_size`, `init_noise_level` round-trip) that nothing
+    consumed — easy to leave behind once you're chasing parity, but
+    they accumulate as ghost contracts.
+
+**Why this happens:** when you're chasing parity drift, you'll add
+intermediate tensors / extra context-dict writes / per-step
+recomputations defensively. Once parity is green you can — and
+should — go back through with a hot-path-only review pass.
+
+**The rule (now codified):** after parity is locked in, **run a
+hot-path review pass before handoff**. Specific things to look for:
+
+  1. Tensor allocations inside `for step in sampler:` or per-DiT-call
+     adapter forwards — hoist constants outward.
+  2. RNG calls inside callbacks — pre-alloc the noise buffer with
+     `empty_like + .normal_()` instead of `randn_like`.
+  3. `torch.backends.*` flags set per-call — move to `load_modules`.
+  4. `batch.extra` writes that nothing reads — delete.
+  5. Hardcoded magic constants that ARE derivable from a model
+     config (e.g. VAE `hop_length`) — derive instead, so variant
+     checkpoints don't silently break.
+
+**Action on the skill:**
+
+- (a) Add a "Post-parity hot-path pass" sub-step to step 13 (right
+  before handoff): a checklist of the five items above.
+- (b) Add a pitfall to the parity-test pattern: *"Once parity is
+  green, run a 3-agent reuse / quality / efficiency review (or
+  equivalent) before merging — defensive intermediates added during
+  parity hunting often hide perf wins that are also accuracy wins
+  (per-step recomputation can introduce more variance than the
+  allocation costs)."*
+
+---
+
+## 32. Drop unused stub helpers when the deps they bypassed become real
+
+**Where in the skill:** Item 17 ("Upstream private-DSL stubs") added
+a stub-helper template; nothing tells the porter when to *delete* it.
+
+**What we found (during the will/stable-audio polish, 2026-04-26):**
+`tests/local_tests/helpers/stable_audio_upstream.py` started life as
+a `sys.modules` stub installer to bypass uninstalled transitive deps
+(`k_diffusion`, `einops_exts`, `alias_free_torch`). Once the test
+suite started requiring those deps as real installs, the stub became
+a no-op kept "for back-compat" with two test call sites. A user
+called this out as dead weight; deleting the helper + its two
+invocations was a 3-file diff with zero behavior change.
+
+**The pattern:** stubs are scaffolding. Once the real dep lands,
+delete the stub *immediately*; don't leave it as a no-op shim. A
+back-compat shim with no real callers is just dead code with a
+plausible-looking name that confuses the next reader.
+
+**Action on the skill:**
+
+- (a) Add a one-line sentence to item 17's stub-helper template:
+  *"Delete the helper + every `install_stubs()` call site as soon as
+  the deps it bypassed are required-installs in the test suite. A
+  no-op shim is dead code, not a feature."*
+
+---
+
 ## 31. `examples/inference/basic/basic_<family>*.py` should lead with user-story docstrings
 
 **Where in the skill:** Files-table row 17 ("`examples/inference/basic/basic_<family>.py`
@@ -1407,6 +1650,11 @@ the convention.
 | 29 | VAE file naming: arch name vs family name is ambiguous | Low | Update row 4/5 wording: name after arch when shared, family when family-specific. (From will/stable-audio rerun.) |
 | 30 | **Hard ban on `from diffusers/transformers import` of model classes at runtime** | **Critical** | Codify the rule, update step 3 / step 6 / step 13(a), drop the "interim diffusers comparison" framing. (From will/stable-audio rerun, user-corrected — direct quote: "remove all use of diffusers version".) |
 | 31 | User-story-shaped docstrings on every `examples/inference/basic/basic_<family>*.py` | Medium | Update Files-table row 17 + add a pitfall: docstring leads with `User story (<persona>):` blocks → How it works → Tunable knobs ("creative dials"). (From will/stable-audio Tier-1 build, user request: "I love the user story style ... document each in docstring at top of corresponding basic example script".) |
+| 32 | Drop stub helpers when the deps they bypassed become real | Low | One-line addendum to item 17's stub-helper template: stubs are scaffolding, not features. (From will/stable-audio polish.) |
+| 33 | Post-parity hot-path pass before handoff | High | Add a 5-item checklist sub-step to step 13: per-step allocs hoisted, RNG buffers pre-alloc'd, `torch.backends.*` flags one-shot, dead `batch.extra` writes deleted, magic constants derived from configs. (From will/stable-audio /simplify pass — also surfaced an A2A diff_max regression that vanished once per-step `zeros_like` was hoisted.) |
+| 34 | Single-class kwargs-driven variants (when modes share weights) | Medium | New "Single-class variants" subsection: split into per-mode classes only when components / `_required_config_modules` actually differ, not just call signature. List 4 split-triggers. (From will/stable-audio Tier-1 design discussion.) |
+| 35 | **Examples must accept paths, not require user-written decode glue** | **High** | Files-table row 17 budget: examples are 5–15 LOC of constants + one pipeline call. Decode/resample/shape-norm belong inside the pipeline. Pitfall: `torchaudio.load` on container formats pulls in torchcodec → NVRTC; PyAV (already a dep for muxing) handles the same formats without that chain. (From will/stable-audio polish, user-corrected — direct quote: "we cannot expect user to provide this code".) |
+| 36 | Strip narrative comments from production code; keep only WHY | Medium | Add a "Comment style" pitfall in step 6 + step 17: examples lead with user-story docstrings (item 31), production code stays comment-thin and WHY-focused. ~295 net lines came out of 11 SA pipeline files in the trim pass without losing useful signal. (From will/stable-audio comment-trim pass.) |
 
 None of these block a new porter from using the skill today; they're
 polish / consistency items that need a codebase-owner call.

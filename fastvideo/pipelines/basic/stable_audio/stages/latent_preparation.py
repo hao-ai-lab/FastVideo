@@ -7,6 +7,8 @@ latent-space tensors on `batch.extra` for the denoising stage.
 """
 from __future__ import annotations
 
+import os
+
 import torch
 import torch.nn.functional as F
 
@@ -87,11 +89,18 @@ class StableAudioLatentPreparationStage(PipelineStage):
             return int(v.oobleck_vae.hop_length)
         return int(getattr(v, "hop_length", 2048))
 
-    def _encode_audio_reference(self, audio: torch.Tensor, device: torch.device) -> torch.Tensor:
-        """Pad/truncate `[B, C, samples]` to `sample_size` and encode via
-        the VAE. Caller resamples to the model's sample rate first.
+    def _encode_audio_reference(self, audio, device: torch.device) -> torch.Tensor:
+        """Pad/truncate to `sample_size` and encode via the VAE.
+
+        `audio` may be a tensor (`[samples]`, `[C, samples]`, or
+        `[B, C, samples]`) at the model's sample rate, or a path to any
+        audio-bearing file (`.wav` / `.mp3` / `.mp4` / `.m4a` / `.flac`,
+        ...) that PyAV can decode — we resample on load so callers don't
+        have to.
         """
         assert self.vae is not None, "VAE required for init_audio / inpaint_audio encoding"
+        if isinstance(audio, str | os.PathLike):
+            audio = _decode_audio_file(audio, target_sr=self.sample_rate)
         audio = audio.to(device=device, dtype=torch.float32)
         if audio.dim() == 1:
             audio = audio.unsqueeze(0).unsqueeze(0)
@@ -116,11 +125,21 @@ class StableAudioLatentPreparationStage(PipelineStage):
         # Bare-OobleckVAE path (tests).
         return self.vae.encode(audio.to(next(self.vae.parameters()).dtype)).sample()
 
-    def _prepare_mask(self, mask: torch.Tensor, latent_len: int, device: torch.device) -> torch.Tensor:
-        """Pad/truncate a `[samples]` binary mask to `sample_size`, then
+    def _prepare_mask(self, mask, latent_len: int, device: torch.device) -> torch.Tensor:
+        """Pad/truncate a binary mask to `sample_size`, then
         nearest-resample to `[1, 1, latent_len]`. Convention: 1 = keep
         the reference, 0 = regenerate.
+
+        `mask` may be a `[samples]` tensor at the model sample rate or a
+        `(keep_seconds, total_seconds)` tuple — the tuple form builds
+        "keep first K seconds, regenerate the rest" automatically.
         """
+        if isinstance(mask, tuple) and len(mask) == 2:
+            keep_s, total_s = (float(x) for x in mask)
+            keep_n = int(keep_s * self.sample_rate)
+            total_n = int(total_s * self.sample_rate)
+            mask = torch.zeros(total_n, dtype=torch.float32)
+            mask[:keep_n] = 1.0
         m = mask.to(device=device, dtype=torch.float32)
         if m.dim() == 1:
             m = m.unsqueeze(0)
@@ -130,3 +149,33 @@ class StableAudioLatentPreparationStage(PipelineStage):
         elif cur_len > self.sample_size:
             m = m[..., :self.sample_size]
         return F.interpolate(m.unsqueeze(1), size=latent_len, mode="nearest")
+
+
+def _decode_audio_file(path, target_sr: int) -> torch.Tensor:
+    """Decode any audio-bearing file (wav, mp3, mp4, m4a, flac, ...) via
+    PyAV and resample to `target_sr`. Returns `[channels, samples]`
+    float32 in roughly [-1, 1].
+
+    PyAV is already a FastVideo dep (used for muxing in
+    `VideoGenerator._mux_audio`). `torchaudio.load` on container
+    formats (mp4 / m4a) routes through `torchcodec`, which pulls in a
+    full CUDA NVRTC stack we don't otherwise need.
+    """
+    import av
+    import numpy as np
+    container = av.open(str(path))
+    audio_stream = next(s for s in container.streams if s.type == "audio")
+    resampler = av.AudioResampler(format="fltp", layout="stereo", rate=target_sr)
+    chunks: list = []
+    for frame in container.decode(audio_stream):
+        for resampled in resampler.resample(frame):
+            chunks.append(resampled.to_ndarray())
+    for resampled in resampler.resample(None):
+        chunks.append(resampled.to_ndarray())
+    container.close()
+    if not chunks:
+        raise RuntimeError(f"No audio frames decoded from {path}")
+    waveform = np.concatenate(chunks, axis=-1)
+    if waveform.ndim == 1:
+        waveform = waveform[None, :]
+    return torch.from_numpy(waveform).float()
