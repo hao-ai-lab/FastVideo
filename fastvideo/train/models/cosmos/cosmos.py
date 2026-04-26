@@ -307,13 +307,29 @@ class CosmosModel(WanModel):
         """Create negative (unconditional) prompt embeddings.
 
         Cosmos 2.5 uses Reason1 (Qwen2.5-VL) which is expensive
-        to load.  For training with ``training_cfg_rate=0`` (no
-        classifier-free guidance dropout), the negative embedding
-        is never used.  We create a zero-valued placeholder that
-        matches the text embedding dimension from the dataset.
+        to load.  This method only supports ``training_cfg_rate=0``
+        (no classifier-free guidance dropout), in which case the
+        negative embedding is never used and a zero placeholder
+        sized to match the text embedding dimension is sufficient.
+        ``training_cfg_rate>0`` would require real Reason1 negative
+        embeddings and is rejected here to avoid silently training
+        with zero-vector "unconditional" inputs.
         """
         if self.negative_prompt_embeds is not None:  # type: ignore[has-type]
             return
+
+        assert self.training_config is not None
+        tc = self.training_config
+
+        cfg_rate = float(tc.data.training_cfg_rate or 0.0)
+        if cfg_rate > 0.0:
+            raise NotImplementedError("Cosmos 2.5 currently only supports training_cfg_rate=0; "
+                                      f"got training_cfg_rate={cfg_rate}. Real negative-prompt "
+                                      "embeddings via Reason1 (Qwen2.5-VL) are not implemented "
+                                      "yet — using the zero placeholder with CFG dropout would "
+                                      "train against zero-vector \"unconditional\" inputs and "
+                                      "produce wrong gradients. Set "
+                                      "training.data.training_cfg_rate=0.")
 
         device = self.device
         dtype = self._get_training_dtype()
@@ -321,8 +337,6 @@ class CosmosModel(WanModel):
         # Infer embedding dimension from the pipeline config's
         # text encoder settings, or fall back to a reasonable
         # default for Cosmos 2.5 (Reason1 full_concat: 100352).
-        assert self.training_config is not None
-        tc = self.training_config
         text_enc_cfgs = tc.pipeline_config.text_encoder_configs
         if text_enc_cfgs:
             arch = text_enc_cfgs[0].arch_config
