@@ -45,6 +45,7 @@ from fastvideo.entrypoints.streaming.session_store import (
     InMemorySessionStore,
     SessionStore,
 )
+from fastvideo.entrypoints.streaming.worker import worker_main
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -459,89 +460,6 @@ def _default_worker_factory(
         ready=ready,
         shutdown_event=shutdown_event,
     )
-
-
-def worker_main(
-    *,
-    gpu_id: int,
-    worker_id: str,
-    generator_config: GeneratorConfig,
-    warmup_config: WarmupConfig,
-    job_queue: mp.Queue,
-    result_queue: mp.Queue,
-    shutdown_event: Any,
-) -> None:  # pragma: no cover - exercised via integration only
-    """Per-worker subprocess entry.
-
-    Runs inside a child process spawned by :func:`_default_worker_factory`.
-    Blocking VideoGenerator construction + generation happens here, not
-    in the parent's event loop.
-    """
-    import os
-
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-    try:
-        from fastvideo import VideoGenerator
-
-        generator = VideoGenerator.from_pretrained(config=generator_config)
-        if warmup_config.enabled:
-            _warmup_worker(generator, warmup_config)
-        result_queue.put({"kind": "ready", "worker_id": worker_id})
-    except Exception as exc:
-        result_queue.put({"kind": "error", "error": repr(exc)})
-        return
-
-    while not shutdown_event.is_set():
-        try:
-            item = job_queue.get(timeout=0.5)
-        except queue.Empty:
-            continue
-        if item is None:
-            break
-        job_id = item["job_id"]
-        request = item["request"]
-        try:
-            result = generator.generate(request)
-            result_queue.put({
-                "kind": "result",
-                "job_id": job_id,
-                "result": result,
-            })
-        except Exception as exc:
-            result_queue.put({
-                "kind": "result",
-                "job_id": job_id,
-                "error": repr(exc),
-            })
-
-
-def _warmup_worker(
-    generator: _GeneratorLike,
-    warmup_config: WarmupConfig,
-) -> None:  # pragma: no cover - real-GPU path
-    """Run a single warmup generation to populate compile caches.
-
-    Matches the internal ``gpu_pool.py`` warmup pattern: one short
-    generation before the worker reports ready so the first real user
-    segment doesn't pay the compile tax.
-    """
-    from fastvideo.api.schema import (
-        InputConfig,
-        OutputConfig,
-        SamplingConfig,
-    )
-    request = GenerationRequest(
-        prompt=warmup_config.prompt,
-        sampling=SamplingConfig(
-            num_frames=8,
-            height=256,
-            width=256,
-            num_inference_steps=1,
-        ),
-        inputs=InputConfig(),
-        output=OutputConfig(save_video=False, return_frames=False),
-    )
-    generator.generate(request)
 
 
 __all__ = [
