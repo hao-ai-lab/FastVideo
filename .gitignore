@@ -92,6 +92,3 @@ preprocess_output_text/
 .sisyphus/
 openspec/
 fastvideo/tests/ssim/reference_videos/**
-
-# Local clone of upstream stable-audio-tools used only for parity testing.
-/stable-audio-tools/
