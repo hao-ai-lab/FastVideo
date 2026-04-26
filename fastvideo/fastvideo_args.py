@@ -1108,14 +1108,13 @@ class TrainingArgs(FastVideoArgs):
                             type=float,
                             default=TrainingArgs.max_timestep_ratio,
                             help="Maximum step ratio")
-        parser.add_argument(
-            "--real-score-guidance-scale",
-            type=float,
-            default=TrainingArgs.real_score_guidance_scale,
-            help=("Teacher CFG scale for the real score in the DMD loss. Uses "
-                  "the parameterization x_cond + w * (x_cond - x_uncond), so "
-                  "w=0 -> cond, w=-1 -> uncond, and the relation to standard "
-                  "CFG is w_standard = w + 1 (default 3.5 == standard 4.5)."))
+        parser.add_argument("--real-score-guidance-scale",
+                            type=float,
+                            default=TrainingArgs.real_score_guidance_scale,
+                            help=("Teacher CFG scale for the real score in the DMD loss. Uses "
+                                  "the parameterization x_cond + w * (x_cond - x_uncond), so "
+                                  "w=0 -> cond, w=-1 -> uncond, and the relation to standard "
+                                  "CFG is w_standard = w + 1 (default 3.5 == standard 4.5)."))
         parser.add_argument("--fake-score-learning-rate",
                             type=float,
                             default=TrainingArgs.fake_score_learning_rate,
