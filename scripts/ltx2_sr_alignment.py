@@ -140,12 +140,12 @@ def _run_typed(args: argparse.Namespace) -> RunResult:
     from fastvideo import VideoGenerator  # noqa: PLC0415
     from fastvideo.api import (  # noqa: PLC0415
         ComponentConfig, EngineConfig, GenerationRequest, GeneratorConfig,
-        InputConfig, OutputConfig, PipelineConfig, SamplingConfig)
+        InputConfig, OutputConfig, PipelineSelection, SamplingConfig)
 
     config = GeneratorConfig(
         model_path=args.model,
         engine=EngineConfig(num_gpus=1, ),
-        pipeline=PipelineConfig(
+        pipeline=PipelineSelection(
             components=ComponentConfig(),
             preset_overrides={
                 "refine": {

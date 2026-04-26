@@ -112,6 +112,8 @@ _SCHEDULERS = {
 _UPSAMPLERS = {
     "SRTo720pUpsampler": ("upsamplers", "hunyuan15", "SRTo720pUpsampler"),
     "SRTo1080pUpsampler": ("upsamplers", "hunyuan15", "SRTo1080pUpsampler"),
+    "LTX2LatentUpsampler":
+    ("upsamplers", "ltx2_upsampler", "LTX2LatentUpsampler"),
 }
 
 _LEGACY_FAST_VIDEO_MODELS = {
