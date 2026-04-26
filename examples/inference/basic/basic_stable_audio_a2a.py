@@ -25,22 +25,50 @@ How it works:
 
     Mirrors upstream `generate_diffusion_cond(init_audio=..., init_noise_level=...)`.
 
-Tunable knobs (the "creative dials"):
-    init_noise_level
-      0.5  — keep most of the reference (subtle reroll)
-      1.0  — moderate variation (default in upstream when init_audio set)
-      5.0  — heavy reroll, reference acts as a soft sketch
-      500.0 — equivalent to no reference (full T2A)
+Picking `init_noise_level` (the only A2A-specific dial):
+
+    `init_noise_level` is the SDE's starting `sigma_max`. The model was
+    trained on `sigma_min=0.3 .. sigma_max=500`. The denoiser walks from
+    your chosen `sigma_max` down to `0.3` over `num_inference_steps`,
+    starting from `init_latent + noise * sigma_max`. Higher = more
+    freedom to drift from the reference; lower = stays closer.
+
+    Useful range: roughly `0.3 .. ~10`. Beyond ~50 the reference is
+    essentially noise to the model and you may as well do plain T2A.
+
+      | value | what you get                                       |
+      |-------|----------------------------------------------------|
+      | 0.3   | VAE round-trip (no diffusion). Output ≈ reference. |
+      | 0.5   | Subtle reroll — micro-variation, same arrangement. |
+      | 1.5   | Light variation — keeps melody/rhythm/timbre,      |
+      |       | rerolls textures + transients (good for "8 SFX     |
+      |       | siblings of the same sword clang").                |
+      | 3.0   | Moderate reroll — keeps the structural phrasing    |
+      |       | and chord progression, repaints timbres + groove   |
+      |       | (good for "change piano to cello, same notes").    |
+      | 7.0   | Heavy reroll — only the high-level mood / tempo    |
+      |       | survives; arrangement is freely regenerated.       |
+      | 50+   | Reference is barely visible. Prompt dominates.     |
+      | 500   | Equivalent to T2A from scratch (full sigma range). |
+
+    Rule of thumb by intent:
+      * "Fix one part of this clip"      -> 0.5 .. 1.5
+      * "Same idea, different timbre"    -> 2 .. 4
+      * "Same vibe, different content"   -> 5 .. 10
+      * "Use this as a loose mood prompt"-> 20+
 
 Prerequisites: same as `basic_stable_audio.py`.
 """
 from fastvideo import VideoGenerator
 
-PROMPT = "Lo-fi hip hop instrumental with vinyl crackle and gentle piano."
+PROMPT = "Change the piano to a cello playing the same notes"
 # Path to any audio-bearing file (wav, mp3, mp4, m4a, flac, ...). Set to
 # `None` to skip A2A and run plain T2A.
-INIT_AUDIO_PATH: str | None = "/home/william5lin/FastVideo2/outputs_audio/stable_audio_basic/output_stable_audio_2.mp4"
-INIT_NOISE_LEVEL = 1.0
+INIT_AUDIO_PATH: str | None = None
+# Renoise level for the SDE start. See "Picking init_noise_level" in the
+# module docstring. Useful range ~0.3 to ~10; defaults to 1.5 (light
+# variation, keeps melody/rhythm/timbre).
+INIT_NOISE_LEVEL = 1.5
 
 
 def main() -> None:
