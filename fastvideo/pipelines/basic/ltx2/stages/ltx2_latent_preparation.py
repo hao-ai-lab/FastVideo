@@ -56,7 +56,11 @@ def _randn_ltx2_video_latents(
         patchifier.get_token_count(video_shape),
         shape[1] * patch_volume,
     )
-    patch_noise = torch.randn(
+    # `randn_tensor` accepts both a single torch.Generator and a list
+    # (one per batch element); `torch.randn` only accepts the former.
+    # The internal version uses `randn_tensor` so the sampling order
+    # matches the official LTX-2 reference; mirror that here.
+    patch_noise = randn_tensor(
         patch_shape,
         generator=generator,
         device=device,

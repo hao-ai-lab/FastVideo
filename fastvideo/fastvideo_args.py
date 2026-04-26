@@ -162,6 +162,21 @@ class FastVideoArgs:
     ltx2_vae_temporal_tile_overlap_in_frames: int | None = None
     ltx2_initial_latent_path: str | None = None
     ltx2_audio_latent_path: str | None = None
+    # Generic stage-2 refine surface (preferred user-facing API). The
+    # ltx2_refine_* fields below remain the runtime carriers; these
+    # generic ones let CLI / typed-config callers set the same values
+    # without binding to a specific model family. ``None`` here means
+    # "fall back to the model_index.json default and/or the
+    # ltx2_refine_* runtime carrier".
+    refine_enabled: bool | None = None
+    refine_upsampler_path: str | None = None
+    refine_transformer_path: str | None = None
+    refine_lora_path: str | None = None
+    refine_num_inference_steps: int | None = None
+    refine_guidance_scale: float | None = None
+    refine_add_noise: bool | None = None
+    refine_noise_path: str | None = None
+    refine_audio_noise_path: str | None = None
     # LTX-2 stage-2 spatial refinement (the SR pipeline). When enabled the
     # transformer runs once at half resolution, the latents are upsampled
     # by the LTX2 latent upsampler, then a short stage-2 distilled
