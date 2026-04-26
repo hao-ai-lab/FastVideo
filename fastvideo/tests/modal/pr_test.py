@@ -16,6 +16,7 @@ image = (modal.Image.from_registry(
 ).run_commands("rm -rf /FastVideo").apt_install(
     "cmake", "pkg-config", "build-essential", "curl", "libssl-dev", "ffmpeg"
 ).pip_install("huggingface_hub", "pandas", "plotly"
+).run_commands("pip show plotly || echo 'plotly NOT installed'"
 ).run_commands(
     "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
 ).run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc").env({
