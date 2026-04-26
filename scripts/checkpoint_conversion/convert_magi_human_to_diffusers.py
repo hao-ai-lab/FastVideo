@@ -63,7 +63,7 @@ from safetensors.torch import load_file, save_file
 # FastVideo's `TransformerLoader.load` calls `ArchConfig.update_model_arch`
 # with this dict (minus `_class_name`, `_diffusers_version`) and rejects
 # any key that isn't a declared field. Pipeline-level knobs (steps, CFG,
-# guidance scales, flow_shift) live on `MagiHumanT2VConfig` and do NOT
+# guidance scales, flow_shift) live on `MagiHumanBaseConfig` and do NOT
 # belong here — they'd silently shadow the ArchConfig loader otherwise.
 MAGI_HUMAN_BASE_ARCH: dict = {
     "_class_name": "MagiHumanDiT",

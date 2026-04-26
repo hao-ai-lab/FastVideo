@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""End-to-end latent parity test for the daVinci-MagiHuman base T2V pipeline.
+"""End-to-end latent parity test for the daVinci-MagiHuman base text-to-AV pipeline.
 
 Runs the joint video+audio FlowUniPC denoise loop with CFG=2 on both:
   - FastVideo MagiHumanDiT loaded from `converted_weights/magi_human_base/transformer/`.
@@ -31,9 +31,12 @@ Skips when:
     script first).
   - CUDA is unavailable.
 
-Tolerance: `atol=5e-2, rtol=5e-2` on bf16 denoise loop latents. If
-tighter parity is wanted, chase the per-call drift first (see the
-DiT component parity test).
+Tolerance: `atol=0.35, rtol=0.05` on bf16 denoise-loop latents. The
+atol absorbs the observed worst-element drift (~0.31 on a signal of
+abs_mean ~2.4 — bf16 + CFG amplification + UniPC accumulation). The
+tight rtol still flags gross structural bugs (sign flip, scheduler
+state leak, modality branch drop). If tighter parity is wanted,
+chase the per-call drift first (see the DiT component parity test).
 """
 from __future__ import annotations
 
@@ -144,25 +147,55 @@ def _dit_forward_upstream(
     )
 
 
-def _run_denoise_loop(
-    dit, dit_forward_fn, video_latent, audio_latent,
-    txt_feat, txt_feat_len, neg_txt_feat, neg_txt_feat_len,
-    *, num_inference_steps, cfg_number, shift,
-    video_txt_guidance_scale, audio_txt_guidance_scale,
-    patch_size, coords_style, video_in_channels, audio_in_channels,
-):
-    """Joint video+audio FlowUniPC denoise. Identical orchestration on
-    both sides — only `dit_forward_fn(dit, ...)` changes.
+def _build_fastvideo_schedulers(shift: float, num_inference_steps: int, device):
+    """Construct schedulers the way FastVideo's `MagiHumanDenoisingStage`
+    does in production: `shift` is passed BOTH at __init__ time (in
+    `magi_human_pipeline.initialize_pipeline`) and at `set_timesteps`
+    time (in the denoising stage). The shift function is non-idempotent
+    for shift≠1, so this compounds; tests must mirror it to be faithful
+    to production.
     """
     from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
         FlowUniPCMultistepScheduler,
     )
     video_sched = FlowUniPCMultistepScheduler(shift=shift)
     audio_sched = FlowUniPCMultistepScheduler(shift=shift)
-    device = video_latent.device
     video_sched.set_timesteps(num_inference_steps, device=device, shift=shift)
     audio_sched.set_timesteps(num_inference_steps, device=device, shift=shift)
+    return video_sched, audio_sched
 
+
+def _build_upstream_schedulers(shift: float, num_inference_steps: int, device):
+    """Construct schedulers the way the official `MagiEvaluator.eval_with_text`
+    does (`daVinci-MagiHuman/inference/pipeline/video_generate.py:404-407`):
+    `FlowUniPCMultistepScheduler()` with default shift=1.0 in __init__
+    (no-op), then `set_timesteps(num_inference_steps, device, shift=self.shift)`
+    applies shift exactly once. Uses FastVideo's scheduler class for
+    the orchestration (algorithmically identical to the upstream copy
+    of the same Diffusers-derived class) but matches the upstream's
+    *call pattern*.
+    """
+    from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
+        FlowUniPCMultistepScheduler,
+    )
+    video_sched = FlowUniPCMultistepScheduler()
+    audio_sched = FlowUniPCMultistepScheduler()
+    video_sched.set_timesteps(num_inference_steps, device=device, shift=shift)
+    audio_sched.set_timesteps(num_inference_steps, device=device, shift=shift)
+    return video_sched, audio_sched
+
+
+def _run_denoise_loop(
+    dit, dit_forward_fn, video_latent, audio_latent,
+    txt_feat, txt_feat_len, neg_txt_feat, neg_txt_feat_len,
+    *, video_sched, audio_sched, cfg_number,
+    video_txt_guidance_scale, audio_txt_guidance_scale,
+    patch_size, coords_style, video_in_channels, audio_in_channels,
+):
+    """Joint video+audio FlowUniPC denoise. The schedulers are passed
+    in pre-constructed so each side can mirror its production scheduler
+    init pattern (see `_build_*_schedulers`).
+    """
     audio_feat_len = int(audio_latent.shape[1])
 
     with torch.inference_mode():
@@ -258,10 +291,10 @@ def test_magi_human_pipeline_latent_parity():
     neg_txt_feat = torch.randn((1, 8, 3584), dtype=torch.float32, device=device)
     neg_txt_feat_len = 8
 
-    denoise_kwargs = dict(
-        num_inference_steps=1,        # 1 step × CFG=2 = 2 DiT calls / side
+    num_inference_steps = 1        # 1 step × CFG=2 = 2 DiT calls / side
+    shift = 5.0
+    common_kwargs = dict(
         cfg_number=2,
-        shift=5.0,
         video_txt_guidance_scale=5.0,
         audio_txt_guidance_scale=5.0,
         patch_size=patch_size,
@@ -271,6 +304,10 @@ def test_magi_human_pipeline_latent_parity():
     )
 
     # --- Upstream side first (so we can free it before loading FastVideo). ---
+    # Upstream uses single-shift scheduler init (matches MagiEvaluator).
+    up_video_sched, up_audio_sched = _build_upstream_schedulers(
+        shift=shift, num_inference_steps=num_inference_steps, device=device,
+    )
     print("Loading upstream DiTModel from base shards...")
     upstream_dit = load_upstream_dit(base_shard_dir, device=device, dtype=None)
     print("Running upstream denoise loop...")
@@ -279,7 +316,8 @@ def test_magi_human_pipeline_latent_parity():
         video_latent.clone(), audio_latent.clone(),
         txt_feat.clone(), txt_feat_len,
         neg_txt_feat.clone(), neg_txt_feat_len,
-        **denoise_kwargs,
+        video_sched=up_video_sched, audio_sched=up_audio_sched,
+        **common_kwargs,
     )
     ref_video = ref_video.detach().float().cpu()
     ref_audio = ref_audio.detach().float().cpu()
@@ -287,6 +325,12 @@ def test_magi_human_pipeline_latent_parity():
     _cleanup_gpu()
 
     # --- FastVideo side ---
+    # FastVideo uses double-shift scheduler init (matches
+    # `MagiHumanDenoisingStage` in production: shift in __init__ via
+    # `magi_human_pipeline.initialize_pipeline` AND in set_timesteps).
+    fv_video_sched, fv_audio_sched = _build_fastvideo_schedulers(
+        shift=shift, num_inference_steps=num_inference_steps, device=device,
+    )
     from fastvideo.configs.models.dits.magi_human import MagiHumanVideoConfig
     from fastvideo.models.dits.magi_human import MagiHumanDiT
     from safetensors.torch import load_file
@@ -309,7 +353,8 @@ def test_magi_human_pipeline_latent_parity():
         video_latent.clone(), audio_latent.clone(),
         txt_feat.clone(), txt_feat_len,
         neg_txt_feat.clone(), neg_txt_feat_len,
-        **denoise_kwargs,
+        video_sched=fv_video_sched, audio_sched=fv_audio_sched,
+        **common_kwargs,
     )
     fv_video = fv_video.detach().float().cpu()
     fv_audio = fv_audio.detach().float().cpu()
@@ -342,12 +387,12 @@ def test_magi_human_pipeline_latent_parity():
     #     two DiT passes drift independently.
     #   * One FlowUniPC scheduler step passes that through.
     # Observed with this config: median ~2.5%, mean ~3%, max ~14% on
-    # a signal of abs_mean ~2.4. `atol=0.5, rtol=0.5` accepts that
-    # while still catching gross structural bugs (sign flip, scheduler
-    # state leak, modality branch drop — all of which would produce
+    # a signal of abs_mean ~2.4. Bound chosen to pass the observed
+    # drift while still catching gross structural bugs (sign flip,
+    # scheduler state leak, modality branch drop — those produce
     # >50% drift or abs_mean mismatch).
-    assert_close(fv_video, ref_video, atol=0.5, rtol=0.5)
-    assert_close(fv_audio, ref_audio, atol=0.5, rtol=0.5)
+    assert_close(fv_video, ref_video, atol=0.35, rtol=0.05)
+    assert_close(fv_audio, ref_audio, atol=0.35, rtol=0.05)
 
     # Global magnitude check — tightest single assertion. A gross bug
     # (scheduler state leak, dropped modality branch, CFG sign flip)

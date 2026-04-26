@@ -37,12 +37,12 @@ def main() -> None:
         "converted_weights/magi_human_base",
         num_gpus=1,
     )
-    output_path = "outputs_video/magi_human_basic/output_magi_human_t2v.mp4"
+    output_path = "outputs_video/magi_human_basic/output_magi_human.mp4"
     generator.generate_video(
         prompt=PROMPT,
         output_path=output_path,
         save_video=True,
-        # Defaults pulled from the registered preset (magi_human_base_t2v):
+        # Defaults pulled from the registered preset (magi_human_base):
         # height=256, width=448, fps=25, num_inference_steps=32, seed=42.
         # Override here only if you have a specific QA scenario.
     )

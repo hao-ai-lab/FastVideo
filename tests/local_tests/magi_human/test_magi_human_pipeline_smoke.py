@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Smoke / preflight tests for the daVinci-MagiHuman base T2V pipeline.
+"""Smoke / preflight tests for the daVinci-MagiHuman base text-to-AV pipeline.
 
 Two tests:
 
@@ -42,7 +42,7 @@ def test_magi_human_typed_surface_preflight() -> None:
     )
     from fastvideo.models.dits.magi_human import MagiHumanDiT
     from fastvideo.pipelines.basic.magi_human.magi_human_pipeline import MagiHumanPipeline  # noqa: F401
-    from fastvideo.pipelines.basic.magi_human.pipeline_configs import MagiHumanT2VConfig
+    from fastvideo.pipelines.basic.magi_human.pipeline_configs import MagiHumanBaseConfig
     from fastvideo.pipelines.basic.magi_human.stages import (  # noqa: F401
         MagiHumanDenoisingStage,
         MagiHumanLatentPreparationStage,
@@ -50,27 +50,27 @@ def test_magi_human_typed_surface_preflight() -> None:
 
     # Presets are registered under the expected family.
     names = {p.name for p in get_presets_for_family("magi_human")}
-    assert names == {"magi_human_base_t2v", "magi_human_distill_t2v"}
+    assert names == {"magi_human_base", "magi_human_distill"}
 
-    base_preset = get_preset("magi_human_base_t2v", "magi_human")
+    base_preset = get_preset("magi_human_base", "magi_human")
     assert base_preset.workload_type == "t2v"
     assert base_preset.defaults["num_inference_steps"] == 32
     assert base_preset.defaults["fps"] == 25
 
-    distill_preset = get_preset("magi_human_distill_t2v", "magi_human")
+    distill_preset = get_preset("magi_human_distill", "magi_human")
     assert distill_preset.workload_type == "t2v"
     assert distill_preset.defaults["num_inference_steps"] == 8
     assert distill_preset.defaults["guidance_scale"] == 1.0
 
     # Distill pipeline config: same arch as base, CFG=1, 8 steps.
-    from fastvideo.pipelines.basic.magi_human.pipeline_configs import MagiHumanDistillT2VConfig
-    distill_pc = MagiHumanDistillT2VConfig()
+    from fastvideo.pipelines.basic.magi_human.pipeline_configs import MagiHumanDistillConfig
+    distill_pc = MagiHumanDistillConfig()
     assert distill_pc.num_inference_steps == 8
     assert distill_pc.cfg_number == 1
     assert distill_pc.dit_config.arch_config.num_layers == 40
 
     # Config constructs with the documented defaults.
-    pc = MagiHumanT2VConfig()
+    pc = MagiHumanBaseConfig()
     assert pc.flow_shift == 5.0
     assert pc.cfg_number == 2
     assert pc.num_inference_steps == 32

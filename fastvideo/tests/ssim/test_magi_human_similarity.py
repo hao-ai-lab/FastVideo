@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SSIM-based similarity test for daVinci-MagiHuman base T2V.
+"""SSIM-based similarity test for daVinci-MagiHuman base text-to-AV.
 
 Reference videos for this test are seeded separately via the
 `.agents/skills/seed-ssim-references/` skill on Modal L40S and uploaded
