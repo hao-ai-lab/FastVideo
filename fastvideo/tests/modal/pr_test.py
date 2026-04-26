@@ -72,13 +72,21 @@ def run_test(pytest_command: str):
     {pytest_command}
     """
 
+    # result = subprocess.run(["/bin/bash", "-c", command],
+    #                         stdout=sys.stdout,
+    #                         stderr=sys.stderr,
+    #                         check=False)
+
+    # sys.exit(result.returncode)
+
     result = subprocess.run(["/bin/bash", "-c", command],
                             stdout=sys.stdout,
                             stderr=sys.stderr,
                             check=False)
 
-    sys.exit(result.returncode)
-
+    if result.returncode != 0:
+        raise RuntimeError(f"Test command failed with exit code {result.returncode}")
+    # On success, just return — don't call sys.exit()
 
 @app.function(gpu="H100:1",
               image=image,
