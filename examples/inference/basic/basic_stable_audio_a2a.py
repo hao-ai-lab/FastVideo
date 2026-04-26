@@ -33,29 +33,46 @@ Picking `init_noise_level` (the only A2A-specific dial):
     starting from `init_latent + noise * sigma_max`. Higher = more
     freedom to drift from the reference; lower = stays closer.
 
-    Useful range: roughly `0.3 .. ~10`. Beyond ~50 the reference is
-    essentially noise to the model and you may as well do plain T2A.
+    Useful range: roughly `0.3 .. 50`. SA Open 1.0 needs more renoise
+    than visual diffusion models to do cross-instrument timbre swaps —
+    don't be afraid to push `sigma_max` higher than your image-diffusion
+    intuition suggests.
 
       | value | what you get                                       |
       |-------|----------------------------------------------------|
       | 0.3   | VAE round-trip (no diffusion). Output ≈ reference. |
-      | 0.5   | Subtle reroll — micro-variation, same arrangement. |
-      | 1.5   | Light variation — keeps melody/rhythm/timbre,      |
-      |       | rerolls textures + transients (good for "8 SFX     |
-      |       | siblings of the same sword clang").                |
-      | 3.0   | Moderate reroll — keeps the structural phrasing    |
-      |       | and chord progression, repaints timbres + groove   |
-      |       | (good for "change piano to cello, same notes").    |
-      | 7.0   | Heavy reroll — only the high-level mood / tempo    |
-      |       | survives; arrangement is freely regenerated.       |
+      | 1     | Almost unchanged. Texture micro-variation only.    |
+      | 2     | Light variation — same instruments, slight reroll  |
+      |       | of dynamics + transients.                          |
+      | 5     | Moderate reroll — keeps melody + chord progression,|
+      |       | starts shifting timbres but instrument identity    |
+      |       | usually survives.                                  |
+      | 7     | Heavier reroll — instrument identity is replaceable|
+      |       | (cello can take over from piano on the same notes).|
+      |       | Default for the example prompt above.              |
+      | 15    | Only the high-level rhythm / mood survives;        |
+      |       | arrangement is freely regenerated.                 |
       | 50+   | Reference is barely visible. Prompt dominates.     |
       | 500   | Equivalent to T2A from scratch (full sigma range). |
 
     Rule of thumb by intent:
-      * "Fix one part of this clip"      -> 0.5 .. 1.5
-      * "Same idea, different timbre"    -> 2 .. 4
-      * "Same vibe, different content"   -> 5 .. 10
-      * "Use this as a loose mood prompt"-> 20+
+      * "Fix one part of this clip"            -> 1 .. 3
+      * "Same notes, different instrument"     -> 5 .. 10
+      * "Same chord progression, new content"  -> 10 .. 20
+      * "Use this as a loose mood prompt"      -> 30+
+
+    Empirically calibrated against `PROMPT` below ("Change the piano to
+    a cello playing the same notes"). Different prompt/reference combos
+    can shift the sweet spot by ±2; if the reference timbre is bleeding
+    through, raise it; if the structure is gone, lower it.
+
+    Note for users coming from stableaudio.com: the commercial Stable
+    Audio web UI exposes a "Reference Audio Strength" slider with
+    inverted semantics — higher = closer to reference. This dial is
+    upstream's `sigma_max`, so higher = more freedom from the reference.
+    The open-source 1.0 community hasn't published recalibrated
+    defaults; the gradio default is 1.0 (which we found insufficient
+    for instrument swaps).
 
 Prerequisites: same as `basic_stable_audio.py`.
 """
@@ -66,9 +83,10 @@ PROMPT = "Change the piano to a cello playing the same notes"
 # `None` to skip A2A and run plain T2A.
 INIT_AUDIO_PATH: str | None = None
 # Renoise level for the SDE start. See "Picking init_noise_level" in the
-# module docstring. Useful range ~0.3 to ~10; defaults to 1.5 (light
-# variation, keeps melody/rhythm/timbre).
-INIT_NOISE_LEVEL = 1.5
+# module docstring. Useful range ~0.3 to ~50; default 7 because the
+# example PROMPT is a cross-instrument timbre swap, which empirically
+# needs a heavier reroll than image-diffusion intuition suggests.
+INIT_NOISE_LEVEL = 7.0
 
 
 def main() -> None:
