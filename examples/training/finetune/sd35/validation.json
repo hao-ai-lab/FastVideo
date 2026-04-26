@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "caption": "a photo of a cat sitting on a windowsill",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 28,
+      "height": 512,
+      "width": 512,
+      "num_frames": 1
+    },
+    {
+      "caption": "a beautiful landscape with mountains and a lake",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 28,
+      "height": 512,
+      "width": 512,
+      "num_frames": 1
+    }
+  ]
+}
