@@ -72,13 +72,30 @@ class StableAudioLatentPreparationStage(PipelineStage):
 
         # ---- A2A / inpainting reference encoding -----------------------
         init_audio = getattr(batch, "init_audio", None)
+        inpaint_audio = getattr(batch, "inpaint_audio", None)
+        inpaint_mask = getattr(batch, "inpaint_mask", None)
+
+        # Loud-fail validation: silent fall-through to T2A would hide
+        # caller bugs. Enforce that A2A / inpaint kwargs come in
+        # complete sets.
+        if inpaint_audio is not None and inpaint_mask is None:
+            raise ValueError("Stable Audio inpainting requires both `inpaint_audio` and "
+                             "`inpaint_mask` (1-D tensor in {0, 1} at the model sample rate, "
+                             "1 = keep, 0 = regenerate). Got `inpaint_audio` without `inpaint_mask`.")
+        if inpaint_mask is not None and inpaint_audio is None:
+            raise ValueError("Stable Audio inpainting requires both `inpaint_audio` and "
+                             "`inpaint_mask`. Got `inpaint_mask` without `inpaint_audio` — "
+                             "did you mean to pass `init_audio` (audio-to-audio variation)?")
+        if init_audio is not None and inpaint_audio is not None:
+            raise ValueError("Stable Audio cannot do A2A variation and inpainting in the "
+                             "same call. Pass either `init_audio` (variation) or "
+                             "`inpaint_audio` + `inpaint_mask` (inpainting), not both.")
+
         if init_audio is not None:
             init_latent = self._encode_audio_reference(init_audio, device)
             batch.extra["init_latent"] = init_latent
             batch.extra["init_noise_level"] = float(getattr(batch, "init_noise_level", None) or 1.0)
 
-        inpaint_audio = getattr(batch, "inpaint_audio", None)
-        inpaint_mask = getattr(batch, "inpaint_mask", None)
         if inpaint_audio is not None and inpaint_mask is not None:
             ref_latent = self._encode_audio_reference(inpaint_audio, device)
             mask_latent = self._prepare_mask(inpaint_mask, latent_sample_size, device)
