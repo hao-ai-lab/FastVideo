@@ -31,7 +31,6 @@ online (W&B API) and offline (local `wandb-summary.json`) modes.
 ### 1. Load run summary
 
 **Online**:
-
 ```python
 import wandb
 api = wandb.Api()
@@ -41,7 +40,6 @@ config = dict(run.config)
 ```
 
 **Offline** (existing codebase pattern from `fastvideo/tests/training/`):
-
 ```python
 import json
 summary_path = f"{output_dir}/tracker/wandb/latest-run/files/wandb-summary.json"
@@ -116,7 +114,6 @@ with the final metrics and status.
 - Updated experiment journal entry.
 
 ## Example Usage
-
 ```
 Summarize the run in output directory "outputs/wan_finetune":
 

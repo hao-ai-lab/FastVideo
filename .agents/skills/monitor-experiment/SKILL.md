@@ -32,7 +32,6 @@ report before committing more resources.
 ### 1. Connect to the run
 
 **Online mode** (preferred):
-
 ```python
 import wandb
 api = wandb.Api()
@@ -40,7 +39,6 @@ run = api.run("<run_id>")
 ```
 
 **Offline fallback**:
-
 ```python
 import json
 summary_path = f"{output_dir}/tracker/wandb/latest-run/files/wandb-summary.json"
@@ -72,7 +70,6 @@ with open(summary_path) as f:
 ### 4. Emit structured status
 
 Output format (agent-consumable):
-
 ```json
 {
   "run_id": "...",
@@ -114,7 +111,6 @@ After the first 30 minutes of wall-clock time:
 - 30-minute checkpoint quality report.
 
 ## Example Usage
-
 ```
 Monitor W&B run "fastvideo/Wan_distillation/abc123":
 

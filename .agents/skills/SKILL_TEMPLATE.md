@@ -28,7 +28,6 @@ description: <one-line description — Codex uses this for implicit invocation m
 - <What this skill produces>
 
 ## Example Usage
-
 ```
 <Example invocation or prompt snippet>
 ```
@@ -51,7 +50,6 @@ Each skill lives in its own directory under `.agents/skills/`:
 ```
 
 After creating a new skill, add an entry to `.agents/skills/index.jsonl`:
-
 ```json
 {"name": "<skill-name>", "description": "<description>", "path": "<skill-name>/SKILL.md", "status": "draft", "trust": "low"}
 ```

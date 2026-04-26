@@ -22,10 +22,9 @@ Read these files to build your context:
 |----------|------|----------------|
 | 1 | `AGENTS.md` | Coding guidelines, build/test commands, PR conventions |
 | 2 | `docs/design/overview.md` | Architecture: models, pipelines, configs, registry |
-| 3 | `fastvideo/train/` | Refactored training framework (YAML-driven, modular methods/models/callbacks) |
-| 4 | `docs/training/overview.md` | Training data flow and preprocessing |
-| 5 | `docs/training/finetune.md` | Training arguments, parallelism, LoRA, validation |
-| 6 | `docs/contributing/coding_agents.md` | How to add model pipelines with agent assistance |
+| 3 | `docs/training/overview.md` | Training data flow and preprocessing |
+| 4 | `docs/training/finetune.md` | Training arguments, parallelism, LoRA, validation |
+| 5 | `docs/contributing/coding_agents.md` | How to add model pipelines with agent assistance |
 
 ## Step 2: Discover Available Resources
 
