@@ -601,10 +601,17 @@ class VideoGenerator:
         thread = threading.Thread(target=execute_forward_thread)
         thread.start()
         latent_batch_size = _infer_latent_batch_size(batch)
-        samples = torch.empty(
-            (latent_batch_size, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width),
-            device='cpu',
-            pin_memory=fastvideo_args.pin_cpu_memory)
+        # ``output_type == "latent"`` bypasses VAE decode, so the forward
+        # output has latent shape rather than pixel shape. Skipping the
+        # pre-allocation avoids a wasted ~50 MB pinned buffer and the
+        # spurious "Output shape ... use slow path" warning below.
+        if fastvideo_args.output_type == "latent":
+            samples = torch.empty(0, device='cpu')
+        else:
+            samples = torch.empty(
+                (latent_batch_size, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width),
+                device='cpu',
+                pin_memory=fastvideo_args.pin_cpu_memory)
         thread.join()
 
         if thread_error["error"] is not None:
@@ -627,17 +634,28 @@ class VideoGenerator:
         gen_time = time.perf_counter() - start_time
         logger.info("Generated successfully in %.2f seconds", gen_time)
 
-        # Process outputs
-        videos = rearrange(samples, "b c t h w -> t b c h w")
-        frames = []
-        for x in videos:
-            x = torchvision.utils.make_grid(x, nrow=6)
-            x = x.permute(1, 2, 0).squeeze(-1)
-            x = (x * 255).to(torch.uint8)
-            frames.append(x.cpu().numpy())
+        # When `output_type == "latent"` the VAE is bypassed in DecodingStage
+        # and `samples` holds raw latents (arbitrary channel count). The RGB
+        # grid/uint8 pipeline below and the mp4/png encoders cannot consume
+        # those, so we skip them and let callers work with the latent tensor
+        # directly via `result["samples"]`.
+        is_latent_output = fastvideo_args.output_type == "latent"
 
-        # Save output if requested
-        if batch.save_video:
+        frames: list | None
+        if is_latent_output:
+            frames = None
+        else:
+            videos = rearrange(samples, "b c t h w -> t b c h w")
+            frames = []
+            for x in videos:
+                x = torchvision.utils.make_grid(x, nrow=6)
+                x = x.permute(1, 2, 0).squeeze(-1)
+                x = (x * 255).to(torch.uint8)
+                frames.append(x.cpu().numpy())
+
+        save_video_to_disk = batch.save_video and not is_latent_output
+        if save_video_to_disk:
+            assert frames is not None  # implied by not is_latent_output
             if self._is_image_workload():
                 # Image workloads (t2i, i2i, …): save the first frame as PNG.
                 imageio.imwrite(output_path, frames[0])
@@ -662,7 +680,7 @@ class VideoGenerator:
             "trajectory": output_batch.trajectory_latents,
             "trajectory_timesteps": output_batch.trajectory_timesteps,
             "trajectory_decoded": output_batch.trajectory_decoded,
-            "video_path": output_path if batch.save_video else None,
+            "video_path": output_path if save_video_to_disk else None,
             "peak_memory_mb": output_batch.extra.get("peak_memory_mb"),
         }
 
