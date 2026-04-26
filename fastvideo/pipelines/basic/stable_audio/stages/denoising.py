@@ -20,6 +20,7 @@ import torch
 import torch.nn as nn
 
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -125,6 +126,11 @@ class StableAudioDenoisingStage(PipelineStage):
         if ext.get("negative_global_embed") is not None:
             extra_args["negative_global_cond"] = ext["negative_global_embed"]
 
-        sampled = K.sampling.sample_dpmpp_3m_sde(denoiser, x, sigmas, disable=False, extra_args=extra_args)
+        # `LocalAttention` (used inside our native StableAudioDiT) needs an
+        # active forward context to read `attn_metadata`. Wrap the whole
+        # sampling loop — every DiT call sees `attn_metadata=None`, which is
+        # what the SDPA / FlashAttn backends accept for unconditioned compute.
+        with set_forward_context(current_timestep=0, attn_metadata=None):
+            sampled = K.sampling.sample_dpmpp_3m_sde(denoiser, x, sigmas, disable=False, extra_args=extra_args)
         batch.latents = sampled
         return batch
