@@ -54,6 +54,28 @@ class StableAudioDenoisingStage(PipelineStage):
         super().__init__()
         self.transformer = transformer
 
+    def _resolve_sigma_max(self, batch) -> float:
+        """Map A2A intent (`init_audio_strength` 0..1, or raw
+        `init_noise_level`) to the sigma_max the SDE starts from.
+
+        `init_audio_strength` is log-interpolated between SIGMA_MIN
+        (full preservation) and SIGMA_MAX (full T2A) so equal-spaced
+        strength values map to perceptually equal-spaced amounts of
+        renoise. `init_noise_level` if set wins (legacy).
+        """
+        raw = getattr(batch, "init_noise_level", None)
+        if raw is not None:
+            return float(raw)
+        strength = getattr(batch, "init_audio_strength", None)
+        if strength is None:
+            # Default: roughly the cello-for-piano timbre-swap sweet spot.
+            strength = 0.6
+        s = max(0.0, min(1.0, float(strength)))
+        # log-interp: sigma_max(s=0) = SIGMA_MAX, sigma_max(s=1) = SIGMA_MIN.
+        import math
+        log_min, log_max = math.log(self._SIGMA_MIN), math.log(self._SIGMA_MAX)
+        return float(math.exp(log_max - s * (log_max - log_min)))
+
     def verify_input(self, batch, fastvideo_args):
         return VerificationResult()
 
@@ -70,11 +92,13 @@ class StableAudioDenoisingStage(PipelineStage):
 
         import k_diffusion as K
 
-        # A2A path: start at sigma_max=init_noise_level instead of the full
-        # sigma_max so the sampler stays close to the reference latent.
+        # A2A: start the SDE at a smaller `sigma_max` so the sampler
+        # stays close to the encoded reference. Two ways to specify it:
+        #   * `init_audio_strength` in [0, 1] (preferred, matches the
+        #     commercial UI convention; higher = closer to source).
+        #   * `init_noise_level` raw `sigma_max` override (legacy).
         init_latent = ext.get("init_latent")
-        sigma_max = (float(getattr(batch, "init_noise_level", None) or self._SIGMA_MAX)
-                     if init_latent is not None else self._SIGMA_MAX)
+        sigma_max = self._resolve_sigma_max(batch) if init_latent is not None else self._SIGMA_MAX
 
         sigmas = K.sampling.get_sigmas_polyexponential(steps, self._SIGMA_MIN, sigma_max, self._RHO, device=device)
         x = batch.latents * sigmas[0]

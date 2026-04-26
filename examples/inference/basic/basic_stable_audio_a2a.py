@@ -25,54 +25,52 @@ How it works:
 
     Mirrors upstream `generate_diffusion_cond(init_audio=..., init_noise_level=...)`.
 
-Picking `init_noise_level` (the only A2A-specific dial):
+Picking `init_audio_strength` (the A2A dial):
 
-    `init_noise_level` is the SDE's starting `sigma_max`. The model was
-    trained on `sigma_min=0.3 .. sigma_max=500`. The denoiser walks from
-    your chosen `sigma_max` down to `0.3` over `num_inference_steps`,
-    starting from `init_latent + noise * sigma_max`. Higher = more
-    freedom to drift from the reference; lower = stays closer.
+    `init_audio_strength` is in `[0, 1]` — **higher = closer to the
+    reference, lower = more transformation**. Same convention as the
+    "Input Audio Strength" slider in Stability's commercial Stable
+    Audio web UI, so values transfer directly.
 
-    Useful range: roughly `0.3 .. 50`. SA Open 1.0 needs more renoise
-    than visual diffusion models to do cross-instrument timbre swaps —
-    don't be afraid to push `sigma_max` higher than your image-diffusion
-    intuition suggests.
+    Internally we map strength to the SDE's starting `sigma_max` via
+    log-interpolation between the model's trained range
+    (`sigma_min=0.3` ↔ `sigma_max=500`), so equal strength steps map
+    to perceptually equal amounts of renoise.
 
-      | value | what you get                                       |
-      |-------|----------------------------------------------------|
-      | 0.3   | VAE round-trip (no diffusion). Output ≈ reference. |
-      | 1     | Almost unchanged. Texture micro-variation only.    |
-      | 2     | Light variation — same instruments, slight reroll  |
-      |       | of dynamics + transients.                          |
-      | 5     | Moderate reroll — keeps melody + chord progression,|
-      |       | starts shifting timbres but instrument identity    |
-      |       | usually survives.                                  |
-      | 7     | Heavier reroll — instrument identity is replaceable|
-      |       | (cello can take over from piano on the same notes).|
-      |       | Default for the example prompt above.              |
-      | 15    | Only the high-level rhythm / mood survives;        |
-      |       | arrangement is freely regenerated.                 |
-      | 50+   | Reference is barely visible. Prompt dominates.     |
-      | 500   | Equivalent to T2A from scratch (full sigma range). |
+      | strength | ~sigma_max | what you get                       |
+      |----------|-----------:|------------------------------------|
+      | 1.00     |       0.30 | VAE round-trip. Output ≈ reference.|
+      | 0.85     |       0.95 | Texture micro-variation only.      |
+      | 0.70     |       2.78 | Light reroll, same instruments.    |
+      | 0.65     |       4.03 | Moderate reroll, instrument        |
+      |          |            | identity usually survives.         |
+      | 0.60     |       5.83 | Default. Instrument identity is    |
+      |          |            | replaceable (cello can take over   |
+      |          |            | from piano on the same notes).     |
+      | 0.50     |      12.25 | Heavy — only melody / chord        |
+      |          |            | progression survives, content      |
+      |          |            | freely regenerated.                |
+      | 0.30     |      54.00 | Reference acts as a loose mood     |
+      |          |            | prompt; rhythm + key may carry     |
+      |          |            | through but content is new.        |
+      | 0.00     |     500.00 | Plain T2A — reference ignored.     |
 
-    Rule of thumb by intent:
-      * "Fix one part of this clip"            -> 1 .. 3
-      * "Same notes, different instrument"     -> 5 .. 10
-      * "Same chord progression, new content"  -> 10 .. 20
-      * "Use this as a loose mood prompt"      -> 30+
+    Rule of thumb by intent (calibrated against the commercial UI's
+    published examples + our cello-for-piano testing):
+      * "Fix one part of this clip"            -> 0.75 .. 0.85
+      * "Same notes, different instrument"     -> 0.55 .. 0.65
+      * "Same chord progression, new content"  -> 0.40 .. 0.55
+      * "Use this as a loose mood prompt"      -> 0.20 .. 0.35
 
-    Empirically calibrated against `PROMPT` below ("Change the piano to
-    a cello playing the same notes"). Different prompt/reference combos
-    can shift the sweet spot by ±2; if the reference timbre is bleeding
-    through, raise it; if the structure is gone, lower it.
+    These bands track Stability's own commercial examples
+    (https://stableaudio.com/user-guide/audio-to-audio): "synth sample
+    to bass guitar" sits at 75%, "piano stem to vibraphone" at 60-65%,
+    looser style transfers down at 30-50%. SA Open 1.0 behaves
+    similarly per dial; if the reference timbre is bleeding through,
+    lower the strength; if structure is gone, raise it.
 
-    Note for users coming from stableaudio.com: the commercial Stable
-    Audio web UI exposes a "Reference Audio Strength" slider with
-    inverted semantics — higher = closer to reference. This dial is
-    upstream's `sigma_max`, so higher = more freedom from the reference.
-    The open-source 1.0 community hasn't published recalibrated
-    defaults; the gradio default is 1.0 (which we found insufficient
-    for instrument swaps).
+    Legacy: `init_noise_level` (raw sigma_max, 0.3..500, *higher = more
+    freedom*) still works and takes precedence if both are passed.
 
 Prerequisites: same as `basic_stable_audio.py`.
 """
@@ -82,11 +80,9 @@ PROMPT = "Change the piano to a cello playing the same notes"
 # Path to any audio-bearing file (wav, mp3, mp4, m4a, flac, ...). Set to
 # `None` to skip A2A and run plain T2A.
 INIT_AUDIO_PATH: str | None = None
-# Renoise level for the SDE start. See "Picking init_noise_level" in the
-# module docstring. Useful range ~0.3 to ~50; default 7 because the
-# example PROMPT is a cross-instrument timbre swap, which empirically
-# needs a heavier reroll than image-diffusion intuition suggests.
-INIT_NOISE_LEVEL = 7.0
+# Reference fidelity in [0, 1] (higher = closer to source). See
+# "Picking init_audio_strength" in the module docstring above.
+INIT_AUDIO_STRENGTH = 0.6  # cross-instrument timbre swap sweet spot
 
 
 def main() -> None:
@@ -100,7 +96,7 @@ def main() -> None:
         save_video=True,
         audio_end_in_s=6.0,
         init_audio=INIT_AUDIO_PATH,
-        init_noise_level=INIT_NOISE_LEVEL,
+        init_audio_strength=INIT_AUDIO_STRENGTH,
     )
     generator.shutdown()
 

@@ -202,6 +202,7 @@ class ForwardBatch:
     # `SamplingParam`). `Any` because we accept torch tensors or numpy
     # arrays the user supplies; the latent-prep stage normalises shapes.
     init_audio: Any = None
+    init_audio_strength: float | None = None
     init_noise_level: float | None = None
     inpaint_audio: Any = None
     inpaint_mask: Any = None
