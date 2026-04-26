@@ -1180,6 +1180,82 @@ in the PR description."
 
 ---
 
+## 30. Hard ban on `from diffusers import` and `from transformers import` (model classes) at runtime
+
+**Where in the skill:** "Decide what to reuse" (step 3); "Files you will
+create or touch" (rows 1, 4); pitfall around shortcuts.
+
+**What we found (during the will/stable-audio rerun, 2026-04-25):** The
+first cut of `StableAudioPipeline.load_modules` imported three
+diffusers components at runtime as a "temporary scaffold":
+
+  * `diffusers.StableAudioDiTModel`
+  * `diffusers.pipelines.stable_audio.modeling_stable_audio.StableAudioProjectionModel`
+  * `diffusers.CosineDPMSolverMultistepScheduler`
+
+This was meant to be a fast first-pass that proved the orchestration
+worked while the heavy DiT/projection/scheduler ports were deferred.
+The cost was real and concrete:
+
+  1. **Pipeline parity vs the official upstream repo drifted to 71%
+     abs_mean** (see `test_stable_audio_pipeline_official_parity` in
+     `tests/local_tests/pipelines/`). All of that drift came from
+     diffusers↔upstream divergence in the components we re-imported —
+     none of it was FastVideo orchestration drift.
+  2. The pipeline froze to diffusers' release cadence (a diffusers
+     bump could silently change Stable Audio behavior).
+  3. Two parallel test suites had to exist: a tight diffusers-vs-FV
+     test (~0.1% drift, the meaningful gate) and a loose
+     official-vs-FV test (~70% drift, the documented-as-aspirational
+     gate). Confusing for any future reader.
+  4. Future ports would copy the same shortcut, compounding the debt.
+
+The user's directive was unambiguous: *"remove all use of diffusers
+version. directly port from official repo into fastvideo natively for
+all pipeline components."*
+
+**The rule (now codified):**
+
+> **Pipeline component classes (DiT, VAE, projection / conditioner,
+> scheduler) MUST be first-class FastVideo ports.** Runtime imports
+> from `diffusers` or `transformers` (model classes) inside a
+> `Pipeline.load_modules`, stage `forward`, or any production code
+> path are forbidden. The only permitted runtime third-party imports
+> are:
+>   * `transformers.<TokenizerFast>` for tokenizers (these are pure
+>     data-conversion utilities, not model weights).
+>   * `diffusers` / `transformers` *inside test files* for parity
+>     references — never in `fastvideo/`.
+>
+> If a component isn't yet ported, **don't ship the pipeline that
+> needs it**. A scaffold pipeline with diffusers imports as
+> placeholders is worse than no pipeline at all: it sets the wrong
+> precedent, masks parity drift, and forks the project from upstream.
+
+**Action on the skill:**
+
+- (a) Add the rule above as a top-level **Hard rule** in step 3
+  ("Decide what to reuse") and again as pitfall #N in the parity
+  pattern.
+- (b) Update step 6's subagent prompt template: every component
+  subagent must produce a FastVideo-native class under
+  `fastvideo/models/<bucket>/`. No subagent should ever return
+  `from diffusers import X` in a model file.
+- (c) Update step 13(a): the pipeline-parity gate is **vs the
+  official upstream**, not vs diffusers. Drop the "comparing
+  diffusers as an interim gate" framing entirely.
+- (d) Pre-extend the Files-table with separate rows for any DiT /
+  scheduler / conditioner ports needed for first-class status
+  (currently row 1 is DiT-only).
+
+**Exception:** the only acceptable runtime import from `diffusers` or
+`transformers` (model classes) is when the component is already a
+shared FastVideo dependency at the package boundary (e.g. T5
+*tokenizer* — pure data utility, no weights). Anything that owns
+weights or numerical behavior must be FastVideo-native.
+
+---
+
 ## 29. VAE file naming: arch name vs family name is ambiguous
 
 **Where in the skill:** Files-table rows 4 + 5 say `<family>vae.py`.
@@ -1257,6 +1333,7 @@ the convention.
 | 27 | "Official repo" can be plural — pick the one matching published weights | Medium | Reword step 1 / step 5 to acknowledge multi-implementation case. (From will/stable-audio rerun.) |
 | 28 | `WorkloadType` enum has no audio variants | High | Pre-extend with T2A/A2A/AV + document in Inputs table. (From will/stable-audio rerun.) |
 | 29 | VAE file naming: arch name vs family name is ambiguous | Low | Update row 4/5 wording: name after arch when shared, family when family-specific. (From will/stable-audio rerun.) |
+| 30 | **Hard ban on `from diffusers/transformers import` of model classes at runtime** | **Critical** | Codify the rule, update step 3 / step 6 / step 13(a), drop the "interim diffusers comparison" framing. (From will/stable-audio rerun, user-corrected — direct quote: "remove all use of diffusers version".) |
 
 None of these block a new porter from using the skill today; they're
 polish / consistency items that need a codebase-owner call.

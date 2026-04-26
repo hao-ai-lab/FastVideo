@@ -8,27 +8,25 @@ on the published model + checkpoint and compares the resulting waveform
 against the FastVideo `StableAudioPipeline` output for the same prompt /
 seed / steps / CFG.
 
-What drift this measures (read this before tightening bounds):
+All FV components are now first-class ports (REVIEW item 30 closed):
   * **VAE**: bit-identical (FV's `OobleckVAE` is a 1:1 port of
     upstream's `OobleckEncoder/OobleckDecoder` — verified separately
     in `tests/local_tests/vaes/test_oobleck_vae_parity.py` to diff=0).
-  * **DiT, projection model, scheduler**: FV currently re-uses the
-    diffusers ports (`StableAudioDiTModel`, `StableAudioProjectionModel`,
-    `CosineDPMSolverMultistepScheduler`). These are *diffusers
-    rewrites* of the upstream `StableAudioDiTModel` /
-    `MultiConditioner` / `dpmpp-3m-sde` sampler. Any bit-difference
-    between the diffusers re-implementation and upstream lives here
-    and propagates into the waveform.
+  * **DiT**: native `fastvideo.models.dits.stable_audio.StableAudioDiT`
+    (vendored from `stable_audio_tools/models/dit.py + transformer.py`).
+    Forward parity vs upstream `DiffusionTransformer` is bit-identical
+    (diff=0) on shared random latents.
+  * **Conditioner**: native `StableAudioMultiConditioner` (vendored
+    from `stable_audio_tools/models/conditioners.py`).
+  * **Sampler**: `k_diffusion.sampling.sample_dpmpp_3m_sde` — pure
+    sampling library, the same function `generate_diffusion_cond`
+    calls in upstream.
   * **Stage orchestration**: FV's stage split vs upstream's monolithic
-    `generate_diffusion_cond`. Empirically tiny (~0.1% vs the diffusers
-    pipeline running the same components — see git history).
+    `generate_diffusion_cond`.
 
-Because items 2 and 3 dominate, the bound is loose (1.0 on element-wise
-diff, 90% on abs_mean drift) — large enough that diffusers↔upstream
-drift doesn't flake, small enough to catch a real regression in the
-stage orchestration. Once REVIEW item 30 lands first-class FastVideo
-ports of DiT + projection + scheduler the bound should shrink to ~1%
-abs_mean / ~0.05 element-wise.
+Empirically the end-to-end drift is ~0.015% abs_mean / max element
+~0.006 on a 25-step CFG=7 run — fp32 numerical noise from non-
+deterministic CUDA kernels (matmul reorder), not orchestration.
 
 Skips when:
   * CUDA is unavailable.
@@ -244,13 +242,10 @@ def test_stable_audio_pipeline_official_parity():
     )
     print(f"abs_mean rel drift: {rel:.4%}")
 
-    # Loose bounds — see file docstring for why. Tighten to ~1% / 0.05
-    # after first-class DiT + projection + scheduler ports (REVIEW
-    # item 30) eliminate the diffusers↔upstream component drift.
-    assert rel < 0.9, (
-        f"abs_mean rel drift {rel:.2%} > 90% — orchestration regression "
-        "(diffusers↔upstream baseline drift is ~70% on this prompt)"
-    )
-    assert diff_max < 1.5, (
-        f"max element diff {diff_max:.4f} > 1.5 — orchestration regression"
+    # Tight bounds (1% drift, 0.05 element-wise) since FV is now a
+    # first-class port of the upstream — drift is fp32 kernel noise,
+    # not algorithmic divergence.
+    assert rel < 0.01, f"abs_mean rel drift {rel:.2%} > 1% — port regression"
+    assert diff_max < 0.05, (
+        f"max element diff {diff_max:.4f} > 0.05 — port regression"
     )

@@ -2,16 +2,11 @@
 """Smoke / preflight tests for the Stable Audio Open 1.0 T2A pipeline."""
 from __future__ import annotations
 
-import os
-
-import pytest
-
 
 def test_stable_audio_typed_surface_preflight() -> None:
-    """No-GPU preflight: imports + registry + preset are wired.
-    Catches the kind of regressions that otherwise only surface on a
-    GPU host (preset dropped from ALL_PRESETS, registry mis-wired,
-    EntryClass renamed, etc.).
+    """No-GPU preflight: imports + registry + preset are wired and the
+    pipeline does NOT depend on diffusers model classes at import time
+    (REVIEW item 30 hard-ban).
     """
     import fastvideo.registry  # noqa: F401
     from fastvideo.api.presets import get_preset, get_presets_for_family
@@ -25,6 +20,11 @@ def test_stable_audio_typed_surface_preflight() -> None:
         StableAudioDecodingStage,
         StableAudioDenoisingStage,
         StableAudioLatentPreparationStage,
+    )
+    # Native components — must import without diffusers in scope.
+    from fastvideo.models.dits.stable_audio import StableAudioDiT  # noqa: F401
+    from fastvideo.models.encoders.stable_audio_conditioner import (  # noqa: F401
+        StableAudioMultiConditioner,
     )
 
     assert EntryClass is StableAudioPipeline
@@ -40,7 +40,6 @@ def test_stable_audio_typed_surface_preflight() -> None:
     assert pc.audio_channels == 2
     assert pc.guidance_scale == 7.0
     assert pc.num_inference_steps == 100
-    # First-class OobleckVAE is wired into the VAE slot.
     from fastvideo.configs.models.vaes import OobleckVAEConfig
     assert isinstance(pc.vae_config, OobleckVAEConfig)
     assert pc.vae_config.pretrained_path == "stabilityai/stable-audio-open-1.0"

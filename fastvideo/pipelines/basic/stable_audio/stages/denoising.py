@@ -1,11 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stable Audio CFG denoise loop (mirrors `StableAudioPipeline.__call__`
-denoise loop, lines 712-746 of diffusers' pipeline_stable_audio.py).
+"""Stable Audio denoising — k-diffusion `dpmpp-3m-sde` over the native DiT.
+
+The official upstream `generate_diffusion_cond` reduces to:
+
+    denoiser = K.external.VDenoiser(model.model)         # v-prediction wrapper
+    sigmas   = K.sampling.get_sigmas_polyexponential(steps, sigma_min, sigma_max, rho)
+    x        = noise * sigmas[0]
+    sampled  = K.sampling.sample_dpmpp_3m_sde(
+        denoiser, x, sigmas, extra_args={... cross_attn_cond, global_cond, cfg_scale, ...},
+    )
+
+We do exactly the same here, using a thin `_DiTAdapter` to expose our
+`StableAudioDiT` to `K.external.VDenoiser` with the kwargs it expects
+(CFG batching is done inside the adapter, not by the DiT itself).
 """
 from __future__ import annotations
 
 import torch
-from tqdm import tqdm
+import torch.nn as nn
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -13,13 +25,65 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 
-class StableAudioDenoisingStage(PipelineStage):
-    """Cosine-DPM++ denoising with text + duration CFG."""
+class _DiTAdapter(nn.Module):
+    """Minimal wrapper exposing `StableAudioDiT` to `VDenoiser` with the
+    same conditioning + CFG semantics as upstream `DiTWrapper.forward`.
+    """
 
-    def __init__(self, transformer, scheduler) -> None:
+    def __init__(self, dit) -> None:
+        super().__init__()
+        self.dit = dit
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        t: torch.Tensor,
+        *,
+        cross_attn_cond: torch.Tensor,
+        cross_attn_cond_mask: torch.Tensor | None = None,
+        negative_cross_attn_cond: torch.Tensor | None = None,
+        negative_cross_attn_mask: torch.Tensor | None = None,
+        global_cond: torch.Tensor,
+        negative_global_cond: torch.Tensor | None = None,
+        cfg_scale: float = 1.0,
+        **_unused,
+    ) -> torch.Tensor:
+        if cfg_scale == 1.0:
+            return self.dit(x, t, cross_attn_cond=cross_attn_cond, global_embed=global_cond)
+
+        # CFG batching — replicate upstream `DiffusionTransformer.forward`'s
+        # batch-CFG branch.
+        batch_inputs = torch.cat([x, x], dim=0)
+        batch_t = torch.cat([t, t], dim=0)
+        batch_global = torch.cat([global_cond, global_cond if negative_global_cond is None else negative_global_cond],
+                                 dim=0)
+
+        null_embed = torch.zeros_like(cross_attn_cond)
+        if negative_cross_attn_cond is not None:
+            if negative_cross_attn_mask is not None:
+                neg_mask = negative_cross_attn_mask.to(torch.bool).unsqueeze(2)
+                negative_cross_attn_cond = torch.where(neg_mask, negative_cross_attn_cond, null_embed)
+            batch_cond = torch.cat([cross_attn_cond, negative_cross_attn_cond], dim=0)
+        else:
+            batch_cond = torch.cat([cross_attn_cond, null_embed], dim=0)
+
+        batch_out = self.dit(batch_inputs, batch_t, cross_attn_cond=batch_cond, global_embed=batch_global)
+        cond_out, uncond_out = torch.chunk(batch_out, 2, dim=0)
+        return uncond_out + (cond_out - uncond_out) * cfg_scale
+
+
+class StableAudioDenoisingStage(PipelineStage):
+    """k-diffusion `dpmpp-3m-sde` sampling loop."""
+
+    # Defaults pulled from the official `generate_diffusion_cond` call site
+    # used by the Stability AI demo and the official inference scripts.
+    _SIGMA_MIN = 0.3
+    _SIGMA_MAX = 500.0
+    _RHO = 1.0
+
+    def __init__(self, transformer) -> None:
         super().__init__()
         self.transformer = transformer
-        self.scheduler = scheduler
 
     def verify_input(self, batch, fastvideo_args):
         return VerificationResult()
@@ -30,52 +94,37 @@ class StableAudioDenoisingStage(PipelineStage):
     @torch.inference_mode()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         pc = fastvideo_args.pipeline_config
+        ext = batch.extra
         device = batch.latents.device
-        text_audio = batch.extra["text_audio_duration_embeds"]
-        audio_dur = batch.extra["audio_duration_embeds"]
-        cos, sin = batch.extra["rotary_embedding"]
-        do_cfg = batch.extra.get("do_cfg", False)
         guidance_scale = float(batch.guidance_scale or pc.guidance_scale)
+        steps = int(batch.num_inference_steps)
 
-        num_steps = batch.num_inference_steps
-        # `set_timesteps` resets the scheduler's internal step state,
-        # including the lazily-built `BrownianTreeNoiseSampler`. We also
-        # null it out explicitly to make the seeded re-init below
-        # deterministic across calls — without this the noise sampler
-        # built in step 1 of the *previous* run lingers into step 1 of
-        # this run if the scheduler instance is shared.
-        self.scheduler.set_timesteps(num_steps, device=device)
-        if hasattr(self.scheduler, "noise_sampler"):
-            self.scheduler.noise_sampler = None
-        timesteps = self.scheduler.timesteps
-        # Match diffusers' `prepare_extra_step_kwargs(generator, eta)`:
-        # CosineDPMSolverMultistepScheduler seeds its
-        # BrownianTreeNoiseSampler from `generator.initial_seed()`.
-        generator = batch.extra.get("generator") if batch.extra else None
-        step_kwargs: dict = {}
-        if generator is not None:
-            step_kwargs["generator"] = generator
+        # k-diffusion is a sampling library, not a model class — using its
+        # dpmpp-3m-sde sampler matches the official upstream byte-for-byte.
+        import k_diffusion as K
+        adapter = _DiTAdapter(self.transformer)
+        denoiser = K.external.VDenoiser(adapter)
 
-        latents = batch.latents
-        disable_tqdm = not getattr(fastvideo_args, "log_level_progress", True)
-        for i, t in enumerate(tqdm(timesteps, disable=disable_tqdm)):
-            latent_model_input = torch.cat([latents] * 2) if do_cfg else latents
-            latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+        sigmas = K.sampling.get_sigmas_polyexponential(steps,
+                                                       self._SIGMA_MIN,
+                                                       self._SIGMA_MAX,
+                                                       self._RHO,
+                                                       device=device)
+        # Upstream scales the initial noise by sigmas[0] inside `sample_k`.
+        x = batch.latents * sigmas[0]
 
-            noise_pred = self.transformer(
-                latent_model_input,
-                t.unsqueeze(0),
-                encoder_hidden_states=text_audio,
-                global_hidden_states=audio_dur,
-                rotary_embedding=(cos, sin),
-                return_dict=False,
-            )[0]
+        extra_args = {
+            "cross_attn_cond": ext["cross_attn_cond"],
+            "cross_attn_cond_mask": ext.get("cross_attn_mask"),
+            "global_cond": ext["global_embed"],
+            "cfg_scale": guidance_scale,
+        }
+        if ext.get("negative_cross_attn_cond") is not None:
+            extra_args["negative_cross_attn_cond"] = ext["negative_cross_attn_cond"]
+            extra_args["negative_cross_attn_mask"] = ext["negative_cross_attn_mask"]
+        if ext.get("negative_global_embed") is not None:
+            extra_args["negative_global_cond"] = ext["negative_global_embed"]
 
-            if do_cfg:
-                noise_uncond, noise_text = noise_pred.chunk(2)
-                noise_pred = noise_uncond + guidance_scale * (noise_text - noise_uncond)
-
-            latents = self.scheduler.step(noise_pred, t, latents, **step_kwargs).prev_sample
-
-        batch.latents = latents
+        sampled = K.sampling.sample_dpmpp_3m_sde(denoiser, x, sigmas, disable=False, extra_args=extra_args)
+        batch.latents = sampled
         return batch
