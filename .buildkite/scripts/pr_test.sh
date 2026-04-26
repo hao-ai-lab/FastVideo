@@ -63,7 +63,31 @@ EFFECTIVE_PR=${BUILDKITE_PULL_REQUEST:-false}
 if [ "$EFFECTIVE_PR" = "false" ] && [ -n "${PR_NUMBER:-}" ]; then
     EFFECTIVE_PR=$PR_NUMBER
 fi
-MODAL_ENV="BUILDKITE_REPO=$BUILDKITE_REPO BUILDKITE_COMMIT=$BUILDKITE_COMMIT BUILDKITE_PULL_REQUEST=$EFFECTIVE_PR IMAGE_VERSION=$IMAGE_VERSION"
+MODAL_ENV="BUILDKITE_REPO=$BUILDKITE_REPO BUILDKITE_COMMIT=$BUILDKITE_COMMIT BUILDKITE_PULL_REQUEST=$EFFECTIVE_PR BUILDKITE_BRANCH=${BUILDKITE_BRANCH:-} TEST_SCOPE=${TEST_SCOPE:-} IMAGE_VERSION=$IMAGE_VERSION"
+
+POST_RUN_HOOK=""
+
+upload_performance_artifacts() {
+    SHORT_SHA=${BUILDKITE_COMMIT:0:7}
+    LOCAL_DIR="downloaded_reports"
+
+    log "Downloading reports directory from Modal Volume..."
+    mkdir -p "$LOCAL_DIR"
+    modal volume get hf-model-weights "perf_reports/" "$LOCAL_DIR"
+
+    TARGET_FILE=$(find "$LOCAL_DIR" -name "*${SHORT_SHA}*" | head -n 1)
+    log "TARGET_FILE: '$TARGET_FILE'"
+
+    if [ -n "$TARGET_FILE" ]; then
+        log "Found dashboard: $TARGET_FILE. Uploading to Buildkite..."
+        buildkite-agent artifact upload "$TARGET_FILE"
+        buildkite-agent annotate --style info --context "perf" < "$TARGET_FILE"
+    else
+        log "Warning: Could not find a dashboard file matching $SHORT_SHA"
+    fi
+
+    rm -rf "$LOCAL_DIR"
+}
 
 case "$TEST_TYPE" in
     "encoder")
@@ -124,8 +148,9 @@ case "$TEST_TYPE" in
         MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_lora_extraction_tests"
         ;;
     "performance")
-        log "Running performance tests..."
+        log "Running performance tests on Modal..."
         MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_performance_tests"
+        POST_RUN_HOOK="upload_performance_artifacts"
         ;;
     "api_server")
         log "Running API server integration tests..."
@@ -145,6 +170,11 @@ if [ $TEST_EXIT_CODE -eq 0 ]; then
     log "Modal test completed successfully"
 else
     log "Error: Modal test failed with exit code: $TEST_EXIT_CODE"
+fi
+
+if [ -n "$POST_RUN_HOOK" ]; then
+    log "Executing post-run hook: $POST_RUN_HOOK"
+    "$POST_RUN_HOOK"
 fi
 
 log "=== Test execution completed with exit code: $TEST_EXIT_CODE ==="

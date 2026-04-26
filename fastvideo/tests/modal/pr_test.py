@@ -5,6 +5,8 @@ import modal
 app = modal.App()
 
 model_vol = modal.Volume.from_name("hf-model-weights")
+performance_tracking_vol = modal.Volume.from_name(
+    "fastvideo-performance-tracking", create_if_missing=True)
 image_version = os.getenv("IMAGE_VERSION")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
 print(f"Using image: {image_tag}")
@@ -24,6 +26,10 @@ image = (modal.Image.from_registry(
     os.environ.get("BUILDKITE_COMMIT", ""),
     "BUILDKITE_PULL_REQUEST":
     os.environ.get("BUILDKITE_PULL_REQUEST", ""),
+    "BUILDKITE_BRANCH":
+    os.environ.get("BUILDKITE_BRANCH", ""),
+    "TEST_SCOPE":
+    os.environ.get("TEST_SCOPE", ""),
     "IMAGE_VERSION":
     os.environ.get("IMAGE_VERSION", ""),
 }))
@@ -66,13 +72,21 @@ def run_test(pytest_command: str):
     {pytest_command}
     """
 
+    # result = subprocess.run(["/bin/bash", "-c", command],
+    #                         stdout=sys.stdout,
+    #                         stderr=sys.stderr,
+    #                         check=False)
+
+    # sys.exit(result.returncode)
+
     result = subprocess.run(["/bin/bash", "-c", command],
                             stdout=sys.stdout,
                             stderr=sys.stderr,
                             check=False)
 
-    sys.exit(result.returncode)
-
+    if result.returncode != 0:
+        raise RuntimeError(f"Test command failed with exit code {result.returncode}")
+    # On success, just return — don't call sys.exit()
 
 @app.function(gpu="H100:1",
               image=image,
@@ -228,12 +242,20 @@ def run_lora_extraction_tests():
               timeout=1800,
               secrets=[
                   modal.Secret.from_dict(
-                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
+                      {"HF_API_KEY": os.environ.get("HF_API_KEY", ""),
+                       "HF_REPO_ID": "FastVideo/performance-tracking"})
               ],
-              volumes={"/root/data": model_vol})
+              volumes={
+                  "/root/data": model_vol,
+              })
 def run_performance_tests():
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/performance -vs"
+        "export HF_HOME='/root/data/.cache' && "
+        "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
+        "hf auth login --token $HF_API_KEY && "
+        "pytest ./fastvideo/tests/performance -vs && "
+        "python ./fastvideo/tests/performance/compare_baseline.py && "
+        "python ./fastvideo/tests/performance/dashboard.py"
     )
 
 
