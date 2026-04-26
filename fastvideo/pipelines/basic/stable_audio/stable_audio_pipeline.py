@@ -153,6 +153,15 @@ class StableAudioPipeline(ComposedPipelineBase):
         logger.info("Loading official Stable Audio checkpoint from %s", weights_path)
         full_state = load_file(weights_path)
 
+        # Mirror upstream `generate_diffusion_cond`'s deterministic-math
+        # toggles — TF32 matmul / cuDNN nondeterminism amplifies through
+        # the A2A renoise-then-denoise SDE trajectory. One-shot here so
+        # we don't flip cuDNN's algorithm cache mid-run.
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+        torch.backends.cudnn.benchmark = False
+
         # --- VAE: first-class FastVideo OobleckVAE via the lazy wrapper.
         if "vae" in loaded_modules:
             modules["vae"] = loaded_modules["vae"]

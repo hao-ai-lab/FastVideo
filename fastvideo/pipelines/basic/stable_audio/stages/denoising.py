@@ -11,8 +11,10 @@ The official upstream `generate_diffusion_cond` reduces to:
     )
 
 We do exactly the same here, using a thin `_DiTAdapter` to expose our
-`StableAudioDiT` to `K.external.VDenoiser` with the kwargs it expects
-(CFG batching is done inside the adapter, not by the DiT itself).
+`StableAudioDiT` to `K.external.VDenoiser` with the kwargs it expects.
+CFG batching is precomputed in `forward()` so the adapter only has to
+do the per-step `cat([x, x])` + DiT call + chunk + lerp; the constant
+conditioning tensors are built once outside the sampler loop.
 """
 from __future__ import annotations
 
@@ -27,50 +29,30 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 
 
 class _DiTAdapter(nn.Module):
-    """Minimal wrapper exposing `StableAudioDiT` to `VDenoiser` with the
-    same conditioning + CFG semantics as upstream `DiTWrapper.forward`.
+    """Wraps `StableAudioDiT` for `K.external.VDenoiser`.
+
+    `batch_cond` and `batch_global` are the already-CFG-batched
+    conditioning tensors (shape `[2, ...]` for CFG, `[1, ...]` for
+    unconditional); building them once outside the sampler loop saves
+    ~3 cats × 100 steps per call.
     """
 
-    def __init__(self, dit) -> None:
+    def __init__(self, dit, *, batch_cond: torch.Tensor, batch_global: torch.Tensor, cfg_scale: float) -> None:
         super().__init__()
         self.dit = dit
+        self.batch_cond = batch_cond
+        self.batch_global = batch_global
+        self.cfg_scale = cfg_scale
+        self.do_cfg = cfg_scale != 1.0
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        t: torch.Tensor,
-        *,
-        cross_attn_cond: torch.Tensor,
-        cross_attn_cond_mask: torch.Tensor | None = None,
-        negative_cross_attn_cond: torch.Tensor | None = None,
-        negative_cross_attn_mask: torch.Tensor | None = None,
-        global_cond: torch.Tensor,
-        negative_global_cond: torch.Tensor | None = None,
-        cfg_scale: float = 1.0,
-        **_unused,
-    ) -> torch.Tensor:
-        if cfg_scale == 1.0:
-            return self.dit(x, t, cross_attn_cond=cross_attn_cond, global_embed=global_cond)
-
-        # CFG batching — replicate upstream `DiffusionTransformer.forward`'s
-        # batch-CFG branch.
-        batch_inputs = torch.cat([x, x], dim=0)
+    def forward(self, x: torch.Tensor, t: torch.Tensor, **_unused) -> torch.Tensor:
+        if not self.do_cfg:
+            return self.dit(x, t, cross_attn_cond=self.batch_cond, global_embed=self.batch_global)
+        batch_x = torch.cat([x, x], dim=0)
         batch_t = torch.cat([t, t], dim=0)
-        batch_global = torch.cat([global_cond, global_cond if negative_global_cond is None else negative_global_cond],
-                                 dim=0)
-
-        null_embed = torch.zeros_like(cross_attn_cond)
-        if negative_cross_attn_cond is not None:
-            if negative_cross_attn_mask is not None:
-                neg_mask = negative_cross_attn_mask.to(torch.bool).unsqueeze(2)
-                negative_cross_attn_cond = torch.where(neg_mask, negative_cross_attn_cond, null_embed)
-            batch_cond = torch.cat([cross_attn_cond, negative_cross_attn_cond], dim=0)
-        else:
-            batch_cond = torch.cat([cross_attn_cond, null_embed], dim=0)
-
-        batch_out = self.dit(batch_inputs, batch_t, cross_attn_cond=batch_cond, global_embed=batch_global)
-        cond_out, uncond_out = torch.chunk(batch_out, 2, dim=0)
-        return uncond_out + (cond_out - uncond_out) * cfg_scale
+        out = self.dit(batch_x, batch_t, cross_attn_cond=self.batch_cond, global_embed=self.batch_global)
+        cond_out, uncond_out = torch.chunk(out, 2, dim=0)
+        return uncond_out + (cond_out - uncond_out) * self.cfg_scale
 
 
 class StableAudioDenoisingStage(PipelineStage):
@@ -100,94 +82,119 @@ class StableAudioDenoisingStage(PipelineStage):
         guidance_scale = float(batch.guidance_scale or pc.guidance_scale)
         steps = int(batch.num_inference_steps)
 
-        # k-diffusion is a sampling library, not a model class — using its
-        # dpmpp-3m-sde sampler matches the official upstream byte-for-byte.
         import k_diffusion as K
-        adapter = _DiTAdapter(self.transformer)
-        denoiser = K.external.VDenoiser(adapter)
 
         # If the user gave us an init latent (audio-to-audio variation),
-        # the sampler should start at `sigma_max = init_noise_level` instead
-        # of the full self._SIGMA_MAX. This matches upstream
-        # `generate_diffusion_cond`'s `sampler_kwargs["sigma_max"]` override.
+        # the sampler should start at `sigma_max = init_noise_level` — see
+        # upstream `generate_diffusion_cond`'s `sampler_kwargs` override.
         init_latent = ext.get("init_latent")
-        sigma_max = (float(ext.get("init_noise_level", self._SIGMA_MAX))
+        sigma_max = (float(getattr(batch, "init_noise_level", None) or self._SIGMA_MAX)
                      if init_latent is not None else self._SIGMA_MAX)
 
         sigmas = K.sampling.get_sigmas_polyexponential(steps, self._SIGMA_MIN, sigma_max, self._RHO, device=device)
         # Upstream scales the initial noise by sigmas[0] inside `sample_k`,
         # then adds `init_data` if provided.
-        noise_latent = batch.latents * sigmas[0]
-        x = init_latent + noise_latent if init_latent is not None else noise_latent
+        x = batch.latents * sigmas[0]
+        if init_latent is not None:
+            x = x + init_latent
 
-        extra_args = {
-            "cross_attn_cond": ext["cross_attn_cond"],
-            "cross_attn_cond_mask": ext.get("cross_attn_mask"),
-            "global_cond": ext["global_embed"],
-            "cfg_scale": guidance_scale,
-        }
-        if ext.get("negative_cross_attn_cond") is not None:
-            extra_args["negative_cross_attn_cond"] = ext["negative_cross_attn_cond"]
-            extra_args["negative_cross_attn_mask"] = ext["negative_cross_attn_mask"]
-        if ext.get("negative_global_embed") is not None:
-            extra_args["negative_global_cond"] = ext["negative_global_embed"]
+        # Precompute the CFG-batched conditioning once. The adapter then
+        # only has to do `cat([x, x])` + DiT call per step.
+        batch_cond, batch_global = _build_cfg_conditioning(
+            cross_attn_cond=ext["cross_attn_cond"],
+            global_embed=ext["global_embed"],
+            negative_cross_attn_cond=ext.get("negative_cross_attn_cond"),
+            negative_cross_attn_mask=ext.get("negative_cross_attn_mask"),
+            negative_global_embed=ext.get("negative_global_embed"),
+            do_cfg=guidance_scale != 1.0,
+        )
+        adapter = _DiTAdapter(self.transformer,
+                              batch_cond=batch_cond,
+                              batch_global=batch_global,
+                              cfg_scale=guidance_scale)
+        denoiser = K.external.VDenoiser(adapter)
 
-        # RePaint-style inpainting hook: if a binary mask + reference latent
-        # are supplied, blend (renoised reference) into x at every step in
-        # the kept region (mask == 1). This works on any v-prediction
-        # diffusion model — it does not require an inpaint-trained
-        # checkpoint. Stable Audio Open 1.0 is `diffusion_cond` (not
-        # `diffusion_cond_inpaint`), so this is the only inpainting path
-        # available without a different checkpoint.
-        inpaint_mask = ext.get("inpaint_mask_latent")  # [1, 1, latent_seq] or None
-        inpaint_ref = ext.get("inpaint_reference_latent")  # [1, C, latent_seq] or None
-        callback = None
-        if inpaint_mask is not None and inpaint_ref is not None:
-            callback = _make_inpaint_callback(inpaint_ref, inpaint_mask, sigmas)
+        # RePaint-style inpainting hook (works on any v-prediction model;
+        # SA Open 1.0 isn't inpaint-trained so this is the only path).
+        inpaint_mask = ext.get("inpaint_mask_latent")
+        inpaint_ref = ext.get("inpaint_reference_latent")
+        callback = (_make_inpaint_callback(inpaint_ref, inpaint_mask, sigmas)
+                    if inpaint_mask is not None and inpaint_ref is not None else None)
 
-        # `LocalAttention` (used inside our native StableAudioDiT) needs an
-        # active forward context to read `attn_metadata`. Wrap the whole
-        # sampling loop — every DiT call sees `attn_metadata=None`, which is
-        # what the SDPA / FlashAttn backends accept for unconditioned compute.
+        # `LocalAttention` (used inside our native StableAudioDiT) reads
+        # `get_forward_context()` for `attn_metadata`. Wrap the whole loop.
         with set_forward_context(current_timestep=0, attn_metadata=None):
             sampled = K.sampling.sample_dpmpp_3m_sde(denoiser,
                                                      x,
                                                      sigmas,
                                                      disable=False,
-                                                     extra_args=extra_args,
+                                                     extra_args={},
                                                      callback=callback)
 
-        # Final mask blend so the kept region of the inpaint reference is
-        # exactly preserved in the returned latent.
+        # Final blend: kept region of the inpaint reference is exact-equal.
         if inpaint_mask is not None and inpaint_ref is not None:
             sampled = inpaint_ref * inpaint_mask + sampled * (1 - inpaint_mask)
         batch.latents = sampled
         return batch
 
 
+def _build_cfg_conditioning(
+    *,
+    cross_attn_cond: torch.Tensor,
+    global_embed: torch.Tensor,
+    negative_cross_attn_cond: torch.Tensor | None,
+    negative_cross_attn_mask: torch.Tensor | None,
+    negative_global_embed: torch.Tensor | None,
+    do_cfg: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build the CFG-batched (cond, global) tensors once.
+
+    Mirrors upstream `DiffusionTransformer.forward`'s batch-CFG branch:
+      * cond ordering = [conditioned, unconditioned] (the adapter splits
+        with the same convention)
+      * masked negative cond is zero-filled where mask == 0 (matches
+        `prepare negative cross_attn_cond` in upstream)
+    """
+    if not do_cfg:
+        return cross_attn_cond, global_embed
+    if negative_cross_attn_cond is not None:
+        if negative_cross_attn_mask is not None:
+            neg_mask = negative_cross_attn_mask.to(torch.bool).unsqueeze(2)
+            null_embed = torch.zeros_like(cross_attn_cond)
+            negative_cross_attn_cond = torch.where(neg_mask, negative_cross_attn_cond, null_embed)
+        batch_cond = torch.cat([cross_attn_cond, negative_cross_attn_cond], dim=0)
+    else:
+        batch_cond = torch.cat([cross_attn_cond, torch.zeros_like(cross_attn_cond)], dim=0)
+    other_global = global_embed if negative_global_embed is None else negative_global_embed
+    batch_global = torch.cat([global_embed, other_global], dim=0)
+    return batch_cond, batch_global
+
+
 def _make_inpaint_callback(reference_latent: torch.Tensor, mask: torch.Tensor, sigmas: torch.Tensor):
     """Build a k-diffusion sampler callback that performs RePaint blending
     after every step.
 
-    At step `i` (current sigma = `sigmas[i]`), the callback:
-      1. Re-noises the reference latent to `sigma = sigmas[i+1]` (the sigma
-         the next denoise step will see).
-      2. Replaces the kept region (mask == 1) of the in-flight latent
-         `state['x']` with the renoised reference.
+    Pre-allocates the noise + working buffers so the ~100 sampler steps
+    don't churn 25MB of fresh allocations per call.
 
-    This pulls the kept region back onto the trajectory the model expects,
-    which is what makes RePaint-style inpainting converge on
-    non-inpaint-trained models.
+    At step `i`, replaces the kept region (mask == 1) of the in-flight
+    latent with the reference re-noised to `sigmas[i + 1]`. This pulls
+    the kept region back onto the trajectory the model expects, which
+    is what makes RePaint-style inpainting converge on non-inpaint-
+    trained models.
     """
+    noise_buf = torch.empty_like(reference_latent)
+    inv_mask = 1 - mask
 
     def cb(info: dict) -> None:
         i = int(info["i"])
         next_i = min(i + 1, len(sigmas) - 1)
         sigma_next = float(sigmas[next_i])
-        # Renoise the reference to the *next* sigma.
-        noisy_ref = reference_latent + torch.randn_like(reference_latent) * sigma_next
-        # Blend in-place — k_diffusion samplers respect mutated state['x'].
+        noise_buf.normal_()
+        # Blend in-place — k_diffusion's dpmpp-3m-sde sampler reads
+        # `state["x"]` between steps, so mutating it via copy_() carries
+        # forward (verified against k_diffusion 0.1.1.post1).
         x = info["x"]
-        x.copy_(noisy_ref * mask + x * (1 - mask))
+        x.copy_((reference_latent + noise_buf * sigma_next) * mask + x * inv_mask)
 
     return cb

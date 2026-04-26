@@ -22,9 +22,6 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
 
-# Fixed downsampling ratio for Stable Audio Open 1.0 Oobleck VAE.
-_DOWNSAMPLING_RATIO = 2048
-
 
 class StableAudioLatentPreparationStage(PipelineStage):
 
@@ -37,8 +34,8 @@ class StableAudioLatentPreparationStage(PipelineStage):
         super().__init__()
         self.io_channels = io_channels
         # `sample_size` is the audio-domain length the official model was
-        # trained for; latent length = sample_size // _DOWNSAMPLING_RATIO
-        # (= 2097152 / 2048 = 1024).
+        # trained for; latent length = sample_size // vae.hop_length
+        # (= 2097152 / 2048 = 1024 for Stable Audio Open 1.0).
         self.sample_size = sample_size
         self.vae = vae  # used to encode init_audio / inpaint_audio
         self.sample_rate = sample_rate
@@ -54,21 +51,18 @@ class StableAudioLatentPreparationStage(PipelineStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         ext = batch.extra or {}
         device = ext["cross_attn_cond"].device
-        latent_sample_size = self.sample_size // _DOWNSAMPLING_RATIO
+        latent_sample_size = self.sample_size // self._hop_length()
 
-        seed = batch.seed if batch.seed is not None else 0
+        seed = int(batch.seed) if batch.seed is not None else 0
         # Match upstream `generate_diffusion_cond`:
         #     torch.manual_seed(seed)
         #     noise = torch.randn([B, io_channels, sample_size], device=device)
-        torch.manual_seed(int(seed))
+        torch.manual_seed(seed)
         latents = torch.randn((1, self.io_channels, latent_sample_size), device=device)
 
         batch.latents = latents
         if batch.extra is None:
             batch.extra = {}
-        batch.extra["seed"] = int(seed)
-        batch.extra["downsampling_ratio"] = _DOWNSAMPLING_RATIO
-        batch.extra["sample_size"] = self.sample_size
 
         # ---- A2A / inpainting reference encoding -----------------------
         init_audio = getattr(batch, "init_audio", None)
@@ -92,16 +86,22 @@ class StableAudioLatentPreparationStage(PipelineStage):
                              "`inpaint_audio` + `inpaint_mask` (inpainting), not both.")
 
         if init_audio is not None:
-            init_latent = self._encode_audio_reference(init_audio, device)
-            batch.extra["init_latent"] = init_latent
-            batch.extra["init_noise_level"] = float(getattr(batch, "init_noise_level", None) or 1.0)
+            batch.extra["init_latent"] = self._encode_audio_reference(init_audio, device)
+            # init_noise_level stays on `batch` directly; the denoising
+            # stage reads `batch.init_noise_level` (parallel to how
+            # `guidance_scale` is read).
 
         if inpaint_audio is not None and inpaint_mask is not None:
-            ref_latent = self._encode_audio_reference(inpaint_audio, device)
-            mask_latent = self._prepare_mask(inpaint_mask, latent_sample_size, device)
-            batch.extra["inpaint_reference_latent"] = ref_latent
-            batch.extra["inpaint_mask_latent"] = mask_latent
+            batch.extra["inpaint_reference_latent"] = self._encode_audio_reference(inpaint_audio, device)
+            batch.extra["inpaint_mask_latent"] = self._prepare_mask(inpaint_mask, latent_sample_size, device)
         return batch
+
+    def _hop_length(self) -> int:
+        """Resolve the VAE's audio-to-latent downsampling ratio."""
+        v = self.vae
+        if hasattr(v, "oobleck_vae"):
+            return int(v.oobleck_vae.hop_length)
+        return int(getattr(v, "hop_length", 2048))
 
     def _encode_audio_reference(self, audio: torch.Tensor, device: torch.device) -> torch.Tensor:
         """Pad/truncate audio to `sample_size`, then encode via the VAE.
@@ -126,29 +126,14 @@ class StableAudioLatentPreparationStage(PipelineStage):
             audio = F.pad(audio, (0, self.sample_size - cur_len))
         elif cur_len > self.sample_size:
             audio = audio[..., :self.sample_size]
-        # Upstream `pretransform.encode` calls `VAEBottleneck.encode` →
-        # `vae_sample(mean, scale)` which adds `randn_like(mean) *
-        # softplus(scale)+1e-4` (stochastic). To byte-match upstream we
-        # need to sample from the posterior, not take .mode() — the
-        # global torch RNG state at this point is "post-`randn(noise)`",
-        # same as upstream.
-        #
-        # Bypass `SAAudioVAEModel.encode` (the legacy wrapper that
-        # auto-takes .mode()) and go direct to the inner OobleckVAE.
-        # `_move_to_input_device` triggers the lazy load + device move
-        # so the inner module's params land on the right GPU before we
-        # pull `next(inner.parameters()).dtype`.
-        if hasattr(self.vae, "oobleck_vae"):
-            mover = getattr(self.vae, "_move_to_input_device", None)
-            if mover is not None:
-                self.vae._move_to_input_device(self.vae.oobleck_vae, audio)
-            inner = self.vae.oobleck_vae
-        else:
-            inner = self.vae
-        posterior = inner.encode(audio.to(next(inner.parameters()).dtype))
-        if hasattr(posterior, "sample") and not isinstance(posterior, torch.Tensor):
-            return posterior.sample()
-        return posterior
+        # Stochastic posterior — matches upstream `vae_sample(mean, scale)`.
+        # The global torch RNG state at this point is "post-`randn(noise)`",
+        # same as upstream `generate_diffusion_cond`.
+        from fastvideo.models.vaes.sa_audio import SAAudioVAEModel
+        if isinstance(self.vae, SAAudioVAEModel):
+            return self.vae.encode(audio, sample_posterior=True)
+        # Bare OobleckVAE path (used by tests): returns a posterior with `.sample()`.
+        return self.vae.encode(audio.to(next(self.vae.parameters()).dtype)).sample()
 
     def _prepare_mask(self, mask: torch.Tensor, latent_len: int, device: torch.device) -> torch.Tensor:
         """Resample a binary [0/1] mask in audio-sample space to latent space.

@@ -39,18 +39,6 @@ class StableAudioConditioningStage(PipelineStage):
         pc = fastvideo_args.pipeline_config
         device = next(self.conditioner.parameters()).device
 
-        # Mirror upstream `generate_diffusion_cond`'s deterministic-math
-        # toggles. Without these, TF32 matmul + cuDNN benchmark introduce
-        # per-element drift between FastVideo and the upstream reference
-        # — small for plain T2A but compounded heavily by the A2A
-        # renoise-then-denoise trajectory. Set as early as possible so
-        # T5, the conditioner, the VAE encode (in latent_prep), and the
-        # DiT denoise (in denoising stage) all run in the same regime.
-        torch.backends.cuda.matmul.allow_tf32 = False
-        torch.backends.cudnn.allow_tf32 = False
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-        torch.backends.cudnn.benchmark = False
-
         audio_start_in_s = float(getattr(batch, "audio_start_in_s", None) or pc.audio_start_in_s)
         audio_end_in_s = float(getattr(batch, "audio_end_in_s", None) or pc.audio_end_in_s)
         guidance_scale = float(batch.guidance_scale or pc.guidance_scale)

@@ -117,21 +117,21 @@ class SAAudioVAEModel(nn.Module):
             return out.sample
         return out
 
-    def encode(self, waveform: torch.Tensor) -> torch.Tensor:
+    def encode(self, waveform: torch.Tensor, sample_posterior: bool = False) -> torch.Tensor:
         """Encode a waveform (`[B, audio_channels, samples]`) -> latent
-        mean (`[B, decoder_input_channels, L]`).
+        (`[B, decoder_input_channels, L]`).
+
+        sample_posterior=False (default): deterministic mean (`.mode()`).
+        sample_posterior=True: stochastic sample matching upstream
+        `vae_sample(mean, scale)` (= `mean + softplus(scale)*randn`).
         """
         model = self.oobleck_vae
         model = self._move_to_input_device(model, waveform)
         with torch.no_grad():
             out = model.encode(waveform.to(next(model.parameters()).dtype))
         if hasattr(out, "latent_dist"):
-            return out.latent_dist.mode()
-        if hasattr(out, "mode"):
-            return out.mode()
-        if hasattr(out, "sample") and callable(getattr(out, "sample")):
-            return out.sample()
-        return out
+            out = out.latent_dist
+        return out.sample() if sample_posterior else out.mode()
 
 
 EntryClass = SAAudioVAEModel

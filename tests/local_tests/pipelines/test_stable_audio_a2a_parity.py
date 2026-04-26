@@ -183,16 +183,13 @@ def test_stable_audio_a2a_official_parity():
     print(f"diff max={diff_max:.6f} mean={diff_mean:.6f} median={diff_median:.6f} "
           f"abs_mean rel drift={rel:.4%}")
 
-    # A2A is fundamentally more sensitive than T2A: the VAE encode-side
-    # samples a stochastic latent (`posterior.sample()` adds randn noise
-    # scaled by per-element softplus(scale)+1e-4), and any tiny RNG-
-    # ordering difference between FV and upstream propagates through
-    # the renoise-then-denoise SDE trajectory as a per-sample phase
-    # shift — same statistical distribution, different per-sample
-    # values. So we bound on the *aggregate* statistics rather than
-    # the element-wise max.
-    assert rel < 0.05, f"A2A abs_mean drift {rel:.2%} > 5% — likely orchestration regression"
-    assert diff_mean < 0.15, f"A2A mean diff {diff_mean:.4f} > 0.15"
+    # A2A is more sensitive than T2A — the encode-side
+    # `posterior.sample()` adds per-element randn noise, so even tiny
+    # RNG-ordering differences propagate through the SDE trajectory.
+    # Empirically (after hoisting the CFG batching + null_embed out of
+    # the sampler loop): drift ~0.5%, mean diff ~0.003.
+    assert rel < 0.02, f"A2A abs_mean drift {rel:.2%} > 2%"
+    assert diff_mean < 0.05, f"A2A mean diff {diff_mean:.4f} > 0.05"
     # Both waveforms should stay in the audio range (no NaN, no blow-up).
     assert torch.isfinite(fv_audio).all(), "FV A2A produced non-finite values"
     assert fv_audio.abs().max().item() < 5.0, "FV A2A magnitude blew up"

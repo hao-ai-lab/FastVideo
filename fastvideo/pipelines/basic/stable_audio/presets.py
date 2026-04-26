@@ -29,6 +29,16 @@ _DENOISE_STAGE = PresetStageSpec(
     }),
 )
 
+# Sampling defaults shared across both checkpoints (see module docstring
+# for provenance). audio_end_in_s / audio_start_in_s are pipeline-call
+# kwargs; not surfaced here to keep them explicit.
+_SHARED_DEFAULTS = {
+    "seed": 0,
+    "guidance_scale": 7.0,
+    "num_inference_steps": 100,
+    "negative_prompt": "",
+}
+
 STABLE_AUDIO_OPEN_1_0_BASE = InferencePreset(
     name="stable_audio_open_1_0_base",
     version=1,
@@ -38,14 +48,7 @@ STABLE_AUDIO_OPEN_1_0_BASE = InferencePreset(
                  "is 10s; raise via `audio_end_in_s` up to the model max."),
     workload_type="t2v",  # NOTE: WorkloadType has no T2A variant yet (REVIEW item 28)
     stage_schemas=(_DENOISE_STAGE, ),
-    defaults={
-        "seed": 0,
-        "guidance_scale": 7.0,
-        "num_inference_steps": 100,
-        "negative_prompt": "",
-        # audio_end_in_s / audio_start_in_s are pipeline-call kwargs;
-        # not surfaced as preset defaults to keep them explicit.
-    },
+    defaults=dict(_SHARED_DEFAULTS),
 )
 
 # `stable-audio-open-small` is a separate gated Stability AI checkpoint
@@ -65,12 +68,7 @@ STABLE_AUDIO_OPEN_SMALL = InferencePreset(
                  "access on HF before use."),
     workload_type="t2v",
     stage_schemas=(_DENOISE_STAGE, ),
-    defaults={
-        "seed": 0,
-        "guidance_scale": 7.0,
-        "num_inference_steps": 100,
-        "negative_prompt": "",
-    },
+    defaults=dict(_SHARED_DEFAULTS),
 )
 
 ALL_PRESETS = (STABLE_AUDIO_OPEN_1_0_BASE, STABLE_AUDIO_OPEN_SMALL)
