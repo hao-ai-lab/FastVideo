@@ -98,17 +98,22 @@ class SamplingParam:
     camera_rotation: str | None = None
 
     # LTX-2 multi-modal CFG and STG.
-    # cfg_scale defaults are 1.0 (CFG off) so ``ForwardBatch.__post_init__``
-    # doesn't force ``do_classifier_free_guidance`` on non-LTX-2 models that
-    # never override these fields. LTX-2 presets that need text-CFG on set
-    # them in their ``defaults`` dict (e.g. ``ltx2_base``).
+    # Class-level defaults match the *distilled* LTX-2 schedule
+    # (mirrors ``FastVideo-internal/.../LTX2DistilledSamplingParam``):
+    # the distilled model expects neutral guidance scales — modality 1,
+    # rescale 0, STG 0 — and explicit-CFG callers (full LTX-2) opt back
+    # in by selecting the ``LTX2_BASE`` preset, which overrides these
+    # to mod=3.0 / rescale=0.7 / stg=1.0 in its ``defaults`` dict.
+    # cfg_scale defaults stay at 1.0 (CFG off) so
+    # ``ForwardBatch.__post_init__`` doesn't force CFG on non-LTX-2
+    # models that never override these fields.
     ltx2_cfg_scale_video: float = 1.0
     ltx2_cfg_scale_audio: float = 1.0
-    ltx2_modality_scale_video: float = 3.0
-    ltx2_modality_scale_audio: float = 3.0
-    ltx2_rescale_scale: float = 0.7
-    ltx2_stg_scale_video: float = 1.0
-    ltx2_stg_scale_audio: float = 1.0
+    ltx2_modality_scale_video: float = 1.0
+    ltx2_modality_scale_audio: float = 1.0
+    ltx2_rescale_scale: float = 0.0
+    ltx2_stg_scale_video: float = 0.0
+    ltx2_stg_scale_audio: float = 0.0
     ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
     ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
 
