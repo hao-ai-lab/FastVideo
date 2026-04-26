@@ -519,7 +519,7 @@ def test_main_rejects_top_level_config_without_subcommand(tmp_path, monkeypatch)
         cli_main.main()
 
 
-def test_serve_cmd_dispatches_to_streaming_when_streaming_block_set(tmp_path):
+def test_serve_cmd_dispatches_to_streaming_when_streaming_block_set(tmp_path, monkeypatch):
     config_path = tmp_path / "serve-streaming.yaml"
     config_path.write_text(
         "generator:\n"
@@ -530,9 +530,21 @@ def test_serve_cmd_dispatches_to_streaming_when_streaming_block_set(tmp_path):
     )
     args, _ = _parse_serve_args(["--config", str(config_path)])
 
-    with pytest.raises(NotImplementedError,
-                       match="streaming server is not implemented"):
-        ServeSubcommand().cmd(args)
+    captured: dict[str, object] = {}
+
+    def fake_run_server(serve_config, *, generator=None):
+        captured["serve_config"] = serve_config
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("OpenAI server must not run when streaming is set")
+
+    monkeypatch.setattr(streaming_server, "run_server", fake_run_server)
+    monkeypatch.setattr(api_server, "run_server", fail_if_called)
+    ServeSubcommand().cmd(args)
+
+    serve_config = captured["serve_config"]
+    assert serve_config.streaming is not None
+    assert serve_config.streaming.stream_mode == "av_fmp4"
 
 
 def test_streaming_run_server_rejects_missing_streaming_block():

@@ -1,10 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
+from __future__ import annotations
+
 import copy
 from dataclasses import dataclass, field, fields
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastvideo.logger import init_logger
 from fastvideo.utils import StoreBoolean
+
+if TYPE_CHECKING:
+    from fastvideo.api.schema import ContinuationState
 
 logger = init_logger(__name__)
 
@@ -92,9 +97,13 @@ class SamplingParam:
     movement_distance: float | None = None
     camera_rotation: str | None = None
 
-    # LTX2 multi-modal CFG and STG
-    ltx2_cfg_scale_video: float = 3.0
-    ltx2_cfg_scale_audio: float = 7.0
+    # LTX-2 multi-modal CFG and STG.
+    # cfg_scale defaults are 1.0 (CFG off) so ``ForwardBatch.__post_init__``
+    # doesn't force ``do_classifier_free_guidance`` on non-LTX-2 models that
+    # never override these fields. LTX-2 presets that need text-CFG on set
+    # them in their ``defaults`` dict (e.g. ``ltx2_base``).
+    ltx2_cfg_scale_video: float = 1.0
+    ltx2_cfg_scale_audio: float = 1.0
     ltx2_modality_scale_video: float = 3.0
     ltx2_modality_scale_audio: float = 3.0
     ltx2_rescale_scale: float = 0.7
@@ -102,6 +111,12 @@ class SamplingParam:
     ltx2_stg_scale_audio: float = 1.0
     ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
     ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
+
+    # Continuation state carried across streaming/multi-segment calls.
+    continuation_state: ContinuationState | None = None
+    # When True, the pipeline returns a ContinuationState on the result so
+    # the caller can resume from the generated segment.
+    return_continuation_state: bool = False
 
     # Misc
     save_video: bool = True
@@ -127,7 +142,7 @@ class SamplingParam:
         self.__post_init__()
 
     @classmethod
-    def from_pretrained(cls, model_path: str) -> "SamplingParam":
+    def from_pretrained(cls, model_path: str) -> SamplingParam:
         sampling_param = cls._from_preset(model_path)
         if sampling_param is not None:
             return sampling_param
@@ -143,7 +158,7 @@ class SamplingParam:
     def _from_preset(
         cls,
         model_path: str,
-    ) -> "SamplingParam | None":
+    ) -> SamplingParam | None:
         """Build a SamplingParam from preset defaults.
 
         Returns ``None`` when no preset is configured for

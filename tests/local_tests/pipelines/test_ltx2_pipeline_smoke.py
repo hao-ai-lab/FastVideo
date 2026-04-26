@@ -294,3 +294,52 @@ def test_ltx2_pipeline_smoke():
 
         assert ref_video.shape == fastvideo_out.shape
         assert_close(ref_video, fastvideo_out, atol=2 / 255, rtol=1e-3)
+
+
+def test_ltx2_typed_surface_preflight() -> None:
+    """Preflight: the PR 6 typed LTX-2 surface (preset + refine
+    override dataclasses + colocated pipeline config) must be importable
+    and registered before any GPU pipeline construction is attempted.
+
+    Pure-Python; does not need CUDA or model weights. Catches import-
+    wiring regressions (registry loss, renamed modules, preset dropped
+    from ALL_PRESETS) that would otherwise only surface on a GPU host.
+    """
+    import fastvideo.registry  # noqa: F401 — triggers preset registration
+    from fastvideo.api.presets import get_preset, get_presets_for_family
+    from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
+    from fastvideo.pipelines.basic.ltx2.stage_overrides import (
+        LTX2RefinePresetOverride,
+        LTX2RefineStageOverride,
+        refine_preset_override_fields,
+        refine_stage_override_fields,
+    )
+    from fastvideo.pipelines.basic.ltx2.stages import (  # noqa: F401
+        LTX2AudioDecodingStage,
+        LTX2DenoisingStage,
+        LTX2LatentPreparationStage,
+        LTX2TextEncodingStage,
+    )
+
+    # All three LTX-2 presets registered.
+    names = {p.name for p in get_presets_for_family("ltx2")}
+    assert names == {"ltx2_base", "ltx2_distilled", "ltx2_two_stage"}
+
+    # Two-stage preset has the denoise + refine topology and pulls its
+    # refine allowed_overrides from the typed dataclass.
+    two_stage = get_preset("ltx2_two_stage", "ltx2")
+    stage_names = [s.name for s in two_stage.stage_schemas]
+    assert stage_names == ["denoise", "refine"]
+    refine_spec = two_stage.stage_schemas[1]
+    assert refine_spec.allowed_overrides == refine_stage_override_fields()
+
+    # Override dataclasses are constructable and advertise disjoint
+    # field sets (init-time vs. per-request).
+    assert LTX2RefinePresetOverride().enabled is None
+    assert LTX2RefineStageOverride().num_inference_steps is None
+    preset_fields = refine_preset_override_fields()
+    stage_fields = refine_stage_override_fields()
+    assert preset_fields.isdisjoint(stage_fields)
+
+    # Colocated pipeline config is discoverable.
+    assert LTX2T2VConfig().vae_tiling is True

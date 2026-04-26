@@ -26,7 +26,7 @@ MATRIXGAME_I2V = InferencePreset(
         "fps": 25,
         "guidance_scale": 1.0,
         "num_inference_steps": 3,
-        "negative_prompt": None,
+        "negative_prompt": "",
     },
 )
 
