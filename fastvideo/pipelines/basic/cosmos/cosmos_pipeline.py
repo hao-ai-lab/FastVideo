@@ -22,23 +22,18 @@ class Cosmos2VideoToWorldPipeline(ComposedPipelineBase):
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler", "safety_checker"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(shift=fastvideo_args.pipeline_config.flow_shift,
-                                                                    use_karras_sigmas=True)
-
-        sigma_max = 80.0
-        sigma_min = 0.002
-        sigma_data = 1.0
-        final_sigmas_type = "sigma_min"
-
-        if self.modules["scheduler"] is not None:
-            scheduler = self.modules["scheduler"]
-            scheduler.config.sigma_max = sigma_max
-            scheduler.config.sigma_min = sigma_min
-            scheduler.config.sigma_data = sigma_data
-            scheduler.config.final_sigmas_type = final_sigmas_type
-            scheduler.sigma_max = sigma_max
-            scheduler.sigma_min = sigma_min
-            scheduler.sigma_data = sigma_data
+        scheduler = FlowMatchEulerDiscreteScheduler(
+            shift=fastvideo_args.pipeline_config.flow_shift,
+            use_karras_sigmas=True,
+        )
+        scheduler.config.sigma_max = 80.0
+        scheduler.config.sigma_min = 0.002
+        scheduler.config.sigma_data = 1.0
+        scheduler.config.final_sigmas_type = "sigma_min"
+        scheduler.sigma_max = 80.0
+        scheduler.sigma_min = 0.002
+        scheduler.sigma_data = 1.0
+        self.modules["scheduler"] = scheduler
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
