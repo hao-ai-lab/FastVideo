@@ -271,7 +271,7 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         # Resolve the typed quant name to a concrete ``QuantizationConfig``
         # instance and pin it on ``dit_config.quant_config``. The legacy
         # path expected callers to do this themselves via
-        # ``pipeline_config.dit_config.quant_config = FP4Config()``; the
+        # ``pipeline_config.dit_config.quant_config = NVFP4Config()``; the
         # typed surface accepts a string and does the wiring here so
         # downstream code can rely on a single source of truth.
         from fastvideo.layers.quantization import get_quantization_config

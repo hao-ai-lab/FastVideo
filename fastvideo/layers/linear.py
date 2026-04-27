@@ -192,7 +192,7 @@ class LinearBase(torch.nn.Module):
             self.quant_method: QuantizeMethodBase | None = (UnquantizedLinearMethod())
         else:
             # ``get_quant_method`` returns ``None`` for layers the config
-            # has decided not to quantize (e.g. ``FP4Config`` only tags
+            # has decided not to quantize (e.g. ``NVFP4Config`` only tags
             # a curated subset of LTX-2 attention/FFN layers). Fall back
             # to ``UnquantizedLinearMethod`` so untagged layers behave
             # like a plain ``nn.Linear`` instead of breaking subclass
@@ -239,7 +239,7 @@ class ReplicatedLinear(LinearBase):
         )
 
         # ``QuantizationConfig.get_quant_method`` may return ``None`` for
-        # layers it doesn't intend to quantize (e.g. ``FP4Config`` only
+        # layers it doesn't intend to quantize (e.g. ``NVFP4Config`` only
         # tags a specific subset of LTX-2 attention/FFN layers). Fall
         # back to ``UnquantizedLinearMethod`` so non-matched layers
         # behave like a plain ``nn.Linear``.
