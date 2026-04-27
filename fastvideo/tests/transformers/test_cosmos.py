@@ -22,9 +22,24 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29504"
 
 BASE_MODEL_PATH = "nvidia/Cosmos-Predict2-2B-Video2World"
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join(
-                                      'data', BASE_MODEL_PATH))
+
+
+def _resolve_model_path() -> str:
+    try:
+        return maybe_download_model(
+            BASE_MODEL_PATH,
+            local_dir=os.path.join("data", BASE_MODEL_PATH),
+        )
+    except ValueError as exc:
+        pytest.skip(
+            "Skipping Cosmos transformer test because the configured "
+            "HuggingFace token cannot access the gated Cosmos weights: "
+            f"{exc}",
+            allow_module_level=True,
+        )
+
+
+MODEL_PATH = _resolve_model_path()
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 
 

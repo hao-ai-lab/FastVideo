@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import copy
 import gc
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, ClassVar, Literal, TYPE_CHECKING
 
 import torch
 
@@ -60,6 +60,7 @@ class WanModel(ModelBase):
     """Wan per-role model: owns transformer + noise_scheduler."""
 
     _transformer_cls_name: str = "WanTransformer3DModel"
+    _prompt_pipeline_cls: ClassVar[type[WanPipeline]] = WanPipeline
 
     def __init__(
         self,
@@ -357,7 +358,7 @@ class WanModel(ModelBase):
 
             inference_args = make_inference_args(tc, model_path=tc.model_path)
 
-            prompt_pipeline = WanPipeline.from_pretrained(
+            prompt_pipeline = self._prompt_pipeline_cls.from_pretrained(
                 tc.model_path,
                 args=inference_args,
                 inference_mode=True,
