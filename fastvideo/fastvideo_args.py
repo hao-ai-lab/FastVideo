@@ -218,9 +218,9 @@ class FastVideoArgs:
     override_text_encoder_safetensors: str | None = None  # path to safetensors file for text encoder override
     override_text_encoder_quant: QuantizationMethods = None
     # Typed transformer quantization carrier. The typed inference API
-    # accepts ``engine.quantization.transformer_quant: "FP4"`` and the
+    # accepts ``engine.quantization.transformer_quant: "NVFP4"`` and the
     # compat layer resolves the name to a concrete ``QuantizationConfig``
-    # instance (e.g. ``FP4Config()``); ``__post_init__`` then pins it on
+    # instance (e.g. ``NVFP4Config()``); ``__post_init__`` then pins it on
     # ``pipeline_config.dit_config.quant_config`` so the loader can detect
     # FP4 layers via the standard ``get_quant_method`` path. ``None``
     # leaves whatever value the caller already set on ``dit_config``
@@ -261,7 +261,7 @@ class FastVideoArgs:
         """Pin the typed ``transformer_quant`` instance onto ``dit_config``.
 
         ``transformer_quant`` is populated by the typed compat layer when
-        a caller writes ``engine.quantization.transformer_quant: "FP4"``
+        a caller writes ``engine.quantization.transformer_quant: "NVFP4"``
         in their config. We pin it here rather than at request time so
         the model loader sees the quant_config when constructing the
         DiT (linear layers attach their quant_method during ``__init__``).
@@ -272,7 +272,7 @@ class FastVideoArgs:
         if dit_config is None:
             return
         # Don't overwrite if the caller already set it explicitly on
-        # dit_config (e.g. via ``pipeline_config.dit_config.quant_config = FP4Config()``);
+        # dit_config (e.g. via ``pipeline_config.dit_config.quant_config = NVFP4Config()``);
         # the explicit setter wins.
         if getattr(dit_config, "quant_config", None) is None:
             dit_config.quant_config = self.transformer_quant
