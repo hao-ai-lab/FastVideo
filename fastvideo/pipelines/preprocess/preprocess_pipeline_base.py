@@ -33,6 +33,16 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                            tokenizers=[self.get_module("tokenizer")],
                        ))
 
+    def _preprocess_inference_context(self, fastvideo_args: FastVideoArgs):
+        """Choose inference context for preprocessing.
+
+        FSDP2 CPU offload needs normal tensors with version counters during
+        text-encoder forward, so fall back to no_grad for that path.
+        """
+        if bool(getattr(fastvideo_args, "text_encoder_cpu_offload", False)):
+            return torch.no_grad()
+        return torch.inference_mode()
+
     @torch.no_grad()
     def forward(
         self,
@@ -264,7 +274,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             if data is None:
                 continue
 
-            with torch.inference_mode():
+            with self._preprocess_inference_context(fastvideo_args):
                 # Filter out invalid samples (those with all zeros)
                 valid_indices = []
                 for i, pixel_values in enumerate(data["pixel_values"]):

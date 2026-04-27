@@ -54,11 +54,20 @@ def run_training_from_config(
     cfg = load_run_config(config_path, overrides=overrides)
     tc = cfg.training
 
-    # Auto-set attention backend for VSA when sparsity is configured.
+    model_path_lower = str(tc.model_path).lower()
+
+    # Auto-set attention backend for model families that require a specific
+    # backend at load time, unless the user already overrode it explicitly.
     if tc.vsa_sparsity > 0.0:
         os.environ.setdefault(
             "FASTVIDEO_ATTENTION_BACKEND",
             "VIDEO_SPARSE_ATTN",
+        )
+    elif ("turbodiffusion" in model_path_lower
+          or "turbowan" in model_path_lower):
+        os.environ.setdefault(
+            "FASTVIDEO_ATTENTION_BACKEND",
+            "SLA_ATTN",
         )
 
     maybe_init_distributed_environment_and_model_parallel(
