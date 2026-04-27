@@ -48,6 +48,7 @@ from fastvideo.configs.pipelines.wan import (
     WanT2V720PConfig,
 )
 from fastvideo.configs.pipelines.sd35 import SD35Config
+from fastvideo.configs.pipelines.stable_audio import StableAudioT2AConfig
 from fastvideo.api.sampling_param import SamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
@@ -240,6 +241,24 @@ def _register_configs() -> None:
         ],
         model_family="ltx2",
         default_preset="ltx2_distilled",
+    )
+
+    # Stable Audio Open 1.0 (text-to-audio).
+    # NOTE: WorkloadType has no T2A variant yet (REVIEW item 28); using
+    # T2V as the placeholder until the enum is extended.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=StableAudioT2AConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "stabilityai/stable-audio-open-1.0",
+            "stabilityai/stable-audio-open-small",
+        ],
+        model_detectors=[
+            lambda path: "stable-audio-open" in path.lower() or "stableaudio" in path.lower(),
+        ],
+        model_family="stable_audio",
+        default_preset="stable_audio_open_1_0_base",
     )
 
     # Hunyuan 1.5 (specific)
@@ -786,6 +805,8 @@ def _register_presets() -> None:
         ALL_PRESETS as MATRIXGAME_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
+    from fastvideo.pipelines.basic.stable_audio.presets import (
+        ALL_PRESETS as STABLE_AUDIO_PRESETS, )
     from fastvideo.pipelines.basic.turbodiffusion.presets import (
         ALL_PRESETS as TURBODIFFUSION_PRESETS, )
     from fastvideo.pipelines.basic.wan.presets import (
@@ -803,6 +824,7 @@ def _register_presets() -> None:
         LTX2_PRESETS,
         MATRIXGAME_PRESETS,
         SD35_PRESETS,
+        STABLE_AUDIO_PRESETS,
         TURBODIFFUSION_PRESETS,
         WAN_PRESETS,
     )

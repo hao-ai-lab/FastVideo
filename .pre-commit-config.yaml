@@ -18,6 +18,7 @@ exclude: |
     fastvideo/train\.py|
     fastvideo/utils/.*|
     examples/.*|
+    \.agents/.*|
     .github/workflows/publish-fastvideo.yml|
     .github/workflows/_template-build-image.yml|
     docs/source/inference/support_matrix.md
