@@ -37,6 +37,7 @@ surfaces:
       torch_compile_kwargs_text_encoder: generator.engine.compile.text_encoder_kwargs
       torch_compile_kwargs_vae: generator.engine.compile.vae_kwargs
       torch_compile_kwargs_audio_vae: generator.engine.compile.audio_vae_kwargs
+      transformer_quant: generator.engine.quantization.transformer_quant
       disable_autocast: generator.engine.disable_autocast
       enable_stage_verification: generator.engine.enable_stage_verification
       prompt_txt: request.inputs.prompt_path
