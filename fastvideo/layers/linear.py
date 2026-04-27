@@ -191,7 +191,15 @@ class LinearBase(torch.nn.Module):
         if quant_config is None:
             self.quant_method: QuantizeMethodBase | None = (UnquantizedLinearMethod())
         else:
+            # ``get_quant_method`` returns ``None`` for layers the config
+            # has decided not to quantize (e.g. ``FP4Config`` only tags
+            # a curated subset of LTX-2 attention/FFN layers). Fall back
+            # to ``UnquantizedLinearMethod`` so untagged layers behave
+            # like a plain ``nn.Linear`` instead of breaking subclass
+            # asserts.
             self.quant_method = quant_config.get_quant_method(self, prefix=prefix)
+            if self.quant_method is None:
+                self.quant_method = UnquantizedLinearMethod()
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, Parameter | None]:
         raise NotImplementedError
@@ -230,8 +238,14 @@ class ReplicatedLinear(LinearBase):
             prefix=prefix,
         )
 
-        # All the linear layer supports quant method.
-        assert self.quant_method is not None
+        # ``QuantizationConfig.get_quant_method`` may return ``None`` for
+        # layers it doesn't intend to quantize (e.g. ``FP4Config`` only
+        # tags a specific subset of LTX-2 attention/FFN layers). Fall
+        # back to ``UnquantizedLinearMethod`` so non-matched layers
+        # behave like a plain ``nn.Linear``.
+        if self.quant_method is None:
+            self.quant_method = UnquantizedLinearMethod()
+
         self.quant_method.create_weights(
             self,
             self.input_size,

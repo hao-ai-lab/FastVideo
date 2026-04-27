@@ -268,7 +268,15 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
     if quantization is not None and quantization.text_encoder_quant is not None:
         kwargs["override_text_encoder_quant"] = quantization.text_encoder_quant
     if quantization is not None and quantization.transformer_quant is not None:
-        kwargs["transformer_quant"] = quantization.transformer_quant
+        # Resolve the typed quant name to a concrete ``QuantizationConfig``
+        # instance and pin it on ``dit_config.quant_config``. The legacy
+        # path expected callers to do this themselves via
+        # ``pipeline_config.dit_config.quant_config = FP4Config()``; the
+        # typed surface accepts a string and does the wiring here so
+        # downstream code can rely on a single source of truth.
+        from fastvideo.layers.quantization import get_quantization_config
+        _resolved_quant_cls = get_quantization_config(quantization.transformer_quant)
+        kwargs["transformer_quant"] = _resolved_quant_cls()
 
     components = normalized.pipeline.components
     if components.pipeline_config_path is not None:
