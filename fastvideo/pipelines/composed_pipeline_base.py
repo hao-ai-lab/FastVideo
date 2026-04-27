@@ -131,6 +131,11 @@ class ComposedPipelineBase(ABC):
             )
             return
 
+        prepare_for_compile = getattr(module, "prepare_for_compile", None)
+        if callable(prepare_for_compile):
+            logger.info("Running prepare_for_compile for %s", module_name)
+            prepare_for_compile()
+
         compiled_count = self._compile_with_conditions(module, compile_kwargs)
         if compiled_count > 0:
             logger.info(
@@ -159,7 +164,11 @@ class ComposedPipelineBase(ABC):
                 self.initialize_validation_pipeline(self.training_args)
 
         self.initialize_pipeline(self.fastvideo_args)
-        if self.fastvideo_args.enable_torch_compile:
+        compile_transformer = self.fastvideo_args.enable_torch_compile
+        compile_text_encoder = (self.fastvideo_args.enable_torch_compile_text_encoder)
+        compile_vae = self.fastvideo_args.enable_torch_compile_vae
+        compile_audio_vae = self.fastvideo_args.enable_torch_compile_audio_vae
+        if (compile_transformer or compile_text_encoder or compile_vae or compile_audio_vae):
             if self.fastvideo_args.training_mode:
                 logger.info("Torch Compile enabled via FSDP loader for training; skipping additional pipeline compile")
             else:
@@ -170,18 +179,58 @@ class ComposedPipelineBase(ABC):
                 except Exception:  # pragma: no cover - FSDP not always available
                     fsdp_module_cls = None
 
-                compile_kwargs = self.fastvideo_args.torch_compile_kwargs or {}
-                self._maybe_compile_pipeline_module(
-                    module_name="transformer",
-                    fsdp_module_cls=fsdp_module_cls,
-                    compile_kwargs=compile_kwargs,
-                )
-                self._maybe_compile_pipeline_module(
-                    module_name="transformer_2",
-                    fsdp_module_cls=fsdp_module_cls,
-                    compile_kwargs=compile_kwargs,
-                )
-                logger.info("Torch Compile enabled for DiT")
+                global_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs or {})
+                dit_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_dit or global_compile_kwargs)
+                text_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_text_encoder or global_compile_kwargs)
+                vae_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_vae or global_compile_kwargs)
+                audio_vae_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_audio_vae or global_compile_kwargs)
+
+                if compile_transformer:
+                    self._maybe_compile_pipeline_module(
+                        module_name="transformer",
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=dit_compile_kwargs,
+                    )
+                    self._maybe_compile_pipeline_module(
+                        module_name="transformer_refine",
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=dit_compile_kwargs,
+                    )
+                    self._maybe_compile_pipeline_module(
+                        module_name="transformer_2",
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=dit_compile_kwargs,
+                    )
+                    logger.info("Torch Compile enabled for DiT")
+
+                if compile_text_encoder:
+                    self._maybe_compile_pipeline_module(
+                        module_name="text_encoder",
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=text_compile_kwargs,
+                    )
+                    self._maybe_compile_pipeline_module(
+                        module_name="text_encoder_2",
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=text_compile_kwargs,
+                    )
+                    logger.info("Torch Compile enabled for text encoder")
+
+                if compile_vae:
+                    self._maybe_compile_pipeline_module(
+                        module_name="vae",
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=vae_compile_kwargs,
+                    )
+                    logger.info("Torch Compile enabled for VAE")
+
+                if compile_audio_vae:
+                    self._maybe_compile_pipeline_module(
+                        module_name="audio_vae",
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=audio_vae_compile_kwargs,
+                    )
+                    logger.info("Torch Compile enabled for audio VAE")
 
         if not self.fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")

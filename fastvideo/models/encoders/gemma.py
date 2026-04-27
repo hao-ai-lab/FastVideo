@@ -361,6 +361,10 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
                 continue
             yield name, param
 
+    def prepare_for_compile(self) -> None:
+        # Load Gemma outside Dynamo so torch.compile does not trace HF file-system checks.
+        _ = self.gemma_model
+
     @property
     def gemma_model(self) -> Gemma3ForConditionalGeneration:
         if self._gemma_model is None:
