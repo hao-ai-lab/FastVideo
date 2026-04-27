@@ -31,7 +31,7 @@ from fastvideo.api.compat import (
 # One item from gpu_pool.py's load_kwargs is deliberately excluded:
 #   - ``pipeline_config=<PipelineConfig instance>`` — an opaque Python
 #     object; internal mutates it in place (``dit_config.quant_config =
-#     FP4Config()``). The typed path for quantization is tracked in
+#     NVFP4Config()``). The typed path for quantization is tracked in
 #     "Known Technical Debt" in PR plan.md; ``pipeline_config`` as an
 #     instance legitimately belongs in ``pipeline.experimental``.
 #

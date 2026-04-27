@@ -1,13 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""LTX-2 FP4 quantization (FlashInfer-backed).
+"""LTX-2 NVFP4 quantization (FlashInfer-backed).
+
+NVFP4 is NVIDIA's block-scaled FP4 format (e2m1 mantissa, fp32 alpha,
+``layout_128x4`` scale layout, group size 16) — distinct from
+generic FP4 / OCP-FP4 / MX-FP4. We name the public surface ``NVFP4``
+explicitly so downstream callers don't conflate it with other FP4
+variants that may land later (e.g. AMD's MX-FP4 or vendor-neutral
+e3m0).
 
 Upstreamed from ``FastVideo-internal`` so consumers that load LTX-2
-weights with FP4 quantization can drive the public package end-to-end.
+weights with NVFP4 quantization can drive the public package
+end-to-end.
 
 `flashinfer` is imported lazily inside the call paths that need it.
 This keeps ``import fastvideo`` cheap on hosts where flashinfer is
-not installed; only the actual FP4 quantize / matmul ops fail at use
-time, with a clear error.
+not installed; only the actual NVFP4 quantize / matmul ops fail at
+use time, with a clear error.
 """
 from __future__ import annotations
 
@@ -39,7 +47,7 @@ def _require_flashinfer() -> tuple[Any, Any, Any]:
             SfLayout, mm_fp4, nvfp4_quantize,
         )
     except ImportError as exc:  # pragma: no cover - depends on host env
-        raise ImportError("FP4 quantization requires flashinfer. "
+        raise ImportError("NVFP4 quantization requires flashinfer. "
                           "Install with `pip install flashinfer-python`.") from exc
     return SfLayout, mm_fp4, nvfp4_quantize
 
@@ -253,7 +261,7 @@ def _mm_fp4(
     )
 
 
-class FP4QuantizeMethod(QuantizeMethodBase):
+class NVFP4QuantizeMethod(QuantizeMethodBase):
 
     def __init__(self, layer_prefix: str = ""):
         super().__init__()
@@ -335,12 +343,12 @@ class FP4QuantizeMethod(QuantizeMethodBase):
                 do_shuffle=False,
             )
 
-        weight_fp4 = layer._fp4_weight
-        weight_scale = layer._fp4_weight_scale
+        weight_fp4 = layer._nvfp4_weight
+        weight_scale = layer._nvfp4_weight_scale
         weight_global_sf = layer._weight_global_sf
 
-        if hasattr(layer, "_fp4_alpha"):
-            alpha = layer._fp4_alpha / x_global_sf
+        if hasattr(layer, "_nvfp4_alpha"):
+            alpha = layer._nvfp4_alpha / x_global_sf
         else:
             alpha = 1.0 / (x_global_sf * weight_global_sf)
 
@@ -361,12 +369,14 @@ class FP4QuantizeMethod(QuantizeMethodBase):
         return out
 
 
-class FP4Config(QuantizationConfig):
-    """LTX-2-specific FP4 quantization configuration.
+class NVFP4Config(QuantizationConfig):
+    """LTX-2-specific NVFP4 quantization configuration.
 
-    Today this class hardcodes the LTX-2 layer paths it covers. When a
-    second model wants FP4, lift the layer-path list into a config
-    field instead of hardcoding it here.
+    NVFP4 is NVIDIA's block-scaled FP4 (e2m1 mantissa, fp32 alpha,
+    ``layout_128x4`` scale layout, group size 16). Today this class
+    hardcodes the LTX-2 layer paths it covers. When a second model
+    wants NVFP4, lift the layer-path list into a config field
+    instead of hardcoding it here.
     """
 
     def __init__(self, layer_profile: str = "refine"):
@@ -376,7 +386,7 @@ class FP4Config(QuantizationConfig):
         self.layer_profile = layer_profile
 
     def get_name(self):
-        return "fp4"
+        return "nvfp4"
 
     def get_supported_act_dtypes(self):
         return [torch.bfloat16, torch.float16]
@@ -390,14 +400,14 @@ class FP4Config(QuantizationConfig):
         return []
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> FP4Config:
+    def from_config(cls, config: dict[str, Any]) -> NVFP4Config:
         return cls(layer_profile=config.get("layer_profile", "refine"))
 
     def get_quant_method(self, layer: torch.nn.Module, prefix: str):
         from fastvideo.layers.linear import LinearBase
 
         # Use the superset at build/load time, then switch active subset
-        # dynamically in FP4QuantizeMethod.apply based on stage profile.
+        # dynamically in NVFP4QuantizeMethod.apply based on stage profile.
         fp4_layers = [[
             f"ltx2.blocks.{i}.attn1.to_q",
             f"ltx2.blocks.{i}.attn1.to_k",
@@ -416,17 +426,17 @@ class FP4Config(QuantizationConfig):
             "ltx2.adaln_single.linear",
         ])
         if isinstance(layer, LinearBase) and any(prefix in layer_names for layer_names in fp4_layers):
-            return FP4QuantizeMethod(layer_prefix=prefix)
+            return NVFP4QuantizeMethod(layer_prefix=prefix)
         return None
 
 
-def convert_model_to_fp4(model: torch.nn.Module) -> None:
+def convert_model_to_nvfp4(model: torch.nn.Module) -> None:
     SfLayout, _, _ = _require_flashinfer()
     from torch.distributed.tensor import DTensor  # type: ignore
 
     for mod in model.modules():
         qm = getattr(mod, "quant_method", None)
-        if isinstance(qm, FP4QuantizeMethod):
+        if isinstance(qm, NVFP4QuantizeMethod):
             weight = getattr(mod, "weight", None)
             if weight is None:
                 continue
@@ -443,22 +453,22 @@ def convert_model_to_fp4(model: torch.nn.Module) -> None:
                 device=weight_local.device,
                 dtype=torch.float32,
             )
-            mod.register_buffer("_fp4_weight", fp4_w, persistent=False)
-            mod.register_buffer("_fp4_weight_scale", fp4_s, persistent=False)
+            mod.register_buffer("_nvfp4_weight", fp4_w, persistent=False)
+            mod.register_buffer("_nvfp4_weight_scale", fp4_s, persistent=False)
             mod.register_buffer(
                 "_weight_global_sf",
                 weight_global_sf_t.to(dtype=torch.bfloat16),
                 persistent=False,
             )
             mod.register_buffer(
-                "_fp4_alpha",
+                "_nvfp4_alpha",
                 (1.0 / weight_global_sf_t).to(dtype=torch.float32),
                 persistent=False,
             )
 
 
 __all__ = [
-    "FP4Config",
-    "FP4QuantizeMethod",
-    "convert_model_to_fp4",
+    "NVFP4Config",
+    "NVFP4QuantizeMethod",
+    "convert_model_to_nvfp4",
 ]

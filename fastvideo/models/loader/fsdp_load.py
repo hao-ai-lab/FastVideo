@@ -28,32 +28,34 @@ from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
 logger = init_logger(__name__)
 
 
-def _maybe_convert_model_to_fp4(model: nn.Module) -> None:
-    """Quantize FP4-tagged linear layers in-place after weights are loaded.
+def _maybe_convert_model_to_nvfp4(model: nn.Module) -> None:
+    """Quantize NVFP4-tagged linear layers in-place after weights are loaded.
 
     Walks the module tree once, looking for layers whose ``quant_method``
-    is an :class:`FP4QuantizeMethod` (attached at construction time by
-    :meth:`FP4Config.get_quant_method`). When at least one such layer
-    exists, calls :func:`convert_model_to_fp4` to register the
-    ``_fp4_weight*`` / ``_fp4_alpha`` / ``_weight_global_sf`` buffers
+    is an :class:`NVFP4QuantizeMethod` (attached at construction time by
+    :meth:`NVFP4Config.get_quant_method`). When at least one such layer
+    exists, calls :func:`convert_model_to_nvfp4` to register the
+    ``_nvfp4_weight*`` / ``_nvfp4_alpha`` / ``_weight_global_sf`` buffers
     on each targeted layer.
 
-    The walk is short-circuited on the first non-FP4 layer in the
-    ``UnquantizedLinearMethod`` case so non-FP4 callers pay only a
-    single ``isinstance`` check. flashinfer is imported lazily inside
-    :func:`convert_model_to_fp4` so this helper is a no-op on hosts
-    without the FP4 backend.
+    The walk returns on the first NVFP4 layer found so non-NVFP4 callers
+    pay only an ``isinstance`` check per module. flashinfer is imported
+    lazily inside :func:`convert_model_to_nvfp4` so this helper is a
+    no-op on hosts without the NVFP4 backend.
     """
-    # Defer the import: fp4_config imports heavy diffusers/torch.distributed
-    # symbols at module-load time, and unconditional import would penalize
-    # every loader call regardless of whether FP4 is wired.
-    from fastvideo.layers.quantization.fp4_config import (FP4QuantizeMethod,
-                                                          convert_model_to_fp4)
+    # Defer the import: nvfp4_config imports heavy diffusers /
+    # torch.distributed symbols at module-load time, and unconditional
+    # import would penalize every loader call regardless of whether
+    # NVFP4 is wired.
+    from fastvideo.layers.quantization.nvfp4_config import (
+        NVFP4QuantizeMethod, convert_model_to_nvfp4,
+    )
 
     for mod in model.modules():
-        if isinstance(getattr(mod, "quant_method", None), FP4QuantizeMethod):
-            logger.info("Converting loaded model weights for FP4 linear layers")
-            convert_model_to_fp4(model)
+        if isinstance(getattr(mod, "quant_method", None),
+                      NVFP4QuantizeMethod):
+            logger.info("Converting loaded model weights for NVFP4 linear layers")
+            convert_model_to_nvfp4(model)
             return
 
 
@@ -187,14 +189,14 @@ def maybe_load_fsdp_model(
         if isinstance(p, torch.nn.Parameter):
             p.requires_grad = False
 
-    # FP4 weight prequantization. We detect by the registered
+    # NVFP4 weight prequantization. We detect by the registered
     # ``quant_method`` on linear layers rather than by a separate flag —
-    # construction-time ``FP4Config.get_quant_method`` already attached
-    # ``FP4QuantizeMethod`` to every targeted layer, so the loader's
-    # responsibility is just to materialize the per-layer fp4 weight /
+    # construction-time ``NVFP4Config.get_quant_method`` already attached
+    # ``NVFP4QuantizeMethod`` to every targeted layer, so the loader's
+    # responsibility is just to materialize the per-layer nvfp4 weight /
     # scale buffers from the freshly-loaded bf16 weights. No-op when
     # ``flashinfer`` is not installed (lazy import inside the helper).
-    _maybe_convert_model_to_fp4(model)
+    _maybe_convert_model_to_nvfp4(model)
 
     compile_in_loader = enable_torch_compile and training_mode
     if compile_in_loader:
