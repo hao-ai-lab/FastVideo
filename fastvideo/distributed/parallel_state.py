@@ -43,6 +43,7 @@ from fastvideo.distributed.device_communicators.base_device_communicator import 
 from fastvideo.distributed.device_communicators.cpu_communicator import (CpuCommunicator)
 from fastvideo.distributed.utils import StatelessProcessGroup
 from fastvideo.logger import init_logger
+from fastvideo.fastvideo_args import get_current_fastvideo_args
 
 logger = init_logger(__name__)
 
@@ -821,6 +822,30 @@ def initialize_model_parallel(
         group_ranks.append(ranks)
 
     _DP = init_model_parallel_group(group_ranks, get_world_group().local_rank, backend, group_name="dp")
+
+    # Validation logic for ring attention
+    try:
+        fastvideo_args = get_current_fastvideo_args()
+
+        # Fetch the attributes
+        ring_size = getattr(fastvideo_args, 'ring_size', 1)
+        ulysses_degree = getattr(fastvideo_args, 'ulysses_degree', 1)
+
+        # Validate ring_size * ulysses_degree == world_size
+        if ring_size > 1 or ulysses_degree > 1:
+            world_size = get_world_size()
+            expected_size = ring_size * ulysses_degree
+
+            if expected_size != world_size:
+                raise ValueError(
+                    f"Invalid parallelism configuration: "
+                    f"ring_size ({ring_size}) * "
+                    f"ulysses_degree ({ulysses_degree}) = {expected_size}, "
+                    f"but world_size = {world_size}. "
+                    f"These must be equal.")
+    except (ValueError, ImportError, AttributeError):
+        # skip validation
+        pass
 
 
 def get_sp_world_size() -> int:
