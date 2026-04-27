@@ -120,6 +120,10 @@ def legacy_from_pretrained_to_config(
             compile_config["enabled"] = value
         elif key == "enable_torch_compile_text_encoder":
             compile_config["text_encoder_enabled"] = value
+        elif key == "enable_torch_compile_vae":
+            compile_config["vae_enabled"] = value
+        elif key == "enable_torch_compile_audio_vae":
+            compile_config["audio_vae_enabled"] = value
         elif key == "torch_compile_kwargs":
             remaining: dict[str, Any] = (dict(deepcopy(value)) if isinstance(value, Mapping) else {})
             for first_class in _COMPILE_TYPED_KEYS:
@@ -127,6 +131,14 @@ def legacy_from_pretrained_to_config(
                     compile_config[first_class] = remaining.pop(first_class)
             if remaining:
                 compile_config["extras"] = remaining
+        elif key in {
+                "torch_compile_kwargs_dit",
+                "torch_compile_kwargs_text_encoder",
+                "torch_compile_kwargs_vae",
+                "torch_compile_kwargs_audio_vae",
+        }:
+            compile_config[key[len("torch_compile_kwargs_"):] +
+                           "_kwargs"] = (dict(deepcopy(value)) if isinstance(value, Mapping) else {})
         elif key == "ltx2_vae_tiling":
             pipeline["vae_tiling"] = value
         elif key == "config_model_path":
@@ -238,11 +250,19 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
     if normalized.pipeline.vae_tiling is not None:
         kwargs["ltx2_vae_tiling"] = normalized.pipeline.vae_tiling
     if engine.compile.text_encoder_enabled is not None:
-        # ``FastVideoArgs.from_kwargs`` filters to declared fields, so
-        # this is a no-op on the current legacy path. Emit anyway so the
-        # realtime runtime (PR 7.6) — which reads from the kwargs dict
-        # before FastVideoArgs filtering — can pick it up once wired.
         kwargs["enable_torch_compile_text_encoder"] = (engine.compile.text_encoder_enabled)
+    if engine.compile.vae_enabled is not None:
+        kwargs["enable_torch_compile_vae"] = engine.compile.vae_enabled
+    if engine.compile.audio_vae_enabled is not None:
+        kwargs["enable_torch_compile_audio_vae"] = (engine.compile.audio_vae_enabled)
+    if engine.compile.dit_kwargs:
+        kwargs["torch_compile_kwargs_dit"] = deepcopy(engine.compile.dit_kwargs)
+    if engine.compile.text_encoder_kwargs:
+        kwargs["torch_compile_kwargs_text_encoder"] = deepcopy(engine.compile.text_encoder_kwargs)
+    if engine.compile.vae_kwargs:
+        kwargs["torch_compile_kwargs_vae"] = deepcopy(engine.compile.vae_kwargs)
+    if engine.compile.audio_vae_kwargs:
+        kwargs["torch_compile_kwargs_audio_vae"] = deepcopy(engine.compile.audio_vae_kwargs)
 
     quantization = engine.quantization
     if quantization is not None and quantization.text_encoder_quant is not None:
