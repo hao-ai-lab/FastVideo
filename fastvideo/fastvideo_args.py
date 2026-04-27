@@ -133,8 +133,23 @@ class FastVideoArgs:
     pin_cpu_memory: bool = True
 
     # Compilation
+    # ``enable_torch_compile`` covers the DiT path (transformer,
+    # transformer_2, and the LTX-2 stage-2 transformer_refine).
+    # Per-component flags below let callers compile additional submodules
+    # independently; ``False`` leaves the component eager.
     enable_torch_compile: bool = False
+    enable_torch_compile_text_encoder: bool = False
+    enable_torch_compile_vae: bool = False
+    enable_torch_compile_audio_vae: bool = False
+    # ``torch_compile_kwargs`` is the master kwargs dict (applied to every
+    # compiled submodule unless a per-component dict below is non-empty,
+    # in which case the per-component dict overrides entirely — matching
+    # the FastVideo-internal precedent).
     torch_compile_kwargs: dict[str, Any] = field(default_factory=dict)
+    torch_compile_kwargs_dit: dict[str, Any] = field(default_factory=dict)
+    torch_compile_kwargs_text_encoder: dict[str, Any] = field(default_factory=dict)
+    torch_compile_kwargs_vae: dict[str, Any] = field(default_factory=dict)
+    torch_compile_kwargs_audio_vae: dict[str, Any] = field(default_factory=dict)
 
     disable_autocast: bool = False
 

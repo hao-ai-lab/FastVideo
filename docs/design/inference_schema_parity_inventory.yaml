@@ -29,7 +29,14 @@ surfaces:
       vae_cpu_offload: generator.engine.offload.vae
       pin_cpu_memory: generator.engine.offload.pin_cpu_memory
       enable_torch_compile: generator.engine.compile.enabled
+      enable_torch_compile_text_encoder: generator.engine.compile.text_encoder_enabled
+      enable_torch_compile_vae: generator.engine.compile.vae_enabled
+      enable_torch_compile_audio_vae: generator.engine.compile.audio_vae_enabled
       torch_compile_kwargs: generator.engine.compile.backend,fullgraph,mode,dynamic,extras
+      torch_compile_kwargs_dit: generator.engine.compile.dit_kwargs
+      torch_compile_kwargs_text_encoder: generator.engine.compile.text_encoder_kwargs
+      torch_compile_kwargs_vae: generator.engine.compile.vae_kwargs
+      torch_compile_kwargs_audio_vae: generator.engine.compile.audio_vae_kwargs
       disable_autocast: generator.engine.disable_autocast
       enable_stage_verification: generator.engine.enable_stage_verification
       prompt_txt: request.inputs.prompt_path
