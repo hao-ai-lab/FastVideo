@@ -41,12 +41,25 @@ surfaces:
       override_pipeline_cls_name: generator.pipeline.components.override_pipeline_cls_name
       boundary_ratio: request.sampling.boundary_ratio
       ltx2_vae_tiling: generator.pipeline.vae_tiling
+      refine_enabled: generator.pipeline.preset_overrides.refine.enabled
+      refine_upsampler_path: generator.pipeline.components.upsampler_weights
+      refine_lora_path: generator.pipeline.components.lora_path
+      refine_num_inference_steps: request.stage_overrides.refine.num_inference_steps
+      refine_guidance_scale: request.stage_overrides.refine.guidance_scale
+      refine_add_noise: generator.pipeline.preset_overrides.refine.add_noise
+      ltx2_refine_enabled: generator.pipeline.preset_overrides.refine.enabled
+      ltx2_refine_upsampler_path: generator.pipeline.components.upsampler_weights
+      ltx2_refine_lora_path: generator.pipeline.components.lora_path
+      ltx2_refine_num_inference_steps: request.stage_overrides.refine.num_inference_steps
+      ltx2_refine_guidance_scale: request.stage_overrides.refine.guidance_scale
+      ltx2_refine_add_noise: generator.pipeline.preset_overrides.refine.add_noise
     preset_owned:
       ltx2_vae_spatial_tile_size_in_pixels: generator.pipeline.preset_overrides.ltx2.vae.spatial_tile_size_in_pixels
       ltx2_vae_spatial_tile_overlap_in_pixels: generator.pipeline.preset_overrides.ltx2.vae.spatial_tile_overlap_in_pixels
       ltx2_vae_temporal_tile_size_in_frames: generator.pipeline.preset_overrides.ltx2.vae.temporal_tile_size_in_frames
       ltx2_vae_temporal_tile_overlap_in_frames: generator.pipeline.preset_overrides.ltx2.vae.temporal_tile_overlap_in_frames
       ltx2_initial_latent_path: request.extensions.ltx2.initial_latent_path
+      ltx2_audio_latent_path: request.extensions.ltx2.audio_latent_path
     compatibility_only:
       mode: "Legacy multi-mode FastVideoArgs switch; typed inference config should not expose execution mode."
       inference_mode: "Legacy boolean mirror of mode; kept only through adapters while FastVideoArgs remains."
@@ -56,6 +69,12 @@ surfaces:
       VSA_sparsity: "Model-specific inference optimization not yet represented in the typed public schema."
       moba_config_path: "Model-specific MoBA optimization surface not yet represented in the typed public schema."
       master_port: "Executor/bootstrap compatibility field; not part of the canonical inference schema."
+      refine_transformer_path: "Generic stage-2 refine transformer override; no typed equivalent yet."
+      refine_noise_path: "Generic stage-2 refine noise override; no typed equivalent yet."
+      refine_audio_noise_path: "Generic stage-2 refine audio noise override; no typed equivalent yet."
+      ltx2_refine_transformer_path: "LTX-2 refine transformer carrier; no typed equivalent yet."
+      ltx2_refine_noise_path: "LTX-2 refine noise carrier; no typed equivalent yet."
+      ltx2_refine_audio_noise_path: "LTX-2 refine audio noise carrier; no typed equivalent yet."
     private_only:
       ray_placement_group: "Ray deployment-only field."
       ray_runtime_env: "Ray deployment-only field."
@@ -380,6 +399,11 @@ surfaces:
       ltx2_stg_scale_audio: request.extensions.ltx2.stg_scale_audio
       ltx2_stg_blocks_video: request.extensions.ltx2.stg_blocks_video
       ltx2_stg_blocks_audio: request.extensions.ltx2.stg_blocks_audio
+      ltx2_images: request.extensions.ltx2.images
+      ltx2_image_crf: request.stage_overrides.refine.image_crf
+      ltx2_conditioning_latent_stage1: request.extensions.ltx2.conditioning_latent_stage1
+      ltx2_conditioning_latent_stage2: request.extensions.ltx2.conditioning_latent_stage2
+      ltx2_video_conditions: request.extensions.ltx2.video_conditions
     internal_only:
       data_type: "Derived from the request shape and not a public input."
 

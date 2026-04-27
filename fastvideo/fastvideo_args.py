@@ -229,7 +229,29 @@ class FastVideoArgs:
                 logger.error("Failed to load V-MoBA config from %s: %s", self.moba_config_path, e)
                 raise
         self._apply_ltx2_vae_overrides()
+        self._resolve_refine_args()
         self.check_fastvideo_args()
+
+    def _resolve_refine_args(self) -> None:
+        """Map generic refine_* args to LTX-2-specific refine fields."""
+        if self.refine_enabled is not None:
+            self.ltx2_refine_enabled = self.refine_enabled
+        if self.refine_upsampler_path is not None:
+            self.ltx2_refine_upsampler_path = self.refine_upsampler_path
+        if self.refine_transformer_path is not None:
+            self.ltx2_refine_transformer_path = self.refine_transformer_path
+        if self.refine_lora_path is not None:
+            self.ltx2_refine_lora_path = self.refine_lora_path
+        if self.refine_num_inference_steps is not None:
+            self.ltx2_refine_num_inference_steps = self.refine_num_inference_steps
+        if self.refine_guidance_scale is not None:
+            self.ltx2_refine_guidance_scale = self.refine_guidance_scale
+        if self.refine_add_noise is not None:
+            self.ltx2_refine_add_noise = self.refine_add_noise
+        if self.refine_noise_path is not None:
+            self.ltx2_refine_noise_path = self.refine_noise_path
+        if self.refine_audio_noise_path is not None:
+            self.ltx2_refine_audio_noise_path = self.refine_audio_noise_path
 
     def _apply_ltx2_vae_overrides(self) -> None:
         if self.pipeline_config is None:
