@@ -120,8 +120,7 @@ def _sync_baselines_from_hf():
         # If the repo is empty or doesn't exist yet, we just start fresh
         print(f"Note: Could not sync from HF (may be an empty repo): {e}")
 
-# Todo(satyam): Maybe we can go with the median and not mean.
-def _mean_metric(records: list[dict[str, Any]], key: str) -> float | None:
+def _baseline_metric(records: list[dict[str, Any]], key: str) -> float | None:
     values = [
         _safe_float(r.get(key))
         for r in records
@@ -129,7 +128,7 @@ def _mean_metric(records: list[dict[str, Any]], key: str) -> float | None:
     values = [v for v in values if v is not None]
     if not values:
         return None
-    return statistics.mean(values)
+    return statistics.median(values)
 
 
 def _check_regressions(
@@ -140,7 +139,7 @@ def _check_regressions(
     failures: list[str] = []
 
     for metric in ("latency", "memory"):
-        baseline = _mean_metric(baseline_records, metric)
+        baseline = _baseline_metric(baseline_records, metric)
         curr = _safe_float(current.get(metric))
         if baseline is None or curr is None or baseline <= 0:
             continue
@@ -148,10 +147,10 @@ def _check_regressions(
         if regression > max_regression:
             failures.append(
                 f"{current['model_id']} {metric} regressed by {regression * 100:.1f}% "
-                f"(current={curr:.3f}, baseline_mean={baseline:.3f})"
+                f"(current={curr:.3f}, baseline_median={baseline:.3f})"
             )
 
-    baseline_tp = _mean_metric(baseline_records, "throughput")
+    baseline_tp = _baseline_metric(baseline_records, "throughput")
     curr_tp = _safe_float(current.get("throughput"))
     if baseline_tp is not None and curr_tp is not None and baseline_tp > 0:
         regression = (baseline_tp - curr_tp) / baseline_tp
