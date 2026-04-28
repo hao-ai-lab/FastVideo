@@ -36,11 +36,17 @@
   "thresholds": {
     "L40S": {
       "max_generation_time_s": 34.0,
-      "max_peak_memory_mb": 11000.0
+      "max_peak_memory_mb": 11000.0,
+      "max_text_encoder_time_s": 2.0,
+      "max_dit_time_s": 25.0,
+      "max_vae_decode_time_s": 5.0
     },
     "default": {
       "max_generation_time_s": 120.0,
-      "max_peak_memory_mb": 30000.0
+      "max_peak_memory_mb": 30000.0,
+      "max_text_encoder_time_s": 2.0,
+      "max_dit_time_s": 25.0,
+      "max_vae_decode_time_s": 5.0
     }
   }
 }

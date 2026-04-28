@@ -223,14 +223,18 @@ def load_records_for_model(
 # DataFrame helpers (dashboard / analytics consumers)
 # ---------------------------------------------------------------------------
 
-_NUMERIC_COLS = ("latency", "throughput", "memory")
+_NUMERIC_COLS = (
+    "latency", "throughput", "memory",
+    "text_encoder_time_s", "dit_time_s", "vae_decode_time_s",
+)
 
 
 def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """Apply standard type coercions to a raw records DataFrame.
 
     - Parses ``timestamp`` to UTC-aware datetime.
-    - Coerces ``latency``, ``throughput``, ``memory`` to float.
+    - Coerces ``latency``, ``throughput``, ``memory``, ``text_encoder_time_s``,
+      ``dit_time_s``, ``vae_decode_time_s`` to float.
     - Adds a ``config_id`` column (first 7 chars of ``commit_sha``).
 
     Returns the mutated DataFrame (also modifies in place for efficiency).
