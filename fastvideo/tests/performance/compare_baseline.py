@@ -120,7 +120,7 @@ def _sync_baselines_from_hf():
         # If the repo is empty or doesn't exist yet, we just start fresh
         print(f"Note: Could not sync from HF (may be an empty repo): {e}")
 
-# Todo: Maybe we can go with the median and not mean.
+# Todo(satyam): Maybe we can go with the median and not mean.
 def _mean_metric(records: list[dict[str, Any]], key: str) -> float | None:
     values = [
         _safe_float(r.get(key))
@@ -247,8 +247,7 @@ def _build_markdown_summary(
 
     return "\n".join(lines) + "\n"
 
-# Todo: Put this in post run hookup since buildkite agent won't be available in the Modal function environment.
-def _emit_markdown_summary(markdown: str) -> None:
+def _emit_markdown_summary(markdown: str, commit_sha: str) -> None:
     print("\n" + markdown)
     
     # 1. Existing GitHub logic (safe to keep)
@@ -257,18 +256,18 @@ def _emit_markdown_summary(markdown: str) -> None:
         with open(summary_path, "a", encoding="utf-8") as f:
             f.write(markdown + "\n")
 
-    # 2. Buildkite Annotation logic
-    # This makes the table appear at the top of the Buildkite build page
-    if os.environ.get("BUILDKITE"):
-        import subprocess
-        try:
-            subprocess.run(
-                ["buildkite-agent", "annotate", markdown, "--style", "info", "--context", "perf-summary"],
-                input=markdown.encode(),
-                check=False
-            )
-        except Exception as e:
-            print(f"Failed to emit Buildkite annotation: {e}")
+    # 2. Write to Modal volume for Buildkite to pick up in post-run hook
+    try:
+        perf_reports_dir = "/root/data/perf_reports"
+        os.makedirs(perf_reports_dir, exist_ok=True)
+        short_sha = commit_sha[:7] if commit_sha else "unknown"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_path = os.path.join(perf_reports_dir, f"perf_{short_sha}_{timestamp}.md")
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(markdown + "\n")
+        print(f"Performance report written to {report_path}")
+    except Exception as e:
+        print(f"Failed to write performance report to Modal volume: {e}")
 
 def main() -> int:
     # Pull the current state of the world from HF
@@ -324,8 +323,10 @@ def main() -> int:
         summary_row = _build_summary_row(record, baseline_records, bool(failures))
         summary_rows.append(summary_row)
 
+    commit_sha = os.environ.get("BUILDKITE_COMMIT", "unknown")[:7]
+
     markdown = _build_markdown_summary(summary_rows, MAX_REGRESSION)
-    _emit_markdown_summary(markdown)
+    _emit_markdown_summary(markdown, commit_sha)
 
     if all_failures:
         print("Performance regression check failed:")

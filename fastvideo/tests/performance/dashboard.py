@@ -64,26 +64,6 @@ def render_html(figs: list, days: int) -> str:
     return "\n".join(html_parts)
 
 # -----------------------------
-# 4. Buildkite helpers
-# -----------------------------
-def annotate_buildkite(html: str) -> None:
-    if not os.environ.get("BUILDKITE"):
-        return
-    subprocess.run(
-        ["buildkite-agent", "annotate", "--style", "info", "--context", "perf-dashboard"],
-        input=html.encode(),
-        check=False,
-    )
-
-
-def upload_artifact(path: str) -> None:
-    if shutil.which("buildkite-agent") is None:
-        print("buildkite-agent not found, skipping artifact upload")
-        return
-    subprocess.run(["buildkite-agent", "artifact", "upload", path], check=True)
-
-
-# -----------------------------
 # 5. Main
 # -----------------------------
 def main() -> None:
