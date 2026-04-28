@@ -5,8 +5,6 @@ import modal
 app = modal.App()
 
 model_vol = modal.Volume.from_name("hf-model-weights")
-performance_tracking_vol = modal.Volume.from_name(
-    "fastvideo-performance-tracking", create_if_missing=True)
 image_version = os.getenv("IMAGE_VERSION")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
 print(f"Using image: {image_tag}")
