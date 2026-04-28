@@ -1,151 +1,60 @@
+# SPDX-License-Identifier: Apache-2.0
 import os
-import json
-import glob
-import pandas as pd
-from datetime import datetime, timedelta, timezone
+import shutil
+import subprocess
+from datetime import datetime
+
 import plotly.express as px
-from huggingface_hub import snapshot_download
+import pandas as pd
 
-
-HF_REPO_ID = os.environ.get("HF_REPO_ID", "FastVideo/performance-tracking")
-HF_TOKEN = os.environ.get("HF_API_KEY")
-
+from hf_store import sync_from_hf, load_as_dataframe
 
 # -----------------------------
-# 1. Load HF JSON artifacts
-# -----------------------------
-# def load_hf_dataset(days: int = 30) -> pd.DataFrame:
-#     """
-#     Loads only recent benchmark JSONs from HF repo.
-#     Avoids full history scan when possible.
-#     """
-#     api = HfApi(token=HF_TOKEN)
-
-#     files = api.list_repo_files(
-#         repo_id=HF_REPO_ID,
-#         repo_type="dataset",
-#     )
-
-#     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-#     records = []
-
-#     for f in files:
-#         if not f.endswith(".json"):
-#             continue
-
-#         path = hf_hub_download(
-#             repo_id=HF_REPO_ID,
-#             repo_type="dataset",
-#             filename=f,
-#             token=HF_TOKEN,
-#         )
-
-#         try:
-#             with open(path, "r") as fp:
-#                 data = json.load(fp)
-
-#             # fast skip: timestamp filter BEFORE dataframe creation
-#             ts = pd.to_datetime(data.get("timestamp"), utc=True)
-#             if ts < cutoff:
-#                 continue
-
-#             records.append(data)
-
-#         except Exception:
-#             continue
-
-#     return pd.DataFrame(records)
-
-def load_hf_dataset(days: int = 30) -> pd.DataFrame:
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-
-    local_dir = snapshot_download(
-        repo_id=HF_REPO_ID,
-        repo_type="dataset",
-        token=HF_TOKEN,
-        allow_patterns="*.json"
-    )
-
-    records = []
-
-    for path in glob.glob(f"{local_dir}/**/*.json", recursive=True):
-        try:
-            with open(path, "r") as fp:
-                data = json.load(fp)
-
-            ts = pd.to_datetime(data.get("timestamp"), utc=True, errors="coerce")
-            if pd.isna(ts) or ts < cutoff:
-                continue
-
-            records.append(data)
-
-        except Exception:
-            continue
-
-    return pd.DataFrame(records)
-
-# -----------------------------
-# 2. Normalize schema (your CI format)
-# -----------------------------
-def normalize(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
-
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-
-    # config = commit + optional future knobs
-    df["config_id"] = df["commit_sha"].fillna("unknown").str[:7]
-
-    # ensure numeric safety
-    for c in ["latency", "throughput", "memory"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    return df
-
-
-# -----------------------------
-# 3. Grouping (your requested design)
+# 1. Grouping
 # -----------------------------
 def group_data(df: pd.DataFrame):
-    keys = ["model_id", "gpu_type", "config_id"]
+    # Group only by model+GPU so each group produces a time-series line.
+    # config_id (commit SHA) is carried as a column for hover/color use.
+    keys = ["model_id", "gpu_type"]
     return df.groupby(keys, dropna=False)
 
-
 # -----------------------------
-# 4. Plot builder (clean + scalable)
+# 2. Plot builder
 # -----------------------------
-def build_plots(df: pd.DataFrame):
+def build_plots(df: pd.DataFrame) -> list:
     figs = []
 
-    grouped = group_data(df)
-
-    for name, g in grouped:
+    for (model_id, gpu_type), g in group_data(df):
         g = g.sort_values("timestamp")
 
-        model_id, gpu_type, config_id = name
+        # One chart per metric so the y-axes aren't on wildly different scales
+        for metric in ("latency", "throughput", "memory"):
+            if g[metric].isna().all():
+                continue
 
-        title = f"{model_id} | {gpu_type} | {config_id}"
-
-        fig = px.line(
-            g,
-            x="timestamp",
-            y=["latency", "throughput", "memory"],
-            markers=True,
-            title=title,
-        )
-
-        figs.append(fig)
+            fig = px.line(
+                g,
+                x="timestamp",
+                y=metric,
+                markers=True,
+                hover_data=["config_id", "commit_sha"],
+                title=f"{model_id} | {gpu_type} | {metric}",
+                labels={"timestamp": "Time", metric: metric},
+            )
+            figs.append(fig)
 
     return figs
 
-
 # -----------------------------
-# 5. Render HTML dashboard
+# 3. Render HTML dashboard
 # -----------------------------
-def render_html(figs):
+def render_html(figs: list, days: int) -> str:
     html_parts = [
-        "<html><head><meta charset='utf-8'></head><body>",
-        f"<h2>Performance Dashboard (last run)</h2>",
+        "<html>",
+        "<head><meta charset='utf-8'>",
+        "<style>body { font-family: sans-serif; margin: 2rem; }</style>",
+        "</head><body>",
+        f"<h2>Performance Dashboard (last {days} days)</h2>",
     ]
 
     for fig in figs:
@@ -154,100 +63,60 @@ def render_html(figs):
     html_parts.append("</body></html>")
     return "\n".join(html_parts)
 
-
 # -----------------------------
-# 6. Buildkite annotation (fixed)
+# 4. Buildkite helpers
 # -----------------------------
-def annotate_buildkite(html: str):
+def annotate_buildkite(html: str) -> None:
     if not os.environ.get("BUILDKITE"):
         return
-
-    import subprocess
-
     subprocess.run(
         ["buildkite-agent", "annotate", "--style", "info", "--context", "perf-dashboard"],
         input=html.encode(),
         check=False,
     )
 
-# -----------------------------
-# 6. Buildkite upload
-# -----------------------------
 
-# def upload_artifact(path: str):
-#     if not os.environ.get("BUILDKITE"):
-#         return
-
-#     import subprocess
-
-#     subprocess.run(
-#         ["buildkite-agent", "artifact", "upload", path],
-#         check=False,
-#     )
-
-def upload_artifact(path: str):
-    import shutil
-    import subprocess
-
+def upload_artifact(path: str) -> None:
     if shutil.which("buildkite-agent") is None:
         print("buildkite-agent not found, skipping artifact upload")
         return
+    subprocess.run(["buildkite-agent", "artifact", "upload", path], check=True)
 
-    subprocess.run(
-        ["buildkite-agent", "artifact", "upload", path],
-        check=True,
-    )
 
 # -----------------------------
-# 7. Main
+# 5. Main
 # -----------------------------
-def main():
+def main() -> None:
     days = int(os.environ.get("DASHBOARD_DAYS", "30"))
 
-    df = load_hf_dataset(days=days)
+    local_dir = sync_from_hf("/tmp/perf-tracking")
+    df = load_as_dataframe(local_dir, days=days)
 
     if df.empty:
         print("No data found")
         return
 
-    df = normalize(df)
+    # Sanity-check: log what we actually loaded
+    print(f"Loaded {len(df)} records across {df['model_id'].nunique()} model(s), "
+          f"{df['gpu_type'].nunique()} GPU type(s), "
+          f"date range: {df['timestamp'].min()} → {df['timestamp'].max()}")
 
     figs = build_plots(df)
-    html = render_html(figs)
+    html = render_html(figs, days)
 
-    # Get the commit SHA from environment (passed via MODAL_ENV in your shell script)
     commit_sha = os.environ.get("BUILDKITE_COMMIT", "unknown")[:7]
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     report_dir = "/root/data/perf_reports"
     os.makedirs(report_dir, exist_ok=True)
 
-    # Include the SHA in the filename!
-    # Example: dashboard_a1b2c3d_20240426_032528.html
     filename = f"dashboard_{commit_sha}_{timestamp}.html"
     output_file = os.path.join(report_dir, filename)
 
-    with open(output_file, "w") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         f.write(html)
 
     print(f"Dashboard generated: {output_file}")
-
-    # report_dir = "/root/data/perf_reports"
-
-    # # 2. Create the directory (if it doesn't exist)
-    # os.makedirs(report_dir, exist_ok=True)
-
-    # # 3. Define the full file path
-    # output_file = os.path.join(report_dir, f"dashboard_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
-
-    # with open(output_file, "w") as f:
-    #     f.write(html)
-
-    # annotate_buildkite(html)
-    # print(f"Dashboard generated: {output_file}")
-
-    # upload_artifact(output_file)
-    # print(f"Dashboard uploaded as Buildkite artifact: {output_file}")
 
 if __name__ == "__main__":
     main()

@@ -18,6 +18,8 @@ from huggingface_hub import HfApi, snapshot_download
 from datetime import datetime, timezone
 from typing import Any
 
+from hf_store import sync_from_hf, upload_record, load_records_for_model, sanitize, safe_float
+
 # Use the env var passed by Modal, fallback to a default if needed
 HF_REPO_ID = os.environ.get("HF_REPO_ID", "FastVideo/performance-tracking")
 HF_TOKEN = os.environ.get("HF_API_KEY")
@@ -31,7 +33,6 @@ TRACKING_ROOT = os.environ.get(
     "/tmp/perf-tracking",
 )
 MAX_REGRESSION = float(os.environ.get("PERF_MAX_REGRESSION", "0.15"))
-
 
 def _should_persist_tracking() -> bool:
     # test_scope = os.environ.get("TEST_SCOPE", "")
@@ -119,58 +120,7 @@ def _sync_baselines_from_hf():
         # If the repo is empty or doesn't exist yet, we just start fresh
         print(f"Note: Could not sync from HF (may be an empty repo): {e}")
 
-def _upload_to_hf(local_path: str, record: dict[str, Any]):
-    """Uploads result to the FastVideo organization repo."""
-    if not HF_TOKEN:
-        print("HF_API_KEY not found. Skipping upload.")
-        return
-
-    api = HfApi(token=HF_TOKEN)
-    
-    # Store in folders by model_id: e.g., "fastvideo-v1/2026-04-23_commitsha.json"
-    path_in_repo = f"{_sanitize(record['model_id'])}/{os.path.basename(local_path)}"
-    
-    try:
-        api.upload_file(
-            path_or_fileobj=local_path,
-            path_in_repo=path_in_repo,
-            repo_id=HF_REPO_ID,
-            repo_type="dataset",
-            commit_message=f"Perf: {record['model_id']} at {record['commit_sha'][:7]}"
-        )
-        print(f"Successfully synced to FastVideo/performance-tracking: {path_in_repo}")
-    except Exception as e:
-        print(f"HF Sync failed: {e}")
-
-def _load_baseline_records(model_id: str) -> list[dict[str, Any]]:
-    model_dir = os.path.join(TRACKING_ROOT, _sanitize(model_id))
-    if not os.path.exists(model_dir):
-        return []
-
-    # Get all historical JSONs synced from HF
-    all_paths = sorted(glob.glob(os.path.join(model_dir, "*.json")))
-    
-    baseline: list[dict[str, Any]] = []
-    for path in all_paths:
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-                # IMPORTANT: Only use successful runs for the baseline mean
-                # This prevents "Performance Drift"
-                if data.get("success", True): 
-                    baseline.append(data)
-        except (OSError, json.JSONDecodeError):
-            continue
-    return baseline
-
-
-def _filter_by_gpu_type(
-    records: list[dict[str, Any]],
-    gpu_type: str,
-) -> list[dict[str, Any]]:
-    return [r for r in records if r.get("gpu_type") == gpu_type]
-
-
+# Todo: Maybe we can go with the median and not mean.
 def _mean_metric(records: list[dict[str, Any]], key: str) -> float | None:
     values = [
         _safe_float(r.get(key))
@@ -297,6 +247,7 @@ def _build_markdown_summary(
 
     return "\n".join(lines) + "\n"
 
+# Todo: Put this in post run hookup since buildkite agent won't be available in the Modal function environment.
 def _emit_markdown_summary(markdown: str) -> None:
     print("\n" + markdown)
     
@@ -321,7 +272,7 @@ def _emit_markdown_summary(markdown: str) -> None:
 
 def main() -> int:
     # Pull the current state of the world from HF
-    _sync_baselines_from_hf()
+    sync_from_hf(TRACKING_ROOT)
 
     current_results = _load_current_results()
     if not current_results:
@@ -340,9 +291,10 @@ def main() -> int:
     for raw in current_results:
         record = _normalize_record(raw)
 
-        baseline_records = _load_baseline_records(record["model_id"])
-        baseline_records = _filter_by_gpu_type(baseline_records, record["gpu_type"])
-        baseline_records = baseline_records[-5:]
+        baseline_records = load_records_for_model(
+            TRACKING_ROOT, record["model_id"], record["gpu_type"],
+            last_n=5, successful_only=True
+        )
 
         failures = _check_regressions(record, baseline_records, MAX_REGRESSION)
 
@@ -366,7 +318,7 @@ def main() -> int:
             # This writes the JSON with the "success" field to /tmp
             current_path = _write_tracking_record(record)
             # This pushes it to the FastVideo/performance-tracking repo
-            _upload_to_hf(current_path, record)
+            upload_record(current_path, record)
 
         
         summary_row = _build_summary_row(record, baseline_records, bool(failures))
@@ -383,7 +335,6 @@ def main() -> int:
 
     print("Performance baseline comparison passed")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())
