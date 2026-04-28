@@ -74,6 +74,9 @@ def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
     latency = _safe_float(result.get("avg_generation_time_s"))
     throughput = _safe_float(result.get("throughput_fps"))
     memory = _safe_float(result.get("max_peak_memory_mb"))
+    text_encoder_time = _safe_float(result.get("text_encoder_time_s"))
+    dit_time = _safe_float(result.get("dit_time_s"))
+    vae_decode_time = _safe_float(result.get("vae_decode_time_s"))
 
     return {
         "model_id": model_id,
@@ -83,6 +86,9 @@ def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
         "latency": latency,
         "throughput": throughput,
         "memory": memory,
+        "text_encoder_time_s": text_encoder_time,
+        "dit_time_s":          dit_time,
+        "vae_decode_time_s":   vae_decode_time,
         "success": True,
     }
 
@@ -137,8 +143,9 @@ def _check_regressions(
     max_regression: float,
 ) -> list[str]:
     failures: list[str] = []
-
-    for metric in ("latency", "memory"):
+    
+    for metric in ("latency", "memory",
+               "text_encoder_time_s", "dit_time_s", "vae_decode_time_s"):
         baseline = _baseline_metric(baseline_records, metric)
         curr = _safe_float(current.get(metric))
         if baseline is None or curr is None or baseline <= 0:

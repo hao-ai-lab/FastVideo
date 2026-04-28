@@ -201,7 +201,10 @@ def load_records_for_model(
 # DataFrame helpers (dashboard / analytics consumers)
 # ---------------------------------------------------------------------------
 
-_NUMERIC_COLS = ("latency", "throughput", "memory")
+_NUMERIC_COLS = (
+    "latency", "throughput", "memory",
+    "text_encoder_time_s", "dit_time_s", "vae_decode_time_s",
+)
 
 
 def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
@@ -209,6 +212,8 @@ def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     - Parses ``timestamp`` to UTC-aware datetime.
     - Coerces ``latency``, ``throughput``, ``memory`` to float.
+    - Coerces ``latency``, ``throughput``, ``memory``, ``text_encoder_time_s``,
+      ``dit_time_s``, ``vae_decode_time_s`` to float.
     - Adds a ``config_id`` column (first 7 chars of ``commit_sha``).
 
     Returns the mutated DataFrame (also modifies in place for efficiency).
@@ -218,6 +223,7 @@ def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
     df["config_id"] = df.get("commit_sha", pd.Series(dtype=str)).fillna("unknown").str[:7]
+    
 
     for col in _NUMERIC_COLS:
         if col in df.columns:

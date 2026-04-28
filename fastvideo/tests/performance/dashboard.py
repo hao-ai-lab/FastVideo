@@ -28,7 +28,8 @@ def build_plots(df: pd.DataFrame) -> list:
         g = g.sort_values("timestamp")
 
         # One chart per metric so the y-axes aren't on wildly different scales
-        for metric in ("latency", "throughput", "memory"):
+        for metric in ("latency", "throughput", "memory",
+            "text_encoder_time_s", "dit_time_s", "vae_decode_time_s"):
             if g[metric].isna().all():
                 continue
 
