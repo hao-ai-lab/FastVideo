@@ -3,13 +3,10 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 
-from fastvideo.pipelines.basic.longcat.longcat_pipeline import (
-    LongCatPipeline,
-)
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.models.wan.wan import WanModel
 
@@ -21,7 +18,6 @@ class LongCatModel(WanModel):
     """LongCat per-role model for training and distillation."""
 
     _transformer_cls_name: str = "LongCatTransformer3DModel"
-    _prompt_pipeline_cls: ClassVar[type[LongCatPipeline]] = LongCatPipeline
 
     @staticmethod
     def _validate_flow_shift(flow_shift: float | None) -> float:
