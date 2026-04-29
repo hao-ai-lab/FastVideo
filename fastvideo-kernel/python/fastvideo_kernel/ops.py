@@ -61,6 +61,70 @@ def sliding_tile_attention(
     return output[:, :, :seq_length]
 
 
+def video_sparse_attn_varlen(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    cu_seqlens_q: torch.Tensor,
+    cu_seqlens_kv: torch.Tensor,
+    variable_block_sizes_list: list,
+    q_variable_block_sizes_list: list,
+    topk: int,
+    block_size: int | tuple = 64,
+    compress_attn_weight: torch.Tensor = None,
+) -> torch.Tensor:
+    """
+    Varlen variant of video_sparse_attn following flash_attn_varlen_func convention.
+
+    Args:
+        q:  [total_q, heads, dim]  — flat packed query tokens
+        k:  [total_kv, heads, dim] — flat packed key tokens
+        v:  [total_kv, heads, dim] — flat packed value tokens
+        cu_seqlens_q:  [batch+1] int32 cumulative Q sequence lengths
+        cu_seqlens_kv: [batch+1] int32 cumulative KV sequence lengths
+        variable_block_sizes_list:   list of per-sequence KV block size tensors
+        q_variable_block_sizes_list: list of per-sequence Q block size tensors
+        topk:        number of KV blocks each Q block attends to
+        block_size:  tile size (int or 3-tuple), default 64
+        compress_attn_weight: optional [total_q, heads, dim] gate tensor
+
+    Returns:
+        [total_q, heads, dim]
+    """
+    batch = cu_seqlens_q.shape[0] - 1
+    outputs = []
+
+    for i in range(batch):
+        q_s = cu_seqlens_q[i].item()
+        q_e = cu_seqlens_q[i + 1].item()
+        kv_s = cu_seqlens_kv[i].item()
+        kv_e = cu_seqlens_kv[i + 1].item()
+
+        # Slice and reshape: [S, H, D] → [1, H, S, D]
+        q_i = q[q_s:q_e].unsqueeze(0).transpose(1, 2).contiguous()
+        k_i = k[kv_s:kv_e].unsqueeze(0).transpose(1, 2).contiguous()
+        v_i = v[kv_s:kv_e].unsqueeze(0).transpose(1, 2).contiguous()
+
+        caw_i = None
+        if compress_attn_weight is not None:
+            caw_i = compress_attn_weight[q_s:q_e].unsqueeze(0).transpose(1, 2).contiguous()
+
+        # [1, H, S_q, D]
+        out_i = video_sparse_attn(
+            q_i, k_i, v_i,
+            variable_block_sizes_list[i],
+            q_variable_block_sizes_list[i],
+            topk,
+            block_size=block_size,
+            compress_attn_weight=caw_i,
+        )
+
+        # [1, H, S_q, D] → [S_q, H, D]
+        outputs.append(out_i.squeeze(0).transpose(0, 1))
+
+    return torch.cat(outputs, dim=0)
+
+
 def video_sparse_attn(
     q: torch.Tensor,
     k: torch.Tensor,
