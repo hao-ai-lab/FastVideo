@@ -43,6 +43,7 @@ from fastvideo.pipelines.stages.timestep_preparation import (Cosmos25TimestepPre
 from fastvideo.pipelines.stages.longcat_video_vae_encoding import LongCatVideoVAEEncodingStage
 from fastvideo.pipelines.stages.longcat_kv_cache_init import LongCatKVCacheInitStage
 from fastvideo.pipelines.stages.longcat_vc_denoising import LongCatVCDenoisingStage
+from fastvideo.pipelines.stages.longcat_causal_dmd_denoising import LongCatCausalDMDDenoisingStage
 
 __all__ = [
     "PipelineStage",
@@ -93,4 +94,5 @@ __all__ = [
     "LongCatVideoVAEEncodingStage",
     "LongCatKVCacheInitStage",
     "LongCatVCDenoisingStage",
+    "LongCatCausalDMDDenoisingStage",
 ]
