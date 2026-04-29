@@ -1,6 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-"""LongCat streaming model plugin for self-forcing rollouts."""
+"""LongCat streaming model plugin for self-forcing rollouts.
 
+KV cache management mirrors :class:`WanCausalModel` 's pattern: a
+fixed-size buffer per layer, pre-allocated to fit the full rollout
+(``training.data.num_frames``), with a write pointer that advances
+chunk-by-chunk via in-place ``.copy_()``. Old positions are never
+overwritten, so backward (under gradient checkpointing) can safely
+re-read the same slice even after later forwards have advanced the
+pointer — no per-forward clone of the K/V tensors is needed.
+
+Switching from a growing dict + ``torch.cat`` per chunk to a
+pre-allocated buffer keeps peak memory constant at
+``num_frames * tokens_per_frame * 2 (K+V) * num_layers`` instead of
+growing linearly with the number of chunks.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,10 +32,20 @@ if TYPE_CHECKING:
 
 @dataclass(slots=True)
 class _LongCatStreamingCache:
-    kv_cache: dict[int, tuple[torch.Tensor, torch.Tensor]]
-    start_frame: int
-    cached_frames: int
+    """Pre-allocated KV cache buffer for one ``cache_tag``.
+
+    Mirrors the ``WanCausalModel`` pattern: each transformer layer
+    gets a fixed-size ``[B, H, max_tokens, D]`` buffer, and a single
+    ``write_idx`` (0-d long tensor, like Wan's ``global_end_index``)
+    tracks the next write position.
+    """
+
+    # layer_idx -> {"k": [B, H, max_tokens, D], "v": [B, H, max_tokens, D]}
+    buffers: dict[int, dict[str, torch.Tensor]]
+    # Next write position, in tokens. 0-d tensor for cheap snapshotting.
+    write_idx: torch.Tensor
     tokens_per_frame: int
+    max_tokens: int
 
 
 class LongCatCausalModel(LongCatModel, CausalModelBase):
@@ -38,7 +61,6 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
         flow_shift: float = 12.0,
         enable_gradient_checkpointing_type: str | None = None,
         transformer_override_safetensor: str | None = None,
-        max_kv_cache_frames: int | None = None,
     ) -> None:
         super().__init__(
             init_from=init_from,
@@ -49,12 +71,7 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
             enable_gradient_checkpointing_type=enable_gradient_checkpointing_type,
             transformer_override_safetensor=transformer_override_safetensor,
         )
-        if max_kv_cache_frames is None:
-            self._max_kv_cache_frames = int(training_config.data.num_frames)
-        else:
-            if int(max_kv_cache_frames) <= 0:
-                raise ValueError("max_kv_cache_frames must be > 0")
-            self._max_kv_cache_frames = int(max_kv_cache_frames)
+        # Lazy-allocated per cache_tag on the first store_kv call.
         self._streaming_caches: dict[str, _LongCatStreamingCache] = {}
 
     def clear_caches(self, *, cache_tag: str = "pos") -> None:
@@ -76,7 +93,8 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
         if attn_kind not in {"dense", "vsa"}:
             raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
         # SelfForcingMethod passes "vsa" for student rollout, but LongCat
-        # selects sparse behavior through its native BSA config, not VSA metadata.
+        # selects sparse behavior through its native BSA config, not VSA
+        # metadata.
         cache_tag = str(cache_tag)
         cur_start_frame = int(cur_start_frame)
         if cur_start_frame < 0:
@@ -87,24 +105,20 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
             if text_dict is None:
                 raise RuntimeError("Missing conditional_dict in TrainingBatch")
         else:
-            text_dict = self._get_uncond_text_dict(batch, cfg_uncond=cfg_uncond)
+            text_dict = self._get_uncond_text_dict(
+                batch, cfg_uncond=cfg_uncond)
 
         transformer = self.transformer
         dtype = noisy_latents.dtype
+
         cache_state = self._streaming_caches.get(cache_tag)
-        kv_cache_dict = cache_state.kv_cache if cache_state is not None else None
-        kv_cache_start_frame = (
-            cache_state.start_frame if cache_state is not None else 0
-        )
-        cached_frames = cache_state.cached_frames if cache_state is not None else 0
+        kv_cache_view, cached_frames = self._cache_view(cache_state)
 
-        if self._should_snapshot_streaming_cache() and torch.is_grad_enabled():
-            kv_cache_dict = self._snapshot_kv_cache_dict(kv_cache_dict)
-
-        with torch.autocast(self.device.type, dtype=dtype), set_forward_context(
-            current_timestep=batch.timesteps,
-            attn_metadata=None,
-        ):
+        with torch.autocast(self.device.type,
+                            dtype=dtype), set_forward_context(
+                                current_timestep=batch.timesteps,
+                                attn_metadata=None,
+                            ):
             if store_kv:
                 empty_embeds = self._empty_kv_cache_inputs(
                     transformer=transformer,
@@ -112,7 +126,7 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
                     device=noisy_latents.device,
                     dtype=dtype,
                 )
-                _, new_cache = transformer(
+                _, new_chunk = transformer(
                     hidden_states=noisy_latents.permute(0, 2, 1, 3, 4),
                     encoder_hidden_states=empty_embeds,
                     timestep=timestep,
@@ -120,13 +134,16 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
                     return_kv=True,
                     skip_crs_attn=True,
                 )
-                if new_cache is None:
-                    raise RuntimeError("LongCat transformer returned no KV cache")
-                self._streaming_caches[cache_tag] = self._merge_kv_cache_state(
-                    existing=cache_state,
-                    new=new_cache,
-                    new_frames=int(noisy_latents.shape[1]),
-                )
+                if new_chunk is None:
+                    raise RuntimeError(
+                        "LongCat transformer returned no KV cache")
+                self._streaming_caches[cache_tag] = (
+                    self._write_chunk_to_buffer(
+                        cache_state=cache_state,
+                        new_chunk=new_chunk,
+                        new_frames=int(noisy_latents.shape[1]),
+                        device=noisy_latents.device,
+                    ))
                 return None
 
             pred_noise = transformer(
@@ -135,13 +152,160 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
                 encoder_attention_mask=text_dict["encoder_attention_mask"],
                 timestep=timestep,
                 num_cond_latents=cached_frames,
-                kv_cache_dict=kv_cache_dict,
-                kv_cache_start_frame=kv_cache_start_frame,
+                kv_cache_dict=kv_cache_view,
+                # Buffer never evicts; cached frames always start at frame 0.
+                kv_cache_start_frame=0,
             )
             if isinstance(pred_noise, tuple):
                 raise RuntimeError("LongCat transformer returned a tuple "
                                    "when return_kv=False")
         return pred_noise.permute(0, 2, 1, 3, 4)
+
+    # ------------------------------------------------------------------
+    # KV cache buffer
+    # ------------------------------------------------------------------
+
+    def _cache_view(
+        self,
+        cache_state: _LongCatStreamingCache | None,
+    ) -> tuple[dict[int, tuple[torch.Tensor, torch.Tensor]] | None, int]:
+        """Return ``(kv_cache_dict view, cached_frames)`` for the transformer.
+
+        The slice ``buf[..., :write_idx, :]`` is a view into the
+        pre-allocated buffer. Because positions ``[0, write_idx)`` are
+        never overwritten, this view stays valid across later writes —
+        which is what makes the buffer pattern grad-checkpoint safe
+        without cloning the full K/V every forward.
+        """
+        if cache_state is None:
+            return None, 0
+
+        widx = int(cache_state.write_idx.item())
+        if widx == 0:
+            return None, 0
+
+        view = {
+            idx: (buf["k"][:, :, :widx, :], buf["v"][:, :, :widx, :])
+            for idx, buf in cache_state.buffers.items()
+        }
+        cached_frames = widx // cache_state.tokens_per_frame
+        return view, cached_frames
+
+    def _write_chunk_to_buffer(
+        self,
+        *,
+        cache_state: _LongCatStreamingCache | None,
+        new_chunk: dict[int, tuple[torch.Tensor, torch.Tensor]],
+        new_frames: int,
+        device: torch.device,
+    ) -> _LongCatStreamingCache:
+        """Copy the new chunk's K/V into the pre-allocated buffer.
+
+        Lazy-allocates the buffer on the first call from the first
+        chunk's K/V shape and ``training_config.data.num_frames``.
+        Subsequent calls are pure in-place ``.copy_()`` into the next
+        slot, plus an advance of ``write_idx`` — no allocation, no
+        ``torch.cat``, no eviction.
+        """
+        if int(new_frames) <= 0:
+            raise ValueError("new_frames must be > 0")
+        if not new_chunk:
+            raise ValueError("LongCat transformer returned an empty KV cache")
+
+        sample_k, _ = next(iter(new_chunk.values()))
+        if sample_k.ndim != 4:
+            raise ValueError(
+                "Unexpected LongCat KV cache shape; expected [B, H, N, D], "
+                f"got ndim={sample_k.ndim}")
+        new_tokens = int(sample_k.shape[2])
+        if new_tokens % new_frames != 0:
+            raise ValueError(
+                "LongCat KV cache token count is not divisible by the "
+                "number of frames in the cached chunk: "
+                f"{new_tokens} vs {new_frames}")
+        tokens_per_frame = new_tokens // new_frames
+
+        if cache_state is None:
+            # First chunk: allocate a fixed-size buffer sized for the
+            # full rollout. We use training_config.data.num_frames as
+            # the upper bound.
+            tc = self.training_config
+            assert tc is not None
+            total_frames = int(tc.data.num_frames)
+            if total_frames <= 0:
+                raise ValueError(
+                    "training.num_frames must be > 0 for streaming "
+                    f"KV cache; got {total_frames}")
+            max_tokens = tokens_per_frame * total_frames
+            B = int(sample_k.shape[0])
+            H = int(sample_k.shape[1])
+            D = int(sample_k.shape[3])
+
+            buffers: dict[int, dict[str, torch.Tensor]] = {}
+            for idx, (k, v) in new_chunk.items():
+                if (k.shape[0] != B or k.shape[1] != H or k.shape[3] != D):
+                    raise ValueError(
+                        "LongCat KV cache shape mismatch across layers: "
+                        f"layer {idx} has {tuple(k.shape)}, expected "
+                        f"({B}, {H}, *, {D})")
+                buffers[idx] = {
+                    "k":
+                    torch.zeros(
+                        (B, H, max_tokens, D),
+                        dtype=k.dtype,
+                        device=k.device,
+                    ),
+                    "v":
+                    torch.zeros(
+                        (B, H, max_tokens, D),
+                        dtype=v.dtype,
+                        device=v.device,
+                    ),
+                }
+
+            cache_state = _LongCatStreamingCache(
+                buffers=buffers,
+                write_idx=torch.zeros((), dtype=torch.long, device=device),
+                tokens_per_frame=tokens_per_frame,
+                max_tokens=max_tokens,
+            )
+        else:
+            if cache_state.tokens_per_frame != tokens_per_frame:
+                raise ValueError(
+                    "LongCat KV cache token density changed between chunks: "
+                    f"{cache_state.tokens_per_frame} vs {tokens_per_frame}")
+
+        widx = int(cache_state.write_idx.item())
+        new_widx = widx + new_tokens
+        if new_widx > cache_state.max_tokens:
+            raise ValueError(
+                "LongCat KV cache buffer overflow: tried to write up to "
+                f"{new_widx} tokens, buffer capacity is "
+                f"{cache_state.max_tokens} "
+                f"({cache_state.max_tokens // cache_state.tokens_per_frame} "
+                "frames). Increase training.data.num_frames or reduce "
+                "the rollout length.")
+
+        for idx, (k, v) in new_chunk.items():
+            buf = cache_state.buffers.get(idx)
+            if buf is None:
+                raise ValueError(
+                    f"LongCat returned new K/V for layer {idx} not present "
+                    "in the pre-allocated buffer; the layer set must be "
+                    "consistent across chunks")
+            # In-place write into the next slot. .detach() ensures the
+            # buffer is a constant from the next chunk's perspective —
+            # gradients flow through the live transformer call, not back
+            # through previously-cached K/V (matches WanCausalModel).
+            buf["k"][:, :, widx:new_widx, :].copy_(k.detach())
+            buf["v"][:, :, widx:new_widx, :].copy_(v.detach())
+
+        cache_state.write_idx.fill_(new_widx)
+        return cache_state
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     def _empty_kv_cache_inputs(
         self,
@@ -164,7 +328,8 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
         )
 
     def _get_text_len(self, *, default: int) -> int:
-        pipeline_config = getattr(self.training_config, "pipeline_config", None)
+        pipeline_config = getattr(self.training_config, "pipeline_config",
+                                  None)
         text_configs = getattr(pipeline_config, "text_encoder_configs", None)
         if text_configs:
             arch_config = getattr(text_configs[0], "arch_config", None)
@@ -172,123 +337,3 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
             if value is not None:
                 return int(value)
         return int(default)
-
-    def _should_use_checkpoint_safe_kv_cache(self) -> bool:
-        tc = getattr(self, "training_config", None)
-        checkpointing_type = (
-            tc.model.enable_gradient_checkpointing_type
-            if tc is not None else None
-        )
-        return bool(checkpointing_type) and bool(self._trainable)
-
-    def _should_snapshot_streaming_cache(self) -> bool:
-        return self._should_use_checkpoint_safe_kv_cache()
-
-    def _snapshot_kv_cache_dict(
-        self,
-        kv_cache_dict: dict[int, tuple[torch.Tensor, torch.Tensor]] | None,
-    ) -> dict[int, tuple[torch.Tensor, torch.Tensor]] | None:
-        if kv_cache_dict is None:
-            return None
-
-        return {
-            idx: (k.detach().clone(), v.detach().clone())
-            for idx, (k, v) in kv_cache_dict.items()
-        }
-
-    def _merge_kv_cache_state(
-        self,
-        existing: _LongCatStreamingCache | None,
-        new: dict[int, tuple[torch.Tensor, torch.Tensor]],
-        new_frames: int,
-    ) -> _LongCatStreamingCache:
-        if int(new_frames) <= 0:
-            raise ValueError("new_frames must be > 0")
-
-        tokens_per_frame = self._infer_tokens_per_frame(
-            cache_dict=new,
-            num_frames=int(new_frames),
-        )
-
-        if existing is None:
-            merged = {
-                idx: (k.contiguous(), v.contiguous())
-                for idx, (k, v) in new.items()
-            }
-            start_frame = 0
-            cached_frames = int(new_frames)
-        else:
-            if existing.tokens_per_frame != tokens_per_frame:
-                raise ValueError(
-                    "LongCat KV cache token density changed between chunks: "
-                    f"{existing.tokens_per_frame} vs {tokens_per_frame}"
-                )
-            merged = {}
-            for idx in sorted(set(existing.kv_cache) | set(new)):
-                if idx not in existing.kv_cache:
-                    merged[idx] = new[idx]
-                    continue
-                if idx not in new:
-                    merged[idx] = existing.kv_cache[idx]
-                    continue
-
-                prev_k, prev_v = existing.kv_cache[idx]
-                new_k, new_v = new[idx]
-                merged[idx] = (
-                    torch.cat((prev_k, new_k), dim=2),
-                    torch.cat((prev_v, new_v), dim=2),
-                )
-            start_frame = int(existing.start_frame)
-            cached_frames = int(existing.cached_frames + new_frames)
-
-        max_cache_frames = min(
-            self._max_kv_cache_frames,
-            int(self.training_config.data.num_frames),
-        )
-        if cached_frames > max_cache_frames:
-            frames_to_drop = int(cached_frames - max_cache_frames)
-            tokens_to_drop = int(frames_to_drop * tokens_per_frame)
-            for idx, (k, v) in merged.items():
-                if k.shape[2] < tokens_to_drop or v.shape[2] < tokens_to_drop:
-                    raise ValueError(
-                        "LongCat KV cache eviction would drop more tokens "
-                        "than are present in the cache"
-                    )
-                merged[idx] = (
-                    k[:, :, tokens_to_drop:, :].contiguous(),
-                    v[:, :, tokens_to_drop:, :].contiguous(),
-                )
-            start_frame += frames_to_drop
-            cached_frames = max_cache_frames
-
-        return _LongCatStreamingCache(
-            kv_cache=merged,
-            start_frame=start_frame,
-            cached_frames=cached_frames,
-            tokens_per_frame=tokens_per_frame,
-        )
-
-    def _infer_tokens_per_frame(
-        self,
-        *,
-        cache_dict: dict[int, tuple[torch.Tensor, torch.Tensor]],
-        num_frames: int,
-    ) -> int:
-        if not cache_dict:
-            raise ValueError("LongCat returned an empty KV cache")
-        if num_frames <= 0:
-            raise ValueError("num_frames must be > 0")
-
-        sample_k, _ = next(iter(cache_dict.values()))
-        if sample_k.ndim != 4:
-            raise ValueError(
-                "Unexpected LongCat KV cache shape; expected [B, H, N, D], "
-                f"got ndim={sample_k.ndim}"
-            )
-        num_tokens = int(sample_k.shape[2])
-        if num_tokens % num_frames != 0:
-            raise ValueError(
-                "LongCat KV cache token count is not divisible by the number "
-                f"of frames in the cached chunk: {num_tokens} vs {num_frames}"
-            )
-        return num_tokens // num_frames
