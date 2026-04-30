@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 
@@ -88,3 +88,47 @@ class LongCatModel(WanModel):
             "encoder_attention_mask": text_dict["encoder_attention_mask"],
             "timestep": timestep,
         }
+
+    def predict_noise(
+        self,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> torch.Tensor:
+        """Adapt LongCat's sign convention to FineTuneMethod's target.
+
+        ``LongCatTransformer3DModel`` is pretrained to output the
+        ``clean - noise`` direction; ``LongCatDenoisingStage`` (the
+        bidirectional inference pipeline) explicitly negates the
+        transformer output before handing it to
+        ``FlowMatchEulerDiscreteScheduler.step``. Training methods on
+        the other hand (``FineTuneMethod``,
+        ``DiffusionForcingSFTMethod``) target ``noise - clean``
+        directly (the standard rectified-flow velocity Wan uses).
+
+        Without the negation here, the loss MSE pushes the transformer
+        toward ``noise - clean``, flipping its native output sign over
+        training. Inference then applies its own negation on top, so
+        the scheduler receives the wrong direction and produces noise
+        even while the training loss is dropping. Verified empirically
+        on a 100-step LongCat overfit run: step 0 generated meaningful
+        video, step 100 was pure noise despite low loss.
+
+        Negating in ``predict_noise`` keeps the transformer's
+        pretrained sign convention intact while presenting the
+        training methods with a Wan-compatible
+        ``pred ≈ noise - clean`` for MSE.
+        """
+        pred = super().predict_noise(
+            noisy_latents,
+            timestep,
+            batch,
+            conditional=conditional,
+            cfg_uncond=cfg_uncond,
+            attn_kind=attn_kind,
+        )
+        return -pred
