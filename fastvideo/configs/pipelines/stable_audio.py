@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from fastvideo.configs.models import VAEConfig
+from fastvideo.configs.models import DiTConfig, VAEConfig
+from fastvideo.configs.models.dits import StableAudioConfig
 from fastvideo.configs.models.vaes import OobleckVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
@@ -12,6 +13,11 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 @dataclass
 class StableAudioT2AConfig(PipelineConfig):
     """Stable Audio Open 1.0 pipeline config."""
+
+    dit_config: DiTConfig = field(default_factory=StableAudioConfig)
+    # Standard `TransformerLoader` reads `dit_precision`; default in
+    # `PipelineConfig` is bf16, but we want fp16 to match official.
+    dit_precision: str = "fp16"
 
     vae_config: VAEConfig = field(default_factory=OobleckVAEConfig)
     vae_tiling: bool = False

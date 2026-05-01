@@ -209,10 +209,17 @@ class OobleckDecoder(nn.Module):
 
 
 class OobleckVAE(nn.Module):
-    """Stable Audio Open 1.0 VAE."""
+    """Stable Audio Open 1.0 VAE.
+
+    Constructed either from an `OobleckVAEConfig` (the standard
+    `VAELoader` path) or from explicit kwargs (back-compat for tests
+    and `from_pretrained` callers).
+    """
 
     def __init__(
         self,
+        config=None,  # type: OobleckVAEConfig | None
+        *,
         encoder_hidden_size: int = 128,
         downsampling_ratios: list[int] | None = None,
         channel_multiples: list[int] | None = None,
@@ -222,6 +229,15 @@ class OobleckVAE(nn.Module):
         sampling_rate: int = 44100,
     ):
         super().__init__()
+        if config is not None:
+            arch = config.arch_config
+            encoder_hidden_size = arch.encoder_hidden_size
+            downsampling_ratios = list(arch.downsampling_ratios)
+            channel_multiples = list(arch.channel_multiples)
+            decoder_channels = arch.decoder_channels
+            decoder_input_channels = arch.decoder_input_channels
+            audio_channels = arch.audio_channels
+            sampling_rate = arch.sampling_rate
         if downsampling_ratios is None:
             downsampling_ratios = [2, 4, 4, 8, 8]
         if channel_multiples is None:
@@ -348,3 +364,6 @@ class OobleckVAE(nn.Module):
             model = model.to(dtype=torch_dtype)
         model.eval()
         return model
+
+
+EntryClass = OobleckVAE

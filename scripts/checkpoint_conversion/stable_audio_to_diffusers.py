@@ -141,11 +141,20 @@ def _component_config(model_config: dict[str, Any]) -> dict[str, dict[str, Any]]
     diff = model_config["model"]["diffusion"]
     pre = model_config["model"]["pretransform"]["config"]
     cond = model_config["model"]["conditioning"]
+    # Translate upstream `model_config.json` field names to FastVideo's
+    # `StableAudioArchConfig` fields. The standard `TransformerLoader`
+    # calls `dit_config.update_model_arch(json_dict)` which raises on
+    # unknown keys.
+    diff_cfg = dict(diff["config"])
+    if "num_heads" in diff_cfg:
+        diff_cfg["num_attention_heads"] = diff_cfg.pop("num_heads")
+    diff_cfg.pop("transformer_type", None)  # always "continuous_transformer"
+    diff_cfg.pop("attn_kwargs", None)  # small variant; surfaced via `qk_norm` instead
+    # `cross_attention_cond_ids` / `global_cond_ids` belong to the
+    # conditioner, not the DiT — keep them out of transformer/config.json.
     transformer_cfg = {
         "_class_name": "StableAudioDiT",
-        **diff["config"],
-        "cross_attention_cond_ids": diff["cross_attention_cond_ids"],
-        "global_cond_ids": diff["global_cond_ids"],
+        **diff_cfg,
     }
     vae_cfg = {
         "_class_name": "OobleckVAE",
@@ -159,6 +168,8 @@ def _component_config(model_config: dict[str, Any]) -> dict[str, dict[str, Any]]
         "_class_name": "StableAudioMultiConditioner",
         "cond_dim": cond["cond_dim"],
         "configs": cond["configs"],
+        "cross_attention_cond_ids": diff["cross_attention_cond_ids"],
+        "global_cond_ids": diff["global_cond_ids"],
     }
     return {
         "transformer": transformer_cfg,

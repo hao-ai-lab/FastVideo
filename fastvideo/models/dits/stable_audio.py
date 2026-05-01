@@ -7,6 +7,7 @@ and prepend global conditioning. 24 layers, embed_dim=1536, head_dim=64.
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import torch
 from einops import rearrange
@@ -16,6 +17,7 @@ from fastvideo.attention import LocalAttention
 from fastvideo.configs.models.dits import StableAudioConfig
 from fastvideo.layers.layernorm import FP32LayerNorm
 from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.loader.utils import get_param_names_mapping
 
 # Single import-time snapshot — re-reading via `StableAudioConfig()` per
@@ -241,15 +243,25 @@ class ContinuousTransformer(nn.Module):
         return x
 
 
-class StableAudioDiT(nn.Module):
+class StableAudioDiT(BaseDiT):
     """Stable Audio Open 1.0 diffusion transformer."""
 
+    _fsdp_shard_conditions = StableAudioConfig().arch_config._fsdp_shard_conditions
+    _compile_conditions = StableAudioConfig().arch_config._compile_conditions
     param_names_mapping = StableAudioConfig().arch_config.param_names_mapping
+    reverse_param_names_mapping: dict = {}
 
-    def __init__(self, config: StableAudioConfig | None = None) -> None:
-        super().__init__()
-        self.config = config or StableAudioConfig()
-        arch = self.config.arch_config
+    def __init__(self, config: StableAudioConfig | None = None,
+                 hf_config: dict[str, Any] | None = None) -> None:
+        if config is None:
+            config = StableAudioConfig()
+        # `BaseDiT.__init__` requires both args.
+        super().__init__(config=config, hf_config=hf_config or {})
+        arch = config.arch_config
+        # `BaseDiT.__post_init__` checks these are set on `self`.
+        self.hidden_size = arch.hidden_size
+        self.num_attention_heads = arch.num_attention_heads
+        self.num_channels_latents = arch.num_channels_latents
         io_channels = arch.io_channels
         embed_dim = arch.embed_dim
         depth = arch.depth
@@ -297,6 +309,7 @@ class StableAudioDiT(nn.Module):
         self.embed_dim = embed_dim
         self.depth = depth
         self.num_heads = num_heads
+        self.__post_init__()
 
     @staticmethod
     def _seq_apply(seq: nn.Sequential, x: torch.Tensor) -> torch.Tensor:
@@ -366,3 +379,6 @@ class StableAudioDiT(nn.Module):
             raise RuntimeError(
                 f"StableAudioDiT load mismatch — missing={missing[:5]} unexpected={unexpected[:5]}")
         return model
+
+
+EntryClass = StableAudioDiT

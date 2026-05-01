@@ -94,6 +94,10 @@ class StableAudioLatentPreparationStage(PipelineStage):
         have to.
         """
         assert self.vae is not None, "VAE required for init_audio / inpaint_audio encoding"
+        # Standard `VAELoader` may have parked the VAE on CPU
+        # (`vae_cpu_offload=True` default); pull it onto the latent's
+        # device before encode.
+        self.vae = self.vae.to(device)
         if isinstance(audio, str | os.PathLike):
             audio = _decode_audio_file(audio, target_sr=self.sample_rate)
         audio = audio.to(device=device, dtype=torch.float32)
@@ -114,10 +118,8 @@ class StableAudioLatentPreparationStage(PipelineStage):
             audio = audio[..., :self.sample_size]
         # Stochastic sample (the next random draw after the latent
         # `randn` above), so encode-noise stays on the seeded sequence.
-        from fastvideo.models.vaes.sa_audio import SAAudioVAEModel
-        if isinstance(self.vae, SAAudioVAEModel):
-            return self.vae.encode(audio, sample_posterior=True)
-        # Bare-OobleckVAE path (tests).
+        # `OobleckVAE.encode(...)` returns a `OobleckDiagonalGaussianDistribution`
+        # whose `.sample()` draws from the posterior.
         return self.vae.encode(audio.to(next(self.vae.parameters()).dtype)).sample()
 
     def _prepare_mask(self, mask, latent_len: int, device: torch.device) -> torch.Tensor:

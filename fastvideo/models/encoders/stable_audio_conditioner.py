@@ -217,3 +217,6 @@ class StableAudioMultiConditioner(nn.Module):
             )
         mc.load_state_dict(loaded, strict=False)
         return mc
+
+
+EntryClass = StableAudioMultiConditioner
