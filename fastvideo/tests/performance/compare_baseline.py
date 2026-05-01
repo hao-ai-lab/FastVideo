@@ -32,7 +32,7 @@ TRACKING_ROOT = os.environ.get(
     "PERFORMANCE_TRACKING_ROOT",
     "/tmp/perf-tracking",
 )
-MAX_REGRESSION = float(os.environ.get("PERF_MAX_REGRESSION", "0.15"))
+MAX_REGRESSION = float(os.environ.get("PERF_MAX_REGRESSION", "0.05"))
 
 def _should_persist_tracking() -> bool:
     # test_scope = os.environ.get("TEST_SCOPE", "")
@@ -100,26 +100,6 @@ def _write_tracking_record(record: dict[str, Any]) -> str:
 
     return out_path
 
-def _sync_baselines_from_hf():
-    """Download existing records from HF to local temp for comparison."""
-    if not HF_REPO_ID:
-        print("No HF_REPO_ID found, skipping baseline sync.")
-        return
-    
-    print(f"Syncing baselines from {HF_REPO_ID}...")
-    try:
-        snapshot_download(
-            repo_id=HF_REPO_ID,
-            repo_type="dataset",
-            local_dir=TRACKING_ROOT,
-            token=HF_TOKEN,
-            # We only care about the JSON files
-            allow_patterns="*.json"
-        )
-    except Exception as e:
-        # If the repo is empty or doesn't exist yet, we just start fresh
-        print(f"Note: Could not sync from HF (may be an empty repo): {e}")
-
 def _baseline_metric(records: list[dict[str, Any]], key: str) -> float | None:
     values = [
         _safe_float(r.get(key))
@@ -157,7 +137,7 @@ def _check_regressions(
         if regression > max_regression:
             failures.append(
                 f"{current['model_id']} throughput regressed by {regression * 100:.1f}% "
-                f"(current={curr_tp:.3f}, baseline_mean={baseline_tp:.3f})"
+                f"(current={curr_tp:.3f}, baseline_median={baseline_tp:.3f})"
             )
 
     return failures
@@ -169,7 +149,7 @@ def _metric_delta_percent(
     baseline_records: list[dict[str, Any]],
 ) -> float | None:
     curr = _safe_float(current.get(metric))
-    baseline = _mean_metric(baseline_records, metric)
+    baseline = _baseline_metric(baseline_records, metric)
     if curr is None or baseline is None or baseline <= 0:
         return None
 
@@ -192,9 +172,9 @@ def _build_summary_row(
 ) -> dict[str, Any]:
     """Formats a single benchmark result into a row for the Markdown summary table."""
     
-    latency_base = _safe_float(_mean_metric(baseline_records, "latency"))
-    throughput_base = _safe_float(_mean_metric(baseline_records, "throughput"))
-    memory_base = _safe_float(_mean_metric(baseline_records, "memory"))
+    latency_base = _safe_float(_baseline_metric(baseline_records, "latency"))
+    throughput_base = _safe_float(_baseline_metric(baseline_records, "throughput"))
+    memory_base = _safe_float(_baseline_metric(baseline_records, "memory"))
     
     # Calculate percentages for the 'Worst Regression' column
     latency_reg = _metric_delta_percent("latency", record, baseline_records)
