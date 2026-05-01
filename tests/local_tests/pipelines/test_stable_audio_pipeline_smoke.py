@@ -30,7 +30,7 @@ def test_stable_audio_typed_surface_preflight() -> None:
     assert EntryClass is StableAudioPipeline
 
     names = {p.name for p in get_presets_for_family("stable_audio")}
-    assert names == {"stable_audio_open_1_0_base"}
+    assert names == {"stable_audio_open_1_0_base", "stable_audio_open_small"}
     preset = get_preset("stable_audio_open_1_0_base", "stable_audio")
     assert preset.defaults["num_inference_steps"] == 100
     assert preset.defaults["guidance_scale"] == 7.0

@@ -48,7 +48,7 @@ from fastvideo.configs.pipelines.wan import (
     WanT2V720PConfig,
 )
 from fastvideo.configs.pipelines.sd35 import SD35Config
-from fastvideo.configs.pipelines.stable_audio import StableAudioT2AConfig
+from fastvideo.configs.pipelines.stable_audio import (StableAudioOpenSmallConfig, StableAudioT2AConfig)
 from fastvideo.api.sampling_param import SamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
@@ -243,15 +243,13 @@ def _register_configs() -> None:
         default_preset="ltx2_distilled",
     )
 
-    # Stable Audio Open 1.0 (text-to-audio).
+    # Stable Audio Open (text-to-audio). Both variants use the same
+    # `StableAudioPipeline` and `StableAudioT2AConfig` — the per-variant
+    # DiT shape (embed_dim, depth, num_heads, qk_norm) and conditioner
+    # spec come from `transformer/config.json` and `conditioner/config.json`
+    # in the converted Diffusers-format repos.
     # NOTE: WorkloadType has no T2A variant yet (REVIEW item 28); using
     # T2V as the placeholder until the enum is extended.
-    # `stable-audio-open-small` has its own converted repo on HF
-    # (`FastVideo/stable-audio-open-small-Diffusers`) but the small DiT
-    # uses `qk_norm="ln"` and different (embed_dim, depth, num_heads),
-    # which the current `StableAudioDiT` doesn't yet support — wiring
-    # the small variant into the registry is deferred until that DiT
-    # arch lands.
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=StableAudioT2AConfig,
@@ -261,10 +259,26 @@ def _register_configs() -> None:
             "stabilityai/stable-audio-open-1.0",
         ],
         model_detectors=[
-            lambda path: "stable-audio-open-1" in path.lower() or "stableaudio" in path.lower(),
+            lambda path: "stable-audio-open-1" in path.lower(),
         ],
         model_family="stable_audio",
         default_preset="stable_audio_open_1_0_base",
+    )
+    # Small variant uses a different `pipeline_config_cls` so it picks
+    # up the smaller (524288-sample) training window in `sample_size` /
+    # `max_audio_duration_s`.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=StableAudioOpenSmallConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "FastVideo/stable-audio-open-small-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: "stable-audio-open-small" in path.lower(),
+        ],
+        model_family="stable_audio",
+        default_preset="stable_audio_open_small",
     )
 
     # Hunyuan 1.5 (specific)

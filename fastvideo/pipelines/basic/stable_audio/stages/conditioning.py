@@ -53,11 +53,16 @@ class StableAudioConditioningStage(PipelineStage):
         do_cfg = guidance_scale > 1.0
 
         prompt = batch.prompt if isinstance(batch.prompt, str) else batch.prompt[0]
-        cond_meta = [{
+        # Build cond_meta with only the keys the conditioner expects.
+        # SA-1.0 wants {prompt, seconds_start, seconds_total}; SA-small
+        # wants {prompt, seconds_total} only.
+        all_cond_values = {
             "prompt": prompt,
             "seconds_start": audio_start_in_s,
             "seconds_total": audio_end_in_s,
-        }]
+        }
+        active_ids = self.conditioner.cross_attention_cond_ids
+        cond_meta = [{k: all_cond_values[k] for k in active_ids if k in all_cond_values}]
         cond = self.conditioner(cond_meta, device)
         cross_attn_cond, cross_attn_mask, global_embed = self.conditioner.get_conditioning_inputs(cond)
 
@@ -68,11 +73,8 @@ class StableAudioConditioningStage(PipelineStage):
             neg_prompt = batch.negative_prompt or ""
             if isinstance(neg_prompt, list):
                 neg_prompt = neg_prompt[0] if neg_prompt else ""
-            neg_meta = [{
-                "prompt": neg_prompt,
-                "seconds_start": audio_start_in_s,
-                "seconds_total": audio_end_in_s,
-            }]
+            neg_values = dict(all_cond_values, prompt=neg_prompt)
+            neg_meta = [{k: neg_values[k] for k in active_ids if k in neg_values}]
             neg = self.conditioner(neg_meta, device)
             neg_cross_attn_cond, neg_cross_attn_mask, neg_global_embed = (self.conditioner.get_conditioning_inputs(neg))
 

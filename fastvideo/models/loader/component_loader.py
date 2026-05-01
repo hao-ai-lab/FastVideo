@@ -1016,6 +1016,7 @@ class ConditionerLoader(ComponentLoader):
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         config = get_diffusers_config(model=model_path)
         class_name = config.pop("_class_name")
+        config.pop("_name_or_path", None)
         assert class_name is not None, (
             "Conditioner config does not contain a _class_name attribute.")
         model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
@@ -1024,8 +1025,26 @@ class ConditionerLoader(ComponentLoader):
         precision = getattr(fastvideo_args.pipeline_config, "precision", "fp16")
         target_dtype = PRECISION_TO_TYPE.get(precision, torch.float16)
 
-        with set_default_torch_dtype(target_dtype):
-            model = model_cls()
+        # Build a fresh FastVideo `*Config` for this conditioner class,
+        # merge the per-checkpoint json fields into its `arch_config`,
+        # then pass to the constructor. Without this the model falls
+        # back to its dataclass defaults (e.g. SA-1.0's 3-conditioner
+        # spec — wrong for SA-small).
+        from dataclasses import fields as _fields
+        from fastvideo.configs.models.encoders import (
+            StableAudioConditionerConfig, )
+        if model_cls.__name__ == "StableAudioMultiConditioner":
+            cond_config = StableAudioConditionerConfig()
+            arch = cond_config.arch_config
+            valid = {f.name for f in _fields(arch)}
+            for k, v in config.items():
+                if k in valid:
+                    setattr(arch, k, v)
+            with set_default_torch_dtype(target_dtype):
+                model = model_cls(cond_config)
+        else:
+            with set_default_torch_dtype(target_dtype):
+                model = model_cls()
 
         weights = os.path.join(str(model_path), "diffusion_pytorch_model.safetensors")
         if not os.path.isfile(weights):

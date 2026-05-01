@@ -135,6 +135,26 @@ def _split_state_dict(src_safetensors: Path) -> dict[str, dict[str, Any]]:
     return buckets
 
 
+def _detect_projection_flags(
+        diff_cfg: dict[str, Any],
+        dit_state: dict[str, Any]) -> tuple[bool, bool]:
+    """Decide `project_cond_tokens` / `project_global_cond` by comparing
+    the actual `to_cond_embed.0` / `to_global_embed.0` weight shapes
+    in the DiT state dict against `cond_token_dim` / `global_cond_dim`.
+    Upstream's factory toggles these per-variant in ways that aren't
+    derivable from `embed_dim` alone (SA-1.0 keeps `cond_embed_dim` =
+    `cond_token_dim` and uses GQA in cross-attn; SA-small projects to
+    `embed_dim` and uses MHA).
+    """
+    cond_dim = diff_cfg.get("cond_token_dim")
+    glob_dim = diff_cfg.get("global_cond_dim")
+    cond_w = dit_state.get("to_cond_embed.0.weight")
+    glob_w = dit_state.get("to_global_embed.0.weight")
+    project_cond = (cond_w is not None and cond_w.shape[0] != cond_dim)
+    project_glob = (glob_w is not None and glob_w.shape[0] != glob_dim)
+    return project_cond, project_glob
+
+
 def _component_config(model_config: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Pull per-component sizing out of the official `model_config.json`
     so the converted repo records the architecture authoritatively."""
@@ -149,20 +169,30 @@ def _component_config(model_config: dict[str, Any]) -> dict[str, dict[str, Any]]
     if "num_heads" in diff_cfg:
         diff_cfg["num_attention_heads"] = diff_cfg.pop("num_heads")
     diff_cfg.pop("transformer_type", None)  # always "continuous_transformer"
-    diff_cfg.pop("attn_kwargs", None)  # small variant; surfaced via `qk_norm` instead
+    # `attn_kwargs.qk_norm` (small variant) → top-level `qk_norm`.
+    attn_kwargs = diff_cfg.pop("attn_kwargs", None) or {}
+    if "qk_norm" in attn_kwargs:
+        diff_cfg["qk_norm"] = attn_kwargs["qk_norm"]
     # `cross_attention_cond_ids` / `global_cond_ids` belong to the
     # conditioner, not the DiT — keep them out of transformer/config.json.
     transformer_cfg = {
         "_class_name": "StableAudioDiT",
         **diff_cfg,
     }
+    # Mirror Diffusers' `AutoencoderOobleck` config field naming so
+    # `OobleckVAEArchConfig.update_model_arch` (called by `VAELoader`)
+    # accepts the keys.
+    enc_cfg = pre["encoder"]["config"]
+    dec_cfg = pre["decoder"]["config"]
     vae_cfg = {
-        "_class_name": "OobleckVAE",
-        "io_channels": pre["io_channels"],
-        "latent_dim": pre["latent_dim"],
-        "downsampling_ratio": pre["downsampling_ratio"],
-        "encoder_config": pre["encoder"]["config"],
-        "decoder_config": pre["decoder"]["config"],
+        "_class_name": "AutoencoderOobleck",
+        "encoder_hidden_size": enc_cfg["channels"],
+        "downsampling_ratios": enc_cfg["strides"],
+        "channel_multiples": enc_cfg["c_mults"],
+        "decoder_channels": dec_cfg["channels"],
+        "decoder_input_channels": dec_cfg["latent_dim"],
+        "audio_channels": pre.get("io_channels", 2),
+        "sampling_rate": model_config.get("sample_rate", 44100),
     }
     conditioner_cfg = {
         "_class_name": "StableAudioMultiConditioner",
@@ -228,6 +258,10 @@ def convert(src: str, dst: str) -> None:
 
     print("\n[3/4] Writing per-component configs + safetensors:")
     component_cfgs = _component_config(model_config)
+    project_cond, project_glob = _detect_projection_flags(component_cfgs["transformer"],
+                                                          buckets["transformer"])
+    component_cfgs["transformer"]["project_cond_tokens"] = project_cond
+    component_cfgs["transformer"]["project_global_cond"] = project_glob
     for name in ("transformer", "vae", "conditioner"):
         if name in copied:
             print(f"  skipped {name}/ (already copied from source in Diffusers format)")

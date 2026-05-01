@@ -56,6 +56,9 @@ class StableAudioArchConfig(DiTArchConfig):
     global_cond_dim: int = 1536
     project_cond_tokens: bool = False
     project_global_cond: bool = True
+    # Set to "ln" to wrap attention Q/K in LayerNorm (used by
+    # `stable-audio-open-small`; absent in the 1.0 base).
+    qk_norm: str | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()

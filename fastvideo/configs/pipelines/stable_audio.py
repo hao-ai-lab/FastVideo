@@ -38,6 +38,7 @@ class StableAudioT2AConfig(PipelineConfig):
     # Stable Audio Open 1.0 was trained at a fixed 2,097,152-sample
     # window (= 2097152 / 44100 ≈ 47.55s). Anything past this is
     # silently truncated by the post-decode slice — validate up-front.
+    sample_size: int = 2097152
     max_audio_duration_s: float = 2097152 / 44100
 
     # Match the official `stable_audio_tools` defaults (`model_half=True`
@@ -52,3 +53,15 @@ class StableAudioT2AConfig(PipelineConfig):
         # A2A needs encode; load both halves for either path.
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
+
+
+@dataclass
+class StableAudioOpenSmallConfig(StableAudioT2AConfig):
+    """`stable-audio-open-small` overrides: shorter training window
+    (524288 samples ≈ 11.89s @ 44.1 kHz) and a faster default sampler
+    config carried by the small preset.
+    """
+
+    sample_size: int = 524288
+    max_audio_duration_s: float = 524288 / 44100
+    audio_end_in_s: float = 6.0  # short-clip default suitable for the small window

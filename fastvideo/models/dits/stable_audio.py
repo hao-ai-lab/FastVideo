@@ -123,7 +123,7 @@ class FeedForward(nn.Module):
 class Attention(nn.Module):
 
     def __init__(self, dim: int, dim_heads: int = 64, dim_context: int | None = None,
-                 zero_init_output: bool = True) -> None:
+                 zero_init_output: bool = True, qk_norm: str | None = None) -> None:
         super().__init__()
         self.dim = dim
         self.dim_heads = dim_heads
@@ -138,6 +138,19 @@ class Attention(nn.Module):
         self.to_out = ReplicatedLinear(dim, dim, bias=False)
         if zero_init_output:
             nn.init.zeros_(self.to_out.weight)
+
+        # `stable-audio-open-small` wraps Q/K in LayerNorm before attn
+        # (`attn_kwargs.qk_norm = "ln"` in its `model_config.json`); the
+        # 1.0 base does not. Names match upstream (`q_norm`/`k_norm`)
+        # so the converted state dict loads strict.
+        if qk_norm == "ln":
+            self.q_norm = nn.LayerNorm(dim_heads)
+            self.k_norm = nn.LayerNorm(dim_heads)
+        elif qk_norm is None:
+            self.q_norm = nn.Identity()
+            self.k_norm = nn.Identity()
+        else:
+            raise ValueError(f"Unsupported qk_norm={qk_norm!r}; expected 'ln' or None.")
 
         self.attn = LocalAttention(num_heads=self.num_heads, head_size=dim_heads,
                                    num_kv_heads=self.kv_heads, causal=False,
@@ -158,6 +171,9 @@ class Attention(nn.Module):
         q = rearrange(q, "b n (h d) -> b n h d", h=h)
         k = rearrange(k, "b n (h d) -> b n h d", h=kv_h)
         v = rearrange(v, "b n (h d) -> b n h d", h=kv_h)
+        # qk_norm runs after the head-dim split (norms are per-head).
+        q = self.q_norm(q)
+        k = self.k_norm(k)
 
         if rotary_pos_emb is not None:
             freqs, _ = rotary_pos_emb
@@ -185,18 +201,21 @@ class Attention(nn.Module):
 class TransformerBlock(nn.Module):
 
     def __init__(self, dim: int, dim_heads: int = 64, cross_attend: bool = False,
-                 dim_context: int | None = None, zero_init_branch_outputs: bool = True) -> None:
+                 dim_context: int | None = None, zero_init_branch_outputs: bool = True,
+                 qk_norm: str | None = None) -> None:
         super().__init__()
         self.dim = dim
         self.dim_heads = min(dim_heads, dim)
         self.cross_attend = cross_attend
         self.pre_norm = FP32LayerNorm(dim, elementwise_affine=True)
         self.self_attn = Attention(dim, dim_heads=self.dim_heads,
-                                   zero_init_output=zero_init_branch_outputs)
+                                   zero_init_output=zero_init_branch_outputs,
+                                   qk_norm=qk_norm)
         if cross_attend:
             self.cross_attend_norm = FP32LayerNorm(dim, elementwise_affine=True)
             self.cross_attn = Attention(dim, dim_heads=self.dim_heads, dim_context=dim_context,
-                                        zero_init_output=zero_init_branch_outputs)
+                                        zero_init_output=zero_init_branch_outputs,
+                                        qk_norm=qk_norm)
         self.ff_norm = FP32LayerNorm(dim, elementwise_affine=True)
         self.ff = FeedForward(dim, zero_init_output=zero_init_branch_outputs)
 
@@ -213,7 +232,8 @@ class ContinuousTransformer(nn.Module):
 
     def __init__(self, dim: int, depth: int, *, dim_heads: int = 64, dim_in: int | None = None,
                  dim_out: int | None = None, cross_attend: bool = False,
-                 cond_token_dim: int | None = None, zero_init_branch_outputs: bool = True) -> None:
+                 cond_token_dim: int | None = None, zero_init_branch_outputs: bool = True,
+                 qk_norm: str | None = None) -> None:
         super().__init__()
         self.dim = dim
         self.depth = depth
@@ -225,7 +245,8 @@ class ContinuousTransformer(nn.Module):
         self.layers = nn.ModuleList([
             TransformerBlock(dim, dim_heads=dim_heads, cross_attend=cross_attend,
                              dim_context=cond_token_dim,
-                             zero_init_branch_outputs=zero_init_branch_outputs) for _ in range(depth)
+                             zero_init_branch_outputs=zero_init_branch_outputs,
+                             qk_norm=qk_norm) for _ in range(depth)
         ])
 
     def forward(self, x: torch.Tensor, prepend_embeds: torch.Tensor | None = None,
@@ -270,6 +291,7 @@ class StableAudioDiT(BaseDiT):
         global_cond_dim = arch.global_cond_dim
         project_cond_tokens = arch.project_cond_tokens
         project_global_cond = arch.project_global_cond
+        qk_norm = arch.qk_norm
 
         self.cond_token_dim = cond_token_dim
         timestep_features_dim = 256
@@ -298,6 +320,7 @@ class StableAudioDiT(BaseDiT):
         self.transformer = ContinuousTransformer(
             dim=embed_dim, depth=depth, dim_heads=embed_dim // num_heads, dim_in=io_channels,
             dim_out=io_channels, cross_attend=True, cond_token_dim=cond_embed_dim,
+            qk_norm=qk_norm,
         )
 
         self.preprocess_conv = nn.Conv1d(io_channels, io_channels, 1, bias=False)

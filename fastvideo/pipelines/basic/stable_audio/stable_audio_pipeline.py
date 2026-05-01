@@ -100,9 +100,11 @@ class StableAudioPipeline(ComposedPipelineBase):
             stage_name="latent_preparation_stage",
             stage=StableAudioLatentPreparationStage(
                 io_channels=64,
-                # Fixed-size latent (~47.5s @ 44.1 kHz); requested duration
-                # is sliced after decode.
-                sample_size=2097152,
+                # Per-variant training window: 2,097,152 (~47.5s) for
+                # SA-1.0; 524,288 (~11.9s) for SA-small. Pulled from the
+                # pipeline config so each variant gets its own latent
+                # length.
+                sample_size=pc.sample_size,
                 vae=self.get_module("vae"),
                 sample_rate=pc.sampling_rate,
                 audio_channels=pc.audio_channels,

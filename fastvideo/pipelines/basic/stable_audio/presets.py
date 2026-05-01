@@ -45,4 +45,19 @@ STABLE_AUDIO_OPEN_1_0_BASE = InferencePreset(
     defaults=dict(_SHARED_DEFAULTS),
 )
 
-ALL_PRESETS = (STABLE_AUDIO_OPEN_1_0_BASE, )
+# Smaller / faster checkpoint with the same Oobleck VAE but a 1024-dim
+# 16-layer DiT with `qk_norm="ln"`. Sampling defaults match the official
+# `stable-audio-open-small` model card.
+STABLE_AUDIO_OPEN_SMALL = InferencePreset(
+    name="stable_audio_open_small",
+    version=1,
+    model_family="stable_audio",
+    description=("Stability AI Stable Audio Open Small text-to-audio. Faster than "
+                 "the 1.0 base; supports up to ~11.9s of stereo 44.1 kHz audio per "
+                 "call (smaller training window)."),
+    workload_type="t2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults=dict(_SHARED_DEFAULTS),
+)
+
+ALL_PRESETS = (STABLE_AUDIO_OPEN_1_0_BASE, STABLE_AUDIO_OPEN_SMALL)

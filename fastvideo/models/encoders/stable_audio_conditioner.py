@@ -136,14 +136,28 @@ class StableAudioMultiConditioner(nn.Module):
         super().__init__()
         self.config = config or StableAudioConditionerConfig()
         arch = self.config.arch_config
-        self.conditioners = nn.ModuleDict({
-            "prompt": T5Conditioner(output_dim=arch.cond_dim, t5_model_name=arch.t5_model_name,
-                                    max_length=arch.t5_max_length, dtype=arch.t5_dtype),
-            "seconds_start": NumberConditioner(output_dim=arch.cond_dim, min_val=arch.number_min_val,
-                                               max_val=arch.number_max_val),
-            "seconds_total": NumberConditioner(output_dim=arch.cond_dim, min_val=arch.number_min_val,
-                                               max_val=arch.number_max_val),
-        })
+        # Build sub-conditioners from the `configs` list (mirrors
+        # upstream's `MultiConditioner` factory). SA-1.0 has 3 entries
+        # (prompt + seconds_start + seconds_total); SA-small has 2
+        # (prompt + seconds_total only).
+        sub: dict[str, nn.Module] = {}
+        for spec in arch.configs:
+            sid = spec["id"]
+            stype = spec["type"]
+            scfg = spec["config"]
+            if stype == "t5":
+                sub[sid] = T5Conditioner(output_dim=arch.cond_dim,
+                                         t5_model_name=scfg["t5_model_name"],
+                                         max_length=scfg["max_length"],
+                                         dtype=arch.t5_dtype)
+            elif stype == "number":
+                sub[sid] = NumberConditioner(output_dim=arch.cond_dim,
+                                             min_val=scfg["min_val"], max_val=scfg["max_val"])
+            else:
+                raise ValueError(f"Unknown sub-conditioner type {stype!r} for id {sid!r}.")
+        self.conditioners = nn.ModuleDict(sub)
+        self.cross_attention_cond_ids = tuple(arch.cross_attention_cond_ids)
+        self.global_cond_ids = tuple(arch.global_cond_ids)
 
     def forward(self, batch_metadata: list[dict],
                 device: torch.device | str) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
@@ -157,14 +171,17 @@ class StableAudioMultiConditioner(nn.Module):
         self, cond: dict[str, tuple[torch.Tensor, torch.Tensor]]
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Pack conditioner outputs into the (cross_attn_cond,
-        cross_attn_mask, global_embed) triple the DiT consumes.
+        cross_attn_mask, global_embed) triple the DiT consumes. Order
+        is driven by `cross_attention_cond_ids` / `global_cond_ids`
+        from the config — SA-1.0 uses three sub-conditioners
+        (prompt + seconds_start + seconds_total); SA-small uses two
+        (prompt + seconds_total).
         """
-        prompt_emb, prompt_mask = cond["prompt"]
-        ss_emb, ss_mask = cond["seconds_start"]
-        st_emb, st_mask = cond["seconds_total"]
-        cross_attn_cond = torch.cat([prompt_emb, ss_emb, st_emb], dim=1)
-        cross_attn_mask = torch.cat([prompt_mask, ss_mask, st_mask], dim=1)
-        global_embed = torch.cat([ss_emb[:, 0], st_emb[:, 0]], dim=-1)
+        x_embs = [cond[i][0] for i in self.cross_attention_cond_ids]
+        x_masks = [cond[i][1] for i in self.cross_attention_cond_ids]
+        cross_attn_cond = torch.cat(x_embs, dim=1)
+        cross_attn_mask = torch.cat(x_masks, dim=1)
+        global_embed = torch.cat([cond[i][0][:, 0] for i in self.global_cond_ids], dim=-1)
         return cross_attn_cond, cross_attn_mask, global_embed
 
     @classmethod
