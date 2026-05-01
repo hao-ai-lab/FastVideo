@@ -31,12 +31,10 @@ class StableAudioConditioningStage(PipelineStage):
         pc = fastvideo_args.pipeline_config
         device = next(self.conditioner.parameters()).device
 
-        # `0 or default` resolves to default — the user-set 0 still falls
-        # through to the config default. That's intentional for end_s
-        # (callers always specify it explicitly when they care) but means
-        # the start default of 0.0 always wins for start_s.
-        audio_start_in_s = float(getattr(batch, "audio_start_in_s", None) or pc.audio_start_in_s)
-        audio_end_in_s = float(getattr(batch, "audio_end_in_s", None) or pc.audio_end_in_s)
+        start_attr = getattr(batch, "audio_start_in_s", None)
+        end_attr = getattr(batch, "audio_end_in_s", None)
+        audio_start_in_s = float(start_attr if start_attr is not None else pc.audio_start_in_s)
+        audio_end_in_s = float(end_attr if end_attr is not None else pc.audio_end_in_s)
         max_duration = float(getattr(pc, "max_audio_duration_s", 2097152 / 44100))
         if audio_start_in_s < 0:
             raise ValueError(f"audio_start_in_s must be >= 0, got {audio_start_in_s}.")
@@ -52,7 +50,17 @@ class StableAudioConditioningStage(PipelineStage):
         guidance_scale = float(batch.guidance_scale or pc.guidance_scale)
         do_cfg = guidance_scale > 1.0
 
-        prompt = batch.prompt if isinstance(batch.prompt, str) else batch.prompt[0]
+        if isinstance(batch.prompt, str):
+            prompt = batch.prompt
+        elif isinstance(batch.prompt, list):
+            if len(batch.prompt) > 1:
+                raise ValueError(f"Stable Audio does not support batched prompts; got "
+                                 f"{len(batch.prompt)} entries. Pass a single string or a "
+                                 f"single-element list.")
+            prompt = batch.prompt[0] if batch.prompt else ""
+        else:
+            raise TypeError(f"`prompt` must be a string or a list of strings, got "
+                            f"{type(batch.prompt).__name__}.")
         # Send only the keys the conditioner declares (per-variant).
         all_cond_values = {
             "prompt": prompt,

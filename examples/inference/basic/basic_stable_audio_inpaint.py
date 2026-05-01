@@ -45,6 +45,8 @@ rate. Conventions:
 
 Prerequisites: same as `basic_stable_audio.py`.
 """
+import os
+
 from fastvideo import VideoGenerator
 
 PROMPT = "Steady lo-fi hip hop drum loop with vinyl crackle."
@@ -57,6 +59,11 @@ TOTAL_SECONDS = 12.0     # extend the loop to this duration
 
 
 def main() -> None:
+    if not os.path.isfile(REFERENCE_AUDIO_PATH):
+        raise FileNotFoundError(
+            f"REFERENCE_AUDIO_PATH={REFERENCE_AUDIO_PATH!r} does not exist. "
+            "Edit this script to point at a real audio file (wav/mp3/mp4/"
+            "m4a/flac) before running.")
     generator = VideoGenerator.from_pretrained(
         "FastVideo/stable-audio-open-1.0-Diffusers",
         num_gpus=1,

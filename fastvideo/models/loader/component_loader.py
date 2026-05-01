@@ -1015,10 +1015,12 @@ class ConditionerLoader(ComponentLoader):
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         config = get_diffusers_config(model=model_path)
-        class_name = config.pop("_class_name")
+        class_name = config.pop("_class_name", None)
         config.pop("_name_or_path", None)
-        assert class_name is not None, (
-            "Conditioner config does not contain a _class_name attribute.")
+        if class_name is None:
+            raise ValueError(
+                f"Conditioner config at {model_path} is missing the "
+                f"`_class_name` attribute required to resolve a model class.")
         model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
 
         target_device = get_local_torch_device()

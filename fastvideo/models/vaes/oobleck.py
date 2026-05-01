@@ -21,6 +21,10 @@ import torch
 import torch.nn as nn
 from torch.nn.utils import weight_norm
 
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
+
 
 class Snake1d(nn.Module):
     """A 1D Snake activation with learnable per-channel alpha/beta."""
@@ -356,9 +360,12 @@ class OobleckVAE(nn.Module):
             )
         if unexpected:
             # Non-critical: some checkpoints embed the VAE inside a larger
-            # container (e.g. `pretransform.model.*`). We silently drop
-            # those here since they belong to other subsystems.
-            pass
+            # container (e.g. `pretransform.model.*`). Log the count so
+            # genuine loader regressions don't go unnoticed.
+            logger.debug(
+                "OobleckVAE: ignored %d unexpected keys from %s "
+                "(first 3: %s)", len(unexpected), weights_path, unexpected[:3],
+            )
 
         if torch_dtype is not None:
             model = model.to(dtype=torch_dtype)

@@ -36,35 +36,20 @@ Skips when:
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 import torch
+
+from fastvideo.utils import resolve_hf_token
+from tests.local_tests._stable_audio_helpers import (
+    can_access_repo,
+    setup_hf_env,
+)
 
 _HF_REPO_ID = "stabilityai/stable-audio-open-1.0"  # raw upstream weights for the official side
 _FV_REPO_ID = "FastVideo/stable-audio-open-1.0-Diffusers"  # converted Diffusers layout for FastVideo's loader
 _MODEL_CFG = "model_config.json"
 _MODEL_WEIGHTS = "model.safetensors"
-
-
-def _hf_token():
-    for k in ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY"):
-        v = os.environ.get(k)
-        if v:
-            return v
-    return None
-
-
-def _can_access() -> bool:
-    token = _hf_token()
-    if token is None:
-        return False
-    try:
-        from huggingface_hub import hf_hub_download
-        hf_hub_download(repo_id=_HF_REPO_ID, filename="model_index.json", token=token)
-        return True
-    except Exception:
-        return False
 
 
 def _stable_audio_tools_inference_available() -> bool:
@@ -80,15 +65,6 @@ def _stable_audio_tools_inference_available() -> bool:
         return False
 
 
-def _setup_hf_env() -> None:
-    for src in ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY"):
-        v = os.environ.get(src)
-        if v:
-            os.environ.setdefault("HF_TOKEN", v)
-            os.environ.setdefault("HUGGINGFACE_HUB_TOKEN", v)
-            return
-
-
 def _load_official_diffusion_cond(device: torch.device):
     """Build the official `ConditionedDiffusionModelWrapper` from
     `model_config.json` and load its weights from `model.safetensors`.
@@ -97,9 +73,9 @@ def _load_official_diffusion_cond(device: torch.device):
     from safetensors.torch import load_file
 
     cfg_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_MODEL_CFG,
-                               token=_hf_token())
+                               token=resolve_hf_token())
     weights_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_MODEL_WEIGHTS,
-                                   token=_hf_token())
+                                   token=resolve_hf_token())
     with open(cfg_path) as f:
         model_config = json.load(f)
 
@@ -118,7 +94,7 @@ def _load_official_diffusion_cond(device: torch.device):
     reason="Stable Audio pipeline parity requires CUDA.",
 )
 @pytest.mark.skipif(
-    not _can_access(),
+    not can_access_repo(_HF_REPO_ID),
     reason=(f"{_HF_REPO_ID} not accessible — gated repo; set HF_TOKEN / "
             f"HF_API_KEY and accept the terms on https://huggingface.co/{_HF_REPO_ID}."),
 )
@@ -129,7 +105,7 @@ def _load_official_diffusion_cond(device: torch.device):
             "`pip install` its deps (k_diffusion, einops_exts, alias_free_torch)."),
 )
 def test_stable_audio_pipeline_official_parity():
-    _setup_hf_env()
+    setup_hf_env()
     device = torch.device("cuda:0")
 
     prompt = "A gentle ambient pad with soft synth swells."

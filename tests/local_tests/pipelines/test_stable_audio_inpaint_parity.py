@@ -24,41 +24,16 @@ Skips when CUDA / HF access is unavailable.
 """
 from __future__ import annotations
 
-import os
-
 import pytest
 import torch
 
+from tests.local_tests._stable_audio_helpers import (
+    can_access_repo,
+    setup_hf_env,
+)
+
 _HF_REPO_ID = "stabilityai/stable-audio-open-1.0"  # raw upstream — only used to gate the test on access
 _FV_REPO_ID = "FastVideo/stable-audio-open-1.0-Diffusers"  # converted Diffusers repo FastVideo loads from
-
-
-def _hf_token():
-    for k in ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY"):
-        v = os.environ.get(k)
-        if v:
-            return v
-    return None
-
-
-def _can_access() -> bool:
-    if _hf_token() is None:
-        return False
-    try:
-        from huggingface_hub import hf_hub_download
-        hf_hub_download(repo_id=_HF_REPO_ID, filename="model_index.json", token=_hf_token())
-        return True
-    except Exception:
-        return False
-
-
-def _setup_hf_env() -> None:
-    for src in ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY"):
-        v = os.environ.get(src)
-        if v:
-            os.environ.setdefault("HF_TOKEN", v)
-            os.environ.setdefault("HUGGINGFACE_HUB_TOKEN", v)
-            return
 
 
 def _make_reference(seed: int, sample_rate: int, seconds: float):
@@ -72,14 +47,14 @@ def _make_reference(seed: int, sample_rate: int, seconds: float):
 
 @pytest.mark.skipif(not torch.cuda.is_available(),
                     reason="Stable Audio inpainting test requires CUDA.")
-@pytest.mark.skipif(not _can_access(),
+@pytest.mark.skipif(not can_access_repo(_HF_REPO_ID),
                     reason=f"{_HF_REPO_ID} not accessible — gated.")
 def test_stable_audio_inpaint_kept_region_preserved():
     """Run inpainting with the first 1.5s kept and the next 4.5s
     regenerated. Verify the kept region matches the reference and the
     regenerated region is genuinely different.
     """
-    _setup_hf_env()
+    setup_hf_env()
     sample_rate = 44100
     keep_seconds = 1.5
     total_seconds = 6.0

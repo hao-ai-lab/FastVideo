@@ -10,34 +10,20 @@ compares decoded waveforms.
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 import torch
+
+from fastvideo.utils import resolve_hf_token
+from tests.local_tests._stable_audio_helpers import (
+    can_access_repo,
+    setup_hf_env,
+)
 
 _HF_REPO_ID = "stabilityai/stable-audio-open-1.0"  # raw upstream weights for the official side
 _FV_REPO_ID = "FastVideo/stable-audio-open-1.0-Diffusers"  # converted Diffusers layout for FastVideo's loader
 _MODEL_CFG = "model_config.json"
 _MODEL_WEIGHTS = "model.safetensors"
-
-
-def _hf_token():
-    for k in ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY"):
-        v = os.environ.get(k)
-        if v:
-            return v
-    return None
-
-
-def _can_access() -> bool:
-    if _hf_token() is None:
-        return False
-    try:
-        from huggingface_hub import hf_hub_download
-        hf_hub_download(repo_id=_HF_REPO_ID, filename="model_index.json", token=_hf_token())
-        return True
-    except Exception:
-        return False
 
 
 def _stable_audio_tools_inference_available() -> bool:
@@ -49,23 +35,14 @@ def _stable_audio_tools_inference_available() -> bool:
         return False
 
 
-def _setup_hf_env() -> None:
-    for src in ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY"):
-        v = os.environ.get(src)
-        if v:
-            os.environ.setdefault("HF_TOKEN", v)
-            os.environ.setdefault("HUGGINGFACE_HUB_TOKEN", v)
-            return
-
-
 def _load_official(device):
     from huggingface_hub import hf_hub_download
     from safetensors.torch import load_file
     from stable_audio_tools.models.factory import create_model_from_config
 
-    cfg_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_MODEL_CFG, token=_hf_token())
+    cfg_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_MODEL_CFG, token=resolve_hf_token())
     weights_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_MODEL_WEIGHTS,
-                                   token=_hf_token())
+                                   token=resolve_hf_token())
     with open(cfg_path) as f:
         model_config = json.load(f)
     model = create_model_from_config(model_config)
@@ -89,12 +66,12 @@ def _make_init_audio(seed: int, sample_rate: int, seconds: float, channels: int 
 
 @pytest.mark.skipif(not torch.cuda.is_available(),
                     reason="Stable Audio A2A parity requires CUDA.")
-@pytest.mark.skipif(not _can_access(),
+@pytest.mark.skipif(not can_access_repo(_HF_REPO_ID),
                     reason=f"{_HF_REPO_ID} not accessible — gated.")
 @pytest.mark.skipif(not _stable_audio_tools_inference_available(),
                     reason="`stable_audio_tools.inference` not importable.")
 def test_stable_audio_a2a_official_parity():
-    _setup_hf_env()
+    setup_hf_env()
     device = torch.device("cuda:0")
 
     prompt = "A gentle ambient pad with soft synth swells."

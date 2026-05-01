@@ -25,35 +25,20 @@ Install official deps once via:
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 import torch
 from torch.testing import assert_close
 
+from fastvideo.utils import resolve_hf_token
+from tests.local_tests._stable_audio_helpers import (
+    can_access_repo,
+    setup_hf_env,
+)
+
 _SA_AUDIO_ID = "stabilityai/stable-audio-open-1.0"
 _VAE_CKPT_FILE = "vae_model.ckpt"
 _VAE_CFG_FILE = "vae_model_config.json"
-
-
-def _hf_token():
-    for k in ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY"):
-        v = os.environ.get(k)
-        if v:
-            return v
-    return None
-
-
-def _can_access() -> bool:
-    token = _hf_token()
-    if token is None:
-        return False
-    try:
-        from huggingface_hub import hf_hub_download
-        hf_hub_download(repo_id=_SA_AUDIO_ID, filename=_VAE_CFG_FILE, token=token)
-        return True
-    except Exception:
-        return False
 
 
 def _stable_audio_tools_available() -> bool:
@@ -66,15 +51,6 @@ def _stable_audio_tools_available() -> bool:
         return False
 
 
-def _setup_hf_env() -> None:
-    for src in ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY"):
-        v = os.environ.get(src)
-        if v:
-            os.environ.setdefault("HF_TOKEN", v)
-            os.environ.setdefault("HUGGINGFACE_HUB_TOKEN", v)
-            return
-
-
 def _load_official_vae(device: torch.device):
     """Build the official `AudioAutoencoder` from `vae_model_config.json`
     and load its weights from `vae_model.ckpt`.
@@ -82,9 +58,9 @@ def _load_official_vae(device: torch.device):
     from huggingface_hub import hf_hub_download
 
     cfg_path = hf_hub_download(repo_id=_SA_AUDIO_ID, filename=_VAE_CFG_FILE,
-                               token=_hf_token())
+                               token=resolve_hf_token())
     ckpt_path = hf_hub_download(repo_id=_SA_AUDIO_ID, filename=_VAE_CKPT_FILE,
-                                token=_hf_token())
+                                token=resolve_hf_token())
     with open(cfg_path) as f:
         vcfg = json.load(f)
 
@@ -107,7 +83,7 @@ _skip_no_cuda = pytest.mark.skipif(
     reason="Oobleck VAE parity test requires CUDA.",
 )
 _skip_no_access = pytest.mark.skipif(
-    not _can_access(),
+    not can_access_repo(_SA_AUDIO_ID, filename=_VAE_CFG_FILE),
     reason=(f"{_SA_AUDIO_ID} not accessible — gated repo; set HF_TOKEN / "
             f"HF_API_KEY and accept the terms on https://huggingface.co/{_SA_AUDIO_ID}."),
 )
@@ -124,7 +100,7 @@ _skip_no_official = pytest.mark.skipif(
 @_skip_no_official
 def test_oobleck_vae_decode_official_parity():
     """Decode-side parity with the official AudioAutoencoder."""
-    _setup_hf_env()
+    setup_hf_env()
     device = torch.device("cuda:0")
 
     off_vae = _load_official_vae(device)
@@ -177,7 +153,7 @@ def test_oobleck_vae_encode_official_parity():
     bottleneck (`skip_bottleneck=True`), chunk to (mean, scale)
     ourselves, and compare against FV's `.encode().mode()`.
     """
-    _setup_hf_env()
+    setup_hf_env()
     device = torch.device("cuda:0")
 
     off_vae = _load_official_vae(device)
@@ -226,7 +202,7 @@ def test_oobleck_vae_round_trip_sanity():
     sensible amplitude range. Not a parity test — just guards against
     silent diverging VAE output. Uses FV alone (no comparison).
     """
-    _setup_hf_env()
+    setup_hf_env()
     device = torch.device("cuda:0")
 
     from fastvideo.models.vaes.oobleck import OobleckVAE

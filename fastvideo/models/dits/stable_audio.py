@@ -22,8 +22,10 @@ from fastvideo.models.loader.utils import get_param_names_mapping
 
 # Single import-time snapshot — re-reading via `StableAudioConfig()` per
 # `Attention.__init__` would rebuild the nested dataclass + regex map ~48
-# times during a single DiT construction.
-_SUPPORTED_BACKENDS = StableAudioConfig().arch_config._supported_attention_backends
+# times during a single DiT construction. Reused for the class-level
+# attribute defaults below.
+_DEFAULT_CONFIG = StableAudioConfig()
+_SUPPORTED_BACKENDS = _DEFAULT_CONFIG.arch_config._supported_attention_backends
 
 
 class FourierFeatures(nn.Module):
@@ -266,9 +268,9 @@ class ContinuousTransformer(nn.Module):
 class StableAudioDiT(BaseDiT):
     """Stable Audio Open 1.0 diffusion transformer."""
 
-    _fsdp_shard_conditions = StableAudioConfig().arch_config._fsdp_shard_conditions
-    _compile_conditions = StableAudioConfig().arch_config._compile_conditions
-    param_names_mapping = StableAudioConfig().arch_config.param_names_mapping
+    _fsdp_shard_conditions = _DEFAULT_CONFIG.arch_config._fsdp_shard_conditions
+    _compile_conditions = _DEFAULT_CONFIG.arch_config._compile_conditions
+    param_names_mapping = _DEFAULT_CONFIG.arch_config.param_names_mapping
     reverse_param_names_mapping: dict = {}
 
     def __init__(self, config: StableAudioConfig | None = None,

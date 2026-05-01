@@ -94,9 +94,8 @@ def _resolve_src(src: str) -> Path:
     """Accept either a HF repo id or a local directory."""
     if os.path.isdir(src):
         return Path(src)
-    token = (os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
-             or os.environ.get("HF_API_KEY"))
-    return Path(snapshot_download(repo_id=src, token=token))
+    from fastvideo.utils import resolve_hf_token
+    return Path(snapshot_download(repo_id=src, token=resolve_hf_token()))
 
 
 def _rename_layernorm_keys(state: dict[str, Any]) -> dict[str, Any]:
