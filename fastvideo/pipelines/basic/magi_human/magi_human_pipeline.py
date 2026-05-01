@@ -144,9 +144,9 @@ class MagiHumanPipeline(ComposedPipelineBase):
         return modules
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
-        # MagiHuman's reference uses UniPC on its own — so we make sure we
-        # build FastVideo's matching `FlowUniPCMultistepScheduler` here.
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=fastvideo_args.pipeline_config.flow_shift, )
+        # MagiHuman applies `flow_shift` during timestep setup; keep the
+        # scheduler constructor at its default no-op shift.
+        self.modules["scheduler"] = FlowUniPCMultistepScheduler()
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         pc = fastvideo_args.pipeline_config
