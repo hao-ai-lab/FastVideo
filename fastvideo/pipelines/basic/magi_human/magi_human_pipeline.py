@@ -177,6 +177,7 @@ class MagiHumanPipeline(ComposedPipelineBase):
                 t5_gemma_target_length=pc.t5_gemma_target_length,
                 coords_style=pc.coords_style,
                 text_offset=pc.text_offset,
+                audio_in_channels=dit_arch.audio_in_channels,
             ),
         )
 
@@ -192,6 +193,8 @@ class MagiHumanPipeline(ComposedPipelineBase):
                 audio_txt_guidance_scale=pc.audio_txt_guidance_scale,
                 cfg_number=pc.cfg_number,
                 coords_style=pc.coords_style,
+                video_guidance_high_t_threshold=pc.video_guidance_high_t_threshold,
+                video_guidance_low_t_value=pc.video_guidance_low_t_value,
             ),
         )
 

@@ -93,6 +93,12 @@ class MagiHumanBaseConfig(PipelineConfig):
     ref_audio_offset: int = 1000
     text_offset: int = 0
 
+    # Video CFG step-dependent guidance: low-t steps use a relaxed scale.
+    # Upstream daVinci-MagiHuman/inference/pipeline/video_generate.py:426
+    # uses 5.0 for high-t and 2.0 for low-t with cutoff at t=500.
+    video_guidance_high_t_threshold: int = 500
+    video_guidance_low_t_value: float = 2.0
+
     def __post_init__(self) -> None:
         # Base text-to-AV does not need the VAE encoder (no reference-image
         # conditioning). Keep decoder only to save memory.
