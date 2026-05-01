@@ -7,19 +7,16 @@ and prepend global conditioning. 24 layers, embed_dim=1536, head_dim=64.
 from __future__ import annotations
 
 import math
-from typing import Any
 
 import torch
 from einops import rearrange
 from torch import nn
 
 from fastvideo.attention import LocalAttention
+from fastvideo.configs.models.dits import StableAudioConfig
 from fastvideo.layers.layernorm import FP32LayerNorm
 from fastvideo.layers.linear import ReplicatedLinear
-from fastvideo.platforms import AttentionBackendEnum
-
-# Backends supported on a single GPU; mirrors the LTX-2 cross-attn choice.
-_SUPPORTED_BACKENDS = (AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
+from fastvideo.models.loader.utils import get_param_names_mapping
 
 
 class FourierFeatures(nn.Module):
@@ -137,7 +134,7 @@ class Attention(nn.Module):
 
         self.attn = LocalAttention(num_heads=self.num_heads, head_size=dim_heads,
                                    num_kv_heads=self.kv_heads, causal=False,
-                                   supported_attention_backends=_SUPPORTED_BACKENDS)
+                                   supported_attention_backends=StableAudioConfig().arch_config._supported_attention_backends)
 
     def forward(self, x: torch.Tensor, context: torch.Tensor | None = None,
                 rotary_pos_emb: tuple[torch.Tensor, float] | None = None) -> torch.Tensor:
@@ -242,10 +239,21 @@ class ContinuousTransformer(nn.Module):
 class StableAudioDiT(nn.Module):
     """Stable Audio Open 1.0 diffusion transformer."""
 
-    def __init__(self, io_channels: int = 64, embed_dim: int = 1536, depth: int = 24,
-                 num_heads: int = 24, cond_token_dim: int = 768, global_cond_dim: int = 1536,
-                 project_cond_tokens: bool = False, project_global_cond: bool = True) -> None:
+    param_names_mapping = StableAudioConfig().arch_config.param_names_mapping
+
+    def __init__(self, config: StableAudioConfig | None = None) -> None:
         super().__init__()
+        self.config = config or StableAudioConfig()
+        arch = self.config.arch_config
+        io_channels = arch.io_channels
+        embed_dim = arch.embed_dim
+        depth = arch.depth
+        num_heads = arch.num_attention_heads
+        cond_token_dim = arch.cond_token_dim
+        global_cond_dim = arch.global_cond_dim
+        project_cond_tokens = arch.project_cond_tokens
+        project_global_cond = arch.project_global_cond
+
         self.cond_token_dim = cond_token_dim
         timestep_features_dim = 256
         self.timestep_features = FourierFeatures(1, timestep_features_dim)
@@ -318,23 +326,19 @@ class StableAudioDiT(nn.Module):
     @classmethod
     def from_official_state_dict(cls, state_dict: dict[str, torch.Tensor],
                                  prefix: str = "model.model.") -> "StableAudioDiT":
-        """Load from the published `model.safetensors`. DiT weights live
-        under the `model.model.*` prefix; LayerNorm keys are remapped
-        from `gamma`/`beta` to `weight`/`bias` (nn.LayerNorm convention).
+        """Load from the published `model.safetensors`. The DiT weights
+        live under the `model.model.*` prefix and the LayerNorm keys use
+        the official `gamma`/`beta` names; both remaps come from the
+        `StableAudioConfig.param_names_mapping` regex table.
         """
-        cfg: dict[str, Any] = dict(io_channels=64, embed_dim=1536, depth=24, num_heads=24,
-                                   cond_token_dim=768, global_cond_dim=1536,
-                                   project_cond_tokens=False, project_global_cond=True)
-        model = cls(**cfg)
-        own = {k[len(prefix):]: v for k, v in state_dict.items() if k.startswith(prefix)}
+        model = cls()
+        mapping_fn = get_param_names_mapping(cls.param_names_mapping)
         remapped: dict[str, torch.Tensor] = {}
-        for k, v in own.items():
-            if k.endswith(".gamma"):
-                remapped[k[:-len(".gamma")] + ".weight"] = v
-            elif k.endswith(".beta"):
-                remapped[k[:-len(".beta")] + ".bias"] = v
-            else:
-                remapped[k] = v
+        for k, v in state_dict.items():
+            if not k.startswith(prefix):
+                continue
+            new_key, _, _ = mapping_fn(k)
+            remapped[new_key] = v
         missing, unexpected = model.load_state_dict(remapped, strict=True)
         if missing or unexpected:
             raise RuntimeError(
