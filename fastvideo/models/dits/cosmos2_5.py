@@ -12,6 +12,7 @@ from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25VideoConfig
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import RMSNorm
+from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import apply_rotary_emb
 from fastvideo.layers.visual_embedding import Timesteps
@@ -57,9 +58,10 @@ class Cosmos25PatchEmbed(nn.Module):
         )
         hidden_states = hidden_states.permute(0, 2, 4, 6, 1, 3, 5, 7)
         hidden_states = hidden_states.flatten(4, 7)  # Flatten patch dimensions
-        
-        # Project to model dimension
-        hidden_states = self.proj(hidden_states)
+
+        # Project to model dimension — cast to weight dtype to handle fp32/bf16 mismatch
+        # between training (fp32) and inference (bf16) contexts
+        hidden_states = self.proj(hidden_states.to(self.proj.weight.dtype))
         return hidden_states
 
 
@@ -212,10 +214,10 @@ class Cosmos25SelfAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
 
-        self.to_q = nn.Linear(dim, dim, bias=False)
-        self.to_k = nn.Linear(dim, dim, bias=False)
-        self.to_v = nn.Linear(dim, dim, bias=False)
-        self.to_out = nn.Linear(dim, dim, bias=False)
+        self.to_q = ReplicatedLinear(dim, dim, bias=False)
+        self.to_k = ReplicatedLinear(dim, dim, bias=False)
+        self.to_v = ReplicatedLinear(dim, dim, bias=False)
+        self.to_out = ReplicatedLinear(dim, dim, bias=False)
 
         self.norm_q = RMSNorm(self.head_dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = RMSNorm(self.head_dim, eps=eps) if qk_norm else nn.Identity()
@@ -245,9 +247,9 @@ class Cosmos25SelfAttention(nn.Module):
             rope_emb: Tuple of (cos, sin) for RoPE
         """
         # Get QKV
-        query = self.to_q(hidden_states)
-        key = self.to_k(hidden_states)
-        value = self.to_v(hidden_states)
+        query, _ = self.to_q(hidden_states)
+        key, _ = self.to_k(hidden_states)
+        value, _ = self.to_v(hidden_states)
 
         # Reshape for multi-head attention: (B, S, D) -> (B, S, H, D_h) -> (B, H, S, D_h)
         query = query.unflatten(-1, (self.num_heads, self.head_dim)).transpose(1, 2)
@@ -276,7 +278,7 @@ class Cosmos25SelfAttention(nn.Module):
         attn_output = attn_output.flatten(-2, -1)
 
         # Output projection
-        attn_output = self.to_out(attn_output)
+        attn_output, _ = self.to_out(attn_output)
         return attn_output
 
 
@@ -301,10 +303,10 @@ class Cosmos25CrossAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
 
-        self.to_q = nn.Linear(dim, dim, bias=False)
-        self.to_k = nn.Linear(cross_attention_dim, dim, bias=False)
-        self.to_v = nn.Linear(cross_attention_dim, dim, bias=False)
-        self.to_out = nn.Linear(dim, dim, bias=False)
+        self.to_q = ReplicatedLinear(dim, dim, bias=False)
+        self.to_k = ReplicatedLinear(cross_attention_dim, dim, bias=False)
+        self.to_v = ReplicatedLinear(cross_attention_dim, dim, bias=False)
+        self.to_out = ReplicatedLinear(dim, dim, bias=False)
 
         self.norm_q = RMSNorm(self.head_dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = RMSNorm(self.head_dim, eps=eps) if qk_norm else nn.Identity()
@@ -333,9 +335,9 @@ class Cosmos25CrossAttention(nn.Module):
             encoder_hidden_states: (B, N, D_text)
         """
         # Get QKV
-        query = self.to_q(hidden_states)
-        key = self.to_k(encoder_hidden_states)
-        value = self.to_v(encoder_hidden_states)
+        query, _ = self.to_q(hidden_states)
+        key, _ = self.to_k(encoder_hidden_states)
+        value, _ = self.to_v(encoder_hidden_states)
 
         # Reshape for multi-head attention
         query = query.unflatten(-1, (self.num_heads, self.head_dim))
@@ -353,7 +355,7 @@ class Cosmos25CrossAttention(nn.Module):
         attn_output = attn_output.flatten(-2, -1)
 
         # Output projection
-        attn_output = self.to_out(attn_output)
+        attn_output, _ = self.to_out(attn_output)
         return attn_output
 
 
@@ -912,7 +914,9 @@ class Cosmos25Transformer3DModel(BaseDiT):
 
         # 7. Apply cross-attention projection (if used)
         if self.use_crossattn_projection:
-            encoder_hidden_states = self.crossattn_proj(encoder_hidden_states)
+            encoder_hidden_states = self.crossattn_proj(
+                encoder_hidden_states.to(self.crossattn_proj[0].weight.dtype)
+            )
             
         
         

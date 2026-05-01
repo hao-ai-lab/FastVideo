@@ -16,7 +16,10 @@ from typing import TYPE_CHECKING, Any
 
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
-from fastvideo.configs.pipelines.cosmos2_5 import Cosmos25Config
+from fastvideo.configs.pipelines.cosmos2_5 import (
+    Cosmos25Config,
+    Cosmos25_14BConfig,
+)
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
 from fastvideo.configs.pipelines.gen3c import Gen3CConfig
@@ -447,7 +450,7 @@ def _register_configs() -> None:
         default_preset="gen3c_cosmos_7b",
     )
 
-    # Cosmos 2.5
+    # Cosmos 2.5 (2B)
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=Cosmos25Config,
@@ -460,7 +463,25 @@ def _register_configs() -> None:
                 "cosmos25",
                 "cosmos2_5",
                 "cosmos2.5",
-            )),
+                "cosmos-predict2.5",
+            )) and "14b" not in path.lower(),
+        ],
+    )
+
+    # Cosmos 2.5 (14B)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Cosmos25_14BConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "nvidia/Cosmos-Predict2.5-14B",
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in (
+                "cosmos25",
+                "cosmos2_5",
+                "cosmos2.5",
+            )) and "14b" in path.lower(),
         ],
         model_family="cosmos25",
         default_preset="cosmos25_predict2_2b",
