@@ -627,14 +627,17 @@ class VideoGenerator:
         gen_time = time.perf_counter() - start_time
         logger.info("Generated successfully in %.2f seconds", gen_time)
 
-        # Process outputs
-        videos = rearrange(samples, "b c t h w -> t b c h w")
-        frames = []
-        for x in videos:
-            x = torchvision.utils.make_grid(x, nrow=6)
-            x = x.permute(1, 2, 0).squeeze(-1)
-            x = (x * 255).to(torch.uint8)
-            frames.append(x.cpu().numpy())
+        # Process outputs (skip the make_grid loop for audio-only, where
+        # `samples` is a 1×3×1×8×8 placeholder no caller will use).
+        audio_only = bool(output_batch.extra.get("audio_only"))
+        frames: list[np.ndarray] = []
+        if not audio_only:
+            videos = rearrange(samples, "b c t h w -> t b c h w")
+            for x in videos:
+                x = torchvision.utils.make_grid(x, nrow=6)
+                x = x.permute(1, 2, 0).squeeze(-1)
+                x = (x * 255).to(torch.uint8)
+                frames.append(x.cpu().numpy())
 
         # Save output if requested
         if batch.save_video:
@@ -643,7 +646,7 @@ class VideoGenerator:
                 # muxing the audio into a placeholder mp4 (which forces
                 # ffmpeg to round 8x8 placeholder frames up to 16x16).
                 output_path = self._rewrite_extension(output_path, ".wav")
-                self._write_audio_only(
+                self._write_pcm_wav(
                     output_path,
                     output_batch.extra["audio"],
                     int(output_batch.extra["audio_sample_rate"]),
@@ -700,42 +703,53 @@ class VideoGenerator:
     @staticmethod
     def _rewrite_extension(path: str, new_ext: str) -> str:
         root, old_ext = os.path.splitext(path)
-        if old_ext.lower() == new_ext.lower():
-            return path
         new_path = root + new_ext
-        if old_ext:
-            logger.info("Rewriting output extension %s -> %s for audio-only workload.", old_ext, new_ext)
+        if old_ext and old_ext.lower() != new_ext.lower():
+            logger.info("Rewriting output extension %s -> %s.", old_ext, new_ext)
         return new_path
 
     @staticmethod
-    def _write_audio_only(
-        wav_path: str,
-        audio: torch.Tensor | np.ndarray,
-        sample_rate: int,
-    ) -> None:
-        """Write a standalone 16-bit PCM WAV. `audio` is `[samples,
-        channels]` or `[samples]` in roughly [-1, 1].
+    def _audio_to_int16(audio: torch.Tensor | np.ndarray, ) -> tuple[np.ndarray, int]:
+        """Normalize `[samples]` / `[samples, channels]` / `[channels,
+        samples]` audio in roughly [-1, 1] to a `(int16 [samples,
+        channels], num_channels)` pair. Raises `ValueError` for shapes
+        we can't classify.
         """
-        import wave
         if torch.is_tensor(audio):
             audio_np = audio.detach().cpu().float().numpy()
         else:
             audio_np = np.asarray(audio, dtype=np.float32)
         if audio_np.ndim == 1:
             audio_np = audio_np[:, None]
-        elif audio_np.ndim == 2 and audio_np.shape[0] <= 8 and audio_np.shape[1] > audio_np.shape[0]:
-            audio_np = audio_np.T
+        elif audio_np.ndim == 2:
+            if audio_np.shape[0] <= 8 and audio_np.shape[1] > audio_np.shape[0]:
+                audio_np = audio_np.T
+        else:
+            raise ValueError(f"Unexpected audio shape {audio_np.shape}.")
         audio_np = np.clip(audio_np, -1.0, 1.0)
         audio_int16 = (audio_np * 32767.0).astype(np.int16)
-        os.makedirs(os.path.dirname(wav_path) or ".", exist_ok=True)
+        return audio_int16, audio_int16.shape[1]
+
+    @classmethod
+    def _write_pcm_wav(
+        cls,
+        wav_path: str,
+        audio: torch.Tensor | np.ndarray,
+        sample_rate: int,
+    ) -> int:
+        """Write 16-bit PCM WAV; returns the channel count."""
+        import wave
+        audio_int16, num_channels = cls._audio_to_int16(audio)
         with wave.open(wav_path, "wb") as f:
-            f.setnchannels(audio_int16.shape[1])
+            f.setnchannels(num_channels)
             f.setsampwidth(2)
             f.setframerate(sample_rate)
             f.writeframes(audio_int16.tobytes())
+        return num_channels
 
-    @staticmethod
+    @classmethod
     def _mux_audio(
+        cls,
         video_path: str,
         audio: torch.Tensor | np.ndarray,
         sample_rate: int,
@@ -748,37 +762,13 @@ class VideoGenerator:
                            "Install with: pip install av")
             return False
 
-        if torch.is_tensor(audio):
-            audio_np = audio.detach().cpu().float().numpy()
-        else:
-            audio_np = np.asarray(audio, dtype=np.float32)
-
-        if audio_np.ndim == 1:
-            audio_np = audio_np[:, None]
-        elif audio_np.ndim == 2:
-            if audio_np.shape[0] <= 8 and audio_np.shape[1] > audio_np.shape[0]:
-                audio_np = audio_np.T
-        else:
-            logger.warning("Unexpected audio shape %s; skipping mux.", audio_np.shape)
-            return False
-
-        audio_np = np.clip(audio_np, -1.0, 1.0)
-        audio_int16 = (audio_np * 32767.0).astype(np.int16)
-        num_channels = audio_int16.shape[1]
-        layout = "stereo" if num_channels == 2 else "mono"
-
         try:
-            import wave
             with tempfile.TemporaryDirectory() as tmpdir:
                 out_path = os.path.join(tmpdir, "muxed.mp4")
                 wav_path = os.path.join(tmpdir, "audio.wav")
 
-                # Write audio to WAV file
-                with wave.open(wav_path, "wb") as wav_file:
-                    wav_file.setnchannels(num_channels)
-                    wav_file.setsampwidth(2)
-                    wav_file.setframerate(sample_rate)
-                    wav_file.writeframes(audio_int16.tobytes())
+                num_channels = cls._write_pcm_wav(wav_path, audio, sample_rate)
+                layout = "stereo" if num_channels == 2 else "mono"
 
                 # Open input video and audio
                 input_video = av.open(video_path)
