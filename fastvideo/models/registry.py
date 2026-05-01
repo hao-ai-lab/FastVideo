@@ -86,6 +86,9 @@ _VAE_MODELS = {
     ("vaes", "gen3c_tokenizer_vae", "AutoencoderKLGen3CTokenizer"),
     "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
     "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
+    # `stable-audio-open-1.0/vae/config.json` ships `_class_name="AutoencoderOobleck"`
+    # (Diffusers' name); FastVideo's class is `OobleckVAE`.
+    "AutoencoderOobleck": ("vaes", "oobleck", "OobleckVAE"),
 }
 
 _AUDIO_MODELS = {
