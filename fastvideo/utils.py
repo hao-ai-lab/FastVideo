@@ -636,6 +636,23 @@ def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
         raise ValueError(f"Failed to download or parse model_index.json for {model_name_or_path}: {e}") from e
 
 
+_HF_TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY")
+
+
+def resolve_hf_token() -> str | None:
+    """Return the first non-empty HF token from the standard env vars.
+
+    Order: `HF_TOKEN`, `HUGGINGFACE_HUB_TOKEN`, `HF_API_KEY` (the last is
+    a FastVideo convention; `huggingface_hub` itself doesn't read it).
+    Does not mutate `os.environ`.
+    """
+    for src in _HF_TOKEN_ENV_VARS:
+        v = os.environ.get(src)
+        if v:
+            return v
+    return None
+
+
 def update_environment_variables(envs: dict[str, str]):
     for k, v in envs.items():
         if k in os.environ and os.environ[k] != v:

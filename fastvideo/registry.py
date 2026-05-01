@@ -48,6 +48,7 @@ from fastvideo.configs.pipelines.wan import (
     WanT2V720PConfig,
 )
 from fastvideo.configs.pipelines.sd35 import SD35Config
+from fastvideo.configs.pipelines.stable_audio import (StableAudioOpenSmallConfig, StableAudioT2AConfig)
 from fastvideo.api.sampling_param import SamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
@@ -240,6 +241,47 @@ def _register_configs() -> None:
         ],
         model_family="ltx2",
         default_preset="ltx2_distilled",
+    )
+
+    # Stable Audio Open (text-to-audio). Both variants must be loaded
+    # from the FastVideo-curated converted Diffusers-format repos —
+    # the upstream `stabilityai/stable-audio-open-{1.0,small}` repos
+    # ship `model.safetensors` as a single monolithic checkpoint with
+    # no per-component subfolders our standard loader can consume. See
+    # `scripts/checkpoint_conversion/stable_audio_to_diffusers.py`.
+    # NOTE: WorkloadType has no T2A variant yet (REVIEW item 28); using
+    # T2V as the placeholder until the enum is extended.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=StableAudioT2AConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "FastVideo/stable-audio-open-1.0-Diffusers",
+        ],
+        # Substring match against HF cache snapshot paths (the lookup
+        # runs on the resolved local directory, which uses `--` between
+        # org and repo: `models--FastVideo--stable-audio-open-1.0-Diffusers`).
+        model_detectors=[
+            lambda path: "stable-audio-open-1" in path.lower(),
+        ],
+        model_family="stable_audio",
+        default_preset="stable_audio_open_1_0_base",
+    )
+    # Small variant uses its own `pipeline_config_cls` so it picks up
+    # the smaller (524288-sample) training window in `sample_size` /
+    # `max_audio_duration_s`.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=StableAudioOpenSmallConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "FastVideo/stable-audio-open-small-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: "stable-audio-open-small" in path.lower(),
+        ],
+        model_family="stable_audio",
+        default_preset="stable_audio_open_small",
     )
 
     # Hunyuan 1.5 (specific)
@@ -786,6 +828,8 @@ def _register_presets() -> None:
         ALL_PRESETS as MATRIXGAME_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
+    from fastvideo.pipelines.basic.stable_audio.presets import (
+        ALL_PRESETS as STABLE_AUDIO_PRESETS, )
     from fastvideo.pipelines.basic.turbodiffusion.presets import (
         ALL_PRESETS as TURBODIFFUSION_PRESETS, )
     from fastvideo.pipelines.basic.wan.presets import (
@@ -803,6 +847,7 @@ def _register_presets() -> None:
         LTX2_PRESETS,
         MATRIXGAME_PRESETS,
         SD35_PRESETS,
+        STABLE_AUDIO_PRESETS,
         TURBODIFFUSION_PRESETS,
         WAN_PRESETS,
     )
