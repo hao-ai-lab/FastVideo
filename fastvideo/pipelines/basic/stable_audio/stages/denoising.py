@@ -96,16 +96,21 @@ class StableAudioDenoisingStage(PipelineStage):
         sigma_max = self._resolve_sigma_max(batch) if init_latent is not None else self._SIGMA_MAX
 
         sigmas = K.sampling.get_sigmas_polyexponential(steps, self._SIGMA_MIN, sigma_max, self._RHO, device=device)
-        x = batch.latents * sigmas[0]
+        # Cast noise + conditioning to the DiT's dtype before sampling
+        # (matches `stable_audio_tools/inference/generation.py:185-187`).
+        model_dtype = next(self.transformer.parameters()).dtype
+        x = (batch.latents * sigmas[0]).to(model_dtype)
         if init_latent is not None:
-            x = x + init_latent
+            x = x + init_latent.to(model_dtype)
 
         batch_cond, batch_global = _build_cfg_conditioning(
-            cross_attn_cond=ext["cross_attn_cond"],
-            global_embed=ext["global_embed"],
-            negative_cross_attn_cond=ext.get("negative_cross_attn_cond"),
+            cross_attn_cond=ext["cross_attn_cond"].to(model_dtype),
+            global_embed=ext["global_embed"].to(model_dtype),
+            negative_cross_attn_cond=(ext["negative_cross_attn_cond"].to(model_dtype)
+                                      if ext.get("negative_cross_attn_cond") is not None else None),
             negative_cross_attn_mask=ext.get("negative_cross_attn_mask"),
-            negative_global_embed=ext.get("negative_global_embed"),
+            negative_global_embed=(ext["negative_global_embed"].to(model_dtype)
+                                   if ext.get("negative_global_embed") is not None else None),
             do_cfg=guidance_scale != 1.0,
         )
         adapter = _DiTAdapter(self.transformer,
@@ -118,8 +123,12 @@ class StableAudioDenoisingStage(PipelineStage):
         # inpaint-trained checkpoint needed.
         inpaint_mask = ext.get("inpaint_mask_latent")
         inpaint_ref = ext.get("inpaint_reference_latent")
-        callback = (_make_inpaint_callback(inpaint_ref, inpaint_mask, sigmas)
-                    if inpaint_mask is not None and inpaint_ref is not None else None)
+        if inpaint_mask is not None and inpaint_ref is not None:
+            inpaint_mask = inpaint_mask.to(model_dtype)
+            inpaint_ref = inpaint_ref.to(model_dtype)
+            callback = _make_inpaint_callback(inpaint_ref, inpaint_mask, sigmas)
+        else:
+            callback = None
 
         # `LocalAttention` (in `StableAudioDiT`) reads `get_forward_context()`
         # for `attn_metadata`; wrap the whole loop.

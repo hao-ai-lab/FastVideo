@@ -34,8 +34,12 @@ class StableAudioT2AConfig(PipelineConfig):
     # silently truncated by the post-decode slice — validate up-front.
     max_audio_duration_s: float = 2097152 / 44100
 
-    precision: str = "fp32"
-    vae_precision: str = "fp32"
+    # Match the official `stable_audio_tools` defaults (`model_half=True`
+    # in `run_gradio.py`), which loads the DiT, VAE, and T5 in fp16 and
+    # wraps T5 forward in `autocast(fp16)`. fp16 is also a hard
+    # requirement for FlashAttention-2 / FA-3.
+    precision: str = "fp16"
+    vae_precision: str = "fp16"
     text_encoder_precisions: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:

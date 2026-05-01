@@ -62,4 +62,7 @@ class OobleckVAEConfig(VAEConfig):
     # https://huggingface.co/stabilityai/stable-audio-open-1.0.
     pretrained_path: str = "stabilityai/stable-audio-open-1.0"
     pretrained_subfolder: str = "vae"
-    pretrained_dtype: str = "float32"
+    # Match official `stable_audio_tools`: VAE runs in fp16 (the
+    # `pretransform.model_half` path in
+    # `stable_audio_tools/models/pretransforms.py`).
+    pretrained_dtype: str = "float16"

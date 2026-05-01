@@ -75,19 +75,21 @@ class T5Conditioner(_Conditioner):
         from transformers import AutoTokenizer, T5EncoderModel
         self.max_length = max_length
         self.tokenizer = AutoTokenizer.from_pretrained(t5_model_name)
-        # T5 is registered as a normal submodule (auto `.to()` / `.eval()`
-        # / `torch.compile` tracking). The SA checkpoint doesn't ship T5
-        # weights — `from_official_state_dict` filters
-        # `conditioners.prompt.*` from the missing-key check and uses
-        # `strict=False`, so the absent T5 keys are tolerated.
-        self.model = T5EncoderModel.from_pretrained(t5_model_name).eval().requires_grad_(False)
+        # T5 loaded directly in fp16 to match official
+        # `stable_audio_tools/models/conditioners.py:334`. Registered as
+        # a normal submodule so `.to(device)` / `torch.compile` track it;
+        # `from_official_state_dict` filters `conditioners.prompt.*` from
+        # the missing-key check (T5 weights are absent from the SA
+        # checkpoint by design).
+        self.model = (T5EncoderModel.from_pretrained(t5_model_name).eval().requires_grad_(False).to(torch.float16))
 
     def forward(self, texts: list[str], device: torch.device | str) -> tuple[torch.Tensor, torch.Tensor]:
         encoded = self.tokenizer(texts, truncation=True, max_length=self.max_length,
                                  padding="max_length", return_tensors="pt")
         input_ids = encoded["input_ids"].to(device)
         attention_mask = encoded["attention_mask"].to(device).to(torch.bool)
-        with torch.no_grad():
+        # Mirror official's `autocast(fp16)` wrap on T5 forward.
+        with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.float16):
             embeddings = self.model(input_ids=input_ids,
                                     attention_mask=attention_mask)["last_hidden_state"]
         embeddings = self.proj_out(embeddings) * attention_mask.unsqueeze(-1).float()

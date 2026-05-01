@@ -28,7 +28,7 @@ from fastvideo.pipelines.basic.stable_audio.stages import (
 )
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import InputValidationStage
-from fastvideo.utils import resolve_hf_token
+from fastvideo.utils import resolve_hf_token, set_mixed_precision_policy
 
 logger = init_logger(__name__)
 
@@ -111,6 +111,13 @@ class StableAudioPipeline(ComposedPipelineBase):
         logger.info("Loading Stable Audio checkpoint from %s", weights_path)
         full_state = load_file(weights_path)
 
+        # Tell `fastvideo.attention.layer` what dtype the model will run
+        # in — without this the attention layer reads
+        # `torch.get_default_dtype()` (fp32) and rejects FlashAttention.
+        # The standard FSDP loader does this in `fsdp_load.py:89`; we
+        # bypass that loader so we set it ourselves.
+        set_mixed_precision_policy(param_dtype=torch_dtype, reduce_dtype=torch_dtype)
+
         _disable_tf32_for_stable_audio()
 
         if "vae" in loaded_modules:
@@ -141,7 +148,7 @@ class StableAudioPipeline(ComposedPipelineBase):
             from fastvideo.models.encoders.stable_audio_conditioner import (
                 StableAudioMultiConditioner, )
             modules["conditioner"] = StableAudioMultiConditioner.from_official_state_dict(full_state)
-            modules["conditioner"] = modules["conditioner"].to(device=device).eval()
+            modules["conditioner"] = modules["conditioner"].to(device=device, dtype=torch_dtype).eval()
 
         return modules
 
