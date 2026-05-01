@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import gc
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -39,28 +38,24 @@ os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 
 def _find_base_shard_dir() -> Path | None:
-    """Return the local path to GAIR/daVinci-MagiHuman/base/, or None."""
+    """Return the local path to GAIR/daVinci-MagiHuman/base/ with shards present, or None."""
     override = os.getenv("MAGI_HUMAN_BASE_SHARD_DIR")
     if override:
         p = Path(override)
         return p if p.is_dir() else None
-
-    # Try HF cache snapshot (present because the conversion ran earlier).
     try:
-        from huggingface_hub import try_to_load_from_cache
-    except ImportError:
-        return None
-    from huggingface_hub import hf_hub_download
-
-    try:
-        # Using the index as a canary; hf_hub_download will return cached
-        # path if present, download otherwise (not ideal in a test, but
-        # we're gated on `_find_base_shard_dir is not None` above).
-        idx = hf_hub_download(
+        from huggingface_hub import snapshot_download
+        snap = snapshot_download(
             repo_id="GAIR/daVinci-MagiHuman",
-            filename="base/model.safetensors.index.json",
+            allow_patterns=[
+                "base/*.safetensors",
+                "base/model.safetensors.index.json",
+            ],
         )
-        return Path(idx).parent
+        candidate = Path(snap) / "base"
+        if candidate.is_dir() and any(candidate.glob("*.safetensors")):
+            return candidate
+        return None
     except Exception:
         return None
 
