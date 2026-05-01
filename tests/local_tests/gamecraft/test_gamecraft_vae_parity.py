@@ -12,7 +12,7 @@ Follows the same pattern as test_ltx2_vae.py:
 - Checks for non-finite values
 
 Usage:
-    DISABLE_SP=1 pytest tests/local_tests/vaes/test_gamecraft_vae_parity.py -v
+    DISABLE_SP=1 pytest tests/local_tests/gamecraft/test_gamecraft_vae_parity.py -v
 """
 import json
 import os

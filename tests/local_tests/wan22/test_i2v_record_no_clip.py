@@ -5,7 +5,7 @@ The preprocessing pipeline skips ImageEncodingStage, so image_embeds
 stays empty. The record creator must handle this gracefully.
 
 Usage:
-    python tests/local_tests/test_i2v_record_no_clip.py
+    python tests/local_tests/wan22/test_i2v_record_no_clip.py
 """
 
 import importlib
@@ -14,8 +14,8 @@ import os
 import sys
 import types
 
-# Remove tests/local_tests from sys.path to avoid shadowing
-# the real 'transformers' package.
+# Drop the test file's own directory from sys.path to keep the explicit
+# `_load_module` route below as the only loader for the leaf modules.
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path = [p for p in sys.path if os.path.abspath(p) != _here]
 
@@ -26,7 +26,7 @@ import numpy as np  # noqa: E402
 #   fastvideo.pipelines.pipeline_batch_info
 # But their intermediate __init__.py files pull in heavy deps.
 # Stub out all intermediate packages so only the leaf files load.
-_repo = os.path.dirname(os.path.dirname(_here))
+_repo = os.path.dirname(os.path.dirname(os.path.dirname(_here)))
 _fv = os.path.join(_repo, "fastvideo")
 
 

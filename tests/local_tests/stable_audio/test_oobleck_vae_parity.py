@@ -31,7 +31,7 @@ import torch
 from torch.testing import assert_close
 
 from fastvideo.utils import resolve_hf_token
-from tests.local_tests._stable_audio_helpers import (
+from ._stable_audio_helpers import (
     can_access_repo,
     setup_hf_env,
 )

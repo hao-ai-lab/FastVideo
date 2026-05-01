@@ -27,7 +27,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from tests.local_tests._stable_audio_helpers import (
+from ._stable_audio_helpers import (
     can_access_repo,
     setup_hf_env,
 )

@@ -9,11 +9,11 @@ required.
 
 Usage:
     # Quick smoke test (no weights required, CPU or CUDA)
-    pytest tests/local_tests/pipelines/test_gen3c_pipeline_smoke.py -v
+    pytest tests/local_tests/gen3c/test_gen3c_pipeline_smoke.py -v
 
     # Full pipeline smoke test with converted weights
     GEN3C_DIFFUSERS_PATH=./gen3c_fastvideo \
-        pytest tests/local_tests/pipelines/test_gen3c_pipeline_smoke.py -v -k full
+        pytest tests/local_tests/gen3c/test_gen3c_pipeline_smoke.py -v -k full
 """
 
 import os
