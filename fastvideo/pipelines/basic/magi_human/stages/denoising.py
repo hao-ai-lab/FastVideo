@@ -127,9 +127,8 @@ class MagiHumanDenoisingStage(PipelineStage):
         if self.cfg_number == 2:
             neg_list = batch.negative_prompt_embeds or []
             if not neg_list:
-                # Pad negative to same shape as positive (empty prompt).
-                neg_txt_feat = torch.zeros_like(txt_feat)
-                neg_txt_feat_len = 1
+                raise ValueError("CFG=2 requires negative prompt embeddings; got None. "
+                                 "Did the prompt encoding stage run?")
             else:
                 neg_txt_feat = neg_list[0]
                 neg_txt_feat_len = int(batch.magi_original_neg_text_lens[0])

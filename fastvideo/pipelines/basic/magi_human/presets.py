@@ -6,18 +6,32 @@ distilled twin. SR variants live behind their own presets once ported.
 """
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
-# Mirrors the video-side block of `MagiEvaluator.negative_prompt`. The
-# upstream reference (`daVinci-MagiHuman/inference/pipeline/video_generate.py:222-224`)
-# concatenates three blocks — video, audio, and speech — into a single
-# negative prompt that conditions BOTH the video and audio CFG paths.
-# This preset currently surfaces only the video block; extending to the
-# full upstream concatenation is tracked as a follow-up parity item.
-_MAGI_HUMAN_NEGATIVE_PROMPT = ("Bright tones, overexposed, static, blurred details, subtitles, style, "
-                               "works, paintings, images, static, overall gray, worst quality, low "
-                               "quality, JPEG compression residue, ugly, incomplete, extra fingers, "
-                               "poorly drawn hands, poorly drawn faces, deformed, disfigured, "
-                               "misshapen limbs, fused fingers, still picture, messy background, "
-                               "three legs, many people in the background, walking backwards")
+# Keep this in sync with upstream MagiEvaluator.negative_prompt
+# (daVinci-MagiHuman/inference/pipeline/video_generate.py:222-224): the
+# video, audio-quality, and speech-delivery blocks all condition CFG.
+_MAGI_HUMAN_NEGATIVE_PROMPT = ("Bright tones, overexposed, static, blurred details, subtitles, style, works, "
+                               "paintings, images, static, overall gray, worst quality, low quality, JPEG "
+                               "compression residue, ugly, incomplete, extra fingers, poorly drawn hands, "
+                               "poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, "
+                               "still picture, messy background, three legs, many people in the background, "
+                               "walking backwards, low quality, worst quality, poor quality, noise, background "
+                               "noise, hiss, hum, buzz, crackle, static, compression artifacts, MP3 artifacts, "
+                               "digital clipping, distortion, muffled, muddy, unclear, echo, reverb, room echo, "
+                               "over-reverberated, hollow sound, distant, washed out, harsh, shrill, piercing, "
+                               "grating, tinny, thin sound, boomy, bass-heavy, flat EQ, over-compressed, "
+                               "abrupt cut, jarring transition, sudden silence, looping artifact, music, "
+                               "instrumental, sirens, alarms, crowd noise, unrelated sound effects, chaotic, "
+                               "disorganized, messy, cheap sound, emotionless, flat delivery, deadpan, lifeless, "
+                               "apathetic, robotic, mechanical, monotone, flat intonation, undynamic, boring, "
+                               "reading from a script, AI voice, synthetic, text-to-speech, TTS, insincere, "
+                               "fake emotion, exaggerated, overly dramatic, melodramatic, cheesy, cringey, "
+                               "hesitant, unconfident, tired, weak voice, stuttering, stammering, mumbling, "
+                               "slurred speech, mispronounced, bad articulation, lisp, vocal fry, creaky voice, "
+                               "mouth clicks, lip smacks, wet mouth sounds, heavy breathing, audible inhales, "
+                               "plosives, p-pops, coughing, clearing throat, sneezing, speaking too fast, rushed, "
+                               "speaking too slow, dragged out, unnatural pauses, awkward silence, choppy, "
+                               "disjointed, multiple speakers, two voices, background talking, out of tune, "
+                               "off-key, autotune artifacts")
 
 _DENOISE_STAGE = PresetStageSpec(
     name="denoise",
