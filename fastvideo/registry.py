@@ -243,7 +243,12 @@ def _register_configs() -> None:
         default_preset="ltx2_distilled",
     )
 
-    # Stable Audio Open (text-to-audio).
+    # Stable Audio Open (text-to-audio). Both variants must be loaded
+    # from the FastVideo-curated converted Diffusers-format repos —
+    # the upstream `stabilityai/stable-audio-open-{1.0,small}` repos
+    # ship `model.safetensors` as a single monolithic checkpoint with
+    # no per-component subfolders our standard loader can consume. See
+    # `scripts/checkpoint_conversion/stable_audio_to_diffusers.py`.
     # NOTE: WorkloadType has no T2A variant yet (REVIEW item 28); using
     # T2V as the placeholder until the enum is extended.
     register_configs(
@@ -252,16 +257,18 @@ def _register_configs() -> None:
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "FastVideo/stable-audio-open-1.0-Diffusers",
-            "stabilityai/stable-audio-open-1.0",
         ],
+        # Substring match against HF cache snapshot paths (the lookup
+        # runs on the resolved local directory, which uses `--` between
+        # org and repo: `models--FastVideo--stable-audio-open-1.0-Diffusers`).
         model_detectors=[
             lambda path: "stable-audio-open-1" in path.lower(),
         ],
         model_family="stable_audio",
         default_preset="stable_audio_open_1_0_base",
     )
-    # Small variant uses a different `pipeline_config_cls` so it picks
-    # up the smaller (524288-sample) training window in `sample_size` /
+    # Small variant uses its own `pipeline_config_cls` so it picks up
+    # the smaller (524288-sample) training window in `sample_size` /
     # `max_audio_duration_s`.
     register_configs(
         sampling_param_cls=None,
