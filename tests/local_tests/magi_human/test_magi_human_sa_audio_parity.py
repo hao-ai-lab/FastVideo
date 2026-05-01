@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Parity test: FastVideo SAAudioVAEModel wrapper vs direct
-`diffusers.AutoencoderOobleck.from_pretrained(...)` on the Stable Audio
-Open 1.0 VAE.
+"""Parity test: MagiHuman's audio-VAE path (FastVideo `SAAudioVAEModel`
+lazy-loader around the native `OobleckVAE` port, shared with the
+standalone Stable Audio pipeline) vs `diffusers.AutoencoderOobleck.
+from_pretrained(...)` on the Stable Audio Open 1.0 VAE.
 
-Same setup as the T5-Gemma wrapper parity test — both paths are thin
-wrappers around the same HF Diffusers class on the same gated repo, so
-parity should be exact. Guards against regressions in the lazy-load
-device placement, dtype casts, or interface deviations in the wrapper.
+Companion to `tests/local_tests/vaes/test_oobleck_vae_parity.py`, which
+already validates `OobleckVAE` itself; this test exercises the wrapper
+layer that MagiHuman uses (lazy load, device migration, decode output
+unwrap) so wrapper-level regressions don't slip past the underlying-VAE
+parity test.
 
 Skips when:
   * CUDA is unavailable (VAE is 156M params, small enough for CPU but
@@ -76,11 +78,18 @@ def test_magi_human_sa_audio_vae_decode_parity():
         _SA_AUDIO_ID, subfolder="vae", torch_dtype=torch.float32,
     ).to(device).eval()
 
-    # --- FastVideo wrapper path ---
-    from fastvideo.configs.models.encoders.sa_audio import SAAudioVAEConfig
-    from fastvideo.models.encoders.sa_audio import SAAudioVAEModel
-    fv_config = SAAudioVAEConfig()
-    fv_config.arch_config.sa_audio_model_path = _SA_AUDIO_ID
+    # --- FastVideo wrapper path (shared with the standalone Stable
+    #     Audio pipeline that landed in main: `OobleckVAEConfig` +
+    #     `SAAudioVAEModel` lazy-loader around the first-class
+    #     `OobleckVAE` port). ---
+    from fastvideo.configs.models.vaes import OobleckVAEConfig
+    from fastvideo.models.vaes.sa_audio import SAAudioVAEModel
+    fv_config = OobleckVAEConfig()
+    fv_config.pretrained_path = _SA_AUDIO_ID
+    # The default `pretrained_dtype="float16"` matches official stable-
+    # audio-tools, but this parity test runs the reference path in fp32
+    # — so override here.
+    fv_config.pretrained_dtype = "float32"
     fv_vae = SAAudioVAEModel(fv_config)
 
     # --- Tiny shared latent ---

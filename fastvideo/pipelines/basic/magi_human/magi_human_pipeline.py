@@ -24,12 +24,12 @@ from typing import Any
 
 from transformers import AutoTokenizer
 
-from fastvideo.configs.models.encoders.sa_audio import SAAudioVAEConfig
 from fastvideo.configs.models.encoders.t5gemma import T5GemmaEncoderConfig
+from fastvideo.configs.models.vaes import OobleckVAEConfig
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.encoders.sa_audio import SAAudioVAEModel
 from fastvideo.models.encoders.t5gemma import T5GemmaEncoderModel
+from fastvideo.models.vaes.sa_audio import SAAudioVAEModel
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler, )
 from fastvideo.pipelines.basic.magi_human.stages import (
@@ -137,8 +137,8 @@ class MagiHumanPipeline(ComposedPipelineBase):
                 "requires HF terms accepted for gated repo",
                 _SA_AUDIO_HF_ID,
             )
-            audio_config = SAAudioVAEConfig()
-            audio_config.arch_config.sa_audio_model_path = _SA_AUDIO_HF_ID
+            audio_config = OobleckVAEConfig()
+            audio_config.pretrained_path = _SA_AUDIO_HF_ID
             modules["audio_vae"] = SAAudioVAEModel(audio_config)
 
         return modules

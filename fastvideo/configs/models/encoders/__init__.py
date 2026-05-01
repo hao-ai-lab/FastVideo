@@ -7,7 +7,6 @@ from fastvideo.configs.models.encoders.qwen2_5 import Qwen2_5_VLConfig
 from fastvideo.configs.models.encoders.siglip import SiglipVisionConfig
 from fastvideo.configs.models.encoders.reason1 import Reason1ArchConfig, Reason1Config
 from fastvideo.configs.models.encoders.gemma import LTX2GemmaConfig
-from fastvideo.configs.models.encoders.sa_audio import SAAudioVAEConfig
 from fastvideo.configs.models.encoders.stable_audio_conditioner import (StableAudioConditionerArchConfig,
                                                                         StableAudioConditionerConfig)
 from fastvideo.configs.models.encoders.t5gemma import T5GemmaEncoderConfig
@@ -16,5 +15,5 @@ __all__ = [
     "EncoderConfig", "TextEncoderConfig", "ImageEncoderConfig", "BaseEncoderOutput", "CLIPTextConfig",
     "CLIPVisionConfig", "WAN2_1ControlCLIPVisionConfig", "LlamaConfig", "T5Config", "T5LargeConfig", "Qwen2_5_VLConfig",
     "Reason1ArchConfig", "Reason1Config", "LTX2GemmaConfig", "SiglipVisionConfig", "StableAudioConditionerArchConfig",
-    "StableAudioConditionerConfig", "T5GemmaEncoderConfig", "SAAudioVAEConfig"
+    "StableAudioConditionerConfig", "T5GemmaEncoderConfig"
 ]

@@ -12,10 +12,9 @@ from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import MagiHumanVideoConfig
 from fastvideo.configs.models.encoders import (
     BaseEncoderOutput,
-    SAAudioVAEConfig,
     T5GemmaEncoderConfig,
 )
-from fastvideo.configs.models.vaes import WanVAEConfig
+from fastvideo.configs.models.vaes import OobleckVAEConfig, WanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
 
@@ -55,9 +54,10 @@ class MagiHumanBaseConfig(PipelineConfig):
     vae_tiling: bool = False
     vae_sp: bool = False
 
-    # Audio VAE — Stable Audio Open 1.0 (AutoencoderOobleck). Lazy-loaded
-    # from `stabilityai/stable-audio-open-1.0` (HF gated, Apache 2.0).
-    audio_vae_config: EncoderConfig = field(default_factory=SAAudioVAEConfig)
+    # Audio VAE — Stable Audio Open 1.0 (Oobleck), shared with the
+    # standalone Stable Audio pipeline. Lazy-loaded from
+    # `stabilityai/stable-audio-open-1.0` (HF gated, Apache 2.0).
+    audio_vae_config: VAEConfig = field(default_factory=OobleckVAEConfig)
 
     # Denoising (flow-matching UniPC).
     flow_shift: float | None = 5.0
