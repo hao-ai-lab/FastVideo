@@ -47,6 +47,7 @@ from pathlib import Path
 
 import pytest
 import torch
+import torch.nn.functional as F
 from torch.testing import assert_close
 
 
@@ -54,6 +55,102 @@ from torch.testing import assert_close
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29519")
+
+_T5GEMMA_ID = os.getenv("MAGI_HUMAN_T5GEMMA_ID", "google/t5gemma-9b-9b-ul2")
+_T5_GEMMA_TARGET_LENGTH = 640
+_SAMPLE_PROMPT = (
+    "A warm afternoon scene: a person sits on a park bench reading a book, "
+    "surrounded by softly swaying trees."
+)
+
+
+def _hf_token() -> str | None:
+    for key in ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY"):
+        token = os.environ.get(key)
+        if token:
+            return token
+    return None
+
+
+def _can_access_t5gemma() -> bool:
+    token = _hf_token()
+    if token is None:
+        return False
+    try:
+        from huggingface_hub import hf_hub_download
+        hf_hub_download(
+            repo_id=_T5GEMMA_ID,
+            filename="config.json",
+            token=token,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _pad_or_trim_dim1(t: torch.Tensor, target: int) -> tuple[torch.Tensor, int]:
+    """Mirror MagiHumanLatentPreparationStage's text pad-or-trim."""
+    current = t.size(1)
+    if current < target:
+        pad = [0, 0, 0, target - current]
+        return F.pad(t, pad, "constant", 0.0), current
+    return t[:, :target], target
+
+
+def _encode_magi_human_prompt_pair(device: torch.device):
+    """Encode the production preset prompt pair once via T5-Gemma."""
+    if not _can_access_t5gemma():
+        pytest.skip(
+            f"{_T5GEMMA_ID} not accessible — gated Google repo; set "
+            "HF_TOKEN / HF_API_KEY and accept the terms of use."
+        )
+
+    for src in ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY"):
+        token = os.environ.get(src)
+        if token:
+            os.environ.setdefault("HF_TOKEN", token)
+            os.environ.setdefault("HUGGINGFACE_HUB_TOKEN", token)
+            break
+
+    try:
+        from transformers import AutoTokenizer
+
+        from fastvideo.configs.models.encoders.t5gemma import (
+            T5GemmaEncoderConfig,
+        )
+        from fastvideo.models.encoders.t5gemma import (
+            T5GemmaEncoderModel,
+        )
+        from fastvideo.pipelines.basic.magi_human.presets import (
+            _MAGI_HUMAN_NEGATIVE_PROMPT,
+        )
+    except Exception as exc:
+        pytest.skip(f"T5-Gemma prompt encoding dependencies unavailable: {exc}")
+
+    tokenizer = AutoTokenizer.from_pretrained(_T5GEMMA_ID)
+    enc_config = T5GemmaEncoderConfig()
+    enc_config.arch_config.t5gemma_model_path = _T5GEMMA_ID
+    encoder = T5GemmaEncoderModel(enc_config)
+
+    def encode(text: str, text_encoder=encoder) -> tuple[torch.Tensor, int]:
+        inputs = tokenizer(
+            [text],
+            return_tensors="pt",
+            padding=True,
+            truncation=False,
+        ).to(device)
+        with torch.inference_mode():
+            hidden = text_encoder(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs.get("attention_mask"),
+            ).last_hidden_state
+        return _pad_or_trim_dim1(hidden.to(torch.float32), _T5_GEMMA_TARGET_LENGTH)
+
+    txt_feat, txt_feat_len = encode(_SAMPLE_PROMPT)
+    neg_txt_feat, neg_txt_feat_len = encode(_MAGI_HUMAN_NEGATIVE_PROMPT)
+    del encoder
+    _cleanup_gpu()
+    return txt_feat, txt_feat_len, neg_txt_feat, neg_txt_feat_len
 
 
 def _find_base_shard_dir() -> Path | None:
@@ -288,14 +385,14 @@ def test_magi_human_pipeline_latent_parity():
     audio_latent = torch.randn(
         (1, 4, 64), dtype=torch.float32, device=device,
     )
-    # Realistic text embeddings: both conditional and unconditional are
-    # non-zero (upstream uses a real NEGATIVE_PROMPT encoded via T5-Gemma,
-    # not a zero tensor). Using zero-text for uncond amplifies CFG
-    # sensitivity to per-call DiT drift non-representatively.
-    txt_feat = torch.randn((1, 8, 3584), dtype=torch.float32, device=device)
-    txt_feat_len = 8
-    neg_txt_feat = torch.randn((1, 8, 3584), dtype=torch.float32, device=device)
-    neg_txt_feat_len = 8
+    # Production-facing text embeddings: encode the example prompt and the
+    # preset negative prompt via T5-Gemma once, then feed the identical cached
+    # tensors to upstream and FastVideo. This keeps the DiT comparison focused
+    # while still validating prompt/preset content such as the full
+    # three-block MagiHuman negative prompt.
+    txt_feat, txt_feat_len, neg_txt_feat, neg_txt_feat_len = (
+        _encode_magi_human_prompt_pair(device)
+    )
 
     num_inference_steps = 4        # 4 steps × CFG=2 = 8 DiT calls / side; surfaces compounding drift that 1-step hides
     shift = 5.0
