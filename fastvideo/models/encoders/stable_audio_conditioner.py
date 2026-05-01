@@ -14,6 +14,8 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 
+from fastvideo.configs.models.encoders import StableAudioConditionerConfig
+
 
 class _LearnedPositionalEmbedding(nn.Module):
 
@@ -70,18 +72,20 @@ class T5Conditioner(_Conditioner):
     T5_MODEL_DIMS = {"t5-base": 768}
 
     def __init__(self, output_dim: int, t5_model_name: str = "t5-base",
-                 max_length: int = 128) -> None:
+                 max_length: int = 128, dtype: str = "float16") -> None:
         super().__init__(self.T5_MODEL_DIMS[t5_model_name], output_dim, project_out=False)
         from transformers import AutoTokenizer, T5EncoderModel
         self.max_length = max_length
         self.tokenizer = AutoTokenizer.from_pretrained(t5_model_name)
-        # T5 loaded directly in fp16 to match official
+        # T5 loaded directly in fp16 (config-driven) to match official
         # `stable_audio_tools/models/conditioners.py:334`. Registered as
         # a normal submodule so `.to(device)` / `torch.compile` track it;
         # `from_official_state_dict` filters `conditioners.prompt.*` from
         # the missing-key check (T5 weights are absent from the SA
         # checkpoint by design).
-        self.model = (T5EncoderModel.from_pretrained(t5_model_name).eval().requires_grad_(False).to(torch.float16))
+        torch_dtype = getattr(torch, dtype, torch.float16)
+        self._t5_dtype = torch_dtype
+        self.model = (T5EncoderModel.from_pretrained(t5_model_name).eval().requires_grad_(False).to(torch_dtype))
 
     def forward(self, texts: list[str], device: torch.device | str) -> tuple[torch.Tensor, torch.Tensor]:
         encoded = self.tokenizer(texts, truncation=True, max_length=self.max_length,
@@ -89,7 +93,7 @@ class T5Conditioner(_Conditioner):
         input_ids = encoded["input_ids"].to(device)
         attention_mask = encoded["attention_mask"].to(device).to(torch.bool)
         # Mirror official's `autocast(fp16)` wrap on T5 forward.
-        with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.float16):
+        with torch.no_grad(), torch.autocast(device_type="cuda", dtype=self._t5_dtype):
             embeddings = self.model(input_ids=input_ids,
                                     attention_mask=attention_mask)["last_hidden_state"]
         embeddings = self.proj_out(embeddings) * attention_mask.unsqueeze(-1).float()
@@ -116,24 +120,28 @@ class NumberConditioner(_Conditioner):
 
 
 class StableAudioMultiConditioner(nn.Module):
-    """SA-Open-1.0 conditioner config:
-        prompt        -> T5Conditioner(t5-base, max_length=128)
-        seconds_start -> NumberConditioner(min=0, max=512)
-        seconds_total -> NumberConditioner(min=0, max=512)
-    cond_dim = 768
+    """SA-Open-1.0 conditioner: T5 prompt + duration NumberConditioners.
+
+    All hardcoded constants (cond_dim, sub-conditioner ids, T5 model
+    name + max_length, NumberConditioner ranges) live on
+    `StableAudioConditionerConfig` — see
+    `fastvideo/configs/models/encoders/stable_audio_conditioner.py`.
     """
 
-    cross_attention_cond_ids = ("prompt", "seconds_start", "seconds_total")
-    global_cond_ids = ("seconds_start", "seconds_total")
-    cond_dim = 768
-
-    def __init__(self) -> None:
+    def __init__(self, config: StableAudioConditionerConfig | None = None) -> None:
         super().__init__()
+        self.config = config or StableAudioConditionerConfig()
+        arch = self.config.arch_config
+        self.cond_dim: int = arch.cond_dim
+        self.cross_attention_cond_ids: tuple[str, ...] = tuple(arch.cross_attention_cond_ids)
+        self.global_cond_ids: tuple[str, ...] = tuple(arch.global_cond_ids)
         self.conditioners = nn.ModuleDict({
-            "prompt": T5Conditioner(output_dim=self.cond_dim, t5_model_name="t5-base",
-                                    max_length=128),
-            "seconds_start": NumberConditioner(output_dim=self.cond_dim, min_val=0, max_val=512),
-            "seconds_total": NumberConditioner(output_dim=self.cond_dim, min_val=0, max_val=512),
+            "prompt": T5Conditioner(output_dim=arch.cond_dim, t5_model_name=arch.t5_model_name,
+                                    max_length=arch.t5_max_length, dtype=arch.t5_dtype),
+            "seconds_start": NumberConditioner(output_dim=arch.cond_dim, min_val=arch.number_min_val,
+                                               max_val=arch.number_max_val),
+            "seconds_total": NumberConditioner(output_dim=arch.cond_dim, min_val=arch.number_min_val,
+                                               max_val=arch.number_max_val),
         })
 
     def forward(self, batch_metadata: list[dict],
