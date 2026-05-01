@@ -18,16 +18,18 @@ _DENOISE_STAGE = PresetStageSpec(
 )
 
 # `audio_start_in_s` / `audio_end_in_s` are call-kwargs, kept off here.
-# `height`/`width`/`num_frames` are pinned to 1 so the video-shaped
-# preallocation in `VideoGenerator` stays tiny — the real output is the
-# audio waveform on `result["audio"]`, not the placeholder frame tensor.
+# `height`/`width` are pinned to 8 (the shared `InputValidationStage`
+# rejects values that aren't divisible by 8) and `num_frames` to 1 so
+# the video-shaped preallocation in `VideoGenerator` stays tiny — the
+# real output is the audio waveform on `result["audio"]`, not the
+# placeholder frame tensor.
 _SHARED_DEFAULTS = {
     "seed": 0,
     "guidance_scale": 7.0,
     "num_inference_steps": 100,
     "negative_prompt": "",
-    "height": 1,
-    "width": 1,
+    "height": 8,
+    "width": 8,
     "num_frames": 1,
 }
 

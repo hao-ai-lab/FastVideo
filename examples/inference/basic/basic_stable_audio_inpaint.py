@@ -48,10 +48,10 @@ Prerequisites: same as `basic_stable_audio.py`.
 from fastvideo import VideoGenerator
 
 PROMPT = "Steady lo-fi hip hop drum loop with vinyl crackle."
-# Path to any audio-bearing file (wav, mp3, mp4, m4a, flac, ...). Set
-# to `None` and the model will continue from silence (rarely useful;
-# point this at a real loop you want to extend).
-REFERENCE_AUDIO_PATH: str | None = None
+# Required: path to the reference audio file (wav, mp3, mp4, m4a, flac,
+# ...) you want to extend or repair. The pipeline raises if a mask is
+# passed without a reference, so this must be a real path.
+REFERENCE_AUDIO_PATH = "path/to/your/loop.wav"
 KEEP_SECONDS = 6.0       # first KEEP_SECONDS preserved exactly
 TOTAL_SECONDS = 12.0     # extend the loop to this duration
 

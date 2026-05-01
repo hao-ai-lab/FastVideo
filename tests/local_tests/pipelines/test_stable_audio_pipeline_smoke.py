@@ -37,8 +37,10 @@ def test_stable_audio_typed_surface_preflight() -> None:
     # Audio workload: pin frame-shaped fields so the video-shaped sample
     # buffer in `VideoGenerator` doesn't pre-allocate a hundreds-of-MB
     # placeholder. The real output is the waveform on `result["audio"]`.
-    assert preset.defaults["height"] == 1
-    assert preset.defaults["width"] == 1
+    # `height`/`width` use 8 (smallest value the shared
+    # `InputValidationStage` accepts — rejects non-8-divisible).
+    assert preset.defaults["height"] == 8
+    assert preset.defaults["width"] == 8
     assert preset.defaults["num_frames"] == 1
 
     pc = StableAudioT2AConfig()
