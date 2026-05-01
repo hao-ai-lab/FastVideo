@@ -43,7 +43,6 @@ from __future__ import annotations
 import gc
 import glob
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -58,17 +57,24 @@ os.environ.setdefault("MASTER_PORT", "29519")
 
 
 def _find_base_shard_dir() -> Path | None:
+    """Return the local path to GAIR/daVinci-MagiHuman/base/ with shards present, or None."""
     override = os.getenv("MAGI_HUMAN_BASE_SHARD_DIR")
     if override:
         p = Path(override)
         return p if p.is_dir() else None
     try:
-        from huggingface_hub import hf_hub_download
-        idx = hf_hub_download(
+        from huggingface_hub import snapshot_download
+        snap = snapshot_download(
             repo_id="GAIR/daVinci-MagiHuman",
-            filename="base/model.safetensors.index.json",
+            allow_patterns=[
+                "base/*.safetensors",
+                "base/model.safetensors.index.json",
+            ],
         )
-        return Path(idx).parent
+        candidate = Path(snap) / "base"
+        if candidate.is_dir() and any(candidate.glob("*.safetensors")):
+            return candidate
+        return None
     except Exception:
         return None
 
