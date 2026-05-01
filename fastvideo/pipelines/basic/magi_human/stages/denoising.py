@@ -14,6 +14,7 @@ import torch
 from tqdm import tqdm
 
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.hooks.activation_trace import trace_step
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -148,34 +149,41 @@ class MagiHumanDenoisingStage(PipelineStage):
 
         disable_tqdm = not getattr(fastvideo_args, "log_level_progress", True)
         for idx, t in enumerate(tqdm(timesteps, disable=disable_tqdm)):
-            v_cond_video, v_cond_audio = _dit_forward(
-                self.transformer,
-                video_latent=video_latent,
-                audio_feat_len=audio_feat_len,
-                txt_feat=txt_feat,
-                txt_feat_len=txt_feat_len,
-                static_packed=static_packed,
-                coords_style=self.coords_style,
-                video_in_channels=self.video_in_channels,
-                audio_in_channels=self.audio_in_channels,
-                patch_size=self.patch_size,
-            )
-
-            if self.cfg_number == 2:
-                v_uncond_video, v_uncond_audio = _dit_forward(
+            with trace_step(idx):
+                v_cond_video, v_cond_audio = _dit_forward(
                     self.transformer,
                     video_latent=video_latent,
                     audio_feat_len=audio_feat_len,
-                    txt_feat=neg_txt_feat,
-                    txt_feat_len=neg_txt_feat_len,
+                    txt_feat=txt_feat,
+                    txt_feat_len=txt_feat_len,
                     static_packed=static_packed,
                     coords_style=self.coords_style,
                     video_in_channels=self.video_in_channels,
                     audio_in_channels=self.audio_in_channels,
                     patch_size=self.patch_size,
                 )
+
+                if self.cfg_number == 2:
+                    v_uncond_video, v_uncond_audio = _dit_forward(
+                        self.transformer,
+                        video_latent=video_latent,
+                        audio_feat_len=audio_feat_len,
+                        txt_feat=neg_txt_feat,
+                        txt_feat_len=neg_txt_feat_len,
+                        static_packed=static_packed,
+                        coords_style=self.coords_style,
+                        video_in_channels=self.video_in_channels,
+                        audio_in_channels=self.audio_in_channels,
+                        patch_size=self.patch_size,
+                    )
+                else:
+                    v_uncond_video = None
+                    v_uncond_audio = None
+
+            if self.cfg_number == 2:
                 video_guidance = (self.video_txt_guidance_scale
                                   if t > self.video_guidance_high_t_threshold else self.video_guidance_low_t_value)
+                assert v_uncond_video is not None and v_uncond_audio is not None
                 v_video = v_uncond_video + video_guidance * (v_cond_video - v_uncond_video)
                 v_audio = v_uncond_audio + self.audio_txt_guidance_scale * (v_cond_audio - v_uncond_audio)
             else:
