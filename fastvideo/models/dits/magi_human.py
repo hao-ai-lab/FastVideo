@@ -345,6 +345,9 @@ class MagiAttention(nn.Module):
 
         self.q_size = cfg.num_heads_q * cfg.head_dim
         self.kv_size = cfg.num_heads_kv * cfg.head_dim
+        # Config-derived constant; hoisted from forward to avoid recomputing
+        # on every attention call (called 2x per CFG step × num_layers).
+        self.kv_repeat = cfg.num_heads_q // cfg.num_heads_kv
 
     def forward(
         self,
@@ -387,10 +390,9 @@ class MagiAttention(nn.Module):
 
         # Single-GPU self-attention over the full concat stream. Repeat KV
         # heads to match Q heads (GQA).
-        kv_repeat = self.cfg.num_heads_q // self.cfg.num_heads_kv
-        if kv_repeat > 1:
-            k = k.repeat_interleave(kv_repeat, dim=1)
-            v = v.repeat_interleave(kv_repeat, dim=1)
+        if self.kv_repeat > 1:
+            k = k.repeat_interleave(self.kv_repeat, dim=1)
+            v = v.repeat_interleave(self.kv_repeat, dim=1)
 
         # [L, H, D] -> [1, H, L, D] for SDPA.
         q_t = q.to(torch.bfloat16).permute(1, 0, 2).unsqueeze(0)
@@ -522,6 +524,14 @@ class MagiAdapter(nn.Module):
             arch.audio_in_channels, arch.hidden_size, bias=True, dtype=torch.float32,
         )
         self.rope = ElementWiseFourierEmbed(arch.head_dim)
+        # RoPE cache: coords_mapping is the same tensor object across timesteps
+        # in the denoising loop, so data_ptr()+shape+dtype+device is a fast,
+        # collision-free key that avoids recomputing the Fourier embed each step.
+        self._cached_rope: Optional[torch.Tensor] = None
+        self._cached_rope_key: Optional[tuple] = None
+
+    def _rope_cache_key(self, t: torch.Tensor) -> tuple:
+        return (t.data_ptr(), t.shape, t.dtype, t.device)
 
     def forward(
         self,
@@ -531,7 +541,11 @@ class MagiAdapter(nn.Module):
         audio_mask: torch.Tensor,
         text_mask: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        rope = self.rope(coords_mapping)
+        key = self._rope_cache_key(coords_mapping)
+        if key != self._cached_rope_key:
+            self._cached_rope = self.rope(coords_mapping)
+            self._cached_rope_key = key
+        rope = self._cached_rope
         # Embedder dtypes may differ from x's dtype when FastVideo's FSDP
         # loader casts all weights to `pipeline_config.precision` (bf16).
         # Match the weight dtype per modality.
@@ -626,6 +640,18 @@ class MagiHumanDiT(BaseDiT):
         self.final_linear_audio = nn.Linear(
             arch.hidden_size, arch.audio_in_channels, bias=False, dtype=torch.float32,
         )
+        # Dispatcher + mask cache: modality_mapping is the same tensor object
+        # across all timesteps in the denoising loop; data_ptr()+shape+dtype+device
+        # is a fast, collision-free key that avoids rebuilding ModalityDispatcher
+        # (which calls argsort + bincount) on every forward call.
+        self._cached_dispatcher: Optional[ModalityDispatcher] = None
+        self._cached_video_mask: Optional[torch.Tensor] = None
+        self._cached_audio_mask: Optional[torch.Tensor] = None
+        self._cached_text_mask: Optional[torch.Tensor] = None
+        self._cached_modality_key: Optional[tuple] = None
+
+    def _modality_cache_key(self, t: torch.Tensor) -> tuple:
+        return (t.data_ptr(), t.shape, t.dtype, t.device)
 
     def forward(
         self,
@@ -642,10 +668,17 @@ class MagiHumanDiT(BaseDiT):
             out: [L, max(V_ch, A_ch)] with video channels in video slots and
                  audio channels in audio slots; text slots are zero.
         """
-        dispatcher = ModalityDispatcher(modality_mapping, num_modalities=3)
-        video_mask = modality_mapping == Modality.VIDEO
-        audio_mask = modality_mapping == Modality.AUDIO
-        text_mask = modality_mapping == Modality.TEXT
+        key = self._modality_cache_key(modality_mapping)
+        if key != self._cached_modality_key:
+            self._cached_dispatcher = ModalityDispatcher(modality_mapping, num_modalities=3)
+            self._cached_video_mask = modality_mapping == Modality.VIDEO
+            self._cached_audio_mask = modality_mapping == Modality.AUDIO
+            self._cached_text_mask = modality_mapping == Modality.TEXT
+            self._cached_modality_key = key
+        dispatcher = self._cached_dispatcher
+        video_mask = self._cached_video_mask
+        audio_mask = self._cached_audio_mask
+        text_mask = self._cached_text_mask
 
         x, rope = self.adapter(x, coords_mapping, video_mask, audio_mask, text_mask)
         x = x.to(torch.bfloat16)
