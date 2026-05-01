@@ -274,7 +274,6 @@ class OobleckVAE(nn.Module):
         *,
         subfolder: str | None = None,
         torch_dtype: torch.dtype | None = None,
-        token: str | None = None,
     ) -> "OobleckVAE":
         """Instantiate and load weights from a Stable Audio VAE dir.
 
@@ -283,26 +282,22 @@ class OobleckVAE(nn.Module):
           * a local directory containing `config.json` + safetensors,
           * a local directory whose `subfolder="vae"` holds those files.
 
-        `token` is forwarded to `snapshot_download` for gated repos. If
-        omitted, falls back to `HF_TOKEN` / `HUGGINGFACE_HUB_TOKEN` /
-        `HF_API_KEY` from the environment.
+        For gated repos, the HF token is read from `HF_TOKEN` /
+        `HUGGINGFACE_HUB_TOKEN` / `HF_API_KEY` (see `resolve_hf_token`).
         """
         import inspect
         from safetensors.torch import load_file
+
+        from fastvideo.utils import resolve_hf_token
 
         # Resolve to a local directory.
         if os.path.isdir(model_path):
             root = model_path
         else:
             from huggingface_hub import snapshot_download
-            resolved_token = token or (
-                os.environ.get("HF_TOKEN")
-                or os.environ.get("HUGGINGFACE_HUB_TOKEN")
-                or os.environ.get("HF_API_KEY")
-            )
             allow = ["vae/*"] if subfolder else ["*"]
             root = snapshot_download(
-                repo_id=model_path, token=resolved_token, allow_patterns=allow,
+                repo_id=model_path, token=resolve_hf_token(), allow_patterns=allow,
             )
         if subfolder:
             root = os.path.join(root, subfolder)
@@ -318,10 +313,8 @@ class OobleckVAE(nn.Module):
         with open(cfg_path) as f:
             cfg = json.load(f)
         cfg_fields = {k: v for k, v in cfg.items() if not k.startswith("_")}
-        # Filter to ctor-accepted kwargs — Diffusers configs commonly add
-        # fields (`scaling_factor`, `_diffusers_version`, ...) the bare
-        # `OobleckVAE` doesn't carry, which would crash a positional kwargs
-        # expansion below.
+        # Diffusers configs commonly carry extra fields (`scaling_factor`,
+        # `_diffusers_version`, ...) the bare `OobleckVAE` ctor doesn't accept.
         init_params = inspect.signature(cls.__init__).parameters
         cfg_fields = {k: v for k, v in cfg_fields.items() if k in init_params}
 
