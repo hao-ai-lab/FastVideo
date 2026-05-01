@@ -29,7 +29,8 @@ import os
 import pytest
 import torch
 
-_HF_REPO_ID = "stabilityai/stable-audio-open-1.0"
+_HF_REPO_ID = "stabilityai/stable-audio-open-1.0"  # raw upstream — only used to gate the test on access
+_FV_REPO_ID = "FastVideo/stable-audio-open-1.0-Diffusers"  # converted Diffusers repo FastVideo loads from
 
 
 def _hf_token():
@@ -94,7 +95,7 @@ def test_stable_audio_inpaint_kept_region_preserved():
 
     from fastvideo import VideoGenerator
     generator = VideoGenerator.from_pretrained(
-        _HF_REPO_ID,
+        _FV_REPO_ID,
         num_gpus=1,
         use_fsdp_inference=False,
         dit_cpu_offload=False,
