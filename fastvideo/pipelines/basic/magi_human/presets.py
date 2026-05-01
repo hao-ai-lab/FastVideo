@@ -47,7 +47,7 @@ MAGI_HUMAN_BASE = InferencePreset(
     name="magi_human_base",
     version=1,
     model_family="magi_human",
-    description=("daVinci-MagiHuman base text-to-AV at 448x256, 4s @ 25 fps. "
+    description=("daVinci-MagiHuman base text-to-AV at 256x480, 4s @ 25 fps. "
                  "Produces an mp4 with muxed audio + video. workload_type "
                  "is `t2v` because the framework enum has no `t2av` variant yet."),
     workload_type="t2v",
@@ -55,7 +55,10 @@ MAGI_HUMAN_BASE = InferencePreset(
     defaults={
         "seed": 42,
         "height": 256,
-        "width": 448,
+        # Upstream pipeline.py:61-64 defaults br_width=480, br_height=272,
+        # and video_generate.py:254-261 snaps height to 256 while width stays
+        # 480, so the rendered default is 256x480.
+        "width": 480,
         # num_frames is derived by the pipeline as `seconds*fps + 1`; we
         # surface it here for APIs that expect a concrete default.
         "num_frames": 101,
@@ -70,7 +73,7 @@ MAGI_HUMAN_DISTILL = InferencePreset(
     name="magi_human_distill",
     version=1,
     model_family="magi_human",
-    description=("daVinci-MagiHuman DMD-2 distilled text-to-AV at 448x256, 4s @ "
+    description=("daVinci-MagiHuman DMD-2 distilled text-to-AV at 256x480, 4s @ "
                  "25 fps. 8-step inference, no classifier-free guidance. Produces "
                  "an mp4 with muxed audio + video."),
     workload_type="t2v",
@@ -78,7 +81,7 @@ MAGI_HUMAN_DISTILL = InferencePreset(
     defaults={
         "seed": 42,
         "height": 256,
-        "width": 448,
+        "width": 480,
         "num_frames": 101,
         "fps": 25,
         # DMD: cfg=1 at the pipeline level. guidance_scale is kept at 1.0
