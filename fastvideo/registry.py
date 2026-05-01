@@ -243,11 +243,7 @@ def _register_configs() -> None:
         default_preset="ltx2_distilled",
     )
 
-    # Stable Audio Open (text-to-audio). Both variants use the same
-    # `StableAudioPipeline` and `StableAudioT2AConfig` — the per-variant
-    # DiT shape (embed_dim, depth, num_heads, qk_norm) and conditioner
-    # spec come from `transformer/config.json` and `conditioner/config.json`
-    # in the converted Diffusers-format repos.
+    # Stable Audio Open (text-to-audio).
     # NOTE: WorkloadType has no T2A variant yet (REVIEW item 28); using
     # T2V as the placeholder until the enum is extended.
     register_configs(

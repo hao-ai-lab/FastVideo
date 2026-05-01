@@ -137,9 +137,7 @@ class StableAudioMultiConditioner(nn.Module):
         self.config = config or StableAudioConditionerConfig()
         arch = self.config.arch_config
         # Build sub-conditioners from the `configs` list (mirrors
-        # upstream's `MultiConditioner` factory). SA-1.0 has 3 entries
-        # (prompt + seconds_start + seconds_total); SA-small has 2
-        # (prompt + seconds_total only).
+        # upstream's `MultiConditioner` factory).
         sub: dict[str, nn.Module] = {}
         for spec in arch.configs:
             sid = spec["id"]
@@ -185,35 +183,12 @@ class StableAudioMultiConditioner(nn.Module):
         return cross_attn_cond, cross_attn_mask, global_embed
 
     @classmethod
-    def from_pretrained(cls, model_path: str) -> "StableAudioMultiConditioner":
-        """Load NumberConditioner weights from a converted Diffusers-format
-        `conditioner/` subfolder. T5 is fetched fresh from HF in
-        `__init__` (T5 weights aren't part of the SA checkpoint by
-        design — see `from_official_state_dict` for the rationale).
-        """
-        import os
-        from safetensors.torch import load_file
-        weights = os.path.join(model_path, "diffusion_pytorch_model.safetensors")
-        state = load_file(weights)
-        mc = cls()
-        own = set(mc.state_dict().keys())
-        # T5 weights are fetched in `__init__`; ignore them in the
-        # missing-key check, only NumberConditioner keys must be present.
-        missing = [k for k in own if k not in state and not k.startswith("conditioners.prompt.")]
-        unexpected = [k for k in state if k not in own]
-        if missing or unexpected:
-            raise RuntimeError(
-                f"StableAudioMultiConditioner load mismatch — missing={missing[:5]} unexpected={unexpected[:5]}")
-        mc.load_state_dict(state, strict=False)
-        return mc
-
-    @classmethod
     def from_official_state_dict(cls, state_dict: dict[str, torch.Tensor],
                                  prefix: str = "conditioner.") -> "StableAudioMultiConditioner":
         """Load NumberConditioner weights from a raw `stable_audio_tools`
         monolithic state dict. Kept for tests / older checkpoints;
-        production loads go through `from_pretrained` against the
-        Diffusers-format converted repo.
+        production loads go through the standard `ConditionerLoader`
+        against the converted Diffusers repo.
         """
         mc = cls()
         own_state = mc.state_dict()

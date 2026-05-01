@@ -53,9 +53,7 @@ class StableAudioConditioningStage(PipelineStage):
         do_cfg = guidance_scale > 1.0
 
         prompt = batch.prompt if isinstance(batch.prompt, str) else batch.prompt[0]
-        # Build cond_meta with only the keys the conditioner expects.
-        # SA-1.0 wants {prompt, seconds_start, seconds_total}; SA-small
-        # wants {prompt, seconds_total} only.
+        # Send only the keys the conditioner declares (per-variant).
         all_cond_values = {
             "prompt": prompt,
             "seconds_start": audio_start_in_s,

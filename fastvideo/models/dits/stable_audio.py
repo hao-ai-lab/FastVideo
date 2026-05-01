@@ -171,7 +171,6 @@ class Attention(nn.Module):
         q = rearrange(q, "b n (h d) -> b n h d", h=h)
         k = rearrange(k, "b n (h d) -> b n h d", h=kv_h)
         v = rearrange(v, "b n (h d) -> b n h d", h=kv_h)
-        # qk_norm runs after the head-dim split (norms are per-head).
         q = self.q_norm(q)
         k = self.k_norm(k)
 
@@ -276,10 +275,8 @@ class StableAudioDiT(BaseDiT):
                  hf_config: dict[str, Any] | None = None) -> None:
         if config is None:
             config = StableAudioConfig()
-        # `BaseDiT.__init__` requires both args.
         super().__init__(config=config, hf_config=hf_config or {})
         arch = config.arch_config
-        # `BaseDiT.__post_init__` checks these are set on `self`.
         self.hidden_size = arch.hidden_size
         self.num_attention_heads = arch.num_attention_heads
         self.num_channels_latents = arch.num_channels_latents
@@ -365,29 +362,12 @@ class StableAudioDiT(BaseDiT):
         return self.postprocess_conv(out) + out
 
     @classmethod
-    def from_pretrained(cls, model_path: str) -> "StableAudioDiT":
-        """Load from a converted Diffusers-format `transformer/`
-        subfolder (see `scripts/checkpoint_conversion/stable_audio_to_diffusers.py`).
-        Keys are already prefix-stripped + LayerNorm-renamed so the load
-        is `strict=True`.
-        """
-        import os
-        from safetensors.torch import load_file
-        weights = os.path.join(model_path, "diffusion_pytorch_model.safetensors")
-        state = load_file(weights)
-        model = cls()
-        missing, unexpected = model.load_state_dict(state, strict=True)
-        if missing or unexpected:
-            raise RuntimeError(
-                f"StableAudioDiT load mismatch — missing={missing[:5]} unexpected={unexpected[:5]}")
-        return model
-
-    @classmethod
     def from_official_state_dict(cls, state_dict: dict[str, torch.Tensor],
                                  prefix: str = "model.model.") -> "StableAudioDiT":
         """Load from a raw `stable_audio_tools` monolithic state dict.
         Kept for tests / older checkpoints; production loads go through
-        `from_pretrained` against the Diffusers-format converted repo.
+        the standard `TransformerLoader` against the converted Diffusers
+        repo.
         """
         model = cls()
         mapping_fn = get_param_names_mapping(model.config.arch_config.param_names_mapping)

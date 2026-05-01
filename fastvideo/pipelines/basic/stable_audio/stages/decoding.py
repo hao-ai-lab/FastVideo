@@ -33,10 +33,7 @@ class StableAudioDecodingStage(PipelineStage):
         pc = fastvideo_args.pipeline_config
         latents = batch.latents
 
-        # The standard `VAELoader` respects `vae_cpu_offload` (default
-        # True), so the VAE may have been parked on CPU after load.
-        # Match `fastvideo/pipelines/stages/decoding.py:96` and pull it
-        # to the latent's device before use.
+        # VAE may be CPU-parked under `vae_cpu_offload=True`.
         from fastvideo.distributed.parallel_state import get_local_torch_device
         self.vae = self.vae.to(get_local_torch_device())
         decoded = self.vae.decode(latents)
