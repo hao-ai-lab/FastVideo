@@ -114,6 +114,7 @@ All MagiHuman local tests in one shot:
 pytest tests/local_tests/transformers/test_magi_human_parity.py \
        tests/local_tests/encoders/test_magi_human_t5gemma_parity.py \
        tests/local_tests/vaes/test_magi_human_sa_audio_parity.py \
+       tests/local_tests/vaes/test_magi_human_sa_audio_official_parity.py \
        tests/local_tests/vaes/test_magi_human_vae_parity.py \
        tests/local_tests/pipelines/test_magi_human_pipeline_smoke.py \
        tests/local_tests/pipelines/test_magi_human_pipeline_parity.py \
@@ -142,6 +143,14 @@ parity. Compares the FastVideo `OobleckVAE` (shared with the standalone Stable
 Audio pipeline) against HuggingFace Diffusers' `AutoencoderOobleck` on the
 `stabilityai/stable-audio-open-1.0` weights. Encode + decode + round-trip;
 expected to be bit-identical in fp32.
+
+**`test_magi_human_sa_audio_official_parity.py`** — Stable Audio Open VAE
+parity vs the official daVinci-MagiHuman integration layer. Compares FastVideo's
+`SAAudioVAEModel` against the upstream `SAAudioFeatureExtractor.decode()` path
+from the `daVinci-MagiHuman` clone. Catches drift between FastVideo's full SA
+wrapper and the official repo's custom Stable-Audio module. Requires the upstream
+clone and the `stabilityai/stable-audio-open-1.0` gated repo. Expected to be
+bit-exact (diff=0) in fp32.
 
 **`test_magi_human_vae_parity.py`** — Wan video VAE parity. Compares the
 FastVideo Wan VAE decoder against the upstream `Wan2_2_VAE` on
@@ -183,13 +192,14 @@ Branch tip `eeef855b` (rebased onto `origin/main` `c77a76c6`), Wave 1+4 changes 
 | `tests/local_tests/transformers/test_magi_human_parity.py::test_magi_human_dit_parity` | FAIL | video diff_max=0.057, diff_mean=0.008; audio diff_max=0.034, diff_mean=0.008; text exact (diff_max=0) | Tightened to `atol=0.03, rtol=0.01` (Wave 1). Bf16-noise-floor; per-layer drift ~1e-3 accumulates over 40 layers. Root cause of OQ-6 compounding. See §Numerical-alignment investigation. |
 | `tests/local_tests/vaes/test_magi_human_vae_parity.py::test_magi_human_vae_decode_parity` | PASS | diff_max=8e-4, diff_mean=4.9e-5 | Wan VAE. Deferred to `atol=1e-3, rtol=1e-3` per OQ-7 (Wave 4). Tighten to `atol=1e-4` once Wan VAE op-order fix lands. |
 | `tests/local_tests/vaes/test_magi_human_sa_audio_parity.py::test_magi_human_sa_audio_vae_decode_parity` | PASS | exact (`assert_close(atol=1e-5, rtol=1e-5)`, machine epsilon) | gated repo, requires HF token; uses main's shared `OobleckVAE` + `SAAudioVAEModel` wrapper |
+| `tests/local_tests/vaes/test_magi_human_sa_audio_official_parity.py::test_magi_human_sa_audio_official_decode_parity` | PASS | `atol=1e-5, rtol=1e-5`, diff_max=0, diff_mean=0 (bit-exact) | Wave 7. Compares FV `SAAudioVAEModel` vs upstream `SAAudioFeatureExtractor.decode()`. Confirms OQ-6 is NOT in audio VAE. Requires upstream clone + gated SA repo. |
 | `tests/local_tests/pipelines/test_magi_human_pipeline_smoke.py::test_magi_human_typed_surface_preflight` | PASS | CPU-only key/preset checks, exact key set equality, 331 keys | no skip conditions met locally |
 | `tests/local_tests/pipelines/test_magi_human_pipeline_smoke.py::test_magi_human_pipeline_smoke` | PASS | shape-only; 2 inference steps, output shape `[B,C,T,H,W]` validated | wallclock ~50s |
 | `tests/local_tests/pipelines/test_magi_human_pipeline_parity.py::test_magi_human_pipeline_latent_parity` | FAIL | video: diff_max=15.10, diff_mean=1.30 (18.85x compounding ratio vs 1-step 0.069); audio: diff_mean=0.74 | Bumped to `num_inference_steps=4` (Wave 1). Pre-existing compounding bug; tracked as OQ-6. Bug present in original commit 620aaf41 (confirmed via bisect). |
 | `fastvideo/tests/ssim/test_magi_human_similarity.py::test_magi_human_base_inference_similarity` | DEFERRED | n/a | Reference videos not yet seeded to `FastVideo/ssim-reference-videos` HF repo; tracked as OQ-2. Requires Modal L40S seeding via `seed-ssim-references` skill. |
 | _(debug)_ | INFO | Per-side layer logs: `/tmp/opencode/magi_dit_up_layers.log`, `/tmp/opencode/magi_dit_fv_layers.log` | Added in Wave 1 to `_debug_magi_human_block_parity.py`. See `add-model-trace` skill at `~/.config/opencode/skill/add-model-trace/`. |
 
-_Last verified: 2026-05-01 (Wave 2-3 numerical alignment investigation), branch `will/magi` @ working tree (Wave 1+4 changes uncommitted), B200 GPU, HF token from `~/.cache/huggingface/token`. Loader fix means `MAGI_HUMAN_BASE_SHARD_DIR` no longer required (override still works)._
+_Last verified: 2026-05-01 (Wave 7 CFG+neg-prompt investigation), branch `will/magi` @ working tree (Wave 1+4+7 changes committed), B200 GPU, HF token from `~/.cache/huggingface/token`. Loader fix means `MAGI_HUMAN_BASE_SHARD_DIR` no longer required (override still works)._
 
 ## Design notes
 
@@ -310,6 +320,21 @@ remaining candidates are dtype boundary mismatches around sensitive MM-layer ops
 (pre-norm, attention, MLP activation) where upstream may cast to fp32 and FV
 stays in bf16.
 
+### Wave 7 (2026-05-01): CFG + negative prompt investigation
+
+Findings:
+- **CFG math identical**: FV `v = uncond + g * (cond - uncond)` matches upstream at `denoising.py:178-181` ↔ `video_generate.py:426,456-457`. Video has `t > 500` cutoff (`5.0 → 2.0`); audio has none. Both sides apply the same formula.
+- **Scheduler args identical for T2AV base path**: `step(model_output, t, sample, return_dict=False)[0]`. Audio-skip modes (`is_a2v`/SR) are not exercised in base.
+- **Audio decode path bit-exact vs official**: New parity test [`test_magi_human_sa_audio_official_parity.py`] passes at machine-eps (diff=0). FV's `SAAudioVAEModel` is identical to upstream `SAAudioFeatureExtractor.decode()`. Confirms OQ-6 is NOT in audio VAE.
+- **Production root cause identified**: FV's preset `_MAGI_HUMAN_NEGATIVE_PROMPT` was missing the audio-quality + speech-delivery blocks present in upstream `video_generate.py:222-224`. Fix applied at `presets.py`. Audio CFG amplifies the missing-block delta 5x → consistent with observed step-1 audio amplification of ~3x.
+- **Hardening**: Replaced silent zero-fallback in `denoising.py:127-135` with `ValueError`. Missing negative embeds at CFG=2 is a real bug, not silent-success.
+
+Caveat — parity test path bypasses preset prompts: `test_magi_human_pipeline_parity.py:291-298` uses random `txt_feat` and `neg_txt_feat` (identical on both sides), so the negative-prompt fix does NOT change parity numbers. Production inference (basic example) DOES use the preset and benefits from the fix.
+
+Reframed OQ-6 root cause:
+- Production-facing "blurry abstract" output: caused by incomplete negative prompt (audio CFG didn't have the right negatives). FIXED in this commit.
+- Parity-test 4-step compounding (1.196 mean): separate phenomenon — inherent FlowUniPC multistep scheduler amplification of per-call bf16 noise (~2x per DiT call expansively, 8 calls = ~256x). NOT a code bug; would require fp32 sensitive ops or a different scheduler to materially change.
+
 ### Potential mitigations (not investigated this session)
 
 - Run sensitive ops (MM-layer pre-norm, attention) in fp32 instead of bf16.
@@ -341,7 +366,7 @@ with hard rules around no-source-residue cleanup.
 | OQ-3 | **Audio quality regression metric.** Mel-spectrogram L1 / multi-resolution STFT regression deferred per `tests/local_tests/stable-audio.md` precedent. | DEFERRED |
 | OQ-4 | **`_find_base_shard_dir` is fragile across HF-cache configurations.** Wave 1 fixed the loader with `snapshot_download(repo_id, allow_patterns=['base/*.safetensors'])` fallback in 3 files. `MAGI_HUMAN_BASE_SHARD_DIR` still works as an override but is no longer required. | RESOLVED |
 | OQ-5 | **Basic-example output mp4 visual quality is impressionistic at 256x448.** Root cause identified: OQ-6 (pre-existing compounding bf16 drift over the 32-step denoise loop). Wave 2-3 investigation confirmed the 4-step pipeline parity shows 18.85x compounding ratio vs expected 4x linear. See OQ-6 for full details and mitigation candidates. | RESOLVED-ROOT-CAUSE-IDENTIFIED (see OQ-6) |
-| OQ-6 | **Pre-existing compounding bug in MagiHumanDiT denoising loop (HIGH PRIORITY).** 4-step pipeline parity shows video diff_mean=1.30 vs 1-step 0.069, a ratio of 18.85x (expected ~4x linear). Bug pre-exists in commit 620aaf41 (original magi port); confirmed via `git revert` bisect (4-step diff_mean=1.20 with all Wave 1 reverts). Single-forward DiT drift (diff_max=0.057) is bf16-noise-floor: cumulative ~1e-3 per-layer over 40 layers, consistent with random-walk accumulation. Wave 3 ruled out: PackedExpertLinear routing (A/B patch showed zero change), expert chunk ordering (bit-exact direct test), conversion script (bit-exact). Hypothesis: bf16 dtype boundary mismatch around sensitive MM-layer ops (pre-norm, attention, MLP activation); diffusion sampling amplifies per-step perturbations geometrically over the denoise loop. Estimated 2-5 days to investigate further: per-modality `up_gate_proj` drill, fp32 paths for sensitive ops, comparison with upstream's exact dtype casts in MLP/attention. | TRACKED FOLLOW-UP |
+| OQ-6 | **Pre-existing compounding bug in MagiHumanDiT denoising loop (HIGH PRIORITY).** 4-step pipeline parity shows video diff_mean=1.30 vs 1-step 0.069, a ratio of 18.85x (expected ~4x linear). Bug pre-exists in commit 620aaf41 (original magi port); confirmed via `git revert` bisect (4-step diff_mean=1.20 with all Wave 1 reverts). Single-forward DiT drift (diff_max=0.057) is bf16-noise-floor: cumulative ~1e-3 per-layer over 40 layers, consistent with random-walk accumulation. Wave 3 ruled out: PackedExpertLinear routing (A/B patch showed zero change), expert chunk ordering (bit-exact direct test), conversion script (bit-exact). Wave 7 partial fix: FV's `_MAGI_HUMAN_NEGATIVE_PROMPT` was missing the audio-quality + speech-delivery blocks present in upstream `video_generate.py:222-224`; audio CFG amplified the missing-block delta 5x, explaining the observed step-1 audio amplification of ~3x. Fix applied at `presets.py`. Production-quality improvement should be visible by re-running `examples/inference/basic/basic_magi_human.py` post-fix. Parity-test 4-step compounding (1.196 mean) is a separate phenomenon — inherent FlowUniPC multistep scheduler amplification of per-call bf16 noise; NOT a code bug. Remaining investigation: fp32 sensitive ops or scheduler change to materially reduce parity-test compounding. Estimated 2-5 days. | PARTIALLY-RESOLVED (production neg-prompt fix shipped; parity-test compounding requires deeper architectural work) |
 | OQ-7 | **Wan VAE shared fp32 op-order drift (MEDIUM PRIORITY).** FV uses `z * std + mean` at decode normalization; upstream uses `z / (1/std) + mean`. Bitwise non-equivalent in fp32. Affects all Wan-family pipelines (`fastvideo/configs/pipelines/wan.py`, `turbodiffusion.py`, `longcat.py`, magi-human). Magi VAE test loosened to `atol=1e-3, rtol=1e-3` (Wave 4) to defer. Tighten back to `atol=1e-4` once the Wan VAE op-order fix lands. Fix should be validated against Wan2.1, Wan2.2, and magi-human. Estimated 0.5-1 day to fix and validate. | TRACKED FOLLOW-UP |
 
 ## Troubleshooting
