@@ -60,7 +60,7 @@ def main() -> None:
         "stabilityai/stable-audio-open-1.0",
         num_gpus=1,
     )
-    output_path = "outputs_audio/stable_audio_basic/output_stable_audio.mp4"
+    output_path = "outputs_audio/stable_audio_basic/output_stable_audio.wav"
     generator.generate_video(
         prompt=PROMPT,
         output_path=output_path,

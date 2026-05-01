@@ -638,7 +638,18 @@ class VideoGenerator:
 
         # Save output if requested
         if batch.save_video:
-            if self._is_image_workload():
+            if output_batch.extra.get("audio_only"):
+                # Audio-only workload: write a standalone .wav rather than
+                # muxing the audio into a placeholder mp4 (which forces
+                # ffmpeg to round 8x8 placeholder frames up to 16x16).
+                output_path = self._rewrite_extension(output_path, ".wav")
+                self._write_audio_only(
+                    output_path,
+                    output_batch.extra["audio"],
+                    int(output_batch.extra["audio_sample_rate"]),
+                )
+                logger.info("Saved audio to %s", output_path)
+            elif self._is_image_workload():
                 # Image workloads (t2i, i2i, …): save the first frame as PNG.
                 imageio.imwrite(output_path, frames[0])
                 logger.info("Saved image to %s", output_path)
@@ -685,6 +696,43 @@ class VideoGenerator:
         if isinstance(result, list):
             return [item.to_legacy_dict() for item in result]
         return result.to_legacy_dict()
+
+    @staticmethod
+    def _rewrite_extension(path: str, new_ext: str) -> str:
+        root, old_ext = os.path.splitext(path)
+        if old_ext.lower() == new_ext.lower():
+            return path
+        new_path = root + new_ext
+        if old_ext:
+            logger.info("Rewriting output extension %s -> %s for audio-only workload.", old_ext, new_ext)
+        return new_path
+
+    @staticmethod
+    def _write_audio_only(
+        wav_path: str,
+        audio: torch.Tensor | np.ndarray,
+        sample_rate: int,
+    ) -> None:
+        """Write a standalone 16-bit PCM WAV. `audio` is `[samples,
+        channels]` or `[samples]` in roughly [-1, 1].
+        """
+        import wave
+        if torch.is_tensor(audio):
+            audio_np = audio.detach().cpu().float().numpy()
+        else:
+            audio_np = np.asarray(audio, dtype=np.float32)
+        if audio_np.ndim == 1:
+            audio_np = audio_np[:, None]
+        elif audio_np.ndim == 2 and audio_np.shape[0] <= 8 and audio_np.shape[1] > audio_np.shape[0]:
+            audio_np = audio_np.T
+        audio_np = np.clip(audio_np, -1.0, 1.0)
+        audio_int16 = (audio_np * 32767.0).astype(np.int16)
+        os.makedirs(os.path.dirname(wav_path) or ".", exist_ok=True)
+        with wave.open(wav_path, "wb") as f:
+            f.setnchannels(audio_int16.shape[1])
+            f.setsampwidth(2)
+            f.setframerate(sample_rate)
+            f.writeframes(audio_int16.tobytes())
 
     @staticmethod
     def _mux_audio(

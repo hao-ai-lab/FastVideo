@@ -64,7 +64,7 @@ def main() -> None:
     )
     generator.generate_video(
         prompt=PROMPT,
-        output_path="outputs_audio/stable_audio_a2a/output_a2a.mp4",
+        output_path="outputs_audio/stable_audio_a2a/output_a2a.wav",
         save_video=True,
         audio_end_in_s=6.0,
         init_audio=INIT_AUDIO_PATH,

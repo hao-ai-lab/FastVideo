@@ -44,9 +44,12 @@ class StableAudioDecodingStage(PipelineStage):
 
         if batch.extra is None:
             batch.extra = {}
-        # `_mux_audio` wants `[samples, channels]`.
+        # `_mux_audio` / `_write_audio_only` want `[samples, channels]`.
         batch.extra["audio"] = decoded.squeeze(0).T.detach().float().cpu().numpy()
         batch.extra["audio_sample_rate"] = sr
+        # Signals the entrypoint to write a standalone audio file (.wav)
+        # rather than muxing into the placeholder mp4.
+        batch.extra["audio_only"] = True
         # Raw tensor for parity tests.
         batch.extra["decoded_audio"] = decoded.detach().cpu()
 
