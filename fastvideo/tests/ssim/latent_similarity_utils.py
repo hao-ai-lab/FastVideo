@@ -6,31 +6,45 @@ Motivation
 Pixel-space SSIM is a poor regression signal for distilled / few-step
 models (e.g. LTX-2 distilled): a single mis-rounded bf16 accumulator in
 the VAE decoder can drive mean SSIM from ~0.95 to ~0.50 without any real
-quality regression. diffusers works around this by comparing small
-signature slices of the pre-VAE latent via cosine distance
-(see ``diffusers/tests/pipelines/test_ltx_pipeline.py``).
+quality regression.
 
-This module ports the same idea to FastVideo so that CI can reliably
-detect actual drift without relying on the pixel-space cliff-edge.
+Inspired by diffusers' "small signature slice + bounded full-tensor
+distance" testing philosophy, applied here to the **pre-VAE latent**
+rather than the decoded pixel/audio output:
+
+* `tests/pipelines/ltx2/test_ltx2.py` (diffusers) compares
+  ``output_type='pt'`` (pixel) slices via
+  ``torch.allclose(generated_slice, expected_slice, atol=1e-4)``;
+* `tests/pipelines/stable_audio/test_stable_audio.py` (diffusers)
+  compares decoded audio samples via
+  ``np.abs(expected - actual).max() < 1.5e-3``;
+* `tests/pipelines/cogvideo/test_cogvideox.py` (diffusers) compares
+  full pixel video tensors via
+  ``numpy_cosine_similarity_distance(...) < 1e-3``.
+
+Diffusers does *not* assert on latents directly — that is a FastVideo
+adaptation. Distilled few-step pipelines amplify per-step bf16 noise
+enough that VAE-decoded comparisons are unreliable across our
+heterogeneous CI pool, so we move the assertion upstream of the VAE.
 
 Design
 ------
-* Inference is run with ``output_type='latent'`` so the VAE is skipped
-  inside ``DecodingStage``; numerically this is where the bulk of
-  run-to-run variance originates.
-* The reference artefact is a ``.pt`` bundle (tensor + metadata) committed
-  to the same HF dataset as the mp4 references, selected by
+* Inference is run with ``output_type='latent'`` so ``DecodingStage``
+  hands back the un-decoded latent on ``result["samples"]``.
+* The reference artefact is a ``.pt`` bundle (tensor + metadata) hosted
+  on the same HF dataset as the mp4 references, selected by
   ``<GPU>_reference_videos/<model_id>/<backend>/<prompt>.pt``.
 * Two assertions are performed:
-    1. A small signature slice (``latent[0, :, 0, :3, :3]``) is compared
-       via cosine distance with a loose tolerance. This is the primary
-       pass/fail gate.
+    1. A small signature slice (default video: ``latent[0, :, 0, :3, :3]``;
+       audio: ``latent[0, :, :8]``) is compared via cosine distance with
+       a loose tolerance. Primary pass/fail gate.
     2. The full latent is compared via cosine distance with a slightly
        tighter tolerance, guarding against shape-correct but globally
        drifted outputs.
-* Tolerances default to 5e-3 (slice) and 1e-2 (full). These mirror the
-  order of magnitude diffusers uses (``1e-3``), relaxed to absorb
-  cross-GPU-arch bf16 differences on the rented CI pool (A40/L40S/H100).
+* Tolerances default to 5e-3 (slice) and 1e-2 (full). diffusers uses
+  ``1e-3`` against deterministic CPU dummy components; we relax for
+  cross-GPU-arch bf16 differences on the rented CI pool
+  (A40/L40S/H100/B200).
 
 The helper intentionally reuses ``build_init_kwargs`` /
 ``build_generation_kwargs`` from :mod:`inference_similarity_utils` so
@@ -40,6 +54,7 @@ source of truth.
 
 from __future__ import annotations
 
+import json
 import os
 from logging import Logger
 from typing import Any
@@ -63,12 +78,13 @@ from fastvideo.tests.ssim.reference_utils import (
 LATENT_REFERENCE_EXTENSION = ".pt"
 LATENT_REFERENCE_FORMAT_VERSION = 1
 
-# ``latent[0, :, 0, :3, :3]`` — first sample, all channels, first latent
-# frame, top-left 3x3 spatial patch. Matches the "corner patch" pattern
-# used by diffusers but keeps the channel axis so distilled checkpoints
-# (C=128 for LTX-2) still contribute rich signal.
 DEFAULT_SLICE_SPEC: dict[str, Any] = {
     "kind": "corner_3x3_first_frame",
+    "version": 1,
+}
+
+AUDIO_FIRST_8_TIMESTEPS_SPEC: dict[str, Any] = {
+    "kind": "audio_first_8_timesteps",
     "version": 1,
 }
 
@@ -77,24 +93,42 @@ def _extract_expected_slice(
     latent: torch.Tensor,
     spec: dict[str, Any],
 ) -> torch.Tensor:
-    """Return a 1-D signature slice extracted from ``latent``.
+    """Return a 1-D fp32 signature slice from ``latent`` per ``spec``.
 
-    ``latent`` must be 5-D ``[B, C, T, H, W]``. The result is always
-    fp32 and detached so it can be persisted via ``torch.save`` or fed
-    into cosine-distance math without further casts.
+    Dispatch by ``spec["kind"]``:
+
+    * ``"corner_3x3_first_frame"`` — 5-D video latent ``[B, C, T, H, W]``;
+      returns ``latent[0, :, 0, :3, :3]`` flattened (length = C * 9).
+    * ``"audio_first_8_timesteps"`` — 3-D audio latent ``[B, C, T]``;
+      returns ``latent[0, :, :8]`` flattened (length = C * 8).
     """
-    if latent.dim() != 5:
-        raise ValueError(
-            f"Expected 5-D latent [B,C,T,H,W]; got shape {tuple(latent.shape)}"
-        )
     kind = spec.get("kind", "corner_3x3_first_frame")
     if kind == "corner_3x3_first_frame":
+        if latent.dim() != 5:
+            raise ValueError(
+                f"corner_3x3_first_frame requires 5-D latent [B,C,T,H,W]; "
+                f"got shape {tuple(latent.shape)}")
         _, _, t, h, w = latent.shape
         if t < 1 or h < 3 or w < 3:
             raise ValueError(
                 "corner_3x3_first_frame requires T>=1, H>=3, W>=3; got "
                 f"shape {tuple(latent.shape)}")
         return (latent[0, :, 0, :3, :3]
+                .detach()
+                .to(torch.float32)
+                .reshape(-1)
+                .contiguous())
+    if kind == "audio_first_8_timesteps":
+        if latent.dim() != 3:
+            raise ValueError(
+                f"audio_first_8_timesteps requires 3-D latent [B,C,T]; "
+                f"got shape {tuple(latent.shape)}")
+        _, _, t = latent.shape
+        if t < 8:
+            raise ValueError(
+                "audio_first_8_timesteps requires T>=8; got "
+                f"shape {tuple(latent.shape)}")
+        return (latent[0, :, :8]
                 .detach()
                 .to(torch.float32)
                 .reshape(-1)
@@ -157,8 +191,76 @@ def save_latent_reference(
 
 
 def load_latent_reference(path: str) -> dict[str, Any]:
-    """Inverse of :func:`save_latent_reference` — always loads to cpu."""
-    return torch.load(path, map_location="cpu", weights_only=False)
+    """Inverse of :func:`save_latent_reference` — always loads to cpu.
+
+    Enforces ``format_version == LATENT_REFERENCE_FORMAT_VERSION`` so a
+    schema change forces a deliberate reseed instead of silently
+    misinterpreting old artefacts.
+    """
+    # ``weights_only=False`` is required because the payload is a dict of
+    # tensors + plain-Python metadata (slice_spec, prompt, ...). The trust
+    # boundary is the controlled HF dataset configured via
+    # FASTVIDEO_SSIM_REFERENCE_HF_REPO (default
+    # FastVideo/ssim-reference-videos), which is org-write-gated.
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    fmt = payload.get("format_version") if isinstance(payload, dict) else None
+    if fmt != LATENT_REFERENCE_FORMAT_VERSION:
+        raise ValueError(
+            f"Latent reference at {path!r} has format_version={fmt!r}; "
+            f"expected {LATENT_REFERENCE_FORMAT_VERSION}. Re-seed via the "
+            "test that produces this artefact, then re-upload through "
+            "fastvideo/tests/ssim/reference_videos_cli.py upload.")
+    return payload
+
+
+def write_latent_similarity_results(
+    output_dir: str,
+    metrics: dict[str, float],
+    *,
+    reference_path: str,
+    generated_path: str,
+    num_inference_steps: int,
+    prompt: str,
+    model_id: str,
+    attention_backend_name: str,
+    slice_spec: dict[str, Any],
+    slice_cosine_threshold: float,
+    full_cosine_threshold: float,
+    passed: bool,
+) -> bool:
+    """Persist latent regression metrics next to the generated artefact.
+
+    Mirrors :func:`fastvideo.tests.utils.write_ssim_results` so downstream
+    CI tooling can scrape one schema for both pixel and latent runs.
+    The filename is ``steps{N}_{prompt[:100]}_latent.json``.
+    """
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        prompt_prefix = prompt[:100].strip()
+        filename = f"steps{num_inference_steps}_{prompt_prefix}_latent.json"
+        target = os.path.join(output_dir, filename)
+        payload = {
+            "metrics": metrics,
+            "reference_latent": reference_path,
+            "generated_latent": generated_path,
+            "model_id": model_id,
+            "attention_backend": attention_backend_name,
+            "slice_spec": slice_spec,
+            "thresholds": {
+                "slice_cosine": slice_cosine_threshold,
+                "full_cosine": full_cosine_threshold,
+            },
+            "passed": passed,
+            "parameters": {
+                "num_inference_steps": num_inference_steps,
+                "prompt": prompt,
+            },
+        }
+        with open(target, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+        return True
+    except OSError:
+        return False
 
 
 def _assert_latent_similarity(
@@ -170,6 +272,10 @@ def _assert_latent_similarity(
     full_cosine_threshold: float,
     model_id: str,
     attention_backend_name: str,
+    output_dir: str,
+    generated_path: str,
+    num_inference_steps: int,
+    prompt: str,
 ) -> dict[str, float]:
     ref = load_latent_reference(reference_path)
     expected_slice = ref["expected_slice"]
@@ -177,22 +283,20 @@ def _assert_latent_similarity(
     ref_shape = tuple(ref.get("shape", ref_full.shape))
     slice_spec = ref.get("slice_spec", DEFAULT_SLICE_SPEC)
 
-    gen_cpu = gen_latent.detach().to("cpu")
-    if tuple(gen_cpu.shape) != ref_shape:
+    if tuple(gen_latent.shape) != ref_shape:
         raise AssertionError(
-            f"Generated latent shape {tuple(gen_cpu.shape)} does not match "
-            f"reference shape {ref_shape} for {model_id} with backend "
-            f"{attention_backend_name}"
-        )
+            f"Generated latent shape {tuple(gen_latent.shape)} does not "
+            f"match reference shape {ref_shape} for {model_id} with "
+            f"backend {attention_backend_name}")
 
-    gen_slice = _extract_expected_slice(gen_cpu, slice_spec)
+    gen_slice = _extract_expected_slice(gen_latent, slice_spec)
     slice_cos = _cosine_distance(gen_slice, expected_slice)
     # The reference full tensor was fp16-quantized at seed time. Round-trip
     # the generated tensor through fp16 so both sides share the same
     # quantization floor and the cosine distance is symmetric. This does
     # NOT affect ``slice_cos`` because the reference slice is persisted in
     # fp32 (see :func:`save_latent_reference`).
-    gen_full_matched = gen_cpu.to(torch.float16).to(torch.float32)
+    gen_full_matched = gen_latent.to(torch.float16).to(torch.float32)
     full_cos = _cosine_distance(gen_full_matched, ref_full)
     max_abs_diff = float(
         (gen_full_matched - ref_full).abs().max().item())
@@ -219,6 +323,22 @@ def _assert_latent_similarity(
             f"full cosine {full_cos:.6e} > threshold "
             f"{full_cosine_threshold:.6e}")
 
+    passed = not failures
+    write_latent_similarity_results(
+        output_dir,
+        metrics,
+        reference_path=reference_path,
+        generated_path=generated_path,
+        num_inference_steps=num_inference_steps,
+        prompt=prompt,
+        model_id=model_id,
+        attention_backend_name=attention_backend_name,
+        slice_spec=slice_spec,
+        slice_cosine_threshold=slice_cosine_threshold,
+        full_cosine_threshold=full_cosine_threshold,
+        passed=passed,
+    )
+
     if failures:
         raise AssertionError(
             f"Latent regression exceeded tolerance for {model_id} with "
@@ -229,7 +349,9 @@ def _assert_latent_similarity(
 
 
 def _extract_latent_from_result(result: Any) -> torch.Tensor:
-    """Pull a 5-D fp32 cpu latent tensor out of ``generate_video`` output."""
+    """Pull a fp32 cpu latent tensor (5-D video or 3-D audio) from
+    ``generate_video`` output.
+    """
     if not isinstance(result, dict):
         raise RuntimeError(
             "VideoGenerator.generate_video returned unexpected payload "
@@ -243,10 +365,10 @@ def _extract_latent_from_result(result: Any) -> torch.Tensor:
         raise RuntimeError(
             f"Expected torch.Tensor samples; got type={type(samples)!r}.")
     gen_latent = samples.detach().to(torch.float32).cpu()
-    if gen_latent.dim() != 5:
+    if gen_latent.dim() not in (3, 5):
         raise RuntimeError(
-            "Expected 5-D latent (B,C,T,H,W); got shape "
-            f"{tuple(gen_latent.shape)}")
+            "Expected 5-D video latent (B,C,T,H,W) or 3-D audio latent "
+            f"(B,C,T); got shape {tuple(gen_latent.shape)}")
     return gen_latent
 
 
@@ -266,11 +388,12 @@ def run_text_to_latent_similarity_test(
     generation_kwargs_override: dict[str, object] | None = None,
     slice_spec: dict[str, Any] | None = None,
 ) -> dict[str, float]:
-    """Run T2V inference with ``output_type='latent'`` and compare to ref.
+    """Run T2V (or T2A) inference with ``output_type='latent'`` and
+    compare to a reference latent.
 
-    Returns the computed metrics dict on success. Raises ``AssertionError``
-    if any cosine tolerance is exceeded and ``FileNotFoundError`` if the
-    reference artefact is missing.
+    Returns the computed metrics dict on success. Raises
+    ``AssertionError`` if any cosine tolerance is exceeded and
+    ``FileNotFoundError`` if the reference artefact is missing.
     """
     spec = slice_spec if slice_spec is not None else DEFAULT_SLICE_SPEC
     with attention_backend(attention_backend_name):
@@ -292,9 +415,11 @@ def run_text_to_latent_similarity_test(
         num_inference_steps = int(base_params["num_inference_steps"])
 
         init_kwargs = build_init_kwargs(base_params)
-        init_kwargs["output_type"] = "latent"
         if init_kwargs_override:
             init_kwargs.update(init_kwargs_override)
+        # Always wins: the helper exists specifically to compare on latents,
+        # so an override can never silently turn it back into a pixel run.
+        init_kwargs["output_type"] = "latent"
 
         generation_kwargs = build_generation_kwargs(
             base_params,
@@ -362,4 +487,8 @@ def run_text_to_latent_similarity_test(
         full_cosine_threshold=full_cosine_threshold,
         model_id=model_id,
         attention_backend_name=attention_backend_name,
+        output_dir=output_dir,
+        generated_path=generated_latent_path,
+        num_inference_steps=num_inference_steps,
+        prompt=prompt,
     )

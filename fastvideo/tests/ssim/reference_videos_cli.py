@@ -48,14 +48,8 @@ def _default_repo_type() -> str:
     return os.environ.get(HF_REPO_TYPE_ENV_KEY, DEFAULT_REPO_TYPE)
 
 
-def _iter_video_files(root: Path) -> Iterable[Path]:
-    for path in root.rglob("*"):
-        if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS:
-            yield path
-
-
 def _iter_reference_files(root: Path) -> Iterable[Path]:
-    """Yield video files and latent `.pt` references under `root`.
+    """Yield video and latent (.pt) references under `root`.
 
     Used by copy-local and the "has local references" marker probe so that
     latent-only tests (no mp4) still satisfy readiness checks.

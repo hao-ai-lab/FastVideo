@@ -65,6 +65,7 @@ _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "pin_cpu_memory",
     "enable_torch_compile",
     "torch_compile_kwargs",
+    "output_type",
 })
 
 
@@ -601,11 +602,14 @@ class VideoGenerator:
         thread = threading.Thread(target=execute_forward_thread)
         thread.start()
         latent_batch_size = _infer_latent_batch_size(batch)
-        # ``output_type == "latent"`` bypasses VAE decode, so the forward
-        # output has latent shape rather than pixel shape. Skipping the
-        # pre-allocation avoids a wasted ~50 MB pinned buffer and the
-        # spurious "Output shape ... use slow path" warning below.
-        if fastvideo_args.output_type == "latent":
+        # When ``output_type == "latent"`` the forward output has latent
+        # shape (e.g. ``[B, C_latent, T_latent, H_latent, W_latent]``)
+        # rather than the pre-allocation's pixel shape. Skip the pinned
+        # ~50 MB buffer entirely; we always fall through to the
+        # ``samples = output_batch.output.cpu()`` branch below in that
+        # mode. ``skip_pixel_prealloc`` also gates the slow-path warning.
+        skip_pixel_prealloc = fastvideo_args.output_type == "latent"
+        if skip_pixel_prealloc:
             samples = torch.empty(0, device='cpu')
         else:
             samples = torch.empty(
@@ -626,8 +630,9 @@ class VideoGenerator:
         if output_batch.output.shape == samples.shape:
             samples.copy_(output_batch.output)
         else:
-            logger.warning("Output shape %s does not match expected shape %s; use slow path", output_batch.output.shape,
-                           samples.shape)
+            if not skip_pixel_prealloc:
+                logger.warning("Output shape %s does not match expected shape %s; use slow path",
+                               output_batch.output.shape, samples.shape)
             samples = output_batch.output.cpu()
         logging_info = output_batch.logging_info
 
