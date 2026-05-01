@@ -262,15 +262,14 @@ def test_magi_human_dit_parity():
     # Text rows are zero-padded on both sides — must match exactly.
     assert_close(fv_text, ref_text, atol=1e-6, rtol=1e-6)
 
-    # Video + audio: element-wise tolerance is pragmatic for a bf16,
-    # 40-layer, cross-kernel parity test. We use a combined
-    # atol=0.1 / rtol=0.1 check that catches structural bugs
+    # Video + audio: bf16 single-forward DiT noise floor is ~1e-3 to
+    # 5e-3 per element. atol=0.03 catches gross structural bugs
     # (permutation flips, sign inversions, wrong modality dispatch,
-    # missing sub-layers) while tolerating bf16 numerical drift
-    # through 40 transformer layers. With the current first-cut DiT
-    # port, drift is ~1% mean / ~5% max (see printed stats). Tighten
-    # to 1e-2 once per-layer parity is chased down.
-    assert_close(fv_out, ref_out, atol=0.1, rtol=0.1)
+    # missing sub-layers) while leaving 6-10x margin over actual bf16
+    # noise. Observed diff_max=0.057 will FAIL — that is the bug
+    # surfacing and is the intended spec for downstream root-cause
+    # investigation.
+    assert_close(fv_out, ref_out, atol=0.03, rtol=0.01)
 
     # Sanity: mean magnitudes should match within 5%. A gross bug
     # (e.g. dropping a modality branch) would show up here.

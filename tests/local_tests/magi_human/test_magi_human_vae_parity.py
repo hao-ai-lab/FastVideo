@@ -165,9 +165,11 @@ def test_magi_human_vae_decode_parity():
         f"range=[{fv_s.min().item():.4f}, {fv_s.max().item():.4f}]"
     )
 
-    # The two implementations are from the same team (Wan-AI) and should
-    # agree to within fp32 numerical noise. Use a loose tolerance since
-    # the pipelines may differ slightly in normalization ordering.
+    # Wan VAE has a known fp32 op-ordering drift of ~8e-4 caused by
+    # `z * std + mean` (FV) vs `z / (1/std) + mean` (upstream) at decode
+    # normalization. This is a SHARED Wan-family bug, not magi-specific.
+    # Tracked as OQ-7 in tests/local_tests/magi-human.md; tighten to
+    # atol=1e-4 once the Wan VAE op-order fix lands.
     assert up_s.shape == fv_s.shape, (
         f"shape mismatch: up={up_s.shape} fv={fv_s.shape}"
     )
@@ -175,4 +177,4 @@ def test_magi_human_vae_decode_parity():
     print(
         f"diff max={diff.max().item():.6f} mean={diff.mean().item():.6f}"
     )
-    assert_close(fv_s, up_s, atol=5e-2, rtol=5e-2)
+    assert_close(fv_s, up_s, atol=1e-3, rtol=1e-3)
