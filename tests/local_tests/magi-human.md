@@ -198,8 +198,9 @@ Branch tip `eeef855b` (rebased onto `origin/main` `c77a76c6`), Wave 1+4 changes 
 | `tests/local_tests/pipelines/test_magi_human_pipeline_parity.py::test_magi_human_pipeline_latent_parity` | FAIL | video: diff_max=6.69, diff_mean=0.47; audio: diff_max=3.45, diff_mean=1.01 | Wave 7.5: now uses real preset prompts via T5-Gemma. Wave 8 production fixes don't move parity numbers (both sides use same encoder). Residual drift is bf16+CFG amplification floor; tracked as OQ-6 RESOLVED-PRODUCTION. |
 | `fastvideo/tests/ssim/test_magi_human_similarity.py::test_magi_human_base_inference_similarity` | DEFERRED | n/a | Reference videos not yet seeded to `FastVideo/ssim-reference-videos` HF repo; tracked as OQ-2. Requires Modal L40S seeding via `seed-ssim-references` skill. |
 | _(debug)_ | INFO | Per-side layer logs: `/tmp/opencode/magi_dit_up_layers.log`, `/tmp/opencode/magi_dit_fv_layers.log` | Added in Wave 1 to `_debug_magi_human_block_parity.py`. See `add-model-trace` skill at `~/.config/opencode/skill/add-model-trace/`. |
+| `fastvideo/tests/hooks/test_activation_trace.py::*` | PASS | 6 tests covering off/on/filter/stats/step-filter/cleanup | Wave 9 activation trace infrastructure |
 
-_Last verified: 2026-05-01 (Wave 8 broader audit + fixes), branch `will/magi` @ working tree (Wave 1+4+7+8 changes committed), B200 GPU, HF token from `~/.cache/huggingface/token`. Loader fix means `MAGI_HUMAN_BASE_SHARD_DIR` no longer required (override still works)._
+_Last verified: 2026-05-01 (Wave 9 trace mode build)_
 
 ## Design notes
 
@@ -365,6 +366,23 @@ Per-test parity numbers post-Wave-8:
 OQ-6 status update:
 - **Production-facing root causes**: ALL identified and FIXED — incomplete neg prompt (Wave 7), tokenizer pre-padding (Wave 8 #1), resolution defaults (Wave 8 #3), silent fallbacks (Wave 7 + Wave 8 #10).
 - **Parity-test compounding**: bf16+CFG inherent amplification floor. Cannot be improved without fp32 sensitive ops or a less-amplifying scheduler. Tracked as `RESOLVED-PRODUCTION` for OQ-6 with a separate `OPEN-IF-NEEDED` follow-up for fp32 path investigation.
+
+### Wave 9 (2026-05-01): activation trace infrastructure
+
+Built Extension 0 of FastVideo's activation trace mode at `fastvideo/hooks/activation_trace.py` (env-gated zero-overhead module forward hooks). Designed for parity-debug across model ports — enable on both FastVideo's and upstream's path, diff resulting JSONL files to find first divergent layer.
+
+Key design properties:
+- `FASTVIDEO_TRACE_ACTIVATIONS=1` master toggle. Off = single env var lookup at startup, no hooks ever registered.
+- `FASTVIDEO_TRACE_LAYERS=<regex>` selective filter.
+- `FASTVIDEO_TRACE_STATS=abs_mean,sum,max,...` configurable per-tensor stats.
+- `FASTVIDEO_TRACE_STEPS=0,1,5` step-indexed dumps via `trace_step(idx)` context manager.
+- Output: JSONL records to `FASTVIDEO_TRACE_OUTPUT` path.
+
+E2E smoke confirmed: 28,864 records generated against the magi-human pipeline.
+
+Documentation at `docs/contributing/activation_trace.md`. Future Extensions 1-3 (FX/AST/dispatch) designed but not implemented.
+
+Companion skill at `~/.config/opencode/skill/add-model-trace/` (template for one-off ad-hoc port investigations) is unchanged.
 
 ### Potential mitigations (not investigated this session)
 
