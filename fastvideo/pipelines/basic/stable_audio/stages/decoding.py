@@ -33,6 +33,15 @@ class StableAudioDecodingStage(PipelineStage):
         pc = fastvideo_args.pipeline_config
         latents = batch.latents
 
+        # Latent regression path: hand back the un-decoded denoised latent
+        # so the LatentSimilarityUtils harness can compare on pre-VAE
+        # numerics. Mirrors the bypass in `pipelines/stages/decoding.py`
+        # used by the video DiTs. Skips the `.to(device)` VAE move so we
+        # don't pay decoder load cost on this shortcut path.
+        if fastvideo_args.output_type == "latent":
+            batch.output = latents.detach().cpu()
+            return batch
+
         # VAE may be CPU-parked under `vae_cpu_offload=True`.
         from fastvideo.distributed.parallel_state import get_local_torch_device
         self.vae = self.vae.to(get_local_torch_device())
