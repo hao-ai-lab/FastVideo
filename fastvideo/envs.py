@@ -35,6 +35,11 @@ if TYPE_CHECKING:
     FASTVIDEO_TORCH_PROFILER_WARMUP_STEPS: int = 1
     FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS: int = 2
     FASTVIDEO_TORCH_PROFILE_REGIONS: str = ""
+    FASTVIDEO_TRACE_ACTIVATIONS: bool = False
+    FASTVIDEO_TRACE_LAYERS: str = ""
+    FASTVIDEO_TRACE_STATS: str = "abs_mean,sum"
+    FASTVIDEO_TRACE_OUTPUT: str = "/tmp/fv_trace_<pid>.jsonl"
+    FASTVIDEO_TRACE_STEPS: str = ""
     FASTVIDEO_SERVER_DEV_MODE: bool = False
     FASTVIDEO_STAGE_LOGGING: bool = False
     FASTVIDEO_HOST_IP: str = ""
@@ -251,6 +256,22 @@ environment_variables: dict[str, Callable[[], Any]] = {
     lambda: int(os.getenv("FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS", "2")),
     "FASTVIDEO_TORCH_PROFILE_REGIONS":
     lambda: os.getenv("FASTVIDEO_TORCH_PROFILE_REGIONS", ""),
+
+    # Enable activation trace hooks if set.
+    "FASTVIDEO_TRACE_ACTIVATIONS":
+    lambda: bool(os.getenv("FASTVIDEO_TRACE_ACTIVATIONS", "0") != "0"),
+    # Regex filter for traced module names. Empty means all modules.
+    "FASTVIDEO_TRACE_LAYERS":
+    lambda: os.getenv("FASTVIDEO_TRACE_LAYERS", ""),
+    # Comma-separated activation stats to dump for each output tensor.
+    "FASTVIDEO_TRACE_STATS":
+    lambda: os.getenv("FASTVIDEO_TRACE_STATS", "abs_mean,sum"),
+    # JSONL sink path. The literal <pid> is replaced at runtime.
+    "FASTVIDEO_TRACE_OUTPUT":
+    lambda: os.getenv("FASTVIDEO_TRACE_OUTPUT", "/tmp/fv_trace_<pid>.jsonl"),
+    # Comma-separated denoise step indices. Empty means all steps.
+    "FASTVIDEO_TRACE_STEPS":
+    lambda: os.getenv("FASTVIDEO_TRACE_STEPS", ""),
 
     # If set, fastvideo will run in development mode, which will enable
     # some additional endpoints for developing and debugging,
