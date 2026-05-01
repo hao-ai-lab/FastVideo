@@ -355,25 +355,35 @@ def test_magi_human_pipeline_latent_parity():
     assert ref_video.shape == fv_video.shape
     assert ref_audio.shape == fv_audio.shape
 
-    # Tolerance budget for 1-step / CFG=2:
-    #   * ~1% per-DiT-call drift (see DiT component parity).
-    #   * CFG mixing `v_uncond + guidance * (v_cond - v_uncond)` with
-    #     guidance=5 amplifies the (cond - uncond) drift ~5x when the
-    #     two DiT passes drift independently.
-    #   * One FlowUniPC scheduler step passes that through.
-    # Observed with this config: median ~2.5%, mean ~3%, max ~14% on
-    # a signal of abs_mean ~2.4. Bound chosen to pass the observed
-    # drift while still catching gross structural bugs (sign flip,
-    # scheduler state leak, modality branch drop — those produce
-    # >50% drift or abs_mean mismatch).
-    assert_close(fv_video, ref_video, atol=0.35, rtol=0.05)
-    assert_close(fv_audio, ref_audio, atol=0.35, rtol=0.05)
+    # Tolerance budget for 1-step / CFG=2 (bf16 DiT + bf16 CFG mix):
+    #   * Single-DiT bf16 drift: diff_mean ~0.008 on `abs ~ 1.0`
+    #     (see DiT component parity, `test_magi_human_dit_parity`).
+    #   * CFG mixes `v = v_uncond + guidance * (v_cond - v_uncond)`
+    #     with guidance=5; cond and uncond drift independently in bf16,
+    #     so the post-CFG `diff_mean` scales by ~guidance (~5x).
+    #   * One FlowUniPC scheduler step passes that through unchanged.
+    # `diff_max` is the noisiest statistic for bf16 transformer parity
+    # (a single fma quantization can blow it up). Use it only as a loose
+    # guard. The two ratio guards below catch real structural bugs:
+    # `abs_mean` drift signals scale errors / dropped branches, and
+    # `diff_mean / ref_abs` signals systematic per-element bias far
+    # beyond what bf16+CFG noise can produce.
+    assert_close(fv_video, ref_video, atol=0.40, rtol=0.05)
+    assert_close(fv_audio, ref_audio, atol=0.40, rtol=0.05)
 
-    # Global magnitude check — tightest single assertion. A gross bug
+    # Global-magnitude guard — tightest single assertion. A gross bug
     # (scheduler state leak, dropped modality branch, CFG sign flip)
-    # would shift abs_mean far beyond the single-digit-percent drift
-    # that per-call bf16 numerics can produce.
-    rel_v = abs(ref_video.abs().mean() - fv_video.abs().mean()) / max(ref_video.abs().mean().item(), 1e-6)
-    rel_a = abs(ref_audio.abs().mean() - fv_audio.abs().mean()) / max(ref_audio.abs().mean().item(), 1e-6)
-    assert rel_v < 0.05, f"video abs_mean drift {rel_v:.2%} > 5%"
-    assert rel_a < 0.05, f"audio abs_mean drift {rel_a:.2%} > 5%"
+    # would shift `abs_mean` far beyond the bf16+CFG noise floor.
+    ref_v_abs = ref_video.abs().mean().item()
+    ref_a_abs = ref_audio.abs().mean().item()
+    rel_v = abs(ref_v_abs - fv_video.abs().mean().item()) / max(ref_v_abs, 1e-6)
+    rel_a = abs(ref_a_abs - fv_audio.abs().mean().item()) / max(ref_a_abs, 1e-6)
+    assert rel_v < 0.01, f"video abs_mean drift {rel_v:.2%} > 1%"
+    assert rel_a < 0.01, f"audio abs_mean drift {rel_a:.2%} > 1%"
+
+    # Per-element mean-bias guard — catches systematic shift that
+    # `abs_mean` misses (e.g. equal-magnitude flip across many elements).
+    mean_rel_v = v_diff.mean().item() / max(ref_v_abs, 1e-6)
+    mean_rel_a = a_diff.mean().item() / max(ref_a_abs, 1e-6)
+    assert mean_rel_v < 0.04, f"video mean_diff/ref_abs {mean_rel_v:.2%} > 4%"
+    assert mean_rel_a < 0.04, f"audio mean_diff/ref_abs {mean_rel_a:.2%} > 4%"
