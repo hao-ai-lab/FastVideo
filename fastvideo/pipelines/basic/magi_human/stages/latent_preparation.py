@@ -30,6 +30,15 @@ MODALITY_VIDEO = 0
 MODALITY_AUDIO = 1
 MODALITY_TEXT = 2
 
+# Audio temporal compression ratio: 1 audio frame → 1/4 latent frame.
+# Mirrors data_proxy.py:206 `(audio_feat_len - 1) // 4 + 1` where 4 is
+# the audio VAE's temporal stride (same as vae_stride[0] for video).
+_AUDIO_TEMPORAL_COMPRESSION = 4
+
+# v1 text-coord reference shape: (T=2, H=1, W=1).
+# Mirrors data_proxy.py:202 `ref_feat_shape=(2, 1, 1)` for coords_style=="v1".
+_V1_TEXT_REF_SHAPE: tuple[int, int, int] = (2, 1, 1)
+
 
 def _build_coords(
     shape: tuple[int, int, int],
@@ -93,6 +102,7 @@ class MagiHumanLatentPreparationStage(PipelineStage):
         t5_gemma_target_length: int = 640,
         coords_style: Literal["v1", "v2"] = "v2",
         text_offset: int = 0,
+        audio_in_channels: int = 64,
     ) -> None:
         super().__init__()
         self.vae_stride = vae_stride
@@ -102,6 +112,7 @@ class MagiHumanLatentPreparationStage(PipelineStage):
         self.t5_gemma_target_length = t5_gemma_target_length
         self.coords_style = coords_style
         self.text_offset = text_offset
+        self.audio_in_channels = audio_in_channels
 
     def verify_input(self, batch, fastvideo_args):
         return VerificationResult()
@@ -139,9 +150,9 @@ class MagiHumanLatentPreparationStage(PipelineStage):
             device=device,
             dtype=torch.float32,
         )
-        # Audio latent: [1, num_frames, 64]
+        # Audio latent: [1, num_frames, audio_in_channels]
         audio_latent = torch.randn(
-            (1, num_frames, 64),
+            (1, num_frames, self.audio_in_channels),
             generator=generator,
             device=device,
             dtype=torch.float32,
@@ -190,88 +201,190 @@ class MagiHumanLatentPreparationStage(PipelineStage):
         return batch
 
 
-def build_packed_inputs(
-    video_latent: torch.Tensor,  # [1, z_dim, T, H, W]
-    audio_latent: torch.Tensor,  # [1, num_frames, 64]
+class StaticPackedInputs:
+    """Step-invariant packed inputs: video+audio tokens, coords, modality map.
+
+    Computed once before the denoise loop; reused for every cond/uncond call.
+    Text tokens are NOT included here because cond/uncond have different lengths.
+    """
+
+    __slots__ = (
+        "video_tokens",
+        "audio_tokens",
+        "video_coords",
+        "audio_coords",
+        "video_mm",
+        "audio_mm",
+        "video_token_num",
+        "audio_feat_len",
+        "max_ch",
+    )
+
+    def __init__(
+        self,
+        video_tokens: torch.Tensor,
+        audio_tokens: torch.Tensor,
+        video_coords: torch.Tensor,
+        audio_coords: torch.Tensor,
+        video_mm: torch.Tensor,
+        audio_mm: torch.Tensor,
+        max_ch: int,
+    ) -> None:
+        self.video_tokens = video_tokens
+        self.audio_tokens = audio_tokens
+        self.video_coords = video_coords
+        self.audio_coords = audio_coords
+        self.video_mm = video_mm
+        self.audio_mm = audio_mm
+        self.video_token_num = video_tokens.size(0)
+        self.audio_feat_len = audio_tokens.size(0)
+        self.max_ch = max_ch
+
+
+def build_static_packed_inputs(
+    video_latent: torch.Tensor,
+    audio_latent: torch.Tensor,
     audio_feat_len: int,
-    txt_feat: torch.Tensor,  # [1, target_length, 3584]
-    txt_feat_len: int,
     patch_size: tuple[int, int, int],
     coords_style: Literal["v1", "v2"] = "v2",
-    text_offset: int = 0,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Build the flat (token_sequence, coords_mapping, modality_mapping) tuple
-    the DiT consumes. Mirrors SingleData in inference/pipeline/data_proxy.py.
+) -> StaticPackedInputs:
+    """Build the step-invariant portion of the packed token stream.
 
-    Assumes batch size 1 (the reference also hard-assumes this for its
-    local-attention handler).
+    Returns video+audio tokens (padded to a common channel width), their
+    coords, and their modality slices. Text is excluded because cond/uncond
+    differ in length; call assemble_packed_inputs to attach text per call.
+
+    Mirrors SingleData.token_sequence / coords_mapping / modality_mapping in
+    inference/pipeline/data_proxy.py, minus the text portion.
     """
     pT, pH, pW = patch_size
     _, z_dim, T, H, W = video_latent.shape
     assert video_latent.size(0) == 1, "batch size 1 required for MagiHuman base"
 
-    # Tokenize video: [B, L_v, pT*pH*pW*z_dim]
     video_tokens = _img2tokens(video_latent, t_patch=pT, patch=pH)[0]
     audio_tokens = audio_latent[0, :audio_feat_len].contiguous()
-    text_tokens = txt_feat[0, :txt_feat_len].contiguous()
 
-    max_ch = max(video_tokens.size(-1), audio_tokens.size(-1), text_tokens.size(-1))
+    max_ch = max(video_tokens.size(-1), audio_tokens.size(-1))
     video_tokens = F.pad(video_tokens, (0, max_ch - video_tokens.size(-1)))
     audio_tokens = F.pad(audio_tokens, (0, max_ch - audio_tokens.size(-1)))
-    text_tokens = F.pad(text_tokens, (0, max_ch - text_tokens.size(-1)))
-    token_seq = torch.cat([video_tokens, audio_tokens, text_tokens], dim=0)
 
+    device = video_tokens.device
+    dtype = video_tokens.dtype
     video_token_num = video_tokens.size(0)
-    # Modality map.
-    device = token_seq.device
-    mm = torch.cat([
-        torch.full((video_token_num, ), MODALITY_VIDEO, dtype=torch.int64, device=device),
-        torch.full((audio_feat_len, ), MODALITY_AUDIO, dtype=torch.int64, device=device),
-        torch.full((txt_feat_len, ), MODALITY_TEXT, dtype=torch.int64, device=device),
-    ],
-                   dim=0)
 
-    # Coords: build per-modality then concat in (video, audio, text) order.
+    video_mm = torch.full((video_token_num, ), MODALITY_VIDEO, dtype=torch.int64, device=device)
+    audio_mm = torch.full((audio_feat_len, ), MODALITY_AUDIO, dtype=torch.int64, device=device)
+
     video_ref_shape = (T // pT, H // pH, W // pW)
     video_coords = _build_coords(
-        shape=(T // pT, H // pH, W // pW),
+        shape=video_ref_shape,
         ref_feat_shape=video_ref_shape,
         device=device,
-        dtype=token_seq.dtype,
+        dtype=dtype,
     )
 
     if coords_style == "v2":
-        audio_ref_t = (audio_feat_len - 1) // 4 + 1
+        audio_ref_t = (audio_feat_len - 1) // _AUDIO_TEMPORAL_COMPRESSION + 1
         audio_coords = _build_coords(
             shape=(audio_feat_len, 1, 1),
             ref_feat_shape=(audio_ref_t // pT, 1, 1),
             device=device,
-            dtype=token_seq.dtype,
-        )
-        text_coords = _build_coords(
-            shape=(txt_feat_len, 1, 1),
-            ref_feat_shape=(1, 1, 1),
-            offset_thw=(-txt_feat_len, 0, 0),
-            device=device,
-            dtype=token_seq.dtype,
+            dtype=dtype,
         )
     else:
         audio_coords = _build_coords(
             shape=(audio_feat_len, 1, 1),
             ref_feat_shape=(T // pT, 1, 1),
             device=device,
-            dtype=token_seq.dtype,
-        )
-        text_coords = _build_coords(
-            shape=(txt_feat_len, 1, 1),
-            ref_feat_shape=(2, 1, 1),
-            offset_thw=(text_offset, 0, 0),
-            device=device,
-            dtype=token_seq.dtype,
+            dtype=dtype,
         )
 
-    coords = torch.cat([video_coords, audio_coords, text_coords], dim=0)
+    return StaticPackedInputs(
+        video_tokens=video_tokens,
+        audio_tokens=audio_tokens,
+        video_coords=video_coords,
+        audio_coords=audio_coords,
+        video_mm=video_mm,
+        audio_mm=audio_mm,
+        max_ch=max_ch,
+    )
+
+
+def assemble_packed_inputs(
+    static: StaticPackedInputs,
+    txt_feat: torch.Tensor,
+    txt_feat_len: int,
+    coords_style: Literal["v1", "v2"] = "v2",
+    text_offset: int = 0,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Attach per-call text tokens to the precomputed static packed inputs.
+
+    Returns (token_seq, coords, modality_map) ready for the DiT.
+    """
+    text_tokens = txt_feat[0, :txt_feat_len].contiguous()
+    max_ch = max(static.max_ch, text_tokens.size(-1))
+
+    video_tokens = F.pad(static.video_tokens, (0, max_ch - static.video_tokens.size(-1)))
+    audio_tokens = F.pad(static.audio_tokens, (0, max_ch - static.audio_tokens.size(-1)))
+    text_tokens = F.pad(text_tokens, (0, max_ch - text_tokens.size(-1)))
+    token_seq = torch.cat([video_tokens, audio_tokens, text_tokens], dim=0)
+
+    device = token_seq.device
+    dtype = token_seq.dtype
+    text_mm = torch.full((txt_feat_len, ), MODALITY_TEXT, dtype=torch.int64, device=device)
+    mm = torch.cat([static.video_mm, static.audio_mm, text_mm], dim=0)
+
+    if coords_style == "v2":
+        text_coords = _build_coords(
+            shape=(txt_feat_len, 1, 1),
+            ref_feat_shape=(1, 1, 1),
+            offset_thw=(-txt_feat_len, 0, 0),
+            device=device,
+            dtype=dtype,
+        )
+    else:
+        text_coords = _build_coords(
+            shape=(txt_feat_len, 1, 1),
+            ref_feat_shape=_V1_TEXT_REF_SHAPE,
+            offset_thw=(text_offset, 0, 0),
+            device=device,
+            dtype=dtype,
+        )
+
+    coords = torch.cat([static.video_coords, static.audio_coords, text_coords], dim=0)
     return token_seq, coords, mm
+
+
+def build_packed_inputs(
+    video_latent: torch.Tensor,
+    audio_latent: torch.Tensor,
+    audio_feat_len: int,
+    txt_feat: torch.Tensor,
+    txt_feat_len: int,
+    patch_size: tuple[int, int, int],
+    coords_style: Literal["v1", "v2"] = "v2",
+    text_offset: int = 0,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build the full packed token stream in one call (backwards-compat wrapper).
+
+    Equivalent to assemble_packed_inputs(build_static_packed_inputs(...), ...).
+    Prefer calling the two helpers separately when the static portion can be
+    reused across multiple calls (e.g. cond/uncond in the denoise loop).
+    """
+    static = build_static_packed_inputs(
+        video_latent=video_latent,
+        audio_latent=audio_latent,
+        audio_feat_len=audio_feat_len,
+        patch_size=patch_size,
+        coords_style=coords_style,
+    )
+    return assemble_packed_inputs(
+        static=static,
+        txt_feat=txt_feat,
+        txt_feat_len=txt_feat_len,
+        coords_style=coords_style,
+        text_offset=text_offset,
+    )
 
 
 def unpack_tokens(

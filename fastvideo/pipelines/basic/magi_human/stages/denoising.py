@@ -18,7 +18,9 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.pipelines.basic.magi_human.stages.latent_preparation import (
-    build_packed_inputs,
+    StaticPackedInputs,
+    assemble_packed_inputs,
+    build_static_packed_inputs,
     unpack_tokens,
 )
 
@@ -26,29 +28,22 @@ from fastvideo.pipelines.basic.magi_human.stages.latent_preparation import (
 def _dit_forward(
     dit,
     video_latent: torch.Tensor,
-    audio_latent: torch.Tensor,
     audio_feat_len: int,
     txt_feat: torch.Tensor,
     txt_feat_len: int,
-    patch_size: tuple[int, int, int],
+    static_packed: StaticPackedInputs,
     coords_style: str,
     video_in_channels: int,
     audio_in_channels: int,
+    patch_size: tuple[int, int, int],
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """One DiT call: builds the packed token stream, runs the DiT, unpacks
-    the video/audio outputs back into their natural shapes.
-    """
-    x, coords, mm = build_packed_inputs(
-        video_latent=video_latent,
-        audio_latent=audio_latent,
-        audio_feat_len=audio_feat_len,
+    x, coords, mm = assemble_packed_inputs(
+        static=static_packed,
         txt_feat=txt_feat,
         txt_feat_len=txt_feat_len,
-        patch_size=patch_size,
         coords_style=coords_style,
     )
-    video_token_num = x.size(0) - audio_feat_len - txt_feat_len
-    # DiT is bf16 internally; keep inputs fp32 (embedders dtype).
+    video_token_num = static_packed.video_token_num
     out = dit(x, coords, mm)
     return unpack_tokens(
         out,
@@ -75,6 +70,8 @@ class MagiHumanDenoisingStage(PipelineStage):
         audio_txt_guidance_scale: float = 5.0,
         cfg_number: int = 2,
         coords_style: str = "v2",
+        video_guidance_high_t_threshold: int = 500,
+        video_guidance_low_t_value: float = 2.0,
     ) -> None:
         super().__init__()
         self.transformer = transformer
@@ -86,6 +83,8 @@ class MagiHumanDenoisingStage(PipelineStage):
         self.audio_txt_guidance_scale = audio_txt_guidance_scale
         self.cfg_number = cfg_number
         self.coords_style = coords_style
+        self.video_guidance_high_t_threshold = video_guidance_high_t_threshold
+        self.video_guidance_low_t_value = video_guidance_low_t_value
 
     def verify_input(self, batch, fastvideo_args):
         return VerificationResult()
@@ -96,7 +95,7 @@ class MagiHumanDenoisingStage(PipelineStage):
     @torch.inference_mode()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         device = batch.latents.device
-        shift = fastvideo_args.pipeline_config.flow_shift or 5.0
+        shift = fastvideo_args.pipeline_config.flow_shift
         # Video and audio use independent FlowUniPC state (upstream
         # inference/pipeline/video_generate.py:404-407 instantiates two
         # separate schedulers). Sharing one scheduler causes the
@@ -137,38 +136,47 @@ class MagiHumanDenoisingStage(PipelineStage):
 
         audio_feat_len = int(audio_latent.shape[1])
 
+        # Precompute step-invariant packed inputs (video+audio tokens, coords,
+        # modality map). Text varies per cond/uncond call so it is assembled
+        # inside _dit_forward via assemble_packed_inputs.
+        static_packed = build_static_packed_inputs(
+            video_latent=video_latent,
+            audio_latent=audio_latent,
+            audio_feat_len=audio_feat_len,
+            patch_size=self.patch_size,
+            coords_style=self.coords_style,
+        )
+
         disable_tqdm = not getattr(fastvideo_args, "log_level_progress", True)
         for idx, t in enumerate(tqdm(timesteps, disable=disable_tqdm)):
-            # Conditional pass
             v_cond_video, v_cond_audio = _dit_forward(
                 self.transformer,
                 video_latent=video_latent,
-                audio_latent=audio_latent,
                 audio_feat_len=audio_feat_len,
                 txt_feat=txt_feat,
                 txt_feat_len=txt_feat_len,
-                patch_size=self.patch_size,
+                static_packed=static_packed,
                 coords_style=self.coords_style,
                 video_in_channels=self.video_in_channels,
                 audio_in_channels=self.audio_in_channels,
+                patch_size=self.patch_size,
             )
 
             if self.cfg_number == 2:
                 v_uncond_video, v_uncond_audio = _dit_forward(
                     self.transformer,
                     video_latent=video_latent,
-                    audio_latent=audio_latent,
                     audio_feat_len=audio_feat_len,
                     txt_feat=neg_txt_feat,
                     txt_feat_len=neg_txt_feat_len,
-                    patch_size=self.patch_size,
+                    static_packed=static_packed,
                     coords_style=self.coords_style,
                     video_in_channels=self.video_in_channels,
                     audio_in_channels=self.audio_in_channels,
+                    patch_size=self.patch_size,
                 )
-                # Reference trick: drop the video guidance to 2.0 for
-                # timesteps <= 500 in the non-SR path.
-                video_guidance = (self.video_txt_guidance_scale if t > 500 else 2.0)
+                video_guidance = (self.video_txt_guidance_scale
+                                  if t > self.video_guidance_high_t_threshold else self.video_guidance_low_t_value)
                 v_video = v_uncond_video + video_guidance * (v_cond_video - v_uncond_video)
                 v_audio = v_uncond_audio + self.audio_txt_guidance_scale * (v_cond_audio - v_uncond_audio)
             else:
@@ -188,6 +196,14 @@ class MagiHumanDenoisingStage(PipelineStage):
                 audio_latent,
                 return_dict=False,
             )[0]
+
+            static_packed = build_static_packed_inputs(
+                video_latent=video_latent,
+                audio_latent=audio_latent,
+                audio_feat_len=audio_feat_len,
+                patch_size=self.patch_size,
+                coords_style=self.coords_style,
+            )
 
         batch.latents = video_latent
         batch.audio_latents = audio_latent
