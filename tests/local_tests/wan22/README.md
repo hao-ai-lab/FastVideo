@@ -6,9 +6,6 @@ the I2V record creator handles missing CLIP embeddings — Wan2.2 I2V conditions
 on the input image through the VAE only and skips `ImageEncodingStage`. Skipped
 in CI; runs CPU-only.
 
-Port progress, open questions, issues, and handoff notes live in
-[`PORT_STATUS.md`](./PORT_STATUS.md).
-
 ## Reference Assets
 
 | Field | Value |
@@ -61,5 +58,3 @@ pytest tests/local_tests/wan22/ -v
 - This directory currently covers only the I2V record-schema regression. Add
   encoder/transformer/VAE/pipeline parity tests here as the full Wan2.2 port
   proceeds.
-- See [`PORT_STATUS.md`](./PORT_STATUS.md) for open issues, escape hatches, and
-  the component matrix.

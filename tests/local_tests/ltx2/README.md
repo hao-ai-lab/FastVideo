@@ -5,9 +5,6 @@ port. Most tests depend on a checked-out `LTX-2/` directory at the repo root
 (`FastVideo/LTX-2`) and converted Diffusers weights; without those they will
 skip or fail. Skipped in CI; run locally on a single GPU.
 
-Port progress, open questions, issues, and handoff notes live in
-[`PORT_STATUS.md`](./PORT_STATUS.md).
-
 ## Reference Assets
 
 | Field | Value |
@@ -74,5 +71,3 @@ pytest tests/local_tests/ltx2/ -v -s
   including reused components that own weights or numerical behavior.
 - Pipeline parity may start as a scaffold; final handoff requires non-skip
   PASS or an explicit blocker accepted via the escape-hatch process.
-- See [`PORT_STATUS.md`](./PORT_STATUS.md) for open issues, escape hatches, and
-  the component matrix.

@@ -4,9 +4,6 @@ Local-only parity tests for the `gamecraft` FastVideo port. They compare
 FastVideo against the official `Hunyuan-GameCraft-1.0` implementation and are
 skipped in CI; run locally on a single GPU (~40 GB+ memory).
 
-Port progress, open questions, issues, and handoff notes live in
-[`PORT_STATUS.md`](./PORT_STATUS.md).
-
 ## Reference Assets
 
 | Field | Value |
@@ -68,5 +65,3 @@ DISABLE_SP=1 pytest tests/local_tests/gamecraft/ -v -s
   including reused components that own weights or numerical behavior.
 - Pipeline parity may start as a scaffold; final handoff requires non-skip
   PASS or an explicit blocker accepted via the escape-hatch process.
-- See [`PORT_STATUS.md`](./PORT_STATUS.md) for open issues, escape hatches, and
-  the component matrix.

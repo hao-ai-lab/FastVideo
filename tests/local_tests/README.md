@@ -15,7 +15,6 @@ directory follows the layout produced by the
 ```
 tests/local_tests/<family>/
 ├── README.md         # reference assets, setup, test inventory
-├── PORT_STATUS.md    # phase, component matrix, parity commands, open questions
 ├── __init__.py
 └── test_<family>_<component>_*.py
 ```
@@ -39,10 +38,12 @@ pytest tests/local_tests/<family>/ -v -s
 ```
 
 See each family's `README.md` for setup (clones, weights, env vars, gated
-tokens) and its `PORT_STATUS.md` for the per-component parity status.
+tokens) and the per-component parity coverage.
 
 ## Adding a new family
 
 Run the [`add-model-prep`](https://github.com/anthropic-skills/add-model-prep)
-skill from the FastVideo repo root. It scaffolds the family directory,
-`README.md`, and `PORT_STATUS.md` and stages reference clones + weights.
+skill from the FastVideo repo root. It scaffolds the family directory and
+`README.md` and stages reference clones + weights. (In-progress ports may also
+add a `PORT_STATUS.md` from the same skill template; remove it once the port
+lands.)
