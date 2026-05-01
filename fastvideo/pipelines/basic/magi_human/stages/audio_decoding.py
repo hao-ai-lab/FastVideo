@@ -89,8 +89,10 @@ class MagiHumanAudioDecodingStage(PipelineStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         latent_audio = getattr(batch, "audio_latents", None)
         if latent_audio is None:
-            # Nothing to decode — silent output.
-            return batch
+            # Joint AV: missing audio latents means the denoising stage broke.
+            raise ValueError("MagiHumanAudioDecodingStage requires batch.audio_latents to be set. "
+                             "Did the denoising stage produce them? Joint AV pipeline expects "
+                             "both video and audio latents from MagiHumanDenoisingStage.")
 
         # Upstream shape: `[B, L, C_latent]` from the DiT; AutoencoderOobleck
         # expects `[B, C_latent, L]`. MagiEvaluator.post_process does
