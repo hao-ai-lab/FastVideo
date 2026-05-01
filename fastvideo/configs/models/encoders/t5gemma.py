@@ -54,13 +54,14 @@ class T5GemmaEncoderArchConfig(TextEncoderArchConfig):
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        # MagiHuman tokenizes without truncation in the reference pipeline;
-        # the fixed-length pad_or_trim happens after tokenization. Mirror
-        # that here by leaving the tokenizer to return all tokens and letting
-        # the pipeline-side prompt preprocessor pad/trim to target_length.
-        self.tokenizer_kwargs["truncation"] = True
-        self.tokenizer_kwargs["max_length"] = self.text_len
-        self.tokenizer_kwargs["padding"] = "max_length"
+        # WHY: upstream `t5_gemma_model.py:25` tokenizes without
+        # padding/max_length, then `prompt_process.py` pad_or_trim-s the
+        # encoded states. Keep only tensor return here so
+        # MagiHumanLatentPreparationStage can pad/trim post-encode while
+        # preserving the real original prompt length.
+        self.tokenizer_kwargs.pop("truncation", None)
+        self.tokenizer_kwargs.pop("max_length", None)
+        self.tokenizer_kwargs.pop("padding", None)
 
 
 @dataclass
