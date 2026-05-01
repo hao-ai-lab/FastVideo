@@ -18,6 +18,11 @@ from fastvideo.layers.layernorm import FP32LayerNorm
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.models.loader.utils import get_param_names_mapping
 
+# Single import-time snapshot — re-reading via `StableAudioConfig()` per
+# `Attention.__init__` would rebuild the nested dataclass + regex map ~48
+# times during a single DiT construction.
+_SUPPORTED_BACKENDS = StableAudioConfig().arch_config._supported_attention_backends
+
 
 class FourierFeatures(nn.Module):
     """Random-Fourier learned-frequency timestep encoder."""
@@ -134,7 +139,7 @@ class Attention(nn.Module):
 
         self.attn = LocalAttention(num_heads=self.num_heads, head_size=dim_heads,
                                    num_kv_heads=self.kv_heads, causal=False,
-                                   supported_attention_backends=StableAudioConfig().arch_config._supported_attention_backends)
+                                   supported_attention_backends=_SUPPORTED_BACKENDS)
 
     def forward(self, x: torch.Tensor, context: torch.Tensor | None = None,
                 rotary_pos_emb: tuple[torch.Tensor, float] | None = None) -> torch.Tensor:
@@ -332,7 +337,7 @@ class StableAudioDiT(nn.Module):
         `StableAudioConfig.param_names_mapping` regex table.
         """
         model = cls()
-        mapping_fn = get_param_names_mapping(cls.param_names_mapping)
+        mapping_fn = get_param_names_mapping(model.config.arch_config.param_names_mapping)
         remapped: dict[str, torch.Tensor] = {}
         for k, v in state_dict.items():
             if not k.startswith(prefix):

@@ -83,7 +83,11 @@ class T5Conditioner(_Conditioner):
         # `from_official_state_dict` filters `conditioners.prompt.*` from
         # the missing-key check (T5 weights are absent from the SA
         # checkpoint by design).
-        torch_dtype = getattr(torch, dtype, torch.float16)
+        # Explicit lookup so a typo (e.g. "fp16" instead of "float16") errors
+        # at load time rather than silently falling back to a wrong dtype.
+        torch_dtype = getattr(torch, dtype)
+        if not isinstance(torch_dtype, torch.dtype):
+            raise ValueError(f"T5Conditioner dtype={dtype!r} is not a torch.dtype.")
         self._t5_dtype = torch_dtype
         self.model = (T5EncoderModel.from_pretrained(t5_model_name).eval().requires_grad_(False).to(torch_dtype))
 
@@ -132,9 +136,6 @@ class StableAudioMultiConditioner(nn.Module):
         super().__init__()
         self.config = config or StableAudioConditionerConfig()
         arch = self.config.arch_config
-        self.cond_dim: int = arch.cond_dim
-        self.cross_attention_cond_ids: tuple[str, ...] = tuple(arch.cross_attention_cond_ids)
-        self.global_cond_ids: tuple[str, ...] = tuple(arch.global_cond_ids)
         self.conditioners = nn.ModuleDict({
             "prompt": T5Conditioner(output_dim=arch.cond_dim, t5_model_name=arch.t5_model_name,
                                     max_length=arch.t5_max_length, dtype=arch.t5_dtype),

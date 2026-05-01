@@ -99,6 +99,10 @@ class StableAudioDenoisingStage(PipelineStage):
         # Cast noise + conditioning to the DiT's dtype before sampling
         # (matches `stable_audio_tools/inference/generation.py:185-187`).
         model_dtype = next(self.transformer.parameters()).dtype
+
+        def _cast(t: torch.Tensor | None) -> torch.Tensor | None:
+            return t.to(model_dtype) if t is not None else None
+
         x = (batch.latents * sigmas[0]).to(model_dtype)
         if init_latent is not None:
             x = x + init_latent.to(model_dtype)
@@ -106,11 +110,9 @@ class StableAudioDenoisingStage(PipelineStage):
         batch_cond, batch_global = _build_cfg_conditioning(
             cross_attn_cond=ext["cross_attn_cond"].to(model_dtype),
             global_embed=ext["global_embed"].to(model_dtype),
-            negative_cross_attn_cond=(ext["negative_cross_attn_cond"].to(model_dtype)
-                                      if ext.get("negative_cross_attn_cond") is not None else None),
+            negative_cross_attn_cond=_cast(ext.get("negative_cross_attn_cond")),
             negative_cross_attn_mask=ext.get("negative_cross_attn_mask"),
-            negative_global_embed=(ext["negative_global_embed"].to(model_dtype)
-                                   if ext.get("negative_global_embed") is not None else None),
+            negative_global_embed=_cast(ext.get("negative_global_embed")),
             do_cfg=guidance_scale != 1.0,
         )
         adapter = _DiTAdapter(self.transformer,
