@@ -3,11 +3,17 @@
 
 Pixel-space SSIM is not a useful signal for this model: 4 distilled
 steps + bf16 attention + tiled VAE decode produce outputs that pass
-visual QA but occupy a very wide region in pixel space. Per the
-reference discussion in diffusers' own LTX test
-(``tests/pipelines/test_ltx_pipeline.py``) we instead compare the
-pre-VAE latent directly, using cosine distance on a small signature
-slice plus the full tensor.
+visual QA but occupy a very wide region in pixel space.
+
+Inspired by diffusers' slice-vs-full regression philosophy — see
+``diffusers/tests/pipelines/ltx2/test_ltx2.py`` (compares pixel slices
+via ``torch.allclose(..., atol=1e-4)``) and
+``diffusers/tests/pipelines/cogvideo/test_cogvideox.py`` (full pixel
+tensors via ``numpy_cosine_similarity_distance(...) < 1e-3``).
+Diffusers itself does NOT compare latents; we apply the same "small
+signature slice + bounded full-tensor distance" idea to the **pre-VAE
+latent** because distilled few-step pipelines amplify per-step bf16
+noise enough that VAE-decoded comparisons are unreliable.
 
 Parameters are kept identical to the original SSIM run so that
 reference artefacts generated on Modal L40S remain bit-compatible with
