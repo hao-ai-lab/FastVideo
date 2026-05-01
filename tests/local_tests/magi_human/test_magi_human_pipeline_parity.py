@@ -147,33 +147,11 @@ def _dit_forward_upstream(
     )
 
 
-def _build_fastvideo_schedulers(shift: float, num_inference_steps: int, device):
-    """Construct schedulers the way FastVideo's `MagiHumanDenoisingStage`
-    does in production: `shift` is passed BOTH at __init__ time (in
-    `magi_human_pipeline.initialize_pipeline`) and at `set_timesteps`
-    time (in the denoising stage). The shift function is non-idempotent
-    for shift≠1, so this compounds; tests must mirror it to be faithful
-    to production.
-    """
-    from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-        FlowUniPCMultistepScheduler,
-    )
-    video_sched = FlowUniPCMultistepScheduler(shift=shift)
-    audio_sched = FlowUniPCMultistepScheduler(shift=shift)
-    video_sched.set_timesteps(num_inference_steps, device=device, shift=shift)
-    audio_sched.set_timesteps(num_inference_steps, device=device, shift=shift)
-    return video_sched, audio_sched
+def _build_schedulers(shift: float, num_inference_steps: int, device):
+    """Construct the paired video/audio schedulers used by both sides.
 
-
-def _build_upstream_schedulers(shift: float, num_inference_steps: int, device):
-    """Construct schedulers the way the official `MagiEvaluator.eval_with_text`
-    does (`daVinci-MagiHuman/inference/pipeline/video_generate.py:404-407`):
-    `FlowUniPCMultistepScheduler()` with default shift=1.0 in __init__
-    (no-op), then `set_timesteps(num_inference_steps, device, shift=self.shift)`
-    applies shift exactly once. Uses FastVideo's scheduler class for
-    the orchestration (algorithmically identical to the upstream copy
-    of the same Diffusers-derived class) but matches the upstream's
-    *call pattern*.
+    The constructor now stays at the default no-op shift, and both schedulers
+    apply `shift` once during `set_timesteps(...)`.
     """
     from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
         FlowUniPCMultistepScheduler,
@@ -192,9 +170,7 @@ def _run_denoise_loop(
     video_txt_guidance_scale, audio_txt_guidance_scale,
     patch_size, coords_style, video_in_channels, audio_in_channels,
 ):
-    """Joint video+audio FlowUniPC denoise. The schedulers are passed
-    in pre-constructed so each side can mirror its production scheduler
-    init pattern (see `_build_*_schedulers`).
+    """Joint video+audio FlowUniPC denoise with pre-built paired schedulers.
     """
     audio_feat_len = int(audio_latent.shape[1])
 
@@ -304,8 +280,8 @@ def test_magi_human_pipeline_latent_parity():
     )
 
     # --- Upstream side first (so we can free it before loading FastVideo). ---
-    # Upstream uses single-shift scheduler init (matches MagiEvaluator).
-    up_video_sched, up_audio_sched = _build_upstream_schedulers(
+    # Both sides now share the same single-shift scheduler setup.
+    up_video_sched, up_audio_sched = _build_schedulers(
         shift=shift, num_inference_steps=num_inference_steps, device=device,
     )
     print("Loading upstream DiTModel from base shards...")
@@ -325,10 +301,9 @@ def test_magi_human_pipeline_latent_parity():
     _cleanup_gpu()
 
     # --- FastVideo side ---
-    # FastVideo uses double-shift scheduler init (matches
-    # `MagiHumanDenoisingStage` in production: shift in __init__ via
-    # `magi_human_pipeline.initialize_pipeline` AND in set_timesteps).
-    fv_video_sched, fv_audio_sched = _build_fastvideo_schedulers(
+    # FastVideo now matches upstream with one `shift` application in
+    # `set_timesteps(...)` only.
+    fv_video_sched, fv_audio_sched = _build_schedulers(
         shift=shift, num_inference_steps=num_inference_steps, device=device,
     )
     from fastvideo.configs.models.dits.magi_human import MagiHumanVideoConfig
