@@ -64,12 +64,19 @@ _COMPONENT_PREFIXES: dict[str, str] = {
     "conditioner.": "conditioner",
 }
 
-# Subfolders we copy verbatim from the source repo (auxiliary components
-# that don't live in the monolithic safetensors).
-_PASSTHROUGH_SUBFOLDERS = ("text_encoder", "tokenizer", "scheduler")
+# Subfolders we copy verbatim from the source repo. The `vae/` subfolder
+# in `stabilityai/stable-audio-open-1.0` already ships in Diffusers
+# format with the key naming our `OobleckVAE` expects (`decoder.block.X.
+# conv_t1.weight_g` etc.) — preferred over the raw `pretransform.model.*`
+# extraction below, which uses a different module nesting (`decoder.
+# layers.X.layers.Y.*`) that would need a separate remap.
+_PASSTHROUGH_SUBFOLDERS = ("text_encoder", "tokenizer", "scheduler", "vae")
 
 _MODEL_INDEX = {
     "_class_name": "StableAudioPipeline",
+    # `ComposedPipelineBase._load_config` requires this field; the value
+    # is informational (we don't pin a Diffusers version).
+    "_diffusers_version": "0.30.0",
     "_fastvideo_converted_from": None,  # filled in at write time
     "transformer": ["fastvideo.models.dits.stable_audio", "StableAudioDiT"],
     "vae": ["fastvideo.models.vaes.oobleck", "OobleckVAE"],
@@ -205,13 +212,16 @@ def convert(src: str, dst: str) -> None:
     print("\n[1/4] Splitting monolithic state dict by component prefix:")
     buckets = _split_state_dict(monolithic)
 
-    print("\n[2/4] Writing per-component configs + safetensors:")
+    print("\n[2/4] Copying passthrough subfolders (text_encoder/tokenizer/scheduler/vae):")
+    copied = _copy_passthrough(src_dir, dst_dir)
+
+    print("\n[3/4] Writing per-component configs + safetensors:")
     component_cfgs = _component_config(model_config)
     for name in ("transformer", "vae", "conditioner"):
+        if name in copied:
+            print(f"  skipped {name}/ (already copied from source in Diffusers format)")
+            continue
         _write_component(dst_dir, name, buckets[name], component_cfgs[name])
-
-    print("\n[3/4] Copying passthrough subfolders (text_encoder/tokenizer/scheduler):")
-    copied = _copy_passthrough(src_dir, dst_dir)
 
     print("\n[4/4] Writing model_index.json:")
     index = dict(_MODEL_INDEX)

@@ -58,7 +58,7 @@ TOTAL_SECONDS = 12.0     # extend the loop to this duration
 
 def main() -> None:
     generator = VideoGenerator.from_pretrained(
-        "stabilityai/stable-audio-open-1.0",
+        "FastVideo/stable-audio-open-1.0-Diffusers",
         num_gpus=1,
     )
     generator.generate_video(

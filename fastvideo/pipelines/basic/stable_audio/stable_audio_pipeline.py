@@ -1,6 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Stable Audio Open 1.0 pipeline (T2A + A2A + RePaint inpainting).
 
+Loads from the FastVideo-curated Diffusers-format converted repo
+(`FastVideo/stable-audio-open-1.0-Diffusers`), produced by
+`scripts/checkpoint_conversion/stable_audio_to_diffusers.py`. Each
+component lives in its own subfolder (`transformer/`, `vae/`,
+`conditioner/`) and is loaded via the matching `from_pretrained`
+classmethod — same per-subfolder layout the standard
+`ComposedPipelineBase` loader assumes, just dispatched here because
+`conditioner` is not a standard component type in
+`fastvideo.models.loader.component_loader`.
+
 Stages:
 
     InputValidationStage
@@ -28,12 +38,9 @@ from fastvideo.pipelines.basic.stable_audio.stages import (
 )
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import InputValidationStage
-from fastvideo.utils import resolve_hf_token, set_mixed_precision_policy
+from fastvideo.utils import maybe_download_model, set_mixed_precision_policy
 
 logger = init_logger(__name__)
-
-_HF_REPO_ID = "stabilityai/stable-audio-open-1.0"
-_OFFICIAL_WEIGHTS_FILE = "model.safetensors"
 
 
 @functools.lru_cache(maxsize=1)
@@ -83,9 +90,9 @@ class StableAudioPipeline(ComposedPipelineBase):
         fastvideo_args: FastVideoArgs,
         loaded_modules: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Build the components from the single `model.safetensors`. The
-        published checkpoint isn't in Diffusers per-subfolder layout, so
-        we skip the standard component loader.
+        """Load each component from its own subfolder of the
+        Diffusers-format converted repo (resolves a HF id to a local
+        snapshot first).
         """
         loaded_modules = loaded_modules or {}
         modules: dict[str, Any] = {}
@@ -98,27 +105,18 @@ class StableAudioPipeline(ComposedPipelineBase):
             "fp32": torch.float32,
         }.get(precision, torch.float32)
 
-        from huggingface_hub import hf_hub_download
-        local_weights = os.path.join(self.model_path, _OFFICIAL_WEIGHTS_FILE)
-        if os.path.isfile(local_weights):
-            weights_path = local_weights
-        else:
-            weights_path = hf_hub_download(repo_id=_HF_REPO_ID,
-                                           filename=_OFFICIAL_WEIGHTS_FILE,
-                                           token=resolve_hf_token())
-
-        from safetensors.torch import load_file
-        logger.info("Loading Stable Audio checkpoint from %s", weights_path)
-        full_state = load_file(weights_path)
-
         # Tell `fastvideo.attention.layer` what dtype the model will run
         # in — without this the attention layer reads
         # `torch.get_default_dtype()` (fp32) and rejects FlashAttention.
         # The standard FSDP loader does this in `fsdp_load.py:89`; we
-        # bypass that loader so we set it ourselves.
+        # do it here too because we bypass that loader.
         set_mixed_precision_policy(param_dtype=torch_dtype, reduce_dtype=torch_dtype)
 
         _disable_tf32_for_stable_audio()
+
+        # `self.model_path` may be a HF repo id; resolve to a local dir.
+        local_root = (self.model_path if os.path.isdir(self.model_path) else maybe_download_model(self.model_path))
+        logger.info("Loading Stable Audio components from %s", local_root)
 
         if "vae" in loaded_modules:
             modules["vae"] = loaded_modules["vae"]
@@ -126,20 +124,15 @@ class StableAudioPipeline(ComposedPipelineBase):
             from fastvideo.configs.models.vaes import OobleckVAEConfig
             from fastvideo.models.vaes.sa_audio import SAAudioVAEModel
             cfg = OobleckVAEConfig()
-            local_vae_dir = os.path.join(self.model_path, "vae")
-            if os.path.isdir(local_vae_dir):
-                cfg.pretrained_path = local_vae_dir
-                cfg.pretrained_subfolder = None
-            else:
-                cfg.pretrained_path = _HF_REPO_ID
-                cfg.pretrained_subfolder = "vae"
+            cfg.pretrained_path = os.path.join(local_root, "vae")
+            cfg.pretrained_subfolder = None
             modules["vae"] = SAAudioVAEModel(cfg)
 
         if "transformer" in loaded_modules:
             modules["transformer"] = loaded_modules["transformer"]
         else:
             from fastvideo.models.dits.stable_audio import StableAudioDiT
-            modules["transformer"] = StableAudioDiT.from_official_state_dict(full_state)
+            modules["transformer"] = StableAudioDiT.from_pretrained(os.path.join(local_root, "transformer"))
             modules["transformer"] = modules["transformer"].to(device=device, dtype=torch_dtype).eval()
 
         if "conditioner" in loaded_modules:
@@ -147,7 +140,8 @@ class StableAudioPipeline(ComposedPipelineBase):
         else:
             from fastvideo.models.encoders.stable_audio_conditioner import (
                 StableAudioMultiConditioner, )
-            modules["conditioner"] = StableAudioMultiConditioner.from_official_state_dict(full_state)
+            modules["conditioner"] = StableAudioMultiConditioner.from_pretrained(os.path.join(
+                local_root, "conditioner"))
             modules["conditioner"] = modules["conditioner"].to(device=device, dtype=torch_dtype).eval()
 
         return modules

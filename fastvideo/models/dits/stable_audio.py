@@ -329,12 +329,29 @@ class StableAudioDiT(nn.Module):
         return self.postprocess_conv(out) + out
 
     @classmethod
+    def from_pretrained(cls, model_path: str) -> "StableAudioDiT":
+        """Load from a converted Diffusers-format `transformer/`
+        subfolder (see `scripts/checkpoint_conversion/stable_audio_to_diffusers.py`).
+        Keys are already prefix-stripped + LayerNorm-renamed so the load
+        is `strict=True`.
+        """
+        import os
+        from safetensors.torch import load_file
+        weights = os.path.join(model_path, "diffusion_pytorch_model.safetensors")
+        state = load_file(weights)
+        model = cls()
+        missing, unexpected = model.load_state_dict(state, strict=True)
+        if missing or unexpected:
+            raise RuntimeError(
+                f"StableAudioDiT load mismatch — missing={missing[:5]} unexpected={unexpected[:5]}")
+        return model
+
+    @classmethod
     def from_official_state_dict(cls, state_dict: dict[str, torch.Tensor],
                                  prefix: str = "model.model.") -> "StableAudioDiT":
-        """Load from the published `model.safetensors`. The DiT weights
-        live under the `model.model.*` prefix and the LayerNorm keys use
-        the official `gamma`/`beta` names; both remaps come from the
-        `StableAudioConfig.param_names_mapping` regex table.
+        """Load from a raw `stable_audio_tools` monolithic state dict.
+        Kept for tests / older checkpoints; production loads go through
+        `from_pretrained` against the Diffusers-format converted repo.
         """
         model = cls()
         mapping_fn = get_param_names_mapping(model.config.arch_config.param_names_mapping)

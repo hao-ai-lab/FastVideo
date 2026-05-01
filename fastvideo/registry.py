@@ -246,15 +246,18 @@ def _register_configs() -> None:
     # Stable Audio Open 1.0 (text-to-audio).
     # NOTE: WorkloadType has no T2A variant yet (REVIEW item 28); using
     # T2V as the placeholder until the enum is extended.
-    # `stable-audio-open-small` is intentionally absent — its HF repo is
-    # not Diffusers-format (no `model_index.json`/`transformer/`/`vae/`)
-    # and the DiT dimensions differ from the 1.0 base. Adding it requires
-    # a custom resolver + per-variant DiT sizing; deferred to a follow-up.
+    # `stable-audio-open-small` has its own converted repo on HF
+    # (`FastVideo/stable-audio-open-small-Diffusers`) but the small DiT
+    # uses `qk_norm="ln"` and different (embed_dim, depth, num_heads),
+    # which the current `StableAudioDiT` doesn't yet support — wiring
+    # the small variant into the registry is deferred until that DiT
+    # arch lands.
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=StableAudioT2AConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
+            "FastVideo/stable-audio-open-1.0-Diffusers",
             "stabilityai/stable-audio-open-1.0",
         ],
         model_detectors=[
