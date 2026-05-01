@@ -11,7 +11,7 @@ seed / steps / CFG.
 All FV components are now first-class ports (REVIEW item 30 closed):
   * **VAE**: bit-identical (FV's `OobleckVAE` is a 1:1 port of
     upstream's `OobleckEncoder/OobleckDecoder` — verified separately
-    in `tests/local_tests/vaes/test_oobleck_vae_parity.py` to diff=0).
+    in `tests/local_tests/stable_audio/test_oobleck_vae_parity.py` to diff=0).
   * **DiT**: native `fastvideo.models.dits.stable_audio.StableAudioDiT`
     (vendored from `stable_audio_tools/models/dit.py + transformer.py`).
     Forward parity vs upstream `DiffusionTransformer` is bit-identical
@@ -41,7 +41,7 @@ import pytest
 import torch
 
 from fastvideo.utils import resolve_hf_token
-from tests.local_tests._stable_audio_helpers import (
+from ._stable_audio_helpers import (
     can_access_repo,
     setup_hf_env,
 )

@@ -2,10 +2,10 @@
 """
 Usage:
     # Basic tests (no weights required)
-    pytest tests/local_tests/transformers/test_gen3c.py -v
+    pytest tests/local_tests/gen3c/test_gen3c.py -v
     
     # Full parity tests (requires converted weights)
-    GEN3C_FASTVIDEO_PATH=./gen3c_converted/transformer pytest tests/local_tests/transformers/test_gen3c.py -v
+    GEN3C_FASTVIDEO_PATH=./gen3c_converted/transformer pytest tests/local_tests/gen3c/test_gen3c.py -v
 """
 
 import os

@@ -63,13 +63,19 @@ python -c "from huggingface_hub import snapshot_download; \
 All Stable Audio tests in one shot (~80 s on a single B200):
 
 ```bash
-pytest tests/local_tests/pipelines/test_stable_audio_pipeline_smoke.py \
-       tests/local_tests/pipelines/test_stable_audio_pipeline_parity.py \
-       tests/local_tests/pipelines/test_stable_audio_a2a_parity.py \
-       tests/local_tests/pipelines/test_stable_audio_inpaint_parity.py \
-       tests/local_tests/vaes/test_oobleck_vae_parity.py \
-       tests/local_tests/vaes/test_oobleck_vae_official_parity.py \
+pytest tests/local_tests/stable_audio/test_stable_audio_pipeline_smoke.py \
+       tests/local_tests/stable_audio/test_stable_audio_pipeline_parity.py \
+       tests/local_tests/stable_audio/test_stable_audio_a2a_parity.py \
+       tests/local_tests/stable_audio/test_stable_audio_inpaint_parity.py \
+       tests/local_tests/stable_audio/test_oobleck_vae_parity.py \
+       tests/local_tests/stable_audio/test_oobleck_vae_official_parity.py \
        -v -s
+```
+
+Or, to run the entire family:
+
+```bash
+pytest tests/local_tests/stable_audio/ -v -s
 ```
 
 Add `-s` to print the per-test diff numbers (shape / abs_mean / max
@@ -91,7 +97,7 @@ diff / drift / RMS ratios).
 Each test file is independent. Run one:
 
 ```bash
-pytest tests/local_tests/pipelines/test_stable_audio_a2a_parity.py -v -s
+pytest tests/local_tests/stable_audio/test_stable_audio_a2a_parity.py -v -s
 ```
 
 Expected output (approximate, on a B200, fp32, default seed = 0):

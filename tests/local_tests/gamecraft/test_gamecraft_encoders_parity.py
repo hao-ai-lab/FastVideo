@@ -7,7 +7,7 @@ GameCraft uses:
 2. CLIP ViT-L/14 for secondary text encoding (768-dim pooled)
 
 Usage:
-    DISABLE_SP=1 pytest tests/local_tests/encoders/test_gamecraft_encoders_parity.py -v
+    DISABLE_SP=1 pytest tests/local_tests/gamecraft/test_gamecraft_encoders_parity.py -v
 """
 import os
 import sys
