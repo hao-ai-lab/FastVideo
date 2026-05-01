@@ -34,13 +34,40 @@ _HF_REPO_ID = "stabilityai/stable-audio-open-1.0"
 _OFFICIAL_WEIGHTS_FILE = "model.safetensors"
 
 
-def _ensure_hf_token_env() -> None:
+def _resolve_hf_token() -> str | None:
+    """Return the first non-empty HF token from the standard env vars
+    without mutating `os.environ`. Order: `HF_TOKEN`,
+    `HUGGINGFACE_HUB_TOKEN`, `HF_API_KEY`.
+    """
     for src in ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY"):
         v = os.environ.get(src)
         if v:
-            os.environ.setdefault("HF_TOKEN", v)
-            os.environ.setdefault("HUGGINGFACE_HUB_TOKEN", v)
-            return
+            return v
+    return None
+
+
+_TF32_FLAGS_WARNED = False
+
+
+def _disable_tf32_for_stable_audio() -> None:
+    """Disable TF32 / cuDNN nondeterminism — A2A renoise-then-denoise SDE
+    amplifies per-element drift, and the published parity bounds were
+    set with these off. These are **process-global** torch settings; we
+    log loudly the first time this fires so callers running other models
+    in the same process aren't surprised.
+    """
+    global _TF32_FLAGS_WARNED
+    if not _TF32_FLAGS_WARNED:
+        logger.warning("Stable Audio pipeline is disabling process-global "
+                       "torch.backends.{cuda.matmul.allow_tf32, cudnn.allow_tf32, "
+                       "cuda.matmul.allow_fp16_reduced_precision_reduction, "
+                       "cudnn.benchmark} for A2A renoise determinism. Other models "
+                       "loaded into this process will inherit these settings.")
+        _TF32_FLAGS_WARNED = True
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+    torch.backends.cudnn.benchmark = False
 
 
 class StableAudioPipeline(ComposedPipelineBase):
@@ -73,7 +100,7 @@ class StableAudioPipeline(ComposedPipelineBase):
         published checkpoint isn't in Diffusers per-subfolder layout, so
         we skip the standard component loader.
         """
-        _ensure_hf_token_env()
+        hf_token = _resolve_hf_token()
         loaded_modules = loaded_modules or {}
         modules: dict[str, Any] = {}
 
@@ -90,21 +117,13 @@ class StableAudioPipeline(ComposedPipelineBase):
         if os.path.isfile(local_weights):
             weights_path = local_weights
         else:
-            weights_path = hf_hub_download(repo_id=_HF_REPO_ID,
-                                           filename=_OFFICIAL_WEIGHTS_FILE,
-                                           token=os.environ.get("HF_TOKEN"))
+            weights_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_OFFICIAL_WEIGHTS_FILE, token=hf_token)
 
         from safetensors.torch import load_file
         logger.info("Loading Stable Audio checkpoint from %s", weights_path)
         full_state = load_file(weights_path)
 
-        # Disable TF32 / cuDNN nondeterminism — A2A renoise-then-denoise
-        # SDE amplifies per-element drift. One-shot to avoid invalidating
-        # the cuDNN algorithm cache mid-run.
-        torch.backends.cuda.matmul.allow_tf32 = False
-        torch.backends.cudnn.allow_tf32 = False
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-        torch.backends.cudnn.benchmark = False
+        _disable_tf32_for_stable_audio()
 
         if "vae" in loaded_modules:
             modules["vae"] = loaded_modules["vae"]
@@ -119,7 +138,9 @@ class StableAudioPipeline(ComposedPipelineBase):
             else:
                 cfg.pretrained_path = _HF_REPO_ID
                 cfg.pretrained_subfolder = "vae"
-            modules["vae"] = SAAudioVAEModel(cfg)
+            vae_module = SAAudioVAEModel(cfg)
+            vae_module.hf_token = hf_token
+            modules["vae"] = vae_module
 
         if "transformer" in loaded_modules:
             modules["transformer"] = loaded_modules["transformer"]
@@ -135,9 +156,6 @@ class StableAudioPipeline(ComposedPipelineBase):
                 StableAudioMultiConditioner, )
             modules["conditioner"] = StableAudioMultiConditioner.from_official_state_dict(full_state)
             modules["conditioner"] = modules["conditioner"].to(device=device).eval()
-            # T5 sits outside the module's `parameters()` — move it explicitly.
-            if hasattr(modules["conditioner"].conditioners["prompt"], "model"):
-                modules["conditioner"].conditioners["prompt"].model.to(device=device)
 
         return modules
 

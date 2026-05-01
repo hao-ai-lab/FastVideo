@@ -75,23 +75,18 @@ class T5Conditioner(_Conditioner):
         from transformers import AutoTokenizer, T5EncoderModel
         self.max_length = max_length
         self.tokenizer = AutoTokenizer.from_pretrained(t5_model_name)
-        # Hide T5 from `parameters()` so the SA checkpoint loader doesn't
-        # try to match its keys (T5 is fetched fresh from HF here).
-        model = T5EncoderModel.from_pretrained(t5_model_name).eval().requires_grad_(False)
-        self.__dict__["model"] = model
-
-    def to(self, *args, **kwargs):
-        super().to(*args, **kwargs)
-        if hasattr(self, "model"):
-            self.model.to(*args, **kwargs)
-        return self
+        # T5 is registered as a normal submodule (auto `.to()` / `.eval()`
+        # / `torch.compile` tracking). The SA checkpoint doesn't ship T5
+        # weights — `from_official_state_dict` filters
+        # `conditioners.prompt.*` from the missing-key check and uses
+        # `strict=False`, so the absent T5 keys are tolerated.
+        self.model = T5EncoderModel.from_pretrained(t5_model_name).eval().requires_grad_(False)
 
     def forward(self, texts: list[str], device: torch.device | str) -> tuple[torch.Tensor, torch.Tensor]:
         encoded = self.tokenizer(texts, truncation=True, max_length=self.max_length,
                                  padding="max_length", return_tensors="pt")
         input_ids = encoded["input_ids"].to(device)
         attention_mask = encoded["attention_mask"].to(device).to(torch.bool)
-        self.model.eval()
         with torch.no_grad():
             embeddings = self.model(input_ids=input_ids,
                                     attention_mask=attention_mask)["last_hidden_state"]

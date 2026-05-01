@@ -35,6 +35,11 @@ class SAAudioVAEModel(nn.Module):
         self.sampling_rate: int = arch.sampling_rate
         self.audio_channels: int = arch.audio_channels
         self.decoder_input_channels: int = arch.decoder_input_channels
+        # Optional explicit HF token, used by `_build` when fetching a
+        # gated repo. If unset, `OobleckVAE.from_pretrained` falls back
+        # to the standard `HF_TOKEN` / `HUGGINGFACE_HUB_TOKEN` /
+        # `HF_API_KEY` env vars.
+        self.hf_token: str | None = None
         self._oobleck_vae = None
 
     def named_parameters(self, prefix: str = "", recurse: bool = True):
@@ -60,7 +65,8 @@ class SAAudioVAEModel(nn.Module):
         subfolder: str | None = self.pretrained_subfolder
         if subfolder and os.path.isdir(path) and os.path.isfile(os.path.join(path, "config.json")):
             subfolder = None
-        model = OobleckVAE.from_pretrained(path, subfolder=subfolder, torch_dtype=dtype)
+        model = OobleckVAE.from_pretrained(path, subfolder=subfolder, torch_dtype=dtype,
+                                           token=self.hf_token)
         if device is not None:
             model = model.to(device=device)
         model.eval()
