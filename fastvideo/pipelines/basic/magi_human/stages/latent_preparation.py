@@ -127,8 +127,10 @@ class MagiHumanLatentPreparationStage(PipelineStage):
         num_frames = seconds * fps + 1
         latent_T = (num_frames - 1) // 4 + 1
 
+        # Match upstream pipeline.py:61-64 + video_generate.py:254-261:
+        # the requested 272p height snaps to 256, while width stays 480.
         br_h = int(batch.height) if batch.height else 256
-        br_w = int(batch.width) if batch.width else 448
+        br_w = int(batch.width) if batch.width else 480
         pT, pH, pW = self.patch_size
         vt, vh, vw = self.vae_stride
         # Snap to patch granularity (matches reference).
