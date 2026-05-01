@@ -246,16 +246,19 @@ def _register_configs() -> None:
     # Stable Audio Open 1.0 (text-to-audio).
     # NOTE: WorkloadType has no T2A variant yet (REVIEW item 28); using
     # T2V as the placeholder until the enum is extended.
+    # `stable-audio-open-small` is intentionally absent — its HF repo is
+    # not Diffusers-format (no `model_index.json`/`transformer/`/`vae/`)
+    # and the DiT dimensions differ from the 1.0 base. Adding it requires
+    # a custom resolver + per-variant DiT sizing; deferred to a follow-up.
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=StableAudioT2AConfig,
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "stabilityai/stable-audio-open-1.0",
-            "stabilityai/stable-audio-open-small",
         ],
         model_detectors=[
-            lambda path: "stable-audio-open" in path.lower() or "stableaudio" in path.lower(),
+            lambda path: "stable-audio-open-1" in path.lower() or "stableaudio" in path.lower(),
         ],
         model_family="stable_audio",
         default_preset="stable_audio_open_1_0_base",

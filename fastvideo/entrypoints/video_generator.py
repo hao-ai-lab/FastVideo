@@ -655,7 +655,11 @@ class VideoGenerator:
             "prompts": prompt,
             "samples": samples if batch.return_frames else None,
             "frames": frames if batch.return_frames else None,
-            "audio": output_batch.extra.get("audio") if batch.return_frames else None,
+            # Audio is the primary output for audio workloads — return it
+            # whenever the pipeline produced one, regardless of
+            # `return_frames` (which gates the video-shaped buffers).
+            "audio": output_batch.extra.get("audio"),
+            "audio_sample_rate": output_batch.extra.get("audio_sample_rate"),
             "size": (target_height, target_width, batch.num_frames),
             "generation_time": gen_time,
             "logging_info": logging_info,

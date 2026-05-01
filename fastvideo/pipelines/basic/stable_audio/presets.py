@@ -18,11 +18,17 @@ _DENOISE_STAGE = PresetStageSpec(
 )
 
 # `audio_start_in_s` / `audio_end_in_s` are call-kwargs, kept off here.
+# `height`/`width`/`num_frames` are pinned to 1 so the video-shaped
+# preallocation in `VideoGenerator` stays tiny — the real output is the
+# audio waveform on `result["audio"]`, not the placeholder frame tensor.
 _SHARED_DEFAULTS = {
     "seed": 0,
     "guidance_scale": 7.0,
     "num_inference_steps": 100,
     "negative_prompt": "",
+    "height": 1,
+    "width": 1,
+    "num_frames": 1,
 }
 
 STABLE_AUDIO_OPEN_1_0_BASE = InferencePreset(
@@ -37,20 +43,4 @@ STABLE_AUDIO_OPEN_1_0_BASE = InferencePreset(
     defaults=dict(_SHARED_DEFAULTS),
 )
 
-# Gated repo `stabilityai/stable-audio-open-small` — same VAE, smaller
-# DiT. Registered for users with HF access; load-time state-dict
-# mismatch will surface clearly if the DiT sizing differs from the base.
-STABLE_AUDIO_OPEN_SMALL = InferencePreset(
-    name="stable_audio_open_small",
-    version=1,
-    model_family="stable_audio",
-    description=("Stability AI Stable Audio Open Small. Lower-latency variant of "
-                 "Stable Audio Open 1.0 — same Oobleck VAE, smaller/faster DiT. "
-                 "Gated repo (`stabilityai/stable-audio-open-small`); request "
-                 "access on HF before use."),
-    workload_type="t2v",
-    stage_schemas=(_DENOISE_STAGE, ),
-    defaults=dict(_SHARED_DEFAULTS),
-)
-
-ALL_PRESETS = (STABLE_AUDIO_OPEN_1_0_BASE, STABLE_AUDIO_OPEN_SMALL)
+ALL_PRESETS = (STABLE_AUDIO_OPEN_1_0_BASE, )

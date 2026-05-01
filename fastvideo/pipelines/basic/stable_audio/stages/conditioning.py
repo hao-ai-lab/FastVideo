@@ -31,8 +31,24 @@ class StableAudioConditioningStage(PipelineStage):
         pc = fastvideo_args.pipeline_config
         device = next(self.conditioner.parameters()).device
 
+        # `0 or default` resolves to default — the user-set 0 still falls
+        # through to the config default. That's intentional for end_s
+        # (callers always specify it explicitly when they care) but means
+        # the start default of 0.0 always wins for start_s.
         audio_start_in_s = float(getattr(batch, "audio_start_in_s", None) or pc.audio_start_in_s)
         audio_end_in_s = float(getattr(batch, "audio_end_in_s", None) or pc.audio_end_in_s)
+        max_duration = float(getattr(pc, "max_audio_duration_s", 2097152 / 44100))
+        if audio_start_in_s < 0:
+            raise ValueError(f"audio_start_in_s must be >= 0, got {audio_start_in_s}.")
+        if audio_end_in_s <= audio_start_in_s:
+            raise ValueError(f"audio_end_in_s ({audio_end_in_s}) must be > audio_start_in_s "
+                             f"({audio_start_in_s}).")
+        if audio_end_in_s > max_duration:
+            raise ValueError(f"audio_end_in_s ({audio_end_in_s}s) exceeds the model's fixed "
+                             f"window of {max_duration:.4f}s. Stable Audio Open 1.0 always "
+                             f"samples a 2,097,152-frame latent and slices to "
+                             f"[start, end] after decode; values past the window are silently "
+                             f"truncated. Lower audio_end_in_s or split the request.")
         guidance_scale = float(batch.guidance_scale or pc.guidance_scale)
         do_cfg = guidance_scale > 1.0
 

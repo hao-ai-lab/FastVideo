@@ -30,12 +30,16 @@ def test_stable_audio_typed_surface_preflight() -> None:
     assert EntryClass is StableAudioPipeline
 
     names = {p.name for p in get_presets_for_family("stable_audio")}
-    assert names == {"stable_audio_open_1_0_base", "stable_audio_open_small"}
+    assert names == {"stable_audio_open_1_0_base"}
     preset = get_preset("stable_audio_open_1_0_base", "stable_audio")
     assert preset.defaults["num_inference_steps"] == 100
     assert preset.defaults["guidance_scale"] == 7.0
-    small = get_preset("stable_audio_open_small", "stable_audio")
-    assert small.defaults["num_inference_steps"] == 100
+    # Audio workload: pin frame-shaped fields so the video-shaped sample
+    # buffer in `VideoGenerator` doesn't pre-allocate a hundreds-of-MB
+    # placeholder. The real output is the waveform on `result["audio"]`.
+    assert preset.defaults["height"] == 1
+    assert preset.defaults["width"] == 1
+    assert preset.defaults["num_frames"] == 1
 
     pc = StableAudioT2AConfig()
     assert pc.sampling_rate == 44100

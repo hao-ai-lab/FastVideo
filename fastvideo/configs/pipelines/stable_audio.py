@@ -25,10 +25,14 @@ class StableAudioT2AConfig(PipelineConfig):
 
     num_inference_steps: int = 100
     guidance_scale: float = 7.0
-    audio_end_in_s: float = 10.0  # short-clip default; max is ~47.5s
+    audio_end_in_s: float = 10.0  # short-clip default
     audio_start_in_s: float = 0.0
     sampling_rate: int = 44100
     audio_channels: int = 2
+    # Stable Audio Open 1.0 was trained at a fixed 2,097,152-sample
+    # window (= 2097152 / 44100 ≈ 47.55s). Anything past this is
+    # silently truncated by the post-decode slice — validate up-front.
+    max_audio_duration_s: float = 2097152 / 44100
 
     precision: str = "fp32"
     vae_precision: str = "fp32"
