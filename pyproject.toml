@@ -126,6 +126,23 @@ test = [
     "pytest",
 ]
 
+# Extra deps for `fastvideo.eval`. The vbench upstream submodule ships
+# its own ad-hoc requirements list; this group covers the imports that
+# the in-tree metric adapters (and vbench's pure-Python helpers) need.
+# Heavier per-metric deps (detectron2, mmcv, ...) are left for users to
+# install on demand — the metric registry surfaces a clear ImportError.
+eval = [
+    "decord",
+    "openai-clip",
+    "open_clip_torch",
+    "pyiqa",
+    "ptlflow",
+    "lpips",
+    "torchmetrics",
+    "easydict",
+    "qwen-vl-utils",
+]
+
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 
 rocm = [
@@ -155,6 +172,12 @@ skip = "./data,./wandb,ui/package-lock.json"
 [tool.ruff]
 # Allow lines to be as long as 120.
 line-length = 120
+extend-exclude = [
+    # Upstream submodules under fastvideo/third_party/ are not our style
+    # territory; modern-dep compat lives as runtime shims in our metric
+    # __init__.py files.
+    "fastvideo/third_party/**",
+]
 
 [tool.ruff.lint]
 select = [

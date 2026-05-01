@@ -5,6 +5,7 @@ from fastvideo.entrypoints.cli.generate import cmd_init as generate_cmd_init
 from fastvideo.utils import FlexibleArgumentParser
 from fastvideo.entrypoints.cli.serve import cmd_init as serve_cmd_init
 from fastvideo.entrypoints.cli.bench import cmd_init as bench_cmd_init
+from fastvideo.entrypoints.cli.eval import cmd_init as eval_cmd_init
 
 
 def cmd_init() -> list[CLISubcommand]:
@@ -13,6 +14,7 @@ def cmd_init() -> list[CLISubcommand]:
     commands.extend(generate_cmd_init())
     commands.extend(serve_cmd_init())
     commands.extend(bench_cmd_init())
+    commands.extend(eval_cmd_init())
     return commands
 
 
