@@ -357,7 +357,8 @@ class MagiAttention(nn.Module):
         inv_permute_mapping: torch.Tensor,
         modality_dispatcher: ModalityDispatcher,
     ) -> torch.Tensor:
-        h = self.pre_norm(hidden_states, modality_dispatcher=modality_dispatcher).to(torch.bfloat16)
+        orig_dtype = self.linear_qkv.weight.dtype
+        h = self.pre_norm(hidden_states, modality_dispatcher=modality_dispatcher).to(orig_dtype)
         qkv = self.linear_qkv(h, modality_dispatcher=modality_dispatcher).float()
         q, k, v, g = torch.split(
             qkv, [self.q_size, self.kv_size, self.kv_size, self.gating_size], dim=-1,
@@ -395,9 +396,9 @@ class MagiAttention(nn.Module):
             v = v.repeat_interleave(self.kv_repeat, dim=1)
 
         # [L, H, D] -> [1, H, L, D] for SDPA.
-        q_t = q.to(torch.bfloat16).permute(1, 0, 2).unsqueeze(0)
-        k_t = k.to(torch.bfloat16).permute(1, 0, 2).unsqueeze(0)
-        v_t = v.to(torch.bfloat16).permute(1, 0, 2).unsqueeze(0)
+        q_t = q.to(orig_dtype).permute(1, 0, 2).unsqueeze(0)
+        k_t = k.to(orig_dtype).permute(1, 0, 2).unsqueeze(0)
+        v_t = v.to(orig_dtype).permute(1, 0, 2).unsqueeze(0)
         out = F.scaled_dot_product_attention(q_t, k_t, v_t)  # [1, H, L, D]
         out = out.squeeze(0).permute(1, 0, 2).contiguous()   # [L, H, D]
 
@@ -407,7 +408,7 @@ class MagiAttention(nn.Module):
         if g is not None:
             g = ModalityDispatcher.permute(g, permute_mapping)
             out = out * torch.sigmoid(g.to(out.dtype))
-        out = out.reshape(-1, self.cfg.num_heads_q * self.cfg.head_dim).to(torch.bfloat16)
+        out = out.reshape(-1, self.cfg.num_heads_q * self.cfg.head_dim).to(orig_dtype)
         return self.linear_proj(out, modality_dispatcher=modality_dispatcher)
 
 
@@ -440,9 +441,10 @@ class MagiMLP(nn.Module):
         x: torch.Tensor,
         modality_dispatcher: ModalityDispatcher,
     ) -> torch.Tensor:
-        x = self.pre_norm(x, modality_dispatcher=modality_dispatcher).to(torch.bfloat16)
+        orig_dtype = self.up_gate_proj.weight.dtype
+        x = self.pre_norm(x, modality_dispatcher=modality_dispatcher).to(orig_dtype)
         x = self.up_gate_proj(x, modality_dispatcher=modality_dispatcher).float()
-        x = self._act(x).to(torch.bfloat16)
+        x = self._act(x).to(orig_dtype)
         x = self.down_proj(x, modality_dispatcher=modality_dispatcher).float()
         return x
 
@@ -681,7 +683,10 @@ class MagiHumanDiT(BaseDiT):
         text_mask = self._cached_text_mask
 
         x, rope = self.adapter(x, coords_mapping, video_mask, audio_mask, text_mask)
-        x = x.to(torch.bfloat16)
+        # Match WanVideo's dtype-agnostic DiT pattern: the loader owns model
+        # precision, so forward follows the loaded block dtype instead of
+        # forcing bf16 here.
+        x = x.to(self.block.layers[0].attention.linear_qkv.weight.dtype)
         x = ModalityDispatcher.permute(x, dispatcher.permute_mapping)
 
         x = self.block(
