@@ -7,15 +7,15 @@ Hunyuan-GameCraft-1.0 implementation to ensure numerical alignment.
 
 Usage:
     # Run with default paths
-    pytest tests/local_tests/transformers/test_gamecraft_parity.py -v
+    pytest tests/local_tests/gamecraft/test_gamecraft_parity.py -v
     
     # Run with custom paths
     GAMECRAFT_OFFICIAL_PATH=path/to/Hunyuan-GameCraft-1.0 \
     GAMECRAFT_WEIGHTS_PATH=path/to/weights/gamecraft_models/mp_rank_00_model_states.pt \
-    pytest tests/local_tests/transformers/test_gamecraft_parity.py -v
+    pytest tests/local_tests/gamecraft/test_gamecraft_parity.py -v
     
     # Enable debug logging
-    GAMECRAFT_DEBUG_LOGS=1 pytest tests/local_tests/transformers/test_gamecraft_parity.py -v
+    GAMECRAFT_DEBUG_LOGS=1 pytest tests/local_tests/gamecraft/test_gamecraft_parity.py -v
 """
 import os
 import sys

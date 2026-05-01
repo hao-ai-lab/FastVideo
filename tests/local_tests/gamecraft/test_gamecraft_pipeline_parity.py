@@ -8,12 +8,12 @@ across the complete pipeline (text encoding -> denoising -> VAE decode).
 
 Usage:
     # Run with default paths
-    DISABLE_SP=1 pytest tests/local_tests/pipelines/test_gamecraft_pipeline_parity.py -v -s
+    DISABLE_SP=1 pytest tests/local_tests/gamecraft/test_gamecraft_pipeline_parity.py -v -s
     
     # Run with custom paths
     GAMECRAFT_OFFICIAL_PATH=path/to/Hunyuan-GameCraft-1.0 \
     GAMECRAFT_WEIGHTS_PATH=path/to/weights \
-    DISABLE_SP=1 pytest tests/local_tests/pipelines/test_gamecraft_pipeline_parity.py -v -s
+    DISABLE_SP=1 pytest tests/local_tests/gamecraft/test_gamecraft_pipeline_parity.py -v -s
 
 Notes:
     - This test requires the official Hunyuan-GameCraft-1.0 repo
