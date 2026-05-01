@@ -16,6 +16,7 @@ from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.distributed import (maybe_init_distributed_environment_and_model_parallel, get_world_group)
 from fastvideo.distributed.communication_op import (warmup_sequence_parallel_communication)
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.hooks.activation_trace import attach_activation_trace, detach_activation_trace
 from fastvideo.logger import init_logger
 from fastvideo.profiler import get_or_create_profiler
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
@@ -62,6 +63,7 @@ class ComposedPipelineBase(ABC):
         self.model_path: str = model_path
         self._stages: list[PipelineStage] = []
         self._stage_name_mapping: dict[str, PipelineStage] = {}
+        self._trace_mgr = None
 
         if required_config_modules is not None:
             self._required_config_modules = required_config_modules
@@ -182,6 +184,8 @@ class ComposedPipelineBase(ABC):
                     compile_kwargs=compile_kwargs,
                 )
                 logger.info("Torch Compile enabled for DiT")
+
+        self._trace_mgr = attach_activation_trace(self.modules.get("transformer"))
 
         if not self.fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")
@@ -455,3 +459,10 @@ class ComposedPipelineBase(ABC):
 
     def train(self) -> None:
         raise NotImplementedError("if training_mode is True, the pipeline must implement this method")
+
+    def close(self) -> None:
+        detach_activation_trace(getattr(self, "_trace_mgr", None))
+        self._trace_mgr = None
+
+    def __del__(self):
+        self.close()
