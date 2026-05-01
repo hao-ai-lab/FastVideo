@@ -1,26 +1,41 @@
 ---
 name: seed-ssim-references
-description: Seed HF reference videos for a single newly-added SSIM test. Runs the test on Modal L40S, downloads the generated mp4s via `modal volume get`, pauses for the user to eyeball quality, then uploads only that test's files to `FastVideo/ssim-reference-videos`. Use when a new `fastvideo/tests/ssim/test_*_similarity.py` has just been added and has no references on HF yet.
+description: Seed HF reference artefacts for a single newly-added SSIM test (pixel `.mp4` for `run_text_to_video_similarity_test`-style tests, or latent `.pt` for `run_text_to_latent_similarity_test`-style tests). Runs the test on Modal L40S, downloads the generated artefacts via `modal volume get`, pauses for the user to verify (visual eyeball for mp4, numerics dump for pt), then uploads only that test's files to `FastVideo/ssim-reference-videos`. Use when a new `fastvideo/tests/ssim/test_*_similarity.py` has just been added and has no references on HF yet.
 ---
 
-# Seed SSIM Reference Videos
+# Seed SSIM Reference Artefacts (mp4 or pt)
 
 ## Purpose
 
 A brand-new SSIM test in `fastvideo/tests/ssim/` fails forever until its
-reference videos exist on the HF dataset (`FastVideo/ssim-reference-videos`).
+reference artefacts exist on the HF dataset
+(`FastVideo/ssim-reference-videos`). The dataset hosts two kinds of artefacts
+side-by-side per `(model_id, backend, prompt)`:
+
+- **`.mp4`** — pixel ground-truth for tests that call
+  `run_text_to_video_similarity_test` / `run_image_to_video_similarity_test`
+  in `inference_similarity_utils.py`. Compared via SSIM.
+- **`.pt`** — pre-VAE latent bundle (fp16 full latent + fp32 slice +
+  metadata + `slice_spec` + `format_version`) for tests that call
+  `run_text_to_latent_similarity_test` in `latent_similarity_utils.py`.
+  Compared via cosine distance on the slice and the full tensor.
+
 This skill:
 
-1. Runs the test on Modal's L40S pool to generate the videos.
-2. Downloads them to the local repo via `modal volume get`.
-3. Pauses so the user can eyeball the mp4s and confirm quality.
-4. Uploads only the new test's files to HF, with a guard that refuses to
+1. Detects which artefact type the test produces (pixel vs latent).
+2. Runs the test on Modal's L40S pool to generate the artefacts.
+3. Downloads them to the local repo via `modal volume get`.
+4. Pauses so the user can verify quality:
+   - **mp4**: visual eyeball in a video player.
+   - **pt**: numerics dump (shape, slice stats, NaN/Inf check, metadata).
+5. Uploads only the new test's files to HF, with a guard that refuses to
    overwrite anything already present.
 
 The skill is run **manually**, once per new test. Before invoking it, the user
 has already sanity-tested the new test locally — it launches `VideoGenerator`
-and writes an mp4 without crashing. The skill does not re-test locally; it
-goes straight to Modal L40S (which is what CI uses).
+and writes an artefact without crashing (the missing-reference assertion at
+the end is expected). The skill does not re-test locally; it goes straight
+to Modal L40S (which is what CI uses).
 
 ## When to use
 
@@ -69,7 +84,7 @@ Fail fast if the token env var is missing.
 
 ## Steps
 
-### 1. Ask for the test file
+### 1. Ask for the test file, then detect artefact type
 
 If the user didn't name one, ask: *"Which SSIM test file do you want to seed
 references for? (e.g. `fastvideo/tests/ssim/test_ltx2_similarity.py`)"*.
@@ -79,6 +94,22 @@ Validate:
 - Path exists and matches `fastvideo/tests/ssim/test_*_similarity.py`.
 - File defines a `*_MODEL_TO_PARAMS` dict — grep it to extract the set of
   model ids. Those ids drive step 5.
+
+Detect artefact type by inspecting the file's imports / helper call:
+
+- **latent** (`.pt`) — file imports `run_text_to_latent_similarity_test`
+  from `fastvideo.tests.ssim.latent_similarity_utils` (or any other helper
+  that ends with `_latent_similarity_test`).
+- **pixel** (`.mp4`) — file imports
+  `run_text_to_video_similarity_test` / `run_image_to_video_similarity_test`
+  from `fastvideo.tests.ssim.inference_similarity_utils`, OR uses the
+  legacy custom-inline helper pattern (see `test_gamecraft`,
+  `test_longcat`, etc.). Default to pixel when both heuristics fail.
+
+Record `ARTEFACT_TYPE ∈ {pixel, latent}` for use in step 4. Steps 2, 3, 5,
+and 6 are artefact-type-agnostic — `_iter_reference_files`,
+`copy_generated_to_reference`, and `upload_reference_videos` already walk
+both `.mp4` and `.pt` (see `reference_videos_cli.py`).
 
 If either check fails, stop and tell the user what's wrong.
 
@@ -166,17 +197,59 @@ get` preserves that trailing `generated_videos/` segment.
 
 ### 4. PAUSE — user reviews quality
 
-Print the list of downloaded mp4s and their paths, then stop. Tell the user:
+Type-aware verification.
+
+**For `ARTEFACT_TYPE = pixel`** — list the downloaded mp4s and ask the user to
+open them in a video player:
 
 > "Generated videos downloaded to `./generated_videos_modal/default/generated_videos/L40S_reference_videos/`. Please open them and confirm the quality looks correct. Reply **`upload`** to continue, or anything else to abort."
+
+**For `ARTEFACT_TYPE = latent`** — `.pt` files are not human-watchable. Print
+a numerics dump for each `.pt` so the user can sanity-check shape, distribution,
+and metadata:
+
+```python
+import torch
+from pathlib import Path
+ROOT = Path("./generated_videos_modal/default/generated_videos/L40S_reference_videos")
+for p in sorted(ROOT.rglob("*.pt")):
+    d = torch.load(p, map_location="cpu", weights_only=False)
+    s = d["expected_slice"]
+    L = d["latent"].float()
+    print(f"=== {p.relative_to(ROOT)} ===")
+    print(f"  format_version: {d['format_version']}")
+    print(f"  shape:          {d['shape']}")
+    print(f"  dtype_original: {d['dtype_original']}")
+    print(f"  slice_spec:     {d['slice_spec']}")
+    print(f"  slice  shape={tuple(s.shape)}  mean={s.mean():+.4f}  std={s.std():.4f}  min={s.min():+.4f}  max={s.max():+.4f}")
+    print(f"  latent shape={tuple(L.shape)}  mean={L.mean():+.4f}  std={L.std():.4f}  min={L.min():+.4f}  max={L.max():+.4f}")
+    print(f"  finite: latent NaN={torch.isnan(L).any().item()} Inf={torch.isinf(L).any().item()}; "
+          f"slice NaN={torch.isnan(s).any().item()} Inf={torch.isinf(s).any().item()}")
+    print(f"  metadata: {d['metadata']}\n")
+```
+
+Sanity criteria:
+- `format_version == 1` (matches `LATENT_REFERENCE_FORMAT_VERSION`).
+- `shape` matches what the model produces (e.g. LTX-2 distilled =
+  `[1, 128, T_lat, H_lat, W_lat]`; Stable Audio Open 1.0 = `[1, 64, 1024]`).
+- `slice_spec.kind` matches a registered kind (`corner_3x3_first_frame`
+  for video, `audio_first_8_timesteps` for audio).
+- No `NaN`/`Inf`. `mean ≈ 0`, `std ≈ 1` (denoised latents stay close to
+  the initial Gaussian distribution; very wide deviations suggest
+  numerical drift).
+- `metadata.prompt` matches the test's prompt.
+
+Then ask:
+
+> "Numerics look right? Reply **`upload`** to continue, or anything else to abort."
 
 Do not proceed until the user explicitly says `upload`. If they abort, leave
 everything on disk so they can inspect further — no cleanup.
 
 ### 5. Copy into the local reference layout
 
-Scoped copy — only the new test's mp4s. Loop over each `<model_id>` extracted
-in step 1:
+Scoped copy — only the new test's artefacts. Single command works for both
+artefact types because `_iter_reference_files` walks `.mp4` and `.pt`:
 
 ```bash
 python fastvideo/tests/ssim/reference_videos_cli.py copy-local \
@@ -186,12 +259,13 @@ python fastvideo/tests/ssim/reference_videos_cli.py copy-local \
 ```
 
 (The `--generated-dir` points at the device-folder root inside the
-downloaded tree; `copy-local` walks all `<model>/<backend>/*.mp4`
+downloaded tree; `copy-local` walks all `<model>/<backend>/*.{mp4,pt}`
 underneath it. Since the Modal run was scoped to a single test file via
 `--test-files`, only that test's model(s) are present — so the copy is
 implicitly per-test.)
 
-Result: `fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos/<model_id>/<backend>/<prompt>.mp4`.
+Result for pixel: `fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos/<model_id>/<backend>/<prompt>.mp4`.
+Result for latent: same path with `.pt` extension.
 
 ### 6. Upload to HF — scoped per model_id, with overwrite guard
 
@@ -224,33 +298,54 @@ it will auto-download the refs they just uploaded.
 ## Failure modes and how to handle them
 
 - **`HF_API_KEY` unset.** Stop before step 2. The Modal run needs it (passed
-  via `--hf-api-key`), and step 6 needs it for upload.
-- **Modal run fails before generation.** No mp4s on the volume — nothing to
-  download. Fix the test locally (`pytest fastvideo/tests/ssim/<test_file>`)
+  via `--hf-api-key`), and step 6 needs it for upload. If the user
+  ran `hf auth login` instead of exporting an env var, read the cached
+  token via `huggingface_hub.get_token()` and forward it to Modal as
+  `--hf-api-key="$CACHED_TOKEN"`.
+- **Modal run fails before generation.** No artefacts on the volume — nothing
+  to download. Fix the test locally (`pytest fastvideo/tests/ssim/<test_file>`)
   and retry from step 2.
 - **`./generated_videos_modal/default/L40S_reference_videos/` missing after
-  `modal volume get`.** The run didn't produce videos (most likely the test
-  crashed before writing, or `REQUIRED_GPUS` exceeded the partition capacity
-  — see Modal logs).
+  `modal volume get`.** The run didn't produce artefacts (most likely the
+  test crashed before writing, or `REQUIRED_GPUS` exceeded the partition
+  capacity — see Modal logs).
+- **Latent test crashed with FSDP / inference_mode error
+  (`RuntimeError: Inference tensors do not track version counter`).** The
+  test must pass `init_kwargs_override={"use_fsdp_inference": False}` when
+  `sp_size == 1` — see `test_stable_audio_similarity.py` for the pattern.
+  Fix in the test, push, retry.
 - **Upload guard fires (files already exist).** The test name / model id
   collides with something already on HF. Verify the user actually wants to
   replace existing refs; if so, re-run the upload with `--force`. If not,
   rename the model id in `*_MODEL_TO_PARAMS` and re-seed.
-- **Quality looks wrong in step 4.** Abort. The mp4s stay on disk for
+- **Quality looks wrong in step 4.** Abort. The artefacts stay on disk for
   inspection. The fix is usually in the test's params (resolution, steps,
   seed) — edit the test, then re-run the skill.
+  - For latent: also check `slice_spec.kind` matches the latent rank
+    (`corner_3x3_first_frame` requires 5-D, `audio_first_8_timesteps`
+    requires 3-D); a rank/kind mismatch raises in `_extract_expected_slice`.
 
 ## Design notes (for future skill maintainers)
 
 - The skill deliberately runs on Modal, **not** locally, because the CI
   runner is L40S. Seeding from a different GPU SKU produces refs that CI's
-  L40S runs can't match (SSIM drifts across SKUs).
+  L40S runs can't match (pixel SSIM drifts across SKUs; latent cosine has
+  tighter cross-SKU bf16 drift but the configured tolerances assume
+  same-SKU seed → same-SKU verify).
 - The skill is default-tier only. `full_quality` refs are seeded by a
   separate, deliberate operation — they double runtime and aren't what CI
   gates on.
 - The overwrite guard in `reference_videos_cli.py upload` is default-on
   specifically because this skill exists. Re-seeding is a distinct operation
   that requires explicit `--force`.
+- Both artefact types share the same Modal flow: the orchestrator sets
+  `--skip-reference-download` + `--no-fail-fast`, runs pytest, the test's
+  helper writes the artefact (`.mp4` via `imageio` for pixel,
+  `save_latent_reference` → `torch.save` for latent) BEFORE the
+  missing-reference assertion raises. `_sync_generated_videos_to_volume` in
+  `ssim_test.py` does a `shutil.copytree` of the whole `generated_videos/`
+  tree, picking up `.mp4`, `.pt`, and the `*_ssim.json` / `*_latent.json`
+  metric files alongside.
 
 ## References
 
@@ -259,10 +354,17 @@ it will auto-download the refs they just uploaded.
   `--skip-reference-download`, `--no-fail-fast`.
 - `fastvideo/tests/ssim/reference_videos_cli.py` — `copy-local`, `upload`
   (with `--model-id`, `--force`), `download`, `ensure` subcommands.
+  Extension allowlist is `REFERENCE_EXTENSIONS = VIDEO_EXTENSIONS +
+  LATENT_EXTENSIONS` (`.pt`).
 - `fastvideo/tests/ssim/README.md` — reference layout, HF repo conventions.
-- `fastvideo/tests/ssim/inference_similarity_utils.py` —
-  `run_text_to_video_similarity_test` + `_build_init_kwargs`: what each test
-  config passes to `VideoGenerator.from_pretrained`.
+- `fastvideo/tests/ssim/inference_similarity_utils.py` — pixel helpers
+  (`run_text_to_video_similarity_test`,
+  `run_image_to_video_similarity_test`, `build_init_kwargs`).
+- `fastvideo/tests/ssim/latent_similarity_utils.py` — latent helper
+  (`run_text_to_latent_similarity_test`), slice spec dispatch
+  (`_extract_expected_slice`), reference schema
+  (`save_latent_reference` / `load_latent_reference`),
+  `LATENT_REFERENCE_FORMAT_VERSION`.
 
 ## Changelog
 
@@ -271,3 +373,4 @@ it will auto-download the refs they just uploaded.
 | 2026-04-17 | Initial version (Modal sync-to-volume flow). |
 | 2026-04-21 | Rewrite: single-test scope, explicit user-review pause, per-`model_id` upload, HF overwrite guard. Dropped `scripts/seed_ssim.sh`. |
 | 2026-04-21 | Post-first-run fixes: `modal volume get` needs `--force` when parent exists; download tree has an extra `generated_videos/` level so `--generated-dir` must reflect it. |
+| 2026-05-01 | Latent (`*.pt`) artefact support: artefact-type detection in step 1, type-aware verification (visual eyeball for mp4, numerics dump for pt) in step 4, FSDP+inference_mode failure-mode added, design notes for the unified Modal flow. Triggered by PR #1253 (LTX-2 latent migration + Stable Audio latent test). |

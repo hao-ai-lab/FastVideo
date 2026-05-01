@@ -485,6 +485,10 @@ def _prepare_ssim_workspace(
     ./build.sh
     cd ..
     uv pip install git+https://github.com/microsoft/MoGe.git
+    # Stable Audio Open 1.0 inference deps (optional in basic install,
+    # required by `StableAudioDenoisingStage`; consumed by
+    # `test_stable_audio_similarity.py`).
+    uv pip install k_diffusion einops_exts alias_free_torch torchsde
     export HF_HOME='/root/data/.cache'
     hf auth login --token "$HF_API_KEY"
     """
