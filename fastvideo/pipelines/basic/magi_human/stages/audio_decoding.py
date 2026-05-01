@@ -10,7 +10,7 @@ daVinci-MagiHuman/inference/pipeline/video_generate.py:503):
     latent_audio.squeeze(0)                 # (L, C_latent)
     audio = self.audio_vae.decode(latent_audio.T)   # (1, audio_ch, samples)
     audio = audio.squeeze(0).T.cpu().numpy()        # (samples, audio_ch)
-    audio = resample_audio_sinc(audio, 441/512)     # model-specific time stretch
+    audio = resample_audio_sinc(audio, _UPSTREAM_AUDIO_TIME_STRETCH)
 
 The stage stores the resampled waveform on `batch.extra["audio"]`
 (shape `[samples, audio_channels]`) and the sample rate on
@@ -27,6 +27,15 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
+
+# 441/512 is daVinci-MagiHuman's audio time-stretch ratio that aligns
+# the 44.1 kHz Stable-Audio output with the 25-fps video frame rate.
+# See daVinci-MagiHuman/inference/pipeline/video_generate.py:516.
+_UPSTREAM_AUDIO_TIME_STRETCH = 441.0 / 512.0
+
+# Stable Audio Open 1.0 native sample rate (per stabilityai/stable-audio-open-1.0
+# model card and fastvideo/configs/models/vaes/oobleck.py::OobleckVAEArchConfig.sampling_rate).
+_SA_AUDIO_OPEN_SAMPLE_RATE = 44100
 
 
 def _resample_sinc(audio: np.ndarray, time_stretching: float) -> np.ndarray:
@@ -64,7 +73,7 @@ class MagiHumanAudioDecodingStage(PipelineStage):
     def __init__(
         self,
         audio_vae,
-        time_stretching: float = 441.0 / 512.0,
+        time_stretching: float = _UPSTREAM_AUDIO_TIME_STRETCH,
     ) -> None:
         super().__init__()
         self.audio_vae = audio_vae
@@ -93,9 +102,6 @@ class MagiHumanAudioDecodingStage(PipelineStage):
         # Decode: [B, C_latent, L] -> [B, audio_channels, samples]
         audio_out = self.audio_vae.decode(latent_bcl)
 
-        # Match upstream: squeeze batch, transpose to [samples, C],
-        # numpy, then resample by 441/512 (upstream time-stretch that
-        # aligns audio playback rate with the video frame rate).
         audio_np = audio_out.squeeze(0).T.float().cpu().numpy()
         audio_np = _resample_sinc(audio_np, self.time_stretching)
 
@@ -104,5 +110,5 @@ class MagiHumanAudioDecodingStage(PipelineStage):
         if batch.extra is None:
             batch.extra = {}
         batch.extra["audio"] = audio_np
-        batch.extra["audio_sample_rate"] = int(getattr(self.audio_vae, "sampling_rate", 44100))
+        batch.extra["audio_sample_rate"] = int(getattr(self.audio_vae, "sampling_rate", _SA_AUDIO_OPEN_SAMPLE_RATE))
         return batch
