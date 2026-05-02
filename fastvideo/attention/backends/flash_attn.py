@@ -38,10 +38,7 @@ class FlashAttentionBackend(AttentionBackend):
 
     @staticmethod
     def get_supported_head_sizes() -> list[int]:
-        # FA's actual contract is `head_size <= 256 and head_size % 8 == 0`
-        # (see flash_api.cpp TORCH_CHECK + HEADDIM_SWITCH); intermediate
-        # sizes like 80, 144 dispatch to the next kernel via internal padding.
-        return list(range(8, 257, 8))
+        return [32, 64, 96, 128, 160, 192, 224, 256]
 
     @staticmethod
     def get_name() -> str:
