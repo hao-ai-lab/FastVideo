@@ -137,15 +137,28 @@ non-existent `model_id` or there are no refs yet (in which case
 
 ### 3. Regenerate on Modal L40S
 
-Identical Modal launch to `seed-ssim-references`, with one important
-difference: **do not pass `--skip-reference-download`**. Letting the test
-fetch the existing refs and run the full SSIM compare gives "before" SSIM
-numbers for the PR description, and the test still produces the new mp4s
-regardless of whether the comparison passes or fails.
+Mirror CI's exact env recipe so the regenerated refs are byte-comparable to
+what CI will produce on the same commit. Two differences from CI:
+
+1. **Pass the same env prefix CI uses** (`IMAGE_VERSION`, `BUILDKITE_*`) — see
+   `.buildkite/pipeline.yml:1-3` and `.buildkite/scripts/pr_test.sh:62-83`.
+   Without this, `ssim_test.py:17-18` resolves a different GHCR image tag
+   (default is `latest`, CI is `py3.12-latest`), and `ssim_test.py:38-46`
+   bakes different values into the image's frozen env block. **Mismatched
+   image or env is the most common source of SSIM drift between reseed and
+   CI runs.**
+2. **Do not pass `--skip-reference-download`**. Letting the test fetch the
+   existing refs and run the full SSIM compare gives "before" SSIM numbers
+   for the PR description, and the test still produces the new mp4s
+   regardless of whether the comparison passes or fails.
 
 ```bash
 SUBDIR="${TIMESTAMP}_${SHORT_COMMIT}"
 
+IMAGE_VERSION="py3.12-latest" \
+BUILDKITE_REPO="$(git config --get remote.origin.url)" \
+BUILDKITE_COMMIT="$(git rev-parse HEAD)" \
+BUILDKITE_PULL_REQUEST="${BUILDKITE_PULL_REQUEST:-false}" \
 modal run fastvideo/tests/modal/ssim_test.py \
     --git-repo="$(git config --get remote.origin.url)" \
     --git-commit="$(git rev-parse HEAD)" \
