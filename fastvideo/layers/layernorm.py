@@ -5,6 +5,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed.tensor import DTensor
 
 from fastvideo.layers.custom_op import CustomOp
 
@@ -76,7 +77,10 @@ class RMSNorm(CustomOp):
         x = x * torch.rsqrt(variance + self.variance_epsilon)
         x = x.to(orig_dtype)
         if self.has_weight:
-            x = x * self.weight
+            # TODO(wenxuan): When using CPU offload, FSDP has a bug that
+            # doesn't unwrap DTensor in final_layer_norm. Report this
+            weight = self.weight.to_local().to(x.device) if isinstance(self.weight, DTensor) else self.weight
+            x = x * weight
         if residual is None:
             return x
         else:

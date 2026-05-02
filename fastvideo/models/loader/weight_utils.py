@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/model_loader/weight_utils.py
 """Utilities for downloading and initializing model weights."""
+import glob
 import hashlib
 import json
 import os
@@ -11,11 +12,27 @@ from pathlib import Path
 import filelock
 import huggingface_hub.constants
 import torch
+import torch.distributed as dist
 from safetensors.torch import safe_open
 from tqdm.auto import tqdm
 
-from fastvideo.distributed import get_local_torch_device
+from fastvideo.distributed.parallel_state import get_node_group
 from fastvideo.logger import init_logger
+
+SAFETENSORS_TO_TORCH_DTYPE = {
+    'F16': torch.float16,
+    'BF16': torch.bfloat16,
+    'F32': torch.float32,
+    'F64': torch.float64,
+    'I8': torch.int8,
+    'I16': torch.int16,
+    'I32': torch.int32,
+    'I64': torch.int64,
+    'U8': torch.uint8,
+    'BOOL': torch.bool,
+    'F8_E4M3': torch.float8_e4m3fn,
+    'F8_E5M2': torch.float8_e5m2,
+}
 
 logger = init_logger(__name__)
 
@@ -89,6 +106,24 @@ def filter_duplicate_safetensors_files(hf_weights_files: list[str],
     return hf_weights_files
 
 
+SAFE_WEIGHTS_INDEX_NAME = "model.safetensors.index.json"
+
+
+def resolve_safetensors_files(model_path: str) -> list[str]:
+    """Discover safetensors files in a model directory."""
+    files = sorted(
+        glob.glob(os.path.join(model_path, "*.safetensors")))
+    if not files:
+        raise FileNotFoundError(
+            f"No .safetensors files found in {model_path}")
+    index_file = os.path.join(
+        model_path, SAFE_WEIGHTS_INDEX_NAME)
+    if os.path.exists(index_file):
+        files = filter_duplicate_safetensors_files(
+            files, model_path, SAFE_WEIGHTS_INDEX_NAME)
+    return files
+
+
 def filter_files_not_needed_for_inference(
         hf_weights_files: list[str]) -> list[str]:
     """
@@ -119,12 +154,24 @@ _BAR_FORMAT = "{desc}: {percentage:3.0f}% Completed | {n_fmt}/{total_fmt} [{elap
 
 def safetensors_weights_iterator(
     hf_weights_files: list[str],
-    to_cpu: bool = True,
+    to_cpu: bool = False,
+    async_broadcast: bool = False
 ) -> Generator[tuple[str, torch.Tensor], None, None]:
-    """Iterate over the weights in the model safetensor files."""
-    enable_tqdm = not torch.distributed.is_initialized(
-    ) or torch.distributed.get_rank() == 0
-    device = "cpu" if to_cpu else str(get_local_torch_device())
+    """Iterate over the weights in the model safetensor files.
+    Args:
+        hf_weights_files: List of safetensor files to load.
+        to_cpu: Whether to load the weights to CPU. If False, will load to the GPU device bound to the current process.
+        async_broadcast: Whether to overlap loading from disk and broadcasting to other ranks. If True,
+            must iterate over all the weights before use. Only use if to_cpu is False.
+    """
+    node_group = get_node_group()
+    local_rank = node_group.local_rank
+    device = f"cuda:{local_rank}" if not to_cpu else "cpu"
+    enable_tqdm = not torch.distributed.is_initialized() or local_rank == 0
+    assert not (async_broadcast
+                and to_cpu), "Cannot broadcast weights when loading to CPU"
+
+    handles = []
     for st_file in tqdm(
             hf_weights_files,
             desc="Loading safetensors checkpoint shards",
@@ -133,18 +180,48 @@ def safetensors_weights_iterator(
     ):
         with safe_open(st_file, framework="pt", device=device) as f:
             for name in f.keys():  # noqa: SIM118
-                param = f.get_tensor(name)
+                if to_cpu:
+                    param = f.get_tensor(name)
+                else:
+                    if local_rank == 0:
+                        param = f.get_tensor(name)
+                    else:
+                        sl = f.get_slice(name)
+                        shape = sl.get_shape()
+                        dtype = SAFETENSORS_TO_TORCH_DTYPE[sl.get_dtype()]
+                        param = torch.empty(shape, device=device, dtype=dtype)
+                    # broadcast to local ranks
+                    # TODO(Wenxuan): scatter instead of broadcast
+                    if node_group.world_size > 1:
+                        group = node_group.device_group
+                        if async_broadcast:
+                            handle = dist.broadcast(param,
+                                                    src=dist.get_global_rank(
+                                                        group, 0),
+                                                    async_op=True,
+                                                    group=group)
+                            handles.append(handle)
+                        else:
+                            dist.broadcast(param,
+                                           src=dist.get_global_rank(group, 0),
+                                           group=group)
                 yield name, param
+
+        if async_broadcast:
+            for handle in handles:
+                handle.wait()
+            handles.clear()
 
 
 def pt_weights_iterator(
     hf_weights_files: list[str],
-    to_cpu: bool = True,
+    to_cpu: bool = True  # default to CPU for text encoder
 ) -> Generator[tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model bin/pt files."""
-    device = "cpu" if to_cpu else str(get_local_torch_device())
-    enable_tqdm = not torch.distributed.is_initialized(
-    ) or torch.distributed.get_rank() == 0
+    node_group = get_node_group()
+    local_rank = node_group.local_rank
+    device = f"cuda:{local_rank}" if not to_cpu else "cpu"
+    enable_tqdm = not torch.distributed.is_initialized() or local_rank == 0
     for bin_file in tqdm(
             hf_weights_files,
             desc="Loading pt checkpoint shards",
