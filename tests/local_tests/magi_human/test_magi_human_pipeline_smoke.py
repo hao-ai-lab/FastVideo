@@ -41,16 +41,29 @@ def test_magi_human_typed_surface_preflight() -> None:
         T5GemmaEncoderConfig,
     )
     from fastvideo.models.dits.magi_human import MagiHumanDiT
-    from fastvideo.pipelines.basic.magi_human.magi_human_pipeline import MagiHumanPipeline  # noqa: F401
-    from fastvideo.pipelines.basic.magi_human.pipeline_configs import MagiHumanBaseConfig
+    from fastvideo.pipelines.basic.magi_human.magi_human_pipeline import (  # noqa: F401
+        MagiHumanI2VPipeline,
+        MagiHumanPipeline,
+    )
+    from fastvideo.pipelines.basic.magi_human.pipeline_configs import (
+        MagiHumanBaseConfig,
+        MagiHumanBaseI2VConfig,
+        MagiHumanDistillI2VConfig,
+    )
     from fastvideo.pipelines.basic.magi_human.stages import (  # noqa: F401
         MagiHumanDenoisingStage,
         MagiHumanLatentPreparationStage,
+        MagiHumanReferenceImageStage,
     )
 
     # Presets are registered under the expected family.
     names = {p.name for p in get_presets_for_family("magi_human")}
-    assert names == {"magi_human_base", "magi_human_distill"}
+    assert names == {
+        "magi_human_base",
+        "magi_human_distill",
+        "magi_human_base_ti2v",
+        "magi_human_distill_ti2v",
+    }
 
     base_preset = get_preset("magi_human_base", "magi_human")
     assert base_preset.workload_type == "t2v"
@@ -62,12 +75,31 @@ def test_magi_human_typed_surface_preflight() -> None:
     assert distill_preset.defaults["num_inference_steps"] == 8
     assert distill_preset.defaults["guidance_scale"] == 1.0
 
+    base_ti2v_preset = get_preset("magi_human_base_ti2v", "magi_human")
+    assert base_ti2v_preset.workload_type == "i2v"
+    assert base_ti2v_preset.defaults["num_inference_steps"] == 32
+
+    distill_ti2v_preset = get_preset("magi_human_distill_ti2v", "magi_human")
+    assert distill_ti2v_preset.workload_type == "i2v"
+    assert distill_ti2v_preset.defaults["num_inference_steps"] == 8
+
     # Distill pipeline config: same arch as base, CFG=1, 8 steps.
     from fastvideo.pipelines.basic.magi_human.pipeline_configs import MagiHumanDistillConfig
     distill_pc = MagiHumanDistillConfig()
     assert distill_pc.num_inference_steps == 8
     assert distill_pc.cfg_number == 1
     assert distill_pc.dit_config.arch_config.num_layers == 40
+
+    base_i2v_pc = MagiHumanBaseI2VConfig()
+    assert base_i2v_pc.image_conditioning is True
+    assert base_i2v_pc.vae_config.load_encoder is True
+    assert base_i2v_pc.vae_config.load_decoder is True
+
+    distill_i2v_pc = MagiHumanDistillI2VConfig()
+    assert distill_i2v_pc.num_inference_steps == 8
+    assert distill_i2v_pc.cfg_number == 1
+    assert distill_i2v_pc.image_conditioning is True
+    assert distill_i2v_pc.vae_config.load_encoder is True
 
     # Config constructs with the documented defaults.
     pc = MagiHumanBaseConfig()

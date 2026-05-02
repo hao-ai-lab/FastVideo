@@ -159,6 +159,12 @@ class MagiHumanLatentPreparationStage(PipelineStage):
             device=device,
             dtype=torch.float32,
         )
+        image_latent = getattr(batch, "image_latent", None)
+        if image_latent is not None:
+            video_latent[:, :, :1] = image_latent.to(
+                device=video_latent.device,
+                dtype=video_latent.dtype,
+            )[:, :, :1]
         # Audio latent: [1, num_frames, audio_in_channels]
         audio_latent = torch.randn(
             (1, num_frames, self.audio_in_channels),

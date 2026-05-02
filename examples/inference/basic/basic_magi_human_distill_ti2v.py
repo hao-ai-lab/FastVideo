@@ -1,23 +1,34 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stub example for daVinci-MagiHuman DMD-2 distilled TI2V — NOT YET PORTED.
+"""Minimal daVinci-MagiHuman DMD-2 distilled text+image-to-AV example."""
+from fastvideo import VideoGenerator
+from fastvideo.pipelines.basic.magi_human.pipeline_configs import (
+    MagiHumanDistillI2VConfig,
+)
 
-Mirrors upstream `daVinci-MagiHuman/example/distill/run_TI2V.sh`. Same arch
-as `magi_human_distill` (8 steps, no CFG, ~30 GB bf16 weights) but in
-TI2V mode — see `basic_magi_human_ti2v.py` for the missing pipeline-side
-work that applies to both base and distill TI2V variants.
-"""
-import sys
+
+PROMPT = (
+    "A cheerful saxophonist performs a short line with expressive facial "
+    "motion, natural head movement, and synchronized audio in a small jazz club."
+)
+IMAGE_PATH = "assets/images/saxophonist.jpg"
 
 
 def main() -> None:
-    raise NotImplementedError(
-        "MagiHuman distilled TI2V is not yet ported. See "
-        "`basic_magi_human_ti2v.py` for the required image-conditioning "
-        "pipeline work and `tests/local_tests/magi-human.md` for the "
-        "port-status journal.",
+    generator = VideoGenerator.from_pretrained(
+        "converted_weights/magi_human_distill",
+        num_gpus=1,
+        workload_type="i2v",
+        override_pipeline_cls_name="MagiHumanI2VPipeline",
+        pipeline_config=MagiHumanDistillI2VConfig(),
     )
+    generator.generate_video(
+        prompt=PROMPT,
+        image_path=IMAGE_PATH,
+        output_path="outputs_video/magi_human_distill_ti2v/output_magi_human_distill_ti2v.mp4",
+        save_video=True,
+    )
+    generator.shutdown()
 
 
 if __name__ == "__main__":
     main()
-    sys.exit(0)

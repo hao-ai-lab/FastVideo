@@ -58,6 +58,18 @@ def _dit_forward(
     )
 
 
+def _overwrite_first_frame(
+    video_latent: torch.Tensor,
+    image_latent: torch.Tensor | None,
+) -> torch.Tensor:
+    if image_latent is not None:
+        video_latent[:, :, :1] = image_latent.to(
+            device=video_latent.device,
+            dtype=video_latent.dtype,
+        )[:, :, :1]
+    return video_latent
+
+
 class MagiHumanDenoisingStage(PipelineStage):
     """UniPC-flow joint denoising with CFG=2 over (video, audio) latents."""
 
@@ -119,6 +131,7 @@ class MagiHumanDenoisingStage(PipelineStage):
 
         video_latent = batch.latents
         audio_latent = batch.audio_latents
+        image_latent = getattr(batch, "image_latent", None)
 
         # Expect [1, L, 3584] text embeds plus a list of original lengths.
         txt_feat = batch.prompt_embeds[0]
@@ -137,19 +150,19 @@ class MagiHumanDenoisingStage(PipelineStage):
 
         audio_feat_len = int(audio_latent.shape[1])
 
-        # Precompute step-invariant packed inputs (video+audio tokens, coords,
-        # modality map). Text varies per cond/uncond call so it is assembled
-        # inside _dit_forward via assemble_packed_inputs.
-        static_packed = build_static_packed_inputs(
-            video_latent=video_latent,
-            audio_latent=audio_latent,
-            audio_feat_len=audio_feat_len,
-            patch_size=self.patch_size,
-            coords_style=self.coords_style,
-        )
-
         disable_tqdm = not getattr(fastvideo_args, "log_level_progress", True)
         for idx, t in enumerate(tqdm(timesteps, disable=disable_tqdm)):
+            video_latent = _overwrite_first_frame(video_latent, image_latent)
+            # Precompute packed video+audio tokens after any TI2V first-frame
+            # overwrite. Text varies per cond/uncond call and is attached in
+            # _dit_forward via assemble_packed_inputs.
+            static_packed = build_static_packed_inputs(
+                video_latent=video_latent,
+                audio_latent=audio_latent,
+                audio_feat_len=audio_feat_len,
+                patch_size=self.patch_size,
+                coords_style=self.coords_style,
+            )
             with trace_step(idx), set_forward_context(
                     current_timestep=int(t.item()) if torch.is_tensor(t) else int(t),
                     attn_metadata=None,
@@ -208,14 +221,7 @@ class MagiHumanDenoisingStage(PipelineStage):
                 return_dict=False,
             )[0]
 
-            static_packed = build_static_packed_inputs(
-                video_latent=video_latent,
-                audio_latent=audio_latent,
-                audio_feat_len=audio_feat_len,
-                patch_size=self.patch_size,
-                coords_style=self.coords_style,
-            )
-
+        video_latent = _overwrite_first_frame(video_latent, image_latent)
         batch.latents = video_latent
         batch.audio_latents = audio_latent
         return batch
