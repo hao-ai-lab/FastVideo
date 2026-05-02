@@ -128,7 +128,7 @@ class CLIPFeatureExtractor(BaseFeatureExtractor):
 
     def __init__(self, device: str = 'cuda', model_name: str = "openai/clip-vit-base-patch32"):
         if not TRANSFORMERS_AVAILABLE:
-            raise ImportError("Please install transformers: pip install transformers")
+            raise ImportError("Please install transformers: uv pip install transformers")
         super().__init__(device)
         self.processor = CLIPProcessor.from_pretrained(model_name)
         self.model = CLIPModel.from_pretrained(model_name).to(self.device)
@@ -171,7 +171,7 @@ class VideoMAEFeatureExtractor(BaseFeatureExtractor):
 
     def __init__(self, device: str = 'cuda', model_name: str = "MCG-NJU/videomae-base"):
         if not TRANSFORMERS_AVAILABLE:
-            raise ImportError("Please install transformers: pip install transformers")
+            raise ImportError("Please install transformers: uv pip install transformers")
         super().__init__(device)
         self.model = VideoMAEModel.from_pretrained(model_name).to(self.device)
         self.model.eval()

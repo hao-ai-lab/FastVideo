@@ -158,7 +158,7 @@ def _load_hf_sdk():
         from huggingface_hub import HfApi, snapshot_download
     except ImportError as exc:
         raise RuntimeError(
-            "huggingface_hub is required for download/upload.\nInstall with: pip install huggingface_hub"
+            "huggingface_hub is required for download/upload.\nInstall with: uv pip install huggingface_hub"
         ) from exc
     return HfApi, snapshot_download
 

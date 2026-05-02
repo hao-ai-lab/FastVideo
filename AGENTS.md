@@ -11,7 +11,7 @@
 - Static assets: `assets/` (including `assets/images/`, `assets/videos/`, and `assets/prompts/`) and `comfyui/assets/`.
 
 ## Build, Test, and Development Commands
-- `uv pip install -e .[dev]`: editable install with lint/test extras.
+- `uv pip install -e ".[dev]"`: editable install with lint/test extras.
 - `pre-commit install --hook-type pre-commit --hook-type commit-msg`: enable local hooks.
 - `pre-commit run --all-files`: run formatter/lint/type/spelling checks.
 - `pytest tests/`: run top-level test suite.

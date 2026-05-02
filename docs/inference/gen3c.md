@@ -19,7 +19,7 @@
 - Install MoGe:
 
 ```bash
-pip install git+https://github.com/microsoft/MoGe.git
+uv pip install git+https://github.com/microsoft/MoGe.git
 ```
 
 - If you hit `ImportError: libGL.so.1` (common on Ubuntu/headless nodes), you can try installing OpenCV runtime libs:

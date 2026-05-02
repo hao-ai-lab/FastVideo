@@ -13,8 +13,13 @@ log "Project root: $PROJECT_ROOT"
 
 if ! python3 -m pre_commit --version &> /dev/null; then
     log "pre-commit not found, installing..."
-    python3 -m pip install --user pre-commit==4.0.1
-    
+    if ! command -v uv &> /dev/null; then
+        log "uv not found, bootstrapping..."
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        export PATH="$HOME/.local/bin:$PATH"
+    fi
+    uv pip install --system pre-commit==4.0.1
+
     if ! python3 -m pre_commit --version &> /dev/null; then
         log "Error: Failed to install pre-commit."
         exit 1

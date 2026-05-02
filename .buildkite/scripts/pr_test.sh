@@ -15,8 +15,13 @@ log "Project root: $PROJECT_ROOT"
 # Install Modal if not available
 if ! python3 -m modal --version &> /dev/null; then
     log "Modal not found, installing..."
-    python3 -m pip install modal
-    
+    if ! command -v uv &> /dev/null; then
+        log "uv not found, bootstrapping..."
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        export PATH="$HOME/.local/bin:$PATH"
+    fi
+    uv pip install --system modal
+
     # Verify installation
     if ! python3 -m modal --version &> /dev/null; then
         log "Error: Failed to install modal. Please install it manually."
