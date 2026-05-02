@@ -75,15 +75,22 @@ def _pad_or_trim_dim1(t: torch.Tensor, target: int) -> tuple[torch.Tensor, int]:
 
 
 def _img2tokens(x_t: torch.Tensor, t_patch: int, patch: int) -> torch.Tensor:
-    """Pack a video latent [B, C, T, H, W] -> [B, L, C * t_patch * patch^2]."""
+    """Pack a video latent [B, C, T, H, W] -> [B, L, C * t_patch * patch^2].
+
+    Per-token feature ordering is channel-major ``(C pT pH pW)``: the DiT's
+    ``video_embedder`` weight was trained on the layout produced by
+    upstream's grouped-conv ``UnfoldNd`` packer (channel slowest, patch
+    elements fastest). Spatial-major ``(pT pH pW C)`` silently permutes the
+    in-features and produces noise output. Asymmetric with
+    ``unpack_tokens`` which uses ``(pT pH pW C)`` to match
+    ``final_linear_video``'s trained output layout.
+    """
     B, C, T, H, W = x_t.shape
     assert T % t_patch == 0 and H % patch == 0 and W % patch == 0, (
         f"Latent dims {T,H,W} must divide ({t_patch}, {patch}, {patch})")
-    # Rearrange so each (t_patch, patch, patch) block becomes one token with
-    # concatenated channels — mirrors the reference `UnfoldNd(stride=kernel)`.
     return rearrange(
         x_t,
-        "B C (T pT) (H pH) (W pW) -> B (T H W) (pT pH pW C)",
+        "B C (T pT) (H pH) (W pW) -> B (T H W) (C pT pH pW)",
         pT=t_patch,
         pH=patch,
         pW=patch,
