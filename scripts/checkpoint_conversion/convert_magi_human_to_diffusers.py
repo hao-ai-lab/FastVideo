@@ -156,7 +156,21 @@ def _load_all_shards(
     """
     # Tensors that must stay in float32 regardless of cast_bf16. These are
     # the dtypes that appear as fp32 in the BASE checkpoint, which is the
-    # ground-truth shape of a "runtime-loadable" MagiHuman repo.
+    # ground-truth shape of a "runtime-loadable" MagiHuman repo. The list
+    # includes:
+    #   - all RMSNorm weights (norms always run fp32 in upstream
+    #     MultiModalityRMSNorm and FV's mirror)
+    #   - the rope band buffer
+    #   - the adapter embedders (video/text/audio: weight + bias) which
+    #     upstream's Adapter declares as `dtype=torch.float32` and FV's
+    #     MagiAdapter mirrors at `magi_human.py:519-527`
+    #   - the final_linear_{video,audio} heads which upstream/FV both
+    #     declare as `dtype=torch.float32` (`magi_human.py:645-648`,
+    #     `dit_module.py:896-900`)
+    # Forgetting any of these makes `--cast-bf16` lossy for the distill
+    # checkpoint (which ships everything as fp32) and produces parity
+    # drift vs upstream that base does not exhibit (because base already
+    # ships with the right mixed-dtype layout).
     _FP32_KEEP_SUFFIXES = (
         ".pre_norm.weight",
         ".q_norm.weight",
@@ -165,6 +179,14 @@ def _load_all_shards(
         ".mlp_post_norm.weight",
         "final_norm_video.weight",
         "final_norm_audio.weight",
+        "final_linear_video.weight",
+        "final_linear_audio.weight",
+        "adapter.video_embedder.weight",
+        "adapter.video_embedder.bias",
+        "adapter.text_embedder.weight",
+        "adapter.text_embedder.bias",
+        "adapter.audio_embedder.weight",
+        "adapter.audio_embedder.bias",
         "adapter.rope.bands",
     )
     _FP32_KEEP_FULL = {"adapter.rope.bands"}
