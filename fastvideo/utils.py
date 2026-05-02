@@ -567,19 +567,38 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
         raise ValueError(f"Model directory {model_path} does not contain model_index.json. "
                          "Only Hugging Face diffusers format is supported.")
 
-    # Check for transformer and vae directories
-    transformer_dir = os.path.join(model_path, "transformer")
-    vae_dir = os.path.join(model_path, "vae")
+    # Load the config first so directory checks below can be conditional
+    # on what model_index.json actually declares.
+    with open(config_path) as f:
+        config = json.load(f)
 
+    # transformer/ is mandatory for every supported pipeline; the variant-
+    # specific DiT weights live there.
+    transformer_dir = os.path.join(model_path, "transformer")
     if not os.path.exists(transformer_dir):
         raise ValueError(f"Model directory {model_path} does not contain a transformer/ directory.")
 
-    if not os.path.exists(vae_dir):
-        raise ValueError(f"Model directory {model_path} does not contain a vae/ directory.")
-
-    # Load the config
-    with open(config_path) as f:
-        config = json.load(f)
+    # Other components (vae, text_encoder, audio_vae, tokenizer, ...) are
+    # only required to live in a local subfolder if model_index.json
+    # actually lists them. Pipelines that lazy-load shared components
+    # from upstream HF repos (e.g. MagiHuman lazy-loading the Wan VAE,
+    # T5-Gemma, Stable Audio) emit a model_index.json that omits those
+    # keys, and the pipeline subclass handles the load at module-build
+    # time. Enforce only the "declared but missing" mismatch.
+    _OPTIONAL_COMPONENT_DIRS = (
+        "vae",
+        "text_encoder",
+        "tokenizer",
+        "audio_vae",
+        "scheduler",
+        "image_encoder",
+    )
+    for key in _OPTIONAL_COMPONENT_DIRS:
+        if key in config:
+            subdir = os.path.join(model_path, key)
+            if not os.path.exists(subdir):
+                raise ValueError(f"Model directory {model_path} declares `{key}` in "
+                                 f"model_index.json but is missing the {key}/ subfolder.")
 
     # Verify diffusers version exists
     if "_diffusers_version" not in config:
