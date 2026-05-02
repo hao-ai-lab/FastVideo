@@ -119,7 +119,7 @@ FastVideo-WorldModel/
 ## Build & Test Commands
 
 ```bash
-uv pip install -e .[dev]                          # Editable install
+uv pip install -e ".[dev]"                        # Editable install
 pre-commit run --all-files                        # Lint/format/spell
 pytest tests/                                     # Top-level tests
 pytest fastvideo/tests/ -v                        # Package tests

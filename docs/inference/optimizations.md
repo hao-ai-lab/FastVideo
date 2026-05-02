@@ -54,7 +54,7 @@ FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN python example.py
 We recommend always installing [Flash Attention 2](https://github.com/Dao-AILab/flash-attention):
 
 ```bash
-pip install flash-attn==2.7.4.post1 --no-build-isolation
+uv pip install flash-attn==2.7.4.post1 --no-build-isolation
 ```
 
 And if using a Hopper+ GPU (ie H100), installing [Flash Attention 3](https://github.com/Dao-AILab/flash-attention?tab=readme-ov-file#flashattention-3-beta-release) by compiling it from source (takes about 10 minutes for me):
@@ -63,7 +63,7 @@ And if using a Hopper+ GPU (ie H100), installing [Flash Attention 3](https://git
 git clone https://github.com/Dao-AILab/flash-attention.git && cd flash-attention
 
 cd hopper
-pip install ninja
+uv pip install ninja
 python setup.py install
 ```
 
@@ -98,7 +98,7 @@ To use [SageAttention](https://github.com/thu-ml/SageAttention) 2.1.1, please co
 ```bash
 git clone https://github.com/thu-ml/SageAttention.git
 cd sageattention
-python setup.py install  # or pip install -e .
+python setup.py install  # or uv pip install -e .
 ```
 
 ### Sage Attention 3

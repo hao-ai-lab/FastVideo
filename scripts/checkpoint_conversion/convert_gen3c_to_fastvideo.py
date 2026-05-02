@@ -378,7 +378,7 @@ def download_checkpoint(
 ) -> Path:
     """Download checkpoint from HuggingFace Hub."""
     if hf_hub_download is None:
-        raise RuntimeError("huggingface_hub is required for --download. Install with: pip install huggingface_hub")
+        raise RuntimeError("huggingface_hub is required for --download. Install with: uv pip install huggingface_hub")
     
     print(f"Downloading {filename} from {repo_id}...")
     path = hf_hub_download(
@@ -403,7 +403,7 @@ def resolve_model_dir(
     if snapshot_download is None:
         raise RuntimeError(
             "huggingface_hub is required to download component source. "
-            "Install with: pip install huggingface_hub")
+            "Install with: uv pip install huggingface_hub")
 
     print(f"Downloading component source repo: {model_name_or_path}")
     downloaded = snapshot_download(

@@ -854,7 +854,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             import av
         except ImportError:
             logger.warning("PyAV not installed; cannot mux audio. "
-                           "Install with: pip install av")
+                           "Install with: uv pip install av")
             return False
 
         if torch.is_tensor(audio):

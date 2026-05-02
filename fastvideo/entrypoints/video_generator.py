@@ -759,7 +759,7 @@ class VideoGenerator:
             import av
         except ImportError:
             logger.warning("PyAV not installed; cannot mux audio. "
-                           "Install with: pip install av")
+                           "Install with: uv pip install av")
             return False
 
         try:

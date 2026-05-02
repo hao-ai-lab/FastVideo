@@ -19,8 +19,8 @@ Skips when:
 
 Install official deps once via:
     git clone --depth 1 https://github.com/Stability-AI/stable-audio-tools.git
-    pip install --no-deps -e ./stable-audio-tools
-    pip install k_diffusion einops_exts alias_free_torch
+    uv pip install --no-deps -e ./stable-audio-tools
+    uv pip install k_diffusion einops_exts alias_free_torch
 """
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ _skip_no_access = pytest.mark.skipif(
 _skip_no_official = pytest.mark.skipif(
     not _stable_audio_tools_available(),
     reason=("`stable_audio_tools` not importable. Clone "
-            "https://github.com/Stability-AI/stable-audio-tools and `pip install` "
+            "https://github.com/Stability-AI/stable-audio-tools and `uv pip install` "
             "its deps (k_diffusion, einops_exts, alias_free_torch)."),
 )
 

@@ -26,7 +26,7 @@ The tests skip cleanly with a helpful message if no token is set.
 One-shot:
 
 ```bash
-pip install k_diffusion einops_exts alias_free_torch torchsde
+uv pip install k_diffusion einops_exts alias_free_torch torchsde
 ```
 
 ### 3. Clone the upstream reference repo
@@ -35,12 +35,12 @@ The pipeline-level parity tests (`test_stable_audio_pipeline_parity.py`,
 `test_stable_audio_a2a_parity.py`) and the VAE-component parity tests
 (`test_oobleck_vae_parity.py`, `test_oobleck_vae_official_parity.py`)
 import directly from `stable_audio_tools`. Clone it under the repo
-root and `pip install` editable, then add it to `.gitignore`:
+root and `uv pip install` editable, then add it to `.gitignore`:
 
 ```bash
 cd <FastVideo repo root>
 git clone --depth 1 https://github.com/Stability-AI/stable-audio-tools.git
-pip install --no-deps -e ./stable-audio-tools
+uv pip install --no-deps -e ./stable-audio-tools
 echo "/stable-audio-tools/" >> .git/info/exclude   # personal ignore
 ```
 

@@ -102,7 +102,7 @@ def _load_official_diffusion_cond(device: torch.device):
     not _stable_audio_tools_inference_available(),
     reason=("`stable_audio_tools.inference.generation` not importable. "
             "Clone https://github.com/Stability-AI/stable-audio-tools and "
-            "`pip install` its deps (k_diffusion, einops_exts, alias_free_torch)."),
+            "`uv pip install` its deps (k_diffusion, einops_exts, alias_free_torch)."),
 )
 def test_stable_audio_pipeline_official_parity():
     setup_hf_env()

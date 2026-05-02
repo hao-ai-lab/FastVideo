@@ -26,8 +26,8 @@ Skips when:
   * `stable-audio-tools` isn't importable (clone missing or its
     `alias_free_torch` dep isn't installed). Install via:
         git clone --depth 1 https://github.com/Stability-AI/stable-audio-tools.git
-        pip install --no-deps -e ./stable-audio-tools
-        pip install alias_free_torch
+        uv pip install --no-deps -e ./stable-audio-tools
+        uv pip install alias_free_torch
 """
 from __future__ import annotations
 
@@ -55,8 +55,8 @@ def _stable_audio_tools_available() -> bool:
     reason=(
         "Official `stable-audio-tools` not importable. Install with:\n"
         "  git clone --depth 1 https://github.com/Stability-AI/stable-audio-tools.git\n"
-        "  pip install --no-deps -e ./stable-audio-tools\n"
-        "  pip install alias_free_torch"
+        "  uv pip install --no-deps -e ./stable-audio-tools\n"
+        "  uv pip install alias_free_torch"
     ),
 )
 def test_oobleck_official_parity():
