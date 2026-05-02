@@ -165,16 +165,17 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 last_epoch=self.init_steps - 1,
             )
 
-        self.train_dataset, self.train_dataloader = build_parquet_map_style_dataloader(
-            training_args.data_path,
-            training_args.train_batch_size,
-            parquet_schema=self.train_dataset_schema,
-            num_data_workers=training_args.dataloader_num_workers,
-            cfg_rate=training_args.training_cfg_rate,
-            drop_last=True,
-            text_padding_length=training_args.pipeline_config.text_encoder_configs[0].arch_config.
-            text_len,  # type: ignore[attr-defined]
-            seed=self.seed)
+        if not self.training_args.rl_args.rl_mode:
+            self.train_dataset, self.train_dataloader = build_parquet_map_style_dataloader(
+                training_args.data_path,
+                training_args.train_batch_size,
+                parquet_schema=self.train_dataset_schema,
+                num_data_workers=training_args.dataloader_num_workers,
+                cfg_rate=training_args.training_cfg_rate,
+                drop_last=True,
+                text_padding_length=training_args.pipeline_config.text_encoder_configs[0].arch_config.
+                text_len,  # type: ignore[attr-defined]
+                seed=self.seed)
 
         self.noise_scheduler = noise_scheduler
         if self.training_args.boundary_ratio is not None:
@@ -182,15 +183,17 @@ class TrainingPipeline(LoRAPipeline, ABC):
         else:
             self.boundary_timestep = None
 
-        logger.info("train_dataloader length: %s", len(self.train_dataloader))
+        if not self.training_args.rl_args.rl_mode:
+            logger.info("train_dataloader length: %s", len(self.train_dataloader))
         logger.info("train_sp_batch_size: %s", training_args.train_sp_batch_size)
         logger.info("gradient_accumulation_steps: %s", training_args.gradient_accumulation_steps)
         logger.info("sp_size: %s", training_args.sp_size)
 
-        self.num_update_steps_per_epoch = math.ceil(
-            len(self.train_dataloader) / training_args.gradient_accumulation_steps * training_args.sp_size /
-            training_args.train_sp_batch_size)
-        self.num_train_epochs = math.ceil(training_args.max_train_steps / self.num_update_steps_per_epoch)
+        if not self.training_args.rl_args.rl_mode:
+            self.num_update_steps_per_epoch = math.ceil(
+                len(self.train_dataloader) / training_args.gradient_accumulation_steps * training_args.sp_size /
+                training_args.train_sp_batch_size)
+            self.num_train_epochs = math.ceil(training_args.max_train_steps / self.num_update_steps_per_epoch)
 
         # TODO(will): is there a cleaner way to track epochs?
         self.current_epoch = 0
@@ -525,11 +528,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         round(num_trainable_params / 1e9, 3))
 
         # Set random seeds for deterministic training
-        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(self.seed + self.global_rank)
-        self.noise_gen_cuda = torch.Generator(device=current_platform.device_name).manual_seed(self.seed +
-                                                                                               self.global_rank)
-        self.validation_random_generator = torch.Generator(device="cpu").manual_seed(self.seed + self.global_rank)
-        logger.info("Initialized random seeds with seed: %s", self.seed + self.global_rank)
+        if not self.training_args.rl_args.rl_mode:
+            self.noise_random_generator = torch.Generator(device="cpu").manual_seed(self.seed)
+        else:
+            self.noise_random_generator = torch.Generator(device=self.device).manual_seed(self.seed)
+        self.noise_gen_cuda = torch.Generator(device=current_platform.device_name).manual_seed(self.seed)
+        self.validation_random_generator = torch.Generator(device="cpu").manual_seed(self.seed)
+        logger.info("Initialized random seeds with seed: %s", self.seed)
+
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
         if self.training_args.resume_from_checkpoint:
@@ -681,6 +687,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
         assert self.seed is not None
         sampling_param.seed = self.seed
 
+        temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        num_frames = (training_args.num_latent_t - 1) * temporal_compression_factor + 1
+        sampling_param.num_frames = num_frames
+
+        # Calculate n_tokens AFTER updating num_frames (aligns with sampling pipeline)
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1, sampling_param.height // 8, sampling_param.width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
         temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio

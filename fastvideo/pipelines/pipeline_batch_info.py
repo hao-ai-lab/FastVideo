@@ -9,7 +9,7 @@ in a functional manner, reducing the need for explicit parameter passing.
 
 import pprint
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import PIL.Image
 import torch
@@ -67,6 +67,26 @@ class ForwardBatch:
     execution, allowing methods to update specific components without needing
     to manage numerous individual parameters.
     """
+
+    @dataclass
+    class RLData:
+        """RL-specific data collection options and outputs."""
+        enabled: bool = False
+        collect_log_probs: bool = True
+        collect_kl: bool = False
+        kl_reward: float = 0.0
+        store_trajectory: bool = True
+        keep_trajectory_on_cpu: bool = False
+        log_probs: torch.Tensor | None = None
+        kl: torch.Tensor | None = None
+        trajectory_latents: torch.Tensor | None = None
+        trajectory_timesteps: torch.Tensor | None = None
+        # Saved transformer forward args from DenoisingStage for matching GRPO loss forward pass.
+        # transformer_forward_contexts: one dict per timestep with keys current_timestep (int), attn_metadata (optional).
+        transformer_forward_contexts: list[dict[str, Any]] | None = None
+        # transformer_forward_kwargs: batch-level kwargs passed to transformer (image_kwargs, pos_cond_kwargs, neg_cond_kwargs, action_kwargs, guidance_expand).
+        transformer_forward_kwargs: dict[str, Any] | None = None
+
     # TODO(will): double check that args are separate from fastvideo_args
     # properly. Also maybe think about providing an abstraction for pipeline
     # specific arguments.
@@ -241,6 +261,9 @@ class ForwardBatch:
     # Logging info
     logging_info: PipelineLoggingInfo = field(default_factory=PipelineLoggingInfo)
 
+    # RL data collection
+    rl_data: "ForwardBatch.RLData" = field(default_factory=RLData)
+
     def __post_init__(self):
         """Initialize dependent fields after dataclass initialization."""
 
@@ -319,6 +342,197 @@ class TrainingBatch:
     dmd_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     fake_score_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
+
+    # RL/GRPO-specific attributes
+    reward_scores: torch.Tensor | None = None  # Computed rewards from reward models
+    log_probs: torch.Tensor | None = None  # Current policy log probabilities [B, num_steps] or [B]
+    old_log_probs: torch.Tensor | None = None  # Old policy log probs (for importance ratio) [B, num_steps] or [B]
+    advantages: torch.Tensor | None = None  # GAE advantages [B, num_steps] or [B]
+    returns: torch.Tensor | None = None  # TD returns (advantages + values) [B, num_steps] or [B]
+    values: torch.Tensor | None = None  # Value function predictions [B]
+    old_values: torch.Tensor | None = None  # Old value predictions (for clipping) [B]
+
+    # GRPO sampling-specific attributes
+    kl: torch.Tensor | None = None  # KL divergences from sampling [B, num_steps] (if kl_reward > 0)
+    prompt_ids: torch.Tensor | None = None  # Prompt token IDs for stat tracking [B, seq_len]
+    prompt_embeds: torch.Tensor | None = None  # Prompt embeddings used in sampling [B, seq_len, hidden_dim]
+    negative_prompt_embeds: torch.Tensor | None = None  # Negative prompt embeddings for CFG [B, seq_len, hidden_dim]
+    # Saved from trajectory collection: same transformer forward context used in DenoisingStage (for GRPO loss).
+    rl_transformer_forward_contexts: list[dict[str, Any]] | None = None  # Per-timestep: current_timestep, attn_metadata
+    rl_transformer_forward_kwargs: dict[
+        str, Any] | None = None  # image_kwargs, pos_cond_kwargs, neg_cond_kwargs, action_kwargs, guidance_expand
+
+    # RL loss components
+    policy_loss: float = 0.0  # GRPO/PPO policy loss
+    value_loss: float = 0.0  # Value function loss
+    kl_divergence: float = 0.0  # KL(new_policy || old_policy)
+    importance_ratio: float = 1.0  # exp(log_prob - old_log_prob)
+    clip_fraction: float = 0.0  # Fraction of ratios that were clipped
+
+    # RL metrics
+    advantage_mean: float = 0.0  # Mean advantage (should be ~0 after normalization)
+    advantage_std: float = 1.0  # Std of advantages
+    reward_mean: float = 0.0  # Mean reward across batchp
+    reward_std: float = 0.0  # Std of rewards
+    value_mean: float = 0.0  # Mean value prediction
+    entropy: float = 0.0  # Policy entropy (for exploration)
+
+
+# Tensor attributes with batch dimension that are part of collected samples and used in
+# the RL training step (concat/split/mask/shuffle must all use this list).
+TRAINING_BATCH_SAMPLE_TENSOR_FIELDS = [
+    "latents",
+    "timesteps",
+    "old_log_probs",
+    "advantages",
+    "reward_scores",
+    "log_probs",
+    "kl",
+    "prompt_ids",
+    "prompt_embeds",
+    "negative_prompt_embeds",
+    "values",
+    "returns",
+    "encoder_hidden_states",
+    "encoder_attention_mask",
+    "noise_latents",
+    "trajectory_latents",
+    "trajectory_timesteps",
+]
+
+
+def get_training_batch_sample_size(batch: TrainingBatch) -> int:
+    """Return batch size (first dim) from the first present sample tensor field."""
+    for f in TRAINING_BATCH_SAMPLE_TENSOR_FIELDS:
+        t = getattr(batch, f)
+        if t is not None and isinstance(t, torch.Tensor):
+            return t.shape[0]
+    return 0
+
+
+def _cat_tensors_or_none(tensors: list) -> torch.Tensor | None:
+    non_none = [t for t in tensors if t is not None]
+    if not non_none:
+        return None
+    return torch.cat(non_none, dim=0)
+
+
+def _concat_dict_tensors(dicts: list[dict[str, Any] | None]) -> dict[str, Any] | None:
+    if not dicts or all(d is None for d in dicts):
+        return dicts[0] if dicts else None
+    out = {}
+    keys = set()
+    for d in dicts:
+        if d is not None:
+            keys |= set(d.keys())
+    for k in keys:
+        vals = [d.get(k) for d in dicts if d is not None and k in d]
+        vals = [v for v in vals if v is not None]
+        if not vals:
+            continue
+        v0 = vals[0]
+        if isinstance(v0, torch.Tensor):
+            out[k] = torch.cat(vals, dim=0)
+        elif isinstance(v0, dict):
+            nested_dicts = [v for v in vals if isinstance(v, dict)]
+            out[k] = _concat_dict_tensors(cast(list[dict[str, Any] | None], nested_dicts))
+        else:
+            out[k] = v0
+    return out if out else None
+
+
+def concat_training_batches(batches: list[TrainingBatch]) -> TrainingBatch:
+    """Concatenate multiple TrainingBatches along batch dim (for flow_grpo-style multi-batch per step)."""
+    if len(batches) == 1:
+        return batches[0]
+    out = TrainingBatch()
+    out.current_timestep = batches[0].current_timestep
+    out.current_vsa_sparsity = batches[0].current_vsa_sparsity
+
+    for f in TRAINING_BATCH_SAMPLE_TENSOR_FIELDS:
+        vals = [getattr(b, f) for b in batches]
+        if any(v is not None for v in vals):
+            setattr(out, f, _cat_tensors_or_none(vals))
+
+    if any(b.input_kwargs for b in batches):
+        out.input_kwargs = {}
+        for k in ("prompts", "metadata"):
+            lst = []
+            for b in batches:
+                if b.input_kwargs and k in b.input_kwargs:
+                    v = b.input_kwargs[k]
+                    lst.extend(v) if isinstance(v, list) else lst.append(v)
+            if lst:
+                out.input_kwargs[k] = lst
+        vlist = [
+            b.input_kwargs["decoded_videos"] for b in batches if b.input_kwargs and "decoded_videos" in b.input_kwargs
+        ]
+        if vlist:
+            out.input_kwargs["decoded_videos"] = torch.cat(vlist, dim=0)
+
+    out.infos = []
+    for b in batches:
+        if b.infos:
+            out.infos.extend(b.infos)
+
+    out.rl_transformer_forward_contexts = batches[0].rl_transformer_forward_contexts
+    out.rl_transformer_forward_kwargs = _concat_dict_tensors([b.rl_transformer_forward_kwargs for b in batches])
+
+    if batches[0].raw_latent_shape is not None:
+        total_b = sum((b.raw_latent_shape or (0, ))[0] for b in batches)
+        out.raw_latent_shape = (total_b, ) + tuple(batches[0].raw_latent_shape[1:])
+
+    return out
+
+
+def split_training_batch(batch: TrainingBatch, num_splits: int) -> list[TrainingBatch]:
+    """Split a TrainingBatch into num_splits chunks along batch dim (for per-batch optimizer step)."""
+    if num_splits <= 1:
+        return [batch]
+    B = get_training_batch_sample_size(batch)
+    if B == 0:
+        return [batch]
+    sizes = [B // num_splits] * num_splits
+    for i in range(B % num_splits):
+        sizes[i] += 1
+    offsets = [0]
+    for s in sizes:
+        offsets.append(offsets[-1] + s)
+
+    out_batches = []
+    for i in range(num_splits):
+        s, e = offsets[i], offsets[i + 1]
+        sub = TrainingBatch()
+        sub.current_timestep = batch.current_timestep
+        sub.current_vsa_sparsity = batch.current_vsa_sparsity
+        for f in TRAINING_BATCH_SAMPLE_TENSOR_FIELDS:
+            t = getattr(batch, f)
+            if t is not None:
+                setattr(sub, f, t[s:e].clone() if t.is_cuda else t[s:e])
+        if batch.input_kwargs:
+            sub.input_kwargs = {}
+            for k, v in batch.input_kwargs.items():
+                if k == "decoded_videos" and isinstance(v, torch.Tensor) or isinstance(v, list):
+                    sub.input_kwargs[k] = v[s:e]
+                else:
+                    sub.input_kwargs[k] = v
+        if batch.infos:
+            sub.infos = batch.infos[s:e]
+        sub.rl_transformer_forward_contexts = batch.rl_transformer_forward_contexts
+        if batch.rl_transformer_forward_kwargs:
+
+            def _slice_kwargs(obj: Any, sl: slice) -> Any:
+                if isinstance(obj, torch.Tensor):
+                    return obj[sl]
+                if isinstance(obj, dict):
+                    return {k: _slice_kwargs(v, sl) for k, v in obj.items()}
+                return obj
+
+            sub.rl_transformer_forward_kwargs = _slice_kwargs(batch.rl_transformer_forward_kwargs, slice(s, e))
+        if batch.raw_latent_shape is not None:
+            sub.raw_latent_shape = (sizes[i], ) + tuple(batch.raw_latent_shape[1:])
+        out_batches.append(sub)
+    return out_batches
 
 
 @dataclass

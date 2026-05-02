@@ -1,0 +1,1128 @@
+=== batch 0 ===
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: -402564.0709840691
+sum_model_pred_fp64: 1016809.1106071472
+sum_prompt_embeds_fp64: 531.095852422555
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 10298058.713710278
+step_0 sum_model_pred_fp64: 74747.79832077026
+step_0 sum_intermediate_latents_fp64: -4201.614239226532
+step_0 sum_variance_noise_fp64: -789.6831162320522
+step_1 sum_model_pred_fp64: 50330.50751495361
+step_1 sum_intermediate_latents_fp64: -5319.089416501782
+step_1 sum_variance_noise_fp64: -1650.2171930825245
+step_2 sum_model_pred_fp64: 58167.67397689819
+step_2 sum_intermediate_latents_fp64: -6326.761748021207
+step_2 sum_variance_noise_fp64: 877.1397947799464
+step_3 sum_model_pred_fp64: 51216.272649765015
+step_3 sum_intermediate_latents_fp64: -7287.760806797218
+step_3 sum_variance_noise_fp64: 736.812491993373
+step_4 sum_model_pred_fp64: 49764.00761795044
+step_4 sum_intermediate_latents_fp64: -8117.122513978895
+step_4 sum_variance_noise_fp64: 2061.4611658635285
+step_5 sum_model_pred_fp64: 48955.61805534363
+step_5 sum_intermediate_latents_fp64: -9188.071700069937
+step_5 sum_variance_noise_fp64: 847.0691408767577
+step_6 sum_model_pred_fp64: 47743.76357650757
+step_6 sum_intermediate_latents_fp64: -10638.169627348238
+step_6 sum_variance_noise_fp64: -1336.0408117195327
+step_7 sum_model_pred_fp64: 47891.643074035645
+step_7 sum_intermediate_latents_fp64: -12019.286901603147
+step_7 sum_variance_noise_fp64: -11.548195632876286
+step_8 sum_model_pred_fp64: 47555.25828552246
+step_8 sum_intermediate_latents_fp64: -13620.908259736534
+step_8 sum_variance_noise_fp64: -694.2449807570147
+step_9 sum_model_pred_fp64: 47805.91408538818
+step_9 sum_intermediate_latents_fp64: -15176.01394411616
+step_9 sum_variance_noise_fp64: 732.648895439603
+step_10 sum_model_pred_fp64: 47711.351037979126
+step_10 sum_intermediate_latents_fp64: -16723.161294721504
+step_10 sum_variance_noise_fp64: 1982.1610815613558
+step_11 sum_model_pred_fp64: 47325.8822555542
+step_11 sum_intermediate_latents_fp64: -18814.66504476247
+step_11 sum_variance_noise_fp64: -418.57023844048274
+step_12 sum_model_pred_fp64: 48638.06114768982
+step_12 sum_intermediate_latents_fp64: -20980.629329626565
+step_12 sum_variance_noise_fp64: 1222.7006414796608
+step_13 sum_model_pred_fp64: 48850.0936498642
+step_13 sum_intermediate_latents_fp64: -23877.807323936053
+step_13 sum_variance_noise_fp64: -1694.874662188572
+step_14 sum_model_pred_fp64: 49060.45521354675
+step_14 sum_intermediate_latents_fp64: -26871.95392472644
+step_14 sum_variance_noise_fp64: 221.7823308666558
+step_15 sum_model_pred_fp64: 50148.52765274048
+step_15 sum_intermediate_latents_fp64: -30340.142885250796
+step_15 sum_variance_noise_fp64: 623.7748358961333
+step_16 sum_model_pred_fp64: 51976.65728855133
+step_16 sum_intermediate_latents_fp64: -34510.01238637797
+step_16 sum_variance_noise_fp64: 838.3412947085856
+step_17 sum_model_pred_fp64: 51809.90590286255
+step_17 sum_intermediate_latents_fp64: -39227.59998641591
+step_17 sum_variance_noise_fp64: 2384.4944336419594
+step_18 sum_model_pred_fp64: 52927.73027229309
+step_18 sum_intermediate_latents_fp64: -45268.96347817697
+step_18 sum_variance_noise_fp64: -299.3766390163852
+step_19 sum_model_pred_fp64: 44181.989028930664
+step_19 sum_intermediate_latents_fp64: -51220.37285208015
+step_19 sum_variance_noise_fp64: 86.60947481863718
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: -134.570347%
+pct_diff_vs_flow_sum_model_pred_fp64: 129.207818%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: -2.476792%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: -60.380309%
+=== batch 1 ===
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: -1424750.151467751
+sum_model_pred_fp64: 3954762.532356262
+sum_prompt_embeds_fp64: 483.9238204477418
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 19090278.695177436
+step_0 sum_model_pred_fp64: 323907.8684234619
+step_0 sum_intermediate_latents_fp64: -8499.559957192396
+step_0 sum_variance_noise_fp64: -789.6831162320522
+step_1 sum_model_pred_fp64: 190849.51680374146
+step_1 sum_intermediate_latents_fp64: -12197.59036385655
+step_1 sum_variance_noise_fp64: -1650.2171930825245
+step_2 sum_model_pred_fp64: 197739.5009918213
+step_2 sum_intermediate_latents_fp64: -15958.25983839645
+step_2 sum_variance_noise_fp64: 877.1397947799464
+step_3 sum_model_pred_fp64: 189452.699716568
+step_3 sum_intermediate_latents_fp64: -19855.216577020037
+step_3 sum_variance_noise_fp64: 736.812491993373
+step_4 sum_model_pred_fp64: 195544.64254570007
+step_4 sum_intermediate_latents_fp64: -24036.092815734577
+step_4 sum_variance_noise_fp64: 2061.4611658635285
+step_5 sum_model_pred_fp64: 192976.2154006958
+step_5 sum_intermediate_latents_fp64: -28692.310670509178
+step_5 sum_variance_noise_fp64: 847.0691408767577
+step_6 sum_model_pred_fp64: 195631.35538864136
+step_6 sum_intermediate_latents_fp64: -34150.63339531838
+step_6 sum_variance_noise_fp64: -1336.0408117195327
+step_7 sum_model_pred_fp64: 192652.59524536133
+step_7 sum_intermediate_latents_fp64: -39806.21464770006
+step_7 sum_variance_noise_fp64: -11.548195632876286
+step_8 sum_model_pred_fp64: 194093.4359111786
+step_8 sum_intermediate_latents_fp64: -46151.938397256396
+step_8 sum_variance_noise_fp64: -694.2449807570147
+step_9 sum_model_pred_fp64: 191994.51056671143
+step_9 sum_intermediate_latents_fp64: -52835.38374992463
+step_9 sum_variance_noise_fp64: 732.648895439603
+step_10 sum_model_pred_fp64: 190033.81558990479
+step_10 sum_intermediate_latents_fp64: -59971.45477107479
+step_10 sum_variance_noise_fp64: 1982.1610815613558
+step_11 sum_model_pred_fp64: 188911.91746139526
+step_11 sum_intermediate_latents_fp64: -68239.14616552106
+step_11 sum_variance_noise_fp64: -418.57023844048274
+step_12 sum_model_pred_fp64: 188809.34230995178
+step_12 sum_intermediate_latents_fp64: -77233.51871051316
+step_12 sum_variance_noise_fp64: 1222.7006414796608
+step_13 sum_model_pred_fp64: 188018.58638381958
+step_13 sum_intermediate_latents_fp64: -87754.66624058237
+step_13 sum_variance_noise_fp64: -1694.874662188572
+step_14 sum_model_pred_fp64: 187661.85003089905
+step_14 sum_intermediate_latents_fp64: -99354.805926455
+step_14 sum_variance_noise_fp64: 221.7823308666558
+step_15 sum_model_pred_fp64: 187944.42071723938
+step_15 sum_intermediate_latents_fp64: -112600.87443968828
+step_15 sum_variance_noise_fp64: 623.7748358961333
+step_16 sum_model_pred_fp64: 189205.629196167
+step_16 sum_intermediate_latents_fp64: -128010.61818814838
+step_16 sum_variance_noise_fp64: 838.3412947085856
+step_17 sum_model_pred_fp64: 188797.4082622528
+step_17 sum_intermediate_latents_fp64: -145829.65779115097
+step_17 sum_variance_noise_fp64: 2384.4944336419594
+step_18 sum_model_pred_fp64: 190394.13682746887
+step_18 sum_intermediate_latents_fp64: -167433.0538391662
+step_18 sum_variance_noise_fp64: -299.3766390163852
+step_19 sum_model_pred_fp64: 190143.08458328247
+step_19 sum_intermediate_latents_fp64: -193305.19166194744
+step_19 sum_variance_noise_fp64: 86.60947481863718
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: -222.350975%
+pct_diff_vs_flow_sum_model_pred_fp64: 213.600460%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: -11.138822%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: -26.554027%
+
+=== reward, advantage, prompt (one per line) ===
+0.0078125, 0.26606475269883423, A vintage tattoo parlor with a weathered wooden door and a narrow window stenciled with the cursive words "Ink Regret". The scene is set in a dimly lit alley, with a faint glow from an old streetlamp casting shadows on the brick wall.
+0.060672514140605927, 0.5967858953429895, A realistic photograph of a boxing ring with the floor mat prominently displaying "Round 30  Still 2020", surrounded by the ropes and corner posts, under the glow of overhead lights.
+0.044893376529216766, 1.1352954037542704, A retro arcade game loading screen with vibrant pixel art, displaying the iconic message "Press Start" in bold, neon colors. The background features a space-themed galaxy with stars and planets, enhancing the game's futuristic vibe.
+0.0, -0.8833349241524822, A vintage tattoo parlor with a weathered wooden door and a narrow window stenciled with the cursive words "Ink Regret". The scene is set in a dimly lit alley, with a faint glow from an old streetlamp casting shadows on the brick wall.
+0.017676766961812973, -0.9327544609673569, A retro arcade game loading screen with vibrant pixel art, displaying the iconic message "Press Start" in bold, neon colors. The background features a space-themed galaxy with stars and planets, enhancing the game's futuristic vibe.
+0.0, 0.0, Ancient cave wall paintings vividly depicting the myth of "First Fire", with flickering torchlight casting dynamic shadows, enhancing the raw, primal scenes of early humans harnessing flames. The rough stone textures and natural pigments add authenticity to this prehistoric artwork.
+0.06003289297223091, 0.5655521792932672, A realistic photograph of a boxing ring with the floor mat prominently displaying "Round 30  Still 2020", surrounded by the ropes and corner posts, under the glow of overhead lights.
+0.0, 0.0, Ancient cave wall paintings vividly depicting the myth of "First Fire", with flickering torchlight casting dynamic shadows, enhancing the raw, primal scenes of early humans harnessing flames. The rough stone textures and natural pigments add authenticity to this prehistoric artwork.
+0.01315789483487606, -1.7234283204812542, A realistic photograph of a boxing ring with the floor mat prominently displaying "Round 30  Still 2020", surrounded by the ropes and corner posts, under the glow of overhead lights.
+0.05994151905179024, 0.5610902458449973, A realistic photograph of a boxing ring with the floor mat prominently displaying "Round 30  Still 2020", surrounded by the ropes and corner posts, under the glow of overhead lights.
+0.040965206921100616, 0.8368140441804618, A retro arcade game loading screen with vibrant pixel art, displaying the iconic message "Press Start" in bold, neon colors. The background features a space-themed galaxy with stars and planets, enhancing the game's futuristic vibe.
+0.016273848712444305, -1.0393549869673753, A retro arcade game loading screen with vibrant pixel art, displaying the iconic message "Press Start" in bold, neon colors. The background features a space-themed galaxy with stars and planets, enhancing the game's futuristic vibe.
+0.016203703358769417, 1.50060509560613, A vintage tattoo parlor with a weathered wooden door and a narrow window stenciled with the cursive words "Ink Regret". The scene is set in a dimly lit alley, with a faint glow from an old streetlamp casting shadows on the brick wall.
+0.0, -0.8833349241524822, A vintage tattoo parlor with a weathered wooden door and a narrow window stenciled with the cursive words "Ink Regret". The scene is set in a dimly lit alley, with a faint glow from an old streetlamp casting shadows on the brick wall.
+0.0, 0.0, Ancient cave wall paintings vividly depicting the myth of "First Fire", with flickering torchlight casting dynamic shadows, enhancing the raw, primal scenes of early humans harnessing flames. The rough stone textures and natural pigments add authenticity to this prehistoric artwork.
+0.0, 0.0, Ancient cave wall paintings vividly depicting the myth of "First Fire", with flickering torchlight casting dynamic shadows, enhancing the raw, primal scenes of early humans harnessing flames. The rough stone textures and natural pigments add authenticity to this prehistoric artwork.
+0.0, -1.6931211058208644, A pet store interior with a large fish tank prominently displaying a humorous sign that reads "No Swimming Lessons", surrounded by various aquatic plants and colorful fish. The scene is brightly lit, emphasizing the playful and inviting atmosphere of the store.
+0.04125412553548813, 0.03731560767773617, A dimly lit graveyard at dusk, with a single headstone prominently engraved with "Told You I Was Sick". Overgrown grass and a few withered flowers surround the stone, casting long shadows as the sun sets behind a row of ancient, gnarled trees.
+0.0784313753247261, 1.2072766622328281, A digital camera screen displaying a "Low Light Warning" message, set against a dimly lit room with soft shadows and a faint glow from a nearby window, capturing the eerie, serene atmosphere of twilight.
+0.027502750977873802, -1.206538767829548, A dimly lit graveyard at dusk, with a single headstone prominently engraved with "Told You I Was Sick". Overgrown grass and a few withered flowers surround the stone, casting long shadows as the sun sets behind a row of ancient, gnarled trees.
+0.05480140820145607, 0.8700761002294718, A pet store interior with a large fish tank prominently displaying a humorous sign that reads "No Swimming Lessons", surrounded by various aquatic plants and colorful fish. The scene is brightly lit, emphasizing the playful and inviting atmosphere of the store.
+0.02777777798473835, -0.2592246710298961, A digital camera screen displays "Smile For The Photo" against a soft, blurred background of a sunny garden, capturing the essence of a joyful moment.
+0.0676470622420311, 0.694863463481253, A digital camera screen displaying a "Low Light Warning" message, set against a dimly lit room with soft shadows and a faint glow from a nearby window, capturing the eerie, serene atmosphere of twilight.
+0.026143791154026985, -1.277151233586811, A digital camera screen displaying a "Low Light Warning" message, set against a dimly lit room with soft shadows and a faint glow from a nearby window, capturing the eerie, serene atmosphere of twilight.
+0.04524886980652809, 0.42328028734528034, A pet store interior with a large fish tank prominently displaying a humorous sign that reads "No Swimming Lessons", surrounded by various aquatic plants and colorful fish. The scene is brightly lit, emphasizing the playful and inviting atmosphere of the store.
+0.03685368597507477, -0.3607177655274721, A dimly lit graveyard at dusk, with a single headstone prominently engraved with "Told You I Was Sick". Overgrown grass and a few withered flowers surround the stone, casting long shadows as the sun sets behind a row of ancient, gnarled trees.
+0.04474610462784767, 0.39976471824611237, A pet store interior with a large fish tank prominently displaying a humorous sign that reads "No Swimming Lessons", surrounded by various aquatic plants and colorful fish. The scene is brightly lit, emphasizing the playful and inviting atmosphere of the store.
+0.0398692823946476, -0.6249888921272703, A digital camera screen displaying a "Low Light Warning" message, set against a dimly lit room with soft shadows and a faint glow from a nearby window, capturing the eerie, serene atmosphere of twilight.
+0.01984127052128315, -0.4577797401846908, A digital camera screen displays "Smile For The Photo" against a soft, blurred background of a sunny garden, capturing the essence of a joyful moment.
+0.0, -0.9541674596712225, A digital camera screen displays "Smile For The Photo" against a soft, blurred background of a sunny garden, capturing the essence of a joyful moment.
+0.05775577574968338, 1.529940925679284, A dimly lit graveyard at dusk, with a single headstone prominently engraved with "Told You I Was Sick". Overgrown grass and a few withered flowers surround the stone, casting long shadows as the sun sets behind a row of ancient, gnarled trees.
+0.10493826866149902, 1.6711718708858094, A digital camera screen displays "Smile For The Photo" against a soft, blurred background of a sunny garden, capturing the essence of a joyful moment.
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: 23714.413813228282
+sum_model_pred_fp64: -215051.41737890244
+sum_prompt_embeds_fp64: 170.33617508131508
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 13347099.499325037
+step_0 sum_model_pred_fp64: -15647.525955200195
+step_0 sum_intermediate_latents_fp64: -2631.583347539534
+step_0 sum_variance_noise_fp64: -706.4486107184051
+step_1 sum_model_pred_fp64: -5145.636917114258
+step_1 sum_intermediate_latents_fp64: -2609.2297854468925
+step_1 sum_variance_noise_fp64: -736.1102221184066
+step_2 sum_model_pred_fp64: 7512.509085178375
+step_2 sum_intermediate_latents_fp64: -2651.690403900313
+step_2 sum_variance_noise_fp64: 637.502268261293
+step_3 sum_model_pred_fp64: 3825.571243286133
+step_3 sum_intermediate_latents_fp64: -2690.8791781949985
+step_3 sum_variance_noise_fp64: 138.91650706733856
+step_4 sum_model_pred_fp64: 1475.9818239212036
+step_4 sum_intermediate_latents_fp64: -3044.8665954372627
+step_4 sum_variance_noise_fp64: -2515.23333117891
+step_5 sum_model_pred_fp64: -5624.866527557373
+step_5 sum_intermediate_latents_fp64: -2663.655236879189
+step_5 sum_variance_noise_fp64: 1440.9399752979068
+step_6 sum_model_pred_fp64: -8935.398025512695
+step_6 sum_intermediate_latents_fp64: -2049.527291397797
+step_6 sum_variance_noise_fp64: 2314.609635473033
+step_7 sum_model_pred_fp64: -9572.193187713623
+step_7 sum_intermediate_latents_fp64: -1936.671114058292
+step_7 sum_variance_noise_fp64: -1489.2500841973638
+step_8 sum_model_pred_fp64: -11651.894810199738
+step_8 sum_intermediate_latents_fp64: -1179.529701931373
+step_8 sum_variance_noise_fp64: 2257.234146402997
+step_9 sum_model_pred_fp64: -12337.631351470947
+step_9 sum_intermediate_latents_fp64: -505.86143447055656
+step_9 sum_variance_noise_fp64: 1242.83279304604
+step_10 sum_model_pred_fp64: -14116.070163726807
+step_10 sum_intermediate_latents_fp64: 115.73064955911832
+step_10 sum_variance_noise_fp64: 45.812928689657156
+step_11 sum_model_pred_fp64: -15669.751399993896
+step_11 sum_intermediate_latents_fp64: 857.8675476273638
+step_11 sum_variance_noise_fp64: -79.38408517262155
+step_12 sum_model_pred_fp64: -16449.081714630127
+step_12 sum_intermediate_latents_fp64: 1901.2995075877698
+step_12 sum_variance_noise_fp64: 1133.307939376589
+step_13 sum_model_pred_fp64: -16905.5724029541
+step_13 sum_intermediate_latents_fp64: 2449.6638155513792
+step_13 sum_variance_noise_fp64: -3221.7685823896795
+step_14 sum_model_pred_fp64: -17220.412914276123
+step_14 sum_intermediate_latents_fp64: 3681.698531581089
+step_14 sum_variance_noise_fp64: 505.56747779699424
+step_15 sum_model_pred_fp64: -15947.204921722412
+step_15 sum_intermediate_latents_fp64: 5008.39066312174
+step_15 sum_variance_noise_fp64: 869.539356301844
+step_16 sum_model_pred_fp64: -13886.682636737823
+step_16 sum_intermediate_latents_fp64: 6009.137546686383
+step_16 sum_variance_noise_fp64: -1599.1376832508709
+step_17 sum_model_pred_fp64: -14075.733545303345
+step_17 sum_intermediate_latents_fp64: 7438.051948264358
+step_17 sum_variance_noise_fp64: 237.32162386863547
+step_18 sum_model_pred_fp64: -13793.47679901123
+step_18 sum_intermediate_latents_fp64: 9005.330332014768
+step_18 sum_variance_noise_fp64: -469.5498168189896
+step_19 sum_model_pred_fp64: -20886.346258163452
+step_19 sum_intermediate_latents_fp64: 12044.700681085145
+step_19 sum_variance_noise_fp64: 2285.0715935038043
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: -97.963515%
+pct_diff_vs_flow_sum_model_pred_fp64: 93.822653%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: -68.721785%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: -48.649743%
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: 1276272.7811250088
+sum_model_pred_fp64: -3809900.2895212173
+sum_prompt_embeds_fp64: 549.0616661570037
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 25720200.8740865
+step_0 sum_model_pred_fp64: -238894.54167175293
+step_0 sum_intermediate_latents_fp64: 1257.1177335531393
+step_0 sum_variance_noise_fp64: -413.76701284138187
+step_1 sum_model_pred_fp64: -183517.95473861694
+step_1 sum_intermediate_latents_fp64: 4809.521122724691
+step_1 sum_variance_noise_fp64: 1097.8478760132637
+step_2 sum_model_pred_fp64: -172958.88459777832
+step_2 sum_intermediate_latents_fp64: 8102.359458133971
+step_2 sum_variance_noise_fp64: -1146.8078859883822
+step_3 sum_model_pred_fp64: -185712.17908096313
+step_3 sum_intermediate_latents_fp64: 12019.593000715628
+step_3 sum_variance_noise_fp64: -546.8123247198301
+step_4 sum_model_pred_fp64: -190817.29721450806
+step_4 sum_intermediate_latents_fp64: 16112.523793006556
+step_4 sum_variance_noise_fp64: -2465.23402356364
+step_5 sum_model_pred_fp64: -184538.43008422852
+step_5 sum_intermediate_latents_fp64: 20632.382237200858
+step_5 sum_variance_noise_fp64: -862.7989280010322
+step_6 sum_model_pred_fp64: -188103.99914169312
+step_6 sum_intermediate_latents_fp64: 25885.68242692259
+step_6 sum_variance_noise_fp64: 756.632577442635
+step_7 sum_model_pred_fp64: -191423.7793483734
+step_7 sum_intermediate_latents_fp64: 31657.62393098662
+step_7 sum_variance_noise_fp64: 394.200246270673
+step_8 sum_model_pred_fp64: -191319.39298057556
+step_8 sum_intermediate_latents_fp64: 38130.82754136628
+step_8 sum_variance_noise_fp64: 1520.4352477508678
+step_9 sum_model_pred_fp64: -190705.08354091644
+step_9 sum_intermediate_latents_fp64: 45116.462298355764
+step_9 sum_variance_noise_fp64: 936.7956031903974
+step_10 sum_model_pred_fp64: -189169.78499221802
+step_10 sum_intermediate_latents_fp64: 52538.19796100717
+step_10 sum_variance_noise_fp64: -528.8627464762219
+step_11 sum_model_pred_fp64: -188859.93423461914
+step_11 sum_intermediate_latents_fp64: 61114.275498876406
+step_11 sum_variance_noise_fp64: 1781.804026242601
+step_12 sum_model_pred_fp64: -189353.72718811035
+step_12 sum_intermediate_latents_fp64: 70729.12329355802
+step_12 sum_variance_noise_fp64: 2080.2173336393785
+step_13 sum_model_pred_fp64: -188500.65565490723
+step_13 sum_intermediate_latents_fp64: 81233.52697679566
+step_13 sum_variance_noise_fp64: 619.1326401572791
+step_14 sum_model_pred_fp64: -188044.47400283813
+step_14 sum_intermediate_latents_fp64: 93320.4364741958
+step_14 sum_variance_noise_fp64: 2309.9071875857644
+step_15 sum_model_pred_fp64: -187403.68109703064
+step_15 sum_intermediate_latents_fp64: 106493.64721966686
+step_15 sum_variance_noise_fp64: -1641.4140322407984
+step_16 sum_model_pred_fp64: -186587.94689559937
+step_16 sum_intermediate_latents_fp64: 121727.58817656289
+step_16 sum_variance_noise_fp64: -1158.4837642844855
+step_17 sum_model_pred_fp64: -186459.64710998535
+step_17 sum_intermediate_latents_fp64: 139415.49210320425
+step_17 sum_variance_noise_fp64: -2220.624273855751
+step_18 sum_model_pred_fp64: -186600.23207473755
+step_18 sum_intermediate_latents_fp64: 160641.6451632034
+step_18 sum_variance_noise_fp64: 356.50661577396
+step_19 sum_model_pred_fp64: -200928.66387176514
+step_19 sum_intermediate_latents_fp64: 188168.71803556685
+step_19 sum_variance_noise_fp64: 748.0209825060505
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: 9.600423%
+pct_diff_vs_flow_sum_model_pred_fp64: -9.439295%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: 0.822205%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: -1.046746%
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: 23714.413813228282
+sum_model_pred_fp64: -215051.41737890244
+sum_prompt_embeds_fp64: 170.33617508131508
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 13347099.499325037
+step_0 sum_model_pred_fp64: -15647.525955200195
+step_0 sum_intermediate_latents_fp64: -2631.583347539534
+step_0 sum_variance_noise_fp64: -706.4486107184051
+step_1 sum_model_pred_fp64: -5145.636917114258
+step_1 sum_intermediate_latents_fp64: -2609.2297854468925
+step_1 sum_variance_noise_fp64: -736.1102221184066
+step_2 sum_model_pred_fp64: 7512.509085178375
+step_2 sum_intermediate_latents_fp64: -2651.690403900313
+step_2 sum_variance_noise_fp64: 637.502268261293
+step_3 sum_model_pred_fp64: 3825.571243286133
+step_3 sum_intermediate_latents_fp64: -2690.8791781949985
+step_3 sum_variance_noise_fp64: 138.91650706733856
+step_4 sum_model_pred_fp64: 1475.9818239212036
+step_4 sum_intermediate_latents_fp64: -3044.8665954372627
+step_4 sum_variance_noise_fp64: -2515.23333117891
+step_5 sum_model_pred_fp64: -5624.866527557373
+step_5 sum_intermediate_latents_fp64: -2663.655236879189
+step_5 sum_variance_noise_fp64: 1440.9399752979068
+step_6 sum_model_pred_fp64: -8935.398025512695
+step_6 sum_intermediate_latents_fp64: -2049.527291397797
+step_6 sum_variance_noise_fp64: 2314.609635473033
+step_7 sum_model_pred_fp64: -9572.193187713623
+step_7 sum_intermediate_latents_fp64: -1936.671114058292
+step_7 sum_variance_noise_fp64: -1489.2500841973638
+step_8 sum_model_pred_fp64: -11651.894810199738
+step_8 sum_intermediate_latents_fp64: -1179.529701931373
+step_8 sum_variance_noise_fp64: 2257.234146402997
+step_9 sum_model_pred_fp64: -12337.631351470947
+step_9 sum_intermediate_latents_fp64: -505.86143447055656
+step_9 sum_variance_noise_fp64: 1242.83279304604
+step_10 sum_model_pred_fp64: -14116.070163726807
+step_10 sum_intermediate_latents_fp64: 115.73064955911832
+step_10 sum_variance_noise_fp64: 45.812928689657156
+step_11 sum_model_pred_fp64: -15669.751399993896
+step_11 sum_intermediate_latents_fp64: 857.8675476273638
+step_11 sum_variance_noise_fp64: -79.38408517262155
+step_12 sum_model_pred_fp64: -16449.081714630127
+step_12 sum_intermediate_latents_fp64: 1901.2995075877698
+step_12 sum_variance_noise_fp64: 1133.307939376589
+step_13 sum_model_pred_fp64: -16905.5724029541
+step_13 sum_intermediate_latents_fp64: 2449.6638155513792
+step_13 sum_variance_noise_fp64: -3221.7685823896795
+step_14 sum_model_pred_fp64: -17220.412914276123
+step_14 sum_intermediate_latents_fp64: 3681.698531581089
+step_14 sum_variance_noise_fp64: 505.56747779699424
+step_15 sum_model_pred_fp64: -15947.204921722412
+step_15 sum_intermediate_latents_fp64: 5008.39066312174
+step_15 sum_variance_noise_fp64: 869.539356301844
+step_16 sum_model_pred_fp64: -13886.682636737823
+step_16 sum_intermediate_latents_fp64: 6009.137546686383
+step_16 sum_variance_noise_fp64: -1599.1376832508709
+step_17 sum_model_pred_fp64: -14075.733545303345
+step_17 sum_intermediate_latents_fp64: 7438.051948264358
+step_17 sum_variance_noise_fp64: 237.32162386863547
+step_18 sum_model_pred_fp64: -13793.47679901123
+step_18 sum_intermediate_latents_fp64: 9005.330332014768
+step_18 sum_variance_noise_fp64: -469.5498168189896
+step_19 sum_model_pred_fp64: -20886.346258163452
+step_19 sum_intermediate_latents_fp64: 12044.700681085145
+step_19 sum_variance_noise_fp64: 2285.0715935038043
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: -97.963515%
+pct_diff_vs_flow_sum_model_pred_fp64: 93.822653%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: -68.721785%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: -48.649743%
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: 1276272.7811250088
+sum_model_pred_fp64: -3809900.2895212173
+sum_prompt_embeds_fp64: 549.0616661570037
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 25720200.8740865
+step_0 sum_model_pred_fp64: -238894.54167175293
+step_0 sum_intermediate_latents_fp64: 1257.1177335531393
+step_0 sum_variance_noise_fp64: -413.76701284138187
+step_1 sum_model_pred_fp64: -183517.95473861694
+step_1 sum_intermediate_latents_fp64: 4809.521122724691
+step_1 sum_variance_noise_fp64: 1097.8478760132637
+step_2 sum_model_pred_fp64: -172958.88459777832
+step_2 sum_intermediate_latents_fp64: 8102.359458133971
+step_2 sum_variance_noise_fp64: -1146.8078859883822
+step_3 sum_model_pred_fp64: -185712.17908096313
+step_3 sum_intermediate_latents_fp64: 12019.593000715628
+step_3 sum_variance_noise_fp64: -546.8123247198301
+step_4 sum_model_pred_fp64: -190817.29721450806
+step_4 sum_intermediate_latents_fp64: 16112.523793006556
+step_4 sum_variance_noise_fp64: -2465.23402356364
+step_5 sum_model_pred_fp64: -184538.43008422852
+step_5 sum_intermediate_latents_fp64: 20632.382237200858
+step_5 sum_variance_noise_fp64: -862.7989280010322
+step_6 sum_model_pred_fp64: -188103.99914169312
+step_6 sum_intermediate_latents_fp64: 25885.68242692259
+step_6 sum_variance_noise_fp64: 756.632577442635
+step_7 sum_model_pred_fp64: -191423.7793483734
+step_7 sum_intermediate_latents_fp64: 31657.62393098662
+step_7 sum_variance_noise_fp64: 394.200246270673
+step_8 sum_model_pred_fp64: -191319.39298057556
+step_8 sum_intermediate_latents_fp64: 38130.82754136628
+step_8 sum_variance_noise_fp64: 1520.4352477508678
+step_9 sum_model_pred_fp64: -190705.08354091644
+step_9 sum_intermediate_latents_fp64: 45116.462298355764
+step_9 sum_variance_noise_fp64: 936.7956031903974
+step_10 sum_model_pred_fp64: -189169.78499221802
+step_10 sum_intermediate_latents_fp64: 52538.19796100717
+step_10 sum_variance_noise_fp64: -528.8627464762219
+step_11 sum_model_pred_fp64: -188859.93423461914
+step_11 sum_intermediate_latents_fp64: 61114.275498876406
+step_11 sum_variance_noise_fp64: 1781.804026242601
+step_12 sum_model_pred_fp64: -189353.72718811035
+step_12 sum_intermediate_latents_fp64: 70729.12329355802
+step_12 sum_variance_noise_fp64: 2080.2173336393785
+step_13 sum_model_pred_fp64: -188500.65565490723
+step_13 sum_intermediate_latents_fp64: 81233.52697679566
+step_13 sum_variance_noise_fp64: 619.1326401572791
+step_14 sum_model_pred_fp64: -188044.47400283813
+step_14 sum_intermediate_latents_fp64: 93320.4364741958
+step_14 sum_variance_noise_fp64: 2309.9071875857644
+step_15 sum_model_pred_fp64: -187403.68109703064
+step_15 sum_intermediate_latents_fp64: 106493.64721966686
+step_15 sum_variance_noise_fp64: -1641.4140322407984
+step_16 sum_model_pred_fp64: -186587.94689559937
+step_16 sum_intermediate_latents_fp64: 121727.58817656289
+step_16 sum_variance_noise_fp64: -1158.4837642844855
+step_17 sum_model_pred_fp64: -186459.64710998535
+step_17 sum_intermediate_latents_fp64: 139415.49210320425
+step_17 sum_variance_noise_fp64: -2220.624273855751
+step_18 sum_model_pred_fp64: -186600.23207473755
+step_18 sum_intermediate_latents_fp64: 160641.6451632034
+step_18 sum_variance_noise_fp64: 356.50661577396
+step_19 sum_model_pred_fp64: -200928.66387176514
+step_19 sum_intermediate_latents_fp64: 188168.71803556685
+step_19 sum_variance_noise_fp64: 748.0209825060505
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: 9.600423%
+pct_diff_vs_flow_sum_model_pred_fp64: -9.439295%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: 0.822205%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: -1.046746%
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: 23714.413813228282
+sum_model_pred_fp64: -215051.41737890244
+sum_prompt_embeds_fp64: 170.33617508131508
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 13347099.499325037
+step_0 sum_model_pred_fp64: -15647.525955200195
+step_0 sum_intermediate_latents_fp64: -2631.583347539534
+step_0 sum_variance_noise_fp64: -706.4486107184051
+step_1 sum_model_pred_fp64: -5145.636917114258
+step_1 sum_intermediate_latents_fp64: -2609.2297854468925
+step_1 sum_variance_noise_fp64: -736.1102221184066
+step_2 sum_model_pred_fp64: 7512.509085178375
+step_2 sum_intermediate_latents_fp64: -2651.690403900313
+step_2 sum_variance_noise_fp64: 637.502268261293
+step_3 sum_model_pred_fp64: 3825.571243286133
+step_3 sum_intermediate_latents_fp64: -2690.8791781949985
+step_3 sum_variance_noise_fp64: 138.91650706733856
+step_4 sum_model_pred_fp64: 1475.9818239212036
+step_4 sum_intermediate_latents_fp64: -3044.8665954372627
+step_4 sum_variance_noise_fp64: -2515.23333117891
+step_5 sum_model_pred_fp64: -5624.866527557373
+step_5 sum_intermediate_latents_fp64: -2663.655236879189
+step_5 sum_variance_noise_fp64: 1440.9399752979068
+step_6 sum_model_pred_fp64: -8935.398025512695
+step_6 sum_intermediate_latents_fp64: -2049.527291397797
+step_6 sum_variance_noise_fp64: 2314.609635473033
+step_7 sum_model_pred_fp64: -9572.193187713623
+step_7 sum_intermediate_latents_fp64: -1936.671114058292
+step_7 sum_variance_noise_fp64: -1489.2500841973638
+step_8 sum_model_pred_fp64: -11651.894810199738
+step_8 sum_intermediate_latents_fp64: -1179.529701931373
+step_8 sum_variance_noise_fp64: 2257.234146402997
+step_9 sum_model_pred_fp64: -12337.631351470947
+step_9 sum_intermediate_latents_fp64: -505.86143447055656
+step_9 sum_variance_noise_fp64: 1242.83279304604
+step_10 sum_model_pred_fp64: -14116.070163726807
+step_10 sum_intermediate_latents_fp64: 115.73064955911832
+step_10 sum_variance_noise_fp64: 45.812928689657156
+step_11 sum_model_pred_fp64: -15669.751399993896
+step_11 sum_intermediate_latents_fp64: 857.8675476273638
+step_11 sum_variance_noise_fp64: -79.38408517262155
+step_12 sum_model_pred_fp64: -16449.081714630127
+step_12 sum_intermediate_latents_fp64: 1901.2995075877698
+step_12 sum_variance_noise_fp64: 1133.307939376589
+step_13 sum_model_pred_fp64: -16905.5724029541
+step_13 sum_intermediate_latents_fp64: 2449.6638155513792
+step_13 sum_variance_noise_fp64: -3221.7685823896795
+step_14 sum_model_pred_fp64: -17220.412914276123
+step_14 sum_intermediate_latents_fp64: 3681.698531581089
+step_14 sum_variance_noise_fp64: 505.56747779699424
+step_15 sum_model_pred_fp64: -15947.204921722412
+step_15 sum_intermediate_latents_fp64: 5008.39066312174
+step_15 sum_variance_noise_fp64: 869.539356301844
+step_16 sum_model_pred_fp64: -13886.682636737823
+step_16 sum_intermediate_latents_fp64: 6009.137546686383
+step_16 sum_variance_noise_fp64: -1599.1376832508709
+step_17 sum_model_pred_fp64: -14075.733545303345
+step_17 sum_intermediate_latents_fp64: 7438.051948264358
+step_17 sum_variance_noise_fp64: 237.32162386863547
+step_18 sum_model_pred_fp64: -13793.47679901123
+step_18 sum_intermediate_latents_fp64: 9005.330332014768
+step_18 sum_variance_noise_fp64: -469.5498168189896
+step_19 sum_model_pred_fp64: -20886.346258163452
+step_19 sum_intermediate_latents_fp64: 12044.700681085145
+step_19 sum_variance_noise_fp64: 2285.0715935038043
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: -97.963515%
+pct_diff_vs_flow_sum_model_pred_fp64: 93.822653%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: -68.721785%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: -48.649743%
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: 1276272.7811250088
+sum_model_pred_fp64: -3809900.2895212173
+sum_prompt_embeds_fp64: 549.0616661570037
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 25720200.8740865
+step_0 sum_model_pred_fp64: -238894.54167175293
+step_0 sum_intermediate_latents_fp64: 1257.1177335531393
+step_0 sum_variance_noise_fp64: -413.76701284138187
+step_1 sum_model_pred_fp64: -183517.95473861694
+step_1 sum_intermediate_latents_fp64: 4809.521122724691
+step_1 sum_variance_noise_fp64: 1097.8478760132637
+step_2 sum_model_pred_fp64: -172958.88459777832
+step_2 sum_intermediate_latents_fp64: 8102.359458133971
+step_2 sum_variance_noise_fp64: -1146.8078859883822
+step_3 sum_model_pred_fp64: -185712.17908096313
+step_3 sum_intermediate_latents_fp64: 12019.593000715628
+step_3 sum_variance_noise_fp64: -546.8123247198301
+step_4 sum_model_pred_fp64: -190817.29721450806
+step_4 sum_intermediate_latents_fp64: 16112.523793006556
+step_4 sum_variance_noise_fp64: -2465.23402356364
+step_5 sum_model_pred_fp64: -184538.43008422852
+step_5 sum_intermediate_latents_fp64: 20632.382237200858
+step_5 sum_variance_noise_fp64: -862.7989280010322
+step_6 sum_model_pred_fp64: -188103.99914169312
+step_6 sum_intermediate_latents_fp64: 25885.68242692259
+step_6 sum_variance_noise_fp64: 756.632577442635
+step_7 sum_model_pred_fp64: -191423.7793483734
+step_7 sum_intermediate_latents_fp64: 31657.62393098662
+step_7 sum_variance_noise_fp64: 394.200246270673
+step_8 sum_model_pred_fp64: -191319.39298057556
+step_8 sum_intermediate_latents_fp64: 38130.82754136628
+step_8 sum_variance_noise_fp64: 1520.4352477508678
+step_9 sum_model_pred_fp64: -190705.08354091644
+step_9 sum_intermediate_latents_fp64: 45116.462298355764
+step_9 sum_variance_noise_fp64: 936.7956031903974
+step_10 sum_model_pred_fp64: -189169.78499221802
+step_10 sum_intermediate_latents_fp64: 52538.19796100717
+step_10 sum_variance_noise_fp64: -528.8627464762219
+step_11 sum_model_pred_fp64: -188859.93423461914
+step_11 sum_intermediate_latents_fp64: 61114.275498876406
+step_11 sum_variance_noise_fp64: 1781.804026242601
+step_12 sum_model_pred_fp64: -189353.72718811035
+step_12 sum_intermediate_latents_fp64: 70729.12329355802
+step_12 sum_variance_noise_fp64: 2080.2173336393785
+step_13 sum_model_pred_fp64: -188500.65565490723
+step_13 sum_intermediate_latents_fp64: 81233.52697679566
+step_13 sum_variance_noise_fp64: 619.1326401572791
+step_14 sum_model_pred_fp64: -188044.47400283813
+step_14 sum_intermediate_latents_fp64: 93320.4364741958
+step_14 sum_variance_noise_fp64: 2309.9071875857644
+step_15 sum_model_pred_fp64: -187403.68109703064
+step_15 sum_intermediate_latents_fp64: 106493.64721966686
+step_15 sum_variance_noise_fp64: -1641.4140322407984
+step_16 sum_model_pred_fp64: -186587.94689559937
+step_16 sum_intermediate_latents_fp64: 121727.58817656289
+step_16 sum_variance_noise_fp64: -1158.4837642844855
+step_17 sum_model_pred_fp64: -186459.64710998535
+step_17 sum_intermediate_latents_fp64: 139415.49210320425
+step_17 sum_variance_noise_fp64: -2220.624273855751
+step_18 sum_model_pred_fp64: -186600.23207473755
+step_18 sum_intermediate_latents_fp64: 160641.6451632034
+step_18 sum_variance_noise_fp64: 356.50661577396
+step_19 sum_model_pred_fp64: -200928.66387176514
+step_19 sum_intermediate_latents_fp64: 188168.71803556685
+step_19 sum_variance_noise_fp64: 748.0209825060505
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: 9.600423%
+pct_diff_vs_flow_sum_model_pred_fp64: -9.439295%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: 0.822205%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: -1.046746%
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: 23714.413813228282
+sum_model_pred_fp64: -215051.41737890244
+sum_prompt_embeds_fp64: 170.33617508131508
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 13347099.499325037
+step_0 sum_model_pred_fp64: -15647.525955200195
+step_0 sum_intermediate_latents_fp64: -2631.583347539534
+step_0 sum_variance_noise_fp64: -706.4486107184051
+step_1 sum_model_pred_fp64: -5145.636917114258
+step_1 sum_intermediate_latents_fp64: -2609.2297854468925
+step_1 sum_variance_noise_fp64: -736.1102221184066
+step_2 sum_model_pred_fp64: 7512.509085178375
+step_2 sum_intermediate_latents_fp64: -2651.690403900313
+step_2 sum_variance_noise_fp64: 637.502268261293
+step_3 sum_model_pred_fp64: 3825.571243286133
+step_3 sum_intermediate_latents_fp64: -2690.8791781949985
+step_3 sum_variance_noise_fp64: 138.91650706733856
+step_4 sum_model_pred_fp64: 1475.9818239212036
+step_4 sum_intermediate_latents_fp64: -3044.8665954372627
+step_4 sum_variance_noise_fp64: -2515.23333117891
+step_5 sum_model_pred_fp64: -5624.866527557373
+step_5 sum_intermediate_latents_fp64: -2663.655236879189
+step_5 sum_variance_noise_fp64: 1440.9399752979068
+step_6 sum_model_pred_fp64: -8935.398025512695
+step_6 sum_intermediate_latents_fp64: -2049.527291397797
+step_6 sum_variance_noise_fp64: 2314.609635473033
+step_7 sum_model_pred_fp64: -9572.193187713623
+step_7 sum_intermediate_latents_fp64: -1936.671114058292
+step_7 sum_variance_noise_fp64: -1489.2500841973638
+step_8 sum_model_pred_fp64: -11651.894810199738
+step_8 sum_intermediate_latents_fp64: -1179.529701931373
+step_8 sum_variance_noise_fp64: 2257.234146402997
+step_9 sum_model_pred_fp64: -12337.631351470947
+step_9 sum_intermediate_latents_fp64: -505.86143447055656
+step_9 sum_variance_noise_fp64: 1242.83279304604
+step_10 sum_model_pred_fp64: -14116.070163726807
+step_10 sum_intermediate_latents_fp64: 115.73064955911832
+step_10 sum_variance_noise_fp64: 45.812928689657156
+step_11 sum_model_pred_fp64: -15669.751399993896
+step_11 sum_intermediate_latents_fp64: 857.8675476273638
+step_11 sum_variance_noise_fp64: -79.38408517262155
+step_12 sum_model_pred_fp64: -16449.081714630127
+step_12 sum_intermediate_latents_fp64: 1901.2995075877698
+step_12 sum_variance_noise_fp64: 1133.307939376589
+step_13 sum_model_pred_fp64: -16905.5724029541
+step_13 sum_intermediate_latents_fp64: 2449.6638155513792
+step_13 sum_variance_noise_fp64: -3221.7685823896795
+step_14 sum_model_pred_fp64: -17220.412914276123
+step_14 sum_intermediate_latents_fp64: 3681.698531581089
+step_14 sum_variance_noise_fp64: 505.56747779699424
+step_15 sum_model_pred_fp64: -15947.204921722412
+step_15 sum_intermediate_latents_fp64: 5008.39066312174
+step_15 sum_variance_noise_fp64: 869.539356301844
+step_16 sum_model_pred_fp64: -13886.682636737823
+step_16 sum_intermediate_latents_fp64: 6009.137546686383
+step_16 sum_variance_noise_fp64: -1599.1376832508709
+step_17 sum_model_pred_fp64: -14075.733545303345
+step_17 sum_intermediate_latents_fp64: 7438.051948264358
+step_17 sum_variance_noise_fp64: 237.32162386863547
+step_18 sum_model_pred_fp64: -13793.47679901123
+step_18 sum_intermediate_latents_fp64: 9005.330332014768
+step_18 sum_variance_noise_fp64: -469.5498168189896
+step_19 sum_model_pred_fp64: -20886.346258163452
+step_19 sum_intermediate_latents_fp64: 12044.700681085145
+step_19 sum_variance_noise_fp64: 2285.0715935038043
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: -97.963515%
+pct_diff_vs_flow_sum_model_pred_fp64: 93.822653%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: -68.721785%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: -48.649743%
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: 1276272.7811250088
+sum_model_pred_fp64: -3809900.2895212173
+sum_prompt_embeds_fp64: 549.0616661570037
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 25720200.8740865
+step_0 sum_model_pred_fp64: -238894.54167175293
+step_0 sum_intermediate_latents_fp64: 1257.1177335531393
+step_0 sum_variance_noise_fp64: -413.76701284138187
+step_1 sum_model_pred_fp64: -183517.95473861694
+step_1 sum_intermediate_latents_fp64: 4809.521122724691
+step_1 sum_variance_noise_fp64: 1097.8478760132637
+step_2 sum_model_pred_fp64: -172958.88459777832
+step_2 sum_intermediate_latents_fp64: 8102.359458133971
+step_2 sum_variance_noise_fp64: -1146.8078859883822
+step_3 sum_model_pred_fp64: -185712.17908096313
+step_3 sum_intermediate_latents_fp64: 12019.593000715628
+step_3 sum_variance_noise_fp64: -546.8123247198301
+step_4 sum_model_pred_fp64: -190817.29721450806
+step_4 sum_intermediate_latents_fp64: 16112.523793006556
+step_4 sum_variance_noise_fp64: -2465.23402356364
+step_5 sum_model_pred_fp64: -184538.43008422852
+step_5 sum_intermediate_latents_fp64: 20632.382237200858
+step_5 sum_variance_noise_fp64: -862.7989280010322
+step_6 sum_model_pred_fp64: -188103.99914169312
+step_6 sum_intermediate_latents_fp64: 25885.68242692259
+step_6 sum_variance_noise_fp64: 756.632577442635
+step_7 sum_model_pred_fp64: -191423.7793483734
+step_7 sum_intermediate_latents_fp64: 31657.62393098662
+step_7 sum_variance_noise_fp64: 394.200246270673
+step_8 sum_model_pred_fp64: -191319.39298057556
+step_8 sum_intermediate_latents_fp64: 38130.82754136628
+step_8 sum_variance_noise_fp64: 1520.4352477508678
+step_9 sum_model_pred_fp64: -190705.08354091644
+step_9 sum_intermediate_latents_fp64: 45116.462298355764
+step_9 sum_variance_noise_fp64: 936.7956031903974
+step_10 sum_model_pred_fp64: -189169.78499221802
+step_10 sum_intermediate_latents_fp64: 52538.19796100717
+step_10 sum_variance_noise_fp64: -528.8627464762219
+step_11 sum_model_pred_fp64: -188859.93423461914
+step_11 sum_intermediate_latents_fp64: 61114.275498876406
+step_11 sum_variance_noise_fp64: 1781.804026242601
+step_12 sum_model_pred_fp64: -189353.72718811035
+step_12 sum_intermediate_latents_fp64: 70729.12329355802
+step_12 sum_variance_noise_fp64: 2080.2173336393785
+step_13 sum_model_pred_fp64: -188500.65565490723
+step_13 sum_intermediate_latents_fp64: 81233.52697679566
+step_13 sum_variance_noise_fp64: 619.1326401572791
+step_14 sum_model_pred_fp64: -188044.47400283813
+step_14 sum_intermediate_latents_fp64: 93320.4364741958
+step_14 sum_variance_noise_fp64: 2309.9071875857644
+step_15 sum_model_pred_fp64: -187403.68109703064
+step_15 sum_intermediate_latents_fp64: 106493.64721966686
+step_15 sum_variance_noise_fp64: -1641.4140322407984
+step_16 sum_model_pred_fp64: -186587.94689559937
+step_16 sum_intermediate_latents_fp64: 121727.58817656289
+step_16 sum_variance_noise_fp64: -1158.4837642844855
+step_17 sum_model_pred_fp64: -186459.64710998535
+step_17 sum_intermediate_latents_fp64: 139415.49210320425
+step_17 sum_variance_noise_fp64: -2220.624273855751
+step_18 sum_model_pred_fp64: -186600.23207473755
+step_18 sum_intermediate_latents_fp64: 160641.6451632034
+step_18 sum_variance_noise_fp64: 356.50661577396
+step_19 sum_model_pred_fp64: -200928.66387176514
+step_19 sum_intermediate_latents_fp64: 188168.71803556685
+step_19 sum_variance_noise_fp64: 748.0209825060505
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: 9.600423%
+pct_diff_vs_flow_sum_model_pred_fp64: -9.439295%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: 0.822205%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: -1.046746%
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: 23714.413813228282
+sum_model_pred_fp64: -215051.41737890244
+sum_prompt_embeds_fp64: 170.33617508131508
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 13347099.499325037
+step_0 sum_model_pred_fp64: -15647.525955200195
+step_0 sum_intermediate_latents_fp64: -2631.583347539534
+step_0 sum_variance_noise_fp64: -706.4486107184051
+step_1 sum_model_pred_fp64: -5145.636917114258
+step_1 sum_intermediate_latents_fp64: -2609.2297854468925
+step_1 sum_variance_noise_fp64: -736.1102221184066
+step_2 sum_model_pred_fp64: 7512.509085178375
+step_2 sum_intermediate_latents_fp64: -2651.690403900313
+step_2 sum_variance_noise_fp64: 637.502268261293
+step_3 sum_model_pred_fp64: 3825.571243286133
+step_3 sum_intermediate_latents_fp64: -2690.8791781949985
+step_3 sum_variance_noise_fp64: 138.91650706733856
+step_4 sum_model_pred_fp64: 1475.9818239212036
+step_4 sum_intermediate_latents_fp64: -3044.8665954372627
+step_4 sum_variance_noise_fp64: -2515.23333117891
+step_5 sum_model_pred_fp64: -5624.866527557373
+step_5 sum_intermediate_latents_fp64: -2663.655236879189
+step_5 sum_variance_noise_fp64: 1440.9399752979068
+step_6 sum_model_pred_fp64: -8935.398025512695
+step_6 sum_intermediate_latents_fp64: -2049.527291397797
+step_6 sum_variance_noise_fp64: 2314.609635473033
+step_7 sum_model_pred_fp64: -9572.193187713623
+step_7 sum_intermediate_latents_fp64: -1936.671114058292
+step_7 sum_variance_noise_fp64: -1489.2500841973638
+step_8 sum_model_pred_fp64: -11651.894810199738
+step_8 sum_intermediate_latents_fp64: -1179.529701931373
+step_8 sum_variance_noise_fp64: 2257.234146402997
+step_9 sum_model_pred_fp64: -12337.631351470947
+step_9 sum_intermediate_latents_fp64: -505.86143447055656
+step_9 sum_variance_noise_fp64: 1242.83279304604
+step_10 sum_model_pred_fp64: -14116.070163726807
+step_10 sum_intermediate_latents_fp64: 115.73064955911832
+step_10 sum_variance_noise_fp64: 45.812928689657156
+step_11 sum_model_pred_fp64: -15669.751399993896
+step_11 sum_intermediate_latents_fp64: 857.8675476273638
+step_11 sum_variance_noise_fp64: -79.38408517262155
+step_12 sum_model_pred_fp64: -16449.081714630127
+step_12 sum_intermediate_latents_fp64: 1901.2995075877698
+step_12 sum_variance_noise_fp64: 1133.307939376589
+step_13 sum_model_pred_fp64: -16905.5724029541
+step_13 sum_intermediate_latents_fp64: 2449.6638155513792
+step_13 sum_variance_noise_fp64: -3221.7685823896795
+step_14 sum_model_pred_fp64: -17220.412914276123
+step_14 sum_intermediate_latents_fp64: 3681.698531581089
+step_14 sum_variance_noise_fp64: 505.56747779699424
+step_15 sum_model_pred_fp64: -15947.204921722412
+step_15 sum_intermediate_latents_fp64: 5008.39066312174
+step_15 sum_variance_noise_fp64: 869.539356301844
+step_16 sum_model_pred_fp64: -13886.682636737823
+step_16 sum_intermediate_latents_fp64: 6009.137546686383
+step_16 sum_variance_noise_fp64: -1599.1376832508709
+step_17 sum_model_pred_fp64: -14075.733545303345
+step_17 sum_intermediate_latents_fp64: 7438.051948264358
+step_17 sum_variance_noise_fp64: 237.32162386863547
+step_18 sum_model_pred_fp64: -13793.47679901123
+step_18 sum_intermediate_latents_fp64: 9005.330332014768
+step_18 sum_variance_noise_fp64: -469.5498168189896
+step_19 sum_model_pred_fp64: -20886.346258163452
+step_19 sum_intermediate_latents_fp64: 12044.700681085145
+step_19 sum_variance_noise_fp64: 2285.0715935038043
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: -97.963515%
+pct_diff_vs_flow_sum_model_pred_fp64: 93.822653%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: -68.721785%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: -48.649743%
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: 1276272.7811250088
+sum_model_pred_fp64: -3809900.2895212173
+sum_prompt_embeds_fp64: 549.0616661570037
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 25720200.8740865
+step_0 sum_model_pred_fp64: -238894.54167175293
+step_0 sum_intermediate_latents_fp64: 1257.1177335531393
+step_0 sum_variance_noise_fp64: -413.76701284138187
+step_1 sum_model_pred_fp64: -183517.95473861694
+step_1 sum_intermediate_latents_fp64: 4809.521122724691
+step_1 sum_variance_noise_fp64: 1097.8478760132637
+step_2 sum_model_pred_fp64: -172958.88459777832
+step_2 sum_intermediate_latents_fp64: 8102.359458133971
+step_2 sum_variance_noise_fp64: -1146.8078859883822
+step_3 sum_model_pred_fp64: -185712.17908096313
+step_3 sum_intermediate_latents_fp64: 12019.593000715628
+step_3 sum_variance_noise_fp64: -546.8123247198301
+step_4 sum_model_pred_fp64: -190817.29721450806
+step_4 sum_intermediate_latents_fp64: 16112.523793006556
+step_4 sum_variance_noise_fp64: -2465.23402356364
+step_5 sum_model_pred_fp64: -184538.43008422852
+step_5 sum_intermediate_latents_fp64: 20632.382237200858
+step_5 sum_variance_noise_fp64: -862.7989280010322
+step_6 sum_model_pred_fp64: -188103.99914169312
+step_6 sum_intermediate_latents_fp64: 25885.68242692259
+step_6 sum_variance_noise_fp64: 756.632577442635
+step_7 sum_model_pred_fp64: -191423.7793483734
+step_7 sum_intermediate_latents_fp64: 31657.62393098662
+step_7 sum_variance_noise_fp64: 394.200246270673
+step_8 sum_model_pred_fp64: -191319.39298057556
+step_8 sum_intermediate_latents_fp64: 38130.82754136628
+step_8 sum_variance_noise_fp64: 1520.4352477508678
+step_9 sum_model_pred_fp64: -190705.08354091644
+step_9 sum_intermediate_latents_fp64: 45116.462298355764
+step_9 sum_variance_noise_fp64: 936.7956031903974
+step_10 sum_model_pred_fp64: -189169.78499221802
+step_10 sum_intermediate_latents_fp64: 52538.19796100717
+step_10 sum_variance_noise_fp64: -528.8627464762219
+step_11 sum_model_pred_fp64: -188859.93423461914
+step_11 sum_intermediate_latents_fp64: 61114.275498876406
+step_11 sum_variance_noise_fp64: 1781.804026242601
+step_12 sum_model_pred_fp64: -189353.72718811035
+step_12 sum_intermediate_latents_fp64: 70729.12329355802
+step_12 sum_variance_noise_fp64: 2080.2173336393785
+step_13 sum_model_pred_fp64: -188500.65565490723
+step_13 sum_intermediate_latents_fp64: 81233.52697679566
+step_13 sum_variance_noise_fp64: 619.1326401572791
+step_14 sum_model_pred_fp64: -188044.47400283813
+step_14 sum_intermediate_latents_fp64: 93320.4364741958
+step_14 sum_variance_noise_fp64: 2309.9071875857644
+step_15 sum_model_pred_fp64: -187403.68109703064
+step_15 sum_intermediate_latents_fp64: 106493.64721966686
+step_15 sum_variance_noise_fp64: -1641.4140322407984
+step_16 sum_model_pred_fp64: -186587.94689559937
+step_16 sum_intermediate_latents_fp64: 121727.58817656289
+step_16 sum_variance_noise_fp64: -1158.4837642844855
+step_17 sum_model_pred_fp64: -186459.64710998535
+step_17 sum_intermediate_latents_fp64: 139415.49210320425
+step_17 sum_variance_noise_fp64: -2220.624273855751
+step_18 sum_model_pred_fp64: -186600.23207473755
+step_18 sum_intermediate_latents_fp64: 160641.6451632034
+step_18 sum_variance_noise_fp64: 356.50661577396
+step_19 sum_model_pred_fp64: -200928.66387176514
+step_19 sum_intermediate_latents_fp64: 188168.71803556685
+step_19 sum_variance_noise_fp64: 748.0209825060505
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: 9.600423%
+pct_diff_vs_flow_sum_model_pred_fp64: -9.439295%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: 0.822205%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: -1.046746%
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: 1315365.5450949187
+sum_model_pred_fp64: -3923157.115114212
+sum_prompt_embeds_fp64: -18.010899819694956
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 22707033.48490274
+step_0 sum_model_pred_fp64: -279161.9210510254
+step_0 sum_intermediate_latents_fp64: 1913.9707425490487
+step_0 sum_variance_noise_fp64: -706.4486107184051
+step_1 sum_model_pred_fp64: -202578.02646636963
+step_1 sum_intermediate_latents_fp64: 5575.14370576464
+step_1 sum_variance_noise_fp64: -736.1102221184066
+step_2 sum_model_pred_fp64: -184222.31785583496
+step_2 sum_intermediate_latents_fp64: 9326.251460625761
+step_2 sum_variance_noise_fp64: 637.502268261293
+step_3 sum_model_pred_fp64: -182454.35874938965
+step_3 sum_intermediate_latents_fp64: 13253.146926558315
+step_3 sum_variance_noise_fp64: 138.91650706733856
+step_4 sum_model_pred_fp64: -184185.44427490234
+step_4 sum_intermediate_latents_fp64: 17168.170214284815
+step_4 sum_variance_noise_fp64: -2515.23333117891
+step_5 sum_model_pred_fp64: -187407.92437553406
+step_5 sum_intermediate_latents_fp64: 22073.410464640416
+step_5 sum_variance_noise_fp64: 1440.9399752979068
+step_6 sum_model_pred_fp64: -193113.41357803345
+step_6 sum_intermediate_latents_fp64: 27674.225782781898
+step_6 sum_variance_noise_fp64: 2314.609635473033
+step_7 sum_model_pred_fp64: -193962.6644153595
+step_7 sum_intermediate_latents_fp64: 33234.44949819462
+step_7 sum_variance_noise_fp64: -1489.2500841973638
+step_8 sum_model_pred_fp64: -193698.0438194275
+step_8 sum_intermediate_latents_fp64: 39876.90357255039
+step_8 sum_variance_noise_fp64: 2257.234146402997
+step_9 sum_model_pred_fp64: -193706.89869308472
+step_9 sum_intermediate_latents_fp64: 46999.459122281
+step_9 sum_variance_noise_fp64: 1242.83279304604
+step_10 sum_model_pred_fp64: -193334.1884174347
+step_10 sum_intermediate_latents_fp64: 54657.65920521144
+step_10 sum_variance_noise_fp64: 45.812928689657156
+step_11 sum_model_pred_fp64: -193872.00868225098
+step_11 sum_intermediate_latents_fp64: 63171.598361266166
+step_11 sum_variance_noise_fp64: -79.38408517262155
+step_12 sum_model_pred_fp64: -192908.49453735352
+step_12 sum_intermediate_latents_fp64: 72809.72381368812
+step_12 sum_variance_noise_fp64: 1133.307939376589
+step_13 sum_model_pred_fp64: -193904.96211242676
+step_13 sum_intermediate_latents_fp64: 83064.96634056803
+step_13 sum_variance_noise_fp64: -3221.7685823896795
+step_14 sum_model_pred_fp64: -193527.1113204956
+step_14 sum_intermediate_latents_fp64: 95255.00559615734
+step_14 sum_variance_noise_fp64: 505.56747779699424
+step_15 sum_model_pred_fp64: -191765.0856742859
+step_15 sum_intermediate_latents_fp64: 109073.24764882406
+step_15 sum_variance_noise_fp64: 869.539356301844
+step_16 sum_model_pred_fp64: -190147.15653038025
+step_16 sum_intermediate_latents_fp64: 124537.902657369
+step_16 sum_variance_noise_fp64: -1599.1376832508709
+step_17 sum_model_pred_fp64: -190144.6646900177
+step_17 sum_intermediate_latents_fp64: 142832.4219844285
+step_17 sum_variance_noise_fp64: 237.32162386863547
+step_18 sum_model_pred_fp64: -186801.456325531
+step_18 sum_intermediate_latents_fp64: 163968.4104802513
+step_18 sum_variance_noise_fp64: -469.5498168189896
+step_19 sum_model_pred_fp64: -202260.97354507446
+step_19 sum_intermediate_latents_fp64: 191733.4408375184
+step_19 sum_variance_noise_fp64: 2285.0715935038043
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: 12.957529%
+pct_diff_vs_flow_sum_model_pred_fp64: -12.692595%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: -103.307276%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: -12.639297%
+sum_initial_latents_fp64: -2833.963320594627
+sum_intermediate_latents_fp64: 835383.2105513761
+sum_model_pred_fp64: -2535921.5186367035
+sum_prompt_embeds_fp64: 393.9204009138916
+sum_negative_prompt_embeds_fp64: -11.343228434134744
+sum_decoded_fp64: 27343402.06117931
+step_0 sum_model_pred_fp64: -107822.4541091919
+step_0 sum_intermediate_latents_fp64: -1003.8413222534
+step_0 sum_variance_noise_fp64: -413.76701284138187
+step_1 sum_model_pred_fp64: -154780.28731536865
+step_1 sum_intermediate_latents_fp64: 2032.9171320468959
+step_1 sum_variance_noise_fp64: 1097.8478760132637
+step_2 sum_model_pred_fp64: -109107.57977294922
+step_2 sum_intermediate_latents_fp64: 4062.8971163114475
+step_2 sum_variance_noise_fp64: -1146.8078859883822
+step_3 sum_model_pred_fp64: -124072.87265396118
+step_3 sum_intermediate_latents_fp64: 6668.508947822149
+step_3 sum_variance_noise_fp64: -546.8123247198301
+step_4 sum_model_pred_fp64: -125666.86209869385
+step_4 sum_intermediate_latents_fp64: 9260.895538831348
+step_4 sum_variance_noise_fp64: -2465.23402356364
+step_5 sum_model_pred_fp64: -127851.16478347778
+step_5 sum_intermediate_latents_fp64: 12375.932905160793
+step_5 sum_variance_noise_fp64: -862.7989280010322
+step_6 sum_model_pred_fp64: -127371.22029876709
+step_6 sum_intermediate_latents_fp64: 15986.011032732742
+step_6 sum_variance_noise_fp64: 756.632577442635
+step_7 sum_model_pred_fp64: -127978.95749664307
+step_7 sum_intermediate_latents_fp64: 19879.657250187563
+step_7 sum_variance_noise_fp64: 394.200246270673
+step_8 sum_model_pred_fp64: -127209.28393554688
+step_8 sum_intermediate_latents_fp64: 24272.47377402408
+step_8 sum_variance_noise_fp64: 1520.4352477508678
+step_9 sum_model_pred_fp64: -127572.9127292633
+step_9 sum_intermediate_latents_fp64: 29007.48014795677
+step_9 sum_variance_noise_fp64: 936.7956031903974
+step_10 sum_model_pred_fp64: -127405.1398639679
+step_10 sum_intermediate_latents_fp64: 34000.40702084621
+step_10 sum_variance_noise_fp64: -528.8627464762219
+step_11 sum_model_pred_fp64: -128598.63160133362
+step_11 sum_intermediate_latents_fp64: 39949.7625478993
+step_11 sum_variance_noise_fp64: 1781.804026242601
+step_12 sum_model_pred_fp64: -128197.41047668457
+step_12 sum_intermediate_latents_fp64: 46579.10409779669
+step_12 sum_variance_noise_fp64: 2080.2173336393785
+step_13 sum_model_pred_fp64: -128721.138174057
+step_13 sum_intermediate_latents_fp64: 53808.43040644773
+step_13 sum_variance_noise_fp64: 619.1326401572791
+step_14 sum_model_pred_fp64: -129043.45131111145
+step_14 sum_intermediate_latents_fp64: 62235.82449996669
+step_14 sum_variance_noise_fp64: 2309.9071875857644
+step_15 sum_model_pred_fp64: -127513.45964431763
+step_15 sum_intermediate_latents_fp64: 71152.06899940474
+step_15 sum_variance_noise_fp64: -1641.4140322407984
+step_16 sum_model_pred_fp64: -127245.30294799805
+step_16 sum_intermediate_latents_fp64: 81521.56180715439
+step_16 sum_variance_noise_fp64: -1158.4837642844855
+step_17 sum_model_pred_fp64: -126451.25827026367
+step_17 sum_intermediate_latents_fp64: 93458.20617139514
+step_17 sum_variance_noise_fp64: -2220.624273855751
+step_18 sum_model_pred_fp64: -125492.25035858154
+step_18 sum_intermediate_latents_fp64: 107746.98282487685
+step_18 sum_variance_noise_fp64: 356.50661577396
+step_19 sum_model_pred_fp64: -127819.88079452515
+step_19 sum_intermediate_latents_fp64: 125221.8929733626
+step_19 sum_variance_noise_fp64: 748.0209825060505
+num_inference_steps: 20
+guidance_scale: 4.5
+height: 240
+width: 416
+num_frames: 33
+batch_size: 8
+pct_diff_vs_flow_sum_initial_latents_fp64: 0.000000%
+pct_diff_vs_flow_sum_intermediate_latents_fp64: -28.261141%
+pct_diff_vs_flow_sum_model_pred_fp64: 27.155715%
+pct_diff_vs_flow_sum_prompt_embeds_fp64: -27.665824%
+pct_diff_vs_flow_sum_negative_prompt_embeds_fp64: -0.544070%
+pct_diff_vs_flow_sum_decoded_fp64: 5.198191%
