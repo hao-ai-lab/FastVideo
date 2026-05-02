@@ -49,13 +49,13 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import repeat
 
 from fastvideo.attention import LocalAttention
 from fastvideo.configs.models.dits.magi_human import (
     MagiHumanArchConfig,
     MagiHumanVideoConfig,
 )
+from fastvideo.layers.rotary_embedding import _apply_rotary_emb
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 
@@ -221,24 +221,6 @@ class ElementWiseFourierEmbed(nn.Module):
         return torch.cat((sin_proj, cos_proj), dim=1).flatten(1)
 
 
-def _rotate_half(x: torch.Tensor) -> torch.Tensor:
-    x1, x2 = x.chunk(2, dim=-1)
-    return torch.cat((-x2, x1), dim=-1)
-
-
-def apply_rotary_emb(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    """Apply split-half RoPE. x: [..., seq, heads, head_dim].
-    cos/sin: [..., seq, rot_dim/2].
-    """
-    rot_dim = cos.shape[-1] * 2
-    cos = repeat(cos, "... d -> ... 1 (2 d)")
-    sin = repeat(sin, "... d -> ... 1 (2 d)")
-    x_rot = x[..., :rot_dim] * cos + _rotate_half(x[..., :rot_dim]) * sin
-    if rot_dim < x.shape[-1]:
-        return torch.cat([x_rot, x[..., rot_dim:]], dim=-1)
-    return x_rot
-
-
 # ---------------------------------------------------------------------------
 # Packed-expert linear
 # ---------------------------------------------------------------------------
@@ -389,12 +371,19 @@ class MagiAttention(nn.Module):
         # Element-wise Fourier embed packs sin/cos of 3 axes into a single
         # `rope` tensor. Match reference's split:
         #   sin_emb, cos_emb = rope.tensor_split(2, -1)
-        # Note the reference calls apply_rotary_emb_torch with (cos_emb, sin_emb)
-        # but passes sin_emb first in the split — we replicate that quirk
-        # exactly so weight parity holds.
+        # Reference passes (cos_emb, sin_emb) but splits sin first — replicated
+        # exactly so weight parity holds. Partial RoPE: rope dim is
+        # 6 * (head_dim // 8) = 96 < head_dim (128), so the trailing 32
+        # head_dim positions stay unrotated, matching the reference.
         sin_emb, cos_emb = rope.tensor_split(2, -1)
-        q = apply_rotary_emb(q, cos_emb, sin_emb)
-        k = apply_rotary_emb(k, cos_emb, sin_emb)
+        rot_dim = cos_emb.shape[-1] * 2
+        q_rot = _apply_rotary_emb(q[..., :rot_dim], cos_emb, sin_emb, is_neox_style=True)
+        k_rot = _apply_rotary_emb(k[..., :rot_dim], cos_emb, sin_emb, is_neox_style=True)
+        if rot_dim < q.shape[-1]:
+            q = torch.cat([q_rot, q[..., rot_dim:]], dim=-1)
+            k = torch.cat([k_rot, k[..., rot_dim:]], dim=-1)
+        else:
+            q, k = q_rot, k_rot
 
         # Run SDPA via FastVideo's LocalAttention so the backend selection
         # (SDPA / FlashAttn / SLA / SageAttn) flows through the standard
