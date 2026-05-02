@@ -56,6 +56,13 @@ def _randn_ltx2_video_latents(
         patchifier.get_token_count(video_shape),
         shape[1] * patch_volume,
     )
+    # `torch.randn` accepts only a single torch.Generator. Some callers
+    # (e.g. InputValidationStage) hand us a one-element list when
+    # num_videos_per_prompt == 1; unwrap it here. For batched sampling
+    # (>1 sample) this collapses to the first generator — match this
+    # against expected reproducibility semantics if that path is ever used.
+    if isinstance(generator, list):
+        generator = generator[0] if generator else None
     patch_noise = torch.randn(
         patch_shape,
         generator=generator,
