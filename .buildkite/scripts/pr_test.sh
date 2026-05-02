@@ -17,10 +17,18 @@ if ! python3 -m modal --version &> /dev/null; then
     log "Modal not found, installing..."
     if ! command -v uv &> /dev/null; then
         log "uv not found, bootstrapping..."
-        curl -LsSf https://astral.sh/uv/install.sh | sh
+        if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
+            log "Error: Failed to bootstrap uv via astral.sh installer."
+            exit 1
+        fi
         export PATH="$HOME/.local/bin:$PATH"
+        if ! command -v uv &> /dev/null; then
+            log "Error: uv still not on PATH after bootstrap."
+            exit 1
+        fi
     fi
-    uv pip install --system modal
+    # --break-system-packages preserves prior `pip install --user` semantics on PEP 668 agents.
+    uv pip install --system --break-system-packages modal
 
     # Verify installation
     if ! python3 -m modal --version &> /dev/null; then
