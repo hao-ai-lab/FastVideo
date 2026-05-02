@@ -300,34 +300,37 @@ def _run_denoise_loop(
     in pre-constructed so each side can mirror its production scheduler
     init pattern (see `_build_*_schedulers`).
     """
+    from fastvideo.forward_context import set_forward_context
     audio_feat_len = int(audio_latent.shape[1])
 
     with torch.inference_mode():
         for idx, t in enumerate(video_sched.timesteps):
-            v_cond_video, v_cond_audio = dit_forward_fn(
-                dit, video_latent, audio_latent, audio_feat_len,
-                txt_feat, txt_feat_len, patch_size, coords_style,
-                video_in_channels, audio_in_channels,
-            )
-            if cfg_number == 2:
-                v_uncond_video, v_uncond_audio = dit_forward_fn(
+            t_int = int(t.item()) if torch.is_tensor(t) else int(t)
+            with set_forward_context(current_timestep=t_int, attn_metadata=None):
+                v_cond_video, v_cond_audio = dit_forward_fn(
                     dit, video_latent, audio_latent, audio_feat_len,
-                    neg_txt_feat, neg_txt_feat_len, patch_size, coords_style,
+                    txt_feat, txt_feat_len, patch_size, coords_style,
                     video_in_channels, audio_in_channels,
                 )
-                # Upstream's video-guidance drop-at-t<=500 trick.
-                video_guidance = (
-                    video_txt_guidance_scale if t > 500 else 2.0
-                )
-                v_video = v_uncond_video + video_guidance * (
-                    v_cond_video - v_uncond_video
-                )
-                v_audio = v_uncond_audio + audio_txt_guidance_scale * (
-                    v_cond_audio - v_uncond_audio
-                )
-            else:
-                v_video = v_cond_video
-                v_audio = v_cond_audio
+                if cfg_number == 2:
+                    v_uncond_video, v_uncond_audio = dit_forward_fn(
+                        dit, video_latent, audio_latent, audio_feat_len,
+                        neg_txt_feat, neg_txt_feat_len, patch_size, coords_style,
+                        video_in_channels, audio_in_channels,
+                    )
+                    # Upstream's video-guidance drop-at-t<=500 trick.
+                    video_guidance = (
+                        video_txt_guidance_scale if t > 500 else 2.0
+                    )
+                    v_video = v_uncond_video + video_guidance * (
+                        v_cond_video - v_uncond_video
+                    )
+                    v_audio = v_uncond_audio + audio_txt_guidance_scale * (
+                        v_cond_audio - v_uncond_audio
+                    )
+                else:
+                    v_video = v_cond_video
+                    v_audio = v_cond_audio
 
             video_latent = video_sched.step(
                 v_video, t, video_latent, return_dict=False,

@@ -14,6 +14,7 @@ import torch
 from tqdm import tqdm
 
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.forward_context import set_forward_context
 from fastvideo.hooks.activation_trace import trace_step
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -149,7 +150,10 @@ class MagiHumanDenoisingStage(PipelineStage):
 
         disable_tqdm = not getattr(fastvideo_args, "log_level_progress", True)
         for idx, t in enumerate(tqdm(timesteps, disable=disable_tqdm)):
-            with trace_step(idx):
+            with trace_step(idx), set_forward_context(
+                    current_timestep=int(t.item()) if torch.is_tensor(t) else int(t),
+                    attn_metadata=None,
+            ):
                 v_cond_video, v_cond_audio = _dit_forward(
                     self.transformer,
                     video_latent=video_latent,
