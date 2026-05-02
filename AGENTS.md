@@ -24,7 +24,7 @@
 - Style tools are configured in `pyproject.toml` and `.pre-commit-config.yaml`:
   - `yapf` (format), `ruff` (lint, auto-fix), `mypy` (typing), `codespell`.
 - Lint via `pre-commit run --files <changed paths>` (or `pre-commit run --all-files` for a full sweep) before committing. Do not shell out to `yapf`/`ruff`/`codespell`/`mypy` directly — pre-commit chains them with the project's config and respects the `.pre-commit-config.yaml` excludes (e.g. `fastvideo/tests/` is intentionally skipped). If pre-commit reports `(no files to check)` for your paths, that exclude is deliberate — don't bypass it.
-- Target line length is 80.
+- Target line length is 120 (configured in `pyproject.toml` for ruff, yapf, and isort).
 - Naming: `snake_case` for functions/files, `PascalCase` for classes, `UPPER_SNAKE_CASE` for constants.
 
 ## Testing Guidelines
