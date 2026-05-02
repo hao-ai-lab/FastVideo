@@ -32,6 +32,8 @@ from fastvideo.pipelines.basic.magi_human.pipeline_configs import (
     MagiHumanBaseI2VConfig,
     MagiHumanDistillConfig,
     MagiHumanDistillI2VConfig,
+    MagiHumanSR540pConfig,
+    MagiHumanSR540pI2VConfig,
 )
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
@@ -290,6 +292,41 @@ def _register_configs() -> None:
         default_preset="stable_audio_open_small",
     )
 
+    # daVinci-MagiHuman SR-540p (two-stage base + SR text-to-AV).
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanSR540pConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "FastVideo/MagiHuman-SR-540p-Diffusers",
+            "FastVideo/MagiHuman-Diffusers/sr_540p",
+        ],
+        model_detectors=[
+            lambda path:
+            (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower()) and
+             ("sr_540p" in path.lower() or "sr-540p" in path.lower() or "540p_sr" in path.lower() or "srpipeline" in
+              path.lower()) and "ti2v" not in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_sr_540p",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanSR540pI2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "FastVideo/MagiHuman-SR-540p-TI2V-Diffusers",
+        ],
+        model_detectors=[
+            lambda path:
+            (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower()) and
+             ("sr_540p" in path.lower() or "sr-540p" in path.lower() or "540p_sr" in path.lower() or "srpipeline" in
+              path.lower()) and "ti2v" in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_sr_540p_ti2v",
+    )
+
     # daVinci-MagiHuman (base text-to-AV).
     # NOTE: WorkloadType has no T2AV variant yet; using T2V as the
     # placeholder until the enum is extended (same as Stable Audio).
@@ -302,8 +339,9 @@ def _register_configs() -> None:
             "FastVideo/MagiHuman-Base-Diffusers",
         ],
         model_detectors=[
-            lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower())
-                          and "distill" not in path.lower() and "ti2v" not in path.lower()),
+            lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower(
+            )) and "distill" not in path.lower() and "ti2v" not in path.lower() and "sr_540p" not in path.lower(
+            ) and "sr-540p" not in path.lower() and "540p_sr" not in path.lower() and "srpipeline" not in path.lower()),
         ],
         model_family="magi_human",
         default_preset="magi_human_base",
@@ -316,8 +354,9 @@ def _register_configs() -> None:
             "FastVideo/MagiHuman-Base-TI2V-Diffusers",
         ],
         model_detectors=[
-            lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower())
-                          and "ti2v" in path.lower() and "distill" not in path.lower()),
+            lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower(
+            )) and "ti2v" in path.lower() and "distill" not in path.lower() and "sr_540p" not in path.lower(
+            ) and "sr-540p" not in path.lower() and "540p_sr" not in path.lower() and "srpipeline" not in path.lower()),
         ],
         model_family="magi_human",
         default_preset="magi_human_base_ti2v",

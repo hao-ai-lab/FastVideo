@@ -78,6 +78,7 @@ class ComponentLoader(ABC):
         module_loaders = {
             "scheduler": (SchedulerLoader, "diffusers"),
             "transformer": (TransformerLoader, "diffusers"),
+            "sr_transformer": (TransformerLoader, "diffusers"),
             "transformer_2": (TransformerLoader, "diffusers"),
             "transformer_3": (TransformerLoader, "diffusers"),
             "vae": (VAELoader, "diffusers"),

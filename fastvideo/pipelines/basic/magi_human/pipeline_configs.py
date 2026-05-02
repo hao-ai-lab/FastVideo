@@ -149,3 +149,31 @@ class MagiHumanDistillI2VConfig(MagiHumanDistillConfig):
     def __post_init__(self) -> None:
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
+
+
+@dataclass
+class MagiHumanSR540pConfig(MagiHumanBaseConfig):
+    """Two-stage MagiHuman base + SR-540p text-to-AV pipeline config."""
+
+    noise_value: int = 220
+    sr_audio_noise_scale: float = 0.7
+    sr_num_inference_steps: int = 5
+    sr_video_txt_guidance_scale: float = 3.5
+    use_cfg_trick: bool = True
+    cfg_trick_start_frame: int = 13
+    cfg_trick_value: float = 2.0
+    # Upstream example/sr_540p uses sr_height=512, sr_width=896. Despite the
+    # marketing name, these are the VAE/patch-aligned dimensions actually run.
+    sr_height: int = 512
+    sr_width: int = 896
+
+
+@dataclass
+class MagiHumanSR540pI2VConfig(MagiHumanSR540pConfig):
+    """Two-stage MagiHuman base + SR-540p text+image-to-AV config."""
+
+    image_conditioning: bool = True
+
+    def __post_init__(self) -> None:
+        self.vae_config.load_encoder = True
+        self.vae_config.load_decoder = True

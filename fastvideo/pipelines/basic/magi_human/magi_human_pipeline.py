@@ -41,6 +41,8 @@ from fastvideo.pipelines.basic.magi_human.stages import (
     MagiHumanDenoisingStage,
     MagiHumanLatentPreparationStage,
     MagiHumanReferenceImageStage,
+    MagiHumanSRDenoisingStage,
+    MagiHumanSRLatentPreparationStage,
 )
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import (
@@ -200,9 +202,11 @@ class MagiHumanPipeline(ComposedPipelineBase):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler()
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
-        pc = fastvideo_args.pipeline_config
-        dit_arch = pc.dit_config.arch_config
+        self._add_input_and_conditioning_stages(fastvideo_args)
+        self._add_base_latent_and_denoising_stages(fastvideo_args)
+        self._add_decode_stages()
 
+    def _add_input_and_conditioning_stages(self, fastvideo_args: FastVideoArgs) -> None:
         self.add_stage(
             stage_name="input_validation_stage",
             stage=InputValidationStage(),
@@ -217,6 +221,10 @@ class MagiHumanPipeline(ComposedPipelineBase):
         )
 
         self._add_reference_image_stage(fastvideo_args)
+
+    def _add_base_latent_and_denoising_stages(self, fastvideo_args: FastVideoArgs) -> None:
+        pc = fastvideo_args.pipeline_config
+        dit_arch = pc.dit_config.arch_config
 
         # Data-proxy + eval knobs come from the PipelineConfig (`pc`).
         # Only DiT-architecture fields live on `dit_arch` now.
@@ -251,6 +259,7 @@ class MagiHumanPipeline(ComposedPipelineBase):
             ),
         )
 
+    def _add_decode_stages(self) -> None:
         self.add_stage(
             stage_name="decoding_stage",
             stage=DecodingStage(vae=self.get_module("vae"), pipeline=self),
@@ -279,4 +288,78 @@ class MagiHumanI2VPipeline(MagiHumanPipeline):
         )
 
 
-EntryClass = [MagiHumanPipeline, MagiHumanI2VPipeline]
+class MagiHumanSRPipeline(MagiHumanPipeline):
+    """Two-stage MagiHuman base + SR-540p text-to-AV pipeline."""
+
+    _required_config_modules = [
+        "text_encoder",
+        "tokenizer",
+        "vae",
+        "transformer",
+        "sr_transformer",
+        "scheduler",
+        "audio_vae",
+    ]
+
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+        self._add_input_and_conditioning_stages(fastvideo_args)
+        self._add_base_latent_and_denoising_stages(fastvideo_args)
+        self._add_sr_latent_and_denoising_stages(fastvideo_args)
+        self._add_decode_stages()
+
+    def _add_sr_latent_and_denoising_stages(self, fastvideo_args: FastVideoArgs) -> None:
+        pc = fastvideo_args.pipeline_config
+        dit_arch = pc.dit_config.arch_config
+
+        self.add_stage(
+            stage_name="sr_latent_preparation_stage",
+            stage=MagiHumanSRLatentPreparationStage(
+                vae=self.get_module("vae"),
+                vae_stride=tuple(pc.vae_stride),
+                patch_size=tuple(dit_arch.patch_size),
+                noise_value=pc.noise_value,
+                sr_audio_noise_scale=pc.sr_audio_noise_scale,
+                sr_height=pc.sr_height,
+                sr_width=pc.sr_width,
+                vae_scale_factor=pc.vae_stride[1],
+            ),
+        )
+        self.add_stage(
+            stage_name="sr_denoising_stage",
+            stage=MagiHumanSRDenoisingStage(
+                transformer=self.get_module("sr_transformer"),
+                scheduler=self.get_module("scheduler"),
+                patch_size=tuple(dit_arch.patch_size),
+                video_in_channels=dit_arch.video_in_channels,
+                audio_in_channels=dit_arch.audio_in_channels,
+                sr_num_inference_steps=pc.sr_num_inference_steps,
+                sr_video_txt_guidance_scale=pc.sr_video_txt_guidance_scale,
+                use_cfg_trick=pc.use_cfg_trick,
+                cfg_trick_start_frame=pc.cfg_trick_start_frame,
+                cfg_trick_value=pc.cfg_trick_value,
+                cfg_number=pc.cfg_number,
+                coords_style="v1",
+            ),
+        )
+
+
+class MagiHumanSRI2VPipeline(MagiHumanSRPipeline):
+    """Two-stage MagiHuman base + SR-540p text+image-to-AV pipeline."""
+
+    def _add_reference_image_stage(self, fastvideo_args: FastVideoArgs) -> None:
+        pc = fastvideo_args.pipeline_config
+        self.add_stage(
+            stage_name="reference_image_stage",
+            stage=MagiHumanReferenceImageStage(
+                vae=self.get_module("vae"),
+                vae_scale_factor=pc.vae_stride[1],
+            ),
+        )
+
+
+EntryClass = [
+    MagiHumanPipeline,
+    MagiHumanI2VPipeline,
+    MagiHumanSRPipeline,
+    MagiHumanSRI2VPipeline,
+]

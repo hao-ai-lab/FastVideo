@@ -44,16 +44,22 @@ def test_magi_human_typed_surface_preflight() -> None:
     from fastvideo.pipelines.basic.magi_human.magi_human_pipeline import (  # noqa: F401
         MagiHumanI2VPipeline,
         MagiHumanPipeline,
+        MagiHumanSRI2VPipeline,
+        MagiHumanSRPipeline,
     )
     from fastvideo.pipelines.basic.magi_human.pipeline_configs import (
         MagiHumanBaseConfig,
         MagiHumanBaseI2VConfig,
         MagiHumanDistillI2VConfig,
+        MagiHumanSR540pConfig,
+        MagiHumanSR540pI2VConfig,
     )
     from fastvideo.pipelines.basic.magi_human.stages import (  # noqa: F401
         MagiHumanDenoisingStage,
         MagiHumanLatentPreparationStage,
         MagiHumanReferenceImageStage,
+        MagiHumanSRDenoisingStage,
+        MagiHumanSRLatentPreparationStage,
     )
 
     # Presets are registered under the expected family.
@@ -63,6 +69,8 @@ def test_magi_human_typed_surface_preflight() -> None:
         "magi_human_distill",
         "magi_human_base_ti2v",
         "magi_human_distill_ti2v",
+        "magi_human_sr_540p",
+        "magi_human_sr_540p_ti2v",
     }
 
     base_preset = get_preset("magi_human_base", "magi_human")
@@ -83,6 +91,14 @@ def test_magi_human_typed_surface_preflight() -> None:
     assert distill_ti2v_preset.workload_type == "i2v"
     assert distill_ti2v_preset.defaults["num_inference_steps"] == 8
 
+    sr_preset = get_preset("magi_human_sr_540p", "magi_human")
+    assert sr_preset.workload_type == "t2v"
+    assert sr_preset.defaults["num_inference_steps"] == 32
+
+    sr_ti2v_preset = get_preset("magi_human_sr_540p_ti2v", "magi_human")
+    assert sr_ti2v_preset.workload_type == "i2v"
+    assert sr_ti2v_preset.defaults["num_inference_steps"] == 32
+
     # Distill pipeline config: same arch as base, CFG=1, 8 steps.
     from fastvideo.pipelines.basic.magi_human.pipeline_configs import MagiHumanDistillConfig
     distill_pc = MagiHumanDistillConfig()
@@ -100,6 +116,19 @@ def test_magi_human_typed_surface_preflight() -> None:
     assert distill_i2v_pc.cfg_number == 1
     assert distill_i2v_pc.image_conditioning is True
     assert distill_i2v_pc.vae_config.load_encoder is True
+
+    sr_pc = MagiHumanSR540pConfig()
+    assert sr_pc.num_inference_steps == 32
+    assert sr_pc.sr_num_inference_steps == 5
+    assert sr_pc.noise_value == 220
+    assert sr_pc.sr_audio_noise_scale == 0.7
+    assert sr_pc.sr_video_txt_guidance_scale == 3.5
+    assert sr_pc.sr_height == 512
+    assert sr_pc.sr_width == 896
+
+    sr_i2v_pc = MagiHumanSR540pI2VConfig()
+    assert sr_i2v_pc.image_conditioning is True
+    assert sr_i2v_pc.vae_config.load_encoder is True
 
     # Config constructs with the documented defaults.
     pc = MagiHumanBaseConfig()
