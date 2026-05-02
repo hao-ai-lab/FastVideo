@@ -125,7 +125,7 @@ jobs:
           set -euo pipefail
           TEST_NAME=$(echo "$COMMENT" | grep -oP '(?<=/test\s)\S+' | head -1 || true)
 
-          VALID="encoder vae transformer kernel unit ssim training lora-inference lora-training distillation self-forcing vsa vmoba performance api full fastcheck pre-commit"
+          VALID="encoder vae transformer kernel unit ssim training lora-inference lora-training distillation self-forcing vsa vmoba performance api train-framework full fastcheck pre-commit"
           if [ -z "$TEST_NAME" ] || ! echo "$VALID" | grep -qw "$TEST_NAME"; then
             echo "Unknown test: '$TEST_NAME'. Valid: $VALID"
             exit 1
@@ -139,6 +139,7 @@ jobs:
             [distillation]=distillation_dmd [self-forcing]=self_forcing
             [vsa]=training_vsa [vmoba]=inference_vmoba
             [performance]=performance [api]=api_server
+            [train-framework]=train_framework
           )
 
           if [ "$TEST_NAME" = "full" ]; then
