@@ -16,7 +16,8 @@ Both models are trained on **61×448×832** resolution but support generating vi
 First install [VSA](../attention/vsa/index.md). Set `MODEL_BASE` to your own model path and run:
 
 ```bash
-bash scripts/inference/v1_inference_wan_dmd.sh
+FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN \
+  fastvideo generate --config scripts/inference/inference_wan_VSA_DMD_1_3B.yaml
 ```
 
 ## 🗂️ Dataset
@@ -85,3 +86,25 @@ sbatch examples/distill/Wan2.2-TI2V-5B-Diffusers/Data-free/distill_dmd_t2v_5B.sh
 - Learning rate: 2e-5
 - Training steps: 3000 (~12 hours)
 - HSDP shard dim: 1
+
+## 🧭 Note on `real_score_guidance_scale`
+
+The teacher CFG used inside the DMD loss follows the DMD2 reference
+implementation and uses the parameterization
+
+```
+x = x_cond + w * (x_cond - x_uncond)
+```
+
+rather than the Ho & Salimans form `x_uncond + w * (x_cond - x_uncond)`. The
+two are mathematically equivalent up to a constant offset:
+
+| `real_score_guidance_scale` (`w`) | Equivalent standard CFG (`w + 1`) | Output                |
+|-----------------------------------|-----------------------------------|-----------------------|
+| `-1`                              | `0`                               | unconditional         |
+| `0`                               | `1`                               | conditional           |
+| `3.5` (default)                   | `4.5`                             | strong guidance       |
+
+So `real_score_guidance_scale` should be read as the **extra** guidance
+strength added on top of the conditional prediction. When porting values
+from a paper that uses the Ho & Salimans form, subtract 1.

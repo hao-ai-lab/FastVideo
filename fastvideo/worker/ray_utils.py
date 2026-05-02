@@ -57,7 +57,7 @@ def assert_ray_available() -> None:
     """Raise an exception if Ray is not available."""
     if ray is None:
         raise ValueError(f"Failed to import Ray: {ray_import_err}."
-                         "Please install Ray with `pip install ray`.")
+                         "Please install Ray with `uv pip install ray`.")
 
 
 def _verify_bundles(placement_group: "PlacementGroup", fastvideo_args: FastVideoArgs, device_str: str):

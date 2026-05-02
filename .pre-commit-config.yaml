@@ -7,20 +7,13 @@ exclude: |
     fastvideo-kernel/.*|
     assets/.*|
     tests/.*|
-    demo/.*|
-    predict\.py|
     scripts/.*|
-    assets/prompts/.*|
-    fastvideo/data_preprocess/.*|
     fastvideo/dataset/.*|
     fastvideo/models/.*|
-    fastvideo/sample/.*|
-    fastvideo/train\.py|
-    fastvideo/utils/.*|
     examples/.*|
+    \.agents/.*|
     .github/workflows/publish-fastvideo.yml|
-    .github/workflows/_template-build-image.yml|
-    docs/source/inference/support_matrix.md
+    .github/workflows/_template-build-image.yml
   )
 repos:
 - repo: https://github.com/google/yapf

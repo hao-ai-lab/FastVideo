@@ -9,7 +9,7 @@ import tempfile
 
 import gradio as gr
 
-from fastvideo.configs.sample.base import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 
 
 MODEL_PATH_MAPPING = {

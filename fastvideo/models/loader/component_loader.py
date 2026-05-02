@@ -95,6 +95,10 @@ class ComponentLoader(ABC):
             "image_encoder": (ImageEncoderLoader, "transformers"),
             "upsampler": (UpsamplerLoader, "diffusers"),
             "upsampler_2": (UpsamplerLoader, "diffusers"),
+            # Stable Audio's `StableAudioMultiConditioner` bundles T5 +
+            # NumberConditioners; not a pure text encoder, so it gets
+            # its own loader.
+            "conditioner": (ConditionerLoader, "fastvideo"),
         }
 
         if module_type in module_loaders:
@@ -996,6 +1000,61 @@ class SchedulerLoader(ComponentLoader):
         if fastvideo_args.pipeline_config.flow_shift is not None:
             scheduler.set_shift(fastvideo_args.pipeline_config.flow_shift)
         return scheduler
+
+
+class ConditionerLoader(ComponentLoader):
+    """Loader for multi-conditioner components (e.g. Stable Audio's
+    `StableAudioMultiConditioner`, which bundles T5 + NumberConditioners
+    and is neither a pure text encoder nor a Diffusers-shaped module).
+    Reads `<subfolder>/config.json` to resolve the class via
+    `ModelRegistry`, instantiates with no args (the class pulls its own
+    defaults from its FastVideo config), then loads
+    `diffusion_pytorch_model.safetensors` non-strictly so externally
+    fetched sub-encoders (T5) don't trip the missing-key check.
+    """
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        config = get_diffusers_config(model=model_path)
+        class_name = config.pop("_class_name", None)
+        config.pop("_name_or_path", None)
+        if class_name is None:
+            raise ValueError(
+                f"Conditioner config at {model_path} is missing the "
+                f"`_class_name` attribute required to resolve a model class.")
+        model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+
+        target_device = get_local_torch_device()
+        precision = getattr(fastvideo_args.pipeline_config, "precision", "fp16")
+        target_dtype = PRECISION_TO_TYPE.get(precision, torch.float16)
+
+        # Without this merge the model falls back to its dataclass
+        # defaults (e.g. SA-1.0's 3-conditioner spec — wrong for SA-small).
+        from dataclasses import fields as _fields
+        from fastvideo.configs.models.encoders import (
+            StableAudioConditionerConfig, )
+        if model_cls.__name__ == "StableAudioMultiConditioner":
+            cond_config = StableAudioConditionerConfig()
+            # `update_model_arch` is strict (raises on unknown keys); the
+            # converter writes a few non-arch keys (`_class_name`,
+            # `_diffusers_version`, `_name_or_path`) that must be filtered
+            # out first.
+            valid = {f.name for f in _fields(cond_config.arch_config)}
+            cond_config.update_model_arch({k: v for k, v in config.items() if k in valid})
+            with set_default_torch_dtype(target_dtype):
+                model = model_cls(cond_config)
+        else:
+            with set_default_torch_dtype(target_dtype):
+                model = model_cls()
+
+        weights = os.path.join(str(model_path), "diffusion_pytorch_model.safetensors")
+        if not os.path.isfile(weights):
+            raise FileNotFoundError(
+                f"Conditioner weights not found: {weights}")
+        state = safetensors_load_file(weights)
+        # Non-strict: T5 weights live outside this checkpoint (fetched in
+        # the conditioner's `__init__` from the standard HF repo).
+        model.load_state_dict(state, strict=False)
+        return model.to(device=target_device, dtype=target_dtype).eval()
 
 
 class UpsamplerLoader(ComponentLoader):

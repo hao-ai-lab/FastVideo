@@ -1,0 +1,43 @@
+# Run with:
+#   fastvideo generate --config scripts/inference/inference_wan_i2v.yaml
+generator:
+  model_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers
+  engine:
+    num_gpus: 2
+    parallelism:
+      tp_size: 2
+      sp_size: 2
+    offload:
+      dit: true
+      vae: true
+      text_encoder: true
+      image_encoder: true
+      pin_cpu_memory: true
+  pipeline:
+    workload_type: i2v
+    experimental:
+      flow_shift: 3.0
+request:
+  prompt: >-
+    An astronaut hatching from an egg, on the surface of the moon, the
+    darkness and depth of space realised in the background. High quality,
+    ultrarealistic detail and breath-taking movie-like camera shot.
+  negative_prompt: >-
+    Bright tones, overexposed, static, blurred details, subtitles, style,
+    works, paintings, images, static, overall gray, worst quality, low
+    quality, JPEG compression residue, ugly, incomplete, extra fingers,
+    poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen
+    limbs, fused fingers, still picture, messy background, three legs, many
+    people in the background, walking backwards
+  inputs:
+    image_path: https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg
+  sampling:
+    seed: 1024
+    num_frames: 77
+    height: 480
+    width: 832
+    fps: 16
+    num_inference_steps: 40
+    guidance_scale: 5.0
+  output:
+    output_path: outputs_i2v/

@@ -38,6 +38,11 @@ class Callback:
     training_config: TrainingConfig
     method: TrainingMethod
     _callback_dict: CallbackDict | None
+    # Yaml dict key under which this callback was declared (e.g.
+    # "validation_short").  Set by ``CallbackDict`` after instantiation.
+    # Useful for callbacks that want to disambiguate themselves from
+    # sibling instances in tracker keys, log paths, etc.
+    name: str = ""
 
     def on_train_start(
         self,
@@ -132,6 +137,7 @@ class CallbackDict:
                                 f"Callback subclass.")
             cb.training_config = training_config
             cb._callback_dict = self
+            cb.name = name
             self._callbacks[name] = cb
 
     def __getattr__(

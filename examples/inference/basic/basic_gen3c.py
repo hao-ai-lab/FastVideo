@@ -7,7 +7,7 @@ and the GEN3C diffusion model.
 
 Requirements:
   1. Install MoGe:
-     pip install git+https://github.com/microsoft/MoGe.git
+     uv pip install git+https://github.com/microsoft/MoGe.git
      If you hit `ImportError: libGL.so.1`, install:
      sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender1
   2. Download and convert weights:

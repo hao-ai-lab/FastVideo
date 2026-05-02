@@ -41,6 +41,14 @@ class T5ArchConfig(TextEncoderArchConfig):
     text_len: int = 512
     dtype: str | None = None
     gradient_checkpointing: bool = False
+    # Extra fields present in upstream HF T5Config but unused by FastVideo's
+    # encoder. Declared here so `update_model_arch` doesn't reject them when
+    # loading repos like `stabilityai/stable-audio-open-1.0` that ship the
+    # full HF config.
+    n_positions: int = 512
+    decoder_start_token_id: int = 0
+    output_past: bool = True
+    task_specific_params: dict | None = None
     stacked_params_mapping: list[tuple[str, str, str]] = field(default_factory=lambda: [
         # (param_name, shard_name, shard_id)
         (".qkv_proj", ".q", "q"),

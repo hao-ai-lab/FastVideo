@@ -27,7 +27,7 @@ dependencies = [
     "timm==1.0.11",
     "peft>=0.15.0",
     "diffusers>=0.33.1",
-    "torch>=2.10.0",
+    "torch==2.11.0",
     "torchvision",
     "torchaudio",
 
@@ -98,6 +98,10 @@ torchvision = [
   { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
   { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
 ]
+torchaudio = [
+  { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
+  { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
+]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -111,7 +115,7 @@ explicit = true
 
 [project.optional-dependencies]
 
-# flash-attn: pip install flash-attn==2.8.1 --no-cache-dir --no-build-isolation
+# flash-attn: uv pip install flash-attn==2.8.1 --no-cache-dir --no-build-isolation
 
 
 lint = [
@@ -124,6 +128,8 @@ test = [
     "av",
     "pytorch-msssim==1.0.0",
     "pytest",
+    "pandas",
+    "plotly",
 ]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]

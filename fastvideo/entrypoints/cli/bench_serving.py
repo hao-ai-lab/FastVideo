@@ -7,7 +7,7 @@ Example usage:
     # launch a server and benchmark on it
 
     # T2V or T2I or any other multimodal generation model
-    fastvideo serve --model-path Wan-AI/Wan2.1-T2V-1.3B-Diffusers --port 8000
+    fastvideo serve --config serve.yaml
 
     # benchmark it and make sure the port is the same as the server's port
     fastvideo bench --dataset vbench --num-prompts 20 --port 8000

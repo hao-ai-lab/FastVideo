@@ -24,8 +24,14 @@ image = (modal.Image.from_registry(
     os.environ.get("BUILDKITE_COMMIT", ""),
     "BUILDKITE_PULL_REQUEST":
     os.environ.get("BUILDKITE_PULL_REQUEST", ""),
+    "BUILDKITE_BRANCH":
+    os.environ.get("BUILDKITE_BRANCH", ""),
+    "TEST_SCOPE":
+    os.environ.get("TEST_SCOPE", ""),
     "IMAGE_VERSION":
     os.environ.get("IMAGE_VERSION", ""),
+    "HF_REPO_ID":
+    "FastVideo/performance-tracking",
 }))
 
 
@@ -62,7 +68,7 @@ def run_test(pytest_command: str):
     cd fastvideo-kernel &&
     ./build.sh &&
     cd .. &&
-    uv pip install -e .[test] &&
+    uv pip install -e ".[test]" &&
     {pytest_command}
     """
 
@@ -71,8 +77,10 @@ def run_test(pytest_command: str):
                             stderr=sys.stderr,
                             check=False)
 
-    sys.exit(result.returncode)
-
+    # Modal containers crash on sys.exit(0); raise on failure, return on success.
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Test command failed with exit code {result.returncode}")
 
 @app.function(gpu="H100:1",
               image=image,
@@ -206,7 +214,7 @@ def run_self_forcing_tests():
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_unit_test():
     run_test(
-        "pytest ./fastvideo/tests/dataset/ ./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ --ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py -vs"
+        "pytest ./fastvideo/tests/api/ ./fastvideo/tests/dataset/ ./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ --ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py -vs"
     )
 
 
@@ -232,9 +240,17 @@ def run_lora_extraction_tests():
               ],
               volumes={"/root/data": model_vol})
 def run_performance_tests():
+    # Dashboard runs after compare_baseline regardless of regression result so
+    # the trend view is always available when investigating a failed gate.
     run_test(
-        "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/performance -vs"
-    )
+        "export HF_HOME='/root/data/.cache' && "
+        "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
+        "hf auth login --token $HF_API_KEY && "
+        "pytest ./fastvideo/tests/performance -vs && "
+        "{ python ./fastvideo/tests/performance/compare_baseline.py; "
+        "PERF_RC=$?; "
+        "python ./fastvideo/tests/performance/dashboard.py || true; "
+        "exit $PERF_RC; }")
 
 
 @app.function(gpu="L40S:1",

@@ -1,0 +1,42 @@
+# Run with:
+#   fastvideo generate --config scripts/inference/inference_longcat_i2v.yaml
+generator:
+  model_path: FastVideo/LongCat-Video-I2V-Diffusers
+  engine:
+    num_gpus: 1
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      pin_cpu_memory: false
+  pipeline:
+    workload_type: i2v
+    experimental:
+      enable_bsa: false
+request:
+  prompt: >-
+    A woman sits at a wooden table by the window in a cozy café. She reaches
+    out with her right hand, picks up the white coffee cup from the saucer,
+    and gently brings it to her lips to take a sip. After drinking, she places
+    the cup back on the table and looks out the window, enjoying the peaceful
+    atmosphere.
+  negative_prompt: >-
+    Bright tones, overexposed, static, blurred details, subtitles, style,
+    works, paintings, images, static, overall gray, worst quality, low
+    quality, JPEG compression residue, ugly, incomplete, extra fingers,
+    poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen
+    limbs, fused fingers, still picture, messy background, three legs, many
+    people in the background, walking backwards
+  inputs:
+    image_path: assets/girl.png
+  sampling:
+    seed: 42
+    num_frames: 93
+    height: 480
+    width: 480
+    fps: 15
+    num_inference_steps: 50
+    guidance_scale: 4.0
+  output:
+    output_path: outputs_video/longcat_i2v

@@ -25,10 +25,12 @@ from fastvideo.pipelines.stages.latent_preparation import (Cosmos25LatentPrepara
                                                            Cosmos25AutoLatentPreparationStage,
                                                            Cosmos25T2WLatentPreparationStage,
                                                            Cosmos25V2WLatentPreparationStage, LatentPreparationStage)
-from fastvideo.pipelines.stages.ltx2_audio_decoding import LTX2AudioDecodingStage
-from fastvideo.pipelines.stages.ltx2_denoising import LTX2DenoisingStage
-from fastvideo.pipelines.stages.ltx2_latent_preparation import (LTX2LatentPreparationStage)
-from fastvideo.pipelines.stages.ltx2_text_encoding import LTX2TextEncodingStage
+from fastvideo.pipelines.basic.ltx2.stages import (
+    LTX2AudioDecodingStage,
+    LTX2DenoisingStage,
+    LTX2LatentPreparationStage,
+    LTX2TextEncodingStage,
+)
 from fastvideo.pipelines.stages.matrixgame_denoising import (MatrixGameCausalDenoisingStage)
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
 from fastvideo.pipelines.stages.gamecraft_denoising import GameCraftDenoisingStage

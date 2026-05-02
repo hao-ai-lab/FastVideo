@@ -37,7 +37,7 @@ def load_moge_model(
         from moge.model.v1 import MoGeModel
     except ImportError as exc:
         raise ImportError("MoGe is required for GEN3C 3D cache conditioning. "
-                          "Install it with: pip install git+https://github.com/microsoft/MoGe.git. "
+                          "Install it with: uv pip install git+https://github.com/microsoft/MoGe.git. "
                           "If import fails with libGL.so.1, install system deps: "
                           "sudo apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender1") from exc
 

@@ -44,7 +44,7 @@ FastVideo maps a Diffusers-style repo into a pipeline like:
 - `fastvideo/configs/models/*`: arch configs and `param_names_mapping` for
   weight name translation.
 - `fastvideo/configs/pipelines/*`: pipeline wiring (component classes + names).
-- `fastvideo/configs/sample/*`: default runtime sampling parameters.
+- `fastvideo/api/sampling_param.py`: runtime sampling parameters.
 - `fastvideo/pipelines/basic/*`: end-to-end pipeline logic built from stages.
 - `model_index.json`: the HF repo entrypoint that maps component names to
   classes and weight files.
@@ -55,7 +55,7 @@ Minimal usage example (based on `examples/inference/basic/basic.py`):
 
 ```python
 from fastvideo import VideoGenerator
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 
 model_id = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # or official_weights/<model_name>/
 generator = VideoGenerator.from_pretrained(model_id, num_gpus=1)
@@ -296,8 +296,10 @@ Action:
 
 - Add or reuse a numerical parity test that loads the official model and the
   FastVideo model and compares outputs.
-- See examples in `tests/local_tests/` (e.g., `tests/local_tests/upsamplers/`)
-  and the commands in `tests/local_tests/README.md`.
+- See examples in `tests/local_tests/` organized by model family
+  (e.g., `tests/local_tests/sd35/`, `tests/local_tests/ltx2/`,
+  `tests/local_tests/stable_audio/`) and the navigation index in
+  `tests/local_tests/README.md`.
 - If there are discrepancies, add opt‑in logging to both models and compare
   activation summaries (layer output sums, per‑stage logs).
 - First align the loaded weights (validate `param_names_mapping`).
@@ -319,7 +321,8 @@ Purpose:
 
 - `fastvideo/configs/pipelines/` describes pipeline wiring and model module
   names.
-- `fastvideo/configs/sample/` defines default runtime parameters.
+- `fastvideo/api/sampling_param.py` defines runtime sampling parameters.
+  Defaults come from profiles in `fastvideo/pipelines/basic/<family>/profiles.py`.
 
 Action:
 
@@ -347,7 +350,8 @@ Purpose:
 
 Action:
 
-- Add a pipeline parity test under `tests/local_tests/pipelines/`.
+- Add a pipeline parity test under `tests/local_tests/<family>/`
+  (e.g., `tests/local_tests/<family>/test_<family>_pipeline_parity.py`).
 - See the [Testing Guide](testing.md) for test conventions.
 
 ### 7) Add user‑facing examples
@@ -474,7 +478,7 @@ FastVideo integration.
 3. Pipeline wiring.
    - Pipeline: `fastvideo/pipelines/basic/wan/wan_pipeline.py`
    - Pipeline config: `fastvideo/configs/pipelines/wan.py`
-   - Sampling defaults: `fastvideo/configs/sample/wan.py`
+   - Sampling defaults: `fastvideo/pipelines/basic/wan/profiles.py`
 
 4. Minimal example.
    - Script: `examples/inference/basic/basic.py`
