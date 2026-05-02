@@ -15,7 +15,7 @@ IMAGE_PATH = "assets/images/saxophonist.jpg"
 
 def main() -> None:
     generator = VideoGenerator.from_pretrained(
-        "converted_weights/magi_human_sr_540p",
+        "FastVideo/MagiHuman-Diffusers/sr_540p",
         num_gpus=1,
         workload_type="i2v",
         override_pipeline_cls_name="MagiHumanSRI2VPipeline",
