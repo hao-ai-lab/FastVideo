@@ -212,6 +212,23 @@ class DenoisingStage(PipelineStage):
         trajectory_timesteps: list[torch.Tensor] = []
         trajectory_latents: list[torch.Tensor] = []
 
+        # Hoisted out of the per-step loop: depends only on inputs that
+        # are constant across denoising steps.
+        use_meanflow = getattr(self.transformer.config, "use_meanflow", False)
+        embedded_cfg_scale = fastvideo_args.pipeline_config.embedded_cfg_scale
+        if embedded_cfg_scale is not None:
+            guidance_expand = (torch.tensor(
+                [embedded_cfg_scale] * latents.shape[0],
+                dtype=torch.float32,
+                device=get_local_torch_device(),
+            ).to(target_dtype) * 1000.0)
+        else:
+            guidance_expand = None
+        # V2V padding: zero-filled tensor concatenated with each step's
+        # latent_model_input.  Shape is fixed by latents and is never
+        # written to, so we allocate once.
+        v2v_zero_pad = torch.zeros_like(latents) if batch.video_latent is not None else None
+
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -248,8 +265,7 @@ class DenoisingStage(PipelineStage):
                 # Expand latents for V2V/I2V
                 latent_model_input = latents.to(target_dtype)
                 if batch.video_latent is not None:
-                    latent_model_input = torch.cat([latent_model_input, batch.video_latent,
-                                                    torch.zeros_like(latents)],
+                    latent_model_input = torch.cat([latent_model_input, batch.video_latent, v2v_zero_pad],
                                                    dim=1).to(target_dtype)
                 elif batch.image_latent is not None:
                     assert not fastvideo_args.pipeline_config.ti2v_task, "image latents should not be provided for TI2V task"
@@ -266,7 +282,6 @@ class DenoisingStage(PipelineStage):
                     t_expand = t.repeat(latent_model_input.shape[0])
                 t_expand = t_expand.to(get_local_torch_device())
 
-                use_meanflow = getattr(self.transformer.config, "use_meanflow", False)
                 if use_meanflow:
                     if i == len(timesteps) - 1:
                         timesteps_r = torch.tensor([0.0], device=get_local_torch_device())
@@ -284,13 +299,6 @@ class DenoisingStage(PipelineStage):
                 )
 
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
-
-                # Prepare inputs for transformer
-                guidance_expand = (torch.tensor(
-                    [fastvideo_args.pipeline_config.embedded_cfg_scale] * latent_model_input.shape[0],
-                    dtype=torch.float32,
-                    device=get_local_torch_device(),
-                ).to(target_dtype) * 1000.0 if fastvideo_args.pipeline_config.embedded_cfg_scale is not None else None)
 
                 # Predict noise residual
                 with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):

@@ -6,13 +6,10 @@ Conditioning stage for diffusion pipelines.
 import torch
 
 from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
-
-logger = init_logger(__name__)
 
 
 class ConditioningStage(PipelineStage):
@@ -39,31 +36,9 @@ class ConditioningStage(PipelineStage):
         Returns:
             The batch with applied conditioning.
         """
-        # TODO!!
-        if not batch.do_classifier_free_guidance:
-            return batch
-        else:
-            return batch
-
-        logger.info("batch.negative_prompt_embeds: %s", batch.negative_prompt_embeds)
-        logger.info("do_classifier_free_guidance: %s", batch.do_classifier_free_guidance)
-        logger.info("cfg_scale: %s", batch.guidance_scale)
-
-        # Ensure negative prompt embeddings are available
-        assert batch.negative_prompt_embeds is not None, (
-            "Negative prompt embeddings are required for classifier-free guidance")
-
-        # Concatenate primary embeddings and masks
-        batch.prompt_embeds = torch.cat([batch.negative_prompt_embeds, batch.prompt_embeds])
-        if batch.attention_mask is not None:
-            batch.attention_mask = torch.cat([batch.negative_attention_mask, batch.attention_mask])
-
-        # Concatenate secondary embeddings and masks if present
-        if batch.prompt_embeds_2 is not None:
-            batch.prompt_embeds_2 = torch.cat([batch.negative_prompt_embeds_2, batch.prompt_embeds_2])
-        if batch.attention_mask_2 is not None:
-            batch.attention_mask_2 = torch.cat([batch.negative_attention_mask_2, batch.attention_mask_2])
-
+        # Negative-prompt prepending now happens earlier in the
+        # pipeline (CFG is applied as a separate forward pass per step
+        # in DenoisingStage), so this stage is currently a no-op.
         return batch
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
