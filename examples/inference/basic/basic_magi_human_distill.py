@@ -35,7 +35,7 @@ PROMPT = (
 
 def main() -> None:
     generator = VideoGenerator.from_pretrained(
-        "converted_weights/magi_human_distill",
+        "FastVideo/MagiHuman-Diffusers/distill",
         num_gpus=1,
     )
     output_path = "outputs_video/magi_human_basic/output_magi_human_distill.mp4"

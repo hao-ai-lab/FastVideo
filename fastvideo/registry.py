@@ -374,6 +374,7 @@ def _register_configs() -> None:
         hf_model_paths=[
             "GAIR/daVinci-MagiHuman",
             "FastVideo/MagiHuman-Base-Diffusers",
+            "FastVideo/MagiHuman-Diffusers/base",
         ],
         model_detectors=[
             lambda path:
@@ -409,6 +410,7 @@ def _register_configs() -> None:
         workload_types=(WorkloadType.T2V, ),
         hf_model_paths=[
             "FastVideo/MagiHuman-Distilled-Diffusers",
+            "FastVideo/MagiHuman-Diffusers/distill",
         ],
         model_detectors=[
             lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower())

@@ -28,7 +28,7 @@ PROMPT = (
 
 def main() -> None:
     generator = VideoGenerator.from_pretrained(
-        "converted_weights/magi_human_sr_1080p",
+        "FastVideo/MagiHuman-Diffusers/sr_1080p",
         num_gpus=1,
         override_pipeline_cls_name="MagiHumanSR1080pPipeline",
         pipeline_config=MagiHumanSR1080pConfig(),
