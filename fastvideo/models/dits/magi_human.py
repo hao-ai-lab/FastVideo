@@ -393,21 +393,18 @@ class MagiAttention(nn.Module):
             k = k.repeat_interleave(self.kv_repeat, dim=1)
             v = v.repeat_interleave(self.kv_repeat, dim=1)
 
-        # Mirror upstream's exact dtype boundary at dit_module.py:508 + 651:
-        # attention math is hardcoded bf16 inside upstream's
-        # flash_attn_with_cp regardless of weight dtype, then the per-head
-        # gating multiply runs in fp32 (g stays fp32 from linear_qkv.to(fp32);
-        # bf16 * fp32 promotes to fp32), and the gated output is finally
-        # cast to bf16 for linear_proj. The bf16 hardcode is intentional
-        # in upstream and we match it: it keeps production parity exact and
-        # gives test-time runs (fp32 weights) the same bf16 attention math
-        # that upstream uses, instead of FV silently running fp32 attention
-        # whenever weights happen to be fp32.
-        q_t = q.to(torch.bfloat16).permute(1, 0, 2).unsqueeze(0)
-        k_t = k.to(torch.bfloat16).permute(1, 0, 2).unsqueeze(0)
-        v_t = v.to(torch.bfloat16).permute(1, 0, 2).unsqueeze(0)
+        # Match upstream's attention dtype boundary at dit_module.py:508+651:
+        # attention math runs at the loaded weight dtype (bf16 in production,
+        # bf16 in the parity test since PackedExpertLinear's default is bf16),
+        # then the gated output is cast back to weight dtype for linear_proj.
+        # The fp32 promotion of the gating multiply is implicit: g stays fp32
+        # from the linear_qkv.float() split, and bf16*sigmoid(fp32) promotes
+        # to fp32 per PyTorch's type-promotion rules.
+        q_t = q.to(orig_dtype).permute(1, 0, 2).unsqueeze(0)
+        k_t = k.to(orig_dtype).permute(1, 0, 2).unsqueeze(0)
+        v_t = v.to(orig_dtype).permute(1, 0, 2).unsqueeze(0)
         out = F.scaled_dot_product_attention(q_t, k_t, v_t)
-        out = out.squeeze(0).permute(1, 0, 2).contiguous().float()
+        out = out.squeeze(0).permute(1, 0, 2).contiguous()
 
         out = ModalityDispatcher.permute(out, permute_mapping)
         if g is not None:
