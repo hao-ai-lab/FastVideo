@@ -51,11 +51,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import repeat
 
+from fastvideo.attention import LocalAttention
 from fastvideo.configs.models.dits.magi_human import (
     MagiHumanArchConfig,
     MagiHumanVideoConfig,
 )
 from fastvideo.models.dits.base import BaseDiT
+from fastvideo.platforms import AttentionBackendEnum
 
 
 # ---------------------------------------------------------------------------
@@ -345,9 +347,14 @@ class MagiAttention(nn.Module):
 
         self.q_size = cfg.num_heads_q * cfg.head_dim
         self.kv_size = cfg.num_heads_kv * cfg.head_dim
-        # Config-derived constant; hoisted from forward to avoid recomputing
-        # on every attention call (called 2x per CFG step × num_layers).
-        self.kv_repeat = cfg.num_heads_q // cfg.num_heads_kv
+
+        self.attn = LocalAttention(
+            num_heads=cfg.num_heads_q,
+            head_size=cfg.head_dim,
+            num_kv_heads=cfg.num_heads_kv,
+            causal=False,
+            supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
+        )
 
     def forward(
         self,
@@ -389,22 +396,21 @@ class MagiAttention(nn.Module):
         q = apply_rotary_emb(q, cos_emb, sin_emb)
         k = apply_rotary_emb(k, cos_emb, sin_emb)
 
-        if self.kv_repeat > 1:
-            k = k.repeat_interleave(self.kv_repeat, dim=1)
-            v = v.repeat_interleave(self.kv_repeat, dim=1)
-
-        # Match upstream's attention dtype boundary at dit_module.py:508+651:
-        # attention math runs at the loaded weight dtype (bf16 in production,
-        # bf16 in the parity test since PackedExpertLinear's default is bf16),
-        # then the gated output is cast back to weight dtype for linear_proj.
-        # The fp32 promotion of the gating multiply is implicit: g stays fp32
-        # from the linear_qkv.float() split, and bf16*sigmoid(fp32) promotes
-        # to fp32 per PyTorch's type-promotion rules.
-        q_t = q.to(orig_dtype).permute(1, 0, 2).unsqueeze(0)
-        k_t = k.to(orig_dtype).permute(1, 0, 2).unsqueeze(0)
-        v_t = v.to(orig_dtype).permute(1, 0, 2).unsqueeze(0)
-        out = F.scaled_dot_product_attention(q_t, k_t, v_t)
-        out = out.squeeze(0).permute(1, 0, 2).contiguous()
+        # Run SDPA via FastVideo's LocalAttention so the backend selection
+        # (SDPA / FlashAttn / SLA / SageAttn) flows through the standard
+        # configurable path. GQA is handled inside the SDPA backend via
+        # `enable_gqa=True` when num_heads_q != num_heads_kv, so we no
+        # longer need the manual `repeat_interleave` here.
+        # Attention math runs at orig_dtype (bf16 in production and in the
+        # parity test, since PackedExpertLinear's default is bf16, matching
+        # upstream BaseLinear at dit_module.py:330). The gating multiply
+        # promotes back to fp32 implicitly via PyTorch's type-promotion
+        # rules: bf16_attn_out * sigmoid(fp32_g) -> fp32, mirroring upstream
+        # dit_module.py:649.
+        q_la = q.to(orig_dtype).unsqueeze(0)
+        k_la = k.to(orig_dtype).unsqueeze(0)
+        v_la = v.to(orig_dtype).unsqueeze(0)
+        out = self.attn(q_la, k_la, v_la).squeeze(0)
 
         out = ModalityDispatcher.permute(out, permute_mapping)
         if g is not None:

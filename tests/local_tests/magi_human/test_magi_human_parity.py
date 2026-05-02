@@ -32,6 +32,8 @@ import pytest
 import torch
 from torch.testing import assert_close
 
+from fastvideo.forward_context import set_forward_context
+
 
 # Force TORCH_SDPA for FastVideo so the attention kernel is deterministic.
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
@@ -208,7 +210,7 @@ def test_magi_human_dit_parity():
     fv_model.eval()
 
     print("Running FastVideo forward...")
-    with torch.inference_mode():
+    with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=None):
         fv_out = fv_model(x.clone(), coords.clone(), mm.clone()).detach().float().cpu()
 
     # Global stats
