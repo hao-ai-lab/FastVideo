@@ -40,6 +40,7 @@ from fastvideo.pipelines.basic.magi_human.stages import (
     MagiHumanAudioDecodingStage,
     MagiHumanDenoisingStage,
     MagiHumanLatentPreparationStage,
+    MagiHumanReferenceImageStage,
 )
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import (
@@ -215,6 +216,8 @@ class MagiHumanPipeline(ComposedPipelineBase):
             ),
         )
 
+        self._add_reference_image_stage(fastvideo_args)
+
         # Data-proxy + eval knobs come from the PipelineConfig (`pc`).
         # Only DiT-architecture fields live on `dit_arch` now.
         self.add_stage(
@@ -258,5 +261,22 @@ class MagiHumanPipeline(ComposedPipelineBase):
             stage=MagiHumanAudioDecodingStage(audio_vae=self.get_module("audio_vae"), ),
         )
 
+    def _add_reference_image_stage(self, fastvideo_args: FastVideoArgs) -> None:
+        return
 
-EntryClass = MagiHumanPipeline
+
+class MagiHumanI2VPipeline(MagiHumanPipeline):
+    """MagiHuman text+image-to-AV pipeline using the T2V DiT weights."""
+
+    def _add_reference_image_stage(self, fastvideo_args: FastVideoArgs) -> None:
+        pc = fastvideo_args.pipeline_config
+        self.add_stage(
+            stage_name="reference_image_stage",
+            stage=MagiHumanReferenceImageStage(
+                vae=self.get_module("vae"),
+                vae_scale_factor=pc.vae_stride[1],
+            ),
+        )
+
+
+EntryClass = [MagiHumanPipeline, MagiHumanI2VPipeline]

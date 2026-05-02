@@ -29,7 +29,9 @@ from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
 from fastvideo.pipelines.basic.magi_human.pipeline_configs import (
     MagiHumanBaseConfig,
+    MagiHumanBaseI2VConfig,
     MagiHumanDistillConfig,
+    MagiHumanDistillI2VConfig,
 )
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
@@ -301,10 +303,24 @@ def _register_configs() -> None:
         ],
         model_detectors=[
             lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower())
-                          and "distill" not in path.lower()),
+                          and "distill" not in path.lower() and "ti2v" not in path.lower()),
         ],
         model_family="magi_human",
         default_preset="magi_human_base",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanBaseI2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "FastVideo/MagiHuman-Base-TI2V-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower())
+                          and "ti2v" in path.lower() and "distill" not in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_base_ti2v",
     )
     # daVinci-MagiHuman (DMD-2 distilled text-to-AV)
     register_configs(
@@ -316,10 +332,24 @@ def _register_configs() -> None:
         ],
         model_detectors=[
             lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower())
-                          and "distill" in path.lower()),
+                          and "distill" in path.lower() and "ti2v" not in path.lower()),
         ],
         model_family="magi_human",
         default_preset="magi_human_distill",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanDistillI2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "FastVideo/MagiHuman-Distilled-TI2V-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower())
+                          and "ti2v" in path.lower() and "distill" in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_distill_ti2v",
     )
 
     # Hunyuan 1.5 (specific)

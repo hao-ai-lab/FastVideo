@@ -92,4 +92,50 @@ MAGI_HUMAN_DISTILL = InferencePreset(
     },
 )
 
-ALL_PRESETS = (MAGI_HUMAN_BASE, MAGI_HUMAN_DISTILL)
+MAGI_HUMAN_BASE_TI2V = InferencePreset(
+    name="magi_human_base_ti2v",
+    version=1,
+    model_family="magi_human",
+    description=("daVinci-MagiHuman base text+image-to-AV at 256x480, 4s @ 25 fps. "
+                 "The reference image is VAE-encoded and pinned to the first "
+                 "video latent frame at each denoise step."),
+    workload_type="i2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "seed": 42,
+        "height": 256,
+        "width": 480,
+        "num_frames": 101,
+        "fps": 25,
+        "guidance_scale": 5.0,
+        "num_inference_steps": 32,
+        "negative_prompt": _MAGI_HUMAN_NEGATIVE_PROMPT,
+    },
+)
+
+MAGI_HUMAN_DISTILL_TI2V = InferencePreset(
+    name="magi_human_distill_ti2v",
+    version=1,
+    model_family="magi_human",
+    description=("daVinci-MagiHuman DMD-2 distilled text+image-to-AV at 256x480, "
+                 "4s @ 25 fps. 8-step inference, no CFG."),
+    workload_type="i2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "seed": 42,
+        "height": 256,
+        "width": 480,
+        "num_frames": 101,
+        "fps": 25,
+        "guidance_scale": 1.0,
+        "num_inference_steps": 8,
+        "negative_prompt": _MAGI_HUMAN_NEGATIVE_PROMPT,
+    },
+)
+
+ALL_PRESETS = (
+    MAGI_HUMAN_BASE,
+    MAGI_HUMAN_DISTILL,
+    MAGI_HUMAN_BASE_TI2V,
+    MAGI_HUMAN_DISTILL_TI2V,
+)

@@ -295,6 +295,7 @@ def _run_denoise_loop(
     *, video_sched, audio_sched, cfg_number,
     video_txt_guidance_scale, audio_txt_guidance_scale,
     patch_size, coords_style, video_in_channels, audio_in_channels,
+    image_latent=None,
 ):
     """Joint video+audio FlowUniPC denoise. The schedulers are passed
     in pre-constructed so each side can mirror its production scheduler
@@ -305,6 +306,11 @@ def _run_denoise_loop(
 
     with torch.inference_mode():
         for idx, t in enumerate(video_sched.timesteps):
+            if image_latent is not None:
+                video_latent[:, :, :1] = image_latent.to(
+                    device=video_latent.device,
+                    dtype=video_latent.dtype,
+                )[:, :, :1]
             t_int = int(t.item()) if torch.is_tensor(t) else int(t)
             with set_forward_context(current_timestep=t_int, attn_metadata=None):
                 v_cond_video, v_cond_audio = dit_forward_fn(
@@ -338,6 +344,11 @@ def _run_denoise_loop(
             audio_latent = audio_sched.step(
                 v_audio, t, audio_latent, return_dict=False,
             )[0]
+        if image_latent is not None:
+            video_latent[:, :, :1] = image_latent.to(
+                device=video_latent.device,
+                dtype=video_latent.dtype,
+            )[:, :, :1]
     return video_latent, audio_latent
 
 
