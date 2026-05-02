@@ -302,6 +302,8 @@ class AttentionSubConfig:
     head_dim: int
     num_modality: int
     enable_attn_gating: bool
+    use_local_attn: bool = False
+    frame_receptive_field: int = 11
 
 
 class MagiAttention(nn.Module):
@@ -338,6 +340,96 @@ class MagiAttention(nn.Module):
             supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
         )
 
+    def configure_local_attention(
+        self,
+        *,
+        enabled: bool,
+        frame_receptive_field: int = 11,
+    ) -> None:
+        self.cfg.use_local_attn = enabled
+        self.cfg.frame_receptive_field = frame_receptive_field
+
+    def _sdpa(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        """Run SDPA on [L, H, D] tensors and return [L, Hq, D]."""
+        if q.numel() == 0:
+            return q.new_empty(q.shape)
+        out = F.scaled_dot_product_attention(
+            q.transpose(0, 1).unsqueeze(0).contiguous(),
+            k.transpose(0, 1).unsqueeze(0).contiguous(),
+            v.transpose(0, 1).unsqueeze(0).contiguous(),
+            enable_gqa=self.cfg.num_heads_q != self.cfg.num_heads_kv,
+        )
+        return out.squeeze(0).transpose(0, 1).contiguous()
+
+    def _local_window_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        *,
+        num_video_tokens: int,
+        num_frames: int,
+    ) -> torch.Tensor:
+        """Approximate upstream FFAHandler block accumulation with SDPA.
+
+        SR-1080p's reference kernel sums three independently-normalized
+        attention contributions:
+
+        * video frame queries -> local-window video keys;
+        * all video queries -> all audio+text keys;
+        * all audio+text queries -> full sequence keys.
+
+        This method mirrors that accumulator semantics with ordinary SDPA
+        slices. It is intentionally scoped to single-process inference; layers
+        without ``use_local_attn`` keep the existing full LocalAttention path.
+        """
+        if num_frames <= 0 or num_video_tokens <= 0:
+            return self._sdpa(q, k, v)
+        if num_video_tokens % num_frames != 0:
+            raise ValueError(
+                f"MagiHuman local attention expects video tokens divisible by "
+                f"frames, got {num_video_tokens=} and {num_frames=}."
+            )
+
+        token_per_frame = num_video_tokens // num_frames
+        out = torch.zeros(
+            q.shape[0],
+            self.cfg.num_heads_q,
+            self.cfg.head_dim,
+            device=q.device,
+            dtype=q.dtype,
+        )
+        rf = int(self.cfg.frame_receptive_field)
+
+        q_video = q[:num_video_tokens]
+        k_video = k[:num_video_tokens]
+        v_video = v[:num_video_tokens]
+        for frame_idx in range(num_frames):
+            q_start = frame_idx * token_per_frame
+            q_end = q_start + token_per_frame
+            k_start = max(0, (frame_idx - rf) * token_per_frame)
+            k_end = min(num_video_tokens, (frame_idx + rf + 1) * token_per_frame)
+            out[q_start:q_end] = self._sdpa(
+                q_video[q_start:q_end],
+                k_video[k_start:k_end],
+                v_video[k_start:k_end],
+            )
+
+        if num_video_tokens < q.shape[0]:
+            k_at = k[num_video_tokens:]
+            v_at = v[num_video_tokens:]
+            out[:num_video_tokens] = out[:num_video_tokens] + self._sdpa(
+                q[:num_video_tokens],
+                k_at,
+                v_at,
+            )
+            out[num_video_tokens:] = self._sdpa(
+                q[num_video_tokens:],
+                k,
+                v,
+            )
+        return out
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -345,6 +437,8 @@ class MagiAttention(nn.Module):
         permute_mapping: torch.Tensor,
         inv_permute_mapping: torch.Tensor,
         modality_dispatcher: ModalityDispatcher,
+        num_video_tokens: int | None = None,
+        num_frames: int | None = None,
     ) -> torch.Tensor:
         orig_dtype = self.linear_qkv.weight.dtype
         h = self.pre_norm(hidden_states, modality_dispatcher=modality_dispatcher).to(orig_dtype)
@@ -396,10 +490,21 @@ class MagiAttention(nn.Module):
         # promotes back to fp32 implicitly via PyTorch's type-promotion
         # rules: bf16_attn_out * sigmoid(fp32_g) -> fp32, mirroring upstream
         # dit_module.py:649.
-        q_la = q.to(orig_dtype).unsqueeze(0)
-        k_la = k.to(orig_dtype).unsqueeze(0)
-        v_la = v.to(orig_dtype).unsqueeze(0)
-        out = self.attn(q_la, k_la, v_la).squeeze(0)
+        q = q.to(orig_dtype)
+        k = k.to(orig_dtype)
+        v = v.to(orig_dtype)
+        if self.cfg.use_local_attn:
+            if num_video_tokens is None or num_frames is None:
+                raise ValueError("MagiHuman local attention requires video token/frame metadata.")
+            out = self._local_window_attention(
+                q,
+                k,
+                v,
+                num_video_tokens=num_video_tokens,
+                num_frames=num_frames,
+            )
+        else:
+            out = self.attn(q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0)).squeeze(0)
 
         out = ModalityDispatcher.permute(out, permute_mapping)
         if g is not None:
@@ -451,6 +556,7 @@ class MagiTransformerLayer(nn.Module):
         super().__init__()
         num_modality = 3 if layer_idx in arch.mm_layers else 1
         self.post_norm = layer_idx in arch.post_norm_layers
+        self.layer_idx = layer_idx
 
         self.attention = MagiAttention(AttentionSubConfig(
             hidden_size=arch.hidden_size,
@@ -459,6 +565,7 @@ class MagiTransformerLayer(nn.Module):
             head_dim=arch.head_dim,
             num_modality=num_modality,
             enable_attn_gating=arch.enable_attn_gating,
+            use_local_attn=layer_idx in arch.local_attn_layers,
         ))
 
         is_gelu7 = layer_idx in arch.gelu7_layers
@@ -490,9 +597,13 @@ class MagiTransformerLayer(nn.Module):
         permute_mapping: torch.Tensor,
         inv_permute_mapping: torch.Tensor,
         modality_dispatcher: ModalityDispatcher,
+        num_video_tokens: int | None = None,
+        num_frames: int | None = None,
     ) -> torch.Tensor:
         attn_out = self.attention(
             hidden_states, rope, permute_mapping, inv_permute_mapping, modality_dispatcher,
+            num_video_tokens=num_video_tokens,
+            num_frames=num_frames,
         )
         if self.post_norm:
             attn_out = self.attn_post_norm(attn_out, modality_dispatcher=modality_dispatcher)
@@ -583,6 +694,18 @@ class _TransformerBlock(nn.Module):
             MagiTransformerLayer(arch, i) for i in range(arch.num_layers)
         ])
 
+    def configure_local_attention(
+        self,
+        local_attn_layers: tuple[int, ...],
+        frame_receptive_field: int = 11,
+    ) -> None:
+        enabled_layers = set(local_attn_layers)
+        for idx, layer in enumerate(self.layers):
+            layer.attention.configure_local_attention(
+                enabled=idx in enabled_layers,
+                frame_receptive_field=frame_receptive_field,
+            )
+
     def forward(
         self,
         x: torch.Tensor,
@@ -590,9 +713,19 @@ class _TransformerBlock(nn.Module):
         permute_mapping: torch.Tensor,
         inv_permute_mapping: torch.Tensor,
         modality_dispatcher: ModalityDispatcher,
+        num_video_tokens: int | None = None,
+        num_frames: int | None = None,
     ) -> torch.Tensor:
         for layer in self.layers:
-            x = layer(x, rope, permute_mapping, inv_permute_mapping, modality_dispatcher)
+            x = layer(
+                x,
+                rope,
+                permute_mapping,
+                inv_permute_mapping,
+                modality_dispatcher,
+                num_video_tokens=num_video_tokens,
+                num_frames=num_frames,
+            )
         return x
 
 
@@ -649,6 +782,15 @@ class MagiHumanDiT(BaseDiT):
         self._cached_text_mask: Optional[torch.Tensor] = None
         self._cached_modality_key: Optional[tuple] = None
 
+    def configure_local_attention(
+        self,
+        local_attn_layers: tuple[int, ...] | list[int],
+        frame_receptive_field: int = 11,
+    ) -> None:
+        layers = tuple(int(layer) for layer in local_attn_layers)
+        self.arch.local_attn_layers = layers
+        self.block.configure_local_attention(layers, frame_receptive_field)
+
     def _modality_cache_key(self, t: torch.Tensor) -> tuple:
         return (t.data_ptr(), t.shape, t.dtype, t.device)
 
@@ -678,6 +820,11 @@ class MagiHumanDiT(BaseDiT):
         video_mask = self._cached_video_mask
         audio_mask = self._cached_audio_mask
         text_mask = self._cached_text_mask
+        num_video_tokens = int(video_mask.sum().item())
+        if num_video_tokens:
+            num_frames = int(coords_mapping[:num_video_tokens, 0].max().item()) + 1
+        else:
+            num_frames = 0
 
         x, rope = self.adapter(x, coords_mapping, video_mask, audio_mask, text_mask)
         # Keep the residual stream in adapter dtype (fp32) entering the block.
@@ -694,6 +841,8 @@ class MagiHumanDiT(BaseDiT):
             permute_mapping=dispatcher.permute_mapping,
             inv_permute_mapping=dispatcher.inv_permute_mapping,
             modality_dispatcher=dispatcher,
+            num_video_tokens=num_video_tokens,
+            num_frames=num_frames,
         )
         x = ModalityDispatcher.inv_permute(x, dispatcher.inv_permute_mapping)
 

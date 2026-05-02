@@ -79,12 +79,39 @@ def _install_magi_compiler_stub() -> None:
         out = F.scaled_dot_product_attention(q2, k2, v2)
         return out.transpose(1, 2).contiguous()
 
-    def _not_implemented_flex(q, k, v, q_ranges, k_ranges):
-        # Only hit when local_attn_layers is non-empty; base model has none.
-        raise NotImplementedError(
-            "flex_flash_attn_func stub: local-attn layers are out of "
-            "scope for the base-model parity test."
+    def _sdpa_segments(q, k, v, q_ranges, k_ranges):
+        # Upstream flex op shape: [L, H, D]. FFA accumulates each block's
+        # independently normalized attention output into the destination query
+        # slice. This SDPA fallback mirrors the accumulator semantics for
+        # SR-1080p parity tests without requiring SandAI's MagiAttention wheel.
+        out = torch.zeros(
+            q.shape[0],
+            q.shape[1],
+            q.shape[2],
+            dtype=q.dtype,
+            device=q.device,
         )
+        num_heads_q = q.shape[1]
+        num_heads_kv = k.shape[1]
+        for q_range, k_range in zip(q_ranges.tolist(), k_ranges.tolist()):
+            qs, qe = int(q_range[0]), int(q_range[1])
+            ks, ke = int(k_range[0]), int(k_range[1])
+            q_block = q[qs:qe]
+            k_block = k[ks:ke]
+            v_block = v[ks:ke]
+            if num_heads_q != num_heads_kv:
+                assert num_heads_q % num_heads_kv == 0
+                repeat = num_heads_q // num_heads_kv
+                k_block = k_block.repeat_interleave(repeat, dim=1)
+                v_block = v_block.repeat_interleave(repeat, dim=1)
+            block_out = F.scaled_dot_product_attention(
+                q_block.transpose(0, 1).unsqueeze(0).contiguous(),
+                k_block.transpose(0, 1).unsqueeze(0).contiguous(),
+                v_block.transpose(0, 1).unsqueeze(0).contiguous(),
+            )
+            out[qs:qe] += block_out.squeeze(0).transpose(0, 1).contiguous()
+        lse = torch.empty((q.shape[0], q.shape[1]), dtype=torch.float32, device=q.device)
+        return out, lse
 
     def magi_register_custom_op(name=None, mutates_args=(), infer_output_meta_fn=None, is_subgraph_boundary=False, **kwargs):
         def decorator(fn):
@@ -97,7 +124,8 @@ def _install_magi_compiler_stub() -> None:
                 # Already registered in a previous test run — reuse.
                 return fn
             # Route known ops through SDPA; leave unknown ones as direct fn.
-            schema_name = f"{op_name}({_infer_schema(fn)}) -> Tensor"
+            returns = "(Tensor, Tensor)" if op_name == "flex_flash_attn_func" else "Tensor"
+            schema_name = f"{op_name}({_infer_schema(fn)}) -> {returns}"
             try:
                 _libs[namespace].define(schema_name)
             except Exception:
@@ -112,7 +140,7 @@ def _install_magi_compiler_stub() -> None:
             elif op_name == "flex_flash_attn_func":
                 torch.library.impl(
                     _libs[namespace], op_name, "CUDA"
-                )(_not_implemented_flex)
+                )(_sdpa_segments)
             else:
                 # For ops we don't care about (compile-only wrappers), the
                 # Python fn path inside the module body is used directly —
@@ -153,8 +181,9 @@ def _infer_schema(fn) -> str:
     import inspect
     sig = inspect.signature(fn)
     parts = []
-    for i, _ in enumerate(sig.parameters):
-        parts.append(f"Tensor a{i}")
+    for i, name in enumerate(sig.parameters):
+        arg_name = name if name.isidentifier() else f"a{i}"
+        parts.append(f"Tensor {arg_name}")
     return ", ".join(parts)
 
 
@@ -254,7 +283,7 @@ def _base_arch_dict() -> dict:
     )
 
 
-def load_upstream_dit(base_shard_dir, device=None, dtype=None):
+def load_upstream_dit(base_shard_dir, device=None, dtype=None, local_attn_layers=None):
     """Instantiate upstream `DiTModel` and load the base shards into it.
 
     Args:
@@ -277,6 +306,8 @@ def load_upstream_dit(base_shard_dir, device=None, dtype=None):
     from inference.model.dit.dit_module import DiTModel
 
     arch_dict = _base_arch_dict()
+    if local_attn_layers is not None:
+        arch_dict["local_attn_layers"] = list(local_attn_layers)
     # ModelConfig is a pydantic BaseModel — build via kwargs.
     model_config = ModelConfig(**arch_dict)
 

@@ -71,6 +71,8 @@ def test_magi_human_typed_surface_preflight() -> None:
         "magi_human_distill_ti2v",
         "magi_human_sr_540p",
         "magi_human_sr_540p_ti2v",
+        "magi_human_sr_1080p",
+        "magi_human_sr_1080p_ti2v",
     }
 
     base_preset = get_preset("magi_human_base", "magi_human")

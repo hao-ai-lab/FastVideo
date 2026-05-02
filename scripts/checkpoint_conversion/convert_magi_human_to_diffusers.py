@@ -312,9 +312,16 @@ def _write_model_index(
     bundle_text: bool,
     bundle_audio_vae: bool = False,
     include_sr_transformer: bool = False,
+    sr_subfolder: str = "540p_sr",
 ) -> None:
+    pipeline_class = "MagiHumanPipeline"
+    if include_sr_transformer:
+        pipeline_class = (
+            "MagiHumanSR1080pPipeline"
+            if sr_subfolder == "1080p_sr" else "MagiHumanSRPipeline"
+        )
     index = {
-        "_class_name": "MagiHumanSRPipeline" if include_sr_transformer else "MagiHumanPipeline",
+        "_class_name": pipeline_class,
         "_diffusers_version": "0.33.0",
         "transformer": ["diffusers", "MagiHumanDiT"],
         "scheduler": ["diffusers", "FlowUniPCMultistepScheduler"],
@@ -543,6 +550,7 @@ def main() -> None:
         bundle_text=args.bundle_text_encoder,
         bundle_audio_vae=args.bundle_audio_vae,
         include_sr_transformer=include_sr_transformer,
+        sr_subfolder=args.sr_subfolder,
     )
 
     print(f"\nDone. Output at: {out_dir}")
