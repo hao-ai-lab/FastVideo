@@ -63,7 +63,72 @@ EFFECTIVE_PR=${BUILDKITE_PULL_REQUEST:-false}
 if [ "$EFFECTIVE_PR" = "false" ] && [ -n "${PR_NUMBER:-}" ]; then
     EFFECTIVE_PR=$PR_NUMBER
 fi
-MODAL_ENV="BUILDKITE_REPO=$BUILDKITE_REPO BUILDKITE_COMMIT=$BUILDKITE_COMMIT BUILDKITE_PULL_REQUEST=$EFFECTIVE_PR IMAGE_VERSION=$IMAGE_VERSION"
+MODAL_ENV="BUILDKITE_REPO=$BUILDKITE_REPO BUILDKITE_COMMIT=$BUILDKITE_COMMIT BUILDKITE_PULL_REQUEST=$EFFECTIVE_PR BUILDKITE_BRANCH=${BUILDKITE_BRANCH:-} TEST_SCOPE=${TEST_SCOPE:-} IMAGE_VERSION=$IMAGE_VERSION"
+
+POST_RUN_HOOK=""
+
+upload_performance_artifacts() {
+    SHORT_SHA=${BUILDKITE_COMMIT:0:7}
+    LOCAL_DIR="downloaded_reports"
+
+    _download_reports() {
+        log "Downloading perf_reports/ from Modal Volume..."
+        mkdir -p "$LOCAL_DIR"
+        if ! modal volume get hf-model-weights "perf_reports/" "$LOCAL_DIR"; then
+            log "Error: Failed to download perf_reports/ from Modal Volume."
+            return 1
+        fi
+    }
+
+    _upload_dashboard() {
+        local target
+        target=$(find "$LOCAL_DIR" -name "dashboard_${SHORT_SHA}_*" | head -n 1)
+        log "TARGET dashboard: '$target'"
+
+        if [ -n "$target" ]; then
+            log "Found dashboard: $target. Uploading to Buildkite..."
+            buildkite-agent artifact upload "$target"
+            buildkite-agent annotate --style info --context "perf-dashboard" < "$target"
+        else
+            log "Warning: Could not find a dashboard file matching $SHORT_SHA"
+        fi
+    }
+
+    _upload_perf_summary() {
+        local target
+        target=$(find "$LOCAL_DIR" -name "perf_${SHORT_SHA}_*" | head -n 1)
+        log "TARGET perf summary: '$target'"
+
+        if [ -n "$target" ]; then
+            log "Found perf summary: $target. Uploading to Buildkite..."
+            buildkite-agent artifact upload "$target"
+            buildkite-agent annotate --style info --context "perf-summary" < "$target"
+        else
+            log "Warning: Could not find a perf summary file matching $SHORT_SHA"
+        fi
+    }
+
+    _cleanup_modal_volume() {
+        log "Cleaning up perf_reports/ from Modal Volume..."
+        if modal volume rm hf-model-weights "perf_reports/" --recursive; then
+            log "Successfully deleted perf_reports/ from Modal Volume."
+        else
+            log "Warning: Failed to delete perf_reports/ from Modal Volume. Manual cleanup may be required."
+        fi
+    }
+
+    _cleanup_local() {
+        log "Cleaning up local download directory..."
+        rm -rf "$LOCAL_DIR"
+    }
+
+    # --- Main flow ---
+    _download_reports || { _cleanup_local; return 1; }
+    _upload_dashboard
+    _upload_perf_summary
+    _cleanup_modal_volume
+    _cleanup_local
+}
 
 case "$TEST_TYPE" in
     "encoder")
@@ -124,8 +189,9 @@ case "$TEST_TYPE" in
         MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_lora_extraction_tests"
         ;;
     "performance")
-        log "Running performance tests..."
+        log "Running performance tests on Modal..."
         MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_performance_tests"
+        POST_RUN_HOOK="upload_performance_artifacts"
         ;;
     "api_server")
         log "Running API server integration tests..."
@@ -145,6 +211,11 @@ if [ $TEST_EXIT_CODE -eq 0 ]; then
     log "Modal test completed successfully"
 else
     log "Error: Modal test failed with exit code: $TEST_EXIT_CODE"
+fi
+
+if [ -n "$POST_RUN_HOOK" ]; then
+    log "Executing post-run hook: $POST_RUN_HOOK"
+    "$POST_RUN_HOOK"
 fi
 
 log "=== Test execution completed with exit code: $TEST_EXIT_CODE ==="
