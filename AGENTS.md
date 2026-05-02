@@ -55,3 +55,31 @@ This repository is agent-friendly. Before doing any work, read:
 If you are exploring a new procedure that has no existing SOP, document your
 progress in `.agents/exploration/` and flag it for review at the end of your
 session.
+
+## Per-Directory AGENTS.md
+
+Local guidance lives next to the code. Read the in-scope file before editing:
+
+| Directory | What it covers |
+|-----------|----------------|
+| `fastvideo/AGENTS.md` | Core package map, public API, registry-driven model dispatch |
+| `fastvideo/configs/AGENTS.md` | Arch + pipeline config dataclasses, `param_names_mapping` |
+| `fastvideo/models/AGENTS.md` | DiT / VAE / encoder / scheduler / loader layout (pre-commit excluded) |
+| `fastvideo/layers/AGENTS.md` | Tensor-parallel linear/attention layer rules for ports |
+| `fastvideo/attention/AGENTS.md` | Backend registry + env-var override |
+| `fastvideo/pipelines/AGENTS.md` | Stage ABC, `basic/<model>/`, `preprocess/`, presets |
+| `fastvideo/training/AGENTS.md` | Legacy monolithic pipelines (frozen for existing models) |
+| `fastvideo/train/AGENTS.md` | New modular trainer (methods × models × callbacks, YAML) |
+| `fastvideo/tests/AGENTS.md` | Test taxonomy, conftest, pre-commit-excluded path |
+| `fastvideo/tests/ssim/AGENTS.md` | GPU SSIM regression authoring + reference video sync |
+| `scripts/checkpoint_conversion/AGENTS.md` | Adding a converter for a new HF/official checkpoint |
+
+## Critical: Two Training Stacks Coexist
+
+- `fastvideo/training/` — legacy, monolithic per-model `*_training_pipeline.py` and
+  `*_distillation_pipeline.py`. Still authoritative for shipped models.
+- `fastvideo/train/` — new modular framework (composable methods × models × callbacks
+  driven by YAML). Preferred for new training work.
+
+Pick the matching stack before editing. Do not migrate a pipeline between them
+without an explicit ask — the conventions and config surfaces differ.
