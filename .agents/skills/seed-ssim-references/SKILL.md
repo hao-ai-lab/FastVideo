@@ -92,9 +92,19 @@ TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
 SUBDIR="${TIMESTAMP}_${SHORT_COMMIT}"
 ```
 
-Then launch the Modal run:
+Then launch the Modal run. The `IMAGE_VERSION` and `BUILDKITE_*` env-prefix
+**must** match what CI exports in `.buildkite/scripts/pr_test.sh`, otherwise
+`fastvideo/tests/modal/ssim_test.py` resolves a different GHCR image tag
+(default is `latest`, CI is `py3.12-latest`) and bakes different values into
+the image's frozen env block (`ssim_test.py:17-18, 38-46`). Mismatched image
+or env produces SSIM drift that doesn't show up until the same commit runs
+in CI.
 
 ```bash
+IMAGE_VERSION="py3.12-latest" \
+BUILDKITE_REPO="$(git config --get remote.origin.url)" \
+BUILDKITE_COMMIT="$(git rev-parse HEAD)" \
+BUILDKITE_PULL_REQUEST="${BUILDKITE_PULL_REQUEST:-false}" \
 modal run fastvideo/tests/modal/ssim_test.py \
     --git-repo="$(git config --get remote.origin.url)" \
     --git-commit="$(git rev-parse HEAD)" \
@@ -105,6 +115,19 @@ modal run fastvideo/tests/modal/ssim_test.py \
     --skip-reference-download \
     --no-fail-fast
 ```
+
+Env prefix rationale (parity with CI; see `.buildkite/pipeline.yml:1-3` and
+`.buildkite/scripts/pr_test.sh:62-83`):
+- `IMAGE_VERSION=py3.12-latest`: pins the Modal image tag to the same one CI
+  uses. Without this, `ssim_test.py:17` falls back to `latest`, which on
+  GHCR is built from `Dockerfile.python3.10` — different Python, torch, and
+  flash-attn wheel than CI's `py3.12-latest` (`infra-build-image.yml:51-67`,
+  `_template-build-image.yml:65-101`).
+- `BUILDKITE_REPO`/`BUILDKITE_COMMIT`/`BUILDKITE_PULL_REQUEST`: mirror what
+  Buildkite exports. `ssim_test.py:38-46` bakes these into the image's
+  `.env(...)` block; mismatched values can perturb in-container code paths
+  that branch on PR-vs-non-PR. `false` for `BUILDKITE_PULL_REQUEST` matches
+  Buildkite's "non-PR build" sentinel.
 
 Flag rationale:
 - `--skip-reference-download`: no refs exist yet, so conftest must not try to
