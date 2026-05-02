@@ -140,6 +140,10 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
     reverse_tile_partition_indices: torch.LongTensor
     variable_block_sizes: torch.LongTensor
     non_pad_index: torch.LongTensor
+    # Precomputed fancy index that fuses ``x[:, non_pad_index][:, reverse_tile_partition_indices]``
+    # in postprocess_output().  Avoids materializing the intermediate
+    # ``[B, len(non_pad_index), H, D]`` tensor on every layer.
+    untile_combined_index: torch.LongTensor
 
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
@@ -171,6 +175,7 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
         reverse_tile_partition_indices = get_reverse_tile_partition_indices(dit_seq_shape, VSA_TILE_SIZE, device)
         variable_block_sizes = construct_variable_block_sizes(dit_seq_shape, num_tiles, device)
         non_pad_index = get_non_pad_index(variable_block_sizes, math.prod(VSA_TILE_SIZE))
+        untile_combined_index = non_pad_index[reverse_tile_partition_indices]
 
         return VideoSparseAttentionMetadata(
             current_timestep=current_timestep,
@@ -181,10 +186,21 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
             tile_partition_indices=tile_partition_indices,  # type: ignore
             reverse_tile_partition_indices=reverse_tile_partition_indices,
             variable_block_sizes=variable_block_sizes,
-            non_pad_index=non_pad_index)
+            non_pad_index=non_pad_index,
+            untile_combined_index=untile_combined_index)
 
 
 class VideoSparseAttentionImpl(AttentionImpl):
+
+    # Class-level shared padded buffer.  All VSA layers in a model share
+    # this single allocation: tile() output is consumed in-line by the
+    # subsequent kernel call and never read after the next layer's
+    # tile() runs, so cross-layer reuse is safe on a single CUDA stream.
+    # Pad positions stay zero forever (we only ever write to
+    # ``non_pad_index`` slots), saving the ~hundreds-of-MB
+    # ``torch.zeros`` allocation that the previous implementation did
+    # on every layer per step.
+    _tile_buf: torch.Tensor | None = None
 
     def __init__(
         self,
@@ -205,17 +221,23 @@ class VideoSparseAttentionImpl(AttentionImpl):
         t_padded_size = num_tiles[0] * VSA_TILE_SIZE[0]
         h_padded_size = num_tiles[1] * VSA_TILE_SIZE[1]
         w_padded_size = num_tiles[2] * VSA_TILE_SIZE[2]
+        target_shape = (x.shape[0], t_padded_size * h_padded_size * w_padded_size, x.shape[-2], x.shape[-1])
 
-        x_padded = torch.zeros((x.shape[0], t_padded_size * h_padded_size * w_padded_size, x.shape[-2], x.shape[-1]),
-                               device=x.device,
-                               dtype=x.dtype)
-        x_padded[:, non_pad_index] = x[:, tile_partition_indices]
-        return x_padded
+        cls = type(self)
+        buf = cls._tile_buf
+        if (buf is None or buf.shape != target_shape or buf.dtype != x.dtype or buf.device != x.device):
+            buf = torch.zeros(target_shape, device=x.device, dtype=x.dtype)
+            cls._tile_buf = buf
 
-    def untile(self, x: torch.Tensor, reverse_tile_partition_indices: torch.LongTensor,
-               non_pad_index: torch.LongTensor) -> torch.Tensor:
-        x = x[:, non_pad_index][:, reverse_tile_partition_indices]
-        return x
+        buf[:, non_pad_index] = x[:, tile_partition_indices]
+        return buf
+
+    def untile(self, x: torch.Tensor, untile_combined_index: torch.LongTensor) -> torch.Tensor:
+        # Single fancy index using precomputed combined indices; avoids
+        # the intermediate ``[B, len(non_pad_index), H, D]`` tensor that
+        # the two-step ``x[:, non_pad_index][:, reverse_tile_partition_indices]``
+        # would allocate on every layer.
+        return x[:, untile_combined_index]
 
     def preprocess_qkv(
         self,
@@ -230,7 +252,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         output: torch.Tensor,
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
-        return self.untile(output, attn_metadata.reverse_tile_partition_indices, attn_metadata.non_pad_index)
+        return self.untile(output, attn_metadata.untile_combined_index)
 
     def forward(  # type: ignore[override]
         self,
