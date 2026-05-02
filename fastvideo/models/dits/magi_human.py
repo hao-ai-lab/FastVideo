@@ -389,25 +389,30 @@ class MagiAttention(nn.Module):
         q = apply_rotary_emb(q, cos_emb, sin_emb)
         k = apply_rotary_emb(k, cos_emb, sin_emb)
 
-        # Single-GPU self-attention over the full concat stream. Repeat KV
-        # heads to match Q heads (GQA).
         if self.kv_repeat > 1:
             k = k.repeat_interleave(self.kv_repeat, dim=1)
             v = v.repeat_interleave(self.kv_repeat, dim=1)
 
-        # [L, H, D] -> [1, H, L, D] for SDPA.
-        q_t = q.to(orig_dtype).permute(1, 0, 2).unsqueeze(0)
-        k_t = k.to(orig_dtype).permute(1, 0, 2).unsqueeze(0)
-        v_t = v.to(orig_dtype).permute(1, 0, 2).unsqueeze(0)
-        out = F.scaled_dot_product_attention(q_t, k_t, v_t)  # [1, H, L, D]
-        out = out.squeeze(0).permute(1, 0, 2).contiguous()   # [L, H, D]
+        # Mirror upstream's exact dtype boundary at dit_module.py:508 + 651:
+        # attention math is hardcoded bf16 inside upstream's
+        # flash_attn_with_cp regardless of weight dtype, then the per-head
+        # gating multiply runs in fp32 (g stays fp32 from linear_qkv.to(fp32);
+        # bf16 * fp32 promotes to fp32), and the gated output is finally
+        # cast to bf16 for linear_proj. The bf16 hardcode is intentional
+        # in upstream and we match it: it keeps production parity exact and
+        # gives test-time runs (fp32 weights) the same bf16 attention math
+        # that upstream uses, instead of FV silently running fp32 attention
+        # whenever weights happen to be fp32.
+        q_t = q.to(torch.bfloat16).permute(1, 0, 2).unsqueeze(0)
+        k_t = k.to(torch.bfloat16).permute(1, 0, 2).unsqueeze(0)
+        v_t = v.to(torch.bfloat16).permute(1, 0, 2).unsqueeze(0)
+        out = F.scaled_dot_product_attention(q_t, k_t, v_t)
+        out = out.squeeze(0).permute(1, 0, 2).contiguous().float()
 
-        # Re-permute to modality-grouped order so linear_proj's expert
-        # chunks line up.
         out = ModalityDispatcher.permute(out, permute_mapping)
         if g is not None:
             g = ModalityDispatcher.permute(g, permute_mapping)
-            out = out * torch.sigmoid(g.to(out.dtype))
+            out = out * torch.sigmoid(g)
         out = out.reshape(-1, self.cfg.num_heads_q * self.cfg.head_dim).to(orig_dtype)
         return self.linear_proj(out, modality_dispatcher=modality_dispatcher)
 
@@ -683,10 +688,13 @@ class MagiHumanDiT(BaseDiT):
         text_mask = self._cached_text_mask
 
         x, rope = self.adapter(x, coords_mapping, video_mask, audio_mask, text_mask)
-        # Match WanVideo's dtype-agnostic DiT pattern: the loader owns model
-        # precision, so forward follows the loaded block dtype instead of
-        # forcing bf16 here.
-        x = x.to(self.block.layers[0].attention.linear_qkv.weight.dtype)
+        # Keep the residual stream in adapter dtype (fp32) entering the block.
+        # Upstream daVinci-MagiHuman dit_module.py:923 casts to params_dtype,
+        # which is fp32 by default; each layer's pre_norm.to(bf16) handles
+        # the bf16 internal-compute boundary, and linear_proj outputs bf16
+        # which gets promoted back to fp32 by the residual addition. Casting
+        # the residual to bf16 here degrades the cross-layer accumulator and
+        # compounds visibly over 40 layers in pipeline parity.
         x = ModalityDispatcher.permute(x, dispatcher.permute_mapping)
 
         x = self.block(

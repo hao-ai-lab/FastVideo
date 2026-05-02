@@ -251,18 +251,19 @@ def _dit_forward_upstream(
 
 
 def _build_fastvideo_schedulers(shift: float, num_inference_steps: int, device):
-    """Construct schedulers the way FastVideo's `MagiHumanDenoisingStage`
-    does in production: `shift` is passed BOTH at __init__ time (in
-    `magi_human_pipeline.initialize_pipeline`) and at `set_timesteps`
-    time (in the denoising stage). The shift function is non-idempotent
-    for shift≠1, so this compounds; tests must mirror it to be faithful
-    to production.
+    """Mirror current FastVideo production at `magi_human_pipeline.py:146-149`
+    and `denoising.py:105-116`: default scheduler constructor (`shift=1`,
+    no-op) followed by `set_timesteps(..., shift=shift)` so the temporal
+    shift is applied exactly once. The earlier double-shift pattern was
+    reverted with the Wave 11 single-shift fix; if both __init__ and
+    set_timesteps applied non-trivial shift, the schedule would diverge
+    from upstream.
     """
     from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
         FlowUniPCMultistepScheduler,
     )
-    video_sched = FlowUniPCMultistepScheduler(shift=shift)
-    audio_sched = FlowUniPCMultistepScheduler(shift=shift)
+    video_sched = FlowUniPCMultistepScheduler()
+    audio_sched = FlowUniPCMultistepScheduler()
     video_sched.set_timesteps(num_inference_steps, device=device, shift=shift)
     audio_sched.set_timesteps(num_inference_steps, device=device, shift=shift)
     return video_sched, audio_sched
