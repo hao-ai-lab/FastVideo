@@ -1,5 +1,7 @@
 # `fastvideo/tests/` — Package-Level Test Suite
 
+**Generated:** 2026-05-02
+
 > **Pre-commit excludes `fastvideo/tests/`.** Lint/format hooks do not run on
 > files here. Match style of neighboring tests manually.
 

@@ -1,5 +1,7 @@
 # `fastvideo/configs/` — Config-Driven Model Registry
 
+**Generated:** 2026-05-02
+
 Two layers of dataclass configs feed every pipeline: **arch configs** (what the model is) and **pipeline configs** (how to run it).
 
 ## Layout

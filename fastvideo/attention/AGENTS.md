@@ -1,5 +1,7 @@
 # `fastvideo/attention/` — Attention Backends
 
+**Generated:** 2026-05-02
+
 Backend registry + selector wrapping FlashAttn / SageAttn / SageAttn3 / SDPA / VSA / VMoBA / SLA / BSA.
 
 ## Layout

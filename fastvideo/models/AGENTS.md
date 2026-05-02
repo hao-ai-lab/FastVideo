@@ -1,5 +1,7 @@
 # `fastvideo/models/` — Model Implementations
 
+**Generated:** 2026-05-02
+
 DiT / VAE / encoder / scheduler / upsampler / audio model classes. **Pre-commit excludes this directory** — yapf/ruff/mypy do not run on commits here. Match neighboring file style manually.
 
 ## Layout

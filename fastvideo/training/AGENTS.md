@@ -1,5 +1,7 @@
 # `fastvideo/training/` — Legacy Monolithic Training Pipelines
 
+**Generated:** 2026-05-02
+
 > **Status:** maintenance mode. New training work should go in `fastvideo/train/`.
 > Existing shipped recipes (Wan, LTX-2, MatrixGame distillation) still live here.
 

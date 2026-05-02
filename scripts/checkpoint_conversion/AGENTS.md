@@ -1,5 +1,7 @@
 # `scripts/checkpoint_conversion/` — Official → FastVideo Converters
 
+**Generated:** 2026-05-02
+
 > **Pre-commit excludes `scripts/`.** Format / lint by hand against neighboring
 > converters before opening a PR.
 

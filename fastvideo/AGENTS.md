@@ -1,5 +1,7 @@
 # `fastvideo/` — Core Package
 
+**Generated:** 2026-05-02
+
 Inference + training framework for video DiTs. Public API entry: `from fastvideo import VideoGenerator, PipelineConfig, SamplingParam`.
 
 ## Public Surface (`__init__.py`)

@@ -1,5 +1,7 @@
 # `fastvideo/train/` — Modular Training Framework
 
+**Generated:** 2026-05-02
+
 YAML-driven trainer composed from interchangeable **methods × models × callbacks**. Preferred location for new training code. (See sibling `fastvideo/training/AGENTS.md` for the legacy stack.)
 
 ## Layout

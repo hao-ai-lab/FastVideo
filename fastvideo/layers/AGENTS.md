@@ -1,5 +1,7 @@
 # Layer Guidance For Model Ports
 
+**Generated:** 2026-05-02
+
 Use this file when adding FastVideo-native model components. Keep it generic:
 model-specific parameter mappings belong in `scripts/checkpoint_conversion/`, not
 in this directory.

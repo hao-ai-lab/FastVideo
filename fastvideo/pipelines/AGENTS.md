@@ -1,5 +1,7 @@
 # `fastvideo/pipelines/` — Pipeline Composition
 
+**Generated:** 2026-05-02
+
 Diffusion pipelines are **compositions of `PipelineStage` objects**. Each stage owns one verb (validate / encode / schedule / denoise / decode). Adding a model means assembling stages, not subclassing a megapipeline.
 
 ## Layout
