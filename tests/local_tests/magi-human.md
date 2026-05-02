@@ -431,7 +431,33 @@ Ran the upstream `daVinci-MagiHuman` pipeline end-to-end with the same prompt + 
 
 **Validation**: Reran `examples/inference/basic/basic_magi_human.py` at the standard 480x256 / 32 step / seed 42 prompt. Output is **coherent video** matching the prompt — woman in teal sweater on a wooden park bench reading a book, green trees, sunny park scene. Output mp4 size dropped from ~932 KB (incompressible noise) to ~222 KB (coherent video). Frame samples at `/tmp/opencode/channelmajor_frame_*.png`.
 
-**OQ-6 RESOLVED-FOR-REAL** (Wave 14).
+#### Wave 14 follow-up (2026-05-02): re-running parity exposed dtype-boundary divergences
+
+After fixing the channel-major bug, both DiT and pipeline parity tests started failing with much larger diffs than the pre-fix baseline (DiT diff_max=0.56 vs old "0.057"; pipeline video diff_mean=0.89 vs old 0.47). The pre-fix "0.057" baseline turned out to be a *garbage-in-garbage-out cancellation*: with both sides processing scrambled tokens, the kernel-level differences (TORCH_SDPA vs flash_attn) happened to converge on noise-equilibrium output. Once the inputs were correct, the underlying dtype-boundary divergences from upstream became visible.
+
+Three additional fixes brought parity to bit-exact:
+
+1. **Attention dtype boundary mirrors upstream**: FV now hardcodes the bf16 cast for SDPA inputs (matching `daVinci-MagiHuman/inference/model/dit/dit_module.py:508` `flash_attn_with_cp` which `q.to(bf16), k.to(bf16), v.to(bf16)` regardless of weight dtype). The attention output is upcast to fp32 before the per-head gating multiply (matching upstream's `bf16 * fp32` promotion at `dit_module.py:649`), and the gated result is cast to bf16 only for `linear_proj`. Wave 10's "dtype-agnostic" `orig_dtype` cast at the SDPA call was silently running fp32 attention whenever weights happened to be fp32 (e.g., parity-test load path). Fix in `fastvideo/models/dits/magi_human.py:MagiAttention.forward`.
+
+2. **fp32 residual stream**: removed the `x.to(linear_qkv.weight.dtype)` cast at `MagiHumanDiT.forward` (was line 689). Upstream casts to `params_dtype` which defaults to fp32, so the residual stream stays fp32 across all 40 layers — internal compute still bf16, but the cross-layer accumulator is fp32. FV's bf16 residual was compounding ~6-7 bits of mantissa loss per layer × 40 layers = visible parity drift. Fix in `fastvideo/models/dits/magi_human.py:MagiHumanDiT.forward`.
+
+3. **Pipeline parity test scheduler single-shift**: `_build_fastvideo_schedulers` was still constructing `FlowUniPCMultistepScheduler(shift=shift)` and then calling `set_timesteps(... shift=shift)` (double-shift), but production was migrated to single-shift in Wave 11 (`magi_human_pipeline.py:146-149` + `denoising.py:105-116`). The test helper had a stale docstring. Fix in `tests/local_tests/magi_human/test_magi_human_pipeline_parity.py:_build_fastvideo_schedulers`.
+
+**Final parity numbers** (8 of 8 tests passing, 7 of 8 bit-exact):
+
+| Test | diff_max | diff_mean |
+|---|---|---|
+| `test_magi_human_dit_parity` | 0.0 | 0.0 |
+| `test_magi_human_t5gemma_parity` | 0.0 | 0.0 |
+| `test_magi_human_sa_audio_parity` | 0.0 | 0.0 |
+| `test_magi_human_sa_audio_official_parity` | 0.0 | 0.0 |
+| `test_magi_human_vae_parity` | 8.0e-4 | 4.9e-5 |
+| `test_magi_human_pipeline_latent_parity` | 0.0 | 0.0 |
+| `test_magi_human_pipeline_smoke` (2 cases) | passes | passes |
+
+Production E2E re-validated post-fix: still produces coherent video at the standard 480x256 / 32 step / seed 42 prompt; runtime unchanged (23.5s).
+
+**OQ-6 RESOLVED** (Wave 14, full resolution including dtype boundaries).
 
 #### Parity test fidelity follow-up (separate issue)
 
