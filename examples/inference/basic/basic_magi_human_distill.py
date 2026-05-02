@@ -12,12 +12,14 @@ Prerequisites (one-off):
   # 1) Accept terms on the gated HF repos with your HF_TOKEN:
   #    - https://huggingface.co/google/t5gemma-9b-9b-ul2
   #    - https://huggingface.co/stabilityai/stable-audio-open-1.0
+  #    Cross-variant shared components (Wan 2.2 VAE + T5-Gemma + Stable
+  #    Audio VAE) are lazy-loaded from their canonical upstream HF repos
+  #    and shared with the base variant cache.
   # 2) Convert the distill subfolder of GAIR/daVinci-MagiHuman:
   python scripts/checkpoint_conversion/convert_magi_human_to_diffusers.py \\
       --source GAIR/daVinci-MagiHuman \\
       --subfolder distill \\
       --output converted_weights/magi_human_distill \\
-      --bundle-vae \\
       --cast-bf16
   # `--cast-bf16` is recommended (61 GB fp32 -> 30 GB bf16); the FV pipeline
   # loads bf16 anyway, and the conversion keeps norms / RoPE bands fp32.

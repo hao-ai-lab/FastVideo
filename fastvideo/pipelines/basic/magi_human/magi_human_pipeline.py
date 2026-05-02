@@ -12,14 +12,18 @@ Top-level composition for the daVinci-MagiHuman base model. Wires:
 The base checkpoint is a joint audio-visual generator; both the video
 and audio paths run in the denoising loop and both are decoded.
 
-`load_modules` is overridden because T5-Gemma (`google/t5gemma-9b-9b-ul2`)
-is a gated 18 GB Google repo we intentionally do NOT bundle inside the
-converted MagiHuman directory; the pipeline pulls it at load time from
-the HF hub using the caller's HF token.
+`load_modules` is overridden so the four cross-variant shared components
+(text_encoder, tokenizer, audio_vae, video vae) lazy-load from their
+canonical upstream HF repos at first build time instead of being
+bundled inside every converted MagiHuman variant. This keeps each
+variant's converted repo at ~5-30 GB (transformer + scheduler +
+model_index.json) instead of ~30-55 GB, and lets all variants share
+the same ~25 GB of cached upstream weights.
 """
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 from transformers import AutoTokenizer
@@ -48,6 +52,7 @@ logger = init_logger(__name__)
 
 _T5GEMMA_HF_ID = "google/t5gemma-9b-9b-ul2"
 _SA_AUDIO_HF_ID = "stabilityai/stable-audio-open-1.0"
+_WAN_VAE_HF_ID = "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
 
 
 def _ensure_hf_token_env() -> str | None:
@@ -85,25 +90,30 @@ class MagiHumanPipeline(ComposedPipelineBase):
         fastvideo_args: FastVideoArgs,
         loaded_modules: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Load bundled modules via super(), then add T5-Gemma externally.
+        """Load the variant-specific transformer + scheduler from the
+        converted MagiHuman repo and lazy-load the four cross-variant
+        shared components from their canonical upstream HF repos:
 
-        The converted MagiHuman repo bundles `transformer/`, `vae/`, and
-        `scheduler/`. The text encoder and tokenizer are fetched from
-        `google/t5gemma-9b-9b-ul2` (gated Google repo, requires HF token
-        with accepted terms of use — see `initialize_pipeline`).
+          * text_encoder, tokenizer -> ``google/t5gemma-9b-9b-ul2``
+            (gated, requires HF token with accepted terms of use)
+          * audio_vae -> ``stabilityai/stable-audio-open-1.0`` (gated)
+          * vae -> ``Wan-AI/Wan2.2-TI2V-5B-Diffusers``
+
+        Backwards-compatible with bundled converted repos: if any of
+        these subfolders is present locally and listed in
+        ``model_index.json``, the standard component loader picks it up
+        via super(). Otherwise the loader is told to skip the entry and
+        we lazy-load it here.
         """
         # T5-Gemma is gated: expose `HF_API_KEY` as `HF_TOKEN` if needed.
         _ensure_hf_token_env()
 
-        # Temporarily drop text_encoder + tokenizer + audio_vae so
-        # super() doesn't fail the "every required_config_modules entry
-        # must be in modules" check; we'll load them ourselves below.
-        # All three are lazy-loaded from their own HF repos rather than
-        # bundled in the converted MagiHuman directory: T5-Gemma (gated),
-        # Stable Audio Open (gated), and the tokenizer (small, lives
-        # alongside T5-Gemma).
+        # Temporarily drop the cross-variant shared keys from
+        # required_config_modules so super() does not fail the "every
+        # required entry must appear in model_index.json" check when
+        # the converted repo declares a minimal model_index.json.
         deferred = []
-        for key in ("text_encoder", "tokenizer", "audio_vae"):
+        for key in ("text_encoder", "tokenizer", "audio_vae", "vae"):
             if key in self.required_config_modules:
                 self.required_config_modules.remove(key)
                 deferred.append(key)
@@ -141,7 +151,47 @@ class MagiHumanPipeline(ComposedPipelineBase):
             audio_config.pretrained_path = _SA_AUDIO_HF_ID
             modules["audio_vae"] = SAAudioVAEModel(audio_config)
 
+        if loaded_modules and "vae" in loaded_modules:
+            modules["vae"] = loaded_modules["vae"]
+        else:
+            modules["vae"] = self._load_video_vae(fastvideo_args)
+
         return modules
+
+    def _load_video_vae(self, fastvideo_args: FastVideoArgs) -> Any:
+        """Resolve the video VAE: prefer a bundled ``vae/`` subfolder in
+        the converted repo (legacy), fall back to lazy-downloading the
+        Wan 2.2 TI2V-5B VAE shards from upstream.
+
+        Either way the load goes through FastVideo's standard
+        ``VAELoader`` so the result is the same FV ``AutoencoderKLWan``
+        nn.Module that the bundled path produces.
+        """
+        from fastvideo.models.loader.component_loader import VAELoader
+
+        bundled = Path(self.model_path) / "vae"
+        if bundled.is_dir() and (bundled / "config.json").is_file():
+            logger.info("Loading bundled video VAE from %s", bundled)
+            return VAELoader().load(str(bundled), fastvideo_args)
+
+        from huggingface_hub import snapshot_download
+
+        logger.info(
+            "Bundled vae/ not found at %s; lazy-loading Wan 2.2 TI2V-5B VAE from %s",
+            self.model_path,
+            _WAN_VAE_HF_ID,
+        )
+        snapshot = snapshot_download(
+            repo_id=_WAN_VAE_HF_ID,
+            allow_patterns=["vae/*"],
+        )
+        vae_dir = os.path.join(snapshot, "vae")
+        if not os.path.isdir(vae_dir):
+            raise RuntimeError(
+                f"snapshot_download returned {snapshot} but no vae/ "
+                f"subfolder was found inside it. Check that {_WAN_VAE_HF_ID} "
+                "still exposes a Diffusers-format vae/ folder.", )
+        return VAELoader().load(vae_dir, fastvideo_args)
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
         # MagiHuman applies `flow_shift` during timestep setup; keep the

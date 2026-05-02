@@ -20,29 +20,38 @@ directory so `VideoGenerator.from_pretrained(...)` can load it standalone:
         transformer/
             config.json
             diffusion_pytorch_model-00001-of-00N.safetensors (+ index)
-        vae/
-            config.json
-            diffusion_pytorch_model.safetensors      (pulled from Wan-AI/Wan2.2-TI2V-5B)
         scheduler/
             scheduler_config.json                    (FlowUniPC default)
-        text_encoder/                                (optional; see --bundle-text-encoder)
-            config.json, model-*.safetensors
-        tokenizer/                                   (optional; see --bundle-text-encoder)
+        vae/                                         (optional; --bundle-vae)
+        audio_vae/                                   (optional; --bundle-audio-vae)
+        text_encoder/, tokenizer/                    (optional; --bundle-text-encoder)
+
+By default the converted repo is MINIMAL: only `transformer/`,
+`scheduler/`, and `model_index.json` are emitted (~5-30 GB depending on
+variant). The four cross-variant shared components — Wan VAE, Stable
+Audio VAE, T5-Gemma encoder, and tokenizer — are lazy-loaded by
+`MagiHumanPipeline.load_modules` from their canonical upstream HF repos
+on first build, so all MagiHuman variants share a single ~25 GB cache
+of upstream weights. Pass the `--bundle-*` flags only if you want to
+ship a self-contained snapshot.
 
 The DiT key names pass through unchanged — the FastVideo `MagiHumanDiT` module
 mirrors the reference module tree (`adapter.*`, `block.layers.*`, `final_*`),
 so no regex remapping is needed. The conversion is effectively a reshard +
 Diffusers wrapper.
 
-Example:
+Example (minimal artifact, ~5-30 GB):
     python scripts/checkpoint_conversion/convert_magi_human_to_diffusers.py \\
         --source GAIR/daVinci-MagiHuman \\
-        --output converted_weights/magi_human_base \\
-        --bundle-vae \\
-        --bundle-text-encoder
+        --subfolder base \\
+        --output converted_weights/magi_human_base
 
-Skip `--bundle-text-encoder` to keep the artifact size down; consumers can
-point at `google/t5gemma-9b-9b-ul2` directly via `text_encoder_path`.
+Example (self-contained snapshot with shared components bundled):
+    python scripts/checkpoint_conversion/convert_magi_human_to_diffusers.py \\
+        --source GAIR/daVinci-MagiHuman \\
+        --subfolder base \\
+        --output converted_weights/magi_human_base \\
+        --bundle-vae --bundle-audio-vae --bundle-text-encoder
 """
 
 from __future__ import annotations
