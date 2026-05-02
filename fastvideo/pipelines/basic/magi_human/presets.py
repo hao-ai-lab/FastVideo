@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Presets for the daVinci-MagiHuman pipelines.
-
-Scope of this file: the base AV (audio + video) variant and its DMD-2
-distilled twin. SR variants live behind their own presets once ported.
-"""
+"""Presets for the daVinci-MagiHuman pipelines."""
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
 # Keep this in sync with upstream MagiEvaluator.negative_prompt
@@ -133,9 +129,53 @@ MAGI_HUMAN_DISTILL_TI2V = InferencePreset(
     },
 )
 
+MAGI_HUMAN_SR_540P = InferencePreset(
+    name="magi_human_sr_540p",
+    version=1,
+    model_family="magi_human",
+    description=("daVinci-MagiHuman two-stage base + SR-540p text-to-AV. "
+                 "Base pass runs at 256x480; SR pass refines to upstream's "
+                 "aligned 512x896 output with muxed audio."),
+    workload_type="t2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "seed": 42,
+        "height": 256,
+        "width": 480,
+        "num_frames": 101,
+        "fps": 25,
+        "guidance_scale": 5.0,
+        "num_inference_steps": 32,
+        "negative_prompt": _MAGI_HUMAN_NEGATIVE_PROMPT,
+    },
+)
+
+MAGI_HUMAN_SR_540P_TI2V = InferencePreset(
+    name="magi_human_sr_540p_ti2v",
+    version=1,
+    model_family="magi_human",
+    description=("daVinci-MagiHuman two-stage base + SR-540p text+image-to-AV. "
+                 "The reference image is encoded at base resolution and then "
+                 "re-encoded at SR resolution before the SR denoise pass."),
+    workload_type="i2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "seed": 42,
+        "height": 256,
+        "width": 480,
+        "num_frames": 101,
+        "fps": 25,
+        "guidance_scale": 5.0,
+        "num_inference_steps": 32,
+        "negative_prompt": _MAGI_HUMAN_NEGATIVE_PROMPT,
+    },
+)
+
 ALL_PRESETS = (
     MAGI_HUMAN_BASE,
     MAGI_HUMAN_DISTILL,
     MAGI_HUMAN_BASE_TI2V,
     MAGI_HUMAN_DISTILL_TI2V,
+    MAGI_HUMAN_SR_540P,
+    MAGI_HUMAN_SR_540P_TI2V,
 )

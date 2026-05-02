@@ -1,56 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stub example for daVinci-MagiHuman SR-540p text-to-AV — NOT YET PORTED.
+"""Run daVinci-MagiHuman SR-540p text-to-AV in FastVideo.
 
-Mirrors upstream `daVinci-MagiHuman/example/sr_540p/run_T2V.sh`.
+The converted repo must contain both ``transformer/`` (base DiT) and
+``sr_transformer/`` (540p SR DiT). Build it with:
 
-Upstream pipeline overview (see
-`daVinci-MagiHuman/inference/pipeline/video_generate.py:300-360`,
-`MagiEvaluator.evaluate`):
-
-  1. Run base model at 256x480 (`magi_human_base`) to get
-     `(br_latent_video, br_latent_audio)`.
-  2. Trilinear-interpolate the BR latent up to the SR latent shape
-     `(latent_length, sr_latent_height, sr_latent_width)` and add
-     ZeroSNR noise via `noise_value=220`.
-  3. Replace audio with mostly-fresh noise:
-     `randn_like(br_latent_audio) * 0.7 + br_latent_audio * 0.3`.
-  4. Run a separate SR DiT (`sr_arch_config`, same arch as base, 5 steps)
-     with `sr_video_txt_guidance_scale=3.5` and the cfg-trick that drops
-     guidance for the first `cfg_trick_start_frame=13` frames to avoid
-     overexposure on I2V hand-offs.
-  5. Decode with the Wan VAE.
-
-What is missing in FastVideo:
-
-  * `MagiHumanSR540pConfig` (pipeline_config) wiring two DiTs (base + SR)
-    plus the `sr_video_txt_guidance_scale`, `cfg_trick_*`,
-    `noise_value`, `sr_audio_noise_scale`, `sr_num_inference_steps`
-    knobs surfaced in `inference/common/config.py:EvaluationConfig`.
-  * A two-stage pipeline: base denoise → SR latent prep
-    (`MagiHumanSRLatentPreparationStage`: trilinear up + noise mix) →
-    SR denoise → decode. Either a new `ComposedPipelineBase` subclass
-    that runs base + SR back-to-back or a meta-pipeline that calls
-    both as inner pipelines.
-  * `MagiHumanSRDenoisingStage` with the per-frame cfg-trick guidance
-    tensor (`evaluate_with_latent` lines 412-418).
-  * Conversion script support for the `540p_sr` subfolder (the existing
-    `--subfolder` choices already accept it; just need a separate
-    `convert_magi_human_to_diffusers ... --subfolder 540p_sr ...`
-    invocation that produces a `converted_weights/magi_human_sr_540p`
-    layout with `transformer/` AND `sr_transformer/`).
-  * A new preset (e.g. `magi_human_sr_540p`) and registry entry.
+    python scripts/checkpoint_conversion/convert_magi_human_to_diffusers.py \
+        --source GAIR/daVinci-MagiHuman \
+        --subfolder base \
+        --sr-source GAIR/daVinci-MagiHuman \
+        --sr-subfolder 540p_sr \
+        --output converted_weights/magi_human_sr_540p
 """
-import sys
+from fastvideo import VideoGenerator
+
+
+PROMPT = (
+    "A warm afternoon scene: a person sits on a park bench reading a book, "
+    "surrounded by softly swaying trees."
+)
 
 
 def main() -> None:
-    raise NotImplementedError(
-        "MagiHuman SR-540p T2V is not yet ported. See the docstring at the "
-        "top of this file for the missing pipeline-side work, and "
-        "`tests/local_tests/magi-human.md` for the port-status journal.",
+    generator = VideoGenerator.from_pretrained(
+        "converted_weights/magi_human_sr_540p",
+        num_gpus=1,
     )
+    generator.generate_video(
+        prompt=PROMPT,
+        output_path="outputs_video/magi_human_sr540p/output_magi_human_sr540p.mp4",
+        save_video=True,
+    )
+    generator.shutdown()
 
 
 if __name__ == "__main__":
     main()
-    sys.exit(0)

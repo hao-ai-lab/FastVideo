@@ -40,11 +40,19 @@ mirrors the reference module tree (`adapter.*`, `block.layers.*`, `final_*`),
 so no regex remapping is needed. The conversion is effectively a reshard +
 Diffusers wrapper.
 
-Example (minimal artifact, ~5-30 GB):
+    Example (minimal artifact, ~5-30 GB):
     python scripts/checkpoint_conversion/convert_magi_human_to_diffusers.py \\
         --source GAIR/daVinci-MagiHuman \\
         --subfolder base \\
         --output converted_weights/magi_human_base
+
+Example (self-contained SR-540p artifact with base + SR DiTs):
+    python scripts/checkpoint_conversion/convert_magi_human_to_diffusers.py \
+        --source GAIR/daVinci-MagiHuman \
+        --subfolder base \
+        --sr-source GAIR/daVinci-MagiHuman \
+        --sr-subfolder 540p_sr \
+        --output converted_weights/magi_human_sr_540p
 
 Example (self-contained snapshot with shared components bundled):
     python scripts/checkpoint_conversion/convert_magi_human_to_diffusers.py \\
@@ -261,8 +269,13 @@ def _shard_state_dict(
     return shards, index
 
 
-def _write_transformer(out_dir: Path, state: dict[str, torch.Tensor], arch: dict) -> None:
-    transformer_dir = out_dir / "transformer"
+def _write_transformer(
+    out_dir: Path,
+    state: dict[str, torch.Tensor],
+    arch: dict,
+    subdir: str = "transformer",
+) -> None:
+    transformer_dir = out_dir / subdir
     transformer_dir.mkdir(parents=True, exist_ok=True)
 
     shards, weight_map = _shard_state_dict(state)
@@ -281,7 +294,7 @@ def _write_transformer(out_dir: Path, state: dict[str, torch.Tensor], arch: dict
     with (transformer_dir / "config.json").open("w") as f:
         json.dump(arch, f, indent=2)
         f.write("\n")
-    print(f"  wrote transformer/config.json ({len(arch)} keys)")
+    print(f"  wrote {subdir}/config.json ({len(arch)} keys)")
 
 
 def _write_scheduler(out_dir: Path) -> None:
@@ -298,13 +311,16 @@ def _write_model_index(
     bundle_vae: bool,
     bundle_text: bool,
     bundle_audio_vae: bool = False,
+    include_sr_transformer: bool = False,
 ) -> None:
     index = {
-        "_class_name": "MagiHumanPipeline",
+        "_class_name": "MagiHumanSRPipeline" if include_sr_transformer else "MagiHumanPipeline",
         "_diffusers_version": "0.33.0",
         "transformer": ["diffusers", "MagiHumanDiT"],
         "scheduler": ["diffusers", "FlowUniPCMultistepScheduler"],
     }
+    if include_sr_transformer:
+        index["sr_transformer"] = ["diffusers", "MagiHumanDiT"]
     if bundle_vae:
         index["vae"] = ["diffusers", "AutoencoderKLWan"]
     if bundle_audio_vae:
@@ -458,6 +474,17 @@ def main() -> None:
         help="Download stabilityai/stable-audio-open-1.0 VAE into <output>/audio_vae/. "
              "Requires HF terms accepted for the Stability AI gated repo.",
     )
+    parser.add_argument(
+        "--sr-source",
+        default=None,
+        help="Optional HF repo id or local directory containing SR DiT shards. When set, writes <output>/sr_transformer/.",
+    )
+    parser.add_argument(
+        "--sr-subfolder",
+        default="540p_sr",
+        choices=["540p_sr", "1080p_sr"],
+        help="SR source subfolder to convert into <output>/sr_transformer/.",
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.output)
@@ -475,6 +502,24 @@ def main() -> None:
 
     print(f"-> writing {out_dir}/transformer/")
     _write_transformer(out_dir, state, MAGI_HUMAN_BASE_ARCH)
+
+    include_sr_transformer = args.sr_source is not None
+    if include_sr_transformer:
+        print(f"-> SR DiT shards from {args.sr_source}/{args.sr_subfolder}")
+        sr_shards = _download_dit_shards(args.sr_source, subfolder=args.sr_subfolder)
+        print(f"  found {len(sr_shards)} SR shard(s)")
+        print(f"-> loading SR DiT state dict (cast_bf16={args.cast_bf16})")
+        sr_state = _load_all_shards(sr_shards, cast_bf16=args.cast_bf16)
+        print(f"  total SR keys: {len(sr_state)}")
+        _validate_state(sr_state)
+        print("  SR state dict validation passed")
+        print(f"-> writing {out_dir}/sr_transformer/")
+        _write_transformer(
+            out_dir,
+            sr_state,
+            MAGI_HUMAN_BASE_ARCH,
+            subdir="sr_transformer",
+        )
 
     print(f"-> writing {out_dir}/scheduler/")
     _write_scheduler(out_dir)
@@ -497,6 +542,7 @@ def main() -> None:
         bundle_vae=args.bundle_vae,
         bundle_text=args.bundle_text_encoder,
         bundle_audio_vae=args.bundle_audio_vae,
+        include_sr_transformer=include_sr_transformer,
     )
 
     print(f"\nDone. Output at: {out_dir}")
