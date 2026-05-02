@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import time
+from collections import deque
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
@@ -10,7 +12,12 @@ from typing import Any, TYPE_CHECKING
 import torch
 from tqdm.auto import tqdm
 
-from fastvideo.distributed import get_sp_group, get_world_group
+from fastvideo.distributed import (
+    get_local_torch_device,
+    get_sp_group,
+    get_world_group,
+)
+from fastvideo.logger import init_logger
 from fastvideo.train.callbacks.callback import CallbackDict
 from fastvideo.train.methods.base import TrainingMethod
 from fastvideo.train.utils.tracking import build_tracker
@@ -18,6 +25,9 @@ from fastvideo.train.utils.tracking import build_tracker
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
+
+
+logger = init_logger(__name__)
 
 
 def _coerce_log_scalar(
@@ -124,12 +134,20 @@ class Trainer:
         # have advanced the RNG as a side-effect.
         if (checkpoint_manager is not None and resume_from_checkpoint):
             checkpoint_manager.load_rng_snapshot(resume_from_checkpoint, )
+
+        train_device = get_local_torch_device()
+        track_cuda_peak = train_device.type == "cuda" and torch.cuda.is_available()
+        if track_cuda_peak:
+            torch.cuda.reset_peak_memory_stats(train_device)
+
+        step_times: deque[float] = deque(maxlen=100)
         progress = tqdm(
             range(start_step + 1, max_steps + 1),
             initial=start_step,
             desc="Steps",
             disable=self.local_rank > 0,
         )
+        last_logged_metrics: dict[str, float] = {}
         for step in progress:
             t0 = time.perf_counter()
 
@@ -178,8 +196,20 @@ class Trainer:
             # to float right before logging.
             metrics = {k: float(v) / grad_accum for k, v in loss_sums.items()}
             metrics.update({k: float(v) / grad_accum for k, v in metric_sums.items()})
-            metrics["step_time_sec"] = (time.perf_counter() - t0)
+            step_time_sec = (time.perf_counter() - t0)
+            step_times.append(step_time_sec)
+            avg_step_time_sec = sum(step_times) / len(step_times)
+
+            metrics["step_time_sec"] = step_time_sec
+            metrics["step_time"] = step_time_sec
+            metrics["avg_step_time_sec"] = avg_step_time_sec
+            metrics["avg_step_time"] = avg_step_time_sec
+            if track_cuda_peak:
+                metrics["peak_vram_gb"] = (
+                    torch.cuda.max_memory_allocated(train_device) / 1024**3
+                )
             metrics["vsa_sparsity"] = float(tc.vsa_sparsity)
+            last_logged_metrics = dict(metrics)
             if self.global_rank == 0 and metrics:
                 self.tracker.log(metrics, step)
 
@@ -199,6 +229,19 @@ class Trainer:
             self.callbacks.on_validation_end(
                 method,
                 iteration=step,
+            )
+
+        if self.global_rank == 0 and last_logged_metrics:
+            training_summary = {
+                "final_step": max_steps,
+                "final_train_loss": last_logged_metrics.get("train_loss", ""),
+                "avg_step_time_sec": last_logged_metrics.get("avg_step_time_sec", ""),
+                "peak_vram_gb": last_logged_metrics.get("peak_vram_gb", ""),
+                "wall_clock_step_time_sec": last_logged_metrics.get("step_time_sec", ""),
+            }
+            logger.info(
+                "TRAINING_RUN_SUMMARY %s",
+                json.dumps(training_summary, sort_keys=True),
             )
 
         self.callbacks.on_train_end(

@@ -9,13 +9,13 @@ if TYPE_CHECKING:
         DataConfig, )
 
 
-def build_parquet_t2v_train_dataloader(
+def _build_parquet_train_dataloader(
     data_config: DataConfig,
     *,
     text_len: int,
     parquet_schema: Any,
 ) -> Any:
-    """Build a parquet dataloader for T2V-style datasets."""
+    """Build a parquet dataloader for preprocessed parquet datasets."""
 
     from fastvideo.dataset import (
         build_parquet_map_style_dataloader, )
@@ -31,3 +31,48 @@ def build_parquet_t2v_train_dataloader(
         seed=int(data_config.seed or 0),
     ))
     return dataloader
+
+
+def build_parquet_t2v_train_dataloader(
+    data_config: DataConfig,
+    *,
+    text_len: int,
+    parquet_schema: Any,
+) -> Any:
+    """Build a parquet dataloader for T2V-style datasets."""
+
+    return _build_parquet_train_dataloader(
+        data_config,
+        text_len=text_len,
+        parquet_schema=parquet_schema,
+    )
+
+
+def build_parquet_i2v_train_dataloader(
+    data_config: DataConfig,
+    *,
+    text_len: int,
+    parquet_schema: Any,
+) -> Any:
+    """Build a parquet dataloader for I2V/TI2V-style datasets."""
+
+    return _build_parquet_train_dataloader(
+        data_config,
+        text_len=text_len,
+        parquet_schema=parquet_schema,
+    )
+
+
+def build_parquet_matrixgame_train_dataloader(
+    data_config: DataConfig,
+    *,
+    text_len: int,
+    parquet_schema: Any,
+) -> Any:
+    """Build a parquet dataloader for MatrixGame datasets."""
+
+    return _build_parquet_train_dataloader(
+        data_config,
+        text_len=text_len,
+        parquet_schema=parquet_schema,
+    )

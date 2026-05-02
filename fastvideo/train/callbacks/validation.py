@@ -375,6 +375,18 @@ class ValidationCallback(Callback):
         if ("image" in validation_batch and validation_batch["image"] is not None):
             batch.pil_image = validation_batch["image"]
 
+        if "keyboard_cond" in validation_batch and validation_batch["keyboard_cond"] is not None:
+            batch.keyboard_cond = torch.tensor(
+                validation_batch["keyboard_cond"],
+                dtype=torch.bfloat16,
+            ).unsqueeze(0)
+
+        if "mouse_cond" in validation_batch and validation_batch["mouse_cond"] is not None:
+            batch.mouse_cond = torch.tensor(
+                validation_batch["mouse_cond"],
+                dtype=torch.bfloat16,
+            ).unsqueeze(0)
+
         return batch
 
     # ----------------------------------------------------------
