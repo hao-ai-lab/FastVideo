@@ -30,6 +30,8 @@ image = (modal.Image.from_registry(
     os.environ.get("TEST_SCOPE", ""),
     "IMAGE_VERSION":
     os.environ.get("IMAGE_VERSION", ""),
+    "HF_REPO_ID":
+    "FastVideo/performance-tracking",
 }))
 
 
@@ -70,21 +72,15 @@ def run_test(pytest_command: str):
     {pytest_command}
     """
 
-    # result = subprocess.run(["/bin/bash", "-c", command],
-    #                         stdout=sys.stdout,
-    #                         stderr=sys.stderr,
-    #                         check=False)
-
-    # sys.exit(result.returncode)
-
     result = subprocess.run(["/bin/bash", "-c", command],
                             stdout=sys.stdout,
                             stderr=sys.stderr,
                             check=False)
 
+    # Modal containers crash on sys.exit(0); raise on failure, return on success.
     if result.returncode != 0:
-        raise RuntimeError(f"Test command failed with exit code {result.returncode}")
-    # On success, just return — don't call sys.exit()
+        raise RuntimeError(
+            f"Test command failed with exit code {result.returncode}")
 
 @app.function(gpu="H100:1",
               image=image,
@@ -240,21 +236,21 @@ def run_lora_extraction_tests():
               timeout=1800,
               secrets=[
                   modal.Secret.from_dict(
-                      {"HF_API_KEY": os.environ.get("HF_API_KEY", ""),
-                       "HF_REPO_ID": "FastVideo/performance-tracking"})
+                      {"HF_API_KEY": os.environ.get("HF_API_KEY", "")})
               ],
-              volumes={
-                  "/root/data": model_vol,
-              })
+              volumes={"/root/data": model_vol})
 def run_performance_tests():
+    # Dashboard runs after compare_baseline regardless of regression result so
+    # the trend view is always available when investigating a failed gate.
     run_test(
         "export HF_HOME='/root/data/.cache' && "
         "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
         "hf auth login --token $HF_API_KEY && "
         "pytest ./fastvideo/tests/performance -vs && "
-        "python ./fastvideo/tests/performance/compare_baseline.py && "
-        "python ./fastvideo/tests/performance/dashboard.py"
-    )
+        "{ python ./fastvideo/tests/performance/compare_baseline.py; "
+        "PERF_RC=$?; "
+        "python ./fastvideo/tests/performance/dashboard.py || true; "
+        "exit $PERF_RC; }")
 
 
 @app.function(gpu="L40S:1",

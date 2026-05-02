@@ -26,10 +26,10 @@ from huggingface_hub import HfApi, snapshot_download
 HF_REPO_ID: str = os.environ.get("HF_REPO_ID", "FastVideo/performance-tracking")
 HF_TOKEN: str | None = os.environ.get("HF_API_KEY")
 
-
 # ---------------------------------------------------------------------------
 # Low-level helpers
 # ---------------------------------------------------------------------------
+
 
 def sanitize(value: str) -> str:
     """Return a filesystem- and HF-path-safe version of *value*."""
@@ -50,16 +50,23 @@ def safe_float(value: Any) -> float | None:
 # HF I/O
 # ---------------------------------------------------------------------------
 
-def sync_from_hf(local_dir: str) -> str:
+
+def sync_from_hf(local_dir: str, *, strict: bool = False) -> str:
     """Download the HF dataset repo snapshot to *local_dir*.
 
     Returns *local_dir* so callers can chain: ``load_records(sync_from_hf(...))``.
-    On failure (empty repo, no credentials, network error) the function logs a
-    warning and returns *local_dir* unchanged so the caller can still work with
-    whatever is already on disk.
+
+    By default (``strict=False``) failures are logged and *local_dir* is
+    returned unchanged, so dashboard / PR consumers stay resilient when HF is
+    unavailable. Callers that depend on the sync for correctness (e.g. the
+    main-branch baseline writer) must pass ``strict=True`` so that misconfig
+    or transient HF errors fail loud rather than silently reset the baseline.
     """
     if not HF_REPO_ID:
-        print("hf_store: HF_REPO_ID not set, skipping sync.")
+        msg = "hf_store: HF_REPO_ID not set"
+        if strict:
+            raise RuntimeError(f"{msg}; cannot sync.")
+        print(f"{msg}, skipping sync.")
         return local_dir
 
     print(f"hf_store: syncing from {HF_REPO_ID} → {local_dir}")
@@ -72,19 +79,31 @@ def sync_from_hf(local_dir: str) -> str:
             allow_patterns="*.json",
         )
     except Exception as exc:
+        if strict:
+            raise
         print(f"hf_store: sync skipped — {exc}")
 
     return local_dir
 
 
-def upload_record(local_path: str, record: dict[str, Any]) -> None:
+def upload_record(
+    local_path: str,
+    record: dict[str, Any],
+    *,
+    strict: bool = False,
+) -> None:
     """Upload *local_path* to the HF repo under ``<model_id>/<filename>``.
 
-    Silently skips if HF_TOKEN is absent so local/CI runs without credentials
-    don't crash.
+    By default failures (missing token, network errors) are logged and
+    swallowed. Pass ``strict=True`` when the upload is part of a write-path
+    that must not silently lose records — otherwise the rolling baseline can
+    stop advancing without any signal in the build log.
     """
     if not HF_TOKEN:
-        print("hf_store: HF_API_KEY not set, skipping upload.")
+        msg = "hf_store: HF_API_KEY not set"
+        if strict:
+            raise RuntimeError(f"{msg}; cannot upload.")
+        print(f"{msg}, skipping upload.")
         return
 
     model_id = record.get("model_id", "unknown")
@@ -102,12 +121,15 @@ def upload_record(local_path: str, record: dict[str, Any]) -> None:
         )
         print(f"hf_store: uploaded → {HF_REPO_ID}/{path_in_repo}")
     except Exception as exc:
+        if strict:
+            raise
         print(f"hf_store: upload failed — {exc}")
 
 
 # ---------------------------------------------------------------------------
 # Record loading
 # ---------------------------------------------------------------------------
+
 
 def load_records(
     local_dir: str,
@@ -120,7 +142,7 @@ def load_records(
     Args:
         local_dir: Root directory previously populated by :func:`sync_from_hf`.
         days: When set, discard records whose ``timestamp`` is older than this
-            many days. Records with a missing/unparseable timestamp are kept.
+            many days. Records with a missing/unparsable timestamp are kept.
         successful_only: When True, only records with ``success=True`` are
             returned. Useful when building a regression baseline.
 
@@ -154,7 +176,7 @@ def load_records(
                     if ts < cutoff:
                         continue
                 except ValueError:
-                    pass  # keep records with unparseable timestamps
+                    pass  # keep records with unparsable timestamps
 
         records.append(data)
 

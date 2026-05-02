@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
-import shutil
-import subprocess
 from datetime import datetime
 
 import plotly.express as px

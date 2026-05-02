@@ -82,7 +82,7 @@ upload_performance_artifacts() {
 
     _upload_dashboard() {
         local target
-        target=$(find "$LOCAL_DIR" -name "dashboard_*${SHORT_SHA}*" | head -n 1)
+        target=$(find "$LOCAL_DIR" -name "dashboard_${SHORT_SHA}_*" | head -n 1)
         log "TARGET dashboard: '$target'"
 
         if [ -n "$target" ]; then
@@ -96,7 +96,7 @@ upload_performance_artifacts() {
 
     _upload_perf_summary() {
         local target
-        target=$(find "$LOCAL_DIR" -name "perf_*${SHORT_SHA}*" | head -n 1)
+        target=$(find "$LOCAL_DIR" -name "perf_${SHORT_SHA}_*" | head -n 1)
         log "TARGET perf summary: '$target'"
 
         if [ -n "$target" ]; then
