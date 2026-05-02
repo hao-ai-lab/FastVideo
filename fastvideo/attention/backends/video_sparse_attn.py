@@ -144,6 +144,14 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
     # in postprocess_output().  Avoids materializing the intermediate
     # ``[B, len(non_pad_index), H, D]`` tensor on every layer.
     untile_combined_index: torch.LongTensor
+    # Per-step shared padded buffer used by tile().  Lazily populated on
+    # the first layer's call and reused by every subsequent VSA layer in
+    # the same denoising step.  Scoping to metadata (not class/instance)
+    # makes the reuse thread-safe across concurrent requests and keeps
+    # the "pad positions are zero" invariant trivially true (the buffer
+    # is freshly zeroed alongside ``non_pad_index`` so the index set
+    # cannot drift between calls).
+    tile_buf: torch.Tensor | None = None
 
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
@@ -192,16 +200,6 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
 
 class VideoSparseAttentionImpl(AttentionImpl):
 
-    # Class-level shared padded buffer.  All VSA layers in a model share
-    # this single allocation: tile() output is consumed in-line by the
-    # subsequent kernel call and never read after the next layer's
-    # tile() runs, so cross-layer reuse is safe on a single CUDA stream.
-    # Pad positions stay zero forever (we only ever write to
-    # ``non_pad_index`` slots), saving the ~hundreds-of-MB
-    # ``torch.zeros`` allocation that the previous implementation did
-    # on every layer per step.
-    _tile_buf: torch.Tensor | None = None
-
     def __init__(
         self,
         num_heads: int,
@@ -216,20 +214,26 @@ class VideoSparseAttentionImpl(AttentionImpl):
         sp_group = get_sp_group()
         self.sp_size = sp_group.world_size
 
-    def tile(self, x: torch.Tensor, num_tiles: list[int], tile_partition_indices: torch.LongTensor,
-             non_pad_index: torch.LongTensor) -> torch.Tensor:
+    def tile(self, x: torch.Tensor, attn_metadata: VideoSparseAttentionMetadata) -> torch.Tensor:
+        num_tiles = attn_metadata.num_tiles
         t_padded_size = num_tiles[0] * VSA_TILE_SIZE[0]
         h_padded_size = num_tiles[1] * VSA_TILE_SIZE[1]
         w_padded_size = num_tiles[2] * VSA_TILE_SIZE[2]
         target_shape = (x.shape[0], t_padded_size * h_padded_size * w_padded_size, x.shape[-2], x.shape[-1])
 
-        cls = type(self)
-        buf = cls._tile_buf
+        # Reuse the per-step buffer stashed on metadata (lazily allocated
+        # on the first VSA layer's call within a denoising step).  Pad
+        # positions are zero from the initial torch.zeros and never
+        # written to.  Scoping to metadata makes reuse safe across
+        # concurrent requests and keeps the "pad positions are zero"
+        # invariant trivially true: ``non_pad_index`` is fixed within
+        # a single metadata instance.
+        buf = attn_metadata.tile_buf
         if (buf is None or buf.shape != target_shape or buf.dtype != x.dtype or buf.device != x.device):
             buf = torch.zeros(target_shape, device=x.device, dtype=x.dtype)
-            cls._tile_buf = buf
+            attn_metadata.tile_buf = buf
 
-        buf[:, non_pad_index] = x[:, tile_partition_indices]
+        buf[:, attn_metadata.non_pad_index] = x[:, attn_metadata.tile_partition_indices]
         return buf
 
     def untile(self, x: torch.Tensor, untile_combined_index: torch.LongTensor) -> torch.Tensor:
@@ -244,8 +248,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         qkv: torch.Tensor,
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
-        return self.tile(qkv, attn_metadata.num_tiles, attn_metadata.tile_partition_indices,
-                         attn_metadata.non_pad_index)
+        return self.tile(qkv, attn_metadata)
 
     def postprocess_output(
         self,
