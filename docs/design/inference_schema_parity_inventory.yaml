@@ -306,6 +306,30 @@ surfaces:
         sources: [fastvideo.configs.pipelines.wan.MatrixGameI2V480PConfig]
       num_frames_per_block:
         sources: [fastvideo.configs.pipelines.wan.MatrixGameI2V480PConfig]
+      audio_channels:
+        sources:
+          - fastvideo.configs.pipelines.stable_audio.StableAudioT2AConfig
+          - fastvideo.configs.pipelines.stable_audio.StableAudioOpenSmallConfig
+      audio_end_in_s:
+        sources:
+          - fastvideo.configs.pipelines.stable_audio.StableAudioT2AConfig
+          - fastvideo.configs.pipelines.stable_audio.StableAudioOpenSmallConfig
+      audio_start_in_s:
+        sources:
+          - fastvideo.configs.pipelines.stable_audio.StableAudioT2AConfig
+          - fastvideo.configs.pipelines.stable_audio.StableAudioOpenSmallConfig
+      max_audio_duration_s:
+        sources:
+          - fastvideo.configs.pipelines.stable_audio.StableAudioT2AConfig
+          - fastvideo.configs.pipelines.stable_audio.StableAudioOpenSmallConfig
+      sample_size:
+        sources:
+          - fastvideo.configs.pipelines.stable_audio.StableAudioT2AConfig
+          - fastvideo.configs.pipelines.stable_audio.StableAudioOpenSmallConfig
+      sampling_rate:
+        sources:
+          - fastvideo.configs.pipelines.stable_audio.StableAudioT2AConfig
+          - fastvideo.configs.pipelines.stable_audio.StableAudioOpenSmallConfig
     compatibility_only:
       batch_size: "Gen3C inference-only tuning field pending typed batching design."
       gradient_checkpointing: "Gen3C inference-only compatibility field pending typed batching design."
@@ -380,6 +404,13 @@ surfaces:
       ltx2_stg_scale_audio: request.extensions.ltx2.stg_scale_audio
       ltx2_stg_blocks_video: request.extensions.ltx2.stg_blocks_video
       ltx2_stg_blocks_audio: request.extensions.ltx2.stg_blocks_audio
+      audio_start_in_s: request.extensions.stable_audio.audio_start_in_s
+      audio_end_in_s: request.extensions.stable_audio.audio_end_in_s
+      init_audio: request.extensions.stable_audio.init_audio
+      init_audio_strength: request.extensions.stable_audio.init_audio_strength
+      init_noise_level: request.extensions.stable_audio.init_noise_level
+      inpaint_audio: request.extensions.stable_audio.inpaint_audio
+      inpaint_mask: request.extensions.stable_audio.inpaint_mask
     internal_only:
       data_type: "Derived from the request shape and not a public input."
 
