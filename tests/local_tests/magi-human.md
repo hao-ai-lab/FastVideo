@@ -204,6 +204,59 @@ _Last verified: 2026-05-01 (Wave 10 dtype refactor on rebased branch @ 3caeaad1;
 
 ## Design notes
 
+### Cross-variant shared component lazy-loading
+
+The four MagiHuman variants (`base`, `distill`, `sr_540p`, `sr_1080p`) ship four
+shared components — Wan 2.2 TI2V-5B VAE, T5-Gemma encoder + tokenizer, and
+Stable Audio Open 1.0 VAE — that together account for ~25 GB of weights. To
+avoid duplicating these in every converted variant repo,
+`MagiHumanPipeline.load_modules` lazy-loads all four from their canonical
+upstream HF repos at first build time:
+
+| Component | Upstream HF repo | Gated? |
+|---|---|---|
+| `text_encoder`, `tokenizer` | `google/t5gemma-9b-9b-ul2` | yes |
+| `audio_vae` | `stabilityai/stable-audio-open-1.0` | yes |
+| `vae` | `Wan-AI/Wan2.2-TI2V-5B-Diffusers` | no |
+
+A converted MagiHuman variant repo therefore only needs to ship
+`transformer/`, `scheduler/`, and `model_index.json` (~5 GB for base bf16,
+~30 GB for distill bf16). Bundling the shared components is still supported
+via the conversion script's `--bundle-vae` / `--bundle-audio-vae` /
+`--bundle-text-encoder` flags but is no longer the default.
+
+The verification helper in `fastvideo/utils.py:verify_model_config_and_directory`
+treats the contents of `model_index.json` as authoritative for which component
+subfolders must exist locally; pipelines that emit a minimal `model_index.json`
+(omitting `vae`, `text_encoder`, etc.) pass verification, while pipelines that
+DO declare a component must still ship its subfolder.
+
+### Umbrella-repo subfolder syntax
+
+`fastvideo/utils.py:maybe_download_model` recognises an "umbrella" repo layout
+where a single HF repo holds multiple variants under sibling subfolders:
+
+```
+FastVideo/MagiHuman-Diffusers/
+├── base/{model_index.json, transformer/, scheduler/}
+├── distill/{...}
+├── sr_540p/{...}
+└── sr_1080p/{...}
+```
+
+Pass `org/repo/subfolder` as the model path; the loader downloads only that
+subfolder's blobs and points the pipeline at the local subfolder snapshot:
+
+```python
+generator = VideoGenerator.from_pretrained("FastVideo/MagiHuman-Diffusers/base")
+```
+
+The detection heuristic is purely structural: HF Hub repo ids are always two
+slash-separated components (`org/name`); a path with three or more components
+that does not exist locally and is not posix-absolute or relative-prefixed is
+treated as an umbrella reference. Backwards-compatible with the existing
+single-repo-per-variant layout (`FastVideo/MagiHuman-Base-Diffusers`).
+
 ### T5-Gemma lazy-load exception
 
 `fastvideo/models/encoders/gemma.py:10` establishes the FastVideo precedent for

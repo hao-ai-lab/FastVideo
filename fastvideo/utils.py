@@ -496,14 +496,23 @@ def import_pynvml():
 def maybe_download_model(model_name_or_path: str, local_dir: str | None = None, download: bool = True) -> str:
     """
     Check if the model path is a Hugging Face Hub model ID and download it if needed.
-    
+
+    Supports an "umbrella" repo layout where a single HF repo holds multiple
+    pipeline variants under sibling subfolders. If the input is shaped as
+    ``org/repo/subfolder`` (i.e. a non-existent local path with 3+ slash-
+    separated components and at least one segment that does not look like a
+    posix-absolute path), treat the first two components as the HF repo id
+    and the remainder as a subfolder; only the subfolder's blobs are
+    downloaded, and the returned local path points inside that subfolder.
+
     Args:
-        model_name_or_path: Local path or Hugging Face Hub model ID
+        model_name_or_path: Local path, Hugging Face Hub model ID, or
+            ``org/repo/subfolder`` umbrella-repo reference.
         local_dir: Local directory to save the model
         download: Whether to download the model from Hugging Face Hub
-        
+
     Returns:
-        Local path to the model
+        Local path to the model (or to the subfolder inside the snapshot).
     """
 
     # If the path exists locally, return it
@@ -511,8 +520,32 @@ def maybe_download_model(model_name_or_path: str, local_dir: str | None = None, 
         logger.info("Model already exists locally at %s", model_name_or_path)
         return model_name_or_path
 
+    # Detect the umbrella-repo "org/repo/subfolder[/nested]" form. HF Hub
+    # repo ids are exactly two components ("org/name"); anything more is
+    # always a subfolder reference. Local absolute paths are excluded by
+    # the os.path.exists check above and by the leading-slash test below.
+    repo_id = model_name_or_path
+    subfolder: str | None = None
+    parts = model_name_or_path.split("/")
+    if (len(parts) >= 3 and not model_name_or_path.startswith("/") and not model_name_or_path.startswith(".")
+            and "" not in parts):
+        repo_id = "/".join(parts[:2])
+        subfolder = "/".join(parts[2:])
+
     # Otherwise, assume it's a HF Hub model ID and try to download it
     try:
+        if subfolder is not None:
+            logger.info("Downloading umbrella-repo subfolder %s/%s from HF Hub...", repo_id, subfolder)
+            with get_lock(model_name_or_path):
+                local_path = snapshot_download(
+                    repo_id=repo_id,
+                    allow_patterns=[f"{subfolder}/**"],
+                    local_dir=local_dir,
+                )
+            local_path = os.path.join(local_path, subfolder)
+            logger.info("Downloaded subfolder to %s", local_path)
+            return str(local_path)
+
         logger.info("Downloading model snapshot from HF Hub for %s...", model_name_or_path)
         with get_lock(model_name_or_path):
             local_path = snapshot_download(repo_id=model_name_or_path,
