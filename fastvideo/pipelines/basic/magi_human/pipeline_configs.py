@@ -166,11 +166,68 @@ class MagiHumanSR540pConfig(MagiHumanBaseConfig):
     # marketing name, these are the VAE/patch-aligned dimensions actually run.
     sr_height: int = 512
     sr_width: int = 896
+    sr_local_attn_layers: tuple[int, ...] = ()
 
 
 @dataclass
 class MagiHumanSR540pI2VConfig(MagiHumanSR540pConfig):
     """Two-stage MagiHuman base + SR-540p text+image-to-AV config."""
+
+    image_conditioning: bool = True
+
+    def __post_init__(self) -> None:
+        self.vae_config.load_encoder = True
+        self.vae_config.load_decoder = True
+
+
+_SR_1080P_LOCAL_ATTN_LAYERS: tuple[int, ...] = (
+    0,
+    1,
+    2,
+    4,
+    5,
+    6,
+    8,
+    9,
+    10,
+    12,
+    13,
+    14,
+    16,
+    17,
+    18,
+    20,
+    21,
+    22,
+    24,
+    25,
+    26,
+    28,
+    29,
+    30,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+)
+
+
+@dataclass
+class MagiHumanSR1080pConfig(MagiHumanSR540pConfig):
+    """Two-stage MagiHuman base + SR-1080p text-to-AV pipeline config."""
+
+    sr_height: int = 1080
+    sr_width: int = 1920
+    sr_local_attn_layers: tuple[int, ...] = _SR_1080P_LOCAL_ATTN_LAYERS
+
+
+@dataclass
+class MagiHumanSR1080pI2VConfig(MagiHumanSR1080pConfig):
+    """Two-stage MagiHuman base + SR-1080p text+image-to-AV config."""
 
     image_conditioning: bool = True
 

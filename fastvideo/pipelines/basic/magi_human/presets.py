@@ -171,6 +171,48 @@ MAGI_HUMAN_SR_540P_TI2V = InferencePreset(
     },
 )
 
+MAGI_HUMAN_SR_1080P = InferencePreset(
+    name="magi_human_sr_1080p",
+    version=1,
+    model_family="magi_human",
+    description=("daVinci-MagiHuman two-stage base + SR-1080p text-to-AV. "
+                 "The SR DiT uses upstream local-window attention in 32 of "
+                 "40 layers and refines to 1080p-class output."),
+    workload_type="t2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "seed": 42,
+        "height": 256,
+        "width": 480,
+        "num_frames": 101,
+        "fps": 25,
+        "guidance_scale": 5.0,
+        "num_inference_steps": 32,
+        "negative_prompt": _MAGI_HUMAN_NEGATIVE_PROMPT,
+    },
+)
+
+MAGI_HUMAN_SR_1080P_TI2V = InferencePreset(
+    name="magi_human_sr_1080p_ti2v",
+    version=1,
+    model_family="magi_human",
+    description=("daVinci-MagiHuman two-stage base + SR-1080p text+image-to-AV. "
+                 "The SR DiT uses upstream local-window attention in 32 of "
+                 "40 layers; the reference image is re-encoded at SR resolution."),
+    workload_type="i2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "seed": 42,
+        "height": 256,
+        "width": 480,
+        "num_frames": 101,
+        "fps": 25,
+        "guidance_scale": 5.0,
+        "num_inference_steps": 32,
+        "negative_prompt": _MAGI_HUMAN_NEGATIVE_PROMPT,
+    },
+)
+
 ALL_PRESETS = (
     MAGI_HUMAN_BASE,
     MAGI_HUMAN_DISTILL,
@@ -178,4 +220,6 @@ ALL_PRESETS = (
     MAGI_HUMAN_DISTILL_TI2V,
     MAGI_HUMAN_SR_540P,
     MAGI_HUMAN_SR_540P_TI2V,
+    MAGI_HUMAN_SR_1080P,
+    MAGI_HUMAN_SR_1080P_TI2V,
 )

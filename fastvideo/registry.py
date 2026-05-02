@@ -32,6 +32,8 @@ from fastvideo.pipelines.basic.magi_human.pipeline_configs import (
     MagiHumanBaseI2VConfig,
     MagiHumanDistillConfig,
     MagiHumanDistillI2VConfig,
+    MagiHumanSR1080pConfig,
+    MagiHumanSR1080pI2VConfig,
     MagiHumanSR540pConfig,
     MagiHumanSR540pI2VConfig,
 )
@@ -292,6 +294,41 @@ def _register_configs() -> None:
         default_preset="stable_audio_open_small",
     )
 
+    # daVinci-MagiHuman SR-1080p (two-stage base + local-window SR text-to-AV).
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanSR1080pConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "FastVideo/MagiHuman-SR-1080p-Diffusers",
+            "FastVideo/MagiHuman-Diffusers/sr_1080p",
+        ],
+        model_detectors=[
+            lambda path:
+            (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower()) and
+             ("sr_1080p" in path.lower() or "sr-1080p" in path.lower() or "1080p_sr" in path.lower() or "sr1080p" in
+              path.lower()) and "ti2v" not in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_sr_1080p",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanSR1080pI2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "FastVideo/MagiHuman-SR-1080p-TI2V-Diffusers",
+        ],
+        model_detectors=[
+            lambda path:
+            (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower()) and
+             ("sr_1080p" in path.lower() or "sr-1080p" in path.lower() or "1080p_sr" in path.lower() or "sr1080p" in
+              path.lower()) and "ti2v" in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_sr_1080p_ti2v",
+    )
+
     # daVinci-MagiHuman SR-540p (two-stage base + SR text-to-AV).
     register_configs(
         sampling_param_cls=None,
@@ -305,7 +342,7 @@ def _register_configs() -> None:
             lambda path:
             (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower()) and
              ("sr_540p" in path.lower() or "sr-540p" in path.lower() or "540p_sr" in path.lower() or "srpipeline" in
-              path.lower()) and "ti2v" not in path.lower()),
+              path.lower()) and "1080" not in path.lower() and "ti2v" not in path.lower()),
         ],
         model_family="magi_human",
         default_preset="magi_human_sr_540p",
@@ -321,7 +358,7 @@ def _register_configs() -> None:
             lambda path:
             (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower()) and
              ("sr_540p" in path.lower() or "sr-540p" in path.lower() or "540p_sr" in path.lower() or "srpipeline" in
-              path.lower()) and "ti2v" in path.lower()),
+              path.lower()) and "1080" not in path.lower() and "ti2v" in path.lower()),
         ],
         model_family="magi_human",
         default_preset="magi_human_sr_540p_ti2v",
@@ -339,9 +376,11 @@ def _register_configs() -> None:
             "FastVideo/MagiHuman-Base-Diffusers",
         ],
         model_detectors=[
-            lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower(
-            )) and "distill" not in path.lower() and "ti2v" not in path.lower() and "sr_540p" not in path.lower(
-            ) and "sr-540p" not in path.lower() and "540p_sr" not in path.lower() and "srpipeline" not in path.lower()),
+            lambda path:
+            (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower()
+              ) and "distill" not in path.lower() and "ti2v" not in path.lower() and "sr_540p" not in path.lower() and
+             "sr-540p" not in path.lower() and "540p_sr" not in path.lower() and "sr_1080p" not in path.lower() and
+             "sr-1080p" not in path.lower() and "1080p_sr" not in path.lower() and "srpipeline" not in path.lower()),
         ],
         model_family="magi_human",
         default_preset="magi_human_base",
@@ -354,9 +393,11 @@ def _register_configs() -> None:
             "FastVideo/MagiHuman-Base-TI2V-Diffusers",
         ],
         model_detectors=[
-            lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower(
-            )) and "ti2v" in path.lower() and "distill" not in path.lower() and "sr_540p" not in path.lower(
-            ) and "sr-540p" not in path.lower() and "540p_sr" not in path.lower() and "srpipeline" not in path.lower()),
+            lambda path:
+            (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower()
+              ) and "ti2v" in path.lower() and "distill" not in path.lower() and "sr_540p" not in path.lower() and
+             "sr-540p" not in path.lower() and "540p_sr" not in path.lower() and "sr_1080p" not in path.lower() and
+             "sr-1080p" not in path.lower() and "1080p_sr" not in path.lower() and "srpipeline" not in path.lower()),
         ],
         model_family="magi_human",
         default_preset="magi_human_base_ti2v",

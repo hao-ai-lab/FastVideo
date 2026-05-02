@@ -310,6 +310,13 @@ class MagiHumanSRPipeline(MagiHumanPipeline):
     def _add_sr_latent_and_denoising_stages(self, fastvideo_args: FastVideoArgs) -> None:
         pc = fastvideo_args.pipeline_config
         dit_arch = pc.dit_config.arch_config
+        sr_transformer = self.get_module("sr_transformer")
+        sr_local_attn_layers = tuple(getattr(pc, "sr_local_attn_layers", ()))
+        if sr_local_attn_layers and hasattr(sr_transformer, "configure_local_attention"):
+            sr_transformer.configure_local_attention(
+                sr_local_attn_layers,
+                frame_receptive_field=pc.frame_receptive_field,
+            )
 
         self.add_stage(
             stage_name="sr_latent_preparation_stage",
@@ -327,7 +334,7 @@ class MagiHumanSRPipeline(MagiHumanPipeline):
         self.add_stage(
             stage_name="sr_denoising_stage",
             stage=MagiHumanSRDenoisingStage(
-                transformer=self.get_module("sr_transformer"),
+                transformer=sr_transformer,
                 scheduler=self.get_module("scheduler"),
                 patch_size=tuple(dit_arch.patch_size),
                 video_in_channels=dit_arch.video_in_channels,
@@ -357,9 +364,24 @@ class MagiHumanSRI2VPipeline(MagiHumanSRPipeline):
         )
 
 
+class MagiHumanSR1080pPipeline(MagiHumanSRPipeline):
+    """Two-stage MagiHuman base + SR-1080p text-to-AV pipeline.
+
+    The stage chain is identical to SR-540p. The paired pipeline config enables
+    block-sparse local-window attention on 32 SR-DiT layers and requests the
+    1080p latent target.
+    """
+
+
+class MagiHumanSR1080pI2VPipeline(MagiHumanSRI2VPipeline):
+    """Two-stage MagiHuman base + SR-1080p text+image-to-AV pipeline."""
+
+
 EntryClass = [
     MagiHumanPipeline,
     MagiHumanI2VPipeline,
     MagiHumanSRPipeline,
     MagiHumanSRI2VPipeline,
+    MagiHumanSR1080pPipeline,
+    MagiHumanSR1080pI2VPipeline,
 ]
