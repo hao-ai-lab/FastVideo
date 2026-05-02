@@ -1,0 +1,17 @@
+# Minimum config to instantiate HunyuanModel for the loading + forward
+# smoke test. Real HunyuanVideo checkpoint (~13B) loaded via
+# load_module_from_path.
+
+models:
+  student:
+    _target_: fastvideo.train.models.hunyuan.HunyuanModel
+    init_from: hunyuanvideo-community/HunyuanVideo
+    trainable: false
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  dit_precision: bf16
+
+pipeline: {}
