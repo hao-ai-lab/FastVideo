@@ -195,6 +195,17 @@ steps:
             limit: 2
       agents:
         queue: "default"
+    - label: ":test_tube: Train Framework Tests"
+      if: build.env("TEST_SCOPE") == "direct" && build.env("TEST_TYPE") == "train_framework"
+      command: "timeout 90m .buildkite/scripts/pr_test.sh"
+      retry:
+        automatic:
+          - exit_status: 128
+            limit: 3
+          - exit_status: -1
+            limit: 2
+      agents:
+        queue: "default"
 
   # ============================================================
   # Fastcheck: Runs on every PR (~10-15 min parallel)
@@ -434,5 +445,20 @@ steps:
                 label: ":test_tube: API Server Tests"
                 env:
                   - TEST_TYPE=api_server
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/train/**"
+                - "fastvideo/tests/train/models/**"
+                - "fastvideo/tests/train/fixtures/**"
+                - "fastvideo/models/dits/**"
+                - "fastvideo/models/loader/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                label: ":test_tube: Train Framework Tests"
+                env:
+                  - TEST_TYPE=train_framework
                 agents:
                   queue: "default"
