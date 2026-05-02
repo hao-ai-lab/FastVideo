@@ -65,6 +65,7 @@ _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "pin_cpu_memory",
     "enable_torch_compile",
     "torch_compile_kwargs",
+    "output_type",
 })
 
 
@@ -601,10 +602,20 @@ class VideoGenerator:
         thread = threading.Thread(target=execute_forward_thread)
         thread.start()
         latent_batch_size = _infer_latent_batch_size(batch)
-        samples = torch.empty(
-            (latent_batch_size, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width),
-            device='cpu',
-            pin_memory=fastvideo_args.pin_cpu_memory)
+        # When ``output_type == "latent"`` the forward output has latent
+        # shape (e.g. ``[B, C_latent, T_latent, H_latent, W_latent]``)
+        # rather than the pre-allocation's pixel shape. Skip the pinned
+        # ~50 MB buffer entirely; we always fall through to the
+        # ``samples = output_batch.output.cpu()`` branch below in that
+        # mode. ``skip_pixel_prealloc`` also gates the slow-path warning.
+        skip_pixel_prealloc = fastvideo_args.output_type == "latent"
+        if skip_pixel_prealloc:
+            samples = torch.empty(0, device='cpu')
+        else:
+            samples = torch.empty(
+                (latent_batch_size, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width),
+                device='cpu',
+                pin_memory=fastvideo_args.pin_cpu_memory)
         thread.join()
 
         if thread_error["error"] is not None:
@@ -619,29 +630,44 @@ class VideoGenerator:
         if output_batch.output.shape == samples.shape:
             samples.copy_(output_batch.output)
         else:
-            logger.warning("Output shape %s does not match expected shape %s; use slow path", output_batch.output.shape,
-                           samples.shape)
+            if not skip_pixel_prealloc:
+                logger.warning("Output shape %s does not match expected shape %s; use slow path",
+                               output_batch.output.shape, samples.shape)
             samples = output_batch.output.cpu()
         logging_info = output_batch.logging_info
 
         gen_time = time.perf_counter() - start_time
         logger.info("Generated successfully in %.2f seconds", gen_time)
 
-        # Process outputs (skip the make_grid loop for audio-only, where
-        # `samples` is a 1×3×1×8×8 placeholder no caller will use).
+        # Three mutually-exclusive output modes determine whether (a) we
+        # build an RGB frame buffer and (b) what file we write to disk:
+        #
+        #   1. `output_type == "latent"` — VAE is bypassed in DecodingStage
+        #      and `samples` holds raw latents (arbitrary channel count).
+        #      The RGB grid / uint8 / mp4 / png pipeline below cannot
+        #      consume those, so we skip it entirely and let callers work
+        #      with the latent tensor directly via `result["samples"]`.
+        #   2. Audio-only workload — `samples` is a 1×3×1×8×8 placeholder
+        #      no caller will use; skip the grid loop and save a `.wav`.
+        #   3. Pixel video / image — the historical happy path.
+        is_latent_output = fastvideo_args.output_type == "latent"
         audio_only = bool(output_batch.extra.get("audio_only"))
-        frames: list[np.ndarray] = []
-        if not audio_only:
+
+        frames: list[np.ndarray] | None
+        if is_latent_output or audio_only:
+            frames = None if is_latent_output else []
+        else:
             videos = rearrange(samples, "b c t h w -> t b c h w")
+            frames = []
             for x in videos:
                 x = torchvision.utils.make_grid(x, nrow=6)
                 x = x.permute(1, 2, 0).squeeze(-1)
                 x = (x * 255).to(torch.uint8)
                 frames.append(x.cpu().numpy())
 
-        # Save output if requested
-        if batch.save_video:
-            if output_batch.extra.get("audio_only"):
+        save_to_disk = batch.save_video and not is_latent_output
+        if save_to_disk:
+            if audio_only:
                 # Audio-only workload: write a standalone .wav rather than
                 # muxing the audio into a placeholder mp4 (which forces
                 # ffmpeg to round 8x8 placeholder frames up to 16x16).
@@ -654,9 +680,11 @@ class VideoGenerator:
                 logger.info("Saved audio to %s", output_path)
             elif self._is_image_workload():
                 # Image workloads (t2i, i2i, …): save the first frame as PNG.
+                assert frames is not None  # implied by save_to_disk and not audio_only
                 imageio.imwrite(output_path, frames[0])
                 logger.info("Saved image to %s", output_path)
             else:
+                assert frames is not None  # implied by save_to_disk and not audio_only
                 imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
                 logger.info("Saved video to %s", output_path)
                 audio = output_batch.extra.get("audio")
@@ -680,7 +708,7 @@ class VideoGenerator:
             "trajectory": output_batch.trajectory_latents,
             "trajectory_timesteps": output_batch.trajectory_timesteps,
             "trajectory_decoded": output_batch.trajectory_decoded,
-            "video_path": output_path if batch.save_video else None,
+            "video_path": output_path if save_to_disk else None,
             "peak_memory_mb": output_batch.extra.get("peak_memory_mb"),
         }
 
