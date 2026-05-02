@@ -4,7 +4,7 @@ These are end-to-end example scripts for distilling Wan2.1 T2V 1.3B model using 
 ### 0. Make sure you have installed VSA
 
 ```bash
-pip install vsa
+uv pip install vsa
 ```
 
 ### 1. Download dataset:

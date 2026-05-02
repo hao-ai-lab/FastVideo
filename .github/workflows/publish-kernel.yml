@@ -131,11 +131,13 @@ jobs:
           clang-11 --version
           nvcc --version
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
       - name: Install PyTorch ${{ matrix.torch-cuda.torch-version }}+cu${{ matrix.torch-cuda.cuda-version }}
         run: |
-          pip install --upgrade pip
-          pip install typing-extensions==4.12.2
-          pip install --no-cache-dir torch==${{ matrix.torch-cuda.torch-version }} --index-url https://download.pytorch.org/whl/${{matrix.torch-cuda.torch-cuda-short}}
+          uv pip install --system typing-extensions==4.12.2
+          uv pip install --system --no-cache-dir torch==${{ matrix.torch-cuda.torch-version }} --index-url https://download.pytorch.org/whl/${{matrix.torch-cuda.torch-cuda-short}}
           nvcc --version
           python --version
           python -c "import torch; print('PyTorch:', torch.__version__)"
@@ -145,20 +147,20 @@ jobs:
       - name: Build wheel
         run: |
           export PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH
-          
-          pip install setuptools ninja packaging wheel triton scikit-build-core cmake build
-          
+
+          uv pip install --system setuptools ninja packaging wheel triton scikit-build-core cmake build
+
           cd fastvideo-kernel
           git submodule update --init --recursive  # Ensure ThunderKittens submodule is initialized
           # Release builds are produced on GPU-less runners, so force-enable TK and target Hopper.
           export TORCH_CUDA_ARCH_LIST="9.0a"
           export CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=ON -DCMAKE_CUDA_ARCHITECTURES=90a"
-          
+
           # Build standard wheel (no local version suffix) for PyPI
           python -m build --wheel --outdir dist
-          
+
           # Fix the wheel to be manylinux compliant
-          pip install auditwheel
+          uv pip install --system auditwheel
           # Point auditwheel at torch libs, but do not vendor them into the wheel.
           TORCH_LIB_DIR=$(python - <<'PY'
           import os
@@ -211,10 +213,13 @@ jobs:
           pattern: 'fastvideo_kernel-py*'
           merge-multiple: true
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
       - name: Build source distribution
         run: |
-          pip install build scikit-build-core cmake ninja
-          
+          uv pip install --system build scikit-build-core cmake ninja
+
           cd fastvideo-kernel
           # We don't need full CUDA/Torch to just package the source (sdist)
           python -m build --sdist --outdir dist

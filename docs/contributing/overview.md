@@ -49,7 +49,7 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 Install FastVideo in editable mode and set up hooks:
 
 ```bash
-uv pip install -e .[dev]
+uv pip install -e ".[dev]"
 
 # Optional: FlashAttention (builds native kernels)
 uv pip install flash-attn --no-build-isolation -v

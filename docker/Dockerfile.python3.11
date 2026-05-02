@@ -42,7 +42,7 @@ RUN source $HOME/.local/bin/env && \
     uv venv --python 3.11 --seed /opt/venv && \
     source /opt/venv/bin/activate && \
     uv pip install --no-cache-dir --upgrade pip && \
-    uv pip install --no-cache-dir .[dev] && \
+    uv pip install --no-cache-dir ".[dev]" && \
     uv pip install --no-cache-dir https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.4/flash_attn-2.8.3+cu128torch2.11-cp311-cp311-linux_x86_64.whl
 
 COPY . .
@@ -50,7 +50,7 @@ COPY . .
 # Install dependencies using uv and set up shell configuration
 RUN source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
-    uv pip install --no-cache-dir -e .[dev] && \
+    uv pip install --no-cache-dir -e ".[dev]" && \
     git config --unset-all http.https://github.com/.extraheader || true && \
     echo 'source /opt/venv/bin/activate' >> /root/.bashrc && \
     echo 'if [ -n "$ZSH_VERSION" ] && [ -f ~/.zshrc ]; then . ~/.zshrc; elif [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile

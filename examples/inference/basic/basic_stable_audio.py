@@ -48,7 +48,7 @@ Prerequisites:
      and export your HF token in the shell:
          export HF_TOKEN=hf_...
   2. Install optional inference deps (one-time):
-         pip install k_diffusion einops_exts alias_free_torch torchsde
+         uv pip install k_diffusion einops_exts alias_free_torch torchsde
 """
 from fastvideo import VideoGenerator
 

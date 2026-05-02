@@ -68,7 +68,7 @@ def run_test(pytest_command: str):
     cd fastvideo-kernel &&
     ./build.sh &&
     cd .. &&
-    uv pip install -e .[test] &&
+    uv pip install -e ".[test]" &&
     {pytest_command}
     """
 

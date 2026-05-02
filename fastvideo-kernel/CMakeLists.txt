@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.26 FATAL_ERROR)
 project(fastvideo-kernel LANGUAGES CXX)
 
-# Prefer environment variable (used by CI or pip install git+repo_addr) if CMake var is not explicitly set.
+# Prefer environment variable (used by CI or uv pip install git+repo_addr) if CMake var is not explicitly set.
 if(NOT DEFINED GPU_BACKEND AND DEFINED ENV{GPU_BACKEND})
     set(GPU_BACKEND "$ENV{GPU_BACKEND}")
 endif()
