@@ -227,6 +227,76 @@ def flash_attn_func(
     return out
 
 
+# ---------------------------------------------------------------------------
+# FP4 (NVFP4 block-scaled) variant
+# ---------------------------------------------------------------------------
+# The FP4 path needs the mSFQ/mSFK scale-factor tensors that the regular
+# wrapper does not expose. We register a separate custom op so that
+# torch.compile can treat the kernel as an opaque boundary (the underlying
+# CuTeDSL kernel uses cuda.CUstream which dynamo cannot trace).
+
+
+@torch.library.custom_op(
+    "fastvideo::_flash_attn_cute_fp4_forward",
+    mutates_args=(),
+    device_types="cuda",
+)
+def _flash_attn_cute_fp4_forward(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    sfq: torch.Tensor,
+    sfk: torch.Tensor,
+    softmax_scale: float | None,
+    causal: bool,
+) -> torch.Tensor:
+    out, _ = _flash_attn_fwd(
+        q,
+        k,
+        v,
+        softmax_scale=softmax_scale,
+        causal=causal,
+        window_size_left=None,
+        window_size_right=None,
+        softcap=0.0,
+        num_splits=1,
+        pack_gqa=None,
+        mSFQ=sfq,
+        mSFK=sfk,
+    )
+    return out
+
+
+@torch.library.register_fake("fastvideo::_flash_attn_cute_fp4_forward")
+def _flash_attn_cute_fp4_forward_fake(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    sfq: torch.Tensor,
+    sfk: torch.Tensor,
+    softmax_scale: float | None,
+    causal: bool,
+) -> torch.Tensor:
+    del k, sfq, sfk, softmax_scale, causal
+    # q is FP4 packed: shape (batch, seqlen, nheads, headdim/2). Output is in
+    # V's dtype with full headdim.
+    batch, seqlen_q, nheads = q.shape[:3]
+    return v.new_empty(batch, seqlen_q, nheads, v.shape[-1])
+
+
+def flash_attn_fp4_func(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    sfq: torch.Tensor,
+    sfk: torch.Tensor,
+    softmax_scale: float | None = None,
+    causal: bool = False,
+) -> torch.Tensor:
+    """FP4 (NVFP4 block-scaled) flash attention. q/k are FP4-packed; v is BF16."""
+    return torch.ops.fastvideo._flash_attn_cute_fp4_forward(q, k, v, sfq, sfk, softmax_scale, causal)
+
+
 def flash_attn_varlen_func(
     q: torch.Tensor,
     k: torch.Tensor,
