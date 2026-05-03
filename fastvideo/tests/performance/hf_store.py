@@ -25,6 +25,7 @@ from huggingface_hub import HfApi, snapshot_download
 
 HF_REPO_ID: str = os.environ.get("HF_REPO_ID", "FastVideo/performance-tracking")
 HF_TOKEN: str | None = os.environ.get("HF_API_KEY")
+SYNC_MARKER = ".hf_sync_complete"
 
 # ---------------------------------------------------------------------------
 # Low-level helpers
@@ -51,7 +52,16 @@ def safe_float(value: Any) -> float | None:
 # ---------------------------------------------------------------------------
 
 
-def sync_from_hf(local_dir: str, *, strict: bool = False) -> str:
+def _sync_marker_path(local_dir: str) -> str:
+    return os.path.join(local_dir, SYNC_MARKER)
+
+
+def sync_from_hf(
+    local_dir: str,
+    *,
+    strict: bool = False,
+    reuse_existing: bool = False,
+) -> str:
     """Download the HF dataset repo snapshot to *local_dir*.
 
     Returns *local_dir* so callers can chain: ``load_records(sync_from_hf(...))``.
@@ -61,7 +71,19 @@ def sync_from_hf(local_dir: str, *, strict: bool = False) -> str:
     unavailable. Callers that depend on the sync for correctness (e.g. the
     main-branch baseline writer) must pass ``strict=True`` so that misconfig
     or transient HF errors fail loud rather than silently reset the baseline.
+
+    When ``reuse_existing=True``, a previous successful sync in ``local_dir``
+    is reused. This avoids duplicate HF snapshot checks when compare and
+    dashboard scripts run sequentially in the same CI job.
     """
+    marker_path = _sync_marker_path(local_dir)
+    if reuse_existing and os.path.exists(marker_path):
+        print(f"hf_store: reusing existing sync at {local_dir}")
+        return local_dir
+
+    if not reuse_existing and os.path.exists(marker_path):
+        os.remove(marker_path)
+
     if not HF_REPO_ID:
         msg = "hf_store: HF_REPO_ID not set"
         if strict:
@@ -78,6 +100,12 @@ def sync_from_hf(local_dir: str, *, strict: bool = False) -> str:
             token=HF_TOKEN,
             allow_patterns="*.json",
         )
+        os.makedirs(local_dir, exist_ok=True)
+        with open(marker_path, "w", encoding="utf-8") as marker:
+            json.dump({
+                "repo_id": HF_REPO_ID,
+                "synced_at": datetime.now(timezone.utc).isoformat(),
+            }, marker)
     except Exception as exc:
         if strict:
             raise
