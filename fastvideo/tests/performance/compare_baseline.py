@@ -37,13 +37,27 @@ TRACKING_ROOT = os.environ.get(
     "/tmp/perf-tracking",
 )
 MAX_REGRESSION = float(os.environ.get("PERF_MAX_REGRESSION", "0.05"))
+METRICS = (
+    ("latency", "Latency", 3),
+    ("throughput", "Throughput", 3),
+    ("memory", "Memory", 1),
+    ("text_encoder_time_s", "Text Enc", 3),
+    ("dit_time_s", "DiT", 3),
+    ("vae_decode_time_s", "VAE Decode", 3),
+)
+LOWER_IS_BETTER_METRICS = {
+    "latency",
+    "memory",
+    "text_encoder_time_s",
+    "dit_time_s",
+    "vae_decode_time_s",
+}
 
 
 def _should_persist_tracking() -> bool:
     test_scope = os.environ.get("TEST_SCOPE", "")
     branch = os.environ.get("BUILDKITE_BRANCH", "")
     return test_scope == "full" and branch == "main"
-
 
 def _load_current_results() -> list[dict[str, Any]]:
     pattern = os.path.join(RESULTS_DIR, "perf_*.json")
@@ -66,6 +80,9 @@ def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
     latency = safe_float(result.get("avg_generation_time_s"))
     throughput = safe_float(result.get("throughput_fps"))
     memory = safe_float(result.get("max_peak_memory_mb"))
+    text_encoder_time = safe_float(result.get("text_encoder_time_s"))
+    dit_time = safe_float(result.get("dit_time_s"))
+    vae_decode_time = safe_float(result.get("vae_decode_time_s"))
 
     return {
         "model_id": model_id,
@@ -75,6 +92,9 @@ def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
         "latency": latency,
         "throughput": throughput,
         "memory": memory,
+        "text_encoder_time_s": text_encoder_time,
+        "dit_time_s": dit_time,
+        "vae_decode_time_s": vae_decode_time,
         "success": True,
     }
 
@@ -108,7 +128,8 @@ def _check_regressions(
 ) -> list[str]:
     failures: list[str] = []
 
-    for metric in ("latency", "memory"):
+    for metric in ("latency", "memory", "text_encoder_time_s", "dit_time_s",
+                   "vae_decode_time_s"):
         baseline = _baseline_metric(baseline_records, metric)
         curr = safe_float(current.get(metric))
         if baseline is None or curr is None or baseline <= 0:
@@ -141,7 +162,7 @@ def _metric_delta_percent(
     if curr is None or baseline is None or baseline <= 0:
         return None
 
-    if metric in ("latency", "memory"):
+    if metric in LOWER_IS_BETTER_METRICS:
         return (curr - baseline) / baseline * 100.0
     if metric == "throughput":
         return (baseline - curr) / baseline * 100.0
@@ -161,28 +182,27 @@ def _build_summary_row(
 ) -> dict[str, Any]:
     """Format a single benchmark result as a row for the Markdown table."""
 
-    latency_base = _baseline_metric(baseline_records, "latency")
-    throughput_base = _baseline_metric(baseline_records, "throughput")
-    memory_base = _baseline_metric(baseline_records, "memory")
+    metric_values: dict[str, dict[str, float | None]] = {}
+    regressions: list[float] = []
+    for metric, _label, _precision in METRICS:
+        curr = safe_float(record.get(metric))
+        baseline = _baseline_metric(baseline_records, metric)
+        regression = _metric_delta_percent(metric, record, baseline_records)
+        metric_values[metric] = {
+            "curr": curr,
+            "base": baseline,
+            "regression_pct": regression,
+        }
+        if regression is not None:
+            regressions.append(regression)
 
-    # Calculate percentages for the 'Worst Regression' column
-    latency_reg = _metric_delta_percent("latency", record, baseline_records)
-    throughput_reg = _metric_delta_percent("throughput", record, baseline_records)
-    memory_reg = _metric_delta_percent("memory", record, baseline_records)
-
-    regressions = [v for v in (latency_reg, throughput_reg, memory_reg) if v is not None]
     worst_regression_pct = max(regressions) if regressions else None
 
     return {
         "model_id": record["model_id"],
         "gpu_type": record["gpu_type"],
         "baseline_n": len(baseline_records),
-        "latency_curr": safe_float(record.get("latency")),
-        "latency_base": latency_base,
-        "throughput_curr": safe_float(record.get("throughput")),
-        "throughput_base": throughput_base,
-        "memory_curr": safe_float(record.get("memory")),
-        "memory_base": memory_base,
+        "metrics": metric_values,
         "worst_regression_pct": worst_regression_pct,
         "failed": has_failed,
     }
@@ -199,24 +219,24 @@ def _build_markdown_summary(
         "",
         ("| Model | GPU | Baseline N | Latency (curr/base) | "
          "Throughput (curr/base) | Memory (curr/base) | "
-         "Worst Regression | Status |"),
-        "|---|---|---:|---|---|---|---:|---|",
+         "Text Enc (curr/base) | DiT (curr/base) | "
+         "VAE Decode (curr/base) | Worst Regression | Status |"),
+        "|---|---|---:|---|---|---|---|---|---|---:|---|",
     ]
 
     for row in summary_rows:
-        latency = (f"{_compact_value(row['latency_curr'])} / "
-                   f"{_compact_value(row['latency_base'])}")
-        throughput = (f"{_compact_value(row['throughput_curr'])} / "
-                      f"{_compact_value(row['throughput_base'])}")
-        memory = (f"{_compact_value(row['memory_curr'], 1)} / "
-                  f"{_compact_value(row['memory_base'], 1)}")
+        metric_cells = []
+        for metric, _label, precision in METRICS:
+            values = row["metrics"][metric]
+            metric_cells.append(f"{_compact_value(values['curr'], precision)} / "
+                                f"{_compact_value(values['base'], precision)}")
 
         worst_reg = ("n/a" if row["worst_regression_pct"] is None else f"{row['worst_regression_pct']:.1f}%")
         status = "FAIL" if row["failed"] else "PASS"
 
         lines.append(f"| {row['model_id']} | {row['gpu_type']} | "
                      f"{row['baseline_n']} | "
-                     f"{latency} | {throughput} | {memory} | "
+                     f"{' | '.join(metric_cells)} | "
                      f"{worst_reg} | {status} |")
 
     return "\n".join(lines) + "\n"

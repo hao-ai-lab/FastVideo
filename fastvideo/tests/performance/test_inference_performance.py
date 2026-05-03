@@ -15,11 +15,27 @@ from datetime import datetime, timezone
 import torch
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
+
+STAGE_METRIC_MAP: dict[str, str] = {
+    "TextEncoderStage": "text_encoder_time_s",
+    "TextEncodingStage": "text_encoder_time_s",
+    "CLIPTextEncoderStage": "text_encoder_time_s",
+    "T5TextEncoderStage": "text_encoder_time_s",
+    "DiTStage": "dit_time_s",
+    "DenoisingStage": "dit_time_s",
+    "DmdDenoisingStage": "dit_time_s",
+    "TransformerStage": "dit_time_s",
+    "VAEDecodeStage": "vae_decode_time_s",
+    "VAEDecoderStage": "vae_decode_time_s",
+    "DecodingStage": "vae_decode_time_s",
+    "DecodeStage": "vae_decode_time_s",
+}
 
 # -- Config discovery -------------------------------------------------------
 
@@ -73,16 +89,50 @@ def _shutdown_executor(generator):
         generator.executor.shutdown()
 
 
+def _extract_component_times(result: dict) -> dict[str, float | None]:
+    component_times: dict[str, float | None] = {
+        "text_encoder_time_s": None,
+        "dit_time_s": None,
+        "vae_decode_time_s": None,
+    }
+    logging_info = result.get("logging_info")
+    if logging_info is None:
+        return component_times
+    stages: dict = getattr(logging_info, "stages", {}) or {}
+    if not stages:
+        return component_times
+    logger.info("Discovered pipeline stages: %s", list(stages.keys()))
+    for stage_name, stage_data in stages.items():
+        metric_key = STAGE_METRIC_MAP.get(stage_name)
+        if metric_key is None:
+            logger.debug("Unmapped stage '%s' (%.3fs)",
+                         stage_name,
+                         stage_data.get("execution_time", 0))
+            continue
+        elapsed = stage_data.get("execution_time")
+        if elapsed is None:
+            continue
+        existing = component_times[metric_key]
+        component_times[metric_key] = (
+            elapsed if existing is None else existing + elapsed)
+    return component_times
+
+
+def _avg_component(all_component_times: list[dict], key: str) -> float | None:
+    vals = [r[key] for r in all_component_times if r.get(key) is not None]
+    return round(sum(vals) / len(vals), 3) if vals else None
+
+
 def _run_generation(generator, prompt, generation_kwargs):
-    """Run a single generation, return (elapsed_s, peak_memory_mb)."""
+    """Run a single generation, return (elapsed_s, peak_memory_mb, component_times)."""
     torch.cuda.synchronize()
     start = time.perf_counter()
     result = generator.generate_video(prompt, **generation_kwargs)
     torch.cuda.synchronize()
     elapsed = time.perf_counter() - start
     peak_memory_mb = result.get("peak_memory_mb", 0.0) or 0.0
-    return elapsed, peak_memory_mb
-
+    component_times = _extract_component_times(result)
+    return elapsed, peak_memory_mb, component_times
 
 def _write_results(results):
     """Write JSON results to the results directory."""
@@ -102,15 +152,7 @@ def _write_results(results):
 
 # -- Test -------------------------------------------------------------------
 
-
-@pytest.mark.parametrize(
-    "cfg",
-    _BENCHMARK_CONFIGS,
-    ids=[c["benchmark_id"] for c in _BENCHMARK_CONFIGS],
-)
-def test_inference_performance(cfg):
-    """Measure generation latency and peak GPU memory,
-    assert against device-aware thresholds."""
+def _run_benchmark(cfg):
     run_config = cfg.get("run_config", {})
     required_gpus = run_config.get("required_gpus", 1)
     available = torch.cuda.device_count()
@@ -152,12 +194,18 @@ def test_inference_performance(cfg):
 
         times = []
         peak_memories = []
+        all_component_times = []
         for i in range(num_measure):
             logger.info("Measurement run %d/%d", i + 1, num_measure)
-            elapsed, peak_mb = _run_generation(generator, prompt, gen_kwargs)
+            elapsed, peak_mb, component_times = _run_generation(
+                generator,
+                prompt,
+                gen_kwargs,
+            )
             logger.info("  Time: %.2fs, Peak memory: %.0fMB", elapsed, peak_mb)
             times.append(elapsed)
             peak_memories.append(peak_mb)
+            all_component_times.append(component_times)
     finally:
         _shutdown_executor(generator)
 
@@ -186,6 +234,11 @@ def test_inference_performance(cfg):
         "commit": os.environ.get("BUILDKITE_COMMIT", ""),
         "pr_number": os.environ.get("BUILDKITE_PULL_REQUEST", ""),
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "text_encoder_time_s": _avg_component(all_component_times,
+                                              "text_encoder_time_s"),
+        "dit_time_s": _avg_component(all_component_times, "dit_time_s"),
+        "vae_decode_time_s": _avg_component(all_component_times,
+                                            "vae_decode_time_s"),
     }
 
     logger.info(
@@ -203,3 +256,41 @@ def test_inference_performance(cfg):
     assert max_peak_memory <= max_mem, (
         f"Peak memory {max_peak_memory:.0f}MB exceeds "
         f"threshold {max_mem:.0f}MB for {device_name}")
+
+    component_thresholds = {
+        "text_encoder_time_s": thresholds.get("max_text_encoder_time_s"),
+        "dit_time_s": thresholds.get("max_dit_time_s"),
+        "vae_decode_time_s": thresholds.get("max_vae_decode_time_s"),
+    }
+    for metric, max_val in component_thresholds.items():
+        if max_val is None:
+            continue
+        actual = results[metric]
+        if actual is not None:
+            assert actual <= max_val, (
+                f"{metric} {actual:.3f}s exceeds threshold {max_val:.3f}s "
+                f"for {device_name}")
+
+
+@pytest.mark.parametrize(
+    "cfg",
+    _BENCHMARK_CONFIGS,
+    ids=[c["benchmark_id"] for c in _BENCHMARK_CONFIGS],
+)
+def test_inference_performance(cfg):
+    """Measure generation latency, peak GPU memory, and component-level timings
+    (text encoder, DiT, VAE decode). Assert each against device-aware thresholds.
+    """
+
+    original_env = os.environ.get("FASTVIDEO_STAGE_LOGGING")
+    original_getter = envs.environment_variables["FASTVIDEO_STAGE_LOGGING"]
+    os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
+    envs.environment_variables["FASTVIDEO_STAGE_LOGGING"] = lambda: True
+    try:
+        _run_benchmark(cfg)
+    finally:
+        if original_env is None:
+            os.environ.pop("FASTVIDEO_STAGE_LOGGING", None)
+        else:
+            os.environ["FASTVIDEO_STAGE_LOGGING"] = original_env
+        envs.environment_variables["FASTVIDEO_STAGE_LOGGING"] = original_getter
