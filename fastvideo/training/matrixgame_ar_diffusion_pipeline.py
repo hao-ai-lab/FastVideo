@@ -326,8 +326,8 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
                 reduction="none",
             ).mean(dim=(2, 3, 4))
             timesteps = training_batch.timesteps
-            weight = self.noise_scheduler.training_weight(
-                timesteps.flatten(0, 1)).to(per_frame_loss.dtype).reshape(per_frame_loss.shape)
+            weight = self.noise_scheduler.training_weight(timesteps.flatten(0, 1)).to(per_frame_loss.dtype).reshape(
+                per_frame_loss.shape)
             loss = (per_frame_loss * weight).mean()
             loss = loss / self.training_args.gradient_accumulation_steps
             loss.backward()

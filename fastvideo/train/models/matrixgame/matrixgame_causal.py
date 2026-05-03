@@ -91,12 +91,8 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
 
         if self._should_snapshot_streaming_cache() and torch.is_grad_enabled():
             kv_cache = self._snapshot_kv_cache_indices(kv_cache)
-            kv_cache_mouse = self._snapshot_action_kv_cache_indices(
-                kv_cache_mouse
-            )
-            kv_cache_keyboard = self._snapshot_action_kv_cache_indices(
-                kv_cache_keyboard
-            )
+            kv_cache_mouse = self._snapshot_action_kv_cache_indices(kv_cache_mouse)
+            kv_cache_keyboard = self._snapshot_action_kv_cache_indices(kv_cache_keyboard)
 
         if conditional:
             cond_dict = batch.conditional_dict
@@ -110,11 +106,11 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
         device_type = self.device.type
         dtype = noisy_latents.dtype
         with (
-            torch.autocast(device_type, dtype=dtype),
-            set_forward_context(
-                current_timestep=batch.timesteps,
-                attn_metadata=attn_metadata,
-            ),
+                torch.autocast(device_type, dtype=dtype),
+                set_forward_context(
+                    current_timestep=batch.timesteps,
+                    attn_metadata=attn_metadata,
+                ),
         ):
             input_kwargs = self._build_streaming_input_kwargs(
                 noisy_latents=noisy_latents,
@@ -127,18 +123,16 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
                 device=self.device,
                 dtype=torch.long,
             )
-            input_kwargs.update(
-                {
-                    "kv_cache": kv_cache,
-                    "kv_cache_mouse": kv_cache_mouse,
-                    "kv_cache_keyboard": kv_cache_keyboard,
-                    "crossattn_cache": crossattn_cache,
-                    "current_start": cur_start_frame * frame_seq_length,
-                    "start_frame": cur_start_frame,
-                    "is_cache": bool(store_kv),
-                    "num_frame_per_block": num_frames,
-                }
-            )
+            input_kwargs.update({
+                "kv_cache": kv_cache,
+                "kv_cache_mouse": kv_cache_mouse,
+                "kv_cache_keyboard": kv_cache_keyboard,
+                "crossattn_cache": crossattn_cache,
+                "current_start": cur_start_frame * frame_seq_length,
+                "start_frame": cur_start_frame,
+                "is_cache": bool(store_kv),
+                "num_frame_per_block": num_frames,
+            })
 
             if store_kv:
                 with torch.no_grad():
@@ -167,9 +161,7 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
             noisy_latents,
         )
         local_attn_size = self._get_local_attn_size(transformer)
-        sliding_window_num_frames = self._get_sliding_window_num_frames(
-            transformer
-        )
+        sliding_window_num_frames = self._get_sliding_window_num_frames(transformer)
 
         meta = (
             frame_seq_length,
@@ -270,9 +262,7 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
             "hidden_states": hidden_states,
             "encoder_hidden_states": None,
             "timestep": timestep,
-            "encoder_hidden_states_image": cond_dict[
-                "encoder_hidden_states_image"
-            ],
+            "encoder_hidden_states_image": cond_dict["encoder_hidden_states_image"],
             "keyboard_cond": self._slice_action_prefix(
                 cond_dict.get("keyboard_cond"),
                 frame_end=frame_end,
@@ -293,10 +283,8 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
     ) -> torch.Tensor:
         num_frames = end - start
         if image_latents.ndim != 5:
-            raise ValueError(
-                "image_latents must have shape [B, C, T, H, W], "
-                f"got {tuple(image_latents.shape)}"
-            )
+            raise ValueError("image_latents must have shape [B, C, T, H, W], "
+                             f"got {tuple(image_latents.shape)}")
         if image_latents.shape[2] >= end:
             return image_latents[:, :, start:end]
         if image_latents.shape[2] > start:
@@ -332,14 +320,10 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
     ) -> torch.Tensor | None:
         if action is None:
             return None
-        action_frame_end = (
-            (frame_end - 1) * self._temporal_compression_ratio()
-        ) + 1
+        action_frame_end = ((frame_end - 1) * self._temporal_compression_ratio()) + 1
         if action.shape[1] < action_frame_end:
-            raise ValueError(
-                "Action tensor is shorter than required for causal rollout: "
-                f"got={action.shape[1]}, required>={action_frame_end}"
-            )
+            raise ValueError("Action tensor is shorter than required for causal rollout: "
+                             f"got={action.shape[1]}, required>={action_frame_end}")
         return action[:, :action_frame_end]
 
     def _initialize_action_kv_cache(
@@ -359,20 +343,14 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
             return []
 
         action_config = getattr(transformer, "action_config", {}) or {}
-        action_blocks = {
-            int(block_idx) for block_idx in action_config.get("blocks", [])
-        }
+        action_blocks = {int(block_idx) for block_idx in action_config.get("blocks", [])}
         if local_attn_size <= 0:
-            raise ValueError(
-                "MatrixGame causal streaming requires "
-                "transformer.local_attn_size > 0"
-            )
+            raise ValueError("MatrixGame causal streaming requires "
+                             "transformer.local_attn_size > 0")
 
         action_heads_num = int(action_config.get("heads_num", 0) or 0)
         if action_blocks and action_heads_num <= 0:
-            raise ValueError(
-                "MatrixGame causal action_config.heads_num must be > 0"
-            )
+            raise ValueError("MatrixGame causal action_config.heads_num must be > 0")
 
         if channel == "mouse":
             enabled = bool(action_config.get("enable_mouse", False))
@@ -380,9 +358,7 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
             batch_dim = batch_size * frame_seq_length
         else:
             enabled = bool(action_config.get("enable_keyboard", False))
-            hidden_dim = int(
-                action_config.get("keyboard_hidden_dim", 0) or 0
-            )
+            hidden_dim = int(action_config.get("keyboard_hidden_dim", 0) or 0)
             batch_dim = batch_size
 
         caches: list[dict[str, Any] | None] = []
@@ -392,47 +368,47 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
                 continue
 
             if hidden_dim <= 0 or hidden_dim % action_heads_num != 0:
-                raise ValueError(
-                    f"Invalid {channel} action hidden size for causal "
-                    f"cache initialization: hidden_dim={hidden_dim}, "
-                    f"heads={action_heads_num}"
-                )
+                raise ValueError(f"Invalid {channel} action hidden size for causal "
+                                 f"cache initialization: hidden_dim={hidden_dim}, "
+                                 f"heads={action_heads_num}")
             head_dim = hidden_dim // action_heads_num
 
-            caches.append(
-                {
-                    "k": torch.zeros(
-                        [
-                            batch_dim,
-                            local_attn_size,
-                            action_heads_num,
-                            head_dim,
-                        ],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    "v": torch.zeros(
-                        [
-                            batch_dim,
-                            local_attn_size,
-                            action_heads_num,
-                            head_dim,
-                        ],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    "global_end_index": torch.tensor(
-                        [0],
-                        dtype=torch.long,
-                        device=device,
-                    ),
-                    "local_end_index": torch.tensor(
-                        [0],
-                        dtype=torch.long,
-                        device=device,
-                    ),
-                }
-            )
+            caches.append({
+                "k":
+                torch.zeros(
+                    [
+                        batch_dim,
+                        local_attn_size,
+                        action_heads_num,
+                        head_dim,
+                    ],
+                    dtype=dtype,
+                    device=device,
+                ),
+                "v":
+                torch.zeros(
+                    [
+                        batch_dim,
+                        local_attn_size,
+                        action_heads_num,
+                        head_dim,
+                    ],
+                    dtype=dtype,
+                    device=device,
+                ),
+                "global_end_index":
+                torch.tensor(
+                    [0],
+                    dtype=torch.long,
+                    device=device,
+                ),
+                "local_end_index":
+                torch.tensor(
+                    [0],
+                    dtype=torch.long,
+                    device=device,
+                ),
+            })
 
         return caches
 
@@ -448,15 +424,10 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
 
             global_end_index = cache.get("global_end_index")
             local_end_index = cache.get("local_end_index")
-            if (
-                not isinstance(global_end_index, torch.Tensor)
-                or not isinstance(local_end_index, torch.Tensor)
-            ):
-                raise ValueError(
-                    "Unexpected action kv_cache index tensors; expected "
-                    "tensors at kv_cache_*[*].{global_end_index, "
-                    "local_end_index}"
-                )
+            if (not isinstance(global_end_index, torch.Tensor) or not isinstance(local_end_index, torch.Tensor)):
+                raise ValueError("Unexpected action kv_cache index tensors; expected "
+                                 "tensors at kv_cache_*[*].{global_end_index, "
+                                 "local_end_index}")
 
             copied = dict(cache)
             copied["global_end_index"] = global_end_index.detach().clone()

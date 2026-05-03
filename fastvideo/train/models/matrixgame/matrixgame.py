@@ -18,11 +18,9 @@ from fastvideo.training.training_utils import normalize_dit_input
 
 from fastvideo.train.models.wan.wan import WanModel
 from fastvideo.train.utils.dataloader import (
-    build_parquet_matrixgame_train_dataloader,
-)
+    build_parquet_matrixgame_train_dataloader, )
 from fastvideo.train.utils.moduleloader import (
-    load_module_from_path,
-)
+    load_module_from_path, )
 
 
 class MatrixGameModel(WanModel):
@@ -113,9 +111,7 @@ class MatrixGameModel(WanModel):
         training_batch = self._prepare_dit_inputs(training_batch, generator)
         training_batch = self._build_attention_metadata(training_batch)
 
-        training_batch.attn_metadata_vsa = copy.deepcopy(
-            training_batch.attn_metadata
-        )
+        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
         if training_batch.attn_metadata is not None:
             training_batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore[attr-defined]
 
@@ -184,17 +180,13 @@ class MatrixGameModel(WanModel):
         image_latents: torch.Tensor,
     ) -> torch.Tensor:
         if image_latents.ndim != 5:
-            raise ValueError(
-                "first_frame_latent must have shape [B, C, T, H, W], "
-                f"got {tuple(image_latents.shape)}"
-            )
+            raise ValueError("first_frame_latent must have shape [B, C, T, H, W], "
+                             f"got {tuple(image_latents.shape)}")
         if image_latents.shape[1] == 20:
             return image_latents
         if image_latents.shape[1] != 16:
-            raise ValueError(
-                "MatrixGame expects first_frame_latent with 16 or 20 channels, "
-                f"got {image_latents.shape[1]}"
-            )
+            raise ValueError("MatrixGame expects first_frame_latent with 16 or 20 channels, "
+                             f"got {image_latents.shape[1]}")
 
         temporal_compression_ratio = self._temporal_compression_ratio()
         batch_size, _, num_latent_t, latent_height, latent_width = image_latents.shape
@@ -241,9 +233,7 @@ class MatrixGameModel(WanModel):
         if value is None or value.numel() == 0:
             return None
         if value.shape[1] < expected_frames:
-            raise ValueError(
-                f"{key} has {value.shape[1]} frames but requires at least {expected_frames}"
-            )
+            raise ValueError(f"{key} has {value.shape[1]} frames but requires at least {expected_frames}")
         return value[:, :expected_frames].to(device=self.device, dtype=dtype)
 
     def _expected_action_frames(self, num_latent_t: int) -> int:
@@ -251,9 +241,9 @@ class MatrixGameModel(WanModel):
 
     def _temporal_compression_ratio(self) -> int:
         assert self.training_config is not None
-        return int(
-            self.training_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio  # type: ignore[union-attr]
-        )
+        return int(self.training_config.pipeline_config.vae_config.arch_config.
+                   temporal_compression_ratio  # type: ignore[union-attr]
+                   )
 
     def _infer_batch_size(self, raw_batch: dict[str, Any]) -> int:
         if "vae_latent" in raw_batch:

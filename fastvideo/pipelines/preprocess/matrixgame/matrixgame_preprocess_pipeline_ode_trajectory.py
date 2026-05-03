@@ -231,14 +231,8 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
                 image_latents = extra_features['first_frame_latent']
                 image_latents = image_latents[:, :, :args.num_latent_t]
                 pil_image = extra_features['pil_image']
-                if "keyboard_cond" in extra_features:
-                    keyboard_cond = extra_features['keyboard_cond']
-                else:
-                    keyboard_cond = None
-                if "mouse_cond" in extra_features:
-                    mouse_cond = extra_features['mouse_cond']
-                else:
-                    mouse_cond = None
+                keyboard_cond = extra_features.get('keyboard_cond')
+                mouse_cond = extra_features.get('mouse_cond')
 
                 sampling_params = SamplingParam.from_pretrained(args.model_path)
 

@@ -148,18 +148,21 @@ class DiffusionForcingSFTMethod(TrainingMethod):
             sigmas = sigmas.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
             pred_x0 = noisy_latents - pred * sigmas
             per_frame_loss = F.mse_loss(
-                pred_x0.float(), clean_latents.float(),
+                pred_x0.float(),
+                clean_latents.float(),
                 reduction="none",
             ).mean(dim=(2, 3, 4))
         else:
             target = noise - clean_latents
             per_frame_loss = F.mse_loss(
-                pred.float(), target.float(),
+                pred.float(),
+                target.float(),
                 reduction="none",
             ).mean(dim=(2, 3, 4))
 
         weight = self._get_training_weight(
-            timestep_indices, clean_latents.device,
+            timestep_indices,
+            clean_latents.device,
         ).reshape(batch_size, num_latents)
         loss = (per_frame_loss * weight).mean()
 
@@ -342,7 +345,7 @@ class DiffusionForcingSFTMethod(TrainingMethod):
             raise ValueError("DFSFT requires student.noise_scheduler")
         n = float(len(scheduler.timesteps))
         x = torch.arange(n, dtype=torch.float32)
-        y = torch.exp(-2 * ((x - n / 2) / n) ** 2)
+        y = torch.exp(-2 * ((x - n / 2) / n)**2)
         y_shifted = y - y.min()
         return y_shifted * (n / y_shifted.sum())
 

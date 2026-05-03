@@ -35,6 +35,7 @@ from fastvideo.distributed import (cleanup_dist_env_and_memory, get_local_torch_
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+from fastvideo.models.vision_utils import load_video
 from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch, LoRAPipeline, TrainingBatch)
 from fastvideo.platforms import current_platform
 from fastvideo.training.activation_checkpoint import (apply_activation_checkpointing)
@@ -835,10 +836,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     self.tracker.log_artifacts(logs, global_step)
                 if not self.validation_ref_videos_logged:
                     ref_artifacts = []
-                    for filename, caption in zip(all_ref_videos, all_captions, strict=True):
-                        if filename is None:
+                    for ref_filename, caption in zip(all_ref_videos, all_captions, strict=True):
+                        if ref_filename is None:
                             continue
-                        ref_frames = np.stack([np.asarray(frame) for frame in load_video(filename)], axis=0)
+                        ref_frames = np.stack([np.asarray(frame) for frame in load_video(ref_filename)], axis=0)
                         ref_frames = np.ascontiguousarray(ref_frames.transpose(0, 3, 1, 2))
                         video_artifact = self.tracker.video(ref_frames, caption=caption, fps=sampling_param.fps)
                         if video_artifact is not None:
