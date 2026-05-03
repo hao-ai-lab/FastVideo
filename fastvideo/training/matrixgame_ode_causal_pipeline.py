@@ -186,33 +186,6 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
             timestep = timestep.reshape(timestep.shape[0], -1)
             return timestep
 
-    def _prepare_dit_inputs(self, training_batch: TrainingBatch) -> TrainingBatch:
-        """Override to properly handle I2V concatenation - call parent first, then concatenate image conditioning."""
-
-        # First, call parent method to prepare noise, timesteps, etc. for video latents
-        training_batch = super()._prepare_dit_inputs(training_batch)
-
-        assert isinstance(training_batch.image_latents, torch.Tensor)
-        image_latents = training_batch.image_latents.to(get_local_torch_device(), dtype=torch.bfloat16)
-
-        temporal_compression_ratio = 4
-        num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_ratio + 1
-        batch_size, num_channels, _, latent_height, latent_width = image_latents.shape
-        mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height, latent_width)
-        mask_lat_size[:, :, 1:] = 0
-
-        first_frame_mask = mask_lat_size[:, :, :1]
-        first_frame_mask = torch.repeat_interleave(first_frame_mask, dim=2, repeats=temporal_compression_ratio)
-        mask_lat_size = torch.cat([first_frame_mask, mask_lat_size[:, :, 1:]], dim=2)
-        mask_lat_size = mask_lat_size.view(batch_size, -1, temporal_compression_ratio, latent_height, latent_width)
-        mask_lat_size = mask_lat_size.transpose(1, 2)
-        mask_lat_size = mask_lat_size.to(image_latents.device).to(dtype=torch.bfloat16)
-
-        training_batch.noisy_model_input = torch.cat([training_batch.noisy_model_input, mask_lat_size, image_latents],
-                                                     dim=1)
-
-        return training_batch
-
     def _step_predict_next_latent(
             self, traj_latents: torch.Tensor, traj_timesteps: torch.Tensor, image_embeds: torch.Tensor,
             image_latents: torch.Tensor, keyboard_cond: torch.Tensor | None, mouse_cond: torch.Tensor | None
@@ -253,12 +226,9 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
         relevant_traj_latents = torch.index_select(traj_latents,
                                                    dim=1,
                                                    index=self._cached_closest_idx_per_dmd.to(traj_latents.device))
-        logger.info("relevant_traj_latents: %s", relevant_traj_latents.shape)
 
         indexes = self._get_timestep(  # [B, num_frames]
             0, len(self.dmd_denoising_steps), B, num_frames, 3, uniform_timestep=False)
-        logger.info("indexes: %s", indexes.shape)
-        logger.info("indexes: %s", indexes)
         noisy_input = torch.gather(relevant_traj_latents,
                                    dim=1,
                                    index=indexes.reshape(B, 1, num_frames, 1, 1,
@@ -272,7 +242,6 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
             ],
                                            dim=1)
         timestep = self.dmd_denoising_steps[indexes]
-        logger.info("selected timestep for rank %s: %s", self.global_rank, timestep, local_main_process_only=False)
 
         # Prepare inputs for transformer
         latent_vis_dict["noisy_input"] = noisy_input.permute(0, 2, 1, 3, 4).detach().clone().cpu()
@@ -280,19 +249,6 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
 
         latent_model_input = latent_model_input.to(device, dtype=torch.bfloat16)
         timestep = timestep.to(device, dtype=torch.bfloat16)
-
-        logger.info("========== Transformer Input ==========")
-        logger.info("hidden_states (latent_model_input) shape: %s, dtype: %s", latent_model_input.shape,
-                    latent_model_input.dtype)
-        logger.info("hidden_states min/max/mean: %.4f / %.4f / %.4f",
-                    latent_model_input.min().item(),
-                    latent_model_input.max().item(),
-                    latent_model_input.mean().item())
-        logger.info("encoder_hidden_states_image (image_embeds) shape: %s",
-                    image_embeds.shape if image_embeds is not None else None)
-        logger.info("timestep shape: %s, dtype: %s", timestep.shape, timestep.dtype)
-        logger.info("keyboard_cond: %s", keyboard_cond.shape if keyboard_cond is not None else None)
-        logger.info("mouse_cond: %s", mouse_cond.shape if mouse_cond is not None else None)
 
         input_kwargs = {
             "hidden_states": latent_model_input,
@@ -306,13 +262,6 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
         # Predict noise and step the scheduler to obtain next latent
         with set_forward_context(current_timestep=timestep, attn_metadata=None, forward_batch=None):
             noise_pred = self.transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
-
-        logger.info("========== Transformer Output ==========")
-        logger.info("noise_pred shape: %s", noise_pred.shape)
-        logger.info("noise_pred min/max/mean: %.4f / %.4f / %.4f",
-                    noise_pred.min().item(),
-                    noise_pred.max().item(),
-                    noise_pred.mean().item())
 
         from fastvideo.models.utils import pred_noise_to_pred_video
         pred_video = pred_noise_to_pred_video(pred_noise=noise_pred.flatten(0, 1),

@@ -169,8 +169,6 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         batch_size: int,
         dtype: torch.dtype,
         device: torch.device,
-        *,
-        max_num_frames: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]],
                list[dict[str, Any] | None], list[dict[str, Any] | None]]:
         """Initialize KV cache and cross-attention cache for multi-step simulation."""
@@ -362,13 +360,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         latents = training_batch.latents
         dtype = latents.dtype
         batch_size = latents.shape[0]
-        initial_latent = getattr(training_batch, 'image_latent', None)
 
-        # Dynamic frame generation logic (adapted from _run_generator)
         num_training_frames = getattr(self.training_args, 'num_latent_t', 21)
-
-        # During training, the number of generated frames should be uniformly sampled from
-        # [21, self.num_training_frames], but still being a multiple of self.num_frame_per_block
         min_num_frames = 20 if self.independent_first_frame else 21
         max_num_frames = num_training_frames - 1 if self.independent_first_frame else num_training_frames
         assert max_num_frames % self.num_frame_per_block == 0
@@ -384,21 +377,13 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             dist.broadcast(num_generated_blocks, src=0)
         num_generated_blocks = num_generated_blocks.item()
         num_generated_frames = num_generated_blocks * self.num_frame_per_block
-        if self.independent_first_frame and initial_latent is None:
+        if self.independent_first_frame:
             num_generated_frames += 1
             min_num_frames += 1
 
-        # Create noise with dynamic shape
-        if initial_latent is not None:
-            noise_shape = [
-                batch_size, num_generated_frames - 1,
-                *self.video_latent_shape[2:]
-            ]
-        else:
-            noise_shape = [
-                batch_size, num_generated_frames, *self.video_latent_shape[2:]
-            ]
-
+        noise_shape = [
+            batch_size, num_generated_frames, *self.video_latent_shape[2:]
+        ]
         noise = torch.randn(noise_shape, device=self.device, dtype=dtype)
         if self.sp_world_size > 1:
             noise = rearrange(noise,
@@ -408,69 +393,28 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
         batch_size, num_frames, num_channels, height, width = noise.shape
 
-        # Block size calculation
-        if not self.independent_first_frame or (self.independent_first_frame
-                                                and initial_latent is not None):
-            assert num_frames % self.num_frame_per_block == 0
-            num_blocks = num_frames // self.num_frame_per_block
-        else:
+        if self.independent_first_frame:
             assert (num_frames - 1) % self.num_frame_per_block == 0
             num_blocks = (num_frames - 1) // self.num_frame_per_block
+        else:
+            assert num_frames % self.num_frame_per_block == 0
+            num_blocks = num_frames // self.num_frame_per_block
 
-        num_input_frames = initial_latent.shape[
-            1] if initial_latent is not None else 0
-        num_output_frames = num_frames + num_input_frames
+        num_output_frames = num_frames
         output = torch.zeros(
             [batch_size, num_output_frames, num_channels, height, width],
             device=noise.device,
             dtype=noise.dtype)
 
-        def get_model_device(model):
-            if model is None:
-                return "None"
-            try:
-                return next(model.parameters()).device
-            except (StopIteration, AttributeError):
-                return "Unknown"
-
         # Step 1: Initialize KV cache to all zeros
-        cache_frames = num_generated_frames + num_input_frames
         (self.kv_cache1, self.crossattn_cache, self.kv_cache_mouse,
          self.kv_cache_keyboard) = self._initialize_simulation_caches(
-             batch_size, dtype, self.device, max_num_frames=cache_frames)
+             batch_size, dtype, self.device)
 
-        # Step 2: Cache context feature
+        # Step 2: Temporal denoising loop
         current_start_frame = 0
-        if initial_latent is not None:
-            timestep = torch.ones(
-                [batch_size, 1], device=noise.device, dtype=torch.int64) * 0
-            output[:, :1] = initial_latent
-            with torch.no_grad():
-                # Build input kwargs for initial latent
-                training_batch_temp = self._build_distill_input_kwargs(
-                    initial_latent,
-                    timestep * 0,
-                    training_batch.conditional_dict,
-                    training_batch,
-                    frame_start=0,
-                    frame_end=1,
-                    num_frame_per_block=1)
-
-                # we process the image latent with self.transformer_2 (low-noise expert)
-                current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
-                current_model(
-                    **training_batch_temp.input_kwargs,
-                    kv_cache=self.kv_cache1,
-                    kv_cache_mouse=self.kv_cache_mouse,
-                    kv_cache_keyboard=self.kv_cache_keyboard,
-                    crossattn_cache=self.crossattn_cache,
-                    current_start=current_start_frame * self.frame_seq_length,
-                    start_frame=current_start_frame)
-            current_start_frame += 1
-
-        # Step 3: Temporal denoising loop
         all_num_frames = [self.num_frame_per_block] * num_blocks
-        if self.independent_first_frame and initial_latent is None:
+        if self.independent_first_frame:
             all_num_frames = [1] + all_num_frames
         num_denoising_steps = len(self.denoising_step_list)
         exit_flags = self.generate_and_sync_list(len(all_num_frames),
@@ -479,9 +423,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         start_gradient_frame_index = max(0, num_output_frames - 21)
 
         for block_index, current_num_frames in enumerate(all_num_frames):
-            noisy_input = noise[:, current_start_frame -
-                                num_input_frames:current_start_frame +
-                                current_num_frames - num_input_frames]
+            noisy_input = noise[:, current_start_frame:current_start_frame +
+                                current_num_frames]
 
             # Step 3.1: Spatial denoising loop
             for index, current_timestep in enumerate(self.denoising_step_list):
@@ -628,8 +571,6 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
         # Handle last 21 frames logic
         pred_image_or_video = output
-        if num_input_frames > 0:
-            pred_image_or_video = output[:, num_input_frames:]
 
         # Slice last 21 frames if we generated more
         gradient_mask = None

@@ -41,11 +41,11 @@ method:
 
 training:
   distributed:
-    num_gpus: 1
+    num_gpus: 4
     sp_size: 1
     tp_size: 1
     hsdp_replicate_dim: 1
-    hsdp_shard_dim: 1
+    hsdp_shard_dim: 4
 
   data:
     data_path: /home/hal-kaiqin/solaris_dataset_unzip/solaris
@@ -53,10 +53,10 @@ training:
     train_batch_size: 1
     training_cfg_rate: 0.0
     seed: 1000
-    num_latent_t: 20
-    num_height: 448
-    num_width: 832
-    num_frames: 77
+    num_latent_t: 21
+    num_height: 352
+    num_width: 640
+    num_frames: 81
 
   optimizer:
     learning_rate: 1.0e-5
@@ -74,23 +74,22 @@ training:
     training_state_checkpointing_steps: 1000
     checkpoints_total_limit: 3
 
-  # tracker:
-  #   project_name: self-forcing-matrixgame
-  #   run_name: matrixgame_causal_self_forcing
   tracker:
-    trackers: [none]
-    project_name: ""
-    run_name: ""
+    project_name: self-forcing-matrixgame
+    run_name: matrixgame_causal_self_forcing
 
   model:
     enable_gradient_checkpointing_type: full
 
 callbacks:
+  ema:
+    decay: 0.99
+    start_iter: 200
   grad_clip:
     max_grad_norm: 1.0
   validation:
     pipeline_target: fastvideo.pipelines.basic.matrixgame.matrixgame_causal_dmd_pipeline.MatrixGameCausalDMDPipeline
-    dataset_file: examples/distill/MatrixGame2.0/validation_1.json
+    dataset_file: examples/distill/MatrixGame2.0/validation.json
     every_steps: 50
     sampling_steps: [4]
     sampling_timesteps: [1000, 750, 500, 250]

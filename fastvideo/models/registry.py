@@ -98,9 +98,6 @@ _SCHEDULERS = {
     "FlowMatchEulerDiscreteScheduler":
     ("schedulers", "scheduling_flow_match_euler_discrete",
      "FlowMatchEulerDiscreteScheduler"),
-    "DiffusionForcingScheduler":
-    ("schedulers", "scheduling_diffusion_forcing",
-     "DiffusionForcingScheduler"),
     "UniPCMultistepScheduler":
     ("schedulers", "scheduling_unipc_multistep", "UniPCMultistepScheduler"),
     "FlowUniPCMultistepScheduler":
