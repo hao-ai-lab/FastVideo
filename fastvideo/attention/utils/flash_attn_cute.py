@@ -294,9 +294,7 @@ def flash_attn_fp4_func(
     causal: bool = False,
 ) -> torch.Tensor:
     """FP4 (NVFP4 block-scaled) flash attention. q/k are FP4-packed; v is BF16."""
-    return torch.ops.fastvideo._flash_attn_cute_fp4_forward(
-        q, k, v, sfq, sfk, softmax_scale, causal
-    )
+    return torch.ops.fastvideo._flash_attn_cute_fp4_forward(q, k, v, sfq, sfk, softmax_scale, causal)
 
 
 def flash_attn_varlen_func(
