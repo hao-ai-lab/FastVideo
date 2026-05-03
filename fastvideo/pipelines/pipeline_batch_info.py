@@ -282,6 +282,8 @@ class TrainingBatch:
     image_latents: torch.Tensor | None = None
     infos: list[dict[str, Any]] | None = None
     mask_lat_size: torch.Tensor | None = None
+    condition_latent_counts: torch.Tensor | None = None
+    generation_loss_mask: torch.Tensor | None = None
 
     # ODE trajectory supervision
     trajectory_latents: torch.Tensor | None = None

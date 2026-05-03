@@ -756,6 +756,8 @@ class TrainingArgs(FastVideoArgs):
 
     train_batch_size: int = 0
     num_latent_t: int = 0
+    min_condition_latents: int = 1
+    max_condition_latents: int = 1
     group_frame: bool = False
     group_resolution: bool = False
 
@@ -928,9 +930,31 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--num-frames", type=int, required=True, help="Number of frames")
 
         # Training batch and model configuration
-        parser.add_argument("--train-batch-size", type=int, required=True, help="Training batch size")
-        parser.add_argument("--num-latent-t", type=int, required=True, help="Number of latent time steps")
-        parser.add_argument("--group-frame", action=StoreBoolean, help="Whether to group frames during training")
+        parser.add_argument("--train-batch-size",
+                            type=int,
+                            required=True,
+                            help="Training batch size")
+        parser.add_argument("--num-latent-t",
+                            type=int,
+                            required=True,
+                            help="Number of latent time steps")
+        parser.add_argument(
+            "--min-condition-latents",
+            "--min_condition_latents",
+            dest="min_condition_latents",
+            type=int,
+            default=TrainingArgs.min_condition_latents,
+            help="Minimum number of prefix latent timesteps to condition on")
+        parser.add_argument(
+            "--max-condition-latents",
+            "--max_condition_latents",
+            dest="max_condition_latents",
+            type=int,
+            default=TrainingArgs.max_condition_latents,
+            help="Maximum number of prefix latent timesteps to condition on")
+        parser.add_argument("--group-frame",
+                            action=StoreBoolean,
+                            help="Whether to group frames during training")
         parser.add_argument("--group-resolution",
                             action=StoreBoolean,
                             help="Whether to group resolutions during training")

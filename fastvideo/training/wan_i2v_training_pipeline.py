@@ -7,7 +7,7 @@ import torch
 
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_i2v
-from fastvideo.distributed import get_local_torch_device
+from fastvideo.distributed import get_local_torch_device, get_sp_group
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
@@ -32,6 +32,10 @@ class WanI2VTrainingPipeline(TrainingPipeline):
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=fastvideo_args.pipeline_config.flow_shift)
+
+    def initialize_training_pipeline(self, training_args: TrainingArgs):
+        self._validate_condition_latent_args(training_args)
+        super().initialize_training_pipeline(training_args)
 
     def create_training_stages(self, training_args: TrainingArgs):
         """
@@ -98,29 +102,98 @@ class WanI2VTrainingPipeline(TrainingPipeline):
 
         # First, call parent method to prepare noise, timesteps, etc. for video latents
         training_batch = super()._prepare_dit_inputs(training_batch)
+        training_batch = self._apply_random_context_conditioning(
+            training_batch)
 
-        assert isinstance(training_batch.image_latents, torch.Tensor)
-        image_latents = training_batch.image_latents.to(get_local_torch_device(), dtype=torch.bfloat16)
-
-        temporal_compression_ratio = 4
-        num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_ratio + 1
-        batch_size, num_channels, _, latent_height, latent_width = image_latents.shape
-        mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height, latent_width)
-        mask_lat_size[:, :, 1:] = 0
-
-        first_frame_mask = mask_lat_size[:, :, :1]
-        first_frame_mask = torch.repeat_interleave(first_frame_mask, dim=2, repeats=temporal_compression_ratio)
-        mask_lat_size = torch.cat([first_frame_mask, mask_lat_size[:, :, 1:]], dim=2)
-        mask_lat_size = mask_lat_size.view(batch_size, -1, temporal_compression_ratio, latent_height, latent_width)
-        mask_lat_size = mask_lat_size.transpose(1, 2)
-        mask_lat_size = mask_lat_size.to(image_latents.device).to(dtype=torch.bfloat16)
-
-        training_batch.noisy_model_input = torch.cat([training_batch.noisy_model_input, mask_lat_size, image_latents],
-                                                     dim=1)
+        assert training_batch.mask_lat_size is not None
+        assert training_batch.image_latents is not None
+        assert training_batch.noisy_model_input is not None
+        training_batch.noisy_model_input = torch.cat(
+            [
+                training_batch.noisy_model_input,
+                training_batch.mask_lat_size,
+                training_batch.image_latents,
+            ],
+            dim=1)
 
         return training_batch
 
-    def _build_input_kwargs(self, training_batch: TrainingBatch) -> TrainingBatch:
+    @staticmethod
+    def _validate_condition_latent_args(training_args: TrainingArgs) -> None:
+        min_condition_latents = training_args.min_condition_latents
+        max_condition_latents = training_args.max_condition_latents
+        num_latent_t = training_args.num_latent_t
+
+        if min_condition_latents < 1:
+            raise ValueError("min_condition_latents must be >= 1")
+        if max_condition_latents < min_condition_latents:
+            raise ValueError(
+                "max_condition_latents must be >= min_condition_latents")
+        if max_condition_latents >= num_latent_t:
+            raise ValueError("max_condition_latents must be < num_latent_t")
+
+    def _sample_condition_latent_counts(
+        self,
+        batch_size: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        min_condition_latents = self.training_args.min_condition_latents
+        max_condition_latents = self.training_args.max_condition_latents
+        return torch.randint(
+            low=min_condition_latents,
+            high=max_condition_latents + 1,
+            size=(batch_size,),
+            generator=getattr(self, "noise_gen_cuda", None),
+            device=device,
+        )
+
+    def _apply_random_context_conditioning(
+            self, training_batch: TrainingBatch) -> TrainingBatch:
+        assert training_batch.latents is not None
+        assert training_batch.noisy_model_input is not None
+
+        latents = training_batch.latents
+        batch_size, _, latent_t, latent_height, latent_width = latents.shape
+        counts = self._sample_condition_latent_counts(
+            batch_size=batch_size,
+            device=latents.device,
+        )
+
+        if self.training_args.sp_size > 1:
+            get_sp_group().broadcast(counts, src=0)
+
+        time_ids = torch.arange(latent_t, device=latents.device)
+        prefix_mask = time_ids.view(1, 1, latent_t, 1, 1) < counts.view(
+            batch_size, 1, 1, 1, 1)
+        generation_mask = ~prefix_mask
+
+        training_batch.noisy_model_input = torch.where(
+            prefix_mask.expand_as(training_batch.noisy_model_input),
+            latents,
+            training_batch.noisy_model_input,
+        )
+
+        condition_latents = torch.where(
+            prefix_mask,
+            latents,
+            torch.zeros_like(latents),
+        ).to(dtype=torch.bfloat16)
+        mask_lat_size = prefix_mask.expand(
+            batch_size,
+            4,
+            latent_t,
+            latent_height,
+            latent_width,
+        ).to(dtype=torch.bfloat16)
+
+        training_batch.image_latents = condition_latents
+        training_batch.mask_lat_size = mask_lat_size
+        training_batch.condition_latent_counts = counts
+        training_batch.generation_loss_mask = generation_mask
+        return training_batch
+
+    def _build_input_kwargs(self,
+                            training_batch: TrainingBatch) -> TrainingBatch:
 
         # Image Embeds for conditioning
         image_embeds = training_batch.image_embeds
