@@ -135,7 +135,7 @@ def render_html(figs: list, skipped_metrics: list[dict[str, object]],
 def main() -> None:
     days = int(os.environ.get("DASHBOARD_DAYS", "30"))
 
-    local_dir = sync_from_hf("/tmp/perf-tracking")
+    local_dir = sync_from_hf("/tmp/perf-tracking", reuse_existing=True)
     df = load_as_dataframe(local_dir, days=days)
 
     if df.empty:

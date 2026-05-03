@@ -24,13 +24,16 @@ logger = init_logger(__name__)
 
 STAGE_METRIC_MAP: dict[str, str] = {
     "TextEncoderStage": "text_encoder_time_s",
+    "TextEncodingStage": "text_encoder_time_s",
     "CLIPTextEncoderStage": "text_encoder_time_s",
     "T5TextEncoderStage": "text_encoder_time_s",
     "DiTStage": "dit_time_s",
     "DenoisingStage": "dit_time_s",
+    "DmdDenoisingStage": "dit_time_s",
     "TransformerStage": "dit_time_s",
     "VAEDecodeStage": "vae_decode_time_s",
     "VAEDecoderStage": "vae_decode_time_s",
+    "DecodingStage": "vae_decode_time_s",
     "DecodeStage": "vae_decode_time_s",
 }
 
@@ -279,9 +282,15 @@ def test_inference_performance(cfg):
     (text encoder, DiT, VAE decode). Assert each against device-aware thresholds.
     """
 
-    original = envs.environment_variables["FASTVIDEO_STAGE_LOGGING"]
+    original_env = os.environ.get("FASTVIDEO_STAGE_LOGGING")
+    original_getter = envs.environment_variables["FASTVIDEO_STAGE_LOGGING"]
+    os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
     envs.environment_variables["FASTVIDEO_STAGE_LOGGING"] = lambda: True
     try:
         _run_benchmark(cfg)
     finally:
-        envs.environment_variables["FASTVIDEO_STAGE_LOGGING"] = original
+        if original_env is None:
+            os.environ.pop("FASTVIDEO_STAGE_LOGGING", None)
+        else:
+            os.environ["FASTVIDEO_STAGE_LOGGING"] = original_env
+        envs.environment_variables["FASTVIDEO_STAGE_LOGGING"] = original_getter

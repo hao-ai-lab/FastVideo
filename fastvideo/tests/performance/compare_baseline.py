@@ -55,11 +55,9 @@ LOWER_IS_BETTER_METRICS = {
 
 
 def _should_persist_tracking() -> bool:
-    # test_scope = os.environ.get("TEST_SCOPE", "")
-    # branch = os.environ.get("BUILDKITE_BRANCH", "")
-    # return test_scope == "full" and branch == "main"
-    return True
-
+    test_scope = os.environ.get("TEST_SCOPE", "")
+    branch = os.environ.get("BUILDKITE_BRANCH", "")
+    return test_scope == "full" and branch == "main"
 
 def _load_current_results() -> list[dict[str, Any]]:
     pattern = os.path.join(RESULTS_DIR, "perf_*.json")
