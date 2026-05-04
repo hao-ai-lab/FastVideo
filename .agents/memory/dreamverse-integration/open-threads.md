@@ -7,8 +7,10 @@ For why each item is open see [decisions-log.md](decisions-log.md). For
 PR-level context see [pr-roadmap.md](pr-roadmap.md).
 
 **Last updated:** 2026-05-04 (PRs 7.5 / 7.6 / 7.7 merged; PR 7.8 opened
-as #1284; items #9 + #10 RESOLVED via the cleanup rebase that bundled
-into 7.8 prep; DR-1 unblocked now that PR #1258 has merged).
+as #1284 with 4 gemini review fixes + 2 Oracle polish items applied;
+D-14 added to decisions-log; items #9 + #10 RESOLVED via the cleanup
+rebase that bundled into 7.8 prep; #12 added — safety filter
+UNAVAILABLE log loudness; DR-1 unblocked now that PR #1258 has merged).
 
 ## Priority overview
 
@@ -34,6 +36,7 @@ into 7.8 prep; DR-1 unblocked now that PR #1258 has merged).
 | **7** | Low | Schema parity inventory cleanup (env-driven prompt fields) | S-M | Long-term consistency |
 | **8** | Low | Stale `apps/web/test-results/` dir cleanup | trivial | Cosmetic |
 | **11** | Low | Promote LTX-2 prompt orchestration (locked segments, segment_prompts JSON shape, rollout id/label) to `fastvideo.entrypoints.streaming.prompt.ltx2_orchestration` | M | Resolves Q-2 from decisions-log when a second LTX-2-style consumer appears |
+| **12** | Low | When streaming server starts using `PromptSafetyFilter`, ensure operator-visible logging on `SafetyDecision.UNAVAILABLE` results | trivial | Surfaces degraded-safety state to operators (per D-14 Watch-Out item) |
 | **~~Source-doc disposition~~** | ~~Med~~ | ~~Disposition of 7 untracked source docs~~ | ~~trivial~~ | ✅ **Resolved 2026-05-03** — moved into [source-archive/](source-archive/) |
 | **~~9~~** | ~~Low~~ | ~~Commit-message cleanup: PR 8's 3 commits still have `[8/n] Improve API:` prefix~~ | ~~S~~ | ✅ **Resolved 2026-05-04** — bundled into the will/api_7.8 prep rebase. PR 8's 3 commits now read `[type] streaming: ...` |
 | **~~10~~** | ~~Low~~ | ~~Commit-message cleanup: PR 7.8/7.9 commits have `streaming: streaming X` duplication~~ | ~~S~~ | ✅ **Resolved 2026-05-04** — bundled into the will/api_7.8 prep rebase. 3 commits dedup'd. |
