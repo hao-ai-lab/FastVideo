@@ -6,11 +6,9 @@ recommended next action.
 For why each item is open see [decisions-log.md](decisions-log.md). For
 PR-level context see [pr-roadmap.md](pr-roadmap.md).
 
-**Last updated:** 2026-05-04 (added DR-1/DR-2 — Dreamverse migration to
-public prompt enhancer; added D-12-{A,B,C} — GpuPool follow-ups from
-Oracle review; added D-13-{A,B} — prompt-enhancer follow-ups from Oracle
-review; added 9-10 — minor commit-message cleanups; reorganized priority
-table by category).
+**Last updated:** 2026-05-04 (PRs 7.5 / 7.6 / 7.7 merged; PR 7.8 opened
+as #1284; items #9 + #10 RESOLVED via the cleanup rebase that bundled
+into 7.8 prep; DR-1 unblocked now that PR #1258 has merged).
 
 ## Priority overview
 
@@ -21,7 +19,7 @@ table by category).
 | **2** | High | Fix pre-existing AbsMaxFP8 test failure | S | Self-contained quantization tech debt |
 | **VPO** | High | Decide `video_position_offset_sec` semantics (a vs b) | 30 min | Unblocks PR 7.6 state emission |
 | **D** | High | Implement `generate_async` (PR 7.10) | L | Closes Q-5/Q-9/PR-7.5 TODOs simultaneously; enables Dynamo backend; unblocks audio re-encode; enables `GpuPool.run_async()` migration (D-12-B) |
-| **DR-1** | High | Dreamverse: create `prompting/_internal_compat.py` shim + replace local `prompt_enhancer.py` (1933 LOC) | M (~150-200 LOC shim, replace upstream wiring) | Lets Dreamverse stop carrying a 1933-LOC fork once PR #1258 lands |
+| **DR-1** | High | Dreamverse: create `prompting/_internal_compat.py` shim + replace local `prompt_enhancer.py` (1933 LOC) — **PR #1258 has merged (`f673423b`); now actionable** | M (~150-200 LOC shim, replace upstream wiring) | Lets Dreamverse stop carrying a 1933-LOC fork |
 | **DR-2** | Med | Decide `cerebras_ifm` provider path: (a) public Literal + `CerebrasIFMProvider` shipped, OR (b) Dreamverse-side custom provider via `enhancer.register_provider(...)` | S (decision) + S-M (impl) | Resolves the cerebras_ifm gap left by PR #1258. Same item as legacy #3 below; DR-2 is the Dreamverse-side framing. |
 | **3** | Med | Add `cerebras_ifm` to `PromptEnhancerConfig.provider` Literal + provider | S-M | Public-side resolution if DR-2 picks (a) |
 | **4** | Med | Expose `layer_profile` on typed `engine.quantization` | M | Removes Dreamverse's `experimental["pipeline_config"]` dodge for stage profiles |
@@ -35,10 +33,10 @@ table by category).
 | **6** | Low | Audio attention quantization profile + test update | S | Future audio quant exploration |
 | **7** | Low | Schema parity inventory cleanup (env-driven prompt fields) | S-M | Long-term consistency |
 | **8** | Low | Stale `apps/web/test-results/` dir cleanup | trivial | Cosmetic |
-| **9** | Low | Commit-message cleanup: PR 8's 3 commits still have `[8/n] Improve API:` prefix (regex didn't match single-digit) | S | Cosmetic; will be visible when PR 8 is opened. Extend regex to `[\d+(\.\d+)?/n]`. |
-| **10** | Low | Commit-message cleanup: PR 7.8/7.9 commits have `streaming: streaming X` duplication | S | Cosmetic; will be visible when PR 7.8/7.9 are opened. Drop redundant word. |
 | **11** | Low | Promote LTX-2 prompt orchestration (locked segments, segment_prompts JSON shape, rollout id/label) to `fastvideo.entrypoints.streaming.prompt.ltx2_orchestration` | M | Resolves Q-2 from decisions-log when a second LTX-2-style consumer appears |
 | **~~Source-doc disposition~~** | ~~Med~~ | ~~Disposition of 7 untracked source docs~~ | ~~trivial~~ | ✅ **Resolved 2026-05-03** — moved into [source-archive/](source-archive/) |
+| **~~9~~** | ~~Low~~ | ~~Commit-message cleanup: PR 8's 3 commits still have `[8/n] Improve API:` prefix~~ | ~~S~~ | ✅ **Resolved 2026-05-04** — bundled into the will/api_7.8 prep rebase. PR 8's 3 commits now read `[type] streaming: ...` |
+| **~~10~~** | ~~Low~~ | ~~Commit-message cleanup: PR 7.8/7.9 commits have `streaming: streaming X` duplication~~ | ~~S~~ | ✅ **Resolved 2026-05-04** — bundled into the will/api_7.8 prep rebase. 3 commits dedup'd. |
 
 ---
 
@@ -417,51 +415,21 @@ run.
 
 **Effort:** Trivial.
 
-### Item #9: PR 8 commits — `[8/n] Improve API:` prefix slipped through cleanup
+### ~~Item #9~~ + ~~#10~~: Commit-message cleanups — ✅ Resolved 2026-05-04
 
-**Why:** During the PR-ref cleanup pass on `will/ltx2_sr_port`, the perl
-substitution regex `^\[(feat|...)\] \[\d+\.\d+\/n\] Improve API: ` only
-matched `[N.N/n]` (e.g. `[7.6/n]`). PR 8's three commits use `[8/n]`
-(single-digit, no decimal) and weren't caught:
+Both items resolved during the `will/api_7.8` prep rebase. A targeted
+conditional script (`/tmp/opencode/cleanup_subjects_v2.sh` — only amends
+when text actually changes) ran across 33 commits, modified 6:
 
-```
-[docs] [8/n] Improve API: OpenAI HTTP contract reference
-[docs] [8/n] Improve API: Dynamo native-backend integration reference
-[test] [8/n] Improve API: contract tests for Dreamverse + Dynamo shapes
-```
+- **#9 fix**: extended the regex from `\[\d+\.\d+/n\]` to
+  `\[\d+(\.\d+)?/n\]` so single-digit prefixes match. PR 8's 3 commits
+  now read `[type] streaming: ...` instead of `[type] [8/n] Improve API: ...`.
+- **#10 fix**: added second substitution `streaming: streaming X` →
+  `streaming: X`. PR 7.8 / 7.9 commits no longer have the duplication.
 
-These are on `will/api_8` (local-only), so it doesn't affect any open PR.
-
-**Action:** When PR 8 is opened, extend the regex to `\[\d+(\.\d+)?/n\]`
-and re-run the cleanup rebase on the affected commits, OR simply edit
-each by hand (only 3 commits).
-
-**Effort:** Small.
-
-**Dependencies:** Bundle with PR 8 prep.
-
-### Item #10: PR 7.8/7.9 commits — `streaming: streaming X` duplication
-
-**Why:** During the same PR-ref cleanup pass, the substitution turned
-`[7.8/n] Improve API: streaming auxiliaries (...)` into `streaming:
-streaming auxiliaries (...)` — the original subject already started with
-"streaming" so the prefix substitution duplicated the word. Three
-commits affected (one each on 7.8 + 7.9):
-
-```
-[feat] streaming: streaming auxiliaries (safety, rewrite, logger, mock)
-[test] streaming: streaming auxiliaries coverage
-[feat] streaming: streaming router (multi-replica load balancer)
-```
-
-These are on `will/api_7.8` / `will/api_7.9` (local-only).
-
-**Action:** When 7.8/7.9 are opened, drop the redundant "streaming"
-word from each subject. Or edit each by hand (only 3 commits).
-
-**Effort:** Small.
-
-**Dependencies:** Bundle with PR 7.8/7.9 prep.
+The conditional check skipped pre-commit-hook flakiness on no-op amends
+(unlike the earlier first attempt). All affected commits verified clean
+post-rebase.
 
 ### Item #11: Promote LTX-2 prompt orchestration to public (when 2nd consumer exists)
 
@@ -489,13 +457,13 @@ If you have unbounded time and want to maximize forward progress:
 1. **D-8 verify** (10 min) — eliminates uncertainty
 2. **D-12-A docstring** (trivial) — caveat the GpuPool API publicly
 3. **Item #2 AbsMaxFP8** (S) — clears tech debt
-4. **Item VPO video_position_offset_sec** (30 min) — unblocks PR 7.6
-5. **DR-1 + DR-2 Dreamverse migration** (M) — after PR #1258 merges; replaces 1700+ LOC of local fork
+4. **Item VPO video_position_offset_sec** (30 min) — unblocks PR 7.10 (since 7.6 has merged, this is now scoped to whatever consumer first reads the field)
+5. **DR-1 + DR-2 Dreamverse migration** (M) — **now unblocked since PR #1258 merged**; replaces 1700+ LOC of local fork
 6. **Item #4 layer_profile** (M) — closes Dreamverse quant escape hatch
 7. **Item #1 build_app routes** (M-L) — closes FE-compat
 8. **Item D generate_async** (L) — unlock PR; brings along D-12-B (run_async) + closes Q-5/Q-9/PR-7.5 TODOs
 9. **Item #5 typed quant_config carrier** (L+L) — final form
-10. **Items #6/#7/#8/#9/#10 + D-12-C/D-13-A/D-13-B** — cleanup polish
+10. **Items #6/#7/#8 + D-12-C/D-13-A/D-13-B + #11** — cleanup polish (#9, #10 resolved 2026-05-04)
 
 If you have a specific user goal (e.g. "ship `BE_FLAVOR=fastvideo`
 flavor end-to-end"), that goal dictates the order — read this list as a
