@@ -13,11 +13,12 @@
 
 set -e -x
 
-CONFIG="${CONFIG:-examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/fun_i2v_random_context.yaml}"
+CONFIG="${CONFIG:-examples/training/finetune/Wan2.1-Fun-1.3B-InP/soccernet_pcbas_w21_480/fun_i2v_random_context.yaml}"
 RUNTIME_VENV_DEFAULT="${RUNTIME_VENV:-/leonardo_work/AIFAC_P02_082/code/FastVideo/.venv-fa}"
 
 eval "$(
 "${RUNTIME_VENV_DEFAULT}/bin/python" - "$CONFIG" "$SLURM_JOB_NUM_NODES" <<'PY'
+import os
 import shlex
 import sys
 
@@ -49,6 +50,14 @@ def array(name, values):
     print(")")
 
 
+def data_path_arg(value):
+    if isinstance(value, (list, tuple)):
+        if not value:
+            raise SystemExit("paths.data_path must not be an empty list")
+        return os.pathsep.join(str(path) for path in value)
+    return value
+
+
 gpus_per_node = int(get("job", "gpus_per_node", 8))
 hsdp_replicate_dim = get("parallel", "hsdp_replicate_dim")
 if hsdp_replicate_dim is None:
@@ -64,6 +73,7 @@ assign("NUM_GPUS", gpus_per_node)
 
 model_path = get("paths", "model_path")
 data_path = get("paths", "data_path")
+data_path = data_path_arg(data_path)
 validation_file = get("paths", "validation_dataset_file")
 output_dir = get("paths", "output_dir")
 

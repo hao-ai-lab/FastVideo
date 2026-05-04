@@ -18,7 +18,10 @@ env:
 
 paths:
   model_path: weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers
-  data_path: data/crush-smol_processed_i2v_1_3b_inp/combined_parquet_dataset/
+  # W21-480 t2v latent cache: 480x832 / 49f / 16fps, latent [16, 13, 60, 104].
+  data_path:
+    - /leonardo_work/AIFAC_P02_082/data/latents_wan_v1/W21_480x832_49f_16fps
+    - /leonardo_work/AIFAC_P02_082/data/latents_pcbas_wan_v1/W21_480x832_49f_16fps
   validation_dataset_file: examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json
   output_dir: /leonardo_work/AIFAC_P02_082/.logs/fun_i2v_random_context
 
@@ -36,12 +39,12 @@ training:
   train_batch_size: 2
   train_sp_batch_size: 1
   gradient_accumulation_steps: 1
-  num_latent_t: 8
+  num_latent_t: 13
   min_condition_latents: 1
-  max_condition_latents: 4
+  max_condition_latents: 5
   num_height: 480
   num_width: 832
-  num_frames: 77
+  num_frames: 49
   dataloader_num_workers: 10
   training_cfg_rate: 0.1
   checkpoints_total_limit: 3

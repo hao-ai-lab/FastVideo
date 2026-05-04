@@ -179,6 +179,22 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
     assert t.dit_precision == "bf16"
 
 
+def test_data_path_preserves_list_form(tmp_path: Path) -> None:
+    data = _minimal_yaml()
+    data["training"] = {
+        "data": {
+            "data_path": ["/data/latents_a", "/data/latents_b"],
+        },
+    }
+
+    cfg = load_run_config(_write_yaml(tmp_path, data))
+
+    assert cfg.training.data.data_path == [
+        "/data/latents_a",
+        "/data/latents_b",
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Schema validation
 # ---------------------------------------------------------------------------

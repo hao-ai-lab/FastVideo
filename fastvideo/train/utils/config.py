@@ -308,6 +308,12 @@ def _build_training_config(
             if init_from is not None:
                 model_path = str(init_from)
 
+    data_path_raw = da.get("data_path", "") or ""
+    if isinstance(data_path_raw, list):
+        data_path = [str(path) for path in data_path_raw]
+    else:
+        data_path = str(data_path_raw)
+
     return TrainingConfig(
         distributed=DistributedConfig(
             num_gpus=num_gpus,
@@ -318,7 +324,7 @@ def _build_training_config(
             pin_cpu_memory=bool(d.get("pin_cpu_memory", False)),
         ),
         data=DataConfig(
-            data_path=str(da.get("data_path", "") or ""),
+            data_path=data_path,
             train_batch_size=int(da.get("train_batch_size", 1) or 1),
             dataloader_num_workers=int(da.get("dataloader_num_workers", 0) or 0),
             training_cfg_rate=float(da.get("training_cfg_rate", 0.0) or 0.0),

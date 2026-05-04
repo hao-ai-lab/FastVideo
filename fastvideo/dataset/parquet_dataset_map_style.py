@@ -2,6 +2,7 @@
 import os
 import pickle
 import random
+from collections.abc import Sequence
 from typing import Any
 
 import pyarrow as pa
@@ -20,6 +21,8 @@ from fastvideo.distributed import (get_sp_world_size, get_world_group,
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+
+DatasetPath = str | os.PathLike[str] | Sequence[str | os.PathLike[str]]
 
 
 class DP_SP_BatchSampler(Sampler[list[int]]):
@@ -94,7 +97,24 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
         return len(self.sp_group_local_indices) // self.batch_size
 
 
-def get_parquet_files_and_length(path: str):
+def _normalize_dataset_paths(path: DatasetPath) -> tuple[str, ...]:
+    if isinstance(path, (str, os.PathLike)):
+        raw_path = os.fspath(path).strip()
+        paths = raw_path.split(os.pathsep) if os.pathsep in raw_path else [raw_path]
+    elif isinstance(path, Sequence):
+        paths = [os.fspath(p).strip() for p in path]
+    else:
+        raise TypeError(
+            "Dataset path must be a path string, an os.PathLike object, "
+            "or a sequence of path strings.")
+
+    paths = [p for p in paths if p]
+    if not paths:
+        raise ValueError("Dataset path must contain at least one non-empty path.")
+    return tuple(paths)
+
+
+def _get_single_parquet_files_and_length(path: str):
     dataset_root = os.path.realpath(os.path.expanduser(path))
     # Check if cached info exists
     cache_dir = os.path.join(dataset_root, "map_style_cache")
@@ -203,6 +223,22 @@ def get_parquet_files_and_length(path: str):
     return file_names_sorted, lengths_sorted
 
 
+def get_parquet_files_and_length(path: DatasetPath):
+    dataset_roots = _normalize_dataset_paths(path)
+    if len(dataset_roots) == 1:
+        return _get_single_parquet_files_and_length(dataset_roots[0])
+
+    all_file_names = []
+    all_lengths = []
+    for dataset_root in dataset_roots:
+        file_names, lengths = _get_single_parquet_files_and_length(
+            dataset_root)
+        all_file_names.extend(file_names)
+        all_lengths.extend(lengths)
+
+    return tuple(all_file_names), tuple(all_lengths)
+
+
 def read_row_from_parquet_file(parquet_files: list[str], global_row_idx: int,
                                lengths: list[int]) -> dict[str, Any]:
     '''
@@ -268,7 +304,7 @@ class LatentsParquetMapStyleDataset(Dataset):
 
     def __init__(
         self,
-        path: str,
+        path: DatasetPath,
         batch_size: int,
         parquet_schema: pa.Schema,
         cfg_rate: float = 0.0,
@@ -284,8 +320,8 @@ class LatentsParquetMapStyleDataset(Dataset):
         self.seed = seed
         # Create a seeded random generator for deterministic CFG
         self.rng = random.Random(seed)
-        logger.info("Initializing LatentsParquetMapStyleDataset with path: %s",
-                    path)
+        logger.info("Initializing LatentsParquetMapStyleDataset with path(s): %s",
+                    _normalize_dataset_paths(path))
         self.parquet_files, self.lengths = get_parquet_files_and_length(path)
         self.batch = batch_size
         self.text_padding_length = text_padding_length
