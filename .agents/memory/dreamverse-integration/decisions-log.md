@@ -6,7 +6,7 @@ question/decision, rationale, current status.
 For implementation status see [pr-roadmap.md](pr-roadmap.md). For
 follow-up actions see [open-threads.md](open-threads.md).
 
-**Last updated:** 2026-05-04 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge).
+**Last updated:** 2026-05-04 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion + concrete-vs-Protocol scoping, Oracle review during #1284 review cycle).
 
 ## Status legend
 
@@ -86,6 +86,89 @@ keeps `VideoGenerator` policy-free.
 
 **Open thread it touches:** PR 7.10 (`open-threads.md` item D — generate_async)
 unblocks Alt C and is the natural place to land the API shape change.
+
+### D-14: Streaming auxiliaries (PR #1284) — cohesion + concrete-vs-Protocol scoping
+
+**Status:** ✅ Resolved (interim). Two polish items applied during review; one
+operational caveat tracked.
+**Source:** Oracle review on 2026-05-04, during PR #1284 review cycle.
+
+**Question:** Is PR #1284's bundle of 4 streaming-server auxiliary modules
+(`prompt/safety.py`, `prompt/rewrite.py`, `session_logger.py`,
+`mock_server.py`) correctly scoped? Should `mock_server` live in production
+module path? Should `PromptSafetyFilter` be a Protocol? Should the bundle
+have been split into 4 PRs?
+
+| Alt | Approach | Verdict |
+|---|---|---|
+| A | Status quo — single PR, 4 modules under `streaming/`, mock_server in production path, concrete safety filter | ✅ **Keep** |
+| B | Split into 4 separate PRs | ❌ Process overhead, not architectural improvement |
+| C | Move `mock_server.py` into `tests/` | ❌ Would reduce discoverability + install-time usability of `python -m fastvideo.entrypoints.streaming.mock_server` |
+| D | Move `session_logger.py` to `streaming/observability/` (or top-level `fastvideo/observability/`) | ❌ Premature — currently session-shaped + streaming-specific; promote when a non-streaming consumer appears |
+| E | Convert `PromptSafetyFilter` to Protocol (like `LLMProvider`) | ❌ Premature abstraction — only one classifier exists; small duck-typed surface preserves future Protocol introduction without breaking the concrete |
+| F | Convert `MockGenerator` to Protocol | ❌ Same — small duck-typed surface; no second mock generator exists |
+
+**Decision:** Alt A — keep current shape. Apply two polish items from
+Oracle's review before merge.
+
+**Rationale:**
+
+- "Streaming-server auxiliaries" is cohesive enough at 730 LOC with
+  isolated modules + tests. Each module has independent code path but
+  shared deployment context (the streaming server boots them all).
+- `mock_server.py` in production path is a strength: reuses
+  `build_app()` for protocol parity. Hiding it under `tests/` would lose
+  `python -m fastvideo.entrypoints.streaming.mock_server` CLI access for
+  FE devs.
+- Concrete `PromptSafetyFilter` matches "ship what we have, abstract
+  later" pattern. Internal had multi-classifier composition; public
+  ships single + leaves chaining as a Dreamverse-side concern (per D-2).
+- Same pattern for `MockGenerator`: small duck-typed `_GeneratorLike`
+  surface lets a second mock implementation drop in without inheritance.
+- `threading.Lock` (not `asyncio.Lock`) in `session_logger.py` is
+  correct — writes come from real encoder/control threads via
+  `run_in_executor`, not from coroutines directly. `asyncio.Lock` would
+  be the wrong primitive for cross-thread concurrency.
+
+**Pre-merge polishes applied (per Oracle):**
+
+| Polish | What | Why |
+|---|---|---|
+| 1 | Removed `RewriteOptions.user_system_prompt_override` | Inert public field — was declared but never threaded through to `enhancer.rewrite()`. Shipping unused public options is more likely to bite than any structural choice. Re-add when actually wired through. |
+| 2 | Sanitized `session_id` filename in `session_logger.SessionLogger._get_file()` | Defense-in-depth: today session_id is server-generated UUID, but a future code path that accepts client-supplied ids would otherwise allow path traversal via `../`. Added `_FILENAME_SANITIZE_RE = re.compile(r"[^A-Za-z0-9._-]")` + sub before `os.path.join`. |
+
+**Operational caveat tracked (not a code change):**
+
+- `SafetyDecision.UNAVAILABLE` is treated as `ALLOW` by callers — a
+  policy choice that's correct for an opt-in safety filter, but
+  callers should log loudly so operators know the filter is degraded.
+  Tracked as open-threads.md item #12.
+
+**Pre-merge review feedback (4 of 4 resolved on the GitHub PR):**
+
+| # | File:Line | Severity | Issue | Fix applied |
+|---|---|---|---|---|
+| 1 | `session_logger.py:57` | High | `log()` race vs `close()` — `KeyError` on `_locks[session_id]` | Atomic capture in `_get_file()`; master `_registry_lock`; `with lock, contextlib.suppress(ValueError):` |
+| 2 | `rewrite.py:71` | Medium | `re.compile()` in hot path | Module-level `_LEADING_MARKER_RE`, top-level `import re` |
+| 3 | `safety.py:105` | Medium | `_ensure_loaded()` race on concurrent fastText load | `_load_lock = threading.Lock()` + double-check pattern |
+| 4 | `pyproject.toml:145` | Medium | `streaming` extra missing `prompt-safety` | Added to aggregator |
+
+All 4 review threads marked resolved via GraphQL `resolveReviewThread`.
+
+**Action items (deferred):**
+
+- [ ] Track `SafetyDecision.UNAVAILABLE` log loudness in
+  open-threads.md item #12 — when streaming server starts using the
+  safety filter, ensure operator-visible logging on `UNAVAILABLE`
+  results
+- [ ] If a second safety classifier appears (Perspective API, Detoxify,
+  custom rules), promote `PromptSafetyFilter` to a Protocol — same
+  pattern as `LLMProvider` per D-13
+- [ ] If a second mock generator appears (different frame patterns,
+  different latency models), promote `MockGenerator` to a Protocol
+
+**Open thread it touches:** PR #1284 itself; future safety-classifier
+Protocol promotion; future observability module extraction.
 
 ### D-13: Prompt enhancer / `LLMProvider` abstraction shape — keep streaming-scoped
 
