@@ -121,6 +121,19 @@ upload_performance_artifacts() {
         fi
     }
 
+    _upload_raw_perf_results() {
+        local found=0
+        while IFS= read -r -d '' target; do
+            found=1
+            log "Found raw performance result: $target. Uploading to Buildkite..."
+            buildkite-agent artifact upload "$target"
+        done < <(find "$LOCAL_DIR" -path "*/results/perf_*.json" -print0)
+
+        if [ "$found" -eq 0 ]; then
+            log "No raw performance result artifacts found. This is expected when the performance job passed or failed before writing perf_*.json."
+        fi
+    }
+
     _cleanup_modal_volume() {
         log "Cleaning up perf_reports/ from Modal Volume..."
         if modal volume rm hf-model-weights "perf_reports/" --recursive; then
@@ -139,6 +152,7 @@ upload_performance_artifacts() {
     _download_reports || { _cleanup_local; return 1; }
     _upload_dashboard
     _upload_perf_summary
+    _upload_raw_perf_results
     _cleanup_modal_volume
     _cleanup_local
 }
