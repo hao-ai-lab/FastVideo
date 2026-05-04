@@ -8,7 +8,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from einops import rearrange
 
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.dataset.dataloader.schema import (pyarrow_schema_matrixgame)
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs

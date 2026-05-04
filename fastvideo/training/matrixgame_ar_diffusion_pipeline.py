@@ -7,7 +7,7 @@ from typing import Any, cast
 import torch
 import torch.nn.functional as F
 
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
@@ -31,12 +31,17 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = SelfForcingFlowMatchScheduler(
+        scheduler = SelfForcingFlowMatchScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift,
             sigma_min=0.0,
             extra_one_step=True,
         )
-        self.modules["scheduler"].set_timesteps(num_inference_steps=1000, training=True)
+        scheduler.set_timesteps(num_inference_steps=1000, training=True)
+        self.modules["scheduler"] = scheduler
+
+    def _log_training_info(self) -> None:
+        self.noise_scheduler = self.modules["scheduler"]
+        super()._log_training_info()
 
     def set_schemas(self):
         self.train_dataset_schema = pyarrow_schema_matrixgame

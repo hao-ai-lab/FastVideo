@@ -141,6 +141,7 @@ class MatrixGameModel(WanModel):
             "encoder_hidden_states_image": image_embeds,
             "keyboard_cond": training_batch.keyboard_cond,
             "mouse_cond": training_batch.mouse_cond,
+            "image_latents": cond_latents,
         }
         training_batch.unconditional_dict = dict(training_batch.conditional_dict)
         return training_batch
@@ -165,8 +166,17 @@ class MatrixGameModel(WanModel):
     ) -> dict[str, Any]:
         if text_dict is None:
             raise ValueError("text_dict cannot be None for MatrixGame")
+        hidden_states = noise_input.permute(0, 2, 1, 3, 4)
+        if hidden_states.shape[1] == 16:
+            cond_latents = text_dict.get("image_latents")
+            if cond_latents is None:
+                raise RuntimeError("MatrixGame requires image_latents in conditional_dict "
+                                   "when noise_input has 16 channels")
+            num_t = hidden_states.shape[2]
+            cond_latents = cond_latents[:, :, :num_t]
+            hidden_states = torch.cat([hidden_states, cond_latents], dim=1)
         return {
-            "hidden_states": noise_input.permute(0, 2, 1, 3, 4),
+            "hidden_states": hidden_states,
             "encoder_hidden_states": None,
             "timestep": timestep.to(device=self.device, dtype=torch.bfloat16),
             "encoder_hidden_states_image": text_dict["encoder_hidden_states_image"],
