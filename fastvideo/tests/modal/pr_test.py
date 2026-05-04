@@ -240,17 +240,35 @@ def run_lora_extraction_tests():
               ],
               volumes={"/root/data": model_vol})
 def run_performance_tests():
-    # Dashboard runs after compare_baseline regardless of regression result so
-    # the trend view is always available when investigating a failed gate.
+    # Dashboard runs whenever result JSONs exist, even if pytest failed after
+    # writing them. Raw perf_*.json results are exported for any failed
+    # performance job if result files exist; those artifacts are the reviewed
+    # source input for manual performance-baseline reseeds.
     run_test(
         "export HF_HOME='/root/data/.cache' && "
         "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
         "hf auth login --token $HF_API_KEY && "
-        "pytest ./fastvideo/tests/performance -vs && "
-        "{ python ./fastvideo/tests/performance/compare_baseline.py; "
+        "pytest ./fastvideo/tests/performance -vs; "
+        "PYTEST_RC=$?; "
+        "PERF_RC=0; "
+        "if [ $PYTEST_RC -eq 0 ]; then "
+        "python ./fastvideo/tests/performance/compare_baseline.py; "
         "PERF_RC=$?; "
+        "fi; "
+        "if ls ./fastvideo/tests/performance/results/perf_*.json >/dev/null 2>&1; then "
         "python ./fastvideo/tests/performance/dashboard.py || true; "
-        "exit $PERF_RC; }")
+        "fi; "
+        "FINAL_RC=$PYTEST_RC; "
+        "if [ $FINAL_RC -eq 0 ]; then FINAL_RC=$PERF_RC; fi; "
+        "if [ $FINAL_RC -ne 0 ]; then "
+        "if ls ./fastvideo/tests/performance/results/perf_*.json >/dev/null 2>&1; then "
+        "mkdir -p /root/data/perf_reports/results && "
+        "cp ./fastvideo/tests/performance/results/perf_*.json /root/data/perf_reports/results/; "
+        "else "
+        "echo 'No raw performance result JSON files found to export.'; "
+        "fi; "
+        "fi; "
+        "exit $FINAL_RC")
 
 
 @app.function(gpu="L40S:1",
