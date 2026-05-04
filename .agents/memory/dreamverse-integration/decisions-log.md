@@ -6,13 +6,86 @@ question/decision, rationale, current status.
 For implementation status see [pr-roadmap.md](pr-roadmap.md). For
 follow-up actions see [open-threads.md](open-threads.md).
 
-**Last updated:** 2026-05-03.
+**Last updated:** 2026-05-04 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge).
 
 ## Status legend
 
 - ✅ **Resolved** — decision made and implementation complete (or no implementation needed)
 - 🟡 **Deferred** — decision made, implementation deferred to a known PR
 - 🔴 **Open** — needs decision
+
+## Post-merge architecture decisions
+
+### D-12: `GpuPool` layer separation — keep distinct from `VideoGenerator`
+
+**Status:** ✅ Resolved (interim) + 🟡 Deferred long-term shape to PR 7.10.
+**Source:** Oracle review on 2026-05-04, post-PR-#1257 merge.
+
+**Question:** Should `fastvideo.entrypoints.streaming.GpuPool` (PR #1257) be
+folded into `fastvideo.entrypoints.video_generator.VideoGenerator`, or kept
+separate? Three alternatives were evaluated:
+
+| Alt | Approach | Verdict |
+|---|---|---|
+| A | Status quo — `VideoGenerator` (single inference call) and `GpuPool` (multi-session orchestration) stay separate | ✅ Correct as **interim** |
+| B | `VideoGenerator` absorbs the pool's role (`from_pretrained_pool`, `acquire/release/run`) | ❌ **Wrong layer.** Conflates execution with serving scheduler. |
+| C | `GpuPool` becomes a thin **session-aware async executor** over PR 7.10's `generate_async` | ✅ Correct **long-term destination** |
+
+**Decision:** Alt A as interim; evolve toward Alt C once PR 7.10 lands
+`generate_async`. Do NOT pursue Alt B.
+
+**Rationale:**
+
+- `VideoGenerator` is a library handle — "execute one request, possibly
+  across ranks via `MultiprocExecutor`/`RayDistributedExecutor`."
+- `GpuPool` is serving infrastructure — "schedule N concurrent sessions
+  across N independent replicas, with sticky session-to-GPU affinity for
+  cache locality."
+- These are different layers driven by different consumers (a Python
+  script doing `gen.generate(req)` vs. a WebSocket server with sticky
+  sessions). Folding them muddies both surfaces.
+
+**Key finding — `MultiprocExecutor` and `SubprocessGpuPool` are orthogonal,
+not redundant:**
+
+| Layer | Job | Granularity |
+|---|---|---|
+| `MultiprocExecutor` (`fastvideo/worker/`) | TP/SP shard ONE inference call across N GPU ranks | per-call |
+| `streaming_generator.py` (existing real-time path) | Per-frame streaming via `MultiprocExecutor.submit_step`/`get_result` | per-step within one generator |
+| `SubprocessGpuPool` (`entrypoints/streaming/`, PR #1257) | Serve N concurrent sessions on N replicas, sticky-bound | per-session |
+
+Both spawn subprocesses because **CUDA contexts demand process boundaries**,
+not because they solve the same problem. Sharing low-level lifecycle
+utilities (process spawn, queue plumbing, shutdown) is a future refactor;
+unifying the abstractions is wrong.
+
+**Sticky binding stays in the pool, NOT in `VideoGenerator`:** sticky
+session-to-GPU affinity is a serving policy driven by LTX-2's per-GPU
+continuation cache (last-9-decoded-frames + audio-latents). Different
+consumers want different policies — stateless OpenAI HTTP wants
+per-request leasing; LTX-2 streaming wants sticky affinity; per-frame
+real-time streaming wants a continuous queue. Keeping policy in the pool
+keeps `VideoGenerator` policy-free.
+
+**Specific risks flagged in PR #1257 (already merged):**
+
+| Risk | Mitigation (when relevant) |
+|---|---|
+| `GpuPool.run() -> Any` is sync — fine for whole-segment dispatch, blocks on cancellation | Replace with `run_async() -> AsyncIterator[VideoEvent]` in PR 7.10 cycle (`generate_async` makes this trivial) |
+| `PoolAssignment.gpu_id: int` assumes one-GPU-per-worker | Don't lock as public API. Future may need `device_ids: list[int]` for topology-aware pooling (one worker = group of GPUs running internal `MultiprocExecutor`) |
+| `GpuPool` could be documented as the canonical FastVideo serving API | Mark as **experimental / server-internal** in docstring until PR 7.10 lands. Don't include in user-facing API docs yet |
+| Memory: N processes = N model replicas (~10-50 GB each) | Expected for concurrent serving with crash isolation. CUDA IPC weight sharing loses isolation; CPU-shared-memory loading helps host RAM not device. Real scalable path is topology-aware pooling later. |
+
+**Action items (carried into post-7.10 cycle):**
+
+- [ ] Update `GpuPool` ABC docstring to note "API may change post-PR-7.10"
+- [ ] Plan to replace `run()` with `run_async() -> AsyncIterator[VideoEvent]` in PR 7.10 cycle
+- [ ] Don't promote `gpu_id: int` to public API; revisit shape post-7.10
+- [ ] Consider clarifying field naming (e.g. `worker_id` is the stable identifier; `gpu_id` is current-impl detail)
+- [ ] When opening 7.10's PR, have it consume `generate_async` from `GpuPool.run_async` end-to-end
+
+**Open thread it touches:** PR 7.10 (`open-threads.md` item D — generate_async)
+unblocks Alt C and is the natural place to land the API shape change.
 
 ## D-decisions (from `dreamverse_review.md`, Apr 26)
 
