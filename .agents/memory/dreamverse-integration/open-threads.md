@@ -6,7 +6,11 @@ recommended next action.
 For why each item is open see [decisions-log.md](decisions-log.md). For
 PR-level context see [pr-roadmap.md](pr-roadmap.md).
 
-**Last updated:** 2026-05-03.
+**Last updated:** 2026-05-04 (added DR-1/DR-2 — Dreamverse migration to
+public prompt enhancer; added D-12-{A,B,C} — GpuPool follow-ups from
+Oracle review; added D-13-{A,B} — prompt-enhancer follow-ups from Oracle
+review; added 9-10 — minor commit-message cleanups; reorganized priority
+table by category).
 
 ## Priority overview
 
@@ -16,14 +20,24 @@ PR-level context see [pr-roadmap.md](pr-roadmap.md).
 | **1** | High | Migrate `/healthz`+`/readyz`+`/status` into FastVideo `build_app` | M-L | Closes BE_FLAVOR=fastvideo FE-compatibility; closes streaming-upstream contract debt |
 | **2** | High | Fix pre-existing AbsMaxFP8 test failure | S | Self-contained quantization tech debt |
 | **VPO** | High | Decide `video_position_offset_sec` semantics (a vs b) | 30 min | Unblocks PR 7.6 state emission |
-| **D** | High | Implement `generate_async` (PR 7.10) | L | Closes Q-5/Q-9/PR-7.5 TODOs simultaneously; enables Dynamo backend; unblocks audio re-encode |
-| **3** | Med | Add `cerebras_ifm` to PromptEnhancerConfig provider Literal + provider | S-M | Closes provider-API gap PR 7.7 left for Dreamverse |
+| **D** | High | Implement `generate_async` (PR 7.10) | L | Closes Q-5/Q-9/PR-7.5 TODOs simultaneously; enables Dynamo backend; unblocks audio re-encode; enables `GpuPool.run_async()` migration (D-12-B) |
+| **DR-1** | High | Dreamverse: create `prompting/_internal_compat.py` shim + replace local `prompt_enhancer.py` (1933 LOC) | M (~150-200 LOC shim, replace upstream wiring) | Lets Dreamverse stop carrying a 1933-LOC fork once PR #1258 lands |
+| **DR-2** | Med | Decide `cerebras_ifm` provider path: (a) public Literal + `CerebrasIFMProvider` shipped, OR (b) Dreamverse-side custom provider via `enhancer.register_provider(...)` | S (decision) + S-M (impl) | Resolves the cerebras_ifm gap left by PR #1258. Same item as legacy #3 below; DR-2 is the Dreamverse-side framing. |
+| **3** | Med | Add `cerebras_ifm` to `PromptEnhancerConfig.provider` Literal + provider | S-M | Public-side resolution if DR-2 picks (a) |
 | **4** | Med | Expose `layer_profile` on typed `engine.quantization` | M | Removes Dreamverse's `experimental["pipeline_config"]` dodge for stage profiles |
 | **5** | Med | Design typed `dit_config.quant_config` carrier | L design + L impl | Removes broader `experimental["pipeline_config"]` escape hatch |
 | **SBS** | Med | `SessionStore` / `BlobStore` lifecycle policy | M design | Needed in PR 7.5 design pass |
+| **D-12-A** | Med | Update `GpuPool` ABC docstring: mark "API may change post-PR-7.10; experimental / server-internal" | trivial | Prevents accidental promotion of streaming-internal API to framework-level |
+| **D-12-B** | Med | Replace `GpuPool.run() -> Any` with `run_async() -> AsyncIterator[VideoEvent]` in PR 7.10 cycle | M | Closes the streaming-server cancellation TODO; converges with `generate_async` |
+| **D-13-A** | Med | Document `fastvideo.entrypoints.streaming.prompt.*` in user-facing docs as "streaming-server scoped"; avoid framework-level framing | trivial (docs only) | Keeps future move to `fastvideo.prompt.*` cheap |
+| **D-13-B** | Low | Add optional `client_factory` parameter to `LLMProvider` for `httpx.AsyncClient` pooling | S | Only if metrics show connect/TLS overhead is meaningful |
+| **D-12-C** | Low | Avoid locking `PoolAssignment.gpu_id: int` as public; rename to `worker_id` (already exists) or add `device_ids: list[int]` for topology-aware pooling | S | Future multi-GPU-per-worker refactor stays cheap |
 | **6** | Low | Audio attention quantization profile + test update | S | Future audio quant exploration |
 | **7** | Low | Schema parity inventory cleanup (env-driven prompt fields) | S-M | Long-term consistency |
 | **8** | Low | Stale `apps/web/test-results/` dir cleanup | trivial | Cosmetic |
+| **9** | Low | Commit-message cleanup: PR 8's 3 commits still have `[8/n] Improve API:` prefix (regex didn't match single-digit) | S | Cosmetic; will be visible when PR 8 is opened. Extend regex to `[\d+(\.\d+)?/n]`. |
+| **10** | Low | Commit-message cleanup: PR 7.8/7.9 commits have `streaming: streaming X` duplication | S | Cosmetic; will be visible when PR 7.8/7.9 are opened. Drop redundant word. |
+| **11** | Low | Promote LTX-2 prompt orchestration (locked segments, segment_prompts JSON shape, rollout id/label) to `fastvideo.entrypoints.streaming.prompt.ltx2_orchestration` | M | Resolves Q-2 from decisions-log when a second LTX-2-style consumer appears |
 | **~~Source-doc disposition~~** | ~~Med~~ | ~~Disposition of 7 untracked source docs~~ | ~~trivial~~ | ✅ **Resolved 2026-05-03** — moved into [source-archive/](source-archive/) |
 
 ---
@@ -132,6 +146,7 @@ field (PR 7.6 branch is ready, not yet PR'd).
 - Q-9: Dynamo progress passthrough (deferred)
 - PR 7.5's mid-segment cancellation TODO
 - Unblocks Dynamo native backend integration
+- **D-12-B**: enables `GpuPool.run() -> run_async() -> AsyncIterator[VideoEvent]` migration
 
 **Action:** See [streaming-server.md](streaming-server.md) "PR 7.10 — the
 unlock PR" section for scoping.
@@ -147,28 +162,78 @@ unlock PR" section for scoping.
   `VideoPartialEvent`/`VideoFinalEvent`
 - `fastvideo/entrypoints/streaming/server.py` — consume `generate_async`,
   remove TODO markers
+- `fastvideo/entrypoints/streaming/gpu_pool.py` — add `run_async()`
+  forwarding events from worker to caller
 - New `fastvideo/tests/entrypoints/test_generate_async.py`
 - New `fastvideo/tests/contract/test_dynamo_shape.py` (already in PR 8)
+
+### Item DR-1: Dreamverse — replace local `prompt_enhancer.py` with public + compat shim
+
+**Why:** Today Dreamverse carries `Dreamverse/server/prompt_enhancer.py`
+(1933 LOC) — a local copy/derivative of the FastVideo-internal version.
+After PR #1258 merges, Dreamverse should switch to the public
+`fastvideo.entrypoints.streaming.prompt.PromptEnhancer` and delete most
+of the local module.
+
+**Migration shape:**
+
+1. **Create** `Dreamverse/server/prompting/_internal_compat.py` (~150-200 LOC):
+   - Wraps public `PromptEnhancer.enhance()` → returns `EnhanceResult` shape Dreamverse expects
+   - Wraps public `PromptEnhancer.auto_extend()` — JSON-parses `LLMResponse.content` into `{"next_prompt": "..."}`
+   - Wraps public `PromptEnhancer.rewrite()` — JSON-parses into `{"segment_prompts": [...]}` with lenient fallback for malformed JSON
+   - Layers locked-segment + rollout_id + rollout_label metadata back on top
+2. **Update** `Dreamverse/server/runtime.py + main.py` — replace `from prompt_enhancer import PromptEnhancer` with `from prompting._internal_compat import PromptEnhancer`
+3. **Delete most of** `Dreamverse/server/prompt_enhancer.py` (1933 LOC). Keep only the bits that don't have a public equivalent:
+   - Race-based parallel fallback (`_run_provider_race`) — Dreamverse-specific tail-latency optimization
+   - `cerebras_ifm` provider — pending DR-2 decision
+   - Multi-classifier prompt safety (NSFW + hate-speech chained) — public ships single classifier
+4. **Tests** — verify Dreamverse session controllers still see the expected response shapes through the shim
+
+**Effort:** Medium (~150-200 LOC shim + replace upstream wiring + delete 1700+ LOC local module + test fixture updates).
+
+**Dependencies:**
+- PR #1258 must merge first (publishes `fastvideo.entrypoints.streaming.prompt.*`)
+- DR-2 informs the cerebras_ifm path
+
+**Files:**
+- New: `Dreamverse/server/prompting/_internal_compat.py`
+- Modified: `Dreamverse/server/runtime.py`, `Dreamverse/server/main.py`
+- Mostly deleted: `Dreamverse/server/prompt_enhancer.py`
 
 ---
 
 ## Medium priority
 
+### Item DR-2: Decide `cerebras_ifm` provider path
+
+**Why:** Public PR #1258's `PromptEnhancerConfig.provider` is
+`Literal["cerebras", "groq"]`. Internal supports `"cerebras_ifm"` (the
+Cerebras IFM API endpoint with different auth). Dreamverse needs
+`cerebras_ifm` working post-migration.
+
+Two options:
+
+| Option | Approach | Pros | Cons |
+|---|---|---|---|
+| **(a) Public** | Add `"cerebras_ifm"` to public Literal + ship `CerebrasIFMProvider` in `fastvideo/entrypoints/streaming/prompt/providers/cerebras_ifm.py` | Discoverable; users with IFM access can use typed config | Adds ~50 LOC + Literal extension to public surface |
+| **(b) Dreamverse-side** | Implement `CerebrasIFMProvider` Dreamverse-side as a custom `LLMProvider`, register via `enhancer.register_provider(CerebrasIFMProvider())` | Zero public surface change; private endpoint stays private | Slightly more boilerplate Dreamverse-side; not surfaced to non-Dreamverse users |
+
+**Recommendation:** Option (b) is more contained. Option (a) is more
+discoverable. Default to (b) unless there's a third-party user who needs
+IFM access. The Dreamverse-side PR carrying DR-1 is the natural place to
+make this decision.
+
+**Effort:** Small (decision) + Small-Medium (implementation).
+
+**Dependencies:** DR-1 (compat shim creation).
+
 ### Item #3: `cerebras_ifm` provider in public Literal
 
-**Why:** Public typed `PromptEnhancerConfig.provider` is
-`Literal["cerebras", "groq"]`. Internal supports `"cerebras_ifm"`
-(`config.py:143`). The `streaming_demo.yaml` defaults to `"cerebras"`.
+**Why:** Same item as DR-2 from the public-side framing. If DR-2 picks
+option (a), this is the implementation. If DR-2 picks option (b), this
+item is closed without implementation.
 
-For agents that need `cerebras_ifm`, the `dreamverse-server` flavor
-respects `FASTVIDEO_PROMPT_PROVIDER` env var (legacy path);
-`fastvideo serve --config` does not currently expose it.
-
-**Action:**
-1. Extend Literal in [`fastvideo/api/schema.py`](file:///home/william5lin/FastVideo/fastvideo/api/schema.py)
-2. Implement provider in
-   `fastvideo/entrypoints/streaming/prompt/providers/cerebras_ifm.py`
-3. Tests + register
+**Action:** See DR-2.
 
 **Effort:** S-M.
 
@@ -222,9 +287,99 @@ explicitly in PR 7.5's design.
 
 **Effort:** Medium design + small implementation.
 
+### Item D-12-A: Update `GpuPool` ABC docstring — mark experimental
+
+**Why:** Per D-12 in [decisions-log.md](decisions-log.md), `GpuPool`
+should be documented as "API may change post-PR-7.10; experimental /
+server-internal" to prevent accidental promotion of streaming-internal
+API to framework-level. PR #1257 merged without this caveat.
+
+**Action:** Edit
+[`fastvideo/entrypoints/streaming/gpu_pool.py`](file:///home/william5lin/FastVideo/fastvideo/entrypoints/streaming/gpu_pool.py)
+class docstring on `GpuPool` ABC. Add a note: "API may change post-PR-7.10
+when run_async() lands; treat as server-internal for now."
+
+**Effort:** Trivial.
+
+**Dependencies:** None.
+
+### Item D-12-B: Replace `GpuPool.run() -> Any` with `run_async() -> AsyncIterator[VideoEvent]`
+
+**Why:** Per D-12, this is the canonical evolution post-PR-7.10. Closes
+the streaming server's cancellation TODO and converges the streaming +
+OpenAI + Dynamo consumers on a single async API.
+
+**Action:** As part of PR 7.10 cycle:
+1. Add `GpuPool.run_async(session_id, request) -> AsyncIterator[VideoEvent]`
+2. Worker forwards events through `result_queue` with type discriminator
+3. Streaming server replaces `await pool.run(...)` with `async for event in pool.run_async(...)`
+4. Sync `run()` becomes a thin compat wrapper that collects events and returns the final
+5. Cancellation propagates: client disconnect → `asyncio.CancelledError` → worker stops mid-step
+
+**Effort:** Medium. Adds ~50-100 LOC + tests.
+
+**Dependencies:** Item D (PR 7.10 — `generate_async` on `VideoGenerator`).
+
+### Item D-13-A: Document `streaming/prompt/*` as streaming-scoped
+
+**Why:** Per D-13 in [decisions-log.md](decisions-log.md), the prompt
+enhancer is currently scoped to streaming-server use even though the
+abstraction is general. Phrase user-facing docs as "streaming-server
+prompt enhancement" to keep future move to `fastvideo.prompt.*` cheap.
+
+**Action:** When PR 12 (docs migration) is written, the prompt enhancer
+section should:
+- Be titled "Streaming Server Prompt Enhancement", not "Prompt API"
+- Note the 3 fixed operations (`enhance` / `auto_extend` / `rewrite`) are
+  shaped by LTX-2 streaming session needs
+- Note that consumers wanting custom prompt operations can use
+  `provider.complete()` directly with their own LLMRequest
+- Avoid `from fastvideo import LLMProvider` exports until a second
+  consumer exists
+
+**Effort:** Trivial (docs only).
+
+**Dependencies:** PR 12 (docs migration).
+
 ---
 
 ## Low priority
+
+### Item D-13-B: Optional `client_factory` parameter for `httpx.AsyncClient` pooling
+
+**Why:** Today `_openai_compat.py` instantiates `httpx.AsyncClient` per
+call (no connection pooling). Reviewer flagged inefficient. Team chose
+simplicity for the expected scale (~6-10 enhancer calls per LTX-2
+session). If real-world metrics show connect/TLS overhead is meaningful,
+add an optional `client_factory: Callable[[], httpx.AsyncClient] | None`
+parameter to providers so they can share a pool.
+
+**Action:** Only when metrics justify. Add `client_factory=None` parameter
+to `CerebrasProvider` / `GroqProvider` constructors and pass through to
+`complete_openai_compatible()`. Default to current per-call behavior.
+
+**Effort:** Small.
+
+**Dependencies:** None blocking; only act on real perf data.
+
+### Item D-12-C: Avoid locking `PoolAssignment.gpu_id: int` as public
+
+**Why:** Today `PoolAssignment` exposes `gpu_id: int`, assuming
+one-GPU-per-worker. Future topology-aware pooling may need
+`device_ids: list[int]` (one worker = group of GPUs running internal
+`MultiprocExecutor`). Don't freeze the int field as public API.
+
+**Action:**
+- Treat `gpu_id` as a current-impl detail; prefer `worker_id` (already
+  exists, is stable identifier)
+- When a worker actually spans multiple GPUs, add
+  `PoolAssignment.device_ids: list[int]` and let `gpu_id` be `device_ids[0]`
+  for backward compat
+- Or rename to `gpu_id` → `device_id` with deprecation alias
+
+**Effort:** Small (1 field rename + alias).
+
+**Dependencies:** Driven by an actual future "one worker = many GPUs" use case. Don't act preemptively.
 
 ### Item #6: Audio attention quantization profile
 
@@ -262,6 +417,69 @@ run.
 
 **Effort:** Trivial.
 
+### Item #9: PR 8 commits — `[8/n] Improve API:` prefix slipped through cleanup
+
+**Why:** During the PR-ref cleanup pass on `will/ltx2_sr_port`, the perl
+substitution regex `^\[(feat|...)\] \[\d+\.\d+\/n\] Improve API: ` only
+matched `[N.N/n]` (e.g. `[7.6/n]`). PR 8's three commits use `[8/n]`
+(single-digit, no decimal) and weren't caught:
+
+```
+[docs] [8/n] Improve API: OpenAI HTTP contract reference
+[docs] [8/n] Improve API: Dynamo native-backend integration reference
+[test] [8/n] Improve API: contract tests for Dreamverse + Dynamo shapes
+```
+
+These are on `will/api_8` (local-only), so it doesn't affect any open PR.
+
+**Action:** When PR 8 is opened, extend the regex to `\[\d+(\.\d+)?/n\]`
+and re-run the cleanup rebase on the affected commits, OR simply edit
+each by hand (only 3 commits).
+
+**Effort:** Small.
+
+**Dependencies:** Bundle with PR 8 prep.
+
+### Item #10: PR 7.8/7.9 commits — `streaming: streaming X` duplication
+
+**Why:** During the same PR-ref cleanup pass, the substitution turned
+`[7.8/n] Improve API: streaming auxiliaries (...)` into `streaming:
+streaming auxiliaries (...)` — the original subject already started with
+"streaming" so the prefix substitution duplicated the word. Three
+commits affected (one each on 7.8 + 7.9):
+
+```
+[feat] streaming: streaming auxiliaries (safety, rewrite, logger, mock)
+[test] streaming: streaming auxiliaries coverage
+[feat] streaming: streaming router (multi-replica load balancer)
+```
+
+These are on `will/api_7.8` / `will/api_7.9` (local-only).
+
+**Action:** When 7.8/7.9 are opened, drop the redundant "streaming"
+word from each subject. Or edit each by hand (only 3 commits).
+
+**Effort:** Small.
+
+**Dependencies:** Bundle with PR 7.8/7.9 prep.
+
+### Item #11: Promote LTX-2 prompt orchestration to public (when 2nd consumer exists)
+
+**Why:** Per Q-2 in [decisions-log.md](decisions-log.md) and D-13's
+"missing alternative", the LTX-2-specific orchestration (locked
+segments, segment_prompts JSON shape, rollout id/label, lenient JSON
+parsing) currently stays Dreamverse-side per DR-1. If a second
+LTX-2-style consumer appears (e.g. another video model with multi-segment
+continuation needing the same prompt orchestration), promote this layer
+to `fastvideo.entrypoints.streaming.prompt.ltx2_orchestration`.
+
+**Action:** Wait for a second consumer to materialize. Until then, the
+orchestration stays in Dreamverse's `_internal_compat.py` shim (DR-1).
+
+**Effort:** Medium when triggered.
+
+**Dependencies:** A second consumer.
+
 ---
 
 ## Recommended pull order
@@ -269,14 +487,15 @@ run.
 If you have unbounded time and want to maximize forward progress:
 
 1. **D-8 verify** (10 min) — eliminates uncertainty
-2. **Item #2 AbsMaxFP8** (S) — clears tech debt
-3. **Item VPO video_position_offset_sec** (30 min) — unblocks PR 7.6
-4. **Item #3 cerebras_ifm** (S-M) — closes Dreamverse provider gap
-5. **Item #4 layer_profile** (M) — closes Dreamverse quant escape hatch
-6. **Item #1 build_app routes** (M-L) — closes FE-compat
-7. **Item D generate_async** (L) — unlock PR
-8. **Item #5 typed quant_config carrier** (L+L) — final form
-9. **Items #6/#7/#8** — cleanup
+2. **D-12-A docstring** (trivial) — caveat the GpuPool API publicly
+3. **Item #2 AbsMaxFP8** (S) — clears tech debt
+4. **Item VPO video_position_offset_sec** (30 min) — unblocks PR 7.6
+5. **DR-1 + DR-2 Dreamverse migration** (M) — after PR #1258 merges; replaces 1700+ LOC of local fork
+6. **Item #4 layer_profile** (M) — closes Dreamverse quant escape hatch
+7. **Item #1 build_app routes** (M-L) — closes FE-compat
+8. **Item D generate_async** (L) — unlock PR; brings along D-12-B (run_async) + closes Q-5/Q-9/PR-7.5 TODOs
+9. **Item #5 typed quant_config carrier** (L+L) — final form
+10. **Items #6/#7/#8/#9/#10 + D-12-C/D-13-A/D-13-B** — cleanup polish
 
 If you have a specific user goal (e.g. "ship `BE_FLAVOR=fastvideo`
 flavor end-to-end"), that goal dictates the order — read this list as a
@@ -298,3 +517,8 @@ When implementing any item above, evidence required:
 For NVFP4 touches: re-run `test_nvfp4_ltx2_wiring.py` +
 `test_typed_quant_flow.py` (CPU) + ideally a flashinfer-enabled path
 test (manual, not in CI).
+
+For Dreamverse-side items (DR-1, DR-2): re-run
+`Dreamverse/apps/web/npx playwright test e2e/preset-prompt-generation.spec.ts`
+end-to-end against the live BE+FE — this is the contract test that
+exercises the prompt enhancer through a real session.
