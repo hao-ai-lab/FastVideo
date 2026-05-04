@@ -191,3 +191,110 @@ def text_only_record_creator(text_name: str, text_embedding: np.ndarray,
         "caption": caption,
     }
     return record
+
+
+def matrixgame_ode_record_creator(
+        video_name: str,
+        clip_feature: np.ndarray,
+        first_frame_latent: np.ndarray,
+        trajectory_latents: np.ndarray,
+        trajectory_timesteps: np.ndarray,
+        pil_image: np.ndarray | None = None,
+        keyboard_cond: np.ndarray | None = None,
+        mouse_cond: np.ndarray | None = None,
+        caption: str = "") -> dict[str, Any]:
+    """Create a ODE trajectory record matching pyarrow_schema_matrixgame_ode_trajectory.
+
+    Args:
+        video_name: Base name/id for the sample.
+        clip_feature: CLIP image features.
+        first_frame_latent: First frame VAE latent.
+        trajectory_latents: Collected trajectory latents array.
+        trajectory_timesteps: Collected timesteps array.
+        pil_image: Optional PIL image array for validation.
+        keyboard_cond: Optional keyboard action array.
+        mouse_cond: Optional mouse action array.
+        caption: Optional caption.
+
+    Returns:
+        dict suitable for records_to_table(…, pyarrow_schema_matrixgame_ode_trajectory)
+    """
+    assert trajectory_latents is not None, "trajectory_latents is required"
+    assert trajectory_timesteps is not None, "trajectory_timesteps is required"
+    assert clip_feature is not None, "clip_feature is required"
+    assert first_frame_latent is not None, "first_frame_latent is required"
+
+    record = {
+        "id": video_name,
+        "file_name": video_name,
+        "caption": caption,
+        "media_type": "video",
+    }
+
+    # I2V features
+    record.update({
+        "clip_feature_bytes": clip_feature.tobytes(),
+        "clip_feature_shape": list(clip_feature.shape),
+        "clip_feature_dtype": str(clip_feature.dtype),
+    })
+
+    record.update({
+        "first_frame_latent_bytes": first_frame_latent.tobytes(),
+        "first_frame_latent_shape": list(first_frame_latent.shape),
+        "first_frame_latent_dtype": str(first_frame_latent.dtype),
+    })
+
+    # Optional PIL Image
+    if pil_image is not None:
+        record.update({
+            "pil_image_bytes": pil_image.tobytes(),
+            "pil_image_shape": list(pil_image.shape),
+            "pil_image_dtype": str(pil_image.dtype),
+        })
+    else:
+        record.update({
+            "pil_image_bytes": b"",
+            "pil_image_shape": [],
+            "pil_image_dtype": "",
+        })
+
+    # Actions
+    if keyboard_cond is not None:
+        record.update({
+            "keyboard_cond_bytes": keyboard_cond.tobytes(),
+            "keyboard_cond_shape": list(keyboard_cond.shape),
+            "keyboard_cond_dtype": str(keyboard_cond.dtype),
+        })
+    else:
+        record.update({
+            "keyboard_cond_bytes": b"",
+            "keyboard_cond_shape": [],
+            "keyboard_cond_dtype": "",
+        })
+
+    if mouse_cond is not None:
+        record.update({
+            "mouse_cond_bytes": mouse_cond.tobytes(),
+            "mouse_cond_shape": list(mouse_cond.shape),
+            "mouse_cond_dtype": str(mouse_cond.dtype),
+        })
+    else:
+        record.update({
+            "mouse_cond_bytes": b"",
+            "mouse_cond_shape": [],
+            "mouse_cond_dtype": "",
+        })
+
+    record.update({
+        "trajectory_latents_bytes": trajectory_latents.tobytes(),
+        "trajectory_latents_shape": list(trajectory_latents.shape),
+        "trajectory_latents_dtype": str(trajectory_latents.dtype),
+    })
+
+    record.update({
+        "trajectory_timesteps_bytes": trajectory_timesteps.tobytes(),
+        "trajectory_timesteps_shape": list(trajectory_timesteps.shape),
+        "trajectory_timesteps_dtype": str(trajectory_timesteps.dtype),
+    })
+
+    return record

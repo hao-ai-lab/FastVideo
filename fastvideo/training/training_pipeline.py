@@ -35,6 +35,7 @@ from fastvideo.distributed import (cleanup_dist_env_and_memory, get_local_torch_
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+from fastvideo.models.vision_utils import load_video
 from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch, LoRAPipeline, TrainingBatch)
 from fastvideo.platforms import current_platform
 from fastvideo.training.activation_checkpoint import (apply_activation_checkpointing)
@@ -80,6 +81,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         set_random_seed(fastvideo_args.seed)  # for lora param init
         super().__init__(model_path, fastvideo_args, required_config_modules, loaded_modules)  # type: ignore
         self.tracker = DummyTracker()
+        self.validation_ref_videos_logged = False
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError("create_pipeline_stages should not be called for training pipeline")
@@ -741,6 +743,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         local_main_process_only=False)
             step_videos: list[np.ndarray] = []
             step_captions: list[str] = []
+            step_ref_videos: list[str | None] = []
 
             step_audio: list[np.ndarray | None] = []
             step_sample_rates: list[int | None] = []
@@ -756,6 +759,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
                 assert batch.prompt is not None and isinstance(batch.prompt, str)
                 step_captions.append(batch.prompt)
+                step_ref_videos.append(validation_batch.get("ref_video"))
 
                 # Run validation inference
                 output_batch = self.validation_pipeline.forward(batch, training_args)
@@ -789,6 +793,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 # Global rank 0 collects results from all sp_group leaders
                 all_videos = step_videos  # Start with own results
                 all_captions = step_captions
+                all_ref_videos = step_ref_videos
                 all_audios = step_audio
                 all_sample_rates = step_sample_rates
 
@@ -797,11 +802,13 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
                     recv_videos = world_group.recv_object(src=src_rank)
                     recv_captions = world_group.recv_object(src=src_rank)
+                    recv_ref_videos = world_group.recv_object(src=src_rank)
                     recv_audios = world_group.recv_object(src=src_rank)
                     recv_sample_rates = world_group.recv_object(src=src_rank)
 
                     all_videos.extend(recv_videos)
                     all_captions.extend(recv_captions)
+                    all_ref_videos.extend(recv_ref_videos)
                     all_audios.extend(recv_audios)
                     all_sample_rates.extend(recv_sample_rates)
 
@@ -830,10 +837,24 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 if artifacts:
                     logs = {f"validation_videos_{num_inference_steps}_steps": artifacts}
                     self.tracker.log_artifacts(logs, global_step)
+                if not self.validation_ref_videos_logged:
+                    ref_artifacts = []
+                    for ref_filename, caption in zip(all_ref_videos, all_captions, strict=True):
+                        if ref_filename is None:
+                            continue
+                        ref_frames = np.stack([np.asarray(frame) for frame in load_video(ref_filename)], axis=0)
+                        ref_frames = np.ascontiguousarray(ref_frames.transpose(0, 3, 1, 2))
+                        video_artifact = self.tracker.video(ref_frames, caption=caption, fps=sampling_param.fps)
+                        if video_artifact is not None:
+                            ref_artifacts.append(video_artifact)
+                    if ref_artifacts:
+                        self.tracker.log_artifacts({"validation_ref_videos": ref_artifacts}, global_step)
+                        self.validation_ref_videos_logged = True
             elif self.rank_in_sp_group == 0:
                 # Other sp_group leaders send their results to global rank 0
                 world_group.send_object(step_videos, dst=0)
                 world_group.send_object(step_captions, dst=0)
+                world_group.send_object(step_ref_videos, dst=0)
                 world_group.send_object(step_audio, dst=0)
                 world_group.send_object(step_sample_rates, dst=0)
 

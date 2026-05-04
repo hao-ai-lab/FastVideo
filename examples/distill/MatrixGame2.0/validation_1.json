@@ -1,0 +1,15 @@
+{
+    "data": [
+        {
+            "caption": "00",
+            "image_path": "/home/hal-kaiqin/models/validation/images/00.png",
+            "ref_video": "/home/hal-kaiqin/models/validation/ref_videos/00.mp4",
+            "action_path": "/home/hal-kaiqin/models/validation/actions/00.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        }
+    ]
+}
