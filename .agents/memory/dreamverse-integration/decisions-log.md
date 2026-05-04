@@ -6,7 +6,7 @@ question/decision, rationale, current status.
 For implementation status see [pr-roadmap.md](pr-roadmap.md). For
 follow-up actions see [open-threads.md](open-threads.md).
 
-**Last updated:** 2026-05-04 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge).
+**Last updated:** 2026-05-04 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge).
 
 ## Status legend
 
@@ -86,6 +86,53 @@ keeps `VideoGenerator` policy-free.
 
 **Open thread it touches:** PR 7.10 (`open-threads.md` item D — generate_async)
 unblocks Alt C and is the natural place to land the API shape change.
+
+### D-13: Prompt enhancer / `LLMProvider` abstraction shape — keep streaming-scoped
+
+**Status:** ✅ Resolved (interim) + 🟡 Three deferred polishes after metrics or 2nd consumer.
+**Source:** Oracle review on 2026-05-04, pre-PR-#1258-merge.
+
+**Question:** Is PR #1258's `fastvideo.entrypoints.streaming.prompt.*` module
+correctly designed? Should it be (a) Protocol-based vs ABC, (b) under
+`streaming/` vs top-level `fastvideo.prompt.*`, (c) closed 3-op enum vs
+open `complete()` API?
+
+| Alt | Approach | Verdict |
+|---|---|---|
+| A | Status quo — `streaming/prompt/*`, Protocol provider, fixed 3 ops, lazy `httpx`, per-call `AsyncClient` | ✅ **Keep** |
+| B | Move to top-level `fastvideo.prompt.*` (decouple from streaming) | ❌ **Premature.** No second consumer exists yet. |
+| C | Convert `LLMProvider` Protocol → ABC with default impls + retry classification | ❌ **Wrong direction.** Biases extension toward OpenAI shape; `_openai_compat.py` already factors that as helper not inheritance. |
+
+**Decision:** Alt A as interim. Promote to Alt B only when a second
+non-streaming consumer (OpenAI server, batch generation, tooling) actually
+needs the prompt enhancer. Don't pursue Alt C.
+
+**Rationale:**
+
+- Public contract is tiny — `name: str` + `async complete(LLMRequest) -> LLMResponse`. ABC adds zero value.
+- `_openai_compat.py` is the right place for shared logic — helper, not base class. Anthropic / local / custom providers stay first-class.
+- The 3 ops (enhance / auto_extend / rewrite) are LTX-2 streaming concepts. `auto_extend` (continue prompt sequence) and `rewrite` (multi-line alternatives) come directly from session UX. Calling this "the FastVideo prompt API" misrepresents that.
+
+**Specific risks flagged in PR #1258 (already merged-pending review):**
+
+| Risk | Mitigation (when relevant) |
+|---|---|
+| API publicity — calling this "the FastVideo prompt API" before a second consumer exists | Document module as "streaming-server prompt enhancement" in user-facing docs; keep it nested under `entrypoints/streaming/` |
+| `httpx.AsyncClient` per-call (no connection pooling) | Acceptable for ~6-10 calls per LTX-2 session; LLM latency dominates. Add optional `client_factory` parameter LATER if metrics show connect overhead is meaningful. |
+| 3 fixed operations could constrain future generic use | Closed enum is right for application-level orchestration. Future generic consumers should either call `provider.complete()` directly, or get a thin separate enhancer that shares the provider/fallback machinery. |
+| `register_provider(priority=-1)` semantics rely on Python's negative-index `list.insert` | Cosmetic concern; docstring is clear. Could be tightened to explicit branch later. |
+| `runtime_checkable` Protocol with `name: str` instance attribute — static type checkers may miss missing `name` | Acceptable; runtime check via `isinstance(p, LLMProvider)` works for plugin discovery. |
+
+**Action items (deferred):**
+
+- [ ] Document `fastvideo.entrypoints.streaming.prompt.*` as streaming-scoped in user-facing docs (PR 12 docs migration); avoid promoting as framework-level
+- [ ] Add optional `client_factory` parameter to providers when metrics justify pooling
+- [ ] Plan future move to `fastvideo.prompt.*` (with import shim) when second non-streaming consumer materializes
+- [ ] Track Q-2 reactivation: promote LTX-2 prompt orchestration (locked segments, segment-prompts JSON parsing) to public `fastvideo.entrypoints.streaming.prompt.ltx2_orchestration` when a second LTX-2-style consumer appears
+
+**Open thread it touches:** Dreamverse migration (open-threads.md DR-1)
+will be the first real test of the public surface. Lessons learned there
+inform whether Alt B becomes feasible.
 
 ## D-decisions (from `dreamverse_review.md`, Apr 26)
 
