@@ -98,6 +98,8 @@ class LetterboxResizeVideo:
         if not _is_tensor_video_clip(clip):
             raise ValueError("clip should be a 4D torch.tensor")
         h, w = clip.size(-2), clip.size(-1)
+        if h == self.max_height and w == self.max_width:
+            return clip
         scale = min(self.max_height / h, self.max_width / w)
         new_h, new_w = int(round(h * scale)), int(round(w * scale))
         clip = resize(clip, (new_h, new_w), self.interpolation_mode)
