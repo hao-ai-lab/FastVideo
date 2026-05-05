@@ -11,7 +11,13 @@ streaming router with 4 gemini review fixes + 4 Oracle polish items
 applied — `select()` docstring rewrite, parallel pooled health probes,
 `RouterConfig.__post_init__` validation, FastAPI on_event→lifespan
 migration; D-15 added to decisions-log; #13/#14/#15 added — sticky
-routing extensibility, bridge backpressure, multi-primary semantics).
+routing extensibility, bridge backpressure, multi-primary semantics.
+Second-pass router polish committed as `a152cb77` on `will/api_7.9` /
+`40e265b8` on `will/ltx2_sr_port` — bridge cancellation hygiene,
+registry `UNKNOWN -> HEALTHY` immediate transition, httpx hard-fail,
+URL path/query/fragment/duplicate rejection, per-index YAML parser
+errors, explicit `websockets` `[streaming]` dep + 7 new test cases;
+D-16 added to decisions-log capturing these.).
 
 ## Priority overview
 
