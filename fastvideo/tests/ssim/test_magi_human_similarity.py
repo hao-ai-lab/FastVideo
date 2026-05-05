@@ -93,7 +93,7 @@ MAGI_HUMAN_TEST_PROMPTS = [
 
 
 @pytest.mark.parametrize("prompt", MAGI_HUMAN_TEST_PROMPTS)
-@pytest.mark.parametrize("attention_backend_name", ["TORCH_SDPA"])
+@pytest.mark.parametrize("attention_backend_name", ["FLASH_ATTN"])
 @pytest.mark.parametrize("model_id", list(MAGI_HUMAN_MODEL_TO_PARAMS.keys()))
 def test_magi_human_base_inference_similarity(
     prompt: str,

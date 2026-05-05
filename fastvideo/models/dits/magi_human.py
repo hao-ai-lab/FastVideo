@@ -337,7 +337,10 @@ class MagiAttention(nn.Module):
             head_size=cfg.head_dim,
             num_kv_heads=cfg.num_heads_kv,
             causal=False,
-            supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
+            supported_attention_backends=(
+                AttentionBackendEnum.FLASH_ATTN,
+                AttentionBackendEnum.TORCH_SDPA,
+            ),
         )
 
     def configure_local_attention(
