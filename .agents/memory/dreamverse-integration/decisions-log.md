@@ -6,7 +6,7 @@ question/decision, rationale, current status.
 For implementation status see [pr-roadmap.md](pr-roadmap.md). For
 follow-up actions see [open-threads.md](open-threads.md).
 
-**Last updated:** 2026-05-05 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion, Oracle review during #1284 review cycle; added D-15 — streaming router placement + sticky/active-active deferral, Oracle review during #1286 review cycle; added D-16 — streaming router polish round 2, second-pass review on top of D-15 covering bridge cancellation hygiene, registry state machine, httpx hard-fail, replica YAML parsing, and `websockets` dep; added D-17 — strategy reversal: abandon 6-PR split in favor of single mega-PR #1288 on `will/ltx2_sr_port`; added D-18 — Option B+ chosen: Dreamverse FE+product-server move into FastVideo as `apps/dreamverse/` subfolder while generic backend stays at `fastvideo.entrypoints.streaming.*`; integration-review.md deprecated, integration-plan.md is the executable migration plan).
+**Last updated:** 2026-05-05 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion, Oracle review during #1284 review cycle; added D-15 — streaming router placement + sticky/active-active deferral, Oracle review during #1286 review cycle; added D-16 — streaming router polish round 2, second-pass review on top of D-15 covering bridge cancellation hygiene, registry state machine, httpx hard-fail, replica YAML parsing, and `websockets` dep; added D-17 — strategy reversal: abandon 6-PR split in favor of single mega-PR #1288 on `will/ltx2_sr_port`; added D-18 — Option B+ chosen: Dreamverse FE+product-server move into FastVideo as `apps/dreamverse/` subfolder while generic backend stays at `fastvideo.entrypoints.streaming.*`; integration-review.md deprecated, integration-plan.md is the executable migration plan; added D-19 — D-18 executed: 5 commits land on `will/dreamverse-monorepo`, fix-up commits corrected the integration-plan's invalid "delete generic-merged, import public substitutes" assumption — generic-merged files carried product-local instead, e2e passes against migrated code with /proc-verified evidence).
 
 ## Status legend
 
@@ -15,6 +15,95 @@ follow-up actions see [open-threads.md](open-threads.md).
 - 🔴 **Open** — needs decision
 
 ## Post-merge architecture decisions
+
+### D-19: D-18 executed — Dreamverse migration on `will/dreamverse-monorepo`, generic-merged files carried product-local
+
+**Status:** ✅ Resolved 2026-05-05. 5 commits on top of `will/ltx2_sr_port` HEAD `fbd823df`. Branch pushed to origin at `c1fe5d4c`. e2e definitively passes.
+**Source:** Execution of [integration-plan.md](integration-plan.md) (D-18 plan), with one significant deviation surfaced by Oracle review.
+
+**Commits:**
+
+| SHA | Message |
+|---|---|
+| `08828d96` | `[feat] dreamverse-monorepo: Phase 1 — skeleton + tooling` |
+| `f3a863ba` | `[feat] dreamverse-monorepo: Phase 2 — backend move + import rewires` |
+| `876f7eb3` | `[feat] dreamverse-monorepo: Phase 3 — frontend + public assets` |
+| `1d47ede6` | `[fix] dreamverse-monorepo: carry generic-merged files product-local` |
+| `c1fe5d4c` | `[fix] dreamverse-monorepo: entrypoint + audio re-encode + verification` |
+
+Final stats: 164 files changed, +53294/-2 LOC, 31725 files under `apps/dreamverse/`.
+
+**Question:** [integration-plan.md](integration-plan.md) Phase 2 instructed "DELETE generic-merged files (`gpu_pool.py`, `av_streaming.py`, `worker_ipc.py`, `mock_server.py`, `session_init_image.py`, `session_logger.py`) from the Dreamverse copy and rewire imports to public `fastvideo.entrypoints.streaming.*` substitutes". The first execution attempt followed this instruction. Was that the right call?
+
+**Decision (forced by Oracle finding):** No. The "delete + import substitute" strategy assumed the public modules were API-compatible drop-ins for the Dreamverse-product modules. They are NOT. Public `fastvideo.entrypoints.streaming.GpuPool` is an abstract base class with `acquire/run/release/shutdown/health` semantics designed for a future Phase 4 streaming-runtime API. Dreamverse's product `GPUPool(gpu_ids).initialize()` has totally different shape (per-GPU subprocess workers with `slot.user_step / register_stream_queue / acquire(client_id, websocket) -> (gpu_id, slot)` semantics). Substituting one for the other made `apps/dreamverse/server/main.py:63` fail at boot with `TypeError: GpuPool() takes no arguments`.
+
+**Fix:** Carry all 7 generic-merged files (gpu_pool, av_streaming, worker_ipc, mock_server, session_init_image, session_logger, server_entry) into `apps/dreamverse/server/` as PRODUCT-LOCAL — same status as the rest of the Dreamverse server tree. Imports stay flat (`from gpu_pool import GPUPool`, etc.), matching Dreamverse's existing sys-path-injection convention. Public `fastvideo/entrypoints/streaming/*` reverts cleanly to its `fbd823df` state — `git diff fbd823df..c1fe5d4c -- fastvideo/entrypoints/streaming/` is empty.
+
+The "import public substitutes" promise becomes a future Phase 4 task: actually harmonize the APIs so Dreamverse can drop its product-local copies. Not in scope for this migration.
+
+**Why the e2e initially gave a false positive:**
+
+The first run of all 8 Playwright tests passed (5.1s) — Oracle caught that this was misleading. The `dreamverse-server` console script in `/home/william5lin/miniconda3/envs/fv-main/bin/dreamverse-server` was installed by a prior `pip install -e /home/william5lin/Dreamverse`, so `from server_entry import cli` resolved to `/home/william5lin/Dreamverse/server/...` (the canonical install), not `apps/dreamverse/server/...` (the migrated tree). The migrated code was never actually exercised.
+
+**Fix to entrypoint resolution** (in `c1fe5d4c`): wrapper scripts at `apps/dreamverse/scripts/dreamverse-server` (and `dreamverse-mock-server`) explicitly do:
+
+```bash
+#!/usr/bin/env bash
+REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+cd "${REPO_ROOT}/apps/dreamverse/server"
+exec "${REPO_ROOT}/.venv/bin/python" main.py "$@"
+```
+
+This guarantees the migrated tree is what runs. Verified end-to-end via `/proc/$PID/cwd = /home/william5lin/FastVideo/apps/dreamverse/server` during the second e2e run. All 8 Playwright tests pass against this confirmed-migrated backend.
+
+**Phase 0 environment prereqs (validated 2026-05-05):**
+
+- `flashinfer-python` in FastVideo `.venv` — required for NVFP4 path. Without it, model load fails with `ImportError: NVFP4 quantization requires flashinfer`.
+- `cerebras-cloud-sdk` and `openai` in `.venv` — required by the migrated prompt enhancer.
+- For B200 / sm_100a + gcc-15 conda toolchain: nvcc rejects host compiler. Workaround:
+  ```bash
+  CUDAHOSTCXX=/usr/bin/g++-13
+  NVCC_PREPEND_FLAGS="-ccbin /usr/bin/gcc-13 -allow-unsupported-compiler"
+  ```
+  Without these, flashinfer JIT compilation fails with `error: #error -- unsupported GNU version! gcc versions later than 14 are not supported!`.
+
+These are **operator-side prerequisites**, not migration code defects. Documented in `apps/dreamverse/README.md` and `docs/contributing/dreamverse-development.md`.
+
+**E2E evidence (live, post-fix-up):**
+
+```
+PID 179112 cwd: /home/william5lin/FastVideo/apps/dreamverse/server
+/healthz → 200 {"status":"ok","service":"ltx2-streaming-backend",...}
+/readyz  → 200 {"status":"ready","ready_gpu_workers":1,"total_gpus":1,...}
+GPU4 mem: 50.9 GiB (NVFP4 model loaded)
+
+Playwright (8/8 PASS in 5.1s):
+  ✓ backend-health/healthz returns ok via the next.js rewrite (32ms)
+  ✓ backend-health/readyz reports gpu pool state (11ms)
+  ✓ backend-health/status endpoint exposes gpu pool snapshot (12ms)
+  ✓ backend-health/prompt-system-config exposes operator-tunable prompts (15ms)
+  ✓ backend-health/curated presets endpoint serves a non-empty list (devtools only) (19ms)
+  ✓ frontend-shell/main page loads and exposes the FastVideo brand chip (1.4s)
+  ✓ frontend-shell/composer hydrates with curated preset cards (1.3s)
+  ✓ preset-prompt-generation/generates the first segment from a curated preset prompt (1.8s)
+```
+
+**Implications:**
+
+- The integration-plan.md is **partially superseded** by D-19 outcome:
+  - Phase 2's "DELETE generic-merged" prescription is invalid; replace with "carry product-local".
+  - Phase 0 prereqs need the gcc-13 / `NVCC_PREPEND_FLAGS` workaround documented for B200 hosts.
+  - Phase 4 (in a future PR) is now responsible for actually harmonizing public-vs-Dreamverse pool APIs so the carried product-local modules can be deleted.
+- `dreamverse-mock-server` script under `apps/dreamverse/scripts/` is the only canonical launcher. The conda env's legacy `/home/william5lin/miniconda3/envs/fv-main/bin/dreamverse-server` should NOT be used (it points at canonical Dreamverse repo).
+- The audio re-encode handling in `apps/dreamverse/server/video_generation.py` was carried per `c1fe5d4c`; verify the exact shape (restored from source vs deferred) when reading the commit.
+- Once this branch lands as a PR + merges, the Dreamverse repo can be archived per [integration-plan.md](integration-plan.md) Phase 7.
+
+**Open follow-ups:**
+
+- Open a PR for `will/dreamverse-monorepo` (target main, base on `will/ltx2_sr_port` until #1288 merges).
+- Re-Oracle the post-fix-up state to confirm the prior FAIL is now PASS.
+- Eventually move audio re-encode into a public module (Phase 4) so the carried product file can be slimmed.
+- Eventually do real Phase 4 API harmonization between Dreamverse pool and public `fastvideo.entrypoints.streaming.GpuPool` so the 7 carried product files can be deleted.
 
 ### D-18: Option B+ — Dreamverse becomes `apps/dreamverse/` subfolder under FastVideo
 
