@@ -385,3 +385,12 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 written = self.dataset_writer.flush()
                 logger.info("Flushed %s samples to parquet", written)
                 num_processed_samples = 0
+
+        # Final flush at end of dataset: any buffered tables that didn't trip
+        # the flush_frequency threshold (or fell below samples_per_file) would
+        # otherwise be silently dropped. write_remainder=True spills the partial
+        # chunk into a final worker_0/ parquet so no clip is lost.
+        if hasattr(self, 'dataset_writer'):
+            written = self.dataset_writer.flush(write_remainder=True)
+            if written:
+                logger.info("Final flush: %s remaining samples to parquet", written)
