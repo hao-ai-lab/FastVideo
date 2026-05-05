@@ -22,7 +22,7 @@ paths:
   data_path:
     - /leonardo_work/AIFAC_P02_082/data/latents_wan_v1/W21_480x832_49f_16fps
     - /leonardo_work/AIFAC_P02_082/data/latents_pcbas_wan_v1/W21_480x832_49f_16fps
-  validation_dataset_file: examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json
+  validation_dataset_file: examples/training/finetune/Wan2.1-Fun-1.3B-InP/soccernet_pcbas_w21_480/validation.json
   output_dir: /leonardo_work/AIFAC_P02_082/.logs/fun_i2v_random_context
 
 parallel:
@@ -39,6 +39,9 @@ training:
   train_batch_size: 2
   train_sp_batch_size: 1
   gradient_accumulation_steps: 1
+  seed: 42
+  data_split: train
+  validation_split_ratio: 0.05
   num_latent_t: 13
   min_condition_latents: 1
   max_condition_latents: 5

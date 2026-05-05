@@ -102,6 +102,8 @@ array("model_args", [
 
 array("dataset_args", [
     "--data_path", data_path,
+    "--data_split", get("training", "data_split", "all"),
+    "--validation_split_ratio", get("training", "validation_split_ratio", 0.0),
     "--dataloader_num_workers", get("training", "dataloader_num_workers", 1),
 ])
 
@@ -113,6 +115,7 @@ array("training_args", [
     "--train_batch_size", get("training", "train_batch_size", 1),
     "--train_sp_batch_size", get("training", "train_sp_batch_size", 1),
     "--gradient_accumulation_steps", get("training", "gradient_accumulation_steps", 1),
+    "--seed", get("training", "seed", 42),
     "--num_latent_t", num_latent_t,
     "--min_condition_latents", min_cond,
     "--max_condition_latents", max_cond,

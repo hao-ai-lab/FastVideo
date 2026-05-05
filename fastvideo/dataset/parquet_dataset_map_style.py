@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import hashlib
 import os
 import pickle
 import random
@@ -23,6 +24,7 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 DatasetPath = str | os.PathLike[str] | Sequence[str | os.PathLike[str]]
+VALID_DATA_SPLITS = frozenset(("all", "train", "validation"))
 
 
 class DP_SP_BatchSampler(Sampler[list[int]]):
@@ -112,6 +114,56 @@ def _normalize_dataset_paths(path: DatasetPath) -> tuple[str, ...]:
     if not paths:
         raise ValueError("Dataset path must contain at least one non-empty path.")
     return tuple(paths)
+
+
+def _normalize_data_split(data_split: str) -> str:
+    normalized = (data_split or "all").strip().lower()
+    if normalized == "val":
+        normalized = "validation"
+    if normalized not in VALID_DATA_SPLITS:
+        valid = ", ".join(sorted(VALID_DATA_SPLITS | {"val"}))
+        raise ValueError(
+            f"data_split must be one of: {valid}. Got {data_split!r}.")
+    return normalized
+
+
+def _validate_split_ratio(data_split: str,
+                          validation_split_ratio: float) -> None:
+    if validation_split_ratio < 0.0 or validation_split_ratio >= 1.0:
+        raise ValueError(
+            "validation_split_ratio must be in the range [0.0, 1.0). "
+            f"Got {validation_split_ratio}.")
+    if data_split != "all" and validation_split_ratio <= 0.0:
+        raise ValueError(
+            "validation_split_ratio must be > 0.0 when data_split is "
+            f"{data_split!r}.")
+
+
+def _validation_score(sample_key: str, seed: int) -> float:
+    digest = hashlib.blake2b(
+        f"{seed}:{sample_key}".encode("utf-8"),
+        digest_size=8,
+    ).digest()
+    return int.from_bytes(digest, byteorder="big") / float(1 << 64)
+
+
+def _is_validation_sample(sample_key: str,
+                          validation_split_ratio: float,
+                          seed: int) -> bool:
+    return _validation_score(sample_key, seed) < validation_split_ratio
+
+
+def _split_cache_file(dataset_root: str,
+                      data_split: str,
+                      validation_split_ratio: float,
+                      seed: int) -> str:
+    ratio_token = f"{validation_split_ratio:.8f}".rstrip("0").rstrip(".")
+    ratio_token = ratio_token.replace(".", "p") or "0"
+    return os.path.join(
+        dataset_root,
+        "map_style_cache",
+        f"split_indices_{data_split}_ratio_{ratio_token}_seed_{seed}.pkl",
+    )
 
 
 def _get_single_parquet_files_and_length(path: str):
@@ -223,6 +275,135 @@ def _get_single_parquet_files_and_length(path: str):
     return file_names_sorted, lengths_sorted
 
 
+def _select_split_row_indices(
+    file_names: Sequence[str],
+    lengths: Sequence[int],
+    data_split: str,
+    validation_split_ratio: float,
+    seed: int,
+) -> tuple[int, ...]:
+    selected_indices: list[int] = []
+    global_row_idx = 0
+
+    for file_path, expected_rows in tqdm.tqdm(
+            zip(file_names, lengths, strict=True),
+            total=len(file_names),
+            desc=f"Selecting {data_split} split rows"):
+        parquet_file = pq.ParquetFile(file_path)
+        num_rows = parquet_file.metadata.num_rows
+        if num_rows != expected_rows:
+            raise RuntimeError(
+                "Parquet row count changed while selecting split rows for "
+                f"{file_path}: expected {expected_rows}, found {num_rows}.")
+
+        schema_names = set(parquet_file.schema.names)
+        key_columns = [
+            column for column in ("id", "file_name")
+            if column in schema_names
+        ]
+        row_data = (parquet_file.read(
+            columns=key_columns).to_pydict() if key_columns else {})
+
+        for local_row_idx in range(num_rows):
+            sample_key = ""
+            for column in key_columns:
+                value = row_data[column][local_row_idx]
+                if value:
+                    sample_key = str(value)
+                    break
+            if not sample_key:
+                sample_key = f"{file_path}:{local_row_idx}"
+
+            in_validation = _is_validation_sample(
+                sample_key,
+                validation_split_ratio,
+                seed,
+            )
+            if ((data_split == "validation" and in_validation) or
+                    (data_split == "train" and not in_validation)):
+                selected_indices.append(global_row_idx)
+
+            global_row_idx += 1
+
+    total_rows = sum(lengths)
+    if global_row_idx != total_rows:
+        raise RuntimeError(
+            "Split row selection saw a different number of rows than the "
+            f"cached metadata: saw {global_row_idx}, expected {total_rows}.")
+    if not selected_indices:
+        logger.warning(
+            "Selected %s split is empty for ratio=%s and seed=%s",
+            data_split,
+            validation_split_ratio,
+            seed,
+        )
+    return tuple(selected_indices)
+
+
+def _get_single_split_row_indices(path: str,
+                                  file_names: Sequence[str],
+                                  lengths: Sequence[int],
+                                  data_split: str,
+                                  validation_split_ratio: float,
+                                  seed: int) -> tuple[int, ...]:
+    dataset_root = os.path.realpath(os.path.expanduser(path))
+    cache_file = _split_cache_file(
+        dataset_root,
+        data_split,
+        validation_split_ratio,
+        seed,
+    )
+
+    if get_world_rank() == 0:
+        cache_loaded = False
+        split_indices: tuple[int, ...] | None = None
+        if os.path.exists(cache_file):
+            logger.info("Loading cached split indices from %s", cache_file)
+            try:
+                with open(cache_file, "rb") as f:
+                    cached_file_names, cached_lengths, split_indices = pickle.load(
+                        f)
+                cache_loaded = (
+                    tuple(cached_file_names) == tuple(file_names) and
+                    tuple(cached_lengths) == tuple(lengths))
+                if not cache_loaded:
+                    logger.warning(
+                        "Cached split indices at %s do not match parquet "
+                        "metadata. Cache will be rebuilt.",
+                        cache_file,
+                    )
+            except Exception as e:
+                logger.error("Error loading split cache: %s", str(e))
+                cache_loaded = False
+
+        if not cache_loaded:
+            logger.info(
+                "Building %s split indices with validation ratio=%s seed=%s",
+                data_split,
+                validation_split_ratio,
+                seed,
+            )
+            split_indices = _select_split_row_indices(
+                file_names,
+                lengths,
+                data_split,
+                validation_split_ratio,
+                seed,
+            )
+            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+            with open(cache_file, "wb") as f:
+                pickle.dump((tuple(file_names), tuple(lengths), split_indices),
+                            f)
+            logger.info("Saved split indices to %s", cache_file)
+
+    world_group = get_world_group()
+    world_group.barrier()
+
+    with open(cache_file, "rb") as f:
+        _, _, split_indices = pickle.load(f)
+    return tuple(split_indices)
+
+
 def get_parquet_files_and_length(path: DatasetPath):
     dataset_roots = _normalize_dataset_paths(path)
     if len(dataset_roots) == 1:
@@ -237,6 +418,36 @@ def get_parquet_files_and_length(path: DatasetPath):
         all_lengths.extend(lengths)
 
     return tuple(all_file_names), tuple(all_lengths)
+
+
+def get_parquet_split_indices(path: DatasetPath,
+                              data_split: str,
+                              validation_split_ratio: float,
+                              seed: int) -> tuple[int, ...]:
+    data_split = _normalize_data_split(data_split)
+    _validate_split_ratio(data_split, validation_split_ratio)
+
+    all_indices: list[int] = []
+    offset = 0
+    for dataset_root in _normalize_dataset_paths(path):
+        file_names, lengths = _get_single_parquet_files_and_length(
+            dataset_root)
+        root_length = sum(lengths)
+        if data_split == "all":
+            root_indices = range(root_length)
+        else:
+            root_indices = _get_single_split_row_indices(
+                dataset_root,
+                file_names,
+                lengths,
+                data_split,
+                validation_split_ratio,
+                seed,
+            )
+        all_indices.extend(offset + idx for idx in root_indices)
+        offset += root_length
+
+    return tuple(all_indices)
 
 
 def read_row_from_parquet_file(parquet_files: list[str], global_row_idx: int,
@@ -312,22 +523,38 @@ class LatentsParquetMapStyleDataset(Dataset):
         drop_last: bool = True,
         drop_first_row: bool = False,
         text_padding_length: int = 512,
+        data_split: str = "all",
+        validation_split_ratio: float = 0.0,
     ):
         super().__init__()
         self.path = path
         self.cfg_rate = cfg_rate
         self.parquet_schema = parquet_schema
         self.seed = seed
+        self.data_split = _normalize_data_split(data_split)
+        self.validation_split_ratio = float(validation_split_ratio)
+        _validate_split_ratio(self.data_split, self.validation_split_ratio)
         # Create a seeded random generator for deterministic CFG
         self.rng = random.Random(seed)
         logger.info("Initializing LatentsParquetMapStyleDataset with path(s): %s",
                     _normalize_dataset_paths(path))
         self.parquet_files, self.lengths = get_parquet_files_and_length(path)
+        if self.data_split == "all":
+            self.sample_indices = None
+            dataset_size = sum(self.lengths)
+        else:
+            self.sample_indices = get_parquet_split_indices(
+                path,
+                self.data_split,
+                self.validation_split_ratio,
+                seed,
+            )
+            dataset_size = len(self.sample_indices)
         self.batch = batch_size
         self.text_padding_length = text_padding_length
         self.sampler = DP_SP_BatchSampler(
             batch_size=batch_size,
-            dataset_size=sum(self.lengths),
+            dataset_size=dataset_size,
             num_sp_groups=get_world_size() // get_sp_world_size(),
             sp_world_size=get_sp_world_size(),
             global_rank=get_world_rank(),
@@ -335,8 +562,14 @@ class LatentsParquetMapStyleDataset(Dataset):
             drop_first_row=drop_first_row,
             seed=seed,
         )
-        logger.info("Dataset initialized with %d parquet files and %d rows",
-                    len(self.parquet_files), sum(self.lengths))
+        logger.info(
+            "Dataset initialized with %d parquet files, %d source rows, "
+            "%d selected rows for data_split=%s",
+            len(self.parquet_files),
+            sum(self.lengths),
+            dataset_size,
+            self.data_split,
+        )
 
     def get_validation_negative_prompt(
             self) -> tuple[torch.Tensor, torch.Tensor, str]:
@@ -374,14 +607,19 @@ class LatentsParquetMapStyleDataset(Dataset):
         """
         Batch fetch using read_row_from_parquet_file for each index.
         """
+        row_indices = [
+            self.sample_indices[idx]
+            if self.sample_indices is not None else idx
+            for idx in indices
+        ]
         rows = [
             read_row_from_parquet_file(self.parquet_files, idx, self.lengths)
-            for idx in indices
+            for idx in row_indices
         ]
 
         # Inject sample indices for deterministic CFG dropout
         # that is reproducible across checkpoint resume.
-        for row, idx in zip(rows, indices):
+        for row, idx in zip(rows, row_indices):
             row["_sample_index"] = idx
 
         batch = collate_rows_from_parquet_schema(rows,
@@ -392,6 +630,8 @@ class LatentsParquetMapStyleDataset(Dataset):
         return batch
 
     def __len__(self):
+        if self.sample_indices is not None:
+            return len(self.sample_indices)
         return sum(self.lengths)
 
 
@@ -411,7 +651,9 @@ def build_parquet_map_style_dataloader(
         drop_last=True,
         drop_first_row=False,
         text_padding_length=512,
-        seed=42) -> tuple[LatentsParquetMapStyleDataset, StatefulDataLoader]:
+        seed=42,
+        data_split="all",
+        validation_split_ratio=0.0) -> tuple[LatentsParquetMapStyleDataset, StatefulDataLoader]:
     dataset = LatentsParquetMapStyleDataset(
         path,
         batch_size,
@@ -420,7 +662,9 @@ def build_parquet_map_style_dataloader(
         drop_first_row=drop_first_row,
         text_padding_length=text_padding_length,
         parquet_schema=parquet_schema,
-        seed=seed)
+        seed=seed,
+        data_split=data_split,
+        validation_split_ratio=validation_split_ratio)
 
     loader = StatefulDataLoader(
         dataset,

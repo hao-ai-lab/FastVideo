@@ -749,6 +749,8 @@ class TrainingArgs(FastVideoArgs):
     precedence.
     """
     data_path: str = ""
+    data_split: str = "all"
+    validation_split_ratio: float = 0.0
     dataloader_num_workers: int = 0
     num_height: int = 0
     num_width: int = 0
@@ -924,6 +926,15 @@ class TrainingArgs(FastVideoArgs):
                             type=str,
                             required=True,
                             help="Path to parquet files. Use os.pathsep-separated paths for multiple roots.")
+        parser.add_argument("--data-split",
+                            type=str,
+                            default=TrainingArgs.data_split,
+                            choices=["all", "train", "validation", "val"],
+                            help="Dataset split to read from the parquet roots.")
+        parser.add_argument("--validation-split-ratio",
+                            type=float,
+                            default=TrainingArgs.validation_split_ratio,
+                            help="Fraction of rows reserved for the deterministic validation split.")
         parser.add_argument("--dataloader-num-workers",
                             type=int,
                             required=True,
@@ -933,31 +944,21 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--num-frames", type=int, required=True, help="Number of frames")
 
         # Training batch and model configuration
-        parser.add_argument("--train-batch-size",
+        parser.add_argument("--train-batch-size", type=int, required=True, help="Training batch size")
+        parser.add_argument("--num-latent-t", type=int, required=True, help="Number of latent time steps")
+        parser.add_argument("--min-condition-latents",
+                            "--min_condition_latents",
+                            dest="min_condition_latents",
                             type=int,
-                            required=True,
-                            help="Training batch size")
-        parser.add_argument("--num-latent-t",
+                            default=TrainingArgs.min_condition_latents,
+                            help="Minimum number of prefix latent timesteps to condition on")
+        parser.add_argument("--max-condition-latents",
+                            "--max_condition_latents",
+                            dest="max_condition_latents",
                             type=int,
-                            required=True,
-                            help="Number of latent time steps")
-        parser.add_argument(
-            "--min-condition-latents",
-            "--min_condition_latents",
-            dest="min_condition_latents",
-            type=int,
-            default=TrainingArgs.min_condition_latents,
-            help="Minimum number of prefix latent timesteps to condition on")
-        parser.add_argument(
-            "--max-condition-latents",
-            "--max_condition_latents",
-            dest="max_condition_latents",
-            type=int,
-            default=TrainingArgs.max_condition_latents,
-            help="Maximum number of prefix latent timesteps to condition on")
-        parser.add_argument("--group-frame",
-                            action=StoreBoolean,
-                            help="Whether to group frames during training")
+                            default=TrainingArgs.max_condition_latents,
+                            help="Maximum number of prefix latent timesteps to condition on")
+        parser.add_argument("--group-frame", action=StoreBoolean, help="Whether to group frames during training")
         parser.add_argument("--group-resolution",
                             action=StoreBoolean,
                             help="Whether to group resolutions during training")

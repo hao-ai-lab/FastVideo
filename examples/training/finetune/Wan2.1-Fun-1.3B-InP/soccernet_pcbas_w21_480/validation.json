@@ -1,0 +1,58 @@
+{
+  "data": [
+    {
+      "caption": "A cross by [PLAYER] ([TEAM]) from the side of the pitch flies into the box, but fails to find its intended target as the aim was poor.",
+      "image_path": null,
+      "video_path": "/leonardo_work/AIFAC_P02_082/data/clips_wan_v1/master_77f_25fps_720p/clips/0b/0bc4fa73ab18c964.mp4",
+      "num_inference_steps": 40,
+      "height": 480,
+      "width": 832,
+      "num_frames": 49
+    },
+    {
+      "caption": "[PLAYER] ([TEAM]) controls a nice lofted pass and shoots from the edge of the box, but his attempt is neither hard nor precise, so [PLAYER] stops it easily.",
+      "image_path": null,
+      "video_path": "/leonardo_work/AIFAC_P02_082/data/clips_wan_v1/master_77f_25fps_720p/clips/13/1389d6d4e8959cca.mp4",
+      "num_inference_steps": 40,
+      "height": 480,
+      "width": 832,
+      "num_frames": 49
+    },
+    {
+      "caption": "CHANCE! [PLAYER] ([TEAM]) picks up a perfect pass inside the box, makes himself some space for a shot, but his effort goes just over the crossbar.",
+      "image_path": null,
+      "video_path": "/leonardo_work/AIFAC_P02_082/data/clips_wan_v1/master_77f_25fps_720p/clips/32/32d567f797ebfc7d.mp4",
+      "num_inference_steps": 40,
+      "height": 480,
+      "width": 832,
+      "num_frames": 49
+    },
+    {
+      "caption": "[REFEREE] has a clear sight and sees a foul from [PLAYER] ([TEAM]).",
+      "image_path": null,
+      "video_path": "/leonardo_work/AIFAC_P02_082/data/clips_wan_v1/master_77f_25fps_720p/clips/33/33db8d5885066884.mp4",
+      "num_inference_steps": 40,
+      "height": 480,
+      "width": 832,
+      "num_frames": 49
+    },
+    {
+      "caption": "Soccer broadcast clip centered on a pass action.",
+      "image_path": null,
+      "video_path": "/leonardo_work/AIFAC_P02_082/data/clips_pcbas_wan_v1/master_77f_25fps_720p/clips/02/02e0210f5c92df22.mp4",
+      "num_inference_steps": 40,
+      "height": 480,
+      "width": 832,
+      "num_frames": 49
+    },
+    {
+      "caption": "Soccer broadcast clip centered on a pass action.",
+      "image_path": null,
+      "video_path": "/leonardo_work/AIFAC_P02_082/data/clips_pcbas_wan_v1/master_77f_25fps_720p/clips/04/046e68d44bb6f94b.mp4",
+      "num_inference_steps": 40,
+      "height": 480,
+      "width": 832,
+      "num_frames": 49
+    }
+  ]
+}

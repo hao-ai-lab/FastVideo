@@ -66,6 +66,8 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     assert t.data.dataloader_num_workers == 0
     assert t.data.training_cfg_rate == 0.0
     assert t.data.seed == 0
+    assert t.data.data_split == "all"
+    assert t.data.validation_split_ratio == 0.0
 
     assert t.optimizer.learning_rate == 0.0
     assert t.optimizer.betas == (0.9, 0.999)
@@ -109,6 +111,8 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
             "dataloader_num_workers": 4,
             "training_cfg_rate": 0.1,
             "seed": 42,
+            "data_split": "train",
+            "validation_split_ratio": 0.05,
             "num_height": 256,
             "num_width": 512,
             "num_latent_t": 8,
@@ -157,6 +161,8 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
     assert t.data.train_batch_size == 2
     assert t.data.num_frames == 33
     assert t.data.seed == 42
+    assert t.data.data_split == "train"
+    assert t.data.validation_split_ratio == pytest.approx(0.05)
 
     assert t.optimizer.learning_rate == pytest.approx(1e-4)
     assert t.optimizer.betas == (0.9, 0.95)

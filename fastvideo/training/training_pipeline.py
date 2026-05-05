@@ -174,7 +174,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
             drop_last=True,
             text_padding_length=training_args.pipeline_config.text_encoder_configs[0].arch_config.
             text_len,  # type: ignore[attr-defined]
-            seed=self.seed)
+            seed=self.seed,
+            data_split=training_args.data_split,
+            validation_split_ratio=training_args.validation_split_ratio)
 
         self.noise_scheduler = noise_scheduler
         if self.training_args.boundary_ratio is not None:
@@ -430,8 +432,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         return training_batch
 
     @staticmethod
-    def _compute_loss(model_pred: torch.Tensor, target: torch.Tensor,
-                      training_batch: TrainingBatch) -> torch.Tensor:
+    def _compute_loss(model_pred: torch.Tensor, target: torch.Tensor, training_batch: TrainingBatch) -> torch.Tensor:
         sq_error = (model_pred.float() - target.float())**2
         loss_mask = training_batch.generation_loss_mask
         if loss_mask is None:
@@ -627,16 +628,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 except Exception:
                     pass
 
-                condition_latent_counts = (
-                    training_batch.condition_latent_counts)
+                condition_latent_counts = (training_batch.condition_latent_counts)
                 if condition_latent_counts is not None:
                     condition_latent_counts = condition_latent_counts.float()
-                    metrics["train/condition_latents_mean"] = (
-                        condition_latent_counts.mean().item())
-                    metrics["train/condition_latents_min"] = (
-                        condition_latent_counts.min().item())
-                    metrics["train/condition_latents_max"] = (
-                        condition_latent_counts.max().item())
+                    metrics["train/condition_latents_mean"] = (condition_latent_counts.mean().item())
+                    metrics["train/condition_latents_min"] = (condition_latent_counts.min().item())
+                    metrics["train/condition_latents_max"] = (condition_latent_counts.max().item())
 
                 self.tracker.log(metrics, step)
             if step % self.training_args.training_state_checkpointing_steps == 0:

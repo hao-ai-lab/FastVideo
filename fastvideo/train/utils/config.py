@@ -309,10 +309,8 @@ def _build_training_config(
                 model_path = str(init_from)
 
     data_path_raw = da.get("data_path", "") or ""
-    if isinstance(data_path_raw, list):
-        data_path = [str(path) for path in data_path_raw]
-    else:
-        data_path = str(data_path_raw)
+    data_path: str | list[str] = ([str(path) for path in data_path_raw]
+                                  if isinstance(data_path_raw, list) else str(data_path_raw))
 
     return TrainingConfig(
         distributed=DistributedConfig(
@@ -329,6 +327,8 @@ def _build_training_config(
             dataloader_num_workers=int(da.get("dataloader_num_workers", 0) or 0),
             training_cfg_rate=float(da.get("training_cfg_rate", 0.0) or 0.0),
             seed=int(da.get("seed", 0) or 0),
+            data_split=str(da.get("data_split", "all") or "all"),
+            validation_split_ratio=float(da.get("validation_split_ratio", 0.0) or 0.0),
             num_height=int(da.get("num_height", 0) or 0),
             num_width=int(da.get("num_width", 0) or 0),
             num_latent_t=int(da.get("num_latent_t", 0) or 0),
