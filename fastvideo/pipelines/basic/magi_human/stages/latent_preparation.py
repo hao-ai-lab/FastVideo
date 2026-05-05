@@ -213,6 +213,18 @@ class MagiHumanLatentPreparationStage(PipelineStage):
         batch.magi_latent_T = latent_T
         batch.magi_latent_H = latent_H
         batch.magi_latent_W = latent_W
+        # Precompute the step-invariant packed layout (coords / modality
+        # maps / channel-padding width) once; the denoise loop reuses it
+        # every step instead of rebuilding meshgrids on each call.
+        batch.magi_static_packed_layout = precompute_static_packed_layout(
+            latent_shape=tuple(video_latent.shape),  # type: ignore[arg-type]
+            audio_feat_len=int(audio_latent.shape[1]),
+            z_dim=self.z_dim,
+            audio_in_channels=self.audio_in_channels,
+            patch_size=self.patch_size,
+            coords_style=self.coords_style,
+            device=video_latent.device,
+        )
         return batch
 
 
@@ -256,12 +268,117 @@ class StaticPackedInputs:
         self.max_ch = max_ch
 
 
+class StaticPackedLayout:
+    """Step- and value-invariant portion of the static packed inputs.
+
+    Coords, modality maps, and the channel-padding width depend only on the
+    latent shape, audio length, channel widths, and patch sizes — all fixed
+    for a single generation. Precompute once before the denoise loop and
+    reuse on every step. Only the per-step token tensors must be rebuilt.
+    """
+
+    __slots__ = (
+        "video_coords",
+        "audio_coords",
+        "video_mm",
+        "audio_mm",
+        "max_ch",
+        "video_token_num",
+        "audio_feat_len",
+    )
+
+    def __init__(
+        self,
+        video_coords: torch.Tensor,
+        audio_coords: torch.Tensor,
+        video_mm: torch.Tensor,
+        audio_mm: torch.Tensor,
+        max_ch: int,
+        video_token_num: int,
+        audio_feat_len: int,
+    ) -> None:
+        self.video_coords = video_coords
+        self.audio_coords = audio_coords
+        self.video_mm = video_mm
+        self.audio_mm = audio_mm
+        self.max_ch = max_ch
+        self.video_token_num = video_token_num
+        self.audio_feat_len = audio_feat_len
+
+
+def precompute_static_packed_layout(
+    latent_shape: tuple[int, int, int, int, int],
+    audio_feat_len: int,
+    z_dim: int,
+    audio_in_channels: int,
+    patch_size: tuple[int, int, int],
+    coords_style: Literal["v1", "v2"] = "v2",
+    device: torch.device | None = None,
+    dtype: torch.dtype = torch.float32,
+) -> StaticPackedLayout:
+    """Precompute the invariant fields used by ``build_static_packed_inputs``.
+
+    Arguments are derived from configs and latent shape — none depend on
+    the current denoising-step values. Call this once in the latent
+    preparation stage (or any pre-loop site) and pass the result via the
+    ``layout=`` arg of ``build_static_packed_inputs`` to skip the
+    meshgrid/full() work on every step.
+    """
+    pT, pH, pW = patch_size
+    _, _, T, H, W = latent_shape
+    if device is None:
+        device = torch.device("cpu")
+
+    video_token_num = (T // pT) * (H // pH) * (W // pW)
+    # `_img2tokens` packs to channel `z_dim * pT * pH * pW`; audio tokens
+    # are `audio_in_channels` wide — both are config constants.
+    max_ch = max(z_dim * pT * pH * pW, audio_in_channels)
+
+    video_ref_shape = (T // pT, H // pH, W // pW)
+    video_coords = _build_coords(
+        shape=video_ref_shape,
+        ref_feat_shape=video_ref_shape,
+        device=device,
+        dtype=dtype,
+    )
+
+    if coords_style == "v2":
+        audio_ref_t = (audio_feat_len - 1) // _AUDIO_TEMPORAL_COMPRESSION + 1
+        audio_coords = _build_coords(
+            shape=(audio_feat_len, 1, 1),
+            ref_feat_shape=(audio_ref_t // pT, 1, 1),
+            device=device,
+            dtype=dtype,
+        )
+    else:
+        audio_coords = _build_coords(
+            shape=(audio_feat_len, 1, 1),
+            ref_feat_shape=(T // pT, 1, 1),
+            device=device,
+            dtype=dtype,
+        )
+
+    video_mm = torch.full((video_token_num, ), MODALITY_VIDEO, dtype=torch.int64, device=device)
+    audio_mm = torch.full((audio_feat_len, ), MODALITY_AUDIO, dtype=torch.int64, device=device)
+
+    return StaticPackedLayout(
+        video_coords=video_coords,
+        audio_coords=audio_coords,
+        video_mm=video_mm,
+        audio_mm=audio_mm,
+        max_ch=max_ch,
+        video_token_num=video_token_num,
+        audio_feat_len=audio_feat_len,
+    )
+
+
 def build_static_packed_inputs(
     video_latent: torch.Tensor,
     audio_latent: torch.Tensor,
     audio_feat_len: int,
     patch_size: tuple[int, int, int],
     coords_style: Literal["v1", "v2"] = "v2",
+    layout: StaticPackedLayout | None = None,
 ) -> StaticPackedInputs:
     """Build the step-invariant portion of the packed token stream.
 
@@ -271,13 +388,36 @@ def build_static_packed_inputs(
 
     Mirrors SingleData.token_sequence / coords_mapping / modality_mapping in
     inference/pipeline/data_proxy.py, minus the text portion.
+
+    When ``layout`` is provided, coords / modality maps / max_ch are taken
+    from the precomputed values and only the per-step token tensors are
+    rebuilt; this is the hot-path call from the denoising loop. When
+    ``layout`` is None the function recomputes everything from scratch
+    (e.g. for one-shot tests via ``build_packed_inputs``).
     """
     pT, pH, pW = patch_size
-    _, z_dim, T, H, W = video_latent.shape
     assert video_latent.size(0) == 1, "batch size 1 required for MagiHuman base"
 
     video_tokens = _img2tokens(video_latent, t_patch=pT, patch=pH)[0]
     audio_tokens = audio_latent[0, :audio_feat_len].contiguous()
+
+    if layout is not None:
+        max_ch = layout.max_ch
+        video_tokens = F.pad(video_tokens, (0, max_ch - video_tokens.size(-1)))
+        audio_tokens = F.pad(audio_tokens, (0, max_ch - audio_tokens.size(-1)))
+        return StaticPackedInputs(
+            video_tokens=video_tokens,
+            audio_tokens=audio_tokens,
+            video_coords=layout.video_coords,
+            audio_coords=layout.audio_coords,
+            video_mm=layout.video_mm,
+            audio_mm=layout.audio_mm,
+            max_ch=max_ch,
+        )
+
+    # Slow path: rebuild every invariant from scratch. Kept for the
+    # ``build_packed_inputs`` one-shot wrapper used by tests/parity helpers.
+    _, z_dim, T, H, W = video_latent.shape
 
     max_ch = max(video_tokens.size(-1), audio_tokens.size(-1))
     video_tokens = F.pad(video_tokens, (0, max_ch - video_tokens.size(-1)))

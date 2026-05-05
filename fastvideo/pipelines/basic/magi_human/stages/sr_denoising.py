@@ -108,6 +108,7 @@ class MagiHumanSRDenoisingStage(PipelineStage):
                 audio_feat_len=audio_feat_len,
                 patch_size=self.patch_size,
                 coords_style=self.coords_style,
+                layout=getattr(batch, "magi_static_packed_layout", None),
             )
             with trace_step(idx), set_forward_context(
                     current_timestep=int(t.item()) if torch.is_tensor(t) else int(t),
