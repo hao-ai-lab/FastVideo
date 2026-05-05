@@ -17,13 +17,22 @@ both `/readyz` and the FE root to return 200.
 - `~/.env` exporting `CEREBRAS_API_KEY`, `GROQ_API_KEY`, etc.
 - pnpm installed at `/home/william5lin/.local/share/pnpm/pnpm` (or in `$PATH`)
 - `gcc-13` + `g++-13` at `/usr/bin/` (workaround for nvcc gcc-15 rejection)
+- **Recommended:** native ffmpeg env file at `apps/dreamverse/scripts/ffmpeg-env.sh`
+  (built once via `bash apps/dreamverse/scripts/install_native_ffmpeg.sh`).
+  When present, the deploy sources it inside the backend setsid block so the
+  worker spawns ffmpeg from `$HOME/opt/ffmpeg-native/bin/ffmpeg` (LTO + libx264
+  + native arch) instead of the system `/usr/bin/ffmpeg`. When missing, the
+  deploy falls back to system ffmpeg with a warning. Set
+  `DREAMVERSE_REQUIRE_NATIVE_FFMPEG=true` to make the missing env file a hard
+  failure.
 
-If any prereq is missing, the script fails fast with a clear message.
+If any required prereq is missing, the script fails fast with a clear message.
 
 ## Usage
 
 ```bash
-# Deploy on GPU 4 with default ports (backend 8009, FE 5274)
+# Deploy on GPU 4 with default ports (backend 8009, FE 5274) — torch.compile
+# is OFF by default so first-segment cold start is ~45s instead of ~3-4min.
 ./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 4
 
 # Deploy on GPU 6 with custom ports
@@ -31,6 +40,10 @@ If any prereq is missing, the script fails fast with a clear message.
 
 # Deploy on GPU 0 with warmup enabled (default disabled for fast iter)
 DREAMVERSE_WARMUP=true ./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 0
+
+# Deploy with torch.compile enabled (max-autotune; first segment ~3-4min,
+# subsequent segments ~7-8s instead of ~10s — only worth it for benchmarking)
+DREAMVERSE_TORCH_COMPILE=true ./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 4
 ```
 
 ### Arguments
@@ -46,8 +59,10 @@ DREAMVERSE_WARMUP=true ./.agents/skills/dreamverse-deploy/scripts/dreamverse-dep
 | Var | Default | Purpose |
 |---|---|---|
 | `DREAMVERSE_WARMUP` | `false` | If `true`, runs the GPU warmup at boot (~minutes) |
+| `DREAMVERSE_TORCH_COMPILE` | `false` | If `true`, sets `ENABLE_TORCH_COMPILE=1` (max-autotune ~3-4 min first segment). Default `false` is e2e-friendly: cold segment ~45s, hot ~10s |
 | `DREAMVERSE_REPO_ROOT` | git rev-parse | Repo root override |
 | `DREAMVERSE_LOG_DIR` | `/tmp/opencode/dreamverse-deploy` | Where to write `backend.log` / `frontend.log` |
+| `DREAMVERSE_REQUIRE_NATIVE_FFMPEG` | `false` | If `true`, fail when `apps/dreamverse/scripts/ffmpeg-env.sh` is absent |
 
 ## What it does
 
@@ -60,8 +75,11 @@ DREAMVERSE_WARMUP=true ./.agents/skills/dreamverse-deploy/scripts/dreamverse-dep
    - `FASTVIDEO_ENABLE_DEVTOOLS=1`
    - `FASTVIDEO_ENABLE_STARTUP_WARMUP=<DREAMVERSE_WARMUP>`
    - `FASTVIDEO_GPU_COUNT=1`
+   - `ENABLE_TORCH_COMPILE=<0|1 derived from DREAMVERSE_TORCH_COMPILE>`
    - `CC=/usr/bin/gcc-13 CXX=/usr/bin/g++-13 CUDAHOSTCXX=/usr/bin/g++-13`
    - `NVCC_PREPEND_FLAGS="-ccbin /usr/bin/gcc-13 -allow-unsupported-compiler"`
+   - `FASTVIDEO_FFMPEG_BIN=$HOME/opt/ffmpeg-native/bin/ffmpeg` +
+     `FASTVIDEO_VIDEO_CODEC=libx264` (when the native binary exists)
 5. Launches the backend via `apps/dreamverse/scripts/dreamverse-server` in a
    detached `setsid` session, captures PID.
 6. Polls `/readyz` until 200 (max 5 min).
