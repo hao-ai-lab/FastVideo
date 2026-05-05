@@ -25,9 +25,9 @@ import uuid
 from typing import TYPE_CHECKING
 
 from fastapi import WebSocket, WebSocketDisconnect
-from fastvideo.entrypoints.streaming.gpu_pool import GPUSlot
-from fastvideo.entrypoints.streaming.protocol import MediaChunk, MediaComplete, MediaInit
-from fastvideo.entrypoints.streaming.session_init_image import cleanup_session_init_image, persist_session_init_image
+from gpu_pool import GPUSlot
+from session_init_image import cleanup_session_init_image, persist_session_init_image
+from worker_ipc import MediaChunk, MediaComplete, MediaInit
 
 from config import (
     DEFAULT_MODEL_ID,
@@ -47,8 +47,8 @@ from utils import (
 )
 
 if TYPE_CHECKING:
-    from fastvideo.entrypoints.streaming.gpu_pool import GpuPool as GPUPool
-    from fastvideo.entrypoints.streaming.session_logger import SessionEventLogger
+    from gpu_pool import GPUPool
+    from session_logger import SessionEventLogger
     from prompt_enhancer import PromptEnhancer
     from prompt_safety import PromptSafetyFilter
 

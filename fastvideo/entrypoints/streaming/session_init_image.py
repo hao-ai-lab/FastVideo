@@ -6,9 +6,6 @@ import base64
 import binascii
 import contextlib
 import os
-from pathlib import Path
-import re
-import shutil
 import tempfile
 from dataclasses import dataclass
 from typing import Any
@@ -21,7 +18,6 @@ _ACCEPTED_MIMES = {
 }
 
 _MAX_IMAGE_BYTES = 32 * 1024 * 1024  # 32 MiB cap
-_DATA_URL_RE = re.compile(r"^data:(?P<mime>[-\w.+/]+);base64,(?P<data>[A-Za-z0-9+/=\s]+)$")
 
 
 @dataclass(frozen=True)
@@ -35,24 +31,6 @@ class SessionInitImage:
     path: str
     display_name: str
     mime: str
-
-    @property
-    def file_path(self) -> Path:
-        """Compatibility alias used by the migrated Dreamverse controller."""
-
-        return Path(self.path)
-
-    @property
-    def temp_dir(self) -> Path:
-        """Compatibility alias for cleanup of the temporary image directory."""
-
-        return Path(self.path).parent
-
-    @property
-    def mime_type(self) -> str:
-        """Compatibility alias for the UI payload's MIME field."""
-
-        return self.mime
 
 
 def persist_session_init_image(
@@ -79,19 +57,11 @@ def persist_session_init_image(
     if not isinstance(payload, dict):
         raise ValueError("session init image must be an object")
 
-    data_url = payload.get("data_url")
-    if isinstance(data_url, str) and data_url.strip():
-        match = _DATA_URL_RE.match(data_url.strip())
-        if match is None:
-            raise ValueError("session init image data URL is not valid base64")
-        mime = payload.get("mime_type") or match.group("mime").strip().lower()
-        data_b64 = match.group("data")
-    else:
-        mime = payload.get("mime")
-        data_b64 = payload.get("data")
+    mime = payload.get("mime")
     if mime not in _ACCEPTED_MIMES:
         raise ValueError(f"session init image mime {mime!r} is not one of "
                          f"{sorted(_ACCEPTED_MIMES)}")
+    data_b64 = payload.get("data")
     if not isinstance(data_b64, str):
         raise ValueError("session init image data must be a base64 string")
     try:
@@ -117,14 +87,6 @@ def persist_session_init_image(
     return SessionInitImage(path=path, display_name=display_name, mime=mime)
 
 
-def cleanup_session_init_image(session_image: SessionInitImage | None) -> None:
-    """Remove a persisted session init image and its temporary directory."""
-
-    if session_image is None:
-        return
-    shutil.rmtree(session_image.temp_dir, ignore_errors=True)
-
-
 def _sanitize_display_name(name: Any) -> str | None:
     if not isinstance(name, str):
         return None
@@ -137,6 +99,5 @@ def _sanitize_display_name(name: Any) -> str | None:
 
 __all__ = [
     "SessionInitImage",
-    "cleanup_session_init_image",
     "persist_session_init_image",
 ]
