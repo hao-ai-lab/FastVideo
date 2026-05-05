@@ -6,7 +6,7 @@ question/decision, rationale, current status.
 For implementation status see [pr-roadmap.md](pr-roadmap.md). For
 follow-up actions see [open-threads.md](open-threads.md).
 
-**Last updated:** 2026-05-04 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion + concrete-vs-Protocol scoping, Oracle review during #1284 review cycle).
+**Last updated:** 2026-05-05 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion, Oracle review during #1284 review cycle; added D-15 — streaming router placement + sticky/active-active deferral, Oracle review during #1286 review cycle).
 
 ## Status legend
 
@@ -86,6 +86,91 @@ keeps `VideoGenerator` policy-free.
 
 **Open thread it touches:** PR 7.10 (`open-threads.md` item D — generate_async)
 unblocks Alt C and is the natural place to land the API shape change.
+
+### D-15: Streaming router (PR #1286) — keep in-repo, defer sticky / active-active
+
+**Status:** ✅ Resolved (interim). Pre-merge polishes applied. Three follow-up
+items tracked.
+**Source:** Oracle review on 2026-05-05, during PR #1286 review cycle.
+
+**Question:** Where should the multi-replica WebSocket router live? Should it
+ship at all (vs. delegating to nginx/envoy)? Should sticky session routing
+or weighted/round-robin balancing be in the initial PR?
+
+| Alt | Approach | Verdict |
+|---|---|---|
+| A | Status quo — `fastvideo/entrypoints/streaming/router/`, FastAPI-based, single-primary failover, lazy `httpx`/`websockets` imports | ✅ **Keep** |
+| B | Move to separate package `fastvideo-router/` | ❌ **Premature** — adds packaging/release/compat overhead before evidence of independent adoption |
+| C | Fold router into the streaming server itself (one app, mode flag) | ❌ Conflates router/generator lifecycles, mode-dependent config, drags inference deps into routing deployments |
+| D | Replace with reverse proxy (nginx/envoy/HAProxy) recipes | ❌ Not as the SOLE answer — mature proxies don't naturally emit FastVideo typed `gpu_unavailable` frames or evolve with FastVideo session semantics. Recommend external proxies as a complement at high scale. |
+| E | Add sticky session routing now | ❌ **Defer** — implementing correctly depends on where `session_id` is available (URL/header is easy, first JSON frame is invasive). Reconnects are rare today. |
+| F | Add weighted / round-robin now | ❌ **Defer** — active-active without sticky routing is worse for LTX-2 continuation locality than active-passive failover |
+
+**Decision:** Alt A — keep current shape. Apply pre-merge polishes; preserve
+forward-compat for sticky routing.
+
+**Rationale:**
+
+- Python router is justified as a FastVideo-aware control-plane component,
+  not a replacement for Envoy/HAProxy. It can emit typed
+  `gpu_unavailable` frames, evolve with FastVideo session semantics,
+  and ship local/dev deployment without ceremony.
+- The current abstraction is small + testable: `RouterConfig`,
+  `ReplicaRegistry`, `ReplicaStatus`, `HttpProbe` (Protocol/structural alias).
+  Adding strategy registries / telemetry interfaces / active-active policies
+  now would be over-engineering.
+- Active-passive (single primary) is the right MVP for LTX-2 streaming —
+  preserves continuation cache locality (D-12 sticky binding rationale)
+  better than naive active-active.
+- The biggest architectural risk isn't placement; it's accidentally baking
+  in unstated semantics. Define single-primary behavior + config validation
+  now so future active-active or sticky routing becomes additive.
+
+**Pre-merge polishes applied (per gemini + Oracle review):**
+
+| # | What | Why |
+|---|---|---|
+| 1 | `ReplicaRegistry.select()` docstring rewrite | gemini flagged "round-robin via insertion order" claim was misleading — implementation always returns `[0]`. Replaced with explicit "first healthy primary, else first healthy non-primary; this MVP picks first match within tier; round-robin/weighted deferred". |
+| 2 | Refactored `run_health_check_loop` to share single `httpx.AsyncClient` across the loop's lifetime via `_build_default_probe()` async context manager | gemini flagged per-probe client instantiation as inefficient. With ~1 probe/second default polling, TCP/TLS handshake overhead is non-trivial; now reuses connection. Tests inject probes directly so the path stays bypassable. |
+| 3 | Probe all replicas concurrently per cycle via `asyncio.gather(..., return_exceptions=True)` | gemini flagged sequential probes risk falling behind `health_check_interval_seconds` if replicas time out. Now per-cycle wall time = max(probe latencies), not sum. |
+| 4 | `RouterConfig.__post_init__` validation | Oracle recommended: empty replicas, non-positive intervals/timeouts, thresholds < 1, non-`http(s)://` URLs, and >1 primary all `raise ValueError`. Surfaces misconfiguration at config-load instead of confusing runtime failures. |
+| 5 | Migrated `@app.on_event("startup"/"shutdown")` to `@contextlib.asynccontextmanager`-based `_lifespan()` | Pre-merge — FastAPI deprecated the old API. Was tracked as the 7.9 caveat in pr-roadmap.md. |
+
+**One review comment intentionally not implemented:**
+
+| Comment | Decision |
+|---|---|
+| gemini medium: `_load_router_config` duplicates `fastvideo.api.parser.parse_config` logic | Kept manual flat-from-nested mapping. The YAML schema has nested `health_check:` block but `RouterConfig` is flat; using `parse_config` directly would require either restructuring `RouterConfig` to have a nested `HealthCheckConfig` (schema change beyond this PR's scope) or accepting incomplete parsing. Manual mapping is intentional and well-typed. |
+
+All 4 review threads marked resolved on the GitHub PR.
+
+**Action items (deferred):**
+
+- [ ] Track sticky session routing extensibility — when needed, add
+  `ReplicaRegistry.select(routing_key: str | None = None)` so registry
+  evolution is additive; document upfront where `session_id` should
+  appear (URL/header preferred over first JSON frame to avoid
+  buffering/peeking)
+- [ ] Track `_bridge_session()` backpressure note — fine for MVP because
+  `websockets` library provides basic transport backpressure, but at
+  high scale add max_size/timeouts or recommend Envoy/HAProxy in front
+- [ ] If active-active multi-primary becomes a requirement, define
+  behavior (round-robin within healthy primaries, weighted, sticky-by-key)
+  rather than letting `select()` silently pick `[0]`
+
+**Watch outs:**
+
+- `session_id` in WebSocket URL/headers is the cleanest sticky-routing
+  hook. If it ends up only in the first JSON message, sticky routing
+  later will require buffering/peeking before backend selection.
+- Multi-primary configs are now explicitly rejected by validation;
+  documented + enforced.
+- `_bridge_session()` is fine for MVP (the libraries provide basic
+  backpressure), but not production-grade for edge load. Document the
+  limit.
+
+**Open thread it touches:** open-threads.md items #13 (sticky routing),
+#14 (bridge backpressure), #15 (multi-primary semantics).
 
 ### D-14: Streaming auxiliaries (PR #1284) — cohesion + concrete-vs-Protocol scoping
 
