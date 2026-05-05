@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+from scipy.signal import resample as _scipy_resample
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -39,27 +40,21 @@ _SA_AUDIO_OPEN_SAMPLE_RATE = 44100
 
 
 def _resample_sinc(audio: np.ndarray, time_stretching: float) -> np.ndarray:
-    """Sinc-interpolate the audio to `new_length = int(L * time_stretching)`.
+    """Resample the audio to ``new_length = int(L * time_stretching)`` samples.
 
-    Mirrors upstream `video_process.resample_audio_sinc` (which delegates to
-    `torchaudio.functional.resample` under the hood); to avoid the hard
-    dependency and mixed-library gotchas, we do the same via
-    `torch.nn.functional` on a tensor.
+    Mirrors upstream ``video_process.resample_audio_sinc`` which calls
+    ``scipy.signal.resample`` (FFT-based polyphase resampling that
+    approximates ideal sinc interpolation). This avoids the
+    high-frequency aliasing and roll-off that ``F.interpolate(mode='linear')``
+    would introduce on a 25 fps × ~5 s wav (`scipy` is already a direct
+    fastvideo dep, so this is dependency-free relative to the previous
+    implementation).
     """
     if time_stretching == 1.0:
         return audio
-    t = torch.from_numpy(audio.astype(np.float32))
-    new_length = int(t.shape[0] * time_stretching)
-    # t: [L, C] -> [1, C, L] for interpolate
-    t_bct = t.T.unsqueeze(0)
-    t_bct = torch.nn.functional.interpolate(
-        t_bct,
-        size=new_length,
-        mode="linear",
-        align_corners=True,
-    )
-    t = t_bct.squeeze(0).T  # [new_length, C]
-    return t.numpy()
+    new_length = int(audio.shape[0] * time_stretching)
+    resampled = _scipy_resample(audio.astype(np.float32), new_length, axis=0)
+    return np.asarray(resampled, dtype=np.float32)
 
 
 class MagiHumanAudioDecodingStage(PipelineStage):
