@@ -545,20 +545,51 @@ class LatentsParquetMapStyleDataset(Dataset):
     def __getitems__(self, indices: list[int]) -> dict[str, Any]:
         """
         Batch fetch using read_row_from_parquet_file for each index.
+
+        A single corrupt parquet row would otherwise crash the worker and
+        hang the whole dataloader; instead we skip bad rows with a warning
+        and substitute another index. If the entire batch is unreadable
+        we re-raise so the failure is loud rather than silent.
         """
         row_indices = [
             self.sample_indices[idx]
             if self.sample_indices is not None else idx
             for idx in indices
         ]
-        rows = [
-            read_row_from_parquet_file(self.parquet_files, idx, self.lengths)
-            for idx in row_indices
-        ]
+        rows: list[dict[str, Any]] = []
+        kept_indices: list[int] = []
+        for idx in row_indices:
+            try:
+                row = read_row_from_parquet_file(self.parquet_files, idx,
+                                                 self.lengths)
+            except Exception as e:
+                logger.warning(
+                    "Skipping bad parquet row idx=%d: %s: %s",
+                    idx, type(e).__name__, e)
+                continue
+            rows.append(row)
+            kept_indices.append(idx)
+
+        # If everything failed, surface the error rather than feed an
+        # empty batch to collate (which would crash on stack).
+        if not rows:
+            raise RuntimeError(
+                f"All {len(indices)} parquet rows in this batch failed to "
+                f"decode (indices={indices[:8]}...); aborting to avoid "
+                "silent training stall.")
+
+        # Top up with re-reads of the kept indices so the batch size stays
+        # constant — preserves global step semantics under FSDP.
+        while len(rows) < len(indices):
+            fill_idx = kept_indices[len(rows) % len(kept_indices)]
+            row = read_row_from_parquet_file(self.parquet_files, fill_idx,
+                                             self.lengths)
+            rows.append(row)
+            kept_indices.append(fill_idx)
 
         # Inject sample indices for deterministic CFG dropout
         # that is reproducible across checkpoint resume.
-        for row, idx in zip(rows, row_indices, strict=True):
+        for row, idx in zip(rows, kept_indices, strict=True):
             row["_sample_index"] = idx
 
         batch = collate_rows_from_parquet_schema(rows,
