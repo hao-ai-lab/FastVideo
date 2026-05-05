@@ -290,7 +290,12 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     valid_data["action_path"] = [data["action_path"][i] for i in valid_indices]
 
                 # VAE
-                with torch.autocast("cuda", dtype=torch.float32):
+                _autocast_dtype = {
+                    "fp32": torch.float32,
+                    "bf16": torch.bfloat16,
+                    "fp16": torch.float16,
+                }[getattr(args, "vae_autocast_dtype", "fp32")]
+                with torch.autocast("cuda", dtype=_autocast_dtype):
                     latents = self.get_module("vae").encode(valid_data["pixel_values"].to(
                         get_local_torch_device())).mean
 

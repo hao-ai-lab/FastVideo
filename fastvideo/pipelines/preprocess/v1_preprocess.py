@@ -105,6 +105,13 @@ if __name__ == "__main__":
                         choices=["fp32", "fp16"],
                         help="On-disk dtype for vae_latent bytes. fp32 "
                         "preserves upstream behavior; fp16 halves cache size.")
+    parser.add_argument("--vae_autocast_dtype",
+                        type=str,
+                        default="fp32",
+                        choices=["fp32", "bf16", "fp16"],
+                        help="Autocast dtype for the VAE encode forward. "
+                        "fp32 preserves upstream behavior; bf16 ~25-40%% "
+                        "faster with fp32-equivalent dynamic range.")
     parser.add_argument("--video_length_tolerance_range", type=int, default=2.0)
     parser.add_argument("--group_frame", action="store_true")  # TODO
     parser.add_argument("--group_resolution", action="store_true")  # TODO
