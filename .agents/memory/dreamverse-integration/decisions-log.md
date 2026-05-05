@@ -6,7 +6,7 @@ question/decision, rationale, current status.
 For implementation status see [pr-roadmap.md](pr-roadmap.md). For
 follow-up actions see [open-threads.md](open-threads.md).
 
-**Last updated:** 2026-05-05 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion, Oracle review during #1284 review cycle; added D-15 — streaming router placement + sticky/active-active deferral, Oracle review during #1286 review cycle; added D-16 — streaming router polish round 2, second-pass review on top of D-15 covering bridge cancellation hygiene, registry state machine, httpx hard-fail, replica YAML parsing, and `websockets` dep; added D-17 — strategy reversal: abandon 6-PR split in favor of single mega-PR #1288 on `will/ltx2_sr_port`).
+**Last updated:** 2026-05-05 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion, Oracle review during #1284 review cycle; added D-15 — streaming router placement + sticky/active-active deferral, Oracle review during #1286 review cycle; added D-16 — streaming router polish round 2, second-pass review on top of D-15 covering bridge cancellation hygiene, registry state machine, httpx hard-fail, replica YAML parsing, and `websockets` dep; added D-17 — strategy reversal: abandon 6-PR split in favor of single mega-PR #1288 on `will/ltx2_sr_port`; added D-18 — Option B+ chosen: Dreamverse FE+product-server move into FastVideo as `apps/dreamverse/` subfolder while generic backend stays at `fastvideo.entrypoints.streaming.*`; integration-review.md deprecated, integration-plan.md is the executable migration plan).
 
 ## Status legend
 
@@ -15,6 +15,60 @@ follow-up actions see [open-threads.md](open-threads.md).
 - 🔴 **Open** — needs decision
 
 ## Post-merge architecture decisions
+
+### D-18: Option B+ — Dreamverse becomes `apps/dreamverse/` subfolder under FastVideo
+
+**Status:** ✅ Resolved 2026-05-05. [integration-plan.md](integration-plan.md) is the executable migration plan; [integration-review.md](integration-review.md) is deprecated but kept for drift audit + OSS precedents.
+**Source:** User decision after reviewing [integration-review.md](integration-review.md)'s Option D recommendation.
+
+**Question:** [integration-review.md](integration-review.md) recommended **Option D** — Dreamverse stays a separate repo, generic backend (streaming runtime, GPU pool, prompt enhancer, router) merges into `fastvideo.entrypoints.streaming.*`. The user reviewed this and chose a different shape: keep the generic-backend principle from Option D but ALSO move the Dreamverse FE + product server into FastVideo as a subfolder (`apps/dreamverse/`). Combination is "Option B+" (Option B layout with Option D's backend principle).
+
+**Decision:** Option B+. Concrete shape:
+
+- **One repo**: `hao-ai-lab/FastVideo`. Dreamverse repo gets archived after migration completes.
+- **Python ML library** stays at root: `fastvideo/`, `fastvideo-kernel/`.
+- **Generic backend** stays at `fastvideo.entrypoints.streaming.*` (already there per #1257/#1258/#1284/#1286/#1288).
+- **Dreamverse product** moves into `apps/dreamverse/{server,web,prompts,serve_configs,scripts}/`.
+- **Tooling**: uv workspace for Python (`[tool.uv.workspace] members = ["apps/dreamverse/server"]`), standalone pnpm for the FE (no root `package.json`), split CI workflows with path-filter triggers.
+
+**Rationale:**
+
+- Drops the cross-repo coordination overhead identified in the post-#1286 rebase cycle (D-17 handled by consolidating into mega-PR; D-18 prevents the next round of cross-repo coordination from happening).
+- Keeps the architectural separation Option D recommended (FastVideo owns reusable runtime; product owns product). The boundary is now `apps/dreamverse/` directory rather than two repos.
+- Single repo means atomic cross-cutting refactors (e.g. GpuPool API change + Dreamverse adoption) ship as one PR.
+- OSS precedents support the shape (chainlit uv-workspace + pnpm; open-webui Python + Svelte with paths-ignore CI). The librarian explicitly noted no precedent for "Python ML library + Next.js product merged into library namespace" — but this isn't that pattern. Dreamverse goes into a sibling directory, NOT into `fastvideo.entrypoints.dreamverse.*`. Library namespace stays clean.
+
+**Why not Option D (separate repos):**
+
+- Each upstream merge into FastVideo invalidates Dreamverse's lockfile/imports; the post-#1286 rebase showed this requires coordination overhead that scales with feature velocity.
+- Cross-repo contract tests catch shape drift but not behavior drift.
+- Two repos means two `AGENTS.md`, two CI configs, two release stories, two Dependabot dashboards.
+
+**Why not Option C (full merge into `fastvideo.entrypoints.dreamverse.*`):**
+
+- Forces FastVideo to ship Tailwind config + curated preset JSON + Next.js build artifacts.
+- Locks Dreamverse product cadence to FastVideo PyPI releases.
+- Librarian: "no 1:1 precedent for Python ML library + Next.js product merged into library namespace" — argues against this.
+
+**Why not Option B (subfolder, but generic backend folded into `apps/dreamverse/server/`):**
+
+- Other consumers (Dynamo, future streaming clients) need the backend without the Dreamverse product. Folding the backend under `apps/dreamverse/server/` would force Dynamo to either depend on `apps/` paths (ugly) or carry a fork.
+
+**Implications:**
+
+- [integration-review.md](integration-review.md) is **deprecated** (banner header + reading-guide demotion). Kept in tree for drift audit + OSS precedent reference.
+- [integration-plan.md](integration-plan.md) is the **canonical executable plan** with 7 phases (Phase 0: land #1288; Phase 1: skeleton + tooling; Phase 2: backend move; Phase 3: FE move; Phase 4: promote generic-pending; Phase 5: prompt enhancer fork retirement; Phase 6: CI/release cutover; Phase 7: archive Dreamverse repo).
+- Dreamverse repo will be **archived** at end of Phase 7 — not before.
+- Dreamverse history does NOT migrate cross-repo via `git mv` (technical limitation); original history stays in archived Dreamverse repo, and Phase 2 PR body records the source SHA(s).
+- New top-level `apps/` directory created — must be excluded from FastVideo PyPI wheel via `[tool.setuptools.packages.find] exclude = ["apps*", ...]`.
+- Drift items from [integration-review.md](integration-review.md) get folded into specific phases of [integration-plan.md](integration-plan.md) (e.g. health routes → Phase 4, DR-1 → Phase 5).
+
+**Open questions deferred to phase planning:**
+
+- DR-2 (`cerebras_ifm`): public Literal vs Dreamverse-side custom provider — decide before Phase 5.
+- VPO (`video_position_offset_sec` semantics): persistent vs per-segment — decide in Phase 4.
+- Cross-repo history: fresh import vs `git subtree` import — decide before Phase 2.
+- CORS / write-endpoint security policy: dev-only vs auth vs firewall — decide before Phase 6.
 
 ### D-17: Abandon 6-PR split — land everything as single mega-PR #1288
 
