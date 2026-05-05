@@ -6,11 +6,12 @@ recommended next action.
 For why each item is open see [decisions-log.md](decisions-log.md). For
 PR-level context see [pr-roadmap.md](pr-roadmap.md).
 
-**Last updated:** 2026-05-04 (PRs 7.5 / 7.6 / 7.7 merged; PR 7.8 opened
-as #1284 with 4 gemini review fixes + 2 Oracle polish items applied;
-D-14 added to decisions-log; items #9 + #10 RESOLVED via the cleanup
-rebase that bundled into 7.8 prep; #12 added — safety filter
-UNAVAILABLE log loudness; DR-1 unblocked now that PR #1258 has merged).
+**Last updated:** 2026-05-05 (PR #1284 merged; PR #1286 opened for 7.9
+streaming router with 4 gemini review fixes + 4 Oracle polish items
+applied — `select()` docstring rewrite, parallel pooled health probes,
+`RouterConfig.__post_init__` validation, FastAPI on_event→lifespan
+migration; D-15 added to decisions-log; #13/#14/#15 added — sticky
+routing extensibility, bridge backpressure, multi-primary semantics).
 
 ## Priority overview
 
@@ -37,6 +38,9 @@ UNAVAILABLE log loudness; DR-1 unblocked now that PR #1258 has merged).
 | **8** | Low | Stale `apps/web/test-results/` dir cleanup | trivial | Cosmetic |
 | **11** | Low | Promote LTX-2 prompt orchestration (locked segments, segment_prompts JSON shape, rollout id/label) to `fastvideo.entrypoints.streaming.prompt.ltx2_orchestration` | M | Resolves Q-2 from decisions-log when a second LTX-2-style consumer appears |
 | **12** | Low | When streaming server starts using `PromptSafetyFilter`, ensure operator-visible logging on `SafetyDecision.UNAVAILABLE` results | trivial | Surfaces degraded-safety state to operators (per D-14 Watch-Out item) |
+| **13** | Low | When sticky session routing is needed, add `ReplicaRegistry.select(routing_key: str | None = None)` and document where `session_id` lives (WS URL/header preferred over first JSON frame) | M | Forward-compat from D-15 — keeps the door open without buffering/peeking |
+| **14** | Low | At higher load, add `_bridge_session()` max-size + timeout limits OR recommend Envoy/HAProxy in front | S-M | The libraries' basic backpressure suffices for MVP; document the limit per D-15 |
+| **15** | Low | If active-active multi-primary becomes a requirement, define behavior (round-robin within healthy primaries, weighted, sticky-by-key) | M | Currently `RouterConfig.__post_init__` rejects multi-primary; D-15 deferred until evidence |
 | **~~Source-doc disposition~~** | ~~Med~~ | ~~Disposition of 7 untracked source docs~~ | ~~trivial~~ | ✅ **Resolved 2026-05-03** — moved into [source-archive/](source-archive/) |
 | **~~9~~** | ~~Low~~ | ~~Commit-message cleanup: PR 8's 3 commits still have `[8/n] Improve API:` prefix~~ | ~~S~~ | ✅ **Resolved 2026-05-04** — bundled into the will/api_7.8 prep rebase. PR 8's 3 commits now read `[type] streaming: ...` |
 | **~~10~~** | ~~Low~~ | ~~Commit-message cleanup: PR 7.8/7.9 commits have `streaming: streaming X` duplication~~ | ~~S~~ | ✅ **Resolved 2026-05-04** — bundled into the will/api_7.8 prep rebase. 3 commits dedup'd. |
