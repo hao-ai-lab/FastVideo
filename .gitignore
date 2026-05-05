@@ -16,6 +16,7 @@ cache_dir/
 wandb/
 venv/
 .venv/
+.venv-overlay/
 runs/
 samples/
 Miniconda3-latest-Linux-x86_64.sh
@@ -92,3 +93,4 @@ preprocess_output_text/
 .sisyphus/
 openspec/
 fastvideo/tests/ssim/reference_videos/**
+LATENTS_REPORT.md
