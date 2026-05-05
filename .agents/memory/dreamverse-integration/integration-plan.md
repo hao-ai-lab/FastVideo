@@ -603,12 +603,109 @@ monorepo CI path.
 |---|---|---|
 | uv workspaces | https://docs.astral.sh/uv/concepts/workspaces/ | Authoritative Python workspace model. |
 | Hatch monorepo | https://hatch.pypa.io/latest/how-to/environment/workspace/ | Alternative workspace model; not selected. |
-| chainlit | https://github.com/Chainlit/chainlit | uv workspace precedent plus split frontend/backend CI. |
+| chainlit | https://github.com/Chainlit/chainlit | uv workspace precedent plus **per-language CI split** (separate `check-frontend.yaml` / `check-backend.yaml` workflows path-filtered by directory). Not a PR-level split — independent of D-17 single-mega-PR decision. |
 | open-webui | https://github.com/open-webui/open-webui | Frontend path filtering (`paths-ignore` on backend-only changes) and separate release tracks. **Note:** open-webui has a root `package.json`; we are choosing standalone-pnpm despite the precedent, to avoid forcing Python-only contributors to install Node. |
 | streamlit | https://github.com/streamlit/streamlit | Split Python and JS testing in one repo. |
 | gradio | https://github.com/gradio-app/gradio | Python package plus JS workspace precedent. |
 | full-stack-fastapi-template-nextjs | https://github.com/nemanjam/full-stack-fastapi-template-nextjs | Separate frontend/backend build and deploy workflows. |
 | rerun-io/rerun, microsoft/autogen, langgenius/dify | various | uv workspace examples with workspace members and sources. |
+
+### Test strategy
+
+The migration spans CPU-only logic, GPU-required inference, and end-to-end
+WebSocket flows. Each phase's verification gate must specify which test
+class runs where, because not all tests can run on `ubuntu-latest` CI.
+
+#### Test taxonomy
+
+| Class | Marker | Runs in | What it covers | Examples |
+|---|---|---|---|---|
+| **Unit** | (none / `unit`) | `ci-dreamverse-backend.yml` (ubuntu-latest CI) + locally | Pure logic, no GPU, no live service. Mocked FastVideo backends, schema validation, helper functions. | `test_config.py`, `test_rewrite_prompt_payload.py`, `test_session_init_image.py`, the new `test_import_contract.py` |
+| **Integration (fakes)** | `integration` | `ci-dreamverse-backend.yml` + locally | FastAPI test client + in-process fakes/mocks for GPU pool. Validates routes, request/response shapes, session state machine. | `test_health_endpoints.py`, `test_mock_server.py`, `test_entrypoints.py`, `test_prompt_safety.py`, `test_batching.py` (deleted) |
+| **Live-service GPU** | `gpu` (skip-by-default in CI) | **Local GPU4 manual QA** + Buildkite-Modal (when added) | Real `fastvideo serve` process + real model weights + real WebSocket round-trips. Validates LTX-2 streaming, NVFP4 wiring, continuation state, frame emission. | `test_realtime_stress.py` (947 LOC), `test_session_logging.py` (1278 LOC) — these spin up real workers per their current shape |
+| **Frontend unit / build** | (n/a — pnpm) | `ci-dreamverse-frontend.yml` (ubuntu-latest, no GPU) | Vitest + tsc + Next.js build. No backend needed. | `apps/dreamverse/web/src/**/*.test.ts(x)` |
+| **Frontend Playwright E2E** | (n/a — pnpm) | **Local GPU4 manual QA** until Phase 4 lands public health routes; then `ci-dreamverse-frontend.yml` against a mock backend OR a deployed staging | Real browser → real backend WebSocket flow. Requires `/healthz`, `/readyz`, `/status`, `/prompt-system-config`, `/curated-presets`, `/v1/stream`. | `apps/dreamverse/web/e2e/{backend-health,frontend-shell,preset-prompt-generation}.spec.ts` |
+| **FastVideo public contract** | (none) | Existing FastVideo CI (`ci-precommit` + Buildkite for GPU) | Schema/shape guards that this migration must not break. | `fastvideo/tests/contract/test_dreamverse_shape.py`, `test_dynamo_shape.py`, `test_generate_async.py` |
+| **FastVideo SSIM regression** | (Buildkite path-filter) | Buildkite-Modal | Inference-quality gates for ported models. | `fastvideo/tests/ssim/test_*.py` |
+
+#### Adding the `gpu` marker
+
+In Phase 1, add to root `pyproject.toml`:
+
+```diff
+ [tool.pytest.ini_options]
++markers = [
++  "gpu: requires a real GPU + model weights; skip in ubuntu-latest CI",
++]
+```
+
+In `apps/dreamverse/server/pyproject.toml` `[tool.pytest.ini_options]`, set
+the default for the backend test command to skip GPU tests:
+
+```toml
+[tool.pytest.ini_options]
+addopts = "-m 'not gpu'"
+markers = ["gpu: requires real GPU"]
+```
+
+GPU-dependent tests must add `@pytest.mark.gpu` at module or function level
+during the Phase 2 move. Specifically: `test_realtime_stress.py` and
+`test_session_logging.py` per their current LOC and live-service shape.
+
+#### Local GPU4 verification hook
+
+This dev node has 8× B200 GPUs. **GPU4** is currently held by the running
+`dreamverse-server` (PID 2453227, port 8009 — see
+[`state.md`](file:///home/william5lin/FastVideo/.agents/memory/dreamverse-integration/state.md#L80-L86)).
+For migration verification, GPU4 can be reclaimed:
+
+```bash
+# Stop the running Dreamverse-side server holding GPU4
+sudo kill 2453227   # or use the supervisor that owns it
+
+# Confirm GPU4 is free
+nvidia-smi --query-gpu=index,memory.used --format=csv | grep -E '^4,'
+
+# Deploy the new public FastVideo streaming server pinned to GPU4
+CUDA_VISIBLE_DEVICES=4 uv run --locked --package dreamverse-server \
+  fastvideo serve --config apps/dreamverse/serve_configs/streaming_demo.yaml \
+  --host 0.0.0.0 --port 8009
+
+# Smoke-test from another terminal
+curl -s http://localhost:8009/health | jq .
+curl -s http://localhost:8009/readyz | jq .   # Phase 4+ only
+# Drive the FE against it: cd apps/dreamverse/web && pnpm run dev
+```
+
+This is the **manual QA gate** for any phase that touches the live-service
+path (Phase 2 backend move, Phase 3 frontend move, Phase 4 health-route
+promotion, Phase 5 prompt enhancer retirement). The verification gate for
+each phase calls out whether the GPU4 smoke is required or optional.
+
+**Cleanup after each test session:**
+
+```bash
+# Kill the test deployment
+pkill -f 'fastvideo serve --config'
+
+# Restart the original Dreamverse-side server if it should remain canonical
+# during early phases (until Phase 6e CI freeze)
+cd /home/william5lin/Dreamverse && bash scripts/smoke_local.sh   # or
+cd /home/william5lin/Dreamverse && uv run server   # depending on op convention
+```
+
+#### Per-phase test responsibilities (summary)
+
+| Phase | Unit | Integration (fakes) | GPU live (GPU4) | Frontend build | Frontend E2E (Playwright) |
+|---|:---:|:---:|:---:|:---:|:---:|
+| 0 (#1288 land) | Existing FastVideo suite | Existing | Optional sanity | n/a | n/a |
+| 1 (skeleton) | New empty pkg `pytest --collect-only` | n/a | n/a | n/a | n/a |
+| 2 (backend move) | **Required** in CI | **Required** in CI | **Required manual** on GPU4 (smoke) | n/a | n/a |
+| 3 (FE move) | Backend still green | Backend still green | Optional | **Required** in CI | **Manual on GPU4 only** (FE CI Playwright deferred to Phase 4) |
+| 4 (promote pending) | Streaming tests must add coverage | Required | **Required manual** on GPU4 | Required | **Required manual** on GPU4 → re-enable FE-CI Playwright at end |
+| 5 (DR-1 / DR-2) | Required | Prompt-shim tests required | **Required manual** prompt-flow on GPU4 | Required | **Required manual** preset-prompt-generation spec on GPU4 |
+| 6a-6f | All CI green | All CI green | Optional during 6b/6c deploy dry runs | All CI green | Required against staging in 6c |
+| 7 (archive) | n/a | n/a | n/a | n/a | n/a |
 
 ---
 
@@ -870,8 +967,10 @@ These are **explicit shims** — Phase 4 is responsible for their promotion to p
 
 **Verification gate:**
 
-- `uv run --package dreamverse-server pytest apps/dreamverse/server/tests/ -q` succeeds.
-- Import contract test passes.
+- **CI / unit / integration**:
+  `uv run --locked --package dreamverse-server --extra test pytest apps/dreamverse/server/tests/ -m 'not gpu' -q`
+  succeeds (skips GPU-marked tests; runs in `ci-dreamverse-backend.yml`).
+- Import contract test (`test_import_contract.py`) passes.
 - `lsp_diagnostics` is clean for changed Python files.
 - `pre-commit run --files apps/dreamverse/server/*.py apps/dreamverse/server/session/controller.py apps/dreamverse/server/session/messages.py apps/dreamverse/server/routes/presets.py apps/dreamverse/server/tests/*.py` succeeds.
 - D-8 trace is documented in the PR body and either passes or opens a blocking
@@ -879,6 +978,16 @@ These are **explicit shims** — Phase 4 is responsible for their promotion to p
 - No imports from internal `fastvideo.pipelines`, `fastvideo.models`,
   `fastvideo.layers`, or `fastvideo.worker` remain under
   `apps/dreamverse/server/`.
+- **Manual QA on GPU4** (required, not optional):
+  - Reclaim GPU4 (kill running dreamverse-server PID 2453227).
+  - `CUDA_VISIBLE_DEVICES=4 uv run --locked --package dreamverse-server fastvideo serve --config apps/dreamverse/serve_configs/streaming_demo.yaml --host 0.0.0.0 --port 8009` boots cleanly.
+  - `curl -s http://localhost:8009/health` returns 200.
+  - `pytest apps/dreamverse/server/tests/ -m gpu -q` against the live deploy passes
+    (this exercises `test_realtime_stress.py` and `test_session_logging.py`
+    with a real GPU + real model weights).
+  - Capture output in PR description.
+  - Cleanup: `pkill -f 'fastvideo serve --config'` and restart the canonical
+    Dreamverse-side server.
 
 **Rollback:**
 
@@ -887,6 +996,8 @@ These are **explicit shims** — Phase 4 is responsible for their promotion to p
   rollback is needed.
 - If only one public import is missing, add a temporary product-local shim only
   if it is explicitly deleted in Phase 4 or Phase 5.
+- If the GPU4 manual QA reveals a real-service bug, the Phase 2 PR is
+  blocked; fix the bug and re-run the GPU4 smoke before merging.
 
 ### Phase 3 — Move FE + content
 
@@ -929,10 +1040,19 @@ scripts, and product docs after backend tests are green.
 
 - `cd apps/dreamverse/web && pnpm install --frozen-lockfile` succeeds.
 - `cd apps/dreamverse/web && pnpm run build` succeeds.
-- `cd apps/dreamverse/web && pnpm run test --if-present` succeeds.
-- `cd apps/dreamverse/web && pnpm exec playwright test` succeeds, or a PR note
-  explains which backend endpoint is required for product E2E.
-- `uv run --package dreamverse-server pytest apps/dreamverse/server/tests/ -q`
+- `cd apps/dreamverse/web && pnpm run test --if-present` succeeds (Vitest + tsc).
+- **Frontend CI Playwright is intentionally DEFERRED to Phase 4** — at Phase 3
+  the public `build_app` does not yet expose `/healthz`+`/readyz`+`/status`+
+  `/prompt-system-config`+`/curated-presets`. The `ci-dreamverse-frontend.yml`
+  scaffold from Phase 1 keeps Playwright steps commented out until Phase 4
+  reactivates them. No PR note required.
+- **Manual GPU4 Playwright smoke** (recommended): on this dev node, run
+  `apps/dreamverse/web/e2e/frontend-shell.spec.ts` against the GPU4-deployed
+  backend from Phase 2 manual QA + a `pnpm run dev` frontend at port 5274
+  to confirm shell hydration. `backend-health.spec.ts` and
+  `preset-prompt-generation.spec.ts` will fail until Phase 4 — that is
+  expected; document as deferred.
+- `uv run --locked --package dreamverse-server --extra test pytest apps/dreamverse/server/tests/ -m 'not gpu' -q`
   still succeeds.
 - `examples/serving/streaming_demo.yaml` parses with FastVideo serve config.
 
@@ -966,14 +1086,23 @@ Dreamverse product code.
 
 **Verification gate:**
 
-- FastVideo streaming tests pass.
-- Dreamverse backend tests pass.
+- FastVideo streaming tests pass (existing CI suite).
+- Dreamverse backend tests pass (`-m 'not gpu'` in CI; `-m gpu` on GPU4 manual).
 - Contract tests for `/healthz`, `/readyz`, `/status` cover both healthy and
-  not-ready states.
+  not-ready states (added in this phase to `fastvideo/tests/entrypoints/streaming/`).
 - `run_async()` cancellation test proves client disconnect can stop mid-work.
 - VPO decision is documented in code comments/tests.
 - SessionStore/BlobStore lifecycle policy has tests for replacement cleanup and
   disconnect expiry if implemented.
+- **Frontend CI Playwright RE-ENABLED** at end of this phase: uncomment the
+  Playwright steps in `ci-dreamverse-frontend.yml` (deferred since Phase 1)
+  AND change CI to either (a) run against the mock backend
+  `fastvideo.entrypoints.streaming.mock_server`, or (b) require a deployed
+  staging URL via env var.
+- **Manual GPU4 full E2E**: deploy `fastvideo serve` on GPU4 with the new
+  health routes, run all 3 Playwright specs (`backend-health`, `frontend-shell`,
+  `preset-prompt-generation`) against it. All 3 must pass — this is the
+  re-baseline after Phase 3's deferral. Capture output in PR.
 
 **Rollback:**
 
