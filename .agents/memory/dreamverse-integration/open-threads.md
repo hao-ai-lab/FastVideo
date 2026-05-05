@@ -6,9 +6,12 @@ recommended next action.
 For why each item is open see [decisions-log.md](decisions-log.md). For
 PR-level context see [pr-roadmap.md](pr-roadmap.md).
 
-**Last updated:** 2026-05-05 (strategy reversal — PR #1287 CLOSED, replaced
-by mega-PR #1288 on `will/ltx2_sr_port` @ `b36bdbc9` covering the full
-6-layer stack at once. See [decisions-log.md D-17](decisions-log.md#d-17).
+**Last updated:** 2026-05-05 (D-20 broken-pipe root cause + fix landed on
+`will/dreamverse-monorepo` @ `5eaf0a13`; added new thread D-20-CP for
+cherry-picking the public-API audio routing fix to `will/ltx2_sr_port`
+so it lands in PR #1288. Earlier: strategy reversal — PR #1287 CLOSED,
+replaced by mega-PR #1288 on `will/ltx2_sr_port` @ `b36bdbc9` covering
+the full 6-layer stack at once. See [decisions-log.md D-17](decisions-log.md#d-17).
 Item D resolution gate is now #1288 merge instead of #1287; same content,
 different vehicle.).
 
@@ -16,6 +19,7 @@ different vehicle.).
 
 | # | Pri | Item | Effort | Unblocks |
 |---|---|---|---|---|
+| **D-20-CP** | High | Cherry-pick `[fix] api: route LTX-2 audio kwargs through batch.extra; strict update` (`265ce1a6`) onto `will/ltx2_sr_port` so it lands in PR #1288 | 15 min | Surfaces the public-API audio-conditioning fix in the mega-PR rather than waiting for `will/dreamverse-monorepo` to fold in. Tests already pass (185/185 api). |
 | **D-8** | High | Verify `ltx2_image_crf` post-`d80c2a8` | 10 min | Confirms typed stage-override path actually flows; closes a latent silent-drop bug |
 | **1** | High | Migrate `/healthz`+`/readyz`+`/status` into FastVideo `build_app` | M-L | Closes BE_FLAVOR=fastvideo FE-compatibility; closes streaming-upstream contract debt |
 | **2** | High | Fix pre-existing AbsMaxFP8 test failure | S | Self-contained quantization tech debt |
@@ -47,6 +51,31 @@ different vehicle.).
 ---
 
 ## High priority
+
+### D-20-CP: Cherry-pick public-API audio routing fix to `will/ltx2_sr_port`
+
+**Why:** Commit `265ce1a6` (`[fix] api: route LTX-2 audio kwargs through batch.extra; strict update`) lives only on `will/dreamverse-monorepo` today. It touches public FastVideo surface (`fastvideo/entrypoints/video_generator.py`, `fastvideo/api/sampling_param.py`, plus a new regression test). For PR #1288 to ship a coherent public API — including the strict `SamplingParam.update()` — this commit needs to also land on `will/ltx2_sr_port`.
+
+**Action:**
+
+1. `git checkout will/ltx2_sr_port`
+2. `git cherry-pick 265ce1a6` (clean; only touches `fastvideo/` paths that exist on both branches)
+3. `pre-commit run --files fastvideo/entrypoints/video_generator.py fastvideo/api/sampling_param.py fastvideo/tests/api/test_extra_overrides_routing.py`
+4. `pytest fastvideo/tests/api/ -q` (expect 185 passed)
+5. `git push origin will/ltx2_sr_port` (fast-forward, no force)
+6. `git checkout will/dreamverse-monorepo` (return to default working branch per runbook)
+
+**Outcome:** PR #1288 picks up the fix automatically (its head IS `will/ltx2_sr_port`). The cherry-pick lives on both branches as separate SHAs; they'll dedupe naturally on any future rebase.
+
+**Effort:** 15 minutes (cherry-pick + lint + test + push).
+
+**Dependencies:** None. Tests already pass; no rebase conflicts expected.
+
+**Files touched (same on both branches):**
+
+- `fastvideo/entrypoints/video_generator.py`
+- `fastvideo/api/sampling_param.py`
+- `fastvideo/tests/api/test_extra_overrides_routing.py` (new file)
 
 ### D-8: Verify `ltx2_image_crf` typed flow post-`d80c2a8`
 
