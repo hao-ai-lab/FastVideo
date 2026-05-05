@@ -7,13 +7,17 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import time
 from pathlib import Path
 
 from fastvideo import VideoGenerator
 
-REPO_ROOT = Path("/leonardo_work/AIFAC_P02_082/code/moein/FastVideo")
-MODEL_PATH = "/leonardo_work/AIFAC_P02_082/.cache/FastWan2.2-TI2V-5B-Diffusers"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MODEL_PATH = os.environ.get(
+    "WAN22_MODEL_PATH",
+    "/leonardo_work/AIFAC_P02_082/.cache/FastWan2.2-TI2V-5B-Diffusers",
+)
 SEED_DIR = REPO_ROOT / "outputs/wan22_soccernet_smoke/seeds"
 OUT_DIR = REPO_ROOT / "outputs/wan22_soccernet_smoke/videos"
 MANIFEST_PATH = REPO_ROOT / "outputs/wan22_soccernet_smoke/manifest.csv"
@@ -26,7 +30,13 @@ PROMPT = (
 
 
 def main() -> None:
-    seeds = json.loads((SEED_DIR / "seeds.json").read_text())
+    seeds_path = SEED_DIR / "seeds.json"
+    if not seeds_path.exists():
+        raise FileNotFoundError(
+            f"{seeds_path} not found. Run sample_seed_frames.py "
+            f"--out-dir {SEED_DIR} first (or use submit_wan22_i2v.sbatch, "
+            "which chains the two steps).")
+    seeds = json.loads(seeds_path.read_text())
     print(f"[plan] {len(seeds)} generations, model={MODEL_PATH}", flush=True)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
