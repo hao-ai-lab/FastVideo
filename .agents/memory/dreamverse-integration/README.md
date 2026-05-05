@@ -5,16 +5,53 @@ Tracks the public API refactor (PRs 0-17), the LTX-2 streaming server
 upstream, the Dreamverse switch from `FastVideo-internal` to public
 `FastVideo`, and the NVFP4 quantization landing.
 
-**Last reconciled:** 2026-05-04 (FastVideo `will/ltx2_sr_port` @ `89a6484d`
-post-#1258-merge rebase; Dreamverse `will/integrate-public-fastvideo` @ `ec8ef92`).
-PRs #1257 (`will/api_7.6`) and #1258 (`will/api_7.7`) MERGED to main; PR #1284
-(`will/api_7.8`) OPEN, awaiting review.
+**Last reconciled:** 2026-05-05 (FastVideo `will/ltx2_sr_port` @ `09647a30`
+post-D-16 router polish; Dreamverse `will/integrate-public-fastvideo` @ `ec8ef92`).
+PRs #1257 / #1258 / #1284 MERGED to main; PR #1286 (`will/api_7.9` —
+streaming router) OPEN at `a152cb77`, MERGEABLE.
 
-## Reading guide — what to load when
+## Fresh-context onboarding (read in order)
+
+If you're an agent picking up this work for the first time, do these
+**5 things in this order**. Once done, you have full context to continue
+any open thread, commit correctly, push, and propagate to the open PR.
+
+1. **Confirm worktree state** — run the "First 60 seconds" block in
+   [runbook.md](runbook.md). Tells you the branch is right, services
+   are up, and PR #1286's head matches what this dir claims.
+
+2. **Read [state.md](state.md)** — single-page snapshot of branch tips,
+   live services, test status, pre-existing failures, "do not pop"
+   stashes.
+
+3. **Read [pr-roadmap.md](pr-roadmap.md)** — what PRs landed, what's in
+   flight, what's planned. Identifies the active open PR (currently
+   #1286) and where it sits in the dependency chain.
+
+4. **Read [open-threads.md](open-threads.md)** — prioritized work items
+   with effort estimates and dependencies. The "Recommended pull order"
+   section is a ready-made TODO list if you need one.
+
+5. **Skim [runbook.md](runbook.md) end-to-end** — operational how-to:
+   verify, commit (with co-author trailers), push, propagate to PR
+   #1286, maintain the memory dir, and the "Common pitfalls" section
+   that catches the recurring traps.
+
+Skip the deep-context docs (design / streaming-server / cross-repo /
+quantization / decisions-log) until you need them — they're indexed in
+the "Deep-dive reading guide" below.
+
+Final check: run the "Self-test" block at the bottom of
+[runbook.md](runbook.md). If you can answer all 8 questions from this
+dir alone, you're ready. If you can't, the gap is a memory-dir bug —
+file it in [open-threads.md](open-threads.md) before continuing.
+
+## Deep-dive reading guide
 
 | Question / task | File |
 |---|---|
 | "What's running right now? What just landed?" | [state.md](state.md) |
+| "How do I commit / push / propagate to PR #1286?" | [runbook.md](runbook.md) |
 | "Why is the schema typed this way? What's the philosophy?" | [design.md](design.md) |
 | "What PRs landed? In flight? Planned?" | [pr-roadmap.md](pr-roadmap.md) |
 | "Streaming server, `generate_async`, `build_app` routes?" | [streaming-server.md](streaming-server.md) |
