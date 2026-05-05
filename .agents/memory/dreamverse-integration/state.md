@@ -1,19 +1,25 @@
-# Current State — 2026-05-03
+# Current State — 2026-05-05
 
 Point-in-time snapshot of branches, commits, and live infrastructure.
 Update whenever commits land or services restart.
+
+For HOW to commit / push / verify see [runbook.md](runbook.md). For
+roster of co-authors to credit on every commit see
+[authors.md](authors.md).
 
 ## Branch tips
 
 | Repo | Branch | Tip | Distance |
 |---|---|---|---|
-| FastVideo | `will/ltx2_sr_port` | `156103b9` | 14 commits ahead of i2v port base `cfccd292` |
+| FastVideo | `will/ltx2_sr_port` | `09647a30` | 32 commits ahead of i2v port base `cfccd292` |
+| FastVideo | `will/api_7.9` (PR #1286) | `a152cb77` | router stack head; ancestor of `will/ltx2_sr_port` |
 | Dreamverse | `will/integrate-public-fastvideo` | `ec8ef92` | 10 commits ahead of `737f3c1` (the dep switch) |
 | FastVideo-internal | their `main` | (read-only ref) | — |
 
-Both worktrees clean. FastVideo worktree currently checked out on
-`will/ltx2_sr_port` (was on `will/uv-pip-install-everywhere` per the
-May 2 handoff — that's been corrected).
+FastVideo worktree default branch is `will/ltx2_sr_port`. Other agents
+share this worktree — if `git branch --show-current` shows something
+else, switch back cleanly with `git checkout will/ltx2_sr_port` (don't
+disturb their uncommitted work).
 
 ## FastVideo: commit chain `cfccd292..156103b9`
 
