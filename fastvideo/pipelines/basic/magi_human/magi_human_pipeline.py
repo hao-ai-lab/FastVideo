@@ -22,6 +22,7 @@ the same ~25 GB of cached upstream weights.
 """
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,7 @@ from fastvideo.pipelines.stages import (
     InputValidationStage,
     TextEncodingStage,
 )
+from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
 
@@ -111,13 +113,34 @@ class MagiHumanPipeline(ComposedPipelineBase):
         # T5-Gemma is gated: expose `HF_API_KEY` as `HF_TOKEN` if needed.
         _ensure_hf_token_env()
 
-        # Temporarily drop the cross-variant shared keys from
-        # required_config_modules so super() does not fail the "every
-        # required entry must appear in model_index.json" check when
-        # the converted repo declares a minimal model_index.json.
+        # Resolve to a local cache path so we can inspect
+        # model_index.json before invoking super(). `maybe_download_model`
+        # is idempotent for local paths; super() repeats the call cheaply
+        # via `_load_config`.
+        local_path = maybe_download_model(self.model_path)
+
+        # Identify which cross-variant shared keys are bundled in the
+        # converted repo (declared in model_index.json with a non-null
+        # spec) versus absent (the umbrella scheme). Bundled keys stay
+        # in `required_config_modules` and are loaded normally by super()
+        # from `<model_path>/<key>/`. Absent keys are temporarily
+        # dropped so super() does not fail the "every required entry
+        # must appear in model_index.json" check, then lazy-loaded
+        # below.
+        model_index: dict[str, Any] = {}
+        try:
+            with open(Path(local_path) / "model_index.json") as f:
+                model_index = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+        def _is_bundled(key: str) -> bool:
+            spec = model_index.get(key)
+            return (isinstance(spec, list | tuple) and len(spec) >= 1 and spec[0] is not None)
+
         deferred = []
         for key in ("text_encoder", "tokenizer", "audio_vae", "vae"):
-            if key in self.required_config_modules:
+            if key in self.required_config_modules and not _is_bundled(key):
                 self.required_config_modules.remove(key)
                 deferred.append(key)
 
@@ -128,23 +151,32 @@ class MagiHumanPipeline(ComposedPipelineBase):
                 if key not in self.required_config_modules:
                     self.required_config_modules.append(key)
 
-        if loaded_modules and "text_encoder" in loaded_modules:
-            modules["text_encoder"] = loaded_modules["text_encoder"]
-        else:
+        # For each lazy-load key, prefer whatever super() already loaded
+        # (a bundled subfolder, or a caller-provided override merged in
+        # via `loaded_modules`). Fall back to the caller-provided
+        # `loaded_modules` entry for keys absent from model_index.json
+        # (super() never iterates those). Otherwise lazy-load from the
+        # canonical upstream HF repo.
+        def _resolve(key: str) -> bool:
+            """Return True if `modules[key]` is already populated."""
+            if modules.get(key) is not None:
+                return True
+            if loaded_modules and key in loaded_modules:
+                modules[key] = loaded_modules[key]
+                return True
+            return False
+
+        if not _resolve("text_encoder"):
             logger.info("Building T5-Gemma text encoder (lazy-load from %s)", _T5GEMMA_HF_ID)
             enc_config = T5GemmaEncoderConfig()
             enc_config.arch_config.t5gemma_model_path = _T5GEMMA_HF_ID
             modules["text_encoder"] = T5GemmaEncoderModel(enc_config)
 
-        if loaded_modules and "tokenizer" in loaded_modules:
-            modules["tokenizer"] = loaded_modules["tokenizer"]
-        else:
+        if not _resolve("tokenizer"):
             logger.info("Loading T5-Gemma tokenizer from %s", _T5GEMMA_HF_ID)
             modules["tokenizer"] = AutoTokenizer.from_pretrained(_T5GEMMA_HF_ID)
 
-        if loaded_modules and "audio_vae" in loaded_modules:
-            modules["audio_vae"] = loaded_modules["audio_vae"]
-        else:
+        if not _resolve("audio_vae"):
             logger.info(
                 "Building Stable Audio Open 1.0 VAE (lazy-load from %s) — "
                 "requires HF terms accepted for gated repo",
@@ -154,9 +186,7 @@ class MagiHumanPipeline(ComposedPipelineBase):
             audio_config.pretrained_path = _SA_AUDIO_HF_ID
             modules["audio_vae"] = SAAudioVAEModel(audio_config)
 
-        if loaded_modules and "vae" in loaded_modules:
-            modules["vae"] = loaded_modules["vae"]
-        else:
+        if not _resolve("vae"):
             modules["vae"] = self._load_video_vae(fastvideo_args)
 
         return modules
