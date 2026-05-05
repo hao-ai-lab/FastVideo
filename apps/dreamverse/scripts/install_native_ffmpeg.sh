@@ -26,8 +26,15 @@
 #     X264_REF        x264 git ref            default: stable
 #     FFMPEG_REF      FFmpeg git ref          default: n7.1
 #     MAKE_JOBS       parallel make jobs      default: min(nproc, 16)
-#     CC, CXX, AS     compiler / assembler    default: conda-forge triplet
 #
+# Toolchain selection: CC / CXX / AS are pinned to the conda-forge
+# triplet matching `uname -m`. Inherited values are intentionally
+# ignored — conda envs that have BOTH `gcc_linux-64` and
+# `gcc_linux-aarch64` installed export the cross-compiler triplet on
+# every `conda activate` (the `aarch64` activation script sorts later
+# and wins), which silently breaks x264's compiler probe on the
+# opposite host. If you genuinely need a non-host toolchain, edit the
+# case block below.
 set -euo pipefail
 
 # ─── Defaults (override via env) ──────────────────────────────────────────
@@ -39,23 +46,23 @@ NPROC="$(nproc)"
 MAKE_JOBS="${MAKE_JOBS:-$(( NPROC < 16 ? NPROC : 16 ))}"
 
 # ─── Per-platform, per-stage flags (verbatim from the playbook) ───────────
-# TODO: edit the CC/CXX defaults below if you are NOT using the conda-forge
-#       gcc_linux-{64,aarch64} toolchain. e.g.: CC=gcc CXX=g++.
-#       The probe step below probes whatever CC/CXX resolve to, so this
-#       block is the single source of truth for compiler choice.
+# Toolchain is force-set per `uname -m`, NOT defaulted via `${CC:=...}`.
+# Conda envs that activated both gcc_linux-64 and gcc_linux-aarch64
+# export the cross triplet on every `conda activate`, which would
+# defeat a deferred default and trip x264's compiler probe.
 case "$(uname -m)" in
   x86_64)
-    : "${CC:=x86_64-conda-linux-gnu-cc}"
-    : "${CXX:=x86_64-conda-linux-gnu-c++}"
-    : "${AS:=nasm}"
+    CC=x86_64-conda-linux-gnu-cc
+    CXX=x86_64-conda-linux-gnu-c++
+    AS=nasm
     X264_CFLAGS="-O3 -march=native -mtune=native -fPIC -flto"
     X264_LDFLAGS="-flto -fuse-linker-plugin"
     FFMPEG_CFLAGS="-O3 -march=native -mtune=native -fPIC -flto"
     FFMPEG_LDFLAGS="-flto -Wl,-rpath,$INSTALL_PREFIX/lib"
     ;;
   aarch64)
-    : "${CC:=aarch64-conda-linux-gnu-cc}"
-    : "${CXX:=aarch64-conda-linux-gnu-c++}"
+    CC=aarch64-conda-linux-gnu-cc
+    CXX=aarch64-conda-linux-gnu-c++
     unset AS  # GNU as on ARM
     X264_CFLAGS="-O3 -mcpu=native -fPIC -flto"
     X264_LDFLAGS="-flto -fuse-linker-plugin"
@@ -69,6 +76,7 @@ case "$(uname -m)" in
 esac
 export CC CXX
 [[ -n "${AS:-}" ]] && export AS
+echo "[install_native_ffmpeg] toolchain: CC=$CC CXX=$CXX AS=${AS:-<gnu-as>} (uname -m=$(uname -m))"
 
 # ─── Step 0: probe required tools ─────────────────────────────────────────
 required=("$CC" "$CXX" make pkg-config git)
