@@ -13,7 +13,9 @@ both `/readyz` and the FE root to return 200.
 ## Prerequisites
 
 - Working tree on a branch that has `apps/dreamverse/` (e.g. `will/dreamverse-monorepo`)
-- FastVideo `.venv` populated with `flashinfer-python`, `cerebras-cloud-sdk`, `openai`
+- Local conda env at `~/miniconda3/envs/fv-main/` with `flashinfer-python`,
+  `cerebras-cloud-sdk`, `openai` installed (override the default path with
+  `DREAMVERSE_PYTHON=/path/to/python`)
 - `~/.env` exporting `CEREBRAS_API_KEY`, `GROQ_API_KEY`, etc.
 - pnpm installed at `/home/william5lin/.local/share/pnpm/pnpm` (or in `$PATH`)
 - `gcc-13` + `g++-13` at `/usr/bin/` (workaround for nvcc gcc-15 rejection)
@@ -77,6 +79,7 @@ Flags can appear in any position relative to the positional args. Explicit flag 
 |---|---|---|
 | `DREAMVERSE_WARMUP` | `false` | Same as `--warmup`/`--no-warmup`. Flag takes precedence |
 | `DREAMVERSE_TORCH_COMPILE` | `false` | Same as `--torch-compile`/`--no-torch-compile`. Flag takes precedence |
+| `DREAMVERSE_PYTHON` | `~/miniconda3/envs/fv-main/bin/python` | Conda env python used for prereq probes (flashinfer import). The wrapper at `apps/dreamverse/scripts/dreamverse-server` still resolves python via the `.venv` symlink, which points at the same interpreter on this dev node |
 | `DREAMVERSE_REPO_ROOT` | git rev-parse | Repo root override |
 | `DREAMVERSE_LOG_DIR` | `/tmp/opencode/dreamverse-deploy` | Where to write `backend.log` / `frontend.log` |
 | `DREAMVERSE_REQUIRE_NATIVE_FFMPEG` | `false` | If `true`, fail when `$HOME/opt/ffmpeg-native/bin/ffmpeg` is absent |

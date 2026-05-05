@@ -109,10 +109,12 @@ bail() { echo "error: $*" >&2; exit 3; }
   || bail "REPO_ROOT '${REPO_ROOT}' does not contain apps/dreamverse/. Are you on a migration branch?"
 [[ -x "${REPO_ROOT}/apps/dreamverse/scripts/dreamverse-server" ]] \
   || bail "wrapper script missing or not executable: apps/dreamverse/scripts/dreamverse-server"
-[[ -x "${REPO_ROOT}/.venv/bin/python" ]] \
-  || bail "FastVideo .venv missing at ${REPO_ROOT}/.venv"
-"${REPO_ROOT}/.venv/bin/python" -c 'import flashinfer' 2>/dev/null \
-  || bail "flashinfer-python not installed in .venv (uv pip install flashinfer-python --no-build-isolation)"
+
+CONDA_ENV_PYTHON="${DREAMVERSE_PYTHON:-${HOME}/miniconda3/envs/fv-main/bin/python}"
+[[ -x "${CONDA_ENV_PYTHON}" ]] \
+  || bail "conda env python missing at ${CONDA_ENV_PYTHON} (set DREAMVERSE_PYTHON to override)"
+"${CONDA_ENV_PYTHON}" -c 'import flashinfer' 2>/dev/null \
+  || bail "flashinfer-python not installed in ${CONDA_ENV_PYTHON} (run: ${CONDA_ENV_PYTHON} -m pip install flashinfer-python --no-build-isolation)"
 
 PNPM="${PNPM:-/home/william5lin/.local/share/pnpm/pnpm}"
 command -v "${PNPM}" >/dev/null 2>&1 || PNPM="$(command -v pnpm 2>/dev/null || true)"
@@ -140,6 +142,7 @@ else
   echo "warn: ${NATIVE_FFMPEG_BIN} missing — backend will fall back to system ffmpeg (\$(command -v ffmpeg))." >&2
   echo "      Build native ffmpeg with: bash apps/dreamverse/scripts/install_native_ffmpeg.sh" >&2
 fi
+echo "        python:        ${CONDA_ENV_PYTHON}"
 
 mkdir -p "${LOG_DIR}"
 
