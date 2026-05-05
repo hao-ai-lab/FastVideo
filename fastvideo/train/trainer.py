@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
 from fastvideo.distributed import get_sp_group, get_world_group
-from fastvideo.profiler import get_or_create_profiler, profile_region
+from fastvideo.profiler import get_or_create_profiler
 from fastvideo.train.callbacks.callback import CallbackDict
 from fastvideo.train.methods.base import TrainingMethod
 from fastvideo.train.utils.tracking import build_tracker
@@ -89,8 +89,33 @@ class Trainer:
                 batch = next(data_iter)
             yield batch
 
-    @profile_region("profiler_region_training_train")
     def run(
+        self,
+        method: TrainingMethod,
+        *,
+        dataloader: Any,
+        max_steps: int,
+        start_step: int = 0,
+        checkpoint_manager: Any | None = None,
+    ) -> None:
+        # Make the broad train region explicit so the controller's
+        # `_active_region_depth` is back to zero before `stop()` runs.
+        # `stop()` is in the `finally` so failed training runs still
+        # flush/cleanup the profiler trace.
+        try:
+            with self.profiler_controller.region("profiler_region_training_train"):
+                self._run_impl(
+                    method,
+                    dataloader=dataloader,
+                    max_steps=max_steps,
+                    start_step=start_step,
+                    checkpoint_manager=checkpoint_manager,
+                )
+        finally:
+            if self.profiler_controller.has_profiler:
+                self.profiler_controller.stop()
+
+    def _run_impl(
         self,
         method: TrainingMethod,
         *,
@@ -231,8 +256,3 @@ class Trainer:
             checkpoint_manager.save_final(max_steps)
 
         self.tracker.finish()
-
-        # Stop the profiler if it was actually started — flushes the
-        # last trace to FASTVIDEO_TORCH_PROFILER_DIR.
-        if envs.FASTVIDEO_TORCH_PROFILER_DIR:
-            self.profiler_controller.stop()
