@@ -69,6 +69,7 @@ class T5ArchConfig(TextEncoderArchConfig):
 
         self.tokenizer_kwargs = {
             "truncation": True,
+            "padding": "max_length",
             "max_length": self.text_len,
             "add_special_tokens": True,
             "return_attention_mask": True,
