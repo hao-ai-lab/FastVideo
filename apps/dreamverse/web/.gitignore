@@ -1,0 +1,17 @@
+/node_modules
+/.next
+/out
+/coverage
+*.tsbuildinfo
+
+# local env files
+.env*.local
+
+# package manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# macOS
+.DS_Store
