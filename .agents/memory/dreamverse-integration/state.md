@@ -11,7 +11,7 @@ roster of co-authors to credit on every commit see
 
 | Repo | Branch | Tip | Distance |
 |---|---|---|---|
-| FastVideo | `will/ltx2_sr_port` (**PR #1288 head**) | `39dfa009` | 34 commits ahead of `origin/main`; OPEN, MERGEABLE |
+| FastVideo | `will/ltx2_sr_port` (**PR #1288 head**) | `b36bdbc9` | 36 commits ahead of `origin/main`; OPEN, MERGEABLE; +integration-review.md (Part 1 drift + Part 2 tradeoffs + recommended Option D) |
 | FastVideo | `will/api_7.10` | `6ae7a99f` | **deprecated** — PR #1287 closed in favor of #1288. Branch can be deleted on origin and locally; kept for now as historical reference. |
 | FastVideo | `will/api_8`, `will/ltx2_sr_runtime`, `will/ltx2_nvfp4`, `will/ltx2_post_fixes`, `will/agents_cleanup` | (various) | **deprecated** split bookmarks. Strategy reversed to single mega-PR (D-17). Safe to delete locally; not pushed to origin. |
 | FastVideo | `will/ltx2_sr_port-pre-1286-rebase` | `1baa60bb` | **local-only safety backup** of pre-rebase chain (37 commits); keep until next slice merges |

@@ -41,7 +41,7 @@ across every PR in the integration scope:
 | #1284 | `will/api_7.8` (streaming auxiliaries) | ✅ merged 2026-05-04 | yes (2/2) |
 | #1286 | `will/api_7.9` (streaming router) | ✅ merged 2026-05-05 at `2aaeee2a` (squash) | yes on commits 1-3; commit `a152cb77` (`[fix] streaming: router polish`) was missing trailers but got squashed into the merge commit, so the merge commit on main inherits the trailers from the other 3. The trailerless cherry-pick partner (`40e265b8` on `will/ltx2_sr_port`) was dropped by the post-#1286 rebase — gap permanently resolved. |
 | #1287 | `will/api_7.10` (`generate_async` + `VideoEvent`) | ❌ CLOSED 2026-05-05 — superseded by #1288 per [D-17](decisions-log.md#d-17) | yes on all 3 commits (now part of #1288's chain) |
-| **#1288** | **`will/ltx2_sr_port`** (mega-PR — full stack: SR runtime + NVFP4 + generate_async + Dynamo contract + agents memory) | 🟢 OPEN, MERGEABLE at `39dfa009`, 34 commits / 71 files / +13,074 LOC | yes on all 34 commits |
+| **#1288** | **`will/ltx2_sr_port`** (mega-PR — full stack: SR runtime + NVFP4 + generate_async + Dynamo contract + agents memory + integration-review) | 🟢 OPEN, MERGEABLE at `b36bdbc9`, 36 commits / 70 files / ~+13.0k LOC (post STACK.md removal) | yes on all 36 commits |
 
 Aggregate count across `will/ltx2_sr_port` (top of stack) at the time of
 writing: 32-33 commits per co-author, matching the 32 commits in the stack
