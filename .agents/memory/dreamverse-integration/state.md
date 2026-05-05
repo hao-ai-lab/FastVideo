@@ -11,7 +11,8 @@ roster of co-authors to credit on every commit see
 
 | Repo | Branch | Tip | Distance |
 |---|---|---|---|
-| FastVideo | `will/ltx2_sr_port` (**PR #1288 head**) | `b36bdbc9` | 36 commits ahead of `origin/main`; OPEN, MERGEABLE; +integration-review.md (Part 1 drift + Part 2 tradeoffs + recommended Option D) |
+| FastVideo | `will/ltx2_sr_port` (**PR #1288 head**) | `fbd823df` | merged-into-main pending; latest tip post-D-16 + integration-review + integration-plan + GPU4 smoke validation |
+| FastVideo | **`will/dreamverse-monorepo`** (**MIGRATION** — forked from `will/ltx2_sr_port`) | `c1fe5d4c` | 5 commits ahead of `fbd823df`. Phases 1+2+3 + 2 fix-up commits. apps/dreamverse/ holds full migrated Dreamverse (server/, web/, prompts/, scripts/, serve_configs/, AGENTS.md, etc.). 8/8 Playwright e2e PASSED against migrated backend (verified via `/proc/$PID/cwd = apps/dreamverse/server`). See [decisions-log.md D-19](decisions-log.md#d-19). |
 | FastVideo | `will/api_7.10` | `6ae7a99f` | **deprecated** — PR #1287 closed in favor of #1288. Branch can be deleted on origin and locally; kept for now as historical reference. |
 | FastVideo | `will/api_8`, `will/ltx2_sr_runtime`, `will/ltx2_nvfp4`, `will/ltx2_post_fixes`, `will/agents_cleanup` | (various) | **deprecated** split bookmarks. Strategy reversed to single mega-PR (D-17). Safe to delete locally; not pushed to origin. |
 | FastVideo | `will/ltx2_sr_port-pre-1286-rebase` | `1baa60bb` | **local-only safety backup** of pre-rebase chain (37 commits); keep until next slice merges |
