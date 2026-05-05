@@ -27,6 +27,8 @@ class DataConfig:
     dataloader_num_workers: int = 0
     training_cfg_rate: float = 0.0
     seed: int = 0
+    data_split: str = "all"
+    validation_split_ratio: float = 0.0
     num_height: int = 0
     num_width: int = 0
     num_latent_t: int = 0

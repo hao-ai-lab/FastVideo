@@ -174,7 +174,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
             drop_last=True,
             text_padding_length=training_args.pipeline_config.text_encoder_configs[0].arch_config.
             text_len,  # type: ignore[attr-defined]
-            seed=self.seed)
+            seed=self.seed,
+            data_split=training_args.data_split,
+            validation_split_ratio=training_args.validation_split_ratio)
 
         self.noise_scheduler = noise_scheduler
         if self.training_args.boundary_ratio is not None:

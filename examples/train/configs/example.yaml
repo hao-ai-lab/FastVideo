@@ -91,6 +91,8 @@ training:
     dataloader_num_workers: 4         # default: 0
     training_cfg_rate: 0.1            # default: 0.0
     seed: 1000                        # default: 0
+    data_split: train                 # default: "all"; one of all/train/validation
+    validation_split_ratio: 0.05      # default: 0.0; deterministic hash split
     num_height: 448                   # default: 0
     num_width: 832                    # default: 0
     num_latent_t: 20                  # default: 0

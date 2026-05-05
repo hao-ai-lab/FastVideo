@@ -29,5 +29,7 @@ def build_parquet_t2v_train_dataloader(
         drop_last=True,
         text_padding_length=int(text_len),
         seed=int(data_config.seed or 0),
+        data_split=data_config.data_split,
+        validation_split_ratio=data_config.validation_split_ratio,
     ))
     return dataloader
