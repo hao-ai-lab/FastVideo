@@ -40,10 +40,16 @@ _MAGI_HUMAN_MODEL_PATH = os.getenv(
 MAGI_HUMAN_BASE_PARAMS = {
     "num_gpus": 2,
     "model_path": _MAGI_HUMAN_MODEL_PATH,
+    # height/width/guidance_scale/seed/fps mirror the registered
+    # `magi_human_base` preset defaults (see
+    # `fastvideo/pipelines/basic/magi_human/presets.py::MAGI_HUMAN_BASE`)
+    # so the SSIM test exercises the same code path as
+    # `examples/inference/basic/basic_magi_human.py`. Only the budget
+    # knobs (num_frames, num_inference_steps, sp_size) differ for CI fit.
     "height": 256,
-    "width": 448,
-    "num_frames": 26,                # seconds=1 at fps=25 + 1
-    "num_inference_steps": 4,        # CI budget; full preset uses 32
+    "width": 480,
+    "num_frames": 26,                # seconds=1 at fps=25 + 1; preset = 101
+    "num_inference_steps": 8,        # CI budget; preset = 32
     "guidance_scale": 5.0,
     "seed": 42,
     "sp_size": 2,
