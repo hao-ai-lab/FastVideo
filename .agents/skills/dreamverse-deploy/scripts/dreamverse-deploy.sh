@@ -25,22 +25,53 @@ fi
 # Args
 # ---------------------------------------------------------------------------
 
-if [[ $# -lt 1 ]] || [[ "${1:-}" =~ ^(-h|--help)$ ]]; then
+usage() {
   cat <<USAGE
-Usage: $(basename "$0") <GPU> [BACKEND_PORT] [FRONTEND_PORT]
-       $(basename "$0") --stop
+Usage: $(basename "$0") [FLAGS] <GPU> [BACKEND_PORT] [FRONTEND_PORT]
+       $(basename "$0") --stop [GPU]
 
-Args:
+Positional:
   GPU            Physical GPU index (required), e.g. 4
   BACKEND_PORT   default 8009
   FRONTEND_PORT  default 5274
 
+Flags (override env vars when both set):
+  --warmup / --no-warmup            run GPU warmup at boot (default off)
+  --torch-compile / --no-torch-compile
+                                     enable max-autotune torch.compile
+                                     (default off — first segment ~3-4min
+                                     when on, ~45s when off)
+  -h, --help                        show this help
+
 Env overrides:
-  DREAMVERSE_WARMUP    'true'|'false' (default false)
-  DREAMVERSE_REPO_ROOT default: \$(git rev-parse --show-toplevel)
-  DREAMVERSE_LOG_DIR   default: /tmp/opencode/dreamverse-deploy
+  DREAMVERSE_WARMUP                 'true'|'false' (default false)
+  DREAMVERSE_TORCH_COMPILE          'true'|'false' (default false)
+  DREAMVERSE_REPO_ROOT              default: \$(git rev-parse --show-toplevel)
+  DREAMVERSE_LOG_DIR                default: /tmp/opencode/dreamverse-deploy
+  DREAMVERSE_REQUIRE_NATIVE_FFMPEG  'true'|'false' (default false)
 USAGE
-  exit "$([[ "${1:-}" =~ ^(-h|--help)$ ]] && echo 0 || echo 2)"
+}
+
+WARMUP_OVERRIDE=""
+TORCH_COMPILE_OVERRIDE=""
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)              usage; exit 0 ;;
+    --warmup)               WARMUP_OVERRIDE=true; shift ;;
+    --no-warmup)            WARMUP_OVERRIDE=false; shift ;;
+    --torch-compile)        TORCH_COMPILE_OVERRIDE=true; shift ;;
+    --no-torch-compile)     TORCH_COMPILE_OVERRIDE=false; shift ;;
+    --)                     shift; while [[ $# -gt 0 ]]; do POSITIONAL+=("$1"); shift; done ;;
+    -*)                     echo "error: unknown flag '$1'" >&2; usage >&2; exit 2 ;;
+    *)                      POSITIONAL+=("$1"); shift ;;
+  esac
+done
+set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
+
+if [[ $# -lt 1 ]]; then
+  usage >&2
+  exit 2
 fi
 
 GPU="${1}"
@@ -52,16 +83,16 @@ if ! [[ "${GPU}" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-WARMUP="${DREAMVERSE_WARMUP:-false}"
+WARMUP="${WARMUP_OVERRIDE:-${DREAMVERSE_WARMUP:-false}}"
 case "${WARMUP}" in
   true|false) ;;
-  *) echo "error: DREAMVERSE_WARMUP must be 'true' or 'false' (got '${WARMUP}')" >&2; exit 2 ;;
+  *) echo "error: warmup must be 'true' or 'false' (got '${WARMUP}')" >&2; exit 2 ;;
 esac
 
-TORCH_COMPILE="${DREAMVERSE_TORCH_COMPILE:-false}"
+TORCH_COMPILE="${TORCH_COMPILE_OVERRIDE:-${DREAMVERSE_TORCH_COMPILE:-false}}"
 case "${TORCH_COMPILE}" in
   true|false) ;;
-  *) echo "error: DREAMVERSE_TORCH_COMPILE must be 'true' or 'false' (got '${TORCH_COMPILE}')" >&2; exit 2 ;;
+  *) echo "error: torch-compile must be 'true' or 'false' (got '${TORCH_COMPILE}')" >&2; exit 2 ;;
 esac
 TORCH_COMPILE_FLAG=$([[ "${TORCH_COMPILE}" == "true" ]] && echo 1 || echo 0)
 
