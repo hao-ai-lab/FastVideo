@@ -9,16 +9,12 @@ format; keeping the same shape makes log tooling portable.
 from __future__ import annotations
 
 import contextlib
-from datetime import datetime, timezone
-import asyncio
 import json
 import os
 import re
-import socket
 import threading
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, TextIO
 
 _FILENAME_SANITIZE_RE = re.compile(r"[^A-Za-z0-9._-]")
@@ -111,50 +107,7 @@ class SessionLogger:
             return handle, lock
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-class SessionEventLogger:
-    """Dreamverse-compatible async session event logger.
-
-    This keeps the product server importable during the monorepo migration while
-    the generic streaming logger remains :class:`SessionLogger`.
-    """
-
-    def __init__(self, root_dir: Path):
-        self.hostname = socket.gethostname()
-        timestamp = datetime.now(timezone.utc).strftime("%y%m%d_%H%M%S")
-        self.directory = root_dir / self.hostname
-        self.path = self.directory / f"{timestamp}.jsonl"
-        self._lock = asyncio.Lock()
-
-        self.directory.mkdir(parents=True, exist_ok=True)
-        self.path.touch(exist_ok=False)
-
-    async def write_event(
-        self,
-        *,
-        event: str,
-        client_id: str,
-        payload: dict[str, Any] | None = None,
-    ) -> None:
-        entry = {
-            "ts": _utc_now_iso(),
-            "event": event,
-            "hostname": self.hostname,
-            "client_id": client_id,
-        }
-        if payload:
-            entry.update(payload)
-
-        async with self._lock:
-            with self.path.open("a", encoding="utf-8") as fp:
-                fp.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-
 __all__ = [
     "SessionLogEvent",
-    "SessionEventLogger",
     "SessionLogger",
 ]

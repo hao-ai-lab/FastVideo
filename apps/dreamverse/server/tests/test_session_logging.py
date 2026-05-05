@@ -13,8 +13,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi import WebSocketDisconnect
-from fastvideo.entrypoints.streaming.protocol import MediaChunk, MediaComplete, MediaInit
-from fastvideo.entrypoints.streaming.session_logger import SessionEventLogger
 from PIL import Image
 import pytest
 
@@ -28,6 +26,8 @@ os.environ.setdefault("GROQ_API_KEY", "dummy")
 
 import main as server_main  # noqa: E402
 import runtime  # noqa: E402
+from session_logger import SessionEventLogger  # noqa: E402
+from worker_ipc import MediaChunk, MediaComplete, MediaInit  # noqa: E402
 from session import controller as session_controller  # noqa: E402
 
 pytestmark = pytest.mark.gpu

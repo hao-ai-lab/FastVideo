@@ -11,8 +11,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from fastvideo.entrypoints.streaming.gpu_pool import GpuPool as GPUPool
-    from fastvideo.entrypoints.streaming.session_logger import SessionEventLogger
+    from gpu_pool import GPUPool
+    from session_logger import SessionEventLogger
     from prompt_enhancer import PromptEnhancer
     from prompt_safety import PromptSafetyFilter
 

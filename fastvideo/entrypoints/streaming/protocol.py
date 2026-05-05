@@ -11,7 +11,6 @@ both places in the same PR.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -143,43 +142,11 @@ class StepComplete(BaseModel):
 class MediaInit(BaseModel):
     """Descriptor for the fMP4 initialization segment that follows."""
 
-    model_config = ConfigDict(extra="allow")
-
     type: Literal["media_init"] = "media_init"
     segment_idx: int
     mime: str = "video/mp4; codecs=\"avc1.64001f, mp4a.40.2\""
     stream_id: str
     mode: Literal["av_fmp4"] = "av_fmp4"
-
-
-@dataclass(frozen=True)
-class MediaChunk:
-    """One fMP4 chunk emitted by the legacy Dreamverse worker bridge."""
-
-    user_id: str
-    segment_idx: int
-    stream_id: str
-    chunk: bytes | None = None
-    chunk_offset: int | None = None
-    chunk_length: int | None = None
-    uses_shared_buffer: bool = False
-
-    def __post_init__(self) -> None:
-        has_bytes = self.chunk is not None
-        has_offset = self.chunk_offset is not None and self.chunk_length is not None
-        if has_bytes == has_offset:
-            raise ValueError("MediaChunk must carry either chunk bytes or "
-                             "(chunk_offset + chunk_length), not both or neither")
-
-
-@dataclass(frozen=True)
-class MediaComplete:
-    """Legacy Dreamverse fMP4 segment-complete event."""
-
-    user_id: str
-    segment_idx: int
-    stream_id: str
-    chunks: int
 
 
 class MediaSegmentComplete(BaseModel):
@@ -272,8 +239,6 @@ __all__ = [
     "Ltx2StreamStart",
     "LoopGenerationUpdated",
     "MediaInit",
-    "MediaChunk",
-    "MediaComplete",
     "MediaSegmentComplete",
     "QueueStatus",
     "SeedPromptsUpdated",

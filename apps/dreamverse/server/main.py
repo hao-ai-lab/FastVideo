@@ -9,9 +9,8 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastvideo.entrypoints.streaming.gpu_pool import GpuPool as GPUPool
-from fastvideo.entrypoints.streaming.gpu_pool import get_available_gpus
-from fastvideo.entrypoints.streaming.session_logger import SessionEventLogger
+from gpu_pool import GPUPool, get_available_gpus
+from session_logger import SessionEventLogger
 
 from config import (
     DEVTOOLS_ENABLED,
