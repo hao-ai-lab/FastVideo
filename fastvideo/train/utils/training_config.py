@@ -18,6 +18,10 @@ class DistributedConfig:
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
     pin_cpu_memory: bool = False
+    # Seconds before NCCL aborts a hung collective. Without this, a single
+    # dead rank can leave the whole job hanging until SLURM wall-clock kills
+    # it. Recommend 1800 (30 min) for multi-node runs.
+    dist_timeout: int | None = None
 
 
 @dataclass(slots=True)

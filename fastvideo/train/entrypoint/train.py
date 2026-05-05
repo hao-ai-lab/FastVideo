@@ -64,6 +64,7 @@ def run_training_from_config(
     maybe_init_distributed_environment_and_model_parallel(
         tc.distributed.tp_size,
         tc.distributed.sp_size,
+        dist_timeout=tc.distributed.dist_timeout,
     )
 
     _, method, dataloader, start_step = build_from_config(cfg)
