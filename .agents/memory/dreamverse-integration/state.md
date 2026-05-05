@@ -1,4 +1,4 @@
-# Current State — 2026-05-05 (strategy reversal — single mega-PR #1288)
+# Current State — 2026-05-05 (D-20 broken-pipe fix landed)
 
 Point-in-time snapshot of branches, commits, and live infrastructure.
 Update whenever commits land or services restart.
@@ -12,7 +12,7 @@ roster of co-authors to credit on every commit see
 | Repo | Branch | Tip | Distance |
 |---|---|---|---|
 | FastVideo | `will/ltx2_sr_port` (**PR #1288 head**) | `fbd823df` | merged-into-main pending; latest tip post-D-16 + integration-review + integration-plan + GPU4 smoke validation |
-| FastVideo | **`will/dreamverse-monorepo`** (**MIGRATION** — forked from `will/ltx2_sr_port`) | `c1fe5d4c` | 5 commits ahead of `fbd823df`. Phases 1+2+3 + 2 fix-up commits. apps/dreamverse/ holds full migrated Dreamverse (server/, web/, prompts/, scripts/, serve_configs/, AGENTS.md, etc.). 8/8 Playwright e2e PASSED against migrated backend (verified via `/proc/$PID/cwd = apps/dreamverse/server`). See [decisions-log.md D-19](decisions-log.md#d-19). |
+| FastVideo | **`will/dreamverse-monorepo`** (**MIGRATION** — forked from `will/ltx2_sr_port`) | `5eaf0a13` | 11 commits ahead of `fbd823df`. Phases 1+2+3 + 2 fix-up commits + 4 D-20 commits (broken-pipe root cause fix: ffmpeg toolchain pin, public-API audio kwarg routing, native-ffmpeg + compile-off deploy defaults, --warmup/--torch-compile CLI flags). apps/dreamverse/ holds full migrated Dreamverse (server/, web/, prompts/, scripts/, serve_configs/, AGENTS.md, etc.). End-to-end verified on GPU4 with audio continuation across segments 1→2 (`Cached audio latents shape=(1, 8, 126, 16) for segment 2`, `Segment 2: relayed av chunks=22, bytes=3.8MB`, no BrokenPipeError). See [decisions-log.md D-19](decisions-log.md#d-19) + [D-20](decisions-log.md#d-20). |
 | FastVideo | `will/api_7.10` | `6ae7a99f` | **deprecated** — PR #1287 closed in favor of #1288. Branch can be deleted on origin and locally; kept for now as historical reference. |
 | FastVideo | `will/api_8`, `will/ltx2_sr_runtime`, `will/ltx2_nvfp4`, `will/ltx2_post_fixes`, `will/agents_cleanup` | (various) | **deprecated** split bookmarks. Strategy reversed to single mega-PR (D-17). Safe to delete locally; not pushed to origin. |
 | FastVideo | `will/ltx2_sr_port-pre-1286-rebase` | `1baa60bb` | **local-only safety backup** of pre-rebase chain (37 commits); keep until next slice merges |
@@ -129,8 +129,8 @@ worker-death detection.
 
 | Port | Service | PID | Status |
 |---|---|---|---|
-| 8009 | `dreamverse-server` | 2453227 | `/readyz` returns 200, 1 warmed GPU worker, queue 0 |
-| 5274 | `next-server` (dev) | 2399103 | 200, ~13.6 KB shell |
+| 8009 | `dreamverse-server` | 705513 | `/readyz` returns 200, 1 GPU worker on GPU 4, NVFP4 (50.9 GiB), `ENABLE_TORCH_COMPILE=0`, `FASTVIDEO_FFMPEG_BIN=$HOME/opt/ffmpeg-native/bin/ffmpeg`, `FASTVIDEO_VIDEO_CODEC=libx264` (post-D-20 deploy at 2026-05-05 14:??) |
+| 5274 | `next-server` (dev) | 707746 | 200 |
 | 8000 | unknown FastAPI | — | **Not in handoff.** Probably stray `fastvideo serve`. Verify with `lsof -i :8000` before launching a new BE on the default port. |
 
 ## Stashes — DO NOT POP
@@ -140,17 +140,17 @@ worker-death detection.
 | FastVideo | `stash@{0}: WIP on main: 71bfc13d HunyuanVideo plugin` | Pre-existing, unrelated to integration work |
 | Dreamverse | `stash@{0}: wip: server modular refactor (split config/prompting/runtime/session)` | 3867-line orphan modular split, **not part of `will/integrate-public-fastvideo`**. Recover on a separate branch if needed. |
 
-## Test status (from May 2 handoff, not re-verified post-Layer-3)
+## Test status
 
 | Suite | Status |
 |---|---|
-| FastVideo `fastvideo/tests/api/` + `contract/` + `nvfp4_*` + `ltx2_pipeline_smoke` | 222 passed, 1 skipped |
-| Playwright e2e against live BE+FE | 8 passed (5 backend-health + 2 frontend-shell + 1 preset-prompt-generation) |
-| `fastvideo serve --config streaming_demo.yaml` validation | parses cleanly; dotted overrides work |
-| `bash -n` on launch-demo skill scripts | clean across all 4 |
-
-The 3 post-handoff commits are small parity fixes; full re-verification is
-recommended but not required to read this state.
+| FastVideo `fastvideo/tests/api/` (post-D-20) | 185 passed (was 222 before some tests moved; new `test_extra_overrides_routing.py` adds 7) |
+| FastVideo `contract/` + `nvfp4_*` + `ltx2_pipeline_smoke` (May 2 handoff) | 222 passed, 1 skipped |
+| Playwright e2e against live BE+FE (D-19) | 8 passed (5 backend-health + 2 frontend-shell + 1 preset-prompt-generation) |
+| Live segment-1→segment-2 audio continuation (D-20) | passes — `Cached audio latents shape=(1, 8, 126, 16) for segment 2` + `Segment 2: relayed av chunks=22, bytes=3.8MB`, no BrokenPipeError |
+| `dreamverse-deploy.sh` flag parser standalone test (D-20) | 13/13 permutations pass + bad-flag rejection (defaults / single flags / both flags / `--no-*` overrides / env-only / flag-overrides-env / both-env+both-no-flags / flags interleaved with positional args) |
+| `fastvideo serve --config streaming_demo.yaml` validation (May 2 handoff) | parses cleanly; dotted overrides work |
+| `bash -n` on `apps/dreamverse/scripts/install_native_ffmpeg.sh` + `dreamverse-deploy.sh` (D-20) | clean |
 
 ## Pre-existing failures (NOT caused by this work)
 

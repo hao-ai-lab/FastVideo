@@ -6,7 +6,7 @@ question/decision, rationale, current status.
 For implementation status see [pr-roadmap.md](pr-roadmap.md). For
 follow-up actions see [open-threads.md](open-threads.md).
 
-**Last updated:** 2026-05-05 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion, Oracle review during #1284 review cycle; added D-15 — streaming router placement + sticky/active-active deferral, Oracle review during #1286 review cycle; added D-16 — streaming router polish round 2, second-pass review on top of D-15 covering bridge cancellation hygiene, registry state machine, httpx hard-fail, replica YAML parsing, and `websockets` dep; added D-17 — strategy reversal: abandon 6-PR split in favor of single mega-PR #1288 on `will/ltx2_sr_port`; added D-18 — Option B+ chosen: Dreamverse FE+product-server move into FastVideo as `apps/dreamverse/` subfolder while generic backend stays at `fastvideo.entrypoints.streaming.*`; integration-review.md deprecated, integration-plan.md is the executable migration plan; added D-19 — D-18 executed: 5 commits land on `will/dreamverse-monorepo`, fix-up commits corrected the integration-plan's invalid "delete generic-merged, import public substitutes" assumption — generic-merged files carried product-local instead, e2e passes against migrated code with /proc-verified evidence).
+**Last updated:** 2026-05-05 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion, Oracle review during #1284 review cycle; added D-15 — streaming router placement + sticky/active-active deferral, Oracle review during #1286 review cycle; added D-16 — streaming router polish round 2, second-pass review on top of D-15 covering bridge cancellation hygiene, registry state machine, httpx hard-fail, replica YAML parsing, and `websockets` dep; added D-17 — strategy reversal: abandon 6-PR split in favor of single mega-PR #1288 on `will/ltx2_sr_port`; added D-18 — Option B+ chosen: Dreamverse FE+product-server move into FastVideo as `apps/dreamverse/` subfolder while generic backend stays at `fastvideo.entrypoints.streaming.*`; integration-review.md deprecated, integration-plan.md is the executable migration plan; added D-19 — D-18 executed: 5 commits land on `will/dreamverse-monorepo`, fix-up commits corrected the integration-plan's invalid "delete generic-merged, import public substitutes" assumption — generic-merged files carried product-local instead, e2e passes against migrated code with /proc-verified evidence; added D-20 — segment-2 BrokenPipe root cause was a TWO-direction silent drop of LTX-2 audio kwargs in public `VideoGenerator` (inbound: `SamplingParam.update()` rejected `audio_num_frames`/`ltx2_audio_clean_latent`/etc. as unknown fields and `logger.error`'d, outbound: result dict didn't surface `ltx2_audio_latents` from `output_batch.extra`); ported the FastVideo-internal extra-overrides routing block + made `update()` strict + added regression test + landed 4 commits on `will/dreamverse-monorepo`).
 
 ## Status legend
 
@@ -15,6 +15,60 @@ follow-up actions see [open-threads.md](open-threads.md).
 - 🔴 **Open** — needs decision
 
 ## Post-merge architecture decisions
+
+### D-20: Segment-2 BrokenPipe root cause — two-direction silent drop of LTX-2 audio kwargs in public `VideoGenerator`
+
+**Status:** ✅ Resolved 2026-05-05. 4 commits on `will/dreamverse-monorepo` (`1b686f4e`..`5eaf0a13`); pushed to origin. End-to-end verified on GPU4 (`/proc/$BE_PID/environ` + `Cached audio latents shape=(1, 8, 126, 16) for segment 2` log line + `Segment 2: relayed av chunks=22, bytes=3.8MB`).
+**Source:** Live debugging session triggered by recurring `RuntimeError: ffmpeg frame writer failed: [Errno 32] Broken pipe` on segment 2 in `/tmp/opencode/dreamverse-deploy/backend-gpu4.log`.
+
+**Question:** Why does segment 2 of every Dreamverse session crash with a writer-side EPIPE, while segment 1 streams fine?
+
+**Symptom chain decoded:**
+
+1. ffmpeg writer thread in `apps/dreamverse/server/av_streaming.py:307-317` raises `BrokenPipeError` mid-frame.
+2. ffmpeg's exit code is `0` — the `if rc != 0` branch of `stream_fmp4` never fires; only `if writer_error[0] is not None` does.
+3. `rc=0 + BrokenPipeError` means ffmpeg exited cleanly *before* the writer finished pushing all frames → ffmpeg closed stdin early due to `-shortest` + audio shorter than video.
+4. Manual repro confirmed: with audio 71240 samples (~2.97s) and video 112 frames (~4.67s), ffmpeg `-shortest` + 1MB pipe + 1920x1088x3 frames produces exactly this signature (`rc=0  out_bytes=751028  writer_error=BrokenPipeError(32)`).
+5. The 1.7s audio undershoot is suspicious because Dreamverse's `apply_audio()` in `apps/dreamverse/server/video_generation.py:132-186` explicitly extends `audio_num_frames = NUM_FRAMES + audio_extra` (=`121 + 40 = 161`) for continuation segments. Audio should be 6.71s, not 5.01s. The kwarg was being silently dropped.
+
+**Root cause (TWO directions):**
+
+| Direction | Where | What was missing | What it broke |
+|---|---|---|---|
+| **Inbound** (kwargs → `batch.extra`) | `fastvideo/entrypoints/video_generator.py::_generate_video_impl` | The 5-key extraction block (`ltx2_audio_latents`, `ltx2_audio_clean_latent`, `ltx2_audio_denoise_mask`, `audio_num_frames`, `video_position_offset_sec`) that FastVideo-internal has at lines 168-183. Without it, `apply_audio`'s kwargs landed in `sampling_param.update(kwargs)` which `logger.error`'d "%s has no field %s" and dropped them. | `audio_num_frames` never reached `batch.extra` → `ltx2_denoising.py:325` fell back to `batch.num_frames=121` → audio generated for 5.01s instead of 6.71s. After `head_trim_audio_frames=49` removed the leading 2.04s, only 2.97s of audio remained for 4.67s of video. |
+| **Outbound** (`batch.extra` → result dict) | `fastvideo/entrypoints/video_generator.py::_generate_single_video` | `"ltx2_audio_latents": output_batch.extra.get("ltx2_audio_latents")` in the result dict. Internal exposes it at line 556; public didn't expose it at all. | `Dreamverse._derive_next_audio_latents()` always saw `None` → `self.continuation.audio_latents` was never set → segment 2's `apply_audio` short-circuited (`if not (… and self.audio_latents is not None): return`) → no audio continuation, no `audio_num_frames` extension, no `ltx2_audio_clean_latent` carry-over. |
+
+The two directions hid each other: even after the inbound block was ported, segment 2 still broke until the outbound surface was added. Both must be present for audio continuation to round-trip.
+
+**Resolution — 4 commits on `will/dreamverse-monorepo`:**
+
+| SHA | Subject |
+|---|---|
+| `1b686f4e` | `[fix] dreamverse: pin ffmpeg native build toolchain by uname -m` |
+| `265ce1a6` | `[fix] api: route LTX-2 audio kwargs through batch.extra; strict update` |
+| `dab9499c` | `[feat] dreamverse-deploy: native ffmpeg + compile-off defaults` |
+| `5eaf0a13` | `[feat] dreamverse-deploy: --warmup / --torch-compile CLI flags` |
+
+`265ce1a6` is the substantive public-API fix: ports `_BATCH_EXTRA_PASSTHROUGH_KEYS` extraction in `_generate_video_impl`, ports `_extra_overrides` consumption in `_generate_single_video` (writes into `batch.extra`), surfaces `ltx2_audio_latents` in the result dict, and converts `SamplingParam.update()` from `logger.error`-and-drop to `raise ValueError` on unknown keys so the next contributor who adds an unrecognized kwarg hits a loud failure pointing at `_BATCH_EXTRA_PASSTHROUGH_KEYS` instead of debugging a broken-pipe-shaped symptom hours later. Adds `fastvideo/tests/api/test_extra_overrides_routing.py` (7 tests pinning the contract).
+
+**Why the strict-update is non-negotiable:** the `logger.error`-and-continue pattern is the exact mechanism that hid this bug for the entire Dreamverse-monorepo migration window. It silently traded loud-failure-now for silent-corruption-later. Strict raise + a clear "route via `_BATCH_EXTRA_PASSTHROUGH_KEYS`" hint converts the next regression of this shape from "broken pipe in production" to "ValueError at first call".
+
+**Cross-references:**
+
+- [D-11](decisions-log.md#d-11) (Apr 26) noted "ffmpeg fragment write Broken pipe" but framed it as cosmetic (client-disconnect race). Today's was a different code path: server-side EPIPE caused by a server-internal A/V duration mismatch. Both are now resolved; D-11's fix domain (swallow on intentional disconnect) remains unchanged but lower priority.
+
+- The `[fix] api: route LTX-2 audio kwargs ...` commit (`265ce1a6`) is on `will/dreamverse-monorepo` only. Cherry-picking onto `will/ltx2_sr_port` so it lands as part of PR #1288's mega-PR is a deferred follow-up — see open-threads.md "Cherry-pick API audio routing fix to PR #1288".
+
+**Side effects of the fix:**
+
+- `[feat] dreamverse-deploy: native ffmpeg + compile-off defaults` (`dab9499c`) wires the native LTO+libx264+native-arch ffmpeg the team playbook mandates into every deploy via `FASTVIDEO_FFMPEG_BIN=$HOME/opt/ffmpeg-native/bin/ffmpeg` and disables `torch.compile` by default (`ENABLE_TORCH_COMPILE=0`) so segment-1 cold start drops from ~3-4min (max-autotune) to ~45s (pure inference) — required for any iterative debugging cycle to fit inside the 300s session timeout.
+- `[fix] dreamverse: pin ffmpeg native build toolchain by uname -m` (`1b686f4e`) makes `apps/dreamverse/scripts/install_native_ffmpeg.sh` immune to conda envs that activate both `gcc_linux-64` and `gcc_linux-aarch64` (the aarch64 activation script sorts later and wins, so the inherited `CC=aarch64-conda-linux-gnu-cc` defeated the script's `: "${CC:=...}"` deferred default and tripped x264's compiler probe with "unknown value 'native' for '-march'").
+- `[feat] dreamverse-deploy: --warmup / --torch-compile CLI flags` (`5eaf0a13`) adds `--warmup`/`--no-warmup` and `--torch-compile`/`--no-torch-compile` flags that override the env-var defaults and accept any position relative to the positional GPU/port args (verified across 13 parser permutations).
+
+**Watch-outs for downstream contributors:**
+
+- Adding a new pipeline-specific kwarg now requires either making it a `SamplingParam` field OR adding it to `_BATCH_EXTRA_PASSTHROUGH_KEYS` in `fastvideo/entrypoints/video_generator.py`. Strict `update()` will raise `ValueError` on unknown kwargs that aren't routed through one of those paths.
+- The `[fix] api:` commit (`265ce1a6`) is BACKWARD-INCOMPATIBLE for any caller that was relying on `SamplingParam.update()` to silently swallow unknown keys. If pre-existing CI breaks elsewhere on this surface, the fix is to add the legitimate kwarg to `SamplingParam` or `_BATCH_EXTRA_PASSTHROUGH_KEYS` (not to revert the strict mode).
 
 ### D-19: D-18 executed — Dreamverse migration on `will/dreamverse-monorepo`, generic-merged files carried product-local
 

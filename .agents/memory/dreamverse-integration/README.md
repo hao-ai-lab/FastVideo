@@ -5,17 +5,31 @@ Tracks the public API refactor (PRs 0-17), the LTX-2 streaming server
 upstream, the Dreamverse switch from `FastVideo-internal` to public
 `FastVideo`, and the NVFP4 quantization landing.
 
-**Last reconciled:** 2026-05-05 (**D-19** EXECUTED — Dreamverse migration
-landed on `will/dreamverse-monorepo` @ `c1fe5d4c` (5 commits ahead of
-`will/ltx2_sr_port` HEAD `fbd823df`). 164 files, 53,294 LOC, 31,725 files
-under `apps/dreamverse/`. e2e PASSES against migrated code (8/8 Playwright
-in 5.1s, `/proc/$PID/cwd` verified). Significant deviation from
-[integration-plan.md](integration-plan.md): the plan's "DELETE
+**Last reconciled:** 2026-05-05 (**D-20** EXECUTED — segment-2 BrokenPipe
+root cause was a TWO-direction silent drop of LTX-2 audio kwargs in
+public `VideoGenerator` (inbound `SamplingParam.update()` rejected
+`audio_num_frames`/`ltx2_audio_clean_latent`/etc. as unknown fields and
+`logger.error`'d, outbound result dict didn't surface
+`ltx2_audio_latents` from `output_batch.extra`). Ported the
+FastVideo-internal extra-overrides routing block + made `update()`
+strict + added regression test (7 tests, all pass) + landed 4 commits
+on `will/dreamverse-monorepo` @ `5eaf0a13` (11 commits ahead of
+`fbd823df`). End-to-end verified on GPU4: `Cached audio latents shape
+=(1, 8, 126, 16) for segment 2`, `Segment 2: relayed av chunks=22,
+bytes=3.8MB`, no BrokenPipeError. Public-API fix needs cherry-pick to
+`will/ltx2_sr_port` for PR #1288 — see open-threads.md item D-20-CP.
+**D-19** EXECUTED previously: Dreamverse migration landed on
+`will/dreamverse-monorepo` @ `c1fe5d4c` (5 commits ahead of
+`will/ltx2_sr_port` HEAD `fbd823df`). 164 files, 53,294 LOC, 31,725
+files under `apps/dreamverse/`. e2e PASSES against migrated code (8/8
+Playwright in 5.1s, `/proc/$PID/cwd` verified). Significant deviation
+from [integration-plan.md](integration-plan.md): the plan's "DELETE
 generic-merged from Dreamverse, import public substitutes" assumption
 was invalid (public APIs aren't drop-ins) — generic-merged files now
 carried PRODUCT-LOCAL inside `apps/dreamverse/server/`. Public
 `fastvideo.entrypoints.streaming.*` reverts to `fbd823df` state. See
-[decisions-log.md D-19](decisions-log.md#d-19) for full context.).
+[decisions-log.md D-19](decisions-log.md#d-19) +
+[D-20](decisions-log.md#d-20) for full context.).
 FastVideo `will/ltx2_sr_port` @ HEAD (post-D-17 STACK.md removal +
 integration-review.md addition + integration-plan.md addition + D-18
 reconciliation). Dreamverse `will/integrate-public-fastvideo` @ `ec8ef92`.
