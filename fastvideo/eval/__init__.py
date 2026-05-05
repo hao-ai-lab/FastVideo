@@ -27,7 +27,6 @@ from fastvideo.eval.metrics.base import BaseMetric  # noqa: E402
 from fastvideo.eval.registry import register, list_metrics, get_metric  # noqa: E402
 from fastvideo.eval.api import evaluate  # noqa: E402
 from fastvideo.eval.evaluator import Evaluator, create_evaluator  # noqa: E402
-from fastvideo.eval.runner import EvalRunner  # noqa: E402
 
 # Trigger metric auto-discovery
 import fastvideo.eval.metrics  # noqa: F401, E402
@@ -36,7 +35,6 @@ __all__ = [
     "evaluate",
     "Evaluator",
     "create_evaluator",
-    "EvalRunner",
     "MetricResult",
     "EvalResult",
     "BaseMetric",
