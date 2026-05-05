@@ -579,9 +579,15 @@ class LatentsParquetMapStyleDataset(Dataset):
                 "silent training stall.")
 
         # Top up with re-reads of the kept indices so the batch size stays
-        # constant — preserves global step semantics under FSDP.
+        # constant — preserves global step semantics under FSDP. Snapshot
+        # survivors first and advance an independent counter; otherwise the
+        # growing `kept_indices` list collapses replacements to the first
+        # survivor only.
+        survivor_indices = list(kept_indices)
+        fill_pos = 0
         while len(rows) < len(indices):
-            fill_idx = kept_indices[len(rows) % len(kept_indices)]
+            fill_idx = survivor_indices[fill_pos % len(survivor_indices)]
+            fill_pos += 1
             row = read_row_from_parquet_file(self.parquet_files, fill_idx,
                                              self.lengths)
             rows.append(row)
