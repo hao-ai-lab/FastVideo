@@ -26,11 +26,13 @@ REQUIRED_GPUS = 1
 
 device_reference_folder = resolve_inference_device_reference_folder(logger)
 
-# NOTE: update `model_path` once the converted repo is published. Until
-# then, point at your local converted_weights directory or skip via env.
+# Umbrella HF repo holds all four variants under sibling subfolders;
+# `maybe_download_model` parses "org/repo/subfolder" and only fetches
+# the selected subfolder. Override via `MAGI_HUMAN_MODEL_PATH` to point
+# at a local converted_weights/ dir.
 _MAGI_HUMAN_MODEL_PATH = os.getenv(
     "MAGI_HUMAN_MODEL_PATH",
-    "FastVideo/MagiHuman-Base-Diffusers",
+    "FastVideo/MagiHuman-Diffusers/base",
 )
 
 MAGI_HUMAN_BASE_PARAMS = {
