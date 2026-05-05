@@ -6,7 +6,7 @@ upstream, the Dreamverse switch from `FastVideo-internal` to public
 `FastVideo`, and the NVFP4 quantization landing.
 
 **Last reconciled:** 2026-05-05 (strategy reversal — single mega-PR).
-FastVideo `will/ltx2_sr_port` @ `39dfa009` (34 commits ahead of main).
+FastVideo `will/ltx2_sr_port` @ `b36bdbc9` (36 commits ahead of main, post-D-17 STACK.md removal + integration-review.md addition).
 Dreamverse `will/integrate-public-fastvideo` @ `ec8ef92`.
 PRs #1257 / #1258 / #1284 / #1286 MERGED to main. **PR #1287 CLOSED
 (in favor of consolidation); PR #1288 OPEN as the single mega-PR
@@ -68,6 +68,7 @@ file it in [open-threads.md](open-threads.md) before continuing.
 | "Why was decision X made? What's resolved vs. open?" | [decisions-log.md](decisions-log.md) |
 | "What should I work on next? Priority order?" | [open-threads.md](open-threads.md) |
 | "Who should be co-authored on commits in this scope?" | [authors.md](authors.md) |
+| "Have we drifted from the goal? Should Dreamverse merge into FastVideo?" | [integration-review.md](integration-review.md) |
 
 ## Repo + worktree paths
 
