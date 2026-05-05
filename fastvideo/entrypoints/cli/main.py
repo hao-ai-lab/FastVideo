@@ -3,6 +3,8 @@
 from fastvideo.entrypoints.cli.cli_types import CLISubcommand
 from fastvideo.entrypoints.cli.generate import cmd_init as generate_cmd_init
 from fastvideo.utils import FlexibleArgumentParser
+from fastvideo.entrypoints.cli.router_serve import (
+    cmd_init as router_serve_cmd_init, )
 from fastvideo.entrypoints.cli.serve import cmd_init as serve_cmd_init
 from fastvideo.entrypoints.cli.bench import cmd_init as bench_cmd_init
 
@@ -12,6 +14,7 @@ def cmd_init() -> list[CLISubcommand]:
     commands = []
     commands.extend(generate_cmd_init())
     commands.extend(serve_cmd_init())
+    commands.extend(router_serve_cmd_init())
     commands.extend(bench_cmd_init())
     return commands
 
