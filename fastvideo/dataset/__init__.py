@@ -7,7 +7,8 @@ from fastvideo.dataset.parquet_dataset_map_style import (
 from fastvideo.dataset.ltx2_precomputed_dataset import (
     build_ltx2_precomputed_dataloader, LTX2PrecomputedDataset)
 from fastvideo.dataset.preprocessing_datasets import VideoCaptionMergedDataset, TextDataset
-from fastvideo.dataset.transform import (CenterCropResizeVideo, Normalize255,
+from fastvideo.dataset.transform import (CenterCropResizeVideo,
+                                         LetterboxResizeVideo, Normalize255,
                                          TemporalRandomCrop)
 from fastvideo.dataset.validation_dataset import ValidationDataset
 
@@ -15,12 +16,28 @@ from fastvideo.dataset.validation_dataset import ValidationDataset
 def getdataset(args) -> VideoCaptionMergedDataset:
     temporal_sample = TemporalRandomCrop(args.num_frames) if args.do_temporal_sample else None  # 16 x
     norm_fun = Lambda(lambda x: 2.0 * x - 1.0)
-    resize_topcrop = [
-        CenterCropResizeVideo((args.max_height, args.max_width), top_crop=True),
-    ]
-    resize = [
-        CenterCropResizeVideo((args.max_height, args.max_width)),
-    ]
+    resize_mode = getattr(args, "resize_mode", "center_crop")
+    if resize_mode == "letterbox":
+        # Pad with -1 because the downstream `(video / 127.5) - 1.0` step
+        # in VideoTransformStage maps uint8(0) -> -1.0; we feed pre-uint8
+        # tensors here, so 0 yields the same post-normalize value (-1).
+        resize_topcrop = [
+            LetterboxResizeVideo((args.max_height, args.max_width), fill=0),
+        ]
+        resize = [
+            LetterboxResizeVideo((args.max_height, args.max_width), fill=0),
+        ]
+    elif resize_mode == "center_crop":
+        resize_topcrop = [
+            CenterCropResizeVideo((args.max_height, args.max_width), top_crop=True),
+        ]
+        resize = [
+            CenterCropResizeVideo((args.max_height, args.max_width)),
+        ]
+    else:
+        raise ValueError(
+            f"Unknown resize_mode={resize_mode!r}; "
+            f"valid options: center_crop, letterbox")
     transform = transforms.Compose([
         # Normalize255(),
         *resize,

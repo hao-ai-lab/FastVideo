@@ -532,10 +532,54 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
             filter_counts['frame_sampling_failed'], Counter(sample_num_frames),
             before_count, after_count)
 
+    # Tolerated rate of decode/IO failures before the iterator hard-aborts.
+    # 1% comfortably covers the v4 tail-overshoot rate observed in production
+    # (28 / 224,747 ≈ 0.012%) while still catching a systemic regression.
+    _MAX_SKIP_FRACTION: float = 0.01
+    # Absolute floor so small datasets aren't capped at 0 skips.
+    _MAX_SKIP_FLOOR: int = 16
+
     def __iter__(self):
         """Iterate through processed data items."""
-        for idx in range(len(self.processed_batches)):
-            yield self._get_item(idx)
+        total = len(self.processed_batches)
+        if total == 0:
+            return
+        skip_budget = min(
+            total - 1,
+            max(
+                1,
+                self._MAX_SKIP_FLOOR,
+                math.ceil(self._MAX_SKIP_FRACTION * total),
+            ),
+        )
+        skipped = 0
+        for idx in range(total):
+            try:
+                yield self._get_item(idx)
+            except (RuntimeError, OSError, EOFError, IndexError) as e:
+                # Narrowed to decode/IO exception types so a programming or
+                # config regression (TypeError, KeyError, AttributeError, ...)
+                # propagates immediately rather than silently producing a
+                # partial parquet dataset. Decode failures are bounded by the
+                # skip-budget below.
+                skipped += 1
+                logger.warning(
+                    "Skipping clip idx=%d path=%s due to read/transform error "
+                    "(%d/%d, budget=%d): %s",
+                    idx,
+                    self.processed_batches[idx].path,
+                    skipped,
+                    total,
+                    skip_budget,
+                    e,
+                )
+                if skipped > skip_budget:
+                    raise RuntimeError(
+                        f"Aborting preprocess: skipped {skipped} / {total} "
+                        f"clips (> {self._MAX_SKIP_FRACTION * 100:.2f}%, "
+                        f"budget={skip_budget}). This looks like a systemic "
+                        "bug, not isolated decode failures.") from e
+                continue
 
     def __len__(self):
         return len(self.processed_batches)
@@ -564,11 +608,21 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         # Add video-specific fields
         if batch.is_video:
             result.update({"fps": batch.fps, "duration": batch.duration})
-        
+
         # Add action_path
         if batch.action_path:
             result["action_path"] = batch.action_path
 
+        # `batch` is a reference to self.processed_batches[idx], which the
+        # dataset retains for the whole epoch. The transform stages above
+        # mutated it in-place (e.g. pixel_values became a ~187MB decoded
+        # video tensor). Clear those heavy fields so the only live reference
+        # is in `result`; once the consumer drops the dict, the tensor is
+        # freed. Without this, every iterated clip leaks its decoded tensor
+        # and the host OOMs after a few hundred clips.
+        batch.pixel_values = None
+        batch.input_ids = None
+        batch.cond_mask = None
         return result
 
     def state_dict(self) -> dict[str, Any]:

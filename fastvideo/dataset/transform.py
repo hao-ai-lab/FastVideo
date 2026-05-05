@@ -74,6 +74,49 @@ def normalize_video(clip) -> torch.Tensor:
     return clip.float() / 255.0
 
 
+class LetterboxResizeVideo:
+    """Uniform resize + symmetric pad. Preserves source aspect ratio
+    exactly; pads with `fill` to reach (max_height, max_width).
+
+    Input/output layout matches CenterCropResizeVideo: (T, C, H, W).
+    """
+
+    def __init__(
+        self,
+        size,
+        fill: float = 0.0,
+        interpolation_mode: str = "bilinear",
+    ) -> None:
+        if len(size) != 2:
+            raise ValueError(
+                f"size should be tuple (height, width), instead got {size}")
+        self.max_height, self.max_width = size
+        self.fill = fill
+        self.interpolation_mode = interpolation_mode
+
+    def __call__(self, clip) -> torch.Tensor:
+        if not _is_tensor_video_clip(clip):
+            raise ValueError("clip should be a 4D torch.tensor")
+        h, w = clip.size(-2), clip.size(-1)
+        if h == self.max_height and w == self.max_width:
+            return clip
+        scale = min(self.max_height / h, self.max_width / w)
+        new_h, new_w = int(round(h * scale)), int(round(w * scale))
+        clip = resize(clip, (new_h, new_w), self.interpolation_mode)
+        pad_h = self.max_height - new_h
+        pad_w = self.max_width - new_w
+        top, bottom = pad_h // 2, pad_h - pad_h // 2
+        left, right = pad_w // 2, pad_w - pad_w // 2
+        return torch.nn.functional.pad(
+            clip, (left, right, top, bottom), value=self.fill)
+
+    def __repr__(self) -> str:
+        return (f"{self.__class__.__name__}("
+                f"size=({self.max_height}, {self.max_width}), "
+                f"fill={self.fill}, "
+                f"interpolation_mode={self.interpolation_mode})")
+
+
 class CenterCropResizeVideo:
     """
     First use the short side for cropping length,

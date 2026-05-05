@@ -25,6 +25,8 @@ logger = init_logger(__name__)
 class BasePreprocessPipeline(ComposedPipelineBase):
     """Base class for preprocessing pipelines that handles common functionality."""
 
+    _cached_empty_text_embed: torch.Tensor | None = None
+
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
         self.add_stage(stage_name="prompt_encoding_stage",
@@ -288,7 +290,12 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     valid_data["action_path"] = [data["action_path"][i] for i in valid_indices]
 
                 # VAE
-                with torch.autocast("cuda", dtype=torch.float32):
+                _autocast_dtype = {
+                    "fp32": torch.float32,
+                    "bf16": torch.bfloat16,
+                    "fp16": torch.float16,
+                }[getattr(args, "vae_autocast_dtype", "fp32")]
+                with torch.autocast("cuda", dtype=_autocast_dtype):
                     latents = self.get_module("vae").encode(valid_data["pixel_values"].to(
                         get_local_torch_device())).mean
 
@@ -296,35 +303,37 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 extra_features = self.get_extra_features(valid_data, fastvideo_args)
 
                 batch_captions = valid_data["text"]
-                batch = ForwardBatch(
-                    data_type="video",
-                    prompt=batch_captions,
-                    prompt_embeds=[],
-                    prompt_attention_mask=[],
-                )
+                # Cache T5("") once per process: when every caption in this
+                # batch is the empty string, the T5 forward output is identical
+                # across all items, so reuse it.
+                all_empty = all(c == "" for c in batch_captions)
 
-                if hasattr(self, "prompt_encoding_stage"):
+                if all_empty and self._cached_empty_text_embed is not None:
+                    cached = self._cached_empty_text_embed
+                    prompt_embeds = [cached for _ in batch_captions]
+                elif hasattr(self, "prompt_encoding_stage"):
+                    batch = ForwardBatch(
+                        data_type="video",
+                        prompt=batch_captions,
+                        prompt_embeds=[],
+                        prompt_attention_mask=[],
+                    )
                     result_batch = self.prompt_encoding_stage(batch, fastvideo_args)
-                    prompt_embeds, prompt_attention_mask = result_batch.prompt_embeds[
-                        0], result_batch.prompt_attention_mask[0]
-                    assert prompt_embeds.shape[0] == prompt_attention_mask.shape[0]
+                    prompt_embeds_t = result_batch.prompt_embeds[0]
+                    prompt_attention_mask = result_batch.prompt_attention_mask[0]
+                    assert prompt_embeds_t.shape[0] == prompt_attention_mask.shape[0]
 
-                    # Get sequence lengths from attention masks (number of 1s)
+                    # Slice each row to its non-padding length
                     seq_lens = prompt_attention_mask.sum(dim=1)
-
                     non_padded_embeds = []
-                    non_padded_masks = []
-
-                    # Process each item in the batch
-                    for i in range(prompt_embeds.size(0)):
+                    for i in range(prompt_embeds_t.size(0)):
                         seq_len = seq_lens[i].item()
-                        # Slice the embeddings and masks to keep only non-padding parts
-                        non_padded_embeds.append(prompt_embeds[i, :seq_len])
-                        non_padded_masks.append(prompt_attention_mask[i, :seq_len])
-
-                    # Update the tensors with non-padded versions
+                        non_padded_embeds.append(prompt_embeds_t[i, :seq_len])
                     prompt_embeds = non_padded_embeds
-                    prompt_attention_mask = non_padded_masks
+
+                    if all_empty:
+                        # Populate the cache from this batch's first item
+                        self._cached_empty_text_embed = (non_padded_embeds[0].detach().cpu())
                 else:
                     bs = len(valid_indices)
                     prompt_embeds = [torch.zeros(0) for _ in range(bs)]
@@ -338,6 +347,12 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 # Get the corresponding latent and info using video name
                 latent = latents[idx].cpu()
                 video_name = os.path.basename(video_path).split(".")[0]
+
+                # Optional fp16 on-disk cast: VAE encodes under autocast(fp32),
+                # so the .mean is fp32 by default. Casting before .numpy()
+                # halves cache size with negligible reconstruction loss.
+                if getattr(args, "latent_dtype", "fp32") == "fp16":
+                    latent = latent.to(torch.float16)
 
                 # Convert tensors to numpy arrays
                 vae_latent = latent.cpu().numpy()
@@ -379,3 +394,12 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 written = self.dataset_writer.flush()
                 logger.info("Flushed %s samples to parquet", written)
                 num_processed_samples = 0
+
+        # Final flush at end of dataset: any buffered tables that didn't trip
+        # the flush_frequency threshold (or fell below samples_per_file) would
+        # otherwise be silently dropped. write_remainder=True spills the partial
+        # chunk into a final worker_0/ parquet so no clip is lost.
+        if hasattr(self, 'dataset_writer'):
+            written = self.dataset_writer.flush(write_remainder=True)
+            if written:
+                logger.info("Final flush: %s remaining samples to parquet", written)

@@ -92,6 +92,26 @@ if __name__ == "__main__":
     parser.add_argument("--num_latent_t", type=int, default=28, help="Number of latent timesteps.")
     parser.add_argument("--max_height", type=int, default=480)
     parser.add_argument("--max_width", type=int, default=848)
+    parser.add_argument("--resize_mode",
+                        type=str,
+                        default="center_crop",
+                        choices=["center_crop", "letterbox"],
+                        help="Spatial resize policy. center_crop preserves "
+                        "upstream behavior; letterbox preserves source aspect "
+                        "ratio and pads with black bars.")
+    parser.add_argument("--latent_dtype",
+                        type=str,
+                        default="fp32",
+                        choices=["fp32", "fp16"],
+                        help="On-disk dtype for vae_latent bytes. fp32 "
+                        "preserves upstream behavior; fp16 halves cache size.")
+    parser.add_argument("--vae_autocast_dtype",
+                        type=str,
+                        default="fp32",
+                        choices=["fp32", "bf16", "fp16"],
+                        help="Autocast dtype for the VAE encode forward. "
+                        "fp32 preserves upstream behavior; bf16 ~25-40%% "
+                        "faster with fp32-equivalent dynamic range.")
     parser.add_argument("--video_length_tolerance_range", type=int, default=2.0)
     parser.add_argument("--group_frame", action="store_true")  # TODO
     parser.add_argument("--group_resolution", action="store_true")  # TODO
