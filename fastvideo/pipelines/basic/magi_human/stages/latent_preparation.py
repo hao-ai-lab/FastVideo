@@ -129,9 +129,20 @@ class MagiHumanLatentPreparationStage(PipelineStage):
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        seconds = int(getattr(batch, "num_seconds", None) or 4)
         fps = self.fps
-        num_frames = seconds * fps + 1
+        # Prefer the caller-provided `batch.num_frames` (the standard
+        # SamplingParam knob — production preset and SSIM tests both set
+        # it). Fall back to `batch.num_seconds * fps + 1` when num_frames
+        # is unset or the image-default sentinel (1). This matches
+        # upstream MagiDataProxy.process_input which derives `num_frames
+        # = seconds * fps + 1` and rejects values that don't satisfy
+        # `(num_frames - 1) % vae_temporal_stride == 0`.
+        requested_num_frames = int(getattr(batch, "num_frames", None) or 0)
+        if requested_num_frames > 1:
+            num_frames = requested_num_frames
+        else:
+            seconds = int(getattr(batch, "num_seconds", None) or 4)
+            num_frames = seconds * fps + 1
         latent_T = (num_frames - 1) // 4 + 1
 
         # Match upstream pipeline.py:61-64 + video_generate.py:254-261:
