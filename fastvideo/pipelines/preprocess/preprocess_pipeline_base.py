@@ -339,6 +339,12 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 latent = latents[idx].cpu()
                 video_name = os.path.basename(video_path).split(".")[0]
 
+                # Optional fp16 on-disk cast: VAE encodes under autocast(fp32),
+                # so the .mean is fp32 by default. Casting before .numpy()
+                # halves cache size with negligible reconstruction loss.
+                if getattr(args, "latent_dtype", "fp32") == "fp16":
+                    latent = latent.to(torch.float16)
+
                 # Convert tensors to numpy arrays
                 vae_latent = latent.cpu().numpy()
                 text_embedding = prompt_embeds[idx].cpu().numpy()

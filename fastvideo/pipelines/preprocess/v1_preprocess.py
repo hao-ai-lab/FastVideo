@@ -99,6 +99,12 @@ if __name__ == "__main__":
                         help="Spatial resize policy. center_crop preserves "
                         "upstream behavior; letterbox preserves source aspect "
                         "ratio and pads with black bars.")
+    parser.add_argument("--latent_dtype",
+                        type=str,
+                        default="fp32",
+                        choices=["fp32", "fp16"],
+                        help="On-disk dtype for vae_latent bytes. fp32 "
+                        "preserves upstream behavior; fp16 halves cache size.")
     parser.add_argument("--video_length_tolerance_range", type=int, default=2.0)
     parser.add_argument("--group_frame", action="store_true")  # TODO
     parser.add_argument("--group_resolution", action="store_true")  # TODO
