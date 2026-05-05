@@ -54,6 +54,14 @@ from fastvideo.worker.executor import Executor
 
 logger = init_logger(__name__)
 
+_BATCH_EXTRA_PASSTHROUGH_KEYS: tuple[str, ...] = (
+    "ltx2_audio_latents",
+    "ltx2_audio_clean_latent",
+    "ltx2_audio_denoise_mask",
+    "audio_num_frames",
+    "video_position_offset_sec",
+)
+
 _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "num_gpus",
     "revision",
@@ -463,7 +471,13 @@ class VideoGenerator:
         if grid_sizes is not None:
             kwargs['grid_sizes'] = grid_sizes
 
+        extra_overrides: dict[str, Any] = {}
+        for _ek in _BATCH_EXTRA_PASSTHROUGH_KEYS:
+            if _ek in kwargs:
+                extra_overrides[_ek] = kwargs.pop(_ek)
+
         sampling_param.update(kwargs)
+        kwargs["_extra_overrides"] = extra_overrides
 
         if fastvideo_args.prompt_txt is not None or sampling_param.prompt_path is not None:
             prompt_txt_path = sampling_param.prompt_path or fastvideo_args.prompt_txt
@@ -661,6 +675,10 @@ class VideoGenerator:
             VSA_sparsity=fastvideo_args.VSA_sparsity,
         )
 
+        extra_overrides = kwargs.pop("_extra_overrides", {})
+        for _ek, _ev in extra_overrides.items():
+            batch.extra[_ek] = _ev
+
         # Run inference
         start_time = time.perf_counter()
 
@@ -782,6 +800,7 @@ class VideoGenerator:
             # `return_frames` (which gates the video-shaped buffers).
             "audio": output_batch.extra.get("audio"),
             "audio_sample_rate": output_batch.extra.get("audio_sample_rate"),
+            "ltx2_audio_latents": output_batch.extra.get("ltx2_audio_latents"),
             "size": (target_height, target_width, batch.num_frames),
             "generation_time": gen_time,
             "logging_info": logging_info,

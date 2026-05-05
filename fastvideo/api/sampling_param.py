@@ -177,11 +177,15 @@ class SamplingParam:
 
     def update(self, source_dict: dict[str, Any]) -> None:
         valid_fields = {f.name for f in fields(self)}
+        unknown = [key for key in source_dict if key not in valid_fields]
+        if unknown:
+            raise ValueError(f"{type(self).__name__}.update() received unknown field(s): "
+                             f"{sorted(unknown)}. All kwargs must correspond to declared "
+                             f"SamplingParam fields. If a kwarg is meant to flow into "
+                             f"ForwardBatch.extra (e.g. LTX2 audio conditioning), route it "
+                             f"via VideoGenerator._BATCH_EXTRA_PASSTHROUGH_KEYS instead.")
         for key, value in source_dict.items():
-            if key in valid_fields:
-                setattr(self, key, value)
-            else:
-                logger.error("%s has no field %s", type(self).__name__, key)
+            setattr(self, key, value)
 
         self.__post_init__()
 
