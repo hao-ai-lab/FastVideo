@@ -32,18 +32,25 @@ If any required prereq is missing, the script fails fast with a clear message.
 
 ```bash
 # Deploy on GPU 4 with default ports (backend 8009, FE 5274) — torch.compile
-# is OFF by default so first-segment cold start is ~45s instead of ~3-4min.
+# and warmup are both OFF by default so first-segment cold start is ~45s
+# instead of ~3-4min.
 ./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 4
 
 # Deploy on GPU 6 with custom ports
 ./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 6 8089 5275
 
-# Deploy on GPU 0 with warmup enabled (default disabled for fast iter)
-DREAMVERSE_WARMUP=true ./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 0
+# Deploy on GPU 0 with warmup enabled
+./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh --warmup 0
 
 # Deploy with torch.compile enabled (max-autotune; first segment ~3-4min,
-# subsequent segments ~7-8s instead of ~10s — only worth it for benchmarking)
-DREAMVERSE_TORCH_COMPILE=true ./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 4
+# subsequent segments save ~3s — only worth it for benchmarking)
+./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh --torch-compile 4
+
+# Deploy with both warmup AND torch.compile enabled
+./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh --warmup --torch-compile 4
+
+# Flags can appear before, between, or after positional args
+./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh 4 8089 5275 --warmup
 ```
 
 ### Arguments
@@ -54,15 +61,25 @@ DREAMVERSE_TORCH_COMPILE=true ./.agents/skills/dreamverse-deploy/scripts/dreamve
 | 2 | `BACKEND_PORT` | `8009` | TCP port for the FastAPI server |
 | 3 | `FRONTEND_PORT` | `5274` | TCP port for the Next.js dev server |
 
-### Environment variables (override defaults)
+### Flags
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--warmup` / `--no-warmup` | off | Run GPU warmup at boot (~minutes). Overrides `DREAMVERSE_WARMUP` |
+| `--torch-compile` / `--no-torch-compile` | off | Enable max-autotune `torch.compile`. First segment ~3-4min when on, ~45s when off. Overrides `DREAMVERSE_TORCH_COMPILE` |
+| `-h` / `--help` | — | Show usage |
+
+Flags can appear in any position relative to the positional args. Explicit flag values always win over env-var defaults.
+
+### Environment variables (used when no flag is given)
 
 | Var | Default | Purpose |
 |---|---|---|
-| `DREAMVERSE_WARMUP` | `false` | If `true`, runs the GPU warmup at boot (~minutes) |
-| `DREAMVERSE_TORCH_COMPILE` | `false` | If `true`, sets `ENABLE_TORCH_COMPILE=1` (max-autotune ~3-4 min first segment). Default `false` is e2e-friendly: cold segment ~45s, hot ~10s |
+| `DREAMVERSE_WARMUP` | `false` | Same as `--warmup`/`--no-warmup`. Flag takes precedence |
+| `DREAMVERSE_TORCH_COMPILE` | `false` | Same as `--torch-compile`/`--no-torch-compile`. Flag takes precedence |
 | `DREAMVERSE_REPO_ROOT` | git rev-parse | Repo root override |
 | `DREAMVERSE_LOG_DIR` | `/tmp/opencode/dreamverse-deploy` | Where to write `backend.log` / `frontend.log` |
-| `DREAMVERSE_REQUIRE_NATIVE_FFMPEG` | `false` | If `true`, fail when `apps/dreamverse/scripts/ffmpeg-env.sh` is absent |
+| `DREAMVERSE_REQUIRE_NATIVE_FFMPEG` | `false` | If `true`, fail when `$HOME/opt/ffmpeg-native/bin/ffmpeg` is absent |
 
 ## What it does
 
