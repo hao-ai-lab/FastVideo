@@ -12,6 +12,20 @@ Run CPU-safe backend tests from the FastVideo repository root:
 uv run --locked --package dreamverse --extra test pytest apps/dreamverse/server/tests/ -m 'not gpu' -q
 ```
 
+## Backend launch
+
+Launch the migrated backend through the repo-local wrappers:
+
+```bash
+apps/dreamverse/scripts/dreamverse-server --port 8009
+apps/dreamverse/scripts/dreamverse-mock-server --port 8009
+```
+
+Do not rely on a bare `dreamverse-server` found on `PATH` during the migration.
+With `[tool.uv] package = false`, uv does not register this workspace member's
+console scripts, so a PATH binary can still point at an old Dreamverse editable
+install outside this monorepo.
+
 ## Frontend build and tests
 
 Run frontend commands from the standalone web app:
@@ -33,15 +47,14 @@ that GPU appear as logical GPU 0 inside the process, preserving the previous
 Dreamverse deployment behavior.
 
 ```bash
-CUDA_VISIBLE_DEVICES=4 uv run --locked --package dreamverse \
-  fastvideo serve --config apps/dreamverse/serve_configs/streaming_demo.yaml \
+CUDA_VISIBLE_DEVICES=4 apps/dreamverse/scripts/dreamverse-server \
   --host 0.0.0.0 --port 8009
 ```
 
 In another shell, verify the service:
 
 ```bash
-curl -s http://localhost:8009/health
+curl -s http://localhost:8009/healthz
 ```
 
 Phase 4 adds the public `/healthz`, `/readyz`, `/status`,

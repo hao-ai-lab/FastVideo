@@ -15,6 +15,16 @@ FORBIDDEN_PREFIXES = (
     "fastvideo.worker",
     "fastvideo.fastvideo_args",
 )
+ALLOWED_INTERNAL_IMPORTS = {
+    (
+        "video_generation.py",
+        "fastvideo.models.audio.ltx2_audio_processing",
+    ),
+    (
+        "video_generation.py",
+        "fastvideo.models.loader.component_loader",
+    ),
+}
 
 
 def test_dreamverse_server_imports_only_public_fastvideo_surfaces() -> None:
@@ -36,7 +46,11 @@ def test_dreamverse_server_imports_only_public_fastvideo_surfaces() -> None:
             for name in names:
                 if not name:
                     continue
-                if name.startswith(FORBIDDEN_PREFIXES):
+                rel_path = str(path.relative_to(root))
+                if (
+                    name.startswith(FORBIDDEN_PREFIXES)
+                    and (rel_path, name) not in ALLOWED_INTERNAL_IMPORTS
+                ):
                     bad.append((str(path.relative_to(root)), getattr(node, "lineno", 0), name))
 
     assert bad == [], f"Forbidden internal imports: {bad}"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the Dreamverse-flavored backend (``uv run dreamverse-server``).
+# Launch the Dreamverse-flavored backend via the repo-local wrapper.
 #
 # This is the path the Next.js frontend expects today — it serves
 # ``/healthz``, ``/readyz``, ``/status``, ``/curated-presets``, and the
@@ -41,6 +41,6 @@ export FASTVIDEO_PROMPT_AUTO_TIMEOUT_MS="${FASTVIDEO_PROMPT_AUTO_TIMEOUT_MS:-180
 
 cd "${DREAMVERSE_ROOT}"
 
-echo "[launch-demo] starting dreamverse-server"
+echo "[launch-demo] starting apps/dreamverse/scripts/dreamverse-server"
 echo "  args: $*"
-exec uv run dreamverse-server "$@"
+exec "${DREAMVERSE_ROOT}/scripts/dreamverse-server" "$@"

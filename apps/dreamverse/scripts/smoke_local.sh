@@ -49,7 +49,6 @@ wait_for_endpoint() {
 }
 
 require_command curl
-require_command uv
 
 mkdir -p "$(dirname "${BACKEND_LOG_PATH}")"
 
@@ -62,7 +61,7 @@ if ! probe_json "/healthz" >/dev/null 2>&1; then
   echo "Starting Dreamverse backend on ${BASE_URL}..."
   (
     cd "${ROOT_DIR}"
-    exec uv run dreamverse-server --host "${HOST}" --port "${PORT}"
+    exec "${ROOT_DIR}/scripts/dreamverse-server" --host "${HOST}" --port "${PORT}"
   ) >"${BACKEND_LOG_PATH}" 2>&1 &
   backend_pid=$!
   started_backend=1
