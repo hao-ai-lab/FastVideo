@@ -564,11 +564,21 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         # Add video-specific fields
         if batch.is_video:
             result.update({"fps": batch.fps, "duration": batch.duration})
-        
+
         # Add action_path
         if batch.action_path:
             result["action_path"] = batch.action_path
 
+        # `batch` is a reference to self.processed_batches[idx], which the
+        # dataset retains for the whole epoch. The transform stages above
+        # mutated it in-place (e.g. pixel_values became a ~187MB decoded
+        # video tensor). Clear those heavy fields so the only live reference
+        # is in `result`; once the consumer drops the dict, the tensor is
+        # freed. Without this, every iterated clip leaks its decoded tensor
+        # and the host OOMs after a few hundred clips.
+        batch.pixel_values = None
+        batch.input_ids = None
+        batch.cond_mask = None
         return result
 
     def state_dict(self) -> dict[str, Any]:
