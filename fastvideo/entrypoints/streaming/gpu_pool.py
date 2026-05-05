@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# pyright: reportMissingTypeArgument=false
 """GPU pool manager for the streaming server.
 
 Replaces the single-generator path in PR 7.5 with a typed pool
@@ -26,7 +27,9 @@ from __future__ import annotations
 
 import asyncio
 import multiprocessing as mp
+import os
 import queue
+import subprocess
 import threading
 import time
 import uuid
@@ -69,6 +72,13 @@ class PoolAssignment:
     gpu_id: int
     worker_id: str
     pinned_at: float = field(default_factory=time.monotonic)
+
+
+# Backwards-compatible name for the Dreamverse product controller during
+# the monorepo migration. The controller only uses this name for runtime
+# annotations; Phase 4 replaces the product-local controller path with the
+# generic streaming runtime.
+GPUSlot = PoolAssignment
 
 
 class GpuPool(ABC):
@@ -530,7 +540,32 @@ def _default_worker_factory(
     )
 
 
+def get_available_gpus() -> list[int]:
+    """Return CUDA-visible GPU ids, falling back to ``nvidia-smi`` then ``[0]``."""
+
+    cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    if cuda_visible:
+        return [int(item.strip()) for item in cuda_visible.split(",") if item.strip()]
+
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return [0]
+
+    if result.returncode != 0:
+        return [0]
+    gpu_ids = [int(line.strip()) for line in result.stdout.splitlines() if line.strip()]
+    return gpu_ids or [0]
+
+
 __all__ = [
+    "get_available_gpus",
+    "GPUSlot",
     "GpuPool",
     "InProcessGpuPool",
     "PoolAcquireTimeout",
