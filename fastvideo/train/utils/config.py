@@ -323,6 +323,8 @@ def _build_training_config(
             dataloader_num_workers=int(da.get("dataloader_num_workers", 0) or 0),
             training_cfg_rate=float(da.get("training_cfg_rate", 0.0) or 0.0),
             seed=int(da.get("seed", 0) or 0),
+            data_split=str(da.get("data_split", "all") or "all"),
+            validation_split_ratio=float(da.get("validation_split_ratio", 0.0) or 0.0),
             num_height=int(da.get("num_height", 0) or 0),
             num_width=int(da.get("num_width", 0) or 0),
             num_latent_t=int(da.get("num_latent_t", 0) or 0),

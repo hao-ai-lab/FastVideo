@@ -123,6 +123,8 @@ class LTX2TrainingPipeline(TrainingPipeline):
                 drop_last=True,
                 text_padding_length=text_padding_length,
                 seed=self.seed,
+                data_split=training_args.data_split,
+                validation_split_ratio=training_args.validation_split_ratio,
             ))
             self._use_parquet_data = True
             logger.info("No precomputed .pt data found, using parquet data")

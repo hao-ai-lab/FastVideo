@@ -749,6 +749,8 @@ class TrainingArgs(FastVideoArgs):
     precedence.
     """
     data_path: str = ""
+    data_split: str = "all"
+    validation_split_ratio: float = 0.0
     dataloader_num_workers: int = 0
     num_height: int = 0
     num_width: int = 0
@@ -919,6 +921,15 @@ class TrainingArgs(FastVideoArgs):
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         parser.add_argument("--data-path", type=str, required=True, help="Path to parquet files")
+        parser.add_argument("--data-split",
+                            type=str,
+                            default=TrainingArgs.data_split,
+                            choices=["all", "train", "validation", "val"],
+                            help="Dataset split to read from parquet files.")
+        parser.add_argument("--validation-split-ratio",
+                            type=float,
+                            default=TrainingArgs.validation_split_ratio,
+                            help="Fraction of rows reserved for the deterministic validation split.")
         parser.add_argument("--dataloader-num-workers",
                             type=int,
                             required=True,
