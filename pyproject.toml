@@ -89,6 +89,9 @@ dependencies = [
 [tool.uv]
 prerelease = "allow"
 
+[tool.uv.workspace]
+members = ["apps/dreamverse"]
+
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
@@ -156,10 +159,15 @@ rocm = [
 fastvideo = "fastvideo.entrypoints.cli.main:main"
 
 [tool.setuptools.packages.find]
-exclude = ["assets*", "docker*", "docs", "scripts*"]
+exclude = ["assets*", "docker*", "docs", "scripts*", "apps*"]
 
 [tool.wheel]
-exclude = ["assets*", "docker*", "docs", "scripts*"]
+exclude = ["assets*", "docker*", "docs", "scripts*", "apps*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "gpu: requires real GPU + model weights; skip in CI",
+]
 
 
 [tool.mypy]
