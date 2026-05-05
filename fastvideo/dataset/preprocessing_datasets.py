@@ -542,7 +542,16 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
     def __iter__(self):
         """Iterate through processed data items."""
         total = len(self.processed_batches)
-        skip_budget = max(self._MAX_SKIP_FLOOR, int(self._MAX_SKIP_FRACTION * total))
+        if total == 0:
+            return
+        skip_budget = min(
+            total - 1,
+            max(
+                1,
+                self._MAX_SKIP_FLOOR,
+                math.ceil(self._MAX_SKIP_FRACTION * total),
+            ),
+        )
         skipped = 0
         for idx in range(total):
             try:
