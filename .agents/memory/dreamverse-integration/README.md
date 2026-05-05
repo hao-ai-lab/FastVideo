@@ -5,10 +5,13 @@ Tracks the public API refactor (PRs 0-17), the LTX-2 streaming server
 upstream, the Dreamverse switch from `FastVideo-internal` to public
 `FastVideo`, and the NVFP4 quantization landing.
 
-**Last reconciled:** 2026-05-05 (FastVideo `will/ltx2_sr_port` @ `09647a30`
-post-D-16 router polish; Dreamverse `will/integrate-public-fastvideo` @ `ec8ef92`).
-PRs #1257 / #1258 / #1284 MERGED to main; PR #1286 (`will/api_7.9` —
-streaming router) OPEN at `a152cb77`, MERGEABLE.
+**Last reconciled:** 2026-05-05 (post-#1286 merge + rebase). FastVideo
+`will/ltx2_sr_port` @ `b34d9704` (33 commits ahead of main, post-rebase
+SHAs); Dreamverse `will/integrate-public-fastvideo` @ `ec8ef92`.
+PRs #1257 / #1258 / #1284 / #1286 MERGED to main; PR #1287
+(`will/api_7.10` — `generate_async` + `VideoEvent` hierarchy) OPEN at
+`6ae7a99f`, MERGEABLE. Local backup `will/ltx2_sr_port-pre-1286-rebase`
+@ `1baa60bb` preserves the pre-rebase chain.
 
 ## Fresh-context onboarding (read in order)
 

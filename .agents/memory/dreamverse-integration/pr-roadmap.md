@@ -7,7 +7,7 @@ For design rationale see [design.md](design.md). For streaming-specific
 PRs (7.5-7.10) see [streaming-server.md](streaming-server.md). For NVFP4
 work that runs parallel to this sequence see [quantization.md](quantization.md).
 
-**Last updated:** 2026-05-04 (PRs 7.5 / 7.6 / 7.7 merged; PR 7.8 opened as #1284).
+**Last updated:** 2026-05-05 (PRs 7.5 / 7.6 / 7.7 / 7.8 / 7.9 merged; PR 7.10 opened as #1287).
 
 ## Status legend
 
@@ -32,24 +32,24 @@ work that runs parallel to this sequence see [quantization.md](quantization.md).
 | **7.5** | **#1251** | ✅ | `95fd29e0` (merged 2026-04-26) | Streaming server skeleton (WebSocket + fMP4 + single generator). 8 commits. Deferred TODOs (per-step progress, mid-segment cancellation) carried forward to PR 7.10. |
 | **7.6** | **#1257** | ✅ | `eb0a4152` (merged 2026-05-04) | GPU pool upstream + worker subprocess + two-segment warmup. 7 commits squashed. APPROVED by Eigensystem. See [decisions-log.md D-12](decisions-log.md#d-12) for the architectural review. |
 | **7.7** | **#1258** | ✅ | `f673423b` (merged 2026-05-04) | Prompt enhancer with `LLMProvider` abstraction. Built-in providers: cerebras, groq. 3 commits squashed. **Public Literal does NOT include `cerebras_ifm`** — open-threads.md item DR-2 covers the gap. See [decisions-log.md D-13](decisions-log.md#d-13) for the architectural review. |
+| **7.8** | **#1284** | ✅ | `eb3a3942` (merged 2026-05-04) | Streaming auxiliaries — `prompt/safety.py` (optional fasttext, lazy import), `prompt/rewrite.py`, `session_logger.py` (thread-safe JSONL), `mock_server.py` (build_mock_app + MockGenerator for FE dev). 730 LOC, 2 commits. See [decisions-log.md D-14](decisions-log.md#d-14). |
+| **7.9** | **#1286** | ✅ | `2aaeee2a` (merged 2026-05-05) | Streaming router (multi-replica load balancer + WS proxy + `fastvideo router-serve` CLI). Squashed `cd76cf51 + 1ac1e732 + b0b7f59c + a152cb77` (router-polish second-pass; cherry-pick of `40e265b8` from `will/ltx2_sr_port`). See [decisions-log.md D-15](decisions-log.md#d-15) (structural review) + [D-16](decisions-log.md#d-16) (second-pass polish). |
 
-## In flight (7.8)
+## In flight (7.10)
 
 | # | PR | Status | Branch | Scope |
 |---|---|---|---|---|
-| **7.8** | **#1284** | 🟢 OPEN, MERGEABLE, BLOCKED on review | `will/api_7.8` (head `f95c03b6`) | Streaming auxiliaries — `prompt/safety.py` (optional fasttext, lazy import), `prompt/rewrite.py` (RewriteOptions/Result + build_rewrite splitting), `session_logger.py` (thread-safe JSONL append-only), `mock_server.py` (build_mock_app + MockGenerator for FE dev / protocol integration without GPU). 730 LOC across 7 files, 2 commits. |
+| **7.10** | **#1287** | 🟢 OPEN, MERGEABLE | `will/api_7.10` (head `6ae7a99f`) | **Dynamo backend contract** — `VideoGenerator.generate_async`, `default_health_check_request()`, `VideoEvent` hierarchy. 3 commits, 468/4 LOC across 4 files. The "unlock PR" — enables PR 7.5's mid-segment cancellation, audio re-encode (Q-5), Dynamo progress passthrough (Q-9), and `GpuPool.run_async()` migration (D-12-B). Stacked on `main`; first slice of post-#1286 rebased `will/ltx2_sr_port`. |
 
-## Planned (7.9 → 13)
+## Planned (8 → 13)
 
 | # | Status | Branch | Scope |
 |---|---|---|---|
-| 7.9 | 🟡 ready (rebased on 7.8) | `will/api_7.9` | Router upstream (multi-replica load balancer + WS proxy). 3 commits. Caveat: uses deprecated FastAPI `app.on_event("shutdown")` — migrate to lifespan handlers pre-merge. |
-| 7.10 | 🟡 ready (rebased on 7.9) | `will/api_7.10` | **Dynamo backend contract** — `VideoGenerator.generate_async`, `default_health_check_request()`, `VideoEvent` hierarchy, audio re-encode integration, mid-segment cancellation. 3 commits. The "unlock PR" — closes Q-5/Q-9/PR-7.5 cancellation TODO + enables `GpuPool.run_async()` migration (D-12-B). |
-| 8 | 🟡 ready (rebased on 7.10) | `will/api_8` | Internal-UI ↔ public-server contract docs + Dynamo integration reference. 3 commits. |
-| LTX-2 SR | 🟡 ready (rebased on 8) | `will/ltx2_sr_runtime` | LTX-2 SR runtime port + i2v conditioning + alignment harness against FastVideo-internal. 9 commits. NOT in canonical PR plan — separate stream. |
-| NVFP4 | 🟡 ready (rebased on LTX-2 SR) | `will/ltx2_nvfp4` | NVFP4 wire-up + per-component compile + typed `transformer_quant` flow. 6 commits. NOT in canonical PR plan. |
-| LTX-2 fixes | 🟡 ready (rebased on NVFP4) | `will/ltx2_post_fixes` | Post-handoff parity fixes (Gemma `to()`, list-of-generators). 2 commits. |
-| agents cleanup | 🟡 ready (top of stack) | `will/agents_cleanup` | `.agents/` Phase 1 cleanup + dreamverse-integration memory + STACK/CO-AUTHORS docs + D-12 + D-13 + open-threads tracking. 5 commits. **Independent of API stack** — could fast-track. |
+| 8 | 🟡 ready (slice 4-6 of `will/ltx2_sr_port`) | `will/api_8` (`f32e31ec`) | Server contract docs (OpenAI HTTP + Dynamo native-backend integration reference) + Dreamverse/Dynamo shape contract tests. 3 commits. |
+| LTX-2 SR | 🟡 ready (slice 7-15) | `will/ltx2_sr_runtime` (`e7297519`) | LTX-2 SR runtime port + i2v conditioning + alignment harness against FastVideo-internal. 9 commits. NOT in canonical PR plan — separate stream. |
+| NVFP4 | 🟡 ready (slice 16-21) | `will/ltx2_nvfp4` (`6793166b`) | NVFP4 wire-up + per-component compile + typed `transformer_quant` flow. 6 commits. NOT in canonical PR plan. |
+| LTX-2 fixes | 🟡 ready (slice 22-23) | `will/ltx2_post_fixes` (`25897b67`) | Post-handoff parity fixes (Gemma `to()`, list-of-generators). 2 commits. |
+| agents cleanup | 🟡 ready (slice 24-33, == `will/ltx2_sr_port` HEAD) | `will/agents_cleanup` (`b34d9704`) | `.agents/` Phase 1 cleanup + dreamverse-integration memory + STACK/CO-AUTHORS docs + authors.md + runbook.md + D-12...D-16 + open-threads tracking. 10 commits. **Independent of API stack** — could fast-track. |
 | 9 | 🟡 | — | LongCat preset migration + colocation (9 model-specific stage files) |
 | 10 | 🟡 | — | Hunyuan15 SR preset migration + colocation + SR field migration POC |
 | 11 | 🟡 | — | SSIM/performance test migration off legacy `generate_video(..., **kwargs)` |

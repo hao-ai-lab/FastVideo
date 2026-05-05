@@ -1,4 +1,4 @@
-# Current State — 2026-05-05
+# Current State — 2026-05-05 (post-#1286 merge + rebase)
 
 Point-in-time snapshot of branches, commits, and live infrastructure.
 Update whenever commits land or services restart.
@@ -11,15 +11,60 @@ roster of co-authors to credit on every commit see
 
 | Repo | Branch | Tip | Distance |
 |---|---|---|---|
-| FastVideo | `will/ltx2_sr_port` | `09647a30` | 32 commits ahead of i2v port base `cfccd292` |
-| FastVideo | `will/api_7.9` (PR #1286) | `a152cb77` | router stack head; ancestor of `will/ltx2_sr_port` |
+| FastVideo | `will/ltx2_sr_port` | `b34d9704` | 33 commits ahead of `origin/main` (post-rebase, post-#1286 merge) |
+| FastVideo | `will/api_7.10` (PR #1287) | `6ae7a99f` | first 3 commits of `will/ltx2_sr_port`; OPEN, MERGEABLE |
+| FastVideo | `will/api_8` | `f32e31ec` | local-only split bookmark, slice 4-6 |
+| FastVideo | `will/ltx2_sr_runtime` | `e7297519` | local-only split bookmark, slice 7-15 |
+| FastVideo | `will/ltx2_nvfp4` | `6793166b` | local-only split bookmark, slice 16-21 |
+| FastVideo | `will/ltx2_post_fixes` | `25897b67` | local-only split bookmark, slice 22-23 |
+| FastVideo | `will/agents_cleanup` | `b34d9704` | local-only split bookmark, slice 24-33 (== `will/ltx2_sr_port` HEAD) |
+| FastVideo | `will/ltx2_sr_port-pre-1286-rebase` | `1baa60bb` | **local-only safety backup** of pre-rebase chain (37 commits); keep until next slice merges |
 | Dreamverse | `will/integrate-public-fastvideo` | `ec8ef92` | 10 commits ahead of `737f3c1` (the dep switch) |
 | FastVideo-internal | their `main` | (read-only ref) | — |
 
 FastVideo worktree default branch is `will/ltx2_sr_port`. Other agents
 share this worktree — if `git branch --show-current` shows something
 else, switch back cleanly with `git checkout will/ltx2_sr_port` (don't
-disturb their uncommitted work).
+disturb their uncommitted work). I observed this happen repeatedly in
+the 2026-05-05 session — confirmed harmless; switching back was always
+safe with a clean working tree.
+
+## Post-#1286 rebase summary
+
+PR #1286 merged at `2aaeee2a` (squash). `will/ltx2_sr_port` was rebased
+onto new `origin/main`, dropping 4 commits whose content is now in main:
+
+- `cd76cf51` `[feat] streaming: router (multi-replica load balancer)`
+- `1ac1e732` `[feat] streaming: fastvideo router-serve CLI`
+- `b0b7f59c` `[test] streaming: router registry + health loop ...`
+- `40e265b8` `[fix] streaming: router polish — bridge cancel + state
+  machine + deps` (squashed into `2aaeee2a` via cherry-pick `a152cb77`)
+
+Rebase was clean — no conflicts. All 33 surviving commits got new SHAs
+(rebase rewrites). The pre-rebase tip `1baa60bb` is preserved on the
+local backup branch `will/ltx2_sr_port-pre-1286-rebase`.
+
+## New linearized chain (33 commits, slice indices for STACK.md)
+
+| Slice | PR | Commits | Tip SHA | Subject |
+|---|---|---|---|---|
+| 1-3 | 7.10 (PR #1287) | 3 | `6ae7a99f` | `[test] streaming: generate_async coverage + refreshed streaming test` |
+| 4-6 | 8 | 3 | `f32e31ec` | `[test] streaming: contract tests for Dreamverse + Dynamo shapes` |
+| 7-15 | LTX-2 SR | 9 | `e7297519` | `feat(ltx2): full i2v conditioning + continuation latent port` |
+| 16-21 | NVFP4 | 6 | `6793166b` | `test(nvfp4): lock LTX-2 wiring + typed transformer_quant flow` |
+| 22-23 | LTX-2 post-fixes | 2 | `25897b67` | `[fix]: unwrap list-of-generator before torch.randn in LTX-2 latent prep` |
+| 24-33 | agents_cleanup | 10 | `b34d9704` | `[docs] dreamverse-integration: add runbook + fresh-context onboarding` |
+
+5 PRs landed (7.5, 7.6, 7.7, 7.8, 7.9), 1 in flight (7.10), 5 remaining
+(8 / LTX-2 SR / NVFP4 / post-fixes / agents_cleanup).
+
+## Historical commit chain analysis (pre-#1286 rebase)
+
+The layered chain analysis below documented the pre-rebase SHAs (LTX-2
+SR layer, NVFP4 layer, post-handoff fixes layer). Those SHAs no longer
+exist on `will/ltx2_sr_port` — they live only on
+`will/ltx2_sr_port-pre-1286-rebase`. Content semantics are unchanged;
+SHAs were rewritten by the rebase. Kept here for narrative continuity.
 
 ## FastVideo: commit chain `cfccd292..156103b9`
 

@@ -6,7 +6,7 @@ Operational how-to for the dreamverse-integration scope. Read after
 For design rationale see [design.md](design.md). For who to credit see
 [authors.md](authors.md). For PR status see [pr-roadmap.md](pr-roadmap.md).
 
-**Last updated:** 2026-05-05.
+**Last updated:** 2026-05-05 (post-#1286 merge + rebase; active PR is now #1287 / 7.10).
 
 ## Worktree contract
 
@@ -29,26 +29,89 @@ when done — that is the assumed default.
 
 The dreamverse-integration work lives on the `will/ltx2_sr_port` stack.
 Single linearized branch with the full chain; intermediate split branches
-are bookmarks, not active rebase targets.
+are bookmarks. After each upstream merge the bookmarks are re-sliced
+(see "After a PR merges" below).
 
 ```
 origin/main
-  ↓ [public-API refactor: PRs 0..7.7 merged on main]
-will/api_7.9   (PR #1286 — streaming router, OPEN)
-  ↓ [+30 commits: api_7.10, 8, ltx2_sr_runtime, ltx2_nvfp4,
+  ↓ [public-API refactor: PRs 0..7.9 merged on main, latest #1286 = 2aaeee2a]
+will/api_7.10   (PR #1287 — generate_async + VideoEvent, OPEN)
+  ↓ [+30 commits: api_8, ltx2_sr_runtime, ltx2_nvfp4,
   ↓                ltx2_post_fixes, agents_cleanup all linearized]
-will/ltx2_sr_port   (current top of stack — default working branch)
+will/ltx2_sr_port   (current top of stack — default working branch, 33 commits ahead of main)
 ```
 
 | Branch | Role | Status | How to find tip |
 |---|---|---|---|
-| `will/api_7.9` | PR #1286 head | OPEN | `git rev-parse will/api_7.9` |
+| `will/api_7.10` | PR #1287 head, slice 1-3 | OPEN, MERGEABLE | `git rev-parse will/api_7.10` |
 | `will/ltx2_sr_port` | top of stack, default working branch | active | `git rev-parse HEAD` |
-| `will/api_7.10`, `will/api_8`, `will/ltx2_sr_runtime`, `will/ltx2_nvfp4`, `will/ltx2_post_fixes`, `will/agents_cleanup` | split-PR bookmarks | stale snapshots — do NOT rebase preemptively | (see [pr-roadmap.md](pr-roadmap.md)) |
+| `will/api_8`, `will/ltx2_sr_runtime`, `will/ltx2_nvfp4`, `will/ltx2_post_fixes`, `will/agents_cleanup` | split-PR bookmarks | local-only, re-sliced after each upstream merge | (see [pr-roadmap.md](pr-roadmap.md) + [state.md](state.md) "New linearized chain") |
+| `will/ltx2_sr_port-pre-1286-rebase` | safety backup | local-only, kept until next slice merges | `git rev-parse will/ltx2_sr_port-pre-1286-rebase` |
 
-**Sanity check:** `git merge-base --is-ancestor will/api_7.9 will/ltx2_sr_port`
+**Sanity check:** `git merge-base --is-ancestor will/api_7.10 will/ltx2_sr_port`
 should exit 0. If it doesn't, the stack is in an unexpected state — read
 [state.md](state.md) before continuing.
+
+## After a PR merges (re-slice protocol)
+
+When an upstream PR squash-merges (e.g. PR #1286 -> `2aaeee2a` -> main):
+
+1. **Backup** the current stack tip:
+   ```bash
+   git branch will/ltx2_sr_port-pre-<PR>-rebase will/ltx2_sr_port
+   ```
+2. **Fetch** new main:
+   ```bash
+   git fetch origin main
+   ```
+3. **Identify dropped commits.** A squash merge has a unique patch-id
+   different from any individual commit, so `git cherry` won't auto-detect.
+   List the SHAs that were squashed (typically 3-4 commits — the original
+   PR's individual commits plus any cherry-picked polish):
+   ```bash
+   git log --oneline origin/main..will/ltx2_sr_port | head
+   # Identify which top-of-chain commits match the merged PR's content.
+   ```
+4. **Interactive rebase dropping those commits:**
+   ```bash
+   GIT_SEQUENCE_EDITOR="sed -i \
+       -e '/^pick <sha1>/s/^pick/drop/' \
+       -e '/^pick <sha2>/s/^pick/drop/' \
+       -e '/^pick <sha3>/s/^pick/drop/' \
+       -e '/^pick <sha4>/s/^pick/drop/'" \
+     git rebase -i origin/main will/ltx2_sr_port
+   ```
+   Expect zero conflicts when the dropped commits are isolated to a
+   subdirectory (router code, in PR #1286's case) — the surviving
+   commits don't touch those paths.
+5. **Re-slice split branches** to new boundary tips (see "New linearized
+   chain" in [state.md](state.md) for the slice index table — each
+   "Tip SHA" column maps to a `git branch -f <branch> <sha>` call):
+   ```bash
+   git branch -f will/api_<next>          <slice-N-tip>
+   git branch -f will/api_<next+1>        <slice-N+1-tip>
+   ...
+   ```
+6. **Verify** with the test suites in "Verification" below.
+7. **Force-push** the working branch (one force-push, requires explicit
+   user confirmation per [`AGENTS.md`](../../../AGENTS.md)):
+   ```bash
+   git push --force-with-lease origin will/ltx2_sr_port
+   ```
+8. **Push the next slice** as a new remote branch (no force, just `-u`):
+   ```bash
+   git push -u origin will/api_<next>
+   ```
+9. **Open the next PR** via `gh pr create --base main --head will/api_<next>`.
+10. **Update memory dir** — bump `Last reconciled` headers in
+    [README.md](README.md) / [state.md](state.md), promote PR rows in
+    [pr-roadmap.md](pr-roadmap.md), update Item D state in
+    [open-threads.md](open-threads.md), refresh [authors.md](authors.md)
+    verification table.
+
+The post-#1286 rebase (2026-05-05) followed exactly this protocol — see
+[state.md](state.md) "Post-#1286 rebase summary" for what dropped and
+the new slice indices.
 
 ## Verification
 

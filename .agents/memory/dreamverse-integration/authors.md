@@ -3,7 +3,7 @@
 **Status:** PERMANENT — keep around as the source of truth for who collaborated
 on the dreamverse-integration work, even after every PR in the integration
 scope has merged.
-**Last updated:** 2026-05-05
+**Last updated:** 2026-05-05 (post-#1286 merge — trailerless-commit gap resolved)
 
 This file documents the human co-authors credited on every commit in the
 dreamverse-integration scope (FastVideo public-API refactor, streaming server
@@ -39,7 +39,8 @@ across every PR in the integration scope:
 | #1257 | `will/api_7.6` (GPU pool upstream) | ✅ merged 2026-05-04 | yes (4/4) |
 | #1258 | `will/api_7.7` (prompt enhancer + LLMProvider) | ✅ merged 2026-05-04 | yes (3/3) |
 | #1284 | `will/api_7.8` (streaming auxiliaries) | ✅ merged 2026-05-04 | yes (2/2) |
-| #1286 | `will/api_7.9` (streaming router) | 🟢 open | yes on commits 1-3; **commit `a152cb77` (`[fix] streaming: router polish`) is missing trailers — see "Known gaps" below** |
+| #1286 | `will/api_7.9` (streaming router) | ✅ merged 2026-05-05 at `2aaeee2a` (squash) | yes on commits 1-3; commit `a152cb77` (`[fix] streaming: router polish`) was missing trailers but got squashed into the merge commit, so the merge commit on main inherits the trailers from the other 3. The trailerless cherry-pick partner (`40e265b8` on `will/ltx2_sr_port`) was dropped by the post-#1286 rebase — gap permanently resolved. |
+| #1287 | `will/api_7.10` (`generate_async` + `VideoEvent`) | 🟢 open at `6ae7a99f` | yes on all 3 commits (`44112661` / `00aa5649` / `6ae7a99f`) |
 
 Aggregate count across `will/ltx2_sr_port` (top of stack) at the time of
 writing: 32-33 commits per co-author, matching the 32 commits in the stack
@@ -126,14 +127,17 @@ the pattern). Only human collaborators.
 
 ## Known gaps
 
-| Gap | Where | How to fix |
-|---|---|---|
-| Commit `a152cb77` on `will/api_7.9` (PR #1286 head) is missing the 4 co-author trailers — `[fix] streaming: router polish — bridge cancel + state machine + deps` | `will/api_7.9`, pushed 2026-05-05 | Amend the commit with `--trailer` flags above + force-push `will/api_7.9` (requires explicit user confirmation per AGENTS.md force-push rule) |
-| Commit `40e265b8` on `will/ltx2_sr_port` (the cherry-pick partner of `a152cb77`) is missing the same 4 trailers | `will/ltx2_sr_port`, pushed 2026-05-05 | Same — amend + force-push (or wait for the next bulk rebase across the stack) |
+**Resolved 2026-05-05 by the post-#1286 rebase.** The two trailerless
+commits (`a152cb77` on `will/api_7.9` and `40e265b8` on
+`will/ltx2_sr_port`) are no longer reachable from any active branch:
 
-These commits were authored by an automation flow that did not pass the
-trailer block through to the `git commit` invocation. The fix is mechanical
-once force-push is approved.
+- `a152cb77` was absorbed into squash merge `2aaeee2a` on main, which
+  inherits the trailers from the other 3 commits in the squash.
+- `40e265b8` was dropped by the post-#1286 rebase of
+  `will/ltx2_sr_port`.
+
+Both still exist on the local backup `will/ltx2_sr_port-pre-1286-rebase`
+for archeological reference. No further action needed.
 
 ## See also
 
