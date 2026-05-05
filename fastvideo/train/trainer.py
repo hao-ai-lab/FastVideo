@@ -174,7 +174,19 @@ class Trainer:
             # loss silently corrupts grads. Skip the optimizer step (just
             # zero grads) and surface a `nan_skipped=1` metric so a
             # persistent stream is visible in W&B.
-            non_finite = any(isinstance(v, torch.Tensor) and not torch.isfinite(v).all() for v in loss_sums.values())
+            #
+            # The decision must be world-wide: a single rank seeing NaN
+            # while others don't would diverge weights and then deadlock
+            # on the next collective (checkpoint/validation). All-reduce
+            # the local flag with MAX so every rank takes the same branch.
+            # all_reduce short-circuits on world_size == 1.
+            non_finite_local = any(
+                isinstance(v, torch.Tensor) and not torch.isfinite(v).all() for v in loss_sums.values())
+            loss_device = next((v.device for v in loss_sums.values() if isinstance(v, torch.Tensor)),
+                               torch.device("cpu"))
+            flag = torch.tensor(int(non_finite_local), device=loss_device)
+            flag = self.world_group.all_reduce(flag, op=torch.distributed.ReduceOp.MAX)
+            non_finite = bool(flag.item())
             if non_finite:
                 method.optimizers_zero_grad(step)
                 logger.warning("Non-finite loss at step %d; skipping "
