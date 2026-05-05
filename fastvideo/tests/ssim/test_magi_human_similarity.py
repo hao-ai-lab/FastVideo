@@ -22,7 +22,9 @@ from fastvideo.tests.ssim.inference_similarity_utils import (
 
 logger = init_logger(__name__)
 
-REQUIRED_GPUS = 1
+# 15B DiT + T5-Gemma 9B + Wan VAE + Stable-Audio VAE doesn't fit on a
+# single L40S (44 GB). Shard across 2 ranks via FSDP.
+REQUIRED_GPUS = 2
 
 device_reference_folder = resolve_inference_device_reference_folder(logger)
 
@@ -36,7 +38,7 @@ _MAGI_HUMAN_MODEL_PATH = os.getenv(
 )
 
 MAGI_HUMAN_BASE_PARAMS = {
-    "num_gpus": 1,
+    "num_gpus": 2,
     "model_path": _MAGI_HUMAN_MODEL_PATH,
     "height": 256,
     "width": 448,
@@ -44,7 +46,7 @@ MAGI_HUMAN_BASE_PARAMS = {
     "num_inference_steps": 4,        # CI budget; full preset uses 32
     "guidance_scale": 5.0,
     "seed": 42,
-    "sp_size": 1,
+    "sp_size": 2,
     "tp_size": 1,
     "fps": 25,
 }
