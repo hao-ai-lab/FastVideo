@@ -30,6 +30,7 @@ from collections import namedtuple
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import timedelta
 from multiprocessing import shared_memory
 from typing import Any, Optional
 from unittest.mock import patch
@@ -705,6 +706,7 @@ def init_distributed_environment(
     local_rank: int = 0,
     backend: str = "nccl",
     device_id: torch.device | None = None,
+    dist_timeout: int | None = None,
 ):
     # Determine the appropriate backend based on the platform
     from fastvideo.platforms import current_platform
@@ -725,10 +727,18 @@ def init_distributed_environment(
         assert distributed_init_method is not None, ("distributed_init_method must be provided when initializing "
                                                      "distributed environment")
 
-        torch.distributed.init_process_group(backend=backend,
-                                             init_method=distributed_init_method,
-                                             world_size=world_size,
-                                             rank=rank)
+        # Pass an explicit timeout so a hung rank fails the whole group
+        # within `dist_timeout` seconds instead of stalling until SLURM
+        # wall-clock. Defaults to PyTorch's 30-min nccl default when None.
+        init_kwargs: dict[str, Any] = dict(
+            backend=backend,
+            init_method=distributed_init_method,
+            world_size=world_size,
+            rank=rank,
+        )
+        if dist_timeout is not None:
+            init_kwargs["timeout"] = timedelta(seconds=int(dist_timeout))
+        torch.distributed.init_process_group(**init_kwargs)
     # set the local rank
     # local_rank is not available in torch ProcessGroup,
     # see https://github.com/pytorch/pytorch/issues/122816
@@ -867,7 +877,8 @@ def get_local_torch_device() -> torch.device:
 
 def maybe_init_distributed_environment_and_model_parallel(tp_size: int,
                                                           sp_size: int,
-                                                          distributed_init_method: str = "env://"):
+                                                          distributed_init_method: str = "env://",
+                                                          dist_timeout: int | None = None):
     if _WORLD is not None and model_parallel_is_initialized():
         # make sure the tp and sp sizes are correct
         assert get_tp_world_size(
@@ -888,7 +899,8 @@ def maybe_init_distributed_environment_and_model_parallel(tp_size: int,
                                  rank=rank,
                                  local_rank=local_rank,
                                  distributed_init_method=distributed_init_method,
-                                 device_id=device)
+                                 device_id=device,
+                                 dist_timeout=dist_timeout)
     initialize_model_parallel(tensor_model_parallel_size=tp_size, sequence_model_parallel_size=sp_size)
 
     # set device if we're on a CUDA/NPU platform

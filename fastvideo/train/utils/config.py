@@ -316,6 +316,7 @@ def _build_training_config(
             hsdp_replicate_dim=int(d.get("hsdp_replicate_dim", 1) or 1),
             hsdp_shard_dim=int(d.get("hsdp_shard_dim", num_gpus) or num_gpus),
             pin_cpu_memory=bool(d.get("pin_cpu_memory", False)),
+            dist_timeout=int(d["dist_timeout"]) if d.get("dist_timeout") is not None else None,
         ),
         data=DataConfig(
             data_path=str(da.get("data_path", "") or ""),
