@@ -93,3 +93,4 @@ preprocess_output_text/
 .sisyphus/
 openspec/
 fastvideo/tests/ssim/reference_videos/**
+LATENTS_REPORT.md
