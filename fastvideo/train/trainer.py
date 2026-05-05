@@ -10,7 +10,9 @@ from typing import Any, TYPE_CHECKING
 import torch
 from tqdm.auto import tqdm
 
+import fastvideo.envs as envs
 from fastvideo.distributed import get_sp_group, get_world_group
+from fastvideo.profiler import get_or_create_profiler, profile_region
 from fastvideo.train.callbacks.callback import CallbackDict
 from fastvideo.train.methods.base import TrainingMethod
 from fastvideo.train.utils.tracking import build_tracker
@@ -72,6 +74,11 @@ class Trainer:
             callback_configs or {},
             training_config,
         )
+        # PyTorch profiler. No-op unless FASTVIDEO_TORCH_PROFILER_DIR is set.
+        # Selected regions emit traces; see fastvideo/profiler.py for the
+        # FASTVIDEO_TORCH_PROFILE_REGIONS list (e.g.
+        # `profiler_region_training_train_one_step`).
+        self.profiler_controller = get_or_create_profiler(envs.FASTVIDEO_TORCH_PROFILER_DIR)
 
     def _iter_dataloader(self, dataloader: Any) -> Iterator[dict[str, Any]]:
         data_iter = iter(dataloader)
@@ -82,6 +89,7 @@ class Trainer:
                 batch = next(data_iter)
             yield batch
 
+    @profile_region("profiler_region_training_train")
     def run(
         self,
         method: TrainingMethod,
@@ -131,75 +139,79 @@ class Trainer:
             disable=self.local_rank > 0,
         )
         for step in progress:
-            t0 = time.perf_counter()
+            # Per-step profiler region. No-op unless
+            # FASTVIDEO_TORCH_PROFILE_REGIONS includes
+            # `profiler_region_training_train_one_step`.
+            with self.profiler_controller.region("profiler_region_training_train_one_step"):
+                t0 = time.perf_counter()
 
-            # Accumulate on GPU during grad-accum; materialise
-            # to CPU once per step right before logging.
-            loss_sums: dict[str, float | torch.Tensor] = {}
-            metric_sums: dict[str, float | torch.Tensor] = {}
-            for accum_iter in range(grad_accum):
-                batch = next(data_stream)
-                loss_map, outputs, step_metrics = (method.single_train_step(
-                    batch,
-                    step,
-                ))
-
-                method.backward(
-                    loss_map,
-                    outputs,
-                    grad_accum_rounds=grad_accum,
-                )
-
-                for k, v in loss_map.items():
-                    if isinstance(v, torch.Tensor):
-                        prev = loss_sums.get(k, 0.0)
-                        loss_sums[k] = prev + v.detach()
-                for k, v in step_metrics.items():
-                    if k in loss_sums:
-                        raise ValueError(f"Metric key {k!r} collides "
-                                         "with loss key. Use a "
-                                         "different name (e.g. prefix "
-                                         "with 'train/').")
-                    prev = metric_sums.get(k, 0.0)
-                    metric_sums[k] = (prev + _coerce_log_scalar(
-                        v,
-                        where=("method.single_train_step()"
-                               f".metrics[{k!r}]"),
+                # Accumulate on GPU during grad-accum; materialise
+                # to CPU once per step right before logging.
+                loss_sums: dict[str, float | torch.Tensor] = {}
+                metric_sums: dict[str, float | torch.Tensor] = {}
+                for accum_iter in range(grad_accum):
+                    batch = next(data_stream)
+                    loss_map, outputs, step_metrics = (method.single_train_step(
+                        batch,
+                        step,
                     ))
 
-            self.callbacks.on_before_optimizer_step(
-                method,
-                iteration=step,
-            )
-            method.optimizers_schedulers_step(step)
-            method.optimizers_zero_grad(step)
+                    method.backward(
+                        loss_map,
+                        outputs,
+                        grad_accum_rounds=grad_accum,
+                    )
 
-            # Single CPU sync point: materialise GPU tensors
-            # to float right before logging.
-            metrics = {k: float(v) / grad_accum for k, v in loss_sums.items()}
-            metrics.update({k: float(v) / grad_accum for k, v in metric_sums.items()})
-            metrics["step_time_sec"] = (time.perf_counter() - t0)
-            metrics["vsa_sparsity"] = float(tc.vsa_sparsity)
-            if self.global_rank == 0 and metrics:
-                self.tracker.log(metrics, step)
+                    for k, v in loss_map.items():
+                        if isinstance(v, torch.Tensor):
+                            prev = loss_sums.get(k, 0.0)
+                            loss_sums[k] = prev + v.detach()
+                    for k, v in step_metrics.items():
+                        if k in loss_sums:
+                            raise ValueError(f"Metric key {k!r} collides "
+                                             "with loss key. Use a "
+                                             "different name (e.g. prefix "
+                                             "with 'train/').")
+                        prev = metric_sums.get(k, 0.0)
+                        metric_sums[k] = (prev + _coerce_log_scalar(
+                            v,
+                            where=("method.single_train_step()"
+                                   f".metrics[{k!r}]"),
+                        ))
 
-            self.callbacks.on_training_step_end(
-                method,
-                metrics,
-                iteration=step,
-            )
+                self.callbacks.on_before_optimizer_step(
+                    method,
+                    iteration=step,
+                )
+                method.optimizers_schedulers_step(step)
+                method.optimizers_zero_grad(step)
 
-            if checkpoint_manager is not None:
-                checkpoint_manager.maybe_save(step)
+                # Single CPU sync point: materialise GPU tensors
+                # to float right before logging.
+                metrics = {k: float(v) / grad_accum for k, v in loss_sums.items()}
+                metrics.update({k: float(v) / grad_accum for k, v in metric_sums.items()})
+                metrics["step_time_sec"] = (time.perf_counter() - t0)
+                metrics["vsa_sparsity"] = float(tc.vsa_sparsity)
+                if self.global_rank == 0 and metrics:
+                    self.tracker.log(metrics, step)
 
-            self.callbacks.on_validation_begin(
-                method,
-                iteration=step,
-            )
-            self.callbacks.on_validation_end(
-                method,
-                iteration=step,
-            )
+                self.callbacks.on_training_step_end(
+                    method,
+                    metrics,
+                    iteration=step,
+                )
+
+                if checkpoint_manager is not None:
+                    checkpoint_manager.maybe_save(step)
+
+                self.callbacks.on_validation_begin(
+                    method,
+                    iteration=step,
+                )
+                self.callbacks.on_validation_end(
+                    method,
+                    iteration=step,
+                )
 
         self.callbacks.on_train_end(
             method,
@@ -210,3 +222,8 @@ class Trainer:
             checkpoint_manager.save_final(max_steps)
 
         self.tracker.finish()
+
+        # Stop the profiler if it was actually started — flushes the
+        # last trace to FASTVIDEO_TORCH_PROFILER_DIR.
+        if envs.FASTVIDEO_TORCH_PROFILER_DIR:
+            self.profiler_controller.stop()
