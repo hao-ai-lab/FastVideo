@@ -654,10 +654,45 @@ during the Phase 2 move. Specifically: `test_realtime_stress.py` and
 
 #### Local GPU4 verification hook
 
-This dev node has 8× B200 GPUs. **GPU4** is currently held by the running
-`dreamverse-server` (PID 2453227, port 8009 — see
-[`state.md`](file:///home/william5lin/FastVideo/.agents/memory/dreamverse-integration/state.md#L80-L86)).
-For migration verification, GPU4 can be reclaimed:
+This dev node has 8× B200 GPUs. **GPU4** is the operator's chosen target for
+migration smoke tests. The original `dreamverse-server` was launched with
+`CUDA_VISIBLE_DEVICES=4`, which makes physical GPU 4 appear as logical GPU 0
+inside the process — so the Dreamverse-side log shows `Selected GPU ids: [0]`
+even though it physically holds GPU 4. **Always launch with `CUDA_VISIBLE_DEVICES=4`**
+to keep the same physical pin during smoke runs.
+
+##### Phase 0 prerequisites for the GPU4 hook (validated 2026-05-05)
+
+A live smoke test of `fastvideo serve` from `will/ltx2_sr_port` HEAD
+`d23e71c2` ran on GPU4 and revealed two missing optional deps in the
+FastVideo `.venv`:
+
+- **`flashinfer-python`** — required for the NVFP4 path. Without it, the
+  server fails at boot with `ImportError: NVFP4 quantization requires
+  flashinfer. Install with 'pip install flashinfer-python'.`
+- **`flash_attn`** — optional. Without it, attention falls back to Torch
+  SDPA (`Cannot use FlashAttention-2 backend ... Using Torch SDPA backend.`).
+  Functional but slower per inference step.
+
+For a fast smoke that doesn't need NVFP4, comment out or omit
+`engine.quantization` in the serve config — the loader auto-falls-back
+to bf16. The serve config in
+[`Dreamverse/serve_configs/streaming_demo.yaml`](file:///home/william5lin/Dreamverse/serve_configs/streaming_demo.yaml#L26-L29)
+explicitly says: "Hosts without flashinfer / NVFP4: comment out the
+`engine.quantization` block below — the loader falls back to bf16
+automatically when no quant_config is set."
+
+For production-equivalent NVFP4 smoke, install both deps in the FastVideo
+`.venv`:
+
+```bash
+.venv/bin/pip install flashinfer-python flash-attn --no-build-isolation
+```
+
+This is a **Phase 0 prerequisite** to document in
+`docs/contributing/dreamverse-development.md` (Phase 1).
+
+##### Reclaim and redeploy commands
 
 ```bash
 # Stop the running Dreamverse-side server holding GPU4
@@ -688,11 +723,22 @@ each phase calls out whether the GPU4 smoke is required or optional.
 # Kill the test deployment
 pkill -f 'fastvideo serve --config'
 
-# Restart the original Dreamverse-side server if it should remain canonical
-# during early phases (until Phase 6e CI freeze)
-cd /home/william5lin/Dreamverse && bash scripts/smoke_local.sh   # or
-cd /home/william5lin/Dreamverse && uv run server   # depending on op convention
+# Restart the canonical Dreamverse-side server with the same GPU pin
+cd /home/william5lin/Dreamverse
+setsid bash -c 'CUDA_VISIBLE_DEVICES=4 exec .venv/bin/dreamverse-server > /tmp/dv.log 2>&1 < /dev/null' & disown
+
+# Confirm restart
+sleep 3 && pgrep -af dreamverse-server | head -3
 ```
+
+**Verified 2026-05-05**: this kill/redeploy/teardown cycle was executed
+end-to-end on `will/ltx2_sr_port` HEAD `d23e71c2`. Public `fastvideo serve`
+booted in ~24 s on GPU4 with bf16 fallback (no flashinfer in `.venv`),
+served `/health` → 200 `{"status":"ok","sessions":0,"stream_mode":"av_fmp4"}`,
+and confirmed empirically that `/healthz`, `/readyz`, `/status`,
+`/prompt-system-config`, and `/curated-presets` all 404 (matching drift
+table item #4 → Phase 4 promotion target). Smoke artifacts at
+`/tmp/opencode/fv_smoke/` (serve.log, smoke.yaml).
 
 #### Per-phase test responsibilities (summary)
 
