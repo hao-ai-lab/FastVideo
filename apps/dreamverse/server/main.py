@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastvideo.entrypoints.streaming import build_health_router
 from gpu_pool import GPUPool, get_available_gpus
 from session_logger import SessionEventLogger
 
@@ -23,7 +24,7 @@ from prompt_safety import PromptSafetyFilter
 
 import runtime
 from routes.health import (
-    router as health_router, )
+    router as internal_monitor_router, )
 from routes.presets import (
     prompt_config_router,
     curated_presets_router,
@@ -86,7 +87,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(health_router)
+app.include_router(build_health_router(lambda: runtime.gpu_pool))
+app.include_router(internal_monitor_router)
 app.include_router(prompt_config_router)
 if DEVTOOLS_ENABLED:
     app.include_router(curated_presets_router)
