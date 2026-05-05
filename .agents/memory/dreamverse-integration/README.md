@@ -22,6 +22,7 @@ PRs #1257 (`will/api_7.6`) and #1258 (`will/api_7.7`) MERGED to main; PR #1284
 | "NVFP4? Layer profiles? `LinearBase` fallback? AbsMaxFP8?" | [quantization.md](quantization.md) |
 | "Why was decision X made? What's resolved vs. open?" | [decisions-log.md](decisions-log.md) |
 | "What should I work on next? Priority order?" | [open-threads.md](open-threads.md) |
+| "Who should be co-authored on commits in this scope?" | [authors.md](authors.md) |
 
 ## Repo + worktree paths
 

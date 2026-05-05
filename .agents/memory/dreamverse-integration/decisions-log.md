@@ -6,7 +6,7 @@ question/decision, rationale, current status.
 For implementation status see [pr-roadmap.md](pr-roadmap.md). For
 follow-up actions see [open-threads.md](open-threads.md).
 
-**Last updated:** 2026-05-05 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion, Oracle review during #1284 review cycle; added D-15 — streaming router placement + sticky/active-active deferral, Oracle review during #1286 review cycle).
+**Last updated:** 2026-05-05 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion, Oracle review during #1284 review cycle; added D-15 — streaming router placement + sticky/active-active deferral, Oracle review during #1286 review cycle; added D-16 — streaming router polish round 2, second-pass review on top of D-15 covering bridge cancellation hygiene, registry state machine, httpx hard-fail, replica YAML parsing, and `websockets` dep).
 
 ## Status legend
 
@@ -171,6 +171,63 @@ All 4 review threads marked resolved on the GitHub PR.
 
 **Open thread it touches:** open-threads.md items #13 (sticky routing),
 #14 (bridge backpressure), #15 (multi-primary semantics).
+
+### D-16: Streaming router polish round 2 — second-pass fixes on top of D-15
+
+**Status:** ✅ Resolved. Applied as `[fix] streaming: router polish — bridge
+cancel + state machine + deps` (`a152cb77` on `will/api_7.9`, `40e265b8` on
+`will/ltx2_sr_port`).
+**Source:** Second-pass review on PR #1286, 2026-05-05, after D-15's pre-merge
+polishes landed.
+
+**Question:** D-15 closed the structural review (placement, sticky/active-active
+deferral, basic `__post_init__` validation). On a second pass through the same
+files, five latent issues surfaced that weren't covered by gemini's first pass
+or Oracle's structural review. Apply them on top of the merged D-15 polishes,
+or queue for a follow-up PR?
+
+**Decision:** Apply on top of `will/api_7.9` directly. All five are bug-class
+or DX-class — none are scope-expanding architecture changes — so folding them
+into PR #1286 keeps the router landing in one reviewable unit instead of
+shipping a router PR plus an immediate follow-up fix PR.
+
+**Fixes applied:**
+
+| # | File | What | Why |
+|---|---|---|---|
+| 1 | `router/main.py::_bridge_session` | Replaced `asyncio.gather()` with `wait(FIRST_COMPLETED)` + explicit `cancel()`/drain + `_is_normal_disconnect()` classifier | `gather` waited for both directions; on client disconnect, the backend-reader task leaked and stayed pending. Backend `ConnectionClosed` also surfaced as an unhandled exception in server logs. New shape: first task to finish triggers explicit cancel of the other, both are drained, and only non-routine exceptions re-raise. |
+| 2 | `router/registry.py::record_success` | Split state transitions: `UNKNOWN -> HEALTHY` is now immediate on first successful probe; only `UNHEALTHY -> HEALTHY` remains gated by `recovery_threshold` | Previously a fresh registry needed `recovery_threshold` consecutive successes before any replica was selectable. With default `recovery_threshold=2` and `health_check_interval=1s`, that meant 2-3s of `gpu_unavailable` rejections at startup. Now the first probe promotes immediately; recovery gating still protects against flapping replicas. |
+| 3 | `router/registry.py::_build_default_probe` | Missing `httpx` now raises `RuntimeError` with install hint instead of yielding a "disabled" probe stub | Previous behavior: silently returned `(0.0, "httpx not installed; ...")` for every probe, which `record_failure` then folded into `UNHEALTHY` after `failure_threshold` cycles. Operators saw replicas drop UNHEALTHY with a confusing reason and no clear remediation. Hard-fail at startup is the right surface. |
+| 4 | `router/config.py::__post_init__` | Extended D-15 polish #4 with: rejects `urlparse(url).path not in ("", "/")`, rejects `query`/`fragment`, rejects duplicate URLs across replicas | D-15's validation rejected non-`http(s)://` URLs and >1 primary; it didn't catch `http://host/api` (the router appends `/health` and `/v1/stream` itself, so a base-URL with path yields malformed routes) or `[{url: x}, {url: x}]` (replica registry keys by URL — duplicates would silently collapse to one entry, masking the misconfiguration). |
+| 5 | `cli/router_serve.py::_load_router_config` | Replaced silent list-comprehension filter (`for r in replicas_raw if isinstance(r, dict) and r.get("url")`) with per-index `raise ValueError` | Original parser silently dropped malformed YAML entries. A single typo in `replicas[2].url` would yield 2 replicas instead of 3 with no log line. New shape: explicit per-index error message ("missing required key 'url'", "must be a mapping"). |
+| 6 | `pyproject.toml::[streaming]` extra | Added `websockets` as explicit dep | `router/main.py::_bridge_session` does `import websockets` lazily and raises `RuntimeError` if missing. The `[streaming]` extra was an implicit transitive — anyone installing only `[streaming]` (and not the broader requirements) hit the runtime error. Now explicit. |
+
+**Tests added (7 cases in `fastvideo/tests/entrypoints/streaming/test_router.py`):**
+
+- `TestUnknownToHealthyImmediate.test_first_success_promotes_unknown` — first probe success transitions `UNKNOWN -> HEALTHY` regardless of `recovery_threshold`
+- `TestUnknownToHealthyImmediate.test_unhealthy_recovery_still_gated_by_threshold` — `UNHEALTHY -> HEALTHY` still requires `recovery_threshold` successes
+- `TestConfigValidation.test_rejects_path_in_url` / `test_rejects_query_in_url` / `test_rejects_fragment_in_url` / `test_rejects_duplicate_urls` / `test_accepts_trailing_slash` — `__post_init__` URL validation matrix
+
+**Verification:** 17/17 router tests pass on both branches. `pre-commit run`
+clean (yapf / ruff / codespell / mypy). `lsp_diagnostics` clean on changed
+regions; the one pre-existing `Task` generic-type warning at `main.py:37` is
+unrelated and predates this commit.
+
+**In-flight pre-commit corrections (not part of the 6 fixes themselves):**
+
+- yapf auto-reformatted 4 files (kept verbatim).
+- ruff `UP038`: rewrote `isinstance(exc, (CancelledError, WebSocketDisconnect))`
+  to `isinstance(exc, CancelledError | WebSocketDisconnect)`.
+- mypy `[misc]`: renamed loop var `exc` (inside `for task in done`) to
+  `task_exc` to avoid name collision with the outer
+  `except ImportError as exc` binding.
+
+**Open thread it touches:** None new. Item #14 (bridge backpressure) and
+item #13 (sticky routing) from D-15 remain deferred — this round addressed
+**cancellation/disconnect** semantics on the bridge, which is distinct from
+**throughput backpressure**. Item #14 still applies: at higher load, add
+`_bridge_session()` max-size + timeout limits or recommend Envoy/HAProxy
+in front.
 
 ### D-14: Streaming auxiliaries (PR #1284) — cohesion + concrete-vs-Protocol scoping
 
