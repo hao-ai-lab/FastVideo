@@ -535,7 +535,22 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
     def __iter__(self):
         """Iterate through processed data items."""
         for idx in range(len(self.processed_batches)):
-            yield self._get_item(idx)
+            try:
+                yield self._get_item(idx)
+            except Exception as e:
+                # A corrupt / unreadable mp4 (e.g. torchvision.io.read_video
+                # returning an empty tensor on malformed input) would
+                # otherwise kill the entire shard mid-flight. Log and skip;
+                # the iterator simply produces one fewer item, and the
+                # downstream filter on all-zero pixel_values plus the final
+                # row-count check will catch any mass-skip bug.
+                logger.warning(
+                    "Skipping clip idx=%d path=%s due to read/transform error: %s",
+                    idx,
+                    self.processed_batches[idx].path,
+                    e,
+                )
+                continue
 
     def __len__(self):
         return len(self.processed_batches)
