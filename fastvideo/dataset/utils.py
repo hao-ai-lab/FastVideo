@@ -4,6 +4,38 @@ from typing import Any, cast
 import numpy as np
 import torch
 
+# Map the dtype string written by the preprocess writer
+# (`str(ndarray.dtype)`) back to the numpy dtype the bytes were encoded as.
+# Keep this strict — silently treating fp16 bytes as fp32 yields a tensor
+# half the expected size with garbage values.
+_ON_DISK_NUMPY_DTYPES: dict[str, type] = {
+    "float16": np.float16,
+    "float32": np.float32,
+    "float64": np.float64,
+    "uint8": np.uint8,
+    "int32": np.int32,
+    "int64": np.int64,
+}
+
+
+def _resolve_on_disk_dtype(row_dict: dict[str, Any], tensor_name: str) -> type:
+    """Numpy dtype the *_bytes column was written with.
+
+    Defaults to float32 for legacy caches predating the ``*_dtype`` column.
+    Raises on a recognised-but-unsupported dtype rather than silently
+    misinterpreting the bytes.
+    """
+    dtype_str = row_dict.get(f"{tensor_name}_dtype")
+    if not dtype_str:
+        return np.float32
+    try:
+        return _ON_DISK_NUMPY_DTYPES[dtype_str]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unsupported on-disk dtype {dtype_str!r} for tensor field "
+            f"{tensor_name!r}. Supported: "
+            f"{sorted(_ON_DISK_NUMPY_DTYPES)}.") from exc
+
 
 def pad(t: torch.Tensor, padding_length: int) -> tuple[torch.Tensor, torch.Tensor]:
     """
@@ -45,12 +77,12 @@ def get_torch_tensors_from_row_dict(row_dict,
             shape = row_dict[f"{key}_shape"]
             bytes = row_dict[f"{key}_bytes"]
 
-        # TODO (peiyuan): read precision
+        on_disk_dtype = _resolve_on_disk_dtype(row_dict, key)
         if key == 'text_embedding' and (rng.random()
                                         if rng else random.random()) < cfg_rate:
-            data = np.zeros((512, 4096), dtype=np.float32)
+            data = np.zeros((512, 4096), dtype=on_disk_dtype)
         else:
-            data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
+            data = np.frombuffer(bytes, dtype=on_disk_dtype).reshape(shape).copy()
         data = torch.from_numpy(data)
         if len(data.shape) == 3:
             B, L, D = data.shape
@@ -166,13 +198,14 @@ def collate_rows_from_parquet_schema(rows,
                                      if rng else
                                      random.random())
                                     < cfg_rate)
+                    on_disk_dtype = _resolve_on_disk_dtype(row, tensor_name)
                     if drop:
                         data = np.zeros(
-                            (512, 4096), dtype=np.float32)
+                            (512, 4096), dtype=on_disk_dtype)
                     else:
                         data = np.frombuffer(
                             bytes_data,
-                            dtype=np.float32,
+                            dtype=on_disk_dtype,
                         ).reshape(shape).copy()
                     tensor = torch.from_numpy(data)
                     # if len(data.shape) == 3:

@@ -532,24 +532,44 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
             filter_counts['frame_sampling_failed'], Counter(sample_num_frames),
             before_count, after_count)
 
+    # Tolerated rate of decode/IO failures before the iterator hard-aborts.
+    # 1% comfortably covers the v4 tail-overshoot rate observed in production
+    # (28 / 224,747 ≈ 0.012%) while still catching a systemic regression.
+    _MAX_SKIP_FRACTION: float = 0.01
+    # Absolute floor so small datasets aren't capped at 0 skips.
+    _MAX_SKIP_FLOOR: int = 16
+
     def __iter__(self):
         """Iterate through processed data items."""
-        for idx in range(len(self.processed_batches)):
+        total = len(self.processed_batches)
+        skip_budget = max(self._MAX_SKIP_FLOOR, int(self._MAX_SKIP_FRACTION * total))
+        skipped = 0
+        for idx in range(total):
             try:
                 yield self._get_item(idx)
-            except Exception as e:
-                # A corrupt / unreadable mp4 (e.g. torchvision.io.read_video
-                # returning an empty tensor on malformed input) would
-                # otherwise kill the entire shard mid-flight. Log and skip;
-                # the iterator simply produces one fewer item, and the
-                # downstream filter on all-zero pixel_values plus the final
-                # row-count check will catch any mass-skip bug.
+            except (RuntimeError, OSError, EOFError, IndexError) as e:
+                # Narrowed to decode/IO exception types so a programming or
+                # config regression (TypeError, KeyError, AttributeError, ...)
+                # propagates immediately rather than silently producing a
+                # partial parquet dataset. Decode failures are bounded by the
+                # skip-budget below.
+                skipped += 1
                 logger.warning(
-                    "Skipping clip idx=%d path=%s due to read/transform error: %s",
+                    "Skipping clip idx=%d path=%s due to read/transform error "
+                    "(%d/%d, budget=%d): %s",
                     idx,
                     self.processed_batches[idx].path,
+                    skipped,
+                    total,
+                    skip_budget,
                     e,
                 )
+                if skipped > skip_budget:
+                    raise RuntimeError(
+                        f"Aborting preprocess: skipped {skipped} / {total} "
+                        f"clips (> {self._MAX_SKIP_FRACTION * 100:.2f}%, "
+                        f"budget={skip_budget}). This looks like a systemic "
+                        "bug, not isolated decode failures.") from e
                 continue
 
     def __len__(self):
