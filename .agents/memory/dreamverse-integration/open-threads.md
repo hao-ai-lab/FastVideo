@@ -6,14 +6,11 @@ recommended next action.
 For why each item is open see [decisions-log.md](decisions-log.md). For
 PR-level context see [pr-roadmap.md](pr-roadmap.md).
 
-**Last updated:** 2026-05-05 (PR #1286 MERGED at `2aaeee2a` — squash
-absorbed all 4 router commits including the second-pass polish via
-cherry-pick `a152cb77`. `will/ltx2_sr_port` rebased onto new main:
-4 merged commits dropped, 33 commits remain with new SHAs, local
-backup preserved on `will/ltx2_sr_port-pre-1286-rebase`. PR #1287
-(7.10 — `generate_async` + `VideoEvent` hierarchy) opened on
-`will/api_7.10` @ `6ae7a99f`. Item D moved to in-flight; resolves on
-#1287 merge alongside the bulk of Q-5/Q-9/PR-7.5 + D-12-B chain.).
+**Last updated:** 2026-05-05 (strategy reversal — PR #1287 CLOSED, replaced
+by mega-PR #1288 on `will/ltx2_sr_port` @ `39dfa009` covering the full
+6-layer stack at once. See [decisions-log.md D-17](decisions-log.md#d-17).
+Item D resolution gate is now #1288 merge instead of #1287; same content,
+different vehicle.).
 
 ## Priority overview
 
@@ -23,7 +20,7 @@ backup preserved on `will/ltx2_sr_port-pre-1286-rebase`. PR #1287
 | **1** | High | Migrate `/healthz`+`/readyz`+`/status` into FastVideo `build_app` | M-L | Closes BE_FLAVOR=fastvideo FE-compatibility; closes streaming-upstream contract debt |
 | **2** | High | Fix pre-existing AbsMaxFP8 test failure | S | Self-contained quantization tech debt |
 | **VPO** | High | Decide `video_position_offset_sec` semantics (a vs b) | 30 min | Unblocks PR 7.6 state emission |
-| **D** | 🟢 in flight | Implement `generate_async` (PR 7.10) — **OPENED 2026-05-05 as PR #1287 on `will/api_7.10` @ `6ae7a99f`, MERGEABLE** | L | Closes Q-5/Q-9/PR-7.5 TODOs simultaneously; enables Dynamo backend; unblocks audio re-encode; enables `GpuPool.run_async()` migration (D-12-B). Wait for merge before working downstream PR 8. |
+| **D** | 🟢 in flight | Implement `generate_async` — content shipped in mega-PR **#1288** on `will/ltx2_sr_port` @ `39dfa009` (was #1287, CLOSED + re-routed per [D-17](decisions-log.md#d-17)) | L | Closes Q-5/Q-9/PR-7.5 TODOs simultaneously; enables Dynamo backend; unblocks audio re-encode; enables `GpuPool.run_async()` migration (D-12-B). Resolution gate: #1288 merge. |
 | **DR-1** | High | Dreamverse: create `prompting/_internal_compat.py` shim + replace local `prompt_enhancer.py` (1933 LOC) — **PR #1258 has merged (`f673423b`); now actionable** | M (~150-200 LOC shim, replace upstream wiring) | Lets Dreamverse stop carrying a 1933-LOC fork |
 | **DR-2** | Med | Decide `cerebras_ifm` provider path: (a) public Literal + `CerebrasIFMProvider` shipped, OR (b) Dreamverse-side custom provider via `enhancer.register_provider(...)` | S (decision) + S-M (impl) | Resolves the cerebras_ifm gap left by PR #1258. Same item as legacy #3 below; DR-2 is the Dreamverse-side framing. |
 | **3** | Med | Add `cerebras_ifm` to `PromptEnhancerConfig.provider` Literal + provider | S-M | Public-side resolution if DR-2 picks (a) |

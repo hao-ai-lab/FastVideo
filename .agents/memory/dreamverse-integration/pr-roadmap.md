@@ -7,7 +7,7 @@ For design rationale see [design.md](design.md). For streaming-specific
 PRs (7.5-7.10) see [streaming-server.md](streaming-server.md). For NVFP4
 work that runs parallel to this sequence see [quantization.md](quantization.md).
 
-**Last updated:** 2026-05-05 (PRs 7.5 / 7.6 / 7.7 / 7.8 / 7.9 merged; PR 7.10 opened as #1287).
+**Last updated:** 2026-05-05 (strategy reversal — single mega-PR #1288 replaces planned splits 7.10/8/LTX-2/NVFP4/post-fixes/agents_cleanup; see [decisions-log.md D-17](decisions-log.md#d-17)).
 
 ## Status legend
 
@@ -35,21 +35,26 @@ work that runs parallel to this sequence see [quantization.md](quantization.md).
 | **7.8** | **#1284** | ✅ | `eb3a3942` (merged 2026-05-04) | Streaming auxiliaries — `prompt/safety.py` (optional fasttext, lazy import), `prompt/rewrite.py`, `session_logger.py` (thread-safe JSONL), `mock_server.py` (build_mock_app + MockGenerator for FE dev). 730 LOC, 2 commits. See [decisions-log.md D-14](decisions-log.md#d-14). |
 | **7.9** | **#1286** | ✅ | `2aaeee2a` (merged 2026-05-05) | Streaming router (multi-replica load balancer + WS proxy + `fastvideo router-serve` CLI). Squashed `cd76cf51 + 1ac1e732 + b0b7f59c + a152cb77` (router-polish second-pass; cherry-pick of `40e265b8` from `will/ltx2_sr_port`). See [decisions-log.md D-15](decisions-log.md#d-15) (structural review) + [D-16](decisions-log.md#d-16) (second-pass polish). |
 
-## In flight (7.10)
+## In flight (mega-PR #1288)
 
 | # | PR | Status | Branch | Scope |
 |---|---|---|---|---|
-| **7.10** | **#1287** | 🟢 OPEN, MERGEABLE | `will/api_7.10` (head `6ae7a99f`) | **Dynamo backend contract** — `VideoGenerator.generate_async`, `default_health_check_request()`, `VideoEvent` hierarchy. 3 commits, 468/4 LOC across 4 files. The "unlock PR" — enables PR 7.5's mid-segment cancellation, audio re-encode (Q-5), Dynamo progress passthrough (Q-9), and `GpuPool.run_async()` migration (D-12-B). Stacked on `main`; first slice of post-#1286 rebased `will/ltx2_sr_port`. |
+| **mega** | **#1288** | 🟢 OPEN, MERGEABLE | `will/ltx2_sr_port` (head `39dfa009`) | **Single consolidated landing of the full `will/ltx2_sr_port` chain.** Was originally planned as 6 stacked PRs (slices 1-3 / 4-6 / 7-15 / 16-21 / 22-23 / 24-34). Now landing as one PR — see [decisions-log.md D-17](decisions-log.md#d-17) for the strategy decision. **Contents** (commit-ordered): (1) streaming `generate_async` + `VideoEvent` + Dynamo backend contract (3 commits, was PR 7.10/#1287 closed); (2) server contract docs + Dreamverse/Dynamo shape tests (3 commits, was PR 8); (3) LTX-2 SR runtime port + i2v conditioning + alignment harness (9 commits); (4) NVFP4 wire-up + per-component compile + typed `transformer_quant` flow (6 commits); (5) LTX-2 post-handoff parity fixes — Gemma `to()`, list-of-generators (2 commits); (6) `.agents/memory/dreamverse-integration/` knowledge base + agents Phase 1 cleanup (11 commits). 34 commits total, 71 files, +13,074/-583 LOC. |
 
-## Planned (8 → 13)
+## Closed PRs in this scope
+
+| # | PR | Status | Why closed |
+|---|---|---|---|
+| **7.10** | **#1287** | ❌ CLOSED 2026-05-05 | Superseded by mega-PR #1288 — strategy reversal to land everything in one go. Same 3 commits now form the head of #1288. |
+
+## Deprecated split bookmarks (D-17)
+
+`will/api_7.10` / `will/api_8` / `will/ltx2_sr_runtime` / `will/ltx2_nvfp4` / `will/ltx2_post_fixes` / `will/agents_cleanup` were the split-PR bookmarks under the abandoned 6-PR plan. They remain locally as historical references but are no longer maintained. STACK.md (top-level) is similarly deprecated.
+
+## Planned (post-#1288 merge)
 
 | # | Status | Branch | Scope |
 |---|---|---|---|
-| 8 | 🟡 ready (slice 4-6 of `will/ltx2_sr_port`) | `will/api_8` (`f32e31ec`) | Server contract docs (OpenAI HTTP + Dynamo native-backend integration reference) + Dreamverse/Dynamo shape contract tests. 3 commits. |
-| LTX-2 SR | 🟡 ready (slice 7-15) | `will/ltx2_sr_runtime` (`e7297519`) | LTX-2 SR runtime port + i2v conditioning + alignment harness against FastVideo-internal. 9 commits. NOT in canonical PR plan — separate stream. |
-| NVFP4 | 🟡 ready (slice 16-21) | `will/ltx2_nvfp4` (`6793166b`) | NVFP4 wire-up + per-component compile + typed `transformer_quant` flow. 6 commits. NOT in canonical PR plan. |
-| LTX-2 fixes | 🟡 ready (slice 22-23) | `will/ltx2_post_fixes` (`25897b67`) | Post-handoff parity fixes (Gemma `to()`, list-of-generators). 2 commits. |
-| agents cleanup | 🟡 ready (slice 24-33, == `will/ltx2_sr_port` HEAD) | `will/agents_cleanup` (`b34d9704`) | `.agents/` Phase 1 cleanup + dreamverse-integration memory + STACK/CO-AUTHORS docs + authors.md + runbook.md + D-12...D-16 + open-threads tracking. 10 commits. **Independent of API stack** — could fast-track. |
 | 9 | 🟡 | — | LongCat preset migration + colocation (9 model-specific stage files) |
 | 10 | 🟡 | — | Hunyuan15 SR preset migration + colocation + SR field migration POC |
 | 11 | 🟡 | — | SSIM/performance test migration off legacy `generate_video(..., **kwargs)` |

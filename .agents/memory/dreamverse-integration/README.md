@@ -5,13 +5,18 @@ Tracks the public API refactor (PRs 0-17), the LTX-2 streaming server
 upstream, the Dreamverse switch from `FastVideo-internal` to public
 `FastVideo`, and the NVFP4 quantization landing.
 
-**Last reconciled:** 2026-05-05 (post-#1286 merge + rebase). FastVideo
-`will/ltx2_sr_port` @ `b34d9704` (33 commits ahead of main, post-rebase
-SHAs); Dreamverse `will/integrate-public-fastvideo` @ `ec8ef92`.
-PRs #1257 / #1258 / #1284 / #1286 MERGED to main; PR #1287
-(`will/api_7.10` — `generate_async` + `VideoEvent` hierarchy) OPEN at
-`6ae7a99f`, MERGEABLE. Local backup `will/ltx2_sr_port-pre-1286-rebase`
-@ `1baa60bb` preserves the pre-rebase chain.
+**Last reconciled:** 2026-05-05 (strategy reversal — single mega-PR).
+FastVideo `will/ltx2_sr_port` @ `39dfa009` (34 commits ahead of main).
+Dreamverse `will/integrate-public-fastvideo` @ `ec8ef92`.
+PRs #1257 / #1258 / #1284 / #1286 MERGED to main. **PR #1287 CLOSED
+(in favor of consolidation); PR #1288 OPEN as the single mega-PR
+landing the entire `will/ltx2_sr_port` chain at once** (LTX-2 SR
+runtime + NVFP4 + `generate_async`/Dynamo contract + agents memory dir,
+71 files, +13,074/-583 LOC). Split branches kept as historical
+bookmarks; STACK.md model is **abandoned** — see [decisions-log.md
+D-17](decisions-log.md#d-17). Local backup
+`will/ltx2_sr_port-pre-1286-rebase` @ `1baa60bb` preserves the
+pre-rebase chain.
 
 ## Fresh-context onboarding (read in order)
 
