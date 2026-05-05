@@ -117,6 +117,38 @@ Flags can appear in any position relative to the positional args. Explicit flag 
     NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 \
     pnpm exec playwright test
   ```
+  The fast suite (8 specs, ~5s) runs by default; the long-running
+  two-segment audio-continuation spec is gated behind
+  `PLAYWRIGHT_LONG_RUNNING=1` (see below).
+
+## Long-running e2e (paired with `--warmup --torch-compile`)
+
+[`apps/dreamverse/web/e2e/long-running-segments.spec.ts`](../../../apps/dreamverse/web/e2e/long-running-segments.spec.ts)
+drives a real two-segment session through the FE, captures every WS
+frame, and asserts segments 1 AND 2 both reach `media_segment_complete`
+with at least one binary fMP4 chunk per segment — the canonical
+regression guard against the D-20 BrokenPipe pattern documented in
+[`decisions-log.md D-20`](../../memory/dreamverse-integration/decisions-log.md#d-20).
+Skipped by default. Enable with:
+
+```bash
+./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh \
+    --warmup --torch-compile 4
+
+cd apps/dreamverse/web
+PLAYWRIGHT_SKIP_WEBSERVER=1 \
+  BACKEND_URL=http://127.0.0.1:8009 \
+  PLAYWRIGHT_BASE_URL=http://127.0.0.1:5274 \
+  NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 \
+  PLAYWRIGHT_LONG_RUNNING=1 \
+  pnpm exec playwright test e2e/long-running-segments.spec.ts
+```
+
+Expected runtime: ~7-9 minutes on a B200 (torch.compile max-autotune
+warm-up dominates the cold start; per-test timeout is 900s). The spec
+hard-fails on any WS `error`/`step_error` frame so the BrokenPipe
+regression surfaces with the actual ffmpeg/audio diagnostics rather
+than an opaque "test timed out".
 
 ## Teardown
 
