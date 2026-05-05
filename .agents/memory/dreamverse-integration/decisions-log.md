@@ -6,7 +6,7 @@ question/decision, rationale, current status.
 For implementation status see [pr-roadmap.md](pr-roadmap.md). For
 follow-up actions see [open-threads.md](open-threads.md).
 
-**Last updated:** 2026-05-05 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion, Oracle review during #1284 review cycle; added D-15 — streaming router placement + sticky/active-active deferral, Oracle review during #1286 review cycle; added D-16 — streaming router polish round 2, second-pass review on top of D-15 covering bridge cancellation hygiene, registry state machine, httpx hard-fail, replica YAML parsing, and `websockets` dep).
+**Last updated:** 2026-05-05 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion, Oracle review during #1284 review cycle; added D-15 — streaming router placement + sticky/active-active deferral, Oracle review during #1286 review cycle; added D-16 — streaming router polish round 2, second-pass review on top of D-15 covering bridge cancellation hygiene, registry state machine, httpx hard-fail, replica YAML parsing, and `websockets` dep; added D-17 — strategy reversal: abandon 6-PR split in favor of single mega-PR #1288 on `will/ltx2_sr_port`).
 
 ## Status legend
 
@@ -15,6 +15,34 @@ follow-up actions see [open-threads.md](open-threads.md).
 - 🔴 **Open** — needs decision
 
 ## Post-merge architecture decisions
+
+### D-17: Abandon 6-PR split — land everything as single mega-PR #1288
+
+**Status:** ✅ Resolved 2026-05-05. PR #1287 closed; PR #1288 opened on `will/ltx2_sr_port` covering the full chain.
+**Source:** User decision after observing the post-#1286 rebase + re-slice cycle.
+
+**Question:** The original plan ([STACK.md](../../../STACK.md), [pr-roadmap.md](pr-roadmap.md)) called for the remaining `will/ltx2_sr_port` content (after PRs 7.5/7.6/7.7/7.8/7.9 landed) to ship as 6 stacked PRs: 7.10 (#1287, generate_async), 8 (server contract docs), LTX-2 SR runtime, NVFP4, post-fixes, agents-cleanup. PR #1287 was opened on 2026-05-05 as the first slice. Should the remaining 5 slices be opened sequentially as planned, or should everything be consolidated into one PR?
+
+**Decision:** Consolidate. Close #1287; open one mega-PR (#1288) on `will/ltx2_sr_port` covering all 34 commits / 71 files / +13,074 LOC at once.
+
+**Rationale:**
+
+- The post-#1286 rebase + re-slice cycle exposed real overhead: backup branch, interactive rebase with manual `drop` directives, force-push, re-slice 6 bookmarks, push next slice as new remote, open new PR, update memory dir. Repeating that 6 more times for the remaining slices accumulates substantial review-coordination overhead with diminishing structural benefit.
+- The 6 layers are not independent in the way that landed PRs 7.5-7.9 were. PR 7.10 (`generate_async`) is the only API-shape change; PR 8 is docs+tests on top; LTX-2 SR / NVFP4 / post-fixes / agents-cleanup are feature/fix/docs work that doesn't shape the public API. Reviewing them as one ordered diff is at least as easy as reviewing 6 stacked PRs whose dependencies must be tracked manually.
+- Single PR keeps CI / merge queue simpler and avoids the 6-PR cascade where every upstream merge invalidates the chain below it.
+
+**Implications:**
+
+- [STACK.md](../../../STACK.md) (top-level, 10-PR split tracker) is **deprecated**. Kept in tree as a historical artifact with the merged half (PRs 1-4 of the 10) accurate. Safe to delete in a follow-up.
+- [authors.md](authors.md), [`CO-AUTHORS.md`](../../../CO-AUTHORS.md) — co-author roster is unchanged; trailers still apply per-commit on every commit in the consolidated PR.
+- [runbook.md](runbook.md) — "After a PR merges (re-slice protocol)" section replaced by a simpler "After PR #1288 merges" section.
+- Local split bookmarks (`will/api_7.10`, `will/api_8`, `will/ltx2_sr_runtime`, `will/ltx2_nvfp4`, `will/ltx2_post_fixes`, `will/agents_cleanup`) are no longer maintained; safe to delete locally.
+- `origin/will/api_7.10` — pushed during the #1287 cycle; can be deleted on origin once #1287 close-cleanup completes.
+
+**Watch outs:**
+
+- The PR is large (71 files, +13,074 LOC). Reviewers will need commit-by-commit review; the PR body structures the layers in commit order to make this tractable.
+- If #1288 becomes too large to merge cleanly later (e.g. main moves significantly underneath it), the fallback is to re-split — but the current expectation is to land it as-is.
 
 ### D-12: `GpuPool` layer separation — keep distinct from `VideoGenerator`
 

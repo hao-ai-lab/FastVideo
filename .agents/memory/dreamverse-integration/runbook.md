@@ -6,7 +6,7 @@ Operational how-to for the dreamverse-integration scope. Read after
 For design rationale see [design.md](design.md). For who to credit see
 [authors.md](authors.md). For PR status see [pr-roadmap.md](pr-roadmap.md).
 
-**Last updated:** 2026-05-05 (post-#1286 merge + rebase; active PR is now #1287 / 7.10).
+**Last updated:** 2026-05-05 (strategy reversed to single mega-PR #1288 on `will/ltx2_sr_port`; #1287 closed; STACK.md split model deprecated per [decisions-log.md D-17](decisions-log.md#d-17)).
 
 ## Worktree contract
 
@@ -25,93 +25,56 @@ If your task requires a different branch (e.g. cherry-pick to
 `will/api_7.9` for PR #1286 propagation), return to `will/ltx2_sr_port`
 when done — that is the assumed default.
 
-## Branch topology
+## Branch topology (single mega-PR model)
 
-The dreamverse-integration work lives on the `will/ltx2_sr_port` stack.
-Single linearized branch with the full chain; intermediate split branches
-are bookmarks. After each upstream merge the bookmarks are re-sliced
-(see "After a PR merges" below).
+The dreamverse-integration work now ships as one PR (#1288) off
+`will/ltx2_sr_port`. The split-PR model documented in earlier revisions
+of this runbook (and in top-level `STACK.md`) is **abandoned** —
+see [decisions-log.md D-17](decisions-log.md#d-17).
 
 ```
 origin/main
   ↓ [public-API refactor: PRs 0..7.9 merged on main, latest #1286 = 2aaeee2a]
-will/api_7.10   (PR #1287 — generate_async + VideoEvent, OPEN)
-  ↓ [+30 commits: api_8, ltx2_sr_runtime, ltx2_nvfp4,
-  ↓                ltx2_post_fixes, agents_cleanup all linearized]
-will/ltx2_sr_port   (current top of stack — default working branch, 33 commits ahead of main)
+will/ltx2_sr_port   (**PR #1288 head** — single mega-PR, 34 commits, 71 files, +13,074/-583)
 ```
 
-| Branch | Role | Status | How to find tip |
-|---|---|---|---|
-| `will/api_7.10` | PR #1287 head, slice 1-3 | OPEN, MERGEABLE | `git rev-parse will/api_7.10` |
-| `will/ltx2_sr_port` | top of stack, default working branch | active | `git rev-parse HEAD` |
-| `will/api_8`, `will/ltx2_sr_runtime`, `will/ltx2_nvfp4`, `will/ltx2_post_fixes`, `will/agents_cleanup` | split-PR bookmarks | local-only, re-sliced after each upstream merge | (see [pr-roadmap.md](pr-roadmap.md) + [state.md](state.md) "New linearized chain") |
-| `will/ltx2_sr_port-pre-1286-rebase` | safety backup | local-only, kept until next slice merges | `git rev-parse will/ltx2_sr_port-pre-1286-rebase` |
+| Branch | Role | Status |
+|---|---|---|
+| `will/ltx2_sr_port` | **PR #1288 head**, default working branch | OPEN, MERGEABLE |
+| `will/api_7.10` / `will/api_8` / `will/ltx2_sr_runtime` / `will/ltx2_nvfp4` / `will/ltx2_post_fixes` / `will/agents_cleanup` | deprecated split-PR bookmarks | local-only historical references; safe to delete |
+| `will/ltx2_sr_port-pre-1286-rebase` | safety backup | local-only; preserves the 4 commits dropped during the post-#1286 rebase |
 
-**Sanity check:** `git merge-base --is-ancestor will/api_7.10 will/ltx2_sr_port`
-should exit 0. If it doesn't, the stack is in an unexpected state — read
+**Sanity check:** `git merge-base --is-ancestor origin/main will/ltx2_sr_port`
+should exit 0. If it doesn't, the branch is in an unexpected state — read
 [state.md](state.md) before continuing.
 
-## After a PR merges (re-slice protocol)
+## After PR #1288 merges
 
-When an upstream PR squash-merges (e.g. PR #1286 -> `2aaeee2a` -> main):
+When the mega-PR squash-merges into `main`:
 
-1. **Backup** the current stack tip:
-   ```bash
-   git branch will/ltx2_sr_port-pre-<PR>-rebase will/ltx2_sr_port
-   ```
-2. **Fetch** new main:
-   ```bash
-   git fetch origin main
-   ```
-3. **Identify dropped commits.** A squash merge has a unique patch-id
-   different from any individual commit, so `git cherry` won't auto-detect.
-   List the SHAs that were squashed (typically 3-4 commits — the original
-   PR's individual commits plus any cherry-picked polish):
-   ```bash
-   git log --oneline origin/main..will/ltx2_sr_port | head
-   # Identify which top-of-chain commits match the merged PR's content.
-   ```
-4. **Interactive rebase dropping those commits:**
-   ```bash
-   GIT_SEQUENCE_EDITOR="sed -i \
-       -e '/^pick <sha1>/s/^pick/drop/' \
-       -e '/^pick <sha2>/s/^pick/drop/' \
-       -e '/^pick <sha3>/s/^pick/drop/' \
-       -e '/^pick <sha4>/s/^pick/drop/'" \
-     git rebase -i origin/main will/ltx2_sr_port
-   ```
-   Expect zero conflicts when the dropped commits are isolated to a
-   subdirectory (router code, in PR #1286's case) — the surviving
-   commits don't touch those paths.
-5. **Re-slice split branches** to new boundary tips (see "New linearized
-   chain" in [state.md](state.md) for the slice index table — each
-   "Tip SHA" column maps to a `git branch -f <branch> <sha>` call):
-   ```bash
-   git branch -f will/api_<next>          <slice-N-tip>
-   git branch -f will/api_<next+1>        <slice-N+1-tip>
-   ...
-   ```
-6. **Verify** with the test suites in "Verification" below.
-7. **Force-push** the working branch (one force-push, requires explicit
-   user confirmation per [`AGENTS.md`](../../../AGENTS.md)):
-   ```bash
-   git push --force-with-lease origin will/ltx2_sr_port
-   ```
-8. **Push the next slice** as a new remote branch (no force, just `-u`):
-   ```bash
-   git push -u origin will/api_<next>
-   ```
-9. **Open the next PR** via `gh pr create --base main --head will/api_<next>`.
-10. **Update memory dir** — bump `Last reconciled` headers in
-    [README.md](README.md) / [state.md](state.md), promote PR rows in
-    [pr-roadmap.md](pr-roadmap.md), update Item D state in
-    [open-threads.md](open-threads.md), refresh [authors.md](authors.md)
-    verification table.
+1. `git fetch origin main` to pull the merge commit.
+2. The entire `will/ltx2_sr_port` content is now on main; the branch can
+   be deleted (locally + on origin) once all consumers are notified.
+3. Delete deprecated split bookmarks: `git branch -D will/api_7.10
+   will/api_8 will/ltx2_sr_runtime will/ltx2_nvfp4 will/ltx2_post_fixes
+   will/agents_cleanup` (local-only, no remote).
+4. Optionally remove top-level `STACK.md` (now a historical artifact).
+   Keep `CO-AUTHORS.md` — still the canonical roster reference.
+5. Decide whether to keep `will/ltx2_sr_port-pre-1286-rebase` (safety
+   backup of the pre-rebase chain) — recommend deleting once #1288 is
+   merged and verified on main.
+6. Update memory dir to reflect the post-merge state — bump
+   `Last reconciled` headers, mark Item D resolved in
+   [open-threads.md](open-threads.md), record the merge commit in
+   [decisions-log.md](decisions-log.md).
 
-The post-#1286 rebase (2026-05-05) followed exactly this protocol — see
-[state.md](state.md) "Post-#1286 rebase summary" for what dropped and
-the new slice indices.
+## Historical: split-PR re-slice protocol (deprecated)
+
+Prior revisions of this runbook documented a 10-step re-slice protocol
+for the abandoned 6-PR split model. That protocol is now obsolete.
+The post-#1286 rebase (2026-05-05) was the last execution of it; details
+are preserved in [state.md](state.md) "Post-#1286 rebase summary" and
+git history at commit `b34d9704`.
 
 ## Verification
 

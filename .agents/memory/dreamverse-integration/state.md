@@ -1,4 +1,4 @@
-# Current State — 2026-05-05 (post-#1286 merge + rebase)
+# Current State — 2026-05-05 (strategy reversal — single mega-PR #1288)
 
 Point-in-time snapshot of branches, commits, and live infrastructure.
 Update whenever commits land or services restart.
@@ -11,13 +11,9 @@ roster of co-authors to credit on every commit see
 
 | Repo | Branch | Tip | Distance |
 |---|---|---|---|
-| FastVideo | `will/ltx2_sr_port` | `b34d9704` | 33 commits ahead of `origin/main` (post-rebase, post-#1286 merge) |
-| FastVideo | `will/api_7.10` (PR #1287) | `6ae7a99f` | first 3 commits of `will/ltx2_sr_port`; OPEN, MERGEABLE |
-| FastVideo | `will/api_8` | `f32e31ec` | local-only split bookmark, slice 4-6 |
-| FastVideo | `will/ltx2_sr_runtime` | `e7297519` | local-only split bookmark, slice 7-15 |
-| FastVideo | `will/ltx2_nvfp4` | `6793166b` | local-only split bookmark, slice 16-21 |
-| FastVideo | `will/ltx2_post_fixes` | `25897b67` | local-only split bookmark, slice 22-23 |
-| FastVideo | `will/agents_cleanup` | `b34d9704` | local-only split bookmark, slice 24-33 (== `will/ltx2_sr_port` HEAD) |
+| FastVideo | `will/ltx2_sr_port` (**PR #1288 head**) | `39dfa009` | 34 commits ahead of `origin/main`; OPEN, MERGEABLE |
+| FastVideo | `will/api_7.10` | `6ae7a99f` | **deprecated** — PR #1287 closed in favor of #1288. Branch can be deleted on origin and locally; kept for now as historical reference. |
+| FastVideo | `will/api_8`, `will/ltx2_sr_runtime`, `will/ltx2_nvfp4`, `will/ltx2_post_fixes`, `will/agents_cleanup` | (various) | **deprecated** split bookmarks. Strategy reversed to single mega-PR (D-17). Safe to delete locally; not pushed to origin. |
 | FastVideo | `will/ltx2_sr_port-pre-1286-rebase` | `1baa60bb` | **local-only safety backup** of pre-rebase chain (37 commits); keep until next slice merges |
 | Dreamverse | `will/integrate-public-fastvideo` | `ec8ef92` | 10 commits ahead of `737f3c1` (the dep switch) |
 | FastVideo-internal | their `main` | (read-only ref) | — |
