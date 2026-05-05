@@ -11,6 +11,7 @@ import torch
 from tqdm.auto import tqdm
 
 from fastvideo.distributed import get_sp_group, get_world_group
+from fastvideo.logger import init_logger
 from fastvideo.train.callbacks.callback import CallbackDict
 from fastvideo.train.methods.base import TrainingMethod
 from fastvideo.train.utils.tracking import build_tracker
@@ -18,6 +19,8 @@ from fastvideo.train.utils.tracking import build_tracker
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
+
+logger = init_logger(__name__)
 
 
 def _coerce_log_scalar(
@@ -167,6 +170,34 @@ class Trainer:
                                f".metrics[{k!r}]"),
                     ))
 
+            # NaN/Inf gate: bf16 + FSDP2 has no GradScaler; a non-finite
+            # loss silently corrupts grads. Skip the optimizer step (just
+            # zero grads) and surface a `nan_skipped=1` metric so a
+            # persistent stream is visible in W&B.
+            #
+            # The decision must be world-wide: a single rank seeing NaN
+            # while others don't would diverge weights and then deadlock
+            # on the next collective (checkpoint/validation). All-reduce
+            # the local flag with MAX so every rank takes the same branch.
+            # all_reduce short-circuits on world_size == 1.
+            non_finite_local = any(
+                isinstance(v, torch.Tensor) and not torch.isfinite(v).all() for v in loss_sums.values())
+            loss_device = next((v.device for v in loss_sums.values() if isinstance(v, torch.Tensor)),
+                               torch.device("cpu"))
+            flag = torch.tensor(int(non_finite_local), device=loss_device)
+            flag = self.world_group.all_reduce(flag, op=torch.distributed.ReduceOp.MAX)
+            non_finite = bool(flag.item())
+            if non_finite:
+                method.optimizers_zero_grad(step)
+                logger.warning("Non-finite loss at step %d; skipping "
+                               "optimizer step", step)
+                metrics = {k: float(v) / grad_accum for k, v in loss_sums.items()}
+                metrics["step_time_sec"] = time.perf_counter() - t0
+                metrics["nan_skipped"] = 1.0
+                if self.global_rank == 0:
+                    self.tracker.log(metrics, step)
+                continue
+
             self.callbacks.on_before_optimizer_step(
                 method,
                 iteration=step,
@@ -180,6 +211,7 @@ class Trainer:
             metrics.update({k: float(v) / grad_accum for k, v in metric_sums.items()})
             metrics["step_time_sec"] = (time.perf_counter() - t0)
             metrics["vsa_sparsity"] = float(tc.vsa_sparsity)
+            metrics["nan_skipped"] = 0.0
             if self.global_rank == 0 and metrics:
                 self.tracker.log(metrics, step)
 
