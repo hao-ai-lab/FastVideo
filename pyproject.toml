@@ -134,6 +134,19 @@ test = [
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 
+prompt-safety = [
+    "fasttext",
+]
+
+prompt-enhancer = [
+    "httpx",
+]
+
+streaming = [
+    "fastvideo[prompt-enhancer]",
+    "fastvideo[prompt-safety]",
+]
+
 rocm = [
     "amdsmi",
 ]
