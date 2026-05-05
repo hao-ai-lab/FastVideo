@@ -10,7 +10,10 @@ from typing import Any, TYPE_CHECKING
 import torch
 from tqdm.auto import tqdm
 
+import fastvideo.envs as envs
 from fastvideo.distributed import get_sp_group, get_world_group
+from fastvideo.logger import init_logger
+from fastvideo.profiler import get_or_create_profiler
 from fastvideo.train.callbacks.callback import CallbackDict
 from fastvideo.train.methods.base import TrainingMethod
 from fastvideo.train.utils.tracking import build_tracker
@@ -18,6 +21,8 @@ from fastvideo.train.utils.tracking import build_tracker
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
+
+logger = init_logger(__name__)
 
 
 def _coerce_log_scalar(
@@ -72,6 +77,11 @@ class Trainer:
             callback_configs or {},
             training_config,
         )
+        # PyTorch profiler. No-op unless FASTVIDEO_TORCH_PROFILER_DIR is set.
+        # Selected regions emit traces; see fastvideo/profiler.py for the
+        # FASTVIDEO_TORCH_PROFILE_REGIONS list (e.g.
+        # `profiler_region_training_train_one_step`).
+        self.profiler_controller = get_or_create_profiler(envs.FASTVIDEO_TORCH_PROFILER_DIR)
 
     def _iter_dataloader(self, dataloader: Any) -> Iterator[dict[str, Any]]:
         data_iter = iter(dataloader)
@@ -83,6 +93,32 @@ class Trainer:
             yield batch
 
     def run(
+        self,
+        method: TrainingMethod,
+        *,
+        dataloader: Any,
+        max_steps: int,
+        start_step: int = 0,
+        checkpoint_manager: Any | None = None,
+    ) -> None:
+        # Make the broad train region explicit so the controller's
+        # `_active_region_depth` is back to zero before `stop()` runs.
+        # `stop()` is in the `finally` so failed training runs still
+        # flush/cleanup the profiler trace.
+        try:
+            with self.profiler_controller.region("profiler_region_training_train"):
+                self._run_impl(
+                    method,
+                    dataloader=dataloader,
+                    max_steps=max_steps,
+                    start_step=start_step,
+                    checkpoint_manager=checkpoint_manager,
+                )
+        finally:
+            if self.profiler_controller.has_profiler:
+                self.profiler_controller.stop()
+
+    def _run_impl(
         self,
         method: TrainingMethod,
         *,
@@ -131,75 +167,124 @@ class Trainer:
             disable=self.local_rank > 0,
         )
         for step in progress:
-            t0 = time.perf_counter()
+            # Per-step profiler region. No-op unless
+            # FASTVIDEO_TORCH_PROFILE_REGIONS includes
+            # `profiler_region_training_train_one_step`. The `try/finally`
+            # guarantees `prof.step()` runs once per outer iteration even
+            # when the NaN gate `continue`s or the body raises.
+            try:
+                with self.profiler_controller.region("profiler_region_training_train_one_step"):
+                    t0 = time.perf_counter()
 
-            # Accumulate on GPU during grad-accum; materialise
-            # to CPU once per step right before logging.
-            loss_sums: dict[str, float | torch.Tensor] = {}
-            metric_sums: dict[str, float | torch.Tensor] = {}
-            for accum_iter in range(grad_accum):
-                batch = next(data_stream)
-                loss_map, outputs, step_metrics = (method.single_train_step(
-                    batch,
-                    step,
-                ))
+                    # Accumulate on GPU during grad-accum; materialise
+                    # to CPU once per step right before logging.
+                    loss_sums: dict[str, float | torch.Tensor] = {}
+                    metric_sums: dict[str, float | torch.Tensor] = {}
+                    for accum_iter in range(grad_accum):
+                        batch = next(data_stream)
+                        loss_map, outputs, step_metrics = (method.single_train_step(
+                            batch,
+                            step,
+                        ))
 
-                method.backward(
-                    loss_map,
-                    outputs,
-                    grad_accum_rounds=grad_accum,
-                )
+                        method.backward(
+                            loss_map,
+                            outputs,
+                            grad_accum_rounds=grad_accum,
+                        )
 
-                for k, v in loss_map.items():
-                    if isinstance(v, torch.Tensor):
-                        prev = loss_sums.get(k, 0.0)
-                        loss_sums[k] = prev + v.detach()
-                for k, v in step_metrics.items():
-                    if k in loss_sums:
-                        raise ValueError(f"Metric key {k!r} collides "
-                                         "with loss key. Use a "
-                                         "different name (e.g. prefix "
-                                         "with 'train/').")
-                    prev = metric_sums.get(k, 0.0)
-                    metric_sums[k] = (prev + _coerce_log_scalar(
-                        v,
-                        where=("method.single_train_step()"
-                               f".metrics[{k!r}]"),
-                    ))
+                        for k, v in loss_map.items():
+                            if isinstance(v, torch.Tensor):
+                                prev = loss_sums.get(k, 0.0)
+                                loss_sums[k] = prev + v.detach()
+                        for k, v in step_metrics.items():
+                            if k in loss_sums:
+                                raise ValueError(f"Metric key {k!r} collides "
+                                                 "with loss key. Use a "
+                                                 "different name (e.g. prefix "
+                                                 "with 'train/').")
+                            prev = metric_sums.get(k, 0.0)
+                            metric_sums[k] = (prev + _coerce_log_scalar(
+                                v,
+                                where=("method.single_train_step()"
+                                       f".metrics[{k!r}]"),
+                            ))
 
-            self.callbacks.on_before_optimizer_step(
-                method,
-                iteration=step,
-            )
-            method.optimizers_schedulers_step(step)
-            method.optimizers_zero_grad(step)
+                    # NaN/Inf gate: bf16 + FSDP2 has no GradScaler; a
+                    # non-finite loss silently corrupts grads. Skip the
+                    # optimizer step (just zero grads) and surface a
+                    # `nan_skipped=1` metric so a persistent stream is
+                    # visible in W&B.
+                    #
+                    # The decision must be world-wide: a single rank
+                    # seeing NaN while others don't would diverge weights
+                    # and then deadlock on the next collective
+                    # (checkpoint/validation). All-reduce the local flag
+                    # with MAX so every rank takes the same branch.
+                    # all_reduce short-circuits on world_size == 1.
+                    non_finite_local = any(
+                        isinstance(v, torch.Tensor) and not torch.isfinite(v).all() for v in loss_sums.values())
+                    loss_device = next((v.device for v in loss_sums.values() if isinstance(v, torch.Tensor)),
+                                       torch.device("cpu"))
+                    flag = torch.tensor(int(non_finite_local), device=loss_device)
+                    flag = self.world_group.all_reduce(flag, op=torch.distributed.ReduceOp.MAX)
+                    non_finite = bool(flag.item())
+                    if non_finite:
+                        method.optimizers_zero_grad(step)
+                        logger.warning("Non-finite loss at step %d; skipping "
+                                       "optimizer step", step)
+                        metrics = {k: float(v) / grad_accum for k, v in loss_sums.items()}
+                        metrics["step_time_sec"] = time.perf_counter() - t0
+                        metrics["nan_skipped"] = 1.0
+                        if self.global_rank == 0:
+                            self.tracker.log(metrics, step)
+                        continue
 
-            # Single CPU sync point: materialise GPU tensors
-            # to float right before logging.
-            metrics = {k: float(v) / grad_accum for k, v in loss_sums.items()}
-            metrics.update({k: float(v) / grad_accum for k, v in metric_sums.items()})
-            metrics["step_time_sec"] = (time.perf_counter() - t0)
-            metrics["vsa_sparsity"] = float(tc.vsa_sparsity)
-            if self.global_rank == 0 and metrics:
-                self.tracker.log(metrics, step)
+                    self.callbacks.on_before_optimizer_step(
+                        method,
+                        iteration=step,
+                    )
+                    method.optimizers_schedulers_step(step)
+                    method.optimizers_zero_grad(step)
 
-            self.callbacks.on_training_step_end(
-                method,
-                metrics,
-                iteration=step,
-            )
+                    # Single CPU sync point: materialise GPU tensors
+                    # to float right before logging.
+                    metrics = {k: float(v) / grad_accum for k, v in loss_sums.items()}
+                    metrics.update({k: float(v) / grad_accum for k, v in metric_sums.items()})
+                    metrics["step_time_sec"] = (time.perf_counter() - t0)
+                    metrics["vsa_sparsity"] = float(tc.vsa_sparsity)
+                    metrics["nan_skipped"] = 0.0
+                    if self.global_rank == 0 and metrics:
+                        self.tracker.log(metrics, step)
 
-            if checkpoint_manager is not None:
-                checkpoint_manager.maybe_save(step)
+                    self.callbacks.on_training_step_end(
+                        method,
+                        metrics,
+                        iteration=step,
+                    )
 
-            self.callbacks.on_validation_begin(
-                method,
-                iteration=step,
-            )
-            self.callbacks.on_validation_end(
-                method,
-                iteration=step,
-            )
+                    if checkpoint_manager is not None:
+                        with self.profiler_controller.region("profiler_region_training_save_checkpoint"):
+                            checkpoint_manager.maybe_save(step)
+
+                    with self.profiler_controller.region("profiler_region_training_validation"):
+                        self.callbacks.on_validation_begin(
+                            method,
+                            iteration=step,
+                        )
+                        self.callbacks.on_validation_end(
+                            method,
+                            iteration=step,
+                        )
+            finally:
+                # Advance the torch.profiler schedule once per outer step
+                # so `wait/warmup/active` cycles flush traces via
+                # on_trace_ready. In `finally` so NaN-skipped steps and
+                # exceptions still advance the schedule. No-op when
+                # profiling is disabled.
+                prof = self.profiler_controller.profiler
+                if prof is not None:
+                    prof.step()
 
         self.callbacks.on_train_end(
             method,
