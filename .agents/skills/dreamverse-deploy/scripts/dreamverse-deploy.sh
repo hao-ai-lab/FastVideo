@@ -58,6 +58,13 @@ case "${WARMUP}" in
   *) echo "error: DREAMVERSE_WARMUP must be 'true' or 'false' (got '${WARMUP}')" >&2; exit 2 ;;
 esac
 
+TORCH_COMPILE="${DREAMVERSE_TORCH_COMPILE:-false}"
+case "${TORCH_COMPILE}" in
+  true|false) ;;
+  *) echo "error: DREAMVERSE_TORCH_COMPILE must be 'true' or 'false' (got '${TORCH_COMPILE}')" >&2; exit 2 ;;
+esac
+TORCH_COMPILE_FLAG=$([[ "${TORCH_COMPILE}" == "true" ]] && echo 1 || echo 0)
+
 REPO_ROOT="${DREAMVERSE_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 LOG_DIR="${DREAMVERSE_LOG_DIR:-/tmp/opencode/dreamverse-deploy}"
 
@@ -86,6 +93,22 @@ GPP13=/usr/bin/g++-13
 [[ -x "${GPP13}" ]] || bail "${GPP13} not executable (needed for nvcc workaround)"
 
 [[ -f "${HOME}/.env" ]] || echo "warn: ${HOME}/.env missing — provider API keys may be unset" >&2
+
+NATIVE_FFMPEG_BIN="${HOME}/opt/ffmpeg-native/bin/ffmpeg"
+NATIVE_VIDEO_CODEC=libx264
+REQUIRE_NATIVE_FFMPEG="${DREAMVERSE_REQUIRE_NATIVE_FFMPEG:-false}"
+case "${REQUIRE_NATIVE_FFMPEG}" in
+  true|false) ;;
+  *) bail "DREAMVERSE_REQUIRE_NATIVE_FFMPEG must be 'true' or 'false' (got '${REQUIRE_NATIVE_FFMPEG}')" ;;
+esac
+if [[ -x "${NATIVE_FFMPEG_BIN}" ]]; then
+  echo "        native ffmpeg: ${NATIVE_FFMPEG_BIN} (codec=${NATIVE_VIDEO_CODEC})"
+elif [[ "${REQUIRE_NATIVE_FFMPEG}" == "true" ]]; then
+  bail "DREAMVERSE_REQUIRE_NATIVE_FFMPEG=true but ${NATIVE_FFMPEG_BIN} missing. Run: bash apps/dreamverse/scripts/install_native_ffmpeg.sh"
+else
+  echo "warn: ${NATIVE_FFMPEG_BIN} missing — backend will fall back to system ffmpeg (\$(command -v ffmpeg))." >&2
+  echo "      Build native ffmpeg with: bash apps/dreamverse/scripts/install_native_ffmpeg.sh" >&2
+fi
 
 mkdir -p "${LOG_DIR}"
 
@@ -140,7 +163,7 @@ echo "        ports cleared; GPU${GPU} at ${gpu_mem} MiB"
 # Launch backend
 # ---------------------------------------------------------------------------
 
-echo "[2/8] launching backend on GPU ${GPU} port ${BACKEND_PORT} (warmup=${WARMUP})..."
+echo "[2/8] launching backend on GPU ${GPU} port ${BACKEND_PORT} (warmup=${WARMUP} torch_compile=${TORCH_COMPILE})..."
 
 backend_log="${LOG_DIR}/backend-gpu${GPU}.log"
 : > "${backend_log}"
@@ -151,10 +174,15 @@ setsid bash -c "
     source \"${HOME}/.env\"
   fi
   set +a
+  if [[ -x \"${NATIVE_FFMPEG_BIN}\" ]]; then
+    export FASTVIDEO_FFMPEG_BIN=\"${NATIVE_FFMPEG_BIN}\"
+    export FASTVIDEO_VIDEO_CODEC=\"${NATIVE_VIDEO_CODEC}\"
+  fi
   export CUDA_VISIBLE_DEVICES=${GPU}
   export FASTVIDEO_ENABLE_DEVTOOLS=1
   export FASTVIDEO_ENABLE_STARTUP_WARMUP=${WARMUP}
   export FASTVIDEO_GPU_COUNT=1
+  export ENABLE_TORCH_COMPILE=${TORCH_COMPILE_FLAG}
   export CC=${GCC13}
   export CXX=${GPP13}
   export CUDAHOSTCXX=${GPP13}
@@ -269,6 +297,8 @@ echo "[7/8] frontend / OK"
 
 cwd="$(readlink "/proc/${backend_pid}/cwd" 2>/dev/null || echo unknown)"
 gpu_mem_now="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | sed -n "$((GPU + 1))p" || echo 0)"
+ffmpeg_in_use="$(tr '\0' '\n' < "/proc/${backend_pid}/environ" 2>/dev/null | sed -n 's/^FASTVIDEO_FFMPEG_BIN=//p' | head -1)"
+[[ -z "${ffmpeg_in_use}" ]] && ffmpeg_in_use="$(command -v ffmpeg 2>/dev/null || echo '<not found>') (system fallback)"
 
 cat <<SUMMARY
 [8/8] redeploy OK
@@ -277,6 +307,7 @@ cat <<SUMMARY
   Backend   : http://localhost:${BACKEND_PORT}     (PID ${backend_pid})
               cwd=${cwd}
               gpu=${GPU} mem=${gpu_mem_now} MiB
+              ffmpeg=${ffmpeg_in_use}
 
   Logs      : ${backend_log}
               ${frontend_log}
