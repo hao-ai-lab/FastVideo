@@ -202,16 +202,25 @@ class Trainer:
                 )
 
                 if checkpoint_manager is not None:
-                    checkpoint_manager.maybe_save(step)
+                    with self.profiler_controller.region("profiler_region_training_save_checkpoint"):
+                        checkpoint_manager.maybe_save(step)
 
-                self.callbacks.on_validation_begin(
-                    method,
-                    iteration=step,
-                )
-                self.callbacks.on_validation_end(
-                    method,
-                    iteration=step,
-                )
+                with self.profiler_controller.region("profiler_region_training_validation"):
+                    self.callbacks.on_validation_begin(
+                        method,
+                        iteration=step,
+                    )
+                    self.callbacks.on_validation_end(
+                        method,
+                        iteration=step,
+                    )
+
+            # Advance the torch.profiler schedule once per outer step so
+            # `wait/warmup/active` cycles flush traces via on_trace_ready.
+            # No-op when profiling is disabled.
+            prof = self.profiler_controller.profiler
+            if prof is not None:
+                prof.step()
 
         self.callbacks.on_train_end(
             method,
