@@ -156,6 +156,16 @@ class MagiHumanSRLatentPreparationStage(PipelineStage):
         batch.magi_latent_T = latent_t
         batch.magi_latent_H = latent_h
         batch.magi_latent_W = latent_w
+        # Invalidate the static packed layout precomputed by the base
+        # latent prep stage: SR upsamples `batch.latents` to a larger
+        # spatial grid, which changes video_token_num / video_coords /
+        # video_mm. The SR denoising loop's
+        # `getattr(batch, "magi_static_packed_layout", None)` will then
+        # fall back to the slow path of `build_static_packed_inputs`,
+        # which rebuilds those fields from the new latent shape. SR
+        # only does ~5 denoising steps so the meshgrid recompute cost
+        # is negligible relative to SR-DiT forward.
+        batch.magi_static_packed_layout = None
 
         if getattr(batch, "image_latent", None) is not None:
             batch.image_latent = self._encode_image(batch, actual_h, actual_w)
