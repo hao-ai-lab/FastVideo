@@ -102,9 +102,21 @@ apps/dreamverse/web/.env.production.local
 # Unignore migrated Dreamverse product assets — root .gitignore globally
 # ignores *.png/*.jpg/*.mp4/*.gif, but apps/dreamverse/web/public/ MUST
 # be tracked (logo, icons, k2.png, etc.).
-!apps/dreamverse/web/public/**
-!apps/dreamverse/web/prompts/**
-!apps/dreamverse/server/prompts/**
+!apps/dreamverse/web/public/**/*.png
+!apps/dreamverse/web/public/**/*.jpg
+!apps/dreamverse/web/public/**/*.jpeg
+!apps/dreamverse/web/public/**/*.mp4
+!apps/dreamverse/web/public/**/*.gif
+!apps/dreamverse/web/prompts/**/*.png
+!apps/dreamverse/web/prompts/**/*.jpg
+!apps/dreamverse/web/prompts/**/*.jpeg
+!apps/dreamverse/web/prompts/**/*.mp4
+!apps/dreamverse/web/prompts/**/*.gif
+!apps/dreamverse/server/prompts/**/*.png
+!apps/dreamverse/server/prompts/**/*.jpg
+!apps/dreamverse/server/prompts/**/*.jpeg
+!apps/dreamverse/server/prompts/**/*.mp4
+!apps/dreamverse/server/prompts/**/*.gif
 !apps/dreamverse/gpu-pool.svg
 !apps/dreamverse/gpu-pool.drawio
 
