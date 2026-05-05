@@ -5,16 +5,21 @@ Tracks the public API refactor (PRs 0-17), the LTX-2 streaming server
 upstream, the Dreamverse switch from `FastVideo-internal` to public
 `FastVideo`, and the NVFP4 quantization landing.
 
-**Last reconciled:** 2026-05-05 (strategy reversal — single mega-PR).
-FastVideo `will/ltx2_sr_port` @ `b36bdbc9` (36 commits ahead of main, post-D-17 STACK.md removal + integration-review.md addition).
-Dreamverse `will/integrate-public-fastvideo` @ `ec8ef92`.
+**Last reconciled:** 2026-05-05 (**D-18**: Option B+ chosen — Dreamverse
+becomes `apps/dreamverse/` subfolder under FastVideo; generic backend stays
+at `fastvideo.entrypoints.streaming.*`. See [integration-plan.md](integration-plan.md)
+for the executable 7-phase migration plan;
+[integration-review.md](integration-review.md) is **deprecated** but kept
+for the drift audit and OSS precedent citations.).
+FastVideo `will/ltx2_sr_port` @ HEAD (post-D-17 STACK.md removal +
+integration-review.md addition + integration-plan.md addition + D-18
+reconciliation). Dreamverse `will/integrate-public-fastvideo` @ `ec8ef92`.
 PRs #1257 / #1258 / #1284 / #1286 MERGED to main. **PR #1287 CLOSED
 (in favor of consolidation); PR #1288 OPEN as the single mega-PR
 landing the entire `will/ltx2_sr_port` chain at once** (LTX-2 SR
-runtime + NVFP4 + `generate_async`/Dynamo contract + agents memory dir,
-71 files, +13,074/-583 LOC). Split branches kept as historical
-bookmarks; STACK.md model is **abandoned** — see [decisions-log.md
-D-17](decisions-log.md#d-17). Local backup
+runtime + NVFP4 + `generate_async`/Dynamo contract + agents memory dir).
+Split branches kept as historical bookmarks; STACK.md model **abandoned** —
+see [decisions-log.md D-17](decisions-log.md#d-17). Local backup
 `will/ltx2_sr_port-pre-1286-rebase` @ `1baa60bb` preserves the
 pre-rebase chain.
 
@@ -68,7 +73,8 @@ file it in [open-threads.md](open-threads.md) before continuing.
 | "Why was decision X made? What's resolved vs. open?" | [decisions-log.md](decisions-log.md) |
 | "What should I work on next? Priority order?" | [open-threads.md](open-threads.md) |
 | "Who should be co-authored on commits in this scope?" | [authors.md](authors.md) |
-| "Have we drifted from the goal? Should Dreamverse merge into FastVideo?" | [integration-review.md](integration-review.md) |
+| "How do we execute the Dreamverse → FastVideo monorepo merge?" | [integration-plan.md](integration-plan.md) ← **CURRENT** |
+| "Historical drift audit + Option-D evaluation (deprecated by D-18)" | [integration-review.md](integration-review.md) (DEPRECATED) |
 
 ## Repo + worktree paths
 

@@ -1,6 +1,31 @@
 # Integration Review — Drift Audit + Path Forward
 
-**Last updated:** 2026-05-05.
+> # ⚠️ DEPRECATED — superseded by [integration-plan.md](integration-plan.md)
+>
+> This document recommended **Option D** (Dreamverse stays a separate repo;
+> generic backend merges into FastVideo). On 2026-05-05 the team chose
+> **Option B+** instead (Dreamverse FE + product server move into FastVideo
+> as `apps/dreamverse/`; generic backend stays at
+> `fastvideo.entrypoints.streaming.*` per Option D's principle).
+> See [decisions-log.md D-18](decisions-log.md#d-18) for the strategy
+> reversal rationale and [integration-plan.md](integration-plan.md) for the
+> executable migration plan.
+>
+> **What's still authoritative in this file:**
+> - **Part 1 — Drift audit** (the 17-row drift summary table). The drift
+>   findings remain valid; the migration plan in `integration-plan.md`
+>   folds them into specific phases.
+> - **OSS precedent citations** (vLLM, BentoML, Ray Serve, TGI+ChatUI,
+>   Transformers.js, ComfyUI, AUTOMATIC1111). Reused in `integration-plan.md`.
+>
+> **What's superseded:**
+> - **Part 2 — Recommendation (Option D)**. Replaced by Option B+ in the
+>   new plan. Read `integration-plan.md` for the current decision.
+> - **Part 3 — Action items**. Replaced by the phased migration plan.
+>
+> Kept in tree for historical reference and audit trail. Do not delete.
+
+**Last updated:** 2026-05-05 (deprecated header added).
 
 **Scope:** FastVideo public `will/ltx2_sr_port` at the requested audit
 anchor `b36bdbc9`; Dreamverse `will/integrate-public-fastvideo` at
