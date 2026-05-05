@@ -318,9 +318,9 @@ Expected shape:
 
 ```bash
 uv sync --extra server
-uv run dreamverse-server --host 0.0.0.0 --port 8009
+apps/dreamverse/scripts/dreamverse-server --host 0.0.0.0 --port 8009
 
-cd apps/web
+cd apps/dreamverse/web
 npm ci
 BACKEND_PORT=8009 npm run dev
 ```
@@ -423,7 +423,7 @@ should be:
 1. Fix `server/config.py` and any remaining path assumptions from `prod-ui` to
    `apps/web`.
 2. Update `README.md` to document the real local GPU startup flow.
-3. Confirm `apps/web` connects cleanly to a local `dreamverse-server`.
+3. Confirm `apps/dreamverse/web` connects cleanly to the local wrapper-backed backend.
 4. Improve frontend error handling for backend-not-ready and backend-missing
    cases.
 5. Add a local smoke test and keep existing backend/frontend tests green.
@@ -465,7 +465,7 @@ Add or tighten tests for:
 
 The first manual smoke checklist should be:
 
-1. start `dreamverse-server`
+1. start `apps/dreamverse/scripts/dreamverse-server`
 2. confirm `GET /healthz` returns 200
 3. confirm `GET /readyz` returns 200 after warmup
 4. start `apps/web`

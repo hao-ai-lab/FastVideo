@@ -310,10 +310,30 @@ class VideoGenerationWorker:
     def _load_audio_encoder(self, model_root: str) -> None:
         if not ENABLE_AUDIO_RE_ENCODE:
             return
-        del model_root
-        print(f"[GPU {self.gpu_id}] ENABLE_AUDIO_RE_ENCODE requested, but "
-              "audio re-encode is deferred until a public FastVideo audio "
-              "encoder loader is available.")
+        from fastvideo.models.audio.ltx2_audio_processing import AudioProcessor
+        from fastvideo.models.loader.component_loader import ComponentLoader
+
+        audio_vae_path = os.path.join(model_root, "audio_vae")
+        if not os.path.isdir(audio_vae_path):
+            print(f"[GPU {self.gpu_id}] audio_vae dir not found at "
+                  f"{audio_vae_path}; disabling re-encode")
+            return
+
+        loader = ComponentLoader.for_module_type("audio_encoder", "diffusers")
+        enc = loader.load(audio_vae_path, self.generator.fastvideo_args)
+        target = getattr(enc, "model", enc)
+
+        proc = AudioProcessor(
+            sample_rate=target.sample_rate,
+            mel_bins=target.mel_bins,
+            mel_hop_length=target.mel_hop_length,
+            n_fft=target.n_fft,
+        ).to(torch.device("cuda"))
+
+        self.audio_encoder_module = target
+        self.audio_processor_module = proc
+        print(f"[GPU {self.gpu_id}] Audio encoder loaded for "
+              f"re-encode conditioning ({self._gpu_mem()})")
 
     def _re_encode_audio(
         self,

@@ -24,8 +24,8 @@ test = [
 ]
 
 [project.scripts]
-dreamverse-server = "main:cli"
-dreamverse-mock-server = "fastvideo.entrypoints.streaming.mock_server:main"
+dreamverse-server = "server_entry:cli"
+dreamverse-mock-server = "mock_server:cli"
 
 [tool.uv]
 package = false
