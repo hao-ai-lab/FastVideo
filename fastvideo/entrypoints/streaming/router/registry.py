@@ -132,8 +132,14 @@ class ReplicaRegistry:
             h.last_latency_ms = latency_ms
             h.consecutive_failures = 0
             h.consecutive_successes += 1
-            if (h.status is not ReplicaStatus.HEALTHY and h.consecutive_successes >= recovery_threshold):
-                logger.info("router: replica %s marked HEALTHY after %d successes", replica.url,
+            # State machine: UNKNOWN -> HEALTHY is immediate; only the
+            # UNHEALTHY -> HEALTHY transition is gated by recovery_threshold.
+            if h.status is ReplicaStatus.UNKNOWN:
+                logger.info("router: replica %s initial probe ok, marking HEALTHY", replica.url)
+                h.status = ReplicaStatus.HEALTHY
+                h.consecutive_successes = 0
+            elif (h.status is ReplicaStatus.UNHEALTHY and h.consecutive_successes >= recovery_threshold):
+                logger.info("router: replica %s recovered to HEALTHY after %d successes", replica.url,
                             h.consecutive_successes)
                 h.status = ReplicaStatus.HEALTHY
                 h.consecutive_successes = 0
@@ -232,13 +238,9 @@ async def _build_default_probe(
     config: RouterConfig, ) -> AsyncIterator[Callable[..., Awaitable[tuple[float, str | None]]]]:
     try:
         import httpx
-    except ImportError:  # pragma: no cover - optional extra
-
-        async def disabled_probe(url: str, *, timeout: float) -> tuple[float, str | None]:
-            return 0.0, "httpx not installed; router health checks disabled"
-
-        yield disabled_probe
-        return
+    except ImportError as exc:  # pragma: no cover - optional extra
+        raise RuntimeError("router health checks require httpx; install with "
+                           "`pip install fastvideo[streaming]` or `pip install httpx`") from exc
 
     async with httpx.AsyncClient(timeout=config.health_check_timeout_seconds) as client:
 

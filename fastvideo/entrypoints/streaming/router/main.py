@@ -135,6 +135,13 @@ async def _bridge_session(
 
     Uses ``websockets`` for the backend side; imported lazily to keep
     the router's import graph small for users who only want the server.
+
+    Cancellation: when either direction completes (client disconnect,
+    backend close, exception), the other is cancelled explicitly and
+    both are drained before returning. Unexpected exceptions from the
+    direction that completed first are re-raised; normal disconnect
+    paths (``WebSocketDisconnect``, ``ConnectionClosed``,
+    ``CancelledError``) are swallowed.
     """
     try:
         import websockets
@@ -142,10 +149,32 @@ async def _bridge_session(
         raise RuntimeError("router requires the `websockets` package for backend proxying") from exc
 
     async with websockets.connect(backend_ws_url + "/v1/stream") as backend_ws:
-        await asyncio.gather(
-            _forward_client_to_backend(client_ws, backend_ws),
-            _forward_backend_to_client(backend_ws, client_ws),
-        )
+        c2b = asyncio.create_task(_forward_client_to_backend(client_ws, backend_ws))
+        b2c = asyncio.create_task(_forward_backend_to_client(backend_ws, client_ws))
+        try:
+            done, _pending = await asyncio.wait(
+                {c2b, b2c},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            for task in (c2b, b2c):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(c2b, b2c, return_exceptions=True)
+        for task in done:
+            task_exc = task.exception()
+            if task_exc is not None and not _is_normal_disconnect(task_exc):
+                raise task_exc
+
+
+def _is_normal_disconnect(exc: BaseException) -> bool:
+    """Whether ``exc`` is a routine WebSocket teardown vs a real bridge fault."""
+    if isinstance(exc, asyncio.CancelledError | WebSocketDisconnect):
+        return True
+    name = type(exc).__name__
+    # websockets.exceptions.ConnectionClosed{,OK,Error} all subclass
+    # WebSocketException; check by name to avoid the lazy-import dance.
+    return name.startswith("ConnectionClosed")
 
 
 async def _forward_client_to_backend(client_ws: WebSocket, backend_ws) -> None:

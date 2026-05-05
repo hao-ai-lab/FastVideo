@@ -219,3 +219,61 @@ class TestRouterApp:
             err = ws.receive_json()
             assert err["type"] == "error"
             assert err["code"] == "gpu_unavailable"
+
+
+class TestUnknownToHealthyImmediate:
+    """Initial probe must promote UNKNOWN -> HEALTHY without waiting for recovery_threshold."""
+
+    def test_first_success_promotes_unknown(self):
+        reg = _registry(num_primary=1, num_secondary=0)
+        primary = reg.primaries()[0]
+        assert primary.health.status is ReplicaStatus.UNKNOWN
+
+        async def run():
+            await reg.record_success(primary, recovery_threshold=10, latency_ms=1.0)
+
+        asyncio.run(run())
+        assert primary.health.status is ReplicaStatus.HEALTHY
+
+    def test_unhealthy_recovery_still_gated_by_threshold(self):
+        reg = _registry(num_primary=1, num_secondary=0)
+        primary = reg.primaries()[0]
+
+        async def run():
+            for _ in range(3):
+                await reg.record_failure(primary, failure_threshold=3, reason="x")
+            assert primary.health.status is ReplicaStatus.UNHEALTHY
+            await reg.record_success(primary, recovery_threshold=2, latency_ms=1.0)
+            assert primary.health.status is ReplicaStatus.UNHEALTHY  # 1/2 successes
+            await reg.record_success(primary, recovery_threshold=2, latency_ms=1.0)
+            assert primary.health.status is ReplicaStatus.HEALTHY    # 2/2 successes
+
+        asyncio.run(run())
+
+
+class TestConfigValidation:
+    """RouterConfig.__post_init__ rejects malformed configs."""
+
+    def test_rejects_path_in_url(self):
+        with pytest.raises(ValueError, match="without a path"):
+            RouterConfig(replicas=[ReplicaEndpoint(url="http://host:8000/api")])
+
+    def test_rejects_query_in_url(self):
+        with pytest.raises(ValueError, match="query/fragment"):
+            RouterConfig(replicas=[ReplicaEndpoint(url="http://host:8000?x=1")])
+
+    def test_rejects_fragment_in_url(self):
+        with pytest.raises(ValueError, match="query/fragment"):
+            RouterConfig(replicas=[ReplicaEndpoint(url="http://host:8000#frag")])
+
+    def test_rejects_duplicate_urls(self):
+        with pytest.raises(ValueError, match="Duplicate"):
+            RouterConfig(replicas=[
+                ReplicaEndpoint(url="http://host:8000"),
+                ReplicaEndpoint(url="http://host:8000"),
+            ])
+
+    def test_accepts_trailing_slash(self):
+        # parsed.path == "/" should be allowed
+        cfg = RouterConfig(replicas=[ReplicaEndpoint(url="http://host:8000/")])
+        assert cfg.replicas[0].url == "http://host:8000/"

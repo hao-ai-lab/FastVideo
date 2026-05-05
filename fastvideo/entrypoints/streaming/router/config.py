@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 
 @dataclass
@@ -62,9 +63,21 @@ class RouterConfig:
             raise ValueError(f"failure_threshold must be >= 1, got {self.failure_threshold}")
         if self.recovery_threshold < 1:
             raise ValueError(f"recovery_threshold must be >= 1, got {self.recovery_threshold}")
+        seen_urls: set[str] = set()
         for replica in self.replicas:
             if not replica.url.startswith(("http://", "https://")):
                 raise ValueError(f"ReplicaEndpoint.url must start with http:// or https://, got {replica.url!r}")
+            parsed = urlparse(replica.url)
+            if parsed.path not in ("", "/"):
+                raise ValueError(f"ReplicaEndpoint.url must be a base host[:port] URL without a path; "
+                                 f"got {replica.url!r} with path {parsed.path!r}. The router appends "
+                                 "`/health` and `/v1/stream` itself.")
+            if parsed.query or parsed.fragment:
+                raise ValueError(f"ReplicaEndpoint.url must not include query/fragment; got {replica.url!r}")
+            if replica.url in seen_urls:
+                raise ValueError(f"Duplicate ReplicaEndpoint.url {replica.url!r}; "
+                                 "router selection keys by URL so duplicates would silently collapse")
+            seen_urls.add(replica.url)
         primaries = sum(1 for r in self.replicas if r.primary)
         if primaries > 1:
             raise ValueError(f"RouterConfig allows at most one primary replica; got {primaries}. "

@@ -76,14 +76,22 @@ def _load_router_config(path: str) -> RouterConfig:
         raise ValueError(f"Router config {path!r} must have a top-level `router:` block")
 
     replicas_raw = router_raw.get("replicas", [])
-    replicas = [
-        ReplicaEndpoint(
-            url=r["url"],
-            name=r.get("name"),
-            primary=bool(r.get("primary", False)),
-            weight=float(r.get("weight", 1.0)),
-        ) for r in replicas_raw if isinstance(r, dict) and r.get("url")
-    ]
+    if not isinstance(replicas_raw, list):
+        raise ValueError(f"router.replicas must be a list, got {type(replicas_raw).__name__}")
+    replicas = []
+    for i, r in enumerate(replicas_raw):
+        if not isinstance(r, dict):
+            raise ValueError(f"router.replicas[{i}] must be a mapping, got {type(r).__name__}")
+        url = r.get("url")
+        if not url:
+            raise ValueError(f"router.replicas[{i}] is missing required key 'url'")
+        replicas.append(
+            ReplicaEndpoint(
+                url=url,
+                name=r.get("name"),
+                primary=bool(r.get("primary", False)),
+                weight=float(r.get("weight", 1.0)),
+            ))
     if not replicas:
         raise ValueError("Router config must list at least one replica under `router.replicas`")
 
