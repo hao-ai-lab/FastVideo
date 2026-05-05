@@ -63,12 +63,37 @@ full Playwright suite.
 
 ## Phase 0 production-equivalent prerequisites
 
-For the production-equivalent NVFP4 path, install these optional dependencies
-in the FastVideo `.venv` before GPU4 smoke tests:
+For the production-equivalent NVFP4 path, install these dependencies
+in the FastVideo `.venv` before GPU smoke tests:
 
 ```bash
-.venv/bin/pip install flashinfer-python flash-attn --no-build-isolation
+uv pip install --python .venv/bin/python \
+  flashinfer-python flash-attn cerebras-cloud-sdk openai \
+  --no-build-isolation
 ```
 
-`flashinfer-python` is required for NVFP4 quantization. `flash-attn` is
-optional but recommended; without it, attention falls back to Torch SDPA.
+| Package | Why |
+|---|---|
+| `flashinfer-python` | Required for NVFP4 quantization. Without it, model load fails with `ImportError: NVFP4 quantization requires flashinfer`. |
+| `flash-attn` | Optional but recommended; without it attention falls back to Torch SDPA (functional but slower). |
+| `cerebras-cloud-sdk` | Required by the migrated prompt enhancer for the default `cerebras` provider. |
+| `openai` | Required by the prompt enhancer's OpenAI-compatible providers + downstream rewrites. |
+
+### B200 / sm_100a + gcc-15 conda toolchain (flashinfer JIT workaround)
+
+On hosts where the conda toolchain ships gcc-15 (which nvcc rejects with
+`#error -- unsupported GNU version! gcc versions later than 14 are not
+supported!`), set these env vars before launching anything that triggers
+flashinfer's JIT kernel build:
+
+```bash
+export CC=/usr/bin/gcc-13
+export CXX=/usr/bin/g++-13
+export CUDAHOSTCXX=/usr/bin/g++-13
+export NVCC_PREPEND_FLAGS="-ccbin /usr/bin/gcc-13 -allow-unsupported-compiler"
+```
+
+The `apps/dreamverse/scripts/dreamverse-server` wrapper does NOT set these —
+they need to come from the launching shell. The `dreamverse-deploy` skill
+([`.agents/skills/dreamverse-deploy/`](../../.agents/skills/dreamverse-deploy/SKILL.md))
+sets them for you and is the recommended local-deploy path.
