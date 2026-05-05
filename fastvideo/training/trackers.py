@@ -151,7 +151,12 @@ class WandbTracker(BaseTracker):
     def log(self, metrics: dict[str, Any], step: int) -> None:
         metrics = {**self._timed_metrics, **metrics}
         if metrics:
-            self._run.log(metrics, step=step)
+            # Fail soft: a transient W&B network error must not kill the
+            # training run. Drop the metric, log a warning, continue.
+            try:
+                self._run.log(metrics, step=step)
+            except Exception as e:
+                logger.warning("wandb log failed at step %d (%s: %s); continuing.", step, type(e).__name__, e)
         self._timed_metrics = {}
 
     def log_file(
@@ -159,13 +164,19 @@ class WandbTracker(BaseTracker):
         file_path: str,
         name: str | None = None,
     ) -> None:
-        self._wandb.save(
-            file_path,
-            base_path=os.path.dirname(file_path),
-        )
+        try:
+            self._wandb.save(
+                file_path,
+                base_path=os.path.dirname(file_path),
+            )
+        except Exception as e:
+            logger.warning("wandb file upload failed for %s (%s: %s); continuing.", file_path, type(e).__name__, e)
 
     def finish(self) -> None:
-        self._run.finish()
+        try:
+            self._run.finish()
+        except Exception as e:
+            logger.warning("wandb finish failed (%s: %s); continuing.", type(e).__name__, e)
 
     def video(
         self,
