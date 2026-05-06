@@ -31,7 +31,6 @@ class MotionSmoothnessMetric(BaseMetric):
         super().__init__()
         self._model = None
         self._embt = None
-        self._vram_avail = None
         self._chunk_size = 8
 
     def to(self, device):
@@ -67,24 +66,75 @@ class MotionSmoothnessMetric(BaseMetric):
 
         self._embt = torch.tensor(1 / 2).float().view(1, 1, 1, 1).to(self.device)
 
-        if self.device.type == "cuda":
-            self._vram_avail = torch.cuda.get_device_properties(self.device).total_memory
-        else:
-            self._vram_avail = None
-
     def _get_scale(self, h: int, w: int) -> float:
-        if self._vram_avail is None:
+        """Pick a downscale factor that keeps AMT's correlation volume
+        within free GPU memory.
+
+        Re-queries free memory on every call (rather than caching at setup
+        time) so the scale adapts to whatever's actually available — other
+        metric replicas already loaded, residual generator allocations,
+        another process sharing the GPU, etc. The upstream version cached
+        ``total_memory`` at setup, which on a shared/loaded GPU lets AMT
+        attempt a 30+ GB correlation volume reshape and OOM.
+        """
+        if self.device.type != "cuda":
             return 1.0
+        # Free memory that won't be claimed by other allocations during this
+        # forward pass. min(free, total) is conservative against transient
+        # spikes; mem_get_info returns (free, total) in bytes.
+        free_bytes, _ = torch.cuda.mem_get_info(self.device)
         anchor_resolution = 1024 * 512
         anchor_memory = 1500 * 1024**2
         anchor_memory_bias = 2500 * 1024**2
+        if free_bytes <= anchor_memory_bias:
+            # Less than the model + scratch overhead is free; force the
+            # most aggressive downscale we support.
+            return 1 / 16
         scale = anchor_resolution / (h * w) * np.sqrt(
-            (self._vram_avail - anchor_memory_bias) / anchor_memory
+            (free_bytes - anchor_memory_bias) / anchor_memory
         )
         if scale >= 1.0:
             return 1.0
         scale = 1 / np.floor(1 / np.sqrt(scale) * 16) * 16
         return float(scale)
+
+    _MIN_AMT_SCALE = 1 / 16
+
+    def _safe_amt_forward(self, in0, in1, embt, scale):
+        """Run one chunk through AMT with OOM-retry on two axes.
+
+        Recovery strategy on ``CUDA out of memory``:
+
+        1. **Halve the batch** until batch=1. AMT's per-pair memory
+           dominates; splitting helps until each pair is on its own.
+        2. **Halve the scale_factor** passed to AMT (which controls its
+           internal feature-map resolution and therefore the correlation
+           volume size). Bottoms out at ``_MIN_AMT_SCALE`` — beyond that
+           the feature maps are too coarse to produce meaningful
+           interpolation and we re-raise.
+
+        Self-tunes under memory pressure: the upstream autoscale formula
+        in :meth:`_get_scale` mis-extrapolates at large resolutions
+        (treats memory as linear in pixel count, but AMT's correlation
+        volume grows quadratically). This retry path makes the metric
+        robust to that without rewriting the formula.
+        """
+        try:
+            return self._model(in0, in1, embt,
+                               scale_factor=scale, eval=True)["imgt_pred"]
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            bs = in0.shape[0]
+            if bs > 1:
+                half = bs // 2
+                a = self._safe_amt_forward(in0[:half], in1[:half],
+                                           embt[:half], scale)
+                b = self._safe_amt_forward(in0[half:], in1[half:],
+                                           embt[half:], scale)
+                return torch.cat([a, b], dim=0)
+            if scale > self._MIN_AMT_SCALE:
+                return self._safe_amt_forward(in0, in1, embt, scale / 2)
+            raise
 
     @torch.no_grad()
     def compute(self, sample: dict) -> list[MetricResult]:
@@ -145,8 +195,7 @@ class MotionSmoothnessMetric(BaseMetric):
             in0_batch = torch.cat(all_in0[start:end], dim=0).to(self.device)
             in1_batch = torch.cat(all_in1[start:end], dim=0).to(self.device)
             embt = self._embt.expand(in0_batch.shape[0], -1, -1, -1)
-            pred = self._model(in0_batch, in1_batch, embt,
-                              scale_factor=scale, eval=True)["imgt_pred"]
+            pred = self._safe_amt_forward(in0_batch, in1_batch, embt, scale)
             all_preds.append(pred.cpu())
 
         all_preds = torch.cat(all_preds, dim=0)
