@@ -923,7 +923,8 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--data-path",
                             type=str,
                             required=True,
-                            help="Path to parquet files. Use os.pathsep-separated paths for multiple roots.")
+                            help=("Path to dataset files. Map-style parquet datasets "
+                                  "support os.pathsep-separated paths for multiple roots."))
         parser.add_argument("--data-split",
                             type=str,
                             default=TrainingArgs.data_split,

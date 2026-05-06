@@ -120,6 +120,43 @@ def test_select_split_row_indices_uses_stable_row_keys(tmp_path) -> None:
     assert set(validation_indices).isdisjoint(train_indices)
 
 
+def test_validation_split_sample_keys_stable_when_roots_reordered(
+        tmp_path) -> None:
+    root_a = tmp_path / "root_a"
+    root_b = tmp_path / "root_b"
+    root_a.mkdir()
+    root_b.mkdir()
+
+    ids_a = [f"clip-a-{idx}" for idx in range(8)]
+    ids_b = [f"clip-b-{idx}" for idx in range(8)]
+    file_a = root_a / "data.parquet"
+    file_b = root_b / "data.parquet"
+    pq.write_table(pa.table({"id": ids_a}), file_a)
+    pq.write_table(pa.table({"id": ids_b}), file_b)
+
+    def selected_sample_keys(
+        file_names: list[str],
+        id_groups: list[list[str]],
+    ) -> set[str]:
+        lengths = [len(ids) for ids in id_groups]
+        selected_indices = map_style._select_split_row_indices(
+            file_names,
+            lengths,
+            data_split="validation",
+            validation_split_ratio=0.5,
+            seed=42,
+        )
+        flattened_ids = [sample_id for ids in id_groups for sample_id in ids]
+        return {flattened_ids[idx] for idx in selected_indices}
+
+    keys_ab = selected_sample_keys([file_a.as_posix(), file_b.as_posix()],
+                                   [ids_a, ids_b])
+    keys_ba = selected_sample_keys([file_b.as_posix(), file_a.as_posix()],
+                                   [ids_b, ids_a])
+
+    assert keys_ab == keys_ba
+
+
 def test_dataset_getitems_maps_split_indices(monkeypatch) -> None:
 
     def fake_read_row(parquet_files, global_row_idx, lengths):
