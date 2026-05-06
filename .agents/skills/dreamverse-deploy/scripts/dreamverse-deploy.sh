@@ -41,11 +41,15 @@ Flags (override env vars when both set):
                                      enable max-autotune torch.compile
                                      (default off — first segment ~3-4min
                                      when on, ~45s when off)
+  --nvenc / --no-nvenc              use h264_nvenc hardware encoder (default
+                                     off — uses libx264 software encoder).
+                                     Requires native ffmpeg built with NVENC.
   -h, --help                        show this help
 
 Env overrides:
   DREAMVERSE_WARMUP                 'true'|'false' (default false)
   DREAMVERSE_TORCH_COMPILE          'true'|'false' (default false)
+  DREAMVERSE_NVENC                  'true'|'false' (default false)
   DREAMVERSE_REPO_ROOT              default: \$(git rev-parse --show-toplevel)
   DREAMVERSE_LOG_DIR                default: /tmp/opencode/dreamverse-deploy
   DREAMVERSE_REQUIRE_NATIVE_FFMPEG  'true'|'false' (default false)
@@ -54,6 +58,7 @@ USAGE
 
 WARMUP_OVERRIDE=""
 TORCH_COMPILE_OVERRIDE=""
+NVENC_OVERRIDE=""
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,6 +67,8 @@ while [[ $# -gt 0 ]]; do
     --no-warmup)            WARMUP_OVERRIDE=false; shift ;;
     --torch-compile)        TORCH_COMPILE_OVERRIDE=true; shift ;;
     --no-torch-compile)     TORCH_COMPILE_OVERRIDE=false; shift ;;
+    --nvenc)                NVENC_OVERRIDE=true; shift ;;
+    --no-nvenc)             NVENC_OVERRIDE=false; shift ;;
     --)                     shift; while [[ $# -gt 0 ]]; do POSITIONAL+=("$1"); shift; done ;;
     -*)                     echo "error: unknown flag '$1'" >&2; usage >&2; exit 2 ;;
     *)                      POSITIONAL+=("$1"); shift ;;
@@ -96,6 +103,12 @@ case "${TORCH_COMPILE}" in
 esac
 TORCH_COMPILE_FLAG=$([[ "${TORCH_COMPILE}" == "true" ]] && echo 1 || echo 0)
 
+NVENC="${NVENC_OVERRIDE:-${DREAMVERSE_NVENC:-false}}"
+case "${NVENC}" in
+  true|false) ;;
+  *) echo "error: nvenc must be 'true' or 'false' (got '${NVENC}')" >&2; exit 2 ;;
+esac
+
 REPO_ROOT="${DREAMVERSE_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 LOG_DIR="${DREAMVERSE_LOG_DIR:-/tmp/opencode/dreamverse-deploy}"
 
@@ -128,16 +141,31 @@ GPP13=/usr/bin/g++-13
 [[ -f "${HOME}/.env" ]] || echo "warn: ${HOME}/.env missing — provider API keys may be unset" >&2
 
 NATIVE_FFMPEG_BIN="${HOME}/opt/ffmpeg-native/bin/ffmpeg"
-NATIVE_VIDEO_CODEC=libx264
+if [[ "${NVENC}" == "true" ]]; then
+  NATIVE_VIDEO_CODEC=h264_nvenc
+else
+  NATIVE_VIDEO_CODEC=libx264
+fi
 REQUIRE_NATIVE_FFMPEG="${DREAMVERSE_REQUIRE_NATIVE_FFMPEG:-false}"
 case "${REQUIRE_NATIVE_FFMPEG}" in
   true|false) ;;
   *) bail "DREAMVERSE_REQUIRE_NATIVE_FFMPEG must be 'true' or 'false' (got '${REQUIRE_NATIVE_FFMPEG}')" ;;
 esac
 if [[ -x "${NATIVE_FFMPEG_BIN}" ]]; then
+  if [[ "${NVENC}" == "true" ]]; then
+    encoder_list="$("${NATIVE_FFMPEG_BIN}" -hide_banner -encoders 2>/dev/null || true)"
+    if [[ "${encoder_list}" != *h264_nvenc* ]]; then
+      bail "--nvenc requested but ${NATIVE_FFMPEG_BIN} was not built with NVENC. Rebuild: bash apps/dreamverse/scripts/install_native_ffmpeg.sh (with ENABLE_NVENC=1, the default)"
+    fi
+    if ! "${NATIVE_FFMPEG_BIN}" -hide_banner -loglevel error -y \
+            -f lavfi -i 'color=red:size=64x64:rate=24:duration=0.2' \
+            -c:v h264_nvenc -f null - >/dev/null 2>&1; then
+      bail "--nvenc requested but the GPU on this host has no NVENC silicon (probe failed: 'OpenEncodeSessionEx unsupported device'). Datacenter Blackwell (B200) and some H100 SKUs ship without NVENC; --nvenc only works on hosts with NVENC-capable GPUs (RTX 50-series, T4, A10, etc.)."
+    fi
+  fi
   echo "        native ffmpeg: ${NATIVE_FFMPEG_BIN} (codec=${NATIVE_VIDEO_CODEC})"
-elif [[ "${REQUIRE_NATIVE_FFMPEG}" == "true" ]]; then
-  bail "DREAMVERSE_REQUIRE_NATIVE_FFMPEG=true but ${NATIVE_FFMPEG_BIN} missing. Run: bash apps/dreamverse/scripts/install_native_ffmpeg.sh"
+elif [[ "${REQUIRE_NATIVE_FFMPEG}" == "true" ]] || [[ "${NVENC}" == "true" ]]; then
+  bail "${NATIVE_FFMPEG_BIN} missing (required by --nvenc or DREAMVERSE_REQUIRE_NATIVE_FFMPEG=true). Run: bash apps/dreamverse/scripts/install_native_ffmpeg.sh"
 else
   echo "warn: ${NATIVE_FFMPEG_BIN} missing — backend will fall back to system ffmpeg (\$(command -v ffmpeg))." >&2
   echo "      Build native ffmpeg with: bash apps/dreamverse/scripts/install_native_ffmpeg.sh" >&2
@@ -197,7 +225,7 @@ echo "        ports cleared; GPU${GPU} at ${gpu_mem} MiB"
 # Launch backend
 # ---------------------------------------------------------------------------
 
-echo "[2/8] launching backend on GPU ${GPU} port ${BACKEND_PORT} (warmup=${WARMUP} torch_compile=${TORCH_COMPILE})..."
+echo "[2/8] launching backend on GPU ${GPU} port ${BACKEND_PORT} (warmup=${WARMUP} torch_compile=${TORCH_COMPILE} nvenc=${NVENC})..."
 
 backend_log="${LOG_DIR}/backend-gpu${GPU}.log"
 : > "${backend_log}"
