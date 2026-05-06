@@ -309,10 +309,8 @@ def _build_training_config(
                 model_path = str(init_from)
 
     data_path_raw = da.get("data_path", "") or ""
-    if isinstance(data_path_raw, list):
-        data_path = [str(path) for path in data_path_raw]
-    else:
-        data_path = str(data_path_raw)
+    data_path: str | list[str] = ([str(path) for path in data_path_raw]
+                                  if isinstance(data_path_raw, list) else str(data_path_raw))
 
     return TrainingConfig(
         distributed=DistributedConfig(
