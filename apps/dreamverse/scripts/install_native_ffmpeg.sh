@@ -25,6 +25,9 @@
 #     SOURCE_DIR      build workspace         default: $HOME/src/ffmpeg-native
 #     X264_REF        x264 git ref            default: stable
 #     FFMPEG_REF      FFmpeg git ref          default: n7.1
+#     NV_CODEC_REF    nv-codec-headers ref    default: master
+#     CUDA_PREFIX     CUDA toolkit root       default: /usr/local/cuda
+#     ENABLE_NVENC    build with NVENC/NVDEC  default: 1 (1|0)
 #     MAKE_JOBS       parallel make jobs      default: min(nproc, 16)
 #
 # Toolchain selection: CC / CXX / AS are pinned to the conda-forge
@@ -42,6 +45,13 @@ INSTALL_PREFIX="${INSTALL_PREFIX:-$HOME/opt/ffmpeg-native}"
 SOURCE_DIR="${SOURCE_DIR:-$HOME/src/ffmpeg-native}"
 X264_REF="${X264_REF:-stable}"
 FFMPEG_REF="${FFMPEG_REF:-n7.1}"
+NV_CODEC_REF="${NV_CODEC_REF:-master}"
+CUDA_PREFIX="${CUDA_PREFIX:-/usr/local/cuda}"
+ENABLE_NVENC="${ENABLE_NVENC:-1}"
+case "${ENABLE_NVENC}" in
+  0|1) ;;
+  *) echo "[install_native_ffmpeg] ENABLE_NVENC must be 0 or 1, got '${ENABLE_NVENC}'" >&2; exit 1 ;;
+esac
 NPROC="$(nproc)"
 MAKE_JOBS="${MAKE_JOBS:-$(( NPROC < 16 ? NPROC : 16 ))}"
 
@@ -110,8 +120,17 @@ guard_path SOURCE_DIR     "$SOURCE_DIR"
 
 # ─── Step 1: clean ────────────────────────────────────────────────────────
 echo "[install_native_ffmpeg] cleaning prior install + sources"
-rm -rf "$INSTALL_PREFIX" "$SOURCE_DIR/x264" "$SOURCE_DIR/ffmpeg"
+rm -rf "$INSTALL_PREFIX" "$SOURCE_DIR/x264" "$SOURCE_DIR/ffmpeg" "$SOURCE_DIR/nv-codec-headers"
 mkdir -p "$SOURCE_DIR" "$INSTALL_PREFIX/lib"
+
+if [[ "$ENABLE_NVENC" == "1" ]]; then
+  if [[ ! -f "$CUDA_PREFIX/include/cuda.h" ]]; then
+    echo "[install_native_ffmpeg] ENABLE_NVENC=1 but cuda.h not at $CUDA_PREFIX/include/cuda.h" >&2
+    echo "[install_native_ffmpeg] set CUDA_PREFIX env to your CUDA toolkit root, or ENABLE_NVENC=0 to skip" >&2
+    exit 1
+  fi
+  echo "[install_native_ffmpeg] NVENC build enabled (CUDA_PREFIX=$CUDA_PREFIX)"
+fi
 
 # Deviation 2: force our prefix to win over conda-forge gcc's implicit
 # library search (otherwise an older libx264 from conda's lib dir leaks
@@ -135,7 +154,24 @@ git clone --depth 1 --branch "$X264_REF" \
   make install
 )
 
-# ─── Step 3: build ffmpeg (LTO, libx264, shared) ──────────────────────────
+# ─── Step 2.5: nv-codec-headers (NVENC/NVDEC API headers, no CUDA libs) ──
+# Required for ffmpeg's --enable-cuda --enable-nvenc --enable-cuvid configure
+# flags. Installs ffnvcodec.pc + headers into $INSTALL_PREFIX so ffmpeg's
+# pkg-config picks them up alongside libx264. The runtime libraries
+# (libcuda.so, libnvcuvid.so, libnvidia-encode.so) come from the NVIDIA
+# driver, not from these headers.
+if [[ "$ENABLE_NVENC" == "1" ]]; then
+  echo "[install_native_ffmpeg] cloning nv-codec-headers ($NV_CODEC_REF)"
+  git clone --depth 1 --branch "$NV_CODEC_REF" \
+      https://git.videolan.org/git/ffmpeg/nv-codec-headers.git \
+      "$SOURCE_DIR/nv-codec-headers"
+  (
+    cd "$SOURCE_DIR/nv-codec-headers"
+    make PREFIX="$INSTALL_PREFIX" install
+  )
+fi
+
+# ─── Step 3: build ffmpeg (LTO, libx264, shared, optional NVENC) ──────────
 echo "[install_native_ffmpeg] cloning FFmpeg ($FFMPEG_REF)"
 git clone --depth 1 --branch "$FFMPEG_REF" \
     https://github.com/FFmpeg/FFmpeg.git "$SOURCE_DIR/ffmpeg"
@@ -145,40 +181,59 @@ git clone --depth 1 --branch "$FFMPEG_REF" \
   export CFLAGS="$FFMPEG_CFLAGS"
   export CXXFLAGS="$FFMPEG_CFLAGS"
   export LDFLAGS="$FFMPEG_LDFLAGS"
-  # Informational sanity prints (matches playbook).
   [[ "$(uname -m)" == "x86_64" ]] && which nasm
   pkg-config --modversion x264
   echo "[install_native_ffmpeg] configuring ffmpeg"
-  # Deviation 1 (--disable-libxcb --disable-xlib) and the leading -L of
-  # deviation 2 are inserted here. All other flags are verbatim playbook.
-  ./configure \
-    --prefix="$INSTALL_PREFIX" \
-    --enable-gpl \
-    --enable-libx264 \
-    --enable-lto \
-    --enable-shared \
-    --disable-static \
-    --disable-debug \
-    --disable-doc \
-    --disable-ffplay \
-    --disable-libxcb \
-    --disable-xlib \
-    --extra-cflags="$CFLAGS" \
-    --extra-cxxflags="$CXXFLAGS" \
+  ffmpeg_configure_flags=(
+    --prefix="$INSTALL_PREFIX"
+    --enable-gpl
+    --enable-libx264
+    --enable-lto
+    --enable-shared
+    --disable-static
+    --disable-debug
+    --disable-doc
+    --disable-ffplay
+    --disable-libxcb
+    --disable-xlib
+    --extra-cflags="$CFLAGS"
+    --extra-cxxflags="$CXXFLAGS"
     --extra-ldflags="-L$INSTALL_PREFIX/lib $LDFLAGS"
+  )
+  if [[ "$ENABLE_NVENC" == "1" ]]; then
+    pkg-config --modversion ffnvcodec
+    ffmpeg_configure_flags+=(
+      --enable-cuda
+      --enable-nvenc
+      --enable-cuvid
+      --enable-nvdec
+      --extra-cflags="-I$CUDA_PREFIX/include"
+      --extra-ldflags="-L$CUDA_PREFIX/lib64"
+    )
+  fi
+  ./configure "${ffmpeg_configure_flags[@]}"
   echo "[install_native_ffmpeg] building ffmpeg (-j$MAKE_JOBS)"
   make -j"$MAKE_JOBS"
   make install
 )
 
-# ─── Step 4: sanity check (verbatim playbook checks) ──────────────────────
+# ─── Step 4: sanity check ──────────────────────────────────────────────────
 ffmpeg_bin="$INSTALL_PREFIX/bin/ffmpeg"
 echo "[install_native_ffmpeg] verifying $ffmpeg_bin"
 "$ffmpeg_bin" -hide_banner -buildconf | grep -i -E 'libx264|lto'
 "$ffmpeg_bin" -hide_banner -encoders  | grep -i libx264
 "$ffmpeg_bin" -hide_banner -h encoder=libx264 2>&1 | grep -i preset
+if [[ "$ENABLE_NVENC" == "1" ]]; then
+  "$ffmpeg_bin" -hide_banner -encoders | grep -E 'h264_nvenc|hevc_nvenc' || {
+    echo "[install_native_ffmpeg] ENABLE_NVENC=1 but built ffmpeg has no h264_nvenc/hevc_nvenc encoder" >&2
+    exit 1
+  }
+fi
 
-# ─── Step 5: emit env file (matches playbook exports) ─────────────────────
+# ─── Step 5: emit env file ─────────────────────────────────────────────────
+# FASTVIDEO_VIDEO_CODEC stays at libx264 by default to preserve runtime
+# behavior; NVENC is selected at deploy time via dreamverse-deploy.sh
+# --nvenc, which exports FASTVIDEO_VIDEO_CODEC=h264_nvenc.
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 env_file="$script_dir/ffmpeg-env.sh"
 {
