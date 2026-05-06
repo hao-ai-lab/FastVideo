@@ -90,10 +90,31 @@ class VBenchPromptDataset(PromptDataset):
             n = (TEMPORAL_FLICKERING_SAMPLES
                  if "temporal_flickering" in relevant else DEFAULT_SAMPLES)
 
-            # Flatten upstream's nested {dim: {key: val}} schema into
-            # {key: val} so every downstream consumer sees aux as a
-            # single-level dict (matches the contract documented on
-            # PromptDataset / Sample.auxiliary_info).
+            # Strip the outer {dim_name: ...} wrapper from upstream's aux
+            # schema so every metric reads its inputs from a flat dict.
+            #
+            # This unwraps exactly one level — the dimension key. Whatever
+            # shape lives inside is the metric's contract:
+            #
+            #   color:                {"color": {"color": "red"}}
+            #     → flat: {"color": "red"}                  (scalar)
+            #
+            #   object_class:         {"object_class": {"object": "person"}}
+            #     → flat: {"object": "person"}              (scalar)
+            #
+            #   multiple_objects:     {"multiple_objects": {"object": "a and b"}}
+            #     → flat: {"object": "a and b"}             (scalar)
+            #
+            #   spatial_relationship: {"spatial_relationship":
+            #                            {"spatial_relationship":
+            #                                {"object_a": ..., "object_b": ...,
+            #                                 "relationship": ...}}}
+            #     → flat: {"spatial_relationship": {object_a,object_b,relationship}}
+            #
+            # Note the spatial_relationship case keeps a nested inner dict
+            # by design — upstream double-wraps it, the SpatialRelationship
+            # metric reads ``aux["spatial_relationship"]`` expecting that
+            # inner dict. Don't "simplify" the wrapping away.
             raw_aux = entry.get("auxiliary_info") or {}
             flat_aux: dict = {}
             for v in raw_aux.values():
