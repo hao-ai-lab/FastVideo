@@ -486,7 +486,7 @@ class VideoGenerationWorker:
             raise RuntimeError("Startup warmup prompt must be non-empty.")
 
         print(f"[GPU {self.gpu_id}] Startup warmup starting "
-              "(synthetic segment 1 + 2)")
+              "(synthetic segments: seg1, seg2, seg1-post-LoRA)")
         warmup_t0 = time.perf_counter()
 
         r1 = self.generate_step(
@@ -501,16 +501,35 @@ class VideoGenerationWorker:
             image_path=None,
             reset_conditioning=False,
         )
+        # r1 stage 1 compiled BEFORE LoRA wrapping (which happens during
+        # r1 stage 2 via ltx2_refine_lora_stage), so the resulting graph
+        # is keyed off pre-LoRA module identity and is stale once r1 r2
+        # finish. The first real user seg=1 then re-compiles stage 1
+        # ("stage1-LoRA-nocont"), wasting ~90s on the user's first
+        # request. Run a 3rd warmup pass with seg=1 reset=True after r2
+        # so this graph is compiled while no client is waiting. r3
+        # stage 2 hits r1 stage 2's cache (shape match, both LoRA-nocont)
+        # so the only real work is the missing stage 1 graph.
+        self.continuation.clear()
+        r3 = self.generate_step(
+            warmup_prompt,
+            segment_idx=1,
+            image_path=None,
+            reset_conditioning=True,
+        )
         warmup_total_ms = (time.perf_counter() - warmup_t0) * 1000.0
         self.continuation.clear()
 
         segment1_ms = float(r1.timings.get("e2e_latency_ms", 0.0))
         segment2_ms = float(r2.timings.get("e2e_latency_ms", 0.0))
+        segment3_ms = float(r3.timings.get("e2e_latency_ms", 0.0))
         print(f"[GPU {self.gpu_id}] Startup warmup complete: "
               f"segment1={segment1_ms:.0f}ms, "
-              f"segment2={segment2_ms:.0f}ms, total={warmup_total_ms:.0f}ms")
+              f"segment2={segment2_ms:.0f}ms, "
+              f"segment3={segment3_ms:.0f}ms, total={warmup_total_ms:.0f}ms")
         return {
             "warmup_segment1_ms": segment1_ms,
             "warmup_segment2_ms": segment2_ms,
+            "warmup_segment3_ms": segment3_ms,
             "warmup_total_ms": warmup_total_ms,
         }
