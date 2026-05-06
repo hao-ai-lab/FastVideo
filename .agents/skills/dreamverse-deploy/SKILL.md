@@ -69,6 +69,7 @@ If any required prereq is missing, the script fails fast with a clear message.
 |---|---|---|
 | `--warmup` / `--no-warmup` | off | Run GPU warmup at boot (~minutes). Overrides `DREAMVERSE_WARMUP` |
 | `--torch-compile` / `--no-torch-compile` | off | Enable max-autotune `torch.compile`. First segment ~3-4min when on, ~45s when off. Overrides `DREAMVERSE_TORCH_COMPILE` |
+| `--nvenc` / `--no-nvenc` | off | Use `h264_nvenc` hardware encoder instead of `libx264` software. Eliminates ~1100ms/segment of CPU encoding cost (raises realtime ratio from ~0.78x → ≥1.0x, eliminating inter-segment buffer-drain stutter). Requires native ffmpeg built with `--enable-nvenc` (the install script's default since the NVENC update). Hard-fails up-front if the binary is missing or lacks NVENC. Overrides `DREAMVERSE_NVENC` |
 | `-h` / `--help` | — | Show usage |
 
 Flags can appear in any position relative to the positional args. Explicit flag values always win over env-var defaults.
@@ -79,6 +80,7 @@ Flags can appear in any position relative to the positional args. Explicit flag 
 |---|---|---|
 | `DREAMVERSE_WARMUP` | `false` | Same as `--warmup`/`--no-warmup`. Flag takes precedence |
 | `DREAMVERSE_TORCH_COMPILE` | `false` | Same as `--torch-compile`/`--no-torch-compile`. Flag takes precedence |
+| `DREAMVERSE_NVENC` | `false` | Same as `--nvenc`/`--no-nvenc`. Flag takes precedence |
 | `DREAMVERSE_PYTHON` | `~/miniconda3/envs/fv-main/bin/python` | Conda env python used for prereq probes (flashinfer import). The wrapper at `apps/dreamverse/scripts/dreamverse-server` still resolves python via the `.venv` symlink, which points at the same interpreter on this dev node |
 | `DREAMVERSE_REPO_ROOT` | git rev-parse | Repo root override |
 | `DREAMVERSE_LOG_DIR` | `/tmp/opencode/dreamverse-deploy` | Where to write `backend.log` / `frontend.log` |
