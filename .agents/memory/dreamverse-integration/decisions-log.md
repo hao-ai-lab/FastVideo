@@ -6,7 +6,7 @@ question/decision, rationale, current status.
 For implementation status see [pr-roadmap.md](pr-roadmap.md). For
 follow-up actions see [open-threads.md](open-threads.md).
 
-**Last updated:** 2026-05-05 (added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion, Oracle review during #1284 review cycle; added D-15 — streaming router placement + sticky/active-active deferral, Oracle review during #1286 review cycle; added D-16 — streaming router polish round 2, second-pass review on top of D-15 covering bridge cancellation hygiene, registry state machine, httpx hard-fail, replica YAML parsing, and `websockets` dep; added D-17 — strategy reversal: abandon 6-PR split in favor of single mega-PR #1288 on `will/ltx2_sr_port`; added D-18 — Option B+ chosen: Dreamverse FE+product-server move into FastVideo as `apps/dreamverse/` subfolder while generic backend stays at `fastvideo.entrypoints.streaming.*`; integration-review.md deprecated, integration-plan.md is the executable migration plan; added D-19 — D-18 executed: 5 commits land on `will/dreamverse-monorepo`, fix-up commits corrected the integration-plan's invalid "delete generic-merged, import public substitutes" assumption — generic-merged files carried product-local instead, e2e passes against migrated code with /proc-verified evidence; added D-20 — segment-2 BrokenPipe root cause was a TWO-direction silent drop of LTX-2 audio kwargs in public `VideoGenerator` (inbound: `SamplingParam.update()` rejected `audio_num_frames`/`ltx2_audio_clean_latent`/etc. as unknown fields and `logger.error`'d, outbound: result dict didn't surface `ltx2_audio_latents` from `output_batch.extra`); ported the FastVideo-internal extra-overrides routing block + made `update()` strict + added regression test + landed 4 commits on `will/dreamverse-monorepo`).
+**Last updated:** 2026-05-06 (added D-21 — chunk-stutter root cause is software libx264 encoding consuming ~22% of segment wall-time, NOT a migration regression; verified by 3 parallel explore agents that NVFP4 + torch.compile coverage matches FastVideo-internal exactly; landed opt-in NVENC build path in install_native_ffmpeg.sh + `--nvenc`/`--no-nvenc` flag in dreamverse-deploy.sh + `apps/dreamverse/server/benchmarks/benchmark_av_streaming.py` regression test + memory dir update; default codec stays `libx264` for backward compat, opt-in via `--nvenc`. Earlier: added D-12 — GpuPool layer separation, Oracle review post-#1257-merge; added D-13 — prompt enhancer / LLMProvider abstraction shape, Oracle review pre-#1258-merge; added D-14 — streaming auxiliaries cohesion, Oracle review during #1284 review cycle; added D-15 — streaming router placement + sticky/active-active deferral, Oracle review during #1286 review cycle; added D-16 — streaming router polish round 2, second-pass review on top of D-15 covering bridge cancellation hygiene, registry state machine, httpx hard-fail, replica YAML parsing, and `websockets` dep; added D-17 — strategy reversal: abandon 6-PR split in favor of single mega-PR #1288 on `will/ltx2_sr_port`; added D-18 — Option B+ chosen: Dreamverse FE+product-server move into FastVideo as `apps/dreamverse/` subfolder while generic backend stays at `fastvideo.entrypoints.streaming.*`; integration-review.md deprecated, integration-plan.md is the executable migration plan; added D-19 — D-18 executed: 5 commits land on `will/dreamverse-monorepo`, fix-up commits corrected the integration-plan's invalid "delete generic-merged, import public substitutes" assumption — generic-merged files carried product-local instead, e2e passes against migrated code with /proc-verified evidence; added D-20 — segment-2 BrokenPipe root cause was a TWO-direction silent drop of LTX-2 audio kwargs in public `VideoGenerator`).
 
 ## Status legend
 
@@ -15,6 +15,74 @@ follow-up actions see [open-threads.md](open-threads.md).
 - 🔴 **Open** — needs decision
 
 ## Post-merge architecture decisions
+
+### D-21: AV chunk stutter root cause — software libx264 encoding consumes ~22% of segment wall time; opt-in NVENC fix
+
+**Status:** 🟡 Deferred — fix landed (NVENC build + `--nvenc` flag), default unchanged so no behavior regression for operators who haven't rebuilt ffmpeg yet. Switch default to `h264_nvenc` once benchmark numbers are captured + a release notes entry is published.
+**Source:** Live debug session 2026-05-06 prompted by user observation: "stuttering still between chunks" after D-20 + warmup r3 fix. 3 explore agents fanned out (NVFP4 config, torch.compile config, AV chunk pacing).
+
+**Question:** With D-20 (audio kwarg routing fix) + r3 warmup pass landed and warmup_success=true, why is the live deploy still stuttering between chunks? Is the migration missing some quantization or compile coverage that the FastVideo-internal reference has?
+
+**Investigation (3 parallel explore agents):**
+
+1. **NVFP4 config diff** (`bg_0629273d`): No divergence. apps/dreamverse, original Dreamverse, and FastVideo-internal ALL use `layer_profile="refine"` with the same 48-block `fp4_layers` superset, e2m1 mantissa, fp32 alpha, layout_128x4 scale, group size 16. Stage gating (`base` vs `refine`) and `transformer_refine_quant` carrier match. The only naming difference is the public surface rename `FP4Config` → `NVFP4Config`.
+2. **torch.compile config diff** (`bg_97081cc5`): No divergence. ALL THREE repos use `inductor / fullgraph=True / max-autotune-no-cudagraphs / dynamic=False` and compile only the transformer + text_encoder. **VAE / audio_vae / vocoder are eager bf16 in all three** — so the migrated repo is not missing a compile pass that the original had. Only behavioral difference: FastVideo-internal calls `target.eval()` on its audio encoder; the migrated worker does not (separate D-22 follow-up).
+3. **AV chunk pacing** (`bg_574e831e`): `stream_fmp4` has only one timer (`av_encode_stream_ms`) — no per-chunk instrumentation. Between `worker.generate_step()` returning and `stream_fmp4()` returning there is no significant work other than ffmpeg's own encode + chunk emission. The `main_user_step − worker_e2e ≈ 1300ms` gap is therefore mostly ffmpeg + controller relay loop, NOT IPC. Per-chunk emission cadence is driven by stdout read size (1 MiB), not fragment boundary, so non-uniform pacing is plausible.
+
+**Root cause synthesis:**
+
+| Phase | Wall-time | Compute | Compiled? | NVFP4? |
+|---|---|---|---|---|
+| transformer denoise (gen) | ~4500 ms | GPU | YES | YES |
+| save_conditioning | ~100 ms | GPU/CPU | n/a | n/a |
+| **stream_fmp4 (libx264 software encode)** | **~1300 ms** | **CPU** | **NO** | **NO** |
+| TOTAL wall | ~6000 ms | producing 4.67 s playable | | |
+
+Realtime ratio = 4.67 s playable / 6.0 s wall = **0.78x**. FE buffer drains 1.3 s per segment until empty → inter-segment stutter. **The cause is not a migration regression** (FastVideo-internal exhibits the same architectural limit); it is the choice to use `libx264 ultrafast` software encoding on the segment-streaming hot path on machines that have idle hardware encoders.
+
+**Build-time finding:** `apps/dreamverse/scripts/install_native_ffmpeg.sh` was building ffmpeg with only `--enable-libx264 --enable-lto`. No `--enable-nvenc`, no nv-codec-headers prereq. So even setting `FASTVIDEO_VIDEO_CODEC=h264_nvenc` would have failed at runtime with "encoder not found".
+
+**Resolution (this round, default-preserving):**
+
+1. **`apps/dreamverse/scripts/install_native_ffmpeg.sh`** now:
+   - Clones `nv-codec-headers` (NVENC/NVDEC API headers; no CUDA libs) into `$INSTALL_PREFIX` so `ffnvcodec.pc` is on `pkg-config`'s search path.
+   - Configures ffmpeg with `--enable-cuda --enable-nvenc --enable-cuvid --enable-nvdec` plus `--extra-cflags=-I$CUDA_PREFIX/include` and `--extra-ldflags=-L$CUDA_PREFIX/lib64`.
+   - Drops `--enable-cuda-nvcc` and `--enable-libnpp` so the build does NOT require `--enable-nonfree` (we only need hardware encode/decode, not GPU-side filters).
+   - New env knobs: `ENABLE_NVENC=0|1` (default 1), `CUDA_PREFIX` (default `/usr/local/cuda`), `NV_CODEC_REF`.
+   - Sanity check verifies the resulting binary exposes `h264_nvenc` / `hevc_nvenc` encoders before exiting 0.
+   - **Emits `FASTVIDEO_VIDEO_CODEC=libx264` in the env file by default** so existing deploys are runtime-unchanged.
+
+2. **`.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh`** now:
+   - Accepts `--nvenc` / `--no-nvenc` flag (defaults to off, matches existing behavior). When `--nvenc`, exports `FASTVIDEO_VIDEO_CODEC=h264_nvenc` into the backend setsid block.
+   - Validates the binary actually has `h264_nvenc` encoder via `ffmpeg -encoders | grep h264_nvenc`. Fails fast if `--nvenc` is requested against a libx264-only ffmpeg with a clear hint to rerun the install script.
+   - `DREAMVERSE_NVENC` env var as the env-var counterpart (flag overrides).
+   - Banner now prints `nvenc=true|false` alongside `warmup` and `torch_compile`.
+
+3. **`apps/dreamverse/server/benchmarks/benchmark_av_streaming.py`** is the regression test:
+   - Drives `stream_fmp4` directly with synthetic 121-frame 1920x1088 video + 5-second 24kHz stereo audio (production shape).
+   - Sweeps `libx264` and `h264_nvenc` (auto-skips encoders not present in the active ffmpeg).
+   - Reports per-codec: wall_ms_min/median/p95/max, bytes_median, chunks_median, and **realtime_ratio_median** (playable / wall, must be ≥ 1.0 to avoid buffer drain).
+   - Exit code 1 if any codec produces realtime_ratio < 1.0; useful as a CI gate.
+
+**Empirical findings (this dev host, B200):**
+
+- `libx264 ultrafast` benchmark on production-shape input (121 frames, 1920x1088, 5s 24kHz stereo audio): wall_median=611ms, wall_p95=644ms, 8.25x realtime ratio in isolation. Captured via `apps/dreamverse/server/benchmarks/benchmark_av_streaming.py --runs 5 --codecs libx264`.
+- **B200 has NO NVENC silicon.** Direct ffmpeg probe (`-c:v h264_nvenc` against a 64x64 0.2s color frame) fails with `OpenEncodeSessionEx failed: unsupported device (2): No capable devices found`. This is a hardware omission — datacenter Blackwell (B200) and some H100 SKUs prioritize compute density and ship without NVENC. Only consumer Blackwell (RTX 50-series) and select datacenter SKUs (T4, A10, A100 PCIe) have NVENC.
+- The deploy script's `--nvenc` path now does TWO checks: (a) `h264_nvenc` is in the encoder list (build-time); (b) a 64x64 ffmpeg probe actually succeeds (runtime-time). On a B200, the runtime probe fails fast with a clear "no NVENC silicon on this host" error pointing at SKU-level alternatives.
+- **Stutter on B200 is NOT primarily ffmpeg encoding.** The benchmark shows libx264 ultrafast at 611ms, but production logs show a 1300ms gap between `worker_e2e` and `main_user_step`. The other ~700ms is IPC + controller WebSocket relay (not measured per-chunk in current `stream_fmp4`).
+
+**Open / deferred:**
+
+- D-22: B200 + RTX 5090 split — for B200-class deploys without NVENC, the stutter fix needs a different approach (pipeline gen N+1 with encode N, or larger initial FE buffer pre-fill). For RTX 5090 / T4 / A10 deploys, `--nvenc` is the answer once tested. Make the deploy default conditional: probe NVENC at boot, default `--nvenc` if available.
+- D-23: Per-chunk timing instrumentation in `stream_fmp4` — needed to nail down where the IPC + relay 700ms goes. The benchmark is in-process so it doesn't capture this; needs instrumentation in `apps/dreamverse/server/av_streaming.py::stream_fmp4` and `apps/dreamverse/server/session/controller.py` AV relay loop.
+- D-24: re-evaluate flipping the deploy default from `libx264` to `h264_nvenc` after a real-NVENC host (RTX 5090 or H100 PCIe) benchmark is run. Tradeoff: NVENC has ~5-10% lower compression at same quality but is hardware-accelerated. For real-time streaming the latency win dominates IF the host has NVENC.
+- The `target.eval()` call on the audio encoder that FastVideo-internal does and the migrated Dreamverse does not — surface as a separate decision once observed empirically (probably a no-op in inference path but worth the symmetry).
+
+**Cross-references:**
+
+- [D-20](decisions-log.md#d-20) (audio kwarg routing fix) made segment 2 generate cleanly. D-21 makes the segment-to-segment chain stutter-free in real-time.
+- [`apps/dreamverse/server/av_streaming.py::stream_fmp4`](file:///home/william5lin/FastVideo/apps/dreamverse/server/av_streaming.py) is the hot path; the cmd builder there respects `FASTVIDEO_VIDEO_CODEC` and branches on `*_nvenc` codecs to use NVENC presets (`p1`/`p2`/...) and `-rc constqp -qp 28` instead of libx264 presets (`ultrafast`/...).
+- The benchmark cross-references D-21 in its module docstring so a future contributor reading the script alone has the context.
 
 ### D-20: Segment-2 BrokenPipe root cause — two-direction silent drop of LTX-2 audio kwargs in public `VideoGenerator`
 

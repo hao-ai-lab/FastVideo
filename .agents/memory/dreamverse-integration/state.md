@@ -1,4 +1,4 @@
-# Current State — 2026-05-05 (D-20 broken-pipe fix landed)
+# Current State — 2026-05-06 (D-21 NVENC build path + benchmark landed)
 
 Point-in-time snapshot of branches, commits, and live infrastructure.
 Update whenever commits land or services restart.
@@ -12,7 +12,7 @@ roster of co-authors to credit on every commit see
 | Repo | Branch | Tip | Distance |
 |---|---|---|---|
 | FastVideo | `will/ltx2_sr_port` (**PR #1288 head**) | `fbd823df` | merged-into-main pending; latest tip post-D-16 + integration-review + integration-plan + GPU4 smoke validation |
-| FastVideo | **`will/dreamverse-monorepo`** (**MIGRATION** — forked from `will/ltx2_sr_port`) | `5eaf0a13` | 11 commits ahead of `fbd823df`. Phases 1+2+3 + 2 fix-up commits + 4 D-20 commits (broken-pipe root cause fix: ffmpeg toolchain pin, public-API audio kwarg routing, native-ffmpeg + compile-off deploy defaults, --warmup/--torch-compile CLI flags). apps/dreamverse/ holds full migrated Dreamverse (server/, web/, prompts/, scripts/, serve_configs/, AGENTS.md, etc.). End-to-end verified on GPU4 with audio continuation across segments 1→2 (`Cached audio latents shape=(1, 8, 126, 16) for segment 2`, `Segment 2: relayed av chunks=22, bytes=3.8MB`, no BrokenPipeError). See [decisions-log.md D-19](decisions-log.md#d-19) + [D-20](decisions-log.md#d-20). |
+| FastVideo | **`will/dreamverse-monorepo`** (**MIGRATION** — forked from `will/ltx2_sr_port`) | (HEAD post D-21 commits, push pending) | Phases 1+2+3 + 2 fix-up commits + 6 D-20 commits + 6 D-20-followup commits (warmup r3, scripts→conda python, /readyz polling budget, e2e spec) + D-21 NVENC build/flag/benchmark/probe commits. apps/dreamverse/ holds full migrated Dreamverse + new benchmarks/ subdir. End-to-end verified on GPU4 with audio continuation across segments 1→2 (`Cached audio latents shape=(1, 8, 126, 16) for segment 2`, `Segment 2: relayed av chunks=22, bytes=3.8MB`, no BrokenPipeError). NVENC build supported but not usable on this dev host (B200 has no NVENC silicon — verified by direct ffmpeg probe). See [decisions-log.md D-19](decisions-log.md#d-19) + [D-20](decisions-log.md#d-20) + [D-21](decisions-log.md#d-21). |
 | FastVideo | `will/api_7.10` | `6ae7a99f` | **deprecated** — PR #1287 closed in favor of #1288. Branch can be deleted on origin and locally; kept for now as historical reference. |
 | FastVideo | `will/api_8`, `will/ltx2_sr_runtime`, `will/ltx2_nvfp4`, `will/ltx2_post_fixes`, `will/agents_cleanup` | (various) | **deprecated** split bookmarks. Strategy reversed to single mega-PR (D-17). Safe to delete locally; not pushed to origin. |
 | FastVideo | `will/ltx2_sr_port-pre-1286-rebase` | `1baa60bb` | **local-only safety backup** of pre-rebase chain (37 commits); keep until next slice merges |

@@ -20,6 +20,9 @@ different vehicle.).
 | # | Pri | Item | Effort | Unblocks |
 |---|---|---|---|---|
 | **D-20-CP** | High | Cherry-pick `[fix] api: route LTX-2 audio kwargs through batch.extra; strict update` (`265ce1a6`) onto `will/ltx2_sr_port` so it lands in PR #1288 | 15 min | Surfaces the public-API audio-conditioning fix in the mega-PR rather than waiting for `will/dreamverse-monorepo` to fold in. Tests already pass (185/185 api). |
+| **D-22** | Med | Per-chunk timing instrumentation in `stream_fmp4` and the controller's AV relay loop | M | Confirms whether the 700ms IPC+relay overhead can be reduced before architectural pipelining. Currently only `av_encode_stream_ms` is recorded; we need `wav_write_ms`, `ffmpeg_spawn_ms`, `ffmpeg_first_chunk_ms`, `ipc_publish_ms`, `controller_ws_send_ms`. |
+| **D-23** | Med | On NVENC-capable hosts (RTX 50-series / T4 / A10 / H100 PCIe), benchmark `h264_nvenc` vs `libx264` and decide whether to default `--nvenc=true` for that SKU | S benchmark + S decision | Stutter mitigation depends on hardware; B200 needs different fix path (D-24). |
+| **D-24** | Low | For B200-class deploys without NVENC, prototype gen-N+1 // encode-N pipelining or FE buffer pre-fill | L | Architectural change required; benchmark suggests ~700ms can be hidden if we pipeline. Ship-blocker only when realtime stutter becomes user-visible on B200 deploys. |
 | **D-8** | High | Verify `ltx2_image_crf` post-`d80c2a8` | 10 min | Confirms typed stage-override path actually flows; closes a latent silent-drop bug |
 | **1** | High | Migrate `/healthz`+`/readyz`+`/status` into FastVideo `build_app` | M-L | Closes BE_FLAVOR=fastvideo FE-compatibility; closes streaming-upstream contract debt |
 | **2** | High | Fix pre-existing AbsMaxFP8 test failure | S | Self-contained quantization tech debt |
