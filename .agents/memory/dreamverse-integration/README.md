@@ -5,7 +5,17 @@ Tracks the public API refactor (PRs 0-17), the LTX-2 streaming server
 upstream, the Dreamverse switch from `FastVideo-internal` to public
 `FastVideo`, and the NVFP4 quantization landing.
 
-**Last reconciled:** 2026-05-05 (**D-20** EXECUTED — segment-2 BrokenPipe
+**Last reconciled:** 2026-05-06 (**D-21** EXECUTED — chunk-stutter root cause
+analysis + NVENC build path + opt-in `--nvenc` flag + benchmark regression
+test. 3 parallel explore agents confirmed apps/dreamverse matches
+FastVideo-internal byte-for-byte on NVFP4 + torch.compile coverage; stutter
+is NOT a regression. Software libx264 encoding consumes ~22% of segment
+wall-time. Built ffmpeg with NVENC support; B200 silicon doesn't have NVENC
+encoder hardware so the path is currently moot on this dev host but works
+on RTX 50-series / T4 / A10 deploys. Benchmark captured libx264 ultrafast
+at 611ms median (8.25x realtime in isolation). Open follow-ups D-22/D-23/D-24.
+
+**Earlier — D-20** EXECUTED — segment-2 BrokenPipe
 root cause was a TWO-direction silent drop of LTX-2 audio kwargs in
 public `VideoGenerator` (inbound `SamplingParam.update()` rejected
 `audio_num_frames`/`ltx2_audio_clean_latent`/etc. as unknown fields and
