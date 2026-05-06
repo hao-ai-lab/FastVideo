@@ -78,17 +78,27 @@ class SpatialRelationshipMetric(BaseMetric):
 
         video = sample["video"]  # (B, T, C, H, W)
         aux = sample.get("auxiliary_info")
-        if aux is None:
-            return self._skip(sample, "missing auxiliary_info with 'spatial_relationship' key")
 
         B = video.shape[0]
         results = []
 
         for b in range(B):
-            sp_info = aux[b]["spatial_relationship"] if isinstance(aux, list) else aux["spatial_relationship"]
-            key_a = sp_info["object_a"]
-            key_b = sp_info["object_b"]
-            relation = sp_info["relationship"]
+            aux_b = aux[b] if isinstance(aux, list) else aux
+            if not aux_b or "spatial_relationship" not in aux_b:
+                results.append(MetricResult(
+                    name=self.name, score=None,
+                    details={"skipped": "missing 'spatial_relationship' in auxiliary_info"}))
+                continue
+            sp_info = aux_b["spatial_relationship"]
+            try:
+                key_a = sp_info["object_a"]
+                key_b = sp_info["object_b"]
+                relation = sp_info["relationship"]
+            except (KeyError, TypeError):
+                results.append(MetricResult(
+                    name=self.name, score=None,
+                    details={"skipped": "spatial_relationship missing object_a/object_b/relationship"}))
+                continue
 
             frames_np = prepare_frames(video[b])
 

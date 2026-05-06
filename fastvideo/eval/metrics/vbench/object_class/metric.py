@@ -40,14 +40,24 @@ class ObjectClassMetric(BaseMetric):
 
         video = sample["video"]  # (B, T, C, H, W)
         aux = sample.get("auxiliary_info")
-        if aux is None:
-            return self._skip(sample, "missing auxiliary_info with 'object' key")
 
         B = video.shape[0]
         results = []
 
         for b in range(B):
-            object_key = aux[b]["object"] if isinstance(aux, list) else aux["object"]
+            aux_b = aux[b] if isinstance(aux, list) else aux
+            if not aux_b or "object" not in aux_b:
+                results.append(MetricResult(
+                    name=self.name, score=None,
+                    details={"skipped": "missing 'object' in auxiliary_info"}))
+                continue
+            object_key = aux_b["object"]
+            if " and " in object_key:
+                # multiple_objects' territory; skip this row for object_class.
+                results.append(MetricResult(
+                    name=self.name, score=None,
+                    details={"skipped": "'object' contains ' and ' (multi-object)"}))
+                continue
             frames_np = prepare_frames(video[b])
             preds = detect_frames(self._model, frames_np)
 

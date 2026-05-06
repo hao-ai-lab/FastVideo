@@ -40,14 +40,25 @@ class MultipleObjectsMetric(BaseMetric):
 
         video = sample["video"]  # (B, T, C, H, W)
         aux = sample.get("auxiliary_info")
-        if aux is None:
-            return self._skip(sample, "missing auxiliary_info with 'object' key")
 
         B = video.shape[0]
         results = []
 
         for b in range(B):
-            object_info = aux[b]["object"] if isinstance(aux, list) else aux["object"]
+            aux_b = aux[b] if isinstance(aux, list) else aux
+            if not aux_b or "object" not in aux_b:
+                results.append(MetricResult(
+                    name=self.name, score=None,
+                    details={"skipped": "missing 'object' in auxiliary_info"}))
+                continue
+            object_info = aux_b["object"]
+            if " and " not in object_info:
+                # multiple_objects expects "<a> and <b>"; single objects are
+                # the object_class metric's territory — skip this row.
+                results.append(MetricResult(
+                    name=self.name, score=None,
+                    details={"skipped": "'object' lacks ' and ' separator"}))
+                continue
             key_a, key_b = [k.strip() for k in object_info.split(" and ")]
 
             frames_np = prepare_frames(video[b])

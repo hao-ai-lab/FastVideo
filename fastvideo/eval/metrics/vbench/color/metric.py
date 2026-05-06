@@ -46,14 +46,18 @@ class ColorMetric(BaseMetric):
         video = sample["video"]  # (B, T, C, H, W)
         aux = sample.get("auxiliary_info")
         text_prompts = sample.get("text_prompt")
-        if aux is None:
-            return self._skip(sample, "missing auxiliary_info with 'color' key")
 
         B = video.shape[0]
         results = []
 
         for b in range(B):
-            color_key = aux[b]["color"] if isinstance(aux, list) else aux["color"]
+            aux_b = aux[b] if isinstance(aux, list) else aux
+            if not aux_b or "color" not in aux_b:
+                results.append(MetricResult(
+                    name=self.name, score=None,
+                    details={"skipped": "missing 'color' in auxiliary_info"}))
+                continue
+            color_key = aux_b["color"]
             prompt = text_prompts[b] if text_prompts else ""
             # Parse object name: remove "a ", "an ", and the color word
             object_key = prompt.replace("a ", "").replace("an ", "").replace(color_key, "").strip()
