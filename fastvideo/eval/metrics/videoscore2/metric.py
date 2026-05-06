@@ -148,7 +148,6 @@ class VideoScore2Metric(BaseMetric):
     higher_is_better = True
     needs_gpu = True
     dependencies = ["transformers", "qwen_vl_utils"]
-    batch_unit = "video"
 
     def __init__(
         self,

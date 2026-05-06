@@ -22,7 +22,6 @@ class PhysicsIQMetric(BaseMetric):
     name = "physics_iq"
     requires_reference = True
     higher_is_better = True
-    batch_unit = "video"
 
     def __init__(
         self,
@@ -47,15 +46,6 @@ class PhysicsIQMetric(BaseMetric):
         self._spatiotemporal_iou = SpatiotemporalIoUMetric(**self._prep_kwargs)
         self._spatial_iou = SpatialIoUMetric(**self._prep_kwargs)
         self._weighted_spatial_iou = WeightedSpatialIoUMetric(**self._prep_kwargs)
-
-    def trial_forward(self, batch_size: int, *, height: int, width: int, num_frames: int) -> None:
-        sample = {
-            "video": torch.rand(batch_size, num_frames, 3, height, width, device=self.device),
-            "reference": torch.rand(batch_size, num_frames, 3, height, width, device=self.device),
-            "reference_take2": torch.rand(batch_size, num_frames, 3, height, width, device=self.device),
-        }
-        with torch.no_grad():
-            self.compute(sample)
 
     @staticmethod
     def _extract_payload(result: MetricResult | Mapping[str, Any]) -> Mapping[str, Any]:

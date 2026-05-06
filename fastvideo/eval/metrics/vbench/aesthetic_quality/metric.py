@@ -38,7 +38,6 @@ class AestheticQualityMetric(BaseMetric):
     requires_reference = False
     higher_is_better = True
     needs_gpu = True
-    batch_unit = "frame"
     dependencies = ["clip"]
     backbone = "clip_vit_l14"
 
@@ -79,13 +78,6 @@ class AestheticQualityMetric(BaseMetric):
         )
         self._aesthetic_head.to(self.device)
         self._aesthetic_head.eval()
-
-    def trial_forward(self, batch_size, *, height, width, num_frames):
-        dummy = torch.randn(batch_size, 3, 224, 224, device=self.device)
-        with torch.no_grad():
-            feats = self._clip_model.encode_image(dummy).float()
-            feats = F.normalize(feats, dim=-1, p=2)
-            self._aesthetic_head(feats)
 
     @torch.no_grad()
     def compute(self, sample: dict) -> list[MetricResult]:

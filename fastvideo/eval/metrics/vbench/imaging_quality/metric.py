@@ -21,7 +21,6 @@ class ImagingQualityMetric(BaseMetric):
     requires_reference = False
     higher_is_better = True
     needs_gpu = True
-    batch_unit = "frame"
     dependencies = ["pyiqa"]
 
     def __init__(self) -> None:
@@ -40,15 +39,6 @@ class ImagingQualityMetric(BaseMetric):
         import pyiqa
         self._model = pyiqa.create_metric("musiq-spaq", device=self.device)
         self._model.eval()
-
-    def trial_forward(self, batch_size, *, height, width, num_frames):
-        h, w = min(height, 512), min(width, 512)
-        if max(height, width) > 512:
-            scale = 512.0 / max(height, width)
-            h, w = int(height * scale), int(width * scale)
-        dummy = torch.randn(batch_size, 3, h, w, device=self.device)
-        with torch.no_grad():
-            self._model(dummy)
 
     @torch.no_grad()
     def compute(self, sample: dict) -> list[MetricResult]:

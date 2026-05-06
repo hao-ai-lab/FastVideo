@@ -21,7 +21,6 @@ class TemporalFlickeringMetric(BaseMetric):
     requires_reference = False
     higher_is_better = True
     needs_gpu = False
-    batch_unit = "video"
 
     @torch.no_grad()
     def compute(self, sample: dict) -> list[MetricResult]:

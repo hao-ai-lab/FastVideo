@@ -25,7 +25,6 @@ class MotionSmoothnessMetric(BaseMetric):
     requires_reference = False
     higher_is_better = True
     needs_gpu = True
-    batch_unit = "frame_pair"
     dependencies = ["omegaconf"]
 
     def __init__(self) -> None:
@@ -86,14 +85,6 @@ class MotionSmoothnessMetric(BaseMetric):
             return 1.0
         scale = 1 / np.floor(1 / np.sqrt(scale) * 16) * 16
         return float(scale)
-
-    def trial_forward(self, batch_size, *, height, width, num_frames):
-        h, w = min(height, 512), min(width, 512)
-        img0 = torch.randn(batch_size, 3, h, w, device=self.device)
-        img1 = torch.randn(batch_size, 3, h, w, device=self.device)
-        embt = self._embt.expand(batch_size, -1, -1, -1)
-        with torch.no_grad():
-            self._model(img0, img1, embt, scale_factor=1.0, eval=True)
 
     @torch.no_grad()
     def compute(self, sample: dict) -> list[MetricResult]:

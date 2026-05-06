@@ -37,7 +37,6 @@ class SceneMetric(BaseMetric):
     requires_reference = False
     higher_is_better = True
     needs_gpu = True
-    batch_unit = "video"
     dependencies = ["transformers", "qwen_omni_utils"]
     backbone = "avocado"
 

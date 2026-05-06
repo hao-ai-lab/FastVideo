@@ -14,7 +14,6 @@ class LPIPSMetric(BaseMetric):
     higher_is_better = False
     needs_gpu = True
     dependencies = ["lpips"]
-    batch_unit = "frame"
 
     def __init__(self, net: str = "alex") -> None:
         super().__init__()
@@ -33,11 +32,6 @@ class LPIPSMetric(BaseMetric):
         import lpips as lpips_lib
         self._model = lpips_lib.LPIPS(net=self.net).to(self.device)
         self._model.eval()
-
-    def trial_forward(self, batch_size, *, height, width, num_frames):
-        dummy = torch.randn(batch_size, 3, height, width, device=self.device) * 2 - 1
-        with torch.no_grad():
-            self._model(dummy, dummy)
 
     def compute(self, sample: dict) -> list[MetricResult]:
         if self._model is None:

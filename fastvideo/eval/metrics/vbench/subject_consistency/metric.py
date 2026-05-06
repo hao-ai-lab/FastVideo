@@ -28,7 +28,6 @@ class SubjectConsistencyMetric(BaseMetric):
     requires_reference = False
     higher_is_better = True
     needs_gpu = True
-    batch_unit = "frame"
     backbone = "dino_vitb16"
 
     def __init__(self) -> None:
@@ -48,11 +47,6 @@ class SubjectConsistencyMetric(BaseMetric):
         model.to(self.device)
         model.eval()
         self._model = model
-
-    def trial_forward(self, batch_size, *, height, width, num_frames):
-        dummy = torch.randn(batch_size, 3, 224, 224, device=self.device)
-        with torch.no_grad():
-            self._model(dummy)
 
     @torch.no_grad()
     def compute(self, sample: dict) -> list[MetricResult]:

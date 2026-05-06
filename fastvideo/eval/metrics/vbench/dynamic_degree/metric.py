@@ -25,7 +25,6 @@ class DynamicDegreeMetric(BaseMetric):
     higher_is_better = True
     needs_gpu = True
     dependencies = ["easydict"]
-    batch_unit = "frame_pair"
 
     def __init__(self) -> None:
         super().__init__()
@@ -58,18 +57,6 @@ class DynamicDegreeMetric(BaseMetric):
         model.to(self.device)
         model.eval()
         self._model = model
-
-    def trial_forward(self, batch_size, *, height, width, num_frames):
-        from vbench.third_party.RAFT.core.utils_core.utils import InputPadder
-        # RAFT's CorrBlock creates a (B*H*W, 1, H, W) correlation volume.
-        # Cap resolution to avoid integer overflow at large batch sizes.
-        h, w = min(height, 256), min(width, 256)
-        img1 = torch.randn(batch_size, 3, h, w, device=self.device)
-        img2 = torch.randn(batch_size, 3, h, w, device=self.device)
-        padder = InputPadder(img1.shape)
-        img1, img2 = padder.pad(img1, img2)
-        with torch.no_grad():
-            self._model(img1, img2, iters=20, test_mode=True)
 
     def _get_score(self, flow: torch.Tensor) -> float:
         """Top-5% mean flow magnitude (matching VBench dynamic_degree.get_score)."""

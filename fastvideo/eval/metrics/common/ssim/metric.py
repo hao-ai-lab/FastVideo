@@ -52,15 +52,10 @@ class SSIMMetric(BaseMetric):
     requires_reference = True
     higher_is_better = True
     needs_gpu = False
-    batch_unit = "frame"
 
     def __init__(self, window_size: int = 11) -> None:
         super().__init__()
         self.window_size = window_size
-
-    def trial_forward(self, batch_size, *, height, width, num_frames):
-        dummy = torch.randn(batch_size, 3, height, width, device=self.device)
-        _ssim_per_frame(dummy, dummy, self.window_size)
 
     def compute(self, sample: dict) -> list[MetricResult]:
         gen = sample["video"].float()       # (B, T, C, H, W)
