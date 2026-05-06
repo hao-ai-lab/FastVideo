@@ -251,7 +251,6 @@ class OpticalFlowMetric(BaseMetric):
     needs_gpu = True
     backbone = "optical_flow"
     dependencies = ["ptlflow"]
-    batch_unit = "frame_pair"
 
     def __init__(
         self,
@@ -283,22 +282,6 @@ class OpticalFlowMetric(BaseMetric):
         self._model = ptlflow.get_model(self.model_name, ckpt_path=self.ckpt)
         self._model.eval()
         self._model = self._model.to(self.device)
-
-    def trial_forward(self, batch_size, *, height, width, num_frames):
-        from ptlflow.utils.io_adapter import IOAdapter
-        io_adapter = IOAdapter(
-            output_stride=self._model.output_stride,
-            input_size=(height, width),
-            cuda=(self.device.type == "cuda"),
-        )
-        dummy_bgr = np.random.randint(0, 255, (height, width, 3), dtype=np.uint8)
-        pair_tensors = []
-        for _ in range(batch_size):
-            inputs = io_adapter.prepare_inputs([dummy_bgr, dummy_bgr])
-            pair_tensors.append(inputs["images"])
-        batched = torch.cat(pair_tensors, dim=0)
-        with torch.no_grad():
-            self._model({"images": batched})
 
     def _compute_flows_batched(
         self, pair_frames: list[tuple[np.ndarray, np.ndarray]], io_adapter,

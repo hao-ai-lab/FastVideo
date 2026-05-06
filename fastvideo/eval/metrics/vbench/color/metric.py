@@ -26,7 +26,6 @@ class ColorMetric(BaseMetric):
     requires_reference = False
     higher_is_better = True
     needs_gpu = True
-    batch_unit = "video"
     dependencies = ["detectron2"]
 
     def __init__(self) -> None:
