@@ -240,10 +240,24 @@ fi
 
 echo "        backend pid=${backend_pid} log=${backend_log}"
 
-# Poll /readyz (allow up to 5 min for first compile + model load)
-echo "[3/8] polling http://127.0.0.1:${BACKEND_PORT}/readyz ..."
+# Poll /readyz. Deadline scales with warmup + torch.compile flags
+# because warmup runs two synthetic segments before /readyz=200, and
+# torch.compile max-autotune adds ~3-4min cold start to the first
+# segment. Empirical worst case (warmup=true, torch_compile=true):
+# ~7 min on B200; we budget 15 min for safety.
+if [[ "${WARMUP}" == "true" ]] && [[ "${TORCH_COMPILE}" == "true" ]]; then
+  READYZ_BUDGET_SECONDS=900
+elif [[ "${WARMUP}" == "true" ]] || [[ "${TORCH_COMPILE}" == "true" ]]; then
+  READYZ_BUDGET_SECONDS=480
+else
+  READYZ_BUDGET_SECONDS=300
+fi
+READYZ_POLL_INTERVAL=6
+READYZ_MAX_ITERS=$(( READYZ_BUDGET_SECONDS / READYZ_POLL_INTERVAL ))
+
+echo "[3/8] polling http://127.0.0.1:${BACKEND_PORT}/readyz (budget=${READYZ_BUDGET_SECONDS}s) ..."
 ready=0
-for i in $(seq 1 50); do
+for i in $(seq 1 ${READYZ_MAX_ITERS}); do
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:${BACKEND_PORT}/readyz" 2>/dev/null || echo 000)"
   if [[ "${code}" == "200" ]]; then
     ready=1
@@ -254,11 +268,11 @@ for i in $(seq 1 50); do
     tail -50 "${backend_log}" >&2
     exit 5
   fi
-  sleep 6
+  sleep ${READYZ_POLL_INTERVAL}
 done
 
 if [[ "${ready}" != "1" ]]; then
-  echo "error: backend did not become /readyz=200 within 5 min. Last 50 lines:" >&2
+  echo "error: backend did not become /readyz=200 within ${READYZ_BUDGET_SECONDS}s. Last 50 lines:" >&2
   tail -50 "${backend_log}" >&2
   exit 5
 fi
