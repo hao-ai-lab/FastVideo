@@ -219,6 +219,15 @@ def gpu_worker_process(
                     )
                     if not av_ok:
                         raise RuntimeError(av_error or "worker av_fmp4 stream failed")
+                    print(f"[GPU {gpu_id}] AV streamed segment {segment_idx}: "
+                          f"encode_total={step_result.timings.get('av_encode_stream_ms', 0):.0f}ms "
+                          f"wav_write={step_result.timings.get('av_wav_write_ms', 0):.1f}ms "
+                          f"spawn={step_result.timings.get('av_ffmpeg_spawn_ms', 0):.1f}ms "
+                          f"first_chunk={step_result.timings.get('av_first_chunk_ms', 0):.0f}ms "
+                          f"chunk_interval_med={step_result.timings.get('av_chunk_interval_ms_median', 0):.1f}ms "
+                          f"chunk_interval_p95={step_result.timings.get('av_chunk_interval_ms_p95', 0):.1f}ms "
+                          f"publish_med={step_result.timings.get('av_chunk_publish_ms_median', 0):.2f}ms "
+                          f"read_med={step_result.timings.get('av_chunk_read_ms_median', 0):.1f}ms")
                     step_result.timings["ipc_put_start_ns"] = time.time_ns()
                     response_queue.put(
                         StepComplete(

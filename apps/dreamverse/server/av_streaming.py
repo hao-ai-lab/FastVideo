@@ -204,7 +204,9 @@ def stream_fmp4(
     height = int(out_frames[0].shape[0])
     width = int(out_frames[0].shape[1])
     codec = os.getenv("FASTVIDEO_VIDEO_CODEC", "libx264")
+    t_wav_start = time.perf_counter()
     wav_path = _write_audio_wav(audio_int16, num_channels, sample_rate)
+    wav_write_ms = (time.perf_counter() - t_wav_start) * 1000
 
     cmd = [
         FFMPEG_BIN,
@@ -289,8 +291,12 @@ def stream_fmp4(
         dtype=np.uint8,
         count=shared_buffer_bytes,
     ) if use_shared_buffer else None)
+    chunk_intervals_ms: list[float] = []
+    chunk_publish_ms: list[float] = []
+    chunk_read_ms: list[float] = []
 
     try:
+        t_proc_spawn_start = time.perf_counter()
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -303,6 +309,7 @@ def stream_fmp4(
         assert proc.stderr is not None
         fcntl.fcntl(proc.stdin.fileno(), fcntl.F_SETPIPE_SZ, 1048576)
         fcntl.fcntl(proc.stdout.fileno(), fcntl.F_SETPIPE_SZ, 1048576)
+        ffmpeg_spawn_ms = (time.perf_counter() - t_proc_spawn_start) * 1000
 
         def _write_frames():
             try:
@@ -339,12 +346,21 @@ def stream_fmp4(
 
         chunk_count = 0
         total_bytes = 0
+        first_chunk_ms: float | None = None
+        last_chunk_emit_t = time.perf_counter()
         while True:
+            t_read_start = time.perf_counter()
             chunk = proc.stdout.read(AV_CHUNK_SIZE_BYTES)
+            t_read_end = time.perf_counter()
             if not chunk:
                 break
+            chunk_read_ms.append((t_read_end - t_read_start) * 1000)
             chunk_count += 1
             total_bytes += len(chunk)
+            if first_chunk_ms is None:
+                first_chunk_ms = (t_read_end - t_stream_start) * 1000
+            chunk_intervals_ms.append((t_read_end - last_chunk_emit_t) * 1000)
+            t_publish_start = time.perf_counter()
             if use_shared_buffer and not shared_buffer_fallback:
                 chunk_len = len(chunk)
                 write_end = shared_write_offset + chunk_len
@@ -358,6 +374,8 @@ def stream_fmp4(
                             uses_shared_buffer=True,
                         ))
                     shared_write_offset = write_end
+                    chunk_publish_ms.append((time.perf_counter() - t_publish_start) * 1000)
+                    last_chunk_emit_t = time.perf_counter()
                     continue
                 shared_buffer_fallback = True
                 print(f"{log_prefix} Shared stream buffer exhausted at "
@@ -367,6 +385,8 @@ def stream_fmp4(
                 stream_id=stream_id,
                 chunk=chunk,
             ))
+            chunk_publish_ms.append((time.perf_counter() - t_publish_start) * 1000)
+            last_chunk_emit_t = time.perf_counter()
 
         writer_thread.join(timeout=5.0)
         rc = proc.wait()
@@ -384,6 +404,20 @@ def stream_fmp4(
         timings["av_trim_head_audio_frames"] = head_trim_audio_frames
         timings["av_frames_encoded"] = len(out_frames)
         timings["av_shared_buffer_used"] = (bool(use_shared_buffer and not shared_buffer_fallback))
+        timings["av_wav_write_ms"] = wav_write_ms
+        timings["av_ffmpeg_spawn_ms"] = ffmpeg_spawn_ms
+        timings["av_first_chunk_ms"] = first_chunk_ms or 0.0
+        if chunk_intervals_ms:
+            timings["av_chunk_interval_ms_min"] = min(chunk_intervals_ms)
+            timings["av_chunk_interval_ms_median"] = float(np.median(chunk_intervals_ms))
+            timings["av_chunk_interval_ms_p95"] = (float(np.percentile(chunk_intervals_ms, 95)))
+            timings["av_chunk_interval_ms_max"] = max(chunk_intervals_ms)
+        if chunk_publish_ms:
+            timings["av_chunk_publish_ms_median"] = float(np.median(chunk_publish_ms))
+            timings["av_chunk_publish_ms_p95"] = float(np.percentile(chunk_publish_ms, 95))
+        if chunk_read_ms:
+            timings["av_chunk_read_ms_median"] = float(np.median(chunk_read_ms))
+            timings["av_chunk_read_ms_p95"] = float(np.percentile(chunk_read_ms, 95))
         publish(StreamComplete(
             stream_id=stream_id,
             chunks=chunk_count,
