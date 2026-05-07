@@ -240,10 +240,8 @@ def run_lora_extraction_tests():
               ],
               volumes={"/root/data": model_vol})
 def run_performance_tests():
-    # Dashboard runs whenever result JSONs exist, even if pytest failed after
-    # writing them. Raw perf_*.json results are exported for any failed
-    # performance job if result files exist; those artifacts are the reviewed
-    # source input for manual performance-baseline reseeds.
+    # compare_baseline.py emits normalized_perf_*.json artifacts for manual
+    # performance-baseline reseeds when the rolling comparison runs.
     run_test(
         "export HF_HOME='/root/data/.cache' && "
         "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
@@ -255,19 +253,9 @@ def run_performance_tests():
         "python ./fastvideo/tests/performance/compare_baseline.py; "
         "PERF_RC=$?; "
         "fi; "
-        "if ls ./fastvideo/tests/performance/results/perf_*.json >/dev/null 2>&1; then "
         "python ./fastvideo/tests/performance/dashboard.py || true; "
-        "fi; "
         "FINAL_RC=$PYTEST_RC; "
         "if [ $FINAL_RC -eq 0 ]; then FINAL_RC=$PERF_RC; fi; "
-        "if [ $FINAL_RC -ne 0 ]; then "
-        "if ls ./fastvideo/tests/performance/results/perf_*.json >/dev/null 2>&1; then "
-        "mkdir -p /root/data/perf_reports/results && "
-        "cp ./fastvideo/tests/performance/results/perf_*.json /root/data/perf_reports/results/; "
-        "else "
-        "echo 'No raw performance result JSON files found to export.'; "
-        "fi; "
-        "fi; "
         "exit $FINAL_RC")
 
 

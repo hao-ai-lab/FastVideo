@@ -58,7 +58,7 @@ approval, then upload reviewed accepted baseline records.
 |-----------|----------|-------------|
 | `model_id` | Yes | Benchmark id, e.g. `wan-t2v-1.3b-2gpu`. This maps to the HF subdirectory after `sanitize(model_id)`. |
 | `gpu_type` | Yes | Exact GPU device string from the performance record, e.g. the L40S device name emitted by CI. Baselines are GPU-specific. |
-| `source_result` | Yes | Path or Buildkite artifact URL for one accepted shifted performance JSON. Buildkite uploads raw `perf_*.json` artifacts for failed performance jobs when result files exist. |
+| `source_result` | Yes | Path or Buildkite artifact URL for one accepted shifted performance JSON. Prefer the normalized `normalized_perf_*.json` artifact emitted by `compare_baseline.py`. |
 | `replica_count` | No | Number of success records to create from `source_result`. Default: `3`. Only use `5` if the user explicitly asks for a full reset. |
 | `intent_rationale` | Yes | One-line explanation for why the baseline shift is legitimate. This is written into provenance and should be reused in the PR. |
 
@@ -83,19 +83,54 @@ downloaded JSON path for the rest of the workflow. If the agent cannot access
 the artifact because Buildkite authentication is missing, ask the user to
 download the artifact manually and provide the local path.
 
-Confirm the source JSON exists and normalize it the same way
-`compare_baseline.py` does:
+Prefer the normalized Buildkite artifact emitted by `compare_baseline.py`:
+
+```text
+perf_reports/results/normalized_perf_*.json
+```
+
+That file is already in the HF tracking schema. Load it directly and confirm
+it has the expected baseline fields:
+
+```python
+import json
+
+with open(source_result, encoding="utf-8") as f:
+    record = json.load(f)
+```
+
+If only the older raw `fastvideo/tests/performance/results/perf_*.json`
+artifact is available, normalize it with `compare_baseline.py`'s shared helper
+before continuing. Run this from the repository root with
+`PYTHONPATH=fastvideo/tests/performance` so the script-local `hf_store` import
+resolves the same way it does in CI:
+
+```python
+import json
+from compare_baseline import normalize_performance_result
+
+with open(source_result, encoding="utf-8") as f:
+    record = normalize_performance_result(json.load(f))
+```
+
+The raw-to-normalized helper maps:
 
 - `model_id` comes from `benchmark_id`.
 - `gpu_type` comes from `device`.
 - `memory` comes from `max_peak_memory_mb`.
 - `latency` comes from `avg_generation_time_s`.
 - `throughput` comes from `throughput_fps`.
-- component timings are `text_encoder_time_s`, `dit_time_s`, and
-  `vae_decode_time_s`.
+- component timings come from the raw `text_encoder_time_s`, `dit_time_s`,
+  and `vae_decode_time_s` fields when present. If an older raw artifact lacks
+  those keys, they normalize to `None`; that source can still reseed latency,
+  throughput, and memory, but it cannot move component-time baselines.
 
-Stop if the source result's `benchmark_id` or `device` does not match the
+Stop if the normalized record's `model_id` or `gpu_type` does not match the
 requested `model_id` and `gpu_type`.
+
+The source record may have `success: false` when it came from a failed rolling
+baseline comparison. That is expected; only the reviewed reseed replicas become
+new `success: true` baseline records after explicit approval.
 
 Set `replica_count` to `3` by default. Set it to `5` only when the user
 explicitly asks to upload the same shifted source result 5 times for a full
@@ -106,24 +141,27 @@ upload path requires write access.
 
 ### 1a. How to obtain `source_result` from CI
 
-The performance CI exports raw source results for failed performance jobs when
-result files exist. The artifact comes from:
+The performance CI exports normalized source results for failed rolling
+baseline comparisons when `compare_baseline.py` ran. The preferred artifact
+comes from:
 
 ```text
-fastvideo/tests/performance/results/perf_*.json
+perf_reports/results/normalized_perf_*.json
 ```
 
-and is uploaded by Buildkite as a raw performance result artifact. The normal
-operator flow is:
+and is uploaded by Buildkite with the performance reports. The normal operator
+flow is:
 
 1. Open the failed Buildkite performance job.
-2. Download the `perf_*.json` artifact for the failed benchmark.
+2. Download the `normalized_perf_*.json` artifact for the failed benchmark.
 3. Pass the local path or artifact URL as `source_result`.
 
 Do not scrape the Markdown performance summary to reconstruct the JSON. The
-raw `perf_*.json` is the source of truth for normalization and provenance.
-If no raw JSON artifact is present, the benchmark likely failed before writing
-results, so that run is not a valid source for baseline reseeding.
+normalized JSON artifact is the source of truth for reseed metrics and
+provenance. If only a raw `fastvideo/tests/performance/results/perf_*.json`
+artifact is present, normalize it with `normalize_performance_result()` before
+continuing. If no JSON artifact is present, the benchmark likely failed before
+writing results, so that run is not a valid source for baseline reseeding.
 
 ### 2. Sync and back up existing HF records
 
@@ -243,9 +281,14 @@ fields below:
 - `latency`
 - `throughput`
 - `memory`
+- `text_encoder_time_s`
+- `dit_time_s`
+- `vae_decode_time_s`
 - `success: true`
 
-Map the raw source fields exactly as `compare_baseline.py` does:
+For normalized `normalized_perf_*.json` sources, these fields already exist.
+For older raw `perf_*.json` sources, map the raw fields exactly as
+`normalize_performance_result()` in `compare_baseline.py` does:
 
 | Normalized field | Raw source field |
 |------------------|------------------|
@@ -254,6 +297,9 @@ Map the raw source fields exactly as `compare_baseline.py` does:
 | `latency` | `avg_generation_time_s` |
 | `throughput` | `throughput_fps` |
 | `memory` | `max_peak_memory_mb` |
+| `text_encoder_time_s` | `text_encoder_time_s` |
+| `dit_time_s` | `dit_time_s` |
+| `vae_decode_time_s` | `vae_decode_time_s` |
 | `commit_sha` | `commit` |
 
 Do not upload raw-only fields such as `model_short_name`, `num_gpus`,
