@@ -1,0 +1,74 @@
+# Wan 2.1 Fun I2V random-context finetune config.
+#
+# This config is consumed by submit_fun_i2v_random_context.sbatch, which maps
+# these values to the legacy wan_i2v_training_pipeline.py CLI. The native
+# fastvideo/train YAML trainer does not yet have a Wan Fun I2V model wrapper.
+
+job:
+  name: fun-i2v-rctx
+  gpus_per_node: 8
+
+env:
+  # Defaults to the checkout that contains submit_fun_i2v_random_context.sbatch.
+  fastvideo_path: null
+  runtime_venv: /leonardo_work/AIFAC_P02_082/code/FastVideo/.venv-fa
+  wandb_mode: online
+  wandb_base_url: https://api.wandb.ai
+  tokenizer_parallelism: "false"
+  triton_cache_dir_prefix: /tmp/triton_cache
+
+paths:
+  model_path: weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers
+  # W21-480 t2v latent cache: 480x832 / 49f / 16fps, latent [16, 13, 60, 104].
+  data_path:
+    - /leonardo_work/AIFAC_P02_082/data/latents_wan_v1/W21_480x832_49f_16fps
+    - /leonardo_work/AIFAC_P02_082/data/latents_pcbas_wan_v1/W21_480x832_49f_16fps
+  validation_dataset_file: examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json
+  # submit_fun_i2v_random_context.sbatch appends SLURM_JOB_ID.
+  output_dir: /leonardo_work/AIFAC_P02_082/.logs/fun_i2v_random_context
+
+parallel:
+  # If set to null, the sbatch script derives this from SLURM_JOB_NUM_NODES.
+  hsdp_replicate_dim: null
+  sp_size: 8
+  tp_size: 8
+  hsdp_shard_dim: 8
+
+training:
+  tracker_project_name: wan_i2v_finetune
+  wandb_run_name: fun_i2v_random_context
+  max_train_steps: 2000
+  train_batch_size: 2
+  train_sp_batch_size: 1
+  gradient_accumulation_steps: 1
+  num_latent_t: 13
+  min_condition_latents: 1
+  max_condition_latents: 5
+  num_height: 480
+  num_width: 832
+  num_frames: 49
+  dataloader_num_workers: 10
+  training_cfg_rate: 0.1
+  checkpoints_total_limit: 3
+  enable_gradient_checkpointing_type: full
+  dit_precision: fp32
+  mixed_precision: bf16
+
+optimizer:
+  learning_rate: 1.0e-5
+  weight_decay: 1.0e-4
+  max_grad_norm: 1.0
+  weight_only_checkpointing_steps: 1000
+  training_state_checkpointing_steps: 1000
+
+validation:
+  log_validation: true
+  validation_steps: 100
+  validation_sampling_steps: "40"
+  validation_guidance_scale: "6.0"
+
+misc:
+  multi_phased_distill_schedule: "4000-1"
+  not_apply_cfg_solver: true
+  num_euler_timesteps: 50
+  ema_start_step: 0
