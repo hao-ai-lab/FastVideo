@@ -171,6 +171,7 @@ nav:
     - CI Architecture: contributing/ci_architecture.md
     - Testing: contributing/testing.md
     - Profiling: contributing/profiling.md
+    - Activation Trace: contributing/activation_trace.md
     - Coding Agents: contributing/coding_agents.md
     - Attention Backend Development: contributing/attention_backend.md
   - API Reference:

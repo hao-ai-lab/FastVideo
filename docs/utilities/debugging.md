@@ -29,6 +29,27 @@ Useful variables:
 - `FASTVIDEO_ATTENTION_BACKEND`: force an attention backend (for example
   `TORCH_SDPA` or `FLASH_ATTN`)
 
+## Layer-by-Layer Activation Tracing
+
+For numerical-divergence debugging — typically when porting a new model and
+needing to find the first layer where FastVideo and an upstream reference
+produce different outputs — use the env-gated activation trace mode:
+
+```bash
+FASTVIDEO_TRACE_ACTIVATIONS=1 \
+FASTVIDEO_TRACE_LAYERS="^transformer\.blocks\.\d+$" \
+FASTVIDEO_TRACE_OUTPUT=/tmp/fv_trace.jsonl \
+python your_script.py
+```
+
+The trace dumps per-tensor stats (`abs_mean`, `sum`, `shape`, etc.) to a
+JSONL file. Run the same workload with tracing on the upstream side, then
+`diff` the two files to localize the first divergent layer.
+
+See [Activation Trace Mode](../contributing/activation_trace.md) for the
+full guide (env var reference, JSONL output schema, parity-debug workflow,
+performance impact, and troubleshooting).
+
 ## Common Failure Modes
 
 ### Out-of-memory
