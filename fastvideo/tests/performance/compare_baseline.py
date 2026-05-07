@@ -36,6 +36,7 @@ TRACKING_ROOT = os.environ.get(
     "PERFORMANCE_TRACKING_ROOT",
     "/tmp/perf-tracking",
 )
+PERF_REPORTS_DIR = os.environ.get("PERF_REPORTS_DIR", "/root/data/perf_reports")
 MAX_REGRESSION = float(os.environ.get("PERF_MAX_REGRESSION", "0.05"))
 
 
@@ -54,7 +55,14 @@ def _load_current_results() -> list[dict[str, Any]]:
     return records
 
 
-def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
+def normalize_performance_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a raw perf_*.json result into the HF tracking schema.
+
+    The Buildkite artifact intentionally keeps the raw benchmark output from
+    test_inference_performance.py. Baseline comparison, main-branch persistence,
+    and manual baseline reseeds should all use this mapping so the stored HF
+    records do not drift from the artifact schema.
+    """
     benchmark_id = result.get("benchmark_id", "unknown")
     model_id = benchmark_id
 
@@ -79,6 +87,10 @@ def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
+    return normalize_performance_result(result)
+
+
 def _write_tracking_record(record: dict[str, Any]) -> str:
     model_dir = os.path.join(TRACKING_ROOT, sanitize(record["model_id"]))
     os.makedirs(model_dir, exist_ok=True)
@@ -91,6 +103,24 @@ def _write_tracking_record(record: dict[str, Any]) -> str:
         json.dump(record, f, indent=2)
 
     return out_path
+
+
+def _write_normalized_artifact(record: dict[str, Any]) -> None:
+    try:
+        results_dir = os.path.join(PERF_REPORTS_DIR, "results")
+        os.makedirs(results_dir, exist_ok=True)
+        timestamp = sanitize(record["timestamp"])
+        model_id = sanitize(record["model_id"])
+        commit = sanitize(record["commit_sha"] or "unknown")
+        path = os.path.join(
+            results_dir,
+            f"normalized_perf_{model_id}_{timestamp}_{commit}.json",
+        )
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(record, f, indent=2)
+        print(f"Normalized performance result written to {path}")
+    except Exception as e:
+        print(f"Failed to write normalized performance result artifact: {e}")
 
 
 def _baseline_metric(records: list[dict[str, Any]], key: str) -> float | None:
@@ -233,11 +263,10 @@ def _emit_markdown_summary(markdown: str, commit_sha: str) -> None:
 
     # 2. Write to Modal volume for Buildkite to pick up in post-run hook
     try:
-        perf_reports_dir = "/root/data/perf_reports"
-        os.makedirs(perf_reports_dir, exist_ok=True)
+        os.makedirs(PERF_REPORTS_DIR, exist_ok=True)
         short_sha = commit_sha[:7] if commit_sha else "unknown"
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        report_path = os.path.join(perf_reports_dir, f"perf_{short_sha}_{timestamp}.md")
+        report_path = os.path.join(PERF_REPORTS_DIR, f"perf_{short_sha}_{timestamp}.md")
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(markdown + "\n")
         print(f"Performance report written to {report_path}")
@@ -285,6 +314,8 @@ def main() -> int:
             failures = _check_regressions(record, baseline_records, MAX_REGRESSION)
             record["success"] = not failures
             all_failures.extend(failures)
+
+        _write_normalized_artifact(record)
 
         # Strict upload: a silent failure would freeze the rolling baseline.
         if persist_tracking:
