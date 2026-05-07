@@ -38,6 +38,16 @@ from fastvideo.configs.pipelines.flux_2 import (
 )
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
+from fastvideo.pipelines.basic.magi_human.pipeline_configs import (
+    MagiHumanBaseConfig,
+    MagiHumanBaseI2VConfig,
+    MagiHumanDistillConfig,
+    MagiHumanDistillI2VConfig,
+    MagiHumanSR1080pConfig,
+    MagiHumanSR1080pI2VConfig,
+    MagiHumanSR540pConfig,
+    MagiHumanSR540pI2VConfig,
+)
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
     TurboDiffusionT2V_14B_Config,
@@ -377,6 +387,146 @@ def _register_configs() -> None:
         ],
         model_family="flux2",
         default_preset="flux2_dev",
+    )
+
+    # daVinci-MagiHuman SR-1080p (two-stage base + local-window SR text-to-AV).
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanSR1080pConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "FastVideo/MagiHuman-SR-1080p-Diffusers",
+            "FastVideo/MagiHuman-Diffusers/sr_1080p",
+        ],
+        model_detectors=[
+            lambda path:
+            (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower()) and
+             ("sr_1080p" in path.lower() or "sr-1080p" in path.lower() or "1080p_sr" in path.lower() or "sr1080p" in
+              path.lower()) and "ti2v" not in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_sr_1080p",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanSR1080pI2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "FastVideo/MagiHuman-SR-1080p-TI2V-Diffusers",
+        ],
+        model_detectors=[
+            lambda path:
+            (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower()) and
+             ("sr_1080p" in path.lower() or "sr-1080p" in path.lower() or "1080p_sr" in path.lower() or "sr1080p" in
+              path.lower()) and "ti2v" in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_sr_1080p_ti2v",
+    )
+
+    # daVinci-MagiHuman SR-540p (two-stage base + SR text-to-AV).
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanSR540pConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "FastVideo/MagiHuman-SR-540p-Diffusers",
+            "FastVideo/MagiHuman-Diffusers/sr_540p",
+        ],
+        model_detectors=[
+            lambda path:
+            (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower()) and
+             ("sr_540p" in path.lower() or "sr-540p" in path.lower() or "540p_sr" in path.lower() or "srpipeline" in
+              path.lower()) and "1080" not in path.lower() and "ti2v" not in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_sr_540p",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanSR540pI2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "FastVideo/MagiHuman-SR-540p-TI2V-Diffusers",
+        ],
+        model_detectors=[
+            lambda path:
+            (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower()) and
+             ("sr_540p" in path.lower() or "sr-540p" in path.lower() or "540p_sr" in path.lower() or "srpipeline" in
+              path.lower()) and "1080" not in path.lower() and "ti2v" in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_sr_540p_ti2v",
+    )
+
+    # daVinci-MagiHuman (base text-to-AV).
+    # NOTE: WorkloadType has no T2AV variant yet; using T2V as the
+    # placeholder until the enum is extended (same as Stable Audio).
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanBaseConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "GAIR/daVinci-MagiHuman",
+            "FastVideo/MagiHuman-Base-Diffusers",
+            "FastVideo/MagiHuman-Diffusers/base",
+        ],
+        model_detectors=[
+            lambda path:
+            (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower()
+              ) and "distill" not in path.lower() and "ti2v" not in path.lower() and "sr_540p" not in path.lower() and
+             "sr-540p" not in path.lower() and "540p_sr" not in path.lower() and "sr_1080p" not in path.lower() and
+             "sr-1080p" not in path.lower() and "1080p_sr" not in path.lower() and "srpipeline" not in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_base",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanBaseI2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "FastVideo/MagiHuman-Base-TI2V-Diffusers",
+        ],
+        model_detectors=[
+            lambda path:
+            (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower()
+              ) and "ti2v" in path.lower() and "distill" not in path.lower() and "sr_540p" not in path.lower() and
+             "sr-540p" not in path.lower() and "540p_sr" not in path.lower() and "sr_1080p" not in path.lower() and
+             "sr-1080p" not in path.lower() and "1080p_sr" not in path.lower() and "srpipeline" not in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_base_ti2v",
+    )
+    # daVinci-MagiHuman (DMD-2 distilled text-to-AV)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanDistillConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "FastVideo/MagiHuman-Distilled-Diffusers",
+            "FastVideo/MagiHuman-Diffusers/distill",
+        ],
+        model_detectors=[
+            lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower())
+                          and "distill" in path.lower() and "ti2v" not in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_distill",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MagiHumanDistillI2VConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=[
+            "FastVideo/MagiHuman-Distilled-TI2V-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: (("magihuman" in path.lower() or "magi_human" in path.lower() or "magi-human" in path.lower())
+                          and "ti2v" in path.lower() and "distill" in path.lower()),
+        ],
+        model_family="magi_human",
+        default_preset="magi_human_distill_ti2v",
     )
 
     # Hunyuan 1.5 (specific)
@@ -1214,6 +1364,8 @@ def _register_presets() -> None:
         ALL_PRESETS as LONGCAT_PRESETS, )
     from fastvideo.pipelines.basic.ltx2.presets import (
         ALL_PRESETS as LTX2_PRESETS, )
+    from fastvideo.pipelines.basic.magi_human.presets import (
+        ALL_PRESETS as MAGI_HUMAN_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame2.presets import (
         ALL_PRESETS as MATRIXGAME2_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame3.presets import (
@@ -1242,6 +1394,7 @@ def _register_presets() -> None:
         LINGBOTWORLD_PRESETS,
         LONGCAT_PRESETS,
         LTX2_PRESETS,
+        MAGI_HUMAN_PRESETS,
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
         SD35_PRESETS,

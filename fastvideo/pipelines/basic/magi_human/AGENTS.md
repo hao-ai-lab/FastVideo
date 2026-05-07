@@ -183,8 +183,6 @@ focused PRs:
 | 3/8 | [#1297](https://github.com/hao-ai-lab/FastVideo/pull/1297) | `will/magi-03-dit` | DiT + parity tests |
 | 4/8 | [#1298](https://github.com/hao-ai-lab/FastVideo/pull/1298) | `will/magi-04a-stages` | Pipeline stages + sr_transformer alias |
 | 5/8 | [#1299](https://github.com/hao-ai-lab/FastVideo/pull/1299) | `will/magi-04b-orchestrator` | Pipeline orchestrator + parity battery |
-| 6/8 | this PR | `will/magi-04c-provenance` | This AGENTS.md, JOURNAL.md, lessons, parent AGENTS.md hook |
-| 7/8 | (next) | `will/magi-05-conversion` | Checkpoint conversion + 3rd lesson |
-| 8/8 | (last) | `will/magi-06-activate` | Registry + examples + SSIM + codebase-map |
-
-Provenance section will be finalized in 8/8 with the actual PR numbers for 7/8 and 8/8.
+| 6/8 | [#1300](https://github.com/hao-ai-lab/FastVideo/pull/1300) | `will/magi-04c-provenance` | This AGENTS.md, JOURNAL.md, lessons, parent AGENTS.md hook |
+| 7/8 | [#1301](https://github.com/hao-ai-lab/FastVideo/pull/1301) | `will/magi-05-conversion` | Checkpoint conversion + 3rd lesson |
+| 8/8 | this PR | `will/magi-06-activate` | Registry + examples + SSIM + codebase-map |
