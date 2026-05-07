@@ -137,7 +137,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
             "scores": _serialize_results(results),
         })
 
-    payload = json.dumps(all_results, indent=2)
+    payload = json.dumps(all_results, indent=2, default=_jsonable)
     if args.output:
         Path(args.output).write_text(payload)
         logger.info("Wrote results to %s", args.output)
@@ -176,6 +176,34 @@ def _serialize_metric_result(mr) -> dict:
         "score": getattr(mr, "score", None),
         "details": getattr(mr, "details", None),
     }
+
+
+def _jsonable(obj):
+    """``json.dumps(default=...)`` coercer for metric outputs.
+
+    Metrics frequently land numpy scalars / arrays, torch tensors, and
+    pathlib paths inside ``MetricResult.details`` (e.g. ``optical_flow``
+    populates ``per_frame_metrics`` with numpy floats). The stdlib JSON
+    encoder rejects all of those by default — this callback walks the
+    leaves and coerces them to native Python types.
+    """
+    import numpy as np
+    import torch
+
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, torch.Tensor):
+        return obj.detach().cpu().tolist()
+    if isinstance(obj, Path):
+        return str(obj)
+    raise TypeError(
+        f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 def cmd_init() -> list[CLISubcommand]:
