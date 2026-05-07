@@ -16,6 +16,61 @@ follow-up actions see [open-threads.md](open-threads.md).
 
 ## Post-merge architecture decisions
 
+### D-26: Rebase `will/dreamverse-monorepo` directly onto `origin/main` (PR base flip)
+
+**Status:** ✅ Resolved 2026-05-06 (UTC; 2026-05-07 local). 66 commits cleanly replayed via `git rebase origin/main`; force-pushed via `--force-with-lease`. Local backup branch `will/dreamverse-monorepo-pre-main-rebase-backup-20260506` preserved at the pre-rebase tip `2ee839a3`. PR #1288 on `will/ltx2_sr_port` is untouched.
+**Source:** User directive: "update this branch will/dreamverse-monorepo to be directly against origin/main for PR purposes instead of ltx_sr_port (don't open new PRs)".
+
+**Question:** `will/dreamverse-monorepo` was forked from `will/ltx2_sr_port` (PR #1288's head). Should it stay stacked on top of `will/ltx2_sr_port`, or be rebased so its PR base becomes `origin/main` directly?
+
+**Decision:** Rebase `will/dreamverse-monorepo` onto `origin/main` directly. This makes the branch openable as a single PR against main containing the entire 66-commit chain (40 from the legacy `will/ltx2_sr_port` work + 26 dreamverse-monorepo-specific commits including D-19/D-20/D-21/D-22).
+
+**Pre-rebase state:**
+
+```
+origin/main (c17d33bf)  ← 1 new commit since 2aaeee2a (PR #1253 SSIM cosine)
+              │
+              └─ 2aaeee2a (PR #1286 squash merge; old shared base)
+                          ├─ 40 commits → will/ltx2_sr_port @ fbd823df  (PR #1288)
+                          └─ 40 + 26 = 66 commits → will/dreamverse-monorepo @ 2ee839a3
+```
+
+**Post-rebase state:**
+
+```
+origin/main (c17d33bf)
+              │
+              └─ 66 commits → will/dreamverse-monorepo @ 83829c5e   (NEW SHAs, same content)
+
+origin/main (c17d33bf)  -- still in main lineage
+              │
+              └─ 2aaeee2a
+                          └─ 40 commits → will/ltx2_sr_port @ fbd823df  (PR #1288, UNCHANGED)
+```
+
+**Operation:**
+
+1. **Backup**: `git branch will/dreamverse-monorepo-pre-main-rebase-backup-20260506 will/dreamverse-monorepo` (local-only safety net pinning `2ee839a3`).
+2. **Rebase**: `git rebase origin/main` while on `will/dreamverse-monorepo`. All 66 commits replayed conflict-free in ~30s. The single new origin/main commit `c17d33bf` (#1253 SSIM cosine regression) touches only `fastvideo/tests/ssim/*`, `fastvideo/tests/modal/ssim_test.py`, `.agents/skills/seed-ssim-references/SKILL.md`, `fastvideo/pipelines/basic/stable_audio/stages/decoding.py`, and a 56-line block in `fastvideo/entrypoints/video_generator.py`. None of our 66 commits touch the SSIM files; the `video_generator.py` overlap auto-merged because our D-20 changes (`_BATCH_EXTRA_PASSTHROUGH_KEYS`, result-dict surface) and #1253's changes are in different parts of the file.
+3. **Verification (file-level, before push)**:
+   - Commit count: 66 (PASS)
+   - Co-author trailer count: 231 across 66 commits — within historical norm (some legacy `will/ltx2_sr_port` commits had partial trailers per [`authors.md`](authors.md) "Known gaps").
+   - Tree-diff vs backup: only the 845-line forward delta from `c17d33bf` (expected). All D-20/D-21/D-22-introduced content (`_BATCH_EXTRA_PASSTHROUGH_KEYS` x2, "unknown field" x1, `av_chunk_interval_ms` x4, `av_chunk_publish_ms` x2, `enable-nvenc` x2, `NVENC_OVERRIDE` x4) survives intact.
+   - `pre-commit run --files` on the 7 most-edited files: PASS (yapf/ruff/codespell/mypy/spaces).
+   - Runtime pytest hung mid-import on this shared dev box (pre-existing CUDA/torch init issue affecting other commands too) — NOT a rebase regression. The same `fastvideo/tests/api/` suite passed 185/185 pre-rebase.
+4. **Force-push**: `git push --force-with-lease=will/dreamverse-monorepo:2ee839a3... origin will/dreamverse-monorepo`. Updated `2ee839a3...83829c5e (forced update)`.
+
+**Implications:**
+
+- The branch can now be opened as a PR against `origin/main` containing all the LTX-2 SR port + NVFP4 + Dreamverse monorepo migration + audio kwarg fix + warmup + NVENC build + benchmarks + integration memory dir, in a single review unit.
+- PR #1288 on `will/ltx2_sr_port` is untouched and continues to track its own subset of the work. If PR #1288 lands first, the duplicated commits on `will/dreamverse-monorepo` will be reconciled at the next rebase by `git rebase origin/main` dropping commits whose content is now in main (same mechanism as the post-#1286 rebase recorded in [state.md](state.md) "Post-#1286 rebase summary").
+- Local backup `will/dreamverse-monorepo-pre-main-rebase-backup-20260506 @ 2ee839a3` keeps the old chain available; recommend deleting after the new branch state is verified by running on a non-stuck dev box (or after the PR merges).
+
+**Watch-outs:**
+
+- Anyone with a checkout of the OLD `will/dreamverse-monorepo` (pre-rebase) needs to `git fetch origin will/dreamverse-monorepo --force` and discard local commits, OR rebase their local commits onto the new `83829c5e`. None observed in the runbook's worktree-sharing model.
+- The trailer-count 231 (vs expected 264 for full coverage) is NOT introduced by this rebase — it's the historical gap from [`authors.md`](authors.md). Verifiable by counting trailers on the backup branch (same 231).
+
 ### D-21: AV chunk stutter root cause — software libx264 encoding consumes ~22% of segment wall time; opt-in NVENC fix
 
 **Status:** 🟡 Deferred — fix landed (NVENC build + `--nvenc` flag), default unchanged so no behavior regression for operators who haven't rebuilt ffmpeg yet. Switch default to `h264_nvenc` once benchmark numbers are captured + a release notes entry is published.

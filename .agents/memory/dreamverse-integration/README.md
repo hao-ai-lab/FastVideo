@@ -5,7 +5,16 @@ Tracks the public API refactor (PRs 0-17), the LTX-2 streaming server
 upstream, the Dreamverse switch from `FastVideo-internal` to public
 `FastVideo`, and the NVFP4 quantization landing.
 
-**Last reconciled:** 2026-05-06 (**D-21** EXECUTED — chunk-stutter root cause
+**Last reconciled:** 2026-05-06 (**D-26** EXECUTED — rebased
+`will/dreamverse-monorepo` directly onto `origin/main` (`c17d33bf`)
+via `git rebase origin/main`; 66 commits cleanly replayed; force-
+pushed via `--force-with-lease`. New tip `83829c5e`. Local backup
+branch `will/dreamverse-monorepo-pre-main-rebase-backup-20260506`
+preserved at the pre-rebase tip `2ee839a3`. PR #1288 on
+`will/ltx2_sr_port` is untouched. The branch is now ready to open
+as a single PR against main.
+
+**Earlier — D-21** EXECUTED — chunk-stutter root cause
 analysis + NVENC build path + opt-in `--nvenc` flag + benchmark regression
 test. 3 parallel explore agents confirmed apps/dreamverse matches
 FastVideo-internal byte-for-byte on NVFP4 + torch.compile coverage; stutter
