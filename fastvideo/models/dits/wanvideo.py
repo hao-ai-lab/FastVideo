@@ -624,10 +624,14 @@ class WanTransformer3DModel(BaseDiT):
         orig_dtype = hidden_states.dtype
         if encoder_hidden_states is not None and not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
-        if isinstance(encoder_hidden_states_image,
-                      list) and len(encoder_hidden_states_image) > 0:
-            encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
+        # Training passes CLIP image states as a Tensor; inference may pass the
+        # same states wrapped in a one-item list. Preserve both so Wan-Fun I2V
+        # training and inference use image cross-attention consistently.
+        if isinstance(encoder_hidden_states_image, list):
+            encoder_hidden_states_image = (
+                encoder_hidden_states_image[0]
+                if len(encoder_hidden_states_image) > 0 else None)
+        elif not isinstance(encoder_hidden_states_image, torch.Tensor):
             encoder_hidden_states_image = None
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape

@@ -414,8 +414,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             # make sure no implicit broadcasting happens
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
 
-            loss = (torch.mean(
-                (model_pred.float() - target.float())**2) / self.training_args.gradient_accumulation_steps)
+            loss = (self._compute_loss(model_pred, target, training_batch) /
+                    self.training_args.gradient_accumulation_steps)
 
             loss.backward()
 
@@ -430,6 +430,28 @@ class TrainingPipeline(LoRAPipeline, ABC):
         training_batch.total_loss += avg_loss
 
         return training_batch
+
+    @staticmethod
+    def _compute_loss(model_pred: torch.Tensor, target: torch.Tensor, training_batch: TrainingBatch) -> torch.Tensor:
+        """Compute diffusion loss, optionally ignoring pre-conditioned latents."""
+        sq_error = (model_pred.float() - target.float())**2
+        loss_mask = training_batch.generation_loss_mask
+        if loss_mask is None:
+            return torch.mean(sq_error)
+
+        # Mean over generated tokens only (mask=True), not over all elements.
+        # This keeps per-generated-token gradient magnitude constant across
+        # samples with different prefix lengths; mean-over-all would downweight
+        # samples whose generated suffix is short. Validation guarantees at
+        # least one generated token, so clamp_min(1.0) is defensive.
+        # The mask is full latent shape [B, 1, T, H, W]; Wan sequence-parallel
+        # training must return gathered full-shape predictions before loss.
+        loss_mask = loss_mask.to(device=sq_error.device, dtype=sq_error.dtype)
+        loss_mask = loss_mask.expand_as(sq_error)
+        denom = loss_mask.sum()
+        if denom <= 0:
+            raise ValueError("generation_loss_mask must include at least one generated element.")
+        return (sq_error * loss_mask).sum() / denom
 
     def _clip_grad_norm(self, training_batch: TrainingBatch) -> TrainingBatch:
         max_grad_norm = self.training_args.max_grad_norm
@@ -615,6 +637,15 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     metrics["ffn_dim"] = arch_config.ffn_dim
                 except Exception:
                     pass
+
+                condition_latent_counts = (training_batch.condition_latent_counts)
+                if condition_latent_counts is not None:
+                    # Track the actual sampled range during training so W&B
+                    # makes config mistakes or degenerate sampling visible.
+                    condition_latent_counts = condition_latent_counts.detach().float().cpu()
+                    metrics["train/condition_latents_mean"] = (condition_latent_counts.mean().item())
+                    metrics["train/condition_latents_min"] = (condition_latent_counts.min().item())
+                    metrics["train/condition_latents_max"] = (condition_latent_counts.max().item())
 
                 self.tracker.log(metrics, step)
             if step % self.training_args.training_state_checkpointing_steps == 0:

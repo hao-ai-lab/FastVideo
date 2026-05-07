@@ -758,6 +758,10 @@ class TrainingArgs(FastVideoArgs):
 
     train_batch_size: int = 0
     num_latent_t: int = 0
+    # Wan I2V trains with clean-prefix random-context conditioning by default.
+    # Set 0/0 only when explicitly opting into the legacy first-frame I2V path.
+    min_condition_latents: int = 1
+    max_condition_latents: int = 1
     group_frame: bool = False
     group_resolution: bool = False
 
@@ -945,6 +949,18 @@ class TrainingArgs(FastVideoArgs):
         # Training batch and model configuration
         parser.add_argument("--train-batch-size", type=int, required=True, help="Training batch size")
         parser.add_argument("--num-latent-t", type=int, required=True, help="Number of latent time steps")
+        parser.add_argument("--min-condition-latents",
+                            "--min_condition_latents",
+                            dest="min_condition_latents",
+                            type=int,
+                            default=TrainingArgs.min_condition_latents,
+                            help="Minimum prefix latent timesteps to condition on; 0 with max=0 selects legacy I2V")
+        parser.add_argument("--max-condition-latents",
+                            "--max_condition_latents",
+                            dest="max_condition_latents",
+                            type=int,
+                            default=TrainingArgs.max_condition_latents,
+                            help="Maximum prefix latent timesteps to condition on; 0 with min=0 selects legacy I2V")
         parser.add_argument("--group-frame", action=StoreBoolean, help="Whether to group frames during training")
         parser.add_argument("--group-resolution",
                             action=StoreBoolean,
