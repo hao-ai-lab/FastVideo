@@ -69,6 +69,7 @@ fastvideo/
 ├── eval/
 │   ├── api.py, evaluator.py, registry.py, models.py, ...
 │   ├── io/                        # video loading helpers
+│   ├── datasets/                  # prompt corpora — vbench, physics_iq
 │   └── metrics/
 │       ├── base.py                # BaseMetric + @register contract
 │       ├── common/                # SSIM, PSNR, LPIPS
@@ -82,6 +83,20 @@ fastvideo/
 └── third_party/
     └── eval/
         └── vbench/                # ← git submodule (Vchitect/VBench)
+```
+
+### Prompt datasets
+
+```python
+from fastvideo.eval.datasets import get_dataset, list_datasets
+
+list_datasets()                    # ['physics_iq', 'vbench']
+
+ds = get_dataset("physics_iq", dataset_root="/path/to/physics-IQ-benchmark")
+for row in ds:
+    # row contains 'prompt', 'reference', 'reference_take2', and metric-
+    # specific aux fields. Drop straight into Evaluator.evaluate(**row).
+    ...
 ```
 
 ## Adding a new metric

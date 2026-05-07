@@ -10,7 +10,11 @@ import cv2
 import numpy as np
 import torch
 
-from fastvideo.eval.metrics.physics_iq.models import DEFAULT_DURATION_SECONDS, DEFAULT_TARGET_FPS
+# Default sampling configuration for the Physics-IQ comparison pipeline.
+# Source release ships at 30 FPS / 5 seconds — the metric collapses to those
+# anchors regardless of how the user resampled the input video.
+DEFAULT_TARGET_FPS = 30
+DEFAULT_DURATION_SECONDS = 5
 
 
 @dataclass(frozen=True)

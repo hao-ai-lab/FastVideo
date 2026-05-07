@@ -7,12 +7,14 @@ import numpy as np
 import torch
 
 from fastvideo.eval.metrics.base import BaseMetric
-from fastvideo.eval.metrics.physics_iq.models import DEFAULT_DURATION_SECONDS, DEFAULT_TARGET_FPS
 from fastvideo.eval.metrics.physics_iq.mse.metric import PhysicsIQMSEMetric
 from fastvideo.eval.metrics.physics_iq.spatial_iou.metric import SpatialIoUMetric
 from fastvideo.eval.metrics.physics_iq.spatiotemporal_iou.metric import SpatiotemporalIoUMetric
 from fastvideo.eval.metrics.physics_iq.weighted_spatial_iou.metric import WeightedSpatialIoUMetric
-from fastvideo.eval.metrics.physics_iq.utils import mean, prepare_pair_inputs, prepare_triplet_inputs, unpack_batch_value
+from fastvideo.eval.metrics.physics_iq.utils import (
+    DEFAULT_DURATION_SECONDS, DEFAULT_TARGET_FPS,
+    mean, prepare_pair_inputs, prepare_triplet_inputs, unpack_batch_value,
+)
 from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
 
