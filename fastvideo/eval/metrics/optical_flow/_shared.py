@@ -1,3 +1,13 @@
+"""Shared helpers for optical-flow metrics.
+
+Both ``optical_flow.gt_optical_flow`` and
+``optical_flow.synthetic_optical_flow`` extract per-frame flow with
+``ptlflow`` and reduce it through the same per-pixel / per-frame /
+temporal aggregation pipeline. The pipeline lives here so the two
+metrics stay byte-identical on the comparison side and only differ in
+how they construct the *reference* flow field.
+"""
+
 from __future__ import annotations
 
 from typing import Tuple
@@ -5,9 +15,6 @@ from typing import Tuple
 import numpy as np
 import torch
 
-from fastvideo.eval.metrics.base import BaseMetric
-from fastvideo.eval.registry import register
-from fastvideo.eval.types import MetricResult
 
 _PER_FRAME_AGG_KEYS: tuple[str, ...] = (
     "mf_epe",
@@ -94,14 +101,17 @@ def _flow_kl_2d(
     return float((p * np.log(p / q)).sum())
 
 
-def _compute_frame_metrics(
+def compute_frame_metrics(
     flow_gt: np.ndarray,
     flow_gen: np.ndarray,
     grid_size: int = 8,
     min_mag: float = 0.5,
     max_mag_pct: float = 80.0,
 ) -> dict[str, float]:
-    """Port of mhuo's compute_frame_metrics — see ptlflow_validation.py."""
+    """Per-frame comparison metrics between two HxWx2 flow fields.
+
+    Port of mhuo's compute_frame_metrics — see ptlflow_validation.py.
+    """
     metrics: dict[str, float] = {}
 
     gt_mag_map = np.linalg.norm(flow_gt, axis=2)
@@ -189,10 +199,13 @@ def _compute_frame_metrics(
     return metrics
 
 
-def _aggregate_temporal(
+def aggregate_temporal(
     per_frame: list[dict[str, float]],
 ) -> dict[str, float | int | None]:
-    """Port of mhuo's compute_temporal_metrics."""
+    """Aggregate per-frame metric dicts into mean/std/max/auc/onset summaries.
+
+    Port of mhuo's compute_temporal_metrics.
+    """
     n = len(per_frame)
     if n == 0:
         return {"n_frames": 0}
@@ -227,150 +240,62 @@ def _aggregate_temporal(
     return summary
 
 
-@register("common.optical_flow")
-class OpticalFlowMetric(BaseMetric):
-    """Compare optical flow between generated and reference videos.
-
-    Computes the metric set used by mhuo's ptlflow validation
-    (see fastvideo/training/ptlflow_validation.py in mhuo's tree):
-    mf_epe, mf_angle_err, mf_cosine, mf_mag_ratio, pixel_epe_mean/max,
-    px_angle_rmse, grid_epe_*, fl_all, foe_dist, flow_kl_2d.
-    Aggregated over time as _mean/_std/_max/_auc.
-
-    The headline ``score`` is ``pixel_epe_mean_mean`` (lower is better);
-    every other scalar lives in ``details`` so downstream consumers can
-    pick whichever one they care about.
-
-    All frame pairs from all B videos (both gen and ref) are pooled and
-    batched through the model together for GPU efficiency.
-    """
-
-    name = "common.optical_flow"
-    requires_reference = True
-    higher_is_better = False
-    needs_gpu = True
-    backbone = "optical_flow"
-    dependencies = ["ptlflow"]
-
-    def __init__(
-        self,
-        model_name: str = "dpflow",
-        ckpt: str = "things",
-        min_mag: float = 0.5,
-        max_mag_pct: float = 80.0,
-        grid_size: int = 8,
-    ) -> None:
-        super().__init__()
-        self.model_name = model_name
-        self.ckpt = ckpt
-        self.min_mag = min_mag
-        self.max_mag_pct = max_mag_pct
-        self.grid_size = grid_size
-        self._model = None
-        self._chunk_size = 16
-
-    def to(self, device: str | torch.device) -> OpticalFlowMetric:
-        super().to(device)
-        if self._model is not None:
-            self._model = self._model.to(self.device)
-        return self
-
-    def setup(self) -> None:
-        if self._model is not None:
-            return
-        import ptlflow
-        self._model = ptlflow.get_model(self.model_name, ckpt_path=self.ckpt)
-        self._model.eval()
-        self._model = self._model.to(self.device)
-
-    def _compute_flows_batched(
-        self, pair_frames: list[tuple[np.ndarray, np.ndarray]], io_adapter,
-    ) -> list[np.ndarray]:
-        chunk = self._chunk_size or 16
-        all_flows: list[np.ndarray] = []
-        for start in range(0, len(pair_frames), chunk):
-            end = min(start + chunk, len(pair_frames))
-            pair_tensors = []
-            for f1, f2 in pair_frames[start:end]:
-                inputs = io_adapter.prepare_inputs([f1, f2])
-                pair_tensors.append(inputs["images"])
-            batched_images = torch.cat(pair_tensors, dim=0)
-            with torch.no_grad():
-                preds = self._model({"images": batched_images})
-            preds["images"] = batched_images
-            preds = io_adapter.unscale(preds)
-            flows_tensor = preds["flows"]
-            if flows_tensor.dim() == 5:
-                flows_tensor = flows_tensor.squeeze(1)
-            for i in range(flows_tensor.shape[0]):
-                flow = flows_tensor[i].detach().cpu().permute(1, 2, 0).numpy()
-                all_flows.append(flow)
-        return all_flows
-
-    def compute(self, sample: dict) -> list[MetricResult]:
-        if self._model is None:
-            self.setup()
-
-        from ptlflow.utils.io_adapter import IOAdapter
-
-        gen_video = sample["video"].float()       # (B, T, C, H, W)
-        ref_video = sample["reference"].float()
-        B = gen_video.shape[0]
-        n = min(gen_video.shape[1], ref_video.shape[1])
-        gen_video = gen_video[:, :n]
-        ref_video = ref_video[:, :n]
-        n_pairs = n - 1
-        if n < 2:
-            raise ValueError("Need at least 2 frames to compute optical flow")
-
-        h, w = gen_video.shape[3], gen_video.shape[4]
-        io_adapter = IOAdapter(
-            output_stride=self._model.output_stride,
-            input_size=(h, w),
-            cuda=(self.device.type == "cuda"),
-        )
-
-        gen_pairs: list[tuple[np.ndarray, np.ndarray]] = []
-        ref_pairs: list[tuple[np.ndarray, np.ndarray]] = []
-        for b in range(B):
-            gf = _tensor_to_bgr_list(gen_video[b])
-            rf = _tensor_to_bgr_list(ref_video[b])
-            for i in range(n_pairs):
-                gen_pairs.append((gf[i], gf[i + 1]))
-                ref_pairs.append((rf[i], rf[i + 1]))
-
-        all_gen_flows = self._compute_flows_batched(gen_pairs, io_adapter)
-        all_ref_flows = self._compute_flows_batched(ref_pairs, io_adapter)
-
-        results: list[MetricResult] = []
-        for b in range(B):
-            start = b * n_pairs
-            end = start + n_pairs
-            per_frame = [
-                _compute_frame_metrics(
-                    rf, gf,
-                    grid_size=self.grid_size,
-                    min_mag=self.min_mag,
-                    max_mag_pct=self.max_mag_pct,
-                )
-                for rf, gf in zip(all_ref_flows[start:end], all_gen_flows[start:end])
-            ]
-            summary = _aggregate_temporal(per_frame)
-            score = summary.get("pixel_epe_mean_mean")
-            details = dict(summary)
-            details["per_frame_metrics"] = per_frame
-            results.append(MetricResult(
-                name=self.name,
-                score=float(score) if score is not None else None,
-                details=details,
-            ))
-        return results
-
-
-def _tensor_to_bgr_list(video: torch.Tensor) -> list[np.ndarray]:
+def tensor_to_bgr_list(video: torch.Tensor) -> list[np.ndarray]:
+    """Convert ``(T, C, H, W)`` float [0,1] to a list of HWC BGR uint8 frames."""
     frames = []
     for t in range(video.shape[0]):
         rgb = (video[t].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
         bgr = rgb[:, :, ::-1].copy()
         frames.append(bgr)
     return frames
+
+
+def load_ptlflow_model(model_name: str, ckpt: str, device: torch.device):
+    """Load a ``ptlflow`` model on *device* in eval mode."""
+    import ptlflow
+    model = ptlflow.get_model(model_name, ckpt_path=ckpt)
+    model.eval()
+    return model.to(device)
+
+
+def extract_video_flows(
+    model,
+    video: torch.Tensor,           # (T, C, H, W) float [0, 1]
+    *,
+    chunk: int,
+    device: torch.device,
+) -> list[np.ndarray]:
+    """Run *model* on every consecutive frame pair in *video*.
+
+    Returns a list of HxWx2 flow arrays of length ``T - 1``.
+    """
+    from ptlflow.utils.io_adapter import IOAdapter
+
+    h, w = video.shape[2], video.shape[3]
+    io_adapter = IOAdapter(
+        output_stride=model.output_stride,
+        input_size=(h, w),
+        cuda=(device.type == "cuda"),
+    )
+    bgr_frames = tensor_to_bgr_list(video)
+    pairs = [(bgr_frames[i], bgr_frames[i + 1]) for i in range(len(bgr_frames) - 1)]
+
+    flows: list[np.ndarray] = []
+    for start in range(0, len(pairs), chunk):
+        end = min(start + chunk, len(pairs))
+        pair_tensors = []
+        for f1, f2 in pairs[start:end]:
+            inputs = io_adapter.prepare_inputs([f1, f2])
+            pair_tensors.append(inputs["images"])
+        batched_images = torch.cat(pair_tensors, dim=0)
+        with torch.no_grad():
+            preds = model({"images": batched_images})
+        preds["images"] = batched_images
+        preds = io_adapter.unscale(preds)
+        flows_tensor = preds["flows"]
+        if flows_tensor.dim() == 5:
+            flows_tensor = flows_tensor.squeeze(1)
+        for i in range(flows_tensor.shape[0]):
+            flow = flows_tensor[i].detach().cpu().permute(1, 2, 0).numpy()
+            flows.append(flow)
+    return flows
