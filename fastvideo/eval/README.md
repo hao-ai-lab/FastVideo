@@ -1,19 +1,21 @@
 # `fastvideo.eval`
 
-In-process evaluation suite for video and world-model generations. Native
-metrics (SSIM, PSNR, LPIPS, optical flow), audio metrics, the full VBench
-suite, physics_iq, and a small VLM scorer all live behind a single
-registry-driven API.
+In-process evaluation suite for video and world-model generations.
+Native pixel metrics (SSIM, PSNR, LPIPS), optical-flow comparisons, the
+full VBench suite, Physics-IQ, and a VLM scorer (VideoScore-2) all live
+behind a single registry-driven API.
 
 ## Install
 
-Eval lives in FastVideo's main venv. Add the eval extras:
+| use case | install |
+|---|---|
+| `common.*`, `optical_flow.*`, `vbench.*` (subset), `physics_iq.*`, `videoscore2` | `pip install -e .[eval]` |
+| Just VBench (12 of 16 sub-metrics) | `pip install -e .[eval-vbench]` |
+| Just Physics-IQ (no extras needed; group is documentary) | `pip install -e .[eval-physics-iq]` |
+| Everything pip-installable, including `vbench.scene` (AVoCaDO) | `pip install -e .[eval-full]` |
+| `vbench.{color, multiple_objects, object_class, spatial_relationship}` (GRiT/detectron2) | `pip install -e .[eval-vbench]` and then `pip install 'git+https://github.com/facebookresearch/detectron2.git'` (CUDA-version-pinned, not cleanly on PyPI) |
 
-```bash
-pip install -e .[eval]
-```
-
-To use VBench specifically, also pull the upstream submodule:
+To use VBench, also pull the upstream submodule:
 
 ```bash
 git submodule update --init --recursive  # fetches vbench + kernel deps
@@ -74,8 +76,7 @@ fastvideo/
 │       ├── base.py                # BaseMetric + @register contract
 │       ├── common/                # SSIM, PSNR, LPIPS
 │       ├── optical_flow/          # gt_optical_flow, synthetic_optical_flow
-│       ├── audio/                 # CLAP, WER, audiobox, ...
-│       ├── vlm/                   # VideoScore-2
+│       ├── videoscore2/           # VideoScore-2 (Qwen2.5-VL)
 │       ├── physics_iq/            # PhysicsIQ + sub-metrics
 │       └── vbench/                # ← adapter: sys.path bootstrap + shims
 │           ├── __init__.py

@@ -59,9 +59,9 @@ The eval suite is `fastvideo/eval/`. New metrics register themselves
 via `@register("<group>.<name>")` and are auto-discovered when
 `fastvideo.eval.metrics` is imported.
 
-- **Native metrics** (SSIM, PSNR, LPIPS, optical flow, audio, VLM):
-  drop a file under the appropriate group dir
-  (`fastvideo/eval/metrics/common/`, `audio/`, `vlm/`).
+- **Native metrics** (SSIM, PSNR, LPIPS, optical flow, VLM): drop a
+  file under the appropriate group dir (`fastvideo/eval/metrics/common/`,
+  `optical_flow/`, `videoscore2/`, `physics_iq/`).
 - **Metrics that wrap upstream research code**: follow the vbench
   pattern in `fastvideo/eval/metrics/vbench/`:
   - upstream is a git submodule under

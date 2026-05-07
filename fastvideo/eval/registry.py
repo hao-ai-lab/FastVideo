@@ -30,7 +30,7 @@ def get_metric(name: str, **kwargs: Any) -> BaseMetric:
     """Instantiate a registered metric by name.
 
     Checks that optional dependencies are installed before instantiation
-    and gives a clear install hint if not.
+    and gives a clear install hint pointing at the right extra group.
     """
     cls = _REGISTRY.get(name)
     if cls is None:
@@ -39,10 +39,20 @@ def get_metric(name: str, **kwargs: Any) -> BaseMetric:
 
     for dep in getattr(cls, "dependencies", []):
         if not importlib.util.find_spec(dep):
-            raise ImportError(f"{cls.__name__} requires '{dep}'. "
-                              f"Install with: pip install fastvideo[eval]")
+            raise ImportError(
+                f"{cls.__name__} requires '{dep}'. "
+                f"Install with: pip install 'fastvideo[{_extra_for(name)}]'")
 
     return cls(**kwargs)
+
+
+def _extra_for(metric_name: str) -> str:
+    """Map a metric name to the smallest extra that satisfies its deps."""
+    if metric_name.startswith("vbench."):
+        return "eval-vbench"
+    if metric_name.startswith("physics_iq"):
+        return "eval-physics-iq"
+    return "eval"
 
 
 def list_metrics() -> list[str]:

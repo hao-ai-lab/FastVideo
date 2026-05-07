@@ -126,20 +126,17 @@ test = [
     "pytest",
 ]
 
-# Extra deps for `fastvideo.eval`. The vbench upstream submodule ships
-# its own ad-hoc requirements list; this group covers the imports that
-# the in-tree metric adapters (and vbench's pure-Python helpers) need.
-# Heavier per-metric deps (detectron2, mmcv, ...) are left for users to
-# install on demand — the metric registry surfaces a clear ImportError.
+# Eval extras. See fastvideo/eval/README.md for which install path
+# covers which metrics. detectron2 (vbench color/object_class/etc.) is
+# CUDA-version-pinned and not cleanly pip-installable — install it
+# separately as documented in the README.
+eval-vbench     = ["openai-clip", "pyiqa", "easydict"]
+eval-physics-iq = []
 eval = [
-    "decord",
-    "openai-clip",
-    "pyiqa",
-    "ptlflow",
-    "lpips",
-    "easydict",
-    "qwen-vl-utils",
+    "decord", "lpips", "ptlflow", "qwen-vl-utils",
+    "fastvideo[eval-vbench]", "fastvideo[eval-physics-iq]",
 ]
+eval-full = ["fastvideo[eval]", "qwen-omni-utils"]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 
