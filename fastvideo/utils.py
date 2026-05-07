@@ -496,14 +496,23 @@ def import_pynvml():
 def maybe_download_model(model_name_or_path: str, local_dir: str | None = None, download: bool = True) -> str:
     """
     Check if the model path is a Hugging Face Hub model ID and download it if needed.
-    
+
+    Supports an "umbrella" repo layout where a single HF repo holds multiple
+    pipeline variants under sibling subfolders. If the input is shaped as
+    ``org/repo/subfolder`` (i.e. a non-existent local path with 3+ slash-
+    separated components and at least one segment that does not look like a
+    posix-absolute path), treat the first two components as the HF repo id
+    and the remainder as a subfolder; only the subfolder's blobs are
+    downloaded, and the returned local path points inside that subfolder.
+
     Args:
-        model_name_or_path: Local path or Hugging Face Hub model ID
+        model_name_or_path: Local path, Hugging Face Hub model ID, or
+            ``org/repo/subfolder`` umbrella-repo reference.
         local_dir: Local directory to save the model
         download: Whether to download the model from Hugging Face Hub
-        
+
     Returns:
-        Local path to the model
+        Local path to the model (or to the subfolder inside the snapshot).
     """
 
     # If the path exists locally, return it
@@ -511,8 +520,32 @@ def maybe_download_model(model_name_or_path: str, local_dir: str | None = None, 
         logger.info("Model already exists locally at %s", model_name_or_path)
         return model_name_or_path
 
+    # Detect the umbrella-repo "org/repo/subfolder[/nested]" form. HF Hub
+    # repo ids are exactly two components ("org/name"); anything more is
+    # always a subfolder reference. Local absolute paths are excluded by
+    # the os.path.exists check above and by the leading-slash test below.
+    repo_id = model_name_or_path
+    subfolder: str | None = None
+    parts = model_name_or_path.split("/")
+    if (len(parts) >= 3 and not model_name_or_path.startswith("/") and not model_name_or_path.startswith(".")
+            and "" not in parts):
+        repo_id = "/".join(parts[:2])
+        subfolder = "/".join(parts[2:])
+
     # Otherwise, assume it's a HF Hub model ID and try to download it
     try:
+        if subfolder is not None:
+            logger.info("Downloading umbrella-repo subfolder %s/%s from HF Hub...", repo_id, subfolder)
+            with get_lock(model_name_or_path):
+                local_path = snapshot_download(
+                    repo_id=repo_id,
+                    allow_patterns=[f"{subfolder}/**"],
+                    local_dir=local_dir,
+                )
+            local_path = os.path.join(local_path, subfolder)
+            logger.info("Downloaded subfolder to %s", local_path)
+            return str(local_path)
+
         logger.info("Downloading model snapshot from HF Hub for %s...", model_name_or_path)
         with get_lock(model_name_or_path):
             local_path = snapshot_download(repo_id=model_name_or_path,
@@ -567,19 +600,38 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
         raise ValueError(f"Model directory {model_path} does not contain model_index.json. "
                          "Only Hugging Face diffusers format is supported.")
 
-    # Check for transformer and vae directories
-    transformer_dir = os.path.join(model_path, "transformer")
-    vae_dir = os.path.join(model_path, "vae")
+    # Load the config first so directory checks below can be conditional
+    # on what model_index.json actually declares.
+    with open(config_path) as f:
+        config = json.load(f)
 
+    # transformer/ is mandatory for every supported pipeline; the variant-
+    # specific DiT weights live there.
+    transformer_dir = os.path.join(model_path, "transformer")
     if not os.path.exists(transformer_dir):
         raise ValueError(f"Model directory {model_path} does not contain a transformer/ directory.")
 
-    if not os.path.exists(vae_dir):
-        raise ValueError(f"Model directory {model_path} does not contain a vae/ directory.")
-
-    # Load the config
-    with open(config_path) as f:
-        config = json.load(f)
+    # Other components (vae, text_encoder, audio_vae, tokenizer, ...) are
+    # only required to live in a local subfolder if model_index.json
+    # actually lists them. Pipelines that lazy-load shared components
+    # from upstream HF repos (e.g. MagiHuman lazy-loading the Wan VAE,
+    # T5-Gemma, Stable Audio) emit a model_index.json that omits those
+    # keys, and the pipeline subclass handles the load at module-build
+    # time. Enforce only the "declared but missing" mismatch.
+    _OPTIONAL_COMPONENT_DIRS = (
+        "vae",
+        "text_encoder",
+        "tokenizer",
+        "audio_vae",
+        "scheduler",
+        "image_encoder",
+    )
+    for key in _OPTIONAL_COMPONENT_DIRS:
+        if key in config:
+            subdir = os.path.join(model_path, key)
+            if not os.path.exists(subdir):
+                raise ValueError(f"Model directory {model_path} declares `{key}` in "
+                                 f"model_index.json but is missing the {key}/ subfolder.")
 
     # Verify diffusers version exists
     if "_diffusers_version" not in config:
