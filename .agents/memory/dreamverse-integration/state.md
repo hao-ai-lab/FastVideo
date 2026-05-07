@@ -1,4 +1,4 @@
-# Current State — 2026-05-06 (D-21 NVENC build path + benchmark landed)
+# Current State — 2026-05-06 (D-21 NVENC + D-22 av_streaming instrumentation + pipeline benchmark)
 
 Point-in-time snapshot of branches, commits, and live infrastructure.
 Update whenever commits land or services restart.
