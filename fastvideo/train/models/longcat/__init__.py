@@ -4,6 +4,3 @@
 from fastvideo.train.models.longcat.longcat import (
     LongCatModel as LongCatModel,
 )
-from fastvideo.train.models.longcat.longcat_causal import (
-    LongCatCausalModel as LongCatCausalModel,
-)
