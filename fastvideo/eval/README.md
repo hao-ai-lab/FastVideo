@@ -71,7 +71,8 @@ fastvideo/
 │   ├── io/                        # video loading helpers
 │   └── metrics/
 │       ├── base.py                # BaseMetric + @register contract
-│       ├── common/                # SSIM, PSNR, LPIPS, optical_flow
+│       ├── common/                # SSIM, PSNR, LPIPS
+│       ├── optical_flow/          # gt_optical_flow, synthetic_optical_flow
 │       ├── audio/                 # CLAP, WER, audiobox, ...
 │       ├── vlm/                   # VideoScore-2
 │       ├── physics_iq/            # PhysicsIQ + sub-metrics

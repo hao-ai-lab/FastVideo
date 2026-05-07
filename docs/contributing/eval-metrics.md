@@ -39,7 +39,8 @@ The full recipes are below.
 ```
 fastvideo/eval/metrics/
 ├── base.py                  # BaseMetric + lifecycle contract
-├── common/                  # group: SSIM, PSNR, LPIPS, optical_flow
+├── common/                  # group: SSIM, PSNR, LPIPS
+├── optical_flow/            # group: gt_optical_flow, synthetic_optical_flow
 ├── audio/                   # group: CLAP, WER, audiobox, …
 ├── vlm/                     # group: VideoScore-2
 ├── physics_iq/              # group + sub-metrics
