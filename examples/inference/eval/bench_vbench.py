@@ -41,7 +41,8 @@ def _slugify(prompt: str, max_len: int = 100) -> str:
 
 
 def _generate_videos(prompts: list[str], videos_dir: Path,
-                     model: str, num_gpus: int) -> None:
+                     model: str, num_gpus: int,
+                     num_frames: int, height: int, width: int) -> None:
     from fastvideo import VideoGenerator
 
     videos_dir.mkdir(parents=True, exist_ok=True)
@@ -51,12 +52,14 @@ def _generate_videos(prompts: list[str], videos_dir: Path,
         print(f"[gen] all {len(prompts)} videos already present; skipping.")
         return
 
-    print(f"[gen] {len(todo)}/{len(prompts)} prompts to render with {model}...")
+    print(f"[gen] {len(todo)}/{len(prompts)} prompts to render with {model} "
+          f"({num_frames}x{height}x{width})...")
     gen = VideoGenerator.from_pretrained(model, num_gpus=num_gpus)
     try:
         for prompt, out_path in todo:
             gen.generate_video(
                 prompt=prompt, output_path=str(out_path), save_video=True,
+                num_frames=num_frames, height=height, width=width,
             )
     finally:
         gen.shutdown()
@@ -74,6 +77,9 @@ def main() -> None:
     p.add_argument("--num-gpus", type=int, default=1)
     p.add_argument("--model", default="Davids048/LTX2-Base-Diffusers",
                    help="HF repo id of the text→video generator to use.")
+    p.add_argument("--num-frames", type=int, default=121)
+    p.add_argument("--height", type=int, default=1088)
+    p.add_argument("--width", type=int, default=1920)
     p.add_argument("--fps", type=float, default=24.0,
                    help="Frame-rate annotation passed to fps-aware metrics.")
     p.add_argument("--skip-generation", action="store_true",
@@ -95,8 +101,11 @@ def main() -> None:
 
     # 2. Generate (or reuse) one mp4 per prompt.
     if not args.skip_generation:
-        _generate_videos([row["prompt"] for row in rows],
-                         args.videos_dir, args.model, args.num_gpus)
+        _generate_videos(
+            [row["prompt"] for row in rows],
+            args.videos_dir, args.model, args.num_gpus,
+            args.num_frames, args.height, args.width,
+        )
 
     # 3. Score each video against the requested vbench sub-metrics.
     metric_names = sorted(set(f"vbench.{d}" for d in ds.dimensions))
