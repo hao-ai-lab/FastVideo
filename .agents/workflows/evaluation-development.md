@@ -64,8 +64,9 @@ via `@register("<group>.<name>")` and are auto-discovered when
   (`fastvideo/eval/metrics/common/`, `audio/`, `vlm/`).
 - **Metrics that wrap upstream research code**: follow the vbench
   pattern in `fastvideo/eval/metrics/vbench/`:
-  - upstream is a git submodule under `<metric>/external/upstream/`,
-    pinned to a SHA in repo-root `.gitmodules`;
+  - upstream is a git submodule under
+    `fastvideo/third_party/eval/<bench>/`, pinned to a SHA in repo-root
+    `.gitmodules`;
   - the metric package's `__init__.py` does the `sys.path` insert AND
     installs runtime compat shims (attribute-level monkey-patches) for
     any modern-dep drift. **Do not** modify upstream files on disk and

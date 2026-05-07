@@ -1,9 +1,9 @@
 """Auto-discover and register all built-in metrics (recursive).
 
-Manually walks the metrics package tree and imports any leaf-package's
-`metric` module so @register decorators fire. Skips any path component
-starting with `_` (e.g. _vendor_*, _third_party) to avoid pulling in
-vendored model code that may have side-effecting imports.
+Walks the metrics package tree and imports any leaf-package's
+``metric`` module so ``@register`` decorators fire. Path components
+starting with ``_`` are skipped (used for shared helpers like
+``optical_flow/_shared.py`` and `vbench/_grit_helper.py`).
 """
 
 import importlib

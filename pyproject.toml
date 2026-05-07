@@ -134,11 +134,9 @@ test = [
 eval = [
     "decord",
     "openai-clip",
-    "open_clip_torch",
     "pyiqa",
     "ptlflow",
     "lpips",
-    "torchmetrics",
     "easydict",
     "qwen-vl-utils",
 ]

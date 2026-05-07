@@ -133,11 +133,14 @@ module).
 
 Pattern: see `fastvideo/eval/metrics/vbench/`. The contract is:
 
-1. `<bench>/external/upstream/` is a git submodule pinned to a SHA
-   (registered in repo-root `.gitmodules`).
-2. `<bench>/__init__.py` inserts that path on `sys.path` and installs
-   any compat shims (attribute-level monkey-patches) needed for modern
-   torch/transformers/numpy. **Do not modify upstream files on disk.**
+1. The upstream code lives as a git submodule under
+   `fastvideo/third_party/eval/<bench>/`, pinned to a SHA (registered
+   in repo-root `.gitmodules`).
+2. The metric package's `__init__.py`
+   (`fastvideo/eval/metrics/<bench>/__init__.py`) inserts that submodule
+   path on `sys.path` and installs any compat shims (attribute-level
+   monkey-patches) needed for modern torch/transformers/numpy.
+   **Do not modify upstream files on disk.**
 3. Per-sub-metric `metric.py` files use `@register("<bench>.<name>")`.
 
 There is no per-benchmark setup script. Patches live as Python in
