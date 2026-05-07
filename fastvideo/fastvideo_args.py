@@ -920,7 +920,11 @@ class TrainingArgs(FastVideoArgs):
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
-        parser.add_argument("--data-path", type=str, required=True, help="Path to parquet files")
+        parser.add_argument("--data-path",
+                            type=str,
+                            required=True,
+                            help=("Path to dataset files. Map-style parquet datasets "
+                                  "support os.pathsep-separated paths for multiple roots."))
         parser.add_argument("--data-split",
                             type=str,
                             default=TrainingArgs.data_split,

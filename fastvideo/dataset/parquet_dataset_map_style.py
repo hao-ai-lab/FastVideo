@@ -3,6 +3,7 @@ import hashlib
 import os
 import pickle
 import random
+from collections.abc import Sequence
 from typing import Any
 
 import pyarrow as pa
@@ -21,6 +22,7 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
+DatasetPath = str | os.PathLike[str] | Sequence[str | os.PathLike[str]]
 VALID_DATA_SPLITS = frozenset(("all", "train", "validation"))
 
 
@@ -96,6 +98,23 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
         return len(self.sp_group_local_indices) // self.batch_size
 
 
+def _normalize_dataset_paths(path: DatasetPath) -> tuple[str, ...]:
+    if isinstance(path, (str, os.PathLike)):
+        raw_path = os.fspath(path).strip()
+        paths = raw_path.split(os.pathsep) if os.pathsep in raw_path else [raw_path]
+    elif isinstance(path, Sequence):
+        paths = [os.fspath(p).strip() for p in path]
+    else:
+        raise TypeError(
+            "Dataset path must be a path string, an os.PathLike object, "
+            "or a sequence of path strings.")
+
+    paths = [p for p in paths if p]
+    if not paths:
+        raise ValueError("Dataset path must contain at least one non-empty path.")
+    return tuple(paths)
+
+
 def _normalize_data_split(data_split: str) -> str:
     normalized = (data_split or "all").strip().lower()
     if normalized == "val":
@@ -136,17 +155,25 @@ def _is_validation_sample(sample_key: str,
 def _split_cache_file(dataset_root: str,
                       data_split: str,
                       validation_split_ratio: float,
-                      seed: int) -> str:
+                      seed: int,
+                      dataset_roots: tuple[str, ...] | None = None) -> str:
     ratio_token = f"{validation_split_ratio:.8f}".rstrip("0").rstrip(".")
     ratio_token = ratio_token.replace(".", "p") or "0"
+    roots_token = ""
+    if dataset_roots is not None and len(dataset_roots) > 1:
+        roots_digest = hashlib.blake2b(
+            "\0".join(dataset_roots).encode(),
+            digest_size=8,
+        ).hexdigest()
+        roots_token = f"_roots_{roots_digest}"
     return os.path.join(
         dataset_root,
         "map_style_cache",
-        f"split_indices_{data_split}_ratio_{ratio_token}_seed_{seed}.pkl",
+        f"split_indices{roots_token}_{data_split}_ratio_{ratio_token}_seed_{seed}.pkl",
     )
 
 
-def get_parquet_files_and_length(path: str):
+def _get_single_parquet_files_and_length(path: str):
     dataset_root = os.path.realpath(os.path.expanduser(path))
     # Check if cached info exists
     cache_dir = os.path.join(dataset_root, "map_style_cache")
@@ -255,9 +282,25 @@ def get_parquet_files_and_length(path: str):
     return file_names_sorted, lengths_sorted
 
 
+def get_parquet_files_and_length(path: DatasetPath):
+    dataset_roots = _normalize_dataset_paths(path)
+    if len(dataset_roots) == 1:
+        return _get_single_parquet_files_and_length(dataset_roots[0])
+
+    all_file_names = []
+    all_lengths = []
+    for dataset_root in dataset_roots:
+        file_names, lengths = _get_single_parquet_files_and_length(
+            dataset_root)
+        all_file_names.extend(file_names)
+        all_lengths.extend(lengths)
+
+    return tuple(all_file_names), tuple(all_lengths)
+
+
 def _select_split_row_indices(
-    file_names: list[str],
-    lengths: list[int],
+    file_names: Sequence[str],
+    lengths: Sequence[int],
     data_split: str,
     validation_split_ratio: float,
     seed: int,
@@ -320,14 +363,18 @@ def _select_split_row_indices(
     return tuple(selected_indices)
 
 
-def get_parquet_split_indices(path: str,
+def get_parquet_split_indices(path: DatasetPath,
                               data_split: str,
                               validation_split_ratio: float,
                               seed: int) -> tuple[int, ...]:
     data_split = _normalize_data_split(data_split)
     _validate_split_ratio(data_split, validation_split_ratio)
 
-    dataset_root = os.path.realpath(os.path.expanduser(path))
+    dataset_roots = tuple(
+        os.path.realpath(os.path.expanduser(root))
+        for root in _normalize_dataset_paths(path)
+    )
+    dataset_root = dataset_roots[0]
     file_names, lengths = get_parquet_files_and_length(path)
     if data_split == "all":
         return tuple(range(sum(lengths)))
@@ -337,6 +384,7 @@ def get_parquet_split_indices(path: str,
         data_split,
         validation_split_ratio,
         seed,
+        dataset_roots,
     )
 
     if get_world_rank() == 0:
@@ -454,7 +502,7 @@ class LatentsParquetMapStyleDataset(Dataset):
 
     def __init__(
         self,
-        path: str,
+        path: DatasetPath,
         batch_size: int,
         parquet_schema: pa.Schema,
         cfg_rate: float = 0.0,
@@ -475,8 +523,8 @@ class LatentsParquetMapStyleDataset(Dataset):
         _validate_split_ratio(self.data_split, self.validation_split_ratio)
         # Create a seeded random generator for deterministic CFG
         self.rng = random.Random(seed)
-        logger.info("Initializing LatentsParquetMapStyleDataset with path: %s",
-                    path)
+        logger.info("Initializing LatentsParquetMapStyleDataset with path(s): %s",
+                    _normalize_dataset_paths(path))
         self.parquet_files, self.lengths = get_parquet_files_and_length(path)
         if self.data_split == "all":
             self.sample_indices = None
