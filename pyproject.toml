@@ -186,6 +186,8 @@ follow_imports = "silent"
 # ``_vendored/`` subdir (project-wide convention; mirrors the
 # ``_``-prefixed auto-discovery skip).
 skip = "./data,./wandb,ui/package-lock.json,*/_vendored/*"
+# "TReAD" is daVinci-MagiHuman's acronym (Token Routing and Early Drop).
+ignore-words-list = "TReAD,tread"
 
 [tool.ruff]
 # Allow lines to be as long as 120.
