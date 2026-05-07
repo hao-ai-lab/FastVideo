@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import torch
 
 from fastvideo.eval.evaluator import create_evaluator
@@ -7,8 +9,8 @@ from fastvideo.eval.types import MetricResult
 
 
 def evaluate(
-    generated: torch.Tensor,
-    reference: torch.Tensor | None = None,
+    generated: torch.Tensor | str | Path,
+    reference: torch.Tensor | str | Path | None = None,
     metrics: list[str] | str = "all",
     device: str = "cuda",
     **kwargs,
@@ -17,10 +19,11 @@ def evaluate(
 
     Parameters
     ----------
-    generated : Tensor
-        Generated video ``(T, C, H, W)`` or batch ``(B, T, C, H, W)``.
-    reference : Tensor | None
-        Reference video (same shapes as *generated*).
+    generated : Tensor | str | Path
+        Generated video. Either a pre-loaded ``(T, C, H, W)`` tensor or a
+        path to an mp4/avi/etc. — paths are decoded by the worker.
+    reference : Tensor | str | Path | None
+        Reference video (same accepted shapes as *generated*).
     metrics : list[str] | str
         Metric names, or ``"all"``.
     device : str

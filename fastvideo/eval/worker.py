@@ -13,6 +13,8 @@ unnecessary overhead.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import torch
 
 from fastvideo.eval.memory import clear_cache
@@ -51,18 +53,23 @@ class EvalWorker:
         self._unloaded = False
 
     def evaluate(self, **kwargs) -> dict[str, MetricResult]:
-        """Score one sample. ``video`` must be ``(T, C, H, W)``."""
+        """Score one sample.
+
+        ``video`` may be a ``(T, C, H, W)`` tensor or a path-like
+        (``str`` / ``Path``) — paths are loaded inside this method so
+        the dispatcher can hold a queue of cheap path strings instead
+        of fully-decoded tensors. ``reference`` follows the same rule.
+
+        A ``(1, T, C, H, W)`` tensor is also accepted for back-compat
+        and gets unwrapped to ``(T, C, H, W)`` before reaching metrics.
+        """
         if self._unloaded:
             raise RuntimeError("EvalWorker was unloaded; call reload() before evaluating.")
 
         sample = dict(kwargs)
-        video = sample.get("video")
-        if isinstance(video, torch.Tensor) and video.dim() == 5 and video.shape[0] == 1:
-            # Back-compat: callers that still pass (1, T, C, H, W) get unwrapped.
-            sample["video"] = video.squeeze(0)
-            ref = sample.get("reference")
-            if isinstance(ref, torch.Tensor) and ref.dim() == 5 and ref.shape[0] == 1:
-                sample["reference"] = ref.squeeze(0)
+        sample["video"] = _resolve_video_input(sample.get("video"))
+        if "reference" in sample:
+            sample["reference"] = _resolve_video_input(sample["reference"])
 
         results: dict[str, MetricResult] = {}
         for name, m in self._metrics.items():
@@ -88,3 +95,24 @@ class EvalWorker:
         """Rebuild metrics dropped by :meth:`unload`."""
         if self._unloaded:
             self._load()
+
+
+def _resolve_video_input(value):
+    """Normalize a sample's ``video`` / ``reference`` field for metrics.
+
+    * ``str`` / ``Path`` → decoded ``(T, C, H, W)`` tensor via
+      :func:`fastvideo.eval.io.video.load_video`. Decoding happens in
+      the worker thread so the dispatcher can keep paths queued
+      instead of full tensors.
+    * ``(1, T, C, H, W)`` tensor → squeezed to ``(T, C, H, W)``
+      (back-compat with callers that still pass the leading batch dim).
+    * anything else → returned untouched.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (str, Path)):
+        from fastvideo.eval.io.video import load_video
+        return load_video(str(value))
+    if isinstance(value, torch.Tensor) and value.dim() == 5 and value.shape[0] == 1:
+        return value.squeeze(0)
+    return value

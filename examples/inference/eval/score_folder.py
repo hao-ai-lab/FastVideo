@@ -26,7 +26,6 @@ import json
 from pathlib import Path
 
 from fastvideo.eval import create_evaluator
-from fastvideo.eval.io import load_video
 
 
 def _list_videos(directory: Path) -> list[Path]:
@@ -59,18 +58,18 @@ def main() -> None:
     )
     evaluator = create_evaluator(metrics=metrics, num_gpus=args.num_gpus)
 
-    # Build the list of per-video sample dicts. Loading happens upfront
-    # so the evaluator can fan all samples out across GPU replicas at
-    # once, rather than serializing on a per-call load.
+    # Build per-video sample dicts holding *paths*, not pre-loaded
+    # tensors. Each path is decoded inside the worker thread that picks
+    # up its sample, so peak resident memory is bounded by num_gpus
+    # rather than scaling with the size of the folder.
     samples: list[dict] = []
     for vp in video_paths:
-        sample: dict = {"video": load_video(str(vp))}
+        sample: dict = {"video": str(vp)}
         if args.reference_dir is not None:
             ref_path = args.reference_dir / vp.name
             if not ref_path.is_file():
-                raise FileNotFoundError(
-                    f"Missing reference for {vp.name} at {ref_path}")
-            sample["reference"] = load_video(str(ref_path))
+                raise FileNotFoundError(f"Missing reference for {vp.name} at {ref_path}")
+            sample["reference"] = str(ref_path)
         if args.fps is not None:
             sample["fps"] = args.fps
         samples.append(sample)

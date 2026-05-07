@@ -66,15 +66,23 @@ class Evaluator:
     ) -> dict[str, MetricResult] | list[dict[str, MetricResult]]:
         """Score one sample (kwargs form) or many samples (list form).
 
+        ``video`` and ``reference`` may be either a pre-loaded
+        ``(T, C, H, W)`` tensor or a path-like (``str`` / ``Path``).
+        Paths are decoded inside the worker thread that picks up the
+        sample, so memory stays bounded by ``num_gpus`` even when
+        thousands of paths are queued — see ``score_folder.py`` for
+        the canonical pattern.
+
         One sample::
 
-            ev.evaluate(video=tensor, text_prompt=[...], fps=24.0)
+            ev.evaluate(video=tensor, text_prompt="...", fps=24.0)
+            ev.evaluate(video="path/to/clip.mp4", fps=24.0)
 
         Many samples — fan out across GPU replicas, results in input order::
 
-            ev.evaluate([
-                {"video": v1, "text_prompt": [...], "fps": 24.0},
-                {"video": v2, "text_prompt": [...], "fps": 24.0},
+            ev.evaluate(samples=[
+                {"video": "a.mp4", "reference": "ref_a.mp4"},
+                {"video": "b.mp4", "reference": "ref_b.mp4"},
                 ...
             ])
 

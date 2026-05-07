@@ -31,7 +31,6 @@ from pathlib import Path
 
 from fastvideo.eval import create_evaluator
 from fastvideo.eval.datasets import get_dataset
-from fastvideo.eval.io import load_video
 
 
 def _slugify(prompt: str, max_len: int = 100) -> str:
@@ -119,8 +118,9 @@ def main() -> None:
         if not video_path.is_file():
             print(f"[eval] missing {video_path}; skipping this row.")
             continue
+        # Pass the path; the worker decodes lazily so memory stays bounded.
         samples.append({
-            "video": load_video(str(video_path)),
+            "video": str(video_path),
             "fps": args.fps,
             **row,                                       # prompt / aux / dims
         })
