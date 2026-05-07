@@ -71,15 +71,17 @@ class YourMetric(BaseMetric):
                                               # ImportError if missing
     needs_gpu: bool = False
     backbone: str | None = None               # e.g. "clip_vit_l14"
-    batch_unit: str = "video"                 # "video", "frame", or
-                                              # "frame_pair"
 ```
 
 You must implement:
 
 ```python
 def compute(self, sample: dict) -> list[MetricResult]:
-    """sample['video'] is (B, T, C, H, W). Return one MetricResult per B."""
+    """sample['video'] is (1, T, C, H, W). Return a one-element list.
+
+    The leading 1 is preserved for forward-compat with batched eval;
+    today :class:`EvalWorker` always invokes metrics with B=1.
+    """
 ```
 
 You may override:
@@ -88,9 +90,6 @@ You may override:
   `create_evaluator`. Idempotent (re-entrant). Use the `if self._model
   is not None: return` pattern.
 - `to(self, device)` — move the metric (and its submodels) to `device`.
-- `trial_forward(self, batch_size, *, height, width, num_frames)` — used
-  by `Evaluator.calibrate()`. Default runs `compute()` on dummies; override
-  if your `batch_unit` isn't `"video"` or your inputs need special shapes.
 
 If a required input is missing (e.g. an fps-aware metric called without
 `fps`), return `self._skip(sample, reason)` — **do not raise**.
@@ -116,7 +115,6 @@ class YourMetric(BaseMetric):
     requires_reference = True
     higher_is_better = True
     needs_gpu = False
-    batch_unit = "video"
     dependencies: list[str] = []  # nothing extra
 
     def compute(self, sample: dict) -> list[MetricResult]:

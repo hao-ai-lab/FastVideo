@@ -37,8 +37,7 @@ def get_cache_dir() -> Path:
         ~/.cache/huggingface/hub /   ← left at HF's default; widely shared
                                        with other ML projects
 
-    Override priority: ``FASTVIDEO_EVAL_CACHE`` > ``WM_EVAL_CACHE``
-    (legacy) > ``${FASTVIDEO_CACHE_ROOT}/eval``.
+    Override priority: ``FASTVIDEO_EVAL_CACHE`` > ``${FASTVIDEO_CACHE_ROOT}/eval``.
 
     Metric authors writing new code: when wrapping a third-party loader
     that has its own cache convention (CLIP's ``download_root``, pyiqa's
@@ -48,10 +47,7 @@ def get_cache_dir() -> Path:
     return Path(
         os.environ.get(
             "FASTVIDEO_EVAL_CACHE",
-            os.environ.get(
-                "WM_EVAL_CACHE",
-                os.path.join(envs.FASTVIDEO_CACHE_ROOT, "eval"),
-            ),
+            os.path.join(envs.FASTVIDEO_CACHE_ROOT, "eval"),
         )
     )
 

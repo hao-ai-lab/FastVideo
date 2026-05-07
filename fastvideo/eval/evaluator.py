@@ -3,18 +3,14 @@
 Layering (mirrors FastVideo's VideoGenerator → Worker pattern, but
 in-process)::
 
-    EvalRunner          ← dataset / generator / file conventions / manifest
-      └── Evaluator     ← user-facing; round-robins samples across workers
-           └── EvalWorker × N   ← single-GPU; owns metric replicas
+    Evaluator               ← user-facing; round-robins samples across workers
+      └── EvalWorker × N    ← single-GPU; owns metric replicas
 
 The constructor builds one :class:`EvalWorker` per GPU and loads every
 metric on every worker eagerly. :meth:`evaluate` is the single entry
 point: pass kwargs for one sample, or pass a list of sample dicts to
 fan-out across GPU replicas — same method, return type follows the
 input shape.
-
-Anything fancier (prompts, generation, file naming) lives in
-:class:`EvalRunner`.
 """
 from __future__ import annotations
 
