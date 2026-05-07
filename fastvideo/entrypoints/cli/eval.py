@@ -115,11 +115,10 @@ def _cmd_run(args: argparse.Namespace) -> None:
         raise SystemExit(f"No videos matched: {args.videos}")
     ref_paths = _expand_paths([args.reference]) if args.reference else None
 
-    metrics_arg: list[str] | str
-    if args.metrics == "all":
-        metrics_arg = "all"
-    else:
-        metrics_arg = [m.strip() for m in args.metrics.split(",") if m.strip()]
+    metrics_arg: list[str] | str = (
+        "all" if args.metrics == "all"
+        else [m.strip() for m in args.metrics.split(",") if m.strip()]
+    )
 
     evaluator = create_evaluator(metrics=metrics_arg, device=args.device)
 
@@ -163,7 +162,12 @@ def _expand_paths(patterns: list[str]) -> list[str]:
             out.append(pat)
     # de-dup, preserve order
     seen: set[str] = set()
-    return [x for x in out if not (x in seen or seen.add(x))]
+    deduped: list[str] = []
+    for x in out:
+        if x not in seen:
+            seen.add(x)
+            deduped.append(x)
+    return deduped
 
 
 def _serialize_results(results) -> dict | list:
