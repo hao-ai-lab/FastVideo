@@ -32,9 +32,7 @@ Optional sample keys
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
-import numpy as np
 import torch
 
 from fastvideo.eval.metrics.base import BaseMetric
@@ -112,36 +110,17 @@ class SyntheticOpticalFlowMetric(BaseMetric):
             return
         self._model = load_ptlflow_model(self.model_name, self.ckpt, self.device)
 
-    @staticmethod
-    def _row_actions(actions: Any, b: int) -> dict | None:
-        if actions is None:
-            return None
-        if isinstance(actions, list):
-            return actions[b] if b < len(actions) else None
-        return actions
-
-    def _per_video_predicted_flows(
-        self,
-        actions: dict,
-        cal: ThirdPersonCalibration,
-        frame_shape: tuple[int, int],
-        n_pairs: int,
-        mouse_pitch_sign: int,
-    ) -> list[np.ndarray]:
-        gen = ThirdPersonFlowGenerator(
-            calibration=cal,
-            frame_shape=frame_shape,
-            mouse_pitch_sign=mouse_pitch_sign,
-        )
-        return gen.generate_flow_sequence(actions, n_pairs=n_pairs)
-
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         if self._model is None:
             self.setup()
 
         actions = sample.get("actions")
         if actions is None:
             return self._skip(sample, "missing 'actions' (keyboard + mouse)")
+        if isinstance(actions, list):
+            actions = actions[0] if actions else None
+            if actions is None:
+                return self._skip(sample, "empty 'actions' list")
 
         cal_obj = sample.get("calibration")
         cal = self._calibration if cal_obj is None else _resolve_calibration(cal_obj)
@@ -152,8 +131,8 @@ class SyntheticOpticalFlowMetric(BaseMetric):
                 "or sample['calibration'] per call)",
             )
 
-        video = sample["video"].float()      # (B, T, C, H, W)
-        B, T, _, H, W = video.shape
+        video = sample["video"].float()      # (T, C, H, W)
+        T, _, H, W = video.shape
         if T < 2:
             raise ValueError("Need at least 2 frames to compute optical flow")
         n_pairs = T - 1
@@ -161,40 +140,32 @@ class SyntheticOpticalFlowMetric(BaseMetric):
         mouse_pitch_sign = int(sample.get("mouse_pitch_sign", 1))
         chunk = self._chunk_size or 16
 
-        results: list[MetricResult] = []
-        for b in range(B):
-            row_actions = self._row_actions(actions, b)
-            if row_actions is None:
-                results.append(MetricResult(
-                    name=self.name, score=None,
-                    details={"skipped": "actions missing for this row"},
-                ))
-                continue
+        observed = extract_video_flows(
+            self._model, video, chunk=chunk, device=self.device,
+        )
+        predictor = ThirdPersonFlowGenerator(
+            calibration=cal,
+            frame_shape=(H, W),
+            mouse_pitch_sign=mouse_pitch_sign,
+        )
+        predicted = predictor.generate_flow_sequence(actions, n_pairs=n_pairs)
 
-            observed = extract_video_flows(
-                self._model, video[b], chunk=chunk, device=self.device,
+        n = min(len(observed), len(predicted))
+        per_frame = [
+            compute_frame_metrics(
+                predicted[i], observed[i],
+                grid_size=self.grid_size,
+                min_mag=self.min_mag,
+                max_mag_pct=self.max_mag_pct,
             )
-            predicted = self._per_video_predicted_flows(
-                row_actions, cal, (H, W), n_pairs, mouse_pitch_sign,
-            )
-
-            n = min(len(observed), len(predicted))
-            per_frame = [
-                compute_frame_metrics(
-                    predicted[i], observed[i],
-                    grid_size=self.grid_size,
-                    min_mag=self.min_mag,
-                    max_mag_pct=self.max_mag_pct,
-                )
-                for i in range(n)
-            ]
-            summary = aggregate_temporal(per_frame)
-            score = summary.get("pixel_epe_mean_mean")
-            details = dict(summary)
-            details["per_frame_metrics"] = per_frame
-            results.append(MetricResult(
-                name=self.name,
-                score=float(score) if score is not None else None,
-                details=details,
-            ))
-        return results
+            for i in range(n)
+        ]
+        summary = aggregate_temporal(per_frame)
+        score = summary.get("pixel_epe_mean_mean")
+        details = dict(summary)
+        details["per_frame_metrics"] = per_frame
+        return MetricResult(
+            name=self.name,
+            score=float(score) if score is not None else None,
+            details=details,
+        )

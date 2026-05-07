@@ -62,30 +62,27 @@ class VBWERMetric(BaseMetric):
         return rich_transcription_postprocess(res[0]["text"])
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         if self._model is None:
             self.setup()
 
-        audio = sample["audio"]           # str or list[str]
-        text = sample["text_prompt"]      # str or list[str]
-        if isinstance(audio, str):
-            audio = [audio]
-        if isinstance(text, str):
-            text = [text]
+        audio = sample["audio"]
+        text = sample["text_prompt"]
+        if isinstance(audio, list):
+            audio = audio[0]
+        if isinstance(text, list):
+            text = text[0]
 
         import jiwer
 
-        results = []
-        for a, gt_text in zip(audio, text):
-            asr = self._transcribe(a)
-            gt_text = gt_text.strip().lower()
-            if set(asr).issubset(PUNCTUATION_SET):
-                asr = ""
-            asr = asr.strip().lower()
-            wer = jiwer.wer(gt_text, asr)
-            results.append(MetricResult(
-                name=self.name,
-                score=wer,
-                details={"transcription": asr, "reference_text": gt_text},
-            ))
-        return results
+        asr = self._transcribe(audio)
+        gt_text = text.strip().lower()
+        if set(asr).issubset(PUNCTUATION_SET):
+            asr = ""
+        asr = asr.strip().lower()
+        wer = jiwer.wer(gt_text, asr)
+        return MetricResult(
+            name=self.name,
+            score=wer,
+            details={"transcription": asr, "reference_text": gt_text},
+        )

@@ -23,32 +23,21 @@ class TemporalFlickeringMetric(BaseMetric):
     needs_gpu = False
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
-        video = sample["video"]  # (B, T, C, H, W) float [0, 1]
-        B, T = video.shape[:2]
+    def compute(self, sample: dict) -> MetricResult:
+        video = sample["video"]                                  # (T, C, H, W) [0, 1]
+        T = video.shape[0]
+        if T <= 1:
+            return MetricResult(name=self.name, score=1.0, details={})
 
-        results = []
-        for b in range(B):
-            frames = (video[b] * 255.0).to(torch.uint8).cpu().numpy()  # (T, C, H, W)
-            # Transpose to (T, H, W, C) for MAE computation
-            frames = frames.transpose(0, 2, 3, 1).astype(np.float32)
-
-            if T <= 1:
-                results.append(MetricResult(name=self.name, score=1.0, details={}))
-                continue
-
-            mae_per_pair = []
-            for t in range(T - 1):
-                mae = np.mean(np.abs(frames[t] - frames[t + 1]))
-                mae_per_pair.append(mae)
-
-            mean_mae = np.mean(mae_per_pair)
-            score = (255.0 - mean_mae) / 255.0
-
-            results.append(MetricResult(
-                name=self.name,
-                score=float(score),
-                details={"per_pair_mae": [float(m) for m in mae_per_pair]},
-            ))
-
-        return results
+        frames = (video * 255.0).to(torch.uint8).cpu().numpy()
+        frames = frames.transpose(0, 2, 3, 1).astype(np.float32)
+        mae_per_pair = [
+            float(np.mean(np.abs(frames[t] - frames[t + 1])))
+            for t in range(T - 1)
+        ]
+        mean_mae = float(np.mean(mae_per_pair))
+        return MetricResult(
+            name=self.name,
+            score=(255.0 - mean_mae) / 255.0,
+            details={"per_pair_mae": mae_per_pair},
+        )

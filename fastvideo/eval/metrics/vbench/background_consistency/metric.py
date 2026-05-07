@@ -63,12 +63,9 @@ class BackgroundConsistencyMetric(BaseMetric):
         self._model = model
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
-        video = sample["video"]  # (B, T, C, H, W)
-        B, T = video.shape[:2]
-
-        frames = video.reshape(B * T, *video.shape[2:]).to(self.device)
-        frames = _clip_transform(frames)
+    def compute(self, sample: dict) -> MetricResult:
+        video = sample["video"]                              # (T, C, H, W)
+        frames = _clip_transform(video.to(self.device))
 
         chunk = self._chunk_size or 64
         feats = []
@@ -76,15 +73,9 @@ class BackgroundConsistencyMetric(BaseMetric):
             f = self._model.encode_image(frames[i:i + chunk]).float()
             f = F.normalize(f, dim=-1, p=2)
             feats.append(f)
-        all_feats = torch.cat(feats, dim=0).reshape(B, T, -1)
-
-        results = []
-        for b in range(B):
-            score = consistency_score(all_feats[b])
-            results.append(MetricResult(
-                name=self.name,
-                score=score,
-                details={},
-            ))
-
-        return results
+        all_feats = torch.cat(feats, dim=0)                  # (T, D)
+        return MetricResult(
+            name=self.name,
+            score=consistency_score(all_feats),
+            details={},
+        )

@@ -89,23 +89,20 @@ class VBFrechetDistanceAudioMetric(BaseMetric):
         return emb
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         if self._model is None:
             self.setup()
 
-        audio = sample["audio"]                  # str or list[str]
-        ref_audio = sample["reference_audio"]    # str or list[str]
-        if isinstance(audio, str):
-            audio = [audio]
-        if isinstance(ref_audio, str):
-            ref_audio = [ref_audio]
+        audio = sample["audio"]
+        ref_audio = sample["reference_audio"]
+        if isinstance(audio, list):
+            audio = audio[0]
+        if isinstance(ref_audio, list):
+            ref_audio = ref_audio[0]
 
-        results = []
-        for a, ra in zip(audio, ref_audio):
-            emb1 = self._get_audio_emb(a)
-            emb2 = self._get_audio_emb(ra)
-            mu1, sigma1 = _calculate_embd_statistics(emb1.cpu().numpy())
-            mu2, sigma2 = _calculate_embd_statistics(emb2.cpu().numpy())
-            fd = _calculate_frechet_distance(mu1, sigma1, mu2, sigma2)
-            results.append(MetricResult(name=self.name, score=float(fd), details={}))
-        return results
+        emb1 = self._get_audio_emb(audio)
+        emb2 = self._get_audio_emb(ref_audio)
+        mu1, sigma1 = _calculate_embd_statistics(emb1.cpu().numpy())
+        mu2, sigma2 = _calculate_embd_statistics(emb2.cpu().numpy())
+        fd = _calculate_frechet_distance(mu1, sigma1, mu2, sigma2)
+        return MetricResult(name=self.name, score=float(fd), details={})

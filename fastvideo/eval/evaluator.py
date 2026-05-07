@@ -61,7 +61,7 @@ class Evaluator:
 
     @property
     def metric_names(self) -> list[str]:
-        return list(self._workers[0]._metrics.keys())
+        return self._workers[0].metric_names
 
     def evaluate(
         self,

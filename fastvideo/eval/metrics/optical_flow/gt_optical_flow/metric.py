@@ -66,44 +66,39 @@ class GtOpticalFlowMetric(BaseMetric):
             return
         self._model = load_ptlflow_model(self.model_name, self.ckpt, self.device)
 
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         if self._model is None:
             self.setup()
 
-        gen_video = sample["video"].float()       # (B, T, C, H, W)
+        gen_video = sample["video"].float()       # (T, C, H, W)
         ref_video = sample["reference"].float()
-        B = gen_video.shape[0]
-        n = min(gen_video.shape[1], ref_video.shape[1])
-        gen_video = gen_video[:, :n]
-        ref_video = ref_video[:, :n]
+        n = min(gen_video.shape[0], ref_video.shape[0])
+        gen_video, ref_video = gen_video[:n], ref_video[:n]
         if n < 2:
             raise ValueError("Need at least 2 frames to compute optical flow")
 
         chunk = self._chunk_size or 16
-        results: list[MetricResult] = []
-        for b in range(B):
-            gen_flows = extract_video_flows(
-                self._model, gen_video[b], chunk=chunk, device=self.device,
+        gen_flows = extract_video_flows(
+            self._model, gen_video, chunk=chunk, device=self.device,
+        )
+        ref_flows = extract_video_flows(
+            self._model, ref_video, chunk=chunk, device=self.device,
+        )
+        per_frame = [
+            compute_frame_metrics(
+                rf, gf,
+                grid_size=self.grid_size,
+                min_mag=self.min_mag,
+                max_mag_pct=self.max_mag_pct,
             )
-            ref_flows = extract_video_flows(
-                self._model, ref_video[b], chunk=chunk, device=self.device,
-            )
-            per_frame = [
-                compute_frame_metrics(
-                    rf, gf,
-                    grid_size=self.grid_size,
-                    min_mag=self.min_mag,
-                    max_mag_pct=self.max_mag_pct,
-                )
-                for rf, gf in zip(ref_flows, gen_flows)
-            ]
-            summary = aggregate_temporal(per_frame)
-            score = summary.get("pixel_epe_mean_mean")
-            details = dict(summary)
-            details["per_frame_metrics"] = per_frame
-            results.append(MetricResult(
-                name=self.name,
-                score=float(score) if score is not None else None,
-                details=details,
-            ))
-        return results
+            for rf, gf in zip(ref_flows, gen_flows)
+        ]
+        summary = aggregate_temporal(per_frame)
+        score = summary.get("pixel_epe_mean_mean")
+        details = dict(summary)
+        details["per_frame_metrics"] = per_frame
+        return MetricResult(
+            name=self.name,
+            score=float(score) if score is not None else None,
+            details=details,
+        )

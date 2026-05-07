@@ -49,12 +49,9 @@ class SubjectConsistencyMetric(BaseMetric):
         self._model = model
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
-        video = sample["video"]  # (B, T, C, H, W)
-        B, T = video.shape[:2]
-
-        # Flatten, transform, extract features
-        frames = video.reshape(B * T, *video.shape[2:]).to(self.device)
+    def compute(self, sample: dict) -> MetricResult:
+        video = sample["video"]                              # (T, C, H, W)
+        frames = video.to(self.device)
         # antialias=False matches VBench's dino_transform (vbench/utils.py:50)
         frames = resize(frames, 224, antialias=False)
         frames = normalize(frames, mean=_MEAN, std=_STD)
@@ -65,16 +62,9 @@ class SubjectConsistencyMetric(BaseMetric):
             f = self._model(frames[i:i + chunk])
             f = F.normalize(f, dim=-1, p=2)
             feats.append(f)
-        all_feats = torch.cat(feats, dim=0)  # (B*T, D)
-        all_feats = all_feats.reshape(B, T, -1)  # (B, T, D)
-
-        results = []
-        for b in range(B):
-            score = consistency_score(all_feats[b])
-            results.append(MetricResult(
-                name=self.name,
-                score=score,
-                details={},
-            ))
-
-        return results
+        all_feats = torch.cat(feats, dim=0)                  # (T, D)
+        return MetricResult(
+            name=self.name,
+            score=consistency_score(all_feats),
+            details={},
+        )

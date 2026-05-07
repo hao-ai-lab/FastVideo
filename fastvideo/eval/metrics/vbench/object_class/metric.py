@@ -34,47 +34,37 @@ class ObjectClassMetric(BaseMetric):
         self._model = load_grit_model(self.device, task="ObjectDet")
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         from fastvideo.eval.metrics.vbench._grit_helper import prepare_frames, detect_frames
 
-        video = sample["video"]  # (B, T, C, H, W)
+        video = sample["video"]                              # (T, C, H, W)
         aux = sample.get("auxiliary_info")
+        if isinstance(aux, list):
+            aux = aux[0] if aux else None
+        if not aux or "object" not in aux:
+            return self._skip(sample, "missing 'object' in auxiliary_info")
 
-        B = video.shape[0]
-        results = []
+        object_key = aux["object"]
+        if " and " in object_key:
+            # multiple_objects' territory; skip this row for object_class.
+            return self._skip(sample, "'object' contains ' and ' (multi-object)")
 
-        for b in range(B):
-            aux_b = aux[b] if isinstance(aux, list) else aux
-            if not aux_b or "object" not in aux_b:
-                results.append(MetricResult(
-                    name=self.name, score=None,
-                    details={"skipped": "missing 'object' in auxiliary_info"}))
-                continue
-            object_key = aux_b["object"]
-            if " and " in object_key:
-                # multiple_objects' territory; skip this row for object_class.
-                results.append(MetricResult(
-                    name=self.name, score=None,
-                    details={"skipped": "'object' contains ' and ' (multi-object)"}))
-                continue
-            frames_np = prepare_frames(video[b])
-            preds = detect_frames(self._model, frames_np)
+        frames_np = prepare_frames(video)
+        preds = detect_frames(self._model, frames_np)
 
-            matching = 0
-            for frame_pred in preds:
-                try:
-                    obj_set = set(frame_pred[0][2]) if frame_pred else set()
-                except (IndexError, TypeError):
-                    obj_set = set()
-                if object_key in obj_set:
-                    matching += 1
+        matching = 0
+        for frame_pred in preds:
+            try:
+                obj_set = set(frame_pred[0][2]) if frame_pred else set()
+            except (IndexError, TypeError):
+                obj_set = set()
+            if object_key in obj_set:
+                matching += 1
 
-            total = len(preds)
-            score = matching / total if total > 0 else 0.0
-            results.append(MetricResult(
-                name=self.name,
-                score=float(score),
-                details={"matching_frames": matching, "total_frames": total},
-            ))
-
-        return results
+        total = len(preds)
+        score = matching / total if total > 0 else 0.0
+        return MetricResult(
+            name=self.name,
+            score=float(score),
+            details={"matching_frames": matching, "total_frames": total},
+        )

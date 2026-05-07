@@ -18,9 +18,7 @@ class WeightedSpatialIoUMetric(BaseMetric):
         super().__init__()
         self._kwargs = kwargs
 
-    def compute(self, sample: dict) -> list[MetricResult]:
-        results: list[MetricResult] = []
-        for prepared in prepare_pair_batch(sample, prep_kwargs=self._kwargs):
-            score = compute_weighted_spatial_iou(prepared.reference_masks, prepared.generated_masks)
-            results.append(MetricResult(name=self.name, score=score, details={}))
-        return results
+    def compute(self, sample: dict) -> MetricResult:
+        [prepared] = prepare_pair_batch(sample, prep_kwargs=self._kwargs)
+        score = compute_weighted_spatial_iou(prepared.reference_masks, prepared.generated_masks)
+        return MetricResult(name=self.name, score=score, details={})

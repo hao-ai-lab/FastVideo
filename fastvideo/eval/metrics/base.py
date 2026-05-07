@@ -15,9 +15,9 @@ class BaseMetric(ABC):
 
     Metrics that need to chunk along the time dimension (frames or frame
     pairs) for memory reasons should hardcode their own chunk size in
-    ``__init__`` (see ``optical_flow`` for the canonical example). The
-    :class:`EvalWorker` above never chunks across the batch dim because
-    eval is always B=1: one video per :meth:`Evaluator.evaluate` call.
+    ``__init__`` (see ``optical_flow`` for the canonical example). Eval
+    always processes one video per :meth:`Evaluator.evaluate` call;
+    ``compute`` therefore receives a single sample, not a batch.
     """
 
     name: str = ""
@@ -48,21 +48,19 @@ class BaseMetric(ABC):
         """Eagerly load models. Called once by :class:`EvalWorker`."""
         pass
 
-    def _skip(self, sample: dict, reason: str) -> list[MetricResult]:
-        """Return one skipped result per sample row (score=None)."""
-        B = sample["video"].shape[0] if "video" in sample else 1
-        return [MetricResult(name=self.name, score=None,
-                             details={"skipped": reason}) for _ in range(B)]
+    def _skip(self, sample: dict, reason: str) -> MetricResult:
+        """Return a skipped result (``score=None`` + reason in details)."""
+        return MetricResult(name=self.name, score=None,
+                            details={"skipped": reason})
 
     @abstractmethod
-    def compute(self, sample: dict) -> list[MetricResult]:
-        """Compute the metric on a single-row sample.
+    def compute(self, sample: dict) -> MetricResult:
+        """Compute the metric on a single sample.
 
-        ``sample["video"]`` is ``(1, T, C, H, W)``. Returns a one-element
-        list of :class:`MetricResult` (the leading 1 is preserved for
-        backwards compatibility with metrics that loop ``for b in range(B)``).
+        ``sample["video"]`` is ``(T, C, H, W)`` float in ``[0, 1]``.
+        ``sample["reference"]`` (if used) has the same shape.
 
-        If required inputs are missing, return skipped results via
-        ``self._skip(sample, reason)`` instead of raising.
+        If required inputs are missing, return ``self._skip(sample, reason)``
+        instead of raising.
         """
         ...

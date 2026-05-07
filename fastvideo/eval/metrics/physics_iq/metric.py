@@ -55,10 +55,10 @@ class PhysicsIQMetric(BaseMetric):
 
     def _compute_pair_metrics(self, prepared_pair) -> dict[str, Any]:
         sample = {"_physics_iq_pair": prepared_pair}
-        mse = self._mse.compute(sample)[0]
-        st = self._spatiotemporal_iou.compute(sample)[0]
-        spatial = self._spatial_iou.compute(sample)[0]
-        weighted = self._weighted_spatial_iou.compute(sample)[0]
+        mse = self._mse.compute(sample)
+        st = self._spatiotemporal_iou.compute(sample)
+        spatial = self._spatial_iou.compute(sample)
+        weighted = self._weighted_spatial_iou.compute(sample)
         return {
             "mse_per_frame": mse.details["per_frame"],
             "spatiotemporal_iou_per_frame": st.details["per_frame"],
@@ -158,7 +158,7 @@ class PhysicsIQMetric(BaseMetric):
         )
         return round(float(np.clip(score, 0.0, 100.0)), 2)
 
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         if "reference" not in sample:
             raise KeyError("PhysicsIQMetric requires sample['reference'].")
 
@@ -170,45 +170,34 @@ class PhysicsIQMetric(BaseMetric):
         if take2_key is None:
             raise KeyError("PhysicsIQMetric requires sample['reference_take2'] or an alias.")
 
-        videos = unpack_batch_value(sample["video"])
-        references = unpack_batch_value(sample["reference"])
-        references_take2 = unpack_batch_value(sample[take2_key])
-        generated_masks = unpack_batch_value(sample["video_mask"]) if "video_mask" in sample else [None] * len(videos)
-        reference_masks = unpack_batch_value(sample["reference_mask"]) if "reference_mask" in sample else [None] * len(videos)
-        reference_take2_masks = (
-            unpack_batch_value(sample["reference_take2_mask"])
-            if "reference_take2_mask" in sample
-            else [None] * len(videos)
+        # Polymorphic input handling: tensors / ndarrays / file paths / list-of-one.
+        # ``unpack_batch_value`` always yields a list; with B=1 we take element 0.
+        [video] = unpack_batch_value(sample["video"])
+        [reference] = unpack_batch_value(sample["reference"])
+        [reference_take2] = unpack_batch_value(sample[take2_key])
+        generated_mask = unpack_batch_value(sample["video_mask"])[0] if "video_mask" in sample else None
+        reference_mask = unpack_batch_value(sample["reference_mask"])[0] if "reference_mask" in sample else None
+        reference_take2_mask = (
+            unpack_batch_value(sample["reference_take2_mask"])[0]
+            if "reference_take2_mask" in sample else None
         )
-        if not (
-            len(videos)
-            == len(references)
-            == len(references_take2)
-            == len(generated_masks)
-            == len(reference_masks)
-            == len(reference_take2_masks)
-        ):
-            raise ValueError("Physics-IQ batched inputs must have the same batch size.")
 
-        scenarios = sample.get("scenario")
-        views = sample.get("view")
-        results: list[MetricResult] = []
-        for idx, items in enumerate(
-            zip(videos, references, references_take2, generated_masks, reference_masks, reference_take2_masks)
-        ):
-            video, reference, reference_take2, generated_mask, reference_mask, reference_take2_mask = items
-            scenario = scenarios[idx] if isinstance(scenarios, list) else scenarios
-            view = views[idx] if isinstance(views, list) else views
-            details = self.compute_single(
-                video,
-                reference,
-                reference_take2,
-                generated_mask=generated_mask,
-                reference_mask=reference_mask,
-                reference_take2_mask=reference_take2_mask,
-                scenario=scenario,
-                view=view,
-            )
-            results.append(MetricResult(name=self.name, score=self._per_video_score(details), details=details))
-        return results
+        scenario = sample.get("scenario")
+        if isinstance(scenario, list):
+            scenario = scenario[0] if scenario else None
+        view = sample.get("view")
+        if isinstance(view, list):
+            view = view[0] if view else None
+
+        details = self.compute_single(
+            video,
+            reference,
+            reference_take2,
+            generated_mask=generated_mask,
+            reference_mask=reference_mask,
+            reference_take2_mask=reference_take2_mask,
+            scenario=scenario,
+            view=view,
+        )
+        return MetricResult(name=self.name, score=self._per_video_score(details), details=details)
 

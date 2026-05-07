@@ -215,53 +215,39 @@ class VideoScore2Metric(BaseMetric):
         return pil_frames
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         if self._model is None:
             self.setup()
 
         from qwen_vl_utils import process_vision_info
 
-        video = sample["video"]  # (B, T, C, H, W)
+        video = sample["video"]                              # (T, C, H, W)
         text = sample.get("text_prompt", "")
-        B = video.shape[0]
+        if isinstance(text, list):
+            text = text[0] if text else ""
 
-        if isinstance(text, str):
-            text = [text] * B
+        pil_frames = self._tensor_to_pil_list(video)
+        pil_frames = self._subsample_frames(pil_frames)
+        user_prompt = VS2_QUERY_TEMPLATE.substitute(t2v_prompt=text)
 
-        # Build batch: each video gets its own message, then batch through processor
-        texts = []
-        all_videos = []
-        for b in range(B):
-            pil_frames = self._tensor_to_pil_list(video[b])
-            pil_frames = self._subsample_frames(pil_frames)
-            user_prompt = VS2_QUERY_TEMPLATE.substitute(t2v_prompt=text[b])
+        messages = [{"role": "user", "content": [
+            {"type": "video", "video": pil_frames, "fps": self.infer_fps},
+            {"type": "text", "text": user_prompt},
+        ]}]
+        chat_text = self._processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+        )
+        _, vid_inputs = process_vision_info(messages)
 
-            messages = [{"role": "user", "content": [
-                {"type": "video", "video": pil_frames, "fps": self.infer_fps},
-                {"type": "text", "text": user_prompt},
-            ]}]
-
-            chat_text = self._processor.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True,
-            )
-            texts.append(chat_text)
-
-            _, vid_inputs = process_vision_info(messages)
-            if vid_inputs:
-                all_videos.extend(vid_inputs)
-
-        # Batched processor call
         inputs = self._processor(
-            text=texts,
-            videos=all_videos if all_videos else None,
+            text=[chat_text],
+            videos=vid_inputs if vid_inputs else None,
             fps=self.infer_fps,
             padding=True,
             return_tensors="pt",
         ).to(self.device)
 
         input_len = inputs["input_ids"].shape[1]
-
-        # Batched generation
         gen_kwargs = dict(
             max_new_tokens=self.max_tokens,
             output_scores=True,
@@ -272,30 +258,17 @@ class VideoScore2Metric(BaseMetric):
             gen_kwargs["temperature"] = self.temperature
         gen_out = self._model.generate(**inputs, **gen_kwargs)
 
-        sequences = gen_out.sequences
-        scores = gen_out.scores
+        gen_ids = gen_out.sequences[0, input_len:].tolist()
+        pad_id = self._tokenizer.pad_token_id
+        if pad_id is not None:
+            gen_ids = [t for t in gen_ids if t != pad_id]
+        output_text = self._tokenizer.decode(gen_ids, skip_special_tokens=True)
 
-        # Parse each sequence
-        results = []
-        for b in range(B):
-            gen_ids = sequences[b, input_len:].tolist()
-            # Strip padding tokens from gen_ids
-            pad_id = self._tokenizer.pad_token_id
-            if pad_id is not None:
-                gen_ids = [t for t in gen_ids if t != pad_id]
-
-            output_text = self._tokenizer.decode(gen_ids, skip_special_tokens=True)
-
-            parsed = _parse_output(output_text, scores, self._tokenizer, gen_ids, seq_idx=b)
-
-            soft_vals = [v for v in [parsed["visual_quality"],
-                                     parsed["text_alignment"],
-                                     parsed["physical_consistency"]] if v is not None]
-            combined = sum(soft_vals) / len(soft_vals) if soft_vals else 0.0
-
-            results.append(MetricResult(
-                name=self.name,
-                score=combined,
-                details=parsed,
-            ))
-        return results
+        parsed = _parse_output(
+            output_text, gen_out.scores, self._tokenizer, gen_ids, seq_idx=0,
+        )
+        soft_vals = [v for v in (parsed["visual_quality"],
+                                 parsed["text_alignment"],
+                                 parsed["physical_consistency"]) if v is not None]
+        combined = sum(soft_vals) / len(soft_vals) if soft_vals else 0.0
+        return MetricResult(name=self.name, score=combined, details=parsed)

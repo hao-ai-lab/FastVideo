@@ -73,36 +73,21 @@ class OverallConsistencyMetric(BaseMetric):
         self._model.eval()
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
-        video = sample["video"]  # (B, T, C, H, W)
-        text_prompts = sample.get("text_prompt")
-        if text_prompts is None:
+    def compute(self, sample: dict) -> MetricResult:
+        video = sample["video"]                                  # (T, C, H, W)
+        text_prompt = sample.get("text_prompt")
+        if text_prompt is None:
             return self._skip(sample, "missing text_prompt")
+        if isinstance(text_prompt, list):
+            text_prompt = text_prompt[0]
 
-        B = video.shape[0]
-        chunk = self._chunk_size or B
+        frames = _clip_transform(extract_frames(video, 8))       # (8, C, H, W)
+        clip_in = frames.unsqueeze(0).to(self.device)            # (1, 8, C, H, W)
 
-        # Prepare all 8-frame clips and transform
-        all_clips = []
-        for b in range(B):
-            frames = extract_frames(video[b], 8)  # (8, C, H, W)
-            frames = _clip_transform(frames)
-            all_clips.append(frames)
-        all_clips = torch.stack(all_clips).to(self.device)  # (B, 8, C, H, W)
+        vid_feat = self._model.encode_vision(clip_in, test=True).float()
+        vid_feat = F.normalize(vid_feat, dim=-1, p=2)            # (1, D)
 
-        # Batched ViCLIP vision encoding
-        all_vid_feats = []
-        for i in range(0, B, chunk):
-            vid_feat = self._model.encode_vision(all_clips[i:i + chunk], test=True).float()
-            vid_feat = F.normalize(vid_feat, dim=-1, p=2)
-            all_vid_feats.append(vid_feat)
-        all_vid_feats = torch.cat(all_vid_feats, dim=0)  # (B, D)
-
-        results = []
-        for b in range(B):
-            text_feat = self._model.encode_text(text_prompts[b]).float()
-            text_feat = F.normalize(text_feat, dim=-1, p=2)
-            score = float((all_vid_feats[b:b+1] @ text_feat.T)[0][0].cpu())
-            results.append(MetricResult(name=self.name, score=score, details={}))
-
-        return results
+        text_feat = self._model.encode_text(text_prompt).float()
+        text_feat = F.normalize(text_feat, dim=-1, p=2)
+        score = float((vid_feat @ text_feat.T)[0][0].cpu())
+        return MetricResult(name=self.name, score=score, details={})

@@ -68,11 +68,11 @@ class DynamicDegreeMetric(BaseMetric):
         return float(np.mean(np.sort(rad_flat)[-cut:]))
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         from vbench.third_party.RAFT.core.utils_core.utils import InputPadder
 
-        video = sample["video"]  # (B, T, C, H, W) float [0, 1]
-        B, T, _, H, W = video.shape
+        video = sample["video"]                                 # (T, C, H, W) [0, 1]
+        T, _, H, W = video.shape
 
         # fps controls the temporal sampling stride for optical flow.
         # vbench computes flow at 8fps (interval = round(fps/8)). The metric
@@ -84,7 +84,6 @@ class DynamicDegreeMetric(BaseMetric):
         fps = float(sample["fps"])
         interval = max(1, round(fps / 8.0))
 
-        # Convert to uint8-scale float (RAFT expects ~[0,255])
         video_255 = video * 255.0
         chunk = self._chunk_size or 16
 
@@ -93,64 +92,41 @@ class DynamicDegreeMetric(BaseMetric):
         # shape (B*H1*W1, 1, H2, W2) with H1=H2=H/8, W1=W2=W/8. Its element
         # count is B*(H/8)^2*(W/8)^2 — F.avg_pool2d's index space starts to
         # overflow int32 around 2^31. Safety factor 2x.
-        # At 384x640 → max_chunk=73 (batching helps).
-        # At 1088x1920 → max_chunk=1 (matches upstream's pair-by-pair loop).
         h_red = max(1, H // 8)
         w_red = max(1, W // 8)
         max_chunk = max(1, (1 << 30) // (h_red * h_red * w_red * w_red))
         chunk = min(chunk, max_chunk)
 
-        # Collect all frame pairs across all B videos
-        all_img1, all_img2 = [], []
-        pairs_per_video = []
-        for b in range(B):
-            indices = list(range(0, T, interval))
-            n = len(indices)
-            pairs_per_video.append(n - 1)
-            for i in range(n - 1):
-                all_img1.append(video_255[b, indices[i]])
-                all_img2.append(video_255[b, indices[i + 1]])
+        indices = list(range(0, T, interval))
+        n = len(indices)
+        all_img1 = [video_255[indices[i]] for i in range(n - 1)]
+        all_img2 = [video_255[indices[i + 1]] for i in range(n - 1)]
 
-        total_pairs = len(all_img1)
-
-        # Batched RAFT forward with chunking
-        all_scores = []
-        for start in range(0, total_pairs, chunk):
-            end = min(start + chunk, total_pairs)
+        scores: list[float] = []
+        for start in range(0, len(all_img1), chunk):
+            end = min(start + chunk, len(all_img1))
             img1_batch = torch.stack(all_img1[start:end]).to(self.device)
             img2_batch = torch.stack(all_img2[start:end]).to(self.device)
             padder = InputPadder(img1_batch.shape)
             img1p, img2p = padder.pad(img1_batch, img2_batch)
             _, flow = self._model(img1p, img2p, iters=20, test_mode=True)
             for i in range(flow.shape[0]):
-                all_scores.append(self._get_score(flow[i]))
+                scores.append(self._get_score(flow[i]))
 
-        # Distribute back to per-video results
-        results = []
-        offset = 0
-        for b in range(B):
-            n_pairs = pairs_per_video[b]
-            scores = all_scores[offset:offset + n_pairs]
-            offset += n_pairs
+        scale = min(H, W)
+        thres = 6.0 * (scale / 256.0)
+        count_needed = round(4 * (n / 16.0))
+        count_above = sum(1 for s in scores if s > thres)
+        is_dynamic = 1.0 if count_above >= count_needed else 0.0
 
-            n = n_pairs + 1  # number of frames used
-            scale = min(H, W)
-            thres = 6.0 * (scale / 256.0)
-            count_needed = round(4 * (n / 16.0))
-
-            count_above = sum(1 for s in scores if s > thres)
-            is_dynamic = 1.0 if count_above >= count_needed else 0.0
-
-            results.append(MetricResult(
-                name=self.name,
-                score=is_dynamic,
-                details={"per_pair_magnitude": scores,
-                         "threshold": thres,
-                         "count_above": count_above,
-                         "count_needed": count_needed,
-                         "fps": fps,
-                         "interval": interval,
-                         "n_frames_used": n},
-            ))
-
-        return results
+        return MetricResult(
+            name=self.name,
+            score=is_dynamic,
+            details={"per_pair_magnitude": scores,
+                     "threshold": thres,
+                     "count_above": count_above,
+                     "count_needed": count_needed,
+                     "fps": fps,
+                     "interval": interval,
+                     "n_frames_used": n},
+        )

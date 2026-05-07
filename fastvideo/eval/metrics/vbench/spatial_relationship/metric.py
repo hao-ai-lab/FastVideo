@@ -72,68 +72,53 @@ class SpatialRelationshipMetric(BaseMetric):
         self._model = load_grit_model(self.device, task="ObjectDet")
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         from fastvideo.eval.metrics.vbench._grit_helper import prepare_frames
 
-        video = sample["video"]  # (B, T, C, H, W)
+        video = sample["video"]                              # (T, C, H, W)
         aux = sample.get("auxiliary_info")
+        if isinstance(aux, list):
+            aux = aux[0] if aux else None
+        if not aux or "spatial_relationship" not in aux:
+            return self._skip(sample, "missing 'spatial_relationship' in auxiliary_info")
 
-        B = video.shape[0]
-        results = []
+        sp_info = aux["spatial_relationship"]
+        try:
+            key_a = sp_info["object_a"]
+            key_b = sp_info["object_b"]
+            relation = sp_info["relationship"]
+        except (KeyError, TypeError):
+            return self._skip(sample,
+                              "spatial_relationship missing object_a/object_b/relationship")
 
-        for b in range(B):
-            aux_b = aux[b] if isinstance(aux, list) else aux
-            if not aux_b or "spatial_relationship" not in aux_b:
-                results.append(MetricResult(
-                    name=self.name, score=None,
-                    details={"skipped": "missing 'spatial_relationship' in auxiliary_info"}))
-                continue
-            sp_info = aux_b["spatial_relationship"]
-            try:
-                key_a = sp_info["object_a"]
-                key_b = sp_info["object_b"]
-                relation = sp_info["relationship"]
-            except (KeyError, TypeError):
-                results.append(MetricResult(
-                    name=self.name, score=None,
-                    details={"skipped": "spatial_relationship missing object_a/object_b/relationship"}))
-                continue
+        frames_np = prepare_frames(video)
 
-            frames_np = prepare_frames(video[b])
+        preds = []
+        for frame in frames_np:
+            ret = self._model.run_caption_tensor(frame)
+            frame_dets = []
+            if len(ret[0]) > 0:
+                for info in ret[0]:
+                    frame_dets.append([info[0], info[1]])    # (caption, bbox)
+            preds.append(frame_dets)
 
-            # Run GRiT detection — get (description, bbox) pairs
-            preds = []
-            with torch.no_grad():
-                for frame in frames_np:
-                    ret = self._model.run_caption_tensor(frame)
-                    frame_dets = []
-                    if len(ret[0]) > 0:
-                        for info in ret[0]:
-                            frame_dets.append([info[0], info[1]])  # (caption, bbox)
-                    preds.append(frame_dets)
+        # Score each frame (matching VBench's check_generate).
+        frame_scores: list[float] = []
+        for frame_pred in preds:
+            obj_bboxes = [item[1] for item in frame_pred
+                          if item[0] == key_a or item[0] == key_b]
 
-            # Score each frame (matching VBench's check_generate)
-            frame_scores = []
-            for frame_pred in preds:
-                obj_bboxes = []
-                for item in frame_pred:
-                    if item[0] == key_a or item[0] == key_b:
-                        obj_bboxes.append(item[1])
+            cur_scores = [0.0]
+            for i in range(len(obj_bboxes) - 1):
+                for j in range(i + 1, len(obj_bboxes)):
+                    cur_scores.append(_get_position_score(
+                        relation, obj_bboxes[i], obj_bboxes[j],
+                    ))
+            frame_scores.append(max(cur_scores))
 
-                cur_scores = [0.0]
-                for i in range(len(obj_bboxes) - 1):
-                    for j in range(i + 1, len(obj_bboxes)):
-                        s = _get_position_score(
-                            relation, obj_bboxes[i], obj_bboxes[j]
-                        )
-                        cur_scores.append(s)
-                frame_scores.append(max(cur_scores))
-
-            score = float(np.mean(frame_scores)) if frame_scores else 0.0
-            results.append(MetricResult(
-                name=self.name,
-                score=score,
-                details={"per_frame": frame_scores},
-            ))
-
-        return results
+        score = float(np.mean(frame_scores)) if frame_scores else 0.0
+        return MetricResult(
+            name=self.name,
+            score=score,
+            details={"per_frame": frame_scores},
+        )

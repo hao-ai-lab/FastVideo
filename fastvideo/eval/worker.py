@@ -36,6 +36,11 @@ class EvalWorker:
     def device(self) -> str:
         return self._device
 
+    @property
+    def metric_names(self) -> list[str]:
+        """Names of the metrics this worker owns, in load order."""
+        return list(self._metrics.keys())
+
     def _load(self) -> None:
         for name in self._names:
             m = get_metric(name)
@@ -47,23 +52,23 @@ class EvalWorker:
         self._unloaded = False
 
     def evaluate(self, **kwargs) -> dict[str, MetricResult]:
-        """Score one sample. ``video`` may be ``(T,C,H,W)`` or ``(1,T,C,H,W)``."""
+        """Score one sample. ``video`` must be ``(T, C, H, W)``."""
         if self._unloaded:
             raise RuntimeError(
                 "EvalWorker was unloaded; call reload() before evaluating.")
 
         sample = dict(kwargs)
         video = sample.get("video")
-        if video is not None and video.dim() == 4:
-            sample["video"] = video.unsqueeze(0)
+        if isinstance(video, torch.Tensor) and video.dim() == 5 and video.shape[0] == 1:
+            # Back-compat: callers that still pass (1, T, C, H, W) get unwrapped.
+            sample["video"] = video.squeeze(0)
             ref = sample.get("reference")
-            if isinstance(ref, torch.Tensor) and ref.dim() == 4:
-                sample["reference"] = ref.unsqueeze(0)
+            if isinstance(ref, torch.Tensor) and ref.dim() == 5 and ref.shape[0] == 1:
+                sample["reference"] = ref.squeeze(0)
 
         results: dict[str, MetricResult] = {}
         for name, m in self._metrics.items():
-            batch_results = m.compute(sample)
-            results[name] = batch_results[0]
+            results[name] = m.compute(sample)
         return results
 
     def release_cuda_memory(self) -> None:

@@ -39,66 +39,59 @@ class ColorMetric(BaseMetric):
         self._model = load_grit_model(self.device)
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         from fastvideo.eval.metrics.vbench._grit_helper import prepare_frames
 
-        video = sample["video"]  # (B, T, C, H, W)
+        video = sample["video"]                              # (T, C, H, W)
         aux = sample.get("auxiliary_info")
-        text_prompts = sample.get("text_prompt")
+        if isinstance(aux, list):
+            aux = aux[0] if aux else None
+        if not aux or "color" not in aux:
+            return self._skip(sample, "missing 'color' in auxiliary_info")
 
-        B = video.shape[0]
-        results = []
+        text_prompt = sample.get("text_prompt")
+        if isinstance(text_prompt, list):
+            text_prompt = text_prompt[0] if text_prompt else ""
+        prompt = text_prompt or ""
 
-        for b in range(B):
-            aux_b = aux[b] if isinstance(aux, list) else aux
-            if not aux_b or "color" not in aux_b:
-                results.append(MetricResult(
-                    name=self.name, score=None,
-                    details={"skipped": "missing 'color' in auxiliary_info"}))
-                continue
-            color_key = aux_b["color"]
-            prompt = text_prompts[b] if text_prompts else ""
-            # Parse object name: remove "a ", "an ", and the color word
-            object_key = prompt.replace("a ", "").replace("an ", "").replace(color_key, "").strip()
+        color_key = aux["color"]
+        # Parse object name: remove "a ", "an ", and the color word
+        object_key = prompt.replace("a ", "").replace("an ", "").replace(color_key, "").strip()
 
-            frames_np = prepare_frames(video[b])
+        frames_np = prepare_frames(video)
 
-            # Run GRiT with caption output
-            preds = []
-            with torch.no_grad():
-                for frame in frames_np:
-                    ret = self._model.run_caption_tensor(frame)
-                    cur_pred = []
-                    if len(ret[0]) < 1:
-                        cur_pred.append(["", ""])
-                    else:
-                        for cap_det in ret[0]:
-                            cur_pred.append([cap_det[0], cap_det[2][0]])
-                    preds.append(cur_pred)
+        preds = []
+        for frame in frames_np:
+            ret = self._model.run_caption_tensor(frame)
+            cur_pred = []
+            if len(ret[0]) < 1:
+                cur_pred.append(["", ""])
+            else:
+                for cap_det in ret[0]:
+                    cur_pred.append([cap_det[0], cap_det[2][0]])
+            preds.append(cur_pred)
 
-            # Score: matching VBench's check_generate logic
-            cur_object = 0
-            cur_object_color = 0
-            for frame_pred in preds:
-                object_flag = False
-                color_flag = False
-                for pred in frame_pred:
-                    if object_key == pred[1]:
-                        for cq in _COLOR_KEYWORDS:
-                            if cq in pred[0]:
-                                object_flag = True
-                        if color_key in pred[0]:
-                            color_flag = True
-                if color_flag:
-                    cur_object_color += 1
-                if object_flag:
-                    cur_object += 1
+        # Score: matching VBench's check_generate logic
+        cur_object = 0
+        cur_object_color = 0
+        for frame_pred in preds:
+            object_flag = False
+            color_flag = False
+            for pred in frame_pred:
+                if object_key == pred[1]:
+                    for cq in _COLOR_KEYWORDS:
+                        if cq in pred[0]:
+                            object_flag = True
+                    if color_key in pred[0]:
+                        color_flag = True
+            if color_flag:
+                cur_object_color += 1
+            if object_flag:
+                cur_object += 1
 
-            score = cur_object_color / cur_object if cur_object > 0 else 0.0
-            results.append(MetricResult(
-                name=self.name,
-                score=float(score),
-                details={"object_detected": cur_object, "color_correct": cur_object_color},
-            ))
-
-        return results
+        score = cur_object_color / cur_object if cur_object > 0 else 0.0
+        return MetricResult(
+            name=self.name,
+            score=float(score),
+            details={"object_detected": cur_object, "color_correct": cur_object_color},
+        )

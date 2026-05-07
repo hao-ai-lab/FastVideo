@@ -18,22 +18,18 @@ class PSNRMetric(BaseMetric):
         super().__init__()
         self.max_val = max_val
 
-    def compute(self, sample: dict) -> list[MetricResult]:
-        gen = sample["video"].float()       # (B, T, C, H, W)
-        ref = sample["reference"].float()   # (B, T, C, H, W)
-        B, T = gen.shape[:2]
-        n = min(gen.shape[1], ref.shape[1])
-        gen, ref = gen[:, :n], ref[:, :n]
+    def compute(self, sample: dict) -> MetricResult:
+        gen = sample["video"].float()       # (T, C, H, W)
+        ref = sample["reference"].float()
+        n = min(gen.shape[0], ref.shape[0])
+        gen, ref = gen[:n], ref[:n]
 
-        # Vectorized: per-frame MSE across entire batch at once
-        mse = ((gen - ref) ** 2).mean(dim=(2, 3, 4))  # (B, T)
-        psnr = 10.0 * torch.log10(self.max_val**2 / mse.clamp(min=1e-10))  # (B, T)
+        # Per-frame MSE → PSNR.
+        mse = ((gen - ref) ** 2).mean(dim=(1, 2, 3))                # (T,)
+        psnr = 10.0 * torch.log10(self.max_val**2 / mse.clamp(min=1e-10))
 
-        return [
-            MetricResult(
-                name=self.name,
-                score=psnr[b].mean().item(),
-                details={"per_frame": psnr[b].tolist()},
-            )
-            for b in range(B)
-        ]
+        return MetricResult(
+            name=self.name,
+            score=psnr.mean().item(),
+            details={"per_frame": psnr.tolist()},
+        )

@@ -62,21 +62,18 @@ class VBClapScoreMetric(BaseMetric):
         return emb
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         if self._model is None:
             self.setup()
 
-        audio = sample["audio"]          # str or list[str]
-        text = sample["text_prompt"]     # str or list[str]
-        if isinstance(audio, str):
-            audio = [audio]
-        if isinstance(text, str):
-            text = [text]
+        audio = sample["audio"]
+        text = sample["text_prompt"]
+        if isinstance(audio, list):
+            audio = audio[0]
+        if isinstance(text, list):
+            text = text[0]
 
-        results = []
-        for a, t in zip(audio, text):
-            audio_emb = self._get_audio_emb(a)
-            text_emb = self._model.get_text_embedding([t], use_tensor=True)
-            score = F.cosine_similarity(audio_emb, text_emb, dim=1, eps=1e-8)[0].cpu().item()
-            results.append(MetricResult(name=self.name, score=score, details={}))
-        return results
+        audio_emb = self._get_audio_emb(audio)
+        text_emb = self._model.get_text_embedding([text], use_tensor=True)
+        score = F.cosine_similarity(audio_emb, text_emb, dim=1, eps=1e-8)[0].cpu().item()
+        return MetricResult(name=self.name, score=score, details={})

@@ -60,19 +60,17 @@ class AppearanceStyleMetric(BaseMetric):
         self._model.eval()
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         import clip
 
-        video = sample["video"]  # (B, T, C, H, W)
-        text_prompts = sample.get("text_prompt")
-        if text_prompts is None:
+        video = sample["video"]                                  # (T, C, H, W)
+        text_prompt = sample.get("text_prompt")
+        if text_prompt is None:
             return self._skip(sample, "missing text_prompt")
+        if isinstance(text_prompt, list):
+            text_prompt = text_prompt[0]
 
-        B, T = video.shape[:2]
-
-        # Encode all frames
-        frames = video.reshape(B * T, *video.shape[2:]).to(self.device)
-        frames = _clip_transform(frames)
+        frames = _clip_transform(video.to(self.device))
 
         chunk = self._chunk_size or 64
         img_feats = []
@@ -80,26 +78,17 @@ class AppearanceStyleMetric(BaseMetric):
             f = self._model.encode_image(frames[i:i + chunk]).float()
             f = F.normalize(f, dim=-1, p=2)
             img_feats.append(f)
-        img_feats = torch.cat(img_feats, dim=0).reshape(B, T, -1)  # (B, T, D)
+        img_feats = torch.cat(img_feats, dim=0)                  # (T, D)
 
-        results = []
-        for b in range(B):
-            # Encode text for this sample
-            # truncate=True: CLIP context length is 77 tokens; long prompts
-            # truncate instead of raising. Matches CLIP's documented convention.
-            text_tokens = clip.tokenize([text_prompts[b]], truncate=True).to(self.device)
-            text_feat = self._model.encode_text(text_tokens).float()
-            text_feat = F.normalize(text_feat, dim=-1, p=2)  # (1, D)
+        # truncate=True: CLIP context length is 77 tokens; long prompts
+        # truncate instead of raising. Matches CLIP's documented convention.
+        text_tokens = clip.tokenize([text_prompt], truncate=True).to(self.device)
+        text_feat = self._model.encode_text(text_tokens).float()
+        text_feat = F.normalize(text_feat, dim=-1, p=2)          # (1, D)
 
-            # Cosine similarity per frame (matches VBench logits_per_text / 100)
-            sims = (img_feats[b] @ text_feat.T).squeeze(-1)  # (T,)
-            per_frame = sims.tolist()
-            score = float(sims.mean().item())
-
-            results.append(MetricResult(
-                name=self.name,
-                score=score,
-                details={"per_frame": per_frame},
-            ))
-
-        return results
+        sims = (img_feats @ text_feat.T).squeeze(-1)             # (T,)
+        return MetricResult(
+            name=self.name,
+            score=float(sims.mean().item()),
+            details={"per_frame": sims.tolist()},
+        )

@@ -80,32 +80,20 @@ class AestheticQualityMetric(BaseMetric):
         self._aesthetic_head.eval()
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
-        video = sample["video"]  # (B, T, C, H, W)
-        B, T = video.shape[:2]
-
-        frames = video.reshape(B * T, *video.shape[2:]).to(self.device)
-        frames = _clip_transform(frames)
+    def compute(self, sample: dict) -> MetricResult:
+        video = sample["video"]                       # (T, C, H, W)
+        frames = _clip_transform(video.to(self.device))
 
         chunk = self._chunk_size or 32
         scores_list = []
         for i in range(0, frames.shape[0], chunk):
             feats = self._clip_model.encode_image(frames[i:i + chunk]).float()
             feats = F.normalize(feats, dim=-1, p=2)
-            scores = self._aesthetic_head(feats).squeeze(-1)  # (chunk,)
-            scores_list.append(scores)
+            scores_list.append(self._aesthetic_head(feats).squeeze(-1))
 
-        all_scores = torch.cat(scores_list, dim=0)  # (B*T,)
-        all_scores = all_scores.reshape(B, T)
-
-        results = []
-        for b in range(B):
-            per_frame = (all_scores[b] / 10.0).tolist()
-            score = float(torch.mean(all_scores[b] / 10.0).item())
-            results.append(MetricResult(
-                name=self.name,
-                score=score,
-                details={"per_frame": per_frame},
-            ))
-
-        return results
+        all_scores = torch.cat(scores_list, dim=0) / 10.0   # (T,)
+        return MetricResult(
+            name=self.name,
+            score=float(all_scores.mean().item()),
+            details={"per_frame": all_scores.tolist()},
+        )

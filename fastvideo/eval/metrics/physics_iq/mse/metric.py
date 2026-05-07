@@ -18,10 +18,8 @@ class PhysicsIQMSEMetric(BaseMetric):
         super().__init__()
         self._kwargs = kwargs
 
-    def compute(self, sample: dict) -> list[MetricResult]:
-        results: list[MetricResult] = []
-        for prepared in prepare_pair_batch(sample, prep_kwargs=self._kwargs):
-            per_frame = compute_mse(prepared.reference_quarter, prepared.generated_quarter)
-            score = sum(per_frame) / len(per_frame)
-            results.append(MetricResult(name=self.name, score=score, details={"per_frame": per_frame}))
-        return results
+    def compute(self, sample: dict) -> MetricResult:
+        [prepared] = prepare_pair_batch(sample, prep_kwargs=self._kwargs)
+        per_frame = compute_mse(prepared.reference_quarter, prepared.generated_quarter)
+        score = sum(per_frame) / len(per_frame)
+        return MetricResult(name=self.name, score=score, details={"per_frame": per_frame})

@@ -37,26 +37,23 @@ class VBAudioBoxAestheticsMetric(BaseMetric):
         self._predictor = initialize_predictor()
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         if self._predictor is None:
             self.setup()
 
-        audio = sample["audio"]  # str or list[str]
-        if isinstance(audio, str):
-            audio = [audio]
+        audio = sample["audio"]
+        if isinstance(audio, list):
+            audio = audio[0]
 
-        results = []
-        for a in audio:
-            score = self._predictor.forward([{"path": a}])[0]
-            combined = (score['CE'] + score['CU'] + score['PQ'] + (11 - score['PC'])) / 4
-            results.append(MetricResult(
-                name=self.name,
-                score=combined,
-                details={
-                    "CE": score['CE'],
-                    "CU": score['CU'],
-                    "PC": score['PC'],
-                    "PQ": score['PQ'],
-                },
-            ))
-        return results
+        score = self._predictor.forward([{"path": audio}])[0]
+        combined = (score['CE'] + score['CU'] + score['PQ'] + (11 - score['PC'])) / 4
+        return MetricResult(
+            name=self.name,
+            score=combined,
+            details={
+                "CE": score['CE'],
+                "CU": score['CU'],
+                "PC": score['PC'],
+                "PQ": score['PQ'],
+            },
+        )

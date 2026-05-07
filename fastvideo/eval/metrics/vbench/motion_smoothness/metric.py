@@ -137,58 +137,40 @@ class MotionSmoothnessMetric(BaseMetric):
             raise
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         from vbench.third_party.amt.utils.utils import (
             img2tensor, tensor2img, check_dim_and_resize, InputPadder,
         )
 
-        video = sample["video"]  # (B, T, C, H, W) float [0, 1]
-        B, T = video.shape[:2]
+        video = sample["video"]                              # (T, C, H, W) [0, 1]
         chunk = self._chunk_size or 8
 
-        # Prepare all frame pairs across all videos
-        # Even frames [0, 2, 4, ...] → pairs (0,2), (2,4), (4,6), ...
-        all_in0, all_in1, all_gt = [], [], []
-        pairs_per_video = []
+        frames_np = (video * 255).to(torch.uint8).cpu().numpy()
+        frames_np = [f.transpose(1, 2, 0) for f in frames_np]   # list of (H,W,C)
 
-        for b in range(B):
-            frames_np = (video[b] * 255).to(torch.uint8).cpu().numpy()
-            frames_np = [f.transpose(1, 2, 0) for f in frames_np]  # list of (H,W,C)
+        even_indices = list(range(0, len(frames_np), 2))
+        if len(even_indices) <= 1:
+            return MetricResult(name=self.name, score=1.0, details={})
 
-            even_indices = list(range(0, len(frames_np), 2))
-            if len(even_indices) <= 1:
-                pairs_per_video.append(0)
-                continue
+        even_frames = [frames_np[i] for i in even_indices]
+        inputs = [img2tensor(f).to(self.device) for f in even_frames]
+        inputs = check_dim_and_resize(inputs)
 
-            even_frames = [frames_np[i] for i in even_indices]
-            inputs = [img2tensor(f).to(self.device) for f in even_frames]
-            inputs = check_dim_and_resize(inputs)
-
-            h, w = inputs[0].shape[-2:]
-            scale = self._get_scale(h, w)
-            padding = int(16 / scale)
-            padder = InputPadder(inputs[0].shape, padding)
-            inputs = padder.pad(*inputs)
-
-            n_pairs = len(inputs) - 1
-            pairs_per_video.append(n_pairs)
-
-            for i in range(n_pairs):
-                all_in0.append(inputs[i])
-                all_in1.append(inputs[i + 1])
-                # Ground truth odd frame (the one between even[i] and even[i+1])
-                odd_idx = even_indices[i] + 1
-                if odd_idx < len(frames_np):
-                    all_gt.append(frames_np[odd_idx])
-                else:
-                    all_gt.append(frames_np[-1])
-
-        if not all_in0:
-            return [MetricResult(name=self.name, score=1.0, details={}) for _ in range(B)]
-
-        # Batched AMT forward — all pairs across all videos
-        h, w = all_in0[0].shape[-2:]
+        h, w = inputs[0].shape[-2:]
         scale = self._get_scale(h, w)
+        padding = int(16 / scale)
+        padder = InputPadder(inputs[0].shape, padding)
+        inputs = padder.pad(*inputs)
+
+        n_pairs = len(inputs) - 1
+        all_in0 = [inputs[i] for i in range(n_pairs)]
+        all_in1 = [inputs[i + 1] for i in range(n_pairs)]
+        all_gt = [
+            frames_np[even_indices[i] + 1] if even_indices[i] + 1 < len(frames_np)
+            else frames_np[-1]
+            for i in range(n_pairs)
+        ]
+
         all_preds = []
         for start in range(0, len(all_in0), chunk):
             end = min(start + chunk, len(all_in0))
@@ -197,44 +179,24 @@ class MotionSmoothnessMetric(BaseMetric):
             embt = self._embt.expand(in0_batch.shape[0], -1, -1, -1)
             pred = self._safe_amt_forward(in0_batch, in1_batch, embt, scale)
             all_preds.append(pred.cpu())
-
         all_preds = torch.cat(all_preds, dim=0)
 
-        # Unpad and compute per-video scores
-        padding_val = int(16 / scale)
-        padder = InputPadder(all_in0[0].shape, padding_val)
+        diffs: list[float] = []
+        for i in range(n_pairs):
+            pred = all_preds[i:i + 1]
+            pred_unpadded = padder.unpad(pred)[0]
+            pred_np = tensor2img(pred_unpadded)
+            gt_np = all_gt[i]
+            # gt comes from frames_np; pred goes through check_dim_and_resize +
+            # AMT pad/unpad, which can reshape. Match shapes before absdiff.
+            if gt_np.shape[:2] != pred_np.shape[:2]:
+                gt_np = cv2.resize(gt_np, (pred_np.shape[1], pred_np.shape[0]),
+                                   interpolation=cv2.INTER_AREA)
+            diffs.append(float(np.mean(cv2.absdiff(gt_np, pred_np))))
 
-        results = []
-        offset = 0
-        for b in range(B):
-            n_pairs = pairs_per_video[b]
-            if n_pairs == 0:
-                results.append(MetricResult(name=self.name, score=1.0, details={}))
-                continue
-
-            diffs = []
-            for i in range(n_pairs):
-                pred = all_preds[offset + i:offset + i + 1]
-                pred_unpadded = padder.unpad(pred)[0]
-                pred_np = tensor2img(pred_unpadded)
-                gt_np = all_gt[offset + i]
-                # gt is from the original frames_np; pred comes through
-                # check_dim_and_resize + AMT pad/unpad, which can reshape.
-                # Match shapes before absdiff.
-                if gt_np.shape[:2] != pred_np.shape[:2]:
-                    gt_np = cv2.resize(gt_np, (pred_np.shape[1], pred_np.shape[0]),
-                                       interpolation=cv2.INTER_AREA)
-                diff = np.mean(cv2.absdiff(gt_np, pred_np))
-                diffs.append(diff)
-            offset += n_pairs
-
-            vfi_score = np.mean(diffs) if diffs else 0.0
-            score = (255.0 - vfi_score) / 255.0
-
-            results.append(MetricResult(
-                name=self.name,
-                score=float(score),
-                details={"vfi_score": float(vfi_score)},
-            ))
-
-        return results
+        vfi_score = float(np.mean(diffs)) if diffs else 0.0
+        return MetricResult(
+            name=self.name,
+            score=(255.0 - vfi_score) / 255.0,
+            details={"vfi_score": vfi_score},
+        )

@@ -41,40 +41,29 @@ class ImagingQualityMetric(BaseMetric):
         self._model.eval()
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
-        video = sample["video"]  # (B, T, C, H, W)
-        B, T = video.shape[:2]
+    def compute(self, sample: dict) -> MetricResult:
+        video = sample["video"]                                  # (T, C, H, W)
+        T, _, H, W = video.shape
 
-        # Resize all frames to the same target size
-        _, _, H, W = video.shape[1], video.shape[2], video.shape[3], video.shape[4]
         if max(H, W) > 512:
             scale = 512.0 / max(H, W)
             new_h, new_w = int(H * scale), int(W * scale)
         else:
             new_h, new_w = H, W
 
-        frames = video.reshape(B * T, *video.shape[2:]).to(self.device)
+        frames = video.to(self.device)
         if (new_h, new_w) != (H, W):
             # antialias=False matches VBench's imaging_quality.transform
             frames = resize(frames, [new_h, new_w], antialias=False)
 
-        # Batch through MUSIQ with chunking
         chunk = self._chunk_size or 32
         all_scores = []
-        for i in range(0, frames.shape[0], chunk):
+        for i in range(0, T, chunk):
             scores = self._model(frames[i:i + chunk])
             all_scores.append(scores.squeeze(-1))
-        all_scores = torch.cat(all_scores, dim=0)  # (B*T,)
-        all_scores = all_scores.reshape(B, T)
-
-        results = []
-        for b in range(B):
-            per_frame = all_scores[b].tolist()
-            mean_score = float(all_scores[b].mean().item()) / 100.0
-            results.append(MetricResult(
-                name=self.name,
-                score=mean_score,
-                details={"per_frame_raw": per_frame},
-            ))
-
-        return results
+        all_scores = torch.cat(all_scores, dim=0)                # (T,)
+        return MetricResult(
+            name=self.name,
+            score=float(all_scores.mean().item()) / 100.0,
+            details={"per_frame_raw": all_scores.tolist()},
+        )

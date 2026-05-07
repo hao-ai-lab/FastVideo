@@ -91,21 +91,18 @@ class VBKLDivergenceAudioMetric(BaseMetric):
         self._model = model
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
+    def compute(self, sample: dict) -> MetricResult:
         if self._model is None:
             self.setup()
 
-        audio = sample["audio"]                  # str or list[str]
-        ref_audio = sample["reference_audio"]    # str or list[str]
-        if isinstance(audio, str):
-            audio = [audio]
-        if isinstance(ref_audio, str):
-            ref_audio = [ref_audio]
+        audio = sample["audio"]
+        ref_audio = sample["reference_audio"]
+        if isinstance(audio, list):
+            audio = audio[0]
+        if isinstance(ref_audio, list):
+            ref_audio = ref_audio[0]
 
-        results = []
-        for a, ra in zip(audio, ref_audio):
-            ref_p = _return_probabilities(self._model, ra, self.device)
-            eval_p = _return_probabilities(self._model, a, self.device)
-            kl = F.kl_div((ref_p + 1e-6).log(), eval_p, reduction='sum', log_target=False).cpu().item()
-            results.append(MetricResult(name=self.name, score=kl, details={}))
-        return results
+        ref_p = _return_probabilities(self._model, ref_audio, self.device)
+        eval_p = _return_probabilities(self._model, audio, self.device)
+        kl = F.kl_div((ref_p + 1e-6).log(), eval_p, reduction='sum', log_target=False).cpu().item()
+        return MetricResult(name=self.name, score=kl, details={})

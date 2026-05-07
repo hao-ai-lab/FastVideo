@@ -97,54 +97,37 @@ class HumanActionMetric(BaseMetric):
         self._model.eval()
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
-        video = sample["video"]  # (B, T, C, H, W) float [0, 1]
-        text_prompts = sample.get("text_prompt")
-        if text_prompts is None:
+    def compute(self, sample: dict) -> MetricResult:
+        video = sample["video"]                                  # (T, C, H, W) [0, 1]
+        text_prompt = sample.get("text_prompt")
+        if text_prompt is None:
             return self._skip(sample, "missing text_prompt with action labels")
+        if isinstance(text_prompt, list):
+            text_prompt = text_prompt[0]
 
-        B = video.shape[0]
         cat_dict = _load_cat_dict()
-        chunk = self._chunk_size or B
 
-        # Prepare all 16-frame clips: extract, resize, crop, normalize
-        all_clips = []
-        for b in range(B):
-            frames = extract_frames(video[b], 16)  # (16, C, H, W)
-            frames = resize(frames, 256, antialias=True)
-            frames = center_crop(frames, 224)
-            frames = normalize(frames, mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
-            # UMT expects (C, T, H, W)
-            all_clips.append(frames.permute(1, 0, 2, 3))
-        all_clips = torch.stack(all_clips).to(self.device)  # (B, C, 16, H, W)
+        frames = extract_frames(video, 16)                       # (16, C, H, W)
+        frames = resize(frames, 256, antialias=True)
+        frames = center_crop(frames, 224)
+        frames = normalize(frames, mean=[0.485, 0.456, 0.406],
+                           std=[0.229, 0.224, 0.225])
+        # UMT expects (C, T, H, W); add a leading batch dim of 1.
+        clip_in = frames.permute(1, 0, 2, 3).unsqueeze(0).to(self.device)
 
-        # Batched UMT forward
-        all_logits = []
-        for i in range(0, B, chunk):
-            logits = torch.sigmoid(self._model(all_clips[i:i + chunk]))
-            all_logits.append(logits)
-        all_logits = torch.cat(all_logits, dim=0)  # (B, 400)
+        logits = torch.sigmoid(self._model(clip_in))             # (1, 400)
+        top_scores, top_indices = torch.topk(logits[0], 5)
+        top_indices = top_indices.tolist()
+        top_scores = top_scores.tolist()
 
-        results = []
-        for b in range(B):
-            top_scores, top_indices = torch.topk(all_logits[b:b+1], 5, dim=1)
-            top_indices = top_indices.squeeze().tolist()
-            top_scores = top_scores.squeeze().tolist()
-
-            predictions = []
-            for idx, score in zip(top_indices, top_scores):
-                if score >= 0.85:
-                    label = cat_dict.get(str(idx), "")
-                    predictions.append(label)
-
-            gt_label = text_prompts[b].lower().strip()
-            match = any(pred == gt_label for pred in predictions)
-
-            results.append(MetricResult(
-                name=self.name,
-                score=1.0 if match else 0.0,
-                details={"predictions": predictions, "ground_truth": gt_label},
-            ))
-
-        return results
+        predictions = [
+            cat_dict.get(str(idx), "")
+            for idx, score in zip(top_indices, top_scores) if score >= 0.85
+        ]
+        gt_label = text_prompt.lower().strip()
+        match = any(pred == gt_label for pred in predictions)
+        return MetricResult(
+            name=self.name,
+            score=1.0 if match else 0.0,
+            details={"predictions": predictions, "ground_truth": gt_label},
+        )

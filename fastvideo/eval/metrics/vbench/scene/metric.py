@@ -123,37 +123,31 @@ class SceneMetric(BaseMetric):
         return decoded.split("\nassistant\n")[-1].lower()
 
     @torch.no_grad()
-    def compute(self, sample: dict) -> list[MetricResult]:
-        video = sample["video"]  # (B, T, C, H, W)
+    def compute(self, sample: dict) -> MetricResult:
+        video = sample["video"]                              # (T, C, H, W)
         aux = sample.get("auxiliary_info")
-        if aux is None:
-            return self._skip(sample, "missing auxiliary_info with 'scene' key")
+        if isinstance(aux, list):
+            aux = aux[0] if aux else None
+        if aux is None or "scene" not in aux:
+            return self._skip(sample, "missing 'scene' in auxiliary_info")
 
-        B = video.shape[0]
-        results = []
+        scene_keywords = aux["scene"]
+        keywords = [k.strip().lower() for k in scene_keywords.split() if k.strip()]
 
-        for b in range(B):
-            scene_keywords = aux[b]["scene"] if isinstance(aux, list) else aux["scene"]
-            keywords = [k.strip().lower() for k in scene_keywords.split() if k.strip()]
+        tmp_path = self._save_temp_video(video)
+        try:
+            caption = self._generate_caption(tmp_path)
+        finally:
+            os.unlink(tmp_path)
 
-            tmp_path = self._save_temp_video(video[b])
-            try:
-                caption = self._generate_caption(tmp_path)
-            finally:
-                os.unlink(tmp_path)
-
-            # Check if all keywords appear in the caption
-            matched = [kw for kw in keywords if kw in caption]
-            score = 1.0 if len(matched) == len(keywords) else 0.0
-
-            results.append(MetricResult(
-                name=self.name,
-                score=score,
-                details={
-                    "caption": caption[:500],
-                    "keywords": keywords,
-                    "matched": matched,
-                },
-            ))
-
-        return results
+        matched = [kw for kw in keywords if kw in caption]
+        score = 1.0 if len(matched) == len(keywords) else 0.0
+        return MetricResult(
+            name=self.name,
+            score=score,
+            details={
+                "caption": caption[:500],
+                "keywords": keywords,
+                "matched": matched,
+            },
+        )

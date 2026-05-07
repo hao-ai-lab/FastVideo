@@ -57,28 +57,21 @@ class SSIMMetric(BaseMetric):
         super().__init__()
         self.window_size = window_size
 
-    def compute(self, sample: dict) -> list[MetricResult]:
-        gen = sample["video"].float()       # (B, T, C, H, W)
-        ref = sample["reference"].float()   # (B, T, C, H, W)
-        B, T = gen.shape[:2]
-        n = min(gen.shape[1], ref.shape[1])
-        gen, ref = gen[:, :n], ref[:, :n]
+    def compute(self, sample: dict) -> MetricResult:
+        gen = sample["video"].float()       # (T, C, H, W)
+        ref = sample["reference"].float()
+        n = min(gen.shape[0], ref.shape[0])
+        gen, ref = gen[:n], ref[:n]
 
-        gen_flat = gen.reshape(B * n, *gen.shape[2:])
-        ref_flat = ref.reshape(B * n, *ref.shape[2:])
-
-        # Chunked forward
-        chunk = self._chunk_size or len(gen_flat)
+        chunk = self._chunk_size or n
         parts = []
-        for i in range(0, len(gen_flat), chunk):
-            parts.append(_ssim_per_frame(gen_flat[i:i+chunk], ref_flat[i:i+chunk], self.window_size))
-        per_frame = torch.cat(parts).reshape(B, n)
+        for i in range(0, n, chunk):
+            parts.append(_ssim_per_frame(gen[i:i + chunk], ref[i:i + chunk],
+                                         self.window_size))
+        per_frame = torch.cat(parts)  # (n,)
 
-        return [
-            MetricResult(
-                name=self.name,
-                score=per_frame[b].mean().item(),
-                details={"per_frame": per_frame[b].tolist()},
-            )
-            for b in range(B)
-        ]
+        return MetricResult(
+            name=self.name,
+            score=per_frame.mean().item(),
+            details={"per_frame": per_frame.tolist()},
+        )
