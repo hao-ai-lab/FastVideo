@@ -19,9 +19,7 @@ def load_video(source: str | torch.Tensor | list, **kwargs) -> torch.Tensor:
     """
     if isinstance(source, torch.Tensor):
         if source.ndim != 4:
-            raise ValueError(
-                f"Expected video tensor with 4 dims (T,C,H,W), got {source.ndim}"
-            )
+            raise ValueError(f"Expected video tensor with 4 dims (T,C,H,W), got {source.ndim}")
         return source.float()
 
     if isinstance(source, list):
@@ -43,6 +41,7 @@ def extract_frames(video: torch.Tensor, n_frames: int | None = None) -> torch.Te
 
 
 # --- Internal helpers ---
+
 
 def _pil_to_tensor(img: Image.Image) -> torch.Tensor:
     arr = np.array(img.convert("RGB"))  # (H, W, 3) uint8

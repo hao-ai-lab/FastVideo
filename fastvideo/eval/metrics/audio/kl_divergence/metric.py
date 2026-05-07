@@ -22,10 +22,13 @@ SAMPLING_RATE = 32000
 
 
 class _patch_passt_stft:
+
     def __init__(self):
         self.old_stft = torch.stft
+
     def __enter__(self):
         torch.stft = partial(torch.stft, return_complex=False)
+
     def __exit__(self, *exc):
         torch.stft = self.old_stft
 

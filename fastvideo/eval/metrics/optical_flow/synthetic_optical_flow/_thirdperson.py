@@ -44,7 +44,6 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable, Tuple, Union
 
 import numpy as np
 
@@ -70,7 +69,7 @@ class ThirdPersonCalibration:
     notes: str = ""
     fit_metadata: dict = field(default_factory=dict)
 
-    def to_json(self, path: Union[str, Path]) -> None:
+    def to_json(self, path: str | Path) -> None:
         Path(path).write_text(json.dumps(asdict(self), indent=2))
 
     @classmethod
@@ -79,7 +78,7 @@ class ThirdPersonCalibration:
         return cls(**{k: v for k, v in d.items() if k in known})
 
 
-def load_calibration(path: Union[str, Path]) -> ThirdPersonCalibration:
+def load_calibration(path: str | Path) -> ThirdPersonCalibration:
     return ThirdPersonCalibration.from_dict(json.loads(Path(path).read_text()))
 
 
@@ -97,7 +96,7 @@ class ThirdPersonFlowGenerator:
     def __init__(
         self,
         calibration: ThirdPersonCalibration,
-        frame_shape: Tuple[int, int],
+        frame_shape: tuple[int, int],
         mouse_pitch_sign: int = +1,
     ) -> None:
         self.cal = calibration
@@ -112,8 +111,8 @@ class ThirdPersonFlowGenerator:
 
         # Pre-compute LH rotation kernels (depend only on pixel coords + f).
         self.xy_over_f = self.x_grid * self.y_grid / f
-        self.f_plus_x2_over_f = f + self.x_grid ** 2 / f
-        self.f_plus_y2_over_f = f + self.y_grid ** 2 / f
+        self.f_plus_x2_over_f = f + self.x_grid**2 / f
+        self.f_plus_y2_over_f = f + self.y_grid**2 / f
 
     @staticmethod
     def _action_to_kinematics(
@@ -150,9 +149,7 @@ class ThirdPersonFlowGenerator:
         ])
         return omega, T_avatar + T_orbit
 
-    def _flow_from_kinematics(
-        self, omega: np.ndarray, T: np.ndarray
-    ) -> np.ndarray:
+    def _flow_from_kinematics(self, omega: np.ndarray, T: np.ndarray) -> np.ndarray:
         """Compose rotation + translation flow at every pixel. Z=1."""
         wx, wy, wz = omega
         Tx, Ty, Tz = T
@@ -165,11 +162,16 @@ class ThirdPersonFlowGenerator:
         return np.stack([u_R + u_T, v_R + v_T], axis=-1).astype(np.float32)
 
     def generate_flow(
-        self, keyboard: np.ndarray, mouse: np.ndarray,
+        self,
+        keyboard: np.ndarray,
+        mouse: np.ndarray,
     ) -> np.ndarray:
         """Synthesize HxWx2 flow for one frame's action."""
         omega, T = self._action_to_kinematics(
-            keyboard, mouse, self.cal, self.mouse_pitch_sign,
+            keyboard,
+            mouse,
+            self.cal,
+            self.mouse_pitch_sign,
         )
         return self._flow_from_kinematics(omega, T)
 
@@ -196,17 +198,22 @@ class ThirdPersonFlowGenerator:
 
 # Number of free params we fit. Order is fixed and shared with the fitter.
 PARAM_NAMES = (
-    "alpha_yaw", "alpha_pitch", "alpha_turn",
-    "beta_fwd", "beta_strafe",
-    "focal_length", "r_z", "r_y",
+    "alpha_yaw",
+    "alpha_pitch",
+    "alpha_turn",
+    "beta_fwd",
+    "beta_strafe",
+    "focal_length",
+    "r_z",
+    "r_y",
 )
 
 
 def predict_flow_at_pixels(
-    keyboard: np.ndarray,         # (6,)
-    mouse: np.ndarray,            # (2,)
-    xs_centered: np.ndarray,      # (N,) pixel x relative to principal point
-    ys_centered: np.ndarray,      # (N,)
+    keyboard: np.ndarray,  # (6,)
+    mouse: np.ndarray,  # (2,)
+    xs_centered: np.ndarray,  # (N,) pixel x relative to principal point
+    ys_centered: np.ndarray,  # (N,)
     cal: ThirdPersonCalibration,
     mouse_pitch_sign: int,
 ) -> np.ndarray:
@@ -217,15 +224,18 @@ def predict_flow_at_pixels(
     :func:`predict_flow_at_pixels_stateful` and pass the integrated pitch.
     """
     omega, T = ThirdPersonFlowGenerator._action_to_kinematics(
-        keyboard, mouse, cal, mouse_pitch_sign,
+        keyboard,
+        mouse,
+        cal,
+        mouse_pitch_sign,
     )
     wx, wy, wz = omega
     Tx, Ty, Tz = T
     f = cal.focal_length
 
     xy_over_f = xs_centered * ys_centered / f
-    f_plus_x2_over_f = f + xs_centered ** 2 / f
-    f_plus_y2_over_f = f + ys_centered ** 2 / f
+    f_plus_x2_over_f = f + xs_centered**2 / f
+    f_plus_y2_over_f = f + ys_centered**2 / f
 
     u_R = xy_over_f * wx - f_plus_x2_over_f * wy + ys_centered * wz
     v_R = f_plus_y2_over_f * wx - xy_over_f * wy - xs_centered * wz
@@ -284,8 +294,8 @@ def predict_flow_at_pixels_stateful(
     Tz = avatar_fwd * cos_p
 
     xy_over_f = xs_centered * ys_centered / f
-    f_plus_x2_over_f = f + xs_centered ** 2 / f
-    f_plus_y2_over_f = f + ys_centered ** 2 / f
+    f_plus_x2_over_f = f + xs_centered**2 / f
+    f_plus_y2_over_f = f + ys_centered**2 / f
 
     u_R = xy_over_f * omega_x - f_plus_x2_over_f * omega_y
     v_R = f_plus_y2_over_f * omega_x - xy_over_f * omega_y
@@ -295,7 +305,7 @@ def predict_flow_at_pixels_stateful(
 
 
 def integrate_pitch_state(
-    mouse: np.ndarray,                # (T, 2) raw or cached actions
+    mouse: np.ndarray,  # (T, 2) raw or cached actions
     cal: ThirdPersonCalibration,
     *,
     init_pitch: float = 0.0,

@@ -58,7 +58,7 @@ class SSIMMetric(BaseMetric):
         self.window_size = window_size
 
     def compute(self, sample: dict) -> MetricResult:
-        gen = sample["video"].float()       # (T, C, H, W)
+        gen = sample["video"].float()  # (T, C, H, W)
         ref = sample["reference"].float()
         n = min(gen.shape[0], ref.shape[0])
         gen, ref = gen[:n], ref[:n]
@@ -66,8 +66,7 @@ class SSIMMetric(BaseMetric):
         chunk = self._chunk_size or n
         parts = []
         for i in range(0, n, chunk):
-            parts.append(_ssim_per_frame(gen[i:i + chunk], ref[i:i + chunk],
-                                         self.window_size))
+            parts.append(_ssim_per_frame(gen[i:i + chunk], ref[i:i + chunk], self.window_size))
         per_frame = torch.cat(parts)  # (n,)
 
         return MetricResult(

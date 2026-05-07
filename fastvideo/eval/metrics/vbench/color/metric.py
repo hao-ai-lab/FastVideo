@@ -14,8 +14,18 @@ from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
 
 _COLOR_KEYWORDS = [
-    "white", "red", "pink", "blue", "silver", "purple",
-    "orange", "green", "gray", "yellow", "black", "grey",
+    "white",
+    "red",
+    "pink",
+    "blue",
+    "silver",
+    "purple",
+    "orange",
+    "green",
+    "gray",
+    "yellow",
+    "black",
+    "grey",
 ]
 
 
@@ -42,7 +52,7 @@ class ColorMetric(BaseMetric):
     def compute(self, sample: dict) -> MetricResult:
         from fastvideo.eval.metrics.vbench._grit_helper import prepare_frames
 
-        video = sample["video"]                              # (T, C, H, W)
+        video = sample["video"]  # (T, C, H, W)
         aux = sample.get("auxiliary_info")
         if isinstance(aux, list):
             aux = aux[0] if aux else None
@@ -93,5 +103,8 @@ class ColorMetric(BaseMetric):
         return MetricResult(
             name=self.name,
             score=float(score),
-            details={"object_detected": cur_object, "color_correct": cur_object_color},
+            details={
+                "object_detected": cur_object,
+                "color_correct": cur_object_color
+            },
         )

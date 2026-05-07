@@ -17,7 +17,6 @@ from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
 from fastvideo.eval.io.video import extract_frames
 
-
 # Kinetics-400 class names (loaded lazily). The label file ships inside
 # the upstream vbench submodule.
 _CAT_DICT: dict[str, str] | None = None
@@ -28,8 +27,7 @@ def _load_cat_dict() -> dict[str, str]:
     if _CAT_DICT is not None:
         return _CAT_DICT
     import vbench.third_party.umt as _umt_pkg
-    cat_path = (Path(_umt_pkg.__file__).resolve().parent
-                / "kinetics_400_categories.txt")
+    cat_path = (Path(_umt_pkg.__file__).resolve().parent / "kinetics_400_categories.txt")
     out: dict[str, str] = {}
     with cat_path.open() as f:
         for line in f:
@@ -98,7 +96,7 @@ class HumanActionMetric(BaseMetric):
 
     @torch.no_grad()
     def compute(self, sample: dict) -> MetricResult:
-        video = sample["video"]                                  # (T, C, H, W) [0, 1]
+        video = sample["video"]  # (T, C, H, W) [0, 1]
         text_prompt = sample.get("text_prompt")
         if text_prompt is None:
             return self._skip(sample, "missing text_prompt with action labels")
@@ -107,27 +105,26 @@ class HumanActionMetric(BaseMetric):
 
         cat_dict = _load_cat_dict()
 
-        frames = extract_frames(video, 16)                       # (16, C, H, W)
+        frames = extract_frames(video, 16)  # (16, C, H, W)
         frames = resize(frames, 256, antialias=True)
         frames = center_crop(frames, 224)
-        frames = normalize(frames, mean=[0.485, 0.456, 0.406],
-                           std=[0.229, 0.224, 0.225])
+        frames = normalize(frames, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         # UMT expects (C, T, H, W); add a leading batch dim of 1.
         clip_in = frames.permute(1, 0, 2, 3).unsqueeze(0).to(self.device)
 
-        logits = torch.sigmoid(self._model(clip_in))             # (1, 400)
+        logits = torch.sigmoid(self._model(clip_in))  # (1, 400)
         top_scores, top_indices = torch.topk(logits[0], 5)
         top_indices = top_indices.tolist()
         top_scores = top_scores.tolist()
 
-        predictions = [
-            cat_dict.get(str(idx), "")
-            for idx, score in zip(top_indices, top_scores) if score >= 0.85
-        ]
+        predictions = [cat_dict.get(str(idx), "") for idx, score in zip(top_indices, top_scores, strict=False) if score >= 0.85]
         gt_label = text_prompt.lower().strip()
         match = any(pred == gt_label for pred in predictions)
         return MetricResult(
             name=self.name,
             score=1.0 if match else 0.0,
-            details={"predictions": predictions, "ground_truth": gt_label},
+            details={
+                "predictions": predictions,
+                "ground_truth": gt_label
+            },
         )

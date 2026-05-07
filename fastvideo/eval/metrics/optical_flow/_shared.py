@@ -10,11 +10,9 @@ how they construct the *reference* flow field.
 
 from __future__ import annotations
 
-from typing import Tuple
 
 import numpy as np
 import torch
-
 
 _PER_FRAME_AGG_KEYS: tuple[str, ...] = (
     "mf_epe",
@@ -33,7 +31,7 @@ _PER_FRAME_AGG_KEYS: tuple[str, ...] = (
 
 
 def _trapezoid(vals: np.ndarray) -> float:
-    fn = getattr(np, "trapezoid", None) or getattr(np, "trapz")
+    fn = getattr(np, "trapezoid", None) or np.trapz
     return float(fn(vals))
 
 
@@ -41,7 +39,7 @@ def _estimate_foe(
     flow: np.ndarray,
     step: int = 8,
     min_mag: float = 0.5,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Least-squares Focus of Expansion. Returns (fx, fy)."""
     H, W = flow.shape[:2]
     ys = np.arange(step // 2, H, step)
@@ -52,7 +50,7 @@ def _estimate_foe(
     uu = flow[yy, xx, 0]
     vv = flow[yy, xx, 1]
 
-    mag = np.sqrt(uu ** 2 + vv ** 2)
+    mag = np.sqrt(uu**2 + vv**2)
     valid = mag > min_mag
     if valid.sum() < 10:
         return W / 2.0, H / 2.0
@@ -77,9 +75,10 @@ def _flow_kl_2d(
     min_mag: float = 0.5,
 ) -> float:
     """KL(P_a || P_b) over a joint (angle, log-magnitude) histogram."""
+
     def _hist(flow: np.ndarray) -> np.ndarray | None:
         u, v = flow[:, :, 0].ravel(), flow[:, :, 1].ravel()
-        mag = np.sqrt(u ** 2 + v ** 2)
+        mag = np.sqrt(u**2 + v**2)
         angle = np.degrees(np.arctan2(v, u)) % 360
         valid = mag >= min_mag
         if valid.sum() < 10:
@@ -160,11 +159,10 @@ def compute_frame_metrics(
 
     valid = mag_mask & (gt_mag_map > 0.5) & (gen_mag_map > 0.5)
     if valid.sum() > 0:
-        dot = (flow_gt[:, :, 0] * flow_gen[:, :, 0]
-               + flow_gt[:, :, 1] * flow_gen[:, :, 1])
+        dot = (flow_gt[:, :, 0] * flow_gen[:, :, 0] + flow_gt[:, :, 1] * flow_gen[:, :, 1])
         cos_map = np.clip(dot / (gt_mag_map * gen_mag_map + 1e-8), -1.0, 1.0)
         angle_map = np.degrees(np.arccos(cos_map))
-        metrics["px_angle_rmse"] = float(np.sqrt((angle_map[valid] ** 2).mean()))
+        metrics["px_angle_rmse"] = float(np.sqrt((angle_map[valid]**2).mean()))
     else:
         metrics["px_angle_rmse"] = 0.0
 
@@ -191,17 +189,13 @@ def compute_frame_metrics(
 
     foe_gt_x, foe_gt_y = _estimate_foe(flow_gt)
     foe_gen_x, foe_gen_y = _estimate_foe(flow_gen)
-    metrics["foe_dist"] = float(
-        np.sqrt((foe_gt_x - foe_gen_x) ** 2 + (foe_gt_y - foe_gen_y) ** 2)
-    )
+    metrics["foe_dist"] = float(np.sqrt((foe_gt_x - foe_gen_x)**2 + (foe_gt_y - foe_gen_y)**2))
 
     metrics["flow_kl_2d"] = _flow_kl_2d(flow_gt, flow_gen)
     return metrics
 
 
-def aggregate_temporal(
-    per_frame: list[dict[str, float]],
-) -> dict[str, float | int | None]:
+def aggregate_temporal(per_frame: list[dict[str, float]], ) -> dict[str, float | int | None]:
     """Aggregate per-frame metric dicts into mean/std/max/auc/onset summaries.
 
     Port of mhuo's compute_temporal_metrics.
@@ -211,9 +205,7 @@ def aggregate_temporal(
         return {"n_frames": 0}
 
     summary: dict[str, float | int | None] = {"n_frames": n}
-    series: dict[str, np.ndarray] = {
-        k: np.array([m[k] for m in per_frame]) for k in _PER_FRAME_AGG_KEYS
-    }
+    series: dict[str, np.ndarray] = {k: np.array([m[k] for m in per_frame]) for k in _PER_FRAME_AGG_KEYS}
     for name, vals in series.items():
         summary[f"{name}_mean"] = float(vals.mean())
         summary[f"{name}_std"] = float(vals.std())
@@ -260,7 +252,7 @@ def load_ptlflow_model(model_name: str, ckpt: str, device: torch.device):
 
 def extract_video_flows(
     model,
-    video: torch.Tensor,           # (T, C, H, W) float [0, 1]
+    video: torch.Tensor,  # (T, C, H, W) float [0, 1]
     *,
     chunk: int,
     device: torch.device,

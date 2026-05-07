@@ -21,7 +21,6 @@ from fastvideo.eval.metrics.base import BaseMetric
 from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
 
-
 # Match upstream verbatim, including leading newline and 4-space indents
 # (TIGER-AI-Lab/VideoScore2/vs2_inference.py).
 VS2_QUERY_TEMPLATE = Template("""
@@ -37,7 +36,6 @@ VS2_QUERY_TEMPLATE = Template("""
     text-to-video alignment: <t_score>,
     physical/common-sense consistency: <p_score>
     """)
-
 
 # The released VideoScore2 model emits a <think>...</think> chain-of-
 # thought followed by a numbered list of the form:
@@ -70,14 +68,18 @@ def _find_score_token_index(prompt_text: str, tokenizer, gen_ids: list[int]) -> 
     num_match = re.search(r"\d", after)
     if not num_match:
         return -1
-    target = gen_str[: match.end() + num_match.start() + 1]
+    target = gen_str[:match.end() + num_match.start() + 1]
     for i in range(len(gen_ids)):
-        if tokenizer.decode(gen_ids[: i + 1], skip_special_tokens=False) == target:
+        if tokenizer.decode(gen_ids[:i + 1], skip_special_tokens=False) == target:
             return i
     return -1
 
 
-def _ll_based_soft_score_normed(hard_val: int | None, token_idx: int, scores, tokenizer, seq_idx: int = 0) -> float | None:
+def _ll_based_soft_score_normed(hard_val: int | None,
+                                token_idx: int,
+                                scores,
+                                tokenizer,
+                                seq_idx: int = 0) -> float | None:
     """Upstream VideoScore2's soft score: argmax_score × (argmax_prob / Σprob).
 
     Matches ``ll_based_soft_score_normed`` in
@@ -96,7 +98,7 @@ def _ll_based_soft_score_normed(hard_val: int | None, token_idx: int, scores, to
             score_probs.append((s, float(np.exp(logp))))
     if not score_probs:
         return None
-    scores_list, probs_list = zip(*score_probs)
+    scores_list, probs_list = zip(*score_probs, strict=False)
     total_prob = sum(probs_list)
     max_prob = max(probs_list)
     best_score = scores_list[probs_list.index(max_prob)]
@@ -181,16 +183,20 @@ class VideoScore2Metric(BaseMetric):
         # Match upstream: no dtype kwarg, weights load with whatever the
         # checkpoint was saved as (bf16 for the released VideoScore2).
         self._model = AutoModelForVision2Seq.from_pretrained(
-            self._model_name, trust_remote_code=True,
+            self._model_name,
+            trust_remote_code=True,
         ).to(self.device)
         self._model.eval()
         self._processor = AutoProcessor.from_pretrained(
-            self._model_name, trust_remote_code=True,
+            self._model_name,
+            trust_remote_code=True,
         )
         self._tokenizer = getattr(self._processor, "tokenizer", None)
         if self._tokenizer is None:
             self._tokenizer = AutoTokenizer.from_pretrained(
-                self._model_name, trust_remote_code=True, use_fast=False,
+                self._model_name,
+                trust_remote_code=True,
+                use_fast=False,
             )
 
     def _tensor_to_pil_list(self, video: torch.Tensor) -> list[Image.Image]:
@@ -198,7 +204,10 @@ class VideoScore2Metric(BaseMetric):
         frames = (video.permute(0, 2, 3, 1).cpu().numpy() * 255).astype(np.uint8)
         return [Image.fromarray(frames[t]) for t in range(frames.shape[0])]
 
-    def _subsample_frames(self, pil_frames: list[Image.Image], max_frames: int = 64, max_resolution: int = 960) -> list[Image.Image]:
+    def _subsample_frames(self,
+                          pil_frames: list[Image.Image],
+                          max_frames: int = 64,
+                          max_resolution: int = 960) -> list[Image.Image]:
         """Subsample to ~infer_fps worth of frames (max 64), resize if too large."""
         n = len(pil_frames)
         target = min(n, max_frames)
@@ -221,7 +230,7 @@ class VideoScore2Metric(BaseMetric):
 
         from qwen_vl_utils import process_vision_info
 
-        video = sample["video"]                              # (T, C, H, W)
+        video = sample["video"]  # (T, C, H, W)
         text = sample.get("text_prompt", "")
         if isinstance(text, list):
             text = text[0] if text else ""
@@ -230,12 +239,25 @@ class VideoScore2Metric(BaseMetric):
         pil_frames = self._subsample_frames(pil_frames)
         user_prompt = VS2_QUERY_TEMPLATE.substitute(t2v_prompt=text)
 
-        messages = [{"role": "user", "content": [
-            {"type": "video", "video": pil_frames, "fps": self.infer_fps},
-            {"type": "text", "text": user_prompt},
-        ]}]
+        messages = [{
+            "role":
+            "user",
+            "content": [
+                {
+                    "type": "video",
+                    "video": pil_frames,
+                    "fps": self.infer_fps
+                },
+                {
+                    "type": "text",
+                    "text": user_prompt
+                },
+            ]
+        }]
         chat_text = self._processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True,
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
         )
         _, vid_inputs = process_vision_info(messages)
 
@@ -265,10 +287,15 @@ class VideoScore2Metric(BaseMetric):
         output_text = self._tokenizer.decode(gen_ids, skip_special_tokens=True)
 
         parsed = _parse_output(
-            output_text, gen_out.scores, self._tokenizer, gen_ids, seq_idx=0,
+            output_text,
+            gen_out.scores,
+            self._tokenizer,
+            gen_ids,
+            seq_idx=0,
         )
-        soft_vals = [v for v in (parsed["visual_quality"],
-                                 parsed["text_alignment"],
-                                 parsed["physical_consistency"]) if v is not None]
+        soft_vals = [
+            v for v in (parsed["visual_quality"], parsed["text_alignment"], parsed["physical_consistency"])
+            if v is not None
+        ]
         combined = sum(soft_vals) / len(soft_vals) if soft_vals else 0.0
         return MetricResult(name=self.name, score=combined, details=parsed)

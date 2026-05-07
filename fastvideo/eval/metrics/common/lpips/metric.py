@@ -20,7 +20,7 @@ class LPIPSMetric(BaseMetric):
         self.net = net
         self._model = None
 
-    def to(self, device: str | torch.device) -> "LPIPSMetric":
+    def to(self, device: str | torch.device) -> LPIPSMetric:
         super().to(device)
         if self._model is not None:
             self._model = self._model.to(self.device)
@@ -37,7 +37,7 @@ class LPIPSMetric(BaseMetric):
         if self._model is None:
             self.setup()
 
-        gen = sample["video"].float().to(self.device)       # (T, C, H, W)
+        gen = sample["video"].float().to(self.device)  # (T, C, H, W)
         ref = sample["reference"].float().to(self.device)
         n = min(gen.shape[0], ref.shape[0])
         gen, ref = gen[:n] * 2.0 - 1.0, ref[:n] * 2.0 - 1.0

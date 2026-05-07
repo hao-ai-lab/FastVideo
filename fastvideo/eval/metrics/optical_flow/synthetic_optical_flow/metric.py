@@ -51,9 +51,7 @@ from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
 
 
-def _resolve_calibration(
-    obj: str | Path | dict | ThirdPersonCalibration,
-) -> ThirdPersonCalibration:
+def _resolve_calibration(obj: str | Path | dict | ThirdPersonCalibration, ) -> ThirdPersonCalibration:
     if isinstance(obj, ThirdPersonCalibration):
         return obj
     if isinstance(obj, dict):
@@ -93,13 +91,12 @@ class SyntheticOpticalFlowMetric(BaseMetric):
         self.min_mag = min_mag
         self.max_mag_pct = max_mag_pct
         self.grid_size = grid_size
-        self._calibration: ThirdPersonCalibration | None = (
-            _resolve_calibration(calibration_path) if calibration_path else None
-        )
+        self._calibration: ThirdPersonCalibration | None = (_resolve_calibration(calibration_path)
+                                                            if calibration_path else None)
         self._model = None
         self._chunk_size = 16
 
-    def to(self, device: str | torch.device) -> "SyntheticOpticalFlowMetric":
+    def to(self, device: str | torch.device) -> SyntheticOpticalFlowMetric:
         super().to(device)
         if self._model is not None:
             self._model = self._model.to(self.device)
@@ -131,7 +128,7 @@ class SyntheticOpticalFlowMetric(BaseMetric):
                 "or sample['calibration'] per call)",
             )
 
-        video = sample["video"].float()      # (T, C, H, W)
+        video = sample["video"].float()  # (T, C, H, W)
         T, _, H, W = video.shape
         if T < 2:
             raise ValueError("Need at least 2 frames to compute optical flow")
@@ -141,7 +138,10 @@ class SyntheticOpticalFlowMetric(BaseMetric):
         chunk = self._chunk_size or 16
 
         observed = extract_video_flows(
-            self._model, video, chunk=chunk, device=self.device,
+            self._model,
+            video,
+            chunk=chunk,
+            device=self.device,
         )
         predictor = ThirdPersonFlowGenerator(
             calibration=cal,
@@ -153,12 +153,12 @@ class SyntheticOpticalFlowMetric(BaseMetric):
         n = min(len(observed), len(predicted))
         per_frame = [
             compute_frame_metrics(
-                predicted[i], observed[i],
+                predicted[i],
+                observed[i],
                 grid_size=self.grid_size,
                 min_mag=self.min_mag,
                 max_mag_pct=self.max_mag_pct,
-            )
-            for i in range(n)
+            ) for i in range(n)
         ]
         summary = aggregate_temporal(per_frame)
         score = summary.get("pixel_epe_mean_mean")

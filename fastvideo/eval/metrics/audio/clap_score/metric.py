@@ -17,6 +17,7 @@ from fastvideo.eval.types import MetricResult
 def _int16_to_float32(x):
     return (x / 32767.0).astype(np.float32)
 
+
 def _float32_to_int16(x):
     x = np.clip(x, a_min=-1., a_max=1.)
     return (x * 32767.).astype(np.int16)

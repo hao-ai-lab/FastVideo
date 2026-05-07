@@ -55,7 +55,7 @@ class GtOpticalFlowMetric(BaseMetric):
         self._model = None
         self._chunk_size = 16
 
-    def to(self, device: str | torch.device) -> "GtOpticalFlowMetric":
+    def to(self, device: str | torch.device) -> GtOpticalFlowMetric:
         super().to(device)
         if self._model is not None:
             self._model = self._model.to(self.device)
@@ -70,7 +70,7 @@ class GtOpticalFlowMetric(BaseMetric):
         if self._model is None:
             self.setup()
 
-        gen_video = sample["video"].float()       # (T, C, H, W)
+        gen_video = sample["video"].float()  # (T, C, H, W)
         ref_video = sample["reference"].float()
         n = min(gen_video.shape[0], ref_video.shape[0])
         gen_video, ref_video = gen_video[:n], ref_video[:n]
@@ -79,19 +79,25 @@ class GtOpticalFlowMetric(BaseMetric):
 
         chunk = self._chunk_size or 16
         gen_flows = extract_video_flows(
-            self._model, gen_video, chunk=chunk, device=self.device,
+            self._model,
+            gen_video,
+            chunk=chunk,
+            device=self.device,
         )
         ref_flows = extract_video_flows(
-            self._model, ref_video, chunk=chunk, device=self.device,
+            self._model,
+            ref_video,
+            chunk=chunk,
+            device=self.device,
         )
         per_frame = [
             compute_frame_metrics(
-                rf, gf,
+                rf,
+                gf,
                 grid_size=self.grid_size,
                 min_mag=self.min_mag,
                 max_mag_pct=self.max_mag_pct,
-            )
-            for rf, gf in zip(ref_flows, gen_flows)
+            ) for rf, gf in zip(ref_flows, gen_flows, strict=False)
         ]
         summary = aggregate_temporal(per_frame)
         score = summary.get("pixel_epe_mean_mean")

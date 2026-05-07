@@ -41,8 +41,7 @@ def glob_videos(videos_dir: Path, row: dict, ext: str = ".mp4") -> list[Path]:
     return sorted(files, key=_idx)
 
 
-def build_eval_kwargs(row: dict, video_path: Path, *,
-                      fps: float = 24.0) -> dict[str, Any]:
+def build_eval_kwargs(row: dict, video_path: Path, *, fps: float = 24.0) -> dict[str, Any]:
     """Build evaluator kwargs from a sample row + a video on disk.
 
     Loads the video as ``(T,C,H,W)`` and adds the leading batch dim.
@@ -51,9 +50,9 @@ def build_eval_kwargs(row: dict, video_path: Path, *,
     """
     from fastvideo.eval.io.video import load_video
 
-    video = load_video(str(video_path))            # (T, C, H, W) in [0, 1]
+    video = load_video(str(video_path))  # (T, C, H, W) in [0, 1]
     kwargs: dict[str, Any] = {
-        "video": video.unsqueeze(0),               # (1, T, C, H, W)
+        "video": video.unsqueeze(0),  # (1, T, C, H, W)
         "fps": fps,
     }
     if "prompt" in row:

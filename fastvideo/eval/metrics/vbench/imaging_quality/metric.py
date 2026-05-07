@@ -42,7 +42,7 @@ class ImagingQualityMetric(BaseMetric):
 
     @torch.no_grad()
     def compute(self, sample: dict) -> MetricResult:
-        video = sample["video"]                                  # (T, C, H, W)
+        video = sample["video"]  # (T, C, H, W)
         T, _, H, W = video.shape
 
         if max(H, W) > 512:
@@ -61,7 +61,7 @@ class ImagingQualityMetric(BaseMetric):
         for i in range(0, T, chunk):
             scores = self._model(frames[i:i + chunk])
             all_scores.append(scores.squeeze(-1))
-        all_scores = torch.cat(all_scores, dim=0)                # (T,)
+        all_scores = torch.cat(all_scores, dim=0)  # (T,)
         return MetricResult(
             name=self.name,
             score=float(all_scores.mean().item()) / 100.0,

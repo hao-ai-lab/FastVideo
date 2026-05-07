@@ -4,7 +4,6 @@ from typing import Any
 from collections.abc import Iterable, Mapping
 
 import numpy as np
-import torch
 
 from fastvideo.eval.metrics.base import BaseMetric
 from fastvideo.eval.metrics.physics_iq.mse.metric import PhysicsIQMSEMetric
@@ -12,8 +11,12 @@ from fastvideo.eval.metrics.physics_iq.spatial_iou.metric import SpatialIoUMetri
 from fastvideo.eval.metrics.physics_iq.spatiotemporal_iou.metric import SpatiotemporalIoUMetric
 from fastvideo.eval.metrics.physics_iq.weighted_spatial_iou.metric import WeightedSpatialIoUMetric
 from fastvideo.eval.metrics.physics_iq.utils import (
-    DEFAULT_DURATION_SECONDS, DEFAULT_TARGET_FPS,
-    mean, prepare_pair_inputs, prepare_triplet_inputs, unpack_batch_value,
+    DEFAULT_DURATION_SECONDS,
+    DEFAULT_TARGET_FPS,
+    mean,
+    prepare_pair_inputs,
+    prepare_triplet_inputs,
+    unpack_batch_value,
 )
 from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
@@ -151,13 +154,10 @@ class PhysicsIQMetric(BaseMetric):
 
     def _per_video_score(self, details: Mapping[str, Any]) -> float:
         score = 100.0 * (
-            (
-                (mean(details["spatiotemporal_iou_per_frame"]) / mean(details["pv_spatiotemporal_iou_per_frame"]))
-                + (float(details["spatial_iou"]) / float(details["pv_spatial_iou"]))
-                + (float(details["weighted_spatial_iou"]) / float(details["pv_weighted_spatial_iou"]))
-            ) / 3.0
-            - (mean(details["mse_per_frame"]) - mean(details["pv_mse_per_frame"]))
-        )
+            ((mean(details["spatiotemporal_iou_per_frame"]) / mean(details["pv_spatiotemporal_iou_per_frame"])) +
+             (float(details["spatial_iou"]) / float(details["pv_spatial_iou"])) +
+             (float(details["weighted_spatial_iou"]) / float(details["pv_weighted_spatial_iou"]))) / 3.0 -
+            (mean(details["mse_per_frame"]) - mean(details["pv_mse_per_frame"])))
         return round(float(np.clip(score, 0.0, 100.0)), 2)
 
     def compute(self, sample: dict) -> MetricResult:
@@ -179,10 +179,8 @@ class PhysicsIQMetric(BaseMetric):
         [reference_take2] = unpack_batch_value(sample[take2_key])
         generated_mask = unpack_batch_value(sample["video_mask"])[0] if "video_mask" in sample else None
         reference_mask = unpack_batch_value(sample["reference_mask"])[0] if "reference_mask" in sample else None
-        reference_take2_mask = (
-            unpack_batch_value(sample["reference_take2_mask"])[0]
-            if "reference_take2_mask" in sample else None
-        )
+        reference_take2_mask = (unpack_batch_value(sample["reference_take2_mask"])[0]
+                                if "reference_take2_mask" in sample else None)
 
         scenario = sample.get("scenario")
         if isinstance(scenario, list):
@@ -202,4 +200,3 @@ class PhysicsIQMetric(BaseMetric):
             view=view,
         )
         return MetricResult(name=self.name, score=self._per_video_score(details), details=details)
-

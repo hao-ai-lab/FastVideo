@@ -50,8 +50,7 @@ class BaseMetric(ABC):
 
     def _skip(self, sample: dict, reason: str) -> MetricResult:
         """Return a skipped result (``score=None`` + reason in details)."""
-        return MetricResult(name=self.name, score=None,
-                            details={"skipped": reason})
+        return MetricResult(name=self.name, score=None, details={"skipped": reason})
 
     @abstractmethod
     def compute(self, sample: dict) -> MetricResult:

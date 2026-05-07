@@ -14,8 +14,7 @@ from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
 
 
-def _get_position_score(locality: str, obj1: list, obj2: list,
-                        iou_threshold: float = 0.1) -> float:
+def _get_position_score(locality: str, obj1: list, obj2: list, iou_threshold: float = 0.1) -> float:
     """Score spatial relationship between two bboxes [x0, y0, x1, y1].
 
     Matching VBench's get_position_score() exactly.
@@ -75,7 +74,7 @@ class SpatialRelationshipMetric(BaseMetric):
     def compute(self, sample: dict) -> MetricResult:
         from fastvideo.eval.metrics.vbench._grit_helper import prepare_frames
 
-        video = sample["video"]                              # (T, C, H, W)
+        video = sample["video"]  # (T, C, H, W)
         aux = sample.get("auxiliary_info")
         if isinstance(aux, list):
             aux = aux[0] if aux else None
@@ -88,8 +87,7 @@ class SpatialRelationshipMetric(BaseMetric):
             key_b = sp_info["object_b"]
             relation = sp_info["relationship"]
         except (KeyError, TypeError):
-            return self._skip(sample,
-                              "spatial_relationship missing object_a/object_b/relationship")
+            return self._skip(sample, "spatial_relationship missing object_a/object_b/relationship")
 
         frames_np = prepare_frames(video)
 
@@ -99,20 +97,21 @@ class SpatialRelationshipMetric(BaseMetric):
             frame_dets = []
             if len(ret[0]) > 0:
                 for info in ret[0]:
-                    frame_dets.append([info[0], info[1]])    # (caption, bbox)
+                    frame_dets.append([info[0], info[1]])  # (caption, bbox)
             preds.append(frame_dets)
 
         # Score each frame (matching VBench's check_generate).
         frame_scores: list[float] = []
         for frame_pred in preds:
-            obj_bboxes = [item[1] for item in frame_pred
-                          if item[0] == key_a or item[0] == key_b]
+            obj_bboxes = [item[1] for item in frame_pred if item[0] == key_a or item[0] == key_b]
 
             cur_scores = [0.0]
             for i in range(len(obj_bboxes) - 1):
                 for j in range(i + 1, len(obj_bboxes)):
                     cur_scores.append(_get_position_score(
-                        relation, obj_bboxes[i], obj_bboxes[j],
+                        relation,
+                        obj_bboxes[i],
+                        obj_bboxes[j],
                     ))
             frame_scores.append(max(cur_scores))
 

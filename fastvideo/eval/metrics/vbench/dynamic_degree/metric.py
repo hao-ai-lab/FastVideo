@@ -7,7 +7,6 @@ adaptive threshold, the video is classified as dynamic (1.0) vs static (0.0).
 
 from __future__ import annotations
 
-
 import numpy as np
 import torch
 from easydict import EasyDict
@@ -42,8 +41,7 @@ class DynamicDegreeMetric(BaseMetric):
             return
         from vbench.third_party.RAFT.core.raft import RAFT
 
-        args = EasyDict(small=False, mixed_precision=False,
-                        alternate_corr=False, dropout=0.0)
+        args = EasyDict(small=False, mixed_precision=False, alternate_corr=False, dropout=0.0)
         model = torch.nn.DataParallel(RAFT(args))
 
         from fastvideo.eval.models import ensure_checkpoint
@@ -61,7 +59,7 @@ class DynamicDegreeMetric(BaseMetric):
     def _get_score(self, flow: torch.Tensor) -> float:
         """Top-5% mean flow magnitude (matching VBench dynamic_degree.get_score)."""
         flo = flow.permute(1, 2, 0).cpu().numpy()
-        rad = np.sqrt(flo[..., 0] ** 2 + flo[..., 1] ** 2)
+        rad = np.sqrt(flo[..., 0]**2 + flo[..., 1]**2)
         h, w = rad.shape
         cut = max(1, int(h * w * 0.05))
         rad_flat = rad.flatten()
@@ -71,7 +69,7 @@ class DynamicDegreeMetric(BaseMetric):
     def compute(self, sample: dict) -> MetricResult:
         from vbench.third_party.RAFT.core.utils_core.utils import InputPadder
 
-        video = sample["video"]                                 # (T, C, H, W) [0, 1]
+        video = sample["video"]  # (T, C, H, W) [0, 1]
         T, _, H, W = video.shape
 
         # fps controls the temporal sampling stride for optical flow.
@@ -122,11 +120,13 @@ class DynamicDegreeMetric(BaseMetric):
         return MetricResult(
             name=self.name,
             score=is_dynamic,
-            details={"per_pair_magnitude": scores,
-                     "threshold": thres,
-                     "count_above": count_above,
-                     "count_needed": count_needed,
-                     "fps": fps,
-                     "interval": interval,
-                     "n_frames_used": n},
+            details={
+                "per_pair_magnitude": scores,
+                "threshold": thres,
+                "count_above": count_above,
+                "count_needed": count_needed,
+                "fps": fps,
+                "interval": interval,
+                "n_frames_used": n
+            },
         )

@@ -12,10 +12,8 @@ datasets self-register at import time. To add one, drop a module into
 this package that subclasses :class:`PromptDataset` and decorates with
 ``@register_dataset("name")`` — auto-discovery picks it up.
 """
-from fastvideo.eval.datasets.base import (BasePromptDataset, PromptDataset,
-                                          Sample)
-from fastvideo.eval.datasets.registry import (get_dataset, list_datasets,
-                                              register_dataset)
+from fastvideo.eval.datasets.base import (BasePromptDataset, PromptDataset, Sample)
+from fastvideo.eval.datasets.registry import (get_dataset, list_datasets, register_dataset)
 
 
 def _autodiscover() -> None:

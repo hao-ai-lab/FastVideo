@@ -26,10 +26,12 @@ def _patch_detectron2_registries():
         from fvcore.common.registry import Registry
         orig = Registry._do_register
         if not getattr(orig, "_patched_idempotent", False):
+
             def _safe_do_register(self, name, obj):
                 if name in self._obj_map:
                     return
                 orig(self, name, obj)
+
             _safe_do_register._patched_idempotent = True
             Registry._do_register = _safe_do_register
     except ImportError:
@@ -40,10 +42,12 @@ def _patch_detectron2_registries():
         from detectron2.data import DatasetCatalog
         orig_ds = DatasetCatalog.register
         if not getattr(orig_ds, "_patched_idempotent", False):
+
             def _safe_ds_register(name, func):
                 if name in DatasetCatalog:
                     return
                 orig_ds(name, func)
+
             _safe_ds_register._patched_idempotent = True
             DatasetCatalog.register = _safe_ds_register
     except (ImportError, AttributeError):
@@ -117,8 +121,7 @@ def _vbench_middle_indices(vlen: int, num_frames: int) -> list[int]:
     return indices
 
 
-def prepare_frames(video_tensor: torch.Tensor, n_frames: int = 16,
-                   max_short_side: int = 768) -> list[np.ndarray]:
+def prepare_frames(video_tensor: torch.Tensor, n_frames: int = 16, max_short_side: int = 768) -> list[np.ndarray]:
     """Convert (T, C, H, W) float [0,1] tensor to list of (H, W, C) numpy frames
     in VBench's exact format: float32 [0, 255] HWC.
 

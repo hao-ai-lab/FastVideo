@@ -28,8 +28,7 @@ def _locate_full_info() -> Path:
         p = Path(env)
         if p.is_file():
             return p
-        raise FileNotFoundError(
-            f"VBENCH_FULL_INFO_JSON={env} does not point at a file")
+        raise FileNotFoundError(f"VBENCH_FULL_INFO_JSON={env} does not point at a file")
     here = Path(__file__).resolve()
     for ancestor in here.parents:
         candidate = ancestor / _FULL_INFO_REL
@@ -37,10 +36,9 @@ def _locate_full_info() -> Path:
             return candidate
         if (ancestor / ".git").exists():
             break
-    raise FileNotFoundError(
-        "Could not locate VBench_full_info.json. Initialize the upstream "
-        "submodule (`git submodule update --init "
-        "fastvideo/third_party/eval/vbench`) or set VBENCH_FULL_INFO_JSON.")
+    raise FileNotFoundError("Could not locate VBench_full_info.json. Initialize the upstream "
+                            "submodule (`git submodule update --init "
+                            "fastvideo/third_party/eval/vbench`) or set VBENCH_FULL_INFO_JSON.")
 
 
 @register_dataset("vbench")
@@ -77,9 +75,8 @@ class VBenchPromptDataset(PromptDataset):
         else:
             unknown = set(dimensions) - set(all_dims)
             if unknown:
-                raise ValueError(
-                    f"Unknown VBench dimensions: {sorted(unknown)}. "
-                    f"Available: {all_dims}")
+                raise ValueError(f"Unknown VBench dimensions: {sorted(unknown)}. "
+                                 f"Available: {all_dims}")
             self.dimensions = list(dimensions)
 
         wanted = set(self.dimensions)
@@ -87,8 +84,7 @@ class VBenchPromptDataset(PromptDataset):
             relevant = [d for d in entry["dimension"] if d in wanted]
             if not relevant:
                 continue
-            n = (TEMPORAL_FLICKERING_SAMPLES
-                 if "temporal_flickering" in relevant else DEFAULT_SAMPLES)
+            n = (TEMPORAL_FLICKERING_SAMPLES if "temporal_flickering" in relevant else DEFAULT_SAMPLES)
 
             # Strip the outer {dim_name: ...} wrapper from upstream's aux
             # schema so every metric reads its inputs from a flat dict.

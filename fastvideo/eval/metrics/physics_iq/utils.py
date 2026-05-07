@@ -121,7 +121,8 @@ def prepare_pair_batch(
     videos = unpack_batch_value(sample["video"])
     references = unpack_batch_value(sample["reference"])
     generated_masks = unpack_batch_value(sample["video_mask"]) if "video_mask" in sample else [None] * len(videos)
-    reference_masks = unpack_batch_value(sample["reference_mask"]) if "reference_mask" in sample else [None] * len(videos)
+    reference_masks = unpack_batch_value(
+        sample["reference_mask"]) if "reference_mask" in sample else [None] * len(videos)
 
     if not (len(videos) == len(references) == len(generated_masks) == len(reference_masks)):
         raise ValueError("Physics-IQ pair metric inputs must have the same batch size.")
@@ -134,12 +135,11 @@ def prepare_pair_batch(
             generated_mask=generated_mask,
             reference_mask=reference_mask,
             **prep_kwargs,
-        )
-        for video, reference, generated_mask, reference_mask in zip(
+        ) for video, reference, generated_mask, reference_mask in zip(
             videos,
             references,
             generated_masks,
-            reference_masks,
+            reference_masks, strict=False,
         )
     ]
 
@@ -215,12 +215,10 @@ def infer_real_mask_path(video_source: Any) -> str | None:
     fps_dir = video_path.parent.name
     for ancestor in video_path.parents:
         if ancestor.name == "split-videos":
-            candidates.extend(
-                [
-                    ancestor.parent / "video-masks" / "real" / fps_dir / mask_name,
-                    ancestor.parent / "video_masks" / "real" / fps_dir / mask_name,
-                ]
-            )
+            candidates.extend([
+                ancestor.parent / "video-masks" / "real" / fps_dir / mask_name,
+                ancestor.parent / "video_masks" / "real" / fps_dir / mask_name,
+            ])
             break
 
     for candidate in candidates:
@@ -280,17 +278,17 @@ def compute_mse(video1_frames: np.ndarray, video2_frames: np.ndarray) -> list[fl
     if len(video1_frames) != len(video2_frames):
         raise ValueError("Videos must have the same number of frames.")
     frame_mses: list[float] = []
-    for frame1, frame2 in zip(video1_frames, video2_frames):
+    for frame1, frame2 in zip(video1_frames, video2_frames, strict=False):
         if frame1.shape != frame2.shape:
             raise ValueError("Frames must have the same dimensions.")
-        mse = np.mean((frame1.astype(np.float32) - frame2.astype(np.float32)) ** 2)
+        mse = np.mean((frame1.astype(np.float32) - frame2.astype(np.float32))**2)
         frame_mses.append(round(float(mse), 4))
     return frame_mses
 
 
 def compute_spatiotemporal_iou(mask1_frames: np.ndarray, mask2_frames: np.ndarray) -> list[float]:
     values: list[float] = []
-    for mask1, mask2 in zip(mask1_frames, mask2_frames):
+    for mask1, mask2 in zip(mask1_frames, mask2_frames, strict=False):
         values.append(round(compute_iou(mask1, mask2), 4))
     return values
 
@@ -358,46 +356,36 @@ def prepare_pair_inputs(
     generated_quarter = resize_frames(generated_frames, target_size).astype(np.float32) / 255.0
     reference_quarter = resize_frames(reference_frames, target_size).astype(np.float32) / 255.0
 
-    generated_masks = (
-        load_mask_frames(generated_mask, target_frames=consider_frames, target_size=target_size)
-        if generated_mask is not None
-        else rebinarize_masks(
-            resize_frames(
-                roundtrip_mask_frames(
-                    generate_motion_mask(
-                        generated_frames,
-                        threshold=threshold,
-                        alpha=alpha,
-                        color_order=generated_color,
-                    ),
-                    fps=target_fps,
-                )
-                if roundtrip_generated_masks
-                else generate_motion_mask(
-                    generated_frames,
-                    threshold=threshold,
-                    alpha=alpha,
-                    color_order=generated_color,
-                ),
-                target_size,
-            )
-        )
-    )
-    reference_masks = (
-        load_mask_frames(reference_mask, target_frames=consider_frames, target_size=target_size)
-        if reference_mask is not None
-        else rebinarize_masks(
-            resize_frames(
-                generate_motion_mask(
-                    reference_frames,
-                    threshold=threshold,
-                    alpha=alpha,
-                    color_order=reference_color,
-                ),
-                target_size,
-            )
-        )
-    )
+    generated_masks = (load_mask_frames(generated_mask, target_frames=consider_frames, target_size=target_size)
+                       if generated_mask is not None else rebinarize_masks(
+                           resize_frames(
+                               roundtrip_mask_frames(
+                                   generate_motion_mask(
+                                       generated_frames,
+                                       threshold=threshold,
+                                       alpha=alpha,
+                                       color_order=generated_color,
+                                   ),
+                                   fps=target_fps,
+                               ) if roundtrip_generated_masks else generate_motion_mask(
+                                   generated_frames,
+                                   threshold=threshold,
+                                   alpha=alpha,
+                                   color_order=generated_color,
+                               ),
+                               target_size,
+                           )))
+    reference_masks = (load_mask_frames(reference_mask, target_frames=consider_frames, target_size=target_size)
+                       if reference_mask is not None else rebinarize_masks(
+                           resize_frames(
+                               generate_motion_mask(
+                                   reference_frames,
+                                   threshold=threshold,
+                                   alpha=alpha,
+                                   color_order=reference_color,
+                               ),
+                               target_size,
+                           )))
     return PreparedPhysicsIQPair(
         generated_quarter=generated_quarter,
         reference_quarter=reference_quarter,
@@ -442,21 +430,18 @@ def prepare_triplet_inputs(
     target_size = (pair.reference_quarter.shape[2], pair.reference_quarter.shape[1])
     reference_take2_mask = reference_take2_mask or infer_real_mask_path(reference_take2)
     reference_take2_quarter = resize_frames(reference_take2_frames, target_size).astype(np.float32) / 255.0
-    reference_take2_masks = (
-        load_mask_frames(reference_take2_mask, target_frames=consider_frames, target_size=target_size)
-        if reference_take2_mask is not None
-        else rebinarize_masks(
-            resize_frames(
-                generate_motion_mask(
-                    reference_take2_frames,
-                    threshold=threshold,
-                    alpha=alpha,
-                    color_order=reference_take2_color,
-                ),
-                target_size,
-            )
-        )
-    )
+    reference_take2_masks = (load_mask_frames(
+        reference_take2_mask, target_frames=consider_frames, target_size=target_size)
+                             if reference_take2_mask is not None else rebinarize_masks(
+                                 resize_frames(
+                                     generate_motion_mask(
+                                         reference_take2_frames,
+                                         threshold=threshold,
+                                         alpha=alpha,
+                                         color_order=reference_take2_color,
+                                     ),
+                                     target_size,
+                                 )))
     return PreparedPhysicsIQTriplet(
         generated_quarter=pair.generated_quarter,
         reference_quarter=pair.reference_quarter,

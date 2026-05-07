@@ -80,10 +80,8 @@ class PhysicsIQPromptDataset(PromptDataset):
             sample dict under ``auxiliary_info["generated_video_path"]``.
     """
 
-    description = (
-        "Physics-IQ benchmark, 396 take-1 scenarios across 66 unique physics "
-        "setups × 3 perspective views, each paired with a take-2 reference."
-    )
+    description = ("Physics-IQ benchmark, 396 take-1 scenarios across 66 unique physics "
+                   "setups × 3 perspective views, each paired with a take-2 reference.")
     requires_reference_video = True
 
     def __init__(
@@ -104,7 +102,9 @@ class PhysicsIQPromptDataset(PromptDataset):
         self.fps = fps
 
         scenarios = self._iter_scenarios(
-            fps=fps, generated_dir=generated_dir, limit=limit,
+            fps=fps,
+            generated_dir=generated_dir,
+            limit=limit,
         )
         self._rows = [_scenario_to_row(s) for s in scenarios]
 
@@ -118,16 +118,12 @@ class PhysicsIQPromptDataset(PromptDataset):
         with self.descriptions_path.open("r", newline="") as handle:
             rows = list(csv.DictReader(handle))
 
-        take2_by_suffix = {
-            _scenario_suffix(row["scenario"]): row
-            for row in rows if TAKE2_TOKEN in row["scenario"]
-        }
+        take2_by_suffix = {_scenario_suffix(row["scenario"]): row for row in rows if TAKE2_TOKEN in row["scenario"]}
         take1_rows = [row for row in rows if TAKE1_TOKEN in row["scenario"]]
         if limit is not None:
             take1_rows = take1_rows[:limit]
 
-        generated_dir_path = (Path(generated_dir).expanduser().resolve()
-                              if generated_dir else None)
+        generated_dir_path = (Path(generated_dir).expanduser().resolve() if generated_dir else None)
         real_mask_dir = self._resolve_mask_dir(fps, is_real=True)
         scenarios: list[PhysicsIQScenario] = []
 
@@ -136,68 +132,66 @@ class PhysicsIQPromptDataset(PromptDataset):
             scenario_id, view, _, scenario_name = _parse_scenario_filename(scenario_filename)
             take2_row = take2_by_suffix.get(_scenario_suffix(scenario_filename))
             if take2_row is None:
-                raise FileNotFoundError(
-                    f"Could not find take-2 row matching {scenario_filename}")
+                raise FileNotFoundError(f"Could not find take-2 row matching {scenario_filename}")
             take2_id, _, _, _ = _parse_scenario_filename(take2_row["scenario"])
 
             take1_video_path = self._resolve_testing_video_path(
-                scenario_id=scenario_id, view=view, take=TAKE1_TOKEN,
-                scenario_name=scenario_name, fps=fps,
-            )
-            take2_video_path = self._resolve_testing_video_path(
-                scenario_id=take2_id, view=view, take=TAKE2_TOKEN,
-                scenario_name=scenario_name, fps=fps,
-            )
-            generated_video_path = (
-                str(generated_dir_path / row["generated_video_name"])
-                if generated_dir_path is not None else None
-            )
-
-            scenarios.append(PhysicsIQScenario(
                 scenario_id=scenario_id,
                 view=view,
+                take=TAKE1_TOKEN,
                 scenario_name=scenario_name,
-                take1_video_path=str(take1_video_path),
-                take2_video_path=str(take2_video_path),
-                switch_frame_path=str(
-                    self.dataset_dir / "switch-frames"
-                    / f"{scenario_id}_switch-frames_anyFPS_{view}_{scenario_name}.jpg"
-                ),
-                caption=row["description"],
-                expected_gen_filename=row["generated_video_name"],
-                generated_video_path=generated_video_path,
-                take1_mask_path=str(
-                    real_mask_dir
-                    / f"{scenario_id}_video-masks_{fps}FPS_{view}_{TAKE1_TOKEN}_{scenario_name}.mp4"
-                ),
-                take2_mask_path=str(
-                    real_mask_dir
-                    / f"{take2_id}_video-masks_{fps}FPS_{view}_{TAKE2_TOKEN}_{scenario_name}.mp4"
-                ),
-            ))
+                fps=fps,
+            )
+            take2_video_path = self._resolve_testing_video_path(
+                scenario_id=take2_id,
+                view=view,
+                take=TAKE2_TOKEN,
+                scenario_name=scenario_name,
+                fps=fps,
+            )
+            generated_video_path = (str(generated_dir_path /
+                                        row["generated_video_name"]) if generated_dir_path is not None else None)
+
+            scenarios.append(
+                PhysicsIQScenario(
+                    scenario_id=scenario_id,
+                    view=view,
+                    scenario_name=scenario_name,
+                    take1_video_path=str(take1_video_path),
+                    take2_video_path=str(take2_video_path),
+                    switch_frame_path=str(self.dataset_dir / "switch-frames" /
+                                          f"{scenario_id}_switch-frames_anyFPS_{view}_{scenario_name}.jpg"),
+                    caption=row["description"],
+                    expected_gen_filename=row["generated_video_name"],
+                    generated_video_path=generated_video_path,
+                    take1_mask_path=str(real_mask_dir /
+                                        f"{scenario_id}_video-masks_{fps}FPS_{view}_{TAKE1_TOKEN}_{scenario_name}.mp4"),
+                    take2_mask_path=str(real_mask_dir /
+                                        f"{take2_id}_video-masks_{fps}FPS_{view}_{TAKE2_TOKEN}_{scenario_name}.mp4"),
+                ))
         return scenarios
 
     def _resolve_testing_video_path(
-        self, *, scenario_id: str, view: str, take: str,
-        scenario_name: str, fps: int,
+        self,
+        *,
+        scenario_id: str,
+        view: str,
+        take: str,
+        scenario_name: str,
+        fps: int,
     ) -> Path:
         target_dir = self.dataset_dir / "split-videos" / "testing" / f"{fps}FPS"
-        target_name = (
-            f"{scenario_id}_testing-videos_{fps}FPS_{view}_{take}_{scenario_name}.mp4"
-        )
+        target_name = (f"{scenario_id}_testing-videos_{fps}FPS_{view}_{take}_{scenario_name}.mp4")
         target_path = target_dir / target_name
         if target_path.exists():
             return target_path
 
         # FPS-convert from the 30-FPS source release on miss; cache under
         # ``.physics_iq_cache`` so repeat runs are free.
-        source_name = (
-            f"{scenario_id}_testing-videos_30FPS_{view}_{take}_{scenario_name}.mp4"
-        )
+        source_name = (f"{scenario_id}_testing-videos_30FPS_{view}_{take}_{scenario_name}.mp4")
         source_path = self.dataset_dir / "split-videos" / "testing" / "30FPS" / source_name
         if not source_path.exists():
-            raise FileNotFoundError(
-                f"Could not locate Physics-IQ testing video: {target_path}")
+            raise FileNotFoundError(f"Could not locate Physics-IQ testing video: {target_path}")
 
         cache_dir = self.cache_dir / "split-videos" / "testing" / f"{fps}FPS"
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -234,8 +228,7 @@ def _resolve_descriptions_path(repo_root: Path, dataset_dir: Path) -> Path:
     for path in candidates:
         if path.exists():
             return path
-    raise FileNotFoundError(
-        "Could not locate Physics-IQ descriptions/descriptions.csv")
+    raise FileNotFoundError("Could not locate Physics-IQ descriptions/descriptions.csv")
 
 
 def _parse_scenario_filename(filename: str) -> tuple[str, str, str, str]:
@@ -279,8 +272,7 @@ def _scenario_to_row(scenario: PhysicsIQScenario) -> dict:
     return row
 
 
-def _convert_video_fps(input_path: str | Path, output_path: str | Path,
-                       *, fps_new: int) -> None:
+def _convert_video_fps(input_path: str | Path, output_path: str | Path, *, fps_new: int) -> None:
     """Trim *input_path* to ``_DEFAULT_DURATION_SECONDS`` and re-encode at
     *fps_new*, writing the result to *output_path*. Used to materialize
     Physics-IQ's 30-FPS source release at user-requested rates.

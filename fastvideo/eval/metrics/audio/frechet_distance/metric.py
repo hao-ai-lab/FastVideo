@@ -18,9 +18,11 @@ from fastvideo.eval.types import MetricResult
 def _int16_to_float32(x):
     return (x / 32767.0).astype(np.float32)
 
+
 def _float32_to_int16(x):
     x = np.clip(x, a_min=-1., a_max=1.)
     return (x * 32767.).astype(np.int16)
+
 
 def _calculate_embd_statistics(embd_lst):
     if isinstance(embd_lst, list):
@@ -28,6 +30,7 @@ def _calculate_embd_statistics(embd_lst):
     mu = np.mean(embd_lst, axis=0)
     sigma = np.cov(embd_lst, rowvar=False)
     return mu, sigma
+
 
 def _calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     mu1 = np.atleast_1d(mu1)

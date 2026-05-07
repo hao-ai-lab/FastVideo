@@ -44,12 +44,10 @@ def get_cache_dir() -> Path:
     ``cache_dir``, etc.), pass ``str(get_cache_dir() / "<library>")`` so
     users get a single ``FASTVIDEO_EVAL_CACHE`` knob to redirect them all.
     """
-    return Path(
-        os.environ.get(
-            "FASTVIDEO_EVAL_CACHE",
-            os.path.join(envs.FASTVIDEO_CACHE_ROOT, "eval"),
-        )
-    )
+    return Path(os.environ.get(
+        "FASTVIDEO_EVAL_CACHE",
+        os.path.join(envs.FASTVIDEO_CACHE_ROOT, "eval"),
+    ))
 
 
 def ensure_checkpoint(
@@ -71,10 +69,8 @@ def ensure_checkpoint(
     if "/" in source:
         return _ensure_hf(source, filename)
 
-    raise ValueError(
-        f"Cannot resolve checkpoint: source {source!r} is neither a "
-        "path, URL, nor HF repo id"
-    )
+    raise ValueError(f"Cannot resolve checkpoint: source {source!r} is neither a "
+                     "path, URL, nor HF repo id")
 
 
 def _ensure_url(name: str, url: str) -> str:
@@ -84,7 +80,7 @@ def _ensure_url(name: str, url: str) -> str:
 
     local.parent.mkdir(parents=True, exist_ok=True)
     with get_lock(url):
-        if local.exists():        # racing process won; reuse its result
+        if local.exists():  # racing process won; reuse its result
             return str(local)
         from huggingface_hub.file_download import http_get
         tmp = local.with_suffix(local.suffix + ".tmp")

@@ -24,17 +24,14 @@ class TemporalFlickeringMetric(BaseMetric):
 
     @torch.no_grad()
     def compute(self, sample: dict) -> MetricResult:
-        video = sample["video"]                                  # (T, C, H, W) [0, 1]
+        video = sample["video"]  # (T, C, H, W) [0, 1]
         T = video.shape[0]
         if T <= 1:
             return MetricResult(name=self.name, score=1.0, details={})
 
         frames = (video * 255.0).to(torch.uint8).cpu().numpy()
         frames = frames.transpose(0, 2, 3, 1).astype(np.float32)
-        mae_per_pair = [
-            float(np.mean(np.abs(frames[t] - frames[t + 1])))
-            for t in range(T - 1)
-        ]
+        mae_per_pair = [float(np.mean(np.abs(frames[t] - frames[t + 1]))) for t in range(T - 1)]
         mean_mae = float(np.mean(mae_per_pair))
         return MetricResult(
             name=self.name,

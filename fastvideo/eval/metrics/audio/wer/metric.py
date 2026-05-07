@@ -84,5 +84,8 @@ class VBWERMetric(BaseMetric):
         return MetricResult(
             name=self.name,
             score=wer,
-            details={"transcription": asr, "reference_text": gt_text},
+            details={
+                "transcription": asr,
+                "reference_text": gt_text
+            },
         )

@@ -63,7 +63,7 @@ class AppearanceStyleMetric(BaseMetric):
     def compute(self, sample: dict) -> MetricResult:
         import clip
 
-        video = sample["video"]                                  # (T, C, H, W)
+        video = sample["video"]  # (T, C, H, W)
         text_prompt = sample.get("text_prompt")
         if text_prompt is None:
             return self._skip(sample, "missing text_prompt")
@@ -78,15 +78,15 @@ class AppearanceStyleMetric(BaseMetric):
             f = self._model.encode_image(frames[i:i + chunk]).float()
             f = F.normalize(f, dim=-1, p=2)
             img_feats.append(f)
-        img_feats = torch.cat(img_feats, dim=0)                  # (T, D)
+        img_feats = torch.cat(img_feats, dim=0)  # (T, D)
 
         # truncate=True: CLIP context length is 77 tokens; long prompts
         # truncate instead of raising. Matches CLIP's documented convention.
         text_tokens = clip.tokenize([text_prompt], truncate=True).to(self.device)
         text_feat = self._model.encode_text(text_tokens).float()
-        text_feat = F.normalize(text_feat, dim=-1, p=2)          # (1, D)
+        text_feat = F.normalize(text_feat, dim=-1, p=2)  # (1, D)
 
-        sims = (img_feats @ text_feat.T).squeeze(-1)             # (T,)
+        sims = (img_feats @ text_feat.T).squeeze(-1)  # (T,)
         return MetricResult(
             name=self.name,
             score=float(sims.mean().item()),

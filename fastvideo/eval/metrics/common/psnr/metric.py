@@ -19,13 +19,13 @@ class PSNRMetric(BaseMetric):
         self.max_val = max_val
 
     def compute(self, sample: dict) -> MetricResult:
-        gen = sample["video"].float()       # (T, C, H, W)
+        gen = sample["video"].float()  # (T, C, H, W)
         ref = sample["reference"].float()
         n = min(gen.shape[0], ref.shape[0])
         gen, ref = gen[:n], ref[:n]
 
         # Per-frame MSE → PSNR.
-        mse = ((gen - ref) ** 2).mean(dim=(1, 2, 3))                # (T,)
+        mse = ((gen - ref)**2).mean(dim=(1, 2, 3))  # (T,)
         psnr = 10.0 * torch.log10(self.max_val**2 / mse.clamp(min=1e-10))
 
         return MetricResult(

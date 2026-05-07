@@ -39,10 +39,8 @@ def get_metric(name: str, **kwargs: Any) -> BaseMetric:
 
     for dep in getattr(cls, "dependencies", []):
         if not importlib.util.find_spec(dep):
-            raise ImportError(
-                f"{cls.__name__} requires '{dep}'. "
-                f"Install with: pip install fastvideo[eval]"
-            )
+            raise ImportError(f"{cls.__name__} requires '{dep}'. "
+                              f"Install with: pip install fastvideo[eval]")
 
     return cls(**kwargs)
 

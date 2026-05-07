@@ -27,8 +27,9 @@ same shape.
 """
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import Iterator, TypedDict
+from abc import ABC
+from typing import TypedDict
+from collections.abc import Iterator
 
 
 class Sample(TypedDict, total=False):

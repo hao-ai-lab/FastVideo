@@ -90,9 +90,7 @@ class MotionSmoothnessMetric(BaseMetric):
             # Less than the model + scratch overhead is free; force the
             # most aggressive downscale we support.
             return 1 / 16
-        scale = anchor_resolution / (h * w) * np.sqrt(
-            (free_bytes - anchor_memory_bias) / anchor_memory
-        )
+        scale = anchor_resolution / (h * w) * np.sqrt((free_bytes - anchor_memory_bias) / anchor_memory)
         if scale >= 1.0:
             return 1.0
         scale = 1 / np.floor(1 / np.sqrt(scale) * 16) * 16
@@ -120,17 +118,14 @@ class MotionSmoothnessMetric(BaseMetric):
         robust to that without rewriting the formula.
         """
         try:
-            return self._model(in0, in1, embt,
-                               scale_factor=scale, eval=True)["imgt_pred"]
+            return self._model(in0, in1, embt, scale_factor=scale, eval=True)["imgt_pred"]
         except torch.cuda.OutOfMemoryError:
             torch.cuda.empty_cache()
             bs = in0.shape[0]
             if bs > 1:
                 half = bs // 2
-                a = self._safe_amt_forward(in0[:half], in1[:half],
-                                           embt[:half], scale)
-                b = self._safe_amt_forward(in0[half:], in1[half:],
-                                           embt[half:], scale)
+                a = self._safe_amt_forward(in0[:half], in1[:half], embt[:half], scale)
+                b = self._safe_amt_forward(in0[half:], in1[half:], embt[half:], scale)
                 return torch.cat([a, b], dim=0)
             if scale > self._MIN_AMT_SCALE:
                 return self._safe_amt_forward(in0, in1, embt, scale / 2)
@@ -139,14 +134,17 @@ class MotionSmoothnessMetric(BaseMetric):
     @torch.no_grad()
     def compute(self, sample: dict) -> MetricResult:
         from vbench.third_party.amt.utils.utils import (
-            img2tensor, tensor2img, check_dim_and_resize, InputPadder,
+            img2tensor,
+            tensor2img,
+            check_dim_and_resize,
+            InputPadder,
         )
 
-        video = sample["video"]                              # (T, C, H, W) [0, 1]
+        video = sample["video"]  # (T, C, H, W) [0, 1]
         chunk = self._chunk_size or 8
 
         frames_np = (video * 255).to(torch.uint8).cpu().numpy()
-        frames_np = [f.transpose(1, 2, 0) for f in frames_np]   # list of (H,W,C)
+        frames_np = [f.transpose(1, 2, 0) for f in frames_np]  # list of (H,W,C)
 
         even_indices = list(range(0, len(frames_np), 2))
         if len(even_indices) <= 1:
@@ -166,8 +164,7 @@ class MotionSmoothnessMetric(BaseMetric):
         all_in0 = [inputs[i] for i in range(n_pairs)]
         all_in1 = [inputs[i + 1] for i in range(n_pairs)]
         all_gt = [
-            frames_np[even_indices[i] + 1] if even_indices[i] + 1 < len(frames_np)
-            else frames_np[-1]
+            frames_np[even_indices[i] + 1] if even_indices[i] + 1 < len(frames_np) else frames_np[-1]
             for i in range(n_pairs)
         ]
 
@@ -190,8 +187,7 @@ class MotionSmoothnessMetric(BaseMetric):
             # gt comes from frames_np; pred goes through check_dim_and_resize +
             # AMT pad/unpad, which can reshape. Match shapes before absdiff.
             if gt_np.shape[:2] != pred_np.shape[:2]:
-                gt_np = cv2.resize(gt_np, (pred_np.shape[1], pred_np.shape[0]),
-                                   interpolation=cv2.INTER_AREA)
+                gt_np = cv2.resize(gt_np, (pred_np.shape[1], pred_np.shape[0]), interpolation=cv2.INTER_AREA)
             diffs.append(float(np.mean(cv2.absdiff(gt_np, pred_np))))
 
         vfi_score = float(np.mean(diffs)) if diffs else 0.0

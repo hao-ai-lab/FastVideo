@@ -37,7 +37,7 @@ class MultipleObjectsMetric(BaseMetric):
     def compute(self, sample: dict) -> MetricResult:
         from fastvideo.eval.metrics.vbench._grit_helper import prepare_frames, detect_frames
 
-        video = sample["video"]                              # (T, C, H, W)
+        video = sample["video"]  # (T, C, H, W)
         aux = sample.get("auxiliary_info")
         if isinstance(aux, list):
             aux = aux[0] if aux else None
@@ -68,5 +68,8 @@ class MultipleObjectsMetric(BaseMetric):
         return MetricResult(
             name=self.name,
             score=float(score),
-            details={"matching_frames": matching, "total_frames": total},
+            details={
+                "matching_frames": matching,
+                "total_frames": total
+            },
         )

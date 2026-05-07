@@ -74,18 +74,18 @@ class OverallConsistencyMetric(BaseMetric):
 
     @torch.no_grad()
     def compute(self, sample: dict) -> MetricResult:
-        video = sample["video"]                                  # (T, C, H, W)
+        video = sample["video"]  # (T, C, H, W)
         text_prompt = sample.get("text_prompt")
         if text_prompt is None:
             return self._skip(sample, "missing text_prompt")
         if isinstance(text_prompt, list):
             text_prompt = text_prompt[0]
 
-        frames = _clip_transform(extract_frames(video, 8))       # (8, C, H, W)
-        clip_in = frames.unsqueeze(0).to(self.device)            # (1, 8, C, H, W)
+        frames = _clip_transform(extract_frames(video, 8))  # (8, C, H, W)
+        clip_in = frames.unsqueeze(0).to(self.device)  # (1, 8, C, H, W)
 
         vid_feat = self._model.encode_vision(clip_in, test=True).float()
-        vid_feat = F.normalize(vid_feat, dim=-1, p=2)            # (1, D)
+        vid_feat = F.normalize(vid_feat, dim=-1, p=2)  # (1, D)
 
         text_feat = self._model.encode_text(text_prompt).float()
         text_feat = F.normalize(text_feat, dim=-1, p=2)

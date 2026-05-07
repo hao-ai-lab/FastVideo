@@ -459,18 +459,20 @@ When wiring eval into a training loop, the working pattern is:
    ``torch.cuda.ipc_collect()``. The eval model stays loaded; only
    transient activation buffers from the just-finished call get freed::
 
-       for video_path in batch:
-           try:
-               scores = self._eval.evaluate(video=load_video(video_path))
-           finally:
-               self._eval.release_cuda_memory()
-
+   ```
+   for video_path in batch:
+       try:
+           scores = self._eval.evaluate(video=load_video(video_path))
+       finally:
+        self._eval.release_cuda_memory()
+   ```
+   
 5. If memory pressure spikes (rare on H200), call
    ``evaluator.unload()`` to drop every metric reference and let the
    GPU memory be GC'd. ``unload`` is reversible: ``evaluator.reload()``
    rebuilds the same metrics with the original config (re-paying the
-   model load cost). Calling ``evaluate`` between ``unload`` and
-   ``reload`` raises a clear ``RuntimeError``.
+model load cost). Calling ``evaluate`` between ``unload`` and
+``reload`` raises a clear ``RuntimeError``.
 
 This is the pattern in
 ``fastvideo.training.{ptlflow,vbench}_validation`` (mhuo's branch).

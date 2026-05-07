@@ -62,24 +62,30 @@ class EvalSubcommand(CLISubcommand):
 
         # `eval list`
         list_p = sub.add_parser("list", help="List registered metrics")
-        list_p.add_argument("--group", type=str, default=None,
-                            help="Filter to a metric group (e.g. 'vbench').")
+        list_p.add_argument("--group", type=str, default=None, help="Filter to a metric group (e.g. 'vbench').")
 
         # `eval run`
         run_p = sub.add_parser("run", help="Evaluate videos against one or more metrics")
-        run_p.add_argument("--videos", type=str, nargs="+", required=False,
+        run_p.add_argument("--videos",
+                           type=str,
+                           nargs="+",
+                           required=False,
                            help="Path, glob, or directory of generated videos.")
-        run_p.add_argument("--reference", type=str, default=None,
+        run_p.add_argument("--reference",
+                           type=str,
+                           default=None,
                            help="Path / glob / dir of reference videos (for paired metrics).")
-        run_p.add_argument("--metrics", type=str, default="all",
-                           help="Comma-separated metric names, or 'all'.")
-        run_p.add_argument("--device", type=str, default="cuda",
-                           help="Torch device (e.g. 'cuda', 'cuda:0', 'cpu').")
-        run_p.add_argument("--text-prompt", type=str, nargs="*", default=None,
+        run_p.add_argument("--metrics", type=str, default="all", help="Comma-separated metric names, or 'all'.")
+        run_p.add_argument("--device", type=str, default="cuda", help="Torch device (e.g. 'cuda', 'cuda:0', 'cpu').")
+        run_p.add_argument("--text-prompt",
+                           type=str,
+                           nargs="*",
+                           default=None,
                            help="Prompt(s) for text-conditioned metrics. One per video.")
-        run_p.add_argument("--fps", type=float, default=None,
-                           help="Frame-rate annotation passed to fps-aware metrics.")
-        run_p.add_argument("--output", type=str, default=None,
+        run_p.add_argument("--fps", type=float, default=None, help="Frame-rate annotation passed to fps-aware metrics.")
+        run_p.add_argument("--output",
+                           type=str,
+                           default=None,
                            help="Write results as JSON to this path (default: stdout).")
 
         # Stash the parser so cmd() can re-print help on no-action.
@@ -125,8 +131,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
             ref = ref_paths[i] if i < len(ref_paths) else ref_paths[0]
             kwargs["reference"] = load_video(ref)
         if args.text_prompt is not None:
-            prompt = (args.text_prompt[i] if i < len(args.text_prompt)
-                      else args.text_prompt[0])
+            prompt = (args.text_prompt[i] if i < len(args.text_prompt) else args.text_prompt[0])
             kwargs["text_prompt"] = [prompt]
         if args.fps is not None:
             kwargs["fps"] = args.fps
@@ -202,8 +207,7 @@ def _jsonable(obj):
         return obj.detach().cpu().tolist()
     if isinstance(obj, Path):
         return str(obj)
-    raise TypeError(
-        f"Object of type {type(obj).__name__} is not JSON serializable")
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 def cmd_init() -> list[CLISubcommand]:

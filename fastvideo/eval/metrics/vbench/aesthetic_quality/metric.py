@@ -6,7 +6,6 @@ linear aesthetic head (768 → 1), and averages scores / 10.
 
 from __future__ import annotations
 
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -73,15 +72,13 @@ class AestheticQualityMetric(BaseMetric):
             source=_AESTHETIC_URL,
         )
         self._aesthetic_head = nn.Linear(768, 1)
-        self._aesthetic_head.load_state_dict(
-            torch.load(ckpt_path, map_location="cpu", weights_only=True)
-        )
+        self._aesthetic_head.load_state_dict(torch.load(ckpt_path, map_location="cpu", weights_only=True))
         self._aesthetic_head.to(self.device)
         self._aesthetic_head.eval()
 
     @torch.no_grad()
     def compute(self, sample: dict) -> MetricResult:
-        video = sample["video"]                       # (T, C, H, W)
+        video = sample["video"]  # (T, C, H, W)
         frames = _clip_transform(video.to(self.device))
 
         chunk = self._chunk_size or 32
@@ -91,7 +88,7 @@ class AestheticQualityMetric(BaseMetric):
             feats = F.normalize(feats, dim=-1, p=2)
             scores_list.append(self._aesthetic_head(feats).squeeze(-1))
 
-        all_scores = torch.cat(scores_list, dim=0) / 10.0   # (T,)
+        all_scores = torch.cat(scores_list, dim=0) / 10.0  # (T,)
         return MetricResult(
             name=self.name,
             score=float(all_scores.mean().item()),

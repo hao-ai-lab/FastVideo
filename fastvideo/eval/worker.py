@@ -23,8 +23,7 @@ from fastvideo.eval.types import MetricResult
 class EvalWorker:
     """Owns metric replicas on one device. Single-GPU, single-sample."""
 
-    def __init__(self, metric_names: list[str], device: str,
-                 *, compile: bool = False) -> None:
+    def __init__(self, metric_names: list[str], device: str, *, compile: bool = False) -> None:
         self._names = list(metric_names)
         self._device = device
         self._compile = compile
@@ -54,8 +53,7 @@ class EvalWorker:
     def evaluate(self, **kwargs) -> dict[str, MetricResult]:
         """Score one sample. ``video`` must be ``(T, C, H, W)``."""
         if self._unloaded:
-            raise RuntimeError(
-                "EvalWorker was unloaded; call reload() before evaluating.")
+            raise RuntimeError("EvalWorker was unloaded; call reload() before evaluating.")
 
         sample = dict(kwargs)
         video = sample.get("video")

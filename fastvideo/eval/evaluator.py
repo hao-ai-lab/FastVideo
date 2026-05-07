@@ -15,7 +15,7 @@ input shape.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import Iterable
+from collections.abc import Iterable
 
 from fastvideo.eval.registry import list_metrics, resolve_group
 from fastvideo.eval.types import MetricResult
@@ -46,14 +46,10 @@ class Evaluator:
     ) -> None:
         names = _resolve_metric_names(metrics)
         if num_gpus > 1:
-            self._workers = [
-                EvalWorker(names, f"cuda:{i}", compile=compile)
-                for i in range(num_gpus)
-            ]
+            self._workers = [EvalWorker(names, f"cuda:{i}", compile=compile) for i in range(num_gpus)]
         else:
             self._workers = [EvalWorker(names, device, compile=compile)]
-        self._pool = (ThreadPoolExecutor(max_workers=num_gpus)
-                      if num_gpus > 1 else None)
+        self._pool = (ThreadPoolExecutor(max_workers=num_gpus) if num_gpus > 1 else None)
 
     @property
     def num_gpus(self) -> int:
@@ -97,10 +93,7 @@ class Evaluator:
 
         n = len(self._workers)
         # Round-robin: worker i handles samples i, i+n, i+2n, ...
-        futures = [
-            self._pool.submit(self._workers[idx % n].evaluate, **sample)
-            for idx, sample in enumerate(samples)
-        ]
+        futures = [self._pool.submit(self._workers[idx % n].evaluate, **sample) for idx, sample in enumerate(samples)]
         return [f.result() for f in futures]
 
     def release_cuda_memory(self) -> None:
@@ -131,8 +124,7 @@ def create_evaluator(
     num_gpus: int = 1,
     compile: bool = False,
 ) -> Evaluator:
-    return Evaluator(metrics=metrics, device=device, num_gpus=num_gpus,
-                     compile=compile)
+    return Evaluator(metrics=metrics, device=device, num_gpus=num_gpus, compile=compile)
 
 
 def _resolve_metric_names(metrics: list[str] | str) -> list[str]:
