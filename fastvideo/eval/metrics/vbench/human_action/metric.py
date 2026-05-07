@@ -7,7 +7,7 @@ Score = 1.0 if match found, 0.0 otherwise.
 
 from __future__ import annotations
 
-import os
+from pathlib import Path
 
 import torch
 from torchvision.transforms.functional import resize, center_crop, normalize
@@ -18,26 +18,26 @@ from fastvideo.eval.types import MetricResult
 from fastvideo.eval.io.video import extract_frames
 
 
-# Kinetics-400 class names (loaded lazily)
-_CAT_DICT = None
+# Kinetics-400 class names (loaded lazily). The label file ships inside
+# the upstream vbench submodule.
+_CAT_DICT: dict[str, str] | None = None
 
 
-def _load_cat_dict():
+def _load_cat_dict() -> dict[str, str]:
     global _CAT_DICT
     if _CAT_DICT is not None:
         return _CAT_DICT
-    cat_path = os.path.join(
-        os.path.dirname(__file__), "..", "_third_party", "umt",
-        "kinetics_400_categories.txt",
-    )
-    _CAT_DICT = {}
-    if os.path.exists(cat_path):
-        with open(cat_path) as f:
-            for line in f:
-                parts = line.strip().split("\t")
-                if len(parts) == 2:
-                    cat, idx = parts
-                    _CAT_DICT[idx] = cat.lower()
+    import vbench.third_party.umt as _umt_pkg
+    cat_path = (Path(_umt_pkg.__file__).resolve().parent
+                / "kinetics_400_categories.txt")
+    out: dict[str, str] = {}
+    with cat_path.open() as f:
+        for line in f:
+            parts = line.strip().split("\t")
+            if len(parts) == 2:
+                cat, idx = parts
+                out[idx] = cat.lower()
+    _CAT_DICT = out
     return _CAT_DICT
 
 
