@@ -611,27 +611,21 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     if not os.path.exists(transformer_dir):
         raise ValueError(f"Model directory {model_path} does not contain a transformer/ directory.")
 
-    # Other components (vae, text_encoder, audio_vae, tokenizer, ...) are
-    # only required to live in a local subfolder if model_index.json
-    # actually lists them. Pipelines that lazy-load shared components
-    # from upstream HF repos (e.g. MagiHuman lazy-loading the Wan VAE,
-    # T5-Gemma, Stable Audio) emit a model_index.json that omits those
-    # keys, and the pipeline subclass handles the load at module-build
-    # time. Enforce only the "declared but missing" mismatch.
-    _OPTIONAL_COMPONENT_DIRS = (
-        "vae",
-        "text_encoder",
-        "tokenizer",
-        "audio_vae",
-        "scheduler",
-        "image_encoder",
-    )
-    for key in _OPTIONAL_COMPONENT_DIRS:
-        if key in config:
-            subdir = os.path.join(model_path, key)
-            if not os.path.exists(subdir):
-                raise ValueError(f"Model directory {model_path} declares `{key}` in "
-                                 f"model_index.json but is missing the {key}/ subfolder.")
+    # Diffusers convention: model_index.json entries are [library, class]
+    # pairs for on-disk components. Non-list entries are scalar metadata
+    # (e.g. boundary_ratio); a None first element marks a disabled
+    # component (matches composed_pipeline_base.py). Pipelines that
+    # lazy-load shared components from upstream HF repos simply omit the
+    # key, so we only enforce "declared, active, but missing on disk".
+    for key, value in config.items():
+        if key.startswith("_") or key == "transformer":
+            continue
+        if not isinstance(value, list) or len(value) < 1 or value[0] is None:
+            continue
+        subdir = os.path.join(model_path, key)
+        if not os.path.exists(subdir):
+            raise ValueError(f"Model directory {model_path} declares `{key}` in "
+                             f"model_index.json but is missing the {key}/ subfolder.")
 
     # Verify diffusers version exists
     if "_diffusers_version" not in config:
