@@ -529,20 +529,39 @@ def maybe_download_model(model_name_or_path: str, local_dir: str | None = None, 
     parts = model_name_or_path.split("/")
     if (len(parts) >= 3 and not model_name_or_path.startswith("/") and not model_name_or_path.startswith(".")
             and "" not in parts):
+        # Reject path-traversal segments and fnmatch metacharacters in the
+        # subfolder portion. Without this, "org/repo/../../x" would resolve
+        # outside the snapshot via os.path.join, and "org/repo/base*" would
+        # broaden allow_patterns into unrelated subtrees.
+        sub_parts = parts[2:]
+        if any(p in (".", "..") for p in sub_parts) or any(c in p for p in sub_parts for c in "*?["):
+            raise ValueError(f"Invalid umbrella-repo subfolder in {model_name_or_path!r}: "
+                             "`.`/`..` segments and glob metacharacters (`*`, `?`, `[`) "
+                             "are not allowed.")
         repo_id = "/".join(parts[:2])
-        subfolder = "/".join(parts[2:])
+        subfolder = "/".join(sub_parts)
 
     # Otherwise, assume it's a HF Hub model ID and try to download it
     try:
         if subfolder is not None:
             logger.info("Downloading umbrella-repo subfolder %s/%s from HF Hub...", repo_id, subfolder)
             with get_lock(model_name_or_path):
-                local_path = snapshot_download(
+                snapshot_root = snapshot_download(
                     repo_id=repo_id,
                     allow_patterns=[f"{subfolder}/**"],
                     local_dir=local_dir,
                 )
-            local_path = os.path.join(local_path, subfolder)
+            # Defense-in-depth: ensure the resolved subfolder path stays
+            # inside the snapshot root and that snapshot_download actually
+            # populated it (allow_patterns can match nothing silently).
+            snapshot_real = os.path.realpath(snapshot_root)
+            local_path = os.path.realpath(os.path.join(snapshot_root, subfolder))
+            if local_path != snapshot_real and not local_path.startswith(snapshot_real + os.sep):
+                raise ValueError(f"Resolved umbrella-repo path {local_path!r} escapes the "
+                                 f"snapshot root {snapshot_real!r}.")
+            if not os.path.isdir(local_path):
+                raise ValueError(f"Subfolder {subfolder!r} was not found inside the snapshot of "
+                                 f"{repo_id!r}; verify it exists in the umbrella repo.")
             logger.info("Downloaded subfolder to %s", local_path)
             return str(local_path)
 
@@ -617,8 +636,12 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     # component (matches composed_pipeline_base.py). Pipelines that
     # lazy-load shared components from upstream HF repos simply omit the
     # key, so we only enforce "declared, active, but missing on disk".
+    # Tokenizers are skipped because they often share a directory with
+    # their text encoder (e.g. LTX2's gemma tokenizer lives under
+    # text_encoder/gemma/); the pipeline subclass resolves that fallback
+    # at load time.
     for key, value in config.items():
-        if key.startswith("_") or key == "transformer":
+        if key.startswith("_") or key == "transformer" or key.startswith("tokenizer"):
             continue
         if not isinstance(value, list) or len(value) < 1 or value[0] is None:
             continue
