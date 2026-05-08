@@ -36,7 +36,7 @@ WORKDIR /opt/FastVideo
 COPY . /opt/FastVideo
 
 RUN source /opt/venv/bin/activate \
-    && uv pip install --no-cache-dir -e /opt/FastVideo
+    && uv pip install --no-cache-dir -e "/opt/FastVideo[dreamverse]"
 
 RUN git clone --depth 1 --branch ${FLASH_ATTN_REF} ${FLASH_ATTN_REPO} /opt/flash-attention \
     && source /opt/venv/bin/activate \
@@ -57,12 +57,6 @@ RUN if [[ "${BUILD_FASTVIDEO_KERNEL_FROM_SOURCE}" == "1" ]]; then \
         echo "Skipping source fastvideo-kernel build; using installed fastvideo-kernel package."; \
     fi
 
-RUN source /opt/venv/bin/activate \
-    && uv pip install --no-cache-dir \
-       "cerebras-cloud-sdk" \
-       "openai>=1.40" \
-       "uvicorn[standard]>=0.30,<1"
-
 # The monorepo ffmpeg installer force-selects conda compiler triplets for
 # local dev shells. Inside this image we use the system gcc/g++ toolchain.
 RUN sed -i \
@@ -81,12 +75,14 @@ RUN source /opt/venv/bin/activate \
 
 ENV DREAMVERSE_HOST=0.0.0.0 \
     DREAMVERSE_PORT=8009 \
+    FASTVIDEO_DREAMVERSE_HOME=/var/lib/dreamverse \
     STREAM_MODE=av_fmp4 \
     FASTVIDEO_ENABLE_PROMPT_SAFETY=0 \
-    HF_HOME=/root/.cache/huggingface \
-    PYTHONPATH=/opt/FastVideo/apps/dreamverse/server
+    HF_HOME=/root/.cache/huggingface
 
-WORKDIR /opt/FastVideo/apps/dreamverse/server
+RUN mkdir -p /var/lib/dreamverse
+
+WORKDIR /opt/FastVideo
 
 EXPOSE 8009
 
@@ -94,4 +90,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8009/healthz || exit 1
 
 ENTRYPOINT ["/opt/FastVideo/apps/dreamverse/docker/docker_entrypoint.sh"]
-CMD ["/opt/venv/bin/python", "main.py", "--host", "0.0.0.0", "--port", "8009"]
+CMD ["dreamverse-server", "--host", "0.0.0.0", "--port", "8009"]

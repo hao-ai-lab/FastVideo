@@ -26,5 +26,5 @@ exec docker run --rm --gpus "${GPU_REQUEST}" --init \
   -p "${PORT}:8009" \
   "${env_args[@]}" \
   -v "${HF_CACHE}:/root/.cache/huggingface" \
-  -v "${OUTPUTS_DIR}:/opt/FastVideo/apps/dreamverse/outputs" \
+  -v "${OUTPUTS_DIR}:/var/lib/dreamverse/outputs" \
   "${IMAGE}"

@@ -18,7 +18,7 @@ DREAMVERSE_IMAGE=dreamverse:local apps/dreamverse/docker/docker_build.sh
 ```
 
 The Dockerfile builds a CUDA 12.9.1 image, installs FastVideo from this
-checkout, installs Dreamverse runtime dependencies, installs the FA4
+checkout with the `dreamverse` extra, installs the FA4
 flash-attention fork, builds native FFmpeg, and installs FlashInfer for NVFP4
 quantization.
 
@@ -45,7 +45,7 @@ The container serves Dreamverse on host port `8009` by default and mounts:
 
 ```text
 $HOME/.cache/huggingface -> /root/.cache/huggingface
-apps/dreamverse/outputs -> /opt/FastVideo/apps/dreamverse/outputs
+apps/dreamverse/outputs -> /var/lib/dreamverse/outputs
 ```
 
 Override the host port and output directory with `DREAMVERSE_PORT` and

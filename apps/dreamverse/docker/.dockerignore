@@ -20,7 +20,8 @@ apps/dreamverse/web/test-results/
 apps/dreamverse/web/playwright-report/
 
 apps/dreamverse/outputs/
-apps/dreamverse/server/outputs/
+apps/dreamverse/dreamverse/outputs/
+apps/dreamverse/dreamverse/prompts.local/
 apps/dreamverse/logs/
 outputs/
 logs/
