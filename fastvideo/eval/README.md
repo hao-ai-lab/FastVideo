@@ -9,11 +9,11 @@ behind a single registry-driven API.
 
 | use case | install |
 |---|---|
-| `common.*`, `optical_flow.*`, `vbench.*` (subset), `physics_iq.*`, `videoscore2` | `pip install -e .[eval]` |
-| Just VBench (12 of 16 sub-metrics) | `pip install -e .[eval-vbench]` |
-| Just Physics-IQ (covered by `[eval]`; manifest CSV vendored, video assets auto-fetch from the public bucket) | `pip install -e .[eval-physics-iq]` |
-| Everything pip-installable, including `vbench.scene` (AVoCaDO) | `pip install -e .[eval-full]` |
-| `vbench.{color, multiple_objects, object_class, spatial_relationship}` (GRiT/detectron2) | `pip install -e .[eval-vbench]` and then `pip install 'git+https://github.com/facebookresearch/detectron2.git'` (CUDA-version-pinned, not cleanly on PyPI) |
+| `common.*`, `optical_flow.*`, `vbench.*` (subset), `physics_iq.*`, `videoscore2` | `uv pip install -e .[eval]` |
+| Just VBench (12 of 16 sub-metrics) | `uv pip install -e .[eval-vbench]` |
+| Just Physics-IQ (covered by `[eval]`; manifest CSV vendored, video assets auto-fetch from the public bucket) | `uv pip install -e .[eval-physics-iq]` |
+| Everything pip-installable, including `vbench.scene` (AVoCaDO) | `uv pip install -e .[eval-full]` |
+| `vbench.{color, multiple_objects, object_class, spatial_relationship}` (GRiT/detectron2) | `uv pip install -e .[eval-vbench]` and then `uv pip install --no-build-isolation 'git+https://github.com/facebookresearch/detectron2.git'` (CUDA-version-pinned, not cleanly on PyPI) |
 
 To use VBench, also pull the upstream submodule:
 

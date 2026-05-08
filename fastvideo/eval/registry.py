@@ -39,11 +39,40 @@ def get_metric(name: str, **kwargs: Any) -> BaseMetric:
 
     for dep in getattr(cls, "dependencies", []):
         if not importlib.util.find_spec(dep):
-            raise ImportError(
-                f"{cls.__name__} requires '{dep}'. "
-                f"Install with: pip install 'fastvideo[{_extra_for(name)}]'")
+            raise ImportError(f"{cls.__name__} requires '{dep}'. "
+                              f"Install with: {_install_hint(name, dep)}")
 
     return cls(**kwargs)
+
+
+def missing_dependencies(metric_name: str) -> list[str]:
+    """Importable module names declared by *metric_name* that are not
+    actually importable in this environment. Returns ``[]`` if all deps
+    are satisfied or the metric is unknown.
+
+    Used by group-style resolution to decide which metrics to silently
+    skip (vs. naming a metric explicitly, where the missing dep should
+    surface as :class:`ImportError`).
+    """
+    cls = _REGISTRY.get(metric_name)
+    if cls is None:
+        return []
+    return [d for d in getattr(cls, "dependencies", []) if not importlib.util.find_spec(d)]
+
+
+def _install_hint(metric_name: str, dep: str) -> str:
+    """Copy-pastable install command that actually satisfies *dep*.
+
+    Most deps are covered by a single `[extra]`. ``detectron2`` is a
+    special case: it builds C++ kernels against the user's torch and
+    isn't on PyPI cleanly, so the recipe needs the base extra *plus* a
+    git+ install with build-isolation off.
+    """
+    if dep == "detectron2":
+        return ("uv pip install 'fastvideo[eval-vbench]' && "
+                "uv pip install --no-build-isolation "
+                "'git+https://github.com/facebookresearch/detectron2.git'")
+    return f"uv pip install 'fastvideo[{_extra_for(metric_name)}]'"
 
 
 def _extra_for(metric_name: str) -> str:

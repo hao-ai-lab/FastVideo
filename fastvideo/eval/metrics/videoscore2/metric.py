@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from string import Template
+from typing import Any
 
 import numpy as np
 import torch
@@ -165,9 +166,9 @@ class VideoScore2Metric(BaseMetric):
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.do_sample = do_sample
-        self._model = None
-        self._processor = None
-        self._tokenizer = None
+        self._model: Any = None
+        self._processor: Any = None
+        self._tokenizer: Any = None
 
     def to(self, device):
         super().to(device)
@@ -178,13 +179,20 @@ class VideoScore2Metric(BaseMetric):
     def setup(self) -> None:
         if self._model is not None:
             return
-        from transformers import AutoProcessor, AutoModelForVision2Seq, AutoTokenizer
+        from transformers import AutoProcessor, AutoTokenizer
 
-        # Match upstream: no dtype kwarg, weights load with whatever the
-        # checkpoint was saved as (bf16 for the released VideoScore2).
-        self._model = AutoModelForVision2Seq.from_pretrained(
+        # transformers ≥4.45 prefers AutoModelForImageTextToText for
+        # vision-language models; AutoModelForVision2Seq is the legacy
+        # alias and may go away in a future release.
+        try:
+            from transformers import AutoModelForImageTextToText as _AutoVisionModel
+        except ImportError:
+            from transformers import AutoModelForVision2Seq as _AutoVisionModel
+
+        self._model = _AutoVisionModel.from_pretrained(
             self._model_name,
             trust_remote_code=True,
+            dtype=torch.bfloat16,
         ).to(self.device)
         self._model.eval()
         self._processor = AutoProcessor.from_pretrained(
@@ -270,7 +278,7 @@ class VideoScore2Metric(BaseMetric):
         ).to(self.device)
 
         input_len = inputs["input_ids"].shape[1]
-        gen_kwargs = dict(
+        gen_kwargs: dict[str, Any] = dict(
             max_new_tokens=self.max_tokens,
             output_scores=True,
             return_dict_in_generate=True,

@@ -8,6 +8,7 @@ Score = 1.0 if match found, 0.0 otherwise.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import torch
 from torchvision.transforms.functional import resize, center_crop, normalize
@@ -50,7 +51,7 @@ class HumanActionMetric(BaseMetric):
 
     def __init__(self) -> None:
         super().__init__()
-        self._model = None
+        self._model: Any = None
 
     def to(self, device):
         super().to(device)
@@ -67,7 +68,7 @@ class HumanActionMetric(BaseMetric):
         ckpt_path = ensure_checkpoint(
             "umt_l16_kinetics400.pth",
             source="OpenGVLab/VBench_Used_Models",
-            filename="l16_25m.pth",
+            filename="l16_ptk710_ftk710_ftk400_f16_res224.pth",
         )
 
         import vbench.third_party.umt.models.modeling_finetune  # noqa: F401
@@ -117,7 +118,9 @@ class HumanActionMetric(BaseMetric):
         top_indices = top_indices.tolist()
         top_scores = top_scores.tolist()
 
-        predictions = [cat_dict.get(str(idx), "") for idx, score in zip(top_indices, top_scores, strict=False) if score >= 0.85]
+        predictions = [
+            cat_dict.get(str(idx), "") for idx, score in zip(top_indices, top_scores, strict=False) if score >= 0.85
+        ]
         gt_label = text_prompt.lower().strip()
         match = any(pred == gt_label for pred in predictions)
         return MetricResult(

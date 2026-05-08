@@ -17,9 +17,12 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Iterable
 
-from fastvideo.eval.registry import list_metrics, resolve_group
+from fastvideo.eval.registry import (list_metrics, missing_dependencies, resolve_group)
 from fastvideo.eval.types import MetricResult
 from fastvideo.eval.worker import EvalWorker
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 class Evaluator:
@@ -136,9 +139,17 @@ def create_evaluator(
 
 
 def _resolve_metric_names(metrics: list[str] | str) -> list[str]:
-    """Resolve metric names, supporting groups (``"vbench"``) and ``"all"``."""
+    """Resolve metric names, supporting groups (``"vbench"``) and ``"all"``.
+
+    Group / ``"all"`` selectors silently skip metrics whose declared
+    dependencies aren't importable in this environment, with a single
+    warning per skipped metric. Explicit names (e.g. ``"vbench.color"``)
+    always pass through unchanged — the missing dep then surfaces as
+    :class:`ImportError` at construction time, which is what the user
+    asked for.
+    """
     if metrics == "all":
-        return list_metrics()
+        return _filter_satisfied(list_metrics(), context="all")
     if isinstance(metrics, str):
         metrics = [metrics]
 
@@ -146,8 +157,23 @@ def _resolve_metric_names(metrics: list[str] | str) -> list[str]:
     names: list[str] = []
     for m in metrics:
         group = resolve_group(m)
-        for n in (group if group is not None else [m]):
+        candidates = _filter_satisfied(group, context=m) if group is not None else [m]
+        for n in candidates:
             if n not in seen:
                 seen.add(n)
                 names.append(n)
     return names
+
+
+def _filter_satisfied(names: list[str], *, context: str) -> list[str]:
+    """Drop metrics with missing deps from a group expansion."""
+    keep: list[str] = []
+    for n in names:
+        missing = missing_dependencies(n)
+        if missing:
+            logger.warning(
+                "eval: skipping %s in group '%s'; missing dependency: %s. "
+                "Install instructions: pass the metric name explicitly to see them.", n, context, ", ".join(missing))
+            continue
+        keep.append(n)
+    return keep
