@@ -22,6 +22,7 @@ training paths independent.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import torch
@@ -43,9 +44,9 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
 
     def __init__(
         self,
-        transformer,
-        scheduler,
-        vae=None,
+        transformer: torch.nn.Module,
+        scheduler: Any,
+        vae: Any | None = None,
         chunk_size: int = 3,
     ) -> None:
         super().__init__(transformer, scheduler)
@@ -67,8 +68,9 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
                             and not fastvideo_args.disable_autocast)
 
         latents = batch.latents
-        assert latents is not None
-        b, c, t, h, w = latents.shape
+        if latents is None:
+            raise ValueError("LongCat causal DMD denoising requires latents")
+        b, _, t, _, _ = latents.shape
         device = latents.device
 
         if t % self.chunk_size != 0:
@@ -81,7 +83,8 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
         prompt_embeds = batch.prompt_embeds[0]
         prompt_attention_mask = (batch.prompt_attention_mask[0]
                                  if batch.prompt_attention_mask else None)
-        assert torch.isnan(prompt_embeds).sum() == 0
+        if torch.isnan(prompt_embeds).any():
+            raise ValueError("prompt_embeds contains NaNs")
 
         # DMD few-step timesteps. Optionally remap through the scheduler
         # if warp_denoising_step is on (mirrors Wan's CausalDMDDenosingStage).
@@ -97,8 +100,8 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
             dmd_timesteps = scheduler_timesteps[1000 - dmd_timesteps]
         dmd_timesteps = dmd_timesteps.to(device)
 
-        context_noise = int(
-            getattr(fastvideo_args.pipeline_config, "context_noise", 0))
+        context_noise = float(
+            getattr(fastvideo_args.pipeline_config, "context_noise", 0.0))
 
         # Lazy-allocated KV buffer state.
         cache_state: dict[str, Any] | None = None
@@ -199,7 +202,7 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
                     (b, ),
                     context_noise,
                     device=device,
-                    dtype=torch.long,
+                    dtype=torch.float32,
                 )
                 # Transformer wants BCTHW; current_latents already is.
                 context_bcthw = current_latents.to(target_dtype)
@@ -217,6 +220,7 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
                     out = self.transformer(
                         hidden_states=context_bcthw,
                         encoder_hidden_states=prompt_embeds,
+                        encoder_attention_mask=prompt_attention_mask,
                         timestep=t_context,
                         num_cond_latents=cached_frames_for_write,
                         return_kv=True,
@@ -243,8 +247,7 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
 
                 start_index += self.chunk_size
 
-        batch.latents = latents
-        return batch
+        return replace(batch, latents=latents)
 
     # ------------------------------------------------------------------
     # KV cache buffer (inlined from LongCatCausalModel — same pattern,
@@ -338,8 +341,8 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
                     f"LongCat returned new K/V for layer {idx} not present "
                     "in the pre-allocated buffer; the layer set must be "
                     "consistent across chunks")
-            buf["k"][:, :, widx:new_widx, :].copy_(k.detach())
-            buf["v"][:, :, widx:new_widx, :].copy_(v.detach())
+            buf["k"][:, :, widx:new_widx, :].copy_(k)
+            buf["v"][:, :, widx:new_widx, :].copy_(v)
 
         cache_state["write_idx"].fill_(new_widx)
         return cache_state

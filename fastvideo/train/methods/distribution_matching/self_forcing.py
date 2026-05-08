@@ -286,7 +286,9 @@ class SelfForcingMethod(DMD2Method):
         return self._student_rollout_streaming(batch, with_grad=with_grad)
 
     def _student_rollout_streaming(self, batch: Any, *, with_grad: bool) -> torch.Tensor:
-        assert isinstance(self.student, CausalModelBase)
+        if not isinstance(self.student, CausalModelBase):
+            raise ValueError("SelfForcingMethod requires a causal student "
+                             "implementing CausalModelBase.")
         latents = batch.latents
         if latents is None:
             raise RuntimeError("TrainingBatch.latents is required for "
@@ -326,35 +328,95 @@ class SelfForcingMethod(DMD2Method):
         cache_tag = "pos"
         self.student.clear_caches(cache_tag=cache_tag)
 
-        for block_idx in range(num_blocks):
-            if block_idx == 0:
-                start = 0
-                end = remaining + chunk if remaining else chunk
-            else:
-                start = remaining + block_idx * chunk
-                end = remaining + (block_idx + 1) * chunk
-            start = int(start)
-            end = int(min(end, num_frames))
-            if start >= end:
-                break
+        try:
+            for block_idx in range(num_blocks):
+                if block_idx == 0:
+                    start = 0
+                    end = remaining + chunk if remaining else chunk
+                else:
+                    start = remaining + block_idx * chunk
+                    end = remaining + (block_idx + 1) * chunk
+                start = int(start)
+                end = int(min(end, num_frames))
+                if start >= end:
+                    break
 
-            noisy_block = noise_full[:, start:end]
-            exit_idx = int(exit_indices[block_idx])
+                noisy_block = noise_full[:, start:end]
+                exit_idx = int(exit_indices[block_idx])
 
-            for step_idx, current_timestep in enumerate(denoising_steps):
-                exit_flag = step_idx == exit_idx
+                for step_idx, current_timestep in enumerate(denoising_steps):
+                    exit_flag = step_idx == exit_idx
 
-                timestep_block = (current_timestep * torch.ones(
-                    (batch_size, end - start),
-                    device=device,
-                    dtype=torch.float32,
-                ))
+                    timestep_block = (current_timestep * torch.ones(
+                        (batch_size, end - start),
+                        device=device,
+                        dtype=torch.float32,
+                    ))
 
-                enable_grad = (bool(with_grad) and bool(self._enable_gradient_in_rollout) and torch.is_grad_enabled()
-                               and start >= int(self._start_gradient_frame))
+                    enable_grad = (
+                        bool(with_grad)
+                        and bool(self._enable_gradient_in_rollout)
+                        and torch.is_grad_enabled()
+                        and start >= int(self._start_gradient_frame))
 
-                if not exit_flag:
-                    with torch.no_grad():
+                    if not exit_flag:
+                        with torch.no_grad():
+                            pred_noise = (self.student.predict_noise_streaming(
+                                noisy_block,
+                                timestep_block,
+                                batch,
+                                conditional=True,
+                                cache_tag=cache_tag,
+                                store_kv=False,
+                                cur_start_frame=start,
+                                cfg_uncond=self._cfg_uncond,
+                                attn_kind="vsa",
+                            ))
+                            if pred_noise is None:
+                                raise RuntimeError("predict_noise_streaming "
+                                                   "returned None "
+                                                   "(store_kv=False)")
+                            pred_x0_chunk = pred_noise_to_pred_video(
+                                pred_noise=pred_noise.flatten(0, 1),
+                                noise_input_latent=(
+                                    noisy_block.flatten(0, 1)),
+                                timestep=timestep_block,
+                                scheduler=self._sf_scheduler,
+                            ).unflatten(0, pred_noise.shape[:2])
+
+                        if step_idx + 1 >= num_steps:
+                            break
+                        next_timestep = denoising_steps[step_idx + 1]
+                        if self._student_sample_type == "sde":
+                            noisy_block = self._sf_add_noise(
+                                pred_x0_chunk,
+                                torch.randn_like(pred_x0_chunk),
+                                next_timestep * torch.ones(
+                                    (batch_size, end - start),
+                                    device=device,
+                                    dtype=torch.float32,
+                                ),
+                            )
+                        else:
+                            sigma_cur = self._timestep_to_sigma(
+                                timestep_block).view(batch_size, end - start,
+                                                     1, 1, 1)
+                            sigma_next = self._timestep_to_sigma(
+                                next_timestep * torch.ones(
+                                    (batch_size, end - start),
+                                    device=device,
+                                    dtype=torch.float32,
+                                )).view(batch_size, end - start, 1, 1, 1)
+                            eps = (
+                                noisy_block -
+                                (1 - sigma_cur) * pred_x0_chunk
+                            ) / sigma_cur.clamp_min(1e-8)
+                            noisy_block = (
+                                (1 - sigma_next) * pred_x0_chunk +
+                                sigma_next * eps)
+                        continue
+
+                    with torch.set_grad_enabled(enable_grad):
                         pred_noise = (self.student.predict_noise_streaming(
                             noisy_block,
                             timestep_block,
@@ -367,102 +429,57 @@ class SelfForcingMethod(DMD2Method):
                             attn_kind="vsa",
                         ))
                         if pred_noise is None:
-                            raise RuntimeError("predict_noise_streaming "
-                                               "returned None "
-                                               "(store_kv=False)")
+                            raise RuntimeError(
+                                "predict_noise_streaming returned "
+                                "None (store_kv=False)")
                         pred_x0_chunk = pred_noise_to_pred_video(
                             pred_noise=pred_noise.flatten(0, 1),
                             noise_input_latent=(noisy_block.flatten(0, 1)),
                             timestep=timestep_block,
                             scheduler=self._sf_scheduler,
                         ).unflatten(0, pred_noise.shape[:2])
+                    break
 
-                    if step_idx + 1 >= num_steps:
-                        break
-                    next_timestep = denoising_steps[step_idx + 1]
-                    if self._student_sample_type == "sde":
-                        noisy_block = self._sf_add_noise(
-                            pred_x0_chunk,
-                            torch.randn_like(pred_x0_chunk),
-                            next_timestep * torch.ones(
-                                (batch_size, end - start),
-                                device=device,
-                                dtype=torch.float32,
-                            ),
-                        )
-                    else:
-                        sigma_cur = self._timestep_to_sigma(timestep_block).view(batch_size, end - start, 1, 1, 1)
-                        sigma_next = self._timestep_to_sigma(next_timestep * torch.ones(
+                denoised_blocks.append(pred_x0_chunk)
+
+                with torch.no_grad():
+                    if self._context_noise > 0.0:
+                        context_timestep = torch.ones(
                             (batch_size, end - start),
                             device=device,
                             dtype=torch.float32,
-                        )).view(batch_size, end - start, 1, 1, 1)
-                        eps = (noisy_block - (1 - sigma_cur) * pred_x0_chunk) / sigma_cur.clamp_min(1e-8)
-                        noisy_block = ((1 - sigma_next) * pred_x0_chunk + sigma_next * eps)
-                    continue
+                        ) * float(self._context_noise)
+                        context_latents = self._sf_add_noise(
+                            pred_x0_chunk.detach(),
+                            torch.randn_like(pred_x0_chunk),
+                            context_timestep,
+                        )
+                    else:
+                        context_timestep = torch.zeros(
+                            (batch_size, end - start),
+                            device=device,
+                            dtype=torch.float32,
+                        )
+                        context_latents = pred_x0_chunk.detach()
 
-                with torch.set_grad_enabled(enable_grad):
-                    pred_noise = (self.student.predict_noise_streaming(
-                        noisy_block,
-                        timestep_block,
+                    _ = self.student.predict_noise_streaming(
+                        context_latents,
+                        context_timestep,
                         batch,
                         conditional=True,
                         cache_tag=cache_tag,
-                        store_kv=False,
+                        store_kv=True,
                         cur_start_frame=start,
                         cfg_uncond=self._cfg_uncond,
                         attn_kind="vsa",
-                    ))
-                    if pred_noise is None:
-                        raise RuntimeError("predict_noise_streaming returned "
-                                           "None (store_kv=False)")
-                    pred_x0_chunk = pred_noise_to_pred_video(
-                        pred_noise=pred_noise.flatten(0, 1),
-                        noise_input_latent=(noisy_block.flatten(0, 1)),
-                        timestep=timestep_block,
-                        scheduler=self._sf_scheduler,
-                    ).unflatten(0, pred_noise.shape[:2])
-                break
-
-            denoised_blocks.append(pred_x0_chunk)
-
-            with torch.no_grad():
-                if self._context_noise > 0.0:
-                    context_timestep = torch.ones(
-                        (batch_size, end - start),
-                        device=device,
-                        dtype=torch.float32,
-                    ) * float(self._context_noise)
-                    context_latents = self._sf_add_noise(
-                        pred_x0_chunk.detach(),
-                        torch.randn_like(pred_x0_chunk),
-                        context_timestep,
                     )
-                else:
-                    context_timestep = torch.zeros(
-                        (batch_size, end - start),
-                        device=device,
-                        dtype=torch.float32,
-                    )
-                    context_latents = pred_x0_chunk.detach()
 
-                _ = self.student.predict_noise_streaming(
-                    context_latents,
-                    context_timestep,
-                    batch,
-                    conditional=True,
-                    cache_tag=cache_tag,
-                    store_kv=True,
-                    cur_start_frame=start,
-                    cfg_uncond=self._cfg_uncond,
-                    attn_kind="vsa",
-                )
+            if not denoised_blocks:
+                raise RuntimeError("Self-forcing rollout produced no blocks")
 
-        if not denoised_blocks:
-            raise RuntimeError("Self-forcing rollout produced no blocks")
-
-        self.student.clear_caches(cache_tag=cache_tag)
-        return torch.cat(denoised_blocks, dim=1)
+            return torch.cat(denoised_blocks, dim=1)
+        finally:
+            self.student.clear_caches(cache_tag=cache_tag)
 
     def _critic_flow_matching_loss(self, batch: Any) -> tuple[torch.Tensor, Any, dict[str, Any]]:
         with torch.no_grad():

@@ -455,8 +455,11 @@ class LongCatSelfAttention(nn.Module):
                 
                 # Split H and W dimensions by their respective factors
                 T_bsa, H_bsa, W_bsa = latent_shape
-                assert H_bsa % cp_split_hw[0] == 0 and W_bsa % cp_split_hw[1] == 0, \
-                    f"H {H_bsa} must be divisible by {cp_split_hw[0]}, W {W_bsa} must be divisible by {cp_split_hw[1]}"
+                if (H_bsa % cp_split_hw[0] != 0
+                        or W_bsa % cp_split_hw[1] != 0):
+                    raise ValueError(
+                        f"H {H_bsa} must be divisible by {cp_split_hw[0]}, "
+                        f"W {W_bsa} must be divisible by {cp_split_hw[1]}")
                 H_bsa = H_bsa // cp_split_hw[0]
                 W_bsa = W_bsa // cp_split_hw[1]
                 latent_shape_bsa = (T_bsa, H_bsa, W_bsa)
@@ -506,6 +509,11 @@ class LongCatSelfAttention(nn.Module):
         """
         B, N, C = x.shape
         T, H, W = latent_shape
+        if causal_block_size is not None and int(kv_cache_start_frame) != 0:
+            raise ValueError(
+                "LongCat block-causal mask currently assumes cached K/V "
+                "starts at frame 0; got kv_cache_start_frame="
+                f"{kv_cache_start_frame}")
 
         k_cache, v_cache = kv_cache
 

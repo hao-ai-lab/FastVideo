@@ -96,6 +96,11 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
     ) -> torch.Tensor | None:
         if attn_kind not in {"dense", "vsa"}:
             raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
+        if noisy_latents.ndim != 5:
+            raise ValueError(
+                "LongCatCausalModel.predict_noise_streaming expects "
+                "BTCHW latents [B, T, C, H, W], got "
+                f"shape={tuple(noisy_latents.shape)}")
         # SelfForcingMethod passes "vsa" for student rollout, but LongCat
         # selects sparse behavior through its native BSA config, not VSA
         # metadata.
@@ -115,8 +120,16 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
         transformer = self.transformer
         dtype = noisy_latents.dtype
 
+        # Layout is intentionally BTCHW here. The transformer boundary below
+        # converts to the package-wide BCTHW convention.
+        num_chunk_frames = int(noisy_latents.shape[1])
         cache_state = self._streaming_caches.get(cache_tag)
         kv_cache_view, cached_frames = self._cache_view(cache_state)
+        if cur_start_frame != cached_frames:
+            raise ValueError(
+                "cur_start_frame must match the number of cached frames "
+                "because LongCat streaming cache does not evict yet: "
+                f"{cur_start_frame} vs {cached_frames}")
 
         with torch.autocast(self.device.type,
                             dtype=dtype), set_forward_context(
@@ -146,7 +159,7 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
                     self._write_chunk_to_buffer(
                         cache_state=cache_state,
                         new_chunk=new_chunk,
-                        new_frames=int(noisy_latents.shape[1]),
+                        new_frames=num_chunk_frames,
                         device=noisy_latents.device,
                     ))
                 return None
@@ -236,7 +249,10 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
             # full rollout. We use training_config.data.num_frames as
             # the upper bound.
             tc = self.training_config
-            assert tc is not None
+            if tc is None:
+                raise RuntimeError(
+                    "training_config is required for LongCat streaming "
+                    "KV cache allocation")
             total_frames = int(tc.data.num_frames)
             if total_frames <= 0:
                 raise ValueError(

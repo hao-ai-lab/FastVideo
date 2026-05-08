@@ -11,6 +11,8 @@ import torch
 import torch.nn as nn
 from einops import rearrange, repeat
 
+MAX_CACHED_3D_ROPE_FREQS = 16
+
 
 def broadcast(tensors: list[torch.Tensor], dim: int = -1) -> torch.Tensor:
     """
@@ -18,7 +20,8 @@ def broadcast(tensors: list[torch.Tensor], dim: int = -1) -> torch.Tensor:
     """
     num_tensors = len(tensors)
     shape_lens = set(len(t.shape) for t in tensors)
-    assert len(shape_lens) == 1, "tensors must all have the same number of dimensions"
+    if len(shape_lens) != 1:
+        raise ValueError("tensors must all have the same number of dimensions")
 
     shape_len = list(shape_lens)[0]
     dim = (dim + shape_len) if dim < 0 else dim
@@ -26,7 +29,8 @@ def broadcast(tensors: list[torch.Tensor], dim: int = -1) -> torch.Tensor:
     dims = list(zip(*[list(t.shape) for t in tensors], strict=False))
     expandable_dims = [(i, val) for i, val in enumerate(dims) if i != dim]
 
-    assert all(len(set(t[1])) <= 2 for t in expandable_dims), "invalid dimensions for broadcastable concatenation"
+    if not all(len(set(t[1])) <= 2 for t in expandable_dims):
+        raise ValueError("invalid dimensions for broadcastable concatenation")
 
     max_dims = [(t[0], max(t[1])) for t in expandable_dims]
     expanded_dims = [(t[0], (t[1], ) * num_tensors) for t in max_dims]
@@ -67,14 +71,15 @@ class RotaryPositionalEmbedding3D(nn.Module):
         """
         super().__init__()
         self.head_dim = head_dim
-        assert self.head_dim % 8 == 0, "head_dim must be a multiple of 8 for 3D RoPE"
+        if self.head_dim % 8 != 0:
+            raise ValueError("head_dim must be a multiple of 8 for 3D RoPE")
         self.base = base
 
         # Cache one precomputed table per grid size. Temporal offsets are
         # included in the key. The cache is bounded because causal rollouts
         # may visit many offset/window combinations.
         self.freqs_dict: OrderedDict[tuple, torch.Tensor] = OrderedDict()
-        self.max_cached_freqs = 16
+        self.max_cached_freqs = MAX_CACHED_3D_ROPE_FREQS
 
     def register_grid_size(
         self,
@@ -88,11 +93,17 @@ class RotaryPositionalEmbedding3D(nn.Module):
         
         Args:
             grid_size: (T, H, W) tuple of grid dimensions
+            temporal_offset: Absolute frame offset for causal chunked RoPE.
+            device: Device on which to build the frequency table. If omitted,
+                a CPU table is cached and promoted to the runtime device on
+                first use.
         """
+        cache_device = torch.device(device) if device is not None else torch.device(
+            "cpu")
         key = self._cache_key(
             grid_size,
             temporal_offset=temporal_offset,
-            device=torch.device(device or "cpu"),
+            device=cache_device,
         )
         if key not in self.freqs_dict:
             self._cache_freqs(
@@ -215,14 +226,23 @@ class RotaryPositionalEmbedding3D(nn.Module):
             device=q.device,
         )
         if cache_key not in self.freqs_dict:
-            self._cache_freqs(
-                cache_key,
-                self.precompute_freqs_3d(
-                    grid_size,
-                    temporal_offset=int(temporal_offset),
-                    device=q.device,
-                ),
+            cpu_key = self._cache_key(
+                grid_size,
+                temporal_offset=int(temporal_offset),
+                device=torch.device("cpu"),
             )
+            if cpu_key in self.freqs_dict:
+                self._cache_freqs(cache_key,
+                                  self.freqs_dict[cpu_key].to(q.device))
+            else:
+                self._cache_freqs(
+                    cache_key,
+                    self.precompute_freqs_3d(
+                        grid_size,
+                        temporal_offset=int(temporal_offset),
+                        device=q.device,
+                    ),
+                )
         freqs_cis = self.freqs_dict[cache_key]
         self.freqs_dict.move_to_end(cache_key)
 

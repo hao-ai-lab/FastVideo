@@ -15,6 +15,8 @@ negation (matches :class:`LongCatDenoisingStage`).
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import torch
 
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -47,8 +49,9 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
                             and not fastvideo_args.disable_autocast)
 
         latents = batch.latents
-        assert latents is not None
-        b, c, t, h, w = latents.shape
+        if latents is None:
+            raise ValueError("LongCat causal denoising requires latents")
+        b, _, t, _, _ = latents.shape
         device = latents.device
 
         if t % self.chunk_size != 0:
@@ -60,7 +63,8 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
         prompt_embeds = batch.prompt_embeds[0]
         prompt_attention_mask = (batch.prompt_attention_mask[0]
                                  if batch.prompt_attention_mask else None)
-        assert torch.isnan(prompt_embeds).sum() == 0
+        if torch.isnan(prompt_embeds).any():
+            raise ValueError("prompt_embeds contains NaNs")
 
         num_inference_steps = batch.num_inference_steps
         if num_inference_steps is None or num_inference_steps <= 0:
@@ -68,8 +72,8 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
                 "num_inference_steps must be a positive int for LongCat "
                 f"causal multi-step denoising; got {num_inference_steps}")
 
-        context_noise = int(
-            getattr(fastvideo_args.pipeline_config, "context_noise", 0))
+        context_noise = float(
+            getattr(fastvideo_args.pipeline_config, "context_noise", 0.0))
 
         cache_state: dict | None = None
         start_index = 0
@@ -129,7 +133,6 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
                     pred_noise_btchw = pred_noise_bcthw.permute(
                         0, 2, 1, 3, 4)
                     latents_btchw = current_latents.permute(0, 2, 1, 3, 4)
-                    nf = self.chunk_size
                     pred_noise_flat = pred_noise_btchw.flatten(0, 1)
                     latents_flat = latents_btchw.flatten(0, 1)
                     updated_flat = self.scheduler.step(
@@ -139,7 +142,8 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
                         return_dict=False,
                     )[0]
                     current_latents = updated_flat.unflatten(
-                        0, (b, nf)).permute(0, 2, 1, 3, 4).contiguous()
+                        0, (b, self.chunk_size)).permute(
+                            0, 2, 1, 3, 4).contiguous()
 
                     if progress_bar is not None:
                         progress_bar.update()
@@ -153,7 +157,7 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
                     (b, ),
                     context_noise,
                     device=device,
-                    dtype=torch.long,
+                    dtype=torch.float32,
                 )
                 context_bcthw = current_latents.to(target_dtype)
                 _, cached_frames_for_write = self._cache_view(cache_state)
@@ -170,6 +174,7 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
                     out = self.transformer(
                         hidden_states=context_bcthw,
                         encoder_hidden_states=prompt_embeds,
+                        encoder_attention_mask=prompt_attention_mask,
                         timestep=t_context,
                         num_cond_latents=cached_frames_for_write,
                         return_kv=True,
@@ -196,5 +201,4 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
 
                 start_index += self.chunk_size
 
-        batch.latents = latents
-        return batch
+        return replace(batch, latents=latents)

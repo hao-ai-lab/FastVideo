@@ -32,6 +32,7 @@ def test_longcat_block_causal_mask_blocks_future_chunks():
         [True, True, True, True],
         [True, True, True, True],
     ]
+    assert mask[0, 0, 1].tolist() == mask[0, 0, 0].tolist()
 
 
 def test_longcat_block_causal_mask_handles_cached_prefix():
@@ -47,6 +48,21 @@ def test_longcat_block_causal_mask_handles_cached_prefix():
         [True, True, True, True, False],
         [True, True, True, True, True],
     ]
+
+
+def test_longcat_block_causal_mask_allows_first_single_block_only():
+    mask = build_longcat_block_causal_mask(
+        query_frames=1,
+        key_frames=1,
+        tokens_per_frame=2,
+        causal_block_size=2,
+        device="cpu",
+    )
+
+    assert _frame_visibility(mask, tokens_per_frame=2) == [
+        [True],
+    ]
+    assert mask[0, 0, 1].tolist() == mask[0, 0, 0].tolist()
 
 
 def test_longcat_block_causal_mask_rejects_invalid_shape():
