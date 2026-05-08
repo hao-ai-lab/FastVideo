@@ -5,6 +5,8 @@
 Reference: https://arxiv.org/pdf/2104.09864.pdf
 """
 
+from collections import OrderedDict
+
 import torch
 import torch.nn as nn
 from einops import rearrange, repeat
@@ -69,15 +71,17 @@ class RotaryPositionalEmbedding3D(nn.Module):
         self.base = base
 
         # Cache one precomputed table per grid size. Temporal offsets are
-        # applied on demand so long rollouts do not accumulate a new table for
-        # every window start.
-        self.freqs_dict: dict[tuple[int, int, int], torch.Tensor] = {}
+        # included in the key. The cache is bounded because causal rollouts
+        # may visit many offset/window combinations.
+        self.freqs_dict: OrderedDict[tuple, torch.Tensor] = OrderedDict()
+        self.max_cached_freqs = 16
 
     def register_grid_size(
         self,
         grid_size: tuple[int, int, int],
         *,
         temporal_offset: int = 0,
+        device: torch.device | str | None = None,
     ) -> None:
         """
         Precompute and register frequencies for a given grid size.
@@ -85,14 +89,27 @@ class RotaryPositionalEmbedding3D(nn.Module):
         Args:
             grid_size: (T, H, W) tuple of grid dimensions
         """
-        if grid_size not in self.freqs_dict:
-            self.freqs_dict[grid_size] = self.precompute_freqs_3d(grid_size)
+        key = self._cache_key(
+            grid_size,
+            temporal_offset=temporal_offset,
+            device=torch.device(device or "cpu"),
+        )
+        if key not in self.freqs_dict:
+            self._cache_freqs(
+                key,
+                self.precompute_freqs_3d(
+                    grid_size,
+                    temporal_offset=temporal_offset,
+                    device=device,
+                ),
+            )
 
     def precompute_freqs_3d(
         self,
         grid_size: tuple[int, int, int],
         *,
         temporal_offset: int = 0,
+        device: torch.device | str | None = None,
     ) -> torch.Tensor:
         """
         Precompute 3D rotary frequencies.
@@ -112,18 +129,25 @@ class RotaryPositionalEmbedding3D(nn.Module):
         dim_w = 2 * (self.head_dim // 6)
 
         # Compute frequency bands for each dimension
-        freqs_t = 1.0 / (self.base**(torch.arange(0, dim_t, 2)[:(dim_t // 2)].float() / dim_t))
-        freqs_h = 1.0 / (self.base**(torch.arange(0, dim_h, 2)[:(dim_h // 2)].float() / dim_h))
-        freqs_w = 1.0 / (self.base**(torch.arange(0, dim_w, 2)[:(dim_w // 2)].float() / dim_w))
+        freqs_t = 1.0 / (
+            self.base**(torch.arange(0, dim_t, 2, device=device)
+                        [:(dim_t // 2)].float() / dim_t))
+        freqs_h = 1.0 / (
+            self.base**(torch.arange(0, dim_h, 2, device=device)
+                        [:(dim_h // 2)].float() / dim_h))
+        freqs_w = 1.0 / (
+            self.base**(torch.arange(0, dim_w, 2, device=device)
+                        [:(dim_w // 2)].float() / dim_w))
 
         # Create position grids
         grid_t = torch.arange(
             int(temporal_offset),
             int(temporal_offset) + num_frames,
             dtype=torch.float32,
+            device=device,
         )
-        grid_h = torch.arange(height, dtype=torch.float32)
-        grid_w = torch.arange(width, dtype=torch.float32)
+        grid_h = torch.arange(height, dtype=torch.float32, device=device)
+        grid_w = torch.arange(width, dtype=torch.float32, device=device)
 
         # Compute frequencies for each position
         freqs_t = torch.einsum("..., f -> ... f", grid_t, freqs_t)
@@ -150,6 +174,23 @@ class RotaryPositionalEmbedding3D(nn.Module):
 
         return freqs
 
+    def _cache_key(
+        self,
+        grid_size: tuple[int, int, int],
+        *,
+        temporal_offset: int,
+        device: torch.device,
+    ) -> tuple:
+        device_index = -1 if device.index is None else int(device.index)
+        return (tuple(grid_size), int(temporal_offset), device.type,
+                device_index)
+
+    def _cache_freqs(self, key: tuple, freqs: torch.Tensor) -> None:
+        self.freqs_dict[key] = freqs
+        self.freqs_dict.move_to_end(key)
+        while len(self.freqs_dict) > self.max_cached_freqs:
+            self.freqs_dict.popitem(last=False)
+
     def forward(
         self,
         q: torch.Tensor,
@@ -168,16 +209,22 @@ class RotaryPositionalEmbedding3D(nn.Module):
         Returns:
             (q_rotated, k_rotated): Rotated query and key tensors
         """
-        # Register grid size if not cached
-        if temporal_offset == 0:
-            if grid_size not in self.freqs_dict:
-                self.register_grid_size(grid_size)
-            freqs_cis = self.freqs_dict[grid_size].to(q.device)
-        else:
-            freqs_cis = self.precompute_freqs_3d(
-                grid_size,
-                temporal_offset=int(temporal_offset),
-            ).to(q.device)
+        cache_key = self._cache_key(
+            grid_size,
+            temporal_offset=int(temporal_offset),
+            device=q.device,
+        )
+        if cache_key not in self.freqs_dict:
+            self._cache_freqs(
+                cache_key,
+                self.precompute_freqs_3d(
+                    grid_size,
+                    temporal_offset=int(temporal_offset),
+                    device=q.device,
+                ),
+            )
+        freqs_cis = self.freqs_dict[cache_key]
+        self.freqs_dict.move_to_end(cache_key)
 
         # Cast to float32 for precision
         q_, k_ = q.float(), k.float()
