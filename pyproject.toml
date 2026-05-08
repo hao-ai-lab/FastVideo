@@ -132,6 +132,18 @@ test = [
     "plotly",
 ]
 
+# Eval extras. See fastvideo/eval/README.md for which install path
+# covers which metrics. detectron2 (vbench color/object_class/etc.) is
+# CUDA-version-pinned and not cleanly pip-installable — install it
+# separately as documented in the README.
+eval-vbench     = ["openai-clip", "pyiqa", "easydict"]
+eval-physics-iq = []
+eval = [
+    "decord", "lpips", "ptlflow", "qwen-vl-utils",
+    "fastvideo[eval-vbench]", "fastvideo[eval-physics-iq]",
+]
+eval-full = ["fastvideo[eval]", "qwen-omni-utils"]
+
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 
 prompt-safety = [
@@ -170,11 +182,20 @@ check_untyped_defs = true
 follow_imports = "silent"
 
 [tool.codespell]
-skip = "./data,./wandb,ui/package-lock.json"
+# ``*/_vendored/*`` matches upstream-provenance files vendored under any
+# ``_vendored/`` subdir (project-wide convention; mirrors the
+# ``_``-prefixed auto-discovery skip).
+skip = "./data,./wandb,ui/package-lock.json,*/_vendored/*"
 
 [tool.ruff]
 # Allow lines to be as long as 120.
 line-length = 120
+extend-exclude = [
+    # Upstream submodules under fastvideo/third_party/ are not our style
+    # territory; modern-dep compat lives as runtime shims in our metric
+    # __init__.py files.
+    "fastvideo/third_party/**",
+]
 
 [tool.ruff.lint]
 select = [
