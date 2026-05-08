@@ -3,7 +3,7 @@
 models:
   student:
     _target_: fastvideo.train.models.matrixgame.matrixgame.MatrixGameModel
-    init_from: ./mg_bidirectional_Solaris
+    init_from: FastVideo/Matrix-Game-2.0-Foundation-Diffusers
     trainable: true
 
 method:
@@ -18,7 +18,7 @@ training:
     hsdp_shard_dim: 1
 
   data:
-    data_path: /home/hal-kaiqin/solaris_dataset_unzip/solaris
+    data_path: data/matrixgame
     dataloader_num_workers: 4
     train_batch_size: 1
     training_cfg_rate: 0.0
@@ -63,7 +63,7 @@ callbacks:
   validation:
     _target_: fastvideo.train.callbacks.validation.ValidationCallback
     pipeline_target: fastvideo.pipelines.basic.matrixgame.matrixgame_i2v_pipeline.MatrixGamePipeline
-    dataset_file: examples/distill/MatrixGame2.0/validation_1.json
+    dataset_file: examples/distill/MatrixGame2.0/validation.json
     every_steps: 100
     sampling_steps: [50]
     guidance_scale: 5.0

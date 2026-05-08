@@ -1,19 +1,18 @@
 #!/bin/bash
 
-export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
+export WANDB_API_KEY="${WANDB_API_KEY:-}"
 export WANDB_MODE="offline"
 export TOKENIZERS_PARALLELISM=false
 
 RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
-# Model paths for Self-Forcing DMD distillation:
-# GENERATOR_MODEL_PATH="../mg_models/Solaris-Causal-30K-8K-18K"
-GENERATOR_MODEL_PATH="./mg_causal_Solaris"
-REAL_SCORE_MODEL_PATH="./mg_bidirectional_Solaris"  # Teacher mode
-FAKE_SCORE_MODEL_PATH="./mg_causal_Solaris"  # Critic model
+# Model paths for Self-Forcing DMD distillation.
+GENERATOR_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
+REAL_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"  # Teacher
+FAKE_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"  # Critic
 
-DATA_DIR="/home/hal-kaiqin/solaris_dataset_unzip/solaris"
+DATA_DIR="data/matrixgame"
 VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation.json"
 NUM_GPUS=1
 
@@ -35,7 +34,7 @@ training_args=(
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   # --enable_gradient_masking
   # --gradient_mask_last_n_frames 21
-  --init_weights_from_safetensors "checkpoints/matrixgame_sf_0413_1109/checkpoint-1200_weight_only/ema/generator_ema.safetensors"
+  # --init_weights_from_safetensors "path/to/generator_ema.safetensors"
 )
 
 # Parallel arguments

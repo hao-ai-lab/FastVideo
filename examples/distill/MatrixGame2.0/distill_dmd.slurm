@@ -14,12 +14,11 @@
 set -euo pipefail
 set -x
 
-REPO_ROOT="${SLURM_SUBMIT_DIR:-/home/hal-kaiqin/FastVideo_mg3}"
 CONDA_ROOT="${CONDA_ROOT:-$HOME/miniforge3}"
 CONDA_BIN="${CONDA_ROOT}/bin/conda"
 ENV_NAME="${ENV_NAME:-FastVideo_kaiqin}"
 MASTER_PORT="${MASTER_PORT:-29500}"
-WANDB_API_KEY="${WANDB_API_KEY:-7ff8b6e8356924f7a6dd51a0342dd1a422ea9352}"
+WANDB_API_KEY="${WANDB_API_KEY:-}"
 WANDB_MODE="${WANDB_MODE:-online}"
 GPUS_PER_NODE="${SLURM_GPUS_ON_NODE:-4}"
 TOTAL_GPUS="$(( SLURM_JOB_NUM_NODES * GPUS_PER_NODE ))"
@@ -39,9 +38,9 @@ else
     exit 1
 fi
 
-cd "${REPO_ROOT}"
-mkdir -p "${REPO_ROOT}/logs/slurm"
-export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+cd "${SLURM_SUBMIT_DIR}"
+mkdir -p logs/slurm
+export PYTHONPATH="${SLURM_SUBMIT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
 nodes=( $(scontrol show hostnames "${SLURM_JOB_NODELIST}") )
 export MASTER_ADDR="${nodes[0]}"
@@ -57,11 +56,11 @@ echo "TOTAL_GPUS: ${TOTAL_GPUS}"
 RUN_NAME="$(date +"%m%d_%H%M")"
 echo "RUN_NAME: ${RUN_NAME}"
 
-GENERATOR_MODEL_PATH="./mg_causal_Solaris"
-REAL_SCORE_MODEL_PATH="./mg_bidirectional_Solaris"
-FAKE_SCORE_MODEL_PATH="./mg_causal_Solaris"
+GENERATOR_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
+REAL_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
+FAKE_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
 
-DATA_DIR="/home/hal-kaiqin/solaris_dataset_unzip/solaris"
+DATA_DIR="data/matrixgame"
 VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation.json"
 
 training_args=(
@@ -78,7 +77,7 @@ training_args=(
   --simulate_generator_forward
   --num_frames 81
   --num_frame_per_block 3
-  --init_weights_from_safetensors "checkpoints/matrixgame_sf_0413_1109/checkpoint-1200_weight_only/ema/generator_ema.safetensors"
+  # --init_weights_from_safetensors "path/to/generator_ema.safetensors"
 )
 
 parallel_args=(
