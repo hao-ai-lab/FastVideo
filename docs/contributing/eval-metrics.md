@@ -1,16 +1,16 @@
 # Porting Eval Metrics into `fastvideo.eval`
 
-This guide is for contributors adding new evaluation metrics to FastVideo's
-eval suite. If you just want to *run* the existing metrics, see
+This guide is for contributors adding new evaluation metrics to
+FastVideo's eval suite. To run the existing metrics, see
 [`fastvideo/eval/README.md`](../../fastvideo/eval/README.md).
 
-## When you need this guide
+## When to use this guide
 
 Use this guide when you are:
 
 - Adding a new metric (native or wrapping a third-party library).
-- Porting a benchmark (e.g. VBench, MIND, EvalCrafter) whose Python code
-  needs to be importable from a pinned upstream.
+- Porting a benchmark (e.g. VBench, MIND, EvalCrafter) whose Python
+  code needs to be importable from a pinned upstream.
 - Adding a new metric group (audio, vlm, etc.).
 
 ## TL;DR
@@ -20,28 +20,29 @@ Metrics are auto-discovered from
 with `@register("<group>.<name>")` and subclasses `BaseMetric`. Three
 recipes:
 
-1. **Native metric** (pure-PyTorch, no submodule). Drop a file, declare
-   deps, implement `compute(sample)`.
+1. **Native metric** (pure-PyTorch, no submodule). Drop a file,
+   declare deps, implement `compute(sample)`.
 2. **Library-wrapped metric** (CLIP, torch.hub, transformers, pyiqa).
-   Same as above, plus route the library's cache through `get_cache_dir()`
-   if it has a `download_root=` / `cache_dir=` kwarg.
-3. **Upstream-submodule-wrapped metric** (vbench-style). Pin upstream as
-   a git submodule under `fastvideo/third_party/eval/<bench>/`. Adapter
-   `__init__.py` does the `sys.path` insert + any runtime compat shims
-   for modern dep versions. **No `setup.sh`. No on-disk patches.**
+   Same as above, plus route the library's cache through
+   `get_cache_dir()` if it has a `download_root=` / `cache_dir=`
+   kwarg.
+3. **Upstream-submodule-wrapped metric** (vbench-style). Pin upstream
+   as a git submodule under `fastvideo/third_party/eval/<bench>/`. The
+   adapter `__init__.py` does the `sys.path` insert and any runtime
+   compat shims for modern dep versions. Patches live as Python in
+   that file rather than as on-disk patches to the submodule.
 
 The full recipes are below.
 
 ---
 
-## 0) Layout & auto-discovery
+## 0) Layout and auto-discovery
 
 ```
 fastvideo/eval/metrics/
 ├── base.py                  # BaseMetric + lifecycle contract
 ├── common/                  # group: SSIM, PSNR, LPIPS
 ├── optical_flow/            # group: gt_optical_flow, synthetic_optical_flow
-├── audio/                   # group: CLAP, WER, audiobox, …
 ├── vlm/                     # group: VideoScore-2
 ├── physics_iq/              # group + sub-metrics
 └── vbench/                  # group: 16 sub-metrics
@@ -51,9 +52,10 @@ fastvideo/eval/metrics/
 ```
 
 Auto-discovery (`fastvideo/eval/metrics/__init__.py`) walks each group
-dir and imports every `metric.py` it finds, which fires the `@register`
-decorators. **Names starting with `_` are skipped** — use that prefix
-for shared helpers or vendored code that shouldn't register itself.
+dir and imports every `metric.py` it finds, which fires the
+`@register` decorators. Names starting with `_` are skipped. Use that
+prefix for shared helpers or vendored code that should not register
+itself.
 
 ---
 
@@ -68,7 +70,7 @@ class YourMetric(BaseMetric):
     requires_reference: bool = True           # needs sample["reference"]
     higher_is_better: bool = True             # for ranking / aggregates
     dependencies: list[str] = []              # importable module names;
-                                              # registry surfaces clean
+                                              # registry surfaces a clean
                                               # ImportError if missing
     needs_gpu: bool = False
     backbone: str | None = None               # e.g. "clip_vit_l14"
@@ -87,17 +89,18 @@ def compute(self, sample: dict) -> list[MetricResult]:
 
 You may override:
 
-- `setup(self) -> None` — eager model loading. Called once by
+- `setup(self) -> None`. Eager model loading. Called once by
   `create_evaluator`. Idempotent (re-entrant). Use the `if self._model
   is not None: return` pattern.
-- `to(self, device)` — move the metric (and its submodels) to `device`.
+- `to(self, device)`. Move the metric and its submodels to `device`.
 
-If a required input is missing (e.g. an fps-aware metric called without
-`fps`), return `self._skip(sample, reason)` — **do not raise**.
+If a required input is missing (e.g. an fps-aware metric called
+without `fps`), return `self._skip(sample, reason)` instead of
+raising.
 
 ---
 
-## 2) Recipe A — Native metric (no external deps)
+## 2) Recipe A: native metric (no external deps)
 
 Smallest case. Pixel math, simple closed-form.
 
@@ -127,62 +130,60 @@ class YourMetric(BaseMetric):
         ]
 ```
 
-That's it. Drop the file, the registry picks it up.
+That is the whole recipe. Drop the file and the registry picks it up.
 
 ---
 
-## 3) Recipe B — Library-wrapped metric (CLIP, torch.hub, transformers, pyiqa)
+## 3) Recipe B: library-wrapped metric (CLIP, torch.hub, transformers, pyiqa)
 
-If your metric loads a backbone from a Python package, **you are
-responsible for pointing the library at the eval cache** so users get
-one knob (`FASTVIDEO_EVAL_CACHE`) to redirect everything.
+If your metric loads a backbone from a Python package, route the
+library at the eval cache so users get one knob (`FASTVIDEO_EVAL_CACHE`)
+to redirect everything.
 
 ### Cache routing rules
 
-| library | how to route | location after redirect |
+| Library | How to route | Location after redirect |
 |---|---|---|
 | `clip.load("ViT-X")` | pass `download_root=str(get_cache_dir() / "clip")` | `${FASTVIDEO_EVAL_CACHE}/clip/` |
-| `torch.hub.load(...)` | nothing — `TORCH_HOME` is redirected at `fastvideo.eval` import time | `${FASTVIDEO_EVAL_CACHE}/torch/hub/` |
-| `transformers.from_pretrained(...)` | nothing — leave HF's default cache (`~/.cache/huggingface/hub/`) so users dedupe with other ML projects | `~/.cache/huggingface/hub/` |
+| `torch.hub.load(...)` | nothing; `TORCH_HOME` is redirected at `fastvideo.eval` import time | `${FASTVIDEO_EVAL_CACHE}/torch/hub/` |
+| `transformers.from_pretrained(...)` | nothing; leave HF's default cache (`~/.cache/huggingface/hub/`) so users dedupe with other ML projects | `~/.cache/huggingface/hub/` |
 | `huggingface_hub.snapshot_download` / `hf_hub_download` | use `ensure_checkpoint(...)` (it wraps these with filelock) | same as above |
-| `pyiqa.create_metric(...)` | no env var or kwarg honored — accept the spread, document in metric docstring | pyiqa-internal |
-| `lpips`, `ptlflow` | torch.hub-based — auto-redirected | `${FASTVIDEO_EVAL_CACHE}/torch/hub/` |
+| `pyiqa.create_metric(...)` | no env var or kwarg honored; document in metric docstring | pyiqa-internal |
+| `lpips`, `ptlflow` | torch.hub-based, auto-redirected | `${FASTVIDEO_EVAL_CACHE}/torch/hub/` |
 | Raw URL (no HF Hub) | use `ensure_checkpoint(name, source="https://...")` | `${FASTVIDEO_EVAL_CACHE}/models/<name>` |
-| **Dataset asset (raw video/mask/image)** auto-fetched from a public bucket | download into `get_cache_dir() / "datasets" / "<bench>"`, mirroring upstream's relative layout. Vendor any small manifest (CSV/JSON ≤1 MB) under the metric folder so the dataset can be used without external setup. | `${FASTVIDEO_EVAL_CACHE}/datasets/<bench>/` |
+| Dataset asset (raw video/mask/image) auto-fetched from a public bucket | download into `get_cache_dir() / "datasets" / "<bench>"`, mirroring upstream's relative layout. Vendor any small manifest (CSV/JSON ≤1 MB) under the metric folder so the dataset can be used without external setup. | `${FASTVIDEO_EVAL_CACHE}/datasets/<bench>/` |
 
-### Dataset assets (videos/masks/images) — vendor the manifest, auto-fetch the rest
+### Dataset assets: vendor the manifest, auto-fetch the rest
 
 If your metric ships with its own paired-reference dataset (Physics-IQ
 is the canonical example), follow this layout:
 
 - **Manifest** (CSV/JSON ≤1 MB): vendor it under
   `fastvideo/eval/metrics/<bench>/_vendored/<manifest>.<ext>`, with a
-  sibling `_vendored/LICENSE` recording attribution + provenance. The
-  `_vendored/` subdir is the project-wide convention for
-  upstream-provenance files: it's auto-skipped by metric discovery
+  sibling `_vendored/LICENSE` recording attribution and provenance.
+  The `_vendored/` subdir is the project-wide convention for
+  upstream-provenance files: it is auto-skipped by metric discovery
   (the `_` prefix) and by codespell (one `*/_vendored/*` glob in
   `[tool.codespell].skip`), so dropping in a new vendored file
   requires no further config. Read the manifest from the dataset
-  module via a `Path(__file__)`-relative resolver (mirror
+  module via a `Path(__file__)`-relative resolver. Mirror
   `_VENDORED_DESCRIPTIONS_CSV` in
-  `fastvideo/eval/datasets/physics_iq.py`).
-- **Heavy assets** (videos, masks, images): do NOT vendor. Auto-fetch
+  `fastvideo/eval/datasets/physics_iq.py`.
+- **Heavy assets** (videos, masks, images): do not vendor. Auto-fetch
   on first miss into `get_cache_dir() / "datasets" / "<bench>"`,
-  mirroring upstream's relative directory layout 1-for-1 so a
+  mirroring upstream's relative directory layout one-for-one so a
   pre-downloaded mirror at any path works as a drop-in
-  `dataset_root=`. Use atomic `.part` → final-rename to be safe under
-  concurrent SLURM ranks.
-- **Bucket override**: expose
-  `FASTVIDEO_<BENCH>_BUCKET_URL` so users with internal mirrors can
-  redirect.
+  `dataset_root=`. Use atomic `.part` then final-rename to be safe
+  under concurrent SLURM ranks.
+- **Bucket override**: expose `FASTVIDEO_<BENCH>_BUCKET_URL` so users
+  with internal mirrors can redirect.
 - **Opt-out**: accept `auto_download: bool = True` in the dataset
   constructor; on `False`, raise `FileNotFoundError` instead of
-  fetching, for air-gapped runs and CI.
+  fetching. This covers air-gapped runs and CI.
 
-The end-state UX is `get_dataset("<bench>")` — no kwargs, no submodule,
-no setup script.
+The end-state is `get_dataset("<bench>")` with no kwargs.
 
-### Example — CLIP backbone + LAION head
+### Example: CLIP backbone + LAION head
 
 ```python
 # fastvideo/eval/metrics/your_group/your_metric/metric.py
@@ -244,22 +245,21 @@ class YourMetric(BaseMetric):
         ...
 ```
 
-### Don't reach into other `~/.cache/...` dirs
+### Do not redirect other `~/.cache/...` dirs
 
 If a third-party library hard-codes `~/.cache/<lib>/` and offers no
-override, **don't try to redirect it** by setting `os.environ` or
-patching `os.path.expanduser`. Just document the exception in the
-metric's docstring. Forcing redirection is fragile and breaks user
-expectations of where the library's cache lives.
+override, document the exception in the metric's docstring. Forcing
+redirection by setting `os.environ` or patching `os.path.expanduser`
+is fragile and breaks user expectations of where the library's cache
+lives.
 
 ---
 
-## 4) Recipe C — Upstream-submodule-wrapped metric (vbench pattern)
+## 4) Recipe C: upstream-submodule-wrapped metric (vbench pattern)
 
 Use this when the upstream benchmark ships Python code (`vbench/`,
-`MIND/`, etc.) that's not pip-installable cleanly and we need to import
-it. The pattern (see `fastvideo/eval/metrics/vbench/__init__.py` for the
-full worked example):
+`MIND/`, etc.) that is not pip-installable cleanly. See
+`fastvideo/eval/metrics/vbench/__init__.py` for the worked example.
 
 ### 4.1 Pin the upstream as a submodule
 
@@ -272,8 +272,7 @@ git add .gitmodules fastvideo/third_party/eval/<bench>
 ```
 
 The submodule pulls under the standard `git submodule update --init
---recursive` flow that users run for kernel deps. **No special opt-in
-flag, no `update = none`, no setup script.**
+--recursive` flow that users already run for kernel deps.
 
 ### 4.2 Bootstrap on `sys.path`
 
@@ -289,15 +288,16 @@ if _UPSTREAM.is_dir() and str(_UPSTREAM) not in sys.path:
     sys.path.insert(0, str(_UPSTREAM))
 ```
 
-We don't `pip install` the upstream — its egg-link/.pth would just
-re-do this `sys.path.insert`. Skipping the install also skips the
-upstream's `setup.py` (which often gates on a specific CUDA version).
+We do not `pip install` the upstream because its egg-link/.pth would
+just re-do this `sys.path.insert`, and skipping the install also skips
+the upstream's `setup.py` (which often gates on a specific CUDA
+version).
 
-### 4.3 Modern-dep compat: runtime shims, NOT on-disk patches
+### 4.3 Modern-dep compat: runtime shims
 
-Upstream code pinned to e.g. `transformers==4.33.2`, `numpy<2` typically
-breaks against modern versions in 3-4 known places (API renames). Fix
-those at import time, in the same `__init__.py`:
+Upstream code pinned to e.g. `transformers==4.33.2`, `numpy<2`
+typically breaks against modern versions in 3-4 known places (API
+renames). Fix those at import time, in the same `__init__.py`:
 
 ```python
 def _install_compat_shims() -> None:
@@ -327,21 +327,22 @@ def _install_compat_shims() -> None:
 _install_compat_shims()
 ```
 
-For function-level patches that can't be expressed as attribute writes
-(e.g. wrapping a model factory function), use a `sys.meta_path` finder
-that wraps the loader. See the `_install_modeling_finetune_hook()`
-helper in `fastvideo/eval/metrics/vbench/__init__.py` for the pattern —
-about 30 lines.
+For function-level patches that cannot be expressed as attribute
+writes (e.g. wrapping a model factory function), use a
+`sys.meta_path` finder that wraps the loader. See
+`_install_modeling_finetune_hook()` in
+`fastvideo/eval/metrics/vbench/__init__.py` for the pattern (about 30
+lines).
 
-**Why shims and not `git apply` patches:** patches go stale (new upstream
-SHA → patches don't apply); shims are versioned Python code in our
-repo, grep-able, and only ever run if the targeted module is being
+Why shims rather than `git apply` patches: patches go stale when the
+upstream SHA changes; shims are versioned Python code in our repo,
+they are grep-able, and they only run if the targeted module is
 imported.
 
 ### 4.4 Per-sub-metric files
 
-Each sub-metric is a normal `BaseMetric` subclass that imports from the
-upstream:
+Each sub-metric is a normal `BaseMetric` subclass that imports from
+the upstream:
 
 ```python
 # fastvideo/eval/metrics/<bench>/<sub>/metric.py
@@ -359,15 +360,15 @@ class YourSubMetric(BaseMetric):
             return
         # The sys.path bootstrap fired when fastvideo.eval.metrics.<bench>
         # was imported (which auto-discovery does before importing this
-        # sub-package). So upstream imports just work:
+        # sub-package). Upstream imports just work:
         from <bench>.something import SomeModel
         ...
 ```
 
-### 4.5 Conditional registration when upstream is missing
+### 4.5 Conditional registration when the upstream is missing
 
-If a user installed `fastvideo[eval]` but didn't run `git submodule
-update --init`, `<bench>.*` metrics should *not* register. The
+If a user installed `fastvideo[eval]` but did not run `git submodule
+update --init`, `<bench>.*` metrics should not register. The
 auto-discovery walker imports each sub-package's `metric` module; have
 that import bail out cleanly:
 
@@ -383,44 +384,45 @@ if _AVAILABLE:
     from .metric import YourSubMetric  # noqa
 ```
 
-`fastvideo eval list` then reflects what the user actually has, not what
-they could have.
+`fastvideo eval list` then reflects what the user actually has rather
+than what they could have.
 
-### 4.6 Don't fix upstream bugs unless they block the metric
+### 4.6 Leave the upstream alone unless it blocks the metric
 
-The upstream is pinned. If a metric works against the pinned SHA, leave
-it. If it actively breaks against modern deps (the import-drift cases
-above), shim it. Resist the urge to "improve" upstream code in a
-fastvideo-side fork — that's how patches go stale and parity drifts.
+The upstream is pinned. If a metric works against the pinned SHA,
+leave the upstream files untouched. If it actively breaks against
+modern deps (the import-drift cases above), shim it. Avoid
+fastvideo-side forks of upstream code; they make patches go stale and
+parity drift.
 
 ---
 
-## 5) Model checkpoints — `ensure_checkpoint`
+## 5) Model checkpoints: `ensure_checkpoint`
 
-Use `ensure_checkpoint(name, source, filename=None)` for any non-package
-weights. It resolves a local path, downloading on miss, with filelock
-safety across processes and SLURM ranks.
+Use `ensure_checkpoint(name, source, filename=None)` for any
+non-package weights. It resolves a local path, downloading on miss,
+with filelock safety across processes and SLURM ranks.
 
-| `source` form | what happens |
+| `source` form | What happens |
 |---|---|
-| `"/abs/path/to/file.pth"` | passthrough — returned unchanged |
+| `"/abs/path/to/file.pth"` | passthrough, returned unchanged |
 | `"https://..."` | downloaded to `${FASTVIDEO_EVAL_CACHE}/models/<name>` via `huggingface_hub.http_get`, atomic rename, filelock |
 | `"org/repo"` (no `filename`) | `snapshot_download(repo_id)` → `~/.cache/huggingface/hub/` |
 | `"org/repo"` (with `filename`) | `hf_hub_download(repo_id, filename)` → `~/.cache/huggingface/hub/` |
 
-`name` is only used as the local filename for URL sources; HF sources
+`name` is only used as the local filename for URL sources. HF sources
 ignore it (HF manages its own cache key by content hash).
 
 ```python
 from fastvideo.eval.models import ensure_checkpoint
 
-# URL — name matters
+# URL: name matters
 ckpt = ensure_checkpoint(
     "amt-s.pth",
     source="https://huggingface.co/lalala125/AMT/resolve/main/amt-s.pth",
 )
 
-# HF single file — name is decorative
+# HF single file: name is decorative
 ckpt = ensure_checkpoint(
     "raft-things.pth",                      # ignored; HF cache uses repo+sha
     source="OpenGVLab/VBench_Used_Models",
@@ -432,41 +434,42 @@ ckpt = ensure_checkpoint(
 
 ## 6) Declaring `dependencies`
 
-Set `dependencies = ["pkg1", "pkg2"]` on your metric class (importable
-module names, not PyPI distribution names). The registry checks each via
-`importlib.util.find_spec` at instantiation time and raises a clean
-ImportError pointing the user at `pip install fastvideo[eval]`:
+Set `dependencies = ["pkg1", "pkg2"]` on your metric class with
+importable module names (not PyPI distribution names). The registry
+checks each via `importlib.util.find_spec` at instantiation time and
+raises a clean `ImportError` pointing the user at the right install
+extra:
 
 ```python
 class YourMetric(BaseMetric):
     dependencies = ["clip", "timm"]   # importable as `import clip`, `import timm`
 ```
 
-If a dep is in `[project.optional-dependencies.eval]`, you don't need to
-do anything more. If it's a new dep, **add it to that group** in
-`pyproject.toml`.
+If a dep is in `[project.optional-dependencies.eval-<group>]`, you do
+not need to do anything more. If it is a new dep, add it to that
+group in `pyproject.toml`.
 
 ---
 
 ## 7) Common gotchas
 
-- **Do not write a `setup.sh`** for your benchmark. Submodule init via
-  the standard `git submodule update --init --recursive` is enough; any
-  modern-dep compat goes into your `__init__.py` as runtime shims.
-- **Do not modify upstream files on disk.** The submodule should always
+- The standard `git submodule update --init --recursive` is enough
+  for a benchmark; do not write a `setup.sh`. Modern-dep compat goes
+  into your `__init__.py` as runtime shims.
+- Do not modify upstream files on disk. The submodule should always
   match its pinned SHA. Compat lives in our `__init__.py`.
-- **Do not pip-install the upstream.** The egg-link is just a glorified
-  `sys.path.insert` — we do that directly in `__init__.py`.
-- **Don't `import torch.hub.set_dir(...)` from your metric.** It's done
+- Do not pip-install the upstream. The egg-link is a glorified
+  `sys.path.insert`, which we do directly in `__init__.py`.
+- Do not call `torch.hub.set_dir(...)` from your metric. It is done
   globally in `fastvideo/eval/__init__.py`.
-- **Don't put cache-redirection env vars in your metric's `setup()`.**
-  By the time `setup()` runs, the library has likely already cached the
-  default-location decision. Set env vars at package-init time only.
-- **Skip rather than raise** when an input is missing. Use
-  `self._skip(sample, reason)` for any expected-missing input — it
-  returns a list of `MetricResult(score=None)` so other metrics in the
-  same evaluator continue.
-- **Watch for upstream re-registration conflicts.** If the upstream uses
+- Do not put cache-redirection env vars in your metric's `setup()`.
+  By the time `setup()` runs, the library has likely already cached
+  the default-location decision. Set env vars at package-init time.
+- Skip rather than raise when an input is missing. Use
+  `self._skip(sample, reason)` for any expected-missing input. It
+  returns a list of `MetricResult(score=None)` so other metrics in
+  the same evaluator continue.
+- Watch for upstream re-registration conflicts. If the upstream uses
   a global registry (detectron2's `META_ARCH_REGISTRY`, MMCV, etc.),
   loading the same model twice in the same process will throw. The
   evaluator already loads each metric once; if you write a custom
@@ -474,51 +477,51 @@ do anything more. If it's a new dep, **add it to that group** in
 
 ---
 
-## 8) Training-time eval — keep evaluators hot, free caches between calls
+## 8) Training-time eval: keep evaluators hot, free caches between calls
 
 When wiring eval into a training loop, the working pattern is:
 
-1. Construct the ``Evaluator`` **once**, attach it to the pipeline
-   (``self._eval = create_evaluator(...)``). Don't recreate it per
-   validation round — that re-pays the model load cost.
+1. Construct the `Evaluator` once and attach it to the pipeline
+   (`self._eval = create_evaluator(...)`). Do not recreate it per
+   validation round; that re-pays the model load cost.
 2. Save validation videos to disk (the diffusion path already does
-   this). Pass paths to ``evaluator.evaluate``, not in-memory tensors
+   this). Pass paths to `evaluator.evaluate`, not in-memory tensors
    that share GPU memory with the training model.
-3. Run validation **only on rank 0** of each sequence-parallel group;
-   gather paths from other ranks and let rank 0 score everything.
-4. After every ``evaluate(...)`` call, call
-   ``evaluator.release_cuda_memory()`` in a ``finally`` block —
-   ``gc.collect()`` + ``torch.cuda.empty_cache()`` +
-   ``torch.cuda.ipc_collect()``. The eval model stays loaded; only
-   transient activation buffers from the just-finished call get freed::
+3. Run validation only on rank 0 of each sequence-parallel group.
+   Gather paths from other ranks and let rank 0 score everything.
+4. After every `evaluate(...)` call, call
+   `evaluator.release_cuda_memory()` in a `finally` block. That runs
+   `gc.collect()` + `torch.cuda.empty_cache()` +
+   `torch.cuda.ipc_collect()`. The eval model stays loaded; only
+   transient activation buffers from the just-finished call get
+   freed:
 
-   ```
+   ```python
    for video_path in batch:
        try:
            scores = self._eval.evaluate(video=load_video(video_path))
        finally:
-        self._eval.release_cuda_memory()
+           self._eval.release_cuda_memory()
    ```
-  
-5. If memory pressure spikes (rare on H200), call
-   ``evaluator.unload()`` to drop every metric reference and let the
-   GPU memory be GC'd. ``unload`` is reversible: ``evaluator.reload()``
-   rebuilds the same metrics with the original config (re-paying the
-model load cost). Calling ``evaluate`` between ``unload`` and
-``reload`` raises a clear ``RuntimeError``.
 
-This is the pattern in
-``fastvideo.training.{ptlflow,vbench}_validation`` (mhuo's branch).
+5. If memory pressure spikes (rare on H200), call
+   `evaluator.unload()` to drop every metric reference and let the
+   GPU memory be GC'd. `unload` is reversible:
+   `evaluator.reload()` rebuilds the same metrics with the original
+   config (re-paying the model load cost). Calling `evaluate`
+   between `unload` and `reload` raises a clear `RuntimeError`.
+
 For most metrics (sub-1 GB backbones, e.g. CLIP/DINO/RAFT/AMT) the
 eval model can stay co-resident with the training model in
-``transformer.eval()`` mode without any swap. For larger ones
+`transformer.eval()` mode without any swap. For larger ones
 (VideoScore2 at 14 GB), measure first; if it fits on the rank-0 GPU
-during validation (training model in eval mode = no grads/optimizer
-updates), keep it hot. If not, ``unload`` between rounds.
+during validation (training model in eval mode means no
+grads/optimizer updates), keep it hot. If not, `unload` between
+rounds.
 
 ## 9) Local verification
 
-Native and library-wrapped metrics — single-GPU smoke is enough:
+Native and library-wrapped metrics: a single-GPU smoke is enough.
 
 ```python
 import torch
@@ -529,27 +532,28 @@ video = torch.randn(1, 49, 3, 256, 256, device="cuda").clamp(0, 1)
 print(ev.evaluate(video=video))
 ```
 
-Submodule-wrapped metrics — also do a parity check against the upstream
-once. The pattern from `research/` (see commit history) gives a clean
-recipe: clone upstream into a separate venv, run the same video through
-both, expect EXACT match on bit-deterministic metrics and ≤1% drift on
-backbone-heavy ones (driven by transformers/torch version differences).
+Submodule-wrapped metrics: also do a parity check against the
+upstream once. Clone upstream into a separate venv, run the same
+video through both, and expect an exact match on bit-deterministic
+metrics and ≤1% drift on backbone-heavy ones (driven by
+transformers/torch version differences).
 
-For quick-and-dirty parity in CI: pin a tiny test video, record expected
+For quick parity in CI: pin a tiny test video, record expected
 scores ± tolerance, and add a calibration test under
 `fastvideo/tests/eval/`.
 
 ---
 
-## 10) When *not* to add a metric
+## 10) When not to add a metric
 
-- **Set-vs-set distribution metrics** (FVD, FID-style) don't fit
-  `BaseMetric.compute(sample)` cleanly — they need a population. Adding
-  them requires a stateful accumulator interface that doesn't exist
-  yet. Open an issue first.
-- **Metrics requiring a single-GPU model > available memory.** Eval is
-  not the place for tensor-parallel sharding; metrics are expected to
-  fit on one GPU.
-- **Metrics that need `mmcv` with conflicting CUDA ABI.** Document the
-  affected sub-metrics as unsupported and skip them — do not build
-  isolation infrastructure (subprocess engine, per-metric venv).
+- **Set-vs-set distribution metrics** (FVD, FID-style) do not fit
+  `BaseMetric.compute(sample)` cleanly; they need a population.
+  Adding them requires a stateful accumulator interface that does
+  not exist yet. Open an issue first.
+- **Metrics requiring a single-GPU model larger than available
+  memory.** Eval is not the place for tensor-parallel sharding;
+  metrics are expected to fit on one GPU.
+- **Metrics that need `mmcv` with a conflicting CUDA ABI.** Document
+  the affected sub-metrics as unsupported and skip them. Building
+  isolation infrastructure (subprocess engine, per-metric venv) is
+  out of scope.
