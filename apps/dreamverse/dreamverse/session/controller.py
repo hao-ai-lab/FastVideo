@@ -25,11 +25,11 @@ import uuid
 from typing import TYPE_CHECKING
 
 from fastapi import WebSocket, WebSocketDisconnect
-from gpu_pool import GPUSlot
-from session_init_image import cleanup_session_init_image, persist_session_init_image
-from worker_ipc import MediaChunk, MediaComplete, MediaInit
+from dreamverse.gpu_pool import GPUSlot
+from dreamverse.session_init_image import cleanup_session_init_image, persist_session_init_image
+from dreamverse.worker_ipc import MediaChunk, MediaComplete, MediaInit
 
-from config import (
+from dreamverse.config import (
     DEFAULT_MODEL_ID,
     GENERATION_SEGMENT_CAP,
     PROMPT_AUTO_SLEEP_MS,
@@ -37,20 +37,20 @@ from config import (
     PROMPT_TIMEOUT_MS,
     SESSION_TIMEOUT_SECONDS,
 )
-from rewrite_prompt_payload import normalize_prompt_window_prompts
+from dreamverse.rewrite_prompt_payload import normalize_prompt_window_prompts
 
-from session.messages import PromptSubmission, ReadyPrompt
-from utils import (
+from dreamverse.session.messages import PromptSubmission, ReadyPrompt
+from dreamverse.utils import (
     _main_print,
     _resolve_generation_segment_cap,
     PROMPT_EXTENSION_FAILURE_USER_MESSAGE,
 )
 
 if TYPE_CHECKING:
-    from gpu_pool import GPUPool
-    from session_logger import SessionEventLogger
-    from prompt_enhancer import PromptEnhancer
-    from prompt_safety import PromptSafetyFilter
+    from dreamverse.gpu_pool import GPUPool
+    from dreamverse.session_logger import SessionEventLogger
+    from dreamverse.prompt_enhancer import PromptEnhancer
+    from dreamverse.prompt_safety import PromptSafetyFilter
 
 
 class SessionController:

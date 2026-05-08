@@ -4,20 +4,14 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import sys
 import time
-from pathlib import Path
 
-
-SERVER_DIR = Path(__file__).resolve().parent
-if str(SERVER_DIR) not in sys.path:
-    sys.path.insert(0, str(SERVER_DIR))
 
 os.environ.setdefault("CEREBRAS_API_KEY", "dummy")
 os.environ.setdefault("GROQ_API_KEY", "dummy")
 
-import prompt_enhancer as prompt_enhancer_module
-from prompt_enhancer import (
+import dreamverse.prompt_enhancer as prompt_enhancer_module
+from dreamverse.prompt_enhancer import (
     ProviderRuntime,
     PromptEnhancer,
     _build_prompt_backup_path,

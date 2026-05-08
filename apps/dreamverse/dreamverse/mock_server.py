@@ -29,8 +29,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from config import FRONTEND_STATIC_DIR_CANDIDATES, GENERATION_SEGMENT_CAP
-from session_init_image import cleanup_session_init_image, persist_session_init_image
+from dreamverse._deps import require_dreamverse_runtime_deps
+from dreamverse.config import FRONTEND_STATIC_DIR_CANDIDATES, GENERATION_SEGMENT_CAP
+from dreamverse.session_init_image import cleanup_session_init_image, persist_session_init_image
 
 LATENCY_MS = 200
 SESSION_TIMEOUT_SECONDS = 300
@@ -1134,6 +1135,8 @@ def cli() -> None:
 
     import argparse
     import uvicorn
+
+    require_dreamverse_runtime_deps()
 
     parser = argparse.ArgumentParser(description="Protocol-compatible mock server for the LTX2 UI")
     parser.add_argument(

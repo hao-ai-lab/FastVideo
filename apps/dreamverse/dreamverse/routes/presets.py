@@ -14,12 +14,12 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from config import (
+from dreamverse.config import (
     CURATED_PRESETS_FILE_PATH,
     CURATED_PRESETS_FALLBACK_FILE_PATH,
 )
 
-import runtime
+import dreamverse.runtime as runtime
 
 prompt_config_router = APIRouter()
 curated_presets_router = APIRouter()

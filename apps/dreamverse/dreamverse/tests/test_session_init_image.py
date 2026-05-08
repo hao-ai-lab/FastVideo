@@ -6,7 +6,7 @@ from pathlib import Path
 from PIL import Image
 import pytest
 
-from session_init_image import (
+from dreamverse.session_init_image import (
     MAX_SESSION_INIT_IMAGE_BYTES,
     cleanup_session_init_image,
     persist_session_init_image,
