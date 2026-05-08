@@ -1,0 +1,19 @@
+descriptions.csv is vendored from the upstream Physics-IQ benchmark
+(https://github.com/google-deepmind/physics-IQ-benchmark, file
+descriptions/descriptions.csv) without modification. The associated video,
+mask, and switch-frame assets are NOT vendored — they auto-fetch on first
+use from gs://physics-iq-benchmark (public bucket; HTTPS-readable at
+https://storage.googleapis.com/physics-iq-benchmark/).
+
+Licensed under Creative Commons Attribution 4.0 International (CC-BY-4.0).
+See https://creativecommons.org/licenses/by/4.0/legalcode for the full
+license text.
+
+Citation:
+    @article{motamed2025physics,
+      title={Do generative video models understand physical principles?},
+      author={Saman Motamed and Laura Culp and Kevin Swersky and
+              Priyank Jaini and Robert Geirhos},
+      journal={arXiv preprint arXiv:2501.09038},
+      year={2025}
+    }
