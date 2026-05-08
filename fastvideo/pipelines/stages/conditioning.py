@@ -36,9 +36,11 @@ class ConditioningStage(PipelineStage):
         Returns:
             The batch with applied conditioning.
         """
-        # Negative-prompt prepending now happens earlier in the
-        # pipeline (CFG is applied as a separate forward pass per step
-        # in DenoisingStage), so this stage is currently a no-op.
+        # Forward is a no-op: CFG is applied via two separate
+        # transformer forward passes inside DenoisingStage (e.g.
+        # denoising.py:364-394, :706, :930). The class is kept because
+        # verify_input / verify_output still validate CFG fields and
+        # disable CFG when prompt_embeds is empty.
         return batch
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
