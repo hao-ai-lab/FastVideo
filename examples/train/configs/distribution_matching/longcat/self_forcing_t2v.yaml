@@ -8,6 +8,7 @@ models:
     _target_: fastvideo.train.models.longcat.LongCatCausalModel
     init_from: FastVideo/LongCat-Video-T2V-Diffusers
     trainable: true
+    causal_block_size: 3
   teacher:
     _target_: fastvideo.train.models.longcat.LongCatModel
     init_from: FastVideo/LongCat-Video-T2V-Diffusers

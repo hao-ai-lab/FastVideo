@@ -143,11 +143,13 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
                             num_cond_latents=cached_frames,
                             kv_cache_dict=kv_view,
                             kv_cache_start_frame=0,
+                            causal_block_size=self.chunk_size,
                         )
                     if isinstance(pred_noise_bcthw, tuple):
                         raise RuntimeError(
                             "LongCat transformer returned a tuple when "
                             "return_kv=False")
+                    pred_noise_bcthw = -pred_noise_bcthw
                     pred_noise_btchw = pred_noise_bcthw.permute(0, 2, 1, 3,
                                                                  4)
 
@@ -168,8 +170,9 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
                         noise = torch.randn(
                             video_raw_latent_shape,
                             dtype=pred_video_btchw.dtype,
+                            device=device,
                             generator=gen,
-                        ).to(device)
+                        )
                         noise_latents_btchw = self.scheduler.add_noise(
                             pred_video_btchw.flatten(0, 1),
                             noise.flatten(0, 1),
@@ -217,6 +220,7 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
                         timestep=t_context,
                         num_cond_latents=cached_frames_for_write,
                         return_kv=True,
+                        causal_block_size=self.chunk_size,
                         skip_crs_attn=True,
                     )
                 if not isinstance(out, tuple) or len(out) != 2:

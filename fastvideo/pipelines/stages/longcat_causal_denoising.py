@@ -112,6 +112,7 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
                             num_cond_latents=cached_frames,
                             kv_cache_dict=kv_view,
                             kv_cache_start_frame=0,
+                            causal_block_size=self.chunk_size,
                         )
                     if isinstance(pred_noise_bcthw, tuple):
                         raise RuntimeError(
@@ -172,6 +173,7 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
                         timestep=t_context,
                         num_cond_latents=cached_frames_for_write,
                         return_kv=True,
+                        causal_block_size=self.chunk_size,
                         skip_crs_attn=True,
                     )
                 if not isinstance(out, tuple) or len(out) != 2:

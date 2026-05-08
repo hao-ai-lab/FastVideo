@@ -22,6 +22,45 @@ from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.third_party.longcat_video.block_sparse_attention.bsa_interface import flash_attn_bsa_3d
 
 
+def build_longcat_block_causal_mask(
+    *,
+    query_frames: int,
+    key_frames: int,
+    tokens_per_frame: int,
+    causal_block_size: int,
+    device: torch.device | str,
+) -> torch.Tensor:
+    """Build a block-causal mask for LongCat video-token attention.
+
+    Mask entries are True for visible K/V tokens. Frames in the same
+    causal block can attend bidirectionally within that block, but not
+    to later blocks.
+    """
+    if query_frames <= 0:
+        raise ValueError("query_frames must be > 0")
+    if key_frames <= 0:
+        raise ValueError("key_frames must be > 0")
+    if tokens_per_frame <= 0:
+        raise ValueError("tokens_per_frame must be > 0")
+    if causal_block_size <= 0:
+        raise ValueError("causal_block_size must be > 0")
+    if query_frames > key_frames:
+        raise ValueError("query_frames must be <= key_frames")
+
+    cached_frames = key_frames - query_frames
+    q_tokens = query_frames * tokens_per_frame
+    k_tokens = key_frames * tokens_per_frame
+    q_token_idx = torch.arange(q_tokens, device=device)
+    k_token_idx = torch.arange(k_tokens, device=device)
+    q_frame_idx = cached_frames + q_token_idx // tokens_per_frame
+    k_frame_idx = k_token_idx // tokens_per_frame
+    q_block_end = (
+        (q_frame_idx // causal_block_size + 1) * causal_block_size
+    ).clamp(max=key_frames)
+    mask = k_frame_idx.unsqueeze(0) < q_block_end.unsqueeze(1)
+    return mask.unsqueeze(0).unsqueeze(0)
+
+
 # ============================================================================
 # Embeddings
 # ============================================================================
@@ -279,6 +318,7 @@ class LongCatSelfAttention(nn.Module):
         latent_shape: tuple,          # (T, H, W)
         num_cond_latents: int = 0,    # Number of conditioning latent frames (for I2V)
         return_kv: bool = False,      # Return K/V for caching
+        causal_block_size: int | None = None,
         **kwargs
     ) -> torch.Tensor | tuple:
         """
@@ -324,6 +364,31 @@ class LongCatSelfAttention(nn.Module):
         # Transpose back: [B, N, num_heads, head_dim] or [B, H, N, D] for BSA
         q = q_rope.transpose(1, 2)
         k = k_rope.transpose(1, 2)
+
+        # === Block-Causal Attention ===
+        if causal_block_size is not None:
+            attn_mask = build_longcat_block_causal_mask(
+                query_frames=T,
+                key_frames=T,
+                tokens_per_frame=H * W,
+                causal_block_size=int(causal_block_size),
+                device=x.device,
+            )
+            out = torch.nn.functional.scaled_dot_product_attention(
+                q.transpose(1, 2),
+                k.transpose(1, 2),
+                v.transpose(1, 2),
+                attn_mask=attn_mask,
+                dropout_p=0.0,
+                is_causal=False,
+            )
+            out = out.transpose(1, 2)
+            out = out.reshape(B, N, C)
+            out, _ = self.to_out(out)
+
+            if return_kv:
+                return out, (k_cache, v_cache)
+            return out
 
         # === I2V Split Attention ===
         # For I2V, conditioned tokens and noise tokens are processed separately
@@ -427,6 +492,7 @@ class LongCatSelfAttention(nn.Module):
         num_cond_latents: int,        # Number of conditioning latent frames
         kv_cache: tuple,              # (k_cond, v_cond) - [B, heads, N_cond, head_dim]
         kv_cache_start_frame: int = 0,
+        causal_block_size: int | None = None,
     ) -> torch.Tensor:
         """
         Forward using cached K/V from conditioning frames.
@@ -499,10 +565,20 @@ class LongCatSelfAttention(nn.Module):
         # Extract only the noise portion of Q (last N tokens)
         q_rope = q_padding[:, :, -N:].contiguous()
 
-        # Run attention: Q_noise attends to full K/V (cond + noise)
+        attn_mask = None
+        if causal_block_size is not None:
+            attn_mask = build_longcat_block_causal_mask(
+                query_frames=T,
+                key_frames=full_T,
+                tokens_per_frame=H * W,
+                causal_block_size=int(causal_block_size),
+                device=x.device,
+            )
+
+        # Run attention: Q_noise attends to visible cached/current K/V.
         out = torch.nn.functional.scaled_dot_product_attention(
             q_rope, k_full, v_full,
-            attn_mask=None,
+            attn_mask=attn_mask,
             dropout_p=0.0,
             is_causal=False
         )  # [B, heads, N_noise, head_dim]
@@ -786,6 +862,7 @@ class LongCatTransformerBlock(nn.Module):
         return_kv: bool = False,      # Return K/V for caching
         kv_cache: tuple | None = None,  # Pre-computed K/V cache
         kv_cache_start_frame: int = 0,  # Absolute start frame of retained KV cache
+        causal_block_size: int | None = None,
         skip_crs_attn: bool = False,  # Skip cross-attention (for cache init)
         **kwargs
     ) -> torch.Tensor | tuple:
@@ -828,6 +905,7 @@ class LongCatTransformerBlock(nn.Module):
                 num_cond_latents=num_cond_latents,
                 kv_cache=kv_cache,
                 kv_cache_start_frame=kv_cache_start_frame,
+                causal_block_size=causal_block_size,
             )
             kv_cache_new = None  # Don't return cache when using cache
         else:
@@ -836,6 +914,7 @@ class LongCatTransformerBlock(nn.Module):
                 latent_shape=latent_shape,
                 num_cond_latents=num_cond_latents,
                 return_kv=return_kv,
+                causal_block_size=causal_block_size,
             )
             if return_kv:
                 attn_out, kv_cache_new = attn_result
@@ -1047,6 +1126,7 @@ class LongCatTransformer3DModel(BaseDiT):
         return_kv: bool = False,               # If True, return (output, kv_cache_dict)
         kv_cache_dict: dict | None = None,     # Pre-computed {block_idx: (k, v)}
         kv_cache_start_frame: int = 0,         # Absolute start frame of retained KV cache
+        causal_block_size: int | None = None,  # Block size for causal self-attention
         skip_crs_attn: bool = False,           # Skip cross-attention (for cache init)
         offload_kv_cache: bool = False,        # Move cache to CPU after compute
         **kwargs
@@ -1108,6 +1188,7 @@ class LongCatTransformer3DModel(BaseDiT):
                 return_kv=return_kv,
                 kv_cache=block_kv_cache,
                 kv_cache_start_frame=kv_cache_start_frame,
+                causal_block_size=causal_block_size,
                 skip_crs_attn=skip_crs_attn,
             )
             

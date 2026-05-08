@@ -61,6 +61,7 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
         flow_shift: float = 12.0,
         enable_gradient_checkpointing_type: str | None = None,
         transformer_override_safetensor: str | None = None,
+        causal_block_size: int = 3,
     ) -> None:
         super().__init__(
             init_from=init_from,
@@ -73,6 +74,9 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
         )
         # Lazy-allocated per cache_tag on the first store_kv call.
         self._streaming_caches: dict[str, _LongCatStreamingCache] = {}
+        self._causal_block_size = int(causal_block_size)
+        if self._causal_block_size <= 0:
+            raise ValueError("causal_block_size must be > 0")
 
     def clear_caches(self, *, cache_tag: str = "pos") -> None:
         self._streaming_caches.pop(str(cache_tag), None)
@@ -132,6 +136,7 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
                     timestep=timestep,
                     num_cond_latents=cached_frames,
                     return_kv=True,
+                    causal_block_size=self._causal_block_size,
                     skip_crs_attn=True,
                 )
                 if new_chunk is None:
@@ -155,11 +160,12 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
                 kv_cache_dict=kv_cache_view,
                 # Buffer never evicts; cached frames always start at frame 0.
                 kv_cache_start_frame=0,
+                causal_block_size=self._causal_block_size,
             )
             if isinstance(pred_noise, tuple):
                 raise RuntimeError("LongCat transformer returned a tuple "
                                    "when return_kv=False")
-        return pred_noise.permute(0, 2, 1, 3, 4)
+        return -pred_noise.permute(0, 2, 1, 3, 4)
 
     # ------------------------------------------------------------------
     # KV cache buffer
