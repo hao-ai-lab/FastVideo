@@ -162,7 +162,10 @@ check_untyped_defs = true
 follow_imports = "silent"
 
 [tool.codespell]
-skip = "./data,./wandb,ui/package-lock.json"
+# ``*/_vendored/*`` matches upstream-provenance files vendored under any
+# ``_vendored/`` subdir (project-wide convention; mirrors the
+# ``_``-prefixed auto-discovery skip).
+skip = "./data,./wandb,ui/package-lock.json,*/_vendored/*"
 
 [tool.ruff]
 # Allow lines to be as long as 120.

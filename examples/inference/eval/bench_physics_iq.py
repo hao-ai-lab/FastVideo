@@ -1,26 +1,24 @@
 """End-to-end Physics-IQ: dataset → generate → score → aggregate.
 
-Walks the on-disk Physics-IQ release, generates one video per take-1
-scenario with LTX2 (using the scenario caption as the prompt), scores
-each generated video against the take-1 reference and the take-2
-"physical-variance" reference, and prints aggregate scores using
-:meth:`PhysicsIQMetric.aggregate_components` — the official scoring
-recipe from the upstream benchmark.
+Generates one video per take-1 scenario with LTX2 (using the scenario
+caption as the prompt), scores each generated video against the take-1
+reference and the take-2 "physical-variance" reference, and prints
+aggregate scores using :meth:`PhysicsIQMetric.aggregate_components` —
+the official scoring recipe from the upstream benchmark.
 
-The Physics-IQ release ships at 30 FPS; the dataset transcodes once
-into ``<dataset_root>/.physics_iq_cache/`` on first access.
+Reference videos / masks / switch-frames auto-fetch on first miss into
+``${FASTVIDEO_EVAL_CACHE}/datasets/physics_iq/``; pass ``--dataset-root``
+to point at a pre-downloaded mirror instead.
 
 Quick smoke run on 4 scenarios across 2 GPUs::
 
     python examples/inference/eval/bench_physics_iq.py \\
-        --dataset-root /path/to/physics-IQ-benchmark \\
         --limit 4 --num-gpus 2 \\
         --videos-dir outputs_video/physics_iq_smoke
 
 Re-score existing generations without regenerating::
 
     python examples/inference/eval/bench_physics_iq.py \\
-        --dataset-root /path/to/physics-IQ-benchmark \\
         --videos-dir outputs_video/physics_iq_smoke \\
         --skip-generation
 """
@@ -71,9 +69,10 @@ def _generate_videos(rows: list[dict], videos_dir: Path,
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--dataset-root", type=Path, required=True,
-                   help="Path to the Physics-IQ release (the directory "
-                        "containing descriptions/ and split-videos/).")
+    p.add_argument("--dataset-root", type=Path, default=None,
+                   help="Path to a pre-downloaded Physics-IQ release. "
+                        "Defaults to ${FASTVIDEO_EVAL_CACHE}/datasets/physics_iq, "
+                        "auto-fetching missing assets from the public bucket.")
     p.add_argument("--videos-dir", type=Path,
                    default=Path("outputs_video/bench_physics_iq"),
                    help="Where to read/write generated videos.")
@@ -92,9 +91,10 @@ def main() -> None:
                         "Defaults to <videos-dir>/scores.json.")
     args = p.parse_args()
 
-    # 1. Walk the Physics-IQ corpus.
-    ds = get_dataset("physics_iq", dataset_root=args.dataset_root)
-    rows = list(ds)[: args.limit]
+    # 1. Walk the Physics-IQ corpus. Pass --limit to the dataset
+    # constructor so auto-download only fetches the assets we'll use.
+    ds = get_dataset("physics_iq", dataset_root=args.dataset_root, limit=args.limit)
+    rows = list(ds)
     print(f"[load] Physics-IQ: {len(rows)} scenarios from {ds.dataset_dir}")
 
     # 2. Generate (or reuse) one mp4 per scenario.

@@ -148,6 +148,39 @@ one knob (`FASTVIDEO_EVAL_CACHE`) to redirect everything.
 | `pyiqa.create_metric(...)` | no env var or kwarg honored — accept the spread, document in metric docstring | pyiqa-internal |
 | `lpips`, `ptlflow` | torch.hub-based — auto-redirected | `${FASTVIDEO_EVAL_CACHE}/torch/hub/` |
 | Raw URL (no HF Hub) | use `ensure_checkpoint(name, source="https://...")` | `${FASTVIDEO_EVAL_CACHE}/models/<name>` |
+| **Dataset asset (raw video/mask/image)** auto-fetched from a public bucket | download into `get_cache_dir() / "datasets" / "<bench>"`, mirroring upstream's relative layout. Vendor any small manifest (CSV/JSON ≤1 MB) under the metric folder so the dataset can be used without external setup. | `${FASTVIDEO_EVAL_CACHE}/datasets/<bench>/` |
+
+### Dataset assets (videos/masks/images) — vendor the manifest, auto-fetch the rest
+
+If your metric ships with its own paired-reference dataset (Physics-IQ
+is the canonical example), follow this layout:
+
+- **Manifest** (CSV/JSON ≤1 MB): vendor it under
+  `fastvideo/eval/metrics/<bench>/_vendored/<manifest>.<ext>`, with a
+  sibling `_vendored/LICENSE` recording attribution + provenance. The
+  `_vendored/` subdir is the project-wide convention for
+  upstream-provenance files: it's auto-skipped by metric discovery
+  (the `_` prefix) and by codespell (one `*/_vendored/*` glob in
+  `[tool.codespell].skip`), so dropping in a new vendored file
+  requires no further config. Read the manifest from the dataset
+  module via a `Path(__file__)`-relative resolver (mirror
+  `_VENDORED_DESCRIPTIONS_CSV` in
+  `fastvideo/eval/datasets/physics_iq.py`).
+- **Heavy assets** (videos, masks, images): do NOT vendor. Auto-fetch
+  on first miss into `get_cache_dir() / "datasets" / "<bench>"`,
+  mirroring upstream's relative directory layout 1-for-1 so a
+  pre-downloaded mirror at any path works as a drop-in
+  `dataset_root=`. Use atomic `.part` → final-rename to be safe under
+  concurrent SLURM ranks.
+- **Bucket override**: expose
+  `FASTVIDEO_<BENCH>_BUCKET_URL` so users with internal mirrors can
+  redirect.
+- **Opt-out**: accept `auto_download: bool = True` in the dataset
+  constructor; on `False`, raise `FileNotFoundError` instead of
+  fetching, for air-gapped runs and CI.
+
+The end-state UX is `get_dataset("<bench>")` — no kwargs, no submodule,
+no setup script.
 
 ### Example — CLIP backbone + LAION head
 
@@ -466,7 +499,7 @@ When wiring eval into a training loop, the working pattern is:
        finally:
         self._eval.release_cuda_memory()
    ```
-   
+  
 5. If memory pressure spikes (rare on H200), call
    ``evaluator.unload()`` to drop every metric reference and let the
    GPU memory be GC'd. ``unload`` is reversible: ``evaluator.reload()``

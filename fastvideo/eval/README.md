@@ -11,7 +11,7 @@ behind a single registry-driven API.
 |---|---|
 | `common.*`, `optical_flow.*`, `vbench.*` (subset), `physics_iq.*`, `videoscore2` | `pip install -e .[eval]` |
 | Just VBench (12 of 16 sub-metrics) | `pip install -e .[eval-vbench]` |
-| Just Physics-IQ (no extras needed; group is documentary) | `pip install -e .[eval-physics-iq]` |
+| Just Physics-IQ (covered by `[eval]`; manifest CSV vendored, video assets auto-fetch from the public bucket) | `pip install -e .[eval-physics-iq]` |
 | Everything pip-installable, including `vbench.scene` (AVoCaDO) | `pip install -e .[eval-full]` |
 | `vbench.{color, multiple_objects, object_class, spatial_relationship}` (GRiT/detectron2) | `pip install -e .[eval-vbench]` and then `pip install 'git+https://github.com/facebookresearch/detectron2.git'` (CUDA-version-pinned, not cleanly on PyPI) |
 
@@ -93,12 +93,20 @@ from fastvideo.eval.datasets import get_dataset, list_datasets
 
 list_datasets()                    # ['physics_iq', 'vbench']
 
-ds = get_dataset("physics_iq", dataset_root="/path/to/physics-IQ-benchmark")
+ds = get_dataset("physics_iq", limit=4)   # auto-fetches assets on first miss
 for row in ds:
     # row contains 'prompt', 'reference', 'reference_take2', and metric-
     # specific aux fields. Drop straight into Evaluator.evaluate(**row).
     ...
 ```
+
+The Physics-IQ manifest CSV is vendored under
+`fastvideo/eval/metrics/physics_iq/_vendored/descriptions.csv`; per-scenario
+videos / masks / switch-frames auto-fetch on first use into
+`${FASTVIDEO_EVAL_CACHE}/datasets/physics_iq/`. Pass
+`auto_download=False` (or `dataset_root=` a pre-downloaded copy) for
+air-gapped runs. Override the bucket via
+`FASTVIDEO_PHYSICS_IQ_BUCKET_URL` if you mirror it internally.
 
 ## Adding a new metric
 
@@ -156,7 +164,9 @@ Eval cache root: `${FASTVIDEO_CACHE_ROOT}/eval/` (default
 ${FASTVIDEO_CACHE_ROOT}/eval/
 ├── models/      # URL-fetched checkpoints (LAION head, AMT, GRiT)
 ├── torch/       # redirected TORCH_HOME (DINO via torch.hub, lpips)
-└── clip/        # passed as download_root= to clip.load callsites
+├── clip/        # passed as download_root= to clip.load callsites
+└── datasets/    # auto-fetched dataset assets, one subdir per benchmark
+                 # (e.g. datasets/physics_iq/{split-videos,switch-frames,...})
 ```
 
 HF-hosted models stay in HF's default cache (`~/.cache/huggingface/hub/`)
