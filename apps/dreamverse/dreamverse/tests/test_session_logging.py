@@ -8,8 +8,6 @@ import json
 import os
 import re
 import socket
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi import WebSocketDisconnect
@@ -17,18 +15,14 @@ from PIL import Image
 import pytest
 
 
-SERVER_DIR = Path(__file__).resolve().parent
-if str(SERVER_DIR) not in sys.path:
-    sys.path.insert(0, str(SERVER_DIR))
-
 os.environ.setdefault("CEREBRAS_API_KEY", "dummy")
 os.environ.setdefault("GROQ_API_KEY", "dummy")
 
-import main as server_main  # noqa: E402
-import runtime  # noqa: E402
-from session_logger import SessionEventLogger  # noqa: E402
-from worker_ipc import MediaChunk, MediaComplete, MediaInit  # noqa: E402
-from session import controller as session_controller  # noqa: E402
+import dreamverse.main as server_main  # noqa: E402
+import dreamverse.runtime as runtime  # noqa: E402
+from dreamverse.session_logger import SessionEventLogger  # noqa: E402
+from dreamverse.worker_ipc import MediaChunk, MediaComplete, MediaInit  # noqa: E402
+from dreamverse.session import controller as session_controller  # noqa: E402
 
 pytestmark = pytest.mark.gpu
 

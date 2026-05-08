@@ -3,20 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sys
-from pathlib import Path
 
 from fastapi import WebSocketDisconnect
 
 
-SERVER_DIR = Path(__file__).resolve().parent
-if str(SERVER_DIR) not in sys.path:
-    sys.path.insert(0, str(SERVER_DIR))
-
 os.environ.setdefault("CEREBRAS_API_KEY", "dummy")
 os.environ.setdefault("GROQ_API_KEY", "dummy")
 
-import mock_server
+import dreamverse.mock_server as mock_server
 
 
 class _FakeWebSocket:

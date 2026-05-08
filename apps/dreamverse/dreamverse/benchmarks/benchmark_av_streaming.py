@@ -41,7 +41,7 @@ _SERVER_ROOT = os.path.dirname(_HERE)
 if _SERVER_ROOT not in sys.path:
     sys.path.insert(0, _SERVER_ROOT)
 
-from av_streaming import stream_fmp4  # noqa: E402
+from dreamverse.av_streaming import stream_fmp4  # noqa: E402
 
 
 @dataclass

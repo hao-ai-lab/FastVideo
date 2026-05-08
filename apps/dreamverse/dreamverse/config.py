@@ -3,8 +3,14 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SERVER_ROOT = Path(__file__).resolve().parent
+_FASTVIDEO_DREAMVERSE_HOME = os.environ.get("FASTVIDEO_DREAMVERSE_HOME")
+_XDG_STATE_HOME = os.environ.get("XDG_STATE_HOME")
+_DEFAULT_STATE_ROOT = (Path(_FASTVIDEO_DREAMVERSE_HOME) if _FASTVIDEO_DREAMVERSE_HOME else
+                       (Path(_XDG_STATE_HOME) if _XDG_STATE_HOME else Path.home() / ".local/state") /
+                       "fastvideo/dreamverse")
+_OUTPUTS_ROOT = _DEFAULT_STATE_ROOT / "outputs"
 _PROMPTS_ROOT = _SERVER_ROOT / "prompts"
-_PROMPTS_LOCAL_ROOT = _SERVER_ROOT / "prompts.local"
+_PROMPTS_LOCAL_ROOT = _DEFAULT_STATE_ROOT / "prompts.local"
 _APP_ROOT = _REPO_ROOT
 
 
@@ -243,19 +249,19 @@ PROMPT_MAX_COMPLETION_TOKENS = 3000
 )
 PROMPT_REWRITE_LOG_PATH = os.getenv(
     "FASTVIDEO_PROMPT_REWRITE_LOG_PATH",
-    str(_SERVER_ROOT / "outputs" / "prompt_rewrite.jsonl"),
+    str(_OUTPUTS_ROOT / "prompt_rewrite.jsonl"),
 ).strip()
 PROMPT_ENHANCE_LOG_PATH = os.getenv(
     "FASTVIDEO_PROMPT_ENHANCE_LOG_PATH",
-    str(_SERVER_ROOT / "outputs" / "prompt_enhance.jsonl"),
+    str(_OUTPUTS_ROOT / "prompt_enhance.jsonl"),
 ).strip()
 PROMPT_AUTO_EXTENSION_LOG_PATH = os.getenv(
     "FASTVIDEO_PROMPT_AUTO_EXTENSION_LOG_PATH",
-    str(_SERVER_ROOT / "outputs" / "prompt_auto_extension.jsonl"),
+    str(_OUTPUTS_ROOT / "prompt_auto_extension.jsonl"),
 ).strip()
 SESSION_LOG_ROOT = os.getenv(
     "FASTVIDEO_SESSION_LOG_ROOT",
-    str(_SERVER_ROOT / "outputs" / "session_logs"),
+    str(_OUTPUTS_ROOT / "session_logs"),
 ).strip()
 
 # Auto extension behavior.
