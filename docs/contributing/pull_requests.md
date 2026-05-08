@@ -25,10 +25,12 @@ Mergify before any merge is allowed.
 | `[refactor]` | Code restructuring with no behavior change |
 | `[perf]` | Performance improvement |
 | `[ci]` | CI/CD or build tooling changes |
+| `[infra]` | Repo infrastructure: agent tooling, debug hooks, conversion scripts, dev infra |
 | `[doc]` or `[docs]` | Documentation only |
 | `[misc]` or `[chore]` | Housekeeping, dependency bumps, minor cleanup |
 | `[kernel]` | CUDA kernel changes in `fastvideo-kernel/` |
 | `[new-model]` | Adding a new model or pipeline |
+| `[skill]` or `[skills]` | Agent skills under `.agents/skills/` or `.claude/skills/` |
 
 **Examples:**
 
@@ -38,6 +40,8 @@ Mergify before any merge is allowed.
 [refactor] Restructure distributed attention dispatch
 [docs] Add LoRA finetuning guide
 [new-model] Port HunyuanVideo 1.5 to FastVideo
+[infra] Add activation trace hooks for pipeline debugging
+[skill] Add add-model agent skill
 ```
 
 If your title is missing the tag, Mergify will post a comment listing the valid formats.
@@ -51,8 +55,8 @@ Labels are applied automatically based on your PR title and the files you change
 need to set them manually.
 
 **Type label** — set from the `[tag]` in your title:
-`type: feat`, `type: bugfix`, `type: refactor`, `type: perf`, `type: ci`, `type: docs`,
-`type: misc`, `type: new-model`
+`type: feat`, `type: bugfix`, `type: refactor`, `type: perf`, `type: ci`, `type: infra`,
+`type: docs`, `type: misc`, `type: new-model`, `type: skill`
 
 **Scope labels** — set from which files you modified (multiple labels can apply):
 `scope: training`, `scope: inference`, `scope: attention`, `scope: kernel`, `scope: data`,
@@ -187,8 +191,8 @@ Common quick fixes:
 Update your title to start with a valid type tag. The Mergify merge protection check
 re-evaluates automatically after you save the title.
 
-Valid tags: `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`, `ci`, `doc`, `docs`,
-`misc`, `chore`, `kernel`, `new-model`
+Valid tags: `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`, `ci`, `infra`, `doc`,
+`docs`, `misc`, `chore`, `kernel`, `new-model`, `skill`, `skills`
 
 ### My PR has merge conflicts (`needs-rebase` label)
 
