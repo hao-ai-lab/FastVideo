@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 
 from fastvideo.eval.metrics.base import BaseMetric
@@ -18,7 +20,7 @@ class LPIPSMetric(BaseMetric):
     def __init__(self, net: str = "alex") -> None:
         super().__init__()
         self.net = net
-        self._model = None
+        self._model: Any = None
 
     def to(self, device: str | torch.device) -> LPIPSMetric:
         super().to(device)

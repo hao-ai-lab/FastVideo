@@ -81,7 +81,7 @@ def as_numpy_video(source: Any) -> tuple[np.ndarray, str]:
         if source.shape[1] == 3:
             return np.transpose(source, (0, 2, 3, 1)).astype(np.uint8), "rgb"
         raise ValueError(f"Unsupported ndarray video shape: {source.shape}")
-    if isinstance(source, (str, Path)):
+    if isinstance(source, str | Path):
         return read_video_frames(source), "bgr"
     raise TypeError(f"Unsupported Physics-IQ video source type: {type(source)!r}")
 
@@ -99,7 +99,7 @@ def unpack_batch_value(value: Any) -> list[Any]:
         if value.ndim == 5:
             return [value[idx] for idx in range(value.shape[0])]
         raise ValueError(f"Unsupported ndarray rank for Physics-IQ metric: {value.ndim}")
-    if isinstance(value, (str, Path)):
+    if isinstance(value, str | Path):
         return [value]
     if isinstance(value, list):
         return value
@@ -139,7 +139,8 @@ def prepare_pair_batch(
             videos,
             references,
             generated_masks,
-            reference_masks, strict=False,
+            reference_masks,
+            strict=False,
         )
     ]
 
@@ -202,7 +203,7 @@ def roundtrip_mask_frames(mask_frames: np.ndarray, *, fps: int) -> np.ndarray:
 
 
 def infer_real_mask_path(video_source: Any) -> str | None:
-    if not isinstance(video_source, (str, Path)):
+    if not isinstance(video_source, str | Path):
         return None
 
     video_path = Path(video_source)

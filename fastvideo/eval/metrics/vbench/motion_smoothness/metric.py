@@ -7,6 +7,8 @@ Score = (255 - mean_pixel_diff) / 255.  Higher = smoother motion.
 
 from __future__ import annotations
 
+from typing import Any
+
 import os
 
 import cv2
@@ -29,8 +31,8 @@ class MotionSmoothnessMetric(BaseMetric):
 
     def __init__(self) -> None:
         super().__init__()
-        self._model = None
-        self._embt = None
+        self._model: Any = None
+        self._embt: Any = None
         self._chunk_size = 8
 
     def to(self, device):
@@ -98,7 +100,7 @@ class MotionSmoothnessMetric(BaseMetric):
 
     _MIN_AMT_SCALE = 1 / 16
 
-    def _safe_amt_forward(self, in0, in1, embt, scale):
+    def _safe_amt_forward(self, in0: Any, in1: Any, embt: Any, scale: Any) -> Any:
         """Run one chunk through AMT with OOM-retry on two axes.
 
         Recovery strategy on ``CUDA out of memory``:

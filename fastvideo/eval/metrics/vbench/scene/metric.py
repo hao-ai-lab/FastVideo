@@ -13,6 +13,8 @@ making the keyword check more robust.
 
 from __future__ import annotations
 
+from typing import Any
+
 import os
 import tempfile
 
@@ -40,8 +42,8 @@ class SceneMetric(BaseMetric):
 
     def __init__(self, model_path: str = "AVoCaDO-Captioner/AVoCaDO") -> None:
         super().__init__()
-        self._model = None
-        self._processor = None
+        self._model: Any = None
+        self._processor: Any = None
         self._model_path = model_path
 
     def to(self, device):
@@ -71,10 +73,12 @@ class SceneMetric(BaseMetric):
         """Save (T, C, H, W) float [0,1] tensor as a temp mp4 file."""
         # torchvision expects (T, H, W, C) uint8
         frames = (video * 255).clamp(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu()
-        tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
-        tmp.close()
-        torchvision.io.write_video(tmp.name, frames, fps=8, video_codec="libx264", options={"crf": "18"})
-        return tmp.name
+        # Caller owns the resulting file (it's read by Qwen2.5-Omni and
+        # cleaned up at end of compute()), so we just need a unique path.
+        fd, path = tempfile.mkstemp(suffix=".mp4")
+        os.close(fd)
+        torchvision.io.write_video(path, frames, fps=8, video_codec="libx264", options={"crf": "18"})
+        return path
 
     def _generate_caption(self, video_path: str) -> str:
         from qwen_omni_utils import process_mm_info

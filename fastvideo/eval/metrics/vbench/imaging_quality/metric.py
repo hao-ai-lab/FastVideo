@@ -6,6 +6,8 @@ so the longer side is at most 512px.  Score = mean(MUSIQ_scores) / 100.
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 from torchvision.transforms.functional import resize
 
@@ -25,7 +27,7 @@ class ImagingQualityMetric(BaseMetric):
 
     def __init__(self) -> None:
         super().__init__()
-        self._model = None
+        self._model: Any = None
 
     def to(self, device):
         super().to(device)
@@ -57,13 +59,13 @@ class ImagingQualityMetric(BaseMetric):
             frames = resize(frames, [new_h, new_w], antialias=False)
 
         chunk = self._chunk_size or 32
-        all_scores = []
+        chunks: list[torch.Tensor] = []
         for i in range(0, T, chunk):
             scores = self._model(frames[i:i + chunk])
-            all_scores.append(scores.squeeze(-1))
-        all_scores = torch.cat(all_scores, dim=0)  # (T,)
+            chunks.append(scores.squeeze(-1))
+        per_frame = torch.cat(chunks, dim=0)  # (T,)
         return MetricResult(
             name=self.name,
-            score=float(all_scores.mean().item()) / 100.0,
-            details={"per_frame_raw": all_scores.tolist()},
+            score=float(per_frame.mean().item()) / 100.0,
+            details={"per_frame_raw": per_frame.tolist()},
         )

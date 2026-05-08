@@ -14,12 +14,14 @@ unnecessary overhead.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import torch
 
 from fastvideo.eval.memory import clear_cache
 from fastvideo.eval.registry import get_metric
 from fastvideo.eval.types import MetricResult
+import contextlib
 
 
 class EvalWorker:
@@ -80,10 +82,8 @@ class EvalWorker:
         """Free CUDA caches without dropping models."""
         clear_cache()
         if torch.cuda.is_available():
-            try:
+            with contextlib.suppress(Exception):
                 torch.cuda.ipc_collect()
-            except Exception:
-                pass
 
     def unload(self) -> None:
         """Drop metric refs so models become GC-able. Reverse with reload()."""
@@ -97,7 +97,7 @@ class EvalWorker:
             self._load()
 
 
-def _resolve_video_input(value):
+def _resolve_video_input(value: Any) -> Any:
     """Normalize a sample's ``video`` / ``reference`` field for metrics.
 
     * ``str`` / ``Path`` → decoded ``(T, C, H, W)`` tensor via
@@ -110,7 +110,7 @@ def _resolve_video_input(value):
     """
     if value is None:
         return None
-    if isinstance(value, (str, Path)):
+    if isinstance(value, str | Path):
         from fastvideo.eval.io.video import load_video
         return load_video(str(value))
     if isinstance(value, torch.Tensor) and value.dim() == 5 and value.shape[0] == 1:

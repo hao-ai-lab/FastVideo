@@ -27,7 +27,6 @@ same shape.
 """
 from __future__ import annotations
 
-from abc import ABC
 from typing import TypedDict
 from collections.abc import Iterator
 
@@ -48,8 +47,8 @@ class Sample(TypedDict, total=False):
     reference_video: str
 
 
-class PromptDataset(ABC):
-    """Iterable corpus of sample dicts."""
+class PromptDataset:
+    """Iterable corpus of sample dicts. Subclasses populate ``self._rows``."""
 
     name: str = ""
     description: str = ""

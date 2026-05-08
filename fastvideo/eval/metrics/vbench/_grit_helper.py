@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 
-def _patch_detectron2_registries():
+def _patch_detectron2_registries() -> None:
     """Make detectron2's fvcore registries skip duplicate names instead of raising.
 
     Both pip-installed ``vbench`` and wm-eval vendor the same GRiT / CenterNet2
@@ -32,7 +32,7 @@ def _patch_detectron2_registries():
                     return
                 orig(self, name, obj)
 
-            _safe_do_register._patched_idempotent = True
+            _safe_do_register._patched_idempotent = True  # type: ignore[attr-defined]
             Registry._do_register = _safe_do_register
     except ImportError:
         pass
@@ -48,7 +48,7 @@ def _patch_detectron2_registries():
                     return
                 orig_ds(name, func)
 
-            _safe_ds_register._patched_idempotent = True
+            _safe_ds_register._patched_idempotent = True  # type: ignore[attr-defined]
             DatasetCatalog.register = _safe_ds_register
     except (ImportError, AttributeError):
         pass

@@ -115,10 +115,8 @@ def _cmd_run(args: argparse.Namespace) -> None:
         raise SystemExit(f"No videos matched: {args.videos}")
     ref_paths = _expand_paths([args.reference]) if args.reference else None
 
-    metrics_arg: list[str] | str = (
-        "all" if args.metrics == "all"
-        else [m.strip() for m in args.metrics.split(",") if m.strip()]
-    )
+    metrics_arg: list[str] | str = ("all" if args.metrics == "all" else
+                                    [m.strip() for m in args.metrics.split(",") if m.strip()])
 
     evaluator = create_evaluator(metrics=metrics_arg, device=args.device)
 

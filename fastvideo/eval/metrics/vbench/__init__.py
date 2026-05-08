@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 # fastvideo/eval/metrics/vbench/__init__.py  →  ../../../third_party/eval/vbench
 # parents[3] is the ``fastvideo/`` package root.
@@ -74,7 +75,7 @@ def _install_modeling_finetune_hook() -> None:
 
     class _Loader(importlib.abc.Loader):
 
-        def __init__(self, real_loader):
+        def __init__(self, real_loader: Any) -> None:
             self._real = real_loader
 
         def create_module(self, spec):

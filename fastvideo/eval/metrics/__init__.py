@@ -8,6 +8,7 @@ starting with ``_`` are skipped (used for shared helpers like
 
 import importlib
 import os
+import contextlib
 
 
 def _walk(path: str, prefix: str):
@@ -24,7 +25,5 @@ def _walk(path: str, prefix: str):
 
 for _pkg_path in __path__:
     for _modname, _ispkg in _walk(_pkg_path, __name__):
-        try:
+        with contextlib.suppress(ModuleNotFoundError):
             importlib.import_module(f"{_modname}.metric")
-        except ModuleNotFoundError:
-            pass

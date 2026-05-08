@@ -44,9 +44,13 @@ class BaseMetric(ABC):
         self._device = torch.device(device)
         return self
 
-    def setup(self) -> None:
-        """Eagerly load models. Called once by :class:`EvalWorker`."""
-        pass
+    def setup(self) -> None:  # noqa: B027 - intentionally optional override
+        """Eagerly load models. Called once by :class:`EvalWorker`.
+
+        Default is a no-op; metrics with no eager state (pixel math,
+        closed-form ops) inherit this. Override only if your metric
+        needs to load weights.
+        """
 
     def _skip(self, sample: dict, reason: str) -> MetricResult:
         """Return a skipped result (``score=None`` + reason in details)."""

@@ -6,6 +6,8 @@ satisfy the expected spatial relationship (left/right/above/below).
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import torch
 
@@ -60,7 +62,7 @@ class SpatialRelationshipMetric(BaseMetric):
 
     def __init__(self) -> None:
         super().__init__()
-        self._model = None
+        self._model: Any = None
 
     def setup(self) -> None:
         if self._model is not None:

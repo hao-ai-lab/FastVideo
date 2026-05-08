@@ -7,6 +7,8 @@ adaptive threshold, the video is classified as dynamic (1.0) vs static (0.0).
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import torch
 from easydict import EasyDict
@@ -27,7 +29,7 @@ class DynamicDegreeMetric(BaseMetric):
 
     def __init__(self) -> None:
         super().__init__()
-        self._model = None
+        self._model: Any = None
         self._chunk_size = 16
 
     def to(self, device):

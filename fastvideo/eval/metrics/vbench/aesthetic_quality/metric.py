@@ -6,6 +6,8 @@ linear aesthetic head (768 → 1), and averages scores / 10.
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -42,8 +44,8 @@ class AestheticQualityMetric(BaseMetric):
 
     def __init__(self) -> None:
         super().__init__()
-        self._clip_model = None
-        self._aesthetic_head = None
+        self._clip_model: Any = None
+        self._aesthetic_head: Any = None
 
     def to(self, device):
         super().to(device)

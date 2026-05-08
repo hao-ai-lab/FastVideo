@@ -7,6 +7,8 @@ frames and the first frame.
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 import torch.nn.functional as F
 from torchvision.transforms.functional import resize, normalize
@@ -32,7 +34,7 @@ class SubjectConsistencyMetric(BaseMetric):
 
     def __init__(self) -> None:
         super().__init__()
-        self._model = None
+        self._model: Any = None
 
     def to(self, device):
         super().to(device)

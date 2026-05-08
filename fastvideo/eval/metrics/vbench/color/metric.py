@@ -7,6 +7,8 @@ keyword appears in the object's caption. Score = frames_with_correct_color
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 
 from fastvideo.eval.metrics.base import BaseMetric
@@ -40,7 +42,7 @@ class ColorMetric(BaseMetric):
 
     def __init__(self) -> None:
         super().__init__()
-        self._model = None
+        self._model: Any = None
 
     def setup(self) -> None:
         if self._model is not None:
