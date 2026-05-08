@@ -1,11 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
-"""SSIM-based similarity test for LTX-2 distilled text-to-video.
+"""Latent-slice regression test for LTX-2 distilled text-to-video.
 
-Parameters derived from examples/inference/basic/basic_ltx2_distilled.py,
-with resolution + num_inference_steps reduced to keep GPU CI runtime
-bounded. Full-quality variant (via ``--ssim-full-quality``) falls back
-to the ``ltx2_distilled`` preset defaults.
+Pixel-space SSIM is not a useful signal for this model: 4 distilled
+steps + bf16 attention + tiled VAE decode produce outputs that pass
+visual QA but occupy a very wide region in pixel space.
+
+Inspired by diffusers' slice-vs-full regression philosophy — see
+``diffusers/tests/pipelines/ltx2/test_ltx2.py`` (compares pixel slices
+via ``torch.allclose(..., atol=1e-4)``) and
+``diffusers/tests/pipelines/cogvideo/test_cogvideox.py`` (full pixel
+tensors via ``numpy_cosine_similarity_distance(...) < 1e-3``).
+Diffusers itself does NOT compare latents; we apply the same "small
+signature slice + bounded full-tensor distance" idea to the **pre-VAE
+latent** because distilled few-step pipelines amplify per-step bf16
+noise enough that VAE-decoded comparisons are unreliable.
+
+Parameters are kept identical to the original SSIM run so that
+reference artefacts generated on Modal L40S remain bit-compatible with
+production inference.
 """
+
 import os
 
 import pytest
@@ -14,7 +28,9 @@ from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
     resolve_inference_device_reference_folder,
-    run_text_to_video_similarity_test,
+)
+from fastvideo.tests.ssim.latent_similarity_utils import (
+    run_text_to_latent_similarity_test,
 )
 
 logger = init_logger(__name__)
@@ -71,6 +87,13 @@ LTX2_DISTILLED_TEST_PROMPTS = [
     "deadpan, absurd, and quietly tragic.",
 ]
 
+# Tolerances chosen on top of diffusers' ``1e-3`` defaults. LTX-2 distilled
+# amplifies per-step numerical noise, and FastVideo's CI pool spans L40S /
+# A40 / H100 so cross-architecture bf16 drift must be absorbed. Values can
+# be tightened after an initial stable window of reference refreshes.
+SLICE_COSINE_DISTANCE_THRESHOLD = 5e-3
+FULL_COSINE_DISTANCE_THRESHOLD = 1e-2
+
 
 @pytest.mark.parametrize("prompt", LTX2_DISTILLED_TEST_PROMPTS)
 @pytest.mark.parametrize("attention_backend_name", ["FLASH_ATTN"])
@@ -80,7 +103,7 @@ def test_ltx2_distilled_inference_similarity(
     attention_backend_name: str,
     model_id: str,
 ) -> None:
-    run_text_to_video_similarity_test(
+    run_text_to_latent_similarity_test(
         logger=logger,
         script_dir=os.path.dirname(os.path.abspath(__file__)),
         device_reference_folder=device_reference_folder,
@@ -89,5 +112,6 @@ def test_ltx2_distilled_inference_similarity(
         model_id=model_id,
         default_params_map=LTX2_DISTILLED_MODEL_TO_PARAMS,
         full_quality_params_map=FULL_QUALITY_LTX2_DISTILLED_MODEL_TO_PARAMS,
-        min_acceptable_ssim=0.60,
+        slice_cosine_threshold=SLICE_COSINE_DISTANCE_THRESHOLD,
+        full_cosine_threshold=FULL_COSINE_DISTANCE_THRESHOLD,
     )

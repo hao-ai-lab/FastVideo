@@ -164,6 +164,10 @@ def test_inference_performance(cfg):
     avg_time = sum(times) / len(times)
     max_peak_memory = max(peak_memories)
     device_name = torch.cuda.get_device_name()
+    num_frames = gen_kwargs.get("num_frames")
+    throughput_fps = (1.0 / avg_time) if avg_time > 0 else None
+    if isinstance(num_frames, (int, float)) and avg_time > 0:
+        throughput_fps = num_frames / avg_time
 
     results = {
         "benchmark_id": cfg["benchmark_id"],
@@ -174,6 +178,8 @@ def test_inference_performance(cfg):
         "num_measurement_runs": num_measure,
         "avg_generation_time_s": round(avg_time, 3),
         "individual_times_s": [round(t, 3) for t in times],
+        "throughput_fps": round(throughput_fps, 3)
+        if throughput_fps is not None else None,
         "max_peak_memory_mb": round(max_peak_memory, 1),
         "individual_peak_memories_mb": [round(m, 1) for m in peak_memories],
         "thresholds": thresholds,

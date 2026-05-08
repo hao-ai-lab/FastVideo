@@ -112,6 +112,33 @@ class SamplingParam:
     ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
     ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
 
+    # Stable Audio (T2A): clip start/end in seconds. Honored by
+    # `StableAudioConditioningStage` + `StableAudioDecodingStage`. Other
+    # families ignore them.
+    audio_start_in_s: float | None = None
+    audio_end_in_s: float | None = None
+
+    # Stable Audio audio-to-audio (variation):
+    #   `init_audio` -- a path or `[B, C, samples]` waveform at the model
+    #                   sample rate; the pipeline encodes it via the VAE
+    #                   and uses it as the starting latent.
+    #   `init_audio_strength` -- 0..1, higher = closer to the reference
+    #                            (matches the convention of Stability's
+    #                            commercial Stable Audio 2.0 UI). 1.0 ~=
+    #                            VAE round-trip, 0.0 ~= plain T2A.
+    #   `init_noise_level` -- legacy raw `sigma_max` override (0.3..500,
+    #                         higher = more freedom). Kept for callers
+    #                         that already use it; prefer `init_audio_strength`.
+    init_audio: Any = None
+    init_audio_strength: float | None = None
+    init_noise_level: float | None = None
+
+    # Stable Audio inpainting (RePaint-style): `inpaint_audio` is the
+    # reference clip, `inpaint_mask` is a [samples] tensor in {0, 1} where
+    # 1 means *keep the reference* and 0 means *regenerate*.
+    inpaint_audio: Any = None
+    inpaint_mask: Any = None
+
     # Continuation state carried across streaming/multi-segment calls.
     continuation_state: ContinuationState | None = None
     # When True, the pipeline returns a ContinuationState on the result so

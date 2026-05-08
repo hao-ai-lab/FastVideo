@@ -99,7 +99,7 @@ cd /FastVideo
 **Install the package**
 
 ```bash
-uv pip install -e .[dev]
+uv pip install -e ".[dev]"
 ```
 
 The Docker image already includes Flash Attention and most heavy dependencies, so this is fast.

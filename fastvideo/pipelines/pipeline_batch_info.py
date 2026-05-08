@@ -192,6 +192,21 @@ class ForwardBatch:
     ltx2_stg_blocks_video: list[int] = field(default_factory=list)
     ltx2_stg_blocks_audio: list[int] = field(default_factory=list)
 
+    # Stable Audio (T2A): clip start/end in seconds. Parallels the
+    # `SamplingParam` fields of the same name; the
+    # `StableAudioConditioningStage` / `DecodingStage` read them.
+    audio_start_in_s: float | None = None
+    audio_end_in_s: float | None = None
+
+    # Stable Audio A2A variation + inpainting payloads (parallel to
+    # `SamplingParam`). `Any` because we accept torch tensors or numpy
+    # arrays the user supplies; the latent-prep stage normalises shapes.
+    init_audio: Any = None
+    init_audio_strength: float | None = None
+    init_noise_level: float | None = None
+    inpaint_audio: Any = None
+    inpaint_mask: Any = None
+
     n_tokens: int | None = None
 
     # Other parameters that may be needed by specific schedulers

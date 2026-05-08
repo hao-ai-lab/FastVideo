@@ -15,6 +15,7 @@ class GenerationResult:
     samples: Any | None = None
     frames: Any | None = None
     audio: Any | None = None
+    audio_sample_rate: int | None = None
     size: tuple[int, int, int] | None = None
     generation_time: float | None = None
     logging_info: Any | None = None
@@ -44,6 +45,7 @@ class GenerationResult:
                 "samples",
                 "frames",
                 "audio",
+                "audio_sample_rate",
                 "size",
                 "generation_time",
                 "logging_info",
@@ -62,6 +64,7 @@ class GenerationResult:
             samples=result.get("samples"),
             frames=result.get("frames"),
             audio=result.get("audio"),
+            audio_sample_rate=result.get("audio_sample_rate"),
             size=result.get("size"),
             generation_time=result.get("generation_time"),
             logging_info=result.get("logging_info"),
@@ -80,6 +83,7 @@ class GenerationResult:
             "samples": self.samples,
             "frames": self.frames,
             "audio": self.audio,
+            "audio_sample_rate": self.audio_sample_rate,
             "size": self.size,
             "generation_time": self.generation_time,
             "logging_info": self.logging_info,

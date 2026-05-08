@@ -405,7 +405,7 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
 
         if not SAGESLA_ENABLED:
             raise ImportError("SageSLA requires spas_sage_attn. "
-                              "Install with: pip install git+https://github.com/thu-ml/SpargeAttn.git")
+                              "Install with: uv pip install git+https://github.com/thu-ml/SpargeAttn.git")
 
         assert head_size in [64, 128], f"SageSLA requires head_size in [64, 128], got {head_size}"
 

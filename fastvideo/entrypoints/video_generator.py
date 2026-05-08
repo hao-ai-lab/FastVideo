@@ -65,6 +65,7 @@ _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "pin_cpu_memory",
     "enable_torch_compile",
     "torch_compile_kwargs",
+    "output_type",
 })
 
 
@@ -601,10 +602,20 @@ class VideoGenerator:
         thread = threading.Thread(target=execute_forward_thread)
         thread.start()
         latent_batch_size = _infer_latent_batch_size(batch)
-        samples = torch.empty(
-            (latent_batch_size, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width),
-            device='cpu',
-            pin_memory=fastvideo_args.pin_cpu_memory)
+        # When ``output_type == "latent"`` the forward output has latent
+        # shape (e.g. ``[B, C_latent, T_latent, H_latent, W_latent]``)
+        # rather than the pre-allocation's pixel shape. Skip the pinned
+        # ~50 MB buffer entirely; we always fall through to the
+        # ``samples = output_batch.output.cpu()`` branch below in that
+        # mode. ``skip_pixel_prealloc`` also gates the slow-path warning.
+        skip_pixel_prealloc = fastvideo_args.output_type == "latent"
+        if skip_pixel_prealloc:
+            samples = torch.empty(0, device='cpu')
+        else:
+            samples = torch.empty(
+                (latent_batch_size, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width),
+                device='cpu',
+                pin_memory=fastvideo_args.pin_cpu_memory)
         thread.join()
 
         if thread_error["error"] is not None:
@@ -619,30 +630,61 @@ class VideoGenerator:
         if output_batch.output.shape == samples.shape:
             samples.copy_(output_batch.output)
         else:
-            logger.warning("Output shape %s does not match expected shape %s; use slow path", output_batch.output.shape,
-                           samples.shape)
+            if not skip_pixel_prealloc:
+                logger.warning("Output shape %s does not match expected shape %s; use slow path",
+                               output_batch.output.shape, samples.shape)
             samples = output_batch.output.cpu()
         logging_info = output_batch.logging_info
 
         gen_time = time.perf_counter() - start_time
         logger.info("Generated successfully in %.2f seconds", gen_time)
 
-        # Process outputs
-        videos = rearrange(samples, "b c t h w -> t b c h w")
-        frames = []
-        for x in videos:
-            x = torchvision.utils.make_grid(x, nrow=6)
-            x = x.permute(1, 2, 0).squeeze(-1)
-            x = (x * 255).to(torch.uint8)
-            frames.append(x.cpu().numpy())
+        # Three mutually-exclusive output modes determine whether (a) we
+        # build an RGB frame buffer and (b) what file we write to disk:
+        #
+        #   1. `output_type == "latent"` — VAE is bypassed in DecodingStage
+        #      and `samples` holds raw latents (arbitrary channel count).
+        #      The RGB grid / uint8 / mp4 / png pipeline below cannot
+        #      consume those, so we skip it entirely and let callers work
+        #      with the latent tensor directly via `result["samples"]`.
+        #   2. Audio-only workload — `samples` is a 1×3×1×8×8 placeholder
+        #      no caller will use; skip the grid loop and save a `.wav`.
+        #   3. Pixel video / image — the historical happy path.
+        is_latent_output = fastvideo_args.output_type == "latent"
+        audio_only = bool(output_batch.extra.get("audio_only"))
 
-        # Save output if requested
-        if batch.save_video:
-            if self._is_image_workload():
+        frames: list[np.ndarray] | None
+        if is_latent_output or audio_only:
+            frames = None if is_latent_output else []
+        else:
+            videos = rearrange(samples, "b c t h w -> t b c h w")
+            frames = []
+            for x in videos:
+                x = torchvision.utils.make_grid(x, nrow=6)
+                x = x.permute(1, 2, 0).squeeze(-1)
+                x = (x * 255).to(torch.uint8)
+                frames.append(x.cpu().numpy())
+
+        save_to_disk = batch.save_video and not is_latent_output
+        if save_to_disk:
+            if audio_only:
+                # Audio-only workload: write a standalone .wav rather than
+                # muxing the audio into a placeholder mp4 (which forces
+                # ffmpeg to round 8x8 placeholder frames up to 16x16).
+                output_path = self._rewrite_extension(output_path, ".wav")
+                self._write_pcm_wav(
+                    output_path,
+                    output_batch.extra["audio"],
+                    int(output_batch.extra["audio_sample_rate"]),
+                )
+                logger.info("Saved audio to %s", output_path)
+            elif self._is_image_workload():
                 # Image workloads (t2i, i2i, …): save the first frame as PNG.
+                assert frames is not None  # implied by save_to_disk and not audio_only
                 imageio.imwrite(output_path, frames[0])
                 logger.info("Saved image to %s", output_path)
             else:
+                assert frames is not None  # implied by save_to_disk and not audio_only
                 imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
                 logger.info("Saved video to %s", output_path)
                 audio = output_batch.extra.get("audio")
@@ -655,14 +697,18 @@ class VideoGenerator:
             "prompts": prompt,
             "samples": samples if batch.return_frames else None,
             "frames": frames if batch.return_frames else None,
-            "audio": output_batch.extra.get("audio") if batch.return_frames else None,
+            # Audio is the primary output for audio workloads — return it
+            # whenever the pipeline produced one, regardless of
+            # `return_frames` (which gates the video-shaped buffers).
+            "audio": output_batch.extra.get("audio"),
+            "audio_sample_rate": output_batch.extra.get("audio_sample_rate"),
             "size": (target_height, target_width, batch.num_frames),
             "generation_time": gen_time,
             "logging_info": logging_info,
             "trajectory": output_batch.trajectory_latents,
             "trajectory_timesteps": output_batch.trajectory_timesteps,
             "trajectory_decoded": output_batch.trajectory_decoded,
-            "video_path": output_path if batch.save_video else None,
+            "video_path": output_path if save_to_disk else None,
             "peak_memory_mb": output_batch.extra.get("peak_memory_mb"),
         }
 
@@ -683,7 +729,55 @@ class VideoGenerator:
         return result.to_legacy_dict()
 
     @staticmethod
+    def _rewrite_extension(path: str, new_ext: str) -> str:
+        root, old_ext = os.path.splitext(path)
+        new_path = root + new_ext
+        if old_ext and old_ext.lower() != new_ext.lower():
+            logger.info("Rewriting output extension %s -> %s.", old_ext, new_ext)
+        return new_path
+
+    @staticmethod
+    def _audio_to_int16(audio: torch.Tensor | np.ndarray, ) -> tuple[np.ndarray, int]:
+        """Normalize `[samples]` / `[samples, channels]` / `[channels,
+        samples]` audio in roughly [-1, 1] to a `(int16 [samples,
+        channels], num_channels)` pair. Raises `ValueError` for shapes
+        we can't classify.
+        """
+        if torch.is_tensor(audio):
+            audio_np = audio.detach().cpu().float().numpy()
+        else:
+            audio_np = np.asarray(audio, dtype=np.float32)
+        if audio_np.ndim == 1:
+            audio_np = audio_np[:, None]
+        elif audio_np.ndim == 2:
+            if audio_np.shape[0] <= 8 and audio_np.shape[1] > audio_np.shape[0]:
+                audio_np = audio_np.T
+        else:
+            raise ValueError(f"Unexpected audio shape {audio_np.shape}.")
+        audio_np = np.clip(audio_np, -1.0, 1.0)
+        audio_int16 = (audio_np * 32767.0).astype(np.int16)
+        return audio_int16, audio_int16.shape[1]
+
+    @classmethod
+    def _write_pcm_wav(
+        cls,
+        wav_path: str,
+        audio: torch.Tensor | np.ndarray,
+        sample_rate: int,
+    ) -> int:
+        """Write 16-bit PCM WAV; returns the channel count."""
+        import wave
+        audio_int16, num_channels = cls._audio_to_int16(audio)
+        with wave.open(wav_path, "wb") as f:
+            f.setnchannels(num_channels)
+            f.setsampwidth(2)
+            f.setframerate(sample_rate)
+            f.writeframes(audio_int16.tobytes())
+        return num_channels
+
+    @classmethod
     def _mux_audio(
+        cls,
         video_path: str,
         audio: torch.Tensor | np.ndarray,
         sample_rate: int,
@@ -693,40 +787,16 @@ class VideoGenerator:
             import av
         except ImportError:
             logger.warning("PyAV not installed; cannot mux audio. "
-                           "Install with: pip install av")
+                           "Install with: uv pip install av")
             return False
-
-        if torch.is_tensor(audio):
-            audio_np = audio.detach().cpu().float().numpy()
-        else:
-            audio_np = np.asarray(audio, dtype=np.float32)
-
-        if audio_np.ndim == 1:
-            audio_np = audio_np[:, None]
-        elif audio_np.ndim == 2:
-            if audio_np.shape[0] <= 8 and audio_np.shape[1] > audio_np.shape[0]:
-                audio_np = audio_np.T
-        else:
-            logger.warning("Unexpected audio shape %s; skipping mux.", audio_np.shape)
-            return False
-
-        audio_np = np.clip(audio_np, -1.0, 1.0)
-        audio_int16 = (audio_np * 32767.0).astype(np.int16)
-        num_channels = audio_int16.shape[1]
-        layout = "stereo" if num_channels == 2 else "mono"
 
         try:
-            import wave
             with tempfile.TemporaryDirectory() as tmpdir:
                 out_path = os.path.join(tmpdir, "muxed.mp4")
                 wav_path = os.path.join(tmpdir, "audio.wav")
 
-                # Write audio to WAV file
-                with wave.open(wav_path, "wb") as wav_file:
-                    wav_file.setnchannels(num_channels)
-                    wav_file.setsampwidth(2)
-                    wav_file.setframerate(sample_rate)
-                    wav_file.writeframes(audio_int16.tobytes())
+                num_channels = cls._write_pcm_wav(wav_path, audio, sample_rate)
+                layout = "stereo" if num_channels == 2 else "mono"
 
                 # Open input video and audio
                 input_video = av.open(video_path)

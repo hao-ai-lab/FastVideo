@@ -27,7 +27,7 @@ uv pip install fastvideo
 conda create -n fastvideo python=3.12 -y
 conda activate fastvideo
 
-pip install fastvideo
+uv pip install fastvideo
 ```
 
 ### From source
@@ -41,11 +41,11 @@ uv pip install -e .
 uv pip install flash-attn --no-build-isolation -v
 ```
 
-Alternative with Conda environment:
+Alternative with Conda environment (still drives installs through `uv`):
 
 ```bash
-pip install -e .
-pip install flash-attn --no-build-isolation -v
+uv pip install -e .
+uv pip install flash-attn --no-build-isolation -v
 ```
 
 ## Hardware Requirements

@@ -2,7 +2,6 @@
 
 import torch
 import torch.nn.functional as F
-from flash_attn import flash_attn_func as flash_attn_2_func
 from dataclasses import dataclass
 
 try:
@@ -18,6 +17,7 @@ except ImportError:
         flash_attn_func = flash_attn_3_func
         fa_version = "3"
     except ImportError:
+        from flash_attn import flash_attn_func as flash_attn_2_func
         flash_attn_func = flash_attn_2_func
         fa_version = "2"
 
