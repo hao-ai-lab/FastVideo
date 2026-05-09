@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-PYTHON="${DREAMVERSE_PYTHON:-${HOME}/miniconda3/envs/fv-main/bin/python}"
-[[ -x "${PYTHON}" ]] \
-  || { echo "error: python not executable at ${PYTHON} (set DREAMVERSE_PYTHON to override)" >&2; exit 1; }
-PYTHONPATH="${REPO_ROOT}/apps/dreamverse:${REPO_ROOT}:${PYTHONPATH:-}" \
-  exec "${PYTHON}" -m dreamverse.mock_server "$@"
