@@ -7,27 +7,50 @@ import pandas as pd
 
 from hf_store import sync_from_hf, load_as_dataframe
 
-# -----------------------------
-# 1. Grouping
-# -----------------------------
+# Grouping keys for time-series plots. Adding env-derived columns
+# (torch_version, cuda_runtime, attention_backend) prevents pre-/post-upgrade
+# records from being averaged into the same line, which would otherwise
+# silently smear environment-driven shifts across the trend.
+_GROUP_KEYS = (
+    "model_id",
+    "gpu_type",
+    "torch_version",
+    "cuda_runtime",
+    "attention_backend",
+)
+
+
 def group_data(df: pd.DataFrame):
-    # Group only by model+GPU so each group produces a time-series line.
-    # config_id (commit SHA) is carried as a column for hover/color use.
-    keys = ["model_id", "gpu_type"]
+    keys = [k for k in _GROUP_KEYS if k in df.columns]
     return df.groupby(keys, dropna=False)
 
-# -----------------------------
-# 2. Plot builder
-# -----------------------------
+
+def _format_group_label(key_values: tuple, key_names: list[str]) -> str:
+    parts = []
+    for name, value in zip(key_names, key_values, strict=False):
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            display = "n/a"
+        else:
+            display = str(value)
+        parts.append(f"{name}={display}")
+    return " | ".join(parts)
+
+
 def build_plots(df: pd.DataFrame) -> list:
     figs = []
 
-    for (model_id, gpu_type), g in group_data(df):
+    grouped = group_data(df)
+    key_names = list(grouped.keys) if hasattr(grouped, "keys") else list(_GROUP_KEYS)
+
+    for key_values, g in grouped:
+        if not isinstance(key_values, tuple):
+            key_values = (key_values, )
         g = g.sort_values("timestamp")
+        label = _format_group_label(key_values, key_names)
 
         # One chart per metric so the y-axes aren't on wildly different scales
         for metric in ("latency", "throughput", "memory"):
-            if g[metric].isna().all():
+            if metric not in g.columns or g[metric].isna().all():
                 continue
 
             fig = px.line(
@@ -36,7 +59,7 @@ def build_plots(df: pd.DataFrame) -> list:
                 y=metric,
                 markers=True,
                 hover_data=["config_id", "commit_sha"],
-                title=f"{model_id} | {gpu_type} | {metric}",
+                title=f"{label} | {metric}",
                 labels={"timestamp": "Time", metric: metric},
             )
             figs.append(fig)

@@ -13,6 +13,7 @@ import glob
 import json
 import os
 import re
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -190,6 +191,7 @@ def load_records_for_model(
     *,
     last_n: int | None = None,
     successful_only: bool = True,
+    extra_filter: Callable[[dict[str, Any]], bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Return records for a specific *model_id*, optionally filtered by GPU.
 
@@ -200,6 +202,9 @@ def load_records_for_model(
         last_n: When set, return only the most recent *n* records (after all
             other filters). Useful for sliding-window baseline calculations.
         successful_only: Passed through to :func:`load_records`.
+        extra_filter: Optional predicate applied AFTER ``gpu_type`` and BEFORE
+            ``last_n``. Used by ``compare_baseline`` for env-aware filtering
+            without coupling this module to the env-tuple schema.
 
     Returns:
         List of matching dicts sorted by timestamp ascending.
@@ -213,6 +218,9 @@ def load_records_for_model(
     if gpu_type is not None:
         records = [r for r in records if r.get("gpu_type") == gpu_type]
 
+    if extra_filter is not None:
+        records = [r for r in records if extra_filter(r)]
+
     if last_n is not None:
         records = records[-last_n:]
 
@@ -225,6 +233,26 @@ def load_records_for_model(
 
 _NUMERIC_COLS = ("latency", "throughput", "memory")
 
+_ENV_FLAT_COLS: tuple[tuple[str, str], ...] = (
+    ("torch_version", "torch.version_major_minor"),
+    ("cuda_runtime", "cuda.runtime_major"),
+    ("attention_backend", "attention_backend"),
+    ("gpu_count", "gpu.count"),
+)
+
+
+def _env_dot_get(env: Any, dotted: str) -> Any:
+    if not isinstance(env, dict):
+        return None
+    cur: Any = env
+    for part in dotted.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+        if cur is None:
+            return None
+    return cur
+
 
 def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """Apply standard type coercions to a raw records DataFrame.
@@ -232,6 +260,10 @@ def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     - Parses ``timestamp`` to UTC-aware datetime.
     - Coerces ``latency``, ``throughput``, ``memory`` to float.
     - Adds a ``config_id`` column (first 7 chars of ``commit_sha``).
+    - Flattens selected ``env.*`` fields into top-level columns
+      (``torch_version``, ``cuda_runtime``, ``attention_backend``,
+      ``gpu_count``) so dashboard grouping does not need to know about
+      the nested ``env`` schema.
 
     Returns the mutated DataFrame (also modifies in place for efficiency).
     """
@@ -244,6 +276,12 @@ def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     for col in _NUMERIC_COLS:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    env_series = (df["env"]
+                  if "env" in df.columns
+                  else pd.Series([None] * len(df), index=df.index))
+    for col_name, dotted in _ENV_FLAT_COLS:
+        df[col_name] = env_series.apply(lambda e, d=dotted: _env_dot_get(e, d))
 
     return df
 
