@@ -26,7 +26,7 @@ logger = init_logger(__name__)
 
 def _sanitize_wandb_config(value: Any) -> Any:
     """Best-effort conversion of nested config objects to W&B-safe values."""
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, Enum):
         return value.value
@@ -34,7 +34,7 @@ def _sanitize_wandb_config(value: Any) -> Any:
         return str(value)
     if isinstance(value, dict):
         return {str(k): _sanitize_wandb_config(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, list | tuple | set):
         return [_sanitize_wandb_config(v) for v in value]
     if isinstance(value, torch.dtype):
         return str(value)
