@@ -10,7 +10,7 @@ Requirements:
 
 Usage:
     # FP4 attention
-    FASTVIDEO_NVFP4_FA4=1 CUTE_DSL_ENABLE_TVM_FFI=1 python fp4_attention.py
+    FASTVIDEO_NVFP4_FA4=1 CUTE_DSL_ENABLE_TVM_FFI=1 python fp4_attn_wan2_1_1_3b.py --nvfp4_fa4
 
     # BF16 baseline for comparison
     python fp4_attention.py
