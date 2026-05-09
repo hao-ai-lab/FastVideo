@@ -99,7 +99,7 @@ failing test's output.
 | LoRA Training Tests | `training_lora` | 15 min |
 | Training Tests VSA | `training_vsa` | 15 min |
 | Inference Tests VMoBA | `inference_vmoba` | 15 min |
-| Performance Tests | `performance` | 30 min |
+| [Performance Tests](performance_benchmarks.md) | `performance` | 30 min |
 | API Server Tests | `api_server` | 30 min |
 
 If a Full Suite test fails, check the Buildkite build log for the failing step's output.

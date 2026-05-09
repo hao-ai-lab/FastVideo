@@ -170,6 +170,7 @@ nav:
     - Pull Requests: contributing/pull_requests.md
     - CI Architecture: contributing/ci_architecture.md
     - Testing: contributing/testing.md
+    - Performance Benchmarks: contributing/performance_benchmarks.md
     - Profiling: contributing/profiling.md
     - Coding Agents: contributing/coding_agents.md
     - Attention Backend Development: contributing/attention_backend.md
