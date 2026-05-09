@@ -162,7 +162,8 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
                     dtype=torch.float32,
                 )
                 context_bcthw = current_latents.to(target_dtype)
-                _, cached_frames_for_write = self._cache_view(cache_state)
+                kv_view_for_write, cached_frames_for_write = (
+                    self._cache_view(cache_state))
 
                 with torch.autocast(
                         device_type="cuda",
@@ -179,6 +180,8 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
                         encoder_attention_mask=prompt_attention_mask,
                         timestep=t_context,
                         num_cond_latents=cached_frames_for_write,
+                        kv_cache_dict=kv_view_for_write,
+                        kv_cache_start_frame=0,
                         return_kv=True,
                         causal_block_size=self.chunk_size,
                         skip_crs_attn=True,

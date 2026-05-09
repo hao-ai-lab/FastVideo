@@ -148,6 +148,8 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
                     encoder_hidden_states=empty_embeds,
                     timestep=timestep,
                     num_cond_latents=cached_frames,
+                    kv_cache_dict=kv_cache_view,
+                    kv_cache_start_frame=0,
                     return_kv=True,
                     causal_block_size=self._causal_block_size,
                     skip_crs_attn=True,

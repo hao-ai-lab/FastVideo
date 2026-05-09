@@ -505,12 +505,15 @@ class LongCatSelfAttention(nn.Module):
         kv_cache: tuple,              # (k_cond, v_cond) - [B, heads, N_cond, head_dim]
         kv_cache_start_frame: int = 0,
         causal_block_size: int | None = None,
-    ) -> torch.Tensor:
+        return_kv: bool = False,
+    ) -> torch.Tensor | tuple:
         """
         Forward using cached K/V from conditioning frames.
         
         x contains only NOISE tokens.
         kv_cache contains pre-computed K/V for CONDITIONING tokens.
+        When return_kv=True, returns the current chunk's pre-RoPE K/V so
+        callers can append it to the streaming cache.
         
         CRITICAL: RoPE positions for noise tokens must start AFTER conditioning.
         We achieve this by padding Q with dummy tokens for conditioning positions,
@@ -548,6 +551,10 @@ class LongCatSelfAttention(nn.Module):
         # Per-head RMS normalization
         q = self.q_norm(q)
         k = self.k_norm(k)
+
+        if return_kv:
+            k_cache_new = k.transpose(1, 2).clone()
+            v_cache_new = v.transpose(1, 2).clone()
 
         # Transpose for RoPE: [B, heads, N, head_dim]
         q_rope = q.transpose(1, 2)
@@ -607,6 +614,8 @@ class LongCatSelfAttention(nn.Module):
         out = out.reshape(B, N, C)
         out, _ = self.to_out(out)
 
+        if return_kv:
+            return out, (k_cache_new, v_cache_new)
         return out
 
 
@@ -918,15 +927,20 @@ class LongCatTransformerBlock(nn.Module):
         if kv_cache is not None:
             # Move cache to device if offloaded
             kv_cache = (kv_cache[0].to(x.device), kv_cache[1].to(x.device))
-            attn_out = self.self_attn.forward_with_kv_cache(
+            attn_result = self.self_attn.forward_with_kv_cache(
                 x_norm,
                 latent_shape=latent_shape,
                 num_cond_latents=num_cond_latents,
                 kv_cache=kv_cache,
                 kv_cache_start_frame=kv_cache_start_frame,
                 causal_block_size=causal_block_size,
+                return_kv=return_kv,
             )
-            kv_cache_new = None  # Don't return cache when using cache
+            if return_kv:
+                attn_out, kv_cache_new = attn_result
+            else:
+                attn_out = attn_result
+                kv_cache_new = None
         else:
             attn_result = self.self_attn(
                 x_norm, 
