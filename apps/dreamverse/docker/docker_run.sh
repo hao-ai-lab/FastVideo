@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DREAMVERSE_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 IMAGE="${DREAMVERSE_IMAGE:-dreamverse:dev}"
-PORT="${DREAMVERSE_PORT:-8009}"
+PORT="${BACKEND_PORT:-8009}"
 HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}"
 OUTPUTS_DIR="${DREAMVERSE_OUTPUTS_DIR:-${DREAMVERSE_ROOT}/outputs}"
 GPU_REQUEST="${DREAMVERSE_DOCKER_GPUS:-all}"
