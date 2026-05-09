@@ -58,10 +58,12 @@ if ! probe_json "/healthz" >/dev/null 2>&1; then
     exit 1
   fi
 
+  require_command dreamverse-server
+
   echo "Starting Dreamverse backend on ${BASE_URL}..."
   (
     cd "${ROOT_DIR}"
-    exec "${ROOT_DIR}/scripts/dreamverse-server" --host "${HOST}" --port "${PORT}"
+    exec dreamverse-server --host "${HOST}" --port "${PORT}"
   ) >"${BACKEND_LOG_PATH}" 2>&1 &
   backend_pid=$!
   started_backend=1

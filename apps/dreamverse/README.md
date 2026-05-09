@@ -24,16 +24,11 @@ those commands without the `[dreamverse]` extra exits immediately with a message
 to install `fastvideo[dreamverse]`, because the cloud prompt runtime
 dependencies are intentionally gated by the extra.
 
-## Repo-Local Backend Launch
+## Launch Dreamverse
 
-Use the repo-local wrappers from the FastVideo checkout root:
+Start the backend with the installed Dreamverse commands:
 
 ```bash
-apps/dreamverse/scripts/dreamverse-server --port 8009
-apps/dreamverse/scripts/dreamverse-mock-server --port 8009
+dreamverse-server --port 8009
+dreamverse-mock-server --port 8009
 ```
-
-The workspace member keeps `[tool.uv] package = false`, so the wrappers remain
-the most explicit way to launch the backend from a source checkout. If
-`dreamverse-server` appears earlier on `PATH`, confirm it points at this
-checkout or reinstall FastVideo with the `dreamverse` extra.

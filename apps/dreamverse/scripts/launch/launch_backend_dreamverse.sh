@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the Dreamverse-flavored backend via the repo-local wrapper.
+# Launch the Dreamverse-flavored backend via the installed console command.
 #
 # This is the path the Next.js frontend expects today — it serves
 # ``/healthz``, ``/readyz``, ``/status``, ``/curated-presets``, and the
@@ -41,6 +41,11 @@ export FASTVIDEO_PROMPT_AUTO_TIMEOUT_MS="${FASTVIDEO_PROMPT_AUTO_TIMEOUT_MS:-180
 
 cd "${DREAMVERSE_ROOT}"
 
-echo "[launch-demo] starting apps/dreamverse/scripts/dreamverse-server"
+if ! command -v dreamverse-server >/dev/null 2>&1; then
+  echo "error: dreamverse-server not found on PATH. Install FastVideo with the dreamverse extra." >&2
+  exit 1
+fi
+
+echo "[launch-demo] starting dreamverse-server"
 echo "  args: $*"
-exec "${DREAMVERSE_ROOT}/scripts/dreamverse-server" "$@"
+exec dreamverse-server "$@"
