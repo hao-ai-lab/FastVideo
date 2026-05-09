@@ -77,6 +77,10 @@ class SelfForcingMethod(DMD2Method):
             raise ValueError("method_config.chunk_size must be a positive "
                              f"integer, got {chunk_size}")
         self._chunk_size = int(chunk_size)
+        self._validate_causal_block_size(
+            student=self.student,
+            chunk_size=self._chunk_size,
+        )
 
         sample_type_raw = mcfg.get("student_sample_type", "sde")
         sample_type = _require_str(
@@ -154,6 +158,23 @@ class SelfForcingMethod(DMD2Method):
         )
 
         self._sf_denoising_step_list: torch.Tensor | None = None
+
+    @staticmethod
+    def _validate_causal_block_size(
+        *,
+        student: ModelBase,
+        chunk_size: int,
+    ) -> None:
+        causal_block_size = getattr(student, "_causal_block_size", None)
+        if causal_block_size is None:
+            return
+        if int(causal_block_size) != int(chunk_size):
+            raise ValueError(
+                "LongCat causal self-forcing requires "
+                "models.student.causal_block_size to match "
+                "method.chunk_size so training and rollout block "
+                "boundaries stay aligned: "
+                f"{causal_block_size} vs {chunk_size}")
 
     def _get_denoising_step_list(self, device: torch.device) -> torch.Tensor:
         if (self._sf_denoising_step_list is not None and self._sf_denoising_step_list.device == device):

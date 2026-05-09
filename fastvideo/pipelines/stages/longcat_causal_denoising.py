@@ -22,6 +22,7 @@ import torch
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+from fastvideo.models.dits.longcat import longcat_to_training_velocity
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.longcat_causal_dmd_denoising import (
     LongCatCausalDMDDenoisingStage, )
@@ -126,7 +127,8 @@ class LongCatCausalDenoisingStage(LongCatCausalDMDDenoisingStage):
                     # LongCat scheduler convention: negate noise pred
                     # before scheduler.step (matches LongCatDenoisingStage,
                     # the regular bidirectional pipeline).
-                    pred_noise_bcthw = -pred_noise_bcthw
+                    pred_noise_bcthw = longcat_to_training_velocity(
+                        pred_noise_bcthw)
 
                     # scheduler.step works on flat [B*T, C, H, W] tensors
                     # with BTCHW ordering, so permute first.

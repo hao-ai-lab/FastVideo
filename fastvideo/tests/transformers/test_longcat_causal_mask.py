@@ -3,6 +3,9 @@ import pytest
 import torch
 
 from fastvideo.models.dits.longcat import build_longcat_block_causal_mask
+from fastvideo.train.methods.distribution_matching.self_forcing import (
+    SelfForcingMethod, )
+from fastvideo.train.models.base import ModelBase
 
 
 def _frame_visibility(mask: torch.Tensor, tokens_per_frame: int) -> list[list[bool]]:
@@ -73,4 +76,15 @@ def test_longcat_block_causal_mask_rejects_invalid_shape():
             tokens_per_frame=1,
             causal_block_size=1,
             device="cpu",
+        )
+
+
+def test_longcat_self_forcing_rejects_chunk_block_mismatch():
+    class Student(ModelBase):
+        _causal_block_size = 4
+
+    with pytest.raises(ValueError, match="causal_block_size.*chunk_size"):
+        SelfForcingMethod._validate_causal_block_size(
+            student=Student.__new__(Student),
+            chunk_size=3,
         )

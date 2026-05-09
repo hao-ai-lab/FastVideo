@@ -178,7 +178,8 @@ class LongCatCausalModel(LongCatModel, CausalModelBase):
             if isinstance(pred_noise, tuple):
                 raise RuntimeError("LongCat transformer returned a tuple "
                                    "when return_kv=False")
-        return -pred_noise.permute(0, 2, 1, 3, 4)
+        return self._to_training_velocity(
+            pred_noise).permute(0, 2, 1, 3, 4)
 
     # ------------------------------------------------------------------
     # KV cache buffer

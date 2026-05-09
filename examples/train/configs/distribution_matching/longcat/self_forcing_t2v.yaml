@@ -2,6 +2,8 @@
 #
 # Experimental scaffold for chunk-wise LongCat self-forcing training in the
 # modular framework. The student uses KV-cache accumulation between chunks.
+# Causal LongCat attention uses plain SDPA instead of LongCat BSA because BSA
+# does not accept the block-causal per-row mask yet.
 
 models:
   student:

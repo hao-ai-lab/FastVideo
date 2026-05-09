@@ -30,6 +30,7 @@ import torch
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+from fastvideo.models.dits.longcat import longcat_to_training_velocity
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
@@ -152,7 +153,8 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
                         raise RuntimeError(
                             "LongCat transformer returned a tuple when "
                             "return_kv=False")
-                    pred_noise_bcthw = -pred_noise_bcthw
+                    pred_noise_bcthw = longcat_to_training_velocity(
+                        pred_noise_bcthw)
                     pred_noise_btchw = pred_noise_bcthw.permute(0, 2, 1, 3,
                                                                  4)
 

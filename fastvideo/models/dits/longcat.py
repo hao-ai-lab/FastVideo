@@ -61,6 +61,11 @@ def build_longcat_block_causal_mask(
     return mask.unsqueeze(0).unsqueeze(0)
 
 
+def longcat_to_training_velocity(pred: torch.Tensor) -> torch.Tensor:
+    """Convert native LongCat output to FastVideo velocity target sign."""
+    return -pred
+
+
 # ============================================================================
 # Embeddings
 # ============================================================================
@@ -367,6 +372,10 @@ class LongCatSelfAttention(nn.Module):
 
         # === Block-Causal Attention ===
         if causal_block_size is not None:
+            # LongCat's native BSA path cannot consume a per-row causal mask.
+            # Causal/self-forcing therefore uses plain SDPA here; chunked
+            # rollout supplies only prior/current-frame K/V, while this mask
+            # protects any future multi-block forward mode from future leaks.
             attn_mask = build_longcat_block_causal_mask(
                 query_frames=T,
                 key_frames=T,
@@ -575,6 +584,8 @@ class LongCatSelfAttention(nn.Module):
 
         attn_mask = None
         if causal_block_size is not None:
+            # Same as the non-cache causal path: BSA is intentionally bypassed
+            # because the backend does not support this block-causal mask.
             attn_mask = build_longcat_block_causal_mask(
                 query_frames=T,
                 key_frames=full_T,
