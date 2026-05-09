@@ -1,5 +1,9 @@
 # Dreamverse streaming demo — fastvideo serve --config target.
 #
+# This config is for testing Dreamverse-like streaming through the lower-level
+# `fastvideo serve --config` entrypoint. Use `dreamverse-server` for the full
+# Dreamverse web app.
+#
 # Mirrors ../FastVideo-internal/ui/ltx2-streaming/server/config.py
 # defaults so the public typed surface produces the same runtime
 # behavior as the internal UI's GPU pool. Sources of each setting are
