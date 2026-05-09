@@ -158,8 +158,9 @@ def _check_regressions(
 ) -> list[str]:
     failures: list[str] = []
 
-    for metric in ("latency", "memory", "text_encoder_time_s", "dit_time_s",
-                   "vae_decode_time_s"):
+    for metric, _label, _precision in METRICS:
+        if metric not in LOWER_IS_BETTER_METRICS:
+            continue
         baseline = _baseline_metric(baseline_records, metric)
         curr = safe_float(current.get(metric))
         if baseline is None or curr is None or baseline <= 0:

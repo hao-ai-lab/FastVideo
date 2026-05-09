@@ -43,10 +43,7 @@
     },
     "default": {
       "max_generation_time_s": 120.0,
-      "max_peak_memory_mb": 30000.0,
-      "max_text_encoder_time_s": 5.0,
-      "max_dit_time_s": 10.0,
-      "max_vae_decode_time_s": 10.0
+      "max_peak_memory_mb": 30000.0
     }
   }
 }

@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 import torch
 import pytest
 
-import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
@@ -24,18 +23,10 @@ from fastvideo.worker.multiproc_executor import MultiprocExecutor
 logger = init_logger(__name__)
 
 STAGE_METRIC_MAP: dict[str, str] = {
-    "TextEncoderStage": "text_encoder_time_s",
     "TextEncodingStage": "text_encoder_time_s",
-    "CLIPTextEncoderStage": "text_encoder_time_s",
-    "T5TextEncoderStage": "text_encoder_time_s",
-    "DiTStage": "dit_time_s",
     "DenoisingStage": "dit_time_s",
     "DmdDenoisingStage": "dit_time_s",
-    "TransformerStage": "dit_time_s",
-    "VAEDecodeStage": "vae_decode_time_s",
-    "VAEDecoderStage": "vae_decode_time_s",
     "DecodingStage": "vae_decode_time_s",
-    "DecodeStage": "vae_decode_time_s",
 }
 
 # -- Config discovery -------------------------------------------------------
@@ -287,9 +278,7 @@ def test_inference_performance(cfg):
     """
 
     original_env = os.environ.get("FASTVIDEO_STAGE_LOGGING")
-    original_getter = envs.environment_variables["FASTVIDEO_STAGE_LOGGING"]
     os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
-    envs.environment_variables["FASTVIDEO_STAGE_LOGGING"] = lambda: True
     try:
         _run_benchmark(cfg)
     finally:
@@ -297,4 +286,3 @@ def test_inference_performance(cfg):
             os.environ.pop("FASTVIDEO_STAGE_LOGGING", None)
         else:
             os.environ["FASTVIDEO_STAGE_LOGGING"] = original_env
-        envs.environment_variables["FASTVIDEO_STAGE_LOGGING"] = original_getter

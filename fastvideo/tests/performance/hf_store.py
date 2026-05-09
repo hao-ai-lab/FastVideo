@@ -26,6 +26,7 @@ from huggingface_hub import HfApi, snapshot_download
 HF_REPO_ID: str = os.environ.get("HF_REPO_ID", "FastVideo/performance-tracking")
 HF_TOKEN: str | None = os.environ.get("HF_API_KEY")
 SYNC_MARKER = ".hf_sync_complete"
+SYNC_REUSE_TTL_SECONDS = int(os.environ.get("PERFORMANCE_TRACKING_SYNC_REUSE_TTL_SECONDS", "3600"))
 
 # ---------------------------------------------------------------------------
 # Low-level helpers
@@ -56,6 +57,23 @@ def _sync_marker_path(local_dir: str) -> str:
     return os.path.join(local_dir, SYNC_MARKER)
 
 
+def _sync_marker_is_fresh(marker_path: str) -> bool:
+    try:
+        with open(marker_path, encoding="utf-8") as marker:
+            marker_data = json.load(marker)
+        synced_at_raw = marker_data.get("synced_at")
+        if not synced_at_raw:
+            return False
+        synced_at = datetime.fromisoformat(synced_at_raw)
+        if synced_at.tzinfo is None:
+            synced_at = synced_at.replace(tzinfo=timezone.utc)
+    except (OSError, json.JSONDecodeError, ValueError, TypeError):
+        return False
+
+    age = datetime.now(timezone.utc) - synced_at
+    return age.total_seconds() <= SYNC_REUSE_TTL_SECONDS
+
+
 def sync_from_hf(
     local_dir: str,
     *,
@@ -73,13 +91,18 @@ def sync_from_hf(
     or transient HF errors fail loud rather than silently reset the baseline.
 
     When ``reuse_existing=True``, a previous successful sync in ``local_dir``
-    is reused. This avoids duplicate HF snapshot checks when compare and
-    dashboard scripts run sequentially in the same CI job.
+    is reused only while its marker is fresh. This avoids duplicate HF
+    snapshot checks when compare and dashboard scripts run sequentially in the
+    same CI job, without silently reusing stale data in persistent local or
+    long-lived runner environments.
     """
     marker_path = _sync_marker_path(local_dir)
     if reuse_existing and os.path.exists(marker_path):
-        print(f"hf_store: reusing existing sync at {local_dir}")
-        return local_dir
+        if _sync_marker_is_fresh(marker_path):
+            print(f"hf_store: reusing existing sync at {local_dir}")
+            return local_dir
+        os.remove(marker_path)
+        print(f"hf_store: existing sync at {local_dir} is stale; refreshing")
 
     if not reuse_existing and os.path.exists(marker_path):
         os.remove(marker_path)

@@ -240,8 +240,9 @@ def run_lora_extraction_tests():
               ],
               volumes={"/root/data": model_vol})
 def run_performance_tests():
-    # compare_baseline.py emits normalized_perf_*.json artifacts for manual
-    # performance-baseline reseeds when the rolling comparison runs.
+    # compare_baseline.py runs only after pytest passes, so normalized_perf_*.json
+    # artifacts are emitted for rolling-baseline failures, not fixed-threshold
+    # pytest failures. dashboard.py still runs on red CI for observability.
     run_test(
         "export HF_HOME='/root/data/.cache' && "
         "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "

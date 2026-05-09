@@ -1,6 +1,6 @@
 ---
 name: reseed-performance-baseline
-description: Re-seed the HF performance-tracking baseline for an intentional runtime, dependency, or environment-caused benchmark shift. Use when performance CI fails because metrics such as latency, throughput, component time, or peak memory changed for an accepted reason and the rolling median baseline in FastVideo/performance-tracking must be advanced by replicating one reviewed shifted source result into three success=true records, or five records when explicitly requested.
+description: Re-seed the HF performance-tracking baseline for an intentional runtime, dependency, or environment-caused benchmark shift using one or more reviewed normalized performance JSONs. Use when performance CI fails because metrics such as latency, throughput, component time, or peak memory changed for an accepted reason and the rolling median baseline in FastVideo/performance-tracking must be advanced from a consistent batch of reviewed source results. The workflow backs up existing history under /tmp, validates all source JSONs for the same (model_id, gpu_type), rejects internally inconsistent source batches, uploads one success=true reseed record per accepted source JSON, and offers to clean local temp state after a successful upload.
 ---
 
 # Re-seed Performance Baseline
@@ -16,14 +16,21 @@ for the same model and GPU. Failed records are useful audit history, but they
 do not move the future baseline because `compare_baseline.py` loads records
 with `successful_only=True`.
 
-For a 5-record median, one shifted record is not enough to move the median if
-the other four records are from the old runtime. This skill therefore creates
-3 reviewed `success=true` records from one accepted shifted source result by
-default. If the user explicitly asks for a full reset, create 5 records.
+This skill now reseeds from a reviewed batch of one or more source performance
+JSONs. It uploads one new `success=true` record per accepted source JSON; it
+does not blindly replicate one measurement into 3 or 5 records. The effective
+reseed size is therefore dynamic and equals the number of provided, validated,
+internally consistent source JSONs.
 
-These replicated records are an intentional operator-approved baseline reset,
-not independent measurements. Mark them clearly with provenance fields so the
-HF history remains auditable.
+If the operator provides fewer than 3 records, call out that the last-5 rolling
+median may not move immediately. If the operator provides 3 consistent shifted
+records, the rolling median usually moves immediately. If the operator provides
+5 consistent shifted records, the last-5 window is effectively reset to the new
+runtime profile.
+
+These records are intentional operator-approved baseline resets, not ordinary
+independent main-branch persistence. Mark them clearly with provenance fields
+so the HF history remains auditable.
 
 Use this skill when a performance test fails for an intentional and reviewed
 reason, such as a torch/runtime/container upgrade that legitimately increases
@@ -37,10 +44,11 @@ approval, then upload reviewed accepted baseline records.
   allowed regression threshold, and maintainers agree the shift is caused by
   an intentional runtime, dependency, hardware image, or benchmark environment
   change rather than a FastVideo logic regression.
-- One shifted source result has been reviewed and accepted, and the operator
-  wants to replicate it into 3 successful records so the rolling median moves
-  immediately. Use 5 records only when the user explicitly asks to fully reset
-  the last-5 window.
+- One or more shifted source result JSONs have been reviewed and accepted, and
+  the operator wants to use those exact reviewed results to advance the rolling
+  baseline.
+- The source batch is internally consistent: no provided source JSON regresses
+  against the batch median by more than the configured tolerance.
 
 ## When not to use
 
@@ -51,6 +59,8 @@ approval, then upload reviewed accepted baseline records.
   separate gate from the rolling HF baseline and may need a code review change.
 - There is no clear source run, commit, and rationale. Baseline history is a
   production signal; do not edit it without provenance.
+- The provided source JSONs disagree materially with each other. Rerun or
+  investigate instead of uploading a noisy reseed batch.
 
 ## Inputs
 
@@ -58,27 +68,33 @@ approval, then upload reviewed accepted baseline records.
 |-----------|----------|-------------|
 | `model_id` | Yes | Benchmark id, e.g. `wan-t2v-1.3b-2gpu`. This maps to the HF subdirectory after `sanitize(model_id)`. |
 | `gpu_type` | Yes | Exact GPU device string from the performance record, e.g. the L40S device name emitted by CI. Baselines are GPU-specific. |
-| `source_result` | Yes | Path or Buildkite artifact URL for one accepted shifted performance JSON. Prefer the normalized `normalized_perf_*.json` artifact emitted by `compare_baseline.py`. |
-| `replica_count` | No | Number of success records to create from `source_result`. Default: `3`. Only use `5` if the user explicitly asks for a full reset. |
+| `source_results` | Yes | One or more local paths or Buildkite artifact URLs for accepted shifted performance JSONs. Prefer normalized `normalized_perf_*.json` artifacts emitted by `compare_baseline.py`. Accept `source_result` as an alias only for a single JSON. |
+| `max_intra_batch_regression` | No | Maximum allowed regression of any source JSON against the source batch median. Default: `PERF_MAX_REGRESSION` if set, otherwise `0.05` (5%). |
 | `intent_rationale` | Yes | One-line explanation for why the baseline shift is legitimate. This is written into provenance and should be reused in the PR. |
 
 Hardcoded defaults:
 
 - HF repo: `FastVideo/performance-tracking` (`HF_REPO_ID` override is
   supported by the code, but use the default unless the user explicitly asks).
-- Local sync root: `/tmp/perf-tracking` or a timestamped local backup under
-  `performance_reseed_backup/`.
+- Local sync root: `/tmp/perf-tracking` (`PERFORMANCE_TRACKING_ROOT` override
+  is supported).
+- Backup root: `/tmp/performance_reseed_backup`.
+- Download scratch root for source artifact URLs: `/tmp/performance_reseed_source`.
 - Baseline window: last 5 `success=true` records for the same
   `(model_id, gpu_type)`.
-- Default reseed count: 3 replicated `success=true` records from one reviewed
-  source result. Explicit full-reset count: 5.
+- Reseed count: dynamic. Upload exactly one accepted seed record per validated
+  source JSON.
 
 ## Steps
 
-### 1. Validate the target and source result
+### 1. Validate the target and source results
 
-If `source_result` is a Buildkite artifact URL, download it first into a
-local scratch directory such as `performance_reseed_source/` and use that
+Normalize `source_results` to a list. If the user passes a single
+`source_result`, treat it as a one-element `source_results` list and report
+that a single record may not move the last-5 median immediately.
+
+If any source result is a Buildkite artifact URL, download it first into a
+local scratch directory under `/tmp/performance_reseed_source/` and use the
 downloaded JSON path for the rest of the workflow. If the agent cannot access
 the artifact because Buildkite authentication is missing, ask the user to
 download the artifact manually and provide the local path.
@@ -89,8 +105,8 @@ Prefer the normalized Buildkite artifact emitted by `compare_baseline.py`:
 perf_reports/results/normalized_perf_*.json
 ```
 
-That file is already in the HF tracking schema. Load it directly and confirm
-it has the expected baseline fields:
+That file is already in the HF tracking schema. Load each normalized JSON
+directly:
 
 ```python
 import json
@@ -99,71 +115,73 @@ with open(source_result, encoding="utf-8") as f:
     record = json.load(f)
 ```
 
-If only the older raw `fastvideo/tests/performance/results/perf_*.json`
-artifact is available, normalize it with `compare_baseline.py`'s shared helper
-before continuing. Run this from the repository root with
-`PYTHONPATH=fastvideo/tests/performance` so the script-local `hf_store` import
-resolves the same way it does in CI:
-
-```python
-import json
-from compare_baseline import normalize_performance_result
-
-with open(source_result, encoding="utf-8") as f:
-    record = normalize_performance_result(json.load(f))
-```
-
-The raw-to-normalized helper maps:
-
-- `model_id` comes from `benchmark_id`.
-- `gpu_type` comes from `device`.
-- `memory` comes from `max_peak_memory_mb`.
-- `latency` comes from `avg_generation_time_s`.
-- `throughput` comes from `throughput_fps`.
-- component timings come from the raw `text_encoder_time_s`, `dit_time_s`,
-  and `vae_decode_time_s` fields when present. If an older raw artifact lacks
-  those keys, they normalize to `None`; that source can still reseed latency,
-  throughput, and memory, but it cannot move component-time baselines.
-
-Stop if the normalized record's `model_id` or `gpu_type` does not match the
+Stop if any normalized record's `model_id` or `gpu_type` does not match the
 requested `model_id` and `gpu_type`.
 
-The source record may have `success: false` when it came from a failed rolling
-baseline comparison. That is expected; only the reviewed reseed replicas become
-new `success: true` baseline records after explicit approval.
+The source records may have `success: false` when they came from failed
+rolling baseline comparisons. That is expected; only the reviewed reseed
+records become new `success: true` baseline records after explicit approval.
 
-Set `replica_count` to `3` by default. Set it to `5` only when the user
-explicitly asks to upload the same shifted source result 5 times for a full
-last-5 reset. Reject other counts unless the user gives a concrete reason.
+Sort validated source records by their original `timestamp` ascending before
+preparing the seed records. If a source timestamp is missing or unparsable,
+preserve input order for those records and print a warning. This makes the
+fresh reseed timestamps deterministic and makes it clear which records enter
+the last-5 window when more than 5 source JSONs are provided.
 
 Check that `HF_API_KEY` is exported. The sync path may be public, but the
 upload path requires write access.
 
-### 1a. How to obtain `source_result` from CI
+### 1a. Check source batch consistency
+
+Before syncing or preparing uploads, reject source batches that are internally
+inconsistent. Use the same metric direction as `compare_baseline.py`:
+
+- Lower is better: `latency`, `memory`, `text_encoder_time_s`, `dit_time_s`,
+  `vae_decode_time_s`.
+- Higher is better: `throughput`.
+
+For each metric with at least two non-null source values:
+
+1. Compute the source batch median.
+2. For lower-is-better metrics, compute `(source_value - batch_median) / batch_median`.
+3. For `throughput`, compute `(batch_median - source_value) / batch_median`.
+4. Stop if any source record regresses against the batch median by more than
+   `max_intra_batch_regression`.
+
+Default `max_intra_batch_regression` to `PERF_MAX_REGRESSION` when set,
+otherwise `0.05`. Print a table with per-source values, batch median, and
+worst intra-batch regression.
+
+This check prevents uploading a mixed batch where one JSON is materially
+slower or faster than the others. If the batch fails this check, ask the user
+to provide a cleaner batch or explicitly investigate the variance. Do not
+silently drop outliers unless the user gives a concrete reviewed reason and a
+new source list.
+
+### 1b. How to obtain source results from CI
 
 The performance CI exports normalized source results for failed rolling
-baseline comparisons when `compare_baseline.py` ran. The preferred artifact
-comes from:
+baseline comparisons when `compare_baseline.py` ran. The preferred artifacts
+come from:
 
 ```text
 perf_reports/results/normalized_perf_*.json
 ```
 
-and is uploaded by Buildkite with the performance reports. The normal operator
-flow is:
+The normal operator flow is:
 
-1. Open the failed Buildkite performance job.
-2. Download the `normalized_perf_*.json` artifact for the failed benchmark.
-3. Pass the local path or artifact URL as `source_result`.
+1. Open the failed Buildkite performance job or several reruns of the same
+   benchmark after the accepted environment shift.
+2. Download the `normalized_perf_*.json` artifacts for the target benchmark.
+3. Pass all reviewed local paths or artifact URLs as `source_results`.
 
-Do not scrape the Markdown performance summary to reconstruct the JSON. The
-normalized JSON artifact is the source of truth for reseed metrics and
-provenance. If only a raw `fastvideo/tests/performance/results/perf_*.json`
-artifact is present, normalize it with `normalize_performance_result()` before
-continuing. If no JSON artifact is present, the benchmark likely failed before
-writing results, so that run is not a valid source for baseline reseeding.
+Do not scrape the Markdown performance summary to reconstruct JSON. The
+normalized JSON artifacts are the only supported source of truth for reseed
+metrics and provenance. Raw `fastvideo/tests/performance/results/perf_*.json`
+artifacts are not accepted by this skill. If no normalized JSON artifact is
+present, that run is not a valid source for baseline reseeding.
 
-### 2. Sync and back up existing HF records
+### 2. Sync and back up existing HF records under /tmp
 
 Use `fastvideo/tests/performance/hf_store.py` helpers directly. Do **not** use
 `compare_baseline.py` as a sync shortcut; on full main runs it can persist
@@ -177,17 +195,17 @@ export HF_REPO_ID="${HF_REPO_ID:-FastVideo/performance-tracking}"
 PYTHONPATH=fastvideo/tests/performance python -c 'from hf_store import sync_from_hf; import os; sync_from_hf(os.environ["PERFORMANCE_TRACKING_ROOT"], strict=True)'
 ```
 
-Then back up only the sanitized model directory:
+Then back up only the sanitized model directory under `/tmp`:
 
 ```bash
 SHORT_COMMIT=$(git rev-parse --short=12 HEAD)
 TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
-MODEL_SAFE=$(python - <<'PY'
-from fastvideo.tests.performance.hf_store import sanitize
+MODEL_SAFE=$(PYTHONPATH=fastvideo/tests/performance python - <<'PY'
+from hf_store import sanitize
 print(sanitize("<model_id>"))
 PY
 )
-BACKUP_DIR="performance_reseed_backup/${TIMESTAMP}_${SHORT_COMMIT}_${MODEL_SAFE}"
+BACKUP_DIR="/tmp/performance_reseed_backup/${TIMESTAMP}_${SHORT_COMMIT}_${MODEL_SAFE}"
 mkdir -p "$BACKUP_DIR"
 cp -R "${PERFORMANCE_TRACKING_ROOT}/${MODEL_SAFE}" "$BACKUP_DIR/" 2>/dev/null || true
 ```
@@ -198,8 +216,11 @@ Write provenance next to the backup:
 cat > "$BACKUP_DIR/PROVENANCE.txt" <<EOF
 model_id: <model_id>
 gpu_type: <gpu_type>
-source_result: <source_result>
-replica_count: <3_or_5>
+source_results:
+  - <source_result_1>
+  - <source_result_2>
+reseed_record_count: <len(source_results)>
+max_intra_batch_regression: <threshold>
 head_commit: $(git rev-parse HEAD)
 timestamp_utc: $(date -u +%FT%TZ)
 reason: <intent_rationale>
@@ -214,7 +235,7 @@ first baseline seed. Continue, but report that baseline history was empty.
 Load the last 5 successful records for the target:
 
 ```python
-from fastvideo.tests.performance.hf_store import load_records_for_model
+from hf_store import load_records_for_model
 
 records = load_records_for_model(
     "/tmp/perf-tracking",
@@ -225,8 +246,8 @@ records = load_records_for_model(
 )
 ```
 
-Print a small table showing the source result metrics, the replicated
-candidate median, and the old medians for:
+Print a small table showing old medians, source batch medians, candidate
+medians after appending the proposed seed records, and source batch spread for:
 
 - `latency`
 - `throughput`
@@ -237,14 +258,11 @@ candidate median, and the old medians for:
 
 Also print how many successful old records exist. Make clear:
 
-- 1 shifted record only seeds audit history and usually does not move the
-  median.
-- 3 replicated shifted records in a 5-record window move the median
-  immediately.
-- 5 replicated shifted records fully reset the rolling window to the source
-  result's runtime profile.
-- Replicated records are not independent measurements; they are an intentional
-  approved baseline reset and must be labeled that way.
+- 1 seed record usually does not move a last-5 median by itself.
+- 3 consistent seed records usually move the last-5 median immediately.
+- 5 consistent seed records effectively reset the last-5 window.
+- The records are intentional approved baseline resets and must be labeled
+  that way.
 
 ### 4. Confirm intent
 
@@ -252,13 +270,16 @@ Require an explicit confirmation phrase before preparing the upload:
 
 > About to RE-SEED performance baseline for `<model_id>` on `<gpu_type>`.
 > This will upload `<N>` new `success=true` records to
-> `FastVideo/performance-tracking/<sanitize(model_id)>/`.
+> `FastVideo/performance-tracking/<sanitize(model_id)>/`, one per accepted
+> source JSON.
 >
 > Reason: `<intent_rationale>`
-> Source result: `<source_result>`
-> Replica count: `<replica_count>`
-> Note: these records replicate one reviewed measurement to force the rolling
-> median to the accepted runtime profile.
+> Source results: `<source_results>`
+> Reseed record count: `<N>`
+> Max intra-batch regression: `<threshold>`
+> Note: these records come from a reviewed source batch and are intended to
+> move the rolling median to the accepted runtime profile. They are not
+> ordinary main-branch persistence.
 > HEAD: `<git rev-parse --short=12 HEAD>`
 > Backup: `<BACKUP_DIR>`
 >
@@ -268,11 +289,25 @@ Do not continue unless the user types exactly `confirm performance reseed`.
 
 ### 5. Create the accepted seed records
 
-Create `replica_count` normalized records from the single source result. Use
-an explicit allowlist; do not copy the raw result JSON wholesale.
+Create one seed record from each normalized source result. Do not copy the
+source JSON wholesale.
 
-Each record must include only these baseline fields plus the reseed provenance
-fields below:
+Infer the baseline field allowlist from all existing HF records for the target
+`(model_id, gpu_type)` after syncing, including both `success=true` and
+`success=false` records. Use the union of non-provenance keys present in those
+target records, preserving only fields that also exist in the normalized
+source record or are explicitly set by the reseed workflow. Always include
+`model_id`, `timestamp`, and `success` because the upload path and baseline
+loader depend on them. Always set `timestamp` to a fresh reseed timestamp and
+`success` to `true`. Do not include unrelated source-only fields that are
+absent from existing HF records.
+
+Exclude existing provenance or operator metadata from the inferred baseline
+field allowlist. At minimum, exclude keys prefixed with `baseline_reseed` and
+any fields known to be local-only audit metadata.
+
+If there are no previous HF records for the target model/GPU, fall back to this
+default baseline field list:
 
 - `model_id`
 - `timestamp`
@@ -284,27 +319,9 @@ fields below:
 - `text_encoder_time_s`
 - `dit_time_s`
 - `vae_decode_time_s`
-- `success: true`
+- `success`
 
-For normalized `normalized_perf_*.json` sources, these fields already exist.
-For older raw `perf_*.json` sources, map the raw fields exactly as
-`normalize_performance_result()` in `compare_baseline.py` does:
-
-| Normalized field | Raw source field |
-|------------------|------------------|
-| `model_id` | `benchmark_id` |
-| `gpu_type` | `device` |
-| `latency` | `avg_generation_time_s` |
-| `throughput` | `throughput_fps` |
-| `memory` | `max_peak_memory_mb` |
-| `text_encoder_time_s` | `text_encoder_time_s` |
-| `dit_time_s` | `dit_time_s` |
-| `vae_decode_time_s` | `vae_decode_time_s` |
-| `commit_sha` | `commit` |
-
-Do not upload raw-only fields such as `model_short_name`, `num_gpus`,
-`num_warmup_runs`, `num_measurement_runs`, `individual_times_s`,
-`individual_peak_memories_mb`, `thresholds`, or `pr_number`.
+Do not upload extra fields from the source artifact.
 
 Optional provenance fields are allowed and useful:
 
@@ -312,13 +329,14 @@ Optional provenance fields are allowed and useful:
 - `baseline_reseed_reason`
 - `baseline_reseed_source_result`
 - `baseline_reseed_source_timestamp`
-- `baseline_reseed_replicated_source: true`
+- `baseline_reseed_source_success`
 - `baseline_reseed_batch_size`
 - `baseline_reseed_batch_index`
 - `baseline_reseed_operator`
+- `baseline_reseed_max_intra_batch_regression`
 
-Use a fresh reseed timestamp for each replicated record, not the original
-source result timestamp. This is required because
+Use a fresh reseed timestamp for each seed record, not the original source
+result timestamp. This is required because
 `load_records_for_model(..., last_n=5)` keeps the last records after loading
 the model directory; stale filenames/timestamps may not enter the last-5
 window and therefore may not move the median. Preserve the original source
@@ -327,11 +345,10 @@ timestamp in `baseline_reseed_source_timestamp`.
 Use the existing filename convention from `_write_tracking_record()`:
 `<sanitize(timestamp)>_<sanitize(commit_sha)>.json` under the sanitized model
 directory, but include a deterministic suffix such as `_reseed_01`,
-`_reseed_02`, and `_reseed_03` before `.json` so the replicated files do not
-overwrite each other. For a 5-record full reset, continue through
-`_reseed_05`.
+`_reseed_02`, and so on before `.json` so multiple records from the same
+batch do not overwrite each other.
 
-If the source record already exists on HF with `success=false`, do not edit it
+If a source record already exists on HF with `success=false`, do not edit it
 in place unless the user explicitly asked for an audit-preserving correction.
 Prefer uploading new accepted seed records so failed history remains visible.
 
@@ -339,10 +356,12 @@ Prefer uploading new accepted seed records so failed history remains visible.
 
 Print:
 
-- Backup directory path.
+- Backup directory path under `/tmp`.
+- Prepared local record paths under `PERFORMANCE_TRACKING_ROOT`.
 - HF paths that will receive the new records.
 - Old rolling medians.
-- Source metrics, replica count, and candidate median.
+- Source batch medians, source batch spread, reseed count, and candidate
+  medians.
 - Rationale.
 
 Ask the user to reply exactly `upload`. Anything else aborts and leaves the
@@ -353,7 +372,7 @@ prepared records plus backup on disk.
 Use the shared storage helper so the path and repo type match CI:
 
 ```python
-from fastvideo.tests.performance.hf_store import upload_record
+from hf_store import upload_record
 
 upload_record("<local_record_path>", record, strict=True)
 ```
@@ -367,22 +386,46 @@ FastVideo/performance-tracking/<sanitize(model_id)>/<record_filename>.json
 Never bulk upload the whole tracking root. Never modify another model's
 directory in the same operation.
 
-### 8. Report outcome
+### 8. Report outcome and offer cleanup
 
 Report:
 
 - Uploaded HF paths.
-- Backup directory.
+- Backup directory under `/tmp`.
+- Local tracking root, usually `/tmp/perf-tracking`.
 - Old baseline window count and medians.
-- Source metrics, replica count, and candidate median.
-- Expected effect: 3 replicated shifted records move the 5-record median; 5
-  replicated shifted records fully reset the window to the accepted source
-  result.
+- Source batch medians, source batch spread, reseed count, and candidate
+  medians.
+- Expected effect based on reseed count.
 - Any separate threshold changes still needed in
   `.buildkite/performance-benchmarks/tests/*.json`.
 
 Include the `intent_rationale` in the PR or follow-up comment so reviewers can
 distinguish an accepted baseline shift from a hidden regression.
+
+After the upload is verified, ask whether the user wants to clear temporary
+local state. Explain what each directory is for:
+
+- `PERFORMANCE_TRACKING_ROOT`, usually `/tmp/perf-tracking`: local synced
+  mirror of `FastVideo/performance-tracking` plus the prepared local seed
+  records used for scoped upload.
+- `/tmp/performance_reseed_backup/<...>`: local backup of the target model's
+  pre-reseed HF history plus `PROVENANCE.txt`, kept so a bad reseed can be
+  audited or corrected.
+- `/tmp/performance_reseed_source/<...>` when used: downloaded source JSON
+  artifacts from Buildkite URLs.
+
+Ask:
+
+> Reseed succeeded. Do you want me to delete the local temp tracking mirror,
+> source downloads, and reseed backup under `/tmp`? These files are local
+> safety/audit artifacts only; HF already has the uploaded records.
+>
+> Reply `cleanup reseed temp` to delete them, anything else to keep them.
+
+Do not delete anything unless the user replies exactly
+`cleanup reseed temp`. If cleanup is requested, remove only the specific
+directories created for this reseed. Never remove unrelated `/tmp` contents.
 
 ## Failure modes and handling
 
@@ -390,10 +433,13 @@ distinguish an accepted baseline shift from a hidden regression.
   process that appears to have reseeded but never reached HF.
 - **Source result does not match target.** Stop. The wrong benchmark or GPU
   would poison a separate baseline.
-- **`replica_count` is 5 but the user did not explicitly ask for a full
-  reset.** Stop and use the default count of 3.
-- **The source result is noisy or suspicious.** Stop. Replicating one result
-  amplifies that measurement into the baseline, so it must be reviewed first.
+- **Source batch is internally inconsistent.** Stop if any source regresses
+  against the source batch median by more than `max_intra_batch_regression`.
+  Ask for cleaner sources or a reviewed explanation before continuing.
+- **Too few source records to move the median.** Continue only after making
+  clear that one or two records may not immediately move the last-5 median.
+- **The source results are noisy or suspicious.** Stop. Reseeding amplifies
+  those measurements into the baseline, so they must be reviewed first.
 - **HF sync fails.** Stop for destructive reseeds. A stale or empty sync can
   make the old baseline look missing.
 - **Candidate still violates fixed thresholds.** Report that this skill only
@@ -401,6 +447,9 @@ distinguish an accepted baseline shift from a hidden regression.
   review if maintainers accept the new absolute limit.
 - **The user aborts at either confirmation.** Leave the backup and prepared
   records on disk. Nothing should be uploaded.
+- **The user declines cleanup.** Keep `/tmp/perf-tracking`, the source
+  download directory if any, and `/tmp/performance_reseed_backup/<...>` in
+  place for audit/debugging.
 - **A bad seed was uploaded.** Use the backup and HF history to identify the
   uploaded file, then remove or supersede it with an explicitly reviewed
   corrective record. Do not silently rewrite unrelated history.
@@ -423,4 +472,5 @@ distinguish an accepted baseline shift from a hidden regression.
 | Date | Change |
 |------|--------|
 | 2026-05-03 | Initial version. Sister workflow to `reseed-ssim-references`, scoped to one performance `(model_id, gpu_type)` baseline seed with backup, confirmation, provenance, and `success=true` upload. |
-| 2026-05-03 | Current policy: replicate one approved shifted source result into 3 success records by default, or 5 only when explicitly requested. Add provenance marker for replicated-source reseeds. |
+| 2026-05-03 | Previous policy: replicate one approved shifted source result into 3 success records by default, or 5 only when explicitly requested. Add provenance marker for replicated-source reseeds. Superseded by the 2026-05-08 dynamic multi-source policy. |
+| 2026-05-08 | Replace fixed 3/5 replication with dynamic multi-source reseeding: upload one seed record per reviewed source JSON, validate intra-batch consistency, move backup/source scratch under `/tmp`, and ask whether to clean temp state after successful upload. |
