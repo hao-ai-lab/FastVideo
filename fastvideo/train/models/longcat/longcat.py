@@ -26,11 +26,9 @@ class LongCatModel(WanModel):
 
         validated = float(flow_shift)
         if validated == 0.0:
-            raise ValueError(
-                "LongCat training does not support flow_shift=0.0 because "
-                "it collapses FlowMatch training timesteps. Use 12.0 to "
-                "match the released LongCat scheduler config."
-            )
+            raise ValueError("LongCat training does not support flow_shift=0.0 because "
+                             "it collapses FlowMatch training timesteps. Use 12.0 to "
+                             "match the released LongCat scheduler config.")
         return validated
 
     def __init__(

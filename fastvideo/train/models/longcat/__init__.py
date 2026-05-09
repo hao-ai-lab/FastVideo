@@ -2,5 +2,4 @@
 """LongCat model plugin package."""
 
 from fastvideo.train.models.longcat.longcat import (
-    LongCatModel as LongCatModel,
-)
+    LongCatModel as LongCatModel, )
