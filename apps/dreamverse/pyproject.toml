@@ -14,6 +14,8 @@ dependencies = [
 [project.optional-dependencies]
 server = [
     "cerebras-cloud-sdk",
+    "flash-attn-cute @ git+https://github.com/XOR-op/flash-attention.git@fa4-compile#subdirectory=flash_attn/cute",
+    "flashinfer-python",
     "openai>=1.40",
 ]
 safety = [
