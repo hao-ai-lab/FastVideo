@@ -32,7 +32,7 @@ Do not create a separate upstream environment for parity tests.
 
 ```bash
 # Official reference source, if cloneable.
-python "$HOME/.config/opencode/skill/add-model-01-prep/scripts/clone_reference_repo.py" \
+python ".agents/skills/add-model-01-prep/scripts/clone_reference_repo.py" \
     "<official_repo_url>" \
     "<ReferenceDir>" \
     --commit "<commit-sha>" \
@@ -60,7 +60,7 @@ blocked_on: <none or exact blocker>
 ## Weight Setup
 
 ```bash
-python "$HOME/.config/opencode/skill/add-model-01-prep/scripts/download_hf_weights.py" \
+python ".agents/skills/add-model-01-prep/scripts/download_hf_weights.py" \
     "<Org/Model>" \
     "official_weights/<model_family>" \
     --revision "<revision>"

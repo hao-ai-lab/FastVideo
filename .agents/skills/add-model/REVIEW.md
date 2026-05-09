@@ -3,7 +3,7 @@
 Updated 2026-04-30 after the phase-based `/add-model` rewrite.
 
 All skill-text items from the prior review were incorporated into the current
-split skill stack under `~/.config/opencode/skill/add-model*`. This file is kept
+split skill stack under `.agents/skills/add-model*`. This file is kept
 only for codebase-owner follow-ups that are not blockers for the skill workflow.
 
 ### 1. Audit `wan_to_diffusers.py` usage

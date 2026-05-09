@@ -283,9 +283,16 @@ def main() -> None:
         try:
             with torch.inference_mode():
                 # TODO: adapt forward call signature to your component.
-                ref_out = official(
-                    **{k: v.clone() for k, v in inputs.items()}
-                ).detach().float().cpu()
+                ref_out = official(**{k: v.clone() for k, v in inputs.items()})
+            if isinstance(ref_out, dict):
+                sample = ref_out.get("sample")
+                ref_out = sample if sample is not None else ref_out.get("x")
+            elif hasattr(ref_out, "sample"):
+                ref_out = ref_out.sample
+            elif isinstance(ref_out, tuple):
+                ref_out = ref_out[0]
+            assert torch.is_tensor(ref_out), f"official output is not tensor: {type(ref_out)}"
+            ref_out = ref_out.detach().float().cpu()
         finally:
             for h in up_handles:
                 h.remove()
@@ -302,9 +309,16 @@ def main() -> None:
         try:
             with torch.inference_mode():
                 # TODO: adapt forward call signature to your component.
-                fv_out = fv(
-                    **{k: v.clone() for k, v in inputs.items()}
-                ).detach().float().cpu()
+                fv_out = fv(**{k: v.clone() for k, v in inputs.items()})
+            if isinstance(fv_out, dict):
+                sample = fv_out.get("sample")
+                fv_out = sample if sample is not None else fv_out.get("x")
+            elif hasattr(fv_out, "sample"):
+                fv_out = fv_out.sample
+            elif isinstance(fv_out, tuple):
+                fv_out = fv_out[0]
+            assert torch.is_tensor(fv_out), f"FastVideo output is not tensor: {type(fv_out)}"
+            fv_out = fv_out.detach().float().cpu()
         finally:
             for h in fv_handles:
                 h.remove()

@@ -147,9 +147,8 @@ def _run_official(model: torch.nn.Module, inputs: dict[str, torch.Tensor]) -> to
     with torch.inference_mode():
         output = model(**inputs)  # TODO: adapt official call signature.
     if isinstance(output, dict):
-        output = output.get("sample")
-        if output is None:
-            output = output.get("x")
+        sample = output.get("sample")
+        output = sample if sample is not None else output.get("x")
     elif hasattr(output, "sample"):
         output = output.sample
     elif isinstance(output, tuple):
@@ -163,9 +162,8 @@ def _run_fastvideo(model: torch.nn.Module, inputs: dict[str, torch.Tensor]) -> t
     with torch.inference_mode():
         output = model(**inputs)  # TODO: adapt FastVideo call signature.
     if isinstance(output, dict):
-        output = output.get("sample")
-        if output is None:
-            output = output.get("x")
+        sample = output.get("sample")
+        output = sample if sample is not None else output.get("x")
     elif hasattr(output, "sample"):
         output = output.sample
     elif isinstance(output, tuple):

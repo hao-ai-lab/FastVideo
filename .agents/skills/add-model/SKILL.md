@@ -92,7 +92,7 @@ shared rules.
 2. Resolve `needs_conversion=unknown` before component work:
 
 ```bash
-python "$HOME/.config/opencode/skill/add-model-01-prep/scripts/inspect_hf_layout.py" \
+python ".agents/skills/add-model-01-prep/scripts/inspect_hf_layout.py" \
     "<hf-or-local-path>" \
     --json
 ```

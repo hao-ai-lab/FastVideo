@@ -63,7 +63,7 @@ Expected markers: `fastvideo/`, `scripts/checkpoint_conversion/`,
 2. Inspect HF or local weight layout:
 
 ```bash
-python "$HOME/.config/opencode/skill/add-model-01-prep/scripts/inspect_hf_layout.py" \
+python ".agents/skills/add-model-01-prep/scripts/inspect_hf_layout.py" \
     "Org/Model" \
     --revision "<revision>" \
     --json
@@ -76,7 +76,7 @@ For a local path, replace `Org/Model` with `/path/to/weights`. Record
 3. Download HF weights if needed:
 
 ```bash
-python "$HOME/.config/opencode/skill/add-model-01-prep/scripts/download_hf_weights.py" \
+python ".agents/skills/add-model-01-prep/scripts/download_hf_weights.py" \
     "Org/Model" \
     "official_weights/<model_family>" \
     --revision "<revision>"
@@ -89,7 +89,7 @@ record it instead of copying large weights by default.
 4. Clone the official reference repo if applicable:
 
 ```bash
-python "$HOME/.config/opencode/skill/add-model-01-prep/scripts/clone_reference_repo.py" \
+python ".agents/skills/add-model-01-prep/scripts/clone_reference_repo.py" \
     "<official_repo_url>" \
     "<ReferenceDir>" \
     --branch "<tag-or-branch>" \
@@ -132,9 +132,9 @@ rather than pretending setup is complete.
 
 ```bash
 mkdir -p tests/local_tests/<model_family>
-cp "$HOME/.config/opencode/skill/add-model-01-prep/templates/local_tests_readme.md" \
+cp ".agents/skills/add-model-01-prep/templates/local_tests_readme.md" \
     tests/local_tests/<model_family>/README.md
-cp "$HOME/.config/opencode/skill/add-model-01-prep/templates/port_status.md" \
+cp ".agents/skills/add-model-01-prep/templates/port_status.md" \
     tests/local_tests/<model_family>/PORT_STATUS.md
 ```
 

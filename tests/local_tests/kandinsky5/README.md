@@ -42,7 +42,7 @@ blocked_on: <TODO>
 ## Weight Setup
 
 ```bash
-python "$HOME/.config/opencode/skill/add-model-prep/scripts/download_hf_weights.py" \
+python ".agents/skills/add-model-01-prep/scripts/download_hf_weights.py" \
     "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers" \
     "official_weights/kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers"
 ```
