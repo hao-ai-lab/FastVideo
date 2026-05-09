@@ -48,7 +48,7 @@ $HOME/.cache/huggingface -> /root/.cache/huggingface
 apps/dreamverse/outputs -> /var/lib/dreamverse/outputs
 ```
 
-Override the host port and output directory with `DREAMVERSE_PORT` and
+Override the host port and output directory with `BACKEND_PORT` and
 `DREAMVERSE_OUTPUTS_DIR`.
 
 To pin the container to a specific host GPU, pass Docker's GPU request syntax:

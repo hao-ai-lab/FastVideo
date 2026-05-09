@@ -63,9 +63,7 @@ RUN sed -i \
        SOURCE_DIR=/tmp/ffmpeg-native-src \
        bash /opt/FastVideo/apps/dreamverse/scripts/install_native_ffmpeg.sh
 
-ENV DREAMVERSE_HOST=0.0.0.0 \
-    DREAMVERSE_PORT=8009 \
-    FASTVIDEO_DREAMVERSE_HOME=/var/lib/dreamverse \
+ENV FASTVIDEO_DREAMVERSE_HOME=/var/lib/dreamverse \
     STREAM_MODE=av_fmp4 \
     FASTVIDEO_ENABLE_PROMPT_SAFETY=0 \
     HF_HOME=/root/.cache/huggingface

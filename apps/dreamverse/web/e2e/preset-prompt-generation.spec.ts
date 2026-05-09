@@ -12,7 +12,7 @@ import { test, expect } from '@playwright/test';
  * Devtools mode is required because the Run button only renders when
  * NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 (the production product surface
  * keeps preset selection inside the floating composer). Set
- * BACKEND_URL + NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 before running.
+ * BACKEND_HOST + BACKEND_PORT + NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 before running.
  */
 test.describe('preset prompt generation', () => {
   test.beforeEach(async ({ request }) => {
