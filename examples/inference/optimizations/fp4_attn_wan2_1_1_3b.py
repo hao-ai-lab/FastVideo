@@ -6,7 +6,7 @@ achieving up to 1.39x attention kernel speedup over BF16 FA4.
 Requirements:
     - Blackwell GPU (B200/B300, sm100a/sm103a)
     - flash-attention-fp4, cutlass-dsl, flashinfer
-    - See docs/source/getting_started/fp4_attention.md for installation
+    - See docs/inference/optimizations.md for installation
 
 Usage:
     # FP4 attention
