@@ -2,8 +2,6 @@
 ARG CUDA_TAG=12.9.1-cudnn-devel-ubuntu22.04
 FROM nvidia/cuda:${CUDA_TAG}
 
-ARG FLASH_ATTN_REPO=https://github.com/XOR-op/flash-attention.git
-ARG FLASH_ATTN_REF=fa4-compile
 ARG BUILD_FASTVIDEO_KERNEL_FROM_SOURCE=0
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -38,11 +36,6 @@ COPY . /opt/FastVideo
 RUN source /opt/venv/bin/activate \
     && uv pip install --no-cache-dir -e "/opt/FastVideo[dreamverse]"
 
-RUN git clone --depth 1 --branch ${FLASH_ATTN_REF} ${FLASH_ATTN_REPO} /opt/flash-attention \
-    && source /opt/venv/bin/activate \
-    && uv pip install --no-cache-dir --no-build-isolation \
-       -e /opt/flash-attention/flash_attn/cute
-
 # Standard docker build does not expose GPUs, while fastvideo-kernel/build.sh
 # detects the CUDA architecture with torch at build time. The FastVideo package
 # install above brings in the pinned fastvideo-kernel package; rebuild from the
@@ -69,9 +62,6 @@ RUN sed -i \
     && INSTALL_PREFIX=/opt/ffmpeg-native \
        SOURCE_DIR=/tmp/ffmpeg-native-src \
        bash /opt/FastVideo/apps/dreamverse/scripts/install_native_ffmpeg.sh
-
-RUN source /opt/venv/bin/activate \
-    && uv pip install --no-cache-dir flashinfer-python
 
 ENV DREAMVERSE_HOST=0.0.0.0 \
     DREAMVERSE_PORT=8009 \
