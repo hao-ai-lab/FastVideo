@@ -11,14 +11,14 @@ from dataclasses import dataclass
 from enum import Enum
 from multiprocessing import Process, Queue
 
-from config import (
+from dreamverse.config import (
     DEFAULT_MODEL_ID,
     MODEL_REGISTRY,
     STARTUP_WARMUP_ENABLED,
     STARTUP_WARMUP_PROMPT,
     STARTUP_WARMUP_TIMEOUT_SECONDS,
 )
-from av_streaming import (
+from dreamverse.av_streaming import (
     SHARED_STREAM_BUFFER_BYTES,
     USE_SHARED_STREAM_BUFFER,
     StreamChunk,
@@ -28,7 +28,7 @@ from av_streaming import (
     generate_stream_id,
     stream_fmp4,
 )
-from worker_ipc import (
+from dreamverse.worker_ipc import (
     CommandPayload,
     InitAck,
     JoinAck,
@@ -160,7 +160,7 @@ def gpu_worker_process(
     os.environ["CUDA_VISIBLE_DEVICES"] = cuda_device
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
 
-    from video_generation import VideoGenerationWorker
+    from dreamverse.video_generation import VideoGenerationWorker
 
     worker = VideoGenerationWorker(gpu_id)
 

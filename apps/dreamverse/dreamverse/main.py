@@ -10,26 +10,26 @@ from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastvideo.entrypoints.streaming import build_health_router
-from gpu_pool import GPUPool, get_available_gpus
-from session_logger import SessionEventLogger
+from dreamverse.gpu_pool import GPUPool, get_available_gpus
+from dreamverse.session_logger import SessionEventLogger
 
-from config import (
+from dreamverse.config import (
     DEVTOOLS_ENABLED,
     FRONTEND_STATIC_DIR_CANDIDATES,
     PROMPT_SAFETY_ENABLED,
     SESSION_LOG_ROOT,
 )
-from prompt_enhancer import PromptEnhancer
-from prompt_safety import PromptSafetyFilter
+from dreamverse.prompt_enhancer import PromptEnhancer
+from dreamverse.prompt_safety import PromptSafetyFilter
 
-import runtime
-from routes.health import (
+import dreamverse.runtime as runtime
+from dreamverse.routes.health import (
     router as internal_monitor_router, )
-from routes.presets import (
+from dreamverse.routes.presets import (
     prompt_config_router,
     curated_presets_router,
 )
-from session.controller import SessionController
+from dreamverse.session.controller import SessionController
 if DEVTOOLS_ENABLED:
     pass
 
@@ -120,6 +120,10 @@ for static_dir in FRONTEND_STATIC_DIR_CANDIDATES:
 def cli() -> None:
     import argparse
     import uvicorn
+
+    from dreamverse._deps import require_dreamverse_runtime_deps
+
+    require_dreamverse_runtime_deps()
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="0.0.0.0")

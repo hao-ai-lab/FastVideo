@@ -97,25 +97,26 @@ def test_config_ignores_legacy_groq_primary_override(monkeypatch):
     assert module.PROMPT_API_BASE_URL is None
 
 
-def test_config_uses_local_overlay_paths_when_devtools_enabled(monkeypatch):
+def test_config_uses_local_overlay_paths_when_devtools_enabled(monkeypatch, tmp_path):
     _set_required_prompt_keys(monkeypatch)
     monkeypatch.setenv("FASTVIDEO_ENABLE_DEVTOOLS", "true")
+    monkeypatch.setenv("FASTVIDEO_DREAMVERSE_HOME", str(tmp_path / "dreamverse-state"))
 
     module = _load_config_module()
 
     assert module.DEVTOOLS_ENABLED is True
     assert module.FRONTEND_ROOT.as_posix().endswith("apps/dreamverse/web")
     assert module.PROMPT_ENHANCE_SYSTEM_PROMPT_PATH.endswith(
-        "server/prompts.local/next_segment_system_prompt.md"
+        "dreamverse/prompts.local/next_segment_system_prompt.md"
     )
     assert module.PROMPT_ENHANCE_SYSTEM_PROMPT_FALLBACK_PATH.endswith(
-        "server/prompts/next_segment_system_prompt.md"
+        "dreamverse/prompts/next_segment_system_prompt.md"
     )
     assert module.PROMPT_REWRITE_USER_SYSTEM_PROMPT_PATH.endswith(
-        "server/prompts.local/rewrite_user_system_prompt.md"
+        "dreamverse/prompts.local/rewrite_user_system_prompt.md"
     )
     assert module.PROMPT_REWRITE_USER_SYSTEM_PROMPT_FALLBACK_PATH.endswith(
-        "server/prompts/rewrite_user_system_prompt.md"
+        "dreamverse/prompts/rewrite_user_system_prompt.md"
     )
     assert module.CURATED_PRESETS_FILE_PATH.endswith(
         "apps/dreamverse/web/prompts.local/selected_ltx2_continuation_story_presets.json"

@@ -24,7 +24,7 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     OpenAI = None  # type: ignore[assignment]
 
-from config import (
+from dreamverse.config import (
     PROMPT_AUTO_SYSTEM_PROMPT_FALLBACK_PATH,
     PROMPT_AUTO_SYSTEM_PROMPT_PATH,
     PROMPT_ENHANCE_SYSTEM_PROMPT_PATH,
@@ -51,7 +51,7 @@ from config import (
     PROMPT_TEMPERATURE,
     PROMPT_TIMEOUT_MS,
 )
-from rewrite_prompt_payload import (
+from dreamverse.rewrite_prompt_payload import (
     build_rewrite_request_body,
     DEFAULT_REWRITE_ROLLOUT_ID,
     DEFAULT_REWRITE_ROLLOUT_LABEL,

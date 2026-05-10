@@ -3,18 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import multiprocessing as mp
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 
-SERVER_DIR = Path(__file__).resolve().parent
-if str(SERVER_DIR) not in sys.path:
-    sys.path.insert(0, str(SERVER_DIR))
-
-import gpu_pool
+import dreamverse.gpu_pool as gpu_pool
 
 
 def _child_consume_and_exit(cmd_q, resp_q):
