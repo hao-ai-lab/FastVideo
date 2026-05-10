@@ -46,7 +46,14 @@ from fastvideo.api.parser import (
     load_serve_config,
     parse_config,
 )
-from fastvideo.api.results import GenerationResult
+from fastvideo.api.results import (
+    GenerationResult,
+    VideoEvent,
+    VideoFinalEvent,
+    VideoPartialEvent,
+    VideoProgressEvent,
+    VideoResult,
+)
 from fastvideo.api.sampling_param import SamplingParam
 
 __all__ = [
@@ -76,6 +83,11 @@ __all__ = [
     "ServeConfig",
     "ServerConfig",
     "StreamingConfig",
+    "VideoEvent",
+    "VideoFinalEvent",
+    "VideoPartialEvent",
+    "VideoProgressEvent",
+    "VideoResult",
     "WarmupConfig",
     "InferencePreset",
     "PresetStageSpec",
