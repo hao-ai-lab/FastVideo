@@ -14,17 +14,19 @@ uv run --locked --package dreamverse --extra test pytest apps/dreamverse/server/
 
 ## Backend launch
 
-Launch the migrated backend through the repo-local wrappers:
+Launch the migrated backend through the installed console commands:
 
 ```bash
-apps/dreamverse/scripts/dreamverse-server --port 8009
-apps/dreamverse/scripts/dreamverse-mock-server --port 8009
+dreamverse-server --port 8009
+dreamverse-mock-server --port 8009
 ```
 
-Do not rely on a bare `dreamverse-server` found on `PATH` during the migration.
-With `[tool.uv] package = false`, uv does not register this workspace member's
-console scripts, so a PATH binary can still point at an old Dreamverse editable
-install outside this monorepo.
+If `dreamverse-server` is missing, install FastVideo with the `dreamverse`
+extra from the checkout:
+
+```bash
+uv pip install -e ".[dreamverse]"
+```
 
 ## Frontend build and tests
 
@@ -47,8 +49,7 @@ that GPU appear as logical GPU 0 inside the process, preserving the previous
 Dreamverse deployment behavior.
 
 ```bash
-CUDA_VISIBLE_DEVICES=4 apps/dreamverse/scripts/dreamverse-server \
-  --host 0.0.0.0 --port 8009
+CUDA_VISIBLE_DEVICES=4 dreamverse-server --host 0.0.0.0 --port 8009
 ```
 
 In another shell, verify the service:
@@ -93,7 +94,7 @@ export CUDAHOSTCXX=/usr/bin/g++-13
 export NVCC_PREPEND_FLAGS="-ccbin /usr/bin/gcc-13 -allow-unsupported-compiler"
 ```
 
-The `apps/dreamverse/scripts/dreamverse-server` wrapper does NOT set these —
-they need to come from the launching shell. The `dreamverse-deploy` skill
+`dreamverse-server` does NOT set these — they need to come from the launching
+shell. The `dreamverse-deploy` skill
 ([`.agents/skills/dreamverse-deploy/`](../../.agents/skills/dreamverse-deploy/SKILL.md))
 sets them for you and is the recommended local-deploy path.
