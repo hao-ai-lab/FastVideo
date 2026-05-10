@@ -24,8 +24,8 @@ test = [
 ]
 
 [project.scripts]
-dreamverse-server = "server_entry:cli"
-dreamverse-mock-server = "mock_server:cli"
+dreamverse-server = "dreamverse.server_entry:cli"
+dreamverse-mock-server = "dreamverse.mock_server:cli"
 
 [tool.uv]
 package = false
@@ -34,7 +34,6 @@ package = false
 fastvideo = { workspace = true }
 
 [tool.pytest.ini_options]
-pythonpath = ["server"]
 markers = [
     "gpu: requires real GPU + model weights; skip in CI",
 ]

@@ -151,15 +151,27 @@ streaming = [
     "websockets",
 ]
 
+dreamverse = [
+    "uvicorn[standard]==0.41.0",
+    "cerebras-cloud-sdk",
+    "openai>=1.40",
+]
+
 rocm = [
     "amdsmi",
 ]
 
 [project.scripts]
 fastvideo = "fastvideo.entrypoints.cli.main:main"
+dreamverse-server = "dreamverse.server_entry:cli"
+dreamverse-mock-server = "dreamverse.mock_server:cli"
 
 [tool.setuptools.packages.find]
-exclude = ["assets*", "docker*", "docs", "scripts*", "apps*"]
+where = [".", "apps/dreamverse"]
+exclude = ["assets*", "docker*", "docs", "scripts*", "apps*", "dreamverse.tests*"]
+
+[tool.setuptools.package-data]
+dreamverse = ["prompts/*.md"]
 
 [tool.wheel]
 exclude = ["assets*", "docker*", "docs", "scripts*", "apps*"]

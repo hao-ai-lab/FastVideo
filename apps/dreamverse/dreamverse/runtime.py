@@ -11,10 +11,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from gpu_pool import GPUPool
-    from session_logger import SessionEventLogger
-    from prompt_enhancer import PromptEnhancer
-    from prompt_safety import PromptSafetyFilter
+    from dreamverse.gpu_pool import GPUPool
+    from dreamverse.session_logger import SessionEventLogger
+    from dreamverse.prompt_enhancer import PromptEnhancer
+    from dreamverse.prompt_safety import PromptSafetyFilter
 
 gpu_pool: GPUPool | None = None
 prompt_enhancer: PromptEnhancer | None = None

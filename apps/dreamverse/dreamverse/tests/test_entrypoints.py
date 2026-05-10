@@ -2,16 +2,11 @@ from __future__ import annotations
 # pyright: reportAttributeAccessIssue=false, reportMissingImports=false
 
 import sys
-from pathlib import Path
 import types
 
 
-SERVER_DIR = Path(__file__).resolve().parent
-if str(SERVER_DIR) not in sys.path:
-    sys.path.insert(0, str(SERVER_DIR))
-
-import main as server_main  # noqa: E402
-import mock_server  # noqa: E402
+import dreamverse.main as server_main
+import dreamverse.mock_server as mock_server
 
 
 def _run_cli(module, monkeypatch, argv: list[str]) -> list[dict[str, object]]:
@@ -29,6 +24,8 @@ def _run_cli(module, monkeypatch, argv: list[str]) -> list[dict[str, object]]:
 
     uvicorn_stub.run = run
     monkeypatch.setitem(sys.modules, "uvicorn", uvicorn_stub)
+    monkeypatch.setattr("dreamverse._deps.require_dreamverse_runtime_deps", lambda: None)
+    monkeypatch.setattr(mock_server, "require_dreamverse_runtime_deps", lambda: None)
     monkeypatch.setattr(sys, "argv", argv)
 
     module.cli()

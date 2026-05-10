@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from config import (
+from dreamverse.config import (
     FRAME_HEIGHT,
     FRAME_WIDTH,
     MODEL_CONFIG,
