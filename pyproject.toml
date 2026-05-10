@@ -154,6 +154,8 @@ streaming = [
 dreamverse = [
     "uvicorn[standard]==0.41.0",
     "cerebras-cloud-sdk",
+    "flash-attn-cute @ git+https://github.com/XOR-op/flash-attention.git@fa4-compile#subdirectory=flash_attn/cute",
+    "flashinfer-python",
     "openai>=1.40",
 ]
 
