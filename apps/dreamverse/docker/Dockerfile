@@ -51,16 +51,13 @@ RUN if [[ "${BUILD_FASTVIDEO_KERNEL_FROM_SOURCE}" == "1" ]]; then \
     fi
 
 # The monorepo ffmpeg installer force-selects conda compiler triplets for
-# local dev shells. Inside this image we use the system gcc/g++ toolchain.
-RUN sed -i \
-        -e 's/^\([[:space:]]*\)CC=x86_64-conda-linux-gnu-cc$/\1CC=gcc-11/' \
-        -e 's/^\([[:space:]]*\)CXX=x86_64-conda-linux-gnu-c++$/\1CXX=g++-11/' \
-        -e 's/^\([[:space:]]*\)CC=aarch64-conda-linux-gnu-cc$/\1CC=gcc-11/' \
-        -e 's/^\([[:space:]]*\)CXX=aarch64-conda-linux-gnu-c++$/\1CXX=g++-11/' \
-        /opt/FastVideo/apps/dreamverse/scripts/install_native_ffmpeg.sh \
-    && source /opt/venv/bin/activate \
+# local dev shells. Inside this image we explicitly opt into the system
+# gcc/g++ toolchain.
+RUN source /opt/venv/bin/activate \
     && INSTALL_PREFIX=/opt/ffmpeg-native \
        SOURCE_DIR=/tmp/ffmpeg-native-src \
+       FFMPEG_NATIVE_CC=/usr/bin/gcc \
+       FFMPEG_NATIVE_CXX=/usr/bin/g++ \
        bash /opt/FastVideo/apps/dreamverse/scripts/install_native_ffmpeg.sh
 
 ENV FASTVIDEO_DREAMVERSE_HOME=/var/lib/dreamverse \
