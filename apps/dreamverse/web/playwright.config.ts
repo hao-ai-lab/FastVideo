@@ -4,7 +4,7 @@ import { defineConfig, devices } from '@playwright/test';
  * Playwright config for Dreamverse end-to-end tests.
  *
  * Tests assume the Dreamverse Python server is reachable at
- * BACKEND_HOST:BACKEND_PORT (default localhost:8009) and the Next.js frontend
+ * BACKEND_HOST:BACKEND_PORT (default 127.0.0.1:8009) and the Next.js frontend
  * runs on port 5274. The webServer block boots `pnpm run dev` if no
  * server is already listening so tests work both locally and in CI.
  */
@@ -41,8 +41,8 @@ export default defineConfig({
         reuseExistingServer: true,
         timeout: 120_000,
         env: {
-          BACKEND_HOST: process.env.BACKEND_HOST ?? '127.0.0.1',
-          BACKEND_PORT: process.env.BACKEND_PORT ?? '8009',
+          BACKEND_HOST: process.env.BACKEND_HOST || '127.0.0.1',
+          BACKEND_PORT: process.env.BACKEND_PORT || '8009',
         },
       },
 });
