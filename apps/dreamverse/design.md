@@ -318,7 +318,7 @@ Expected shape:
 
 ```bash
 uv sync --extra server
-apps/dreamverse/scripts/dreamverse-server --host 0.0.0.0 --port 8009
+dreamverse-server --host 0.0.0.0 --port 8009
 
 cd apps/dreamverse/web
 npm ci
@@ -465,7 +465,7 @@ Add or tighten tests for:
 
 The first manual smoke checklist should be:
 
-1. start `apps/dreamverse/scripts/dreamverse-server`
+1. start `dreamverse-server`
 2. confirm `GET /healthz` returns 200
 3. confirm `GET /readyz` returns 200 after warmup
 4. start `apps/web`
