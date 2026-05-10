@@ -11,6 +11,8 @@ You can install Dreamverse using one of the methods below.
 ```bash
 pip install --upgrade pip
 pip install uv
+uv venv .venv --python 3.12
+source .venv/bin/activate
 uv pip install "fastvideo[dreamverse]"
 ```
 
@@ -22,6 +24,8 @@ cd FastVideo
 
 pip install --upgrade pip
 pip install uv
+uv venv .venv --python 3.12
+source .venv/bin/activate
 uv pip install -e ".[dreamverse]"
 ```
 
