@@ -122,7 +122,7 @@ curl http://localhost:8009/readyz
 You can also run the same readiness path with:
 
 ```bash
-BACKEND_HOST=localhost BACKEND_PORT=8010 apps/dreamverse/scripts/smoke_local.sh
+BACKEND_HOST=localhost BACKEND_PORT=8009 apps/dreamverse/scripts/smoke_local.sh
 ```
 
 If a backend is already running and you only want the script to probe it:
