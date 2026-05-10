@@ -2,9 +2,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { NextConfig } from 'next';
 
-const backendUrl =
-   process.env.BACKEND_URL ||
-  `http://${process.env.BACKEND_HOST || 'localhost'}:${Number(process.env.BACKEND_PORT) || 8009}`;
+const backendHost = process.env.BACKEND_HOST || '127.0.0.1';
+const backendPort = Number(process.env.BACKEND_PORT) || 8009;
+const backendUrl = `http://${backendHost}:${backendPort}`;
 const configDir = path.dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
