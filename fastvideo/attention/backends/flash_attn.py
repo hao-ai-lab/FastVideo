@@ -79,14 +79,6 @@ def _key_padding_mask_from_attn_mask(attn_mask: torch.Tensor, key_len: int) -> t
 class FlashAttnMetadata(AttentionMetadata):
     current_timestep: int
     attn_mask: torch.Tensor | None = None
-    # Per-step cache of converted/padded masks.  Mask conversion only
-    # depends on shape and on ``attn_mask`` itself, both of which are
-    # constant across all attention layers within one denoising step,
-    # so we share the converted masks across layers instead of redoing
-    # the work on every forward.  Populated lazily by the impl.
-    # Keys are tuples like ("kpad", key_len), ("qpad", batch, q_len),
-    # ("self_attn_pad", qkv_len).
-    _mask_cache: dict | None = None
 
 
 class FlashAttnMetadataBuilder(AttentionMetadataBuilder):
@@ -134,26 +126,16 @@ class FlashAttentionImpl(AttentionImpl):
             )
 
             attn_mask = attn_metadata.attn_mask
-            if attn_metadata._mask_cache is None:
-                attn_metadata._mask_cache = {}
-            cache = attn_metadata._mask_cache
 
             # flash_attn_no_pad packs q/k/v as one tensor and assumes equal q/k
             # sequence lengths. Cross-attention can violate this.
             if query.shape[1] != key.shape[1]:
-                qpad_key = ("qpad", query.shape[0], query.shape[1])
-                if qpad_key not in cache:
-                    cache[qpad_key] = torch.ones(
-                        (query.shape[0], query.shape[1]),
-                        dtype=torch.bool,
-                        device=query.device,
-                    )
-                query_padding_mask = cache[qpad_key]
-
-                kpad_key = ("kpad", key.shape[1])
-                if kpad_key not in cache:
-                    cache[kpad_key] = _key_padding_mask_from_attn_mask(attn_mask, key.shape[1]).to(device=key.device)
-                key_padding_mask = cache[kpad_key]
+                query_padding_mask = torch.ones(
+                    (query.shape[0], query.shape[1]),
+                    dtype=torch.bool,
+                    device=query.device,
+                )
+                key_padding_mask = _key_padding_mask_from_attn_mask(attn_mask, key.shape[1]).to(device=key.device)
 
                 return flash_attn_varlen_qk_no_pad(
                     query,
@@ -167,11 +149,7 @@ class FlashAttentionImpl(AttentionImpl):
                 )
 
             qkv = torch.stack([query, key, value], dim=2)
-
-            self_pad_key = ("self_attn_pad", qkv.shape[1])
-            if self_pad_key not in cache:
-                cache[self_pad_key] = F.pad(attn_mask, (qkv.shape[1] - attn_mask.shape[1], 0), value=True)
-            attn_mask_padded = cache[self_pad_key]
+            attn_mask_padded = F.pad(attn_mask, (qkv.shape[1] - attn_mask.shape[1], 0), value=True)
             output = flash_attn_no_pad(qkv, attn_mask_padded, causal=False, dropout_p=0, softmax_scale=None)
         else:
             output = flash_attn_func(

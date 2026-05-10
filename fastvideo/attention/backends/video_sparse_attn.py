@@ -215,6 +215,16 @@ class VideoSparseAttentionImpl(AttentionImpl):
         self.sp_size = sp_group.world_size
 
     def tile(self, x: torch.Tensor, attn_metadata: VideoSparseAttentionMetadata) -> torch.Tensor:
+        """Tile ``x`` into ``attn_metadata.tile_buf`` and return it.
+
+        The returned tensor aliases the per-metadata buffer and is only
+        valid until the next ``tile()`` / ``preprocess_qkv`` call on the
+        same ``attn_metadata``.  Callers must consume (or copy) the
+        result before invoking another VSA layer with the same metadata.
+        Today both call sites materialize copies via
+        ``.transpose(...).contiguous()`` inside ``forward()``, so the
+        contract holds; future callers must preserve it.
+        """
         num_tiles = attn_metadata.num_tiles
         t_padded_size = num_tiles[0] * VSA_TILE_SIZE[0]
         h_padded_size = num_tiles[1] * VSA_TILE_SIZE[1]
@@ -248,6 +258,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         qkv: torch.Tensor,
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
+        """Tile QKV; aliasing contract: see ``tile()``."""
         return self.tile(qkv, attn_metadata)
 
     def postprocess_output(
