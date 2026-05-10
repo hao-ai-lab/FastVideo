@@ -57,6 +57,24 @@ class FlashAttentionBackend(AttentionBackend):
         raise NotImplementedError
 
 
+def _key_padding_mask_from_attn_mask(attn_mask: torch.Tensor, key_len: int) -> torch.Tensor:
+    # Normalize attn_mask to [B, key_len] where True means valid token.
+    if attn_mask.dim() == 4:
+        attn_mask = attn_mask[:, 0, 0, :]
+    elif attn_mask.dim() == 3:
+        attn_mask = attn_mask[:, 0, :]
+    elif attn_mask.dim() != 2:
+        raise ValueError(f"Unsupported attn_mask shape for FLASH_ATTN: {attn_mask.shape}")
+
+    # SDPA additive mask convention: valid=0, masked=-inf/large negative.
+    key_padding_mask = attn_mask if attn_mask.dtype == torch.bool else attn_mask >= 0
+
+    if key_padding_mask.shape[-1] != key_len:
+        raise ValueError("Invalid key padding mask length for FLASH_ATTN: "
+                         f"expected {key_len}, got {key_padding_mask.shape[-1]}")
+    return key_padding_mask
+
+
 @dataclass
 class FlashAttnMetadata(AttentionMetadata):
     current_timestep: int
@@ -101,24 +119,6 @@ class FlashAttentionImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: FlashAttnMetadata,
     ):
-
-        def _key_padding_mask_from_attn_mask(attn_mask: torch.Tensor, key_len: int) -> torch.Tensor:
-            # Normalize attn_mask to [B, key_len] where True means valid token.
-            if attn_mask.dim() == 4:
-                attn_mask = attn_mask[:, 0, 0, :]
-            elif attn_mask.dim() == 3:
-                attn_mask = attn_mask[:, 0, :]
-            elif attn_mask.dim() != 2:
-                raise ValueError(f"Unsupported attn_mask shape for FLASH_ATTN: {attn_mask.shape}")
-
-            # SDPA additive mask convention: valid=0, masked=-inf/large negative.
-            key_padding_mask = attn_mask if attn_mask.dtype == torch.bool else attn_mask >= 0
-
-            if key_padding_mask.shape[-1] != key_len:
-                raise ValueError("Invalid key padding mask length for FLASH_ATTN: "
-                                 f"expected {key_len}, got {key_padding_mask.shape[-1]}")
-            return key_padding_mask
-
         if (attn_metadata is not None and hasattr(attn_metadata, "attn_mask") and attn_metadata.attn_mask is not None):
             from fastvideo.attention.utils.flash_attn_no_pad import (
                 flash_attn_no_pad,
@@ -136,6 +136,7 @@ class FlashAttentionImpl(AttentionImpl):
                     device=query.device,
                 )
                 key_padding_mask = _key_padding_mask_from_attn_mask(attn_mask, key.shape[1]).to(device=key.device)
+
                 return flash_attn_varlen_qk_no_pad(
                     query,
                     key,
@@ -148,9 +149,8 @@ class FlashAttentionImpl(AttentionImpl):
                 )
 
             qkv = torch.stack([query, key, value], dim=2)
-
-            attn_mask = F.pad(attn_mask, (qkv.shape[1] - attn_mask.shape[1], 0), value=True)
-            output = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0, softmax_scale=None)
+            attn_mask_padded = F.pad(attn_mask, (qkv.shape[1] - attn_mask.shape[1], 0), value=True)
+            output = flash_attn_no_pad(qkv, attn_mask_padded, causal=False, dropout_p=0, softmax_scale=None)
         else:
             output = flash_attn_func(
                 query,  # type: ignore[no-untyped-call]
