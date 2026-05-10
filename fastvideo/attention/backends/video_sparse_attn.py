@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 import functools
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 
 try:
-    from fastvideo_kernel import video_sparse_attn
+    from fastvideo_kernel import video_sparse_attn, video_sparse_attn_varlen
 except ImportError:
     video_sparse_attn = None
+    video_sparse_attn_varlen = None
 
 from typing import Any
 
@@ -57,7 +58,7 @@ def construct_variable_block_sizes(
 ) -> torch.LongTensor:
     """
     Compute the number of valid (non‑padded) tokens inside every
-    (ts_t × ts_h × ts_w) tile after padding ‑‑ flattened in the order
+    (ts_t × ts_h × ts_w) tile after padding ‑‑ flattened in the order
     (t‑tile, h‑tile, w‑tile) that `rearrange` uses.
 
     Returns
@@ -140,6 +141,11 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
     reverse_tile_partition_indices: torch.LongTensor
     variable_block_sizes: torch.LongTensor
     non_pad_index: torch.LongTensor
+    # Optional varlen fields (None = standard non-varlen path)
+    cu_seqlens_q: torch.Tensor | None = None
+    cu_seqlens_kv: torch.Tensor | None = None
+    variable_block_sizes_list: list | None = field(default=None, compare=False)
+    q_variable_block_sizes_list: list | None = field(default=None, compare=False)
 
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
@@ -157,7 +163,11 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
         patch_size: tuple[int, int, int],
         VSA_sparsity: float,
         device: torch.device,
-        **kwargs: dict[str, Any],
+        cu_seqlens_q: torch.Tensor | None = None,
+        cu_seqlens_kv: torch.Tensor | None = None,
+        variable_block_sizes_list: list | None = None,
+        q_variable_block_sizes_list: list | None = None,
+        **kwargs: Any,
     ) -> VideoSparseAttentionMetadata:
         patch_size = patch_size
         dit_seq_shape = (raw_latent_shape[0] // patch_size[0], raw_latent_shape[1] // patch_size[1],
@@ -181,7 +191,62 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
             tile_partition_indices=tile_partition_indices,  # type: ignore
             reverse_tile_partition_indices=reverse_tile_partition_indices,
             variable_block_sizes=variable_block_sizes,
-            non_pad_index=non_pad_index)
+            non_pad_index=non_pad_index,
+            cu_seqlens_q=cu_seqlens_q,
+            cu_seqlens_kv=cu_seqlens_kv,
+            variable_block_sizes_list=variable_block_sizes_list,
+            q_variable_block_sizes_list=q_variable_block_sizes_list,
+        )
+
+    def build_varlen(
+        self,
+        current_timestep: int,
+        batch_latent_shapes: list[tuple[int, int, int]],
+        patch_size: tuple[int, int, int],
+        VSA_sparsity: float,
+        device: torch.device,
+        **kwargs: Any,
+    ) -> VideoSparseAttentionMetadata:
+        """Build metadata for a varlen batch where each sequence has a different latent shape."""
+        variable_block_sizes_list = []
+        q_variable_block_sizes_list = []
+        q_lengths = []
+        kv_lengths = []
+
+        for raw_latent_shape in batch_latent_shapes:
+            dit_seq_shape = (
+                raw_latent_shape[0] // patch_size[0],
+                raw_latent_shape[1] // patch_size[1],
+                raw_latent_shape[2] // patch_size[2],
+            )
+            num_tiles = (
+                math.ceil(dit_seq_shape[0] / VSA_TILE_SIZE[0]),
+                math.ceil(dit_seq_shape[1] / VSA_TILE_SIZE[1]),
+                math.ceil(dit_seq_shape[2] / VSA_TILE_SIZE[2]),
+            )
+            vbs = construct_variable_block_sizes(dit_seq_shape, num_tiles, device)
+            variable_block_sizes_list.append(vbs)
+            q_variable_block_sizes_list.append(vbs)
+            padded_len = math.prod(num_tiles) * math.prod(VSA_TILE_SIZE)
+            q_lengths.append(padded_len)
+            kv_lengths.append(padded_len)
+
+        cu_seqlens_q = torch.zeros(len(q_lengths) + 1, dtype=torch.int32, device=device)
+        cu_seqlens_q[1:] = torch.tensor(q_lengths, dtype=torch.int32, device=device).cumsum(0)
+        cu_seqlens_kv = torch.zeros(len(kv_lengths) + 1, dtype=torch.int32, device=device)
+        cu_seqlens_kv[1:] = torch.tensor(kv_lengths, dtype=torch.int32, device=device).cumsum(0)
+
+        return self.build(
+            current_timestep=current_timestep,
+            raw_latent_shape=batch_latent_shapes[0],
+            patch_size=patch_size,
+            VSA_sparsity=VSA_sparsity,
+            device=device,
+            cu_seqlens_q=cu_seqlens_q,
+            cu_seqlens_kv=cu_seqlens_kv,
+            variable_block_sizes_list=variable_block_sizes_list,
+            q_variable_block_sizes_list=q_variable_block_sizes_list,
+        )
 
 
 class VideoSparseAttentionImpl(AttentionImpl):
@@ -246,8 +311,28 @@ class VideoSparseAttentionImpl(AttentionImpl):
         gate_compress = gate_compress.transpose(1, 2).contiguous()
 
         VSA_sparsity = attn_metadata.VSA_sparsity
-
         cur_topk = math.ceil((1 - VSA_sparsity) * (attn_metadata.total_seq_length / math.prod(VSA_TILE_SIZE)))
+
+        if attn_metadata.cu_seqlens_q is not None:
+            # varlen path: flat packed tensors [B*L, H, D]
+            if video_sparse_attn_varlen is None:
+                raise NotImplementedError("video_sparse_attn_varlen is not installed")
+            q_flat = query.reshape(-1, query.shape[-2], query.shape[-1])
+            k_flat = key.reshape(-1, key.shape[-2], key.shape[-1])
+            v_flat = value.reshape(-1, value.shape[-2], value.shape[-1])
+            caw_flat = gate_compress.reshape(-1, gate_compress.shape[-2], gate_compress.shape[-1])
+            hidden_states = video_sparse_attn_varlen(
+                q_flat, k_flat, v_flat,
+                attn_metadata.cu_seqlens_q,
+                attn_metadata.cu_seqlens_kv,
+                attn_metadata.variable_block_sizes_list,
+                attn_metadata.q_variable_block_sizes_list,
+                cur_topk,
+                block_size=VSA_TILE_SIZE,
+                compress_attn_weight=caw_flat,
+            )
+            # [total_q, H, D] -> [B, L, H, D]
+            return hidden_states.reshape(query.shape[0], -1, query.shape[-2], query.shape[-1])
 
         if video_sparse_attn is None:
             raise NotImplementedError("video_sparse_attn is not installed")
