@@ -13,7 +13,8 @@ import { test, expect, type WebSocket as PWWebSocket } from '@playwright/test';
  *     ./.agents/skills/dreamverse-deploy/scripts/dreamverse-deploy.sh \
  *         --warmup --torch-compile 4
  *     PLAYWRIGHT_SKIP_WEBSERVER=1 \
- *         BACKEND_URL=http://127.0.0.1:8009 \
+ *         BACKEND_HOST=127.0.0.1 \
+ *         BACKEND_PORT=8009 \
  *         PLAYWRIGHT_BASE_URL=http://127.0.0.1:5274 \
  *         NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 \
  *         PLAYWRIGHT_LONG_RUNNING=1 \

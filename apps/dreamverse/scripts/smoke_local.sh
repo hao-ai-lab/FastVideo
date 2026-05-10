@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HOST="${DREAMVERSE_HOST:-127.0.0.1}"
-PORT="${DREAMVERSE_PORT:-8009}"
-BASE_URL="http://${HOST}:${PORT}"
+HOST="${BACKEND_HOST:-127.0.0.1}"
+PORT="${BACKEND_PORT:-8009}"
+BACKEND_ORIGIN="http://${HOST}:${PORT}"
 TIMEOUT_SECONDS="${DREAMVERSE_SMOKE_TIMEOUT_SECONDS:-240}"
 POLL_INTERVAL_SECONDS="${DREAMVERSE_SMOKE_POLL_SECONDS:-2}"
 BACKEND_LOG_PATH="${DREAMVERSE_SMOKE_LOG_PATH:-${ROOT_DIR}/outputs/smoke-local-backend.log}"
@@ -31,7 +31,7 @@ require_command() {
 
 probe_json() {
   local path="$1"
-  curl --silent --show-error --fail "${BASE_URL}${path}"
+  curl --silent --show-error --fail "${BACKEND_ORIGIN}${path}"
 }
 
 wait_for_endpoint() {
@@ -44,7 +44,7 @@ wait_for_endpoint() {
     fi
     sleep "${POLL_INTERVAL_SECONDS}"
   done
-  echo "Timed out waiting for ${label} at ${BASE_URL}${path}" >&2
+  echo "Timed out waiting for ${label} at ${BACKEND_ORIGIN}${path}" >&2
   return 1
 }
 
@@ -54,13 +54,13 @@ mkdir -p "$(dirname "${BACKEND_LOG_PATH}")"
 
 if ! probe_json "/healthz" >/dev/null 2>&1; then
   if [[ "${START_BACKEND}" != "1" ]]; then
-    echo "Dreamverse backend is not reachable at ${BASE_URL} and auto-start is disabled." >&2
+    echo "Dreamverse backend is not reachable at ${BACKEND_ORIGIN} and auto-start is disabled." >&2
     exit 1
   fi
 
   require_command dreamverse-server
 
-  echo "Starting Dreamverse backend on ${BASE_URL}..."
+  echo "Starting Dreamverse backend on ${BACKEND_ORIGIN}..."
   (
     cd "${ROOT_DIR}"
     exec dreamverse-server --host "${HOST}" --port "${PORT}"
@@ -68,7 +68,7 @@ if ! probe_json "/healthz" >/dev/null 2>&1; then
   backend_pid=$!
   started_backend=1
 else
-  echo "Dreamverse backend already running on ${BASE_URL}."
+  echo "Dreamverse backend already running on ${BACKEND_ORIGIN}."
 fi
 
 echo "Waiting for /healthz..."
@@ -78,7 +78,7 @@ wait_for_endpoint "/readyz" "readyz"
 
 status_payload="$(probe_json "/status")"
 echo "Dreamverse local smoke check passed."
-echo "Backend URL: ${BASE_URL}"
+echo "Backend URL: ${BACKEND_ORIGIN}"
 echo "Status: ${status_payload}"
 
 if [[ "${started_backend}" == "1" ]]; then
@@ -87,9 +87,9 @@ if [[ "${started_backend}" == "1" ]]; then
   echo "Backend log: ${BACKEND_LOG_PATH}"
   echo "Backend is still running so you can launch the frontend:"
   echo "  cd ${ROOT_DIR}/web"
-  echo "  BACKEND_PORT=${PORT} pnpm run dev"
+  echo "  BACKEND_HOST=${HOST} BACKEND_PORT=${PORT} pnpm run dev"
 else
   echo "You can now launch the frontend:"
   echo "  cd ${ROOT_DIR}/web"
-  echo "  BACKEND_PORT=${PORT} pnpm run dev"
+  echo "  BACKEND_HOST=${HOST} BACKEND_PORT=${PORT} pnpm run dev"
 fi
