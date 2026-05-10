@@ -317,12 +317,12 @@ Required outcome:
 Expected shape:
 
 ```bash
-uv sync --extra server
+uv pip install -e ".[dreamverse]"
 dreamverse-server --host 0.0.0.0 --port 8009
 
 cd apps/dreamverse/web
 npm ci
-BACKEND_PORT=8009 npm run dev
+BACKEND_HOST=localhost BACKEND_PORT=8009 npm run dev
 ```
 
 Optional but useful:
@@ -459,7 +459,7 @@ Add or tighten tests for:
 
 - connection failure UX when backend is down
 - readiness failure UX when backend returns non-ready status
-- backend URL configuration through `BACKEND_URL` and `BACKEND_PORT`
+- backend routing configuration through `BACKEND_HOST` and `BACKEND_PORT`
 
 ### Manual smoke path
 
