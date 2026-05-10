@@ -34,7 +34,7 @@ WORKDIR /opt/FastVideo
 COPY . /opt/FastVideo
 
 RUN source /opt/venv/bin/activate \
-    && uv pip install --no-cache-dir -e "/opt/FastVideo[dreamverse]"
+    && uv pip install --no-cache-dir "/opt/FastVideo[dreamverse]"
 
 # Standard docker build does not expose GPUs, while fastvideo-kernel/build.sh
 # detects the CUDA architecture with torch at build time. The FastVideo package
@@ -69,8 +69,6 @@ ENV FASTVIDEO_DREAMVERSE_HOME=/var/lib/dreamverse \
     HF_HOME=/root/.cache/huggingface
 
 RUN mkdir -p /var/lib/dreamverse
-
-WORKDIR /opt/FastVideo
 
 EXPOSE 8009
 
