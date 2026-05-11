@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from abc import ABC
-
 import torch
 
 from fastvideo.eval.types import MetricResult
 
 
-class BaseMetric(ABC):
+class BaseMetric:
     """Abstract base class for all eval metrics.
 
     Two execution shapes:
