@@ -87,6 +87,7 @@ training:
   # --- training.data [TYPED] -> DataConfig ---
   data:
     data_path: data/my_dataset        # default: ""
+    preprocessed_data_type: t2v       # default: "t2v" ("text_only" for simulate-only DMD text prompts)
     train_batch_size: 1               # default: 1
     dataloader_num_workers: 4         # default: 0
     training_cfg_rate: 0.1            # default: 0.0
