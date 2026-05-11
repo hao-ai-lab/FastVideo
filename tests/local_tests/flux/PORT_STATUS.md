@@ -9,11 +9,11 @@ Last updated: 2026-05-11
 
 | Component | Type | Parity test | Status | Notes |
 |---|---|---|---|---|
-| FluxTransformer2DModel | DiT (ported) | fastvideo/tests/transformers/test_flux.py | PASS (L40S, 2026-05-11) | max_diff=0.5, mean_diff=0.04, median=0 — bf16 tail error, see notes |
-| AutoencoderKL | VAE (reused) | tests/local_tests/flux/test_flux_dev_component_loaders.py | PASS (L40S, 2026-05-11) | Loader smoke: 54.14s |
-| CLIPTextModel | encoder (reused) | tests/local_tests/flux/test_flux_dev_component_loaders.py | PASS (L40S, 2026-05-11) | Shared component |
-| T5EncoderModel | encoder (reused) | tests/local_tests/flux/test_flux_dev_component_loaders.py | PASS (L40S, 2026-05-11) | Shared component |
-| FlowMatchEulerDiscreteScheduler | scheduler (reused) | tests/local_tests/flux/test_flux_dev_component_loaders.py | PASS (L40S, 2026-05-11) | Shared component |
+| FluxTransformer2DModel | DiT (ported) | fastvideo/tests/transformers/test_flux.py | PASS (A40, 2026-05-11) | max_diff=0.5, mean_diff=0.04, median=0 — bf16 tail error, see notes |
+| AutoencoderKL | VAE (reused) | tests/local_tests/flux/test_flux_dev_component_loaders.py | PASS (A40, 2026-05-11) | Loader smoke: 54.14s |
+| CLIPTextModel | encoder (reused) | tests/local_tests/flux/test_flux_dev_component_loaders.py | PASS (A40, 2026-05-11) | Shared component |
+| T5EncoderModel | encoder (reused) | tests/local_tests/flux/test_flux_dev_component_loaders.py | PASS (A40, 2026-05-11) | Shared component |
+| FlowMatchEulerDiscreteScheduler | scheduler (reused) | tests/local_tests/flux/test_flux_dev_component_loaders.py | PASS (A40, 2026-05-11) | Shared component |
 
 ## Conversion
 
@@ -25,8 +25,8 @@ Strict-load evidence: PASS — component loader test runs strict load of all com
 
 | Test | Status | Notes |
 |---|---|---|
-| Pipeline smoke (2-step, 256×256) | PASS (L40S, 2026-05-11) | 91.14s — output finite, non-null |
-| Pipeline parity vs Diffusers FluxPipeline | PASS (L40S, 2026-05-11) | Output finite, in [0,1], correct shape — pixel parity not enforced (pipelines sample noise independently) |
+| Pipeline smoke (2-step, 256×256) | PASS (A40, 2026-05-11) | 91.14s — output finite, non-null |
+| Pipeline parity vs Diffusers FluxPipeline | PASS (A40, 2026-05-11) | Output finite, in [0,1], correct shape — pixel parity not enforced (pipelines sample noise independently) |
 
 ## Quality
 
