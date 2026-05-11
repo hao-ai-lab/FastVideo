@@ -21,14 +21,13 @@ List all files in each directory:
 
 ```bash
 echo "=== Skills ==="
-ls -1 .agents/skills/*.md 2>/dev/null | grep -v SKILL_TEMPLATE
+find .agents/skills -mindepth 2 -maxdepth 2 -name SKILL.md | sort
 
 echo "=== Workflows ==="
 ls -1 .agents/workflows/*.md 2>/dev/null
 
 echo "=== Memory ==="
-ls -1 .agents/memory/*.md 2>/dev/null
-ls -1 .agents/memory/related-work/*.md 2>/dev/null | grep -v README
+find .agents/memory -mindepth 2 -maxdepth 2 -name README.md | sort
 
 echo "=== Lessons ==="
 ls -1 .agents/lessons/*.md 2>/dev/null | grep -v README
