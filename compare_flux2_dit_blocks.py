@@ -31,6 +31,7 @@ import os
 import sys
 
 import torch
+import torch.nn.functional as F
 
 # FastVideo imports
 from fastvideo.forward_context import set_forward_context
@@ -554,6 +555,85 @@ def _print_flux2_feedforward_linear_types(transformer) -> None:
             )
 
 
+def _unwrap_module_leaf(module: torch.nn.Module) -> torch.nn.Module:
+    """Peel ``torch.compile`` / wrapper layers so ``.weight`` lives on the inner module."""
+    m = module
+    for _ in range(8):
+        inner = getattr(m, "_orig_mod", None)
+        if inner is not None:
+            m = inner
+            continue
+        inner = getattr(m, "_checkpoint_wrapped_module", None)
+        if inner is not None:
+            m = inner
+            continue
+        break
+    return m
+
+
+def _ff_context_sd_prefix(block_index: int) -> str:
+    return f"transformer_blocks.{block_index}.ff_context."
+
+
+def _get_ff_context_linear_tensors(
+    model: torch.nn.Module,
+    block_index: int,
+    linear_name: str,
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """Resolve ``linear_in`` / ``linear_out`` weights: ``state_dict`` first, then submodule."""
+    prefix = _ff_context_sd_prefix(block_index) + linear_name + "."
+    sd = model.state_dict()
+    w_key, b_key = prefix + "weight", prefix + "bias"
+    w = sd.get(w_key)
+    b = sd.get(b_key) if b_key in sd else None
+    if w is not None and w.numel() > 0:
+        return w, b
+    # Keys may be prefixed (e.g. wrappers); prefer any match ending with the HF-style suffix.
+    needle = f"transformer_blocks.{block_index}.ff_context.{linear_name}.weight"
+    if w is None or w.numel() == 0:
+        for k, t in sd.items():
+            if k.endswith(needle) and t is not None and t.numel() > 0:
+                w = t
+                b_k = k[: -len("weight")] + "bias"
+                b = sd.get(b_k) if b_k in sd else None
+                break
+    if w is not None and w.numel() > 0:
+        return w, b
+    if not hasattr(model, "transformer_blocks") or block_index >= len(
+        model.transformer_blocks
+    ):
+        return w, b
+    ff = model.transformer_blocks[block_index].ff_context
+    mod = getattr(ff, linear_name, None)
+    if mod is None:
+        return w, b
+    mod = _unwrap_module_leaf(mod)
+    w = getattr(mod, "weight", None)
+    b = getattr(mod, "bias", None)
+    return w, b
+
+
+def _flux2_ff_context_forward_explicit(
+    model: torch.nn.Module, block_index: int, x: torch.Tensor
+) -> torch.Tensor:
+    """Run ``ff_context`` like ``Flux2FeedForward`` using state_dict weights + ``act_fn``."""
+    ff = model.transformer_blocks[block_index].ff_context
+    wi, bi = _get_ff_context_linear_tensors(model, block_index, "linear_in")
+    wo, bo = _get_ff_context_linear_tensors(model, block_index, "linear_out")
+    if wi is None or wo is None or wi.numel() == 0 or wo.numel() == 0:
+        raise RuntimeError(
+            f"Missing or empty ff_context linear weights (block {block_index}); "
+            f"keys tried like {_ff_context_sd_prefix(block_index)}linear_in.weight"
+        )
+    wi_t = wi.to(device=x.device, dtype=x.dtype)
+    wo_t = wo.to(device=x.device, dtype=x.dtype)
+    bi_t = bi.to(device=x.device, dtype=x.dtype) if bi is not None else None
+    bo_t = bo.to(device=x.device, dtype=x.dtype) if bo is not None else None
+    h = F.linear(x, wi_t, bi_t)
+    h = ff.act_fn(h)
+    return F.linear(h, wo_t, bo_t)
+
+
 def _print_ff_context_weight_diff_vs_official(
     transformer, pipe, block_index: int
 ) -> None:
@@ -568,24 +648,21 @@ def _print_ff_context_weight_diff_vs_official(
         trans_off.transformer_blocks
     ):
         return
-    fv_ff = trans_fv.transformer_blocks[block_index].ff_context
-    off_ff = trans_off.transformer_blocks[block_index].ff_context
     print(f"\n--- double_{block_index} ff_context weights vs official ---")
     for name in ("linear_in", "linear_out"):
-        fv_m = getattr(fv_ff, name, None)
-        off_m = getattr(off_ff, name, None)
-        if fv_m is None or off_m is None:
-            print(f"  {name}: missing module")
-            continue
-        fw = getattr(fv_m, "weight", None)
-        ow = getattr(off_m, "weight", None)
+        fw, fb = _get_ff_context_linear_tensors(trans_fv, block_index, name)
+        ow, ob = _get_ff_context_linear_tensors(trans_off, block_index, name)
         if fw is None or ow is None:
-            print(f"  {name}: no .weight")
+            print(
+                f"  {name}: missing weight "
+                f"(fv={fw is not None}, official={ow is not None}); "
+                f"expected key {_ff_context_sd_prefix(block_index)}{name}.weight"
+            )
             continue
         if fw.numel() == 0 or ow.numel() == 0:
             print(
                 f"  {name}: empty weight fv={tuple(fw.shape)} "
-                f"off={tuple(ow.shape)}"
+                f"off={tuple(ow.shape)} (fallback: inspect state_dict / compile wrap)"
             )
             continue
         if fw.shape != ow.shape:
@@ -600,7 +677,6 @@ def _print_ff_context_weight_diff_vs_official(
             f"  {name}: max|diff|={d.max().item():.6e} "
             f"mean={d.mean().item():.6e}"
         )
-        fb, ob = getattr(fv_m, "bias", None), getattr(off_m, "bias", None)
         if (
             fb is not None
             and ob is not None
@@ -708,20 +784,38 @@ def _print_ff_context_module_replay(
     if off_before_ff is None:
         print("  Could not capture official before_ff; skip replay.")
         return
-    fv_ff = trans_fv.transformer_blocks[block_index].ff_context
-    off_ff = trans_off.transformer_blocks[block_index].ff_context
     with torch.no_grad():
         x_fp32 = off_before_ff.detach().float().to(device)
-        y_fv = fv_ff(x_fp32.clone())
-        y_off = off_ff(x_fp32.clone())
+        try:
+            y_fv = _flux2_ff_context_forward_explicit(trans_fv, block_index, x_fp32.clone())
+            y_off = _flux2_ff_context_forward_explicit(
+                trans_off, block_index, x_fp32.clone()
+            )
+        except RuntimeError as e:
+            print(f"  explicit ff_context forward failed: {e}")
+            print("  fallback: submodule forward (may fail if .weight is empty)")
+            fv_ff = trans_fv.transformer_blocks[block_index].ff_context
+            off_ff = trans_off.transformer_blocks[block_index].ff_context
+            y_fv = fv_ff(x_fp32.clone())
+            y_off = off_ff(x_fp32.clone())
         d = (y_fv.float() - y_off.float()).abs()
         print(
             "  fp32 activations: "
             f"max_diff={d.max().item():.6e} mean_diff={d.mean().item():.6e}"
         )
         x_act = off_before_ff.detach().to(device=device, dtype=model_dtype)
-        y_fv_b = fv_ff(x_act.clone())
-        y_off_b = off_ff(x_act.clone())
+        try:
+            y_fv_b = _flux2_ff_context_forward_explicit(
+                trans_fv, block_index, x_act.clone()
+            )
+            y_off_b = _flux2_ff_context_forward_explicit(
+                trans_off, block_index, x_act.clone()
+            )
+        except RuntimeError:
+            fv_ff = trans_fv.transformer_blocks[block_index].ff_context
+            off_ff = trans_off.transformer_blocks[block_index].ff_context
+            y_fv_b = fv_ff(x_act.clone())
+            y_off_b = off_ff(x_act.clone())
         d_b = (y_fv_b.float() - y_off_b.float()).abs()
         print(
             f"  {model_dtype} activations: "
