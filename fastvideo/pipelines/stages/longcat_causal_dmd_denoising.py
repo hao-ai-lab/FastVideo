@@ -26,6 +26,7 @@ from dataclasses import replace
 from typing import Any
 
 import torch
+from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -172,7 +173,7 @@ class LongCatCausalDMDDenoisingStage(DenoisingStage):
                             [1], dtype=torch.long, device=device)
                         gen = (batch.generator[0] if isinstance(
                             batch.generator, list) else batch.generator)
-                        noise = torch.randn(
+                        noise = randn_tensor(
                             video_raw_latent_shape,
                             dtype=pred_video_btchw.dtype,
                             device=device,
