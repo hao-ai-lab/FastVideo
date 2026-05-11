@@ -10,7 +10,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-from diffusers.models.embeddings import apply_rotary_emb, get_1d_rotary_pos_embed
+from fastvideo.layers.rotary_embedding import apply_rotary_emb, get_1d_rotary_pos_embed
 
 from fastvideo.attention import DistributedAttention
 from fastvideo.configs.models import DiTConfig
