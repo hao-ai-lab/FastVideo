@@ -14,12 +14,12 @@ unnecessary overhead.
 from __future__ import annotations
 
 import contextlib
-from pathlib import Path
 from typing import Any
 
 import torch
 
 from fastvideo.eval.memory import clear_cache
+from fastvideo.eval.metrics.base import BaseMetric
 from fastvideo.eval.registry import get_metric
 from fastvideo.eval.types import MetricResult
 
@@ -27,9 +27,11 @@ from fastvideo.eval.types import MetricResult
 class EvalWorker:
     """Owns metric replicas on one device. Single-GPU, single-sample.
 
-    Metrics receive one sample per ``compute(sample)`` call: scalar
-    values, not list-wrapped or batch-dim-prefixed. See
-    :class:`Evaluator` for ``pre_upload`` semantics.
+    Per-sample metrics (``is_set_metric=False``) return one
+    :class:`MetricResult` per ``evaluate`` call. Set metrics
+    (``is_set_metric=True``) accumulate state on the worker's own
+    instance and contribute nothing to the per-sample return — the
+    Evaluator finalizes them after the pool drains.
     """
 
     def __init__(self, metric_names: list[str], device: str, *, compile: bool = False, pre_upload: bool = True) -> None:
@@ -37,7 +39,7 @@ class EvalWorker:
         self._device = device
         self._compile = compile
         self._pre_upload = pre_upload
-        self._metrics: dict = {}
+        self._metrics: dict[str, BaseMetric] = {}
         self._unloaded = False
         self._load()
 
@@ -61,20 +63,17 @@ class EvalWorker:
         self._unloaded = False
 
     def evaluate(self, **kwargs) -> dict[str, MetricResult]:
-        """Score one sample.
+        """Score one already-decoded sample.
 
-        ``video`` / ``reference`` may be a ``(T, C, H, W)`` tensor or a
-        path-like (``str`` / ``Path``). Paths are decoded here so the
-        dispatcher can queue cheap strings. A ``(1, T, C, H, W)`` tensor
-        is unwrapped to ``(T, C, H, W)`` for back-compat.
+        Inputs (``video`` / ``reference`` paths, 5-D tensors) are
+        decoded and normalized upstream by the :class:`VideoPool`. The
+        worker only handles the optional pre-upload to its device and
+        dispatches to each metric's ``compute`` or ``accumulate``.
         """
         if self._unloaded:
             raise RuntimeError("EvalWorker was unloaded; call reload() before evaluating.")
 
         sample = dict(kwargs)
-        sample["video"] = _resolve_video_input(sample.get("video"))
-        if "reference" in sample:
-            sample["reference"] = _resolve_video_input(sample["reference"])
         if self._pre_upload:
             sample["video"] = _to_device(sample.get("video"), self._device)
             if "reference" in sample:
@@ -82,8 +81,21 @@ class EvalWorker:
 
         results: dict[str, MetricResult] = {}
         for name, m in self._metrics.items():
-            results[name] = m.compute(sample)
+            if m.is_set_metric:
+                m.accumulate(sample)
+            else:
+                results[name] = m.compute(sample)
         return results
+
+    def set_metrics(self) -> dict[str, BaseMetric]:
+        """Return ``{name: instance}`` for set metrics on this worker."""
+        return {n: m for n, m in self._metrics.items() if m.is_set_metric}
+
+    def reset_set_metrics(self) -> None:
+        """Clear accumulator state on every set metric."""
+        for m in self._metrics.values():
+            if m.is_set_metric:
+                m.reset()
 
     def release_cuda_memory(self) -> None:
         """Free CUDA caches without dropping models."""
@@ -112,19 +124,3 @@ def _to_device(value: Any, device: str | torch.device) -> Any:
     if value.device == target:
         return value
     return value.to(target, non_blocking=True)
-
-
-def _resolve_video_input(value: Any) -> Any:
-    """Normalize a sample's ``video`` / ``reference`` field for metrics.
-
-    Paths → decoded ``(T, C, H, W)`` tensor; ``(1, T, C, H, W)`` →
-    squeezed to ``(T, C, H, W)``; everything else returned untouched.
-    """
-    if value is None:
-        return None
-    if isinstance(value, str | Path):
-        from fastvideo.eval.io.video import load_video
-        return load_video(str(value))
-    if isinstance(value, torch.Tensor) and value.dim() == 5 and value.shape[0] == 1:
-        return value.squeeze(0)
-    return value

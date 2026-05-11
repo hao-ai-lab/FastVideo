@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from abc import ABC
 
 import torch
 
@@ -10,14 +10,24 @@ from fastvideo.eval.types import MetricResult
 class BaseMetric(ABC):
     """Abstract base class for all eval metrics.
 
-    Subclasses must implement :meth:`compute`. Optionally override
-    :meth:`setup` to eagerly load models.
+    Two execution shapes:
 
-    Metrics that need to chunk along the time dimension (frames or frame
-    pairs) for memory reasons should hardcode their own chunk size in
-    ``__init__`` (see ``optical_flow`` for the canonical example). Eval
-    always processes one video per :meth:`Evaluator.evaluate` call;
-    ``compute`` therefore receives a single sample, not a batch.
+    * **Per-sample** (``is_set_metric=False``, default) — implement
+      :meth:`compute`. The Evaluator calls it once per input sample and
+      returns one :class:`MetricResult` per sample.
+
+    * **Set-vs-set** (``is_set_metric=True``) — implement
+      :meth:`accumulate` (called once per sample to buffer features)
+      and :meth:`finalize` (called once after all samples to compute
+      the corpus-level result). Use :meth:`reset` to clear buffers and
+      :meth:`merge_from` to fold multi-GPU per-worker state together.
+
+    Optionally override :meth:`setup` to eagerly load models. Metrics
+    that chunk along the time dim for memory hardcode their own chunk
+    size in ``__init__`` (see ``optical_flow`` for the canonical
+    example). Eval always processes one video per
+    :meth:`Evaluator.evaluate` call; ``compute`` / ``accumulate``
+    receive a single sample, not a batch.
     """
 
     name: str = ""
@@ -26,6 +36,7 @@ class BaseMetric(ABC):
     dependencies: list[str] = []
     needs_gpu: bool = False
     backbone: str | None = None
+    is_set_metric: bool = False
 
     # Default time-dim chunk size for metrics that batch internally over
     # frames or frame-pairs. Override in subclass __init__ if needed
@@ -56,14 +67,27 @@ class BaseMetric(ABC):
         """Return a skipped result (``score=None`` + reason in details)."""
         return MetricResult(name=self.name, score=None, details={"skipped": reason})
 
-    @abstractmethod
     def compute(self, sample: dict) -> MetricResult:
-        """Compute the metric on a single sample.
+        """Per-sample metrics: compute the score for one sample.
 
         ``sample["video"]`` is ``(T, C, H, W)`` float in ``[0, 1]``.
-        ``sample["reference"]`` (if used) has the same shape.
-
-        If required inputs are missing, return ``self._skip(sample, reason)``
-        instead of raising.
+        ``sample["reference"]`` (if used) has the same shape. Return
+        ``self._skip(sample, reason)`` for missing inputs.
         """
-        ...
+        raise NotImplementedError(f"{type(self).__name__}.compute is not implemented")
+
+    # --- set-vs-set protocol (only invoked when is_set_metric=True) ---
+
+    def reset(self) -> None:  # noqa: B027 - intentionally optional override
+        """Clear accumulator state at the start of each evaluate() call."""
+
+    def accumulate(self, sample: dict) -> None:
+        """Buffer per-sample features for a corpus-level metric."""
+        raise NotImplementedError(f"{type(self).__name__}.accumulate is not implemented")
+
+    def finalize(self) -> MetricResult:
+        """Compute the corpus-level result from buffered state."""
+        raise NotImplementedError(f"{type(self).__name__}.finalize is not implemented")
+
+    def merge_from(self, other: BaseMetric) -> None:  # noqa: B027 - intentionally optional override
+        """Multi-GPU: fold another worker's accumulator state into this one."""

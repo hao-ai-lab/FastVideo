@@ -20,7 +20,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from fastvideo.eval.registry import (list_metrics, missing_dependencies, resolve_group)
-from fastvideo.eval.types import MetricResult
+from fastvideo.eval.types import EvalResults, MetricResult
 from fastvideo.eval.worker import EvalWorker
 from fastvideo.logger import init_logger
 
@@ -91,19 +91,19 @@ class Evaluator:
         self,
         samples: Iterable[dict] | None = None,
         **kwargs,
-    ) -> dict[str, MetricResult] | list[dict[str, MetricResult]]:
+    ) -> dict[str, MetricResult] | EvalResults:
         """Score one sample (kwargs form) or many samples (list form).
 
-        ``video`` and ``reference`` may be either a pre-loaded
-        ``(T, C, H, W)`` tensor or a path-like (``str`` / ``Path``).
-        Paths in the list form are decoded asynchronously by a
-        :class:`VideoPool` that runs alongside metric compute, hiding
-        decode latency behind GPU work.
+        Both forms go through the same :class:`VideoPool` pipeline;
+        ``video`` / ``reference`` paths are decoded asynchronously,
+        ``(1, T, C, H, W)`` tensors are squeezed.
 
         One sample::
 
             ev.evaluate(video=tensor, text_prompt="...", fps=24.0)
             ev.evaluate(video="path/to/clip.mp4", fps=24.0)
+
+        Returns a ``dict[str, MetricResult]``.
 
         Many samples — pipelined decode + work-stealing across replicas::
 
@@ -113,26 +113,34 @@ class Evaluator:
                 ...
             ])
 
-        Multi-GPU dispatch fires automatically when ``num_gpus > 1`` and
-        the list form is used: every worker runs a consumer thread,
-        pulling decoded samples from the shared pool as it frees up.
-        The kwargs form always runs on worker 0 with no pool overhead.
+        Returns an :class:`EvalResults` (list-of-dict subclass): per-sample
+        dicts in input order, with set-metric scores under ``.corpus``.
         """
-        if samples is None:
-            return self._workers[0].evaluate(**kwargs)
+        single = samples is None
+        sample_list: list[dict] = [kwargs] if samples is None else list(samples)
+        if not sample_list:
+            return EvalResults(samples=[], corpus={})
 
-        samples = list(samples)
-        if not samples:
-            return []
-        return self._evaluate_with_pool(samples)
+        per_sample, corpus = self._run(sample_list)
 
-    def _evaluate_with_pool(self, samples: list[dict]) -> list[dict[str, MetricResult]]:
-        """Run samples through a :class:`VideoPool`, writing results in input order."""
+        if single:
+            return per_sample[0]
+        return EvalResults(samples=per_sample, corpus=corpus)
+
+    def _run(self, samples: list[dict]) -> tuple[list[dict[str, MetricResult]], dict[str, MetricResult]]:
+        """Pool-driven sample pipeline + set-metric finalize.
+
+        Returns ``(per_sample_results, corpus_results)``.
+        """
         from fastvideo.eval.pool import VideoPool
+
+        # Reset every worker's set-metric buffers — per-call isolation.
+        for w in self._workers:
+            w.reset_set_metrics()
 
         n_workers = len(self._workers)
         max_size = self._prefetch_factor * n_workers
-        results: list[Any] = [None] * len(samples)
+        per_sample: list[Any] = [None] * len(samples)
 
         with VideoPool(samples, loader_threads=self._loader_threads, max_size=max_size) as pool:
             if n_workers == 1:
@@ -141,31 +149,43 @@ class Evaluator:
                     if item is None:
                         break
                     idx, decoded = item
-                    results[idx] = self._workers[0].evaluate(**decoded)
+                    per_sample[idx] = self._workers[0].evaluate(**decoded)
             else:
                 # Multi-GPU: every worker drains the shared pool (work-stealing).
+                errors: list[BaseException] = []
                 threads: list[threading.Thread] = []
                 for w in self._workers:
-                    t = threading.Thread(
-                        target=self._consumer_loop,
-                        args=(w, pool, results),
-                        daemon=True,
-                    )
+                    t = threading.Thread(target=self._consumer_loop, args=(w, pool, per_sample, errors), daemon=True)
                     t.start()
                     threads.append(t)
                 for t in threads:
                     t.join()
+                if errors:
+                    raise errors[0]
 
-        return results
+        # Finalize set metrics. With multiple workers, fold per-worker
+        # accumulator state into worker 0 first, then finalize once.
+        corpus: dict[str, MetricResult] = {}
+        base_set = self._workers[0].set_metrics()
+        if base_set:
+            for w in self._workers[1:]:
+                for name, m in w.set_metrics().items():
+                    base_set[name].merge_from(m)
+            corpus = {name: m.finalize() for name, m in base_set.items()}
+
+        return per_sample, corpus
 
     @staticmethod
-    def _consumer_loop(worker: EvalWorker, pool: Any, results: list) -> None:
-        while True:
-            item = pool.get()
-            if item is None:
-                return
-            idx, decoded = item
-            results[idx] = worker.evaluate(**decoded)
+    def _consumer_loop(worker: EvalWorker, pool: Any, results: list, errors: list) -> None:
+        try:
+            while True:
+                item = pool.get()
+                if item is None:
+                    return
+                idx, decoded = item
+                results[idx] = worker.evaluate(**decoded)
+        except BaseException as e:  # noqa: BLE001 — surface to parent thread via shared list
+            errors.append(e)
 
     def release_cuda_memory(self) -> None:
         """Free CUDA caches on every replica without dropping models."""

@@ -16,9 +16,25 @@ import threading
 from pathlib import Path
 from typing import Any
 
+import torch
+
 from fastvideo.eval.types import Video
 
 _SENTINEL = object()
+
+
+class _DecodeError:
+    """Marker pushed onto the ready queue when a loader thread raises.
+
+    The consumer re-raises in its own thread, surfacing the error to
+    the caller of ``Evaluator.evaluate`` instead of hanging on
+    ``_ready_q.get()`` forever.
+    """
+
+    __slots__ = ("exc", )
+
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
 
 
 class VideoPool:
@@ -82,6 +98,8 @@ class VideoPool:
         """Pop the next decoded ``(idx, sample)``.
 
         Returns ``None`` when all input samples have been consumed.
+        Re-raises any exception caught in a loader thread on the
+        consumer's stack so callers don't hang on a dead loader.
         Thread-safe: multiple consumer threads may share one pool.
         """
         with self._consume_lock:
@@ -93,6 +111,9 @@ class VideoPool:
             return None
         with self._consume_lock:
             self._consumed += 1
+        idx, payload = item
+        if isinstance(payload, _DecodeError):
+            raise payload.exc
         return item
 
     def _loader_loop(self) -> None:
@@ -101,18 +122,26 @@ class VideoPool:
             if item is _SENTINEL:
                 return
             idx, sample = item
-            decoded = self._decode(sample)
+            try:
+                decoded: Any = self._decode(sample)
+            except BaseException as exc:  # noqa: BLE001 — forward to consumer
+                self._ready_q.put((idx, _DecodeError(exc)))
+                continue
             # Blocking put: under normal flow the consumer drains the
             # queue; under shutdown ``__exit__`` drains it for us. A
             # timeout would silently drop samples and hang the consumer.
             self._ready_q.put((idx, decoded))
 
     def _decode(self, sample: dict) -> dict:
-        """Materialize any path-shaped video values in *sample*.
+        """Materialize and normalize ``video`` / ``reference`` entries.
 
-        Recognises ``Video`` instances (populates ``.frames``) and bare
-        path strings under ``video`` / ``reference``. Other entries pass
-        through unchanged.
+        * ``Video`` instance → populate ``.frames`` via decode.
+        * ``str`` / ``Path`` under ``video`` / ``reference`` → decoded
+          ``(T, C, H, W)`` tensor.
+        * ``(1, T, C, H, W)`` tensor under ``video`` / ``reference`` →
+          squeezed to ``(T, C, H, W)`` (back-compat with callers that
+          still pass a leading batch dim).
+        * Everything else passes through unchanged.
         """
         from fastvideo.eval.io.video import load_video
 
@@ -122,6 +151,9 @@ class VideoPool:
                 if val.frames is None and val.source is not None:
                     val.frames = load_video(val.source)
                 out[key] = val
-            elif key in ("video", "reference") and isinstance(val, str | Path):
-                out[key] = load_video(str(val))
+            elif key in ("video", "reference"):
+                if isinstance(val, str | Path):
+                    out[key] = load_video(str(val))
+                elif isinstance(val, torch.Tensor) and val.dim() == 5 and val.shape[0] == 1:
+                    out[key] = val.squeeze(0)
         return out
