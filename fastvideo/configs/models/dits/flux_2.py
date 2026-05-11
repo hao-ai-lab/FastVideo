@@ -28,7 +28,9 @@ class Flux2ArchConfig(DiTArchConfig):
     rope_theta: int = 2000  # Base frequency for RoPE (match diffusers Flux2)
     eps: float = 1e-6
     guidance_embeds: bool = True  # Whether to use guidance embeddings
-    
+    # When True, compute SwiGLU in fp32 inside ``ff_context`` only (bf16 noise mitigation).
+    ff_context_swiglu_fp32: bool = False
+
     # Parameter name mapping for loading HuggingFace checkpoints
     param_names_mapping: dict = field(
         default_factory=lambda: {

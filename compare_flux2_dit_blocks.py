@@ -16,10 +16,17 @@ not to the full block output.
 Also reports post-SDPA tensors (4D, before flatten) for double_0 and double_4,
 and ``ff_context`` sublayer outputs (after linear_in, act_fn, linear_out).
 
+RoPE cos/sin stay fp32 end-to-end (matches HuggingFace Diffusers). Text encoder
+parity vs Diffusers is deferred until DiT block-wise parity is resolved.
+
+Use ``--ff-context-swiglu-fp32`` to run FastVideo with fp32 SwiGLU inside
+``ff_context`` only (bf16 drift mitigation; compare double_4 context FF stats).
+
 Use ``--skip-block-scan`` to avoid caching every block's activations on GPU
 (OOM on smaller cards); the script exits after double_0 post-SDPA stats.
 """
 import argparse
+import glob
 import os
 import sys
 
@@ -606,6 +613,120 @@ def _print_ff_context_weight_diff_vs_official(
                 f"  {name} bias: max|diff|={db.max().item():.6e} "
                 f"mean={db.mean().item():.6e}"
             )
+
+
+def _collect_safetensors_key_union(paths: list[str]) -> set[str]:
+    keys: set[str] = set()
+    try:
+        from safetensors import safe_open
+    except ImportError:
+        return keys
+    for p in paths:
+        with safe_open(p, framework="pt", device="cpu") as f:
+            keys.update(f.keys())
+    return keys
+
+
+def _print_dit_checkpoint_vs_model_keys(transformer, model_path: str) -> None:
+    """Compare union of safetensors keys to ``transformer.state_dict()`` names."""
+    print("\n--- DiT safetensors vs model state_dict keys ---")
+    if os.path.isfile(model_path) and model_path.endswith(".safetensors"):
+        st_files = [model_path]
+    elif os.path.isdir(model_path):
+        st_files = sorted(glob.glob(os.path.join(model_path, "*.safetensors")))
+    else:
+        print(f"  Skip key audit: model_path is not a dir or .safetensors file ({model_path}).")
+        return
+    if not st_files:
+        print("  No *.safetensors found; skip key audit.")
+        return
+    ck_keys = _collect_safetensors_key_union(st_files)
+    if not ck_keys:
+        print("  Could not read safetensors (install safetensors?).")
+        return
+    model_keys = set(transformer.state_dict().keys())
+    missing_in_ckpt = model_keys - ck_keys
+    extra_in_ckpt = ck_keys - model_keys
+    print(
+        f"  safetensors files: {len(st_files)}, union ckpt keys: {len(ck_keys)}, "
+        f"model keys: {len(model_keys)}"
+    )
+    if missing_in_ckpt:
+        samp = sorted(missing_in_ckpt)[:12]
+        tail = " ..." if len(missing_in_ckpt) > 12 else ""
+        print(
+            f"  In model but not in checkpoint ({len(missing_in_ckpt)}): {samp}{tail}"
+        )
+    else:
+        print("  Every model state_dict key appears in checkpoint key union.")
+    if extra_in_ckpt:
+        samp = sorted(extra_in_ckpt)[:12]
+        tail = " ..." if len(extra_in_ckpt) > 12 else ""
+        print(
+            f"  In checkpoint but not in model ({len(extra_in_ckpt)}): {samp}{tail}"
+        )
+    else:
+        print("  No extra checkpoint-only keys vs model.")
+
+
+def _print_ff_context_module_replay(
+    transformer,
+    pipe,
+    latent,
+    prompt_embeds,
+    timestep_scaled,
+    text_ids,
+    latent_ids,
+    device,
+    model_dtype: torch.dtype,
+    block_index: int = 4,
+) -> None:
+    """Replay ``ff_context`` on official ``before_ff`` in fp32 and in ``model_dtype``."""
+    if pipe is None:
+        return
+    trans_off = pipe.transformer
+    trans_fv = transformer
+    if not hasattr(trans_off, "transformer_blocks") or block_index >= len(
+        trans_off.transformer_blocks
+    ):
+        return
+    if not hasattr(trans_fv, "transformer_blocks") or block_index >= len(
+        trans_fv.transformer_blocks
+    ):
+        return
+    off_before_ff = _capture_official_double4_before_ff(
+        pipe,
+        latent,
+        prompt_embeds,
+        timestep_scaled,
+        text_ids,
+        latent_ids,
+        device,
+        block_index=block_index,
+    )
+    print(f"\n--- double_{block_index} ff_context module replay (same official before_ff) ---")
+    if off_before_ff is None:
+        print("  Could not capture official before_ff; skip replay.")
+        return
+    fv_ff = trans_fv.transformer_blocks[block_index].ff_context
+    off_ff = trans_off.transformer_blocks[block_index].ff_context
+    with torch.no_grad():
+        x_fp32 = off_before_ff.detach().float().to(device)
+        y_fv = fv_ff(x_fp32.clone())
+        y_off = off_ff(x_fp32.clone())
+        d = (y_fv.float() - y_off.float()).abs()
+        print(
+            "  fp32 activations: "
+            f"max_diff={d.max().item():.6e} mean_diff={d.mean().item():.6e}"
+        )
+        x_act = off_before_ff.detach().to(device=device, dtype=model_dtype)
+        y_fv_b = fv_ff(x_act.clone())
+        y_off_b = off_ff(x_act.clone())
+        d_b = (y_fv_b.float() - y_off_b.float()).abs()
+        print(
+            f"  {model_dtype} activations: "
+            f"max_diff={d_b.max().item():.6e} mean_diff={d_b.mean().item():.6e}"
+        )
 
 
 def _capture_double0_qk_after_rope_official(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device):
@@ -1210,6 +1331,12 @@ def main():
         help="Skip storing per-block activations for both models (saves VRAM); "
         "runs targeted hooks only, then exits after double_0 post-SDPA.",
     )
+    parser.add_argument(
+        "--ff-context-swiglu-fp32",
+        action="store_true",
+        help="Build FastVideo Flux2 with fp32 SwiGLU inside ff_context only "
+        "(mitigates bf16 saturation vs Diffusers on the text-stream FF path).",
+    )
     args = parser.parse_args()
 
     if not os.path.isfile(args.dump):
@@ -1288,6 +1415,16 @@ def main():
         dit_precision="bf16",
     )
     loader = TransformerLoader(device=device)
+    if args.ff_context_swiglu_fp32:
+        ac = getattr(fastvideo_args.pipeline_config.dit_config, "arch_config", None)
+        if ac is not None and hasattr(ac, "ff_context_swiglu_fp32"):
+            ac.ff_context_swiglu_fp32 = True
+            print("  ff_context SwiGLU compute: fp32 (ff_context only)")
+        else:
+            print(
+                "  Warning: --ff-context-swiglu-fp32 ignored "
+                "(arch_config has no ff_context_swiglu_fp32)."
+            )
     transformer = loader.load(model_path, fastvideo_args)
     transformer = transformer.to(device)
     model_dtype = next(transformer.parameters()).dtype
@@ -1297,6 +1434,14 @@ def main():
 
     print("\n--- Flux2FeedForward linears (expect nn.Linear when tp==1) ---")
     _print_flux2_feedforward_linear_types(transformer)
+
+    _print_dit_checkpoint_vs_model_keys(transformer, model_path)
+    if official_pipeline_ok:
+        nb = len(transformer.transformer_blocks)
+        print("\n--- ff_context weights vs official (blocks 0 and 4) ---")
+        for bi in sorted({0, min(4, nb - 1)}):
+            if bi >= 0 and nb > 0:
+                _print_ff_context_weight_diff_vs_official(transformer, pipe, bi)
 
     # RoPE: compute freqs_cis from text + image position IDs (same as official pipeline)
     freqs_cis = _compute_freqs_cis(
@@ -1521,6 +1666,20 @@ def main():
             else:
                 print("  c_gate_mlp shape mismatch (check broadcast in block).")
 
+        if official_pipeline_ok:
+            _print_ff_context_module_replay(
+                transformer,
+                pipe,
+                latent,
+                prompt_embeds,
+                timestep_scaled,
+                text_ids,
+                latent_ids,
+                device,
+                model_dtype,
+                block_index=TARGET_DOUBLE,
+            )
+
         print(f"\n--- double_{TARGET_DOUBLE} ff_context sublayers ---")
         fv_ffs = _capture_ff_context_steps_fv(
             transformer,
@@ -1548,10 +1707,6 @@ def main():
                 step,
                 fv_ffs.get(step),
                 off_ffs.get(step),
-            )
-        if official_pipeline_ok:
-            _print_ff_context_weight_diff_vs_official(
-                transformer, pipe, TARGET_DOUBLE
             )
 
     # Sub-layer: attention output of double_0 (narrows down where divergence is)

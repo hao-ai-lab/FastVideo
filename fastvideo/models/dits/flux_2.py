@@ -71,14 +71,16 @@ class Flux2SwiGLU(nn.Module):
     layer fused into the first linear layer of the FF sub-block. Thus, this module has no trainable parameters.
     """
 
-    def __init__(self):
+    def __init__(self, compute_in_fp32: bool = False):
         super().__init__()
         self.gate_fn = nn.SiLU()
+        self.compute_in_fp32 = compute_in_fp32
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x1, x2 = x.chunk(2, dim=-1)
-        x = self.gate_fn(x1) * x2
-        return x
+        if self.compute_in_fp32:
+            return (self.gate_fn(x1.float()) * x2.float()).to(x.dtype)
+        return self.gate_fn(x1) * x2
 
 
 class Flux2FeedForward(nn.Module):
@@ -95,6 +97,7 @@ class Flux2FeedForward(nn.Module):
         mult: float = 3.0,
         inner_dim: Optional[int] = None,
         bias: bool = False,
+        swiglu_fp32: bool = False,
     ):
         super().__init__()
         if inner_dim is None:
@@ -112,7 +115,7 @@ class Flux2FeedForward(nn.Module):
             self.linear_out = ColumnParallelLinear(
                 inner_dim, dim_out, bias=bias, gather_output=True
             )
-        self.act_fn = Flux2SwiGLU()
+        self.act_fn = Flux2SwiGLU(compute_in_fp32=swiglu_fp32)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self._ff_dense_linear:
@@ -273,8 +276,9 @@ class Flux2Attention(torch.nn.Module, AttentionModuleMixin):
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
-            cos = cos.to(device=query.device, dtype=query.dtype)
-            sin = sin.to(device=query.device, dtype=query.dtype)
+            # Match Diffusers: keep cos/sin in fp32 for RoPE math (do not cast to bf16).
+            cos = cos.to(device=query.device)
+            sin = sin.to(device=query.device)
             # Diffusers Flux2: [B, S, H, D] with sequence_dim=1 (cos/sin [S, D]).
             query = apply_rotary_emb(
                 query,
@@ -364,7 +368,7 @@ class Flux2ParallelSelfAttention(torch.nn.Module, AttentionModuleMixin):
             bias=bias,
             gather_output=True,
         )
-        self.mlp_act_fn = Flux2SwiGLU()
+        self.mlp_act_fn = Flux2SwiGLU(compute_in_fp32=False)
 
         self.norm_q = nn.RMSNorm(
             dim_head, eps=eps, elementwise_affine=elementwise_affine
@@ -416,8 +420,8 @@ class Flux2ParallelSelfAttention(torch.nn.Module, AttentionModuleMixin):
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
-            cos = cos.to(device=query.device, dtype=query.dtype)
-            sin = sin.to(device=query.device, dtype=query.dtype)
+            cos = cos.to(device=query.device)
+            sin = sin.to(device=query.device)
             # Single stream: match diffusers sequence_dim=1 (query/key [B, S, H, D], no transpose)
             query = apply_rotary_emb(
                 query, (cos, sin), use_real=True, use_real_unbind_dim=-1, sequence_dim=1
@@ -522,6 +526,7 @@ class Flux2TransformerBlock(nn.Module):
         eps: float = 1e-6,
         bias: bool = False,
         supported_attention_backends: Optional[Tuple[AttentionBackendEnum, ...]] = None,
+        ff_context_swiglu_fp32: bool = False,
     ):
         super().__init__()
         self.mlp_hidden_dim = int(dim * mlp_ratio)
@@ -547,7 +552,11 @@ class Flux2TransformerBlock(nn.Module):
 
         self.norm2_context = nn.LayerNorm(dim, elementwise_affine=False, eps=eps)
         self.ff_context = Flux2FeedForward(
-            dim=dim, dim_out=dim, mult=mlp_ratio, bias=bias
+            dim=dim,
+            dim_out=dim,
+            mult=mlp_ratio,
+            bias=bias,
+            swiglu_fp32=ff_context_swiglu_fp32,
         )
 
     def forward(
@@ -788,7 +797,10 @@ def compute_flux2_freqs_cis_from_ids(
     device: torch.device,
     dtype: torch.dtype | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Build (cos, sin) like Diffusers: ``pos_embed(txt)`` then ``pos_embed(img)``, cat dim 0."""
+    """Build (cos, sin) like Diffusers: ``pos_embed(txt)`` then ``pos_embed(img)``, cat dim 0.
+
+    Returns cos/sin in **fp32** on ``device`` (``dtype`` is ignored) so RoPE matches Diffusers.
+    """
     tid = text_ids
     lid = latent_ids
     if tid.ndim == 3:
@@ -803,8 +815,8 @@ def compute_flux2_freqs_cis_from_ids(
         img_cos, img_sin = rotary_emb.forward(lid)
     cos = torch.cat([text_cos, img_cos], dim=0).to(device=device)
     sin = torch.cat([text_sin, img_sin], dim=0).to(device=device)
-    if dtype is not None:
-        cos, sin = cos.to(dtype), sin.to(dtype)
+    # Match Diffusers: keep RoPE cos/sin in fp32 (``dtype`` unused; callers may still pass it).
+    _ = dtype
     return (cos, sin)
 
 
@@ -879,6 +891,9 @@ class Flux2Transformer2DModel(BaseDiT):
 
         # 5. Double Stream Transformer Blocks
         supported_attention_backends = self._supported_attention_backends
+        ff_ctx_swiglu = getattr(
+            config.arch_config, "ff_context_swiglu_fp32", False
+        )
         self.transformer_blocks = nn.ModuleList(
             [
                 Flux2TransformerBlock(
@@ -889,6 +904,7 @@ class Flux2Transformer2DModel(BaseDiT):
                     eps=eps,
                     bias=False,
                     supported_attention_backends=supported_attention_backends,
+                    ff_context_swiglu_fp32=ff_ctx_swiglu,
                 )
                 for _ in range(num_layers)
             ]
