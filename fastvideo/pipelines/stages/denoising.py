@@ -341,14 +341,19 @@ class DenoisingStage(PipelineStage):
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
 
-                # Prepare guidance embedding (transformer scales by 1000 internally)
+                # Prepare guidance embedding.  Most models (HunyuanVideo,
+                # Cosmos, …) expect guidance pre-scaled by 1000.  Flux2's
+                # transformer multiplies by 1000 internally, so skip here.
+                _is_flux = (getattr(fastvideo_args.pipeline_config.dit_config,
+                                    "prefix", "") == "Flux")
                 guidance_expand = (
                     torch.tensor(
                         [fastvideo_args.pipeline_config.embedded_cfg_scale] *
                         latent_model_input.shape[0],
                         dtype=torch.float32,
                         device=get_local_torch_device(),
-                    ).to(target_dtype)
+                    ).to(target_dtype) *
+                    (1.0 if _is_flux else 1000.0)
                     if fastvideo_args.pipeline_config.embedded_cfg_scale
                     is not None else None)
 

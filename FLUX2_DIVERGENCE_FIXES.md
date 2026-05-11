@@ -24,7 +24,9 @@ scales back to `[0, 1000]`.
 already multiplies guidance by 1000 internally. Net effect: guidance embedded at
 `cfg_scale * 1_000_000` instead of `cfg_scale * 1000`.
 
-**Fix:** Removed the external `* 1000.0` from `guidance_expand` creation.
+**Fix:** Made the `* 1000.0` conditional: skip for Flux2 (`prefix == "Flux"`),
+keep for all other models (HunyuanVideo, Cosmos, etc.) which expect pre-scaled
+guidance.
 
 ## 3. Klein `embedded_cfg_scale` was `0.0`, should be `None`
 
