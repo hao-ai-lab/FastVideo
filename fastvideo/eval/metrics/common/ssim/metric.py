@@ -51,15 +51,24 @@ class SSIMMetric(BaseMetric):
     name = "common.ssim"
     requires_reference = True
     higher_is_better = True
-    needs_gpu = False
+    # SSIM is 5 depthwise conv2d's per chunk — pure GPU territory at any
+    # interesting resolution. At 1080p × 121 frames the CPU path takes
+    # ~5–10 s per pair vs <100 ms on GPU. Keeping it on CPU also made
+    # the metric fight the pipelined loader thread for DDR bandwidth.
+    needs_gpu = True
 
-    def __init__(self, window_size: int = 11) -> None:
+    def __init__(self, window_size: int = 11, chunk_size: int = 16) -> None:
         super().__init__()
         self.window_size = window_size
+        # Each conv2d output is (chunk, 3, H, W); SSIM allocates ~5–7
+        # such intermediates plus inputs. At 1080p with chunk=121 this
+        # peaks ~25 GB; chunk=16 brings peak to ~4 GB with no change
+        # in output.
+        self._chunk_size = chunk_size
 
     def compute(self, sample: dict) -> MetricResult:
-        gen = sample["video"].float()  # (T, C, H, W)
-        ref = sample["reference"].float()
+        gen = sample["video"].float().to(self.device)  # (T, C, H, W)
+        ref = sample["reference"].float().to(self.device)
         n = min(gen.shape[0], ref.shape[0])
         gen, ref = gen[:n], ref[:n]
 

@@ -232,13 +232,18 @@ def aggregate_temporal(per_frame: list[dict[str, float]], ) -> dict[str, float |
 
 
 def tensor_to_bgr_list(video: torch.Tensor) -> list[np.ndarray]:
-    """Convert ``(T, C, H, W)`` float [0,1] to a list of HWC BGR uint8 frames."""
-    frames = []
-    for t in range(video.shape[0]):
-        rgb = (video[t].permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
-        bgr = rgb[:, :, ::-1].copy()
-        frames.append(bgr)
-    return frames
+    """Convert ``(T, C, H, W)`` float [0,1] to a list of HWC BGR uint8 frames.
+
+    Performs the cast + permute + BGR swap on the input's device, then
+    transfers once. This avoids 121 per-frame ``.cpu().numpy()`` calls
+    moving 3 GB of float32 across PCIe when the input lives on GPU
+    (which is what ``Evaluator(pre_upload=True)`` produces). One uint8
+    transfer is ~4× less bytes than the per-frame float32 round-trips.
+    """
+    # (T, C, H, W) float [0,1] → (T, H, W, C) uint8 BGR, all on-device.
+    bgr_u8 = (video.float() * 255.0).clamp(0, 255).to(torch.uint8).permute(0, 2, 3, 1).flip(-1).contiguous()
+    arr = bgr_u8.cpu().numpy()  # single transfer
+    return [arr[t] for t in range(arr.shape[0])]
 
 
 def load_ptlflow_model(model_name: str, ckpt: str, device: torch.device):

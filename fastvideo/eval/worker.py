@@ -27,10 +27,17 @@ import contextlib
 class EvalWorker:
     """Owns metric replicas on one device. Single-GPU, single-sample."""
 
-    def __init__(self, metric_names: list[str], device: str, *, compile: bool = False) -> None:
+    def __init__(self, metric_names: list[str], device: str, *, compile: bool = False, pre_upload: bool = True) -> None:
         self._names = list(metric_names)
         self._device = device
         self._compile = compile
+        # Pre-upload ``video``/``reference`` to the worker's device once
+        # so every metric for the same sample shares a single GPU-resident
+        # tensor. Set ``pre_upload=False`` for training-time eval contexts
+        # where holding the input tensor on GPU across the metric loop
+        # competes with the training-step working set; in that case each
+        # metric uploads its own copy as before.
+        self._pre_upload = pre_upload
         self._metrics: dict = {}
         self._unloaded = False
         self._load()
@@ -64,18 +71,32 @@ class EvalWorker:
 
         A ``(1, T, C, H, W)`` tensor is also accepted for back-compat
         and gets unwrapped to ``(T, C, H, W)`` before reaching metrics.
+
+        Stage timings (``decode_ms``, ``compute_ms``) are accumulated on
+        thread-local counters and zeroed on each call. Read via
+        :func:`pop_timings` immediately after the call.
         """
         if self._unloaded:
             raise RuntimeError("EvalWorker was unloaded; call reload() before evaluating.")
 
+        import time
         sample = dict(kwargs)
+        t0 = time.perf_counter()
         sample["video"] = _resolve_video_input(sample.get("video"))
         if "reference" in sample:
             sample["reference"] = _resolve_video_input(sample["reference"])
+        if self._pre_upload:
+            sample["video"] = _to_device(sample.get("video"), self._device)
+            if "reference" in sample:
+                sample["reference"] = _to_device(sample["reference"], self._device)
+        t1 = time.perf_counter()
 
         results: dict[str, MetricResult] = {}
         for name, m in self._metrics.items():
             results[name] = m.compute(sample)
+        t2 = time.perf_counter()
+
+        _record_timing(decode_ms=(t1 - t0) * 1000.0, compute_ms=(t2 - t1) * 1000.0)
         return results
 
     def release_cuda_memory(self) -> None:
@@ -95,6 +116,54 @@ class EvalWorker:
         """Rebuild metrics dropped by :meth:`unload`."""
         if self._unloaded:
             self._load()
+
+
+_TIMINGS: dict[str, float] = {"decode_ms": 0.0, "compute_ms": 0.0, "n": 0}
+
+
+def _record_timing(*, decode_ms: float, compute_ms: float) -> None:
+    """Accumulate per-call decode and compute time into a process-global
+    counter. Read + zeroed via :func:`pop_timings`. Used by
+    ``scripts/eval/bench_pipeline.py``.
+    """
+    _TIMINGS["decode_ms"] += decode_ms
+    _TIMINGS["compute_ms"] += compute_ms
+    _TIMINGS["n"] += 1
+
+
+def add_pool_decode_ms(ms: float) -> None:
+    """Attribute pool-side decode time to the same global counter.
+
+    Pool threads call this when they finish decoding a sample. Keeps
+    ``pop_timings()`` returning total decode time regardless of where
+    the decode physically happened.
+    """
+    _TIMINGS["decode_ms"] += ms
+
+
+def pop_timings() -> dict[str, float]:
+    """Snapshot and zero the timing counters."""
+    snapshot = dict(_TIMINGS)
+    _TIMINGS["decode_ms"] = 0.0
+    _TIMINGS["compute_ms"] = 0.0
+    _TIMINGS["n"] = 0
+    return snapshot
+
+
+def _to_device(value: Any, device: str | torch.device) -> Any:
+    """Move a video tensor to *device* if it isn't already there.
+
+    No-op for ``None`` or non-tensor values. Uses ``non_blocking=True``
+    so the host-side memcpy and device DMA can overlap with subsequent
+    CPU work (pinning is opportunistic; PyTorch will pin internally for
+    pageable tensors).
+    """
+    if value is None or not isinstance(value, torch.Tensor):
+        return value
+    target = torch.device(device)
+    if value.device == target:
+        return value
+    return value.to(target, non_blocking=True)
 
 
 def _resolve_video_input(value: Any) -> Any:

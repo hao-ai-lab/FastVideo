@@ -142,10 +142,8 @@ class SceneMetric(BaseMetric):
     @torch.no_grad()
     def compute(self, sample: dict) -> MetricResult:
         video = sample["video"]  # (T, C, H, W)
-        aux = sample.get("auxiliary_info")
-        if isinstance(aux, list):
-            aux = aux[0] if aux else None
-        if aux is None or "scene" not in aux:
+        aux = sample.get("auxiliary_info") or {}
+        if "scene" not in aux:
             return self._skip(sample, "missing 'scene' in auxiliary_info")
 
         scene_keywords = aux["scene"]

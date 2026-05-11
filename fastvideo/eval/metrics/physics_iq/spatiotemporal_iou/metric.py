@@ -5,7 +5,7 @@ from typing import Any
 from fastvideo.eval.metrics.base import BaseMetric
 from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
-from fastvideo.eval.metrics.physics_iq.utils import compute_spatiotemporal_iou, prepare_pair_batch
+from fastvideo.eval.metrics.physics_iq.utils import compute_spatiotemporal_iou, prepare_pair
 
 
 @register("physics_iq.spatiotemporal_iou")
@@ -19,7 +19,7 @@ class SpatiotemporalIoUMetric(BaseMetric):
         self._kwargs = kwargs
 
     def compute(self, sample: dict) -> MetricResult:
-        [prepared] = prepare_pair_batch(sample, prep_kwargs=self._kwargs)
+        prepared = prepare_pair(sample, prep_kwargs=self._kwargs)
         per_frame = compute_spatiotemporal_iou(prepared.reference_masks, prepared.generated_masks)
         score = sum(per_frame) / len(per_frame)
         return MetricResult(name=self.name, score=score, details={"per_frame": per_frame})

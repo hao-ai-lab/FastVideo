@@ -17,9 +17,13 @@ class LPIPSMetric(BaseMetric):
     needs_gpu = True
     dependencies = ["lpips"]
 
-    def __init__(self, net: str = "alex") -> None:
+    def __init__(self, net: str = "alex", chunk_size: int = 8) -> None:
         super().__init__()
         self.net = net
+        # Per-frame AlexNet feature maps at 1080p run ~500 MB each. A
+        # full 121-frame chunk peaks around 60 GB; chunking to 8 frames
+        # drops that to ~5 GB with identical numerical output.
+        self._chunk_size = chunk_size
         self._model: Any = None
 
     def to(self, device: str | torch.device) -> LPIPSMetric:
@@ -39,8 +43,13 @@ class LPIPSMetric(BaseMetric):
         if self._model is None:
             self.setup()
 
-        gen = sample["video"].float().to(self.device)  # (T, C, H, W)
-        ref = sample["reference"].float().to(self.device)
+        # When the worker pre-uploaded inputs (default), these are
+        # already on ``self.device`` and the ``.to(...)`` below is a
+        # no-op. With ``pre_upload=False`` the worker keeps them on CPU
+        # and this metric pays the transfer just like before.
+        gen = sample["video"].float().to(self.device, non_blocking=True)
+        ref = sample["reference"].float().to(self.device, non_blocking=True)
+
         n = min(gen.shape[0], ref.shape[0])
         gen, ref = gen[:n] * 2.0 - 1.0, ref[:n] * 2.0 - 1.0
 

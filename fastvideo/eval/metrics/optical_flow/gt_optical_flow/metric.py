@@ -53,7 +53,15 @@ class GtOpticalFlowMetric(BaseMetric):
         self.max_mag_pct = max_mag_pct
         self.grid_size = grid_size
         self._model = None
-        self._chunk_size = 16
+        # Frame-pair batch size per DPFlow forward. The correlation
+        # volume scales ~quadratically with input resolution and the
+        # cost-volume tensor is roughly 4 GB per pair at 1080p — so
+        # batching 16 pairs requested ~63 GB and OOMed on H200 (matches
+        # mhuo's reference impl, which runs one pair per forward, see
+        # ``mhuo/ptlflow/eval_flow_divergence.py:99-105``). Default 1
+        # is memory-safe at any resolution; bump for low-res to amortize
+        # Python loop overhead.
+        self._chunk_size = 1
 
     def to(self, device: str | torch.device) -> GtOpticalFlowMetric:
         super().to(device)
