@@ -82,3 +82,4 @@ class Qwen3TextConfig(TextEncoderConfig):
 
     arch_config: TextEncoderArchConfig = field(default_factory=Qwen3TextArchConfig)
     prefix: str = "qwen3"
+    is_chat_model: bool = True

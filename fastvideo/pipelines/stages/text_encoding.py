@@ -248,8 +248,20 @@ class TextEncodingStage(PipelineStage):
                                               return_attention_mask, indices)
 
             if encoder_config.is_chat_model:
-                text_inputs = tokenizer.apply_chat_template(
-                    processed_texts, **tok_kwargs).to(target_device)
+                # Two-step approach matching Diffusers: format with chat
+                # template first, then tokenize the resulting strings.
+                formatted_texts = []
+                for pt in processed_texts:
+                    messages = [{"role": "user", "content": pt}]
+                    formatted = tokenizer.apply_chat_template(
+                        messages,
+                        tokenize=False,
+                        add_generation_prompt=True,
+                        enable_thinking=False,
+                    )
+                    formatted_texts.append(formatted)
+                text_inputs = tokenizer(
+                    formatted_texts, **tok_kwargs).to(target_device)
             else:
                 text_inputs = tokenizer(processed_texts,
                                         **tok_kwargs).to(target_device)
