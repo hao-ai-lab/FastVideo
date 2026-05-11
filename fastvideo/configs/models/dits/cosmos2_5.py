@@ -156,6 +156,5 @@ class Cosmos25VideoConfig(DiTConfig):
 @dataclass
 class Cosmos25_14BVideoConfig(DiTConfig):
     """Configuration for Cosmos 2.5 14B video generation model."""
-    arch_config: DiTArchConfig = field(
-        default_factory=Cosmos25_14BArchConfig)
+    arch_config: DiTArchConfig = field(default_factory=Cosmos25_14BArchConfig)
     prefix: str = "Cosmos25"

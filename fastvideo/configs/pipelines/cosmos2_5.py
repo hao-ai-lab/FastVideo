@@ -89,24 +89,22 @@ class Cosmos25Config(PipelineConfig):
 class Cosmos25_14BConfig(Cosmos25Config):
     """Configuration for Cosmos 2.5 14B pipeline."""
 
-    dit_config: DiTConfig = field(
-        default_factory=lambda: Cosmos25_14BVideoConfig(
-            arch_config=Cosmos25_14BArchConfig(
-                num_attention_heads=40,
-                attention_head_dim=128,
-                in_channels=16,
-                out_channels=16,
-                num_layers=36,
-                patch_size=[1, 2, 2],
-                max_size=[128, 240, 240],
-                rope_scale=[1.0, 3.0, 3.0],
-                text_embed_dim=1024,
-                mlp_ratio=4.0,
-                adaln_lora_dim=256,
-                use_adaln_lora=True,
-                concat_padding_mask=True,
-                extra_pos_embed_type=None,
-                use_crossattn_projection=True,
-                rope_enable_fps_modulation=False,
-                qk_norm="rms_norm",
-            )))
+    dit_config: DiTConfig = field(default_factory=lambda: Cosmos25_14BVideoConfig(arch_config=Cosmos25_14BArchConfig(
+        num_attention_heads=40,
+        attention_head_dim=128,
+        in_channels=16,
+        out_channels=16,
+        num_layers=36,
+        patch_size=[1, 2, 2],
+        max_size=[128, 240, 240],
+        rope_scale=[1.0, 3.0, 3.0],
+        text_embed_dim=1024,
+        mlp_ratio=4.0,
+        adaln_lora_dim=256,
+        use_adaln_lora=True,
+        concat_padding_mask=True,
+        extra_pos_embed_type=None,
+        use_crossattn_projection=True,
+        rope_enable_fps_modulation=False,
+        qk_norm="rms_norm",
+    )))

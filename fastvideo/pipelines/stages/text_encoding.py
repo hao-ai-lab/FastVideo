@@ -233,7 +233,7 @@ class TextEncodingStage(PipelineStage):
             tok = getattr(tokenizer, "tokenizer", tokenizer)
 
             if encoder_config.is_chat_model:
-                text_inputs = tokenizer.apply_chat_template(processed_texts, **tok_kwargs).to(target_device)
+                text_inputs = tok.apply_chat_template(processed_texts, **tok_kwargs).to(target_device)
             else:
                 text_inputs = tok(processed_texts, **tok_kwargs).to(target_device)
 
