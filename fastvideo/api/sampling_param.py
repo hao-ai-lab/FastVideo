@@ -325,6 +325,18 @@ class SamplingParam:
             help="Guidance rescale factor",
         )
         parser.add_argument(
+            "--use-embedded-guidance",
+            action="store_true",
+            default=SamplingParam.use_embedded_guidance,
+            help="Use embedded guidance scale (FLUX-style) instead of classic CFG",
+        )
+        parser.add_argument(
+            "--true-cfg-scale",
+            type=float,
+            default=SamplingParam.true_cfg_scale,
+            help="True CFG scale for FLUX when > 1 (requires negative prompt encoding)",
+        )
+        parser.add_argument(
             "--boundary-ratio",
             type=float,
             default=SamplingParam.boundary_ratio,
