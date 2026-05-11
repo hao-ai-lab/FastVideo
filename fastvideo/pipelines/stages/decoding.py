@@ -209,10 +209,11 @@ class DecodingStage(PipelineStage):
                 latents = latents.squeeze(2)
                 squeezed_for_vae = True
             # Flux2 packed: BN denorm + unpatchify (e.g. 64ch -> 16ch) for VAE
+            # BN denorm is the complete inverse normalisation for Flux2; no
+            # scaling_factor/shift_factor step (Diffusers does the same).
             if latents.ndim == 4 and self._is_flux2_packed(latents):
                 debug_nan_check(latents, "5_before_flux2_unpatchify")
                 latents = self._flux2_bn_denorm_and_unpatchify(latents)
-                latents = self._denormalize_latents(latents)
             debug_nan_check(latents, "5_before_vae_decode")
             image = self.vae.decode(latents)
             debug_nan_check(image, "6_after_vae_decode")
