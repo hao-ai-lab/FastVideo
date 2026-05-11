@@ -101,6 +101,7 @@ class WanModel(ModelBase):
 
         self.negative_prompt_embeds: (torch.Tensor | None) = None
         self.negative_prompt_attention_mask: (torch.Tensor | None) = None
+        self._requires_negative_conditioning = True
 
         # Timestep mechanics.
         self.timestep_shift: float = float(flow_shift)
@@ -160,9 +161,23 @@ class WanModel(ModelBase):
         self._init_timestep_mechanics()
 
         from fastvideo.dataset.dataloader.schema import (
-            pyarrow_schema_t2v, )
+            pyarrow_schema_t2v,
+            pyarrow_schema_text_only,
+        )
         from fastvideo.train.utils.dataloader import (
             build_parquet_t2v_train_dataloader, )
+
+        preprocessed_data_type = str(getattr(
+            training_config.data,
+            "preprocessed_data_type",
+            "t2v",
+        )).strip().lower()
+        parquet_schema = pyarrow_schema_t2v
+        if preprocessed_data_type == "text_only":
+            parquet_schema = pyarrow_schema_text_only
+        elif preprocessed_data_type != "t2v":
+            raise ValueError("Unsupported Wan preprocessed_data_type: "
+                             f"{preprocessed_data_type!r}")
 
         text_len = (
             training_config.pipeline_config.text_encoder_configs[  # type: ignore[union-attr]
@@ -170,13 +185,16 @@ class WanModel(ModelBase):
         self.dataloader = build_parquet_t2v_train_dataloader(
             training_config.data,
             text_len=int(text_len),
-            parquet_schema=pyarrow_schema_t2v,
+            parquet_schema=parquet_schema,
         )
         self.start_step = 0
 
     @property
     def num_train_timesteps(self) -> int:
         return int(self.num_train_timestep)
+
+    def set_requires_negative_conditioning(self, requires: bool) -> None:
+        self._requires_negative_conditioning = bool(requires)
 
     def shift_and_clamp_timestep(self, timestep: torch.Tensor) -> torch.Tensor:
         timestep = shift_timestep(
@@ -187,7 +205,8 @@ class WanModel(ModelBase):
         return timestep.clamp(self.min_timestep, self.max_timestep)
 
     def on_train_start(self) -> None:
-        self.ensure_negative_conditioning()
+        if self._requires_negative_conditioning:
+            self.ensure_negative_conditioning()
 
     # ------------------------------------------------------------------
     # Runtime primitives
@@ -200,7 +219,8 @@ class WanModel(ModelBase):
         generator: torch.Generator,
         latents_source: Literal["data", "zeros"] = "data",
     ) -> TrainingBatch:
-        self.ensure_negative_conditioning()
+        if self._requires_negative_conditioning:
+            self.ensure_negative_conditioning()
         assert self.training_config is not None
         tc = self.training_config
 
