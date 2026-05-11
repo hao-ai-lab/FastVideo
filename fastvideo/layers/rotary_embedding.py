@@ -295,6 +295,8 @@ def get_1d_rotary_pos_embed(
     interpolation_factor: float = 1.0,
     dtype: torch.dtype = torch.float32,
     use_real: bool = True,
+    freqs_dtype: torch.dtype | None = None,
+    repeat_interleave_real: bool | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Precompute the frequency tensor for complex exponential (cis) with given dimensions.
@@ -318,6 +320,10 @@ def get_1d_rotary_pos_embed(
     """
     if isinstance(pos, int):
         pos = torch.arange(pos).float()
+
+    # freqs_dtype is an alias for dtype (Diffusers-compatible calling convention).
+    if freqs_dtype is not None:
+        dtype = freqs_dtype
 
     # proposed by reddit user bloc97, to rescale rotary embeddings to longer sequence length without fine-tuning
     # has some connection to NTK literature
