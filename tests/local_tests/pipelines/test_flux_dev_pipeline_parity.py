@@ -88,8 +88,8 @@ def test_flux_dev_pipeline_image_parity() -> None:
         generator=generator,
         output_type="pt",
     )
-    # hf_out.images: [B, H, W, C] float in [0,1]
-    hf_image = hf_out.images[0].permute(2, 0, 1).float().cpu()  # [C, H, W]
+    # hf_out.images: [B, C, H, W] float in [0,1] when output_type="pt"
+    hf_image = hf_out.images[0].float().cpu()  # [C, H, W]
     _log_stats("Diffusers output", hf_image)
 
     del hf_pipe
@@ -135,8 +135,8 @@ def test_flux_dev_pipeline_image_parity() -> None:
             save_video=False,
         )
         fv_out = pipeline.forward(batch, args)
-        # fv_out.output: [B, C, H, W] float in [0, 1]
-        fv_image = fv_out.output[0].float().cpu()  # [C, H, W]
+        # fv_out.output: [B, C, F, H, W] — squeeze frame dim for T2I
+        fv_image = fv_out.output[0, :, 0].float().cpu()  # [C, H, W]
         _log_stats("FastVideo output", fv_image)
     finally:
         cleanup_dist_env_and_memory()
