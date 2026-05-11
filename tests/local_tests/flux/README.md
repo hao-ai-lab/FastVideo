@@ -33,6 +33,19 @@ pytest tests/local_tests/pipelines/test_flux_dev_pipeline_smoke.py -vs
 
 Status: requires weights — not run in CI.
 
+## Pipeline Parity Test
+
+Compares FastVideo FluxPipeline decoded image output against Diffusers
+FluxPipeline under identical prompt, seed, and inference parameters (4
+steps, 256×256, seed=42). Tolerance: atol=5e-2.
+
+```bash
+FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
+pytest tests/local_tests/pipelines/test_flux_dev_pipeline_parity.py -vs
+```
+
+Status: requires weights — pending local run (see PORT_STATUS.md).
+
 ## DiT Parity Test
 
 Single-forward comparison of FastVideo `FluxTransformer2DModel` against

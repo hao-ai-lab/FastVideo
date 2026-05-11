@@ -26,7 +26,7 @@ Strict-load evidence: pending (loader smoke test verifies class resolution only)
 | Test | Status | Notes |
 |---|---|---|
 | Pipeline smoke (2-step, 256×256) | pending local run | tests/local_tests/pipelines/test_flux_dev_pipeline_smoke.py |
-| Pipeline parity vs Diffusers FluxPipeline | not yet written | blocker: needs weights + GPU time |
+| Pipeline parity vs Diffusers FluxPipeline | pending local run | tests/local_tests/pipelines/test_flux_dev_pipeline_parity.py |
 
 ## Quality
 
@@ -40,9 +40,9 @@ Strict-load evidence: pending (loader smoke test verifies class resolution only)
 1. SSIM reference images not committed — test will FileNotFoundError before comparison.
    Resolution: run seed-ssim-references skill on A40/L40S after weights are available.
 
-2. Pipeline parity test not written — smoke test only verifies non-null finite output.
-   Resolution: write tests/local_tests/pipelines/test_flux_dev_pipeline_parity.py
-   comparing latents or decoded image against Diffusers FluxPipeline.
+2. Pipeline parity test written but not yet run — smoke test only verifies non-null finite output.
+   Resolution: run tests/local_tests/pipelines/test_flux_dev_pipeline_parity.py on GPU
+   with weights and record PASS output here.
 
 3. DiT parity PASS not recorded — test exists but no local output committed.
    Resolution: run on GPU with weights, record pytest output here.
