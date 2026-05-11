@@ -50,11 +50,15 @@ def _is_nvfp4_fa4_enabled() -> bool:
     return os.environ.get("FASTVIDEO_NVFP4_FA4", "0") == "1"
 
 
-def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def _nvfp4_quantize_for_fa4(
+    tensor_4d: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Quantize a (batch, seqlen, nheads, headdim) BF16 tensor to FP4.
 
     Returns:
-        fp4_tensor: torch.float4_e2m1fn_x2, shape (batch, seqlen, nheads, headdim//2)
+        fp4_tensor: torch.float4_e2m1fn_x2, shape (batch, seqlen_padded, nheads, headdim//2)
+            where seqlen_padded is seqlen rounded up to multiple of 128.
+            Caller should slice [:, :orig_seqlen] before passing to FA4.
         sf_tensor:  torch.uint8, shape (32, 4, rest_m, 4, rest_k, nheads, batch) with stride[3]=1
     """
     from flashinfer.quantization import nvfp4_quantize, SfLayout
@@ -62,7 +66,7 @@ def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torc
     batch, seqlen, nheads, headdim = tensor_4d.shape
     sf_vec_size = 16
 
-    # Pad seqlen to multiple of 128 for SF layout atom
+    # Pad seqlen to multiple of 128 (required by nvfp4_quantize layout_128x4)
     tile_m = 128
     seqlen_padded = (seqlen + tile_m - 1) // tile_m * tile_m
     if seqlen_padded != seqlen:
@@ -239,15 +243,16 @@ class FlashAttentionImpl(AttentionImpl):
         """FP4 flash attention with quantized Q and K, BF16 V."""
         orig_seqlen_q = query.shape[1]
         orig_seqlen_k = key.shape[1]
-        tile_m = 128
 
+        # Quantize Q/K to FP4 (internally pads to multiple of 128 for SF layout)
         q_fp4, q_sf = _nvfp4_quantize_for_fa4(query)
         k_fp4, k_sf = _nvfp4_quantize_for_fa4(key)
 
-        # Pad V to match K's padded seqlen
-        seqlen_k_padded = (orig_seqlen_k + tile_m - 1) // tile_m * tile_m
-        if seqlen_k_padded != orig_seqlen_k:
-            value = F.pad(value, (0, 0, 0, 0, 0, seqlen_k_padded - orig_seqlen_k))
+        # Pass original seqlen to FA4 — the kernel handles non-multiple-of-128
+        # via boundary masking. FP4/SF data is padded to 128-multiple but FA4
+        # only attends to orig_seqlen positions, avoiding softmax bias on padding.
+        q_fp4 = q_fp4[:, :orig_seqlen_q]
+        k_fp4 = k_fp4[:, :orig_seqlen_k]
 
         output = flash_attn_fp4_func(
             q_fp4,
@@ -258,7 +263,6 @@ class FlashAttentionImpl(AttentionImpl):
             softmax_scale=self.softmax_scale,
             causal=self.causal,
         )
-        # Trim back to original seqlen
-        if output.shape[1] != orig_seqlen_q:
-            output = output[:, :orig_seqlen_q]
+        if isinstance(output, tuple):
+            output = output[0]
         return output
