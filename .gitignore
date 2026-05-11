@@ -69,8 +69,7 @@ docs/distillation/examples/
 # Python pickle files
 *.pkl
 
-# Reference videos
-!fastvideo/tests/ssim/reference_videos/**/*.mp4
+# Reference videos (negations must come after the catch-all on line below)
 
 # Static images
 !docs/assets/images/**/*.png
@@ -92,3 +91,5 @@ preprocess_output_text/
 .sisyphus/
 openspec/
 fastvideo/tests/ssim/reference_videos/**
+!fastvideo/tests/ssim/reference_videos/**/*.mp4
+!fastvideo/tests/ssim/reference_videos/**/*.png
