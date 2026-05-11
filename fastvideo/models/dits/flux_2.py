@@ -1005,9 +1005,27 @@ class Flux2Transformer2DModel(BaseDiT):
         hidden_states, _ = self.x_embedder(hidden_states)
         encoder_hidden_states, _ = self.context_embedder(encoder_hidden_states)
 
-        # 3. Calculate RoPE embeddings from image and text tokens
-        # NOTE: the below logic means that we can't support batched inference with images of different resolutions or
-        # text prompts of different lengths. Is this a use case we want to support?
+        # 3. Compute RoPE positional embeddings when not provided externally
+        if freqs_cis is None:
+            if input_was_5d:
+                img_h, img_w = h, w
+            else:
+                img_seq_len = hidden_states.shape[1]
+                img_h = img_w = int(img_seq_len ** 0.5)
+
+            txt_len = encoder_hidden_states.shape[1]
+            txt_ids = torch.cartesian_prod(
+                torch.arange(1), torch.arange(1),
+                torch.arange(1), torch.arange(txt_len),
+            ).to(device=hidden_states.device)
+            img_ids = torch.cartesian_prod(
+                torch.arange(1), torch.arange(img_h),
+                torch.arange(img_w), torch.arange(1),
+            ).to(device=hidden_states.device)
+            freqs_cis = compute_flux2_freqs_cis_from_ids(
+                self.rotary_emb, txt_ids, img_ids, device=hidden_states.device,
+            )
+
         # 4. Double Stream Transformer Blocks
         for index_block, block in enumerate(self.transformer_blocks):
             if joint_attention_kwargs is not None:

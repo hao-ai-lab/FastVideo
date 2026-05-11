@@ -84,7 +84,21 @@ tokenize the resulting strings.
 
 **Fix:** Made docstrings generic (`C*4 -> C`, handles any channel count).
 
-## 8. Block comparison tooling: `(0,0)` weight crash
+## 8. Missing RoPE positional embeddings (`freqs_cis`)
+
+**File:** `fastvideo/models/dits/flux_2.py`
+
+**Problem:** The transformer `forward` method accepted `freqs_cis` as a parameter
+(default `None`) but never computed it internally. The denoising stage never
+passed it either. Result: all RoPE embeddings were `None`, so the model had zero
+spatial awareness and produced flat uniform-color output.
+
+**Fix:** Added auto-computation of `freqs_cis` inside the transformer `forward`
+when not provided. Generates `text_ids` (T=0, H=0, W=0, L=0..seq_len-1) and
+`latent_ids` (T=0, H=0..H-1, W=0..W-1, L=0) matching Diffusers, then calls
+`compute_flux2_freqs_cis_from_ids` with `self.rotary_emb`.
+
+## 9. Block comparison tooling: `(0,0)` weight crash
 
 **File:** `compare_flux2_dit_blocks.py`
 
