@@ -78,7 +78,7 @@ class Flux2KleinTextEncoderConfig(EncoderConfig):
 @dataclass
 class Flux2KleinPipelineConfig(Flux2PipelineConfig):
     """Configuration for Flux2 Klein (distilled, 4-step, no guidance)."""
-    embedded_cfg_scale: float = 0.0  # No guidance for distilled Klein
+    embedded_cfg_scale: float = 1.0  # Klein still uses guidance embedding (1.0 matches Diffusers)
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (Qwen3TextConfig(),)
     )

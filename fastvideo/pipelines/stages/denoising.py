@@ -335,15 +335,15 @@ class DenoisingStage(PipelineStage):
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
 
-                # Prepare inputs for transformer
+                # Prepare guidance embedding (transformer scales by 1000 internally)
                 guidance_expand = (
                     torch.tensor(
                         [fastvideo_args.pipeline_config.embedded_cfg_scale] *
                         latent_model_input.shape[0],
                         dtype=torch.float32,
                         device=get_local_torch_device(),
-                    ).to(target_dtype) *
-                    1000.0 if fastvideo_args.pipeline_config.embedded_cfg_scale
+                    ).to(target_dtype)
+                    if fastvideo_args.pipeline_config.embedded_cfg_scale
                     is not None else None)
 
                 # Predict noise residual
