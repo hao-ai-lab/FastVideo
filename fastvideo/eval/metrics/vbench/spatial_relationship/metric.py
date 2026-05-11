@@ -77,10 +77,8 @@ class SpatialRelationshipMetric(BaseMetric):
         from fastvideo.eval.metrics.vbench._grit_helper import prepare_frames
 
         video = sample["video"]  # (T, C, H, W)
-        aux = sample.get("auxiliary_info")
-        if isinstance(aux, list):
-            aux = aux[0] if aux else None
-        if not aux or "spatial_relationship" not in aux:
+        aux = sample.get("auxiliary_info") or {}
+        if "spatial_relationship" not in aux:
             return self._skip(sample, "missing 'spatial_relationship' in auxiliary_info")
 
         sp_info = aux["spatial_relationship"]

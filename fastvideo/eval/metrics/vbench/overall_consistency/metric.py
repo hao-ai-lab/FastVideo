@@ -80,8 +80,6 @@ class OverallConsistencyMetric(BaseMetric):
         text_prompt = sample.get("text_prompt")
         if text_prompt is None:
             return self._skip(sample, "missing text_prompt")
-        if isinstance(text_prompt, list):
-            text_prompt = text_prompt[0]
 
         frames = _clip_transform(extract_frames(video, 8))  # (8, C, H, W)
         clip_in = frames.unsqueeze(0).to(self.device)  # (1, 8, C, H, W)

@@ -21,7 +21,7 @@ def _redirect_third_party_caches() -> None:
 
 _redirect_third_party_caches()
 
-from fastvideo.eval.types import MetricResult  # noqa: E402
+from fastvideo.eval.types import MetricResult, Video  # noqa: E402
 from fastvideo.eval.metrics.base import BaseMetric  # noqa: E402
 from fastvideo.eval.registry import register, list_metrics, get_metric  # noqa: E402
 from fastvideo.eval.api import evaluate  # noqa: E402
@@ -35,6 +35,7 @@ __all__ = [
     "Evaluator",
     "create_evaluator",
     "MetricResult",
+    "Video",
     "BaseMetric",
     "register",
     "list_metrics",

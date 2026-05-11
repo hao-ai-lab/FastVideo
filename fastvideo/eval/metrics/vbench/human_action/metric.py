@@ -101,8 +101,6 @@ class HumanActionMetric(BaseMetric):
         text_prompt = sample.get("text_prompt")
         if text_prompt is None:
             return self._skip(sample, "missing text_prompt with action labels")
-        if isinstance(text_prompt, list):
-            text_prompt = text_prompt[0]
 
         cat_dict = _load_cat_dict()
 

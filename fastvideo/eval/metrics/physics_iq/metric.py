@@ -16,7 +16,6 @@ from fastvideo.eval.metrics.physics_iq.utils import (
     mean,
     prepare_pair_inputs,
     prepare_triplet_inputs,
-    unpack_batch_value,
 )
 from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
@@ -172,22 +171,15 @@ class PhysicsIQMetric(BaseMetric):
         if take2_key is None:
             raise KeyError("PhysicsIQMetric requires sample['reference_take2'] or an alias.")
 
-        # Polymorphic input handling: tensors / ndarrays / file paths / list-of-one.
-        # ``unpack_batch_value`` always yields a list; with B=1 we take element 0.
-        [video] = unpack_batch_value(sample["video"])
-        [reference] = unpack_batch_value(sample["reference"])
-        [reference_take2] = unpack_batch_value(sample[take2_key])
-        generated_mask = unpack_batch_value(sample["video_mask"])[0] if "video_mask" in sample else None
-        reference_mask = unpack_batch_value(sample["reference_mask"])[0] if "reference_mask" in sample else None
-        reference_take2_mask = (unpack_batch_value(sample["reference_take2_mask"])[0]
-                                if "reference_take2_mask" in sample else None)
+        video = sample["video"]
+        reference = sample["reference"]
+        reference_take2 = sample[take2_key]
+        generated_mask = sample.get("video_mask")
+        reference_mask = sample.get("reference_mask")
+        reference_take2_mask = sample.get("reference_take2_mask")
 
         scenario = sample.get("scenario")
-        if isinstance(scenario, list):
-            scenario = scenario[0] if scenario else None
         view = sample.get("view")
-        if isinstance(view, list):
-            view = view[0] if view else None
 
         details = self.compute_single(
             video,
