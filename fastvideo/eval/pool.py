@@ -102,10 +102,10 @@ class VideoPool:
                 return
             idx, sample = item
             decoded = self._decode(sample)
-            try:
-                self._ready_q.put((idx, decoded), timeout=10.0)
-            except queue.Full:
-                return
+            # Blocking put: under normal flow the consumer drains the
+            # queue; under shutdown ``__exit__`` drains it for us. A
+            # timeout would silently drop samples and hang the consumer.
+            self._ready_q.put((idx, decoded))
 
     def _decode(self, sample: dict) -> dict:
         """Materialize any path-shaped video values in *sample*.

@@ -103,13 +103,15 @@ def prepare_pair(
     if "reference" not in sample:
         raise KeyError("Physics-IQ pair metrics require sample['reference'].")
 
-    return prepare_pair_inputs(
+    prepared = prepare_pair_inputs(
         sample["video"],
         sample["reference"],
         generated_mask=sample.get("video_mask"),
         reference_mask=sample.get("reference_mask"),
         **(prep_kwargs or {}),
     )
+    sample["_physics_iq_pair"] = prepared
+    return prepared
 
 
 def select_window(frames: np.ndarray, *, target_frames: int, selection: str = "first") -> np.ndarray:
