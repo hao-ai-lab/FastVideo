@@ -22,7 +22,7 @@ import torch
 from fastvideo.configs.models.encoders import (
     BaseEncoderOutput,
     CLIPTextConfig,
-    T5Config,
+    T5LargeConfig,
 )
 from fastvideo.configs.models.vaes.autoencoder_kl import AutoencoderKLVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig, preprocess_text
@@ -56,8 +56,8 @@ class _FluxDevLoaderPipelineConfig(PipelineConfig):
     vae_config: AutoencoderKLVAEConfig = field(
         default_factory=AutoencoderKLVAEConfig
     )
-    text_encoder_configs: tuple[CLIPTextConfig, T5Config] = field(
-        default_factory=lambda: (CLIPTextConfig(), T5Config())
+    text_encoder_configs: tuple[CLIPTextConfig, T5LargeConfig] = field(
+        default_factory=lambda: (CLIPTextConfig(), T5LargeConfig())
     )
     text_encoder_precisions: tuple[str, ...] = ("fp32", "bf16")
     preprocess_text_funcs: tuple = field(
