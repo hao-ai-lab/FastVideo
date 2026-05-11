@@ -715,6 +715,13 @@ class VideoGenerator:
             n_tokens=n_tokens,
             VSA_sparsity=fastvideo_args.VSA_sparsity,
         )
+        # Allow precomputed prompt_embeds (e.g. from diffusers) to skip text encoding
+        if kwargs.get("prompt_embeds") is not None:
+            batch.prompt_embeds = (
+                list(kwargs["prompt_embeds"])
+                if isinstance(kwargs["prompt_embeds"], (list, tuple))
+                else [kwargs["prompt_embeds"]]
+            )
 
         extra_overrides = kwargs.pop("_extra_overrides", {})
         for _ek, _ev in extra_overrides.items():
