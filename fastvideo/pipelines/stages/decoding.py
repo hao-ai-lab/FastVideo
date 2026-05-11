@@ -51,6 +51,23 @@ class DecodingStage(PipelineStage):
         result.add_check("output", batch.output, [V.is_tensor, V.with_dims(5)])
         return result
 
+    def _is_flux2_packed(self, latents: torch.Tensor) -> bool:
+        """Detect Flux2 packed latents by checking channel count against VAE geometry.
+
+        Flux2 packs latent_channels into 2x2 spatial patches, so the DiT
+        operates on ``latent_channels * 4`` channels at half spatial resolution.
+        The VAE's ``post_quant_conv`` input dimension equals ``latent_channels``.
+        """
+        if not hasattr(self.vae, "bn"):
+            return False
+        pqc = getattr(self.vae, "post_quant_conv", None)
+        if pqc is None:
+            return False
+        vae_latent_ch = pqc.weight.shape[1]
+        packed_ch = vae_latent_ch * 4  # 2x2 patch packing
+        ch_dim = 1 if latents.ndim >= 4 else -1
+        return latents.shape[ch_dim] == packed_ch
+
     def _denormalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
         """Convert normalized latents into the VAE's expected latent space."""
         # Some VAEs handle latent (de)normalization internally.
@@ -101,12 +118,8 @@ class DecodingStage(PipelineStage):
 
     @staticmethod
     def _unpatchify_latents(latents: torch.Tensor) -> torch.Tensor:
-        """
-        Flux2: (B, 128, H', W') -> (B, 32, 2*H', 2*W').
-        Inverse of 2x2 patch packing; matches diffusers Flux2Pipeline._unpatchify_latents.
-        """
+        """Inverse of 2x2 patch packing: ``(B, C*4, H', W') -> (B, C, 2*H', 2*W')``."""
         batch_size, num_channels, height, width = latents.shape
-        # 128 -> 32*2*2
         latents = latents.reshape(
             batch_size, num_channels // (2 * 2), 2, 2, height, width
         )
@@ -117,9 +130,9 @@ class DecodingStage(PipelineStage):
         return latents
 
     def _flux2_bn_denorm_and_unpatchify(self, latents: torch.Tensor) -> torch.Tensor:
-        """
-        Flux2: BN denormalize then unpatchify packed 128ch -> 32ch for VAE.
-        Uses vae.bn running_mean/running_var and vae.config.batch_norm_eps.
+        """BN denormalize then unpatchify packed latents for VAE decode.
+
+        Handles any channel count (e.g. 64->16, 128->32) via 2x2 spatial unpack.
         Skips BN when stats are invalid (NaN, inf, or all zeros) to avoid NaNs.
         """
         running_mean = self.vae.bn.running_mean.view(1, -1, 1, 1).to(
@@ -176,15 +189,8 @@ class DecodingStage(PipelineStage):
         vae_autocast_enabled = (
             vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
-        # Flux2: denormalize only 32ch VAE input, not 128ch packed (scaling_factor is for VAE space)
-        is_flux2_packed = (
-            latents.ndim == 5
-            and latents.shape[1] == 128
-            and hasattr(self.vae, "bn")
-            and getattr(self.vae, "post_quant_conv", None) is not None
-            and self.vae.post_quant_conv.weight.shape[1] == 32
-        )
-        if not is_flux2_packed:
+        # Flux2: skip denormalize on packed latents; it runs after unpatchify below
+        if not (latents.ndim == 5 and self._is_flux2_packed(latents)):
             latents = self._denormalize_latents(latents)
 
         # Decode latents
@@ -202,17 +208,10 @@ class DecodingStage(PipelineStage):
             if latents.ndim == 5 and latents.shape[2] == 1:
                 latents = latents.squeeze(2)
                 squeezed_for_vae = True
-            # Flux2 packed: 128ch packed -> BN denorm + unpatchify -> 32ch for VAE
-            if (
-                latents.ndim == 4
-                and latents.shape[1] == 128
-                and hasattr(self.vae, "bn")
-                and getattr(self.vae, "post_quant_conv", None) is not None
-                and self.vae.post_quant_conv.weight.shape[1] == 32
-            ):
+            # Flux2 packed: BN denorm + unpatchify (e.g. 64ch -> 16ch) for VAE
+            if latents.ndim == 4 and self._is_flux2_packed(latents):
                 debug_nan_check(latents, "5_before_flux2_unpatchify")
                 latents = self._flux2_bn_denorm_and_unpatchify(latents)
-                # Denormalize 32ch VAE input (scaling_factor / shift_factor for VAE space)
                 latents = self._denormalize_latents(latents)
             debug_nan_check(latents, "5_before_vae_decode")
             image = self.vae.decode(latents)
