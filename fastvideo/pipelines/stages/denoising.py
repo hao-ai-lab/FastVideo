@@ -312,6 +312,12 @@ class DenoisingStage(PipelineStage):
                     t_expand = t.repeat(latent_model_input.shape[0])
                 t_expand = t_expand.to(get_local_torch_device())
 
+                # Flux2 transformer multiplies timestep by 1000 internally, so
+                # the pipeline must pass timestep/1000 (matching Diffusers).
+                if getattr(fastvideo_args.pipeline_config.dit_config,
+                           "prefix", "") == "Flux":
+                    t_expand = t_expand / 1000.0
+
                 use_meanflow = getattr(self.transformer.config, "use_meanflow",
                                        False)
                 if use_meanflow:
