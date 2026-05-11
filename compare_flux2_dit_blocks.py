@@ -575,30 +575,71 @@ def _ff_context_sd_prefix(block_index: int) -> str:
     return f"transformer_blocks.{block_index}.ff_context."
 
 
+def _materialize_weight_tensor(t: torch.Tensor | None) -> torch.Tensor | None:
+    """Turn FSDP/DTensor shards into a plain tensor for shape/numel and ``F.linear``."""
+    if t is None:
+        return None
+    full_fn = getattr(t, "full_tensor", None)
+    if callable(full_fn):
+        try:
+            out = full_fn()
+            if isinstance(out, torch.Tensor):
+                return out
+        except Exception:
+            pass
+    return t
+
+
 def _get_ff_context_linear_tensors(
     model: torch.nn.Module,
     block_index: int,
     linear_name: str,
 ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-    """Resolve ``linear_in`` / ``linear_out`` weights: ``state_dict`` first, then submodule."""
+    """Resolve ``linear_in`` / ``linear_out``: named_parameters, state_dict, then submodule."""
+    w_key_suffix = (
+        f"transformer_blocks.{block_index}.ff_context.{linear_name}.weight"
+    )
+    b_key_suffix = f"transformer_blocks.{block_index}.ff_context.{linear_name}.bias"
+
+    w: torch.Tensor | None = None
+    b: torch.Tensor | None = None
+
+    for name, p in model.named_parameters():
+        if name.endswith(w_key_suffix):
+            w = _materialize_weight_tensor(p)
+        elif name.endswith(b_key_suffix):
+            b = _materialize_weight_tensor(p)
+    if w is not None and w.numel() > 0:
+        return w, b
+
     prefix = _ff_context_sd_prefix(block_index) + linear_name + "."
     sd = model.state_dict()
     w_key, b_key = prefix + "weight", prefix + "bias"
-    w = sd.get(w_key)
-    b = sd.get(b_key) if b_key in sd else None
+    w = _materialize_weight_tensor(sd.get(w_key))
+    b = _materialize_weight_tensor(sd.get(b_key)) if b_key in sd else None
     if w is not None and w.numel() > 0:
         return w, b
-    # Keys may be prefixed (e.g. wrappers); prefer any match ending with the HF-style suffix.
-    needle = f"transformer_blocks.{block_index}.ff_context.{linear_name}.weight"
+
+    needle_weight = w_key_suffix
+    mid = f"transformer_blocks.{block_index}.ff_context.{linear_name}"
     if w is None or w.numel() == 0:
         for k, t in sd.items():
-            if k.endswith(needle) and t is not None and t.numel() > 0:
-                w = t
+            if t is None:
+                continue
+            tm = _materialize_weight_tensor(t)
+            if tm is None:
+                continue
+            if (
+                k.endswith(needle_weight)
+                or (mid in k and k.endswith(f"{linear_name}.weight"))
+            ) and tm.numel() > 0:
+                w = tm
                 b_k = k[: -len("weight")] + "bias"
-                b = sd.get(b_k) if b_k in sd else None
+                b = _materialize_weight_tensor(sd.get(b_k)) if b_k in sd else None
                 break
     if w is not None and w.numel() > 0:
         return w, b
+
     if not hasattr(model, "transformer_blocks") or block_index >= len(
         model.transformer_blocks
     ):
@@ -608,8 +649,8 @@ def _get_ff_context_linear_tensors(
     if mod is None:
         return w, b
     mod = _unwrap_module_leaf(mod)
-    w = getattr(mod, "weight", None)
-    b = getattr(mod, "bias", None)
+    w = _materialize_weight_tensor(getattr(mod, "weight", None))
+    b = _materialize_weight_tensor(getattr(mod, "bias", None))
     return w, b
 
 
@@ -784,6 +825,17 @@ def _print_ff_context_module_replay(
     if off_before_ff is None:
         print("  Could not capture official before_ff; skip replay.")
         return
+    def _replay_diag_line(prefix: str, mod: torch.nn.Module, bi: int) -> str:
+        wi, _ = _get_ff_context_linear_tensors(mod, bi, "linear_in")
+        raw = mod.transformer_blocks[bi].ff_context.linear_in.weight
+        raw_shape = tuple(raw.shape) if hasattr(raw, "shape") else ()
+        return (
+            f"{prefix}: resolved linear_in shape="
+            f"{tuple(wi.shape) if wi is not None else ()} numel="
+            f"{wi.numel() if wi is not None else 0}; "
+            f"submodule.weight shape={raw_shape} type={type(raw).__name__}"
+        )
+
     with torch.no_grad():
         x_fp32 = off_before_ff.detach().float().to(device)
         try:
@@ -793,11 +845,13 @@ def _print_ff_context_module_replay(
             )
         except RuntimeError as e:
             print(f"  explicit ff_context forward failed: {e}")
-            print("  fallback: submodule forward (may fail if .weight is empty)")
-            fv_ff = trans_fv.transformer_blocks[block_index].ff_context
-            off_ff = trans_off.transformer_blocks[block_index].ff_context
-            y_fv = fv_ff(x_fp32.clone())
-            y_off = off_ff(x_fp32.clone())
+            print(f"  {_replay_diag_line('FV', trans_fv, block_index)}")
+            print(f"  {_replay_diag_line('official', trans_off, block_index)}")
+            print(
+                "  Skip replay: do not call submodule forward on FV when Linear weights "
+                "are empty (crashes with 0×0 matmul)."
+            )
+            return
         d = (y_fv.float() - y_off.float()).abs()
         print(
             "  fp32 activations: "
@@ -811,11 +865,12 @@ def _print_ff_context_module_replay(
             y_off_b = _flux2_ff_context_forward_explicit(
                 trans_off, block_index, x_act.clone()
             )
-        except RuntimeError:
-            fv_ff = trans_fv.transformer_blocks[block_index].ff_context
-            off_ff = trans_off.transformer_blocks[block_index].ff_context
-            y_fv_b = fv_ff(x_act.clone())
-            y_off_b = off_ff(x_act.clone())
+        except RuntimeError as e:
+            print(f"  explicit ff_context forward ({model_dtype}) failed: {e}")
+            print(
+                "  Skip bf16 replay section (same weight-resolution issue as fp32)."
+            )
+            return
         d_b = (y_fv_b.float() - y_off_b.float()).abs()
         print(
             f"  {model_dtype} activations: "
