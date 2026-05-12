@@ -212,10 +212,21 @@ and assert that the *distribution* — not just the max — looks healthy:
 
 ```python
 abs_diff = (hf_out.float().cpu() - fv_out.float().cpu()).abs()
-print(f"max_diff={abs_diff.max():.4f}  mean_diff={abs_diff.mean():.4f}  "
-      f"median_diff={abs_diff.median():.4f}  "
-      f"p99_diff={abs_diff.flatten().kthvalue(int(0.99 * abs_diff.numel())).values:.4f}")
+max_diff = abs_diff.max().item()
+mean_diff = abs_diff.mean().item()
+median_diff = abs_diff.median().item()
+p99_diff = torch.quantile(abs_diff.flatten(), 0.99).item()
+print(
+    f"max_diff={max_diff:.4f}  mean_diff={mean_diff:.4f}  "
+    f"median_diff={median_diff:.4f}  p99_diff={p99_diff:.4f}"
+)
 ```
+
+Call `.item()` before formatting (older PyTorch versions do not implement
+`__format__` on 0-dim tensors), and prefer `torch.quantile` over
+`kthvalue(int(0.99 * N))` — `kthvalue` is 1-indexed and degenerates for
+very small `N`, while `quantile` handles the distribution boundary
+cleanly.
 
 Healthy bf16-tail signature (FLUX, 57 layers, observed on A40):
 `max=0.5, mean=0.04, median=0, p99=0.25`. Median near zero and mean ≪ atol
