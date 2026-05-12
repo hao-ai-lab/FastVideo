@@ -142,7 +142,7 @@ def test_zimage_qwen3_encoder_parity_forward(dtype: torch.dtype):
         str(ZIMAGE_TEXT_ENCODER_DIR),
         local_files_only=True,
         trust_remote_code=True,
-        dtype=dtype,
+        torch_dtype=dtype,
         low_cpu_mem_usage=True,
     ).eval().to(device=device, dtype=dtype)
 

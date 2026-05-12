@@ -135,7 +135,8 @@ class Qwen3RotaryEmbedding(nn.Module):
         inv_freq_expanded = self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1).to(x.device)
         position_ids_expanded = position_ids[:, None, :].float()
 
-        device_type = x.device.type if isinstance(x.device.type, str) and x.device.type != "mps" else "cpu"
+        # torch.autocast supports cuda/cpu/xpu/hpu but not mps; fall back to cpu for mps.
+        device_type = x.device.type if x.device.type != "mps" else "cpu"
         with torch.autocast(device_type=device_type, enabled=False):
             freqs = (inv_freq_expanded.float() @ position_ids_expanded.float()).transpose(1, 2)
             emb = torch.cat((freqs, freqs), dim=-1)
@@ -354,7 +355,12 @@ class Qwen3Model(TextEncoder):
         hidden_states = inputs_embeds if inputs_embeds is not None else self.get_input_embeddings(input_ids)
 
         if position_ids is None:
-            position_ids = torch.arange(0, hidden_states.shape[1], device=hidden_states.device).unsqueeze(0)
+            position_ids = torch.arange(
+                0,
+                hidden_states.shape[1],
+                device=hidden_states.device,
+                dtype=torch.long,
+            ).unsqueeze(0)
 
         causal_attention_mask: torch.Tensor | None = None
         if attention_mask is not None:
