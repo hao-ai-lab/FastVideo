@@ -1,9 +1,9 @@
 # `fastvideo.eval`
 
 In-process evaluation suite for video generations. Includes pixel
-metrics (SSIM, PSNR, LPIPS), optical-flow comparisons, the full VBench
-suite, Physics-IQ, and a VLM scorer (VideoScore-2) behind a single
-registry-driven API.
+metrics (SSIM, PSNR, LPIPS), FVD (Fréchet Video Distance), optical-flow
+comparisons, the full VBench suite, Physics-IQ, and a VLM scorer
+(VideoScore-2) behind a single registry-driven API.
 
 ## Install
 
@@ -78,7 +78,7 @@ fastvideo/
 │   ├── datasets/                  # prompt corpora (vbench, physics_iq)
 │   └── metrics/
 │       ├── base.py                # BaseMetric + @register contract
-│       ├── common/                # SSIM, PSNR, LPIPS
+│       ├── common/                # SSIM, PSNR, LPIPS, FVD
 │       ├── optical_flow/          # gt_optical_flow, synthetic_optical_flow
 │       ├── videoscore2/           # VideoScore-2 (Qwen2.5-VL)
 │       ├── physics_iq/            # PhysicsIQ + sub-metrics
@@ -170,6 +170,7 @@ ${FASTVIDEO_CACHE_ROOT}/eval/
 ├── models/      # URL-fetched checkpoints (LAION head, AMT, GRiT)
 ├── torch/       # redirected TORCH_HOME (DINO via torch.hub, lpips)
 ├── clip/        # passed as download_root= to clip.load callsites
+├── fvd/         # common.fvd: real_features.pt (cached I3D reference features)
 └── datasets/    # auto-fetched dataset assets, one subdir per benchmark
                  # (e.g. datasets/physics_iq/{split-videos,switch-frames,...})
 ```
@@ -206,9 +207,8 @@ the metric's docstring if it matters.
 
 - **MIND** metrics. Depend on a separate `vipe` upstream submodule.
 - **VBench-2.0**. Sibling vbench2 package; needs its own port.
-- **FVD as a registered metric**. Currently still at `benchmarks/fvd/`.
-  FVD is a set-vs-set distribution distance and does not fit the
-  per-sample `BaseMetric.compute` API without a stateful accumulator;
-  conversion is a designed follow-up.
+- **FVD** is now available as `common.fvd` (see `metrics/common/fvd/`).
+  Uses the `is_set_metric` accumulate/finalize interface; requires
+  ≥ 256 videos for statistically reliable scores (standard: 2048).
 - **Training-time eval callback** (`EvalCallback`) and the
   `RolloutEvaluator` helper.
