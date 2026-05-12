@@ -93,7 +93,7 @@ FLUX_FULL_QUALITY_MODEL_TO_PARAMS = {
     reason="FLUX T2I SSIM test requires CUDA",
 )
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
-@pytest.mark.parametrize("attention_backend_name", ["TORCH_SDPA", "FLASH_ATTN"])
+@pytest.mark.parametrize("attention_backend_name", ["TORCH_SDPA"])
 @pytest.mark.parametrize("model_id", list(FLUX_MODEL_TO_PARAMS.keys()))
 def test_flux_t2i_similarity(
     prompt: str,

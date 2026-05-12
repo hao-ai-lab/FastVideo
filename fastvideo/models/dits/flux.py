@@ -507,7 +507,12 @@ class FluxTransformer2DModel(BaseDiT):
             get_forward_context()
             forward_context = nullcontext()
         except AssertionError:
-            ts0 = int(timestep[0].item()) if timestep.numel() > 0 else 0
+            if timestep.numel() == 0:
+                ts0 = 0
+            elif torch.is_floating_point(timestep):
+                ts0 = int(round(timestep[0].item() * 1000))
+            else:
+                ts0 = int(timestep[0].item())
             forward_context = set_forward_context(current_timestep=ts0, attn_metadata=None)
 
         with forward_context:
@@ -542,7 +547,7 @@ class FluxTransformer2DModel(BaseDiT):
                     image_rotary_emb=image_rotary_emb,
                     joint_attention_kwargs=jkwargs,
                 )
-                if controlnet_block_samples is not None:
+                if controlnet_block_samples:
                     interval = len(self.transformer_blocks) / len(controlnet_block_samples)
                     interval = int(math.ceil(interval))
                     if controlnet_blocks_repeat:
@@ -558,7 +563,7 @@ class FluxTransformer2DModel(BaseDiT):
                     image_rotary_emb=image_rotary_emb,
                     joint_attention_kwargs=jkwargs,
                 )
-                if controlnet_single_block_samples is not None:
+                if controlnet_single_block_samples:
                     interval = len(self.single_transformer_blocks) / len(controlnet_single_block_samples)
                     interval = int(math.ceil(interval))
                     hidden_states = hidden_states + controlnet_single_block_samples[idx // interval]

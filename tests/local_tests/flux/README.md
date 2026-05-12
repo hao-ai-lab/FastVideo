@@ -44,7 +44,7 @@ FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA \
 pytest tests/local_tests/pipelines/test_flux_dev_pipeline_parity.py -vs
 ```
 
-Status: requires weights — pending local run (see PORT_STATUS.md).
+Status: PASS on A40 (2026-05-11) — requires weights; not run in CI.
 
 ## DiT Parity Test
 
@@ -57,7 +57,7 @@ pytest fastvideo/tests/transformers/test_flux.py -vs
 ```
 
 Status: requires weights — not run in CI.
-Pass evidence: pending (see PORT_STATUS.md).
+Pass evidence: PASS recorded in PORT_STATUS.md (A40, 2026-05-11).
 
 ## SSIM Regression Test
 
@@ -70,4 +70,4 @@ FLUX_T2I_MODEL_DIR=official_weights/FLUX.1-dev \
 pytest fastvideo/tests/ssim/test_flux_t2i_similarity.py -vs
 ```
 
-Status: reference images not yet committed — see PORT_STATUS.md.
+Status: seeded reference images committed (TORCH_SDPA, A40, 2026-05-11) — see PORT_STATUS.md.
