@@ -36,6 +36,7 @@ from unittest.mock import patch
 
 import torch
 import torch.distributed
+import torch.distributed as dist
 from torch.distributed import Backend, ProcessGroup, ReduceOp
 
 import fastvideo.envs as envs
@@ -664,6 +665,26 @@ def init_world_group(ranks: list[int], local_rank: int, backend: str) -> GroupCo
     )
 
 
+def get_node_group() -> GroupCoordinator:
+    assert _NODE is not None, ("node group is not initialized")
+    return _NODE
+
+
+def init_node_group(local_rank: int, backend: str):
+    cpu_group = get_world_group().cpu_group
+    node_ranks = is_the_same_node_as(cpu_group)
+    node_size = len(node_ranks)
+    # NOTE: assumes all nodes have the same number of GPUs.
+    # Heterogeneous clusters are not supported.
+    world_size = dist.get_world_size()
+    assert world_size % node_size == 0, (f"World size ({world_size}) must be divisible by "
+                                         f"node size ({node_size}) — heterogeneous clusters "
+                                         f"are not supported.")
+    all_node_ranks = [list(range(i * node_size, (i + 1) * node_size)) for i in range(world_size // node_size)]
+    global _NODE
+    _NODE = init_model_parallel_group(all_node_ranks, local_rank, backend)
+
+
 def init_model_parallel_group(
     group_ranks: list[list[int]],
     local_rank: int,
@@ -743,6 +764,9 @@ def init_distributed_environment(
     else:
         assert _WORLD.world_size == torch.distributed.get_world_size(), (
             "world group already initialized with a different world size")
+    # Init a group for each node
+    if _NODE is None:
+        init_node_group(local_rank, backend)
 
 
 _SP: GroupCoordinator | None = None
@@ -959,6 +983,11 @@ def destroy_model_parallel() -> None:
         _DP.destroy()
     _DP = None
 
+    global _NODE
+    if _NODE:
+        _NODE.destroy()
+    _NODE = None
+
 
 def destroy_distributed_environment() -> None:
     global _WORLD
@@ -981,9 +1010,14 @@ def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
 
 def is_the_same_node_as(pg: ProcessGroup | StatelessProcessGroup, source_rank: int = 0) -> list[int]:
     """
-    This is a collective operation that returns if each rank is in the same node
+    This is a collective operation that returns ranks that are in the same node
     as the source rank. It tests if processes are attached to the same
     memory system (shared access to shared memory).
+    Args:
+        pg: the global process group to test
+        source_rank: the rank to test against
+    Returns:
+        A list of ranks that are in the same node as the source rank.
     """
     if isinstance(pg, ProcessGroup):
         assert torch.distributed.get_backend(pg) != torch.distributed.Backend.NCCL, (
@@ -1056,7 +1090,7 @@ def is_the_same_node_as(pg: ProcessGroup | StatelessProcessGroup, source_rank: i
             rank_data = pg.broadcast_obj(is_in_the_same_node, src=i)
             aggregated_data += rank_data
 
-    return [x == 1 for x in aggregated_data.tolist()]
+    return [i for i, x in enumerate(aggregated_data.tolist()) if x == 1]
 
 
 def initialize_tensor_parallel_group(tensor_model_parallel_size: int = 1,

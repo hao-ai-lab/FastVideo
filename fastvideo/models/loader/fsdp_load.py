@@ -136,7 +136,7 @@ def maybe_load_fsdp_model(
                     fsdp_shard_conditions=model._fsdp_shard_conditions,
                     pin_cpu_memory=pin_cpu_memory)
 
-    weight_iterator = safetensors_weights_iterator(weight_dir_list)
+    weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=True)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
     load_model_from_full_model_state_dict(
         model,
