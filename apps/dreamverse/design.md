@@ -37,9 +37,9 @@ hosted platform.
 
 Today the repo contains two major pieces:
 
-- `apps/web/`: Next.js frontend
-- `server/`: FastAPI runtime that owns websocket state, prompt rewrite, prompt
-  safety, and GPU-backed generation
+- `apps/dreamverse/web/`: Next.js frontend
+- `apps/dreamverse/dreamverse/`: FastAPI runtime that owns websocket state,
+  prompt rewrite, prompt safety, and GPU-backed generation
 
 The current runtime already exposes useful health and streaming surfaces such
 as `/healthz`, `/readyz`, `/status`, and `/ws`.
@@ -50,21 +50,22 @@ The target open source structure should be:
 
 ```text
 Dreamverse/
-├── apps/
-│   └── web/          # browser UI
-├── controller/       # local control plane and provider lifecycle
-├── runtime/          # Dreamverse websocket/generation runtime
-├── providers/        # provider adapters
-├── tests/
-│   ├── contract/
-│   ├── controller/
-│   └── smoke/
-└── design.md
+├── apps/dreamverse/
+│   ├── web/          # browser UI
+│   ├── dreamverse/   # current FastAPI websocket/generation runtime
+│   ├── controller/   # local control plane and provider lifecycle
+│   ├── providers/    # provider adapters
+│   ├── tests/
+│   │   ├── contract/
+│   │   ├── controller/
+│   │   └── smoke/
+│   └── design.md
+└── ...
 ```
 
 Near-term note:
 
-- `server/` is the current runtime implementation.
+- `apps/dreamverse/dreamverse/` is the current runtime implementation.
 - We can keep the code there initially and rename it to `runtime/` only after
   the controller lands.
 
@@ -82,7 +83,7 @@ This is the key reason the provider-based path is acceptable for OSS.
 
 ## Responsibility Split
 
-### `apps/web`
+### `apps/dreamverse/web`
 
 The frontend should own:
 
@@ -251,14 +252,15 @@ This boundary should not move.
 
 ## Recommended Rollout
 
-1. Finish the path reorg so docs and code agree on `apps/web`.
+1. Finish the path reorg so docs and code agree on `apps/dreamverse/web`.
 2. Introduce `controller/` as a local-only API/proxy process.
-3. Keep `server/` as the runtime and adapt it behind the controller.
+3. Keep `apps/dreamverse/dreamverse/` as the runtime and adapt it behind the
+   controller.
 4. Add `local` provider first.
 5. Add "bring your own runtime URL" as an escape hatch.
 6. Add automated Runpod provisioning.
 7. Add Modal deployment support.
-8. Rename `server/` to `runtime/` once the split is stable.
+8. Rename `apps/dreamverse/dreamverse/` to `runtime/` once the split is stable.
 
 ## Implementation Plan
 
@@ -271,7 +273,7 @@ into the first patch series.
 Goal:
 
 - A user with a working `fastvideo` install can run the Dreamverse backend on a
-  local GPU and connect to it from `apps/web`.
+  local GPU and connect to it from `apps/dreamverse/web`.
 
 Non-goals for this milestone:
 
@@ -282,9 +284,9 @@ Non-goals for this milestone:
 
 Reasoning:
 
-- `server/` already is the real local GPU runtime.
-- `apps/web` already knows how to talk to a backend over `/ws` and REST
-  rewrites.
+- `apps/dreamverse/dreamverse/` already is the real local GPU runtime.
+- `apps/dreamverse/web` already knows how to talk to a backend over `/ws` and
+  REST rewrites.
 - The shortest path is to make the existing local path explicit, reliable, and
   tested before adding another layer.
 
@@ -295,11 +297,12 @@ Reasoning:
 Current issue:
 
 - Some paths still assume `prod-ui/`, but the frontend now lives at
-  `apps/web/`.
+  `apps/dreamverse/web/`.
 
 Required changes:
 
-- update prompt/preset path resolution in `server/config.py`
+- update prompt/preset path resolution in
+  `apps/dreamverse/dreamverse/config.py`
 - update docs that still mention `prod-ui`
 - audit any frontend build settings that assume the old repo root
 
@@ -385,7 +388,7 @@ This should happen only after Milestone 0 is stable.
 Scope:
 
 - add `controller/`
-- proxy `/ws` and the needed REST routes to `server/`
+- proxy `/ws` and the needed REST routes to `apps/dreamverse/dreamverse/`
 - expose controller-owned status for "backend starting", "runtime ready", and
   "runtime failed"
 - optionally spawn the local runtime as a subprocess
@@ -420,10 +423,11 @@ matches the runtime most closely.
 If we want the shortest path to a working local GPU milestone, the change order
 should be:
 
-1. Fix `server/config.py` and any remaining path assumptions from `prod-ui` to
-   `apps/web`.
+1. Fix `apps/dreamverse/dreamverse/config.py` and any remaining path
+   assumptions from `prod-ui` to `apps/dreamverse/web`.
 2. Update `README.md` to document the real local GPU startup flow.
-3. Confirm `apps/dreamverse/web` connects cleanly to the local wrapper-backed backend.
+3. Confirm `apps/dreamverse/web` connects cleanly to the local wrapper-backed
+   backend.
 4. Improve frontend error handling for backend-not-ready and backend-missing
    cases.
 5. Add a local smoke test and keep existing backend/frontend tests green.
@@ -435,15 +439,15 @@ should be:
 
 Keep the current Python test suite as the base:
 
-- `server/tests/test_health_endpoints.py`
-- `server/tests/test_mock_server.py`
-- `server/tests/test_prompt_enhancer.py`
-- `server/tests/test_rewrite_prompt_payload.py`
+- `apps/dreamverse/dreamverse/tests/test_health_endpoints.py`
+- `apps/dreamverse/dreamverse/tests/test_mock_server.py`
+- `apps/dreamverse/dreamverse/tests/test_prompt_enhancer.py`
+- `apps/dreamverse/dreamverse/tests/test_rewrite_prompt_payload.py`
 - related config and logging tests
 
 Add or tighten tests for:
 
-- path resolution in `server/config.py`
+- path resolution in `apps/dreamverse/dreamverse/config.py`
 - readiness behavior when GPU pool initialization fails
 - startup error messaging when `fastvideo` is unavailable
 
@@ -453,7 +457,7 @@ Keep the current Vitest suite as the base:
 
 - websocket reducer tests
 - prompt-window snapshot tests
-- integration tests under `apps/web/src/app/`
+- integration tests under `apps/dreamverse/web/src/app/`
 
 Add or tighten tests for:
 
@@ -468,7 +472,7 @@ The first manual smoke checklist should be:
 1. start `dreamverse-server`
 2. confirm `GET /healthz` returns 200
 3. confirm `GET /readyz` returns 200 after warmup
-4. start `apps/web`
+4. start `apps/dreamverse/web`
 5. confirm the UI opens and the websocket connects
 6. submit a prompt and verify the first generation starts
 
@@ -482,7 +486,8 @@ break prompt rewrite, websocket semantics, or runtime behavior silently.
 
 ### 1. Runtime unit and integration tests
 
-Keep and expand the current `pytest` coverage in `server/test_*.py`.
+Keep and expand the current `pytest` coverage in
+`apps/dreamverse/dreamverse/tests/test_*.py`.
 
 Focus areas:
 
@@ -531,7 +536,8 @@ Use recorded fixtures or fakes wherever possible to avoid spend in CI.
 
 ### 4. Web contract tests
 
-The frontend already has useful Vitest coverage under `apps/web/src`.
+The frontend already has useful Vitest coverage under
+`apps/dreamverse/web/src`.
 Preserve that and expand around the controller split.
 
 Priority areas:

@@ -13,25 +13,29 @@
 
 Current paths:
 
-- `apps/web/`: Next.js frontend, client-side stores, websocket event reduction,
-  prompt-window editing, devtools UI.
-- `server/`: current Python FastAPI runtime, websocket protocol, prompt
-  enhancement, prompt rewrite orchestration, GPU worker lifecycle.
-- `server/tests/`: backend unit and integration-oriented tests.
-- `server/benchmarks/`: prompt-provider latency/token benchmarking scripts.
+- `apps/dreamverse/web/`: Next.js frontend, client-side stores, websocket
+  event reduction, prompt-window editing, devtools UI.
+- `apps/dreamverse/dreamverse/`: current Python FastAPI runtime, websocket
+  protocol, prompt enhancement, prompt rewrite orchestration, GPU worker
+  lifecycle.
+- `apps/dreamverse/dreamverse/tests/`: backend unit and integration-oriented
+  tests.
+- `apps/dreamverse/dreamverse/benchmarks/`: prompt-provider latency/token
+  benchmarking scripts.
 
 Planned paths during the OSS reorg:
 
 - `controller/`: local control plane for provider credentials, compute
   lifecycle, and proxying.
-- `runtime/`: eventual rename of `server/` once the controller/runtime split is
-  stable.
+- `runtime/`: eventual rename of `apps/dreamverse/dreamverse/` once the
+  controller/runtime split is stable.
 - `providers/`: provider adapters for local, Runpod, and Modal.
 
 Important rule:
 
-- Until the split lands, treat `server/` as the authoritative runtime and keep
-  provider orchestration out of `apps/web`.
+- Until the split lands, treat `apps/dreamverse/dreamverse/` as the
+  authoritative runtime and keep provider orchestration out of
+  `apps/dreamverse/web`.
 
 ## System split
 
@@ -49,7 +53,7 @@ Modal or Runpod.
 
 ## Current runtime responsibilities
 
-The runtime in `server/` is responsible for:
+The runtime in `apps/dreamverse/dreamverse/` is responsible for:
 
 - websocket session lifecycle on `/ws`
 - queueing, GPU assignment, worker startup, and stream chunk emission
@@ -62,16 +66,20 @@ The runtime in `server/` is responsible for:
 
 Relevant files:
 
-- `server/main.py`: websocket protocol, session state machine, REST routes
-- `server/gpu_pool.py`: FastVideo-backed generation workers
-- `server/prompt_enhancer.py`: provider clients, prompt enhancement, rewrite
-  execution
-- `server/rewrite_prompt_payload.py`: canonical rewrite request body format
-- `server/config.py`: prompt file paths, provider configuration, runtime flags
+- `apps/dreamverse/dreamverse/main.py`: websocket protocol, session state
+  machine, REST routes
+- `apps/dreamverse/dreamverse/gpu_pool.py`: FastVideo-backed generation
+  workers
+- `apps/dreamverse/dreamverse/prompt_enhancer.py`: provider clients, prompt
+  enhancement, rewrite execution
+- `apps/dreamverse/dreamverse/rewrite_prompt_payload.py`: canonical rewrite
+  request body format
+- `apps/dreamverse/dreamverse/config.py`: prompt file paths, provider
+  configuration, runtime flags
 
 ## Frontend responsibilities
 
-The frontend in `apps/web/` is responsible for:
+The frontend in `apps/dreamverse/web/` is responsible for:
 
 - collecting user input and deciding whether to send raw prompts or rewrite
   requests
@@ -85,12 +93,15 @@ The frontend in `apps/web/` is responsible for:
 
 Relevant files:
 
-- `apps/web/src/app/page.tsx`: main orchestration, websocket connect/send paths
-- `apps/web/src/lib/ws/reducer.ts`: applies normalized websocket events to
-  stores
-- `apps/web/src/stores/promptWindow.ts`: prompt window and preset/editor state
-- `apps/web/src/stores/rewrite.ts`: rewrite activity timeline and flags
-- `apps/web/src/lib/prompts/promptWindowSnapshot.ts`: rewrite snapshot
+- `apps/dreamverse/web/src/app/page.tsx`: main orchestration, websocket
+  connect/send paths
+- `apps/dreamverse/web/src/lib/ws/reducer.ts`: applies normalized websocket
+  events to stores
+- `apps/dreamverse/web/src/stores/promptWindow.ts`: prompt window and
+  preset/editor state
+- `apps/dreamverse/web/src/stores/rewrite.ts`: rewrite activity timeline and
+  flags
+- `apps/dreamverse/web/src/lib/prompts/promptWindowSnapshot.ts`: rewrite snapshot
   normalization and padding
 
 ## Planned controller responsibilities
@@ -128,7 +139,8 @@ Runtime responsibilities:
 
 - validate and normalize `prompt_window_prompts`
 - choose the rewrite system prompt and provider/model/temperature
-- build the canonical LLM request body in `server/rewrite_prompt_payload.py`
+- build the canonical LLM request body in
+  `apps/dreamverse/dreamverse/rewrite_prompt_payload.py`
 - run the rewrite through `PromptEnhancer.rewrite_prompt_sequence(...)`
 - apply safety filtering to rewritten prompts
 - replace the authoritative seed prompt memory when rewrite succeeds
@@ -189,15 +201,16 @@ that must survive provider restarts.
 - Do not move rewrite logic into the frontend or controller.
 - Do not make the frontend the source of truth for the generated prompt window
   after rewrite.
-- If you change websocket message types or payload fields in `server/main.py`,
-  update the reducer in `apps/web/src/lib/ws/reducer.ts` in the same change.
+- If you change websocket message types or payload fields in
+  `apps/dreamverse/dreamverse/main.py`, update the reducer in
+  `apps/dreamverse/web/src/lib/ws/reducer.ts` in the same change.
 - If you change rewrite request shape, update both
-  `apps/web/src/lib/prompts/promptWindowSnapshot.ts` and
-  `server/rewrite_prompt_payload.py`.
+  `apps/dreamverse/web/src/lib/prompts/promptWindowSnapshot.ts` and
+  `apps/dreamverse/dreamverse/rewrite_prompt_payload.py`.
 - If you add controller-managed status or error payloads, keep them separate
   from runtime websocket events unless there is a strong reason to merge them.
-- If you change prompt file paths or devtools persistence, update `server/`,
-  the frontend devtools UI, and any controller-owned local persistence logic
-  together.
+- If you change prompt file paths or devtools persistence, update
+  `apps/dreamverse/dreamverse/`, the frontend devtools UI, and any
+  controller-owned local persistence logic together.
 - Keep provider adapters focused on runtime lifecycle and reachability, not on
   prompt or session semantics.

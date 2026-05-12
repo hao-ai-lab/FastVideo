@@ -4,8 +4,8 @@
 
 Dreamverse currently has two main runtime pieces:
 
-- `apps/web/`: Next.js frontend
-- `server/`: Python FastAPI runtime
+- `apps/dreamverse/web/`: Next.js frontend
+- `apps/dreamverse/dreamverse/`: Python FastAPI runtime
 
 Today, the browser talks directly to the Dreamverse runtime over HTTP and a
 single websocket on `/ws`. The frontend owns UI state and interaction flow. The
@@ -14,7 +14,7 @@ semantics, and GPU-backed execution.
 
 Near-term OSS note:
 
-- `server/` is the current runtime implementation.
+- `apps/dreamverse/dreamverse/` is the current runtime implementation.
 - A future `controller/` layer is planned for local-only compute management and
   provider orchestration, but it does not exist yet.
 
@@ -22,32 +22,34 @@ Near-term OSS note:
 
 ### Frontend
 
-- `apps/web/src/app/page.tsx`: main client orchestration, websocket connect,
-  init payloads, send paths, and top-level app behavior
-- `apps/web/src/lib/ws/reducer.ts`: reduces normalized websocket events into
-  client stores
-- `apps/web/src/stores/session.ts`: connection, mode, and top-level session UI
-- `apps/web/src/stores/promptWindow.ts`: editable prompt window and seed prompt
-  UI state
-- `apps/web/src/stores/rewrite.ts`: rewrite activity timeline and inspection
-  state
-- `apps/web/src/stores/stream.ts`: playback and stream-related client state
-- `apps/web/src/lib/prompts/promptWindowSnapshot.ts`: prompt-window snapshot
+- `apps/dreamverse/web/src/app/page.tsx`: main client orchestration,
+  websocket connect, init payloads, send paths, and top-level app behavior
+- `apps/dreamverse/web/src/lib/ws/reducer.ts`: reduces normalized websocket
+  events into client stores
+- `apps/dreamverse/web/src/stores/session.ts`: connection, mode, and top-level
+  session UI
+- `apps/dreamverse/web/src/stores/promptWindow.ts`: editable prompt window and
+  seed prompt UI state
+- `apps/dreamverse/web/src/stores/rewrite.ts`: rewrite activity timeline and
+  inspection state
+- `apps/dreamverse/web/src/stores/stream.ts`: playback and stream-related
+  client state
+- `apps/dreamverse/web/src/lib/prompts/promptWindowSnapshot.ts`: prompt-window snapshot
   building for rewrite requests
 
 ### Server
 
-- `server/main.py`: websocket endpoint, request handling, session state
-  machine, rewrite orchestration, REST routes, and stream relay
-- `server/gpu_pool.py`: GPU worker processes, warmup, model loading, and
-  `generate_video()` calls through FastVideo
-- `server/prompt_enhancer.py`: prompt enhancement, rollout rewrite execution,
-  provider selection, and timeout/fallback behavior
-- `server/rewrite_prompt_payload.py`: canonical rewrite request payload
+- `apps/dreamverse/dreamverse/main.py`: websocket endpoint, request handling,
+  session state machine, rewrite orchestration, REST routes, and stream relay
+- `apps/dreamverse/dreamverse/gpu_pool.py`: GPU worker processes, warmup, model
+  loading, and `generate_video()` calls through FastVideo
+- `apps/dreamverse/dreamverse/prompt_enhancer.py`: prompt enhancement, rollout
+  rewrite execution, provider selection, and timeout/fallback behavior
+- `apps/dreamverse/dreamverse/rewrite_prompt_payload.py`: canonical rewrite request payload
   building
-- `server/config.py`: runtime flags, prompt file paths, provider settings, and
+- `apps/dreamverse/dreamverse/config.py`: runtime flags, prompt file paths, provider settings, and
   warmup config
-- `server/session_init_image.py`: validates and persists uploaded initial
+- `apps/dreamverse/dreamverse/session_init_image.py`: validates and persists uploaded initial
   images for segment 1
 
 ## Current Split Of Responsibility
@@ -121,7 +123,7 @@ The frontend is intentionally not responsible for:
 The current runtime is a FastAPI app with a single long-lived websocket per
 session.
 
-`server/main.py` manages:
+`apps/dreamverse/dreamverse/main.py` manages:
 
 - websocket connect/init
 - prompt queues
@@ -130,7 +132,7 @@ session.
 - stream relay from GPU workers to the browser
 - session logging and REST endpoints
 
-`server/gpu_pool.py` manages:
+`apps/dreamverse/dreamverse/gpu_pool.py` manages:
 
 - model loading through FastVideo
 - one or more worker processes
@@ -139,7 +141,7 @@ session.
 - `USER_STEP` execution for each segment
 - continuation state between segments
 
-`server/prompt_enhancer.py` manages:
+`apps/dreamverse/dreamverse/prompt_enhancer.py` manages:
 
 - prompt enhancement for user-submitted prompts
 - rollout rewrite requests for the prompt window
@@ -149,7 +151,7 @@ session.
 ## FastAPI Surface
 
 The server is a single FastAPI application created in
-`server/main.py`.
+`apps/dreamverse/dreamverse/main.py`.
 
 Current built-in FastAPI docs are enabled:
 
@@ -159,7 +161,8 @@ Current built-in FastAPI docs are enabled:
 
 The runtime also mounts static content:
 
-- `/server-assets`: server-local static assets rooted at `server/`
+- `/server-assets`: server-local static assets rooted at
+  `apps/dreamverse/dreamverse/`
 - `/`: frontend static build when one of the configured frontend static
   directories exists
 
@@ -204,7 +207,8 @@ websocket.
 
 ### Devtools-only preset routes
 
-These exist only when `DEVTOOLS_ENABLED` is true in `server/config.py`.
+These exist only when `DEVTOOLS_ENABLED` is true in
+`apps/dreamverse/dreamverse/config.py`.
 
 - `GET /curated-presets`
   - returns merged curated presets, applying the local overlay file on top of
@@ -247,7 +251,8 @@ Prompt rewrite is a shared flow with strict ownership boundaries.
 
 - validate and normalize the prompt-window payload
 - choose rewrite model, system prompt, timeout, and temperature
-- build the canonical prompt payload in `server/rewrite_prompt_payload.py`
+- build the canonical prompt payload in
+  `apps/dreamverse/dreamverse/rewrite_prompt_payload.py`
 - execute rewrite through `PromptEnhancer`
 - apply safety filtering to rewritten prompts
 - replace the authoritative seed prompt memory when rewrite succeeds
@@ -335,15 +340,16 @@ Binary websocket frames carry media chunks for playback.
 
 Current architecture:
 
-- browser -> `apps/web`
-- `apps/web` -> `server/main.py`
-- `server/main.py` -> `gpu_pool.py`
+- browser -> `apps/dreamverse/web`
+- `apps/dreamverse/web` -> `apps/dreamverse/dreamverse/main.py`
+- `apps/dreamverse/dreamverse/main.py` ->
+  `apps/dreamverse/dreamverse/gpu_pool.py`
 - `gpu_pool.py` -> FastVideo runtime
 
 Planned architecture:
 
-- browser -> `apps/web`
-- `apps/web` -> local `controller/`
+- browser -> `apps/dreamverse/web`
+- `apps/dreamverse/web` -> local `controller/`
 - `controller/` -> local or remote Dreamverse runtime
 - runtime -> FastVideo runtime
 
