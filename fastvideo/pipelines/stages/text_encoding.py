@@ -214,9 +214,11 @@ class TextEncodingStage(PipelineStage):
             for prompt_str in texts:
                 processed_text = preprocess_func(prompt_str)
                 if processed_text is not None:
-                    # Guard against empty strings that produce 0 tokens
-                    # with some tokenizers (e.g. Qwen2).
-                    if not processed_text.strip():
+                    # Guard against empty strings that produce 0 tokens with
+                    # Qwen2-style tokenizers. Scoped via treat_empty_as_dot so
+                    # models that legitimately use "" (e.g. negative_prompt="")
+                    # are not affected.
+                    if not processed_text.strip() and getattr(encoder_config, "treat_empty_as_dot", False):
                         processed_text = "."
                     processed_texts.append(processed_text)
                 else:
