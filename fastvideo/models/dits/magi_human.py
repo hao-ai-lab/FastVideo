@@ -638,13 +638,18 @@ class MagiAdapter(nn.Module):
         )
         self.rope = ElementWiseFourierEmbed(arch.head_dim)
         # RoPE cache: coords_mapping is the same tensor object across timesteps
-        # in the denoising loop, so data_ptr()+shape+dtype+device is a fast,
-        # collision-free key that avoids recomputing the Fourier embed each step.
+        # in the denoising loop. The key combines (id(t), data_ptr, _version,
+        # shape, dtype, device): id(t) catches Python-object identity (so a
+        # new tensor allocated at a previously-freed data_ptr does not collide),
+        # _version catches in-place mutation of the same tensor, and the
+        # remaining fields are belt-and-suspenders. We hold a strong reference
+        # to the source tensor so its id() stays unique while the cache is hot.
         self._cached_rope: Optional[torch.Tensor] = None
         self._cached_rope_key: Optional[tuple] = None
+        self._cached_rope_src: Optional[torch.Tensor] = None
 
     def _rope_cache_key(self, t: torch.Tensor) -> tuple:
-        return (t.data_ptr(), t.shape, t.dtype, t.device)
+        return (id(t), t.data_ptr(), t._version, t.shape, t.dtype, t.device)
 
     def forward(
         self,
@@ -658,6 +663,7 @@ class MagiAdapter(nn.Module):
         if key != self._cached_rope_key:
             self._cached_rope = self.rope(coords_mapping)
             self._cached_rope_key = key
+            self._cached_rope_src = coords_mapping
         rope = self._cached_rope
         # Embedder dtypes may differ from x's dtype when FastVideo's FSDP
         # loader casts all weights to `pipeline_config.precision` (bf16).
@@ -791,23 +797,24 @@ class MagiHumanDiT(BaseDiT):
             arch.hidden_size, arch.audio_in_channels, bias=False, dtype=torch.float32,
         )
         # Dispatcher + mask cache: modality_mapping is the same tensor object
-        # across all timesteps in the denoising loop; data_ptr()+shape+dtype+device
-        # is a fast, collision-free key that avoids rebuilding ModalityDispatcher
-        # (which calls argsort + bincount) on every forward call.
+        # across all timesteps in the denoising loop. See _modality_cache_key
+        # below for the multi-field key design (id + data_ptr + _version +
+        # shape + dtype + device) that defends against CUDA allocator pointer
+        # reuse and in-place mutation. Strong references to the source tensors
+        # are held so id() stays unique while the cache is hot.
         self._cached_dispatcher: Optional[ModalityDispatcher] = None
         self._cached_video_mask: Optional[torch.Tensor] = None
         self._cached_audio_mask: Optional[torch.Tensor] = None
         self._cached_text_mask: Optional[torch.Tensor] = None
         self._cached_modality_key: Optional[tuple] = None
-        # Cache num_video_tokens (keyed on modality_mapping, since it only
-        # depends on the modality assignment) and num_frames (keyed on
-        # coords_mapping, since it reads coord[0]). Both source values are
-        # constant across the denoising loop, so the per-call .item() and
-        # .max() GPU->CPU syncs collapse to a single sync at the first
-        # timestep.
+        self._cached_modality_src: Optional[torch.Tensor] = None
+        # num_frames is keyed on (coords_mapping_key, num_video_tokens) since
+        # the value reads coords_mapping[:num_video_tokens, 0].max() — both
+        # source inputs must match for the cached number to remain valid.
         self._cached_num_video_tokens: int = 0
         self._cached_num_frames: int = 0
         self._cached_coords_key: Optional[tuple] = None
+        self._cached_coords_src: Optional[torch.Tensor] = None
 
     def configure_local_attention(
         self,
@@ -819,7 +826,7 @@ class MagiHumanDiT(BaseDiT):
         self.block.configure_local_attention(layers, frame_receptive_field)
 
     def _modality_cache_key(self, t: torch.Tensor) -> tuple:
-        return (t.data_ptr(), t.shape, t.dtype, t.device)
+        return (id(t), t.data_ptr(), t._version, t.shape, t.dtype, t.device)
 
     def forward(
         self,
@@ -844,13 +851,14 @@ class MagiHumanDiT(BaseDiT):
             self._cached_text_mask = modality_mapping == Modality.TEXT
             self._cached_num_video_tokens = int(self._cached_video_mask.sum().item())
             self._cached_modality_key = key
+            self._cached_modality_src = modality_mapping
         dispatcher = self._cached_dispatcher
         video_mask = self._cached_video_mask
         audio_mask = self._cached_audio_mask
         text_mask = self._cached_text_mask
         num_video_tokens = self._cached_num_video_tokens
 
-        coords_key = self._modality_cache_key(coords_mapping)
+        coords_key = (self._modality_cache_key(coords_mapping), num_video_tokens)
         if coords_key != self._cached_coords_key:
             if num_video_tokens:
                 self._cached_num_frames = int(
@@ -858,6 +866,7 @@ class MagiHumanDiT(BaseDiT):
             else:
                 self._cached_num_frames = 0
             self._cached_coords_key = coords_key
+            self._cached_coords_src = coords_mapping
         num_frames = self._cached_num_frames
 
         x, rope = self.adapter(x, coords_mapping, video_mask, audio_mask, text_mask)
