@@ -110,11 +110,18 @@ def _write_audio_wav(
     """Write normalized int16 audio to a temporary WAV file."""
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
         wav_path = f.name
-    with wave.open(wav_path, "wb") as wav_file:
-        wav_file.setnchannels(num_channels)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(audio_int16.tobytes())
+    try:
+        with wave.open(wav_path, "wb") as wav_file:
+            wav_file.setnchannels(num_channels)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(audio_int16.tobytes())
+    except Exception:
+        try:
+            os.unlink(wav_path)
+        except FileNotFoundError:
+            pass
+        raise
     return wav_path
 
 
@@ -307,8 +314,9 @@ def stream_fmp4(
         assert proc.stdin is not None
         assert proc.stdout is not None
         assert proc.stderr is not None
-        fcntl.fcntl(proc.stdin.fileno(), fcntl.F_SETPIPE_SZ, 1048576)
-        fcntl.fcntl(proc.stdout.fileno(), fcntl.F_SETPIPE_SZ, 1048576)
+        if hasattr(fcntl, "F_SETPIPE_SZ"):
+            fcntl.fcntl(proc.stdin.fileno(), fcntl.F_SETPIPE_SZ, 1048576)
+            fcntl.fcntl(proc.stdout.fileno(), fcntl.F_SETPIPE_SZ, 1048576)
         ffmpeg_spawn_ms = (time.perf_counter() - t_proc_spawn_start) * 1000
 
         def _write_frames():
