@@ -88,26 +88,47 @@ def test_magi_human_t5gemma_wrapper_parity():
     fv_config.arch_config.t5gemma_model_path = _T5GEMMA_ID
     fv_model = FVEncoder(fv_config)
 
-    # --- Identical input ---
-    prompt = (
+    # Two different-length prompts so the batched `attention_mask` carries
+    # zeros (padding tokens). A single prompt would leave all-ones in the
+    # mask and silently miss any "forgot to pass attention_mask" regression.
+    prompts = [
         "A warm afternoon scene: a person sits on a park bench reading "
-        "a book, surrounded by softly swaying trees."
-    )
+        "a book, surrounded by softly swaying trees.",
+        "Sunrise over a quiet harbor.",
+    ]
     inputs = tokenizer(
-        [prompt], return_tensors="pt", padding=True, truncation=False,
+        prompts, return_tensors="pt", padding=True, truncation=False,
     ).to(device)
+    assert (inputs["attention_mask"] == 0).any(), (
+        "Expected at least one padding token across the batch."
+    )
+
+    # Build explicit position_ids (shifted, non-default) to assert that the
+    # wrapper actually forwards position_ids — silently dropping them would
+    # match the bf16 tolerance on the default 0..L-1 path.
+    seq_len = inputs["input_ids"].shape[1]
+    position_ids = torch.arange(seq_len, device=device).unsqueeze(0).expand(
+        inputs["input_ids"].shape[0], -1
+    )
 
     with torch.inference_mode():
-        ref_out = ref_model(**inputs)
+        ref_out = ref_model(
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            position_ids=position_ids,
+            output_hidden_states=True,
+        )
         ref_hidden = ref_out["last_hidden_state"].detach().float().cpu()
+        ref_all_hiddens = ref_out["hidden_states"]
 
-        # FastVideo wrapper: forward through the adapter; it lazy-loads the
-        # encoder on first call and moves it to the input's device.
         fv_out = fv_model(
             input_ids=inputs["input_ids"],
-            attention_mask=inputs.get("attention_mask"),
+            attention_mask=inputs["attention_mask"],
+            position_ids=position_ids,
+            output_hidden_states=True,
         )
         fv_hidden = fv_out.last_hidden_state.detach().float().cpu()
+        fv_all_hiddens = fv_out.hidden_states
 
     print(
         f"ref_hidden shape={tuple(ref_hidden.shape)} "
@@ -128,3 +149,24 @@ def test_magi_human_t5gemma_wrapper_parity():
     # drift is bounded by nondeterminism in SDPA + bf16 matmul. This
     # should be <= 1e-3 end-to-end.
     assert_close(fv_hidden, ref_hidden, atol=1e-3, rtol=1e-3)
+
+    # The wrapper must preserve the encoder's native dtype (bf16) on
+    # `last_hidden_state`; MagiHuman's downstream `.half()` cast is the
+    # pipeline's job, not the wrapper's.
+    assert fv_out.last_hidden_state.dtype == torch.bfloat16, (
+        f"Expected bf16 last_hidden_state, got {fv_out.last_hidden_state.dtype}"
+    )
+
+    # `output_hidden_states=True` must produce a tuple matching the
+    # reference's hidden-state tuple length (42 layers + 1 embedding).
+    assert fv_all_hiddens is not None, "output_hidden_states=True produced None"
+    assert len(fv_all_hiddens) == len(ref_all_hiddens), (
+        f"hidden_states tuple length mismatch: "
+        f"fv={len(fv_all_hiddens)} ref={len(ref_all_hiddens)}"
+    )
+
+    # The wrapper must propagate the input attention_mask back out on
+    # BaseEncoderOutput — downstream stages key off it for pad_or_trim.
+    assert fv_out.attention_mask is inputs["attention_mask"], (
+        "Wrapper must echo the input attention_mask unchanged."
+    )
