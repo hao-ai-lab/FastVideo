@@ -48,7 +48,7 @@ def get_torch_tensors_from_row_dict(row_dict,
         # TODO (peiyuan): read precision
         if key == 'text_embedding' and (rng.random()
                                         if rng else random.random()) < cfg_rate:
-            data = np.zeros((512, 4096), dtype=np.float32)
+            data = np.zeros(shape, dtype=np.float32)
         else:
             data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
         data = torch.from_numpy(data)
@@ -167,8 +167,7 @@ def collate_rows_from_parquet_schema(rows,
                                      random.random())
                                     < cfg_rate)
                     if drop:
-                        data = np.zeros(
-                            (512, 4096), dtype=np.float32)
+                        data = np.zeros(shape, dtype=np.float32)
                     else:
                         data = np.frombuffer(
                             bytes_data,
