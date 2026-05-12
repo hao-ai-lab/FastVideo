@@ -52,6 +52,7 @@ def apply_rotary_emb(
     freqs_cis: torch.Tensor | tuple[torch.Tensor, torch.Tensor],
     use_real: bool = True,
     use_real_unbind_dim: int = -1,
+    sequence_dim: int = 2,
 ) -> torch.Tensor:
     """
     Apply rotary embeddings to input tensors using the given frequency tensor. This function applies rotary embeddings
@@ -60,16 +61,23 @@ def apply_rotary_emb(
     tensors contain rotary embeddings and are returned as real tensors.
     Args:
         x (`torch.Tensor`):
-            Query or key tensor to apply rotary embeddings. [B, H, S, D] xk (torch.Tensor): Key tensor to apply
+            Query or key tensor to apply rotary embeddings.
         freqs_cis (`Tuple[torch.Tensor]`): Precomputed frequency tensor for complex exponentials. ([S, D], [S, D],)
+        sequence_dim (int): Which dimension of x is the sequence dimension. 1 for [B, S, H, D]
+            (FLUX-style), 2 for [B, H, S, D] (default).
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
     """
     if use_real:
         cos, sin = freqs_cis  # [S, D]
-        # Match Diffusers broadcasting (sequence_dim=2 case)
-        cos = cos[None, None, :, :]
-        sin = sin[None, None, :, :]
+        if sequence_dim == 1:
+            # [B, S, H, D] layout (FLUX)
+            cos = cos[None, :, None, :]
+            sin = sin[None, :, None, :]
+        else:
+            # [B, H, S, D] layout (default)
+            cos = cos[None, None, :, :]
+            sin = sin[None, None, :, :]
         cos, sin = cos.to(x.device), sin.to(x.device)
 
         if use_real_unbind_dim == -1:
@@ -288,6 +296,8 @@ def get_1d_rotary_pos_embed(
     interpolation_factor: float = 1.0,
     dtype: torch.dtype = torch.float32,
     use_real: bool = True,
+    freqs_dtype: torch.dtype | None = None,
+    repeat_interleave_real: bool | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Precompute the frequency tensor for complex exponential (cis) with given dimensions.
@@ -312,12 +322,16 @@ def get_1d_rotary_pos_embed(
     if isinstance(pos, int):
         pos = torch.arange(pos).float()
 
+    # freqs_dtype is an alias for dtype (Diffusers-compatible calling convention).
+    if freqs_dtype is not None:
+        dtype = freqs_dtype
+
     # proposed by reddit user bloc97, to rescale rotary embeddings to longer sequence length without fine-tuning
     # has some connection to NTK literature
     if theta_rescale_factor != 1.0:
         theta *= theta_rescale_factor**(dim / (dim - 2))
 
-    freqs = 1.0 / (theta**(torch.arange(0, dim, 2)[:(dim // 2)].to(dtype) / dim))  # [D/2]
+    freqs = 1.0 / (theta**(torch.arange(0, dim, 2, device=pos.device)[:(dim // 2)].to(dtype) / dim))  # [D/2]
     freqs = torch.outer(pos * interpolation_factor, freqs)  # [S, D/2]
     freqs_cos = freqs.cos()  # [S, D/2]
     freqs_sin = freqs.sin()  # [S, D/2]

@@ -50,9 +50,11 @@ from fastvideo.configs.pipelines.wan import (
     WanT2V480PConfig,
     WanT2V720PConfig,
 )
+from fastvideo.configs.pipelines.flux import FluxPipelineConfig
 from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.pipelines.stable_audio import (StableAudioOpenSmallConfig, StableAudioT2AConfig)
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.api.flux import FluxSamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
@@ -215,6 +217,8 @@ def _get_config_info(
 
 
 def _register_configs() -> None:
+    if _CONFIG_REGISTRY:
+        return
     # LTX-2 (base)
     register_configs(
         sampling_param_cls=None,
@@ -747,6 +751,21 @@ def _register_configs() -> None:
         ],
         model_family="sd35",
         default_preset="sd35_medium",
+    )
+
+    # FLUX.1-dev (Diffusers)
+    register_configs(
+        sampling_param_cls=FluxSamplingParam,
+        pipeline_config_cls=FluxPipelineConfig,
+        workload_types=(WorkloadType.T2I, ),
+        hf_model_paths=[
+            "black-forest-labs/FLUX.1-dev",
+        ],
+        model_detectors=[
+            lambda path: "fluxpipeline" in path,
+            lambda path: "flux.1-dev" in path or "flux_1_dev" in path,
+            lambda path: "/flux/" in path or path.endswith("/flux"),
+        ],
     )
 
 

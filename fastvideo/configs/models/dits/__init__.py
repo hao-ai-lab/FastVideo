@@ -1,5 +1,6 @@
 from fastvideo.configs.models.dits.cosmos import CosmosVideoConfig
 from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25VideoConfig
+from fastvideo.configs.models.dits.flux import FluxDiTConfig
 from fastvideo.configs.models.dits.hunyuangamecraft import HunyuanGameCraftConfig
 from fastvideo.configs.models.dits.hunyuanvideo import HunyuanVideoConfig
 from fastvideo.configs.models.dits.hunyuanvideo15 import HunyuanVideo15Config
@@ -12,6 +13,6 @@ from fastvideo.configs.models.dits.kandinsky5 import Kandinsky5VideoConfig
 
 __all__ = [
     "HunyuanVideoConfig", "HunyuanVideo15Config", "HunyuanGameCraftConfig", "WanVideoConfig", "CosmosVideoConfig",
-    "Cosmos25VideoConfig", "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig",
-    "StableAudioConfig"
+    "Cosmos25VideoConfig", "FluxDiTConfig", "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig",
+    "Kandinsky5VideoConfig", "StableAudioConfig"
 ]
