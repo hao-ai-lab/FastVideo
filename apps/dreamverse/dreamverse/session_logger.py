@@ -17,7 +17,7 @@ class SessionEventLogger:
 
     def __init__(self, root_dir: Path):
         self.hostname = socket.gethostname()
-        timestamp = datetime.now(timezone.utc).strftime("%y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%y%m%d_%H%M%S_%f")
         self.directory = root_dir / self.hostname
         self.path = self.directory / f"{timestamp}.jsonl"
         self._lock = asyncio.Lock()

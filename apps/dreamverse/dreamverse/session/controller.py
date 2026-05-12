@@ -1786,7 +1786,7 @@ class SessionController:
             except Exception:
                 pass
             import traceback
-            traceback.print_exc()
+            _main_print("ERROR", f"Traceback: {traceback.format_exc()}")
         finally:
             stop_event.set()
             await cancel_task(websocket_reader_task)
