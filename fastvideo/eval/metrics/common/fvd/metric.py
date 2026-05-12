@@ -51,16 +51,16 @@ from fastvideo.eval.types import MetricResult
 # Constants
 # ---------------------------------------------------------------------------
 
-_I3D_REPO_ID      = "flateon/FVD-I3D-torchscript"
-_I3D_FILENAME     = "i3d_torchscript.pt"
-_I3D_MIN_FRAMES   = 10     # I3D hard minimum
-_MIN_VIDEOS_WARN  = 256    # below this FVD is unreliable
+_I3D_REPO_ID = "flateon/FVD-I3D-torchscript"
+_I3D_FILENAME = "i3d_torchscript.pt"
+_I3D_MIN_FRAMES = 10  # I3D hard minimum
+_MIN_VIDEOS_WARN = 256  # below this FVD is unreliable
 _REAL_FEAT_RELPATH = "fvd/real_features.pt"  # relative to get_cache_dir()
-
 
 # ---------------------------------------------------------------------------
 # I3D helpers  (adapted from FastVideo benchmarks/fvd/i3d_model.py)
 # ---------------------------------------------------------------------------
+
 
 def _load_i3d(device: torch.device) -> torch.nn.Module:
     """Download I3D TorchScript from HuggingFace Hub and load it.
@@ -82,10 +82,8 @@ def _preprocess(video: torch.Tensor) -> torch.Tensor:
     """
     B, T, C, H, W = video.shape
     if T < _I3D_MIN_FRAMES:
-        raise ValueError(
-            f"I3D requires at least {_I3D_MIN_FRAMES} frames, got {T}. "
-            "Increase num_frames or use a longer video."
-        )
+        raise ValueError(f"I3D requires at least {_I3D_MIN_FRAMES} frames, got {T}. "
+                         "Increase num_frames or use a longer video.")
     if H != 224 or W != 224:
         video = video.reshape(B * T, C, H, W)
         video = F.interpolate(video, size=(224, 224), mode="bilinear", align_corners=False)
@@ -98,7 +96,7 @@ def _preprocess(video: torch.Tensor) -> torch.Tensor:
 @torch.no_grad()
 def _extract_features(
     model: torch.nn.Module,
-    video: torch.Tensor,      # (B, T, C, H, W) float [0, 1]
+    video: torch.Tensor,  # (B, T, C, H, W) float [0, 1]
     chunk: int,
     device: torch.device,
 ) -> np.ndarray:
@@ -114,7 +112,7 @@ def _extract_features(
     parts = []
     with torch.jit.fuser("none"):
         for i in range(0, video.shape[0], chunk):
-            batch = _preprocess(video[i : i + chunk].to(device))
+            batch = _preprocess(video[i:i + chunk].to(device))
             feats = model(batch, rescale=False, resize=False, return_features=True)
             if feats.dim() == 1:
                 feats = feats.unsqueeze(0)  # (D,) → (1, D) when I3D squeezes B=1
@@ -126,6 +124,7 @@ def _extract_features(
 # Fréchet distance  (adapted from FastVideo benchmarks/fvd/fvd.py)
 # ---------------------------------------------------------------------------
 
+
 def _gaussian_params(features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Compute mean and covariance of a feature matrix (N, D).
 
@@ -134,9 +133,9 @@ def _gaussian_params(features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     cause ``np.cov`` to return a 0-d scalar and break ``sigma.shape[0]``.
     """
     features = np.atleast_2d(features)
-    mu    = features.mean(axis=0)
+    mu = features.mean(axis=0)
     sigma = np.cov(features, rowvar=False)
-    if sigma.ndim == 0:                    # n==1 edge case: variance scalar
+    if sigma.ndim == 0:  # n==1 edge case: variance scalar
         sigma = sigma.reshape(1, 1)
     return mu, sigma
 
@@ -152,7 +151,7 @@ def _frechet_distance(
     sigma1 = sigma1 + eps * np.eye(sigma1.shape[0])
     sigma2 = sigma2 + eps * np.eye(sigma2.shape[0])
 
-    diff    = mu1 - mu2
+    diff = mu1 - mu2
     covmean = scipy.linalg.sqrtm(sigma1 @ sigma2)
 
     if np.iscomplexobj(covmean):
@@ -164,12 +163,13 @@ def _frechet_distance(
             )
         covmean = covmean.real
 
-    return float(np.sum(diff ** 2) + np.trace(sigma1 + sigma2 - 2.0 * covmean))
+    return float(np.sum(diff**2) + np.trace(sigma1 + sigma2 - 2.0 * covmean))
 
 
 # ---------------------------------------------------------------------------
 # Metric
 # ---------------------------------------------------------------------------
+
 
 @register("common.fvd")
 class FVDMetric(BaseMetric):
@@ -194,12 +194,12 @@ class FVDMetric(BaseMetric):
         Videos per I3D forward pass. Reduce if GPU runs OOM.
     """
 
-    name             = "common.fvd"
-    is_set_metric    = True
-    requires_reference = False   # uses cached real features, not per-sample ref
-    higher_is_better = False     # lower FVD = better
-    needs_gpu        = True
-    dependencies     = ["huggingface_hub", "scipy"]
+    name = "common.fvd"
+    is_set_metric = True
+    requires_reference = False  # uses cached real features, not per-sample ref
+    higher_is_better = False  # lower FVD = better
+    needs_gpu = True
+    dependencies = ["huggingface_hub", "scipy"]
 
     def __init__(
         self,
@@ -210,11 +210,11 @@ class FVDMetric(BaseMetric):
         # None → resolved lazily from get_cache_dir() in setup() so that
         # FASTVIDEO_EVAL_CACHE is honoured even if set after import time.
         self._cache_path_arg = cache_path
-        self._chunk          = chunk_size
+        self._chunk = chunk_size
         self._i3d: torch.nn.Module | None = None
 
         # Accumulated feature buffers — cleared by reset()
-        self._gen_features:  list[np.ndarray] = []
+        self._gen_features: list[np.ndarray] = []
         self._real_features: np.ndarray | None = None
 
     def to(self, device):
@@ -253,9 +253,9 @@ class FVDMetric(BaseMetric):
         if self._i3d is None:
             self.setup()
 
-        video = sample["video"]           # (T, C, H, W) from evaluator
+        video = sample["video"]  # (T, C, H, W) from evaluator
         if video.dim() == 4:
-            video = video.unsqueeze(0)    # → (1, T, C, H, W)
+            video = video.unsqueeze(0)  # → (1, T, C, H, W)
 
         # Buffer generated features
         feats = _extract_features(self._i3d, video, self._chunk, self.device)
@@ -270,9 +270,7 @@ class FVDMetric(BaseMetric):
             if ref is not None:
                 if ref.dim() == 4:
                     ref = ref.unsqueeze(0)
-                self._real_features = _extract_features(
-                    self._i3d, ref, self._chunk, self.device
-                )
+                self._real_features = _extract_features(self._i3d, ref, self._chunk, self.device)
                 self._save_cache(self._real_features)
 
     def finalize(self) -> MetricResult:
@@ -289,17 +287,15 @@ class FVDMetric(BaseMetric):
                 name=self.name,
                 score=None,
                 details={
-                    "skipped": (
-                        "No reference features available. Pass sample['reference'] "
-                        "in at least one accumulate() call to build the cache at: "
-                        f"{self.cache_path}"
-                    )
+                    "skipped": ("No reference features available. Pass sample['reference'] "
+                                "in at least one accumulate() call to build the cache at: "
+                                f"{self.cache_path}")
                 },
             )
 
-        all_gen  = np.concatenate(self._gen_features, axis=0)
-        n_gen    = len(all_gen)
-        n_real   = len(self._real_features)
+        all_gen = np.concatenate(self._gen_features, axis=0)
+        n_gen = len(all_gen)
+        n_real = len(self._real_features)
 
         if n_gen < _MIN_VIDEOS_WARN or n_real < _MIN_VIDEOS_WARN:
             warnings.warn(
@@ -309,7 +305,7 @@ class FVDMetric(BaseMetric):
                 stacklevel=2,
             )
 
-        mu_gen,  sigma_gen  = _gaussian_params(all_gen)
+        mu_gen, sigma_gen = _gaussian_params(all_gen)
         mu_real, sigma_real = _gaussian_params(self._real_features)
         fvd = _frechet_distance(mu_gen, sigma_gen, mu_real, sigma_real)
 
