@@ -186,6 +186,10 @@ follow_imports = "silent"
 # ``_vendored/`` subdir (project-wide convention; mirrors the
 # ``_``-prefixed auto-discovery skip).
 skip = "./data,./wandb,ui/package-lock.json,*/_vendored/*"
+# "tread" matches daVinci-MagiHuman's acronym "TReAD" (Token Routing and
+# Early Drop). codespell lowercases ignore-words entries, so the single
+# lowercase form silences all case variants.
+ignore-words-list = "tread"
 
 [tool.ruff]
 # Allow lines to be as long as 120.
