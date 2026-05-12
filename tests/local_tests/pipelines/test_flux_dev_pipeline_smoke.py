@@ -26,7 +26,8 @@ os.environ.setdefault("MASTER_PORT", "29519")
 
 
 def test_flux_dev_pipeline_short_run_finite_output(
-        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import torch
 
     if not torch.cuda.is_available():
