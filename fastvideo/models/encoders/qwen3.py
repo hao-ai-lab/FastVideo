@@ -302,6 +302,13 @@ class Qwen3DecoderLayer(nn.Module):
 
 class Qwen3Model(TextEncoder):
 
+    # Keys present in `Qwen3ForCausalLM` checkpoints but absent from the
+    # encoder-only `Qwen3Model` body. Documented exclusions per
+    # add-model-02-parity strict-load contract: pipelines that load a CausalLM
+    # checkpoint into the encoder bucket will see these dropped silently, so
+    # tests must assert the unexpected-key set equals this allowlist.
+    ALLOWED_UNEXPECTED_KEYS: frozenset[str] = frozenset({"lm_head.weight"})
+
     def __init__(self, config: Qwen3Config) -> None:
         super().__init__(config)
         self.config = config
@@ -385,6 +392,7 @@ class Qwen3Model(TextEncoder):
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
+        unexpected_keys: list[str] = []
 
         for name, loaded_weight in weights:
             # Z-Image Qwen3 checkpoints are usually prefixed with `model.`.
@@ -420,6 +428,8 @@ class Qwen3Model(TextEncoder):
                 if name.endswith(".bias") and name not in params_dict:
                     continue
                 if name not in params_dict:
+                    if name not in self.ALLOWED_UNEXPECTED_KEYS:
+                        unexpected_keys.append(name)
                     continue
 
                 param = params_dict[name]
@@ -427,6 +437,12 @@ class Qwen3Model(TextEncoder):
                 weight_loader(param, loaded_weight)
                 loaded_params.add(name)
 
+        if unexpected_keys:
+            raise ValueError(
+                f"Qwen3Model.load_weights encountered unexpected keys not in "
+                f"ALLOWED_UNEXPECTED_KEYS={sorted(self.ALLOWED_UNEXPECTED_KEYS)}: "
+                f"{sorted(unexpected_keys)}"
+            )
         return loaded_params
 
 
