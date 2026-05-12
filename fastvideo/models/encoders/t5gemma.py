@@ -110,9 +110,10 @@ class T5GemmaEncoderModel(TextEncoder):
                 self._t5gemma_model = model
         outputs = model(
             input_ids=input_ids,
+            position_ids=position_ids,
             attention_mask=attention_mask,
             inputs_embeds=inputs_embeds,
-            output_hidden_states=bool(output_hidden_states),
+            output_hidden_states=output_hidden_states,
         )
         # MagiHuman casts to fp16 at this point; keep the raw dtype here and
         # leave precision management to the pipeline's postprocess stage.
