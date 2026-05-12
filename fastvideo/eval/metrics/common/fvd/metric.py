@@ -116,6 +116,8 @@ def _extract_features(
         for i in range(0, video.shape[0], chunk):
             batch = _preprocess(video[i : i + chunk].to(device))
             feats = model(batch, rescale=False, resize=False, return_features=True)
+            if feats.dim() == 1:
+                feats = feats.unsqueeze(0)  # (D,) → (1, D) when I3D squeezes B=1
             parts.append(feats.cpu().numpy())
     return np.concatenate(parts, axis=0)
 
