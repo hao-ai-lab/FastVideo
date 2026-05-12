@@ -97,6 +97,12 @@ class SamplingParam:
     movement_distance: float | None = None
     camera_rotation: str | None = None
 
+    # Stable-Video-Infinity image conditioning
+    svi_ref_pad_num: int | None = None  # -1 = tile ref; 0 = zero pad; k>0 = ref for first k slots
+    svi_ref_pad_cfg: bool = False  # widens y-mask to len(first_frames) instead of {first frame only}
+    svi_num_clips: int = 1  # >1 enables motion-frame chaining
+    svi_num_motion_frames: int = 1  # tail frames carried from clip K to clip K+1 (1=Shot/Tom, 5=Film)
+
     # LTX-2 multi-modal CFG and STG.
     # cfg_scale defaults are 1.0 (CFG off) so ``ForwardBatch.__post_init__``
     # doesn't force ``do_classifier_free_guidance`` on non-LTX-2 models that
