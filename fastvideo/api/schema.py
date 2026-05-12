@@ -139,6 +139,7 @@ class SamplingConfig:
     guidance_scale_2: float | None = None
     guidance_rescale: float = 0.0
     true_cfg_scale: float | None = None
+    use_embedded_guidance: bool | None = None
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
 
