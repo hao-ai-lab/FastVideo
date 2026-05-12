@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import itertools
 import math
+import os
 from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Callable, Iterator, List, NamedTuple, Tuple
@@ -17,6 +18,11 @@ import torch.nn.functional as F
 from einops import rearrange
 
 from fastvideo.models.vaes.common import DiagonalGaussianDistribution
+
+
+def _is_env_enabled(name: str, default: str = "") -> bool:
+    value = os.getenv(name, default)
+    return value.lower() in {"1", "true", "yes", "on"}
 
 
 # =============================================================================
@@ -1283,6 +1289,8 @@ class VideoEncoder(nn.Module):
             spatial_padding_mode=encoder_spatial_padding_mode,
         )
 
+    # @torch.compile(mode="max-autotune-no-cudagraphs")
+    @torch.compile
     def forward(self, sample: torch.Tensor) -> torch.Tensor:
         frames_count = sample.shape[2]
         if ((frames_count - 1) % 8) != 0:
@@ -1423,6 +1431,8 @@ class VideoDecoder(nn.Module):
             )
             self.last_scale_shift_table = nn.Parameter(torch.empty(2, feature_channels))
 
+    # @torch.compile(mode="max-autotune-no-cudagraphs")
+    @torch.compile
     def forward(
         self,
         sample: torch.Tensor,
@@ -1606,8 +1616,30 @@ class LTX2CausalVideoAutoencoder(nn.Module):
         self.encoder = VideoEncoderConfigurator.from_config(config)
         self.decoder = VideoDecoderConfigurator.from_config(config)
         self._use_tiling: bool = False
+        self._use_channels_last_3d: bool = False
+
+        if _is_env_enabled("FASTVIDEO_LTX2_VAE_CHANNELS_LAST_3D", default="1"):
+            self.enable_channels_last_3d()
+
+    def _as_channels_last_3d(self, tensor: torch.Tensor) -> torch.Tensor:
+        if not self._use_channels_last_3d or tensor.ndim != 5 or tensor.is_contiguous(memory_format=torch.channels_last_3d):
+            return tensor
+        return tensor.contiguous(memory_format=torch.channels_last_3d)
+
+    def enable_channels_last_3d(self) -> None:
+        """Enable channels-last layout for 3D VAE convolutions."""
+        self._use_channels_last_3d = True
+        self.encoder.to(memory_format=torch.channels_last_3d)
+        self.decoder.to(memory_format=torch.channels_last_3d)
+
+    def disable_channels_last_3d(self) -> None:
+        """Restore contiguous layout for 3D VAE convolutions."""
+        self._use_channels_last_3d = False
+        self.encoder.to(memory_format=torch.contiguous_format)
+        self.decoder.to(memory_format=torch.contiguous_format)
 
     def encode(self, x: torch.Tensor) -> DiagonalGaussianDistribution:
+        x = self._as_channels_last_3d(x)
         means = self.encoder(x)
         zeros = torch.zeros_like(means)
         return DiagonalGaussianDistribution(torch.cat([means, zeros], dim=1), deterministic=True)
@@ -1619,6 +1651,7 @@ class LTX2CausalVideoAutoencoder(nn.Module):
         generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         """Decode latents to video, using tiling if enabled."""
+        z = self._as_channels_last_3d(z)
         if self._use_tiling:
             # Collect all chunks from tiled decode and concatenate
             chunks = list(self.tiled_decode(z, TilingConfig.default(), timestep, generator))
