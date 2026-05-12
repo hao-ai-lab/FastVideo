@@ -233,3 +233,103 @@ def test_zimage_qwen3_encoder_parity_forward(dtype: torch.dtype):
 
         assert_close(ref_last_v, fv_last_v, atol=atol, rtol=rtol)
         assert_close(ref_hs_m2_v, fv_hs_m2_v, atol=atol, rtol=rtol)
+
+
+@pytest.mark.skipif(not ZIMAGE_TEXT_ENCODER_DIR.exists(), reason="Z-Image text encoder checkpoint required")
+@pytest.mark.skipif(
+    not (torch.cuda.is_available() and torch.cuda.is_bf16_supported()),
+    reason="bf16 per-layer diagnostic requires a bf16-capable CUDA device",
+)
+def test_zimage_qwen3_encoder_per_layer_bf16_diagnostic():
+    """Diagnostic-only: prints per-layer FastVideo-vs-HF drift for the bf16
+    forward to distinguish monotonic accumulation (bf16 tail) from a
+    single-layer spike (real op mismatch).
+
+    This test always passes; review the captured stdout to interpret.
+    Expected pattern for healthy bf16 accumulation: max/mean/median grow
+    smoothly with layer depth. Suspect pattern: one layer's diff is
+    >>2x the previous, suggesting a real bug at that block.
+    """
+    if not ZIMAGE_TOKENIZER_DIR.exists():
+        pytest.skip(f"Z-Image tokenizer dir not found: {ZIMAGE_TOKENIZER_DIR}")
+
+    device = torch.device("cuda")
+    dtype = torch.bfloat16
+    torch.manual_seed(11)
+
+    tokenizer = AutoTokenizer.from_pretrained(str(ZIMAGE_TOKENIZER_DIR), local_files_only=True)
+    toks = tokenizer(
+        ["A cinematic shot of a rainy neon street at night."],
+        padding="max_length",
+        truncation=True,
+        max_length=128,
+        return_tensors="pt",
+    )
+    input_ids = toks["input_ids"].to(device)
+    attention_mask = toks["attention_mask"].to(device)
+
+    ref = AutoModel.from_pretrained(
+        str(ZIMAGE_TEXT_ENCODER_DIR),
+        local_files_only=True,
+        trust_remote_code=True,
+        torch_dtype=dtype,
+        low_cpu_mem_usage=True,
+    ).eval().to(device=device, dtype=dtype)
+
+    fv_cls, _ = ModelRegistry.resolve_model_cls("Qwen3Model")
+    cfg_raw = _load_json(ZIMAGE_TEXT_ENCODER_DIR / "config.json")
+    for k in ("_name_or_path", "transformers_version", "model_type", "torch_dtype"):
+        cfg_raw.pop(k, None)
+    cfg = Qwen3Config()
+    cfg.update_model_arch(cfg_raw)
+    fv = fv_cls(cfg).eval()
+    fv.load_weights(_iter_pretrained_safetensors(ZIMAGE_TEXT_ENCODER_DIR))
+    fv = fv.to(device=device, dtype=dtype)
+
+    with torch.no_grad():
+        ref_out = ref(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            return_dict=True,
+        )
+        fv_out = fv(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+        )
+
+    assert ref_out.hidden_states is not None
+    assert fv_out.hidden_states is not None
+    assert len(ref_out.hidden_states) == len(fv_out.hidden_states), (
+        f"len mismatch: HF={len(ref_out.hidden_states)} FV={len(fv_out.hidden_states)}"
+    )
+
+    mask_cpu = attention_mask.detach().bool().cpu()[0]
+    print(
+        f"\n[per-layer bf16 diagnostic] num_hidden_states={len(ref_out.hidden_states)}  "
+        f"valid_tokens={mask_cpu.sum().item()}/{mask_cpu.numel()}",
+        flush=True,
+    )
+    print(
+        f"{'idx':>3}  {'kind':<10}  {'max':>8}  {'mean':>8}  {'median':>8}  {'p99':>8}",
+        flush=True,
+    )
+    for idx, (ref_h, fv_h) in enumerate(zip(ref_out.hidden_states, fv_out.hidden_states)):
+        ref_v = ref_h.detach().float().cpu()[0][mask_cpu]
+        fv_v = fv_h.detach().float().cpu()[0][mask_cpu]
+        diff = (ref_v - fv_v).abs()
+        flat = diff.flatten()
+        p99 = torch.quantile(flat, 0.99).item()
+        if idx == 0:
+            kind = "embedding"
+        elif idx == len(ref_out.hidden_states) - 1:
+            kind = "post-norm"
+        else:
+            kind = f"layer{idx - 1}-out"
+        print(
+            f"{idx:>3}  {kind:<10}  "
+            f"{diff.max().item():>8.4f}  {diff.mean().item():>8.4f}  "
+            f"{diff.median().item():>8.4f}  {p99:>8.4f}",
+            flush=True,
+        )
