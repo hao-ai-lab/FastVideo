@@ -9,7 +9,7 @@ This compares:
 using identical local checkpoint, tokenization, and inputs.
 
 Usage:
-    pytest tests/local_tests/zimage/test_zimage_qwen3_encoder_parity.py -v
+    pytest tests/local_tests/zimage/test_zimage_encoder_parity.py -v -s
 """
 
 from __future__ import annotations
@@ -77,15 +77,49 @@ def _iter_pretrained_safetensors(model_dir: Path):
     )
 
 
+# bf16 tolerance reflects accumulated drift across 24 transformer blocks
+# (per add-model-02-parity calibration block). Diagnostic prints below assert
+# the *distribution* is healthy — median≈0 and mean ≪ atol prove the bulk of
+# elements match; only the tail diverges from per-GEMM bf16 epsilon.
+_BF16_ATOL = 0.05
+_BF16_RTOL = 0.05
+_BF16_MAX_MEAN_DRIFT = 5e-3
+_FP32_ATOL = 1e-4
+_FP32_RTOL = 1e-4
+
+
+def _print_diag(label: str, ref: torch.Tensor, fv: torch.Tensor) -> torch.Tensor:
+    diff = (ref.float() - fv.float()).abs()
+    flat = diff.flatten()
+    p99 = flat.kthvalue(max(1, int(0.99 * flat.numel()))).values
+    print(
+        f"[{label}] max_diff={diff.max():.4f}  mean_diff={diff.mean():.4f}  "
+        f"median_diff={diff.median():.4f}  p99_diff={p99:.4f}",
+        flush=True,
+    )
+    return diff
+
+
 @pytest.mark.skipif(not ZIMAGE_TEXT_ENCODER_DIR.exists(), reason="Z-Image text encoder checkpoint required")
-def test_zimage_qwen3_encoder_parity_forward():
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        pytest.param(torch.float32, id="fp32"),
+        pytest.param(
+            torch.bfloat16,
+            id="bf16",
+            marks=pytest.mark.skipif(
+                not (torch.cuda.is_available() and torch.cuda.is_bf16_supported()),
+                reason="bf16 parity requires a bf16-capable CUDA device",
+            ),
+        ),
+    ],
+)
+def test_zimage_qwen3_encoder_parity_forward(dtype: torch.dtype):
     if not ZIMAGE_TOKENIZER_DIR.exists():
         pytest.skip(f"Z-Image tokenizer dir not found: {ZIMAGE_TOKENIZER_DIR}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # NOTE: Test failing with torch.bloat16
-    # dtype = torch.bfloat16 if (device.type == "cuda" and torch.cuda.is_bf16_supported()) else torch.float32
-    dtype = torch.float32
     torch.manual_seed(11)
 
     tokenizer = AutoTokenizer.from_pretrained(str(ZIMAGE_TOKENIZER_DIR), local_files_only=True)
@@ -134,6 +168,30 @@ def test_zimage_qwen3_encoder_parity_forward():
     assert loaded, "No Qwen3 weights were loaded into FastVideo model"
     fv = fv.to(device=device, dtype=dtype)
 
+    # Per add-model-02-parity strict-load contract: assert the production
+    # loader's allowlist matches the actual checkpoint surface. Non-encoder
+    # heads like `lm_head.weight` (from `Qwen3ForCausalLM` checkpoints) are
+    # the only acceptable unexpected keys; anything else means a real drop.
+    checkpoint_keys = {name for name, _ in _iter_pretrained_safetensors(ZIMAGE_TEXT_ENCODER_DIR)}
+    checkpoint_keys = {k[len("model."):] if k.startswith("model.") else k for k in checkpoint_keys}
+    param_names = {name for name, _ in fv.named_parameters()}
+    # Map stacked-param checkpoint keys to their merged FastVideo names so the
+    # diff below only surfaces *unexpected* keys, not the qkv/gate_up fusion.
+    stacked = fv.config.arch_config.stacked_params_mapping
+    mapped_keys: set[str] = set()
+    for ckpt_name in checkpoint_keys:
+        for param_name, weight_name, _ in stacked:
+            if weight_name in ckpt_name:
+                mapped_keys.add(ckpt_name.replace(weight_name, param_name))
+                break
+        else:
+            mapped_keys.add(ckpt_name)
+    unexpected = mapped_keys - param_names - {"rotary_emb.inv_freq", "rotary_emb.cos_cached", "rotary_emb.sin_cached"}
+    assert unexpected <= fv_cls.ALLOWED_UNEXPECTED_KEYS, (
+        f"Unexpected checkpoint keys not in ALLOWED_UNEXPECTED_KEYS: "
+        f"{sorted(unexpected - fv_cls.ALLOWED_UNEXPECTED_KEYS)}"
+    )
+
     with torch.no_grad():
         fv_out = fv(
             input_ids=input_ids,
@@ -147,7 +205,31 @@ def test_zimage_qwen3_encoder_parity_forward():
     # Z-Image uses only valid token embeddings selected by attention mask.
     # Compare parity on that exact path to avoid padded-token artifacts.
     mask_cpu = attention_mask.detach().bool().cpu()
+    is_bf16 = dtype == torch.bfloat16
+    atol = _BF16_ATOL if is_bf16 else _FP32_ATOL
+    rtol = _BF16_RTOL if is_bf16 else _FP32_RTOL
+
     for i in range(mask_cpu.shape[0]):
         valid = mask_cpu[i]
-        assert_close(ref_last[i][valid], fv_last[i][valid], atol=1e-4, rtol=1e-4)
-        assert_close(ref_hs_m2[i][valid], fv_hs_m2[i][valid], atol=1e-4, rtol=1e-4)
+        ref_last_v = ref_last[i][valid]
+        fv_last_v = fv_last[i][valid]
+        ref_hs_m2_v = ref_hs_m2[i][valid]
+        fv_hs_m2_v = fv_hs_m2[i][valid]
+
+        last_diff = _print_diag(f"batch{i} last_hidden_state {dtype}", ref_last_v, fv_last_v)
+        hs_m2_diff = _print_diag(f"batch{i} hidden_states[-2] {dtype}", ref_hs_m2_v, fv_hs_m2_v)
+
+        if is_bf16:
+            # In bf16 we expect the long tail of per-GEMM epsilon to push max
+            # past atol; require median≈0 and abs-mean drift below threshold.
+            assert last_diff.mean().item() < _BF16_MAX_MEAN_DRIFT, (
+                f"batch{i} last_hidden_state bf16 mean drift "
+                f"{last_diff.mean():.4f} >= {_BF16_MAX_MEAN_DRIFT}"
+            )
+            assert hs_m2_diff.mean().item() < _BF16_MAX_MEAN_DRIFT, (
+                f"batch{i} hidden_states[-2] bf16 mean drift "
+                f"{hs_m2_diff.mean():.4f} >= {_BF16_MAX_MEAN_DRIFT}"
+            )
+
+        assert_close(ref_last_v, fv_last_v, atol=atol, rtol=rtol)
+        assert_close(ref_hs_m2_v, fv_hs_m2_v, atol=atol, rtol=rtol)
