@@ -17,7 +17,6 @@ from __future__ import annotations
 import os
 
 import torch
-from torch import nn
 
 from fastvideo.configs.models.encoders import BaseEncoderOutput, TextEncoderConfig
 from fastvideo.models.encoders.base import TextEncoder
