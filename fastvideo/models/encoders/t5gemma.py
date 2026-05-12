@@ -15,6 +15,7 @@ on top — the pipeline prompt-preprocessing stage handles pad-or-trim to
 from __future__ import annotations
 
 import os
+from typing import Iterable
 
 import torch
 
@@ -122,6 +123,21 @@ class T5GemmaEncoderModel(TextEncoder):
             hidden_states=getattr(outputs, "hidden_states", None),
             attention_mask=attention_mask,
         )
+
+    def load_weights(
+        self, weights: Iterable[tuple[str, torch.Tensor]]
+    ) -> set[str]:
+        # The HF T5-Gemma encoder is lazy-loaded from `t5gemma_model_path`
+        # (see `_build_t5gemma_model`), so this wrapper owns zero
+        # FastVideo-native parameters and `named_parameters()` is filtered
+        # to hide the HF submodule. `TextEncoderLoader.load_model()` calls
+        # `model.load_weights(...)` unconditionally, so we must define it
+        # here. Returning an empty set matches the empty `weights_to_load`
+        # set the loader computes from `named_parameters()`, satisfying
+        # its strict-load check.
+        for _ in weights:
+            pass
+        return set()
 
 
 EntryClass = T5GemmaEncoderModel

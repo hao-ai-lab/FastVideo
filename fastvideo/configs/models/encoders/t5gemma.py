@@ -21,10 +21,6 @@ from fastvideo.configs.models.encoders.base import (
 )
 
 
-def _is_t5gemma_model(n: str, m) -> bool:
-    return n.endswith("t5gemma_model") or n.endswith("_t5gemma_model")
-
-
 @dataclass
 class T5GemmaEncoderArchConfig(TextEncoderArchConfig):
     architectures: list[str] = field(default_factory=lambda: ["T5GemmaEncoderModel"])
@@ -50,7 +46,13 @@ class T5GemmaEncoderArchConfig(TextEncoderArchConfig):
     t5gemma_model_path: str = "google/t5gemma-9b-9b-ul2"
     t5gemma_dtype: str = "bfloat16"
 
-    _fsdp_shard_conditions: list = field(default_factory=lambda: [_is_t5gemma_model])
+    # The HF T5-Gemma encoder is lazy-loaded on first forward (see
+    # `fastvideo/models/encoders/t5gemma.py`), so no FastVideo-owned
+    # submodules exist at FSDP-apply time. An empty list makes
+    # `shard_model()` log a warning and return cleanly instead of raising
+    # "No layer modules were sharded" — sharding of the lazy HF model is
+    # the activation pipeline's responsibility.
+    _fsdp_shard_conditions: list = field(default_factory=list)
 
     def __post_init__(self) -> None:
         super().__post_init__()
