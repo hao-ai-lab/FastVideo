@@ -102,12 +102,21 @@ def _extract_features(
     chunk: int,
     device: torch.device,
 ) -> np.ndarray:
-    """Extract I3D features → (B, 400) numpy array, chunked to fit VRAM."""
+    """Extract I3D features → (B, 400) numpy array, chunked to fit VRAM.
+
+    ``torch.jit.fuser("none")`` disables NVRTC kernel fusion for the I3D
+    TorchScript forward pass.  Without it, PyTorch tries to JIT-compile fused
+    kernels via ``libnvrtc-builtins``, which is only available on the exact
+    CUDA version the binary was built against (e.g. fails on Colab CUDA 12
+    when the lib expects CUDA 13).  Disabling fusion has no effect on
+    numerical correctness — the I3D model still runs in full precision on GPU.
+    """
     parts = []
-    for i in range(0, video.shape[0], chunk):
-        batch = _preprocess(video[i : i + chunk].to(device))
-        feats = model(batch, rescale=False, resize=False, return_features=True)
-        parts.append(feats.cpu().numpy())
+    with torch.jit.fuser("none"):
+        for i in range(0, video.shape[0], chunk):
+            batch = _preprocess(video[i : i + chunk].to(device))
+            feats = model(batch, rescale=False, resize=False, return_features=True)
+            parts.append(feats.cpu().numpy())
     return np.concatenate(parts, axis=0)
 
 
