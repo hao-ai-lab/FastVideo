@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fastvideo.configs.sample.base import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 
 
 @dataclass
