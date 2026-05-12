@@ -784,6 +784,15 @@ class MagiHumanDiT(BaseDiT):
         self._cached_audio_mask: Optional[torch.Tensor] = None
         self._cached_text_mask: Optional[torch.Tensor] = None
         self._cached_modality_key: Optional[tuple] = None
+        # Cache num_video_tokens (keyed on modality_mapping, since it only
+        # depends on the modality assignment) and num_frames (keyed on
+        # coords_mapping, since it reads coord[0]). Both source values are
+        # constant across the denoising loop, so the per-call .item() and
+        # .max() GPU->CPU syncs collapse to a single sync at the first
+        # timestep.
+        self._cached_num_video_tokens: int = 0
+        self._cached_num_frames: int = 0
+        self._cached_coords_key: Optional[tuple] = None
 
     def configure_local_attention(
         self,
@@ -818,16 +827,23 @@ class MagiHumanDiT(BaseDiT):
             self._cached_video_mask = modality_mapping == Modality.VIDEO
             self._cached_audio_mask = modality_mapping == Modality.AUDIO
             self._cached_text_mask = modality_mapping == Modality.TEXT
+            self._cached_num_video_tokens = int(self._cached_video_mask.sum().item())
             self._cached_modality_key = key
         dispatcher = self._cached_dispatcher
         video_mask = self._cached_video_mask
         audio_mask = self._cached_audio_mask
         text_mask = self._cached_text_mask
-        num_video_tokens = int(video_mask.sum().item())
-        if num_video_tokens:
-            num_frames = int(coords_mapping[:num_video_tokens, 0].max().item()) + 1
-        else:
-            num_frames = 0
+        num_video_tokens = self._cached_num_video_tokens
+
+        coords_key = self._modality_cache_key(coords_mapping)
+        if coords_key != self._cached_coords_key:
+            if num_video_tokens:
+                self._cached_num_frames = int(
+                    coords_mapping[:num_video_tokens, 0].max().item()) + 1
+            else:
+                self._cached_num_frames = 0
+            self._cached_coords_key = coords_key
+        num_frames = self._cached_num_frames
 
         x, rope = self.adapter(x, coords_mapping, video_mask, audio_mask, text_mask)
         # Keep the residual stream in adapter dtype (fp32) entering the block.
