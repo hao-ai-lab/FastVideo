@@ -744,6 +744,21 @@ class MagiHumanDiT(BaseDiT):
 
     This scaffold is single-GPU only; the `ulysses_scheduler().dispatch(...)`
     sequence-parallel wrapping in the reference has no equivalent here yet.
+
+    Dtype contract (the production loader / converter MUST preserve this):
+      * PackedExpertLinear params (all packed-expert qkv/proj/up/down) — bf16.
+      * MagiAdapter embedders, final_norm_{video,audio},
+        final_linear_{video,audio}, MultiModalityRMSNorm.weight — fp32.
+      * ElementWiseFourierEmbed.bands buffer — fp32.
+
+    The cross-layer residual stream stays in fp32; only the per-block linear
+    interior runs at bf16 (matching upstream BaseLinear's dtype boundary).
+    A loader that uniformly casts every tensor to one dtype (e.g.
+    `dit_precision=bf16`) WILL silently break numerical parity across the
+    40-layer accumulator. The conversion script in
+    `scripts/checkpoint_conversion/convert_magi_human_to_diffusers.py` and
+    the pipeline-level loader configuration are responsible for honoring
+    this contract.
     """
 
     # BaseDiT requires these class attrs. Source them from the config so
