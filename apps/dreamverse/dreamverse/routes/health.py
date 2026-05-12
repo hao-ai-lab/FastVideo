@@ -20,7 +20,7 @@ async def get_internal_monitor_sessions():
         max_available_sessions = 0
     prompt_provider_success_counts: dict[str, int] = {}
     if runtime.prompt_enhancer is not None:
-        prompt_provider_success_counts = (runtime.prompt_enhancer.get_provider_success_counts())
+        prompt_provider_success_counts = runtime.prompt_enhancer.get_provider_success_counts()
     return {
         "service": "ltx2-streaming-backend",
         "pending_sessions": len(runtime.gpu_pool.waiting_list),

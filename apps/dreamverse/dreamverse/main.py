@@ -30,8 +30,6 @@ from dreamverse.routes.presets import (
     curated_presets_router,
 )
 from dreamverse.session.controller import SessionController
-if DEVTOOLS_ENABLED:
-    pass
 
 
 class _HeartbeatAccessLogFilter(logging.Filter):
@@ -105,10 +103,6 @@ async def websocket_endpoint(websocket: WebSocket):
     )
     await controller.run()
 
-
-# Serve server-side assets (images, etc.)
-server_dir = os.path.dirname(os.path.abspath(__file__))
-app.mount("/server-assets", StaticFiles(directory=server_dir), name="server-assets")
 
 # Serve an exported frontend bundle when present.
 for static_dir in FRONTEND_STATIC_DIR_CANDIDATES:
