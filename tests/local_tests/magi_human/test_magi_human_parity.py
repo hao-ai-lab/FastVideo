@@ -137,9 +137,20 @@ def test_magi_human_dit_parity():
     )
 
     # --- Build the packed inputs the DiT consumes ---
-    from fastvideo.pipelines.basic.magi_human.stages.latent_preparation import (
-        build_packed_inputs,
-    )
+    # The pipeline stages module ships in a later step of the PR #1280
+    # decomposition (4/8). On this branch (3/8 — DiT only) the import fails
+    # cleanly; the test is dead code until the pipeline lands.
+    try:
+        from fastvideo.pipelines.basic.magi_human.stages.latent_preparation import (
+            build_packed_inputs,
+        )
+    except ImportError:
+        pytest.skip(
+            "fastvideo.pipelines.basic.magi_human.stages.latent_preparation "
+            "is not present on this branch yet (activates in step 4/8 of the "
+            "PR #1280 decomposition). DiT parity will run once the pipeline "
+            "lands."
+        )
     from fastvideo.models.dits.magi_human import Modality  # noqa: F401
 
     x, coords, mm = build_packed_inputs(
