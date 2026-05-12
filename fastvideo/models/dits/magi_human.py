@@ -822,6 +822,26 @@ class MagiHumanDiT(BaseDiT):
         frame_receptive_field: int = 11,
     ) -> None:
         layers = tuple(int(layer) for layer in local_attn_layers)
+        if layers:
+            # The current `_local_window_attention` accumulates per-block SDPA
+            # outputs with a plain sum, but upstream
+            # `daVinci-MagiHuman/inference/model/dit/dit_module.py::
+            # _flash_attn_with_correction` reconstructs the equivalent full
+            # softmax via log-sum-exp correction across overlapping key
+            # ranges. The two are NOT numerically equivalent, so enabling
+            # any local-attn layer on this DiT (used by the SR-1080p variant
+            # in the upstream stack) would silently diverge from upstream
+            # output. The activation PR for the SR variant must port the
+            # LSE-corrected math and add a parity test before re-enabling
+            # this path.
+            raise NotImplementedError(
+                "MagiHuman local-window attention is not yet ported. Upstream "
+                "uses log-sum-exp-corrected block accumulation; this DiT "
+                "currently has only a plain-sum approximation that does not "
+                "match upstream output. The SR-1080p activation PR will port "
+                "and parity-test this path. For the base / DMD-2-distill "
+                "variants leave `local_attn_layers=[]` (the default)."
+            )
         self.arch.local_attn_layers = layers
         self.block.configure_local_attention(layers, frame_receptive_field)
 
