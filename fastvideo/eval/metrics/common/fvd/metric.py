@@ -127,9 +127,17 @@ def _extract_features(
 # ---------------------------------------------------------------------------
 
 def _gaussian_params(features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Compute mean and covariance of a feature matrix (N, D)."""
+    """Compute mean and covariance of a feature matrix (N, D).
+
+    ``np.atleast_2d`` guards against a 1-D array (e.g. a single feature
+    vector squeezed by I3D or loaded from a stale cache), which would
+    cause ``np.cov`` to return a 0-d scalar and break ``sigma.shape[0]``.
+    """
+    features = np.atleast_2d(features)
     mu    = features.mean(axis=0)
     sigma = np.cov(features, rowvar=False)
+    if sigma.ndim == 0:                    # n==1 edge case: variance scalar
+        sigma = sigma.reshape(1, 1)
     return mu, sigma
 
 
@@ -329,7 +337,8 @@ class FVDMetric(BaseMetric):
     def _load_cache(self) -> np.ndarray | None:
         if os.path.exists(self.cache_path):
             data = torch.load(self.cache_path, map_location="cpu", weights_only=True)
-            return data.numpy()
+            arr = np.atleast_2d(data.numpy())  # guard against stale 1-D cache
+            return arr
         return None
 
     def _save_cache(self, features: np.ndarray) -> None:
