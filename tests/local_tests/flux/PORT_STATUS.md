@@ -33,7 +33,7 @@ Strict-load evidence: PASS — component loader test runs strict load of all com
 | Item | Status |
 |---|---|
 | SSIM test | written (fastvideo/tests/ssim/test_flux_t2i_similarity.py) |
-| Reference images committed | not yet — pending SSIM seeding run |
+| Reference images committed | TORCH_SDPA committed (A40, 2026-05-11); FLASH_ATTN pending |
 
 ## DiT Parity Notes
 
