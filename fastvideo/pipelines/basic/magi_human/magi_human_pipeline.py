@@ -1,0 +1,417 @@
+# SPDX-License-Identifier: Apache-2.0
+"""MagiHuman base text-to-AV pipeline.
+
+Top-level composition for the daVinci-MagiHuman base model. Wires:
+
+    InputValidationStage -> TextEncodingStage (T5-Gemma)
+        -> MagiHumanLatentPreparationStage
+        -> MagiHumanDenoisingStage
+        -> DecodingStage (Wan 2.2 TI2V-5B VAE decode for video)
+        -> MagiHumanAudioDecodingStage (Stable Audio Open 1.0 VAE decode)
+
+The base checkpoint is a joint audio-visual generator; both the video
+and audio paths run in the denoising loop and both are decoded.
+
+`load_modules` is overridden so the four cross-variant shared components
+(text_encoder, tokenizer, audio_vae, video vae) lazy-load from their
+canonical upstream HF repos at first build time instead of being
+bundled inside every converted MagiHuman variant. This keeps each
+variant's converted repo at ~5-30 GB (transformer + scheduler +
+model_index.json) instead of ~30-55 GB, and lets all variants share
+the same ~25 GB of cached upstream weights.
+"""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+from transformers import AutoTokenizer
+
+from fastvideo.configs.models.encoders.t5gemma import T5GemmaEncoderConfig
+from fastvideo.configs.models.vaes import OobleckVAEConfig
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.models.encoders.t5gemma import T5GemmaEncoderModel
+from fastvideo.models.vaes.sa_audio import SAAudioVAEModel
+from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
+    FlowUniPCMultistepScheduler, )
+from fastvideo.pipelines.basic.magi_human.stages import (
+    MagiHumanAudioDecodingStage,
+    MagiHumanDenoisingStage,
+    MagiHumanLatentPreparationStage,
+    MagiHumanReferenceImageStage,
+    MagiHumanSRDenoisingStage,
+    MagiHumanSRLatentPreparationStage,
+)
+from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.pipelines.stages import (
+    DecodingStage,
+    InputValidationStage,
+    TextEncodingStage,
+)
+from fastvideo.utils import maybe_download_model
+
+logger = init_logger(__name__)
+
+_T5GEMMA_HF_ID = "google/t5gemma-9b-9b-ul2"
+_SA_AUDIO_HF_ID = "stabilityai/stable-audio-open-1.0"
+_WAN_VAE_HF_ID = "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+
+
+def _ensure_hf_token_env() -> str | None:
+    """Surface any of the three common HF token env vars as `HF_TOKEN`.
+
+    FastVideo workers spawn child processes that inherit env; both
+    `huggingface_hub` and `transformers.AutoTokenizer.from_pretrained`
+    look at `HF_TOKEN` / `HUGGINGFACE_HUB_TOKEN` by default but not
+    `HF_API_KEY`. If only the latter is set, gated downloads fail with
+    401. Aliasing at pipeline-load time is the minimum-disruption fix.
+    """
+    for src in ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY"):
+        value = os.environ.get(src)
+        if value:
+            os.environ.setdefault("HF_TOKEN", value)
+            os.environ.setdefault("HUGGINGFACE_HUB_TOKEN", value)
+            return value
+    return None
+
+
+class MagiHumanPipeline(ComposedPipelineBase):
+    """Base MagiHuman text-to-AV pipeline (no LoRA, no distill, no SR)."""
+
+    _required_config_modules = [
+        "text_encoder",
+        "tokenizer",
+        "vae",
+        "transformer",
+        "scheduler",
+        "audio_vae",
+    ]
+
+    def load_modules(
+        self,
+        fastvideo_args: FastVideoArgs,
+        loaded_modules: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Load the variant-specific transformer + scheduler from the
+        converted MagiHuman repo and lazy-load the four cross-variant
+        shared components from their canonical upstream HF repos:
+
+          * text_encoder, tokenizer -> ``google/t5gemma-9b-9b-ul2``
+            (gated, requires HF token with accepted terms of use)
+          * audio_vae -> ``stabilityai/stable-audio-open-1.0`` (gated)
+          * vae -> ``Wan-AI/Wan2.2-TI2V-5B-Diffusers``
+
+        Backwards-compatible with bundled converted repos: if any of
+        these subfolders is present locally and listed in
+        ``model_index.json``, the standard component loader picks it up
+        via super(). Otherwise the loader is told to skip the entry and
+        we lazy-load it here.
+        """
+        # T5-Gemma is gated: expose `HF_API_KEY` as `HF_TOKEN` if needed.
+        _ensure_hf_token_env()
+
+        # Resolve to a local cache path so we can inspect
+        # model_index.json before invoking super(). `maybe_download_model`
+        # is idempotent for local paths; super() repeats the call cheaply
+        # via `_load_config`.
+        local_path = maybe_download_model(self.model_path)
+
+        # Identify which cross-variant shared keys are bundled in the
+        # converted repo (declared in model_index.json with a non-null
+        # spec) versus absent (the umbrella scheme). Bundled keys stay
+        # in `required_config_modules` and are loaded normally by super()
+        # from `<model_path>/<key>/`. Absent keys are temporarily
+        # dropped so super() does not fail the "every required entry
+        # must appear in model_index.json" check, then lazy-loaded
+        # below.
+        model_index: dict[str, Any] = {}
+        try:
+            with open(Path(local_path) / "model_index.json") as f:
+                model_index = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+        def _is_bundled(key: str) -> bool:
+            spec = model_index.get(key)
+            return (isinstance(spec, list | tuple) and len(spec) >= 1 and spec[0] is not None)
+
+        deferred = []
+        for key in ("text_encoder", "tokenizer", "audio_vae", "vae"):
+            if key in self.required_config_modules and not _is_bundled(key):
+                self.required_config_modules.remove(key)
+                deferred.append(key)
+
+        try:
+            modules = super().load_modules(fastvideo_args, loaded_modules)
+        finally:
+            for key in deferred:
+                if key not in self.required_config_modules:
+                    self.required_config_modules.append(key)
+
+        # For each lazy-load key, prefer whatever super() already loaded
+        # (a bundled subfolder, or a caller-provided override merged in
+        # via `loaded_modules`). Fall back to the caller-provided
+        # `loaded_modules` entry for keys absent from model_index.json
+        # (super() never iterates those). Otherwise lazy-load from the
+        # canonical upstream HF repo.
+        def _resolve(key: str) -> bool:
+            """Return True if `modules[key]` is already populated."""
+            if modules.get(key) is not None:
+                return True
+            if loaded_modules and key in loaded_modules:
+                modules[key] = loaded_modules[key]
+                return True
+            return False
+
+        if not _resolve("text_encoder"):
+            logger.info("Building T5-Gemma text encoder (lazy-load from %s)", _T5GEMMA_HF_ID)
+            enc_config = T5GemmaEncoderConfig()
+            enc_config.arch_config.t5gemma_model_path = _T5GEMMA_HF_ID
+            modules["text_encoder"] = T5GemmaEncoderModel(enc_config)
+
+        if not _resolve("tokenizer"):
+            logger.info("Loading T5-Gemma tokenizer from %s", _T5GEMMA_HF_ID)
+            modules["tokenizer"] = AutoTokenizer.from_pretrained(_T5GEMMA_HF_ID)
+
+        if not _resolve("audio_vae"):
+            logger.info(
+                "Building Stable Audio Open 1.0 VAE (lazy-load from %s) — "
+                "requires HF terms accepted for gated repo",
+                _SA_AUDIO_HF_ID,
+            )
+            audio_config = OobleckVAEConfig()
+            audio_config.pretrained_path = _SA_AUDIO_HF_ID
+            modules["audio_vae"] = SAAudioVAEModel(audio_config)
+
+        if not _resolve("vae"):
+            modules["vae"] = self._load_video_vae(fastvideo_args)
+
+        return modules
+
+    def _load_video_vae(self, fastvideo_args: FastVideoArgs) -> Any:
+        """Resolve the video VAE: prefer a bundled ``vae/`` subfolder in
+        the converted repo (legacy), fall back to lazy-downloading the
+        Wan 2.2 TI2V-5B VAE shards from upstream.
+
+        Either way the load goes through FastVideo's standard
+        ``VAELoader`` so the result is the same FV ``AutoencoderKLWan``
+        nn.Module that the bundled path produces.
+        """
+        from fastvideo.models.loader.component_loader import VAELoader
+
+        bundled = Path(self.model_path) / "vae"
+        if bundled.is_dir() and (bundled / "config.json").is_file():
+            logger.info("Loading bundled video VAE from %s", bundled)
+            return VAELoader().load(str(bundled), fastvideo_args)
+
+        from huggingface_hub import snapshot_download
+
+        logger.info(
+            "Bundled vae/ not found at %s; lazy-loading Wan 2.2 TI2V-5B VAE from %s",
+            self.model_path,
+            _WAN_VAE_HF_ID,
+        )
+        snapshot = snapshot_download(
+            repo_id=_WAN_VAE_HF_ID,
+            allow_patterns=["vae/*"],
+        )
+        vae_dir = os.path.join(snapshot, "vae")
+        if not os.path.isdir(vae_dir):
+            raise RuntimeError(
+                f"snapshot_download returned {snapshot} but no vae/ "
+                f"subfolder was found inside it. Check that {_WAN_VAE_HF_ID} "
+                "still exposes a Diffusers-format vae/ folder.", )
+        return VAELoader().load(vae_dir, fastvideo_args)
+
+    def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
+        # MagiHuman applies `flow_shift` during timestep setup; keep the
+        # scheduler constructor at its default no-op shift.
+        self.modules["scheduler"] = FlowUniPCMultistepScheduler()
+
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+        self._add_input_and_conditioning_stages(fastvideo_args)
+        self._add_base_latent_and_denoising_stages(fastvideo_args)
+        self._add_decode_stages()
+
+    def _add_input_and_conditioning_stages(self, fastvideo_args: FastVideoArgs) -> None:
+        self.add_stage(
+            stage_name="input_validation_stage",
+            stage=InputValidationStage(),
+        )
+
+        self.add_stage(
+            stage_name="prompt_encoding_stage",
+            stage=TextEncodingStage(
+                text_encoders=[self.get_module("text_encoder")],
+                tokenizers=[self.get_module("tokenizer")],
+            ),
+        )
+
+        self._add_reference_image_stage(fastvideo_args)
+
+    def _add_base_latent_and_denoising_stages(self, fastvideo_args: FastVideoArgs) -> None:
+        pc = fastvideo_args.pipeline_config
+        dit_arch = pc.dit_config.arch_config
+
+        # Data-proxy + eval knobs come from the PipelineConfig (`pc`).
+        # Only DiT-architecture fields live on `dit_arch` now.
+        self.add_stage(
+            stage_name="latent_preparation_stage",
+            stage=MagiHumanLatentPreparationStage(
+                vae_stride=tuple(pc.vae_stride),
+                z_dim=pc.z_dim,
+                patch_size=tuple(dit_arch.patch_size),
+                fps=pc.fps,
+                t5_gemma_target_length=pc.t5_gemma_target_length,
+                coords_style=pc.coords_style,
+                text_offset=pc.text_offset,
+                audio_in_channels=dit_arch.audio_in_channels,
+            ),
+        )
+
+        self.add_stage(
+            stage_name="denoising_stage",
+            stage=MagiHumanDenoisingStage(
+                transformer=self.get_module("transformer"),
+                scheduler=self.get_module("scheduler"),
+                patch_size=tuple(dit_arch.patch_size),
+                video_in_channels=dit_arch.video_in_channels,
+                audio_in_channels=dit_arch.audio_in_channels,
+                video_txt_guidance_scale=pc.video_txt_guidance_scale,
+                audio_txt_guidance_scale=pc.audio_txt_guidance_scale,
+                cfg_number=pc.cfg_number,
+                coords_style=pc.coords_style,
+                video_guidance_high_t_threshold=pc.video_guidance_high_t_threshold,
+                video_guidance_low_t_value=pc.video_guidance_low_t_value,
+            ),
+        )
+
+    def _add_decode_stages(self) -> None:
+        self.add_stage(
+            stage_name="decoding_stage",
+            stage=DecodingStage(vae=self.get_module("vae"), pipeline=self),
+        )
+
+        self.add_stage(
+            stage_name="audio_decoding_stage",
+            stage=MagiHumanAudioDecodingStage(audio_vae=self.get_module("audio_vae"), ),
+        )
+
+    def _add_reference_image_stage(self, fastvideo_args: FastVideoArgs) -> None:
+        return
+
+
+class MagiHumanI2VPipeline(MagiHumanPipeline):
+    """MagiHuman text+image-to-AV pipeline using the T2V DiT weights."""
+
+    def _add_reference_image_stage(self, fastvideo_args: FastVideoArgs) -> None:
+        pc = fastvideo_args.pipeline_config
+        self.add_stage(
+            stage_name="reference_image_stage",
+            stage=MagiHumanReferenceImageStage(
+                vae=self.get_module("vae"),
+                vae_scale_factor=pc.vae_stride[1],
+            ),
+        )
+
+
+class MagiHumanSRPipeline(MagiHumanPipeline):
+    """Two-stage MagiHuman base + SR-540p text-to-AV pipeline."""
+
+    _required_config_modules = [
+        "text_encoder",
+        "tokenizer",
+        "vae",
+        "transformer",
+        "sr_transformer",
+        "scheduler",
+        "audio_vae",
+    ]
+
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+        self._add_input_and_conditioning_stages(fastvideo_args)
+        self._add_base_latent_and_denoising_stages(fastvideo_args)
+        self._add_sr_latent_and_denoising_stages(fastvideo_args)
+        self._add_decode_stages()
+
+    def _add_sr_latent_and_denoising_stages(self, fastvideo_args: FastVideoArgs) -> None:
+        pc = fastvideo_args.pipeline_config
+        dit_arch = pc.dit_config.arch_config
+        sr_transformer = self.get_module("sr_transformer")
+        sr_local_attn_layers = tuple(getattr(pc, "sr_local_attn_layers", ()))
+        if sr_local_attn_layers and hasattr(sr_transformer, "configure_local_attention"):
+            sr_transformer.configure_local_attention(
+                sr_local_attn_layers,
+                frame_receptive_field=pc.frame_receptive_field,
+            )
+
+        self.add_stage(
+            stage_name="sr_latent_preparation_stage",
+            stage=MagiHumanSRLatentPreparationStage(
+                vae=self.get_module("vae"),
+                vae_stride=tuple(pc.vae_stride),
+                patch_size=tuple(dit_arch.patch_size),
+                noise_value=pc.noise_value,
+                sr_audio_noise_scale=pc.sr_audio_noise_scale,
+                sr_height=pc.sr_height,
+                sr_width=pc.sr_width,
+                vae_scale_factor=pc.vae_stride[1],
+            ),
+        )
+        self.add_stage(
+            stage_name="sr_denoising_stage",
+            stage=MagiHumanSRDenoisingStage(
+                transformer=sr_transformer,
+                scheduler=self.get_module("scheduler"),
+                patch_size=tuple(dit_arch.patch_size),
+                video_in_channels=dit_arch.video_in_channels,
+                audio_in_channels=dit_arch.audio_in_channels,
+                sr_num_inference_steps=pc.sr_num_inference_steps,
+                sr_video_txt_guidance_scale=pc.sr_video_txt_guidance_scale,
+                use_cfg_trick=pc.use_cfg_trick,
+                cfg_trick_start_frame=pc.cfg_trick_start_frame,
+                cfg_trick_value=pc.cfg_trick_value,
+                cfg_number=pc.cfg_number,
+                coords_style="v1",
+            ),
+        )
+
+
+class MagiHumanSRI2VPipeline(MagiHumanSRPipeline):
+    """Two-stage MagiHuman base + SR-540p text+image-to-AV pipeline."""
+
+    def _add_reference_image_stage(self, fastvideo_args: FastVideoArgs) -> None:
+        pc = fastvideo_args.pipeline_config
+        self.add_stage(
+            stage_name="reference_image_stage",
+            stage=MagiHumanReferenceImageStage(
+                vae=self.get_module("vae"),
+                vae_scale_factor=pc.vae_stride[1],
+            ),
+        )
+
+
+class MagiHumanSR1080pPipeline(MagiHumanSRPipeline):
+    """Two-stage MagiHuman base + SR-1080p text-to-AV pipeline.
+
+    The stage chain is identical to SR-540p. The paired pipeline config enables
+    block-sparse local-window attention on 32 SR-DiT layers and requests the
+    1080p latent target.
+    """
+
+
+class MagiHumanSR1080pI2VPipeline(MagiHumanSRI2VPipeline):
+    """Two-stage MagiHuman base + SR-1080p text+image-to-AV pipeline."""
+
+
+EntryClass = [
+    MagiHumanPipeline,
+    MagiHumanI2VPipeline,
+    MagiHumanSRPipeline,
+    MagiHumanSRI2VPipeline,
+    MagiHumanSR1080pPipeline,
+    MagiHumanSR1080pI2VPipeline,
+]
