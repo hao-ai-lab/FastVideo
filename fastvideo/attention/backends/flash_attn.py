@@ -50,9 +50,7 @@ def _is_nvfp4_fa4_enabled() -> bool:
     return os.environ.get("FASTVIDEO_NVFP4_FA4", "0") == "1"
 
 
-def _nvfp4_quantize_for_fa4(
-    tensor_4d: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
+def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor, ) -> tuple[torch.Tensor, torch.Tensor]:
     """Quantize a (batch, seqlen, nheads, headdim) BF16 tensor to FP4.
 
     Returns:

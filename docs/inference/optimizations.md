@@ -86,15 +86,10 @@ See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040) and [flash-attention-
 Install the FP4 flash attention kernel and its dependencies:
 
 ```bash
-# 1. Install flash-attention-fp4 (CuTe DSL FP4 kernel)
-pip install git+ssh://git@github.com/hao-ai-lab/flash-attention-fp4.git@fp4
-
-# 2. Install NVIDIA CuTe DSL (required by the FP4 kernel)
-pip install nvidia-cutlass-dsl
-
-# 3. Install flashinfer (provides nvfp4_quantize for BF16→FP4 conversion)
-pip install flashinfer
+pip install "git+ssh://git@github.com/hao-ai-lab/flash-attention-fp4.git@fp4#subdirectory=flash_attn/cute"
 ```
+
+This installs the FP4 kernel and all dependencies (nvidia-cutlass-dsl, flashinfer-python, apache-tvm-ffi).
 
 #### Usage
 
