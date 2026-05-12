@@ -19,6 +19,10 @@ side-by-side per `(model_id, backend, prompt)`:
   metadata + `slice_spec` + `format_version`) for tests that call
   `run_text_to_latent_similarity_test` in `latent_similarity_utils.py`.
   Compared via cosine distance on the slice and the full tensor.
+- **`.png`** — pixel ground-truth for **T2I** tests (`num_frames=1`) that
+  reuse `run_text_to_video_similarity_test` but produce a single frame. The
+  helper writes a `.png` instead of a `.mp4` when the output has no time
+  dimension. Compared via SSIM the same way.
 
 This skill:
 
@@ -110,6 +114,23 @@ Record `ARTEFACT_TYPE ∈ {pixel, latent}` for use in step 4. Steps 2, 3, 5,
 and 6 are artefact-type-agnostic — `_iter_reference_files`,
 `copy_generated_to_reference`, and `upload_reference_videos` already walk
 both `.mp4` and `.pt` (see `reference_videos_cli.py`).
+
+**T2I gotcha:** when the helper produces a `.png` (T2I test with
+`num_frames=1`), `reference_videos_cli.py copy-local` currently walks
+`.mp4`/`.pt` only and reports `0 copied files` without erroring. After step 5,
+verify the destination contains the seeded file; if it's empty, copy the PNG
+manually:
+
+```bash
+cp ./generated_videos_modal/default/generated_videos/L40S_reference_videos/<model_id>/<backend>/*.png \
+   fastvideo/tests/ssim/reference_videos/default/L40S_reference_videos/<model_id>/<backend>/
+```
+
+Then `git add -f` the PNG: the repo `.gitignore` has a broad `*.png` rule, and
+the `reference_videos/**` negation only applies to extensions explicitly
+re-allowed *after* the catch-all (see `.gitignore` near the
+`reference_videos/**` block — add `!fastvideo/tests/ssim/reference_videos/**/*.png`
+there if the negation is missing).
 
 If either check fails, stop and tell the user what's wrong.
 

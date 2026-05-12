@@ -69,10 +69,28 @@ Use this mode first.
    Runtime pipeline resolution is exact: `model_index.json["_class_name"]` must
    match a registered `EntryClass.__name__`, or a wrapper/alias class in
    `EntryClass`. Registry detectors do not select the executable pipeline class.
-4. Add new public generation kwargs to `fastvideo/api/sampling_param.py` before
-   examples or presets use them. `SamplingParam.update()` ignores unknown keys
-   except for logging, and preset defaults apply only to declared fields. Add CLI
-   args when the option should be available from command-line entrypoints.
+4. Add new public generation kwargs across the **full schema-parity surface**
+   before examples or presets use them. A missed surface fails CI in a different
+   way each time, so touching all four in one commit prevents three follow-ups:
+   - `fastvideo/api/sampling_param.py` — `SamplingParam.update()` ignores unknown
+     keys except for logging, and preset defaults apply only to declared fields.
+     Add CLI args here when the option should be available from command-line
+     entrypoints (note: the inference CLI is now config-only — most new fields
+     are reached via dotted overrides, not new flags).
+   - `fastvideo/api/schema.py` — add the field to `SamplingConfig` with the same
+     default. `test_inventory_targets_exist_in_typed_schema` walks
+     `request.sampling.<field>` and will assert-fail if the dataclass is missing
+     the attribute.
+   - `docs/design/inference_schema_parity_inventory.yaml` — register the field
+     under `surfaces.sampling_param_base.moved` with target
+     `request.sampling.<field>`. If the field has a live CLI dest (rare under
+     the config-only CLI), also add it to `cli.generate.expected_dests`
+     alphabetically, otherwise `test_cli_dest_inventory_matches_live_parsers`
+     fails.
+   - `fastvideo/tests/api/test_parser.py` —
+     `test_load_run_config_supports_yaml_roundtrip` compares an exact hardcoded
+     dict snapshot of every `SamplingConfig` field. Add the new field with its
+     default value in declaration order, or the dict-equality assertion fails.
 5. Put loader-time changes in `load_modules()` or earlier, not
    `initialize_pipeline()`. `ComposedPipelineBase.__init__` loads modules before
    `post_init()` calls `initialize_pipeline()`, so process-global flags, loader
