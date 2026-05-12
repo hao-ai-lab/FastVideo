@@ -37,8 +37,8 @@ def _scatter_to_padded(
     """
     src_pos = src_start
     dst_pos = dst_offset
-    for b in range(block_sizes.numel()):
-        actual = int(block_sizes[b].item())
+    sizes = block_sizes.cpu().tolist()
+    for actual in sizes:
         actual = min(actual, src_end - src_pos)
         if actual > 0:
             dst[:, :, dst_pos:dst_pos + actual, :] = (
@@ -64,8 +64,8 @@ def _gather_from_padded(
     """
     src_pos = src_offset
     dst_pos = dst_start
-    for b in range(block_sizes.numel()):
-        actual = int(block_sizes[b].item())
+    sizes = block_sizes.cpu().tolist()
+    for actual in sizes:
         actual = min(actual, dst_end - dst_pos)
         if actual > 0:
             dst[dst_pos:dst_pos + actual] = (
@@ -132,7 +132,7 @@ def block_sparse_attn_varlen(
             q_vbs_resolved.append(q_variable_block_sizes_list[i])
         else:
             q_vbs_resolved.append(
-                torch.full((n_q_blocks,), block_size, dtype=torch.int32, device=device)
+                torch.full((n_q_blocks,), block_size, dtype=torch.int32)
             )
 
     total_padded_q = sum(padded_q_lens)
