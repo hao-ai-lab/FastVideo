@@ -64,6 +64,25 @@ Reuse `stages/text_encoding.py` if your model takes text → embeddings via a st
 
 When forking, keep the file name model-prefixed (`longcat_*`, `gamecraft_*`) so the registry stays grep-able.
 
+## Per-Package `AGENTS.md` and `JOURNAL.md` (optional)
+
+Pipelines with non-trivial parity invariants, lazy-loaded shared components,
+or cross-component coordination MAY ship a per-package `AGENTS.md` and
+`JOURNAL.md` next to the pipeline files. The canonical example is
+`basic/magi_human/AGENTS.md` (umbrella HF repo, four lazy-loaded shared
+components, channel-major packing + dtype-boundary invariants).
+
+When present:
+
+- `basic/<model>/AGENTS.md` — manifest table of every file in scope, parity
+  invariants, "if you change X re-run Y" cross-refs, run book, open
+  questions, provenance (PR numbers + source SHAs).
+- `basic/<model>/JOURNAL.md` — port-state log for the original port; useful
+  for future maintainers to understand why specific decisions were made.
+
+These files are **not** required for simple ports that share stages and have
+no special parity invariants.
+
 ## Anti-Patterns
 
 - Putting a full pipeline in a single file under `basic/<model>/` instead of composing stages.
