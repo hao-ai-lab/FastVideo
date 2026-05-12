@@ -47,10 +47,6 @@ const nextConfig: NextConfig = {
         source: '/curated-presets/:path*',
         destination: `${backendUrl}/curated-presets/:path*`,
       },
-      {
-        source: '/server-assets/:path*',
-        destination: `${backendUrl}/server-assets/:path*`,
-      },
     ];
   },
   webpack: (config) => {
