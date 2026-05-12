@@ -259,11 +259,11 @@ class PackedExpertLinear(nn.Module):
         self.num_experts = num_experts
         self.use_bias = bias
         self.weight = nn.Parameter(
-            torch.empty(out_features * num_experts, in_features, dtype=dtype)
+            torch.zeros(out_features * num_experts, in_features, dtype=dtype)
         )
         if bias:
             self.bias = nn.Parameter(
-                torch.empty(out_features * num_experts, dtype=dtype)
+                torch.zeros(out_features * num_experts, dtype=dtype)
             )
         else:
             self.register_parameter("bias", None)
