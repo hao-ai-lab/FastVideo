@@ -356,7 +356,7 @@ Playwright (8/8 PASS in 5.1s):
 **Implications:**
 
 - [STACK.md](../../../STACK.md) (top-level, 10-PR split tracker) is **deprecated**. Kept in tree as a historical artifact with the merged half (PRs 1-4 of the 10) accurate. Safe to delete in a follow-up.
-- [authors.md](authors.md), [`CO-AUTHORS.md`](../../../CO-AUTHORS.md) — co-author roster is unchanged; trailers still apply per-commit on every commit in the consolidated PR.
+- [authors.md](authors.md), [co-authors.md](co-authors.md) — co-author roster is unchanged; trailers still apply per-commit on every commit in the consolidated PR.
 - [runbook.md](runbook.md) — "After a PR merges (re-slice protocol)" section replaced by a simpler "After PR #1288 merges" section.
 - Local split bookmarks (`will/api_7.10`, `will/api_8`, `will/ltx2_sr_runtime`, `will/ltx2_nvfp4`, `will/ltx2_post_fixes`, `will/agents_cleanup`) are no longer maintained; safe to delete locally.
 - `origin/will/api_7.10` — pushed during the #1287 cycle; can be deleted on origin once #1287 close-cleanup completes.

@@ -59,7 +59,7 @@ When the mega-PR squash-merges into `main`:
    will/api_8 will/ltx2_sr_runtime will/ltx2_nvfp4 will/ltx2_post_fixes
    will/agents_cleanup` (local-only, no remote).
 4. Optionally remove top-level `STACK.md` (now a historical artifact).
-   Keep `CO-AUTHORS.md` — still the canonical roster reference.
+   Keep [co-authors.md](co-authors.md) — still the canonical roster reference.
 5. Decide whether to keep `will/ltx2_sr_port-pre-1286-rebase` (safety
    backup of the pre-rebase chain) — recommend deleting once #1288 is
    merged and verified on main.

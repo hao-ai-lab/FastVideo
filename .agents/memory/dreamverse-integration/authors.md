@@ -14,11 +14,10 @@ standard
 [`Co-authored-by`](https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/creating-a-commit-with-multiple-authors)
 trailer convention.
 
-Scope-wise this is the dreamverse-integration-flavored mirror of the
-top-level [`CO-AUTHORS.md`](../../../CO-AUTHORS.md), which is scoped to the
-broader `will/ltx2_sr_port` 10-PR stack. The roster is identical; this file
-exists so the dreamverse-integration memory dir is self-contained and
-discoverable without traversing to the repo root.
+Scope-wise this is the dreamverse-integration-flavored mirror of
+[co-authors.md](co-authors.md), which is scoped to the broader
+`will/ltx2_sr_port` 10-PR stack. The roster is identical; both files now live
+in this memory dir so the provenance docs stay self-contained and discoverable.
 
 ## Co-author roster
 
@@ -103,8 +102,8 @@ and force-push the published branches (`will/api_7.9`, `will/ltx2_sr_port`).
 
 ## How to add a new co-author later
 
-1. Add the user to the roster table above (and the top-level
-   [`CO-AUTHORS.md`](../../../CO-AUTHORS.md) — keep them in sync).
+1. Add the user to the roster table above (and [co-authors.md](co-authors.md)
+   — keep them in sync).
 2. Append their `Co-authored-by` line to the trailer block above.
 3. Re-run the bulk rebase command on `will/ltx2_sr_port` — git's trailer
    dedupe handles the existing 4; the new one gets appended.
@@ -142,8 +141,8 @@ for archeological reference. No further action needed.
 
 ## See also
 
-- [`../../../CO-AUTHORS.md`](../../../CO-AUTHORS.md) — top-level stack-scoped
-  co-authors file (same roster, broader scope)
+- [co-authors.md](co-authors.md) — stack-scoped co-authors file (same roster,
+  broader scope)
 - [`../../../STACK.md`](../../../STACK.md) — 10-PR split layout for
   `will/ltx2_sr_port` (re-slice commands live here)
 - [`pr-roadmap.md`](pr-roadmap.md) — per-PR status within the
