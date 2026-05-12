@@ -51,16 +51,24 @@ def scheduler_config() -> dict:
         return json.load(f)
 
 
+# Diffusers-style scheduler-config keys we do NOT want to forward — they are
+# loader/state metadata, not constructor kwargs. Anything else in
+# scheduler_config.json (including future keys like `time_shift_type`,
+# `invert_sigmas`, etc.) must be forwarded so parity actually exercises the
+# config-on-disk and not a hand-curated subset.
+_SCHEDULER_CONFIG_LOADER_KEYS = frozenset({"_class_name", "_diffusers_version", "_name_or_path"})
+
+
+def _scheduler_kwargs_from_config(scheduler_config: dict) -> dict:
+    return {k: v for k, v in scheduler_config.items() if k not in _SCHEDULER_CONFIG_LOADER_KEYS}
+
+
 @pytest.fixture(scope="module")
 def scheduler_pair(scheduler_config: dict):
     if ReferenceScheduler is None:
         pytest.skip(f"Cannot import Z-Image reference scheduler: {_IMPORT_ERROR}")
 
-    kwargs = {
-        "num_train_timesteps": scheduler_config["num_train_timesteps"],
-        "shift": scheduler_config["shift"],
-        "use_dynamic_shifting": scheduler_config["use_dynamic_shifting"],
-    }
+    kwargs = _scheduler_kwargs_from_config(scheduler_config)
     ref = ReferenceScheduler(**kwargs)
     fv = FastVideoScheduler(**kwargs, use_reference_discrete_timesteps=True)
     return ref, fv
@@ -111,11 +119,8 @@ def test_zimage_scheduler_parity_dynamic_shifting_with_mu(scheduler_config: dict
     if ReferenceScheduler is None:
         pytest.skip(f"Cannot import Z-Image reference scheduler: {_IMPORT_ERROR}")
 
-    kwargs = {
-        "num_train_timesteps": scheduler_config["num_train_timesteps"],
-        "shift": scheduler_config["shift"],
-        "use_dynamic_shifting": True,
-    }
+    kwargs = _scheduler_kwargs_from_config(scheduler_config)
+    kwargs["use_dynamic_shifting"] = True
     ref = ReferenceScheduler(**kwargs)
     fv = FastVideoScheduler(**kwargs, use_reference_discrete_timesteps=True)
 
