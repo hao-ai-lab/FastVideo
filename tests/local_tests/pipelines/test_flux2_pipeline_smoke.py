@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import torch
@@ -101,7 +102,9 @@ def test_flux2_klein_pipeline_load_generate_smoke() -> None:
     finally:
         generator.shutdown()
 
-    samples = result["samples"]
+    assert isinstance(result, dict)
+    result_dict = cast(dict[str, Any], result)
+    samples = result_dict["samples"]
     assert torch.is_tensor(samples)
     assert samples.ndim in (3, 5)
     assert torch.isfinite(samples).all()

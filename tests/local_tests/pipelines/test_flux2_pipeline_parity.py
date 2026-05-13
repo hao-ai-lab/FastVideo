@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import torch
@@ -81,6 +82,7 @@ def _run_diffusers_flux_pipeline(model_dir: Path) -> torch.Tensor:
                 output_type="latent",
                 return_dict=True,
             )
+        output = cast(Any, output)
         latents = output.images
         if not torch.is_tensor(latents):
             latents = torch.as_tensor(latents)
@@ -117,7 +119,9 @@ def _run_fastvideo_flux2_pipeline(model_dir: Path) -> torch.Tensor:
             guidance_scale=GUIDANCE_SCALE,
             seed=SEED,
         )
-        latents = result["samples"]
+        assert isinstance(result, dict)
+        result_dict = cast(dict[str, Any], result)
+        latents = result_dict["samples"]
         assert torch.is_tensor(latents), "FastVideo did not return latent samples"
         return latents.detach().float().cpu()
     finally:
