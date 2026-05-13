@@ -66,22 +66,27 @@ def _iter_safetensors(path: str):
 
 
 def _iter_pretrained_safetensors(model_dir: Path):
-    single = model_dir / "model.safetensors"
-    if single.exists():
-        yield from _iter_safetensors(str(single))
-        return
-
-    index = model_dir / "model.safetensors.index.json"
-    if index.exists():
-        idx = _load_json(index)
-        shard_names = sorted(set(idx["weight_map"].values()))
-        for shard in shard_names:
-            yield from _iter_safetensors(str(model_dir / shard))
-        return
+    candidates = [
+        ("model.safetensors", "model.safetensors.index.json"),
+        ("diffusion_pytorch_model.safetensors",
+         "diffusion_pytorch_model.safetensors.index.json"),
+    ]
+    for single_name, index_name in candidates:
+        single = model_dir / single_name
+        if single.exists():
+            yield from _iter_safetensors(str(single))
+            return
+        index = model_dir / index_name
+        if index.exists():
+            idx = _load_json(index)
+            shard_names = sorted(set(idx["weight_map"].values()))
+            for shard in shard_names:
+                yield from _iter_safetensors(str(model_dir / shard))
+            return
 
     raise FileNotFoundError(
         f"Missing safetensors checkpoint in {model_dir} "
-        "(expected model.safetensors or model.safetensors.index.json)"
+        "(expected model.safetensors or diffusion_pytorch_model.safetensors)"
     )
 
 
@@ -427,7 +432,13 @@ def test_flux2_qwen3_text_encoder_parity():
     fv_cfg.update_model_arch(cfg_raw)
     fv_cls, _ = ModelRegistry.resolve_model_cls("Qwen3ForCausalLM")
     fv = fv_cls(fv_cfg).eval()
-    fv.load_weights(_iter_pretrained_safetensors(text_encoder_dir))
+    all_params = {n for n, _ in fv.named_parameters()}
+    loaded = fv.load_weights(_iter_pretrained_safetensors(text_encoder_dir))
+    missing = all_params - loaded
+    assert not missing, (
+        f"FastVideo Qwen3 has {len(missing)} unloaded params "
+        f"(of {len(all_params)} total): {sorted(list(missing))[:20]}"
+    )
     fv = fv.to(device=device, dtype=dtype)
 
     with torch.no_grad():
