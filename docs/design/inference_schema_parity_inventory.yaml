@@ -35,6 +35,7 @@ surfaces:
       prompt_txt: request.inputs.prompt_path
       override_text_encoder_safetensors: generator.pipeline.components.text_encoder_weights
       override_text_encoder_quant: generator.engine.quantization.text_encoder_quant
+      transformer_quant: generator.engine.quantization.transformer_quant
       override_transformer_cls_name: generator.pipeline.components.override_transformer_cls_name
       init_weights_from_safetensors: generator.pipeline.components.transformer_weights
       init_weights_from_safetensors_2: generator.pipeline.components.transformer_2_weights
