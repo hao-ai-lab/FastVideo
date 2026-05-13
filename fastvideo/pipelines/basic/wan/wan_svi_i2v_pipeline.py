@@ -100,15 +100,13 @@ class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
 
         if num_clips == 1:
             batch.prompt = prompts[0]
-            if batch.svi_random_ref_frame is None:
-                batch.svi_random_ref_frame = batch.pil_image  # type: ignore[assignment]
-            if not batch.svi_first_frames:
-                assert isinstance(batch.pil_image, PIL.Image.Image)
-                batch.svi_first_frames = [batch.pil_image]
             for stage in self.stages:
                 batch = stage(batch, fastvideo_args)
             return batch
 
+        # Multi-clip needs the reference image up front to construct motion frames
+        # for clip 0. Run InputValidationStage now to resolve image_path -> pil_image.
+        self.input_validation_stage(batch, fastvideo_args)
         assert isinstance(batch.pil_image, PIL.Image.Image)
         random_ref = batch.svi_random_ref_frame or batch.pil_image
         motion_frames: list[PIL.Image.Image] = batch.svi_first_frames or [batch.pil_image]
