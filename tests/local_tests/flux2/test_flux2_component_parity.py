@@ -227,6 +227,7 @@ def test_flux2_transformer_parity():
         pytest.skip(f"Flux2 transformer dir not found: {transformer_dir}")
 
     from fastvideo.configs.models.dits.flux_2 import Flux2Config
+    from fastvideo.forward_context import set_forward_context
     from fastvideo.models.registry import ModelRegistry
 
     if torch.cuda.is_available():
@@ -269,11 +270,12 @@ def test_flux2_transformer_parity():
     t = torch.tensor([0.5], device=device, dtype=dtype)
 
     with torch.no_grad():
-        fv_out = fv(
-            hidden_states=hidden,
-            encoder_hidden_states=enc,
-            timestep=t,
-        ).detach().float().cpu()
+        with set_forward_context(current_timestep=0, attn_metadata=None):
+            fv_out = fv(
+                hidden_states=hidden,
+                encoder_hidden_states=enc,
+                timestep=t,
+            ).detach().float().cpu()
 
     assert fv_out.shape == (B, seq_len, in_channels), (
         f"Expected output shape {(B, seq_len, in_channels)}, got {fv_out.shape}"
