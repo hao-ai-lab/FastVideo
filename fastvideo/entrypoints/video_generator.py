@@ -27,6 +27,7 @@ from fastvideo.api.compat import (
     expand_request_prompt_batch,
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,
+    legacy_generate_call_to_request,
     load_generator_config_from_file,
     normalize_generation_request,
     normalize_generator_config,
@@ -386,13 +387,38 @@ class VideoGenerator:
             self.executor.set_log_queue(log_queue)
 
         try:
-            return self._generate_video_impl(
-                prompt=prompt,
-                sampling_param=sampling_param,
+            extra_overrides: dict[str, Any] = {}
+            for _ek in _BATCH_EXTRA_PASSTHROUGH_KEYS:
+                if _ek in kwargs:
+                    extra_overrides[_ek] = kwargs.pop(_ek)
+
+            request = legacy_generate_call_to_request(
+                prompt,
+                sampling_param,
                 mouse_cond=mouse_cond,
                 keyboard_cond=keyboard_cond,
                 grid_sizes=grid_sizes,
-                **kwargs,
+                legacy_kwargs=kwargs,
+            )
+
+            fastvideo_args = self.fastvideo_args
+            pipeline_overrides = request_to_pipeline_overrides(request)
+            if pipeline_overrides:
+                fastvideo_args = deepcopy(self.fastvideo_args)
+                for key, value in pipeline_overrides.items():
+                    if not hasattr(fastvideo_args.pipeline_config, key):
+                        raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
+                    setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
+
+            resolved_sampling_param = request_to_sampling_param(
+                request,
+                model_path=self.fastvideo_args.model_path,
+            )
+            return self._generate_video_impl(
+                prompt=request.prompt,
+                sampling_param=resolved_sampling_param,
+                fastvideo_args=fastvideo_args,
+                **extra_overrides,
             )
         finally:
             if log_queue:
