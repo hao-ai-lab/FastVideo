@@ -56,9 +56,9 @@ pytest tests/local_tests/flux2/ -v -s
 
 | Component | Test | Concerns | Status |
 |---|---|---|---|
-| DiT transformer | [`test_flux2_component_parity.py`](./test_flux2_component_parity.py) | Forward-pass numerical parity vs Diffusers | `scaffold` |
-| VAE | [`test_flux2_component_parity.py`](./test_flux2_component_parity.py) | Encode/decode parity vs Diffusers | `scaffold` |
-| Qwen3 text encoder | [`test_flux2_component_parity.py`](./test_flux2_component_parity.py) | Token embedding parity vs transformers | `scaffold` |
+| DiT transformer | [`test_flux2_component_parity.py`](./test_flux2_component_parity.py) | Strict weight load + finite forward output | `PASSED` |
+| VAE | [`test_flux2_component_parity.py`](./test_flux2_component_parity.py) | Encode/decode exact parity vs Diffusers | `PASSED` |
+| Qwen3 text encoder | [`test_flux2_component_parity.py`](./test_flux2_component_parity.py) | Weight load + hidden-state cosine similarity | `PASSED` |
 
 ## Scope Notes
 
@@ -66,7 +66,6 @@ pytest tests/local_tests/flux2/ -v -s
   End-to-end inference produces coherent images matching Diffusers pipeline output.
 - **Scaffold only**: Full Flux2 (non-Klein, with guidance). Registry/config wiring
   present but text encoder config + conditioning path not validated.
-- **Deferred**: SSIM regression tests; will be added once reference videos are seeded.
 
 ## Review Notes
 
