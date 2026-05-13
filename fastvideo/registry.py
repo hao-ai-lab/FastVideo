@@ -345,8 +345,9 @@ def _register_configs() -> None:
             ),
         ],
         model_family="flux2",
+        default_preset="flux2_klein_4b",
     )
-    # Flux2 (full, with guidance)
+    # Flux2 (full, with guidance) — scaffold only; not validated end-to-end
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=Flux2PipelineConfig,
@@ -959,9 +960,12 @@ def _register_presets() -> None:
         ALL_PRESETS as TURBODIFFUSION_PRESETS, )
     from fastvideo.pipelines.basic.wan.presets import (
         ALL_PRESETS as WAN_PRESETS, )
+    from fastvideo.pipelines.basic.flux_2.presets import (
+        ALL_PRESETS as FLUX2_PRESETS, )
 
     all_preset_groups = (
         COSMOS_PRESETS,
+        FLUX2_PRESETS,
         GAMECRAFT_PRESETS,
         GEN3C_PRESETS,
         HUNYUAN_PRESETS,
