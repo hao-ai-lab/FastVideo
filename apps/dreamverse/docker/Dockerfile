@@ -69,7 +69,7 @@ RUN mkdir -p /var/lib/dreamverse
 
 EXPOSE 8009
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=2700s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8009/healthz || exit 1
 
 ENTRYPOINT ["/opt/FastVideo/apps/dreamverse/docker/docker_entrypoint.sh"]
