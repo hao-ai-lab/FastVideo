@@ -11,16 +11,13 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.basic.flux_2.flux_2_latent_preparation import (
-    Flux2LatentPreparationStage,
-)
+    Flux2LatentPreparationStage, )
 from fastvideo.pipelines.basic.flux_2.flux_2_timestep_preparation import (
-    Flux2TimestepPreparationStage,
-)
+    Flux2TimestepPreparationStage, )
 from fastvideo.pipelines.stages import (
     ConditioningStage,
     DecodingStage,
     DenoisingStage,
-    ImageVAEEncodingStage,
     InputValidationStage,
     TextEncodingStage,
 )
@@ -58,13 +55,6 @@ class Flux2Pipeline(LoRAPipeline, ComposedPipelineBase):
         )
 
         self.add_stage(
-            stage_name="image_encoding_stage",
-            stage=ImageVAEEncodingStage(
-                vae=self.get_module("vae"),
-            ),
-        )
-
-        self.add_stage(
             stage_name="conditioning_stage",
             stage=ConditioningStage(),
         )
@@ -79,9 +69,7 @@ class Flux2Pipeline(LoRAPipeline, ComposedPipelineBase):
 
         self.add_stage(
             stage_name="timestep_preparation_stage",
-            stage=Flux2TimestepPreparationStage(
-                scheduler=self.get_module("scheduler"),
-            ),
+            stage=Flux2TimestepPreparationStage(scheduler=self.get_module("scheduler"), ),
         )
 
         self.add_stage(
