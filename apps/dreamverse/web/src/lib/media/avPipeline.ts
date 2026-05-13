@@ -576,7 +576,7 @@ export function createAvPipeline({
         completed: false,
         chunks: [],
       };
-      archivedSegments = [...archivedSegments, segment];
+      archivedSegments.push(segment);
     } else {
       segment.segmentIdx = normalized.segmentIdx;
       segment.streamId = normalizedStreamId;
