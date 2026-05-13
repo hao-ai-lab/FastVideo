@@ -237,15 +237,19 @@ def test_flux2_transformer_parity():
     cfg.pop("_class_name", None)
     cfg.pop("_diffusers_version", None)
 
-    ref = RefTransformer.from_pretrained(
-        str(transformer_dir), local_files_only=True,
-        torch_dtype=dtype, device_map=device,
-    ).eval()
+    ref = RefTransformer.from_config(cfg).eval()
+    ref_sd = {}
+    for k, v in _iter_pretrained_safetensors(transformer_dir):
+        ref_sd[k] = v
+    ref.load_state_dict(ref_sd, strict=True)
+    ref = ref.to(device=device, dtype=dtype)
 
     B, seq_len = 1, 64
-    hidden_dim = ref.config.in_channels * 4  # packed channel count
+    in_channels = cfg.get("in_channels", 64)
+    hidden_dim = in_channels * 4
+    joint_dim = cfg.get("joint_attention_dim", 3072)
     hidden = torch.randn(B, seq_len, hidden_dim, device=device, dtype=dtype)
-    enc = torch.randn(B, 16, ref.config.joint_attention_dim, device=device, dtype=dtype)
+    enc = torch.randn(B, 16, joint_dim, device=device, dtype=dtype)
     img_ids = torch.zeros(B, seq_len, 3, device=device, dtype=dtype)
     txt_ids = torch.zeros(B, 16, 3, device=device, dtype=dtype)
     t = torch.tensor([500.0], device=device, dtype=dtype)
@@ -351,7 +355,7 @@ def test_flux2_vae_encode_decode_parity():
         fv_latents = fv.encode(x).mean.detach().float().cpu()
         fv_dec = fv.decode(
             fv_latents.to(device=device, dtype=dtype)
-        ).sample.detach().float().cpu()
+        ).detach().float().cpu()
 
     assert_close(ref_latents, fv_latents, atol=1e-4, rtol=1e-4)
     assert_close(ref_dec, fv_dec, atol=1e-4, rtol=1e-4)
@@ -412,6 +416,7 @@ def test_flux2_qwen3_text_encoder_parity():
         torch.cuda.empty_cache()
 
     from fastvideo.configs.models.encoders.qwen3 import Qwen3TextConfig
+    from fastvideo.forward_context import set_forward_context
     from fastvideo.models.registry import ModelRegistry
 
     cfg_raw = _load_json(text_encoder_dir / "config.json")
@@ -426,11 +431,12 @@ def test_flux2_qwen3_text_encoder_parity():
     fv = fv.to(device=device, dtype=dtype)
 
     with torch.no_grad():
-        fv_out = fv(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            output_hidden_states=True,
-        )
+        with set_forward_context(current_timestep=0, attn_metadata=None):
+            fv_out = fv(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_hidden_states=True,
+            )
         fv_last = fv_out.hidden_states[-1].detach().float().cpu()
 
     assert_close(ref_last, fv_last, atol=1e-3, rtol=1e-3)
