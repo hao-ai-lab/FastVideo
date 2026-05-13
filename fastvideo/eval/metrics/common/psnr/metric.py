@@ -12,20 +12,29 @@ class PSNRMetric(BaseMetric):
     name = "common.psnr"
     requires_reference = True
     higher_is_better = True
-    needs_gpu = False
+    # On CPU the squared-diff is memory-bandwidth-bound at 1080p and
+    # fights the loader for the host bus; trivial on GPU.
+    needs_gpu = True
 
-    def __init__(self, max_val: float = 1.0) -> None:
+    def __init__(self, max_val: float = 1.0, chunk_size: int = 32) -> None:
         super().__init__()
         self.max_val = max_val
+        # Keeps the (gen - ref)**2 intermediate under ~800 MB at 1080p.
+        self._chunk_size = chunk_size
 
     def compute(self, sample: dict) -> MetricResult:
-        gen = sample["video"].float()  # (T, C, H, W)
-        ref = sample["reference"].float()
+        gen = sample["video"].float().to(self.device)  # (T, C, H, W)
+        ref = sample["reference"].float().to(self.device)
         n = min(gen.shape[0], ref.shape[0])
         gen, ref = gen[:n], ref[:n]
 
-        # Per-frame MSE → PSNR.
-        mse = ((gen - ref)**2).mean(dim=(1, 2, 3))  # (T,)
+        chunk = self._chunk_size or n
+        mse_parts = []
+        for i in range(0, n, chunk):
+            g = gen[i:i + chunk]
+            r = ref[i:i + chunk]
+            mse_parts.append(((g - r)**2).mean(dim=(1, 2, 3)))
+        mse = torch.cat(mse_parts)  # (T,)
         psnr = 10.0 * torch.log10(self.max_val**2 / mse.clamp(min=1e-10))
 
         return MetricResult(

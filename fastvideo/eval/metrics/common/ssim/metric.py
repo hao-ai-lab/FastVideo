@@ -51,15 +51,19 @@ class SSIMMetric(BaseMetric):
     name = "common.ssim"
     requires_reference = True
     higher_is_better = True
-    needs_gpu = False
+    # Five depthwise conv2d's per chunk — GPU is ~100× the CPU path at
+    # 1080p, and it frees the host bus for the loader thread.
+    needs_gpu = True
 
-    def __init__(self, window_size: int = 11) -> None:
+    def __init__(self, window_size: int = 11, chunk_size: int = 16) -> None:
         super().__init__()
         self.window_size = window_size
+        # Caps the ~5-7 conv intermediates at ~4 GB on a 1080p clip.
+        self._chunk_size = chunk_size
 
     def compute(self, sample: dict) -> MetricResult:
-        gen = sample["video"].float()  # (T, C, H, W)
-        ref = sample["reference"].float()
+        gen = sample["video"].float().to(self.device)  # (T, C, H, W)
+        ref = sample["reference"].float().to(self.device)
         n = min(gen.shape[0], ref.shape[0])
         gen, ref = gen[:n], ref[:n]
 
