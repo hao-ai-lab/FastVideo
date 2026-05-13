@@ -226,8 +226,6 @@ def test_flux2_transformer_parity():
     if not transformer_dir.exists():
         pytest.skip(f"Flux2 transformer dir not found: {transformer_dir}")
 
-    from diffusers import FluxTransformer2DModel as RefTransformer
-
     from fastvideo.configs.models.dits.flux_2 import Flux2Config
     from fastvideo.models.registry import ModelRegistry
 
@@ -242,37 +240,14 @@ def test_flux2_transformer_parity():
     cfg.pop("_class_name", None)
     cfg.pop("_diffusers_version", None)
 
-    ref = RefTransformer.from_pretrained(
-        str(transformer_dir), local_files_only=True,
-        torch_dtype=dtype, low_cpu_mem_usage=False,
-    ).eval().to(device)
-
-    B, seq_len = 1, 64
-    in_channels = cfg.get("in_channels", 128)
-    joint_dim = cfg.get("joint_attention_dim", 3072)
-    pooled_dim = cfg.get("pooled_projection_dim", joint_dim)
-    hidden = torch.randn(B, seq_len, in_channels, device=device, dtype=dtype)
-    enc = torch.randn(B, 16, joint_dim, device=device, dtype=dtype)
-    pooled = torch.randn(B, pooled_dim, device=device, dtype=dtype)
-    img_ids = torch.zeros(B, seq_len, 3, device=device, dtype=dtype)
-    txt_ids = torch.zeros(B, 16, 3, device=device, dtype=dtype)
-    t = torch.tensor([500.0], device=device, dtype=dtype)
-
-    with torch.no_grad():
-        ref_out = ref(
-            hidden_states=hidden,
-            encoder_hidden_states=enc,
-            pooled_projections=pooled,
-            timestep=t,
-            img_ids=img_ids,
-            txt_ids=txt_ids,
-            return_dict=True,
-        ).sample.detach().float().cpu()
-
-    del ref
-    gc.collect()
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
+    # The Diffusers and FastVideo Flux2 DiTs have structurally different
+    # forward interfaces (Diffusers uses pooled_projections + explicit
+    # img_ids/txt_ids; FastVideo uses a unified time_guidance_embed and
+    # auto-computes RoPE), so element-wise forward comparison with random
+    # inputs is not meaningful.  Instead we verify:
+    #   1. Weights load via strict load_state_dict
+    #   2. Forward produces finite output with correct shape
+    # End-to-end pipeline parity is validated separately.
 
     fv_cls, _ = ModelRegistry.resolve_model_cls("Flux2Transformer2DModel")
     dit_cfg = Flux2Config()
@@ -285,6 +260,14 @@ def test_flux2_transformer_parity():
     fv.load_state_dict(fv_sd, strict=True)
     fv = fv.to(device=device, dtype=dtype)
 
+    in_channels = dit_cfg.in_channels
+    inner_dim = dit_cfg.arch_config.hidden_size
+    joint_dim = dit_cfg.joint_attention_dim
+    B, seq_len, txt_len = 1, 64, 16
+    hidden = torch.randn(B, seq_len, in_channels, device=device, dtype=dtype)
+    enc = torch.randn(B, txt_len, joint_dim, device=device, dtype=dtype)
+    t = torch.tensor([0.5], device=device, dtype=dtype)
+
     with torch.no_grad():
         fv_out = fv(
             hidden_states=hidden,
@@ -292,15 +275,8 @@ def test_flux2_transformer_parity():
             timestep=t,
         ).detach().float().cpu()
 
-    # The Diffusers and FastVideo Flux2 transformers have structurally
-    # different forward interfaces: Diffusers uses pooled_projections +
-    # explicit img_ids/txt_ids; FastVideo uses a unified time_guidance_embed
-    # and auto-computes RoPE.  With random inputs the conditioning paths
-    # diverge, so we verify output shape and finite values rather than
-    # exact numerical match.  End-to-end pipeline parity (with real text
-    # embeddings and latents) is validated separately.
-    assert ref_out.shape == fv_out.shape, (
-        f"Shape mismatch: ref {ref_out.shape} vs fv {fv_out.shape}"
+    assert fv_out.shape == (B, seq_len, in_channels), (
+        f"Expected output shape {(B, seq_len, in_channels)}, got {fv_out.shape}"
     )
     assert torch.isfinite(fv_out).all(), "FastVideo DiT output contains non-finite values"
 
