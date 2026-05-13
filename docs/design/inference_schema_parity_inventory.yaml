@@ -357,6 +357,40 @@ surfaces:
         sources:
           - fastvideo.configs.pipelines.stable_audio.StableAudioT2AConfig
           - fastvideo.configs.pipelines.stable_audio.StableAudioOpenSmallConfig
+      audio_txt_guidance_scale:
+        sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanBaseConfig]
+      cfg_number:
+        sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanBaseConfig]
+      cfg_trick_start_frame:
+        sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanSR540pConfig]
+      cfg_trick_value:
+        sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanSR540pConfig]
+      noise_value:
+        sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanSR540pConfig]
+      sr_audio_noise_scale:
+        sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanSR540pConfig]
+      sr_height:
+        sources:
+          - fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanSR540pConfig
+          - fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanSR1080pConfig
+      sr_num_inference_steps:
+        sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanSR540pConfig]
+      sr_video_txt_guidance_scale:
+        sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanSR540pConfig]
+      sr_width:
+        sources:
+          - fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanSR540pConfig
+          - fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanSR1080pConfig
+      t5_gemma_target_length:
+        sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanBaseConfig]
+      use_cfg_trick:
+        sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanSR540pConfig]
+      video_guidance_high_t_threshold:
+        sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanBaseConfig]
+      video_guidance_low_t_value:
+        sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanBaseConfig]
+      video_txt_guidance_scale:
+        sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanBaseConfig]
     compatibility_only:
       batch_size: "Gen3C inference-only tuning field pending typed batching design."
       gradient_checkpointing: "Gen3C inference-only compatibility field pending typed batching design."
@@ -365,6 +399,15 @@ surfaces:
     internal_only:
       audio_decoder_config: "Legacy internal component config object."
       audio_decoder_precision: "Precision override pending dedicated component precision design."
+      audio_vae_config: "MagiHuman internal audio VAE component config object."
+      coords_style: "MagiHuman internal data-proxy coordinate convention."
+      frame_receptive_field: "MagiHuman internal data-proxy receptive-field setting."
+      image_conditioning: "MagiHuman preset variant marker for reference-image conditioning."
+      ref_audio_offset: "MagiHuman internal data-proxy audio alignment offset."
+      sr_local_attn_layers: "MagiHuman SR internal sparse-attention layer selection."
+      text_offset: "MagiHuman internal data-proxy text alignment offset."
+      vae_stride: "MagiHuman internal VAE/data-proxy stride setting."
+      z_dim: "MagiHuman internal VAE latent channel setting."
       vocoder_config: "Legacy internal component config object."
       vocoder_precision: "Precision override pending dedicated component precision design."
 
