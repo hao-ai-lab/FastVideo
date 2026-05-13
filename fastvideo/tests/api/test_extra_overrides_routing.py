@@ -20,11 +20,14 @@ These tests pin two contracts:
 from __future__ import annotations
 
 import pytest
+import torch
 
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.video_generator import (
     _BATCH_EXTRA_PASSTHROUGH_KEYS,
 )
+from fastvideo.pipelines import ForwardBatch
+from fastvideo.utils import shallow_asdict
 
 
 def test_passthrough_keys_cover_ltx2_audio_conditioning() -> None:
@@ -80,6 +83,26 @@ def test_sampling_param_update_accepts_known_fields() -> None:
     assert sp.prompt == "hello world"
     assert sp.seed == 42
     assert sp.num_frames == 121
+
+
+def test_forward_batch_accepts_ltx2_sampling_param_fields() -> None:
+    stage1 = torch.zeros(1)
+    stage2 = torch.ones(1)
+    sp = SamplingParam(
+        ltx2_images=[("image.png", 0, 1.0)],
+        ltx2_image_crf=0.0,
+        ltx2_conditioning_latent_stage1=stage1,
+        ltx2_conditioning_latent_stage2=stage2,
+        ltx2_video_conditions=[(["frame0.png", "frame1.png"], 2, 0.5)],
+    )
+
+    batch = ForwardBatch(**shallow_asdict(sp))
+
+    assert batch.ltx2_images == [("image.png", 0, 1.0)]
+    assert batch.ltx2_image_crf == 0.0
+    assert batch.ltx2_conditioning_latent_stage1 is stage1
+    assert batch.ltx2_conditioning_latent_stage2 is stage2
+    assert batch.ltx2_video_conditions == [(["frame0.png", "frame1.png"], 2, 0.5)]
 
 
 def test_sampling_param_update_error_mentions_passthrough_route() -> None:
