@@ -275,7 +275,7 @@ def test_flux2_transformer_parity():
     dit_cfg = Flux2Config()
     dit_cfg.update_model_arch(cfg)
 
-    fv = fv_cls(config=dit_cfg).eval()
+    fv = fv_cls(config=dit_cfg, hf_config=dict(cfg)).eval()
     fv_sd = {}
     for k, v in _iter_pretrained_safetensors(transformer_dir):
         fv_sd[k] = v
