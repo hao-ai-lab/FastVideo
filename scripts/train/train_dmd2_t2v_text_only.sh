@@ -25,8 +25,6 @@ CFG_UNCOND_TEXT="${CFG_UNCOND_TEXT:-zero}"
 CFG_UNCOND_ON_MISSING="${CFG_UNCOND_ON_MISSING:-ignore}"
 PROJECT_NAME="${PROJECT_NAME:-distillation_wan_text_only}"
 RUN_NAME="${RUN_NAME:-wan2.1_dmd2_text_only}"
-CONDA_ROOT="${CONDA_ROOT:-/root/miniconda3}"
-CONDA_ENV="${CONDA_ENV:-fastvideo}"
 LOG_DIR="${LOG_DIR:-logs/train}"
 
 if [[ ! -f "$CONFIG" ]]; then
@@ -46,15 +44,6 @@ if [[ "$num_parquet" -eq 0 ]]; then
     echo "Run scripts/preprocess/preprocess_train_text_only_dmd.sh first." >&2
     exit 1
 fi
-
-if [[ ! -f "$CONDA_ROOT/etc/profile.d/conda.sh" ]]; then
-    echo "Conda activation script not found under $CONDA_ROOT" >&2
-    exit 1
-fi
-
-# shellcheck source=/dev/null
-source "$CONDA_ROOT/etc/profile.d/conda.sh"
-conda activate "$CONDA_ENV"
 
 if [[ "${HF_HUB_ENABLE_HF_TRANSFER:-0}" == "1" ]]; then
     if ! python -c "import hf_transfer" >/dev/null 2>&1; then

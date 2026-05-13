@@ -9,8 +9,7 @@ BATCH_SIZE="${BATCH_SIZE:-1}"
 SAMPLES_PER_FILE="${SAMPLES_PER_FILE:-8}"
 FLUSH_FREQUENCY="${FLUSH_FREQUENCY:-8}"
 TEXT_MAX_LENGTH="${TEXT_MAX_LENGTH:-512}"
-CONDA_ROOT="${CONDA_ROOT:-/root/miniconda3}"
-CONDA_ENV="${CONDA_ENV:-fastvideo}"
+
 MIN_FREE_GPU_MB="${MIN_FREE_GPU_MB:-22000}"
 
 if [[ ! -f "$INPUT_FILE" ]]; then
@@ -18,14 +17,8 @@ if [[ ! -f "$INPUT_FILE" ]]; then
     exit 1
 fi
 
-if [[ ! -f "$CONDA_ROOT/etc/profile.d/conda.sh" ]]; then
-    echo "Conda activation script not found under $CONDA_ROOT" >&2
-    exit 1
-fi
 
-# shellcheck source=/dev/null
-source "$CONDA_ROOT/etc/profile.d/conda.sh"
-conda activate "$CONDA_ENV"
+
 
 if [[ "${HF_HUB_ENABLE_HF_TRANSFER:-0}" == "1" ]]; then
     if ! python -c "import hf_transfer" >/dev/null 2>&1; then

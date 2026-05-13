@@ -5,6 +5,7 @@ from fastvideo.train.methods.base import TrainingMethod
 __all__ = [
     "TrainingMethod",
     "DMD2Method",
+    "DiffusionNFTMethod",
     "FineTuneMethod",
     "KDMethod",
     "SelfForcingMethod",
@@ -16,6 +17,9 @@ def __getattr__(name: str) -> object:
     if name == "DMD2Method":
         from fastvideo.train.methods.distribution_matching.dmd2 import DMD2Method
         return DMD2Method
+    if name == "DiffusionNFTMethod":
+        from fastvideo.train.methods.diffusion_nft.nft import DiffusionNFTMethod
+        return DiffusionNFTMethod
     if name == "FineTuneMethod":
         from fastvideo.train.methods.fine_tuning.finetune import FineTuneMethod
         return FineTuneMethod
