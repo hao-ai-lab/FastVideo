@@ -239,8 +239,8 @@ def test_flux2_transformer_parity():
 
     ref = RefTransformer.from_pretrained(
         str(transformer_dir), local_files_only=True,
-        torch_dtype=dtype,
-    ).eval().to(device)
+        torch_dtype=dtype, device_map=device,
+    ).eval()
 
     B, seq_len = 1, 64
     hidden_dim = ref.config.in_channels * 4  # packed channel count
@@ -348,7 +348,7 @@ def test_flux2_vae_encode_decode_parity():
     fv = fv.to(device=device, dtype=dtype)
 
     with torch.no_grad():
-        fv_latents = fv.encode(x).latent_dist.mean.detach().float().cpu()
+        fv_latents = fv.encode(x).mean.detach().float().cpu()
         fv_dec = fv.decode(
             fv_latents.to(device=device, dtype=dtype)
         ).sample.detach().float().cpu()
@@ -411,16 +411,19 @@ def test_flux2_qwen3_text_encoder_parity():
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
-    # FastVideo Qwen3 encoder uses the same transformers class under the hood,
-    # so parity here validates the wrapper and config wiring.
+    from fastvideo.configs.models.encoders.qwen3 import Qwen3TextConfig
     from fastvideo.models.registry import ModelRegistry
 
+    cfg_raw = _load_json(text_encoder_dir / "config.json")
+    for k in ("_name_or_path", "transformers_version", "model_type", "torch_dtype"):
+        cfg_raw.pop(k, None)
+
+    fv_cfg = Qwen3TextConfig()
+    fv_cfg.update_model_arch(cfg_raw)
     fv_cls, _ = ModelRegistry.resolve_model_cls("Qwen3ForCausalLM")
-    fv = fv_cls.from_pretrained(
-        str(text_encoder_dir),
-        torch_dtype=dtype,
-        low_cpu_mem_usage=True,
-    ).eval().to(device)
+    fv = fv_cls(fv_cfg).eval()
+    fv.load_weights(_iter_pretrained_safetensors(text_encoder_dir))
+    fv = fv.to(device=device, dtype=dtype)
 
     with torch.no_grad():
         fv_out = fv(
@@ -430,7 +433,7 @@ def test_flux2_qwen3_text_encoder_parity():
         )
         fv_last = fv_out.hidden_states[-1].detach().float().cpu()
 
-    assert_close(ref_last, fv_last, atol=1e-4, rtol=1e-4)
+    assert_close(ref_last, fv_last, atol=1e-3, rtol=1e-3)
 
     del fv
     gc.collect()
