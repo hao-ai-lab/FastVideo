@@ -242,12 +242,10 @@ def test_flux2_transformer_parity():
     cfg.pop("_class_name", None)
     cfg.pop("_diffusers_version", None)
 
-    ref = RefTransformer.from_config(cfg).eval()
-    ref_sd = {}
-    for k, v in _iter_pretrained_safetensors(transformer_dir):
-        ref_sd[k] = v
-    ref.load_state_dict(ref_sd, strict=True)
-    ref = ref.to(device=device, dtype=dtype)
+    ref = RefTransformer.from_pretrained(
+        str(transformer_dir), local_files_only=True,
+        torch_dtype=dtype, low_cpu_mem_usage=False,
+    ).eval().to(device)
 
     B, seq_len = 1, 64
     in_channels = cfg.get("in_channels", 64)
@@ -392,13 +390,12 @@ def test_flux2_qwen3_text_encoder_parity():
     prompt = "a photo of a cat"
     toks = tokenizer(
         [prompt],
-        padding="max_length",
+        padding=False,
         truncation=True,
         max_length=128,
         return_tensors="pt",
     )
     input_ids = toks["input_ids"].to(device=device)
-    attention_mask = toks["attention_mask"].to(device=device)
 
     ref = AutoModelForCausalLM.from_pretrained(
         str(text_encoder_dir),
@@ -410,7 +407,6 @@ def test_flux2_qwen3_text_encoder_parity():
     with torch.no_grad():
         ref_out = ref(
             input_ids=input_ids,
-            attention_mask=attention_mask,
             output_hidden_states=True,
         )
         ref_last = ref_out.hidden_states[-1].detach().float().cpu()
@@ -445,7 +441,6 @@ def test_flux2_qwen3_text_encoder_parity():
         with set_forward_context(current_timestep=0, attn_metadata=None):
             fv_out = fv(
                 input_ids=input_ids,
-                attention_mask=attention_mask,
                 output_hidden_states=True,
             )
         fv_last = fv_out.hidden_states[-1].detach().float().cpu()
