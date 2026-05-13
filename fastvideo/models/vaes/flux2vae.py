@@ -5,23 +5,22 @@ from typing import Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from diffusers.models.attention_processor import (
+from fastvideo.configs.models.vaes.flux2vae import Flux2VAEConfig
+from fastvideo.models.vaes.common import ParallelTiledVAE
+from fastvideo.models.vaes.flux2_components import (
     ADDED_KV_ATTENTION_PROCESSORS,
     CROSS_ATTENTION_PROCESSORS,
-    AttentionProcessor,
+    Attention,
     AttnAddedKVProcessor,
     AttnProcessor,
-)
-from diffusers.models.autoencoders.vae import (
+    AutoencoderKLOutput,
     Decoder,
     DecoderOutput,
     DiagonalGaussianDistribution,
     Encoder,
 )
-from diffusers.models.modeling_outputs import AutoencoderKLOutput
 
-from fastvideo.configs.models.vaes.flux2vae import Flux2VAEConfig
-from fastvideo.models.vaes.common import ParallelTiledVAE
+AttentionProcessor = AttnProcessor
 
 
 class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
@@ -226,7 +225,7 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
 
     def encode(
         self, x: torch.Tensor, return_dict: bool = True
-    ) -> Union[DiagonalGaussianDistribution]:
+    ) -> Union[AutoencoderKLOutput, Tuple[DiagonalGaussianDistribution]]:
         """
         Encode a batch of images into latents.
 
@@ -251,7 +250,10 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
             h = self._encode(x)
 
         posterior = DiagonalGaussianDistribution(h)
-        return posterior
+        if not return_dict:
+            return (posterior,)
+
+        return AutoencoderKLOutput(latent_dist=posterior)
 
     def _decode(
         self, z: torch.Tensor, return_dict: bool = True
@@ -295,7 +297,10 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
         else:
             decoded = self._decode(z).sample
 
-        return decoded
+        if not return_dict:
+            return (decoded,)
+
+        return DecoderOutput(sample=decoded)
 
     def blend_v(
         self, a: torch.Tensor, b: torch.Tensor, blend_extent: int
@@ -350,7 +355,7 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
                     j : j + self.tile_sample_min_size,
                 ]
                 tile = self.encoder(tile)
-                if use_quant_conv:
+                if self.quant_conv is not None:
                     tile = self.quant_conv(tile)
                 row.append(tile)
             rows.append(row)
@@ -413,7 +418,7 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
                     j : j + self.tile_sample_min_size,
                 ]
                 tile = self.encoder(tile)
-                if use_quant_conv:
+                if self.quant_conv is not None:
                     tile = self.quant_conv(tile)
                 row.append(tile)
             rows.append(row)
@@ -470,7 +475,7 @@ class AutoencoderKLFlux2(nn.Module, ParallelTiledVAE):
                     i : i + self.tile_latent_min_size,
                     j : j + self.tile_latent_min_size,
                 ]
-                if use_post_quant_conv:
+                if self.post_quant_conv is not None:
                     tile = self.post_quant_conv(tile)
                 decoded = self.decoder(tile)
                 row.append(decoded)
