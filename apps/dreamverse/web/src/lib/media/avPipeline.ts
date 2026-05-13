@@ -412,7 +412,7 @@ export function createAvPipeline({
       completed: false,
       chunks: [],
     };
-    archivedSegments = [...archivedSegments, nextSegment];
+    archivedSegments.push(nextSegment);
     activeArchivedSegmentKey = key;
     return nextSegment;
   }
