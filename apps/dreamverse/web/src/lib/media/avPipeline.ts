@@ -528,7 +528,7 @@ export function createAvPipeline({
       firstChunkAtMs = getNow();
     }
     const clonedChunk = cloneChunk(chunk);
-    archivedChunks = [...archivedChunks, clonedChunk];
+    archivedChunks.push(clonedChunk);
     const archivedSegment = getOrCreateActiveSegment();
     archivedSegment.chunks.push(clonedChunk);
     mediaChunkQueue.push(clonedChunk);
