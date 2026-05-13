@@ -312,9 +312,9 @@ class VideoGenerator:
         if isinstance(result, list):
             # Prompt-batch expansion — emit one Final per sub-result.
             for sub in result:
-                yield _final_event_from_result(sub)
+                yield await asyncio.to_thread(_final_event_from_result, sub)
             return
-        yield _final_event_from_result(result)
+        yield await asyncio.to_thread(_final_event_from_result, result)
 
     @staticmethod
     def default_health_check_request() -> GenerationRequest:
