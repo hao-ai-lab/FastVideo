@@ -109,7 +109,10 @@ class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
         self.input_validation_stage(batch, fastvideo_args)
         assert isinstance(batch.pil_image, PIL.Image.Image)
         random_ref = batch.svi_random_ref_frame or batch.pil_image
-        motion_frames: list[PIL.Image.Image] = batch.svi_first_frames or [batch.pil_image]
+        # Clip 0: when the caller did not pre-stage motion frames, repeat the ref
+        # image num_motion times. For num_motion=1 (Shot/Tom) this is just [ref];
+        # for num_motion=5 (Film) this matches upstream's --repeat_first_clip path.
+        motion_frames: list[PIL.Image.Image] = (batch.svi_first_frames or [batch.pil_image] * num_motion)
 
         clip_outputs: list[torch.Tensor] = []
         for clip_idx in range(num_clips):
@@ -117,6 +120,9 @@ class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
                 batch,
                 prompt=prompts[clip_idx],
                 pil_image=motion_frames[0],
+                # Clear image_path so per-clip InputValidationStage does not
+                # reload the original ref and clobber motion_frames[0].
+                image_path=None,
                 svi_first_frames=motion_frames,
                 svi_random_ref_frame=random_ref,
                 prompt_embeds=[],
