@@ -1,9 +1,10 @@
 # Flux2 Local Tests
 
-Local-only component parity tests for the `flux2` FastVideo port. Compares
-FastVideo's Flux2 components (DiT transformer, VAE, Qwen3 text encoder) against
-the Diffusers reference and the published `black-forest-labs/FLUX.2-klein-4B`
-checkpoint. Skipped in CI; CUDA required.
+Local-only component and pipeline parity tests for the `flux2` FastVideo port.
+Compares FastVideo's Flux2 components (DiT transformer, VAE, Qwen3 text encoder)
+and Klein pipeline against the Diffusers reference and the published
+`black-forest-labs/FLUX.2-klein-4B` checkpoint. Skipped in CI; CUDA required for
+activated parity runs.
 
 ## Reference Assets
 
@@ -52,13 +53,20 @@ python ".agents/skills/add-model-01-prep/scripts/download_hf_weights.py" \
 
 ```bash
 pytest tests/local_tests/flux2/ -v -s
+
+FLUX2_MODEL_DIR=/path/to/black-forest-labs__FLUX.2-klein-4B \
+pytest tests/local_tests/pipelines/test_flux2_pipeline_smoke.py \
+       tests/local_tests/pipelines/test_flux2_pipeline_parity.py \
+       tests/local_tests/flux2/test_flux2_component_parity.py -v -s
 ```
 
 | Component | Test | Concerns | Status |
 |---|---|---|---|
-| DiT transformer | [`test_flux2_component_parity.py`](./test_flux2_component_parity.py) | Strict weight load + finite forward output | `PASSED` |
+| DiT transformer | [`test_flux2_component_parity.py`](./test_flux2_component_parity.py) | Strict weight load + numerical output parity vs Diffusers | `CUDA + FLUX2_MODEL_DIR gated` |
 | VAE | [`test_flux2_component_parity.py`](./test_flux2_component_parity.py) | Encode/decode exact parity vs Diffusers | `PASSED` |
 | Qwen3 text encoder | [`test_flux2_component_parity.py`](./test_flux2_component_parity.py) | Weight load + hidden-state cosine similarity | `PASSED` |
+| Pipeline smoke | [`../pipelines/test_flux2_pipeline_smoke.py`](../pipelines/test_flux2_pipeline_smoke.py) | Import, registry, preset, config wiring; optional four-step latent generate | `CUDA + FLUX2_MODEL_DIR gated` |
+| Pipeline parity | [`../pipelines/test_flux2_pipeline_parity.py`](../pipelines/test_flux2_pipeline_parity.py) | Four-step denoised latent parity vs `diffusers.FluxPipeline` | `CUDA + FLUX2_MODEL_DIR gated` |
 
 ## Scope Notes
 
