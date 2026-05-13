@@ -5,12 +5,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 from diffusers.models.attention import AttentionModuleMixin
-from diffusers.models.embeddings import TimestepEmbedding, Timesteps
-from diffusers.models.normalization import AdaLayerNormContinuous
 
 from fastvideo.configs.models.dits.flux_2 import Flux2Config
 from fastvideo.attention import LocalAttention
 from fastvideo.distributed import get_tp_world_size
+from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.layers.linear import ColumnParallelLinear
 from fastvideo.layers.rotary_embedding import apply_rotary_emb
 from fastvideo.models.dits.base import BaseDiT
@@ -18,6 +17,59 @@ from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)  # pylint: disable=invalid-name
+
+
+class TimestepEmbedding(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        time_embed_dim: int,
+        out_dim: Optional[int] = None,
+        post_act_fn: Optional[str] = None,
+        cond_proj_dim: Optional[int] = None,
+        sample_proj_bias: bool = True,
+    ):
+        super().__init__()
+        self.linear_1 = nn.Linear(in_channels, time_embed_dim, sample_proj_bias)
+        self.cond_proj = nn.Linear(cond_proj_dim, in_channels, bias=False) if cond_proj_dim is not None else None
+        self.act = nn.SiLU()
+        time_embed_dim_out = out_dim if out_dim is not None else time_embed_dim
+        self.linear_2 = nn.Linear(time_embed_dim, time_embed_dim_out, sample_proj_bias)
+        self.post_act = None if post_act_fn is None else None
+
+    def forward(self, sample: torch.Tensor, condition: Optional[torch.Tensor] = None) -> torch.Tensor:
+        if condition is not None and self.cond_proj is not None:
+            sample = sample + self.cond_proj(condition)
+        sample = self.linear_1(sample)
+        if self.act is not None:
+            sample = self.act(sample)
+        sample = self.linear_2(sample)
+        if self.post_act is not None:
+            sample = self.post_act(sample)
+        return sample
+
+
+class AdaLayerNormContinuous(nn.Module):
+    def __init__(
+        self,
+        embedding_dim: int,
+        conditioning_embedding_dim: int,
+        elementwise_affine: bool = True,
+        eps: float = 1e-5,
+        bias: bool = True,
+        norm_type: str = "layer_norm",
+    ):
+        super().__init__()
+        self.silu = nn.SiLU()
+        self.linear = nn.Linear(conditioning_embedding_dim, embedding_dim * 2, bias=bias)
+        if norm_type != "layer_norm":
+            raise ValueError(f"unknown norm_type {norm_type}")
+        self.norm = nn.LayerNorm(embedding_dim, eps=eps, elementwise_affine=elementwise_affine, bias=bias)
+
+    def forward(self, x: torch.Tensor, conditioning_embedding: torch.Tensor) -> torch.Tensor:
+        emb = self.linear(self.silu(conditioning_embedding).to(x.dtype))
+        scale, shift = torch.chunk(emb, 2, dim=1)
+        return self.norm(x) * (1 + scale)[:, None, :] + shift[:, None, :]
 
 
 # Helper function: apply_qk_norm (not in FastVideo, so we implement it)
