@@ -60,6 +60,10 @@ class EvalWorker:
             if self._compile and getattr(m, "_model", None) is not None:
                 m._model = torch.compile(m._model)
             self._metrics[name] = m
+        # Skip pre_upload when no loaded metric actually runs on GPU
+        # (e.g. an all-physics_iq run) — it would just pay a wasted
+        # host→device→host round-trip per sample.
+        self._any_needs_gpu = any(m.needs_gpu for m in self._metrics.values())
         self._unloaded = False
 
     def evaluate(self, **kwargs) -> dict[str, MetricResult]:
@@ -74,7 +78,7 @@ class EvalWorker:
             raise RuntimeError("EvalWorker was unloaded; call reload() before evaluating.")
 
         sample = dict(kwargs)
-        if self._pre_upload:
+        if self._pre_upload and self._any_needs_gpu:
             sample["video"] = _to_device(sample.get("video"), self._device)
             if "reference" in sample:
                 sample["reference"] = _to_device(sample["reference"], self._device)

@@ -127,7 +127,7 @@ def evaluate_video(video_path: Path, prompt: str, fps: float,
     print(f"[eval] running ({video.shape[1]} frames @ {fps} fps)...")
     results = evaluator.evaluate(
         video=video,
-        text_prompt=[prompt],
+        text_prompt=prompt,
         fps=fps,
     )
 

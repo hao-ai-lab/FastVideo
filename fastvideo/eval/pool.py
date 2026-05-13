@@ -94,27 +94,33 @@ class VideoPool:
         for t in self._loaders:
             t.join(timeout=5.0)
 
-    def get(self, timeout: float | None = None) -> tuple[int, dict] | None:
+    def get(self) -> tuple[int, dict] | None:
         """Pop the next decoded ``(idx, sample)``.
 
         Returns ``None`` when all input samples have been consumed.
-        Re-raises any exception caught in a loader thread on the
-        consumer's stack so callers don't hang on a dead loader.
-        Thread-safe: multiple consumer threads may share one pool.
+        Polls in 0.1 s slices so extra consumer threads (when
+        ``len(samples) < num_workers``) wake up periodically to
+        re-check ``_consumed`` and exit cleanly — without the poll,
+        a blocking ``_ready_q.get(timeout=None)`` deadlocks because
+        the loaders are already done. Re-raises any exception caught
+        in a loader thread on the consumer's stack so callers don't
+        hang on a dead loader. Thread-safe: multiple consumer threads
+        may share one pool.
         """
-        with self._consume_lock:
-            if self._consumed >= len(self._samples):
-                return None
-        try:
-            item = self._ready_q.get(timeout=timeout)
-        except queue.Empty:
-            return None
-        with self._consume_lock:
-            self._consumed += 1
-        idx, payload = item
-        if isinstance(payload, _DecodeError):
-            raise payload.exc
-        return item
+        while True:
+            with self._consume_lock:
+                if self._consumed >= len(self._samples):
+                    return None
+            try:
+                item = self._ready_q.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            with self._consume_lock:
+                self._consumed += 1
+            idx, payload = item
+            if isinstance(payload, _DecodeError):
+                raise payload.exc
+            return item
 
     def _loader_loop(self) -> None:
         while not self._stop.is_set():

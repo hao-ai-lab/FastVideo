@@ -121,6 +121,15 @@ class Evaluator:
         if not sample_list:
             return EvalResults(samples=[], corpus={})
 
+        if single and any(m.is_set_metric for m in self._workers[0].set_metrics().values()):
+            # Set metrics need a population. A single sample can't produce a
+            # meaningful corpus result, and silently discarding it (return
+            # ``per_sample[0]`` only) hides the no-op. Force the list form.
+            raise ValueError("Set-vs-set metrics require samples=[...] with >=2 entries; "
+                             "the kwargs form (single sample) cannot produce a corpus "
+                             "result. Registered set metrics: "
+                             f"{sorted(self._workers[0].set_metrics())}")
+
         per_sample, corpus = self._run(sample_list)
 
         if single:
