@@ -13,6 +13,7 @@ import torch
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from fastvideo.pipelines.basic.wan.wan_i2v_pipeline import WanImageToVideoPipeline
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
@@ -39,6 +40,8 @@ class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
+        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(num_train_timesteps=1000, shift=5.0)
+
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
         self.add_stage(
             stage_name="prompt_encoding_stage",
@@ -85,6 +88,9 @@ class WanSVIImageToVideoPipeline(WanImageToVideoPipeline):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         if not self.post_init_called:
             self.post_init()
+
+        n_steps = int(batch.num_inference_steps)
+        batch.sigmas = torch.linspace(1.0, 0.0, n_steps + 1)[:-1].tolist()
 
         num_clips = max(1, int(batch.svi_num_clips or 1))
         num_motion = max(1, int(batch.svi_num_motion_frames or 1))
