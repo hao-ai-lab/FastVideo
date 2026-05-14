@@ -1,22 +1,22 @@
-# Self-forcing distillation: MatrixGame I2V Causal
+# Self-forcing distillation: Matrix-Game 2.0 I2V Causal
 #
-# - Teacher: frozen pretrained MatrixGame model
-# - Student: trainable causal MatrixGame model
-# - Critic:  trainable MatrixGame model
+# - Teacher: frozen pretrained Matrix-Game 2.0 model
+# - Student: trainable causal Matrix-Game 2.0 model
+# - Critic:  trainable Matrix-Game 2.0 model
 # - Training: streaming rollout with SDE sampling
 
 models:
   student:
-    _target_: fastvideo.train.models.matrixgame.matrixgame_causal.MatrixGameCausalModel
+    _target_: fastvideo.train.models.matrixgame2.matrixgame2_causal.MatrixGame2CausalModel
     init_from: FastVideo/Matrix-Game-2.0-Base-Diffusers
     trainable: true
   teacher:
-    _target_: fastvideo.train.models.matrixgame.matrixgame.MatrixGameModel
+    _target_: fastvideo.train.models.matrixgame2.matrixgame2.MatrixGame2Model
     init_from: FastVideo/Matrix-Game-2.0-Foundation-Diffusers
     trainable: false
     disable_custom_init_weights: true
   critic:
-    _target_: fastvideo.train.models.matrixgame.matrixgame.MatrixGameModel
+    _target_: fastvideo.train.models.matrixgame2.matrixgame2.MatrixGame2Model
     init_from: FastVideo/Matrix-Game-2.0-Foundation-Diffusers
     trainable: true
     disable_custom_init_weights: true
@@ -88,7 +88,7 @@ callbacks:
   grad_clip:
     max_grad_norm: 1.0
   validation:
-    pipeline_target: fastvideo.pipelines.basic.matrixgame.matrixgame_causal_dmd_pipeline.MatrixGameCausalDMDPipeline
+    pipeline_target: fastvideo.pipelines.basic.matrixgame2.matrixgame2_causal_dmd_pipeline.MatrixGame2CausalDMDPipeline
     dataset_file: examples/distill/MatrixGame2.0/validation.json
     every_steps: 50
     sampling_steps: [4]

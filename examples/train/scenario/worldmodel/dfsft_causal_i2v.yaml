@@ -1,11 +1,11 @@
-# Diffusion-Forcing SFT: MatrixGame I2V Causal
+# Diffusion-Forcing SFT: Matrix-Game 2.0 I2V Causal
 #
-# - Student: trainable causal MatrixGame model
+# - Student: trainable causal Matrix-Game 2.0 model
 # - Training: inhomogeneous timesteps per chunk (diffusion forcing)
 
 models:
   student:
-    _target_: fastvideo.train.models.matrixgame.matrixgame_causal.MatrixGameCausalModel
+    _target_: fastvideo.train.models.matrixgame2.matrixgame2_causal.MatrixGame2CausalModel
     init_from: FastVideo/Matrix-Game-2.0-Foundation-Diffusers
     trainable: true
 
@@ -59,7 +59,7 @@ callbacks:
   grad_clip:
     max_grad_norm: 1.0
   validation:
-    pipeline_target: fastvideo.pipelines.basic.matrixgame.matrixgame_causal_dmd_pipeline.MatrixGameCausalDMDPipeline
+    pipeline_target: fastvideo.pipelines.basic.matrixgame2.matrixgame2_causal_dmd_pipeline.MatrixGame2CausalDMDPipeline
     dataset_file: examples/distill/MatrixGame2.0/validation.json
     every_steps: 100
     sampling_steps: [40]

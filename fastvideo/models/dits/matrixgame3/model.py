@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 
 from fastvideo.attention import DistributedAttention
-from fastvideo.configs.models.dits.matrixgame import MatrixGame3WanVideoConfig
+from fastvideo.configs.models.dits.matrixgame3 import MatrixGame3WanVideoConfig
 from fastvideo.layers.layernorm import (
     FP32LayerNorm,
     LayerNormScaleShift,

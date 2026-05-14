@@ -1,8 +1,8 @@
-# MatrixGame I2V finetune.
+# Matrix-Game 2.0 I2V finetune.
 
 models:
   student:
-    _target_: fastvideo.train.models.matrixgame.matrixgame.MatrixGameModel
+    _target_: fastvideo.train.models.matrixgame2.matrixgame2.MatrixGame2Model
     init_from: FastVideo/Matrix-Game-2.0-Foundation-Diffusers
     trainable: true
 
@@ -62,7 +62,7 @@ callbacks:
     max_grad_norm: 1.0
   validation:
     _target_: fastvideo.train.callbacks.validation.ValidationCallback
-    pipeline_target: fastvideo.pipelines.basic.matrixgame.matrixgame_i2v_pipeline.MatrixGamePipeline
+    pipeline_target: fastvideo.pipelines.basic.matrixgame2.matrixgame2_i2v_pipeline.MatrixGame2I2VPipeline
     dataset_file: examples/distill/MatrixGame2.0/validation.json
     every_steps: 100
     sampling_steps: [50]

@@ -232,8 +232,8 @@ surfaces:
           - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionT2V_1_3B_Config
           - fastvideo.configs.pipelines.wan.FastWan2_1_T2V_480P_Config
           - fastvideo.configs.pipelines.wan.FastWan2_2_TI2V_5B_Config
-          - fastvideo.configs.pipelines.wan.MatrixGameBaseI2V480PConfig
-          - fastvideo.configs.pipelines.wan.MatrixGameI2V480PConfig
+          - fastvideo.configs.pipelines.matrixgame2.MatrixGame2BaseI2V480PConfig
+          - fastvideo.configs.pipelines.matrixgame2.MatrixGame2I2V480PConfig
           - fastvideo.configs.pipelines.wan.SelfForcingWan2_2_T2V480PConfig
           - fastvideo.configs.pipelines.wan.SelfForcingWanT2V480PConfig
           - fastvideo.configs.pipelines.wan.WANV2VConfig
@@ -255,8 +255,8 @@ surfaces:
           - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionT2V_1_3B_Config
           - fastvideo.configs.pipelines.wan.FastWan2_1_T2V_480P_Config
           - fastvideo.configs.pipelines.wan.FastWan2_2_TI2V_5B_Config
-          - fastvideo.configs.pipelines.wan.MatrixGameBaseI2V480PConfig
-          - fastvideo.configs.pipelines.wan.MatrixGameI2V480PConfig
+          - fastvideo.configs.pipelines.matrixgame2.MatrixGame2BaseI2V480PConfig
+          - fastvideo.configs.pipelines.matrixgame2.MatrixGame2I2V480PConfig
           - fastvideo.configs.pipelines.wan.SelfForcingWan2_2_T2V480PConfig
           - fastvideo.configs.pipelines.wan.SelfForcingWanT2V480PConfig
           - fastvideo.configs.pipelines.wan.WANV2VConfig
@@ -304,9 +304,9 @@ surfaces:
           - fastvideo.configs.pipelines.wan.FastWan2_2_TI2V_5B_Config
           - fastvideo.configs.pipelines.wan.Wan2_2_TI2V_5B_Config
       context_noise:
-        sources: [fastvideo.configs.pipelines.wan.MatrixGameI2V480PConfig]
+        sources: [fastvideo.configs.pipelines.matrixgame2.MatrixGame2I2V480PConfig]
       num_frames_per_block:
-        sources: [fastvideo.configs.pipelines.wan.MatrixGameI2V480PConfig]
+        sources: [fastvideo.configs.pipelines.matrixgame2.MatrixGame2I2V480PConfig]
       audio_channels:
         sources:
           - fastvideo.configs.pipelines.stable_audio.StableAudioT2AConfig
