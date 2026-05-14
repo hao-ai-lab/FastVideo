@@ -6,7 +6,8 @@ recommended next action.
 For why each item is open see [decisions-log.md](decisions-log.md). For
 PR-level context see [pr-roadmap.md](pr-roadmap.md).
 
-**Last updated:** 2026-05-14 (added DR-6 follow-up for PR #1335's Gemma
+**Last updated:** 2026-05-14 (added DR-7 follow-up to remove LTX2 debug
+logging env vars and replace them with per-pipeline/model state. Earlier: 2026-05-14 added DR-6 follow-up for PR #1335's Gemma
 lazy-load/device-placement behavior outside compiled `forward`. Earlier: 2026-05-13 added DR-5 follow-up for PR #1333's LTX2
 distilled SSIM reference refresh. Earlier: 2026-05-12 added DR-4 follow-up for PR #1330's skipped
 `App websocket integration` suite. Earlier: 2026-05-05 D-20 broken-pipe root cause + fix landed on
@@ -38,6 +39,7 @@ different vehicle.).
 | **DR-4** | Low | Investigate unskipping PR #1330's skipped public `App websocket integration` suite | S-M | Public PR #1330 has `describe.skip(...)` around 27 websocket tests while the internal equivalent suite is active with 25 tests. The 2 public-only tests cover backend unreachable / GPU workers not ready. Not blocking while skipped, but stale assertions may need safe refresh before unskip. |
 | **DR-5** | Low | Regenerate LTX2-Distilled latent SSIM references under the intended neutral/distilled defaults, then remove the PR #1333 historical full-guidance pins | S-M | PR #1333 changed public LTX2 distilled defaults to neutral/distilled values, but existing LTX2 latent SSIM references appear to have been generated with historical full-guidance defaults. The current PR pins the SSIM test to old values to keep CI compatible until references are refreshed. |
 | **DR-6** | Low | Decide whether `LTX2GemmaTextEncoderModel` needs a non-forward device-placement hook after lazy Gemma load | S | PR #1335 should remove the `model.device` / `model.to(...)` guard from `forward` for Dynamo/fullgraph compatibility. Non-compiled runs probably do not need it because `gemma_model` moves Gemma at first load, but a later wrapper `.to(...)` after lazy load could leave Gemma on the old device unless lifecycle placement handles it. |
+| **DR-7** | Low | Remove LTX2 debug logging env-var plumbing and replace it with per-pipeline/model debug state | S-M | PR #1335 review flagged that `initialize_pipeline()` mutates process-global LTX2 debug env vars, which can leak/race across pipeline instances. Deleting only the mutation is low-risk but loses config-driven debug logging; deleting all reads without replacement would remove useful SSIM/latent drift diagnostics. |
 | **3** | Med | Add `cerebras_ifm` to `PromptEnhancerConfig.provider` Literal + provider | S-M | Public-side resolution if DR-2 picks (a) |
 | **4** | Med | Expose `layer_profile` on typed `engine.quantization` | M | Removes Dreamverse's `experimental["pipeline_config"]` dodge for stage profiles |
 | **5** | Med | Design typed `dit_config.quant_config` carrier | L design + L impl | Removes broader `experimental["pipeline_config"]` escape hatch |
@@ -456,6 +458,33 @@ document that Gemma must be loaded after final device placement.
 
 **Dependencies:** Not blocking PR #1335 if the forward-path guard is removed and
 the normal load path keeps placing Gemma on the wrapper's current device.
+
+### Item DR-7: Remove LTX2 debug logging env-var plumbing
+
+**Why:** PR #1335 review flagged that
+`fastvideo/pipelines/basic/ltx2/ltx2_pipeline.py::initialize_pipeline()` sets
+and pops LTX2 debug env vars such as `LTX2_PIPELINE_DEBUG_LOG`,
+`LTX2_PIPELINE_DEBUG_PATH`, `LTX2_DEBUG_DETAIL`, and
+`LTX2_PIPELINE_DEBUG_DETAIL_PATH`. Those env vars are process-global, so one
+pipeline instance can enable, overwrite, or clear debug behavior for another
+pipeline instance running in the same process.
+
+Deleting only the `initialize_pipeline()` env mutation is low risk for normal
+generation, but it would stop config-driven debug logging unless replaced.
+Deleting all env-var reads without replacement is riskier because these logs are
+useful for SSIM/latent drift diagnosis and may be used by local debug scripts.
+
+**Action:** Replace LTX2 debug env-var plumbing with per-pipeline/model debug
+state. Use pipeline/model config for construction-time hooks and a
+`ForwardContext`/`ForwardBatch`-style carrier for forward-time logging. Keep
+external env-var compatibility only if there is a documented operator workflow
+that still needs it.
+
+**Effort:** Small-Medium.
+
+**Dependencies:** Not blocking PR #1335 if the immediate fix is limited to
+removing process-global mutation from pipeline initialization while preserving
+existing externally supplied env-var reads.
 
 ### Item D-12-C: Avoid locking `PoolAssignment.gpu_id: int` as public
 
