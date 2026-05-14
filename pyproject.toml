@@ -89,6 +89,9 @@ dependencies = [
 [tool.uv]
 prerelease = "allow"
 
+[tool.uv.workspace]
+members = ["apps/dreamverse"]
+
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
@@ -160,18 +163,37 @@ streaming = [
     "websockets",
 ]
 
+dreamverse = [
+    "uvicorn[standard]==0.41.0",
+    "cerebras-cloud-sdk",
+    "flash-attn-cute @ git+https://github.com/XOR-op/flash-attention.git@fa4-compile#subdirectory=flash_attn/cute",
+    "flashinfer-python",
+    "openai>=1.40",
+]
+
 rocm = [
     "amdsmi",
 ]
 
 [project.scripts]
 fastvideo = "fastvideo.entrypoints.cli.main:main"
+dreamverse-server = "dreamverse.server_entry:cli"
+dreamverse-mock-server = "dreamverse.mock_server:cli"
 
 [tool.setuptools.packages.find]
-exclude = ["assets*", "docker*", "docs", "scripts*"]
+where = [".", "apps/dreamverse"]
+exclude = ["assets*", "docker*", "docs", "scripts*", "apps*", "dreamverse.tests*"]
+
+[tool.setuptools.package-data]
+dreamverse = ["prompts/*.md"]
 
 [tool.wheel]
-exclude = ["assets*", "docker*", "docs", "scripts*"]
+exclude = ["assets*", "docker*", "docs", "scripts*", "apps*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "gpu: requires real GPU + model weights; skip in CI",
+]
 
 
 [tool.mypy]
