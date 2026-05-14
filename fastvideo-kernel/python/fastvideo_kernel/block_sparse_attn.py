@@ -32,7 +32,24 @@ def _is_sm90() -> bool:
 
 
 def _force_triton() -> bool:
-    return os.environ.get("FASTVIDEO_KERNEL_VSA_FORCE_TRITON", "0") == "1"
+    """True iff Triton is explicitly forced via env var.
+
+    Honors both the new ``FASTVIDEO_VSA_TRITON`` and the legacy
+    ``FASTVIDEO_KERNEL_VSA_FORCE_TRITON`` for backward compatibility.
+    """
+    return (
+        os.environ.get("FASTVIDEO_VSA_TRITON", "0") == "1"
+        or os.environ.get("FASTVIDEO_KERNEL_VSA_FORCE_TRITON", "0") == "1"
+    )
+
+
+def _force_tk() -> bool:
+    """True iff the sm_90 (ThunderKittens) backend is explicitly requested.
+
+    Only effective on sm_90 with the compiled extension present; otherwise
+    falls back to the default selection.
+    """
+    return os.environ.get("FASTVIDEO_VSA_TK", "0") == "1"
 
 
 # ---------------------------------------------------------------------------
@@ -368,12 +385,24 @@ def block_sparse_attn_from_indices(
     variable_block_sizes = _as_int32_contig(variable_block_sizes, "variable_block_sizes")
 
     block_sparse_fwd, block_sparse_bwd = _get_sm90_ops()
-    use_sm90 = (
-        (not _force_triton())
-        and _is_sm90()
+    sm90_available = (
+        _is_sm90()
         and block_sparse_fwd is not None
         and block_sparse_bwd is not None
     )
+
+    # Backend resolution:
+    # - FASTVIDEO_VSA_TRITON forces Triton everywhere.
+    # - FASTVIDEO_VSA_TK requests sm_90 TK; honored only when it's actually
+    #   available (else falls through to the default below).
+    # - Otherwise: TK on sm_90 if available, else Triton.
+    if _force_triton():
+        use_sm90 = False
+    elif _force_tk():
+        use_sm90 = sm90_available
+    else:
+        use_sm90 = sm90_available
+
     if use_sm90:
         return block_sparse_attn_sm90(q, k, v, q2k_idx, q2k_num, variable_block_sizes)
     # Triton path: supports q_seq_len != kv_seq_len as long as both are padded
