@@ -53,6 +53,15 @@ LTX2_DISTILLED_PARAMS = {
     "fps": 24,
     "ltx2_vae_tiling": True,
 }
+# TODO: Regenerate LTX2-Distilled references for the new distilled defaults,
+# then remove these historical full-guidance pins.
+LTX2_DISTILLED_REFERENCE_GUIDANCE_OVERRIDES = {
+    "ltx2_modality_scale_video": 3.0,
+    "ltx2_modality_scale_audio": 3.0,
+    "ltx2_rescale_scale": 0.7,
+    "ltx2_stg_scale_video": 1.0,
+    "ltx2_stg_scale_audio": 1.0,
+}
 _LTX2_DISTILLED_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
     LTX2_DISTILLED_PARAMS["model_path"])
 LTX2_DISTILLED_FULL_QUALITY_PARAMS = {
@@ -114,4 +123,5 @@ def test_ltx2_distilled_inference_similarity(
         full_quality_params_map=FULL_QUALITY_LTX2_DISTILLED_MODEL_TO_PARAMS,
         slice_cosine_threshold=SLICE_COSINE_DISTANCE_THRESHOLD,
         full_cosine_threshold=FULL_COSINE_DISTANCE_THRESHOLD,
+        generation_kwargs_override=LTX2_DISTILLED_REFERENCE_GUIDANCE_OVERRIDES,
     )
