@@ -2,7 +2,7 @@ import os
 import time
 from fastvideo import VideoGenerator
 
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 
 OUTPUT_PATH = "video_samples_dmd2"
 def main():

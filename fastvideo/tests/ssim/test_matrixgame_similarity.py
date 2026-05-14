@@ -5,7 +5,7 @@ import torch
 import pytest
 
 from fastvideo import VideoGenerator
-from fastvideo.configs.sample.wan import MatrixGame2_SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.matrixgame.utils import create_action_presets
 from fastvideo.tests.ssim.reference_utils import (
@@ -47,7 +47,8 @@ MATRIXGAME_PARAMS = {
     "seed": 1024,
     "keyboard_dim": 4,
 }
-_MATRIXGAME_FULL_QUALITY_DEFAULTS = MatrixGame2_SamplingParam()
+_MATRIXGAME_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
+    MATRIXGAME_PARAMS["model_path"])
 MATRIXGAME_FULL_QUALITY_PARAMS = {
     "num_gpus": MATRIXGAME_PARAMS["num_gpus"],
     "model_path": MATRIXGAME_PARAMS["model_path"],

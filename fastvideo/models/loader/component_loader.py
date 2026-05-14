@@ -79,6 +79,7 @@ class ComponentLoader(ABC):
         module_loaders = {
             "scheduler": (SchedulerLoader, "diffusers"),
             "transformer": (TransformerLoader, "diffusers"),
+            "sr_transformer": (TransformerLoader, "diffusers"),
             "transformer_2": (TransformerLoader, "diffusers"),
             "transformer_3": (TransformerLoader, "diffusers"),
             "vae": (VAELoader, "diffusers"),
@@ -96,6 +97,10 @@ class ComponentLoader(ABC):
             "image_encoder": (ImageEncoderLoader, "transformers"),
             "upsampler": (UpsamplerLoader, "diffusers"),
             "upsampler_2": (UpsamplerLoader, "diffusers"),
+            # Stable Audio's `StableAudioMultiConditioner` bundles T5 +
+            # NumberConditioners; not a pure text encoder, so it gets
+            # its own loader.
+            "conditioner": (ConditionerLoader, "fastvideo"),
         }
 
         if module_type in module_loaders:
@@ -589,6 +594,33 @@ class TokenizerLoader(ComponentLoader):
 class VAELoader(ComponentLoader):
     """Loader for VAE."""
 
+    @staticmethod
+    def _find_gen3c_tokenizer_checkpoint(model_path: str) -> str | None:
+        """Locate tokenizer-backed VAE checkpoint used by GEN3C integration."""
+        candidates = [
+            os.path.join(model_path, "tokenizer.pth"),
+            os.path.join(os.path.dirname(model_path), "tokenizer",
+                         "tokenizer.pth"),
+        ]
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    @staticmethod
+    def _find_gen3c_jit_tokenizer_dir(model_path: str) -> str | None:
+        """Locate official tokenizer JIT assets (encoder/decoder/mean_std)."""
+        candidates = [
+            model_path,
+            os.path.join(os.path.dirname(model_path), "tokenizer"),
+        ]
+        required = ("encoder.jit", "decoder.jit", "mean_std.pt")
+        for directory in candidates:
+            if all(os.path.exists(os.path.join(directory, name))
+                   for name in required):
+                return directory
+        return None
+
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the VAE based on the model path, and inference args."""
         model_path = str(model_path)
@@ -624,8 +656,68 @@ class VAELoader(ComponentLoader):
             if fastvideo_args.pipeline_config.vae_precision
             else torch.bfloat16
         ):
+            pipeline_name = fastvideo_args.pipeline_config.__class__.__name__
+            is_gen3c = pipeline_name.startswith("Gen3C")
+            is_cosmos25 = pipeline_name == "Cosmos25Config"
+
+            # GEN3C: prefer tokenizer-backed VAE checkpoint when available.
+            # This aligns latent conditioning with the GEN3C temporal contract.
+            if is_gen3c and class_name in (
+                    "AutoencoderKLWan", "AutoencoderKLGen3CTokenizer"):
+                from fastvideo.models.vaes.gen3c_tokenizer_vae import (
+                    AutoencoderKLGen3CTokenizer)
+
+                dtype = PRECISION_TO_TYPE[
+                    fastvideo_args.pipeline_config.vae_precision]
+                num_frames = int(
+                    getattr(fastvideo_args.pipeline_config, "num_frames", 121))
+                state_t = int(
+                    getattr(fastvideo_args.pipeline_config, "state_t", 16))
+                if state_t > 1 and num_frames > 1:
+                    target_temporal = max(1,
+                                          (num_frames - 1) // (state_t - 1))
+                else:
+                    target_temporal = 8
+
+                jit_dir = self._find_gen3c_jit_tokenizer_dir(model_path)
+                if jit_dir is not None:
+                    vae = AutoencoderKLGen3CTokenizer.from_jit_tokenizer(
+                        jit_dir,
+                        device=target_device,
+                        dtype=dtype,
+                        target_temporal_compression=target_temporal,
+                        pixel_chunk_duration=num_frames,
+                    )
+                    logger.info(
+                        "Loaded GEN3C tokenizer VAE from JIT assets in %s (target temporal compression=%d)",
+                        jit_dir,
+                        target_temporal,
+                    )
+                    return vae.eval()
+
+                tokenizer_ckpt = self._find_gen3c_tokenizer_checkpoint(
+                    model_path)
+                if tokenizer_ckpt is not None:
+                    vae = AutoencoderKLGen3CTokenizer.from_tokenizer_checkpoint(
+                        tokenizer_ckpt,
+                        device=target_device,
+                        dtype=dtype,
+                        target_temporal_compression=target_temporal,
+                        pixel_chunk_duration=num_frames,
+                    )
+                    logger.info(
+                        "Loaded GEN3C tokenizer VAE from %s (target temporal compression=%d)",
+                        tokenizer_ckpt,
+                        target_temporal,
+                    )
+                    return vae.eval()
+                logger.warning(
+                    "GEN3C tokenizer VAE checkpoint not found near %s; falling back to configured class %s.",
+                    model_path,
+                    class_name,
+                )
+
             # Cosmos2.5 uses a Wan2.1 VAE stored as `tokenizer.safetensors` under the VAE folder.
-            is_cosmos25 = fastvideo_args.pipeline_config.__class__.__name__ == "Cosmos25Config"
             if class_name == "AutoencoderKLWan" and is_cosmos25:
                 from fastvideo.models.vaes.cosmos25wanvae import Cosmos25WanVAE
 
@@ -926,6 +1018,61 @@ class SchedulerLoader(ComponentLoader):
         if fastvideo_args.pipeline_config.flow_shift is not None:
             scheduler.set_shift(fastvideo_args.pipeline_config.flow_shift)
         return scheduler
+
+
+class ConditionerLoader(ComponentLoader):
+    """Loader for multi-conditioner components (e.g. Stable Audio's
+    `StableAudioMultiConditioner`, which bundles T5 + NumberConditioners
+    and is neither a pure text encoder nor a Diffusers-shaped module).
+    Reads `<subfolder>/config.json` to resolve the class via
+    `ModelRegistry`, instantiates with no args (the class pulls its own
+    defaults from its FastVideo config), then loads
+    `diffusion_pytorch_model.safetensors` non-strictly so externally
+    fetched sub-encoders (T5) don't trip the missing-key check.
+    """
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        config = get_diffusers_config(model=model_path)
+        class_name = config.pop("_class_name", None)
+        config.pop("_name_or_path", None)
+        if class_name is None:
+            raise ValueError(
+                f"Conditioner config at {model_path} is missing the "
+                f"`_class_name` attribute required to resolve a model class.")
+        model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+
+        target_device = get_local_torch_device()
+        precision = getattr(fastvideo_args.pipeline_config, "precision", "fp16")
+        target_dtype = PRECISION_TO_TYPE.get(precision, torch.float16)
+
+        # Without this merge the model falls back to its dataclass
+        # defaults (e.g. SA-1.0's 3-conditioner spec — wrong for SA-small).
+        from dataclasses import fields as _fields
+        from fastvideo.configs.models.encoders import (
+            StableAudioConditionerConfig, )
+        if model_cls.__name__ == "StableAudioMultiConditioner":
+            cond_config = StableAudioConditionerConfig()
+            # `update_model_arch` is strict (raises on unknown keys); the
+            # converter writes a few non-arch keys (`_class_name`,
+            # `_diffusers_version`, `_name_or_path`) that must be filtered
+            # out first.
+            valid = {f.name for f in _fields(cond_config.arch_config)}
+            cond_config.update_model_arch({k: v for k, v in config.items() if k in valid})
+            with set_default_torch_dtype(target_dtype):
+                model = model_cls(cond_config)
+        else:
+            with set_default_torch_dtype(target_dtype):
+                model = model_cls()
+
+        weights = os.path.join(str(model_path), "diffusion_pytorch_model.safetensors")
+        if not os.path.isfile(weights):
+            raise FileNotFoundError(
+                f"Conditioner weights not found: {weights}")
+        state = safetensors_load_file(weights)
+        # Non-strict: T5 weights live outside this checkpoint (fetched in
+        # the conditioner's `__init__` from the standard HF repo).
+        model.load_state_dict(state, strict=False)
+        return model.to(device=target_device, dtype=target_dtype).eval()
 
 
 class UpsamplerLoader(ComponentLoader):

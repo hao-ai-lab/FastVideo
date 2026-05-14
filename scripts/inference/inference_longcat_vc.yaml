@@ -1,0 +1,43 @@
+# Run with:
+#   fastvideo generate --config scripts/inference/inference_longcat_vc.yaml
+generator:
+  model_path: FastVideo/LongCat-Video-VC-Diffusers
+  engine:
+    num_gpus: 1
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      pin_cpu_memory: false
+  pipeline:
+    experimental:
+      enable_bsa: false
+request:
+  prompt: >-
+    A person rides a motorcycle along a long, straight road that stretches
+    between a body of water and a forested hillside. The rider steadily
+    accelerates, keeping the motorcycle centered between the guardrails, while
+    the scenery passes by on both sides. The video captures the journey from
+    the rider's perspective, emphasizing the sense of motion and adventure.
+  negative_prompt: >-
+    Bright tones, overexposed, static, blurred details, subtitles, style,
+    works, paintings, images, static, overall gray, worst quality, low
+    quality, JPEG compression residue, ugly, incomplete, extra fingers,
+    poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen
+    limbs, fused fingers, still picture, messy background, three legs, many
+    people in the background, walking backwards
+  inputs:
+    video_path: assets/motorcycle.mp4
+  sampling:
+    seed: 42
+    num_frames: 93
+    height: 480
+    width: 832
+    fps: 15
+    num_inference_steps: 50
+    guidance_scale: 4.0
+  extensions:
+    num_cond_frames: 13
+  output:
+    output_path: outputs_video/longcat_vc

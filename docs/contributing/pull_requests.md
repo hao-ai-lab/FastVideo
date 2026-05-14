@@ -25,10 +25,12 @@ Mergify before any merge is allowed.
 | `[refactor]` | Code restructuring with no behavior change |
 | `[perf]` | Performance improvement |
 | `[ci]` | CI/CD or build tooling changes |
+| `[infra]` | Repo infrastructure: agent tooling, debug hooks, conversion scripts, dev infra |
 | `[doc]` or `[docs]` | Documentation only |
 | `[misc]` or `[chore]` | Housekeeping, dependency bumps, minor cleanup |
 | `[kernel]` | CUDA kernel changes in `fastvideo-kernel/` |
 | `[new-model]` | Adding a new model or pipeline |
+| `[skill]` or `[skills]` | Agent skills under `.agents/skills/` or `.claude/skills/` |
 
 **Examples:**
 
@@ -38,6 +40,8 @@ Mergify before any merge is allowed.
 [refactor] Restructure distributed attention dispatch
 [docs] Add LoRA finetuning guide
 [new-model] Port HunyuanVideo 1.5 to FastVideo
+[infra] Add activation trace hooks for pipeline debugging
+[skill] Add add-model agent skill
 ```
 
 If your title is missing the tag, Mergify will post a comment listing the valid formats.
@@ -51,8 +55,8 @@ Labels are applied automatically based on your PR title and the files you change
 need to set them manually.
 
 **Type label** — set from the `[tag]` in your title:
-`type: feat`, `type: bugfix`, `type: refactor`, `type: perf`, `type: ci`, `type: docs`,
-`type: misc`, `type: new-model`
+`type: feat`, `type: bugfix`, `type: refactor`, `type: perf`, `type: ci`, `type: infra`,
+`type: docs`, `type: misc`, `type: new-model`, `type: skill`
 
 **Scope labels** — set from which files you modified (multiple labels can apply):
 `scope: training`, `scope: inference`, `scope: attention`, `scope: kernel`, `scope: data`,
@@ -62,7 +66,7 @@ need to set them manually.
 
 | Label | Who sets it | Meaning |
 |-------|-------------|---------|
-| `ready` | You (`/merge` comment) or a maintainer | Requests entry into the Merge Queue |
+| `ready` | You (`/merge` comment) or a maintainer | Triggers Full Suite and enables auto-merge |
 | `needs-rebase` | Mergify (automatic) | Your PR has conflicts; rebase against `main` |
 | `do-not-merge` | Maintainer | Blocks merge regardless of CI status |
 
@@ -82,11 +86,11 @@ hooks: yapf, ruff, mypy, codespell, pymarkdown, actionlint, and check-filenames.
 Buildkite runs GPU tests only for the components you changed. If you only modified
 `fastvideo/models/vaes/`, only VAE Tests run. Tests run in parallel.
 
-**Tier 3: Full Suite (~60-90 min) — runs only in the Merge Queue**
+**Tier 3: Full Suite (~60-90 min) — triggered by the `ready` label**
 
-When your PR enters the Merge Queue, Buildkite runs the complete test suite: SSIM
-regression, LoRA inference and training, distillation, self-forcing, VSA, VMoBA,
-performance benchmarks, and API server tests.
+When you comment `/merge` (or a maintainer adds the `ready` label), Buildkite runs the
+complete test suite on your PR branch: SSIM regression, LoRA inference and training,
+distillation, self-forcing, VSA, VMoBA, performance benchmarks, and API server tests.
 
 ---
 
@@ -99,14 +103,14 @@ performance benchmarks, and API server tests.
 3. Fix any pre-commit failures locally (`pre-commit run --all-files`) and push again.
 4. Wait for at least one approving review.
 5. Once approved and pre-commit is green, comment `/merge` on the PR.
-6. Mergify adds the `ready` label and checks queue conditions (approval, no draft, no
-   conflicts, no `do-not-merge`).
-7. If conditions pass, Mergify creates a `mergify/merge-queue/<branch>` branch and runs
-   the Full Suite.
-8. If all Full Suite tests pass, your PR is squash-merged to `main` automatically. Your
-   branch is deleted.
-9. If a Full Suite test fails, the PR is ejected from the queue and Mergify posts a comment
-   with a link to the Buildkite build. Fix the issue, push, and comment `/merge` again.
+6. The `ready` label is added, which triggers the Full Suite on your PR branch.
+7. Mergify also auto-rebases your branch against `main` if it is behind and conflict-free.
+8. If all Full Suite tests pass and all merge conditions are met (approval, valid title,
+   pre-commit green, fastcheck green, no draft, no conflicts), Mergify squash-merges to
+   `main` automatically. Your branch is deleted.
+9. If a Full Suite test fails, check the Buildkite build log for the failing step. Fix the
+   issue, push, and comment `/merge` again. You can also re-run individual failed tests
+   with `/test <name>` — see below.
 
 !!! note
     Only contributors with write permission to the repository can trigger slash commands.
@@ -117,7 +121,7 @@ performance benchmarks, and API server tests.
 
 ## Running Tests On Demand
 
-Comment on your PR to trigger specific tests without waiting for the Merge Queue.
+Comment on your PR to trigger specific tests independently of the auto-merge flow.
 
 **Trigger the entire Full Suite:**
 
@@ -150,9 +154,14 @@ Comment on your PR to trigger specific tests without waiting for the Merge Queue
 /test vmoba            # VMoBA inference tests
 /test performance      # Performance benchmarks
 /test api              # API server integration tests
+/test pre-commit       # Pre-commit checks on PR code
 ```
 
 The workflow reacts with a 🚀 emoji to confirm the command was received.
+
+When you re-run an individual test with `/test <name>`, the new result overwrites the
+original failed check (same Buildkite check name). Once all tests in a tier pass, the
+`fastcheck-passed` or `full-suite-passed` status is automatically updated.
 
 ---
 
@@ -182,8 +191,8 @@ Common quick fixes:
 Update your title to start with a valid type tag. The Mergify merge protection check
 re-evaluates automatically after you save the title.
 
-Valid tags: `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`, `ci`, `doc`, `docs`,
-`misc`, `chore`, `kernel`, `new-model`
+Valid tags: `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`, `ci`, `infra`, `doc`,
+`docs`, `misc`, `chore`, `kernel`, `new-model`, `skill`, `skills`
 
 ### My PR has merge conflicts (`needs-rebase` label)
 
@@ -198,10 +207,10 @@ git push --force-with-lease
 
 Mergify removes the `needs-rebase` label automatically once conflicts are resolved.
 
-### Merge Queue ejected my PR
+### Full Suite failed after `/merge`
 
-The Full Suite found a regression. The Mergify comment links to the Buildkite build. Check
-the failing step's output for assertion errors or tracebacks.
+The Full Suite found a regression. Check the failing Buildkite step's output for assertion
+errors or tracebacks.
 
 Common causes:
 
@@ -210,7 +219,7 @@ Common causes:
 - GPU memory issue (some tests require specific hardware like L40S or H100)
 - Kernel build failure (if you changed `fastvideo-kernel/`)
 
-After fixing, push and comment `/merge` to re-queue.
+After fixing, push and comment `/merge` again.
 
 ### I'm an external contributor without write permission
 

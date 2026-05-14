@@ -226,6 +226,9 @@ callbacks:
 | Wan T2V finetune | `fastvideo/training/wan_training_pipeline.py` | Standard text-to-video finetune / LoRA |
 | Wan I2V finetune | `fastvideo/training/wan_i2v_training_pipeline.py` | Image-to-video (first frame conditioned) |
 | MatrixGame finetune | `fastvideo/training/matrixgame_training_pipeline.py` | Action-conditioned world model |
+| MatrixGame AR diffusion | `fastvideo/training/matrixgame_ar_diffusion_pipeline.py` | AR diffusion-forcing training |
+| MatrixGame ODE-init | `fastvideo/training/matrixgame_ode_causal_pipeline.py` | ODE-trajectory init |
+| MatrixGame self-forcing distill | `fastvideo/training/matrixgame_self_forcing_distillation_pipeline.py` | Self-forcing distillation |
 | LTX-2 finetune | `fastvideo/training/ltx2_training_pipeline.py` | LTX-2 architecture finetuning |
 | Wan DMD distillation | `fastvideo/training/wan_distillation_pipeline.py` | Few-step distillation via DMD |
 | Self-Forcing distill | `fastvideo/training/wan_self_forcing_distillation_pipeline.py` | Causal streaming distillation |

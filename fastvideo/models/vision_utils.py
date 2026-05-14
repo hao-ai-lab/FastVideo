@@ -183,7 +183,7 @@ def _load_video_with_ffmpeg(
     except AttributeError as e:
         raise AttributeError(
             "Unable to find an ffmpeg installation on your machine. "
-            "Please install via `pip install imageio-ffmpeg`") from e
+            "Please install via `uv pip install imageio-ffmpeg`") from e
 
     pil_images = []
     original_fps = None

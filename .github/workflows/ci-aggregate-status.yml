@@ -1,0 +1,80 @@
+name: Aggregate Test Status
+
+on:
+  status:
+
+permissions:
+  statuses: write
+
+jobs:
+  aggregate:
+    if: >-
+      github.event.context == 'direct-test-completed'
+      && github.event.state == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check and update aggregate status
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const sha = context.payload.sha;
+
+            const { data } = await github.rest.repos.getCombinedStatusForRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: sha,
+              per_page: 100,
+            });
+
+            const bkStatuses = data.statuses.filter(
+              s => s.context.startsWith('buildkite/ci/')
+            );
+
+            const FASTCHECK_PREFIX = 'buildkite/ci/microscope-';
+            const FULL_SUITE_PREFIXES = [
+              'buildkite/ci/test-tube-',
+              'buildkite/ci/bar-chart-',
+            ];
+
+            const fastcheck = bkStatuses.filter(
+              s => s.context.startsWith(FASTCHECK_PREFIX)
+            );
+            const fullSuite = bkStatuses.filter(
+              s => FULL_SUITE_PREFIXES.some(p => s.context.startsWith(p))
+            );
+
+            if (
+              fastcheck.length > 0
+              && fastcheck.every(s => s.state === 'success')
+            ) {
+              core.info(
+                `All ${fastcheck.length} fastcheck tests passed — updating fastcheck-passed`
+              );
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha,
+                state: 'success',
+                context: 'fastcheck-passed',
+                description:
+                  `All ${fastcheck.length} fastcheck tests passed`,
+              });
+            }
+
+            if (
+              fullSuite.length > 0
+              && fullSuite.every(s => s.state === 'success')
+            ) {
+              core.info(
+                `All ${fullSuite.length} full suite tests passed — updating full-suite-passed`
+              );
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha,
+                state: 'success',
+                context: 'full-suite-passed',
+                description:
+                  `All ${fullSuite.length} full suite tests passed`,
+              });
+            }

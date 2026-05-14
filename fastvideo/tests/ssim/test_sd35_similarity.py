@@ -6,7 +6,7 @@ import os
 import pytest
 import torch
 
-from fastvideo.configs.sample.sd35 import SD35SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
     run_text_to_video_similarity_test,
@@ -60,7 +60,8 @@ SD35_PARAMS = {
     "neg_prompt": "lowres, blurry",
 }
 
-_SD35_FULL_QUALITY_DEFAULTS = SD35SamplingParam()
+_SD35_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
+    SD35_MODEL_PATH)
 SD35_FULL_QUALITY_PARAMS = {
     "num_gpus": 1,
     "model_path": SD35_MODEL_PATH,

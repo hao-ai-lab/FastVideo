@@ -243,7 +243,7 @@ for step in range(start_step, max_steps):
 
 ```bash
 # Install
-uv pip install -e .[dev]
+uv pip install -e ".[dev]"
 
 # Run DMD2 distillation on Wan 2.1
 torchrun --nproc_per_node=8 -m fastvideo.train.entrypoint.train \

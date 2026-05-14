@@ -27,7 +27,8 @@ Useful variables:
 - `FASTVIDEO_LOGGING_LEVEL`: `DEBUG`, `INFO`, `WARNING`, `ERROR`
 - `FASTVIDEO_STAGE_LOGGING`: print per-stage timings during pipeline execution
 - `FASTVIDEO_ATTENTION_BACKEND`: force an attention backend (for example
-  `TORCH_SDPA` or `FLASH_ATTN`)
+  `TORCH_SDPA`, `FLASH_ATTN`, `SAGE_ATTN_THREE`, or
+  `ATTN_QAT_INFER`, or `ATTN_QAT_TRAIN`)
 
 ## Common Failure Modes
 
@@ -52,7 +53,11 @@ If forcing a backend fails, verify optional dependencies are installed:
 - `VIDEO_SPARSE_ATTN`: `fastvideo-kernel`
 - `SLIDING_TILE_ATTN`: STA legacy workflow in
   `sta_do_not_delete` + `fastvideo-kernel`
-- `SAGE_ATTN` / `SAGE_ATTN_THREE`: SageAttention packages
+- `SAGE_ATTN`: SageAttention package
+- `SAGE_ATTN_THREE`: upstream `sageattn3` package
+- `ATTN_QAT_INFER`: `fastvideo-kernel` checkout/source install that exposes
+  `attn_qat_infer`
+- `ATTN_QAT_TRAIN`: `fastvideo-kernel` install exposing `fastvideo_kernel`
 
 As a fallback, use:
 

@@ -57,7 +57,7 @@ class I3DFeatureExtractor(nn.Module):
         except Exception as e:
             raise RuntimeError(f"Failed to load I3D model from Hugging Face Hub. Error: {e}\n"
                                f"Ensure you have internet connection and huggingface_hub installed:\n"
-                               f"pip install huggingface_hub") from e
+                               f"uv pip install huggingface_hub") from e
 
     def preprocess(self, videos: torch.Tensor) -> torch.Tensor:
         """

@@ -30,7 +30,8 @@ FastVideo-WorldModel/
 │   │   │   ├── fine_tuning/   #     FineTuneMethod, DiffusionForcingSFTMethod
 │   │   │   └── distribution_matching/  # DMD2Method, SelfForcingMethod
 │   │   ├── models/            #   Per-role model wrappers (ModelBase, CausalModelBase)
-│   │   │   └── wan/           #     WanModel, WanCausalModel
+│   │   │   ├── wan/           #     WanModel, WanCausalModel
+│   │   │   └── matrixgame/    #     MatrixGameModel, MatrixGameCausalModel
 │   │   ├── callbacks/         #   Composable hooks (grad_clip, ema, validation)
 │   │   └── utils/             #   Config, builder, checkpoint, optimizer, tracking
 │   ├── training/              # Legacy training infrastructure (being phased out)
@@ -119,7 +120,7 @@ FastVideo-WorldModel/
 ## Build & Test Commands
 
 ```bash
-uv pip install -e .[dev]                          # Editable install
+uv pip install -e ".[dev]"                        # Editable install
 pre-commit run --all-files                        # Lint/format/spell
 pytest tests/                                     # Top-level tests
 pytest fastvideo/tests/ -v                        # Package tests

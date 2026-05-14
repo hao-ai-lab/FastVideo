@@ -48,8 +48,6 @@ class ModelConfig:
         for key, value in source_model_dict.items():
             if key in valid_fields:
                 setattr(arch_config, key, value)
-            else:
-                raise AttributeError(f"{type(arch_config).__name__} has no field '{key}'")
 
         if hasattr(arch_config, "__post_init__"):
             arch_config.__post_init__()

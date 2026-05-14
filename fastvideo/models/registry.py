@@ -40,8 +40,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "LTX2Transformer3DModel": ("dits", "ltx2", "LTX2Transformer3DModel"),
     "SD3Transformer2DModel": ("dits", "sd3", "SD3Transformer2DModel"),
     "LingBotWorldTransformer3DModel": ("dits", "lingbotworld", "LingBotWorldTransformer3DModel"),
-    "Kandinsky5Transformer3DModel":
-    ("dits", "kandinsky5", "Kandinsky5Transformer3DModel"),
+    "Gen3CTransformer3DModel": ("dits", "gen3c", "Gen3CTransformer3DModel"),
+    "Kandinsky5Transformer3DModel": ("dits", "kandinsky5", "Kandinsky5Transformer3DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
@@ -83,7 +83,13 @@ _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo15": ("vaes", "hunyuan15vae", "AutoencoderKLHunyuanVideo15"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
     "AutoencoderKL": ("vaes", "autoencoder_kl", "AutoencoderKL"),
+    "AutoencoderKLGen3CTokenizer":
+    ("vaes", "gen3c_tokenizer_vae", "AutoencoderKLGen3CTokenizer"),
+    "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
     "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
+    # `stable-audio-open-1.0/vae/config.json` ships `_class_name="AutoencoderOobleck"`
+    # (Diffusers' name); FastVideo's class is `OobleckVAE`.
+    "AutoencoderOobleck": ("vaes", "oobleck", "OobleckVAE"),
 }
 
 _AUDIO_MODELS = {

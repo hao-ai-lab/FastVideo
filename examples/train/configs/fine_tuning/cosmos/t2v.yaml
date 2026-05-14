@@ -1,0 +1,73 @@
+# Cosmos Predict2 2B T2V finetune config.
+#
+# Data must be preprocessed with Cosmos VAE + T5 text encoder
+# into parquet format before training.
+
+models:
+  student:
+    _target_: fastvideo.train.models.cosmos.CosmosModel
+    init_from: nvidia/Cosmos-Predict2-2B-Video2World
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 8
+    hsdp_shard_dim: 1
+
+  data:
+    data_path: data/cosmos_preprocessed
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    # Cosmos VAE: 4x temporal, 8x spatial compression.
+    # 93 frames -> 24 latent frames, 480x832 -> 60x104
+    num_latent_t: 24
+    num_height: 480
+    num_width: 832
+    num_frames: 93
+
+  optimizer:
+    learning_rate: 1.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 5000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/cosmos_finetune
+    training_state_checkpointing_steps: 500
+    checkpoints_total_limit: 3
+    resume_from_checkpoint: latest
+
+  tracker:
+    project_name: fastvideo_cosmos
+    run_name: cosmos_finetune
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.cosmos.cosmos_pipeline.Cosmos2VideoToWorldPipeline
+    dataset_file: data/cosmos_preprocessed/validation_prompts.json
+    every_steps: 100
+    sampling_steps: [50]
+    guidance_scale: 6.0
+
+pipeline:
+  flow_shift: 1.0

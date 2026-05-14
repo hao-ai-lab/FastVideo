@@ -1,30 +1,13 @@
-queue_rules:
-  - name: default
-    queue_conditions:
-      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
-      - check-success~=pre-commit
-      - check-success=fastcheck-passed
-      - "#approved-reviews-by>=1"
-      - -draft
-      - -conflict
-      - -closed
-      - label!=do-not-merge
-    merge_conditions:
-      - check-success=full-suite-passed
-    merge_method: squash
-    commit_message_template: |
-      {{ title }} (#{{ number }})
-
-      {{ body }}
-
 merge_protections:
   - name: PR merge requirements
     if:
       - base = main
     success_conditions:
-      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
+      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model|skill|skills|infra)\\]"
+      - "#approved-reviews-by>=1"
       - check-success~=pre-commit
       - check-success=fastcheck-passed
+      - check-success=full-suite-passed
 
 pull_request_rules:
 
@@ -96,6 +79,22 @@ pull_request_rules:
       label:
         add: ["type: new-model"]
 
+  - name: "label type: infra"
+    conditions:
+      - "title~=(?i)^\\[infra\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: infra"]
+
+  - name: "label type: skill"
+    conditions:
+      - "title~=(?i)^\\[skills?\\]"
+      - -closed
+    actions:
+      label:
+        add: ["type: skill"]
+
   # ============================================================
   # Scope labels (from changed files)
   # ============================================================
@@ -122,7 +121,7 @@ pull_request_rules:
           - files~=^fastvideo/pipelines/samplers/
           - files~=^fastvideo/entrypoints/
           - files~=^fastvideo/worker/
-          - files~=^fastvideo/configs/sample/
+          - files~=^fastvideo/api/sampling_param
           - files~=^fastvideo/configs/pipelines/
           - files~=^examples/inference/
       - -closed
@@ -239,32 +238,6 @@ pull_request_rules:
 
           For future commits, `pre-commit` will run automatically on changed files before each commit.
 
-  # ============================================================
-  # Buildkite CI failure notification
-  # ============================================================
-
-  - name: comment on Buildkite CI failure
-    conditions:
-      - check-failure~=buildkite/ci
-      - -closed
-    actions:
-      comment:
-        message: |
-          ## ❌ CI tests failed
-
-          @{{author}} — to see what failed:
-          1. Scroll to the **Checks** section below
-          2. Find the check marked with ❌ (e.g. `buildkite/ci/microscope-transformer-tests`)
-          3. Click **Details** to view the full build log
-
-          Or [view all builds for this branch on Buildkite →](https://buildkite.com/fastvideo/ci/builds?branch={{head}})
-
-          **Common causes:**
-          - **Assertion error / test failure** — check the failing test's traceback
-          - **Import error** — new dependency missing from `pyproject.toml`
-          - **OOM** — some tests need specific GPUs (L40S, H100 NVL)
-
-          If the failure looks unrelated to your changes, comment why and a maintainer will review.
 
   # ============================================================
   # Merge conflict detection
@@ -298,25 +271,44 @@ pull_request_rules:
       label:
         remove: [needs-rebase]
 
-  - name: enter merge queue when ready and approved
+  # ============================================================
+  # Auto-merge and auto-rebase
+  # ============================================================
+
+  - name: auto-merge when ready and all checks pass
     conditions:
       - label=ready
+      - "title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model|skill|skills|infra)\\]"
+      - "#approved-reviews-by>=1"
+      - check-success~=pre-commit
+      - check-success=fastcheck-passed
+      - check-success=full-suite-passed
+      - -conflict
+      - -closed
+      - -draft
     actions:
-      queue:
-        name: default
+      merge:
+        method: squash
 
-  - name: remove ready label on dequeue
+  - name: auto-update when ready
     conditions:
-      - queue-dequeue-reason!=none
+      - label=ready
+      - "#approved-reviews-by>=1"
+      - -conflict
+      - -closed
+      - -draft
     actions:
-      label:
-        remove: [ready]
+      update: {}
+
+  # ============================================================
+  # PR title format help
+  # ============================================================
 
   - name: comment on invalid PR title format
     conditions:
       - -closed
       - -draft
-      - "-title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model)\\]"
+      - "-title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model|skill|skills|infra)\\]"
     actions:
       comment:
         message: |
@@ -328,11 +320,15 @@ pull_request_rules:
           - `[refactor] Restructure training pipeline`
           - `[perf] Optimize attention kernel`
           - `[ci] Update test infrastructure`
+          - `[infra] Add activation trace hooks`
           - `[docs] Add inference guide`
           - `[misc] Clean up configs`
           - `[new-model] Port Flux2 to FastVideo`
+          - `[skill] Add add-model agent skill`
 
-          Valid tags: `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`, `ci`, `doc`, `docs`, `misc`, `chore`, `kernel`, `new-model`
+          Valid tags: `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`, `ci`, `infra`, `doc`, `docs`, `misc`, `chore`, `kernel`, `new-model`, `skill`, `skills`
 
           Please update your PR title and the merge protection check will pass automatically.
 
+merge_protections_settings:
+  reporting_method: check-runs

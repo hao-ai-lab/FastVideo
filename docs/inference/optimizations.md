@@ -54,7 +54,7 @@ FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN python example.py
 We recommend always installing [Flash Attention 2](https://github.com/Dao-AILab/flash-attention):
 
 ```bash
-pip install flash-attn==2.7.4.post1 --no-build-isolation
+uv pip install flash-attn==2.7.4.post1 --no-build-isolation
 ```
 
 And if using a Hopper+ GPU (ie H100), installing [Flash Attention 3](https://github.com/Dao-AILab/flash-attention?tab=readme-ov-file#flashattention-3-beta-release) by compiling it from source (takes about 10 minutes for me):
@@ -63,9 +63,63 @@ And if using a Hopper+ GPU (ie H100), installing [Flash Attention 3](https://git
 git clone https://github.com/Dao-AILab/flash-attention.git && cd flash-attention
 
 cd hopper
-pip install ninja
+uv pip install ninja
 python setup.py install
 ```
+
+### FP4 Flash Attention 4 (Blackwell only)
+
+**`FLASH_ATTN`** with **`FASTVIDEO_NVFP4_FA4=1`**
+
+On Blackwell GPUs (B200/B300), you can enable FP4 quantized Q/K attention for up to **1.39x kernel speedup** over BF16 FA4, peaking at **1801 TFLOPS**. This quantizes Q and K to NVFP4 E2M1 with per-block E4M3 scale factors while keeping V in BF16.
+
+See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040) and [flash-attention-fp4 benchmark results](https://github.com/hao-ai-lab/flash-attention-fp4/blob/fp4/flash_attn/cute/README.md) for details.
+
+#### Requirements
+
+- **GPU**: NVIDIA Blackwell (sm100a or sm103a) — B200, B300, GB200, GB300
+- **CUDA**: 12.8+
+- **Python**: 3.10 or 3.11
+
+#### Installation
+
+Install the FP4 flash attention kernel and its dependencies:
+
+```bash
+pip install "git+ssh://git@github.com/hao-ai-lab/flash-attention-fp4.git@fp4#subdirectory=flash_attn/cute"
+```
+
+This installs the FP4 kernel and all dependencies (nvidia-cutlass-dsl, flashinfer-python, apache-tvm-ffi).
+
+#### Usage
+
+Enable FP4 attention via environment variables:
+
+```bash
+FASTVIDEO_NVFP4_FA4=1 CUTE_DSL_ENABLE_TVM_FFI=1 python examples/inference/optimizations/fp4_attn_wan2_1_1_3b.py --nvfp4_fa4
+```
+
+Or in Python:
+
+```python
+import os
+os.environ["FASTVIDEO_NVFP4_FA4"] = "1"
+os.environ["CUTE_DSL_ENABLE_TVM_FFI"] = "1"
+
+from fastvideo import VideoGenerator
+gen = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    num_gpus=1,
+    use_fsdp_inference=False,  # FSDP is incompatible with FP4 pointer path
+)
+gen.generate_video(prompt="A raccoon in sunflowers", save_video=True)
+```
+
+#### Known Limitations
+
+- `use_fsdp_inference=True` is incompatible with the FP4 path (FSDP shards invalidate tensor pointers)
+- Per-call cosine similarity vs BF16: ~0.99 (slight quantization error accumulates over denoising steps)
+- Only supports `headdim >= 128`
 
 ### Sliding Tile Attention (Archived)
 
@@ -98,7 +152,7 @@ To use [SageAttention](https://github.com/thu-ml/SageAttention) 2.1.1, please co
 ```bash
 git clone https://github.com/thu-ml/SageAttention.git
 cd sageattention
-python setup.py install  # or pip install -e .
+python setup.py install  # or uv pip install -e .
 ```
 
 ### Sage Attention 3

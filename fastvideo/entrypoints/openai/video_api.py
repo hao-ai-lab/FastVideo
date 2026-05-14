@@ -19,7 +19,10 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse
 
+from fastvideo.api.compat import explicit_request_updates
+from fastvideo.api.schema import GenerationRequest
 from fastvideo.entrypoints.openai.state import (
+    get_default_request,
     get_generator,
     get_output_dir,
     get_server_args,
@@ -42,49 +45,73 @@ logger = init_logger(__name__)
 router = APIRouter(prefix="/v1/videos", tags=["videos"])
 
 
-def _build_generation_kwargs(request_id: str, req: VideoGenerationsRequest) -> dict[str, Any]:
+def _build_generation_kwargs(
+    request_id: str,
+    req: VideoGenerationsRequest,
+    default_request: GenerationRequest | None = None,
+) -> dict[str, Any]:
+    """Build a flat kwargs dict for ``generator.generate_video``.
 
+    Precedence (highest to lowest):
+      1. Request body — only fields the client explicitly sent
+         (``req.model_fields_set``, Pydantic v2).
+      2. ``default_request`` — only fields the operator explicitly set in
+         the serve YAML, projected via ``explicit_request_updates``. Schema
+         defaults on the dataclass are *not* treated as defaults here.
+      3. Hardcoded fallback (e.g. ``fps=24`` when neither side set it).
+
+    Why gate on ``model_fields_set`` / explicit paths? Both the request
+    Pydantic model and the ``GenerationRequest`` dataclass carry schema
+    defaults (e.g. ``seed=1024``, ``num_frames=125``). Without the gate
+    those would masquerade as intent and shadow the other side — the
+    gate preserves "operator pinned it" vs. "dataclass happened to have
+    that default."
+    """
     kwargs: dict[str, Any] = {}
+    if default_request is not None:
+        kwargs.update(explicit_request_updates(default_request))
+
+    body_set = req.model_fields_set
     kwargs["prompt"] = req.prompt
 
-    # Resolution
-    if req.size:
+    if "size" in body_set and req.size:
         w, h = parse_size(req.size)
         if w is not None and h is not None:
             kwargs["width"] = w
             kwargs["height"] = h
 
-    # Frame count / duration
-    fps = req.fps if req.fps is not None else 24
-    kwargs["fps"] = fps
+    if "fps" in body_set and req.fps is not None:
+        kwargs["fps"] = req.fps
 
-    if req.num_frames is not None:
+    if "num_frames" in body_set and req.num_frames is not None:
         kwargs["num_frames"] = req.num_frames
-    elif req.seconds is not None:
+    elif "seconds" in body_set and req.seconds is not None:
+        fps = kwargs.get("fps", 24)
         kwargs["num_frames"] = fps * req.seconds
 
-    # Sampling parameters
-    if req.seed is not None:
+    if "seed" in body_set and req.seed is not None:
         kwargs["seed"] = req.seed
-    if req.num_inference_steps is not None:
+    if ("num_inference_steps" in body_set and req.num_inference_steps is not None):
         kwargs["num_inference_steps"] = req.num_inference_steps
-    if req.guidance_scale is not None:
+    if "guidance_scale" in body_set and req.guidance_scale is not None:
         kwargs["guidance_scale"] = req.guidance_scale
-    if req.guidance_scale_2 is not None:
+    if "guidance_scale_2" in body_set and req.guidance_scale_2 is not None:
         kwargs["guidance_scale_2"] = req.guidance_scale_2
-    if req.negative_prompt is not None:
+    if "negative_prompt" in body_set and req.negative_prompt is not None:
         kwargs["negative_prompt"] = req.negative_prompt
-    if req.enable_teacache:
+    if "enable_teacache" in body_set and req.enable_teacache:
         kwargs["enable_teacache"] = True
-    if req.true_cfg_scale is not None:
+    if "true_cfg_scale" in body_set and req.true_cfg_scale is not None:
         kwargs["true_cfg_scale"] = req.true_cfg_scale
 
-    # Image-to-video input
-    if req.input_reference is not None:
+    if "input_reference" in body_set and req.input_reference is not None:
         kwargs["image_path"] = req.input_reference
 
-    # Output path
-    output_dir = req.output_path or os.path.join(get_output_dir(), "videos")
+    kwargs.setdefault("fps", 24)
+
+    default_output_path = kwargs.pop("output_path", None)
+    body_output_dir = req.output_path if "output_path" in body_set else None
+    output_dir = body_output_dir or default_output_path or os.path.join(get_output_dir(), "videos")
     os.makedirs(output_dir, exist_ok=True)
     kwargs["output_path"] = os.path.join(output_dir, f"{request_id}.mp4")
     kwargs["save_video"] = True
@@ -272,7 +299,12 @@ async def create_video(
 
     logger.info("Video generation request %s: prompt=%s", request_id, req.prompt[:100])
 
-    gen_kwargs = _build_generation_kwargs(request_id, req)
+    # default_request was validated at server startup (run_server) and is
+    # read-only on the request hot path — _build_generation_kwargs and
+    # explicit_request_updates only read, so no per-request deepcopy needed.
+    default_request = get_default_request()
+
+    gen_kwargs = _build_generation_kwargs(request_id, req, default_request=default_request)
     job = _make_video_job(request_id, req, gen_kwargs)
     await VIDEO_STORE.upsert(request_id, job)
 

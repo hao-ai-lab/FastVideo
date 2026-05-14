@@ -3,7 +3,6 @@ import os
 from typing import Any
 
 from fastvideo import PipelineConfig
-from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.distributed import (get_world_size, maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -12,6 +11,8 @@ from fastvideo.pipelines.preprocess.preprocess_pipeline_ode_trajectory import (P
 from fastvideo.pipelines.preprocess.preprocess_pipeline_t2v import (PreprocessPipeline_T2V)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_text import (PreprocessPipeline_Text)
 from fastvideo.pipelines.preprocess.matrixgame.matrixgame_preprocess_pipeline import (PreprocessPipeline_MatrixGame)
+from fastvideo.pipelines.preprocess.matrixgame.matrixgame_preprocess_pipeline_ode_trajectory import (
+    PreprocessPipeline_MatrixGame_ODE_Trajectory)
 from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
@@ -25,18 +26,18 @@ def main(args) -> None:
 
     pipeline_config = PipelineConfig.from_pretrained(args.model_path)
 
-    kwargs: dict[str, Any] = {}
-    if args.preprocess_task == "text_only":
-        kwargs = {
-            "text_encoder_cpu_offload": False,
-        }
-    else:
-        # Full config for video/image processing
-        kwargs = {
-            "vae_precision": "fp32",
-            "vae_config": WanVAEConfig(load_encoder=True, load_decoder=True),
-        }
+    kwargs: dict[str, Any] = ({
+        "text_encoder_cpu_offload": False
+    } if args.preprocess_task == "text_only" else {
+        "vae_precision": "fp32"
+    })
     pipeline_config.update_config_from_dict(kwargs)
+
+    if args.preprocess_task != "text_only":
+        # Set VAE encoder/decoder flags on the existing config (don't
+        # replace with WanVAEConfig — that breaks non-Wan models).
+        pipeline_config.vae_config.load_encoder = True
+        pipeline_config.vae_config.load_decoder = True
 
     fastvideo_args = FastVideoArgs(
         model_path=args.model_path,
@@ -58,9 +59,11 @@ def main(args) -> None:
         PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
     elif args.preprocess_task == "matrixgame":
         PreprocessPipeline = PreprocessPipeline_MatrixGame
+    elif args.preprocess_task == "matrixgame_ode_trajectory":
+        PreprocessPipeline = PreprocessPipeline_MatrixGame_ODE_Trajectory
     else:
         raise ValueError(f"Invalid preprocess task: {args.preprocess_task}. "
-                         f"Valid options: t2v, i2v, ode_trajectory, text_only, matrixgame")
+                         f"Valid options: t2v, i2v, ode_trajectory, text_only, matrixgame, matrixgame_ode_trajectory")
 
     logger.info("Preprocess task: %s using %s", args.preprocess_task, PreprocessPipeline.__name__)
 
@@ -96,11 +99,12 @@ if __name__ == "__main__":
     parser.add_argument("--group_frame", action="store_true")  # TODO
     parser.add_argument("--group_resolution", action="store_true")  # TODO
     parser.add_argument("--flow_shift", type=float, default=None)
-    parser.add_argument("--preprocess_task",
-                        type=str,
-                        default="t2v",
-                        choices=["t2v", "i2v", "text_only", "ode_trajectory", "matrixgame"],
-                        help="Type of preprocessing task to run")
+    parser.add_argument(
+        "--preprocess_task",
+        type=str,
+        default="t2v",
+        choices=["t2v", "i2v", "text_only", "ode_trajectory", "matrixgame", "matrixgame_ode_trajectory"],
+        help="Type of preprocessing task to run")
     parser.add_argument("--train_fps", type=int, default=30)
     parser.add_argument("--use_image_num", type=int, default=0)
     parser.add_argument("--text_max_length", type=int, default=256)

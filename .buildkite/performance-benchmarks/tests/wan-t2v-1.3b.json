@@ -29,8 +29,8 @@
     "Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting."
   ],
   "run_config": {
-    "num_warmup_runs": 1,
-    "num_measurement_runs": 3,
+    "num_warmup_runs": 2,
+    "num_measurement_runs": 5,
     "required_gpus": 2
   },
   "thresholds": {

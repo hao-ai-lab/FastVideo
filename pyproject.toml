@@ -27,7 +27,7 @@ dependencies = [
     "timm==1.0.11",
     "peft>=0.15.0",
     "diffusers>=0.33.1",
-    "torch>=2.10.0",
+    "torch==2.11.0",
     "torchvision",
     "torchaudio",
 
@@ -80,6 +80,10 @@ dependencies = [
     "torchcodec",
     "ray>=2.49.1",
     "ftfy==6.3.1",
+
+    # Job Runner
+    "fastapi==0.129.0",
+    "uvicorn==0.41.0"
 ]
 
 [tool.uv]
@@ -91,6 +95,10 @@ torch = [
   { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
 ]
 torchvision = [
+  { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
+  { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
+]
+torchaudio = [
   { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
   { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
 ]
@@ -107,7 +115,7 @@ explicit = true
 
 [project.optional-dependencies]
 
-# flash-attn: pip install flash-attn==2.8.1 --no-cache-dir --no-build-isolation
+# flash-attn: uv pip install flash-attn==2.8.1 --no-cache-dir --no-build-isolation
 
 
 lint = [
@@ -120,9 +128,37 @@ test = [
     "av",
     "pytorch-msssim==1.0.0",
     "pytest",
+    "pandas",
+    "plotly",
 ]
 
+# Eval extras. See fastvideo/eval/README.md for which install path
+# covers which metrics. detectron2 (vbench color/object_class/etc.) is
+# CUDA-version-pinned and not cleanly pip-installable — install it
+# separately as documented in the README.
+eval-vbench     = ["openai-clip", "pyiqa", "easydict"]
+eval-physics-iq = []
+eval = [
+    "decord", "lpips", "ptlflow", "qwen-vl-utils",
+    "fastvideo[eval-vbench]", "fastvideo[eval-physics-iq]",
+]
+eval-full = ["fastvideo[eval]", "qwen-omni-utils"]
+
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
+
+prompt-safety = [
+    "fasttext",
+]
+
+prompt-enhancer = [
+    "httpx",
+]
+
+streaming = [
+    "fastvideo[prompt-enhancer]",
+    "fastvideo[prompt-safety]",
+    "websockets",
+]
 
 rocm = [
     "amdsmi",
@@ -146,11 +182,24 @@ check_untyped_defs = true
 follow_imports = "silent"
 
 [tool.codespell]
-skip ="./data,./wandb"
+# ``*/_vendored/*`` matches upstream-provenance files vendored under any
+# ``_vendored/`` subdir (project-wide convention; mirrors the
+# ``_``-prefixed auto-discovery skip).
+skip = "./data,./wandb,ui/package-lock.json,*/_vendored/*"
+# "tread" matches daVinci-MagiHuman's acronym "TReAD" (Token Routing and
+# Early Drop). codespell lowercases ignore-words entries, so the single
+# lowercase form silences all case variants.
+ignore-words-list = "tread"
 
 [tool.ruff]
 # Allow lines to be as long as 120.
 line-length = 120
+extend-exclude = [
+    # Upstream submodules under fastvideo/third_party/ are not our style
+    # territory; modern-dep compat lives as runtime shims in our metric
+    # __init__.py files.
+    "fastvideo/third_party/**",
+]
 
 [tool.ruff.lint]
 select = [

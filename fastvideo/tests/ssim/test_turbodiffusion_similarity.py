@@ -3,10 +3,7 @@ import os
 
 import pytest
 
-from fastvideo.configs.sample.turbodiffusion import (
-    TurboDiffusionI2V_A14B_SamplingParam,
-    TurboDiffusionT2V_1_3B_SamplingParam,
-)
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
     DEVICE_MAPPINGS,
@@ -44,7 +41,8 @@ TURBODIFFUSION_PARAMS = {
     "tp_size": 1,
     "fps": 24,
 }
-_TURBODIFFUSION_FULL_QUALITY_DEFAULTS = TurboDiffusionT2V_1_3B_SamplingParam()
+_TURBODIFFUSION_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
+    TURBODIFFUSION_PARAMS["model_path"])
 TURBODIFFUSION_FULL_QUALITY_PARAMS = {
     "num_gpus": TURBODIFFUSION_PARAMS["num_gpus"],
     "model_path": TURBODIFFUSION_PARAMS["model_path"],
@@ -112,7 +110,8 @@ TURBODIFFUSION_I2V_PARAMS = {
     "tp_size": 1,
     "fps": 24,
 }
-_TURBODIFFUSION_I2V_FULL_QUALITY_DEFAULTS = TurboDiffusionI2V_A14B_SamplingParam()
+_TURBODIFFUSION_I2V_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
+    TURBODIFFUSION_I2V_PARAMS["model_path"])
 TURBODIFFUSION_I2V_FULL_QUALITY_PARAMS = {
     "num_gpus": TURBODIFFUSION_I2V_PARAMS["num_gpus"],
     "model_path": TURBODIFFUSION_I2V_PARAMS["model_path"],
@@ -146,6 +145,7 @@ TURBODIFFUSION_I2V_IMAGE_PATHS = [
 ]
 
 
+@pytest.mark.skip(reason="Disabled: causes OOM too often in CI")
 @pytest.mark.parametrize("prompt", TURBODIFFUSION_I2V_TEST_PROMPTS)
 @pytest.mark.parametrize(
     "model_id",

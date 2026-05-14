@@ -4,13 +4,12 @@
 from __future__ import annotations
 
 import copy
-import gc
 from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 
 import fastvideo.envs as envs
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.distributed import (
     get_sp_group,
     get_world_group,
@@ -19,10 +18,6 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
 from fastvideo.pipelines import TrainingBatch
-from fastvideo.pipelines.basic.wan.wan_pipeline import (
-    WanPipeline, )
-from fastvideo.pipelines.pipeline_batch_info import (
-    ForwardBatch, )
 from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing, )
 from fastvideo.training.training_utils import (
@@ -41,6 +36,7 @@ from fastvideo.train.utils.module_state import (
     apply_trainable, )
 from fastvideo.train.utils.moduleloader import (
     load_module_from_path, )
+from fastvideo.train.utils.negative_prompt import encode_negative_prompt
 
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
@@ -341,98 +337,15 @@ class WanModel(ModelBase):
 
         assert self.training_config is not None
         tc = self.training_config
-        world_group = self.world_group
-        device = self.device
-        dtype = self._get_training_dtype()
-
-        from fastvideo.train.utils.moduleloader import (
-            make_inference_args, )
-
-        neg_embeds: torch.Tensor | None = None
-        neg_mask: torch.Tensor | None = None
-
-        if world_group.rank_in_group == 0:
-            sampling_param = SamplingParam.from_pretrained(tc.model_path)
-            negative_prompt = sampling_param.negative_prompt
-
-            inference_args = make_inference_args(tc, model_path=tc.model_path)
-
-            prompt_pipeline = WanPipeline.from_pretrained(
-                tc.model_path,
-                args=inference_args,
-                inference_mode=True,
-                loaded_modules={"transformer": self.transformer},
-                tp_size=tc.distributed.tp_size,
-                sp_size=tc.distributed.sp_size,
-                num_gpus=tc.distributed.num_gpus,
-                pin_cpu_memory=(tc.distributed.pin_cpu_memory),
-                dit_cpu_offload=True,
-            )
-
-            batch_negative = ForwardBatch(
-                data_type="video",
-                prompt=negative_prompt,
-                prompt_embeds=[],
-                prompt_attention_mask=[],
-            )
-            result_batch = prompt_pipeline.prompt_encoding_stage(  # type: ignore[attr-defined]
-                batch_negative,
-                inference_args,
-            )
-
-            neg_embeds = result_batch.prompt_embeds[0].to(device=device, dtype=dtype)
-            neg_mask = (result_batch.prompt_attention_mask[0].to(device=device, dtype=dtype))
-
-            del prompt_pipeline
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-        meta = torch.zeros((2, ), device=device, dtype=torch.int64)
-        if world_group.rank_in_group == 0:
-            assert neg_embeds is not None
-            assert neg_mask is not None
-            meta[0] = neg_embeds.ndim
-            meta[1] = neg_mask.ndim
-        world_group.broadcast(meta, src=0)
-        embed_ndim, mask_ndim = (
-            int(meta[0].item()),
-            int(meta[1].item()),
+        sampling_param = SamplingParam.from_pretrained(tc.model_path)
+        embeds, mask = encode_negative_prompt(
+            tc,
+            prompt=sampling_param.negative_prompt,
+            device=self.device,
+            dtype=self._get_training_dtype(),
         )
-
-        max_ndim = 8
-        embed_shape = torch.full((max_ndim, ), -1, device=device, dtype=torch.int64)
-        mask_shape = torch.full((max_ndim, ), -1, device=device, dtype=torch.int64)
-        if world_group.rank_in_group == 0:
-            assert neg_embeds is not None
-            assert neg_mask is not None
-            embed_shape[:embed_ndim] = torch.tensor(
-                list(neg_embeds.shape),
-                device=device,
-                dtype=torch.int64,
-            )
-            mask_shape[:mask_ndim] = torch.tensor(
-                list(neg_mask.shape),
-                device=device,
-                dtype=torch.int64,
-            )
-        world_group.broadcast(embed_shape, src=0)
-        world_group.broadcast(mask_shape, src=0)
-
-        embed_sizes = tuple(int(x) for x in embed_shape[:embed_ndim].tolist())
-        mask_sizes = tuple(int(x) for x in mask_shape[:mask_ndim].tolist())
-
-        if world_group.rank_in_group != 0:
-            neg_embeds = torch.empty(embed_sizes, device=device, dtype=dtype)
-            neg_mask = torch.empty(mask_sizes, device=device, dtype=dtype)
-        assert neg_embeds is not None
-        assert neg_mask is not None
-
-        world_group.broadcast(neg_embeds, src=0)
-        world_group.broadcast(neg_mask, src=0)
-
-        self.negative_prompt_embeds = neg_embeds
-        self.negative_prompt_attention_mask = neg_mask
+        self.negative_prompt_embeds = embeds
+        self.negative_prompt_attention_mask = mask
 
     def _sample_timesteps(
         self,

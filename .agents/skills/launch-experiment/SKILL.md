@@ -12,7 +12,7 @@ automates the boilerplate of setting environment variables, picking the right
 entrypoint, and applying defaults from the closest example script.
 
 ## Prerequisites
-- The repo is cloned and `fastvideo` is installed (`uv pip install -e .[dev]`).
+- The repo is cloned and `fastvideo` is installed (`uv pip install -e ".[dev]"`).
 - Dataset is preprocessed (see `docs/training/data_preprocess.md`).
 - `WANDB_API_KEY` is set in the environment (or `WANDB_MODE=offline` for local).
 - GPU resources are available (multi-GPU requires NCCL).
