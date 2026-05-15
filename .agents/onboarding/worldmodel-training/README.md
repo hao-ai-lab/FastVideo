@@ -14,7 +14,7 @@ based on **Wan2.1** (SkyReels-V2) DiT models with causal attention for
 auto-regressive streaming generation.
 
 **Key techniques you will work with:**
-- Full finetuning and LoRA on Wan / LTX-2 / MatrixGame models
+- Full finetuning and LoRA on Wan / LTX-2 / Matrix-Game 2.0 models
 - DMD-based distillation (few-step generation)
 - Self-Forcing distillation (causal streaming)
 - Diffusion-Forcing SFT (DFSFT) for causal models
@@ -278,8 +278,8 @@ Read `.agents/memory/evaluation-registry/README.md` for the full metric catalog.
 
 ## World Model–Specific Concepts
 
-### Action Injection (MatrixGame)
-The MatrixGame pipeline adds **action modules** to each DiT block, enabling
+### Action Injection (Matrix-Game 2.0)
+The Matrix-Game 2.0 pipeline adds **action modules** to each DiT block, enabling
 frame-level mouse/keyboard input conditioning. The action sequence is injected
 per-frame alongside the latent video tokens.
 

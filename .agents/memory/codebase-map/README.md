@@ -44,7 +44,7 @@ FastVideo-WorldModel/
 │   │   ├── wan_distillation_pipeline.py # Wan distillation
 │   │   ├── self_forcing_distillation_pipeline.py # Self-forcing distill
 │   │   ├── ltx2_training_pipeline.py   # LTX-2 training
-│   │   └── matrixgame_training_pipeline.py # MatrixGame training
+│   │   └── matrixgame2_training_pipeline.py # Matrix-Game 2.0 training
 │   ├── attention/             # Attention backends
 │   ├── distributed/           # Sequence/tensor parallel utilities
 │   ├── layers/                # Tensor-parallel layers
