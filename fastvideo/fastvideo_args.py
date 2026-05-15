@@ -206,6 +206,8 @@ class FastVideoArgs:
     ltx2_refine_add_noise: bool = True
     ltx2_refine_noise_path: str | None = None
     ltx2_refine_audio_noise_path: str | None = None
+    ltx2_legacy_native_noise_order: bool = False
+    ltx2_use_distilled_sigmas: bool = True
 
     # model paths for correct deallocation
     model_paths: dict[str, str] = field(default_factory=dict)

@@ -123,5 +123,10 @@ def test_ltx2_distilled_inference_similarity(
         full_quality_params_map=FULL_QUALITY_LTX2_DISTILLED_MODEL_TO_PARAMS,
         slice_cosine_threshold=SLICE_COSINE_DISTANCE_THRESHOLD,
         full_cosine_threshold=FULL_COSINE_DISTANCE_THRESHOLD,
+        init_kwargs_override={
+            "dit_cpu_offload": True,
+            "ltx2_legacy_native_noise_order": True,
+            "ltx2_use_distilled_sigmas": False,
+        },
         generation_kwargs_override=LTX2_DISTILLED_REFERENCE_GUIDANCE_OVERRIDES,
     )
