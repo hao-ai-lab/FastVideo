@@ -4,9 +4,9 @@ import numpy as np
 import torch
 from torch import nn
 
-from fastvideo.eval.metrics.audio._synchformer.ast import AST
-from fastvideo.eval.metrics.audio._synchformer.motionformer import MotionFormer
-from fastvideo.eval.metrics.audio._synchformer.transformer import GlobalTransformer
+from fastvideo.third_party.eval.synchformer.ast import AST
+from fastvideo.third_party.eval.synchformer.motionformer import MotionFormer
+from fastvideo.third_party.eval.synchformer.transformer import GlobalTransformer
 
 
 def make_class_grid(leftmost_val,

@@ -7,8 +7,8 @@ from omegaconf import OmegaConf
 from timm.layers import trunc_normal_
 from torch import nn
 
-from fastvideo.eval.metrics.audio._synchformer.utils import check_if_file_exists_else_download
-from fastvideo.eval.metrics.audio._synchformer.video_model_builder import VisionTransformer
+from fastvideo.third_party.eval.synchformer.utils import check_if_file_exists_else_download
+from fastvideo.third_party.eval.synchformer.video_model_builder import VisionTransformer
 
 FILE2URL = {
     # cfg

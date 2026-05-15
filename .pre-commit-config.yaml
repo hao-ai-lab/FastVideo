@@ -10,8 +10,6 @@ exclude: |
     scripts/.*|
     fastvideo/dataset/.*|
     fastvideo/models/.*|
-    fastvideo/eval/metrics/audio/_synchformer/.*|
-    fastvideo/eval/metrics/audio/wer/_glmasr/.*|
     ^apps/dreamverse/web/.*|
     examples/.*|
     \.agents/.*|

@@ -3,8 +3,8 @@ from torch import nn
 from transformers.modeling_outputs import BaseModelOutputWithPooling
 
 # importing modified version of AST
-from fastvideo.eval.metrics.audio._synchformer.hf_src.modeling_ast import (ASTConfig, ASTForAudioClassification)
-from fastvideo.eval.metrics.audio._synchformer.motionformer import (AveragePooling, BaseEncoderLayer,
+from fastvideo.third_party.eval.synchformer.hf_src.modeling_ast import (ASTConfig, ASTForAudioClassification)
+from fastvideo.third_party.eval.synchformer.motionformer import (AveragePooling, BaseEncoderLayer,
                                                TemporalTransformerEncoderLayer)
 
 

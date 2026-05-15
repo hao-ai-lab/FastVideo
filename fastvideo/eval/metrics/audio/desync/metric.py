@@ -1,33 +1,14 @@
 """Synchformer DeSync — average audio-video desynchronization in seconds.
 
-Per-sample. Reproduces the ``DeSync`` metric from
-``hkchengrex/av-benchmark`` (which itself uses the
-``24-01-04T16-39-21`` Synchformer checkpoint trained on AudioSet, the
-one MMAudio reports against):
+Per-sample. Ports ``hkchengrex/av-benchmark``'s ``DeSync`` against the
+``24-01-04T16-39-21`` Synchformer checkpoint (the one MMAudio reports
+against). ``argmax`` over the 21-class grid in ``[-2, +2]`` seconds for
+the first 14 and last 14 segments separately; lower is better, 0 = ideal.
 
-1. Extract video features via ``Synchformer.extract_vfeats``
-   (224×224, normalized, 16-frame segments with step 8 at 25 fps).
-2. Extract audio features via ``Synchformer.extract_afeats`` (16 kHz
-   waveform, log-mel via the model's preprocessor, normalized,
-   ``pad_or_truncate`` to 66 mel frames per segment).
-3. Run ``Synchformer.compare_v_a`` over the first 14 segments and
-   the last 14 segments separately; ``argmax`` over the 21-class
-   grid in ``[-2, +2]`` seconds; take ``abs(grid_value)``; average
-   the two directions. Lower is better; 0 = perfect alignment.
-
-The video is read from ``sample["video"]`` (decoded ``(T, C, H, W)``
-tensor in ``[0, 1]`` — produced by the pool). The audio is read from
-``sample["audio"]`` (path-string). The checkpoint is fetched once
-from MMAudio's GitHub release into the eval cache.
-
-**Clip-length assumption.** Synchformer's transformer carries a fixed
-positional embedding sized for ~14 segments per modality (~5 s of
-video at 25 fps and ~5 s of audio at 16 kHz with the segmentation
-constants below). Clips significantly shorter than ~3 s will raise
-in ``_segment_video`` because too few segments can be extracted; clips
-longer than ~10 s will silently use only the first-14 + last-14
-segments and ignore the middle. Keep input clips in the 3-10 s range
-for trustworthy scores.
+Synchformer's transformer carries a fixed positional embedding sized for
+~14 segments per modality, so keep input clips in the 3-10 s range —
+shorter clips raise in ``_segment_video`` and longer clips ignore the
+middle.
 """
 
 from __future__ import annotations
@@ -96,11 +77,7 @@ def _segment_video(frames: torch.Tensor) -> torch.Tensor:
 
 
 def _load_audio_waveform(audio_path: str, resample_cache: dict[int, Any]) -> torch.Tensor:
-    """Load *audio_path* at 16 kHz mono, native length. Returns ``(N,)``.
-
-    ``resample_cache`` is a metric-owned ``{src_sr: Resample}`` dict so
-    we don't allocate a fresh transform per sample on the hot path.
-    """
+    """Load *audio_path* at 16 kHz mono, native length. Returns ``(N,)``."""
     import torchaudio
     waveform, sr = torchaudio.load(audio_path)
     waveform = waveform.mean(dim=0)
@@ -161,14 +138,11 @@ class DeSyncMetric(BaseMetric):
 
     def __init__(self, src_fps: float | None = None) -> None:
         super().__init__()
-        # If callers know the source fps, pass it in; otherwise we
-        # assume the pool decoded at Synchformer's target (25 fps).
+        # Defaults to 25 fps (Synchformer's target) when the pool's decode fps is unknown.
         self._src_fps = src_fps
         self._model: Any = None
         self._mel: Any = None
         self._grid: torch.Tensor | None = None
-        # Per-(src_sr) torchaudio.transforms.Resample cache so we don't
-        # rebuild the resampler on every ``compute`` call.
         self._resample_cache: dict[int, Any] = {}
 
     def to(self, device):
@@ -183,7 +157,7 @@ class DeSyncMetric(BaseMetric):
         if self._model is not None:
             return
         import torchaudio
-        from fastvideo.eval.metrics.audio._synchformer import Synchformer, make_class_grid
+        from fastvideo.third_party.eval.synchformer import Synchformer, make_class_grid
 
         ckpt = ensure_checkpoint(_SYNCHFORMER_NAME, _SYNCHFORMER_URL)
         model = Synchformer().to(self.device).eval()

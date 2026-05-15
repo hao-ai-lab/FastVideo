@@ -223,14 +223,10 @@ ignore-words-list = "tread,passt"
 # Allow lines to be as long as 120.
 line-length = 120
 extend-exclude = [
-    # Upstream submodules under fastvideo/third_party/ are not our style
-    # territory; modern-dep compat lives as runtime shims in our metric
-    # __init__.py files.
+    # Upstream submodules and vendored sources under fastvideo/third_party/
+    # are not our style territory; modern-dep compat lives as runtime shims
+    # in the consuming metric's __init__.py.
     "fastvideo/third_party/**",
-    # Vendored upstream code under audio eval — same idea. Each dir
-    # keeps its own LICENSE and is namespaced behind a leading underscore.
-    "fastvideo/eval/metrics/audio/_synchformer/**",
-    "fastvideo/eval/metrics/audio/wer/_glmasr/**",
 ]
 
 [tool.ruff.lint]

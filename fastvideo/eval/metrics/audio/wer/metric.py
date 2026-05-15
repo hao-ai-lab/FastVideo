@@ -1,25 +1,9 @@
-"""Word Error Rate (WER) for generated audio.
+"""Word Error Rate for generated audio.
 
-Three ASR backends are supported:
-
-- ``whisper`` (default): ``openai/whisper-base`` via the pinned
-  ``transformers``. No extra deps beyond ``[eval-audio]``. Works for
-  English and the multilingual languages Whisper supports.
-- ``glm_asr``: GLM-ASR-Nano via the vendored architecture under
-  ``_glmasr/`` (Apache-2.0). The HF repo's ``model_type=glmasr`` is not
-  registered in transformers ≤ 4.57 and the repo ships no remote
-  modeling code, so we register the vendored copy with ``AutoModel`` /
-  ``AutoProcessor`` at setup time via ``register_with_auto()``. This is
-  the backend MagiHuman aligns to. Works on FastVideo's pinned
-  transformers without a bump.
-- ``sensevoice``: SenseVoice via FunASR. Requires the ``funasr``
-  package (not in any extra) and is opt-in.
-
-Text normalization follows the MagiHuman paper: NFKC unicode
-normalization, lowercase, punctuation stripped (incl. CJK), whitespace
-collapsed. For CJK references/hypotheses the WER is computed at the
-character level so that jiwer's whitespace tokenizer does not collapse
-a Chinese/Japanese/Korean line into a single "word".
+Per-sample. Default backend is Whisper-base; ``glm_asr`` (vendored under
+``third_party/eval/glmasr/``) and ``sensevoice`` (FunASR, install-on-
+demand) are selectable via ``asr_backend=``. Text is normalized per the
+MagiHuman convention and CJK inputs are scored at the character level.
 """
 
 from __future__ import annotations
@@ -92,16 +76,8 @@ def _resolve_char_level(language: str | None) -> bool | None:
 class WERMetric(BaseMetric):
     """WER metric with selectable ASR backend.
 
-    Expected sample fields:
-      - ``audio``: str | list[str]
-      - ``reference_text`` or ``text_prompt``: str | list[str]
-      - optional ``language``: str (e.g. ``"en"``, ``"zh"``)
-
-    Args:
-        asr_backend: ``"whisper"`` (default), ``"glm_asr"``, or
-            ``"sensevoice"``. See module docstring for the trade-offs.
-        model_name: Override for the backend's HF repo / model name.
-        instruction: Prompt used for GLM-ASR transcription.
+    Sample fields: ``audio``, ``reference_text`` (or ``text_prompt``),
+    optional ``language``. ``instruction`` is passed to GLM-ASR.
     """
 
     name = "audio.wer"
@@ -151,10 +127,9 @@ class WERMetric(BaseMetric):
         self._model.eval()
 
     def _setup_glm_asr(self) -> None:
-        # Vendored architecture: 4.57 doesn't natively register
-        # ``model_type=glmasr`` and the HF repo ships no remote
-        # modeling code, so we register our copy on demand.
-        from fastvideo.eval.metrics.audio.wer._glmasr import register_with_auto
+        # transformers ≤ 4.57 doesn't register ``model_type=glmasr`` and
+        # the HF repo ships no remote modeling code; use our vendored copy.
+        from fastvideo.third_party.eval.glmasr import register_with_auto
         register_with_auto()
 
         from transformers import AutoModel, AutoProcessor
@@ -186,11 +161,8 @@ class WERMetric(BaseMetric):
     def _move_to_device(self, inputs: Any) -> Any:
         """Move processor outputs to device, casting only floats to model dtype.
 
-        Handles plain ``dict`` and ``BatchFeature`` alike — the latter
-        is dict-shaped but not a ``dict`` subclass, and its own
-        ``.to(device)`` method moves tensors but does **not** cast
-        floats. Without this cast, log-mel ``input_features`` (float32)
-        would hit a bfloat16 model and crash the audio tower.
+        ``BatchFeature.to(device)`` moves tensors but doesn't cast floats,
+        so log-mel ``input_features`` (float32) would hit a bf16 model.
         """
         try:
             model_dtype = next(self._model.parameters()).dtype
@@ -209,18 +181,11 @@ class WERMetric(BaseMetric):
         return inputs.to(self.device) if hasattr(inputs, "to") else inputs
 
     def _transcribe_glm_asr(self, audio_path: str) -> str:
-        # 4.57 quirks:
-        # 1. ``apply_chat_template`` renders text only — doesn't
-        #    auto-extract audio features the way 5.x does.
-        # 2. The repo's chat_template.jinja audio block emits a
-        #    trailing ``<|user|>`` token that closes/reopens the user
-        #    turn; in 4.57's render order this leaves the assistant
-        #    turn structurally empty and the model emits just ``<|user|>``
-        #    on generate.
-        # We side-step both by hand-building a clean transcription
-        # prompt and feeding ``processor.__call__`` directly. ``__call__``
-        # then expands the ``<|pad|>`` placeholder by audio-window count
-        # and extracts log-mel features alongside text tokenization.
+        # transformers ≤ 4.57's ``apply_chat_template`` doesn't auto-extract
+        # audio features, and the repo's chat template emits a stray
+        # ``<|user|>`` token that breaks generate. Build the prompt by hand
+        # and call ``processor.__call__`` directly so it expands the
+        # ``<|pad|>`` placeholder and extracts log-mel features in one pass.
         import librosa
         prompt = (f"<|user|>\n"
                   f"<|begin_of_audio|>{self._processor.audio_token}<|end_of_audio|>\n"

@@ -1,17 +1,8 @@
-"""PaSST KL divergence on AudioSet logits.
+"""PaSST KL divergence ``KL(gt || pred)`` on AudioSet-527 logits.
 
-Ports ``av_bench.metrics.kl.compute_kl`` from
-``hkchengrex/av-benchmark``, the V2A literature's de-facto eval
-harness. Audio is run through the ``hear21passt`` AudioSet-527
-classifier in sliding 10-s windows; the per-class logits are
-mean-collected into a single (527,)-d vector per clip, and the KL
-divergence is computed in the direction ``KL(gt || pred)`` to match
-the AudioGen / MusicGen / MMAudio reporting convention.
-
-Both the standard *softmax* and the multi-label *sigmoid*
-formulations are computed; the primary ``score`` is ``kl_softmax``
-(the value reported as "MKL" / "KL_PaSST" by the V2A papers) and the
-sigmoid variant is exposed in ``details["kl_sigmoid"]``.
+Ports ``av_bench.metrics.kl.compute_kl`` 1:1. The primary ``score`` is
+the softmax variant (reported as "MKL" / "KL_PaSST" by V2A papers);
+the sigmoid variant is exposed in ``details["kl_sigmoid"]``.
 """
 
 from __future__ import annotations
@@ -71,10 +62,6 @@ def _collect_logits(
             tmp[:len(window)] = window
             window = tmp
         wav = torch.from_numpy(np.asarray(window, dtype=np.float32)).unsqueeze(0).to(device)
-        # ``contextlib.redirect_stdout`` was used here to swallow PaSST's
-        # per-window prints, but it races across worker threads (see the
-        # FAD metric's setup() for the full story) and closes
-        # ``sys.stdout``.  The noise is acceptable; keep stdout intact.
         with torch.no_grad(), _patch_passt_stft():
             logits = model(wav)
         per_window.append(logits.squeeze().detach().cpu())
@@ -134,7 +121,6 @@ class KLDivergenceMetric(BaseMetric):
         return self
 
     def setup(self) -> None:
-        # See FAD metric for why ``redirect_stdout`` is gone here.
         if self._model is not None:
             return
         from hear21passt.base import get_basic_model
@@ -154,9 +140,6 @@ class KLDivergenceMetric(BaseMetric):
 
         gt_logits = _collect_logits(self._model, ref_path, self.device)
         pred_logits = _collect_logits(self._model, gen_path, self.device)
-        # Silent / near-silent audio drives PaSST's STFT into log(0) and
-        # produces NaN/inf rows. The KL math then returns NaN silently and
-        # poisons the corpus mean. Skip with a clear reason instead.
         if not torch.isfinite(gt_logits).all() or not torch.isfinite(pred_logits).all():
             which = []
             if not torch.isfinite(gt_logits).all():

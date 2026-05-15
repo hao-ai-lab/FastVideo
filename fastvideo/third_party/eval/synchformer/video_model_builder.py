@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 from timm.layers import trunc_normal_
 
-from fastvideo.eval.metrics.audio._synchformer import vit_helper
+from fastvideo.third_party.eval.synchformer import vit_helper
 
 
 class VisionTransformer(nn.Module):

@@ -1,37 +1,12 @@
 """Frechet Audio Distance over PaSST embeddings (``FD_PaSST``).
 
-Corpus-vs-corpus Fréchet distance. Builds Gaussian moments
-``(mu, Sigma)`` over a *generated* set of PaSST 768-d embeddings and a
-*reference* set, then computes the Fréchet distance between the two
-Gaussians. The math has no per-sample pairing — only the marginal
-moments matter — so any way of populating the two buffers gives the
-same number for the same gen/ref sets. This mirrors how the existing
-``benchmarks/fvd/fvd.py`` and the in-flight ``common.fvd`` metric
-handle FVD: two independent corpora.
+Corpus-vs-corpus Fréchet distance between Gaussian moments of two PaSST
+768-d embedding sets. Ports ``av_bench.metrics.fad.compute_fd`` 1:1.
 
-Reference embeddings can be supplied in three equivalent ways:
-
-1. **Cached features** (default for repeated runs): set
-   ``FASTVIDEO_FAD_REF_FEATURES`` to a ``.pt`` file containing a 2-D
-   tensor of shape ``(N, 768)``. The file is loaded once at setup and
-   the gen buffer alone is accumulated from ``sample["audio"]``.
-   Mirrors PR #1341's ``${FASTVIDEO_EVAL_CACHE}/fvd/real_features.pt``
-   pattern for video FVD.
-2. **Reference-tagged samples**: pass samples with
-   ``role="reference"`` to add to the ref buffer (gen samples are
-   anything without that tag). Useful when you want one
-   ``ev.evaluate(samples=...)`` call to cover both sides.
-3. **Paired samples** (back-compat with V2A datasets such as
-   ``hkchengrex/av-benchmark``): each sample carries ``audio`` and
-   ``reference_audio``; both are embedded during ``accumulate``. The
-   pairing is a loading convenience — internally still corpus-vs-
-   corpus.
-
-Skips with a clear message when fewer than two finite-embed samples
-land in either buffer, since the sample covariance is undefined for
-n < 2. Silent / near-silent audio drives PaSST's softmax into
-``log(0)`` and produces NaN/inf 768-d vectors; those rows are dropped
-before computing the Gaussian moments and counted in ``details``.
+References are supplied per-sample via ``reference_audio`` /
+``role="reference"``, or once from a ``.pt`` cache at
+``$FASTVIDEO_FAD_REF_FEATURES``. Skips when either side has fewer than
+two finite embeddings.
 """
 
 from __future__ import annotations
@@ -74,12 +49,7 @@ def _frechet_distance(mu1: np.ndarray,
                       mu2: np.ndarray,
                       sigma2: np.ndarray,
                       eps: float = 1e-6) -> float:
-    """``d^2 = ||mu1 - mu2||^2 + Tr(sigma1 + sigma2 - 2 sqrt(sigma1 sigma2))``.
-
-    Always-on ``eps * I`` regularization on both covariances — matches
-    ``benchmarks/fvd/fvd.py::compute_frechet_distance`` and avoids the
-    "retry on non-finite sqrtm" branch the upstream pytorch-fid uses.
-    """
+    """``d^2 = ||mu1 - mu2||^2 + Tr(sigma1 + sigma2 - 2 sqrt(sigma1 sigma2))``."""
     mu1 = np.atleast_1d(mu1)
     mu2 = np.atleast_1d(mu2)
     sigma1 = np.atleast_2d(sigma1)
@@ -138,9 +108,6 @@ class FrechetAudioDistanceMetric(BaseMetric):
         self._model: Any = None
         self._gen_buf: list[np.ndarray] = []
         self._ref_buf: list[np.ndarray] = []
-        # Cached reference: when ``FASTVIDEO_FAD_REF_FEATURES`` points
-        # to a ``.pt`` file with a ``(N, 768)`` tensor, we load it
-        # once at setup and skip per-sample reference embedding.
         self._cached_ref_path: str | None = os.environ.get(REF_FEATURES_ENV)
         self._cached_ref_mu: np.ndarray | None = None
         self._cached_ref_sigma: np.ndarray | None = None
@@ -153,11 +120,6 @@ class FrechetAudioDistanceMetric(BaseMetric):
         return self
 
     def setup(self) -> None:
-        # ``contextlib.redirect_stdout`` was removed here — it is not
-        # thread-safe under multi-worker construction (the redirect-
-        # stack interleaves and one worker restores a closed devnull,
-        # killing ``sys.stdout`` for the rest of the process). The
-        # upstream init prints are tolerable.
         if self._model is None:
             from hear21passt.base import get_basic_model
             model = get_basic_model(mode="all")
@@ -195,14 +157,6 @@ class FrechetAudioDistanceMetric(BaseMetric):
         self._ref_buf.clear()
 
     def accumulate(self, sample: dict) -> None:
-        """Buffer one PaSST embedding into either the gen or the ref side.
-
-        Side is decided in this order:
-        1. ``sample["role"] == "reference"`` → ref buffer.
-        2. Cached-ref mode is on → ``sample["audio"]`` only goes to gen.
-        3. Otherwise → ``sample["audio"]`` to gen, ``sample["reference_audio"]``
-           (if present) to ref. Both being present is the legacy paired layout.
-        """
         if self._model is None:
             self.setup()
         if sample.get("role") == "reference":
@@ -210,11 +164,9 @@ class FrechetAudioDistanceMetric(BaseMetric):
             if ref_path is not None:
                 self._ref_buf.append(_passt_embed(self._model, ref_path, self.device))
             return
-
         gen_path = sample.get("audio")
         if gen_path is not None:
             self._gen_buf.append(_passt_embed(self._model, gen_path, self.device))
-        # Skip per-sample ref ingestion when the cached ref is in use.
         if self._cached_ref_mu is not None:
             return
         ref_path = sample.get("reference_audio")
@@ -244,8 +196,6 @@ class FrechetAudioDistanceMetric(BaseMetric):
             n_ref_dropped = len(self._ref_buf) - n_ref
             ref_source = "samples"
             if n_ref < 2 or n_gen < 2:
-                # ``BaseMetric._skip`` only surfaces ``reason`` in details, so
-                # construct the result directly to preserve diagnostic counts.
                 return MetricResult(
                     name=self.name,
                     score=None,
