@@ -33,13 +33,13 @@
       }
 
       const label = text(Array.from(node.childNodes).map(serializeInline).join(""));
-      const href = node.getAttribute("href");
+      const href = node.href;
       return href && label ? `${label} (${href})` : label;
     }
 
     if (tagName === "img") {
       const alt = node.getAttribute("alt") || "image";
-      const src = node.getAttribute("src") || "";
+      const src = node.src || "";
       return src ? `[${alt}](${src})` : `[${alt}]`;
     }
 
@@ -51,11 +51,17 @@
   }
 
   function serializeTable(table) {
-    const rows = Array.from(table.querySelectorAll("tr"));
-    return rows
-      .map((row) => Array.from(row.children).map((cell) => text(serializeInline(cell))).join(" | "))
-      .filter(Boolean)
-      .join("\n");
+    const rows = Array.from(table.rows);
+    if (rows.length === 0) return "";
+
+    const mdRows = rows.map(
+      (row) => "| " + Array.from(row.children).map((cell) => text(serializeInline(cell))).join(" | ") + " |"
+    );
+    const separator = "| " + Array.from(rows[0].children)
+      .map(() => "---")
+      .join(" | ") + " |";
+    mdRows.splice(1, 0, separator);
+    return mdRows.join("\n");
   }
 
   function serializeBlock(node, listDepth = 0) {
@@ -122,14 +128,13 @@
     Array.from(item.childNodes).forEach((child) => {
       if (child.nodeType === Node.ELEMENT_NODE && ["ul", "ol"].includes(child.tagName.toLowerCase())) {
         childBlocks.push(serializeBlock(child, listDepth + 1));
-      } else if (child.nodeType === Node.ELEMENT_NODE && ["p", "div"].includes(child.tagName.toLowerCase())) {
-        inlineParts.push(serializeInline(child));
       } else {
-        inlineParts.push(serializeInline(child));
+        const content = serializeInline(child);
+        if (content) inlineParts.push(content);
       }
     });
 
-    const firstLine = `${indent}${marker}${text(inlineParts.join(""))}`.trimEnd();
+    const firstLine = `${indent}${marker}${text(inlineParts.join(" "))}`.trimEnd();
     return [firstLine, ...childBlocks.filter(Boolean)].join("\n");
   }
 
