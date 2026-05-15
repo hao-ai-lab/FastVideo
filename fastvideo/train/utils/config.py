@@ -269,14 +269,39 @@ def _parse_pipeline_config(
         if init_from is not None:
             model_path = str(init_from)
 
-    kwargs: dict[str, Any] = {"pipeline_config": pipeline_raw}
+    causal_dit_overrides: dict[str, Any] = {}
+    pipeline_raw_for_config = pipeline_raw
+    if isinstance(pipeline_raw, dict):
+        dit_raw = pipeline_raw.get("dit_config")
+        if isinstance(dit_raw, dict):
+            dit_raw_for_config = dict(dit_raw)
+            for key in ("local_attn_size", "sink_size"):
+                if key in dit_raw_for_config:
+                    causal_dit_overrides[key] = dit_raw_for_config.pop(key)
+            if causal_dit_overrides:
+                pipeline_raw_for_config = dict(pipeline_raw)
+                pipeline_raw_for_config["dit_config"] = dit_raw_for_config
+
+    kwargs: dict[str, Any] = {"pipeline_config": pipeline_raw_for_config}
     if model_path is not None:
         kwargs["model_path"] = model_path
 
     if isinstance(pipeline_raw, str):
         kwargs["pipeline_config"] = _resolve_existing_file(pipeline_raw)
 
-    return PipelineConfig.from_kwargs(kwargs)
+    pipeline_config = PipelineConfig.from_kwargs(kwargs)
+
+    if causal_dit_overrides:
+        arch_config = getattr(pipeline_config.dit_config, "arch_config", None)
+        for key, value in causal_dit_overrides.items():
+            if arch_config is not None and hasattr(arch_config, key):
+                setattr(arch_config, key, value)
+            else:
+                raise AttributeError(f"Invalid causal DiT field: {key}")
+        if hasattr(arch_config, "__post_init__"):
+            arch_config.__post_init__()
+
+    return pipeline_config
 
 
 def _build_training_config(
