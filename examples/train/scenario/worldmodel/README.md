@@ -1,13 +1,13 @@
-# World-Model: MatrixGame 2.0 I2V
+# World-Model: Matrix-Game 2.0 I2V
 
-Three training scenarios for the MatrixGame 2.0 I2V world model on the
+Three training scenarios for the Matrix-Game 2.0 I2V world model on the
 new YAML-driven trainer (`fastvideo/train/entrypoint/train.py`).
 
 | Config | Method | Student | Notes |
 |---|---|---|---|
-| `finetune_i2v.yaml` | `FineTuneMethod` | `MatrixGameModel` (bidirectional) | Multi-step SFT from `mg_bidirectional_Solaris`. |
-| `dfsft_causal_i2v.yaml` | `DiffusionForcingSFTMethod` | `MatrixGameCausalModel` | Diffusion-Forcing SFT with chunkwise timesteps. |
-| `self_forcing_causal_i2v.yaml` | `SelfForcingMethod` | `MatrixGameCausalModel` | DMD/Self-Forcing distillation; teacher = bidirectional, critic = bidirectional. |
+| `finetune_i2v.yaml` | `FineTuneMethod` | `MatrixGame2Model` (bidirectional) | Multi-step SFT from `mg_bidirectional_Solaris`. |
+| `dfsft_causal_i2v.yaml` | `DiffusionForcingSFTMethod` | `MatrixGame2CausalModel` | Diffusion-Forcing SFT with chunkwise timesteps. |
+| `self_forcing_causal_i2v.yaml` | `SelfForcingMethod` | `MatrixGame2CausalModel` | DMD/Self-Forcing distillation; teacher = bidirectional, critic = bidirectional. |
 
 ## Usage
 

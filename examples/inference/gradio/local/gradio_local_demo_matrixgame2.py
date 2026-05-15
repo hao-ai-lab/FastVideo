@@ -457,7 +457,7 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             }
             grid_sizes = torch.tensor([150, 44, 80])
             
-            output_dir = os.path.abspath("outputs/matrixgame")
+            output_dir = os.path.abspath("outputs/matrixgame2")
             os.makedirs(output_dir, exist_ok=True)
             video_path = os.path.join(output_dir, f"video_{int(time.time())}.mp4")
             

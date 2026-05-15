@@ -12,7 +12,7 @@ models/
 │   ├── <model>.py              # Single-file DiT (wanvideo, ltx2, hunyuanvideo, cosmos, ...)
 │   ├── hyworld/                # Multi-file DiT family
 │   ├── lingbotworld/           # ditto
-│   └── matrixgame/             # ditto
+│   └── matrixgame2/            # ditto
 ├── vaes/                       # AutoencoderKL variants per model family
 ├── encoders/                   # T5, CLIP, Llama, Qwen2.5, Gemma, SigLIP, Reason1, audio conditioner
 ├── schedulers/                 # FlowMatch / EulerDiscrete / DPM custom schedulers

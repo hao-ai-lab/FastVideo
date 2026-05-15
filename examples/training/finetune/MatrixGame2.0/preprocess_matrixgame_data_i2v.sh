@@ -24,4 +24,4 @@ python fastvideo/pipelines/preprocess/v1_preprocess.py \
     --samples_per_file 4 \
     --train_fps 25 \
     --flush_frequency 4 \
-    --preprocess_task matrixgame
+    --preprocess_task matrixgame2

@@ -31,7 +31,7 @@ FastVideo-WorldModel/
 │   │   │   └── distribution_matching/  # DMD2Method, SelfForcingMethod
 │   │   ├── models/            #   Per-role model wrappers (ModelBase, CausalModelBase)
 │   │   │   ├── wan/           #     WanModel, WanCausalModel
-│   │   │   └── matrixgame/    #     MatrixGameModel, MatrixGameCausalModel
+│   │   │   └── matrixgame2/   #     MatrixGame2Model, MatrixGame2CausalModel
 │   │   ├── callbacks/         #   Composable hooks (grad_clip, ema, validation)
 │   │   └── utils/             #   Config, builder, checkpoint, optimizer, tracking
 │   ├── training/              # Legacy training infrastructure (being phased out)
@@ -95,7 +95,7 @@ FastVideo-WorldModel/
 | Wan distillation (DMD) | `fastvideo/training/wan_distillation_pipeline.py` | `torchrun --nproc_per_node N` |
 | Self-forcing distill | `fastvideo/training/wan_self_forcing_distillation_pipeline.py` | `torchrun --nproc_per_node N` |
 | LTX-2 finetune | `fastvideo/training/ltx2_training_pipeline.py` | `torchrun --nproc_per_node N` |
-| MatrixGame | `fastvideo/training/matrixgame_training_pipeline.py` | `torchrun --nproc_per_node N` |
+| Matrix-Game 2.0 | `fastvideo/training/matrixgame2_training_pipeline.py` | `torchrun --nproc_per_node N` |
 
 ## W&B Integration
 

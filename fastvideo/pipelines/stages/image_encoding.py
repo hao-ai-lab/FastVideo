@@ -863,4 +863,3 @@ class MatrixGame2ImageVAEEncodingStage(ImageVAEEncodingStage):
         self.vae.to("cpu")
 
         return batch
-

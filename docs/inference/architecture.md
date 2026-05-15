@@ -226,7 +226,7 @@ Dataclass carrying all pipeline state between stages. Key field groups:
   `width_latents`.
 - **Scheduler**: `timesteps`, `num_inference_steps`, `guidance_scale`,
   `sigmas`.
-- **Task-specific**: `mouse_cond`/`keyboard_cond` (MatrixGame), `pose`
+- **Task-specific**: `mouse_cond`/`keyboard_cond` (Matrix-Game 2.0), `pose`
   (HYWorld), `camera_states` (GameCraft), `c2ws_plucker_emb`
   (LingBotWorld).
 - **Output**: `output: Tensor | None`.
@@ -252,7 +252,7 @@ Standard stages (typical execution order):
 
 Specialized variants: `CausalDenoisingStage`, `LTX2DenoisingStage`,
 `LongCatDenoisingStage`, `GameCraftDenoisingStage`,
-`HYWorldDenoisingStage`, `MatrixGameDenoisingStage`,
+`HYWorldDenoisingStage`, `MatrixGame2CausalDenoisingStage`,
 `SRDenoisingStage`, `LTX2AudioDecodingStage`, `SD35ConditioningStage`,
 `LTX2TextEncodingStage`, `LTX2LatentPreparationStage`.
 
