@@ -102,6 +102,10 @@ torchaudio = [
   { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
   { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
 ]
+# ImageBind ships only on GitHub. ``[tool.uv.sources]`` lets uv resolve
+# it at install time while keeping PyPI metadata clean (this table is
+# uv-only). Pinned to a commit SHA for reproducible installs.
+imagebind = { git = "https://github.com/facebookresearch/ImageBind.git", rev = "53680b02d7e37b19b124fa37bae4b6c98c38f5be" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -133,16 +137,39 @@ test = [
 ]
 
 # Eval extras. See fastvideo/eval/README.md for which install path
-# covers which metrics. detectron2 (vbench color/object_class/etc.) is
-# CUDA-version-pinned and not cleanly pip-installable — install it
+# covers which metrics. ``detectron2`` (vbench color/object_class/etc.)
+# is CUDA-version-pinned and not cleanly pip-installable — install it
 # separately as documented in the README.
 eval-vbench     = ["openai-clip", "pyiqa", "easydict"]
 eval-physics-iq = []
+# Audio metrics. Covers all six registered ``audio.*`` metrics:
+#   audio.clap_score, audio.frechet_distance       (HF CLAP / PaSST)
+#   audio.kl_divergence                            (hear21passt)
+#   audio.wer                                      (Whisper default; GLM-ASR opt-in via vendored package)
+#   audio.audiobox_aesthetics                      (Meta's audiobox_aesthetics)
+#   audio.desync                                   (Synchformer — vendored under _synchformer/)
+#   audio.imagebind_score                          (ImageBind — git-installed via [tool.uv.sources])
+#
+# The SenseVoice (FunASR) WER fallback needs ``funasr`` which is heavy
+# and rarely needed; left as install-on-demand.
+#
+# Notes on transitive deps:
+# - We deliberately do not depend on the ``laion_clap`` pip package; it
+#   pins ``numpy<2`` and would force a fastvideo-wide downgrade. HF's
+#   ``transformers.ClapModel`` covers the same checkpoint family.
+# - ``audiobox_aesthetics`` pulls ``torchaudio``; the cu128 mapping in
+#   ``[tool.uv.sources]`` above ensures ``uv pip install`` picks the
+#   matching wheel. With raw ``pip``, that mapping is ignored — install
+#   torchaudio explicitly from ``https://download.pytorch.org/whl/cu128``
+#   first.
+# - ``imagebind`` is CC BY-NC-SA 4.0; the source dep keeps it outside
+#   FastVideo's Apache 2.0 distribution.
+eval-audio = ["jiwer", "librosa", "pyloudnorm", "hear21passt", "audiobox_aesthetics", "imagebind", "decord", "pytorchvideo"]
 eval = [
     "decord", "lpips", "ptlflow", "qwen-vl-utils",
     "fastvideo[eval-vbench]", "fastvideo[eval-physics-iq]",
 ]
-eval-full = ["fastvideo[eval]", "qwen-omni-utils"]
+eval-full = ["fastvideo[eval]", "fastvideo[eval-audio]", "qwen-omni-utils"]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 
@@ -186,10 +213,11 @@ follow_imports = "silent"
 # ``_vendored/`` subdir (project-wide convention; mirrors the
 # ``_``-prefixed auto-discovery skip).
 skip = "./data,./wandb,ui/package-lock.json,*/_vendored/*"
-# "tread" matches daVinci-MagiHuman's acronym "TReAD" (Token Routing and
-# Early Drop). codespell lowercases ignore-words entries, so the single
+# ``tread`` matches daVinci-MagiHuman's acronym "TReAD" (Token Routing
+# and Early Drop). ``passt`` is the PaSST audio classifier (Koutini et
+# al.). codespell lowercases ignore-words entries, so the single
 # lowercase form silences all case variants.
-ignore-words-list = "tread"
+ignore-words-list = "tread,passt"
 
 [tool.ruff]
 # Allow lines to be as long as 120.
@@ -199,6 +227,10 @@ extend-exclude = [
     # territory; modern-dep compat lives as runtime shims in our metric
     # __init__.py files.
     "fastvideo/third_party/**",
+    # Vendored upstream code under audio eval — same idea. Each dir
+    # keeps its own LICENSE and is namespaced behind a leading underscore.
+    "fastvideo/eval/metrics/audio/_synchformer/**",
+    "fastvideo/eval/metrics/audio/wer/_glmasr/**",
 ]
 
 [tool.ruff.lint]

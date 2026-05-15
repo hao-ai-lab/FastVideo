@@ -12,7 +12,61 @@ registry-driven API.
 | Default (common, optical_flow, vbench-light, physics_iq, videoscore2) | `uv pip install -e .[eval]` |
 | Just VBench (12 of 16 sub-metrics) | `uv pip install -e .[eval-vbench]` |
 | Just Physics-IQ (covered by `[eval]`) | `uv pip install -e .[eval-physics-iq]` |
-| Plus `vbench.scene` (AVoCaDO) | `uv pip install -e .[eval-full]` |
+| Audio metrics (CLAP, FAD, KL, WER, AudioBox, DeSync, ImageBind) | `uv pip install -e .[eval-audio]` |
+| Everything: `[eval]` + `[eval-audio]` + `vbench.scene` (AVoCaDO) | `uv pip install -e .[eval-full]` |
+
+`[eval-audio]` covers every `audio.*` metric in one shot. It includes
+two upstream-only sources that uv resolves via `[tool.uv.sources]`:
+
+- **ImageBind** (`facebookresearch/ImageBind`, CC BY-NC-SA 4.0) — kept
+  out of FastVideo's Apache 2.0 source tree; ``uv pip`` fetches it
+  from upstream at install time. Plain ``pip`` will fail to resolve
+  ``imagebind``; run the same git URL by hand on non-uv setups.
+- **`torchaudio`** at the cu128 wheel — needed transitively by
+  `audiobox_aesthetics`. On cu128 hosts using raw ``pip``, install
+  ``torchaudio`` from ``https://download.pytorch.org/whl/cu128`` first.
+
+The `audio.desync` metric vendors Synchformer under
+`fastvideo/eval/metrics/audio/_synchformer/` (MIT). The `audio.wer`
+metric vendors a transformers-4.57-compatible build of GLM-ASR under
+`fastvideo/eval/metrics/audio/wer/_glmasr/` (Apache-2.0). Both
+vendored trees keep their upstream `LICENSE` files alongside.
+
+### `audio.*` metric input contracts
+
+Every audio metric reads from these sample-dict keys (extra keys are
+ignored):
+
+| Metric | Per-sample? | Required keys |
+|---|---|---|
+| `audio.clap_score` | yes | `audio` (path), `text_prompt` (str) |
+| `audio.audiobox_aesthetics` | yes | `audio` (path) |
+| `audio.kl_divergence` | yes | `audio` (path), `reference_audio` (path) |
+| `audio.frechet_distance` | **set-vs-set** | `audio` (path), `reference_audio` (path) — accumulated across ≥2 samples; `corpus["audio.frechet_distance"]` carries the score |
+| `audio.wer` | yes | `audio` (path), `reference_text` (str) or `text_prompt` (str) |
+| `audio.desync` | yes | `video` (decoded tensor or path), `audio` (path) |
+| `audio.imagebind_score` | yes | `video_path` (str) **and** `audio` (path) — needs the path, not the pool-decoded tensor, because ImageBind's preprocessing decodes its own clips |
+
+`audio.frechet_distance` is the only set-vs-set metric. The kwargs
+form (`ev.evaluate(audio=...)`) raises with a clear message because a
+single sample cannot produce a corpus result; use
+`ev.evaluate(samples=[...])`.
+
+### Reference repos for audio
+
+The audio set ports its math 1:1 from `hkchengrex/av-benchmark` (the
+V2A literature's de-facto eval harness — used by MMAudio, FoleyCrafter,
+V2A-Mapper). Per-metric upstream:
+
+| Metric | Upstream |
+|---|---|
+| `audio.frechet_distance` (PaSST-FAD) | `av_bench/metrics/fad.py::compute_fd` over `hear21passt` 768-d embeds |
+| `audio.kl_divergence` | `av_bench/metrics/kl.py::compute_kl` over PaSST 527-d logits |
+| `audio.clap_score` | HF `transformers.ClapModel` (`laion/clap-htsat-fused` — closest HF mirror of `630k-audioset-fusion-best`) |
+| `audio.audiobox_aesthetics` | `facebookresearch/audiobox-aesthetics` (PQ as primary score, CE/CU/PC in details) |
+| `audio.wer` | MagiHuman-style: NFKC + CJK char-level via `jiwer`, GLM-ASR or Whisper backbone |
+| `audio.desync` | `av_bench/synchformer/` (vendored under `_synchformer/`); checkpoint from `hkchengrex/MMAudio/releases/v0.1/synchformer_state_dict.pth` |
+| `audio.imagebind_score` | `facebookresearch/ImageBind` (`imagebind_huge` pretrained) |
 | Plus `vbench.{color, multiple_objects, object_class, spatial_relationship}` (GRiT) | `uv pip install -e .[eval-vbench]` then `uv pip install --no-build-isolation 'git+https://github.com/facebookresearch/detectron2.git'` |
 
 To use VBench, also pull the upstream submodule:
@@ -80,6 +134,7 @@ fastvideo/
 │       ├── base.py                # BaseMetric + @register contract
 │       ├── common/                # SSIM, PSNR, LPIPS
 │       ├── optical_flow/          # gt_optical_flow, synthetic_optical_flow
+│       ├── audio/                 # clap_score, frechet_distance, kl_divergence, wer, audiobox_aesthetics
 │       ├── videoscore2/           # VideoScore-2 (Qwen2.5-VL)
 │       ├── physics_iq/            # PhysicsIQ + sub-metrics
 │       └── vbench/                # adapter: sys.path bootstrap + shims
