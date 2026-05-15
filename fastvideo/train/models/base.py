@@ -30,10 +30,53 @@ class ModelBase(ABC):
     noise_scheduler: Any
     _trainable: bool
 
+    def __init__(
+        self,
+        *,
+        trainable: bool = True,
+        lora_rank: int | None = None,
+        lora_alpha: int | None = None,
+        lora_target_modules: list[str] | None = None,
+    ) -> None:
+        self._trainable = bool(trainable)
+        self._lora_rank = (int(lora_rank) if lora_rank is not None else None)
+        self._lora_alpha = (int(lora_alpha) if lora_alpha is not None else None)
+        self._lora_target_modules = (
+            list(lora_target_modules)
+            if lora_target_modules is not None else None
+        )
+        self._num_lora_layers = 0
+
     @property
     def device(self) -> torch.device:
         """The local CUDA device for this rank."""
         return get_local_torch_device()
+
+    def _enable_lora_if_configured(
+        self,
+        transformer: torch.nn.Module,
+    ) -> bool:
+        """Enable LoRA training for model plugins that request it.
+
+        Concrete models still own transformer loading because class names and
+        checkpoint setup are model-specific. The LoRA activation path is shared.
+        """
+        if self._lora_rank is None:
+            return False
+        if not self._trainable:
+            raise ValueError(
+                "LoRA training requires trainable=true for the role model"
+            )
+
+        from fastvideo.train.utils.lora import enable_lora_training
+
+        self._num_lora_layers = enable_lora_training(
+            transformer,
+            lora_rank=self._lora_rank,
+            lora_alpha=self._lora_alpha,
+            lora_target_modules=self._lora_target_modules,
+        )
+        return True
 
     # ------------------------------------------------------------------
     # Lifecycle

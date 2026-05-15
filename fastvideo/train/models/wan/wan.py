@@ -69,9 +69,17 @@ class WanModel(ModelBase):
         | None = None,
         transformer_override_safetensor: str
         | None = None,
+        lora_rank: int | None = None,
+        lora_alpha: int | None = None,
+        lora_target_modules: list[str] | None = None,
     ) -> None:
+        super().__init__(
+            trainable=trainable,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+            lora_target_modules=lora_target_modules,
+        )
         self._init_from = str(init_from)
-        self._trainable = bool(trainable)
 
         self.transformer = self._load_transformer(
             init_from=self._init_from,
@@ -121,7 +129,6 @@ class WanModel(ModelBase):
             override_transformer_cls_name=(self._transformer_cls_name),
             transformer_override_safetensor=(transformer_override_safetensor),
         )
-        transformer = apply_trainable(transformer, trainable=trainable)
         # Fall back to training_config.model if not set on the
         # model YAML section directly.
         ckpt_type = (enable_gradient_checkpointing_type or getattr(
@@ -134,6 +141,9 @@ class WanModel(ModelBase):
                 transformer,
                 checkpointing_type=ckpt_type,
             )
+        if self._enable_lora_if_configured(transformer):
+            return transformer
+        transformer = apply_trainable(transformer, trainable=trainable)
         return transformer
 
     # ------------------------------------------------------------------

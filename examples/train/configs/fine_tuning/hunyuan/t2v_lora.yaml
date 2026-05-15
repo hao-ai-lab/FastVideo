@@ -1,0 +1,80 @@
+# HunyuanVideo T2V LoRA finetune
+# 4090 single-GPU debug config
+
+models:
+  student:
+    _target_: fastvideo.train.models.hunyuan.HunyuanModel
+    init_from: hunyuanvideo-community/HunyuanVideo
+    trainable: true
+    lora_rank: 16
+    lora_alpha: 32
+    lora_target_modules:
+      - img_attn_qkv
+      - img_attn_proj
+      - txt_attn_qkv
+      - txt_attn_proj
+      - self_attn_qkv
+      - self_attn_proj
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 1
+
+  data:
+    data_path: data/hunyuan_overfit_preprocessed
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 20
+    num_height: 480
+    num_width: 832
+    num_frames: 77
+
+  optimizer:
+    learning_rate: 1.0e-4
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 10
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/hunyuan_t2v_lora_4090_debug
+    training_state_checkpointing_steps: 5
+    checkpoints_total_limit: 2
+    resume_from_checkpoint: null
+
+  tracker:
+    project_name: fastvideo_hunyuan
+    run_name: hunyuan_t2v_lora_4090_debug
+
+  model:
+    precondition_outputs: true
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.hunyuan.hunyuan_pipeline.HunyuanVideoPipeline
+    dataset_file: data/hunyuan_overfit_preprocessed/validation_prompts.json
+    every_steps: 10
+    sampling_steps: [5]
+    guidance_scale: 1.0
+
+pipeline:
+  flow_shift: 7
