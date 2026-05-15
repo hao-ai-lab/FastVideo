@@ -36,6 +36,10 @@ from fastvideo.models.dits.wanvideo import WanT2VCrossAttention, WanTimeTextImag
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 logger = init_logger(__name__)
+
+GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES = 21
+
+
 class CausalWanSelfAttention(nn.Module):
 
     def __init__(self,
@@ -124,10 +128,17 @@ class CausalWanSelfAttention(nn.Module):
         else:
             current_end = current_start + roped_query.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
-            max_attention_size = (
-                21 * frame_seqlen if self.local_attn_size == -1
-                else self.local_attn_size * frame_seqlen
-            )
+            if self.local_attn_size == -1:
+                max_attention_size = (GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES * frame_seqlen)
+            else:
+                max_attention_size = self.local_attn_size * frame_seqlen
+            if self.local_attn_size == -1 and current_end > max_attention_size:
+                raise ValueError(
+                    "Causal Wan local_attn_size=-1 keeps the previous "
+                    f"{GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES}-latent-frame KV "
+                    "window for compatibility. Set local_attn_size for "
+                    f"longer rollouts; got current_end={current_end} tokens "
+                    f"with frame_seqlen={frame_seqlen}.")
             # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
