@@ -6,7 +6,8 @@ recommended next action.
 For why each item is open see [decisions-log.md](decisions-log.md). For
 PR-level context see [pr-roadmap.md](pr-roadmap.md).
 
-**Last updated:** 2026-05-12 (added DR-4 follow-up for PR #1330's skipped
+**Last updated:** 2026-05-13 (added DR-5 follow-up for PR #1333's LTX2
+distilled SSIM reference refresh. Earlier: 2026-05-12 added DR-4 follow-up for PR #1330's skipped
 `App websocket integration` suite. Earlier: 2026-05-05 D-20 broken-pipe root cause + fix landed on
 `will/dreamverse-monorepo` @ `5eaf0a13`; added new thread D-20-CP for
 cherry-picking the public-API audio routing fix to `will/ltx2_sr_port`
@@ -34,6 +35,7 @@ different vehicle.).
 | **DR-2** | Med | Decide `cerebras_ifm` provider path: (a) public Literal + `CerebrasIFMProvider` shipped, OR (b) Dreamverse-side custom provider via `enhancer.register_provider(...)` | S (decision) + S-M (impl) | Resolves the cerebras_ifm gap left by PR #1258. Same item as legacy #3 below; DR-2 is the Dreamverse-side framing. |
 | **DR-3** | Low | Replace Dreamverse `PromptEnhancer._run_blocking_request` manual thread/queue polling with `asyncio.to_thread` after the PR #1327 prompt-enhancer compatibility surface is retired or isolated | S | Review comment #1327 (`prompt_enhancer.py`) is valid, but deferred to avoid patching the local fork in this PR. |
 | **DR-4** | Low | Investigate unskipping PR #1330's skipped public `App websocket integration` suite | S-M | Public PR #1330 has `describe.skip(...)` around 27 websocket tests while the internal equivalent suite is active with 25 tests. The 2 public-only tests cover backend unreachable / GPU workers not ready. Not blocking while skipped, but stale assertions may need safe refresh before unskip. |
+| **DR-5** | Low | Regenerate LTX2-Distilled latent SSIM references under the intended neutral/distilled defaults, then remove the PR #1333 historical full-guidance pins | S-M | PR #1333 changed public LTX2 distilled defaults to neutral/distilled values, but existing LTX2 latent SSIM references appear to have been generated with historical full-guidance defaults. The current PR pins the SSIM test to old values to keep CI compatible until references are refreshed. |
 | **3** | Med | Add `cerebras_ifm` to `PromptEnhancerConfig.provider` Literal + provider | S-M | Public-side resolution if DR-2 picks (a) |
 | **4** | Med | Expose `layer_profile` on typed `engine.quantization` | M | Removes Dreamverse's `experimental["pipeline_config"]` dodge for stage profiles |
 | **5** | Med | Design typed `dit_config.quant_config` carrier | L design + L impl | Removes broader `experimental["pipeline_config"]` escape hatch |
