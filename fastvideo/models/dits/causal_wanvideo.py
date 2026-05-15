@@ -76,13 +76,15 @@ class CausalWanSelfAttention(nn.Module):
                 kv_cache: dict | None = None,
                 current_start: int = 0,
                 cache_start: int | None = None,
-                frame_seqlen: int | None = None):
+                frame_seqlen: int = 1560):
         r"""
         Args:
             x(Tensor): Shape [B, L, num_heads, C / num_heads]
             seq_lens(Tensor): Shape [B]
             grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
+            frame_seqlen (int): Number of tokens per latent frame,
+                e.g. 1560 for 480x832 resolution.
         """
         if cache_start is None:
             cache_start = current_start
@@ -120,10 +122,6 @@ class CausalWanSelfAttention(nn.Module):
                 block_mask=block_mask
             )[:, :, :-padded_length].transpose(2, 1)
         else:
-            if frame_seqlen is not None:
-                frame_seqlen = int(frame_seqlen)
-            else:
-                frame_seqlen = int(q.shape[1])
             current_end = current_start + roped_query.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
             max_attention_size = (
