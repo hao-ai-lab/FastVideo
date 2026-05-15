@@ -102,7 +102,6 @@ torchaudio = [
   { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
   { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
 ]
-# CC BY-NC-SA 4.0 — kept out of the FastVideo source tree; uv pulls it at install.
 imagebind = { git = "https://github.com/facebookresearch/ImageBind.git", rev = "53680b02d7e37b19b124fa37bae4b6c98c38f5be" }
 
 [[tool.uv.index]]
@@ -190,8 +189,8 @@ follow_imports = "silent"
 # ``_``-prefixed auto-discovery skip).
 skip = "./data,./wandb,ui/package-lock.json,*/_vendored/*"
 # "tread" matches daVinci-MagiHuman's acronym "TReAD" (Token Routing and
-# Early Drop). "passt" is the PaSST audio classifier. codespell lowercases
-# ignore-words entries, so the single lowercase form silences all case variants.
+# Early Drop). codespell lowercases ignore-words entries, so the single
+# lowercase form silences all case variants.
 ignore-words-list = "tread,passt"
 
 [tool.ruff]
