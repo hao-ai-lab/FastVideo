@@ -127,7 +127,7 @@ class CausalWanSelfAttention(nn.Module):
             current_end = current_start + roped_query.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
             max_attention_size = (
-                kv_cache["k"].shape[1] if self.local_attn_size == -1
+                21 * frame_seqlen if self.local_attn_size == -1
                 else self.local_attn_size * frame_seqlen
             )
             # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
