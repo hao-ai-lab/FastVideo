@@ -6,7 +6,6 @@ This module provides a consolidated interface for generating videos using
 diffusion models.
 """
 
-import fcntl
 import os
 import re
 import shutil
@@ -14,6 +13,7 @@ import subprocess
 import threading
 import time
 import tempfile
+import types
 import warnings
 from collections.abc import Mapping
 from contextlib import suppress
@@ -55,6 +55,12 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.utils import align_to, shallow_asdict
 from fastvideo.worker.executor import Executor
+
+fcntl: types.ModuleType | None
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 logger = init_logger(__name__)
 _FFMPEG_ENCODER_OPTION_CACHE: dict[tuple[str, str, str], bool] = {}
@@ -1150,8 +1156,9 @@ class VideoGenerator:
                     proc.wait()
                     logger.warning("ffmpeg stdin unavailable.")
                     return False
-                with suppress(OSError):
-                    fcntl.fcntl(proc.stdin.fileno(), fcntl.F_SETPIPE_SZ, 1048576)
+                if fcntl is not None and hasattr(fcntl, "F_SETPIPE_SZ"):
+                    with suppress(OSError):
+                        fcntl.fcntl(proc.stdin.fileno(), fcntl.F_SETPIPE_SZ, 1048576)
 
                 try:
                     ts_start = time.perf_counter()
