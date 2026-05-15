@@ -8,8 +8,8 @@ from collections.abc import Sequence
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import DTensor
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor import DTensor, Replicate
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.layers.lora.linear import (
@@ -49,15 +49,20 @@ def _is_excluded_layer(
     return any(excluded in module_name for excluded in excluded_modules)
 
 
-def _replicate_lora_parameters(
-    transformer: torch.nn.Module,
-) -> None:
+def _replicate_lora_parameters(transformer: torch.nn.Module, ) -> None:
     """Wrap LoRA params in replicated DTensors when distributed is active.
 
     The training loaders shard the base transformer with FSDP/HSDP before the
     model plugin sees it. Newly-added LoRA parameters therefore need to be
     explicit replicated DTensors so optimizers/checkpointing can treat them the
     same way across ranks.
+
+    The mesh is reused from the FSDP-wrapped base_layer parameters rather than
+    rebuilt via ``init_device_mesh`` — building a parallel mesh with a different
+    topology than the one FSDP already registered can conflict with the
+    existing mesh init.  ``placements=[Replicate()] * mesh.ndim`` is passed
+    explicitly so the local tensor is treated as a replicated copy across all
+    mesh dimensions (instead of falling back to a default Shard layout).
     """
 
     if not dist.is_available() or not dist.is_initialized():
@@ -67,11 +72,25 @@ def _replicate_lora_parameters(
     if device.type != "cuda":
         return
 
-    device_mesh = init_device_mesh(
-        device.type,
-        (dist.get_world_size(), 1),
-        mesh_dim_names=["fake", "replicate"],
-    )
+    # Look up the mesh that FSDP/HSDP already attached to a base_layer
+    # parameter. Non-FSDP runs (e.g. single-GPU / non-distributed) won't have
+    # any DTensor params here; in that case we leave LoRA params as plain
+    # tensors, which is the correct local-only behavior.
+    mesh: DeviceMesh | None = None
+    for module in transformer.modules():
+        if not isinstance(module, BaseLayerWithLoRA):
+            continue
+        for p in module.base_layer.parameters():
+            if isinstance(p, DTensor):
+                mesh = p.device_mesh
+                break
+        if mesh is not None:
+            break
+
+    if mesh is None:
+        return
+
+    placements = [Replicate()] * mesh.ndim
 
     for module in transformer.modules():
         if not isinstance(module, BaseLayerWithLoRA):
@@ -88,7 +107,8 @@ def _replicate_lora_parameters(
                 continue
             replicated = DTensor.from_local(
                 param.detach(),
-                device_mesh=device_mesh,
+                device_mesh=mesh,
+                placements=placements,
             )
             setattr(module, attr_name, nn.Parameter(replicated))
 
@@ -116,9 +136,7 @@ def enable_lora_training(
         "arch_config",
         None,
     )
-    excluded_modules = list(
-        getattr(arch_config, "exclude_lora_layers", []),
-    )
+    excluded_modules = list(getattr(arch_config, "exclude_lora_layers", []), )
 
     transformer.requires_grad_(False)
 
@@ -142,10 +160,8 @@ def enable_lora_training(
         replacements.append((module_name, lora_layer))
 
     if not replacements:
-        raise ValueError(
-            "No LoRA-compatible layers were found for the requested "
-            f"target modules: {target_modules}"
-        )
+        raise ValueError("No LoRA-compatible layers were found for the requested "
+                         f"target modules: {target_modules}")
 
     for module_name, lora_layer in replacements:
         replace_submodule(transformer, module_name, lora_layer)
