@@ -243,7 +243,8 @@ class LTX2DenoisingStage(PipelineStage):
             logger.info("[LTX2] Using override sigma schedule, %s", self.sigmas_override)
         else:
             # Use distilled hardcoded schedule (or subsets) when enabled.
-            use_distilled_sigmas = os.getenv("LTX2_USE_DISTILLED_SIGMAS", "1") == "1"
+            use_distilled_sigmas = (fastvideo_args.ltx2_use_distilled_sigmas
+                                    and os.getenv("LTX2_USE_DISTILLED_SIGMAS", "1") == "1")
             max_distilled_steps = len(DISTILLED_SIGMA_VALUES) - 1
             if use_distilled_sigmas and num_inference_steps <= max_distilled_steps:
                 sigmas, distilled_indices = _distilled_subset_sigmas(

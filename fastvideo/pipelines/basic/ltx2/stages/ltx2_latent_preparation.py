@@ -114,7 +114,7 @@ class LTX2LatentPreparationStage(PipelineStage):
         dtype = batch.prompt_embeds[0].dtype
         device = get_local_torch_device()
         generator = batch.generator
-        if generator is not None:
+        if generator is not None and not fastvideo_args.ltx2_legacy_native_noise_order:
             if isinstance(generator, list):
                 if generator and generator[0].device.type != device.type:
                     seeds = batch.seeds
@@ -160,6 +160,14 @@ class LTX2LatentPreparationStage(PipelineStage):
                 loaded_latents = self._load_initial_latent(latent_path, device, dtype)
                 if loaded_latents is not None:
                     latents = loaded_latents
+                elif fastvideo_args.ltx2_legacy_native_noise_order:
+                    latents = randn_tensor(
+                        shape,
+                        generator=generator,
+                        device=device,
+                        dtype=dtype,
+                    )
+                    self._save_initial_latent(latent_path, latents)
                 else:
                     latents = _randn_ltx2_video_latents(
                         shape=shape,
@@ -170,13 +178,21 @@ class LTX2LatentPreparationStage(PipelineStage):
                     )
                     self._save_initial_latent(latent_path, latents)
             else:
-                latents = _randn_ltx2_video_latents(
-                    shape=shape,
-                    transformer=self.transformer,
-                    generator=generator,
-                    device=device,
-                    dtype=dtype,
-                )
+                if fastvideo_args.ltx2_legacy_native_noise_order:
+                    latents = randn_tensor(
+                        shape,
+                        generator=generator,
+                        device=device,
+                        dtype=dtype,
+                    )
+                else:
+                    latents = _randn_ltx2_video_latents(
+                        shape=shape,
+                        transformer=self.transformer,
+                        generator=generator,
+                        device=device,
+                        dtype=dtype,
+                    )
         else:
             latents = latents.to(device)
 
