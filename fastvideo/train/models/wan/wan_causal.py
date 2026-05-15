@@ -353,7 +353,9 @@ class WanCausalModel(WanModel, CausalModelBase):
             if total_frames <= 0 and tc is not None:
                 raw_num_frames = int(getattr(tc.data, "num_frames", 0))
                 if raw_num_frames > 0:
-                    total_frames = (raw_num_frames - 1) // 4 + 1
+                    temporal_compression_ratio = int(
+                        tc.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
+                    total_frames = (raw_num_frames - 1) // temporal_compression_ratio + 1
             if total_frames <= 0:
                 raise ValueError("training.data.num_latent_t must be set "
                                  "to enable checkpoint-safe "
