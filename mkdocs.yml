@@ -189,3 +189,7 @@ extra:
 # Custom CSS
 extra_css:
   - assets/custom.css
+
+# Custom JavaScript
+extra_javascript:
+  - assets/copy-page.js
