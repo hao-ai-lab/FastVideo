@@ -349,9 +349,7 @@ class WanCausalModel(WanModel, CausalModelBase):
 
         if checkpoint_safe:
             tc = getattr(self, "training_config", None)
-            total_frames = int(
-                getattr(tc.data, "num_latent_t", 0)
-                if tc is not None else 0)
+            total_frames = int(getattr(tc.data, "num_latent_t", 0) if tc is not None else 0)
             if total_frames <= 0 and tc is not None:
                 raw_num_frames = int(getattr(tc.data, "num_frames", 0))
                 if raw_num_frames > 0:
