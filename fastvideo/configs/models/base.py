@@ -56,13 +56,21 @@ class ModelConfig:
         assert "arch_config" not in source_model_dict, "Source model config shouldn't contain arch_config."
 
         valid_fields = {f.name for f in fields(self)}
+        arch_config = self.arch_config
+        # 05/15/2026: allow training configs to update arch fields
+        # directly, specifically local_attn_size and attention sink.
+        valid_arch_fields = {f.name for f in fields(arch_config)}
 
         for key, value in source_model_dict.items():
             if key in valid_fields:
                 setattr(self, key, value)
+            elif key in valid_arch_fields:
+                setattr(arch_config, key, value)
             else:
                 logger.warning("%s does not contain field '%s'!", type(self).__name__, key)
                 raise AttributeError(f"Invalid field: {key}")
 
+        if hasattr(arch_config, "__post_init__"):
+            arch_config.__post_init__()
         if hasattr(self, "__post_init__"):
             self.__post_init__()
