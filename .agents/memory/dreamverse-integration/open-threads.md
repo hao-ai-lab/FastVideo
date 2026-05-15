@@ -6,7 +6,11 @@ recommended next action.
 For why each item is open see [decisions-log.md](decisions-log.md). For
 PR-level context see [pr-roadmap.md](pr-roadmap.md).
 
-**Last updated:** 2026-05-05 (D-20 broken-pipe root cause + fix landed on
+**Last updated:** 2026-05-14 (added DR-7 follow-up to remove LTX2 debug
+logging env vars and replace them with per-pipeline/model state. Earlier: 2026-05-14 added DR-6 follow-up for PR #1335's Gemma
+lazy-load/device-placement behavior outside compiled `forward`. Earlier: 2026-05-13 added DR-5 follow-up for PR #1333's LTX2
+distilled SSIM reference refresh. Earlier: 2026-05-12 added DR-4 follow-up for PR #1330's skipped
+`App websocket integration` suite. Earlier: 2026-05-05 D-20 broken-pipe root cause + fix landed on
 `will/dreamverse-monorepo` @ `5eaf0a13`; added new thread D-20-CP for
 cherry-picking the public-API audio routing fix to `will/ltx2_sr_port`
 so it lands in PR #1288. Earlier: strategy reversal — PR #1287 CLOSED,
@@ -31,6 +35,11 @@ different vehicle.).
 | **D** | 🟢 in flight | Implement `generate_async` — content shipped in mega-PR **#1288** on `will/ltx2_sr_port` @ `b36bdbc9` (was #1287, CLOSED + re-routed per [D-17](decisions-log.md#d-17)) | L | Closes Q-5/Q-9/PR-7.5 TODOs simultaneously; enables Dynamo backend; unblocks audio re-encode; enables `GpuPool.run_async()` migration (D-12-B). Resolution gate: #1288 merge. |
 | **DR-1** | High | Dreamverse: create `prompting/_internal_compat.py` shim + replace local `prompt_enhancer.py` (1933 LOC) — **PR #1258 has merged (`f673423b`); now actionable** | M (~150-200 LOC shim, replace upstream wiring) | Lets Dreamverse stop carrying a 1933-LOC fork |
 | **DR-2** | Med | Decide `cerebras_ifm` provider path: (a) public Literal + `CerebrasIFMProvider` shipped, OR (b) Dreamverse-side custom provider via `enhancer.register_provider(...)` | S (decision) + S-M (impl) | Resolves the cerebras_ifm gap left by PR #1258. Same item as legacy #3 below; DR-2 is the Dreamverse-side framing. |
+| **DR-3** | Low | Replace Dreamverse `PromptEnhancer._run_blocking_request` manual thread/queue polling with `asyncio.to_thread` after the PR #1327 prompt-enhancer compatibility surface is retired or isolated | S | Review comment #1327 (`prompt_enhancer.py`) is valid, but deferred to avoid patching the local fork in this PR. |
+| **DR-4** | Low | Investigate unskipping PR #1330's skipped public `App websocket integration` suite | S-M | Public PR #1330 has `describe.skip(...)` around 27 websocket tests while the internal equivalent suite is active with 25 tests. The 2 public-only tests cover backend unreachable / GPU workers not ready. Not blocking while skipped, but stale assertions may need safe refresh before unskip. |
+| **DR-5** | Low | Regenerate LTX2-Distilled latent SSIM references under the intended neutral/distilled defaults, then remove the PR #1333 historical full-guidance pins | S-M | PR #1333 changed public LTX2 distilled defaults to neutral/distilled values, but existing LTX2 latent SSIM references appear to have been generated with historical full-guidance defaults. The current PR pins the SSIM test to old values to keep CI compatible until references are refreshed. |
+| **DR-6** | Low | Decide whether `LTX2GemmaTextEncoderModel` needs a non-forward device-placement hook after lazy Gemma load | S | PR #1335 should remove the `model.device` / `model.to(...)` guard from `forward` for Dynamo/fullgraph compatibility. Non-compiled runs probably do not need it because `gemma_model` moves Gemma at first load, but a later wrapper `.to(...)` after lazy load could leave Gemma on the old device unless lifecycle placement handles it. |
+| **DR-7** | Low | Remove LTX2 debug logging env-var plumbing and replace it with per-pipeline/model debug state | S-M | PR #1335 review flagged that `initialize_pipeline()` mutates process-global LTX2 debug env vars, which can leak/race across pipeline instances. Deleting only the mutation is low-risk but loses config-driven debug logging; deleting all reads without replacement would remove useful SSIM/latent drift diagnostics. |
 | **3** | Med | Add `cerebras_ifm` to `PromptEnhancerConfig.provider` Literal + provider | S-M | Public-side resolution if DR-2 picks (a) |
 | **4** | Med | Expose `layer_profile` on typed `engine.quantization` | M | Removes Dreamverse's `experimental["pipeline_config"]` dodge for stage profiles |
 | **5** | Med | Design typed `dit_config.quant_config` carrier | L design + L impl | Removes broader `experimental["pipeline_config"]` escape hatch |
@@ -398,6 +407,84 @@ to `CerebrasProvider` / `GroqProvider` constructors and pass through to
 **Effort:** Small.
 
 **Dependencies:** None blocking; only act on real perf data.
+
+### Item DR-4: Unskip PR #1330 `App websocket integration` suite safely
+
+**Why:** Public PR #1330 currently wraps `App websocket integration` in
+`describe.skip(...)`, so the 27-test websocket integration suite does not
+run. The internal repo has the equivalent suite active via `describe(...)`
+with 25 tests. The two public-only cases cover backend unreachable and GPU
+workers not ready readiness/reachability behavior.
+
+**Action:** Later, investigate whether the public suite can be unskipped and
+refresh any stale assertions without changing the intended websocket contract.
+Because the suite is skipped today, this is not blocking the current stack or
+current PR #1330 review.
+
+**Effort:** Small-Medium.
+
+**Dependencies:** Best handled when someone can run the frontend integration
+stack end-to-end and compare the public assertions against the internal active
+suite.
+
+### Item DR-6: Gemma lazy-load device placement outside `forward`
+
+**Why:** PR #1335 review flagged this pattern in
+`fastvideo/models/encoders/gemma.py::LTX2GemmaTextEncoderModel.forward`:
+
+```py
+if model.device != target_device:
+    model.to(device=target_device)
+```
+
+The immediate concern is the compiled/Dynamo path: `model.device` and
+`model.to(...)` inside `forward` can introduce non-tensor/device parsing work
+that fullgraph tracing should not see. Removing the guard from `forward` is the
+right PR #1335 review fix.
+
+For non-compiled execution, the guard is mostly defensive rather than required:
+`gemma_model` already moves the lazily loaded HF Gemma model to the wrapper's
+current parameter device on first load. The remaining edge case is a lifecycle
+sequence where Gemma is loaded, then the parent wrapper is later moved to a
+different device; in that case Gemma could stay behind unless placement is
+handled outside `forward`.
+
+**Action:** After PR #1335 review is unblocked, decide whether FastVideo needs a
+small lifecycle hook/helper for this class so lazy Gemma is moved whenever the
+wrapper/device placement changes. If yes, implement it outside `forward`; if no,
+document that Gemma must be loaded after final device placement.
+
+**Effort:** Small.
+
+**Dependencies:** Not blocking PR #1335 if the forward-path guard is removed and
+the normal load path keeps placing Gemma on the wrapper's current device.
+
+### Item DR-7: Remove LTX2 debug logging env-var plumbing
+
+**Why:** PR #1335 review flagged that
+`fastvideo/pipelines/basic/ltx2/ltx2_pipeline.py::initialize_pipeline()` sets
+and pops LTX2 debug env vars such as `LTX2_PIPELINE_DEBUG_LOG`,
+`LTX2_PIPELINE_DEBUG_PATH`, `LTX2_DEBUG_DETAIL`, and
+`LTX2_PIPELINE_DEBUG_DETAIL_PATH`. Those env vars are process-global, so one
+pipeline instance can enable, overwrite, or clear debug behavior for another
+pipeline instance running in the same process.
+
+Deleting only the `initialize_pipeline()` env mutation is low risk for normal
+generation, but it would stop config-driven debug logging unless replaced.
+Deleting all env-var reads without replacement is riskier because these logs are
+useful for SSIM/latent drift diagnosis and may be used by local debug scripts.
+
+**Action:** Replace LTX2 debug env-var plumbing with per-pipeline/model debug
+state. Use pipeline/model config for construction-time hooks and a
+`ForwardContext`/`ForwardBatch`-style carrier for forward-time logging. Keep
+external env-var compatibility only if there is a documented operator workflow
+that still needs it.
+
+**Effort:** Small-Medium.
+
+**Dependencies:** Not blocking PR #1335 if the immediate fix is limited to
+removing process-global mutation from pipeline initialization while preserving
+existing externally supplied env-var reads.
 
 ### Item D-12-C: Avoid locking `PoolAssignment.gpu_id: int` as public
 

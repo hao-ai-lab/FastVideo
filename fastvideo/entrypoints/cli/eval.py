@@ -128,8 +128,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
             ref = ref_paths[i] if i < len(ref_paths) else ref_paths[0]
             kwargs["reference"] = load_video(ref)
         if args.text_prompt is not None:
-            prompt = (args.text_prompt[i] if i < len(args.text_prompt) else args.text_prompt[0])
-            kwargs["text_prompt"] = [prompt]
+            kwargs["text_prompt"] = (args.text_prompt[i] if i < len(args.text_prompt) else args.text_prompt[0])
         if args.fps is not None:
             kwargs["fps"] = args.fps
 

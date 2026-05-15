@@ -1,3 +1,8 @@
+---
+name: dreamverse-deploy
+description: Use when redeploying the migrated Dreamverse app backend and frontend on a chosen local GPU; tears down existing ports, launches services, and waits for readiness checks.
+---
+
 # dreamverse-deploy — redeploy migrated Dreamverse on a chosen GPU
 
 **Scope:** project (lives in this repo at `.agents/skills/dreamverse-deploy/`)

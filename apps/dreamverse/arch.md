@@ -159,12 +159,9 @@ Current built-in FastAPI docs are enabled:
 - `/redoc`: ReDoc
 - `/openapi.json`: OpenAPI schema
 
-The runtime also mounts static content:
-
-- `/server-assets`: server-local static assets rooted at
-  `apps/dreamverse/dreamverse/`
-- `/`: frontend static build when one of the configured frontend static
-  directories exists
+The runtime also mounts the frontend static build at `/` when one of the
+configured frontend static directories exists. It does not expose the backend
+Python package as static content.
 
 ## HTTP API
 

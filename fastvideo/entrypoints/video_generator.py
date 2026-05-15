@@ -27,14 +27,25 @@ from fastvideo.api.compat import (
     expand_request_prompt_batch,
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,
+    legacy_generate_call_to_request,
     load_generator_config_from_file,
     normalize_generation_request,
     normalize_generator_config,
     request_to_pipeline_overrides,
     request_to_sampling_param,
 )
-from fastvideo.api.results import GenerationResult
-from fastvideo.api.schema import GenerationRequest, GeneratorConfig
+from fastvideo.api.results import (
+    GenerationResult,
+    VideoFinalEvent,
+    VideoProgressEvent,
+)
+from fastvideo.api.schema import (
+    GenerationRequest,
+    GeneratorConfig,
+    InputConfig,
+    OutputConfig,
+    SamplingConfig,
+)
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -43,6 +54,14 @@ from fastvideo.utils import align_to, shallow_asdict
 from fastvideo.worker.executor import Executor
 
 logger = init_logger(__name__)
+
+_BATCH_EXTRA_PASSTHROUGH_KEYS: tuple[str, ...] = (
+    "ltx2_audio_latents",
+    "ltx2_audio_clean_latent",
+    "ltx2_audio_denoise_mask",
+    "audio_num_frames",
+    "video_position_offset_sec",
+)
 
 _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "num_gpus",
@@ -252,6 +271,76 @@ class VideoGenerator:
             if log_queue:
                 self.executor.clear_log_queue()
 
+    async def generate_async(
+        self,
+        request: GenerationRequest | Mapping[str, Any],
+        *,
+        log_queue=None,
+    ):
+        """Async generation that yields typed :class:`VideoEvent`s.
+
+        Three consumers share this substrate:
+
+        * Streaming server (:mod:`fastvideo.entrypoints.streaming`) —
+          pipes :class:`VideoPartialEvent` frames into fMP4.
+        * Stateless OpenAI server — ignores progress events, forwards
+          :class:`VideoFinalEvent` as the HTTP response body.
+        * Dynamo native backend
+          (``components/src/dynamo/fastvideo/``) — wraps each event as
+          an ``NvVideosResponse`` chunk.
+
+        The aggregated code path shipped here yields a single
+        :class:`VideoProgressEvent` at start and one
+        :class:`VideoFinalEvent` at end. Future work will thread
+        per-step progress events through the pipeline's denoise loop
+        so streaming consumers don't have to wait on a materialized
+        final.
+        """
+        import asyncio
+
+        normalized = normalize_generation_request(request)
+        total_steps = max(1, normalized.sampling.num_inference_steps)
+        yield VideoProgressEvent(step=0, total_steps=total_steps, stage="denoise")
+
+        if log_queue:
+            self.executor.set_log_queue(log_queue)
+        try:
+            result = await asyncio.to_thread(self._generate_request_impl, normalized)
+        finally:
+            if log_queue:
+                self.executor.clear_log_queue()
+
+        if isinstance(result, list):
+            # Prompt-batch expansion — emit one Final per sub-result.
+            for sub in result:
+                yield await asyncio.to_thread(_final_event_from_result, sub)
+            return
+        yield await asyncio.to_thread(_final_event_from_result, result)
+
+    @staticmethod
+    def default_health_check_request() -> GenerationRequest:
+        """Return the minimal typed request Dynamo uses for probes.
+
+        256x256, 8 frames, 1 inference step -- fast enough to be a
+        viable liveness check, non-trivial enough to exercise the
+        DiT -> VAE -> decode path. Consumers adapt this shape to their
+        transport's health-check payload (see
+        ``docs/design/server_contracts/dynamo.md``).
+        """
+        return GenerationRequest(
+            prompt="health check",
+            inputs=InputConfig(),
+            sampling=SamplingConfig(
+                num_frames=8,
+                height=256,
+                width=256,
+                fps=24,
+                num_inference_steps=1,
+                guidance_scale=1.0,
+            ),
+            output=OutputConfig(save_video=False, return_frames=False),
+        )
+
     def generate_video(
         self,
         prompt: str | None = None,
@@ -298,13 +387,38 @@ class VideoGenerator:
             self.executor.set_log_queue(log_queue)
 
         try:
-            return self._generate_video_impl(
-                prompt=prompt,
-                sampling_param=sampling_param,
+            extra_overrides: dict[str, Any] = {}
+            for _ek in _BATCH_EXTRA_PASSTHROUGH_KEYS:
+                if _ek in kwargs:
+                    extra_overrides[_ek] = kwargs.pop(_ek)
+
+            request = legacy_generate_call_to_request(
+                prompt,
+                sampling_param,
                 mouse_cond=mouse_cond,
                 keyboard_cond=keyboard_cond,
                 grid_sizes=grid_sizes,
-                **kwargs,
+                legacy_kwargs=kwargs,
+            )
+
+            fastvideo_args = self.fastvideo_args
+            pipeline_overrides = request_to_pipeline_overrides(request)
+            if pipeline_overrides:
+                fastvideo_args = deepcopy(self.fastvideo_args)
+                for key, value in pipeline_overrides.items():
+                    if not hasattr(fastvideo_args.pipeline_config, key):
+                        raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
+                    setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
+
+            resolved_sampling_param = request_to_sampling_param(
+                request,
+                model_path=self.fastvideo_args.model_path,
+            )
+            return self._generate_video_impl(
+                prompt=request.prompt,
+                sampling_param=resolved_sampling_param,
+                fastvideo_args=fastvideo_args,
+                **extra_overrides,
             )
         finally:
             if log_queue:
@@ -383,7 +497,13 @@ class VideoGenerator:
         if grid_sizes is not None:
             kwargs['grid_sizes'] = grid_sizes
 
+        extra_overrides: dict[str, Any] = {}
+        for _ek in _BATCH_EXTRA_PASSTHROUGH_KEYS:
+            if _ek in kwargs:
+                extra_overrides[_ek] = kwargs.pop(_ek)
+
         sampling_param.update(kwargs)
+        kwargs["_extra_overrides"] = extra_overrides
 
         if fastvideo_args.prompt_txt is not None or sampling_param.prompt_path is not None:
             prompt_txt_path = sampling_param.prompt_path or fastvideo_args.prompt_txt
@@ -581,6 +701,10 @@ class VideoGenerator:
             VSA_sparsity=fastvideo_args.VSA_sparsity,
         )
 
+        extra_overrides = kwargs.pop("_extra_overrides", {})
+        for _ek, _ev in extra_overrides.items():
+            batch.extra[_ek] = _ev
+
         # Run inference
         start_time = time.perf_counter()
 
@@ -702,6 +826,7 @@ class VideoGenerator:
             # `return_frames` (which gates the video-shaped buffers).
             "audio": output_batch.extra.get("audio"),
             "audio_sample_rate": output_batch.extra.get("audio_sample_rate"),
+            "ltx2_audio_latents": output_batch.extra.get("ltx2_audio_latents"),
             "size": (target_height, target_width, batch.num_frames),
             "generation_time": gen_time,
             "logging_info": logging_info,
@@ -862,3 +987,34 @@ class VideoGenerator:
         """
         self.executor.shutdown()
         del self.executor
+
+
+def _final_event_from_result(result: GenerationResult) -> VideoFinalEvent:
+    """Build a :class:`VideoFinalEvent` from a terminal result.
+
+    Streaming consumers prefer ``frames`` for the MSE-backed path;
+    server-side consumers prefer encoded ``video_bytes``. We carry both
+    — whichever the pipeline actually produced — and attach the full
+    :class:`GenerationResult` so callers that want the complete object
+    don't have to keep a second reference.
+    """
+    video_bytes: bytes | None = None
+    if result.video_path and os.path.isfile(result.video_path):
+        try:
+            with open(result.video_path, "rb") as f:
+                video_bytes = f.read()
+        except OSError:
+            video_bytes = None
+    metadata = {
+        "generation_time": result.generation_time,
+        "peak_memory_mb": result.peak_memory_mb,
+        "video_path": result.video_path,
+    }
+    return VideoFinalEvent(
+        video_bytes=video_bytes,
+        tensor=result.samples,
+        frames=result.frames,
+        metadata=metadata,
+        continuation_state=result.state,
+        result=result,
+    )
