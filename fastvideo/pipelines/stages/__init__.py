@@ -16,8 +16,7 @@ from fastvideo.pipelines.stages.denoising import (Cosmos25AutoDenoisingStage, Co
 from fastvideo.pipelines.stages.sr_denoising import SRDenoisingStage
 from fastvideo.pipelines.stages.encoding import EncodingStage
 from fastvideo.pipelines.stages.image_encoding import (ImageEncodingStage, MatrixGame2ImageEncodingStage,
-                                                       MatrixGame2ImageVAEEncodingStage,
-                                                       MatrixGame3ImageVAEEncodingStage, RefImageEncodingStage,
+                                                       MatrixGame2ImageVAEEncodingStage, RefImageEncodingStage,
                                                        ImageVAEEncodingStage, VideoVAEEncodingStage,
                                                        Hy15ImageEncodingStage, HYWorldImageEncodingStage)
 from fastvideo.pipelines.stages.gamecraft_image_encoding import (GameCraftImageVAEEncodingStage)
@@ -33,7 +32,6 @@ from fastvideo.pipelines.basic.ltx2.stages import (
     LTX2TextEncodingStage,
 )
 from fastvideo.pipelines.stages.matrixgame2_denoising import MatrixGame2CausalDenoisingStage
-from fastvideo.pipelines.stages.matrixgame3_denoising import MatrixGame3DenoisingStage
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
 from fastvideo.pipelines.stages.gamecraft_denoising import GameCraftDenoisingStage
 from fastvideo.pipelines.stages.gen3c_stages import (Gen3CCFGPolicyStage, Gen3CConditioningStage, Gen3CDenoisingStage,
@@ -65,7 +63,6 @@ __all__ = [
     "CausalDMDDenosingStage",
     "CausalDenoisingStage",
     "MatrixGame2CausalDenoisingStage",
-    "MatrixGame3DenoisingStage",
     "HYWorldDenoisingStage",
     "GameCraftDenoisingStage",
     "Gen3CCFGPolicyStage",
@@ -85,7 +82,6 @@ __all__ = [
     "ImageEncodingStage",
     "MatrixGame2ImageEncodingStage",
     "MatrixGame2ImageVAEEncodingStage",
-    "MatrixGame3ImageVAEEncodingStage",
     "Hy15ImageEncodingStage",
     "HYWorldImageEncodingStage",
     "RefImageEncodingStage",

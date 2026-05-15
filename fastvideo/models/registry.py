@@ -48,9 +48,11 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
-    "MatrixGameWanModel": ("dits", "matrixgame", "MatrixGameWanModel"),
-    "CausalMatrixGameWanModel": ("dits", "matrixgame", "CausalMatrixGameWanModel"),
-    "MatrixGame3WanModel": ("dits", "matrixgame3", "MatrixGame3WanModel"),
+    "MatrixGame2WanModel": ("dits", "matrixgame2", "MatrixGame2WanModel"),
+    "CausalMatrixGame2WanModel": ("dits", "matrixgame2", "CausalMatrixGame2WanModel"),
+    # Legacy aliases for older HF model_index.json files
+    "MatrixGameWanModel": ("dits", "matrixgame2", "MatrixGame2WanModel"),
+    "CausalMatrixGameWanModel": ("dits", "matrixgame2", "CausalMatrixGame2WanModel"),
 }
 
 _TEXT_ENCODER_MODELS = {

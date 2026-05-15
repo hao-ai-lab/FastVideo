@@ -108,8 +108,8 @@ class MatrixGame2CausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         self._vae_cache = None
 
 
-# Legacy alias for HF model_index.json files that pre-date the MG3 split
-# and still declare ``"_class_name": "MatrixGameCausalDMDPipeline"``.
+# Legacy alias for HF model_index.json files that still declare
+# ``"_class_name": "MatrixGameCausalDMDPipeline"``.
 class MatrixGameCausalDMDPipeline(MatrixGame2CausalDMDPipeline):
     pass
 

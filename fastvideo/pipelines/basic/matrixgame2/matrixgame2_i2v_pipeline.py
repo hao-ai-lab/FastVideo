@@ -59,8 +59,8 @@ class MatrixGame2I2VPipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 
 
-# Legacy alias for HF model_index.json files that pre-date the MG3 split
-# and still declare ``"_class_name": "MatrixGameI2VPipeline"``.
+# Legacy alias for HF model_index.json files that still declare
+# ``"_class_name": "MatrixGameI2VPipeline"``.
 class MatrixGameI2VPipeline(MatrixGame2I2VPipeline):
     pass
 
