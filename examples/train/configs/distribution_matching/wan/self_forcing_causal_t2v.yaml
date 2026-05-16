@@ -26,7 +26,10 @@ method:
   _target_: fastvideo.train.methods.distribution_matching.self_forcing.SelfForcingMethod
   rollout_mode: simulate
   generator_update_interval: 5
-  real_score_guidance_scale: 3.0
+  # Clean uses standard CFG for DMD real score:
+  # uncond + scale * (cond - uncond). Self-Forcing training uses
+  # cond + 3.0 * (cond - uncond), so 4.0 matches its guidance_scale=3.0.
+  real_score_guidance_scale: 4.0
   dmd_denoising_steps: [1000, 750, 500, 250]
   warp_denoising_step: true
 
@@ -97,7 +100,9 @@ callbacks:
     sampling_steps: [4]
     sampling_timesteps: [1000, 750, 500, 250]
     num_frames: 81
-    guidance_scale: 6.0
+    # Validation/inference uses standard CFG in both clean and Self-Forcing,
+    # so this directly matches Self-Forcing guidance_scale=3.0.
+    guidance_scale: 3.0
 
 pipeline:
   flow_shift: 5
