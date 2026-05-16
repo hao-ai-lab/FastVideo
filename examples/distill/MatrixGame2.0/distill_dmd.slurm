@@ -56,9 +56,9 @@ echo "TOTAL_GPUS: ${TOTAL_GPUS}"
 RUN_NAME="$(date +"%m%d_%H%M")"
 echo "RUN_NAME: ${RUN_NAME}"
 
-GENERATOR_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
-REAL_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
-FAKE_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
+GENERATOR_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers"
+REAL_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
+FAKE_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
 
 DATA_DIR="data/matrixgame2"
 VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation.json"

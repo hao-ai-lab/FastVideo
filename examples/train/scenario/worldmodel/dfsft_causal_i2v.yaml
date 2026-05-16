@@ -6,7 +6,7 @@
 models:
   student:
     _target_: fastvideo.train.models.matrixgame2.matrixgame2_causal.MatrixGame2CausalModel
-    init_from: FastVideo/Matrix-Game-2.0-Foundation-Diffusers
+    init_from: FastVideo/Matrix-Game-2.0-Base-Diffusers
     trainable: true
 
 method:

@@ -474,6 +474,10 @@ def _register_configs() -> None:
         pipeline_config_cls=MatrixGame2I2V480PConfig,
         workload_types=(WorkloadType.I2V, ),
         hf_model_paths=[
+            "FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers",
+            "FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers",
+            "FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers",
+            # Legacy HF paths (kept for backward compat — pre-rename names):
             "FastVideo/Matrix-Game-2.0-Base-Diffusers",
             "FastVideo/Matrix-Game-2.0-GTA-Diffusers",
             "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",

@@ -39,7 +39,7 @@ device_reference_folder = resolve_device_reference_folder(
 
 MATRIXGAME_PARAMS = {
     "num_gpus": 1,
-    "model_path": "FastVideo/Matrix-Game-2.0-Base-Diffusers",
+    "model_path": "FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers",
     "height": 352,
     "width": 640,
     "num_frames": 117,
