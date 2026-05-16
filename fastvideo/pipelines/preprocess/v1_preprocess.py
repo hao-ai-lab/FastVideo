@@ -60,12 +60,15 @@ def main(args) -> None:
         PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
     elif args.preprocess_task in ("matrixgame2", "matrixgame"):
         if args.preprocess_task == "matrixgame":
-            warnings.warn("--preprocess_task=matrixgame is deprecated; use matrixgame2", DeprecationWarning)
+            warnings.warn("--preprocess_task=matrixgame is deprecated; use matrixgame2",
+                          DeprecationWarning,
+                          stacklevel=2)
         PreprocessPipeline = PreprocessPipeline_MatrixGame2
     elif args.preprocess_task in ("matrixgame2_ode_trajectory", "matrixgame_ode_trajectory"):
         if args.preprocess_task == "matrixgame_ode_trajectory":
             warnings.warn("--preprocess_task=matrixgame_ode_trajectory is deprecated; use matrixgame2_ode_trajectory",
-                          DeprecationWarning)
+                          DeprecationWarning,
+                          stacklevel=2)
         PreprocessPipeline = PreprocessPipeline_MatrixGame2_ODE_Trajectory
     else:
         raise ValueError(f"Invalid preprocess task: {args.preprocess_task}. "
