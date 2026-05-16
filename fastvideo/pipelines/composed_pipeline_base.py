@@ -463,6 +463,10 @@ class ComposedPipelineBase(ABC):
 
     def add_stage(self, stage_name: str, stage: PipelineStage):
         assert self.modules is not None, "No modules are registered"
+        # Preserve the pipeline-unique stage key for structured metrics.
+        # Multiple stages can share the same class (for example LTX2 main
+        # denoise and refine denoise), so class-name keys would collide.
+        stage._pipeline_stage_name = stage_name
         self._stages.append(stage)
         self._stage_name_mapping[stage_name] = stage
         setattr(self, stage_name, stage)
