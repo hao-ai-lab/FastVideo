@@ -793,14 +793,20 @@ class VideoGenerator:
             frames = None if is_latent_output else []
         else:
             # Quantize on the source device (typically CUDA) BEFORE the
-            # device->host copy. The previous path read from the pinned-CPU
-            # `samples` buffer whose non-blocking D->H had not completed, so
-            # the first op here blocked on the full fp32 video transfer
-            # (~0.3-1.4 GB) and ran a single-threaded per-frame CPU *255/cast
-            # loop. Casting to uint8 on-device first makes the transfer 4x
-            # smaller and moves the elementwise work onto the GPU.
-            # clamp_() also fixes a latent overflow bug: VAE output slightly
-            # outside [0, 1] wrapped mod 256 in the old unclamped cast.
+            # device->host copy. `samples` above is just the pinned-CPU
+            # mirror of `output_batch.output` (`samples.copy_(output)` or
+            # `output.cpu()`) with no intervening preprocessing, so reading
+            # `output_batch.output` here is the same data — but its
+            # non-blocking D->H had not completed, so the first op that
+            # touched `samples` blocked on the full fp32 video transfer
+            # (which scales with resolution x frames x batch and can be
+            # large) and then ran a single-threaded per-frame CPU
+            # *255/cast loop. Casting to uint8 on-device first makes the
+            # transfer 4x smaller and moves the elementwise work onto the
+            # GPU. clamp_() also fixes a latent overflow bug: VAE output
+            # slightly outside [0, 1] wrapped mod 256 in the old unclamped
+            # cast. (Equivalence is SSIM-gated, not bit-exact: float->uint8
+            # differs <=1 LSB CPU vs GPU.)
             src = output_batch.output
             vid_u8 = (src * 255).clamp_(0, 255).to(torch.uint8)
             vid_u8 = rearrange(vid_u8, "b c t h w -> t b c h w").cpu()
