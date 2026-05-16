@@ -121,6 +121,8 @@ require_compiler() {
   fi
   if ! command -v -- "$compiler" >/dev/null 2>&1; then
     echo "[install_native_ffmpeg] $name is unavailable: $compiler" >&2
+    echo "[install_native_ffmpeg] install a compiler, or set FFMPEG_NATIVE_CC/FFMPEG_NATIVE_CXX" \
+      "to compiler commands on PATH." >&2
     exit 1
   fi
   if ! "$compiler" --version >/dev/null 2>&1; then
@@ -144,7 +146,12 @@ for cmd in "${required[@]}"; do
 done
 if (( ${#missing[@]} > 0 )); then
   echo "[install_native_ffmpeg] missing required tools: ${missing[*]}" >&2
-  echo "[install_native_ffmpeg] install them, or set FFMPEG_NATIVE_CC/FFMPEG_NATIVE_CXX explicitly." >&2
+  echo "[install_native_ffmpeg] install the missing tools. FFMPEG_NATIVE_CC/FFMPEG_NATIVE_CXX" \
+    "only override compiler selection; they do not provide make, pkg-config, git, or nasm." >&2
+  if [[ " ${missing[*]} " == *" nasm "* ]]; then
+    echo "[install_native_ffmpeg] nasm is required on x86_64 for x264 SIMD; install nasm" \
+      "(for example via apt or conda-forge) and retry." >&2
+  fi
   exit 1
 fi
 

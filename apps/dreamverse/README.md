@@ -43,16 +43,17 @@ See `apps/dreamverse/docker/README.md` for Docker build and run option details.
 ## Optional: Building FFmpeg For Better Performance
 
 For full streaming performance in a non-Docker install, build a custom FFmpeg
-binary:
+binary from a FastVideo source checkout. The command below is repo-relative,
+so run it from the repository root:
 
 ```bash
 bash apps/dreamverse/scripts/install_native_ffmpeg.sh
 ```
 
-The installer supports Linux `x86_64` and `aarch64`. It auto-detects either a
-conda-forge gcc triplet (if a conda env is active) or system `gcc`/`g++` (plain
-venv). On `x86_64`, x264's hand-tuned SIMD also requires `nasm`; install via
-whichever path fits your host:
+The installer supports Linux `x86_64` and `aarch64`. It prefers conda-forge
+triplet compilers when those commands are on `PATH`, otherwise it falls back to
+system `gcc`/`g++` (plain venv). On `x86_64`, x264's hand-tuned SIMD also
+requires `nasm`; install via whichever path fits your host:
 
 ```bash
 sudo apt install nasm                       # Debian/Ubuntu
@@ -62,10 +63,12 @@ conda install -c conda-forge nasm           # inside an active conda env
 No sudo and no conda? Build `nasm` from source (~30s, installs into `$HOME`):
 
 ```bash
-mkdir -p "$HOME/src" "$HOME/opt" && cd "$HOME/src"
-curl -fsSL -O https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/nasm-2.16.03.tar.gz
-tar -xf nasm-2.16.03.tar.gz && cd nasm-2.16.03
-./configure --prefix="$HOME/opt/nasm" && make -j"$(nproc)" && make install
+(
+  mkdir -p "$HOME/src" "$HOME/opt" && cd "$HOME/src"
+  curl -fsSL -O https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/nasm-2.16.03.tar.gz
+  tar -xf nasm-2.16.03.tar.gz && cd nasm-2.16.03
+  ./configure --prefix="$HOME/opt/nasm" && make -j"$(nproc)" && make install
+)
 export PATH="$HOME/opt/nasm/bin:$PATH"      # add to ~/.bashrc to persist
 ```
 
