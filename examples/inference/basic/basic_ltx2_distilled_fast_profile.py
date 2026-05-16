@@ -193,6 +193,14 @@ def main() -> None:
     pipeline_config = PipelineConfig.from_pretrained(model_root)
     pipeline_config.dit_config.quant_config = NVFP4Config()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    torch_compile_kwargs = {
+        "backend": "inductor",
+        "fullgraph": True,
+        # Uncomment for final best-performance profiling. It is disabled
+        # for faster development iteration because autotuning is slow.
+        # "mode": "max-autotune-no-cudagraphs",
+        "dynamic": False,
+    }
 
     generator = VideoGenerator.from_pretrained(
         model_root,
@@ -207,14 +215,9 @@ def main() -> None:
         pipeline_config=pipeline_config,
         enable_torch_compile=True,
         enable_torch_compile_text_encoder=True,
-        torch_compile_kwargs={
-            "backend": "inductor",
-            "fullgraph": True,
-            # Uncomment for final best-performance profiling. It is disabled
-            # for faster development iteration because autotuning is slow.
-            # "mode": "max-autotune-no-cudagraphs",
-            "dynamic": False,
-        },
+        enable_torch_compile_vae=True,
+        torch_compile_kwargs=torch_compile_kwargs,
+        torch_compile_kwargs_vae=torch_compile_kwargs,
         dit_cpu_offload=False,
         text_encoder_cpu_offload=False,
         vae_cpu_offload=False,

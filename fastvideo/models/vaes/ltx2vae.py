@@ -1289,8 +1289,6 @@ class VideoEncoder(nn.Module):
             spatial_padding_mode=encoder_spatial_padding_mode,
         )
 
-    # @torch.compile(mode="max-autotune-no-cudagraphs")
-    @torch.compile
     def forward(self, sample: torch.Tensor) -> torch.Tensor:
         frames_count = sample.shape[2]
         if ((frames_count - 1) % 8) != 0:
@@ -1431,8 +1429,6 @@ class VideoDecoder(nn.Module):
             )
             self.last_scale_shift_table = nn.Parameter(torch.empty(2, feature_channels))
 
-    # @torch.compile(mode="max-autotune-no-cudagraphs")
-    @torch.compile
     def forward(
         self,
         sample: torch.Tensor,
@@ -1600,6 +1596,10 @@ class LTX2VideoDecoder(nn.Module):
         return self.model(sample, timestep=timestep, generator=generator)
 
 
+def _is_ltx2_vae_codec(name: str, submodule: nn.Module) -> bool:
+    return name in {"encoder", "decoder"} and isinstance(submodule, (VideoEncoder, VideoDecoder))
+
+
 class LTX2CausalVideoAutoencoder(nn.Module):
     """
     LTX-2 VAE that exposes FastVideo's VAE encode/decode interface.
@@ -1609,6 +1609,7 @@ class LTX2CausalVideoAutoencoder(nn.Module):
     # LTX-2 VAE scale factors
     TIME_SCALE: int = 8
     SPATIAL_SCALE: int = 32
+    _compile_conditions = [_is_ltx2_vae_codec]
 
     def __init__(self, config: dict[str, Any]):
         super().__init__()
