@@ -84,6 +84,8 @@ surfaces:
       ltx2_refine_transformer_path: "LTX-2 refine transformer carrier; no typed equivalent yet."
       ltx2_refine_noise_path: "LTX-2 refine noise carrier; no typed equivalent yet."
       ltx2_refine_audio_noise_path: "LTX-2 refine audio noise carrier; no typed equivalent yet."
+      ltx2_legacy_native_noise_order: "LTX-2 SSIM compatibility knob preserving legacy native latent noise ordering."
+      ltx2_use_distilled_sigmas: "LTX-2 compatibility knob gating use of distilled sigma schedule."
     private_only:
       ray_placement_group: "Ray deployment-only field."
       ray_runtime_env: "Ray deployment-only field."
