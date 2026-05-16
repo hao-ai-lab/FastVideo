@@ -12,7 +12,6 @@ two finite embeddings.
 from __future__ import annotations
 
 import os
-from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -29,19 +28,6 @@ PASST_WIN_SAMPLES = 320000  # 10 s at 32 kHz — av-benchmark's truncate/pad tar
 PASST_EMBED_DIM = 768  # PaSST mode="all" returns 527+768 = 1295; embed is the trailing 768
 
 REF_FEATURES_ENV = "FASTVIDEO_FAD_REF_FEATURES"
-
-
-class _patch_passt_stft:
-    """Re-enable PaSST's deprecated ``torch.stft(return_complex=False)``."""
-
-    def __init__(self) -> None:
-        self.old_stft = torch.stft
-
-    def __enter__(self) -> None:
-        torch.stft = partial(torch.stft, return_complex=False)  # type: ignore[assignment]
-
-    def __exit__(self, *exc: Any) -> None:
-        torch.stft = self.old_stft  # type: ignore[assignment]
 
 
 def _frechet_distance(mu1: np.ndarray,
@@ -85,7 +71,7 @@ def _passt_embed(model: Any, audio_path: str, device: torch.device) -> np.ndarra
         audio = padded
 
     wav = torch.from_numpy(np.asarray(audio, dtype=np.float32)).unsqueeze(0).to(device)
-    with torch.no_grad(), _patch_passt_stft():
+    with torch.no_grad():
         out = model(wav)  # (1, 1295) — logits[:527] | embed[527:]
     embed = out[0, 527:].detach().cpu().numpy()
     return embed

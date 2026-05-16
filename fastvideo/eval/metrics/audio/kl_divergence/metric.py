@@ -7,7 +7,6 @@ the sigmoid variant is exposed in ``details["kl_sigmoid"]``.
 
 from __future__ import annotations
 
-from functools import partial
 from typing import Any
 
 import numpy as np
@@ -19,19 +18,6 @@ from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
 
 SAMPLING_RATE = 32000
-
-
-class _patch_passt_stft:
-    """Re-enable PaSST's deprecated ``torch.stft(return_complex=False)``."""
-
-    def __init__(self) -> None:
-        self.old_stft = torch.stft
-
-    def __enter__(self) -> None:
-        torch.stft = partial(torch.stft, return_complex=False)  # type: ignore[assignment]
-
-    def __exit__(self, *exc: Any) -> None:
-        torch.stft = self.old_stft  # type: ignore[assignment]
 
 
 def _collect_logits(
@@ -62,7 +48,7 @@ def _collect_logits(
             tmp[:len(window)] = window
             window = tmp
         wav = torch.from_numpy(np.asarray(window, dtype=np.float32)).unsqueeze(0).to(device)
-        with torch.no_grad(), _patch_passt_stft():
+        with torch.no_grad():
             logits = model(wav)
         per_window.append(logits.squeeze().detach().cpu())
 

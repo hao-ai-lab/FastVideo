@@ -183,9 +183,16 @@ class DeSyncMetric(BaseMetric):
         if video is None or audio_path is None:
             return self._skip(sample, "missing 'video' or 'audio'")
 
+        # Prefer the per-sample fps the pool decoded at; fall back to the
+        # constructor override. Without either, the audio/video windows can't
+        # be aligned, so skip rather than guess.
+        sample_fps = sample.get("fps")
+        src_fps = float(sample_fps) if sample_fps is not None else self._src_fps
+        if src_fps is None:
+            return self._skip(sample, "missing 'fps' (set sample fps or pass src_fps=)")
+
         # Video preprocessing → (S, T_seg, C, 224, 224)
         frames = video.float().to(self.device)
-        src_fps = self._src_fps if self._src_fps is not None else _SYNC_FPS
         frames = _resample_video(frames, _SYNC_FPS, src_fps)
         frames = _video_transform(frames)
         vsegs = _segment_video(frames).unsqueeze(0)  # (B=1, S, T_seg, C, H, W)
@@ -205,7 +212,20 @@ class DeSyncMetric(BaseMetric):
         # |grid|-value → average across the two directions.
         sync_grid = self._grid.to(self.device) if self._grid is not None else None
         assert sync_grid is not None
-        s_used = min(_NUM_SEG_PER_DIRECTION, vfeats.shape[1], afeats.shape[1])
+        # Synchformer's transformer carries a fixed 198-token positional embedding
+        # (~14 segments × (tv+ta) + 2 special tokens). Anything shorter would
+        # shape-mismatch on the pos_emb add inside compare_v_a, so skip.
+        n_vsegs = int(vfeats.shape[1])
+        n_asegs = int(afeats.shape[1])
+        s_used = min(n_vsegs, n_asegs)
+        if s_used < _NUM_SEG_PER_DIRECTION:
+            return self._skip(
+                sample,
+                f"too few segments for Synchformer pos_emb "
+                f"(need {_NUM_SEG_PER_DIRECTION}, got v={n_vsegs} a={n_asegs}); "
+                f"use clips of at least ~5 s",
+            )
+        s_used = _NUM_SEG_PER_DIRECTION
         front_logits = self._model.compare_v_a(vfeats[:, :s_used], afeats[:, :s_used])
         back_logits = self._model.compare_v_a(vfeats[:, -s_used:], afeats[:, -s_used:])
         front_id = int(torch.argmax(front_logits, dim=-1).item())
