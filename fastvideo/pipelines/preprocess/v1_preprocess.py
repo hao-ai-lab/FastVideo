@@ -1,5 +1,6 @@
 import argparse
 import os
+import warnings
 from typing import Any
 
 from fastvideo import PipelineConfig
@@ -57,9 +58,14 @@ def main(args) -> None:
         assert args.flow_shift is not None, "flow_shift is required for ode_trajectory"
         fastvideo_args.pipeline_config.flow_shift = args.flow_shift
         PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
-    elif args.preprocess_task == "matrixgame2":
+    elif args.preprocess_task in ("matrixgame2", "matrixgame"):
+        if args.preprocess_task == "matrixgame":
+            warnings.warn("--preprocess_task=matrixgame is deprecated; use matrixgame2", DeprecationWarning)
         PreprocessPipeline = PreprocessPipeline_MatrixGame2
-    elif args.preprocess_task == "matrixgame2_ode_trajectory":
+    elif args.preprocess_task in ("matrixgame2_ode_trajectory", "matrixgame_ode_trajectory"):
+        if args.preprocess_task == "matrixgame_ode_trajectory":
+            warnings.warn("--preprocess_task=matrixgame_ode_trajectory is deprecated; use matrixgame2_ode_trajectory",
+                          DeprecationWarning)
         PreprocessPipeline = PreprocessPipeline_MatrixGame2_ODE_Trajectory
     else:
         raise ValueError(f"Invalid preprocess task: {args.preprocess_task}. "
@@ -103,7 +109,17 @@ if __name__ == "__main__":
         "--preprocess_task",
         type=str,
         default="t2v",
-        choices=["t2v", "i2v", "text_only", "ode_trajectory", "matrixgame2", "matrixgame2_ode_trajectory"],
+        choices=[
+            "t2v",
+            "i2v",
+            "text_only",
+            "ode_trajectory",
+            "matrixgame2",
+            "matrixgame2_ode_trajectory",
+            # Deprecated legacy values (warn on use):
+            "matrixgame",
+            "matrixgame_ode_trajectory",
+        ],
         help="Type of preprocessing task to run")
     parser.add_argument("--train_fps", type=int, default=30)
     parser.add_argument("--use_image_num", type=int, default=0)

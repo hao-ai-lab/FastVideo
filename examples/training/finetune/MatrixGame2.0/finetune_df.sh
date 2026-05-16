@@ -14,9 +14,9 @@ NUM_GPUS=8
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_finetune"
-  --output_dir "checkpoints/matrixgame_finetune"
-  --override_transformer_cls_name "CausalMatrixGameWanModel"
+  --tracker_project_name "matrixgame2_finetune"
+  --output_dir "checkpoints/matrixgame2_finetune"
+  --override_transformer_cls_name "CausalMatrixGame2WanModel"
   --max_train_steps 1500
   --train_batch_size 1
   --train_sp_batch_size 1
