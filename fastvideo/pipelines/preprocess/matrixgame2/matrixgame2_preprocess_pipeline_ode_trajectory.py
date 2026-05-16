@@ -312,14 +312,14 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
 
                     # Create record for Parquet dataset
                     record: dict[str, Any] = matrixgame2_ode_record_creator(video_name=video_name,
-                                                                           clip_feature=clip_feature_np,
-                                                                           first_frame_latent=first_frame_latent_np,
-                                                                           trajectory_latents=traj_latents,
-                                                                           trajectory_timesteps=traj_timesteps,
-                                                                           pil_image=pil_image_np,
-                                                                           keyboard_cond=keyboard_cond_np,
-                                                                           mouse_cond=mouse_cond_np,
-                                                                           caption="")
+                                                                            clip_feature=clip_feature_np,
+                                                                            first_frame_latent=first_frame_latent_np,
+                                                                            trajectory_latents=traj_latents,
+                                                                            trajectory_timesteps=traj_timesteps,
+                                                                            pil_image=pil_image_np,
+                                                                            keyboard_cond=keyboard_cond_np,
+                                                                            mouse_cond=mouse_cond_np,
+                                                                            caption="")
                     batch_data.append(record)
 
                 if batch_data:
