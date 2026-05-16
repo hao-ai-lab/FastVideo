@@ -1083,12 +1083,6 @@ class VideoGenerator:
         if not frames:
             return False
 
-        try:
-            audio_int16, num_channels = cls._audio_to_int16(audio)
-        except ValueError as e:
-            logger.warning("Unexpected audio tensor for ffmpeg pipe save: %s", e)
-            return False
-
         height = int(frames[0].shape[0])
         width = int(frames[0].shape[1])
         codec = os.getenv("FASTVIDEO_VIDEO_CODEC", "libx264")
@@ -1096,12 +1090,11 @@ class VideoGenerator:
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 wav_path = os.path.join(tmpdir, "audio.wav")
-                import wave
-                with wave.open(wav_path, "wb") as wav_file:
-                    wav_file.setnchannels(num_channels)
-                    wav_file.setsampwidth(2)
-                    wav_file.setframerate(sample_rate)
-                    wav_file.writeframes(audio_int16.tobytes())
+                try:
+                    cls._write_pcm_wav(wav_path, audio, sample_rate)
+                except ValueError as e:
+                    logger.warning("Unexpected audio tensor for ffmpeg pipe save: %s", e)
+                    return False
 
                 cmd = [
                     ffmpeg_bin,
