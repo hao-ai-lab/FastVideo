@@ -24,6 +24,9 @@ method:
   _target_: fastvideo.train.methods.distribution_matching.streaming_long_tuning.StreamingLongTuningMethod
   rollout_mode: simulate
   generator_update_interval: 5
+  # Clean uses standard CFG for DMD real score:
+  # uncond + scale * (cond - uncond). Self-Forcing/LongLive training uses
+  # cond + 3.0 * (cond - uncond), so 4.0 matches their guidance_scale=3.0.
   real_score_guidance_scale: 4.0
   dmd_denoising_steps: [1000, 750, 500, 250]
   warp_denoising_step: true
@@ -118,7 +121,9 @@ callbacks:
     sampling_steps: [4]
     sampling_timesteps: [1000, 750, 500, 250]
     num_frames: 513
-    guidance_scale: 6.0
+    # Validation/inference uses standard CFG in both clean and
+    # Self-Forcing/LongLive, so this directly matches their guidance_scale=3.0.
+    guidance_scale: 3.0
 
 pipeline:
   flow_shift: 5
