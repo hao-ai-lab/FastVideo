@@ -118,6 +118,7 @@ def test_matrixgame_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     init_kwargs = {
         "num_gpus": BASE_PARAMS["num_gpus"],
+        "workload_type": "i2v",
         "use_fsdp_inference": True,
         "dit_layerwise_offload": False,
         "dit_cpu_offload": False,
