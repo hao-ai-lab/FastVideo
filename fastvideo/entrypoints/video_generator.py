@@ -792,13 +792,23 @@ class VideoGenerator:
         if is_latent_output or audio_only:
             frames = None if is_latent_output else []
         else:
-            videos = rearrange(samples, "b c t h w -> t b c h w")
-            frames = []
-            for x in videos:
-                x = torchvision.utils.make_grid(x, nrow=6)
-                x = x.permute(1, 2, 0).squeeze(-1)
-                x = (x * 255).to(torch.uint8)
-                frames.append(x.contiguous().cpu().numpy())
+            # Quantize on the source device (typically CUDA) BEFORE the
+            # device->host copy. The previous path read from the pinned-CPU
+            # `samples` buffer whose non-blocking D->H had not completed, so
+            # the first op here blocked on the full fp32 video transfer
+            # (~0.3-1.4 GB) and ran a single-threaded per-frame CPU *255/cast
+            # loop. Casting to uint8 on-device first makes the transfer 4x
+            # smaller and moves the elementwise work onto the GPU.
+            # clamp_() also fixes a latent overflow bug: VAE output slightly
+            # outside [0, 1] wrapped mod 256 in the old unclamped cast.
+            src = output_batch.output
+            vid_u8 = (src * 255).clamp_(0, 255).to(torch.uint8)
+            vid_u8 = rearrange(vid_u8, "b c t h w -> t b c h w").cpu()
+            frames = [
+                torchvision.utils.make_grid(x, nrow=6).permute(
+                    1, 2, 0).squeeze(-1).contiguous().numpy()
+                for x in vid_u8
+            ]
         postprocess_time = time.perf_counter() - postprocess_start
         logger.info("PostDecodeFrameProcessStage completed in %.3f s", postprocess_time)
         if logging_info is not None:
