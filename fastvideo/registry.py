@@ -479,11 +479,7 @@ def _register_configs() -> None:
             "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",
         ],
         model_detectors=[
-            lambda path: any(token in path.lower() for token in (
-                "matrix-game-2",
-                "matrixgame2",
-                "matrix-game-2.0",
-            )),
+            lambda path: "matrix-game" in path.lower() or "matrixgame" in path.lower(),
         ],
         model_family="matrixgame",
         default_preset="matrixgame2_i2v",
