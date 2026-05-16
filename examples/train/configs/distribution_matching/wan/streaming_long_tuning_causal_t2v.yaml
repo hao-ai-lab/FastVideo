@@ -1,0 +1,129 @@
+# Full Wan 2.1 T2V 1.3B LongLive-style multi-stage tuning.
+#
+# Stage 1: vanilla self-forcing for steps 0-700.
+# Stage 2: 129-latent streaming long tuning through step 3000.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanCausalModel
+    init_from: wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    transformer_override_safetensor: /mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors
+  teacher:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: false
+    disable_custom_init_weights: true
+  critic:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    disable_custom_init_weights: true
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.streaming_long_tuning.StreamingLongTuningMethod
+  rollout_mode: simulate
+  generator_update_interval: 5
+  real_score_guidance_scale: 4.0
+  dmd_denoising_steps: [1000, 750, 500, 250]
+  warp_denoising_step: true
+
+  chunk_size: 3
+  student_sample_type: sde
+  context_noise: 0.0
+  same_step_across_blocks: true
+  enable_gradient_in_rollout: true
+  start_gradient_frame: 0
+
+  streaming_training: true
+  streaming_chunk_size: 21
+  streaming_max_length: 129
+  streaming_min_new_frame: 18
+  train_first_chunk: true
+  streaming_debug_log: true
+
+  multi_phased_distill_schedule:
+    - stage: self_forcing
+      start_step: 0
+      end_step: 700
+      num_latent_t: 21
+      streaming_training: false
+    - stage: streaming_long
+      start_step: 700
+      end_step: 3000
+      num_latent_t: 129
+      streaming_training: true
+      streaming_chunk_size: 21
+      streaming_max_length: 129
+      streaming_min_new_frame: 18
+      train_first_chunk: true
+
+  # Critic optimizer
+  fake_score_learning_rate: 4.0e-7
+  fake_score_betas: [0.0, 0.999]
+  fake_score_lr_scheduler: constant
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+
+  data:
+    data_path: /mnt/weka/home/hao.zhang/mhuo/FastVideo-clean/data/vidprom_16k_umt5_text_embed
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 129
+    num_height: 480
+    num_width: 832
+    num_frames: 513
+
+  optimizer:
+    learning_rate: 2.0e-6
+    betas: [0.0, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 3000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/wan2.1_1.3b_longlive_multistage_vidprom_129
+    training_state_checkpointing_steps: 0
+    checkpoints_total_limit: 0
+
+  tracker:
+    project_name: longlive
+    run_name: wan2.1_1.3b_longlive_multistage_vidprom_129
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  ema:
+    decay: 0.99
+    start_iter: 200
+  grad_clip:
+    max_grad_norm: 1.0
+  validation:
+    pipeline_target: fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline.WanCausalDMDPipeline
+    dataset_file: examples/train/validation_files/validation_8_t2v.json
+    every_steps: 100
+    sampling_steps: [4]
+    sampling_timesteps: [1000, 750, 500, 250]
+    num_frames: 513
+    guidance_scale: 6.0
+
+pipeline:
+  flow_shift: 5
+  dit_config:
+    # local_attn_size includes sink latents: 12 = 3 sink + 9 rolling window.
+    # Use a positive local_attn_size for validation videos longer than 81 frames.
+    local_attn_size: 12
+    sink_size: 3
