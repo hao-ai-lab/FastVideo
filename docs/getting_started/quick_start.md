@@ -23,7 +23,24 @@ Also optionally install flash-attn:
 uv pip install flash-attn --no-build-isolation -v
 ```
 
-## Basic Usage
+## ⚡ Generate Your Command
+
+Select your task and hardware to get a ready-to-run command:
+
+<div class="quick-start-guide-wrap">
+  <iframe
+    class="quick-start-guide-frame"
+    src="/config-generator/"
+    title="FastVideo Guided Config Generator"
+  ></iframe>
+</div>
+
+!!! tip "Need more control?"
+    Use the [Advanced Tuning Guide](advanced_tuning_guide.md) to tune all parameters — resolution, attention backend, memory offloading, and more.
+
+## Python API
+
+Prefer Python over the CLI? Here are equivalent examples:
 
 ### Text-to-Video Generation
 
@@ -78,6 +95,7 @@ if __name__ == '__main__':
 
 ## Next Steps
 
+- [Advanced Tuning Guide](advanced_tuning_guide.md) - Fine-grained parameter tuning
 - [Installation Guide](installation.md) - Detailed installation instructions
 - [Configuration](../inference/configuration.md) - Learn about configuration options
 - [Examples](../inference/examples/examples_inference_index.md) - Explore more
