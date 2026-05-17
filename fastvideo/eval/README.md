@@ -2,17 +2,66 @@
 
 In-process evaluation suite for video generations. Includes pixel
 metrics (SSIM, PSNR, LPIPS), optical-flow comparisons, the full VBench
-suite, Physics-IQ, and a VLM scorer (VideoScore-2) behind a single
+suite, Physics-IQ, audio metrics, and a VLM scorer behind a single
 registry-driven API.
 
 ## Install
 
 | Use case | Install |
 |---|---|
-| Default (common, optical_flow, vbench-light, physics_iq, videoscore2) | `uv pip install -e .[eval]` |
-| Just VBench (12 of 16 sub-metrics) | `uv pip install -e .[eval-vbench]` |
+| Default (common, optical_flow, vbench, physics_iq, videoscore2) | `uv pip install -e .[eval]` |
+| Just VBench (11 of 16 by default; +4 with detectron2) | `uv pip install -e .[eval-vbench]` |
 | Just Physics-IQ (covered by `[eval]`) | `uv pip install -e .[eval-physics-iq]` |
-| Plus `vbench.scene` (AVoCaDO) | `uv pip install -e .[eval-full]` |
+| Audio metrics (CLAP, FAD, KL, WER, AudioBox, DeSync, ImageBind) | `uv pip install -e .[eval-audio]` |
+| Everything: `[eval]` + `[eval-audio]` + `vbench.scene` (AVoCaDO) | `uv pip install -e .[eval-full]` |
+
+`[eval-audio]` covers every `audio.*` metric. ImageBind
+(`facebookresearch/ImageBind`, CC BY-NC-SA 4.0) is git-sourced via
+`[tool.uv.sources]` rather than vendored. `torchaudio` at the cu128
+wheel is pulled transitively by `audiobox_aesthetics`; on cu128 hosts
+using raw `pip`, install `torchaudio` from
+`https://download.pytorch.org/whl/cu128` first.
+
+`audio.desync` and `audio.wer (glm_asr)` import vendored upstream from
+`fastvideo/third_party/eval/synchformer/` (MIT) and
+`fastvideo/third_party/eval/glmasr/` (Apache-2.0). Both trees keep
+their upstream `LICENSE` files alongside.
+
+### `audio.*` metric input contracts
+
+Every audio metric reads from these sample-dict keys (extra keys are
+ignored):
+
+| Metric | Per-sample? | Required keys |
+|---|---|---|
+| `audio.clap_score` | yes | `audio` (path), `text_prompt` (str) |
+| `audio.audiobox_aesthetics` | yes | `audio` (path) |
+| `audio.kl_divergence` | yes | `audio` (path), `reference_audio` (path) |
+| `audio.frechet_distance` | **set-vs-set** | `audio` (path), `reference_audio` (path) — accumulated across ≥2 samples; `corpus["audio.frechet_distance"]` carries the score |
+| `audio.wer` | yes | `audio` (path), `reference_text` (str) or `text_prompt` (str) |
+| `audio.desync` | yes | `video` (decoded tensor or path), `audio` (path) |
+| `audio.imagebind_score` | yes | `video_path` (str) **and** `audio` (path) — needs the path, not the pool-decoded tensor, because ImageBind's preprocessing decodes its own clips |
+
+`audio.frechet_distance` is the only set-vs-set metric. The kwargs
+form (`ev.evaluate(audio=...)`) raises with a clear message because a
+single sample cannot produce a corpus result; use
+`ev.evaluate(samples=[...])`.
+
+### Reference repos for audio
+
+The audio set ports its math 1:1 from `hkchengrex/av-benchmark` (the
+V2A literature's de-facto eval harness — used by MMAudio, FoleyCrafter,
+V2A-Mapper). Per-metric upstream:
+
+| Metric | Upstream |
+|---|---|
+| `audio.frechet_distance` (PaSST-FAD) | `av_bench/metrics/fad.py::compute_fd` over `hear21passt` 768-d embeds |
+| `audio.kl_divergence` | `av_bench/metrics/kl.py::compute_kl` over PaSST 527-d logits |
+| `audio.clap_score` | HF `transformers.ClapModel` (`laion/clap-htsat-fused` — closest HF mirror of `630k-audioset-fusion-best`) |
+| `audio.audiobox_aesthetics` | `facebookresearch/audiobox-aesthetics` (PQ as primary score, CE/CU/PC in details) |
+| `audio.wer` | MagiHuman-style: NFKC + CJK char-level via `jiwer`, GLM-ASR or Whisper backbone |
+| `audio.desync` | `av_bench/synchformer/` (vendored under `third_party/eval/synchformer/`); checkpoint from `hkchengrex/MMAudio/releases/v0.1/synchformer_state_dict.pth` |
+| `audio.imagebind_score` | `facebookresearch/ImageBind` (`imagebind_huge` pretrained) |
 | Plus `vbench.{color, multiple_objects, object_class, spatial_relationship}` (GRiT) | `uv pip install -e .[eval-vbench]` then `uv pip install --no-build-isolation 'git+https://github.com/facebookresearch/detectron2.git'` |
 
 To use VBench, also pull the upstream submodule:
@@ -80,6 +129,8 @@ fastvideo/
 │       ├── base.py                # BaseMetric + @register contract
 │       ├── common/                # SSIM, PSNR, LPIPS
 │       ├── optical_flow/          # gt_optical_flow, synthetic_optical_flow
+│       ├── audio/                 # clap_score, audiobox_aesthetics, kl_divergence,
+│       │                          # frechet_distance, wer, desync, imagebind_score
 │       ├── videoscore2/           # VideoScore-2 (Qwen2.5-VL)
 │       ├── physics_iq/            # PhysicsIQ + sub-metrics
 │       └── vbench/                # adapter: sys.path bootstrap + shims
@@ -87,7 +138,9 @@ fastvideo/
 │           └── <16 sub-metric pkgs>
 └── third_party/
     └── eval/
-        └── vbench/                # git submodule (Vchitect/VBench)
+        ├── vbench/                # git submodule (Vchitect/VBench)
+        ├── synchformer/           # vendored (MIT), used by audio.desync
+        └── glmasr/                # vendored (Apache-2.0), used by audio.wer (glm_asr)
 ```
 
 ### Prompt datasets
@@ -134,7 +187,7 @@ class YourMetric(BaseMetric):
     needs_gpu = False
     dependencies: list[str] = []  # e.g. ["pyiqa"] if relevant
 
-    def compute(self, sample) -> list[MetricResult]:
+    def compute(self, sample) -> MetricResult:
         ...
 ```
 
@@ -142,23 +195,21 @@ The metric is auto-discovered by `fastvideo/eval/metrics/__init__.py`,
 which walks all non-underscore subdirectories and imports their
 `metric` module.
 
-### Wrapping upstream code via a submodule
+### Wrapping upstream code
 
-See `fastvideo/eval/metrics/vbench/` for a worked example. The
-contract is:
+Three patterns coexist depending on how the upstream ships and what
+licence it's under. All three keep upstream files on disk unmodified;
+behavioural patches live as runtime shims in the consuming code.
 
-1. Upstream lives as a git submodule under
-   `fastvideo/third_party/eval/<bench>/`, pinned to a SHA in repo-root
-   `.gitmodules`.
-2. The metric package's `__init__.py`
-   (`fastvideo/eval/metrics/<bench>/__init__.py`) inserts that
-   submodule path on `sys.path` and installs any compat shims for
-   modern torch/transformers/numpy. Do not modify upstream files on
-   disk.
-3. Per-sub-metric `metric.py` files use `@register("<bench>.<name>")`.
-
-Patches live as Python in the metric's `__init__.py` so they are
-grep-able and reviewable.
+1. **Git submodule** — large research packages pinned to a SHA, accessed
+   via `sys.path` bootstrap. See `fastvideo/eval/metrics/vbench/` (with
+   `fastvideo/third_party/eval/vbench/`).
+2. **Vendored under `third_party/eval/<name>/`** — small/surgical upstream
+   trees with permissive licences (MIT, Apache-2.0). See
+   `fastvideo/third_party/eval/synchformer/` and `.../glmasr/`.
+3. **Git-source via `[tool.uv.sources]`** — license-restricted upstream
+   that cannot be redistributed in the FastVideo source tree. See
+   ImageBind (CC BY-NC-SA 4.0) in `pyproject.toml`.
 
 ## Caches
 
@@ -167,7 +218,7 @@ Eval cache root: `${FASTVIDEO_CACHE_ROOT}/eval/`, default
 
 ```
 ${FASTVIDEO_CACHE_ROOT}/eval/
-├── models/      # URL-fetched checkpoints (LAION head, AMT, GRiT)
+├── models/      # URL-fetched checkpoints (LAION head, GRiT, Synchformer, ImageBind)
 ├── torch/       # redirected TORCH_HOME (DINO via torch.hub, lpips)
 ├── clip/        # passed as download_root= to clip.load callsites
 └── datasets/    # auto-fetched dataset assets, one subdir per benchmark
