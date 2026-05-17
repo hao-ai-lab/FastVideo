@@ -122,6 +122,7 @@ nav:
     - Installation: getting_started/installation.md
     - Quick Start: getting_started/quick_start.md
     - V1 API: getting_started/v1_api.md
+    - Advanced Tuning Guide: getting_started/advanced_tuning_guide.md
   - Inference:
     - Quick Start: inference/inference_quick_start.md
     - Configuration: inference/configuration.md
