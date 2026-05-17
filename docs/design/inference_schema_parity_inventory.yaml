@@ -108,6 +108,7 @@ surfaces:
       vae_sp: generator.pipeline.preset_overrides.vae_sp
       dmd_denoising_steps: generator.pipeline.preset_overrides.dmd_denoising_steps
       ti2v_task: generator.pipeline.preset_overrides.ti2v_task
+      lucy_edit_task: generator.pipeline.preset_overrides.lucy_edit_task
       boundary_ratio: generator.pipeline.preset_overrides.boundary_ratio
     compatibility_only:
       model_path: "Redundant with generator.model_path."
