@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -33,6 +35,80 @@ DEFAULT_LORA_TARGET_MODULES = [
     "to_qkv",
     "to_gate_compress",
 ]
+
+_LORA_CONFIG_KEYS = ("enable", "rank", "alpha", "target_modules")
+
+
+@dataclass
+class LoraConfig:
+    """Structured LoRA settings for one ``fastvideo.train`` model role.
+
+    Parsed from the nested ``models.<role>.lora`` YAML block::
+
+        lora:
+          enable: true                       # default false
+          rank: 16
+          alpha: 32                          # defaults to rank when omitted
+          target_modules: [to_q, to_k, to_v, to_out]
+
+    ``enable`` is an explicit on/off switch so a config states its intent
+    plainly: the presence of ``rank`` alone never silently flips a run into
+    LoRA-only training.  When ``enable`` is false a still-present ``rank`` is
+    ignored (with an INFO log), so a configured-but-off block is valid.
+    """
+
+    enable: bool = False
+    rank: int | None = None
+    alpha: int | None = None
+    target_modules: list[str] | None = None
+
+    def __post_init__(self) -> None:
+        if self.rank is not None:
+            self.rank = int(self.rank)
+        if self.alpha is not None:
+            self.alpha = int(self.alpha)
+        if self.target_modules is not None:
+            self.target_modules = list(self.target_modules)
+
+        if self.enable:
+            if self.rank is None:
+                raise ValueError("models.<role>.lora.enable is true but lora.rank is unset "
+                                 "— an explicit positive rank is required to enable LoRA")
+            if self.rank <= 0:
+                raise ValueError(f"models.<role>.lora.rank must be > 0, got {self.rank!r}")
+        elif self.rank is not None:
+            logger.info(
+                "models.<role>.lora.rank=%s is set but lora.enable is false — "
+                "LoRA will NOT be applied (model trains on its normal "
+                "trainable path).", self.rank)
+
+    @classmethod
+    def coerce(
+        cls,
+        obj: LoraConfig | dict[str, Any] | None,
+    ) -> LoraConfig | None:
+        """Normalize a raw YAML mapping (or existing config) into a LoraConfig.
+
+        Returns ``None`` when no ``lora`` block was given, which callers treat
+        as "LoRA not configured" — identical in effect to ``enable: false``.
+        """
+        if obj is None:
+            return None
+        if isinstance(obj, LoraConfig):
+            return obj
+        if not isinstance(obj, dict):
+            raise TypeError("models.<role>.lora must be a mapping or LoraConfig, got "
+                            f"{type(obj).__name__}")
+        unknown = set(obj) - set(_LORA_CONFIG_KEYS)
+        if unknown:
+            logger.warning("LoraConfig: ignoring unrecognized lora keys %s "
+                           "(valid keys: %s)", sorted(unknown), list(_LORA_CONFIG_KEYS))
+        return cls(
+            enable=bool(obj.get("enable", False)),
+            rank=obj.get("rank"),
+            alpha=obj.get("alpha"),
+            target_modules=obj.get("target_modules"),
+        )
 
 
 def _is_target_layer(

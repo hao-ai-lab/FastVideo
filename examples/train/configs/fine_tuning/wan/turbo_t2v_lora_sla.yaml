@@ -14,13 +14,15 @@ models:
     _target_: fastvideo.train.models.wan.WanModel
     init_from: loayrashid/TurboWan2.1-T2V-1.3B-Diffusers
     trainable: true
-    lora_rank: 16
-    lora_alpha: 32
-    lora_target_modules:
-      - to_q
-      - to_k
-      - to_v
-      - to_out
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+      target_modules:
+        - to_q
+        - to_k
+        - to_v
+        - to_out
 
 method:
   _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod

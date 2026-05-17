@@ -6,15 +6,17 @@ models:
     _target_: fastvideo.train.models.hunyuan.HunyuanModel
     init_from: hunyuanvideo-community/HunyuanVideo
     trainable: true
-    lora_rank: 16
-    lora_alpha: 32
-    lora_target_modules:
-      - img_attn_qkv
-      - img_attn_proj
-      - txt_attn_qkv
-      - txt_attn_proj
-      - self_attn_qkv
-      - self_attn_proj
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+      target_modules:
+        - img_attn_qkv
+        - img_attn_proj
+        - txt_attn_qkv
+        - txt_attn_proj
+        - self_attn_qkv
+        - self_attn_proj
 
 method:
   _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod

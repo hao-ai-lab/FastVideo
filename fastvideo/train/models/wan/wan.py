@@ -41,6 +41,7 @@ from fastvideo.train.utils.negative_prompt import encode_negative_prompt
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
+    from fastvideo.train.utils.lora import LoraConfig
 
 try:
     from fastvideo.attention.backends.video_sparse_attn import (
@@ -69,15 +70,11 @@ class WanModel(ModelBase):
         | None = None,
         transformer_override_safetensor: str
         | None = None,
-        lora_rank: int | None = None,
-        lora_alpha: int | None = None,
-        lora_target_modules: list[str] | None = None,
+        lora: LoraConfig | dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             trainable=trainable,
-            lora_rank=lora_rank,
-            lora_alpha=lora_alpha,
-            lora_target_modules=lora_target_modules,
+            lora=lora,
         )
         self._init_from = str(init_from)
 

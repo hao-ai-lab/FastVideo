@@ -13,6 +13,7 @@ from fastvideo.models.utils import pred_noise_to_pred_video
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
+    from fastvideo.train.utils.lora import LoraConfig
     from fastvideo.pipelines import TrainingBatch
 
 
@@ -34,17 +35,12 @@ class ModelBase(ABC):
         self,
         *,
         trainable: bool = True,
-        lora_rank: int | None = None,
-        lora_alpha: int | None = None,
-        lora_target_modules: list[str] | None = None,
+        lora: LoraConfig | dict[str, Any] | None = None,
     ) -> None:
+        from fastvideo.train.utils.lora import LoraConfig
+
         self._trainable = bool(trainable)
-        self._lora_rank = (int(lora_rank) if lora_rank is not None else None)
-        self._lora_alpha = (int(lora_alpha) if lora_alpha is not None else None)
-        self._lora_target_modules = (
-            list(lora_target_modules)
-            if lora_target_modules is not None else None
-        )
+        self._lora_config: LoraConfig | None = LoraConfig.coerce(lora)
         self._num_lora_layers = 0
 
     @property
@@ -61,20 +57,20 @@ class ModelBase(ABC):
         Concrete models still own transformer loading because class names and
         checkpoint setup are model-specific. The LoRA activation path is shared.
         """
-        if self._lora_rank is None:
+        cfg = self._lora_config
+        if cfg is None or not cfg.enable:
             return False
         if not self._trainable:
-            raise ValueError(
-                "LoRA training requires trainable=true for the role model"
-            )
+            raise ValueError("LoRA training requires trainable=true for the role model")
 
         from fastvideo.train.utils.lora import enable_lora_training
 
+        assert cfg.rank is not None  # guaranteed by LoraConfig validation
         self._num_lora_layers = enable_lora_training(
             transformer,
-            lora_rank=self._lora_rank,
-            lora_alpha=self._lora_alpha,
-            lora_target_modules=self._lora_target_modules,
+            lora_rank=cfg.rank,
+            lora_alpha=cfg.alpha,
+            lora_target_modules=cfg.target_modules,
         )
         return True
 

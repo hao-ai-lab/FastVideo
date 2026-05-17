@@ -16,6 +16,7 @@ from fastvideo.train.models.wan.wan import WanModel
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
+    from fastvideo.train.utils.lora import LoraConfig
 
 
 @dataclass(slots=True)
@@ -47,9 +48,7 @@ class WanCausalModel(WanModel, CausalModelBase):
         | None = None,
         transformer_override_safetensor: str
         | None = None,
-        lora_rank: int | None = None,
-        lora_alpha: int | None = None,
-        lora_target_modules: list[str] | None = None,
+        lora: LoraConfig | dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             init_from=init_from,
@@ -59,9 +58,7 @@ class WanCausalModel(WanModel, CausalModelBase):
             flow_shift=flow_shift,
             enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
             transformer_override_safetensor=(transformer_override_safetensor),
-            lora_rank=lora_rank,
-            lora_alpha=lora_alpha,
-            lora_target_modules=lora_target_modules,
+            lora=lora,
         )
         self._streaming_caches: (dict[tuple[int, str], _StreamingCaches]) = {}
 
