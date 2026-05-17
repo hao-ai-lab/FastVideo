@@ -32,14 +32,21 @@
 #     FFMPEG_NATIVE_CC  explicit C compiler command for native builds
 #     FFMPEG_NATIVE_CXX explicit C++ compiler command for native builds
 #
-# Toolchain selection: CC / CXX / AS are pinned to the conda-forge
-# triplet matching `uname -m`. Inherited values are intentionally
-# ignored — conda envs that have BOTH `gcc_linux-64` and
-# `gcc_linux-aarch64` installed export the cross-compiler triplet on
-# every `conda activate` (the `aarch64` activation script sorts later
-# and wins), which silently breaks x264's compiler probe on the
-# opposite host. If you genuinely need a non-host toolchain, set
-# FFMPEG_NATIVE_CC and/or FFMPEG_NATIVE_CXX explicitly.
+# Toolchain selection (precedence, highest first):
+#   1. FFMPEG_NATIVE_CC / FFMPEG_NATIVE_CXX, if set — explicit override.
+#   2. The conda-forge triplet matching `uname -m`
+#      (`x86_64-conda-linux-gnu-cc` or `aarch64-conda-linux-gnu-cc`),
+#      if present on PATH. Pinning the triplet sidesteps a bug where
+#      conda envs with BOTH `gcc_linux-64` and `gcc_linux-aarch64`
+#      installed export the cross-compiler triplet on every
+#      `conda activate` (the `aarch64` activation script sorts later
+#      and wins), silently breaking x264's compiler probe on the
+#      opposite host.
+#   3. System `gcc` / `g++` — fallback so the script also works in a
+#      plain venv or bare shell with no conda toolchain installed.
+# Inherited bare CC / CXX from the caller environment are ignored in
+# cases (2) and (3); use FFMPEG_NATIVE_CC/CXX to inject a non-host
+# toolchain.
 set -euo pipefail
 
 # ─── Defaults (override via env) ──────────────────────────────────────────
@@ -61,8 +68,8 @@ MAKE_JOBS="${MAKE_JOBS:-$(( NPROC < 16 ? NPROC : 16 ))}"
 ARCH="$(uname -m)"
 case "$ARCH" in
   x86_64)
-    DEFAULT_CC=x86_64-conda-linux-gnu-cc
-    DEFAULT_CXX=x86_64-conda-linux-gnu-c++
+    CONDA_CC=x86_64-conda-linux-gnu-cc
+    CONDA_CXX=x86_64-conda-linux-gnu-c++
     AS=nasm
     X264_CFLAGS="-O3 -march=native -mtune=native -fPIC -flto"
     X264_LDFLAGS="-flto -fuse-linker-plugin"
@@ -70,8 +77,8 @@ case "$ARCH" in
     FFMPEG_LDFLAGS="-flto -Wl,-rpath,$INSTALL_PREFIX/lib"
     ;;
   aarch64)
-    DEFAULT_CC=aarch64-conda-linux-gnu-cc
-    DEFAULT_CXX=aarch64-conda-linux-gnu-c++
+    CONDA_CC=aarch64-conda-linux-gnu-cc
+    CONDA_CXX=aarch64-conda-linux-gnu-c++
     unset AS  # GNU as on ARM
     X264_CFLAGS="-O3 -mcpu=native -fPIC -flto"
     X264_LDFLAGS="-flto -fuse-linker-plugin"
@@ -84,8 +91,27 @@ case "$ARCH" in
     ;;
 esac
 
+# Prefer the conda-forge triplet when it's actually on PATH; otherwise fall
+# back to system gcc/g++ so a plain venv works too. FFMPEG_NATIVE_CC/CXX
+# overrides both.
+if command -v -- "$CONDA_CC" >/dev/null 2>&1 \
+   && command -v -- "$CONDA_CXX" >/dev/null 2>&1; then
+  DEFAULT_CC="$CONDA_CC"
+  DEFAULT_CXX="$CONDA_CXX"
+  default_source="conda-forge ($ARCH triplet)"
+else
+  DEFAULT_CC=gcc
+  DEFAULT_CXX=g++
+  default_source="system gcc/g++"
+fi
+
 CC="${FFMPEG_NATIVE_CC:-$DEFAULT_CC}"
 CXX="${FFMPEG_NATIVE_CXX:-$DEFAULT_CXX}"
+if [[ -n "${FFMPEG_NATIVE_CC:-}" || -n "${FFMPEG_NATIVE_CXX:-}" ]]; then
+  toolchain_source="FFMPEG_NATIVE_CC/CXX override"
+else
+  toolchain_source="$default_source"
+fi
 
 require_compiler() {
   local name="$1" compiler="$2"
@@ -95,6 +121,8 @@ require_compiler() {
   fi
   if ! command -v -- "$compiler" >/dev/null 2>&1; then
     echo "[install_native_ffmpeg] $name is unavailable: $compiler" >&2
+    echo "[install_native_ffmpeg] install a compiler, or set FFMPEG_NATIVE_CC/FFMPEG_NATIVE_CXX" \
+      "to compiler commands on PATH." >&2
     exit 1
   fi
   if ! "$compiler" --version >/dev/null 2>&1; then
@@ -107,7 +135,7 @@ require_compiler CC "$CC"
 require_compiler CXX "$CXX"
 export CC CXX
 [[ -n "${AS:-}" ]] && export AS
-echo "[install_native_ffmpeg] toolchain: CC=$CC CXX=$CXX AS=${AS:-<gnu-as>} (uname -m=$ARCH)"
+echo "[install_native_ffmpeg] toolchain: CC=$CC CXX=$CXX AS=${AS:-<gnu-as>} (uname -m=$ARCH, source: $toolchain_source)"
 
 # ─── Step 0: probe required tools ─────────────────────────────────────────
 required=("$CC" "$CXX" make pkg-config git)
@@ -118,7 +146,12 @@ for cmd in "${required[@]}"; do
 done
 if (( ${#missing[@]} > 0 )); then
   echo "[install_native_ffmpeg] missing required tools: ${missing[*]}" >&2
-  echo "[install_native_ffmpeg] install them, or set FFMPEG_NATIVE_CC/FFMPEG_NATIVE_CXX explicitly." >&2
+  echo "[install_native_ffmpeg] install the missing tools. FFMPEG_NATIVE_CC/FFMPEG_NATIVE_CXX" \
+    "only override compiler selection; they do not provide make, pkg-config, git, or nasm." >&2
+  if [[ " ${missing[*]} " == *" nasm "* ]]; then
+    echo "[install_native_ffmpeg] nasm is required on x86_64 for x264 SIMD; install nasm" \
+      "(for example via apt or conda-forge) and retry." >&2
+  fi
   exit 1
 fi
 
