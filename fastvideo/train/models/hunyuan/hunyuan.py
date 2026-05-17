@@ -27,6 +27,7 @@ from fastvideo.train.models.wan.wan import WanModel
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
+    from fastvideo.train.utils.lora import LoraConfig
 
 
 class HunyuanModel(WanModel):
@@ -51,6 +52,7 @@ class HunyuanModel(WanModel):
         | None = None,
         transformer_override_safetensor: str
         | None = None,
+        lora: LoraConfig | dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             init_from=init_from,
@@ -60,6 +62,7 @@ class HunyuanModel(WanModel):
             flow_shift=flow_shift,
             enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
             transformer_override_safetensor=(transformer_override_safetensor),
+            lora=lora,
         )
 
     # ------------------------------------------------------------------
