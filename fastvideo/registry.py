@@ -30,6 +30,10 @@ from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
+from fastvideo.configs.pipelines.flux_2 import (
+    Flux2KleinPipelineConfig,
+    Flux2PipelineConfig,
+)
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
     TurboDiffusionT2V_14B_Config,
@@ -292,6 +296,42 @@ def _register_configs() -> None:
         ],
         model_family="stable_audio",
         default_preset="stable_audio_open_small",
+    )
+
+    # Flux2 Klein (distilled, 4-step, no guidance)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Flux2KleinPipelineConfig,
+        workload_types=(WorkloadType.T2I, ),
+        hf_model_paths=[
+            "black-forest-labs/FLUX.2-klein-4B",
+            "black-forest-labs/FLUX.2-klein-9B",
+        ],
+        model_detectors=[
+            lambda path: (
+                "flux.2-klein" in path.lower()
+                or "flux2-klein" in path.lower()
+                or "flux2klein" in path.lower()
+            ),
+        ],
+        model_family="flux2",
+        default_preset="flux2_klein_4b",
+    )
+    # Flux2 (full, with guidance) — scaffold only; not validated end-to-end
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Flux2PipelineConfig,
+        workload_types=(WorkloadType.T2I, ),
+        hf_model_paths=[],
+        model_detectors=[
+            lambda path: (
+                "flux2" in path.lower()
+                or "flux_2" in path.lower()
+                or "flux-2" in path.lower()
+            )
+            and "klein" not in path.lower(),
+        ],
+        model_family="flux2",
     )
 
     # Hunyuan 1.5 (specific)
@@ -862,9 +902,12 @@ def _register_presets() -> None:
         ALL_PRESETS as TURBODIFFUSION_PRESETS, )
     from fastvideo.pipelines.basic.wan.presets import (
         ALL_PRESETS as WAN_PRESETS, )
+    from fastvideo.pipelines.basic.flux_2.presets import (
+        ALL_PRESETS as FLUX2_PRESETS, )
 
     all_preset_groups = (
         COSMOS_PRESETS,
+        FLUX2_PRESETS,
         GAMECRAFT_PRESETS,
         GEN3C_PRESETS,
         HUNYUAN_PRESETS,

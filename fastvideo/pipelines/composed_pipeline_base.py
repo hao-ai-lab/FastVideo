@@ -380,6 +380,8 @@ class ComposedPipelineBase(ABC):
         model_index.pop("boundary_ratio", None)
         # used by Wan2.2 ti2v
         model_index.pop("expand_timesteps", None)
+        # HF metadata (e.g. Flux2 Klein is_distilled); not a loadable module
+        model_index.pop("is_distilled", None)
 
         # some sanity checks
         assert len(model_index) > 1, "model_index.json must contain at least one pipeline module"

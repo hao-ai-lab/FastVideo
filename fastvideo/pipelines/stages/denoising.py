@@ -215,13 +215,17 @@ class DenoisingStage(PipelineStage):
         # Hoisted out of the per-step loop: depends only on inputs that
         # are constant across denoising steps.
         use_meanflow = getattr(self.transformer.config, "use_meanflow", False)
+        # Flux2's transformer multiplies guidance by 1000 internally, so we
+        # skip the external *1000 pre-scaling for Flux models.
+        _is_flux = (getattr(fastvideo_args.pipeline_config.dit_config,
+                            "prefix", "") == "Flux")
         embedded_cfg_scale = fastvideo_args.pipeline_config.embedded_cfg_scale
         if embedded_cfg_scale is not None:
             guidance_expand = (torch.tensor(
                 [embedded_cfg_scale] * latents.shape[0],
                 dtype=torch.float32,
                 device=get_local_torch_device(),
-            ).to(target_dtype) * 1000.0)
+            ).to(target_dtype) * (1.0 if _is_flux else 1000.0))
         else:
             guidance_expand = None
         # V2V padding: zero-filled tensor concatenated with each step's
@@ -281,6 +285,11 @@ class DenoisingStage(PipelineStage):
                 else:
                     t_expand = t.repeat(latent_model_input.shape[0])
                 t_expand = t_expand.to(get_local_torch_device())
+
+                # Flux2 transformer multiplies timestep by 1000 internally, so
+                # the pipeline must pass timestep/1000 (matching Diffusers).
+                if _is_flux:
+                    t_expand = t_expand / 1000.0
 
                 if use_meanflow:
                     if i == len(timesteps) - 1:

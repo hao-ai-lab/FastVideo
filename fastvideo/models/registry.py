@@ -42,6 +42,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "LingBotWorldTransformer3DModel": ("dits", "lingbotworld", "LingBotWorldTransformer3DModel"),
     "Gen3CTransformer3DModel": ("dits", "gen3c", "Gen3CTransformer3DModel"),
     "Kandinsky5Transformer3DModel": ("dits", "kandinsky5", "Kandinsky5Transformer3DModel"),
+    "FluxTransformer2DModel": ("dits", "flux_2", "Flux2Transformer2DModel"),
+    "Flux2Transformer2DModel": ("dits", "flux_2", "Flux2Transformer2DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
@@ -65,6 +67,8 @@ _TEXT_ENCODER_MODELS = {
     "Qwen2_5_VLForConditionalGeneration":
     ("encoders", "reason1", "Reason1TextEncoder"),
     "LTX2GemmaTextEncoderModel": ("encoders", "gemma", "LTX2GemmaTextEncoderModel"),
+    "Qwen3ForCausalLM": ("encoders", "qwen3", "Qwen3ForCausalLM"),
+    "TransformersModel": ("encoders", "qwen3", "Qwen3ForCausalLM"),
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
@@ -86,6 +90,7 @@ _VAE_MODELS = {
     ("vaes", "gen3c_tokenizer_vae", "AutoencoderKLGen3CTokenizer"),
     "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
     "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
+    "AutoencoderKLFlux2": ("vaes", "flux2vae", "AutoencoderKLFlux2"),
     # `stable-audio-open-1.0/vae/config.json` ships `_class_name="AutoencoderOobleck"`
     # (Diffusers' name); FastVideo's class is `OobleckVAE`.
     "AutoencoderOobleck": ("vaes", "oobleck", "OobleckVAE"),
