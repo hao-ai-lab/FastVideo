@@ -17,8 +17,8 @@ from fastvideo.pipelines.stages.sr_denoising import SRDenoisingStage
 from fastvideo.pipelines.stages.encoding import EncodingStage
 from fastvideo.pipelines.stages.image_encoding import (ImageEncodingStage, MatrixGameImageEncodingStage,
                                                        RefImageEncodingStage, ImageVAEEncodingStage,
-                                                       VideoVAEEncodingStage, Hy15ImageEncodingStage,
-                                                       HYWorldImageEncodingStage)
+                                                       SVIImageVAEEncodingStage, VideoVAEEncodingStage,
+                                                       Hy15ImageEncodingStage, HYWorldImageEncodingStage)
 from fastvideo.pipelines.stages.gamecraft_image_encoding import (GameCraftImageVAEEncodingStage)
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.latent_preparation import (Cosmos25LatentPreparationStage, CosmosLatentPreparationStage,
@@ -85,6 +85,7 @@ __all__ = [
     "ImageVAEEncodingStage",
     "VideoVAEEncodingStage",
     "GameCraftImageVAEEncodingStage",
+    "SVIImageVAEEncodingStage",
     "TextEncodingStage",
     "Cosmos25TextEncodingStage",
     # LongCat stages
