@@ -43,13 +43,36 @@ See `apps/dreamverse/docker/README.md` for Docker build and run option details.
 ## Optional: Building FFmpeg For Better Performance
 
 For full streaming performance in a non-Docker install, build a custom FFmpeg
-binary:
+binary from a FastVideo source checkout. The command below is repo-relative,
+so run it from the repository root:
 
 ```bash
 bash apps/dreamverse/scripts/install_native_ffmpeg.sh
 ```
 
-This builds and installs into `~/opt/ffmpeg-native/` and writes
+The installer supports Linux `x86_64` and `aarch64`. It prefers conda-forge
+triplet compilers when those commands are on `PATH`, otherwise it falls back to
+system `gcc`/`g++` (plain venv). On `x86_64`, x264's hand-tuned SIMD also
+requires `nasm`; install via whichever path fits your host:
+
+```bash
+sudo apt install nasm                       # Debian/Ubuntu
+conda install -c conda-forge nasm           # inside an active conda env
+```
+
+No sudo and no conda? Build `nasm` from source (~30s, installs into `$HOME`):
+
+```bash
+(
+  mkdir -p "$HOME/src" "$HOME/opt" && cd "$HOME/src"
+  curl -fsSL -O https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/nasm-2.16.03.tar.gz
+  tar -xf nasm-2.16.03.tar.gz && cd nasm-2.16.03
+  ./configure --prefix="$HOME/opt/nasm" && make -j"$(nproc)" && make install
+)
+export PATH="$HOME/opt/nasm/bin:$PATH"      # add to ~/.bashrc to persist
+```
+
+The installer writes to `~/opt/ffmpeg-native/` and emits
 `apps/dreamverse/scripts/ffmpeg-env.sh`. Source it before starting the backend
 so Dreamverse uses the custom FFmpeg binary:
 
@@ -59,8 +82,7 @@ dreamverse-server
 ```
 
 Docker images already run this FFmpeg build during image creation and source the
-generated environment file at container startup. The installer supports Linux
-`x86_64` and `aarch64`.
+generated environment file at container startup.
 
 ## Launch Dreamverse
 
