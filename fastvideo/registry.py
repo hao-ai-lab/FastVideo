@@ -781,8 +781,16 @@ def get_model_info(
     elif isinstance(pipeline_type, str):
         pipeline_type = PipelineType.from_string(pipeline_type)
 
+    config_info = _get_config_info(model_path, raise_on_missing=True)
+    assert config_info is not None, "config_info must be resolved"
+
     if workload_type is None:
-        workload_type = WorkloadType.T2V
+        # Derive the workload from the model's registration instead of
+        # assuming T2V. A model registered for a single workload (e.g.
+        # Matrix-Game-2.0, which is I2V-only) otherwise fails pipeline
+        # resolution under the blanket T2V default.
+        registered = config_info.workload_types
+        workload_type = (registered[0] if len(registered) == 1 else WorkloadType.T2V)
 
     if os.path.exists(model_path):
         config = verify_model_config_and_directory(model_path)
@@ -800,9 +808,6 @@ def get_model_info(
 
     pipeline_registry = get_pipeline_registry(pipeline_type)
     pipeline_cls = pipeline_registry.resolve_pipeline_cls(pipeline_name, pipeline_type, workload_type)
-
-    config_info = _get_config_info(model_path, raise_on_missing=True)
-    assert config_info is not None, "config_info must be resolved"
 
     sampling_param_cls = config_info.sampling_param_cls or SamplingParam
 
