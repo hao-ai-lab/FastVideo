@@ -63,8 +63,7 @@ def run_training_from_config(
             "FASTVIDEO_ATTENTION_BACKEND",
             "VIDEO_SPARSE_ATTN",
         )
-    elif ("turbodiffusion" in model_path_lower
-          or "turbowan" in model_path_lower):
+    elif ("turbodiffusion" in model_path_lower or "turbowan" in model_path_lower):
         os.environ.setdefault(
             "FASTVIDEO_ATTENTION_BACKEND",
             "SLA_ATTN",
