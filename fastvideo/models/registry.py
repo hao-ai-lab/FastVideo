@@ -53,6 +53,7 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     # Legacy aliases for older HF model_index.json files
     "MatrixGameWanModel": ("dits", "matrixgame2", "MatrixGame2WanModel"),
     "CausalMatrixGameWanModel": ("dits", "matrixgame2", "CausalMatrixGame2WanModel"),
+    "MatrixGame3WanModel": ("dits", "matrixgame3", "MatrixGame3WanModel"),
 }
 
 _TEXT_ENCODER_MODELS = {
