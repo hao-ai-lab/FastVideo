@@ -8,15 +8,15 @@ import torch
 import torch.nn.functional as F
 
 from fastvideo.api.sampling_param import SamplingParam
-from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame2
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
     SelfForcingFlowMatchScheduler, )
-from fastvideo.pipelines.basic.matrixgame.matrixgame_causal_dmd_pipeline import (
-    MatrixGameCausalDMDPipeline, )
+from fastvideo.pipelines.basic.matrixgame2.matrixgame2_causal_dmd_pipeline import (
+    MatrixGame2CausalDMDPipeline, )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
@@ -26,7 +26,7 @@ from fastvideo.utils import shallow_asdict
 logger = init_logger(__name__)
 
 
-class MatrixGameARDiffusionPipeline(TrainingPipeline):
+class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
 
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
@@ -44,7 +44,7 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
         super()._log_training_info()
 
     def set_schemas(self):
-        self.train_dataset_schema = pyarrow_schema_matrixgame
+        self.train_dataset_schema = pyarrow_schema_matrixgame2
 
     def _get_temporal_compression_ratio(self) -> int:
         assert self.training_args is not None
@@ -76,14 +76,14 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
         self.num_frame_per_block = self._resolve_num_frame_per_block(training_args)
 
         logger.info(
-            "MatrixGame AR diffusion pipeline initialized with "
+            "Matrix-Game 2.0 AR diffusion pipeline initialized with "
             "num_frame_per_block=%d, diffusion_forcing_shift=%.1f",
             self.num_frame_per_block,
             training_args.pipeline_config.flow_shift,
         )
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
-        logger.info("Initializing MatrixGame AR validation pipeline...")
+        logger.info("Initializing Matrix-Game 2.0 AR validation pipeline...")
         args_copy = deepcopy(training_args)
         args_copy.inference_mode = True
 
@@ -102,7 +102,7 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
         training_args.pipeline_config.warp_denoising_step = True
 
         logger.info(
-            "Validation: %d-step MatrixGame causal denoising, "
+            "Validation: %d-step Matrix-Game 2.0 causal denoising, "
             "dmd_denoising_steps has %d entries",
             num_val_steps,
             len(args_copy.pipeline_config.dmd_denoising_steps),
@@ -120,7 +120,7 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
         if image_processor is not None:
             loaded_modules["image_processor"] = image_processor
 
-        self.validation_pipeline = MatrixGameCausalDMDPipeline.from_pretrained(
+        self.validation_pipeline = MatrixGame2CausalDMDPipeline.from_pretrained(
             training_args.model_path,
             args=args_copy,
             inference_mode=True,
@@ -209,7 +209,7 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
         return training_batch
 
     def _prepare_dit_inputs(self, training_batch: TrainingBatch) -> TrainingBatch:
-        """Prepare diffusion-forcing inputs and MatrixGame I2V concat."""
+        """Prepare diffusion-forcing inputs and Matrix-Game 2.0 I2V concat."""
         assert self.training_args is not None
         latents = training_batch.latents
         assert latents is not None
@@ -430,12 +430,12 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
 
 
 def main(args) -> None:
-    logger.info("Starting MatrixGame AR diffusion training pipeline...")
+    logger.info("Starting Matrix-Game 2.0 AR diffusion training pipeline...")
 
-    pipeline = MatrixGameARDiffusionPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
+    pipeline = MatrixGame2ARDiffusionPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
     args = pipeline.training_args
     pipeline.train()
-    logger.info("MatrixGame AR diffusion training pipeline done")
+    logger.info("Matrix-Game 2.0 AR diffusion training pipeline done")
 
 
 if __name__ == "__main__":

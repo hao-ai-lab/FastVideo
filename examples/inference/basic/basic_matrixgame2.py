@@ -1,5 +1,5 @@
 from fastvideo import VideoGenerator
-from fastvideo.models.dits.matrixgame.utils import create_action_presets
+from fastvideo.models.dits.matrixgame2.utils import create_action_presets
 
 import torch
 
@@ -13,17 +13,17 @@ MODEL_VARIANT = "base_distilled_model"
 # Variant-specific settings
 VARIANT_CONFIG = {
     "base_distilled_model": {
-        "model_path": "FastVideo/Matrix-Game-2.0-Base-Diffusers",
+        "model_path": "FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers",
         "keyboard_dim": 4,
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/universal/0000.png",
     },
     "gta_distilled_model": {
-        "model_path": "FastVideo/Matrix-Game-2.0-GTA-Diffusers",
+        "model_path": "FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers",
         "keyboard_dim": 2,
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/gta_drive/0000.png",
     },
     "templerun_distilled_model": {
-        "model_path": "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",
+        "model_path": "FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers",
         "keyboard_dim": 7,
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/temple_run/0000.png",
     },

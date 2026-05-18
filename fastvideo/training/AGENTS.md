@@ -3,7 +3,7 @@
 **Generated:** 2026-05-02
 
 > **Status:** maintenance mode. New training work should go in `fastvideo/train/`.
-> Existing shipped recipes (Wan, LTX-2, MatrixGame distillation) still live here.
+> Existing shipped recipes (Wan, LTX-2, Matrix-Game 2.0 distillation) still live here.
 
 ## What's Here
 
@@ -18,7 +18,7 @@ training/
 ├── wan_i2v_distillation_pipeline.py      # Wan I2V distill
 ├── wan_self_forcing_distillation_pipeline.py
 ├── ltx2_training_pipeline.py             # LTX-2 training
-├── matrixgame_training_pipeline.py       # MatrixGame training
+├── matrixgame2_training_pipeline.py      # Matrix-Game 2.0 training
 ├── ode_causal_pipeline.py                # ODE-causal pipeline
 ├── checkpointing_utils.py                # save/load helpers
 ├── activation_checkpoint.py              # AC wrapping helpers
@@ -38,7 +38,7 @@ training/
 
 ## When to Touch a File Here
 
-- Bugfix or behavior tweak to a shipped recipe (Wan, LTX-2, MatrixGame).
+- Bugfix or behavior tweak to a shipped recipe (Wan, LTX-2, Matrix-Game 2.0).
 - Performance / memory regression in `training_utils.py` (used by both stacks).
 - New attention backend that needs distillation-time wiring.
 

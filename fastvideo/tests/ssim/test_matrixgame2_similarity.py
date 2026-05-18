@@ -7,7 +7,7 @@ import pytest
 from fastvideo import VideoGenerator
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
-from fastvideo.models.dits.matrixgame.utils import create_action_presets
+from fastvideo.models.dits.matrixgame2.utils import create_action_presets
 from fastvideo.tests.ssim.reference_utils import (
     build_generated_output_dir,
     build_reference_folder_path,
@@ -39,7 +39,7 @@ device_reference_folder = resolve_device_reference_folder(
 
 MATRIXGAME_PARAMS = {
     "num_gpus": 1,
-    "model_path": "FastVideo/Matrix-Game-2.0-Base-Diffusers",
+    "model_path": "FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers",
     "height": 352,
     "width": 640,
     "num_frames": 117,
@@ -72,7 +72,7 @@ FULL_QUALITY_MODEL_TO_PARAMS = {
 I2V_MODEL_TO_PARAMS = {}
 
 TEST_PROMPTS = [
-    "",  # MatrixGame is I2V with action conditions, no text prompt
+    "",  # Matrix-Game 2.0 is I2V with action conditions, no text prompt
 ]
 
 TEST_IMAGE_PATHS = [
@@ -83,7 +83,7 @@ TEST_IMAGE_PATHS = [
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-def test_matrixgame_similarity(prompt, ATTENTION_BACKEND, model_id):
+def test_matrixgame2_similarity(prompt, ATTENTION_BACKEND, model_id):
     """
     Test that runs inference with different parameters and compares the output
     to reference videos using SSIM.
@@ -109,7 +109,7 @@ def test_matrixgame_similarity(prompt, ATTENTION_BACKEND, model_id):
     BASE_PARAMS = params_map[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
 
-    # Create action conditions for MatrixGame
+    # Create action conditions for Matrix-Game 2.0
     actions = create_action_presets(
         BASE_PARAMS["num_frames"], keyboard_dim=BASE_PARAMS["keyboard_dim"], seed=BASE_PARAMS["seed"]
     )

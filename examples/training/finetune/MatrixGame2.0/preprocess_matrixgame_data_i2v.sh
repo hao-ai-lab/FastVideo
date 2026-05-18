@@ -1,7 +1,7 @@
 #!/bin/bash
 
 GPU_NUM=1 # 2,4,8
-MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"
+MODEL_PATH="Matrix-Game-2.0-Base-Diffusers"
 DATA_MERGE_PATH="footsies-dataset/merge.txt"
 OUTPUT_DIR="footsies-dataset/preprocessed/"
 
@@ -24,4 +24,4 @@ python fastvideo/pipelines/preprocess/v1_preprocess.py \
     --samples_per_file 4 \
     --train_fps 25 \
     --flush_frequency 4 \
-    --preprocess_task matrixgame
+    --preprocess_task matrixgame2

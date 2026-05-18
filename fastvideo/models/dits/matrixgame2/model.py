@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 
 from fastvideo.attention import DistributedAttention
-from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
+from fastvideo.configs.models.dits.matrixgame2 import MatrixGame2WanVideoConfig
 from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.layers.layernorm import (
     FP32LayerNorm,
@@ -43,7 +43,7 @@ from .action_module import ActionModule
 logger = init_logger(__name__)
 
 
-class MatrixGameTimeImageEmbedding(nn.Module):
+class MatrixGame2TimeImageEmbedding(nn.Module):
     def __init__(
         self,
         dim: int,
@@ -73,7 +73,7 @@ class MatrixGameTimeImageEmbedding(nn.Module):
         temb = self.time_embedder(timestep, timestep_seq_len)
         timestep_proj = self.time_modulation(temb)
 
-        # MatrixGame does not use text embeddings, so we ignore encoder_hidden_states
+        # Matrix-Game 2.0 does not use text embeddings, so we ignore encoder_hidden_states
 
         if encoder_hidden_states_image is not None:
             assert self.image_embedder is not None
@@ -95,7 +95,7 @@ class MatrixGameTimeImageEmbedding(nn.Module):
         )
 
 
-class MatrixGameCrossAttention(WanSelfAttention):
+class MatrixGame2CrossAttention(WanSelfAttention):
     def forward(self, x, context, context_lens=None, crossattn_cache=None):
         r"""
         Args:
@@ -132,7 +132,7 @@ class MatrixGameCrossAttention(WanSelfAttention):
         return x
 
 
-class MatrixGameTransformerBlock(nn.Module):
+class MatrixGame2TransformerBlock(nn.Module):
     def __init__(
         self,
         dim: int,
@@ -341,29 +341,29 @@ class MatrixGameTransformerBlock(nn.Module):
         return hidden_states
 
 
-_DEFAULT_MATRIXGAME_CONFIG = MatrixGameWanVideoConfig()
+_DEFAULT_MATRIXGAME2_CONFIG = MatrixGame2WanVideoConfig()
 
 
-class MatrixGameWanModel(BaseDiT):
+class MatrixGame2WanModel(BaseDiT):
     # Marker for action input support (Matrix-Game)
     supports_action_input = True
 
-    _fsdp_shard_conditions = _DEFAULT_MATRIXGAME_CONFIG._fsdp_shard_conditions
-    _compile_conditions = _DEFAULT_MATRIXGAME_CONFIG._compile_conditions
+    _fsdp_shard_conditions = _DEFAULT_MATRIXGAME2_CONFIG._fsdp_shard_conditions
+    _compile_conditions = _DEFAULT_MATRIXGAME2_CONFIG._compile_conditions
     _supported_attention_backends = (
-        _DEFAULT_MATRIXGAME_CONFIG._supported_attention_backends
+        _DEFAULT_MATRIXGAME2_CONFIG._supported_attention_backends
     )
-    param_names_mapping = _DEFAULT_MATRIXGAME_CONFIG.param_names_mapping
+    param_names_mapping = _DEFAULT_MATRIXGAME2_CONFIG.param_names_mapping
     reverse_param_names_mapping = (
-        _DEFAULT_MATRIXGAME_CONFIG.reverse_param_names_mapping
+        _DEFAULT_MATRIXGAME2_CONFIG.reverse_param_names_mapping
     )
     lora_param_names_mapping = (
-        _DEFAULT_MATRIXGAME_CONFIG.lora_param_names_mapping
+        _DEFAULT_MATRIXGAME2_CONFIG.lora_param_names_mapping
     )
 
     def __init__(
         self,
-        config: MatrixGameWanVideoConfig,
+        config: MatrixGame2WanVideoConfig,
         hf_config: dict[str, Any],
         **kwargs,
     ) -> None:
@@ -384,7 +384,7 @@ class MatrixGameWanModel(BaseDiT):
         )
 
         # 2. Condition embeddings
-        self.condition_embedder = MatrixGameTimeImageEmbedding(
+        self.condition_embedder = MatrixGame2TimeImageEmbedding(
             dim=inner_dim,
             time_freq_dim=config.freq_dim,
             image_embed_dim=config.image_dim,
@@ -396,7 +396,7 @@ class MatrixGameWanModel(BaseDiT):
         # 3. Transformer blocks
         self.blocks = nn.ModuleList(
             [
-                MatrixGameTransformerBlock(
+                MatrixGame2TransformerBlock(
                     inner_dim,
                     config.ffn_dim,
                     config.num_attention_heads,
@@ -510,7 +510,7 @@ class MatrixGameWanModel(BaseDiT):
                 encoder_hidden_states = encoder_hidden_states.unsqueeze(0)
         else:
             # encoder_hidden_states is None (e.g. no text encoder)
-            # MatrixGame uses image-action cross-attn.
+            # Matrix-Game 2.0 uses image-action cross-attn.
             pass
 
         if encoder_hidden_states_image is not None:

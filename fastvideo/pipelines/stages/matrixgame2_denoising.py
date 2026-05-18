@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -64,7 +65,7 @@ class BlockProcessingContext:
         return self.kv_cache1
 
 
-class MatrixGameCausalDenoisingStage(DenoisingStage):
+class MatrixGame2CausalDenoisingStage(DenoisingStage):
 
     def __init__(self, transformer, scheduler, pipeline=None, transformer_2=None, vae=None) -> None:
         super().__init__(transformer, scheduler, pipeline, transformer_2, vae)
@@ -88,10 +89,10 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             self.local_attn_size = -1
 
         assert self.local_attn_size != -1, (f"local_attn_size must be set for Matrix-Game causal inference, "
-                                            f"got {self.local_attn_size}. Check MatrixGameWanVideoArchConfig.")
+                                            f"got {self.local_attn_size}. Check MatrixGame2WanVideoArchConfig.")
         assert self.num_frame_per_block > 0, (f"num_frame_per_block must be positive, got {self.num_frame_per_block}")
 
-        logger.info("MatrixGame causal inference initialized: "
+        logger.info("Matrix-Game 2.0 causal inference initialized: "
                     "local_attn_size=%s, num_frame_per_block=%s", self.local_attn_size, self.num_frame_per_block)
 
         self.action_config = getattr(self.transformer, 'action_config', {})
@@ -171,7 +172,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         if boundary_timestep is not None:
             block_sizes[0] = 1
 
-        # NOTE: MatrixGame does NOT process the first frame separately.
+        # NOTE: Matrix-Game 2.0 does NOT process the first frame separately.
         # The first frame information is already encoded in batch.image_latent (cond_concat)
         # and will be used by the model via channel concatenation: torch.cat([x, cond_concat], dim=1)
 

@@ -5,7 +5,7 @@ export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
+MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
 DATA_DIR="footsies-dataset/preprocessed/combined_parquet_dataset"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=8
@@ -14,9 +14,9 @@ NUM_GPUS=8
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_finetune"
-  --output_dir "checkpoints/matrixgame_finetune"
-  --override_transformer_cls_name "CausalMatrixGameWanModel"
+  --tracker_project_name "matrixgame2_finetune"
+  --output_dir "checkpoints/matrixgame2_finetune"
+  --override_transformer_cls_name "CausalMatrixGame2WanModel"
   --max_train_steps 1500
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -84,7 +84,7 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/training/matrixgame_ar_diffusion_pipeline.py \
+    fastvideo/training/matrixgame2_ar_diffusion_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

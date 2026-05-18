@@ -6,16 +6,16 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
-from fastvideo.pipelines.stages import (MatrixGameImageEncodingStage, ConditioningStage, DecodingStage, DenoisingStage,
+from fastvideo.pipelines.stages import (MatrixGame2ImageEncodingStage, ConditioningStage, DecodingStage, DenoisingStage,
                                         InputValidationStage, LatentPreparationStage, TextEncodingStage,
                                         TimestepPreparationStage)
-from fastvideo.pipelines.stages.image_encoding import (MatrixGameImageVAEEncodingStage)
+from fastvideo.pipelines.stages.image_encoding import (MatrixGame2ImageVAEEncodingStage)
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
 
 logger = init_logger(__name__)
 
 
-class MatrixGamePipeline(LoRAPipeline, ComposedPipelineBase):
+class MatrixGame2I2VPipeline(LoRAPipeline, ComposedPipelineBase):
     _required_config_modules = ["vae", "transformer", "scheduler", "image_encoder", "image_processor"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
@@ -34,7 +34,7 @@ class MatrixGamePipeline(LoRAPipeline, ComposedPipelineBase):
         if (self.get_module("image_encoder", None) is not None
                 and self.get_module("image_processor", None) is not None):
             self.add_stage(stage_name="image_encoding_stage",
-                           stage=MatrixGameImageEncodingStage(
+                           stage=MatrixGame2ImageEncodingStage(
                                image_encoder=self.get_module("image_encoder"),
                                image_processor=self.get_module("image_processor"),
                            ))
@@ -49,7 +49,7 @@ class MatrixGamePipeline(LoRAPipeline, ComposedPipelineBase):
                                                     transformer=self.get_module("transformer")))
 
         self.add_stage(stage_name="image_latent_preparation_stage",
-                       stage=MatrixGameImageVAEEncodingStage(vae=self.get_module("vae")))
+                       stage=MatrixGame2ImageVAEEncodingStage(vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(transformer=self.get_module("transformer"),
@@ -59,4 +59,10 @@ class MatrixGamePipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 
 
-EntryClass = [MatrixGamePipeline]
+# Legacy alias for HF model_index.json files that still declare
+# ``"_class_name": "MatrixGamePipeline"``.
+class MatrixGamePipeline(MatrixGame2I2VPipeline):
+    pass
+
+
+EntryClass = [MatrixGame2I2VPipeline, MatrixGamePipeline]

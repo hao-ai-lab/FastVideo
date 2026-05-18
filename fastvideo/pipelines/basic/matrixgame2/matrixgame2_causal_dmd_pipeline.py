@@ -7,13 +7,14 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, ForwardBatch, LoRAPipeline
 
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, InputValidationStage, LatentPreparationStage,
-                                        TextEncodingStage, MatrixGameImageEncodingStage, MatrixGameCausalDenoisingStage)
-from fastvideo.pipelines.stages.image_encoding import (MatrixGameImageVAEEncodingStage)
+                                        TextEncodingStage, MatrixGame2ImageEncodingStage,
+                                        MatrixGame2CausalDenoisingStage)
+from fastvideo.pipelines.stages.image_encoding import (MatrixGame2ImageVAEEncodingStage)
 
 logger = init_logger(__name__)
 
 
-class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
+class MatrixGame2CausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
     _required_config_modules = ["vae", "transformer", "scheduler", "image_encoder", "image_processor"]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
@@ -29,7 +30,7 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         if (self.get_module("image_encoder", None) is not None
                 and self.get_module("image_processor", None) is not None):
             self.add_stage(stage_name="image_encoding_stage",
-                           stage=MatrixGameImageEncodingStage(
+                           stage=MatrixGame2ImageEncodingStage(
                                image_encoder=self.get_module("image_encoder"),
                                image_processor=self.get_module("image_processor"),
                            ))
@@ -41,18 +42,18 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                                                     transformer=self.get_module("transformer", None)))
 
         self.add_stage(stage_name="image_latent_preparation_stage",
-                       stage=MatrixGameImageVAEEncodingStage(vae=self.get_module("vae")))
+                       stage=MatrixGame2ImageVAEEncodingStage(vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=MatrixGameCausalDenoisingStage(transformer=self.get_module("transformer"),
-                                                            transformer_2=self.get_module("transformer_2", None),
-                                                            scheduler=self.get_module("scheduler"),
-                                                            pipeline=self,
-                                                            vae=self.get_module("vae")))
+                       stage=MatrixGame2CausalDenoisingStage(transformer=self.get_module("transformer"),
+                                                             transformer_2=self.get_module("transformer_2", None),
+                                                             scheduler=self.get_module("scheduler"),
+                                                             pipeline=self,
+                                                             vae=self.get_module("vae")))
 
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 
-        logger.info("MatrixGameCausalDMDPipeline initialized with action support")
+        logger.info("MatrixGame2CausalDMDPipeline initialized with action support")
 
     @torch.no_grad()
     def streaming_reset(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs):
@@ -107,4 +108,10 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         self._vae_cache = None
 
 
-EntryClass = [MatrixGameCausalDMDPipeline]
+# Legacy alias for HF model_index.json files that still declare
+# ``"_class_name": "MatrixGameCausalDMDPipeline"``.
+class MatrixGameCausalDMDPipeline(MatrixGame2CausalDMDPipeline):
+    pass
+
+
+EntryClass = [MatrixGame2CausalDMDPipeline, MatrixGameCausalDMDPipeline]

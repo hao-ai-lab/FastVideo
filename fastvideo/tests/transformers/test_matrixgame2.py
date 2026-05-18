@@ -4,7 +4,7 @@ import os
 import pytest
 import torch
 
-from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
+from fastvideo.configs.models.dits.matrixgame2 import MatrixGame2WanVideoConfig
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.distributed.parallel_state import (
     get_sp_parallel_rank,
@@ -23,14 +23,14 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29505"
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
-MODEL_PATH = maybe_download_model("FastVideo/Matrix-Game-2.0-Base-Diffusers")
+MODEL_PATH = maybe_download_model("FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers")
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 REFERENCE_LATENT = -111835.58895772696
 
 
 @pytest.mark.skip(reason="Not reliably reproducible")
 @pytest.mark.usefixtures("distributed_setup")
-def test_matrixgame_transformer():
+def test_matrixgame2_transformer():
     transformer_path = TRANSFORMER_PATH
 
     sp_rank = get_sp_parallel_rank()
@@ -45,7 +45,7 @@ def test_matrixgame_transformer():
         dit_cpu_offload=False,
         use_fsdp_inference=False,
         pipeline_config=PipelineConfig(
-            dit_config=MatrixGameWanVideoConfig(), dit_precision=precision_str
+            dit_config=MatrixGame2WanVideoConfig(), dit_precision=precision_str
         ),
     )
     args.device = device

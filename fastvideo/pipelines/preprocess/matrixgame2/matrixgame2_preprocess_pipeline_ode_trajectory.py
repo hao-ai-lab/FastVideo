@@ -20,11 +20,11 @@ from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm import tqdm
 
-from fastvideo.configs.sample import SamplingParam
+from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.dataset import getdataset
 from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter, records_to_table)
-from fastvideo.dataset.dataloader.record_schema import (matrixgame_ode_record_creator)
-from fastvideo.dataset.dataloader.schema import (pyarrow_schema_matrixgame_ode_trajectory)
+from fastvideo.dataset.dataloader.record_schema import (matrixgame2_ode_record_creator)
+from fastvideo.dataset.dataloader.schema import (pyarrow_schema_matrixgame2_ode_trajectory)
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -33,14 +33,14 @@ from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (Self
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (BasePreprocessPipeline)
 from fastvideo.pipelines.stages import (DecodingStage, InputValidationStage, LatentPreparationStage,
-                                        MatrixGameImageEncodingStage, TimestepPreparationStage)
-from fastvideo.pipelines.stages.matrixgame_denoising import (MatrixGameCausalDenoisingStage)
+                                        MatrixGame2ImageEncodingStage, TimestepPreparationStage)
+from fastvideo.pipelines.stages.matrixgame2_denoising import (MatrixGame2CausalDenoisingStage)
 from fastvideo.utils import save_decoded_latents_as_video, shallow_asdict
 
 logger = init_logger(__name__)
 
 
-class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
+class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
     """ODE Trajectory preprocessing pipeline implementation."""
 
     _required_config_modules = ["vae", "image_encoder", "image_processor", "transformer", "scheduler"]
@@ -52,7 +52,7 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
 
     def get_pyarrow_schema(self) -> pa.Schema:
         """Return the PyArrow schema for ODE Trajectory pipeline."""
-        return pyarrow_schema_matrixgame_ode_trajectory
+        return pyarrow_schema_matrixgame2_ode_trajectory
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
@@ -64,7 +64,7 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
         self.add_stage(stage_name="image_encoding_stage",
-                       stage=MatrixGameImageEncodingStage(
+                       stage=MatrixGame2ImageEncodingStage(
                            image_encoder=self.get_module("image_encoder"),
                            image_processor=self.get_module("image_processor"),
                        ))
@@ -74,7 +74,7 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
                        stage=LatentPreparationStage(scheduler=self.get_module("scheduler"),
                                                     transformer=self.get_module("transformer", None)))
         self.add_stage(stage_name="denoising_stage",
-                       stage=MatrixGameCausalDenoisingStage(
+                       stage=MatrixGame2CausalDenoisingStage(
                            transformer=self.get_module("transformer"),
                            scheduler=self.get_module("scheduler"),
                            pipeline=self,
@@ -311,15 +311,15 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
                         traj_timesteps = traj_timesteps.cpu().float().numpy()
 
                     # Create record for Parquet dataset
-                    record: dict[str, Any] = matrixgame_ode_record_creator(video_name=video_name,
-                                                                           clip_feature=clip_feature_np,
-                                                                           first_frame_latent=first_frame_latent_np,
-                                                                           trajectory_latents=traj_latents,
-                                                                           trajectory_timesteps=traj_timesteps,
-                                                                           pil_image=pil_image_np,
-                                                                           keyboard_cond=keyboard_cond_np,
-                                                                           mouse_cond=mouse_cond_np,
-                                                                           caption="")
+                    record: dict[str, Any] = matrixgame2_ode_record_creator(video_name=video_name,
+                                                                            clip_feature=clip_feature_np,
+                                                                            first_frame_latent=first_frame_latent_np,
+                                                                            trajectory_latents=traj_latents,
+                                                                            trajectory_timesteps=traj_timesteps,
+                                                                            pil_image=pil_image_np,
+                                                                            keyboard_cond=keyboard_cond_np,
+                                                                            mouse_cond=mouse_cond_np,
+                                                                            caption="")
                     batch_data.append(record)
 
                 if batch_data:
@@ -382,4 +382,4 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
         self.preprocess_action_and_trajectory(fastvideo_args, args)
 
 
-EntryClass = PreprocessPipeline_MatrixGame_ODE_Trajectory
+EntryClass = PreprocessPipeline_MatrixGame2_ODE_Trajectory

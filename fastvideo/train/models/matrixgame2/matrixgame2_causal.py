@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""MatrixGame causal training model plugin."""
+"""Matrix-Game 2.0 causal training model plugin."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import torch
 
 from fastvideo.forward_context import set_forward_context
 
-from fastvideo.train.models.matrixgame.matrixgame import MatrixGameModel
+from fastvideo.train.models.matrixgame2.matrixgame2 import MatrixGame2Model
 from fastvideo.train.models.wan.wan_causal import WanCausalModel
 
 
@@ -28,10 +28,10 @@ class _StreamingCaches:
     device: torch.device
 
 
-class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
-    """MatrixGame per-role model with causal/streaming primitives."""
+class MatrixGame2CausalModel(MatrixGame2Model, WanCausalModel):
+    """Matrix-Game 2.0 per-role model with causal/streaming primitives."""
 
-    _transformer_cls_name: str = "CausalMatrixGameWanModel"
+    _transformer_cls_name: str = "CausalMatrixGame2WanModel"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -242,9 +242,9 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
         cur_start_frame: int,
     ) -> dict[str, Any]:
         if batch.image_latents is None:
-            raise RuntimeError("MatrixGame causal rollout requires image_latents")
+            raise RuntimeError("Matrix-Game 2.0 causal rollout requires image_latents")
         if batch.image_embeds is None:
-            raise RuntimeError("MatrixGame causal rollout requires image_embeds")
+            raise RuntimeError("Matrix-Game 2.0 causal rollout requires image_embeds")
 
         num_frames = int(noisy_latents.shape[1])
         frame_end = cur_start_frame + num_frames
@@ -345,12 +345,12 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
         action_config = getattr(transformer, "action_config", {}) or {}
         action_blocks = {int(block_idx) for block_idx in action_config.get("blocks", [])}
         if local_attn_size <= 0:
-            raise ValueError("MatrixGame causal streaming requires "
+            raise ValueError("Matrix-Game 2.0 causal streaming requires "
                              "transformer.local_attn_size > 0")
 
         action_heads_num = int(action_config.get("heads_num", 0) or 0)
         if action_blocks and action_heads_num <= 0:
-            raise ValueError("MatrixGame causal action_config.heads_num must be > 0")
+            raise ValueError("Matrix-Game 2.0 causal action_config.heads_num must be > 0")
 
         if channel == "mouse":
             enabled = bool(action_config.get("enable_mouse", False))
