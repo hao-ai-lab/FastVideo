@@ -10,7 +10,7 @@ CREATED_ROOT_DOCKERIGNORE_SYMLINK=0
 
 cleanup_root_dockerignore_symlink() {
   if [[ "${CREATED_ROOT_DOCKERIGNORE_SYMLINK}" == "1" && -L "${ROOT_DOCKERIGNORE}" ]] && \
-    [[ "$(readlink -- "${ROOT_DOCKERIGNORE}")" == "${DOCKERFILE_DOCKERIGNORE}" ]]; then
+    [[ "$(readlink "${ROOT_DOCKERIGNORE}")" == "${DOCKERFILE_DOCKERIGNORE}" ]]; then
     rm -- "${ROOT_DOCKERIGNORE}"
   fi
 }
