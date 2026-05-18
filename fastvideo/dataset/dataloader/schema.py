@@ -118,7 +118,7 @@ pyarrow_schema_text_only = pa.schema([
 ])
 
 
-pyarrow_schema_matrixgame = pa.schema([
+pyarrow_schema_matrixgame2 = pa.schema([
     pa.field("id", pa.string()),
     # --- Image/Video VAE latents ---
     # Tensors are stored as raw bytes with shape and dtype info for loading
@@ -158,7 +158,7 @@ pyarrow_schema_matrixgame = pa.schema([
     pa.field("fps", pa.float64()),
 ])
 
-pyarrow_schema_matrixgame_ode_trajectory = pa.schema([
+pyarrow_schema_matrixgame2_ode_trajectory = pa.schema([
     pa.field("id", pa.string()),
     # --- Action ---
     pa.field("mouse_cond_bytes", pa.binary()),

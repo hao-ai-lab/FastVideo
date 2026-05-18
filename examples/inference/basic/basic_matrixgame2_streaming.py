@@ -1,5 +1,5 @@
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
-from fastvideo.models.dits.matrixgame.utils import get_current_action_async, expand_action_to_frames
+from fastvideo.models.dits.matrixgame2.utils import get_current_action_async, expand_action_to_frames
 
 import torch
 import asyncio
@@ -14,19 +14,19 @@ MODEL_VARIANT = "base_distilled_model"
 # Variant-specific settings
 VARIANT_CONFIG = {
     "base_distilled_model": {
-        "model_path": "FastVideo/Matrix-Game-2.0-Base-Diffusers",
+        "model_path": "FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers",
         "keyboard_dim": 4,
         "mode": "universal",
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/universal/0000.png",
     },
     "gta_distilled_model": {
-        "model_path": "FastVideo/Matrix-Game-2.0-GTA-Diffusers",
+        "model_path": "FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers",
         "keyboard_dim": 2,
         "mode": "gta_drive",
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/gta_drive/0000.png",
     },
     "templerun_distilled_model": {
-        "model_path": "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",
+        "model_path": "FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers",
         "keyboard_dim": 7,
         "mode": "templerun",
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/temple_run/0000.png",

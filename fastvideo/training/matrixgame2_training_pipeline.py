@@ -6,12 +6,12 @@ from typing import Any
 import torch
 
 from fastvideo.api.sampling_param import SamplingParam
-from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame2
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
-from fastvideo.pipelines.basic.matrixgame.matrixgame_i2v_pipeline import (MatrixGamePipeline)
+from fastvideo.pipelines.basic.matrixgame2.matrixgame2_i2v_pipeline import (MatrixGame2I2VPipeline)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.utils import is_vsa_available, shallow_asdict
@@ -24,7 +24,7 @@ except Exception:
 logger = init_logger(__name__)
 
 
-class MatrixGameTrainingPipeline(TrainingPipeline):
+class MatrixGame2TrainingPipeline(TrainingPipeline):
     """
     A training pipeline for Matrix-Game-2.0.
     """
@@ -40,7 +40,7 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
         pass
 
     def set_schemas(self):
-        self.train_dataset_schema = pyarrow_schema_matrixgame
+        self.train_dataset_schema = pyarrow_schema_matrixgame2
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing validation pipeline...")
@@ -50,16 +50,17 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
         args_copy.dit_cpu_offload = True
         # args_copy.pipeline_config.vae_config.load_encoder = False
         # validation_pipeline = WanImageToVideoValidationPipeline.from_pretrained(
-        self.validation_pipeline = MatrixGamePipeline.from_pretrained(training_args.model_path,
-                                                                      args=None,
-                                                                      inference_mode=True,
-                                                                      loaded_modules={
-                                                                          "transformer": self.get_module("transformer"),
-                                                                      },
-                                                                      tp_size=training_args.tp_size,
-                                                                      sp_size=training_args.sp_size,
-                                                                      num_gpus=training_args.num_gpus,
-                                                                      dit_cpu_offload=True)
+        self.validation_pipeline = MatrixGame2I2VPipeline.from_pretrained(training_args.model_path,
+                                                                          args=None,
+                                                                          inference_mode=True,
+                                                                          loaded_modules={
+                                                                              "transformer":
+                                                                              self.get_module("transformer"),
+                                                                          },
+                                                                          tp_size=training_args.tp_size,
+                                                                          sp_size=training_args.sp_size,
+                                                                          num_gpus=training_args.num_gpus,
+                                                                          dit_cpu_offload=True)
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore
@@ -84,7 +85,7 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
         training_batch.latents = latents.to(get_local_torch_device(), dtype=torch.bfloat16)
         training_batch.encoder_hidden_states = None
         training_batch.encoder_attention_mask = None
-        # MatrixGame doesn't use text encoder
+        # Matrix-Game 2.0 doesn't use text encoder
         training_batch.preprocessed_image = pil_image.to(get_local_torch_device())
         training_batch.image_embeds = clip_features.to(get_local_torch_device())
         training_batch.image_latents = image_latents.to(get_local_torch_device())
@@ -141,7 +142,7 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
         # NOTE: noisy_model_input already contains concatenated image_latents from _prepare_dit_inputs
         training_batch.input_kwargs = {
             "hidden_states": training_batch.noisy_model_input,
-            "encoder_hidden_states": training_batch.encoder_hidden_states,  # None for MatrixGame
+            "encoder_hidden_states": training_batch.encoder_hidden_states,  # None for Matrix-Game 2.0
             "timestep": training_batch.timesteps.to(get_local_torch_device(), dtype=torch.bfloat16),
             # "encoder_attention_mask":
             # training_batch.encoder_attention_mask,
@@ -198,7 +199,7 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
 def main(args) -> None:
     logger.info("Starting training pipeline...")
 
-    pipeline = MatrixGameTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
+    pipeline = MatrixGame2TrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
     args = pipeline.training_args
     pipeline.train()
     logger.info("Training pipeline done")

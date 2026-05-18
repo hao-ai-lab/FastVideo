@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""MatrixGame model family pipeline presets."""
+"""Matrix-Game 2.0 pipeline presets."""
 from fastvideo.api.presets import InferencePreset, PresetStageSpec
 
 _DENOISE_STAGE = PresetStageSpec(
@@ -12,8 +12,8 @@ _DENOISE_STAGE = PresetStageSpec(
     }),
 )
 
-MATRIXGAME_I2V = InferencePreset(
-    name="matrixgame_i2v",
+MATRIXGAME2_I2V = InferencePreset(
+    name="matrixgame2_i2v",
     version=1,
     model_family="matrixgame",
     description="Matrix-Game 2.0 I2V",
@@ -30,4 +30,4 @@ MATRIXGAME_I2V = InferencePreset(
     },
 )
 
-ALL_PRESETS = (MATRIXGAME_I2V, )
+ALL_PRESETS = (MATRIXGAME2_I2V, )

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""MatrixGame training model plugin."""
+"""Matrix-Game 2.0 training model plugin."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 import torch
 
-from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame2
 from fastvideo.distributed import (
     get_sp_group,
     get_world_group,
@@ -18,15 +18,15 @@ from fastvideo.training.training_utils import normalize_dit_input
 
 from fastvideo.train.models.wan.wan import WanModel
 from fastvideo.train.utils.dataloader import (
-    build_parquet_matrixgame_train_dataloader, )
+    build_parquet_matrixgame2_train_dataloader, )
 from fastvideo.train.utils.moduleloader import (
     load_module_from_path, )
 
 
-class MatrixGameModel(WanModel):
-    """MatrixGame per-role model for finetuning in the new trainer."""
+class MatrixGame2Model(WanModel):
+    """Matrix-Game 2.0 per-role model for finetuning in the new trainer."""
 
-    _transformer_cls_name: str = "MatrixGameWanModel"
+    _transformer_cls_name: str = "MatrixGame2WanModel"
 
     def init_preprocessors(self, training_config: Any) -> None:
         self.vae = load_module_from_path(
@@ -37,14 +37,14 @@ class MatrixGameModel(WanModel):
         self.world_group = get_world_group()
         self.sp_group = get_sp_group()
         self._init_timestep_mechanics()
-        self.dataloader = build_parquet_matrixgame_train_dataloader(
+        self.dataloader = build_parquet_matrixgame2_train_dataloader(
             training_config.data,
-            parquet_schema=pyarrow_schema_matrixgame,
+            parquet_schema=pyarrow_schema_matrixgame2,
         )
         self.start_step = 0
 
     def on_train_start(self) -> None:
-        # MatrixGame finetuning does not use negative text conditioning.
+        # Matrix-Game 2.0 finetuning does not use negative text conditioning.
         return
 
     def prepare_batch(
@@ -131,7 +131,7 @@ class MatrixGameModel(WanModel):
         image_latents = training_batch.image_latents
         image_embeds = training_batch.image_embeds
         if image_latents is None or image_embeds is None:
-            raise RuntimeError("MatrixGame requires image_latents and image_embeds")
+            raise RuntimeError("Matrix-Game 2.0 requires image_latents and image_embeds")
 
         cond_latents = self._build_matrixgame_cond_concat(image_latents)
         training_batch.image_latents = cond_latents
@@ -169,12 +169,12 @@ class MatrixGameModel(WanModel):
         text_dict: dict[str, Any] | None,
     ) -> dict[str, Any]:
         if text_dict is None:
-            raise ValueError("text_dict cannot be None for MatrixGame")
+            raise ValueError("text_dict cannot be None for Matrix-Game 2.0")
         hidden_states = noise_input.permute(0, 2, 1, 3, 4)
         if hidden_states.shape[1] == 16:
             cond_latents = text_dict.get("image_latents")
             if cond_latents is None:
-                raise RuntimeError("MatrixGame requires image_latents in conditional_dict "
+                raise RuntimeError("Matrix-Game 2.0 requires image_latents in conditional_dict "
                                    "when noise_input has 16 channels")
             num_t = hidden_states.shape[2]
             cond_latents = cond_latents[:, :, :num_t]
@@ -199,7 +199,7 @@ class MatrixGameModel(WanModel):
         if image_latents.shape[1] == 20:
             return image_latents
         if image_latents.shape[1] != 16:
-            raise ValueError("MatrixGame expects first_frame_latent with 16 or 20 channels, "
+            raise ValueError("Matrix-Game 2.0 expects first_frame_latent with 16 or 20 channels, "
                              f"got {image_latents.shape[1]}")
 
         temporal_compression_ratio = self._temporal_compression_ratio()
@@ -264,7 +264,7 @@ class MatrixGameModel(WanModel):
             return int(raw_batch["vae_latent"].shape[0])
         if "clip_feature" in raw_batch:
             return int(raw_batch["clip_feature"].shape[0])
-        raise ValueError("Unable to infer batch size from MatrixGame batch")
+        raise ValueError("Unable to infer batch size from Matrix-Game 2.0 batch")
 
     def _make_zero_latents(self, *, batch_size: int) -> torch.Tensor:
         assert self.training_config is not None

@@ -10,24 +10,24 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
-from fastvideo.models.dits.matrixgame.utils import expand_action_to_frames
+from fastvideo.models.dits.matrixgame2.utils import expand_action_to_frames
 
 
 VARIANT_CONFIG = {
     "Matrix-Game-2.0-Base": {
-        "model_path": "FastVideo/Matrix-Game-2.0-Base-Diffusers",
+        "model_path": "FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers",
         "keyboard_dim": 4,
         "mode": "universal",
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/universal/0000.png",
     },
     "Matrix-Game-2.0-GTA": {
-        "model_path": "FastVideo/Matrix-Game-2.0-GTA-Diffusers",
+        "model_path": "FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers",
         "keyboard_dim": 2,
         "mode": "gta_drive",
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/gta_drive/0000.png",
     },
     "Matrix-Game-2.0-TempleRun": {
-        "model_path": "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",
+        "model_path": "FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers",
         "keyboard_dim": 7,
         "mode": "templerun",
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/temple_run/0000.png",
@@ -457,7 +457,7 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             }
             grid_sizes = torch.tensor([150, 44, 80])
             
-            output_dir = os.path.abspath("outputs/matrixgame")
+            output_dir = os.path.abspath("outputs/matrixgame2")
             os.makedirs(output_dir, exist_ok=True)
             video_path = os.path.join(output_dir, f"video_{int(time.time())}.mp4")
             

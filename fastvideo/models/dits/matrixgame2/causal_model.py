@@ -18,7 +18,7 @@ flex_attention = torch.compile(
 )
 
 from fastvideo.attention import LocalAttention
-from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
+from fastvideo.configs.models.dits.matrixgame2 import MatrixGame2WanVideoConfig
 from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.layers.layernorm import (
     FP32LayerNorm,
@@ -44,7 +44,7 @@ from fastvideo.models.dits.wanvideo import (
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 from .action_module import ActionModule
-from .model import MatrixGameCrossAttention
+from .model import MatrixGame2CrossAttention
 
 logger = init_logger(__name__)
 
@@ -99,7 +99,7 @@ def rope_params(max_seq_len, dim, theta=10000):
     return freqs
 
 
-class CausalMatrixGameTimeImageEmbedding(nn.Module):
+class CausalMatrixGame2TimeImageEmbedding(nn.Module):
     def __init__(
         self,
         dim: int,
@@ -138,7 +138,7 @@ class CausalMatrixGameTimeImageEmbedding(nn.Module):
         return temb, timestep_proj, None, encoder_hidden_states_image
 
 
-class CausalMatrixGameSelfAttention(nn.Module):
+class CausalMatrixGame2SelfAttention(nn.Module):
     def __init__(
         self,
         dim: int,
@@ -360,7 +360,7 @@ class CausalMatrixGameSelfAttention(nn.Module):
         return x
 
 
-class CausalMatrixGameTransformerBlock(nn.Module):
+class CausalMatrixGame2TransformerBlock(nn.Module):
     def __init__(
         self,
         dim: int,
@@ -387,7 +387,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         self.to_v = ReplicatedLinear(dim, dim, bias=True)
 
         self.to_out = ReplicatedLinear(dim, dim, bias=True)
-        self.attn1 = CausalMatrixGameSelfAttention(
+        self.attn1 = CausalMatrixGame2SelfAttention(
             dim,
             num_heads,
             local_attn_size=local_attn_size,
@@ -418,7 +418,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         )
 
         if added_kv_proj_dim is not None:
-            self.attn2 = MatrixGameCrossAttention(
+            self.attn2 = MatrixGame2CrossAttention(
                 dim, num_heads, qk_norm=qk_norm, eps=eps
             )
         else:
@@ -591,28 +591,28 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         return hidden_states.to(orig_dtype)
 
 
-_DEFAULT_MATRIXGAME_CONFIG = MatrixGameWanVideoConfig()
+_DEFAULT_MATRIXGAME2_CONFIG = MatrixGame2WanVideoConfig()
 
 
-class CausalMatrixGameWanModel(BaseDiT):
+class CausalMatrixGame2WanModel(BaseDiT):
     supports_action_input = True
 
-    _fsdp_shard_conditions = _DEFAULT_MATRIXGAME_CONFIG._fsdp_shard_conditions
-    _compile_conditions = _DEFAULT_MATRIXGAME_CONFIG._compile_conditions
+    _fsdp_shard_conditions = _DEFAULT_MATRIXGAME2_CONFIG._fsdp_shard_conditions
+    _compile_conditions = _DEFAULT_MATRIXGAME2_CONFIG._compile_conditions
     _supported_attention_backends = (
-        _DEFAULT_MATRIXGAME_CONFIG._supported_attention_backends
+        _DEFAULT_MATRIXGAME2_CONFIG._supported_attention_backends
     )
-    param_names_mapping = _DEFAULT_MATRIXGAME_CONFIG.param_names_mapping
+    param_names_mapping = _DEFAULT_MATRIXGAME2_CONFIG.param_names_mapping
     reverse_param_names_mapping = (
-        _DEFAULT_MATRIXGAME_CONFIG.reverse_param_names_mapping
+        _DEFAULT_MATRIXGAME2_CONFIG.reverse_param_names_mapping
     )
     lora_param_names_mapping = (
-        _DEFAULT_MATRIXGAME_CONFIG.lora_param_names_mapping
+        _DEFAULT_MATRIXGAME2_CONFIG.lora_param_names_mapping
     )
 
     def __init__(
         self,
-        config: MatrixGameWanVideoConfig,
+        config: MatrixGame2WanVideoConfig,
         hf_config: dict[str, Any],
         **kwargs,
     ) -> None:
@@ -652,7 +652,7 @@ class CausalMatrixGameWanModel(BaseDiT):
         )
 
         # 2. Condition embeddings
-        self.condition_embedder = CausalMatrixGameTimeImageEmbedding(
+        self.condition_embedder = CausalMatrixGame2TimeImageEmbedding(
             dim=inner_dim,
             time_freq_dim=config.freq_dim,
             image_embed_dim=config.image_dim,
@@ -669,7 +669,7 @@ class CausalMatrixGameWanModel(BaseDiT):
         # 3. Transformer blocks
         self.blocks = nn.ModuleList(
             [
-                CausalMatrixGameTransformerBlock(
+                CausalMatrixGame2TransformerBlock(
                     inner_dim,
                     config.ffn_dim,
                     config.num_attention_heads,

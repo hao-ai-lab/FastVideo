@@ -5,9 +5,9 @@ from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig, WanVideoC
 
 
 @dataclass
-class MatrixGameWanVideoArchConfig(WanVideoArchConfig):
+class MatrixGame2WanVideoArchConfig(WanVideoArchConfig):
     # Override param_names_mapping to remove patch_embedding transformation
-    # because MatrixGame checkpoints already have patch_embedding.proj format
+    # because Matrix-Game 2.0 checkpoints already have patch_embedding.proj format
     param_names_mapping: dict = field(
         default_factory=lambda: {
             r"^patch_embedding\.(?!proj\.)(.*)$": r"patch_embedding.proj.\1",
@@ -67,7 +67,7 @@ def _is_transformer_block(param_name: str, module: torch.nn.Module) -> bool:
 
 
 @dataclass
-class MatrixGameWanVideoConfig(WanVideoConfig):
-    arch_config: MatrixGameWanVideoArchConfig = field(default_factory=MatrixGameWanVideoArchConfig)
+class MatrixGame2WanVideoConfig(WanVideoConfig):
+    arch_config: MatrixGame2WanVideoArchConfig = field(default_factory=MatrixGame2WanVideoArchConfig)
     prefix: str = "Wan"
     _compile_conditions: list = field(default_factory=lambda: [_is_transformer_block])

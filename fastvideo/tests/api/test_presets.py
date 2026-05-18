@@ -560,9 +560,9 @@ class TestSinglePresetFamilies:
 
     def test_matrixgame_registered(self) -> None:
         import fastvideo.registry  # noqa: F401
-        p = get_preset("matrixgame_i2v", "matrixgame")
-        assert p.defaults["num_inference_steps"] == 3
-        assert p.defaults["fps"] == 25
+        p2 = get_preset("matrixgame2_i2v", "matrixgame")
+        assert p2.defaults["num_inference_steps"] == 3
+        assert p2.defaults["fps"] == 25
 
     def test_longcat_presets_registered(self) -> None:
         import fastvideo.registry  # noqa: F401

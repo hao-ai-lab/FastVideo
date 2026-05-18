@@ -8,13 +8,13 @@ import torch
 import torch.nn.functional as F
 
 from fastvideo.api.sampling_param import SamplingParam
-from fastvideo.dataset.dataloader.schema import (pyarrow_schema_matrixgame_ode_trajectory)
+from fastvideo.dataset.dataloader.schema import (pyarrow_schema_matrixgame2_ode_trajectory)
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (SelfForcingFlowMatchScheduler)
-from fastvideo.pipelines.basic.matrixgame.matrixgame_causal_dmd_pipeline import (MatrixGameCausalDMDPipeline)
+from fastvideo.pipelines.basic.matrixgame2.matrixgame2_causal_dmd_pipeline import (MatrixGame2CausalDMDPipeline)
 from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
@@ -24,7 +24,7 @@ from fastvideo.utils import shallow_asdict
 logger = init_logger(__name__)
 
 
-class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
+class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
     """
     Training pipeline for ODE-init using precomputed denoising trajectories.
 
@@ -44,7 +44,7 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
         self.modules["scheduler"].set_timesteps(num_inference_steps=1000, training=True)
 
     def set_schemas(self):
-        self.train_dataset_schema = pyarrow_schema_matrixgame_ode_trajectory
+        self.train_dataset_schema = pyarrow_schema_matrixgame2_ode_trajectory
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         super().initialize_training_pipeline(training_args)
@@ -93,7 +93,7 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
                                                              extra_one_step=True)
         validation_scheduler.set_timesteps(num_inference_steps=1000, training=True)
         # Warm start validation with current transformer
-        self.validation_pipeline = MatrixGameCausalDMDPipeline.from_pretrained(
+        self.validation_pipeline = MatrixGame2CausalDMDPipeline.from_pretrained(
             training_args.model_path,
             args=args_copy,  # type: ignore
             inference_mode=True,
@@ -398,7 +398,7 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
 
 def main(args) -> None:
     logger.info("Starting ODE-init training pipeline...")
-    pipeline = MatrixGameODEInitTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
+    pipeline = MatrixGame2ODEInitTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
     args = pipeline.training_args
     pipeline.train()
     logger.info("ODE-init training pipeline done")

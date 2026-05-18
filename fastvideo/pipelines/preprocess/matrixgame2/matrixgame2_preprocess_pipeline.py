@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame2
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -13,7 +13,7 @@ from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (BasePreproc
 from fastvideo.pipelines.stages import ImageEncodingStage
 
 
-class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
+class PreprocessPipeline_MatrixGame2(BasePreprocessPipeline):
     """I2V preprocessing pipeline implementation."""
 
     _required_config_modules = ["vae", "image_encoder", "image_processor"]
@@ -27,7 +27,7 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
 
     def get_pyarrow_schema(self):
         """Return the PyArrow schema for I2V pipeline."""
-        return pyarrow_schema_matrixgame
+        return pyarrow_schema_matrixgame2
 
     def get_extra_features(self, valid_data: dict[str, Any], fastvideo_args: FastVideoArgs) -> dict[str, Any]:
 
@@ -232,4 +232,4 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
         return record
 
 
-EntryClass = PreprocessPipeline_MatrixGame
+EntryClass = PreprocessPipeline_MatrixGame2

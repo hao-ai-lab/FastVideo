@@ -55,7 +55,7 @@ class DecodingStage(PipelineStage):
 
         cfg = getattr(self.vae, "config", None)
 
-        # MatrixGame-style: z = z * std + mean
+        # Matrix-Game 2.0-style: z = z * std + mean
         if (cfg is not None and hasattr(cfg, "latents_mean") and hasattr(cfg, "latents_std")):
             latents_mean = torch.tensor(cfg.latents_mean, device=latents.device,
                                         dtype=latents.dtype).view(1, -1, 1, 1, 1)

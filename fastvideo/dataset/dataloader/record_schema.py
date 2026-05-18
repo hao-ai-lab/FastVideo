@@ -193,7 +193,7 @@ def text_only_record_creator(text_name: str, text_embedding: np.ndarray,
     return record
 
 
-def matrixgame_ode_record_creator(
+def matrixgame2_ode_record_creator(
         video_name: str,
         clip_feature: np.ndarray,
         first_frame_latent: np.ndarray,
@@ -203,7 +203,7 @@ def matrixgame_ode_record_creator(
         keyboard_cond: np.ndarray | None = None,
         mouse_cond: np.ndarray | None = None,
         caption: str = "") -> dict[str, Any]:
-    """Create a ODE trajectory record matching pyarrow_schema_matrixgame_ode_trajectory.
+    """Create a ODE trajectory record matching pyarrow_schema_matrixgame2_ode_trajectory.
 
     Args:
         video_name: Base name/id for the sample.
@@ -217,7 +217,7 @@ def matrixgame_ode_record_creator(
         caption: Optional caption.
 
     Returns:
-        dict suitable for records_to_table(…, pyarrow_schema_matrixgame_ode_trajectory)
+        dict suitable for records_to_table(…, pyarrow_schema_matrixgame2_ode_trajectory)
     """
     assert trajectory_latents is not None, "trajectory_latents is required"
     assert trajectory_timesteps is not None, "trajectory_timesteps is required"

@@ -23,7 +23,7 @@ flex_attention = torch.compile(
 )
 
 
-def _get_nd_rotary_pos_embed_matrixgame(
+def _get_nd_rotary_pos_embed_matrixgame2(
     rope_dim_list,
     rope_sizes,
     theta: float = 10000.0,
@@ -442,7 +442,7 @@ class ActionModule(nn.Module):
             "sum(rope_dim_list) should equal to head_dim of attention layer"
         )
         # Use Matrix-Game wrapper for FastVideo's function
-        freqs_cos, freqs_sin = _get_nd_rotary_pos_embed_matrixgame(
+        freqs_cos, freqs_sin = _get_nd_rotary_pos_embed_matrixgame2(
             rope_dim_list,
             rope_sizes,
             theta=self.rope_theta,

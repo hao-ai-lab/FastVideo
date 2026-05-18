@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from einops import rearrange
 
 from fastvideo.api.sampling_param import SamplingParam
-from fastvideo.dataset.dataloader.schema import (pyarrow_schema_matrixgame)
+from fastvideo.dataset.dataloader.schema import (pyarrow_schema_matrixgame2)
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
@@ -18,7 +18,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (SelfForcingFlowMatchScheduler)
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines import ComposedPipelineBase
-from fastvideo.pipelines.basic.matrixgame.matrixgame_causal_dmd_pipeline import (MatrixGameCausalDMDPipeline)
+from fastvideo.pipelines.basic.matrixgame2.matrixgame2_causal_dmd_pipeline import (MatrixGame2CausalDMDPipeline)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.self_forcing_distillation_pipeline import (SelfForcingDistillationPipeline)
 from fastvideo.training.training_utils import shift_timestep
@@ -29,9 +29,9 @@ vsa_available = is_vsa_available()
 logger = init_logger(__name__)
 
 
-class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
+class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
     """
-    A self-forcing distillation pipeline for MatrixGame that uses the self-forcing methodology
+    A self-forcing distillation pipeline for Matrix-Game 2.0 that uses the self-forcing methodology
     with DMD for video generation.
     """
     _required_config_modules = [
@@ -43,7 +43,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline)
     ]
 
     def set_schemas(self):
-        self.train_dataset_schema = pyarrow_schema_matrixgame
+        self.train_dataset_schema = pyarrow_schema_matrixgame2
 
     def load_modules(
         self,
@@ -57,7 +57,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline)
         )
         training_args = cast(TrainingArgs, fastvideo_args)
         old_override = training_args.override_transformer_cls_name
-        training_args.override_transformer_cls_name = "MatrixGameWanModel"
+        training_args.override_transformer_cls_name = "MatrixGame2WanModel"
         try:
             if loaded_modules is not None and "real_score_transformer" in loaded_modules:
                 self.real_score_transformer = loaded_modules["real_score_transformer"]
@@ -105,7 +105,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline)
             raise ValueError("first_frame_latent must have shape [B, C, T, H, W], got "
                              f"{tuple(image_latents.shape)}")
         if image_latents.shape[1] != 16:
-            raise ValueError("MatrixGame cond conversion expects a 16-channel "
+            raise ValueError("Matrix-Game 2.0 cond conversion expects a 16-channel "
                              f"first_frame_latent, got {image_latents.shape[1]} channels.")
 
         temporal_compression_ratio = (
@@ -180,7 +180,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline)
                                   action_config.get('local_attn_size', 6) if action_config else 6)
 
         if local_attn_size <= 0:
-            raise ValueError("MatrixGame self-forcing requires transformer.local_attn_size > 0")
+            raise ValueError("Matrix-Game 2.0 self-forcing requires transformer.local_attn_size > 0")
         kv_cache_size = local_attn_size * frame_seq_length
 
         kv_cache = []
@@ -591,7 +591,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline)
                                                              extra_one_step=True)
         validation_scheduler.set_timesteps(num_inference_steps=1000, training=True)
         # Warm start validation with current transformer
-        self.validation_pipeline = MatrixGameCausalDMDPipeline.from_pretrained(
+        self.validation_pipeline = MatrixGame2CausalDMDPipeline.from_pretrained(
             training_args.model_path,
             args=args_copy,  # type: ignore
             inference_mode=True,
@@ -738,7 +738,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline)
         return training_batch
 
     def _dmd_forward(self, generator_pred_video: torch.Tensor, training_batch: TrainingBatch) -> torch.Tensor:
-        """Compute DMD (Diffusion Model Distillation) loss for MatrixGame."""
+        """Compute DMD (Diffusion Model Distillation) loss for Matrix-Game 2.0."""
         original_latent = generator_pred_video
         with torch.no_grad():
             timestep = torch.randint(0, self.num_train_timestep, [1], device=self.device, dtype=torch.long)
@@ -777,7 +777,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline)
                                                              scheduler=self.noise_scheduler).unflatten(
                                                                  0, real_score_pred_noise.shape[:2])
 
-            # No CFG for MatrixGame - use real_score_pred_video directly
+            # No CFG for Matrix-Game 2.0 - use real_score_pred_video directly
             grad = (faker_score_pred_video - real_score_pred_video) / torch.abs(original_latent -
                                                                                 real_score_pred_video).mean()
             grad = torch.nan_to_num(grad)
@@ -795,7 +795,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline)
         return dmd_loss
 
     def faker_score_forward(self, training_batch: TrainingBatch) -> tuple[TrainingBatch, torch.Tensor]:
-        """Forward pass for critic training with MatrixGame action conditioning."""
+        """Forward pass for critic training with Matrix-Game 2.0 action conditioning."""
         with torch.no_grad(), set_forward_context(current_timestep=training_batch.timesteps,
                                                   attn_metadata=training_batch.attn_metadata_vsa):
             if self.training_args.simulate_generator_forward:
@@ -878,13 +878,13 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline)
 
 
 def main(args) -> None:
-    logger.info("Starting MatrixGame self-forcing distillation pipeline...")
+    logger.info("Starting Matrix-Game 2.0 self-forcing distillation pipeline...")
 
-    pipeline = MatrixGameSelfForcingDistillationPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
+    pipeline = MatrixGame2SelfForcingDistillationPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
 
     args = pipeline.training_args
     pipeline.train()
-    logger.info("MatrixGame self-forcing distillation pipeline completed")
+    logger.info("Matrix-Game 2.0 self-forcing distillation pipeline completed")
 
 
 if __name__ == "__main__":
