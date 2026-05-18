@@ -31,14 +31,16 @@ export PYTHONPATH=/home/hal-kaiqin/FastVideo_mg
    `fastvideo/configs/pipelines/wan.py` auto-merged cleanly; main removed its old `MatrixGameI2V480PConfig` block and we now own that surface in `fastvideo/configs/pipelines/matrixgame.py`.
 
 2. **Sanity checks that pass (no model weights touched):**
-   ```python
+  
+```python
    from fastvideo.registry import _MODEL_HF_PATH_TO_NAME
    from fastvideo.configs.pipelines.matrixgame import MatrixGame3I2V720PConfig
    from fastvideo.pipelines.basic.matrixgame.matrixgame3_i2v_pipeline import MatrixGame3I2VPipeline
    ```
-   MG3 path registered: `FastVideo/Matrix-Game-3.0-Diffusers`. MG2 paths still registered. No conflict markers anywhere.
+  
+MG3 path registered: `FastVideo/Matrix-Game-3.0-Diffusers`. MG2 paths still registered. No conflict markers anywhere.
 
-3. **Architecture sanity check against the local raw checkpoint** (`/home/hal-kaiqin/models/Matrix-Game-3.0/base_model/diffusion_pytorch_model.safetensors`):
+1. **Architecture sanity check against the local raw checkpoint** (`/home/hal-kaiqin/models/Matrix-Game-3.0/base_model/diffusion_pytorch_model.safetensors`):
    - With the **5B** MG3 arch values (`num_attention_heads=24, attention_head_dim=128, num_layers=30, ffn_dim=14336, in_channels=48, out_channels=48, text_dim=4096, action_config['img_hidden_size']=3072, action_config['keyboard_dim_in']=6, action_config['blocks']=range(15)`), `MatrixGame3WanModel` instantiates as a 6.47 B-parameter model and **all 1356 checkpoint keys map cleanly** through `param_names_mapping` — 0 unmapped, 0 missing on the model side.
    - **Caveat:** the defaults in `fastvideo/configs/models/dits/matrixgame.py::MatrixGame3WanVideoArchConfig` are still the 28B-MoE values (`num_attention_heads=40, num_layers=40, ffn_dim=13824, img_hidden_size=5120, keyboard_dim_in=4, blocks=range(40)`). `update_model_arch()` won't rescue the load from raw `base_model/config.json` because that JSON uses official-style keys (`dim`, `num_heads`, `in_dim`, `out_dim`) that don't match the diffusers-style field names on the dataclass. See §5.1.
 
