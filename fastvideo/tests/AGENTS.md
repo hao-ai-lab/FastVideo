@@ -24,7 +24,7 @@ tests/
 ├── modal/                 # Modal CI orchestrators (ssim_test.py, nightly_test.py)
 ├── nightly/               # Long-running suites (gated)
 ├── ops/                   # Custom kernel / op tests
-├── performance/           # Throughput / memory benchmarks (informational)
+├── performance/           # Throughput / memory benchmarks (informational) — see docs/contributing/performance_benchmarks.md
 ├── ssim/                  # GPU SSIM regressions — see ssim/AGENTS.md
 ├── stages/                # Per-stage unit tests
 ├── train/                 # New modular trainer tests
