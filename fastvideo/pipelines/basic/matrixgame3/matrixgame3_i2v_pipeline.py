@@ -15,6 +15,7 @@ logger = init_logger(__name__)
 
 class MatrixGame3I2VPipeline(LoRAPipeline, ComposedPipelineBase):
     _required_config_modules = ["vae", "transformer", "scheduler", "text_encoder", "tokenizer"]
+    _extra_config_module_map = {"vae": "light_vae"}
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=fastvideo_args.pipeline_config.flow_shift)

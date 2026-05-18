@@ -82,6 +82,7 @@ class ComponentLoader(ABC):
             "transformer_2": (TransformerLoader, "diffusers"),
             "transformer_3": (TransformerLoader, "diffusers"),
             "vae": (VAELoader, "diffusers"),
+            "light_vae": (VAELoader, "diffusers"),
             "audio_vae": (AudioDecoderLoader, "diffusers"),
             "audio_decoder": (AudioDecoderLoader, "diffusers"),
             "vocoder": (VocoderLoader, "diffusers"),
