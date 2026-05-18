@@ -79,7 +79,6 @@ class ForwardBatch:
     image_embeds: list[torch.Tensor] = field(default_factory=list)
     pil_image: torch.Tensor | PIL.Image.Image | None = None
     preprocessed_image: torch.Tensor | None = None
-
     # Text inputs
     prompt: str | list[str] | None = None
     negative_prompt: str | list[str] | None = None
@@ -193,6 +192,13 @@ class ForwardBatch:
     ltx2_stg_scale_audio: float = 0.0
     ltx2_stg_blocks_video: list[int] = field(default_factory=list)
     ltx2_stg_blocks_audio: list[int] = field(default_factory=list)
+
+    # LTX-2 image / video / continuation conditioning
+    ltx2_images: list[tuple[str, int, float]] | None = None
+    ltx2_image_crf: float = 33.0
+    ltx2_conditioning_latent_stage1: torch.Tensor | None = None
+    ltx2_conditioning_latent_stage2: torch.Tensor | None = None
+    ltx2_video_conditions: list[tuple[list[str], int, float]] | None = None
 
     # Stable Audio (T2A): clip start/end in seconds. Parallels the
     # `SamplingParam` fields of the same name; the

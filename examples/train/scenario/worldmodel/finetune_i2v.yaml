@@ -3,7 +3,7 @@
 models:
   student:
     _target_: fastvideo.train.models.matrixgame2.matrixgame2.MatrixGame2Model
-    init_from: FastVideo/Matrix-Game-2.0-Foundation-Diffusers
+    init_from: FastVideo/Matrix-Game-2.0-Base-Diffusers
     trainable: true
 
 method:
@@ -18,7 +18,7 @@ training:
     hsdp_shard_dim: 1
 
   data:
-    data_path: data/matrixgame
+    data_path: data/matrixgame2
     dataloader_num_workers: 4
     train_batch_size: 1
     training_cfg_rate: 0.0
@@ -40,14 +40,14 @@ training:
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: outputs/matrixgame_i2v_finetune
+    output_dir: outputs/matrixgame2_i2v_finetune
     training_state_checkpointing_steps: 100
     checkpoints_total_limit: 3
     resume_from_checkpoint: latest
 
   # tracker:
   #   project_name: fastvideo
-  #   run_name: matrixgame_i2v_finetune
+  #   run_name: matrixgame2_i2v_finetune
   tracker:
     trackers: [none]
     project_name: ""

@@ -41,3 +41,20 @@ img {
     display: block;
     margin: 0 auto;
 }
+
+.md-typeset .copy-page-button.md-button {
+    float: right;
+    margin: 0 0 1rem 1rem;
+    padding: 0.2em 0.6em;
+    font-size: 1em;
+    font-weight: 400;
+    line-height: 1.2;
+}
+
+.md-typeset .copy-page-button.md-button.copy-page-button--copied {
+    background-color: var(--md-accent-fg-color);
+}
+
+.md-typeset .copy-page-button.md-button.copy-page-button--error {
+    background-color: var(--md-code-hl-number-color);
+}

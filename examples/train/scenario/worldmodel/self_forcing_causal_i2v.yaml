@@ -8,16 +8,16 @@
 models:
   student:
     _target_: fastvideo.train.models.matrixgame2.matrixgame2_causal.MatrixGame2CausalModel
-    init_from: FastVideo/Matrix-Game-2.0-Base-Diffusers
+    init_from: FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers
     trainable: true
   teacher:
     _target_: fastvideo.train.models.matrixgame2.matrixgame2.MatrixGame2Model
-    init_from: FastVideo/Matrix-Game-2.0-Foundation-Diffusers
+    init_from: FastVideo/Matrix-Game-2.0-Base-Diffusers
     trainable: false
     disable_custom_init_weights: true
   critic:
     _target_: fastvideo.train.models.matrixgame2.matrixgame2.MatrixGame2Model
-    init_from: FastVideo/Matrix-Game-2.0-Foundation-Diffusers
+    init_from: FastVideo/Matrix-Game-2.0-Base-Diffusers
     trainable: true
     disable_custom_init_weights: true
 
@@ -48,7 +48,7 @@ training:
     hsdp_shard_dim: 4
 
   data:
-    data_path: data/matrixgame
+    data_path: data/matrixgame2
     dataloader_num_workers: 4
     train_batch_size: 1
     training_cfg_rate: 0.0
@@ -70,13 +70,13 @@ training:
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: outputs/matrixgame_causal_self_forcing
+    output_dir: outputs/matrixgame2_causal_self_forcing
     training_state_checkpointing_steps: 1000
     checkpoints_total_limit: 3
 
   tracker:
-    project_name: self-forcing-matrixgame
-    run_name: matrixgame_causal_self_forcing
+    project_name: self-forcing-matrixgame2
+    run_name: matrixgame2_causal_self_forcing
 
   model:
     enable_gradient_checkpointing_type: full
