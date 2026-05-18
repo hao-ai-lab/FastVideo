@@ -12,6 +12,8 @@ This page describes the various options for speeding up generation times in Fast
   - [Sage Attention](#sage-attention)
   - [Sage Attention 3](#sage-attention-3)
 
+- [torch.compile](#torch-compile)
+
 ## Attention Backends
 
 ### Available Backends
@@ -176,6 +178,101 @@ To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repos
 These backends are model-specific and require the corresponding kernels and
 dependencies. Use the support matrix and model examples to confirm compatibility
 before enabling them.
+
+<a id="torch-compile"></a>
+
+## torch.compile
+
+FastVideo can `torch.compile` the DiT (transformer) for a substantial
+end-to-end speedup. It is **off by default** and enabled per-run.
+
+### Enabling
+
+Python:
+
+```python
+generator = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    enable_torch_compile=True,
+)
+```
+
+CLI:
+
+```bash
+fastvideo generate --model-path "Wan-AI/Wan2.1-T2V-1.3B-Diffusers" \
+    --prompt "..." --enable-torch-compile
+```
+
+Only DiT submodules that declare `_compile_conditions` are compiled
+(most shipped models). The text encoder and VAE are not compiled by this
+flag.
+
+### What to expect
+
+| Config | Effect |
+|---|---|
+| Wan2.1-T2V-1.3B, A100-80GB, 480×832×81f, 50 steps | end-to-end **259.7s → 198.1s (−23.7%)**; per-step **4.91 → 3.78 s/it** |
+
+The speedup is **configuration-dependent** — it varies with model,
+resolution, step count, and GPU. Treat the number above as one measured
+data point, not a guarantee; benchmark your own config (recipe below).
+
+There is a **one-time graph-build cost** on the first generation (tens of
+seconds to minutes, model-dependent). It amortizes over subsequent
+generations with the same input shapes. Always exclude the first
+(warmup) generation when measuring steady-state latency — measuring the
+warmup is the most common way to wrongly conclude "compile is slower".
+
+Compiled output is numerically equivalent to eager for the shipped
+models (MS-SSIM ≈ 1.0 vs eager on Wan2.1-T2V-1.3B); still SSIM-gate when
+combining with quantized attention backends.
+
+### Known interactions
+
+- **Layerwise CPU offload** (`dit_layerwise_offload=True`, the default):
+  the offload hook previously caused an implicit graph break once per
+  transformer layer, fragmenting the compiled region. Addressed in
+  hao-ai-lab/FastVideo#1365 — keep that fix to get a clean compiled
+  region under the default offload path.
+- **`mode="reduce-overhead"` / CUDA graphs**: not yet supported
+  end-to-end. The attention dispatch is an untraceable custom op and
+  still breaks the graph, which CUDA-graph trees cannot span. Use the
+  default inductor mode (shown above) until that is resolved.
+
+Extra `torch.compile` options are passed through `torch_compile_kwargs`
+(a dict), accepted by `VideoGenerator.from_pretrained(...)` and by the
+CLI as a JSON string via `--torch-compile-kwargs`. Example (currently
+**not** recommended — see the CUDA-graphs caveat above):
+
+```python
+VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    enable_torch_compile=True,
+    torch_compile_kwargs={"mode": "reduce-overhead"},  # may error today
+)
+```
+
+### Benchmarking torch.compile
+
+Same discipline as attention backends — same prompt, same seed, same
+config; **discard the first generation** (graph build):
+
+```python
+import time
+from fastvideo import VideoGenerator
+
+gen = VideoGenerator.from_pretrained("your-model-id", enable_torch_compile=True)
+req = {"prompt": "Your prompt", "sampling": {"seed": 1024},
+       "output": {"save_video": False}}
+gen.generate(req)                                            # warmup: graph build, discard
+t0 = time.perf_counter()
+gen.generate(req)                                            # measured: shapes reused
+print(f"compiled steady-state: {time.perf_counter() - t0:.2f}s")
+```
+
+See `examples/inference/optimizations/torch_compile_example.py` for a
+baseline-vs-compile A/B with the warmup correctly excluded.
 
 ## Benchmarking different optimizations
 
