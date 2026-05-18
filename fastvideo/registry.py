@@ -30,6 +30,7 @@ from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
+from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
     TurboDiffusionT2V_14B_Config,
@@ -38,7 +39,6 @@ from fastvideo.configs.pipelines.turbodiffusion import (
 from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config,
     FastWan2_2_TI2V_5B_Config,
-    MatrixGameI2V480PConfig,
     SelfForcingWan2_2_T2V480PConfig,
     SelfForcingWanT2V480PConfig,
     WANV2VConfig,
@@ -53,6 +53,7 @@ from fastvideo.configs.pipelines.wan import (
 from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.pipelines.stable_audio import (StableAudioOpenSmallConfig, StableAudioT2AConfig)
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
@@ -467,12 +468,16 @@ def _register_configs() -> None:
         default_preset="longcat_vc",
     )
 
-    # MatrixGame
+    # MatrixGame 2.0 (I2V)
     register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=MatrixGameI2V480PConfig,
+        sampling_param_cls=MatrixGame2SamplingParam,
+        pipeline_config_cls=MatrixGame2I2V480PConfig,
         workload_types=(WorkloadType.I2V, ),
         hf_model_paths=[
+            "FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers",
+            "FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers",
+            "FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers",
+            # Legacy HF paths (kept for backward compat — pre-rename names):
             "FastVideo/Matrix-Game-2.0-Base-Diffusers",
             "FastVideo/Matrix-Game-2.0-GTA-Diffusers",
             "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",
@@ -481,7 +486,7 @@ def _register_configs() -> None:
             lambda path: "matrix-game" in path.lower() or "matrixgame" in path.lower(),
         ],
         model_family="matrixgame",
-        default_preset="matrixgame_i2v",
+        default_preset="matrixgame2_i2v",
     )
 
     # GEN3C (must register before generic Cosmos detector)
@@ -852,8 +857,8 @@ def _register_presets() -> None:
         ALL_PRESETS as LONGCAT_PRESETS, )
     from fastvideo.pipelines.basic.ltx2.presets import (
         ALL_PRESETS as LTX2_PRESETS, )
-    from fastvideo.pipelines.basic.matrixgame.presets import (
-        ALL_PRESETS as MATRIXGAME_PRESETS, )
+    from fastvideo.pipelines.basic.matrixgame2.presets import (
+        ALL_PRESETS as MATRIXGAME2_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
     from fastvideo.pipelines.basic.stable_audio.presets import (
@@ -873,7 +878,7 @@ def _register_presets() -> None:
         LINGBOTWORLD_PRESETS,
         LONGCAT_PRESETS,
         LTX2_PRESETS,
-        MATRIXGAME_PRESETS,
+        MATRIXGAME2_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
         TURBODIFFUSION_PRESETS,
