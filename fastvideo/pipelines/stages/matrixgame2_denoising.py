@@ -4,7 +4,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
 import torch  # type: ignore
 
 from fastvideo.distributed import get_local_torch_device
@@ -25,7 +24,6 @@ except ImportError:
     VideoSparseAttentionBackend = None  # type: ignore
 
 logger = init_logger(__name__)
-
 
 
 @dataclass
@@ -141,7 +139,7 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
 
         assert batch.latents is not None, "latents must be provided"
         latents = batch.latents
-        _, _, t, _, _ = latents.shape
+        b, c, t, h, w = latents.shape
         prompt_embeds = batch.prompt_embeds
         assert torch.isnan(prompt_embeds[0]).sum() == 0
 
