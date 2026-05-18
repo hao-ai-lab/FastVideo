@@ -18,7 +18,7 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 try:
     from fastvideo.attention.backends.video_sparse_attn import (VideoSparseAttentionBackend)
     vsa_available = True
-except ImportError:
+except (ImportError, RuntimeError):
     vsa_available = False
     VideoSparseAttentionBackend = None  # type: ignore
 
