@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import os
 import time
 
 from fastvideo import VideoGenerator
@@ -39,6 +40,8 @@ def main() -> None:
     mode = "COMPILE" if args.compile else "BASELINE"
     print(f"Mode: {mode}  (enable_torch_compile={args.compile})")
 
+    os.makedirs("video_samples", exist_ok=True)
+
     generator = VideoGenerator.from_pretrained(
         args.model,
         num_gpus=args.num_gpus,
@@ -46,25 +49,32 @@ def main() -> None:
     )
 
     def _run(tag: str) -> float:
+        save = tag == "measured"
+        # Modern typed-request API (generate_video is deprecated). Same
+        # prompt/seed/shapes both runs so the compiled graph is reused.
+        request: dict = {
+            "prompt": PROMPT,
+            "sampling": {"seed": 1024},
+            "output": {"save_video": save},
+        }
+        if save:
+            request["output"]["output_path"] = (
+                f"video_samples/torch_compile_{tag}.mp4")
         t0 = time.perf_counter()
-        generator.generate_video(
-            PROMPT,
-            seed=1024,
-            output_path=f"video_samples/torch_compile_{tag}.mp4",
-            save_video=(tag == "measured"),
-        )
+        generator.generate(request)
         return time.perf_counter() - t0
 
-    # Warmup: pays the one-time graph build when --compile. Discarded.
-    w = _run("warmup")
-    print(f"warmup: {w:.2f}s "
-          f"({'incl. graph build' if args.compile else 'cold start'})")
+    try:
+        # Warmup: pays the one-time graph build when --compile. Discarded.
+        w = _run("warmup")
+        print(f"warmup: {w:.2f}s "
+              f"({'incl. graph build' if args.compile else 'cold start'})")
 
-    # Measured: steady state, compiled graph reused (same shapes/seed).
-    m = _run("measured")
-    print(f"=== {mode} steady-state e2e: {m:.2f}s ===")
-
-    generator.shutdown()
+        # Measured: steady state, compiled graph reused (same shapes/seed).
+        m = _run("measured")
+        print(f"=== {mode} steady-state e2e: {m:.2f}s ===")
+    finally:
+        generator.shutdown()
 
 
 if __name__ == "__main__":

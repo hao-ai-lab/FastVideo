@@ -12,7 +12,7 @@ This page describes the various options for speeding up generation times in Fast
   - [Sage Attention](#sage-attention)
   - [Sage Attention 3](#sage-attention-3)
 
-- [torch.compile](#torchcompile)
+- [torch.compile](#torch-compile)
 
 ## Attention Backends
 
@@ -179,6 +179,8 @@ These backends are model-specific and require the corresponding kernels and
 dependencies. Use the support matrix and model examples to confirm compatibility
 before enabling them.
 
+<a id="torch-compile"></a>
+
 ## torch.compile
 
 FastVideo can `torch.compile` the DiT (transformer) for a substantial
@@ -236,8 +238,20 @@ combining with quantized attention backends.
 - **`mode="reduce-overhead"` / CUDA graphs**: not yet supported
   end-to-end. The attention dispatch is an untraceable custom op and
   still breaks the graph, which CUDA-graph trees cannot span. Use the
-  default inductor mode (shown above) until that is resolved; passing
-  `torch_compile_kwargs={"mode": "reduce-overhead"}` may error.
+  default inductor mode (shown above) until that is resolved.
+
+Extra `torch.compile` options are passed through `torch_compile_kwargs`
+(a dict), accepted by `VideoGenerator.from_pretrained(...)` and by the
+CLI as a JSON string via `--torch-compile-kwargs`. Example (currently
+**not** recommended — see the CUDA-graphs caveat above):
+
+```python
+VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    enable_torch_compile=True,
+    torch_compile_kwargs={"mode": "reduce-overhead"},  # may error today
+)
+```
 
 ### Benchmarking torch.compile
 
@@ -249,9 +263,11 @@ import time
 from fastvideo import VideoGenerator
 
 gen = VideoGenerator.from_pretrained("your-model-id", enable_torch_compile=True)
-gen.generate_video(prompt="Your prompt", seed=1024)          # warmup: graph build, discard
+req = {"prompt": "Your prompt", "sampling": {"seed": 1024},
+       "output": {"save_video": False}}
+gen.generate(req)                                            # warmup: graph build, discard
 t0 = time.perf_counter()
-gen.generate_video(prompt="Your prompt", seed=1024)          # measured: shapes reused
+gen.generate(req)                                            # measured: shapes reused
 print(f"compiled steady-state: {time.perf_counter() - t0:.2f}s")
 ```
 
