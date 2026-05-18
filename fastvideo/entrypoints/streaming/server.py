@@ -7,7 +7,7 @@ import contextlib
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -56,6 +56,7 @@ from fastvideo.entrypoints.streaming.gpu_pool import (
     InProcessGpuPool,
     PoolAcquireTimeout,
 )
+from fastvideo.entrypoints.streaming.health import build_health_router
 from fastvideo.entrypoints.streaming.session_store import (
     InMemorySessionStore,
     SessionStore,
@@ -68,6 +69,15 @@ logger = init_logger(__name__)
 # RFC 6455 WebSocket close codes used by the server.
 _WS_CLOSE_UNSUPPORTED_DATA = 1003
 _WS_CLOSE_TRY_AGAIN_LATER = 1013
+_ErrorCode = Literal[
+    "session_rejected",
+    "invalid_message",
+    "preset_mismatch",
+    "gpu_unavailable",
+    "worker_failed",
+    "upstream_timeout",
+    "internal_error",
+]
 
 
 class _GeneratorProto(Protocol):
@@ -104,6 +114,7 @@ def build_app(
     if serve_config.streaming is None:
         raise ValueError("ServeConfig.streaming must be set to launch the streaming "
                          "server; got None. Add a `streaming:` block to your serve config.")
+    streaming = serve_config.streaming
     if (generator is None) == (pool is None):
         raise ValueError("build_app requires exactly one of `generator` or `pool`")
 
@@ -130,8 +141,10 @@ def build_app(
         return JSONResponse({
             "status": "ok",
             "sessions": len(state.sessions),
-            "stream_mode": state.serve_config.streaming.stream_mode,
+            "stream_mode": streaming.stream_mode,
         })
+
+    app.include_router(build_health_router(pool))
 
     @app.websocket("/v1/stream")
     async def _stream(websocket: WebSocket) -> None:
@@ -507,7 +520,7 @@ def _apply_toggle(session: Session, message: Any) -> None:
         session.curated_prompts = list(message.seed_prompts)
 
 
-def _extract_frames(result: Any) -> list:
+def _extract_frames(result: Any) -> list[Any]:
     if hasattr(result, "frames"):
         return list(result.frames or [])
     if isinstance(result, dict):
@@ -533,7 +546,7 @@ async def _send_json(websocket: WebSocket, message: Any) -> None:
 
 async def _send_error(
     websocket: WebSocket,
-    code: str,
+    code: _ErrorCode,
     message: str,
     *,
     retryable: bool,

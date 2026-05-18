@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import sys
+from collections.abc import Iterable
 from copy import deepcopy
 from typing import Any, cast
 
@@ -288,6 +289,25 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline)
                 opt_cache["k"].zero_()
                 opt_cache["v"].zero_()
 
+    @staticmethod
+    def _snapshot_streaming_kv_cache(
+        kv_cache: Iterable[dict[str, Any] | None] | None, ) -> list[dict[str, Any] | None] | None:
+        # Per-block index clone for checkpoint-safe recompute.
+        if kv_cache is None:
+            return None
+        snapshot: list[dict[str, Any] | None] = []
+        for block_cache in kv_cache:
+            if block_cache is None:
+                snapshot.append(None)
+                continue
+            copied = dict(block_cache)
+            for key in ("global_end_index", "local_end_index"):
+                tensor = block_cache.get(key)
+                if isinstance(tensor, torch.Tensor):
+                    copied[key] = tensor.detach().clone()
+            snapshot.append(copied)
+        return snapshot
+
     def _generator_multi_step_simulation_forward(self,
                                                  training_batch: TrainingBatch,
                                                  return_sim_steps: bool = False) -> torch.Tensor:
@@ -429,10 +449,15 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline)
                                                                                current_num_frames,
                                                                                num_frame_per_block=current_num_frames)
 
+                        # Snapshot streaming caches for checkpoint-safe recompute.
+                        snap_kv_cache = self._snapshot_streaming_kv_cache(self.kv_cache1)
+                        snap_kv_cache_mouse = self._snapshot_streaming_kv_cache(self.kv_cache_mouse)
+                        snap_kv_cache_keyboard = self._snapshot_streaming_kv_cache(self.kv_cache_keyboard)
+
                         pred_flow = current_model(**training_batch_temp.input_kwargs,
-                                                  kv_cache=self.kv_cache1,
-                                                  kv_cache_mouse=self.kv_cache_mouse,
-                                                  kv_cache_keyboard=self.kv_cache_keyboard,
+                                                  kv_cache=snap_kv_cache,
+                                                  kv_cache_mouse=snap_kv_cache_mouse,
+                                                  kv_cache_keyboard=snap_kv_cache_keyboard,
                                                   crossattn_cache=self.crossattn_cache,
                                                   current_start=current_start_frame * self.frame_seq_length,
                                                   start_frame=current_start_frame).permute(0, 2, 1, 3, 4)

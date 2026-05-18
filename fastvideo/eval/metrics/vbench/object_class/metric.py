@@ -38,10 +38,8 @@ class ObjectClassMetric(BaseMetric):
         from fastvideo.eval.metrics.vbench._grit_helper import prepare_frames, detect_frames
 
         video = sample["video"]  # (T, C, H, W)
-        aux = sample.get("auxiliary_info")
-        if isinstance(aux, list):
-            aux = aux[0] if aux else None
-        if not aux or "object" not in aux:
+        aux = sample.get("auxiliary_info") or {}
+        if "object" not in aux:
             return self._skip(sample, "missing 'object' in auxiliary_info")
 
         object_key = aux["object"]

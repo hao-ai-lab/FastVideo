@@ -55,17 +55,11 @@ class ColorMetric(BaseMetric):
         from fastvideo.eval.metrics.vbench._grit_helper import prepare_frames
 
         video = sample["video"]  # (T, C, H, W)
-        aux = sample.get("auxiliary_info")
-        if isinstance(aux, list):
-            aux = aux[0] if aux else None
-        if not aux or "color" not in aux:
+        aux = sample.get("auxiliary_info") or {}
+        if "color" not in aux:
             return self._skip(sample, "missing 'color' in auxiliary_info")
 
-        text_prompt = sample.get("text_prompt")
-        if isinstance(text_prompt, list):
-            text_prompt = text_prompt[0] if text_prompt else ""
-        prompt = text_prompt or ""
-
+        prompt = sample.get("text_prompt") or ""
         color_key = aux["color"]
         # Parse object name: remove "a ", "an ", and the color word
         object_key = prompt.replace("a ", "").replace("an ", "").replace(color_key, "").strip()

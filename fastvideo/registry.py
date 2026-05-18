@@ -16,7 +16,10 @@ from typing import TYPE_CHECKING, Any
 
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
-from fastvideo.configs.pipelines.cosmos2_5 import Cosmos25Config
+from fastvideo.configs.pipelines.cosmos2_5 import (
+    Cosmos25Config,
+    Cosmos25_14BConfig,
+)
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
 from fastvideo.configs.pipelines.gen3c import Gen3CConfig
@@ -212,6 +215,27 @@ def _get_config_info(
 
 
 def _register_configs() -> None:
+    # LTX-2 (distilled) — registered FIRST so its detector wins over
+    # the base detector when both fire. The detector loop in
+    # ``get_model_name_for_path`` ORs the path-based check with a
+    # pipeline-name check (``ltx2pipeline``) which the base detector's
+    # "distilled not in path" predicate matches as True (the
+    # pipeline_name string contains no "distilled" marker), so the
+    # less-specific BASE detector would otherwise win when the
+    # input is the absolute path of the distilled checkpoint.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LTX2T2VConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "FastVideo/LTX2-Distilled-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" in path.lower(),
+        ],
+        model_family="ltx2",
+        default_preset="ltx2_distilled",
+    )
     # LTX-2 (base)
     register_configs(
         sampling_param_cls=None,
@@ -227,20 +251,6 @@ def _register_configs() -> None:
         ],
         model_family="ltx2",
         default_preset="ltx2_base",
-    )
-    # LTX-2 (distilled)
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=LTX2T2VConfig,
-        workload_types=(WorkloadType.T2V, ),
-        hf_model_paths=[
-            "FastVideo/LTX2-Distilled-Diffusers",
-        ],
-        model_detectors=[
-            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" in path.lower(),
-        ],
-        model_family="ltx2",
-        default_preset="ltx2_distilled",
     )
 
     # Stable Audio Open (text-to-audio). Both variants must be loaded
@@ -489,7 +499,7 @@ def _register_configs() -> None:
         default_preset="gen3c_cosmos_7b",
     )
 
-    # Cosmos 2.5
+    # Cosmos 2.5 (2B)
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=Cosmos25Config,
@@ -502,7 +512,25 @@ def _register_configs() -> None:
                 "cosmos25",
                 "cosmos2_5",
                 "cosmos2.5",
-            )),
+                "cosmos-predict2.5",
+            )) and "14b" not in path.lower(),
+        ],
+    )
+
+    # Cosmos 2.5 (14B)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Cosmos25_14BConfig,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "nvidia/Cosmos-Predict2.5-14B",
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in (
+                "cosmos25",
+                "cosmos2_5",
+                "cosmos2.5",
+            )) and "14b" in path.lower(),
         ],
         model_family="cosmos25",
         default_preset="cosmos25_predict2_2b",

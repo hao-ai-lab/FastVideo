@@ -5,7 +5,7 @@ from typing import Any
 from fastvideo.eval.metrics.base import BaseMetric
 from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
-from fastvideo.eval.metrics.physics_iq.utils import compute_weighted_spatial_iou, prepare_pair_batch
+from fastvideo.eval.metrics.physics_iq.utils import compute_weighted_spatial_iou, prepare_pair
 
 
 @register("physics_iq.weighted_spatial_iou")
@@ -19,6 +19,6 @@ class WeightedSpatialIoUMetric(BaseMetric):
         self._kwargs = kwargs
 
     def compute(self, sample: dict) -> MetricResult:
-        [prepared] = prepare_pair_batch(sample, prep_kwargs=self._kwargs)
+        prepared = prepare_pair(sample, prep_kwargs=self._kwargs)
         score = compute_weighted_spatial_iou(prepared.reference_masks, prepared.generated_masks)
         return MetricResult(name=self.name, score=score, details={})

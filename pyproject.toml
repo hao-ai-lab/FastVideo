@@ -89,6 +89,9 @@ dependencies = [
 [tool.uv]
 prerelease = "allow"
 
+[tool.uv.workspace]
+members = ["apps/dreamverse"]
+
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
@@ -102,6 +105,7 @@ torchaudio = [
   { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
   { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
 ]
+imagebind = { git = "https://github.com/facebookresearch/ImageBind.git", rev = "53680b02d7e37b19b124fa37bae4b6c98c38f5be" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -138,11 +142,12 @@ test = [
 # separately as documented in the README.
 eval-vbench     = ["openai-clip", "pyiqa", "easydict"]
 eval-physics-iq = []
+eval-audio = ["jiwer", "librosa", "pyloudnorm", "hear21passt", "audiobox_aesthetics", "imagebind", "decord", "pytorchvideo"]
 eval = [
     "decord", "lpips", "ptlflow", "qwen-vl-utils",
     "fastvideo[eval-vbench]", "fastvideo[eval-physics-iq]",
 ]
-eval-full = ["fastvideo[eval]", "qwen-omni-utils"]
+eval-full = ["fastvideo[eval]", "fastvideo[eval-audio]", "qwen-omni-utils"]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 
@@ -160,18 +165,37 @@ streaming = [
     "websockets",
 ]
 
+dreamverse = [
+    "uvicorn[standard]==0.41.0",
+    "cerebras-cloud-sdk",
+    "flash-attn-cute @ git+https://github.com/XOR-op/flash-attention.git@fa4-compile#subdirectory=flash_attn/cute",
+    "flashinfer-python",
+    "openai>=1.40",
+]
+
 rocm = [
     "amdsmi",
 ]
 
 [project.scripts]
 fastvideo = "fastvideo.entrypoints.cli.main:main"
+dreamverse-server = "dreamverse.server_entry:cli"
+dreamverse-mock-server = "dreamverse.mock_server:cli"
 
 [tool.setuptools.packages.find]
-exclude = ["assets*", "docker*", "docs", "scripts*"]
+where = [".", "apps/dreamverse"]
+exclude = ["assets*", "docker*", "docs", "scripts*", "apps*", "dreamverse.tests*"]
+
+[tool.setuptools.package-data]
+dreamverse = ["prompts/*.md"]
 
 [tool.wheel]
-exclude = ["assets*", "docker*", "docs", "scripts*"]
+exclude = ["assets*", "docker*", "docs", "scripts*", "apps*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "gpu: requires real GPU + model weights; skip in CI",
+]
 
 
 [tool.mypy]
@@ -186,6 +210,10 @@ follow_imports = "silent"
 # ``_vendored/`` subdir (project-wide convention; mirrors the
 # ``_``-prefixed auto-discovery skip).
 skip = "./data,./wandb,ui/package-lock.json,*/_vendored/*"
+# "tread" matches daVinci-MagiHuman's acronym "TReAD" (Token Routing and
+# Early Drop). codespell lowercases ignore-words entries, so the single
+# lowercase form silences all case variants.
+ignore-words-list = "tread,passt"
 
 [tool.ruff]
 # Allow lines to be as long as 120.

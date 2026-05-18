@@ -28,7 +28,7 @@ training_args=(
   --num_latent_t 21
   --num_height 352
   --num_width 640
-  # --enable_gradient_checkpointing_type "full"
+  --enable_gradient_checkpointing_type "full"
   --simulate_generator_forward
   --num_frames 81
   --num_frame_per_block 3  # Frame generation block size for self-forcing
