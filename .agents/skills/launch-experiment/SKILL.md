@@ -38,7 +38,7 @@ entrypoint, and applying defaults from the closest example script.
 | `finetune` (Wan T2V) | `fastvideo/training/wan_training_pipeline.py` |
 | `finetune` (Wan I2V) | `fastvideo/training/wan_i2v_training_pipeline.py` |
 | `finetune` (LTX-2) | `fastvideo/training/ltx2_training_pipeline.py` |
-| `finetune` (MatrixGame) | `fastvideo/training/matrixgame_training_pipeline.py` |
+| `finetune` (Matrix-Game 2.0) | `fastvideo/training/matrixgame2_training_pipeline.py` |
 | `distill-dmd` | `fastvideo/training/wan_distillation_pipeline.py` |
 | `self-forcing` | `fastvideo/training/wan_self_forcing_distillation_pipeline.py` |
 

@@ -23,13 +23,13 @@ pipelines/
 │   ├── longcat_*.py            #   LongCat I2V/V2V/refine variants
 │   ├── gen3c_stages.py         #   Gen3C-specific stages
 │   ├── gamecraft_denoising.py  #   GameCraft-specific
-│   └── matrixgame_denoising.py #   MatrixGame-specific
+│   └── matrixgame2_denoising.py #  Matrix-Game 2.0-specific
 ├── basic/                      # Per-model end-to-end pipelines
 │   ├── hunyuan/, hunyuan15/, hyworld/, gamecraft/, gen3c/, cosmos/
-│   ├── wan/, longcat/, ltx2/, lingbotworld/, magi_human/, matrixgame/
+│   ├── wan/, longcat/, ltx2/, lingbotworld/, magi_human/, matrixgame2/
 │   ├── sd35/, stable_audio/, turbodiffusion/
 │   └── <model>/{<model>_pipeline.py, presets.py, __init__.py}
-├── preprocess/                 # Data preprocessing pipelines (ltx2, wan, matrixgame)
+├── preprocess/                 # Data preprocessing pipelines (ltx2, wan, matrixgame2)
 └── training/                   # Training-time pipeline glue
 ```
 
