@@ -33,6 +33,11 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
+try:
+    from fastvideo_kernel.triton_kernels.rope_triton import apply_rope as _apply_rope_triton
+except ImportError:
+    _apply_rope_triton = None
+
 
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:
     x1 = x[..., :x.shape[-1] // 2]
@@ -113,6 +118,11 @@ def _apply_rotary_emb(
     - If cos/sin have head_size: use rotate_half style (for HunyuanVideo/GameCraft)
     - If cos/sin have head_size // 2: use Neox/GPT-J style
     """
+    if _apply_rope_triton is not None:
+        fast = _apply_rope_triton(x, cos, sin, is_neox_style)
+        if fast is not None:
+            return fast
+
     head_size = x.shape[-1]
     rope_dim = cos.shape[-1]
 
