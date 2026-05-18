@@ -22,6 +22,55 @@ except ImportError:
         flash_attn_func = flash_attn_2_func
         fa_version = "2"
 
+
+# torch.compile traceability: the FA4/cute path (fa_version=="4") is
+# already a registered torch.library custom op, so dynamo treats it as a
+# graph node. The external FA2/FA3 `flash_attn_func` is NOT — dynamo
+# breaks the graph at the call site (observed: wanvideo.py self-attn,
+# once per layer every step), which fragments the compiled region and
+# blocks CUDA-graph capture. Wrap the FA2/FA3 default call in a custom
+# op (mirrors the FP4 `flash_attn_cute` template) so it becomes an
+# opaque-but-traceable node. The kernel still runs eager inside the op
+# (correct — flash-attn must run eager); only dynamo's treatment of the
+# boundary changes, so numerics are unchanged (SSIM-gate to confirm).
+if fa_version in ("2", "3"):
+    _fa_default = flash_attn_func
+
+    @torch.library.custom_op(
+        "fastvideo::_flash_attn_default_forward",
+        mutates_args=(),
+        device_types="cuda",
+    )
+    def _flash_attn_default_forward(
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        softmax_scale: float | None,
+        causal: bool,
+    ) -> torch.Tensor:
+        return _fa_default(q, k, v, softmax_scale=softmax_scale, causal=causal)
+
+    @torch.library.register_fake("fastvideo::_flash_attn_default_forward")
+    def _flash_attn_default_forward_fake(
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        softmax_scale: float | None,
+        causal: bool,
+    ) -> torch.Tensor:
+        del softmax_scale, causal
+        # FA2/FA3 default path: [batch, seqlen_q, nheads, head_dim_v],
+        # same dtype/device as q (head dim taken from v).
+        return q.new_empty(q.shape[0], q.shape[1], q.shape[2], v.shape[-1])
+
+    def flash_attn_func_compilable(q, k, v, softmax_scale=None, causal=False):
+        return torch.ops.fastvideo._flash_attn_default_forward(
+            q, k, v, softmax_scale, causal)
+else:
+    # fa_version == "4": flash_attn_func is already a custom op.
+    def flash_attn_func_compilable(q, k, v, softmax_scale=None, causal=False):
+        return flash_attn_func(q, k, v, softmax_scale=softmax_scale, causal=causal)
+
 from fastvideo.attention.backends.abstract import (
     AttentionBackend,
     AttentionImpl,
@@ -228,7 +277,10 @@ class FlashAttentionImpl(AttentionImpl):
             output = self._forward_nvfp4(query, key, value)
 
         else:
-            output = flash_attn_func(
+            # Route through the compilable wrapper so dynamo sees a
+            # registered op (no graph break) for FA2/FA3; identical
+            # kernel + numerics, op runs eager internally.
+            output = flash_attn_func_compilable(
                 query,  # type: ignore[no-untyped-call]
                 key,
                 value,
