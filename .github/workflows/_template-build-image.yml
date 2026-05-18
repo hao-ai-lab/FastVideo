@@ -12,6 +12,10 @@ on:
       tag_suffix:
         required: true
         type: string
+      image_name:
+        required: false
+        type: string
+        default: fastvideo-dev
 
 jobs:
   build-and-push:
@@ -85,7 +89,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}/fastvideo-dev
+          images: ghcr.io/${{ github.repository }}/${{ inputs.image_name }}
           tags: ${{ steps.prepare-tags.outputs.tags }}
       
       - name: Build and push Docker image
@@ -102,5 +106,5 @@ jobs:
       
       - name: Success message
         run: |
-          echo "✅ Python ${{ inputs.python_version }} image successfully built and pushed to ghcr.io/${{ github.repository }}/fastvideo-dev:${{ inputs.tag_suffix }}-latest"
-          echo "To run tests with this image, manually trigger the 'Run Tests' workflow." 
+          echo "✅ Python ${{ inputs.python_version }} image successfully built and pushed to ghcr.io/${{ github.repository }}/${{ inputs.image_name }}:${{ inputs.tag_suffix }}-latest"
+          echo "To run tests with this image, manually trigger the 'Run Tests' workflow."
