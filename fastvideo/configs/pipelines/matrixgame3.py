@@ -15,3 +15,4 @@ class MatrixGame3I2V720PConfig(WanT2V480PConfig):
     def __post_init__(self) -> None:
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
+        self.vae_config.use_light_vae = True
