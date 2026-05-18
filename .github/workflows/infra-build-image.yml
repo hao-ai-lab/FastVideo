@@ -1,6 +1,9 @@
 name: Build and Push Docker Images
 
 on:
+  push:
+    tags:
+      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       python_3_10:
@@ -24,6 +27,10 @@ on:
         default: false
         type: boolean
 
+concurrency:
+  group: docker-image-build
+  cancel-in-progress: true
+
 
 permissions:
   contents: read
@@ -31,7 +38,7 @@ permissions:
 
 jobs:
   build-python-3-10:
-    if: ${{ github.event.inputs.python_3_10 == 'true' }}
+    if: ${{ github.event_name == 'push' || github.event.inputs.python_3_10 == 'true' }}
     uses: ./.github/workflows/_template-build-image.yml
     with:
       python_version: '3.10'
@@ -40,7 +47,7 @@ jobs:
     secrets: inherit
 
   build-python-3-11:
-    if: ${{ github.event.inputs.python_3_11 == 'true' }}
+    if: ${{ github.event_name == 'push' || github.event.inputs.python_3_11 == 'true' }}
     uses: ./.github/workflows/_template-build-image.yml
     with:
       python_version: '3.11'
@@ -49,7 +56,7 @@ jobs:
     secrets: inherit
 
   build-python-3-12:
-    if: ${{ github.event.inputs.python_3_12 == 'true' }}
+    if: ${{ github.event_name == 'push' || github.event.inputs.python_3_12 == 'true' }}
     uses: ./.github/workflows/_template-build-image.yml
     with:
       python_version: '3.12'
@@ -58,7 +65,7 @@ jobs:
     secrets: inherit
 
   build-python-3-12-cuda-12-9:
-    if: ${{ github.event.inputs.python_3_12_cuda_12_9 == 'true' }}
+    if: ${{ github.event_name == 'push' || github.event.inputs.python_3_12_cuda_12_9 == 'true' }}
     uses: ./.github/workflows/_template-build-image.yml
     with:
       python_version: '3.12'
