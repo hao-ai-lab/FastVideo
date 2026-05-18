@@ -63,16 +63,18 @@ def missing_dependencies(metric_name: str) -> list[str]:
 def _install_hint(metric_name: str, dep: str) -> str:
     """Copy-pastable install command that actually satisfies *dep*.
 
-    Most deps are covered by a single `[extra]`. ``detectron2`` is a
-    special case: it builds C++ kernels against the user's torch and
-    isn't on PyPI cleanly, so the recipe needs the base extra *plus* a
-    git+ install with build-isolation off.
+    Most metrics resolve to a single ``uv pip install -e .[<extra>]``
+    (``imagebind`` is git-installed via ``[tool.uv.sources]`` and rides
+    that recipe). ``detectron2`` stays a manual two-step: it builds
+    C++ kernels against the user's torch and isn't on PyPI cleanly, so
+    its install requires the extra *plus* a separate
+    ``--no-build-isolation`` git+ install.
     """
     if dep == "detectron2":
         return ("uv pip install 'fastvideo[eval-vbench]' && "
                 "uv pip install --no-build-isolation "
                 "'git+https://github.com/facebookresearch/detectron2.git'")
-    return f"uv pip install 'fastvideo[{_extra_for(metric_name)}]'"
+    return f"uv pip install -e '.[{_extra_for(metric_name)}]'"
 
 
 def _extra_for(metric_name: str) -> str:
@@ -81,6 +83,8 @@ def _extra_for(metric_name: str) -> str:
         return "eval-vbench"
     if metric_name.startswith("physics_iq"):
         return "eval-physics-iq"
+    if metric_name.startswith("audio."):
+        return "eval-audio"
     return "eval"
 
 

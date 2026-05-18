@@ -126,7 +126,9 @@ class PipelineStage(ABC):
         Returns:
             The updated batch information after this stage's processing.
         """
-        stage_name = self.__class__.__name__
+        stage_class_name = self.__class__.__name__
+        stage_key = getattr(self, "_pipeline_stage_name", stage_class_name)
+        stage_name = f"{stage_key}|{stage_class_name}"
 
         # Check if verification is enabled (simple approach for prototype)
         enable_verification = getattr(fastvideo_args, 'enable_stage_verification', False)
@@ -151,7 +153,8 @@ class PipelineStage(ABC):
                 torch.cuda.synchronize()
                 execution_time = time.perf_counter() - start_time
                 logger.info("[%s] Execution completed in %s ms", stage_name, execution_time * 1000)
-                batch.logging_info.add_stage_execution_time(stage_name, execution_time)
+                batch.logging_info.add_stage_execution_time(stage_key, execution_time)
+                batch.logging_info.add_stage_metric(stage_key, "stage_class", stage_class_name)
             except Exception as e:
                 torch.cuda.synchronize()
                 execution_time = time.perf_counter() - start_time
