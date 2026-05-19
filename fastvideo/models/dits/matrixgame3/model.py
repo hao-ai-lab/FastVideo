@@ -489,7 +489,6 @@ class MatrixGame3TransformerBlock(nn.Module):
                 keyboard_cond,
                 mouse_cond_memory=mouse_cond_memory,
                 keyboard_cond_memory=keyboard_cond_memory,
-                num_frame_per_block=grid_sizes[0],
             )
 
             norm_hidden_states = self.cross_attn_residual_norm.norm(
