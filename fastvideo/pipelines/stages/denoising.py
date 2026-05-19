@@ -11,6 +11,7 @@ from typing import Any
 import torch
 from tqdm.auto import tqdm
 
+import fastvideo.envs as envs
 from fastvideo.attention import get_attn_backend
 from fastvideo.distributed import (get_local_torch_device, get_world_group)
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -229,6 +230,44 @@ class DenoisingStage(PipelineStage):
         # written to, so we allocate once.
         v2v_zero_pad = torch.zeros_like(latents) if batch.video_latent is not None else None
 
+        # CFG gating / stale-uncond reuse setup (Adaptive Guidance LinearAG
+        # variant, Castillo et al. 2023).  When envs.FASTVIDEO_CFG_GATE_STEP
+        # < 1.0, the uncond forward is skipped after the gating step and the
+        # guidance delta (cond - uncond) is reused from the last fresh
+        # compute.  See envs.py for semantics.  delta_cached_model_id tracks
+        # which underlying transformer produced the cache so we invalidate on
+        # Wan2.2 expert switch.
+        _cfg_gate_fraction = envs.FASTVIDEO_CFG_GATE_STEP
+        if not 0.0 <= _cfg_gate_fraction <= 1.0:
+            raise ValueError(f"FASTVIDEO_CFG_GATE_STEP must be in [0.0, 1.0], got {_cfg_gate_fraction!r}. "
+                             "Use 1.0 (default) to disable; lower values trade quality for speed.")
+        _cfg_gate_active = _cfg_gate_fraction < 1.0 and batch.do_classifier_free_guidance
+        _is_rank0 = get_world_group().local_rank == 0
+        if _cfg_gate_active:
+            _cfg_gate_step_idx = int(num_inference_steps * _cfg_gate_fraction)
+            if _is_rank0:
+                logger.info("CFG gating enabled: fraction=%.3f, gate_step=%d/%d", _cfg_gate_fraction,
+                            _cfg_gate_step_idx, num_inference_steps)
+            if batch.guidance_rescale > 0.0 and _is_rank0:
+                # guidance_rescale rescales CFG output stats to match cond
+                # stats (Lin et al. §3.4).  When `delta_cached` goes stale,
+                # the rescaling still computes but is no longer guaranteed
+                # to preserve the original quality semantics.  Warn so the
+                # caller knows this combo is unvalidated; tighten or
+                # fallback once VBench data lands.
+                logger.warning(
+                    "CFG gating (fraction=%.3f) combined with guidance_rescale=%.3f is unvalidated; "
+                    "quality may degrade beyond CFG-gating-alone expectations.", _cfg_gate_fraction,
+                    batch.guidance_rescale)
+        else:
+            _cfg_gate_step_idx = num_inference_steps + 1  # never gates
+        delta_cached: torch.Tensor | None = None
+        delta_cached_model_id: int | None = None
+        # Telemetry — logged at end of denoising loop on rank 0.
+        _cfg_gate_fresh_uncond = 0
+        _cfg_gate_reused_delta = 0
+        _cfg_gate_invalidations = 0
+
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -362,26 +401,58 @@ class DenoisingStage(PipelineStage):
                         )
 
                     if batch.do_classifier_free_guidance:
-                        batch.is_cfg_negative = True
-                        with set_forward_context(
-                                current_timestep=i,
-                                attn_metadata=attn_metadata,
-                                forward_batch=batch,
-                        ):
-                            noise_pred_uncond = current_model(
-                                latent_model_input,
-                                neg_prompt_embeds,
-                                t_expand,
-                                guidance=guidance_expand,
-                                **image_kwargs,
-                                **neg_cond_kwargs,
-                                **action_kwargs,
-                                **camera_kwargs,
-                                **timesteps_r_kwarg,
-                            )
+                        # CFG gating: invalidate cached delta when the underlying
+                        # transformer changes (Wan2.2 high/low-noise expert
+                        # switch at `boundary_timestep`).  delta_cached is tied
+                        # to the model that produced it; reusing it across the
+                        # boundary is silently wrong.
+                        if delta_cached_model_id is not None and delta_cached_model_id != id(current_model):
+                            delta_cached = None
+                            delta_cached_model_id = None
+                            _cfg_gate_invalidations += 1
+
+                        _use_cached_delta = (i >= _cfg_gate_step_idx and delta_cached is not None)
 
                         noise_pred_text = noise_pred
-                        noise_pred = noise_pred_uncond + current_guidance_scale * (noise_pred_text - noise_pred_uncond)
+                        if _use_cached_delta:
+                            # Reuse frozen delta = cond - uncond from the last
+                            # fresh compute.  Algebra:
+                            #   pred = uncond + s * (cond - uncond)
+                            #        = cond + (s - 1) * (cond - uncond)
+                            #        = cond + (s - 1) * delta_cached
+                            noise_pred = noise_pred_text + (current_guidance_scale - 1.0) * delta_cached
+                            _cfg_gate_reused_delta += 1
+                        else:
+                            batch.is_cfg_negative = True
+                            with set_forward_context(
+                                    current_timestep=i,
+                                    attn_metadata=attn_metadata,
+                                    forward_batch=batch,
+                            ):
+                                noise_pred_uncond = current_model(
+                                    latent_model_input,
+                                    neg_prompt_embeds,
+                                    t_expand,
+                                    guidance=guidance_expand,
+                                    **image_kwargs,
+                                    **neg_cond_kwargs,
+                                    **action_kwargs,
+                                    **camera_kwargs,
+                                    **timesteps_r_kwarg,
+                                )
+                            _cfg_gate_fresh_uncond += 1
+
+                            # Refresh cache only when gating is active; under the
+                            # default (FASTVIDEO_CFG_GATE_STEP=1.0, _cfg_gate_step_idx
+                            # > num_inference_steps) we never reuse, so skip the
+                            # tensor allocation.
+                            if _cfg_gate_step_idx <= num_inference_steps:
+                                delta_cached = noise_pred_text - noise_pred_uncond
+                                delta_cached_model_id = id(current_model)
+                                noise_pred = noise_pred_uncond + current_guidance_scale * delta_cached
+                            else:
+                                noise_pred = noise_pred_uncond + current_guidance_scale * (noise_pred_text -
+                                                                                           noise_pred_uncond)
 
                         # Apply guidance rescale if needed
                         if batch.guidance_rescale > 0.0:
@@ -407,6 +478,22 @@ class DenoisingStage(PipelineStage):
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and
                                                (i + 1) % self.scheduler.order == 0 and progress_bar is not None):
                     progress_bar.update()
+
+        # CFG gating telemetry — log once on rank 0 after the loop ends.  When
+        # gating is disabled (or CFG itself is off) fresh_uncond equals the
+        # number of CFG-on steps and reused/invalidations are zero; we still
+        # emit the line so users can confirm the env var is wired through.
+        if _is_rank0 and batch.do_classifier_free_guidance:
+            logger.info(
+                "CFG gating summary: fraction=%.3f gate_step=%d/%d "
+                "fresh_uncond=%d reused=%d invalidations=%d",
+                _cfg_gate_fraction,
+                _cfg_gate_step_idx if _cfg_gate_active else -1,
+                num_inference_steps,
+                _cfg_gate_fresh_uncond,
+                _cfg_gate_reused_delta,
+                _cfg_gate_invalidations,
+            )
 
         trajectory_tensor: torch.Tensor | None = None
         if trajectory_latents:
