@@ -168,3 +168,54 @@ def test_embedder_gate_not_in_state_dict() -> None:
     emb = _make_embedder(r_embedder=True, fusion="gated", gate=0.25)
     keys = list(emb.state_dict().keys())
     assert not any("_r_embedder_gate" in k for k in keys)
+
+
+# ---------------------------------------------------------------------------
+# Task 3: WanTransformer3DModel threads r_timestep through.
+# ---------------------------------------------------------------------------
+
+
+def test_wan_transformer_forward_signature_has_r_timestep() -> None:
+    """The forward signature must declare r_timestep explicitly (not
+    swallowed by **kwargs) so callers and type checkers can see it."""
+    import inspect
+
+    from fastvideo.models.dits.wanvideo import WanTransformer3DModel
+
+    sig = inspect.signature(WanTransformer3DModel.forward)
+    assert "r_timestep" in sig.parameters
+    param = sig.parameters["r_timestep"]
+    assert param.default is None
+
+
+def test_wan_transformer_init_propagates_r_embedder_config() -> None:
+    """When the arch config sets r_embedder=True the WanTransformer3DModel
+    constructor must instantiate the embedder with the delta path active.
+
+    We avoid full WanTransformer3DModel instantiation (which requires
+    distributed init) by reading the source's __init__ to confirm it
+    forwards the four arch flags to WanTimeTextImageEmbedding.
+    """
+    import inspect
+
+    from fastvideo.models.dits.wanvideo import WanTransformer3DModel
+
+    src = inspect.getsource(WanTransformer3DModel.__init__)
+    # All four arch config fields must be passed to WanTimeTextImageEmbedding.
+    assert "r_embedder=config.r_embedder" in src
+    assert "r_embedder_fusion=config.r_embedder_fusion" in src
+    assert "r_embedder_gate_value=config.r_embedder_gate_value" in src
+    assert "r_embedder_deltatime_type=config.r_embedder_deltatime_type" in src
+
+
+def test_wan_transformer_forward_threads_r_timestep_to_embedder() -> None:
+    """The forward must pass r_timestep into the embedder call (verified via
+    source inspection to avoid heavyweight distributed bring-up)."""
+    import inspect
+
+    from fastvideo.models.dits.wanvideo import WanTransformer3DModel
+
+    src = inspect.getsource(WanTransformer3DModel.forward)
+    assert "r_timestep=r_timestep" in src, (
+        "WanTransformer3DModel.forward must forward r_timestep into "
+        "self.condition_embedder")

@@ -629,6 +629,10 @@ class WanTransformer3DModel(BaseDiT):
             time_freq_dim=config.freq_dim,
             text_embed_dim=config.text_dim,
             image_embed_dim=config.image_dim,
+            r_embedder=config.r_embedder,
+            r_embedder_fusion=config.r_embedder_fusion,
+            r_embedder_gate_value=config.r_embedder_gate_value,
+            r_embedder_deltatime_type=config.r_embedder_deltatime_type,
         )
 
         # 3. Transformer blocks
@@ -669,6 +673,7 @@ class WanTransformer3DModel(BaseDiT):
                 encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
                 | None = None,
                 guidance=None,
+                r_timestep: torch.Tensor | None = None,
                 **kwargs) -> torch.Tensor:
         orig_dtype = hidden_states.dtype
         if encoder_hidden_states is not None and not isinstance(encoder_hidden_states, torch.Tensor):
@@ -717,8 +722,17 @@ class WanTransformer3DModel(BaseDiT):
         else:
             ts_seq_len = None
 
+        # AnyFlow dual-timestep — match timestep's flattening so embedder
+        # sees aligned shapes.
+        if r_timestep is not None and r_timestep.dim() == 2:
+            r_timestep = r_timestep.flatten()
+
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
-            timestep, encoder_hidden_states, encoder_hidden_states_image, timestep_seq_len=ts_seq_len)
+            timestep,
+            encoder_hidden_states,
+            encoder_hidden_states_image,
+            timestep_seq_len=ts_seq_len,
+            r_timestep=r_timestep)
         if ts_seq_len is not None:
             # batch_size, seq_len, 6, inner_dim
             timestep_proj = timestep_proj.unflatten(2, (6, -1))
