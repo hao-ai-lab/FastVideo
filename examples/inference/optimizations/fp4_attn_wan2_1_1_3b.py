@@ -59,16 +59,16 @@ def main():
 
     n_warmup = 2 if args.compile else 1
     for i in range(n_warmup):
-        generator.generate_video(prompt, save_video=False, infer_steps=2)
+        generator.generate(request={"prompt": prompt, "sampling": {"num_inference_steps": 2},
+                                    "output": {"save_video": False}})
 
     os.makedirs(OUTPUT_PATH, exist_ok=True)
     start = time.time()
-    generator.generate_video(
-        prompt,
-        output_path=os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4"),
-        save_video=True,
-        infer_steps=args.infer_steps,
-    )
+    generator.generate(request={
+        "prompt": prompt,
+        "sampling": {"num_inference_steps": args.infer_steps},
+        "output": {"save_video": True, "output_path": os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4")},
+    })
     elapsed = time.time() - start
     print(f"[{mode.upper()}] {args.infer_steps} steps in {elapsed:.2f}s "
           f"({args.infer_steps / elapsed:.2f} it/s)")

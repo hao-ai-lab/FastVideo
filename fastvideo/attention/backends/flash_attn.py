@@ -34,7 +34,7 @@ logger = init_logger(__name__)
 logger.info("Using FlashAttention-%s backend", fa_version)
 
 # FP4 FA4 support: quantize Q/K to NVFP4 E2M1 for block-scaled MMA on Blackwell.
-# Requires: flash-attention-fp4, flashinfer, cutlass-dsl. Enable via FASTVIDEO_NVFP4_FA4=1.
+# Requires: flash-attention-fp4, flashinfer, cutlass-dsl. Enable via nvfp4_fa4=True kwarg.
 # The FP4 path uses a dedicated custom_op wrapper (flash_attn_fp4_func) so that
 # torch.compile treats the CuTeDSL kernel as an opaque boundary.
 try:
@@ -43,11 +43,6 @@ try:
 except ImportError:
     flash_attn_fp4_func = None
     _FA4_FP4_AVAILABLE = False
-
-
-def _is_nvfp4_fa4_enabled() -> bool:
-    """Check if NVFP4 FA4 is enabled via environment variable."""
-    return os.environ.get("FASTVIDEO_NVFP4_FA4", "0") == "1"
 
 
 def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor, ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -177,7 +172,7 @@ class FlashAttentionImpl(AttentionImpl):
     ) -> None:
         self.causal = causal
         self.softmax_scale = softmax_scale
-        self.nvfp4_fa4 = extra_impl_args.get("nvfp4_fa4", False) or _is_nvfp4_fa4_enabled()
+        self.nvfp4_fa4 = extra_impl_args.get("nvfp4_fa4", False) or os.environ.get("FASTVIDEO_NVFP4_FA4", "0") == "1"
         if self.nvfp4_fa4:
             cap = torch.cuda.get_device_capability()
             assert cap in [(10, 0), (10, 3)], (f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}")
