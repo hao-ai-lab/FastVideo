@@ -10,6 +10,21 @@ import torch
 from fastvideo_kernel import video_sparse_attn
 
 
+@pytest.fixture(autouse=True)
+def _require_cute_backend(monkeypatch):
+    """3-way parity needs the CuTe leg; skip if the optional build is absent.
+
+    VSA-256 defaults to Triton, so opt the CuTe leg in explicitly. The test
+    later forces Triton via ``FASTVIDEO_VSA_TRITON=1`` (which takes
+    precedence in ``_resolve_backend``) for the Triton leg.
+    """
+    pytest.importorskip(
+        "flash_attn.cute.block_sparsity",
+        reason="optional FA4 CuTe build (flash_attn.cute) not installed",
+    )
+    monkeypatch.setenv("FASTVIDEO_VSA_CUTEDSL", "1")
+
+
 def _torch_vsa256_reference(
     q: torch.Tensor,
     k: torch.Tensor,

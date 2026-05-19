@@ -8,9 +8,11 @@ Both [B, H, S, D] (BHSD) and [B, S, H, D] (BSHD) entrypoints are provided.
 The BSHD variant is preferred from VSA-256 callers to avoid layout
 round-trips on the hot path.
 
-Requires the FoundationResearch flash-attention submodule (vsapad branch)
-installed under fastvideo-kernel/include/flash-attention, plus
-`nvidia-cutlass-dsl` and `quack-kernels`.
+The FA4 CuTe block-sparse kernel (``flash_attn.cute`` with
+``block_sparsity``) is an *optional* dependency: it is imported lazily and
+only exercised when the VSA-256 CuTe fastpath is explicitly selected
+(``FASTVIDEO_VSA_CUTEDSL=1``). The default VSA-256 path is Triton and does
+not require it. Also needs ``nvidia-cutlass-dsl`` and ``quack-kernels``.
 """
 
 from __future__ import annotations
@@ -20,8 +22,28 @@ from typing import Tuple
 
 import torch
 
-from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
-from flash_attn.cute.interface import _flash_attn_fwd
+_FA4_IMPORT_HINT = (
+    "VSA-256 CuTe fastpath requires a FlashAttention-4 CuTe build that "
+    "provides `flash_attn.cute` with block-sparsity support (plus "
+    "`nvidia-cutlass-dsl` and `quack-kernels`). This is an optional "
+    "dependency; the default VSA-256 path is Triton. Install the FA4 CuTe "
+    "build and set FASTVIDEO_VSA_CUTEDSL=1 to enable the CuTe fastpath."
+)
+
+
+def _load_fa4_cute():
+    """Lazily import the optional FA4 CuTe block-sparse symbols.
+
+    Raising a clear, actionable error here keeps the optional FA4 CuTe
+    build from being a hard import-time dependency of this module (and of
+    the default Triton VSA-256 path).
+    """
+    try:
+        from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
+        from flash_attn.cute.interface import _flash_attn_fwd
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise ImportError(_FA4_IMPORT_HINT) from exc
+    return BlockSparseTensorsTorch, _flash_attn_fwd
 
 
 # FA4 BSA fwd uses (m_block_size, n_block_size); m_block_size=128 is the
@@ -131,6 +153,7 @@ def _cute_forward(
     kv_block_size: int,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Internal: FA4 CuTe BSA fwd with BSHD inputs."""
+    BlockSparseTensorsTorch, _flash_attn_fwd = _load_fa4_cute()
     q_sparse_candidate = _choose_q_sparse_block_size(q_bshd.shape[1])
     q_sparse_block_size = max(
         q_block_size,

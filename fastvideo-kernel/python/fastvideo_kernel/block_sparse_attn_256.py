@@ -1,19 +1,19 @@
 """VSA-256 block-sparse attention wrapper.
 
-The 256-block path is intended for Blackwell (sm_100+) and routes by default
-to the FA4 CuTe block-sparse attention kernel
-(:mod:`fastvideo_kernel.block_sparse_attn_cute_fwd`). The kernel natively
-operates on KV blocks of 128 tokens, so this wrapper expands the caller's
-logical 256-block map / sizes into the physical 128-block representation the
-kernel consumes.
+The default 256-block path is Triton: it expands the logical 256-block map
+to the existing 64-block Triton kernel via a dense 4x4 expansion per logical
+edge ("route A"), and requires no optional dependencies.
 
-Triton can be selected as a fallback via ``FASTVIDEO_VSA_TRITON=1`` (or the
-legacy ``FASTVIDEO_KERNEL_VSA_FORCE_TRITON=1``). Triton has no native 256
-kernel, so we expand to the existing 64-block Triton path via a dense 4x4
-expansion per logical edge ("route A").
+The FA4 CuTe block-sparse fastpath (intended for Blackwell sm_100+) is
+*opt-in* via ``FASTVIDEO_VSA_CUTEDSL=1``. It routes to
+:mod:`fastvideo_kernel.block_sparse_attn_cute_fwd`, which natively operates
+on 128-token KV blocks (this wrapper expands the logical 256-block map /
+sizes into that physical 128-block representation). The CuTe kernel
+(``flash_attn.cute`` with block-sparsity) is an optional dependency,
+imported lazily only when this fastpath is selected.
 
-CuTe is selected by default and can be made explicit via
-``FASTVIDEO_VSA_CUTEDSL=1``.
+``FASTVIDEO_VSA_TRITON=1`` (or the legacy
+``FASTVIDEO_KERNEL_VSA_FORCE_TRITON=1``) forces Triton explicitly.
 """
 
 from __future__ import annotations
@@ -24,10 +24,11 @@ from typing import Tuple
 import torch
 
 from .block_sparse_attn import block_sparse_attn_triton, _force_triton
-from .block_sparse_attn_cute_fwd import (
-    block_sparse_attn_cute_fwd,
-    block_sparse_attn_cute_fwd_bshd,
-)
+
+# NOTE: ``block_sparse_attn_cute_fwd`` is imported lazily inside the CuTe
+# branches below. Importing it at module load would pull in the optional
+# FA4 CuTe build (``flash_attn.cute``) and make it a hard dependency of the
+# default Triton path.
 
 
 _KV_BLOCK_PHYS = 128  # FA4 CuTe BSA forward uses 128-token KV blocks.
@@ -37,15 +38,16 @@ _KV_BLOCK_TRITON = 64  # Existing Triton path uses 64-token KV blocks.
 def _resolve_backend() -> str:
     """Pick the backend for the 256-block VSA path.
 
-    Priority: explicit Triton override > explicit CuTe override > default (CuTe).
+    Default is Triton (no optional deps). The FA4 CuTe fastpath is opt-in
+    via ``FASTVIDEO_VSA_CUTEDSL=1`` and requires the optional FA4 CuTe
+    build. ``FASTVIDEO_VSA_TRITON=1`` / the legacy force-triton flag force
+    Triton explicitly and take precedence over the CuTe opt-in.
     """
     if _force_triton():
         return "triton"
-    # FASTVIDEO_VSA_CUTEDSL is the default for this path; honor it as an
-    # explicit no-op so users can document their config intent.
     if os.environ.get("FASTVIDEO_VSA_CUTEDSL", "0") == "1":
         return "cutedsl"
-    return "cutedsl"
+    return "triton"
 
 
 def _expand_mask_and_sizes_256_to_128(
@@ -132,6 +134,7 @@ def block_sparse_attn_256(
     mask_128, sizes_128 = _expand_mask_and_sizes_256_to_128(
         logical_block_map_256, logical_variable_block_sizes_256
     )
+    from .block_sparse_attn_cute_fwd import block_sparse_attn_cute_fwd
     return block_sparse_attn_cute_fwd(q, k, v, mask_128, sizes_128)
 
 
@@ -163,4 +166,5 @@ def block_sparse_attn_256_bshd(
     mask_128, sizes_128 = _expand_mask_and_sizes_256_to_128(
         logical_block_map_256, logical_variable_block_sizes_256
     )
+    from .block_sparse_attn_cute_fwd import block_sparse_attn_cute_fwd_bshd
     return block_sparse_attn_cute_fwd_bshd(q, k, v, mask_128, sizes_128)

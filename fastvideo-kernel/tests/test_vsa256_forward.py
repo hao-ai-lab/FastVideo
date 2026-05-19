@@ -13,6 +13,21 @@ from fastvideo_kernel import video_sparse_attn
 from .utils import create_full_mask_from_block_mask
 
 
+@pytest.fixture(autouse=True)
+def _require_cute_backend(monkeypatch):
+    """Exercise the FA4 CuTe fastpath; skip if the optional build is absent.
+
+    The VSA-256 default backend is Triton (see ``block_sparse_attn_256``);
+    these tests target the CuTe path, so they explicitly opt in and skip
+    cleanly when the optional ``flash_attn.cute`` build is not installed.
+    """
+    pytest.importorskip(
+        "flash_attn.cute.block_sparsity",
+        reason="optional FA4 CuTe build (flash_attn.cute) not installed",
+    )
+    monkeypatch.setenv("FASTVIDEO_VSA_CUTEDSL", "1")
+
+
 def _dense_reference(
     q: torch.Tensor,
     k: torch.Tensor,

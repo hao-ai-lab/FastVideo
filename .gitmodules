@@ -7,7 +7,3 @@
 [submodule "fastvideo/third_party/eval/vbench"]
 	path = fastvideo/third_party/eval/vbench
 	url = https://github.com/Vchitect/VBench.git
-[submodule "fastvideo-kernel/include/flash-attention"]
-	path = fastvideo-kernel/include/flash-attention
-	url = git@github.com:FoundationResearch/flash-attention.git
-	branch = vsapad
