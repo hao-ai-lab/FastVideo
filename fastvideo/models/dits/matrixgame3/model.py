@@ -25,11 +25,7 @@ from fastvideo.layers.visual_embedding import (
 )
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.models.dits.wanvideo import (
-    WanSelfAttention,
-    WanI2VCrossAttention,
-    WanImageEmbedding,
-)
+from fastvideo.models.dits.wanvideo import WanSelfAttention
 from fastvideo.platforms import AttentionBackendEnum
 
 # Import ActionModule
@@ -146,7 +142,6 @@ class MatrixGame3TimeImageEmbedding(nn.Module):
         self,
         dim: int,
         time_freq_dim: int,
-        image_embed_dim: int | None = None,
     ):
         super().__init__()
 
@@ -157,25 +152,14 @@ class MatrixGame3TimeImageEmbedding(nn.Module):
             dim, factor=6, act_layer="silu"
         )
 
-        self.image_embedder = None
-        if image_embed_dim is not None:
-            self.image_embedder = WanImageEmbedding(image_embed_dim, dim)
-
     def forward(
         self,
         timestep: torch.Tensor,
         encoder_hidden_states: torch.Tensor | None,
-        encoder_hidden_states_image: torch.Tensor | None = None,
         timestep_seq_len: int | None = None,
     ):
         temb = self.time_embedder(timestep, timestep_seq_len)
         timestep_proj = self.time_modulation(temb)
-
-        if encoder_hidden_states_image is not None:
-            assert self.image_embedder is not None
-            encoder_hidden_states_image = self.image_embedder(
-                encoder_hidden_states_image
-            )
 
         if encoder_hidden_states is None:
             batch_size = temb.shape[0] if temb.dim() > 1 else timestep.shape[0]
@@ -185,49 +169,28 @@ class MatrixGame3TimeImageEmbedding(nn.Module):
                 dtype=temb.dtype,
             )
 
-        return (
-            temb,
-            timestep_proj,
-            encoder_hidden_states,
-            encoder_hidden_states_image,
-        )
+        return temb, timestep_proj, encoder_hidden_states
 
 
 class MatrixGame3CrossAttention(WanSelfAttention):
-    def forward(self, x, context, context_lens=None, crossattn_cache=None):
+    def forward(self, x, context, context_lens=None):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
             context(Tensor): Shape [B, L2, C] - typically 257 image tokens
             context_lens(Tensor): Shape [B]
-            crossattn_cache(dict): Optional cache for k/v during inference
         """
         b, n, d = x.size(0), self.num_heads, self.head_dim
 
-        # compute query, key, value
         q_input = x.to(self.to_q.weight.dtype)
         q = self.norm_q(self.to_q(q_input)[0]).view(b, -1, n, d)
 
-        if crossattn_cache is not None:
-            if not crossattn_cache["is_init"]:
-                crossattn_cache["is_init"] = True
-                context_input = context.to(self.to_k.weight.dtype)
-                k = self.norm_k(self.to_k(context_input)[0]).view(b, -1, n, d)
-                v = self.to_v(context_input)[0].view(b, -1, n, d)
-                crossattn_cache["k"] = k
-                crossattn_cache["v"] = v
-            else:
-                k = crossattn_cache["k"]
-                v = crossattn_cache["v"]
-        else:
-            context_input = context.to(self.to_k.weight.dtype)
-            k = self.norm_k(self.to_k(context_input)[0]).view(b, -1, n, d)
-            v = self.to_v(context_input)[0].view(b, -1, n, d)
+        context_input = context.to(self.to_k.weight.dtype)
+        k = self.norm_k(self.to_k(context_input)[0]).view(b, -1, n, d)
+        v = self.to_v(context_input)[0].view(b, -1, n, d)
 
-        # compute attention
         x = self.attn(q, k, v)
 
-        # output
         x = x.flatten(2)
         x, _ = self.to_out(x)
         return x
@@ -242,7 +205,6 @@ class MatrixGame3TransformerBlock(nn.Module):
         qk_norm: str = "rms_norm_across_heads",
         cross_attn_norm: bool = False,
         eps: float = 1e-6,
-        added_kv_proj_dim: int | None = None,
         supported_attention_backends: tuple[AttentionBackendEnum, ...]
         | None = None,
         prefix: str = "",
@@ -292,16 +254,9 @@ class MatrixGame3TransformerBlock(nn.Module):
         )
 
         # 2. Cross-attention
-        if added_kv_proj_dim is not None:
-            # I2V
-            self.attn2 = WanI2VCrossAttention(
-                dim, num_heads, qk_norm=qk_norm, eps=eps
-            )
-        else:
-            # T2V
-            self.attn2 = MatrixGame3CrossAttention(
-                dim, num_heads, qk_norm=qk_norm, eps=eps
-            )
+        self.attn2 = MatrixGame3CrossAttention(
+            dim, num_heads, qk_norm=qk_norm, eps=eps
+        )
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
             dim,
             norm_type="layer",
@@ -551,7 +506,6 @@ class MatrixGame3WanModel(BaseDiT):
         self.condition_embedder = MatrixGame3TimeImageEmbedding(
             dim=inner_dim,
             time_freq_dim=config.freq_dim,
-            image_embed_dim=(config.image_dim if config.image_dim > 0 else None),
         )
         self.text_embedding = nn.Sequential(
             nn.Linear(config.text_dim, inner_dim),
@@ -586,7 +540,6 @@ class MatrixGame3WanModel(BaseDiT):
                     config.qk_norm,
                     config.cross_attn_norm,
                     config.eps,
-                    config.added_kv_proj_dim,
                     self._supported_attention_backends,
                     prefix=f"{getattr(config, 'prefix', 'Wan')}.blocks.{i}",
                     action_config=self.action_config,
@@ -620,9 +573,6 @@ class MatrixGame3WanModel(BaseDiT):
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor | list[torch.Tensor],
         timestep: torch.LongTensor,
-        encoder_hidden_states_image: torch.Tensor
-        | list[torch.Tensor]
-        | None = None,
         # Action inputs
         mouse_cond: torch.Tensor | None = None,
         keyboard_cond: torch.Tensor | None = None,
@@ -639,13 +589,6 @@ class MatrixGame3WanModel(BaseDiT):
             encoder_hidden_states, torch.Tensor
         ):
             encoder_hidden_states = encoder_hidden_states[0]
-        if (
-            isinstance(encoder_hidden_states_image, list)
-            and len(encoder_hidden_states_image) > 0
-        ):
-            encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
-            encoder_hidden_states_image = None
 
         memory_length = 0
         if x_memory is not None:
@@ -761,15 +704,9 @@ class MatrixGame3WanModel(BaseDiT):
                 [timestep_memory.to(timestep_tokens.dtype), timestep_tokens], dim=1
             )
 
-        (
-            temb,
-            timestep_proj,
-            encoder_hidden_states,
-            encoder_hidden_states_image,
-        ) = self.condition_embedder(
+        temb, timestep_proj, encoder_hidden_states = self.condition_embedder(
             timestep_tokens.flatten(),
             encoder_hidden_states,
-            encoder_hidden_states_image,
             timestep_seq_len=timestep_tokens.shape[1],
         )
         if timestep_proj.dim() == 3 and timestep_proj.shape[-1] % 6 == 0:
@@ -787,18 +724,6 @@ class MatrixGame3WanModel(BaseDiT):
                 encoder_hidden_states = self.text_embedding(
                     encoder_hidden_states.to(hidden_states.dtype)
                 )
-        else:
-            # encoder_hidden_states is None (e.g. no text encoder)
-            # MatrixGame uses image-action cross-attn.
-            pass
-
-        if encoder_hidden_states_image is not None:
-            if encoder_hidden_states is not None:
-                encoder_hidden_states = torch.concat(
-                    [encoder_hidden_states_image, encoder_hidden_states], dim=1
-                )
-            else:
-                encoder_hidden_states = encoder_hidden_states_image
 
         # [F, H, W] for the ActionModule
         grid_sizes = (post_patch_num_frames, post_patch_height, post_patch_width)
