@@ -561,7 +561,7 @@ class MatrixGame3ActionModule(nn.Module):
                     key=padded_k.transpose(2, 1),
                     value=padded_v.transpose(2, 1),
                     block_mask=block_mask_mouse,
-                )[:, :, :-padded_length].transpose(2, 1)
+                )[:, :, :q.shape[1]].transpose(2, 1)
             else:
                 attn = _update_kv_cache_and_attend(
                     q,
@@ -690,7 +690,7 @@ class MatrixGame3ActionModule(nn.Module):
                         key=padded_k.transpose(2, 1),
                         value=padded_v.transpose(2, 1),
                         block_mask=block_mask_keyboard,
-                    )[:, :, :-padded_length].transpose(2, 1)
+                    )[:, :, :q.shape[1]].transpose(2, 1)
                 else:
                     assert (
                         k.shape[0] == S
@@ -723,7 +723,7 @@ class MatrixGame3ActionModule(nn.Module):
                         key=padded_k.transpose(2, 1),
                         value=padded_v.transpose(2, 1),
                         block_mask=block_mask_keyboard,
-                    )[:, :, :-padded_length].transpose(2, 1)
+                    )[:, :, :q.shape[1]].transpose(2, 1)
                 else:
                     attn = _update_kv_cache_and_attend(
                         q,

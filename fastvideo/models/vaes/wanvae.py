@@ -319,7 +319,8 @@ class WanResample(nn.Module):
                     if _feat_cache[idx] is None:
                         _feat_cache[idx] = "Rep"
                     cache_x = x[:, :, -CACHE_T:, :, :].clone()
-                    if _feat_cache[idx] == "Rep":
+                    # "Rep" sentinel on first chunk, cache tensor after; isinstance avoids `tensor == str` version surprises.
+                    if isinstance(_feat_cache[idx], str):
                         x = self.time_conv(x)
                     else:
                         if cache_x.shape[2] < 2:
