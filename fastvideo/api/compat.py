@@ -159,6 +159,11 @@ def legacy_from_pretrained_to_config(
             preset_refine["guidance_scale"] = value
         elif key in {"enable_stage_verification", "use_fsdp_inference", "disable_autocast"}:
             engine[key] = value
+        elif key == "nvfp4_fa4":
+            if value:
+                import os
+                os.environ["FASTVIDEO_NVFP4_FA4"] = "1"
+                os.environ.setdefault("CUTE_DSL_ENABLE_TVM_FFI", "1")
         elif key == "override_text_encoder_quant":
             quantization["text_encoder_quant"] = value
         elif key == "workload_type":

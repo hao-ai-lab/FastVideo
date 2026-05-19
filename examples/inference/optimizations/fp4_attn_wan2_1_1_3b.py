@@ -9,11 +9,8 @@ Requirements:
     - See docs/inference/optimizations.md for installation
 
 Usage:
-    # FP4 attention (env vars set automatically by --nvfp4_fa4 flag)
     python fp4_attn_wan2_1_1_3b.py --nvfp4_fa4
-
-    # BF16 baseline for comparison
-    python fp4_attn_wan2_1_1_3b.py
+    python fp4_attn_wan2_1_1_3b.py  # BF16 baseline
 """
 
 import argparse
@@ -37,10 +34,6 @@ def main():
     parser.add_argument("--infer_steps", type=int, default=50)
     args = parser.parse_args()
 
-    if args.nvfp4_fa4:
-        os.environ["FASTVIDEO_NVFP4_FA4"] = "1"
-        os.environ["CUTE_DSL_ENABLE_TVM_FFI"] = "1"
-
     mode = "nvfp4" if args.nvfp4_fa4 else "bf16"
     if args.compile:
         mode += "_compile"
@@ -49,7 +42,7 @@ def main():
     generator = VideoGenerator.from_pretrained(
         args.model,
         num_gpus=args.num_gpus,
-        # FSDP shards tensors across GPUs — incompatible with FP4 make_ptr path
+        nvfp4_fa4=args.nvfp4_fa4,
         use_fsdp_inference=not args.nvfp4_fa4,
         dit_cpu_offload=False,
         dit_layerwise_offload=False,
@@ -64,12 +57,10 @@ def main():
         "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     )
 
-    # Warmup (2 runs for compile to JIT)
     n_warmup = 2 if args.compile else 1
     for i in range(n_warmup):
         generator.generate_video(prompt, save_video=False, infer_steps=2)
 
-    # Timed run
     os.makedirs(OUTPUT_PATH, exist_ok=True)
     start = time.time()
     generator.generate_video(

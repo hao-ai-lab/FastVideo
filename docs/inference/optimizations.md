@@ -94,19 +94,15 @@ The `--no-deps` flag prevents upgrading torch/torchvision. The kernel requires t
 
 #### Usage
 
-Enable FP4 attention in the example script with `--nvfp4_fa4`; the script sets the required environment variables before loading the model:
+Enable FP4 attention via the `--nvfp4_fa4` flag:
 
 ```bash
 python examples/inference/optimizations/fp4_attn_wan2_1_1_3b.py --nvfp4_fa4
 ```
 
-Or in Python:
+Or in Python via the `nvfp4_fa4` kwarg (sets env vars automatically):
 
 ```python
-import os
-os.environ["CUTE_DSL_ENABLE_TVM_FFI"] = "1"
-os.environ["FASTVIDEO_NVFP4_FA4"] = "1"  # required: nvfp4_fa4 kwarg below is not yet wired through from_pretrained
-
 from fastvideo import VideoGenerator
 gen = VideoGenerator.from_pretrained(
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
