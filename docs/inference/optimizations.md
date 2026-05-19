@@ -105,6 +105,7 @@ Or in Python:
 ```python
 import os
 os.environ["CUTE_DSL_ENABLE_TVM_FFI"] = "1"
+os.environ["FASTVIDEO_NVFP4_FA4"] = "1"  # required: nvfp4_fa4 kwarg below is not yet wired through from_pretrained
 
 from fastvideo import VideoGenerator
 gen = VideoGenerator.from_pretrained(
