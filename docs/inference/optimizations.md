@@ -87,7 +87,7 @@ Install the FP4 flash attention kernel (without upgrading your existing torch):
 
 ```bash
 pip install --no-deps "git+ssh://git@github.com/hao-ai-lab/flash-attention-fp4.git@fp4#subdirectory=flash_attn/cute"
-pip install nvidia-cutlass-dsl>=4.4.2 apache-tvm-ffi flashinfer-python
+pip install "nvidia-cutlass-dsl>=4.4.2" apache-tvm-ffi flashinfer-python
 ```
 
 The `--no-deps` flag prevents upgrading torch/torchvision. The kernel requires torch >= 2.4 with CUDA 12.8+ support (already present in FastVideo's environment).
