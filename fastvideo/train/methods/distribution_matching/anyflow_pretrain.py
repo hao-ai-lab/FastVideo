@@ -92,6 +92,58 @@ def _sample_pair_timesteps(
     return t, r, is_diffusion, is_consistency
 
 
+@torch.no_grad()
+def _central_difference_dF_dt(
+    *,
+    student: Any,
+    batch: Any,
+    noisy: torch.Tensor,
+    latents: torch.Tensor,
+    noise: torch.Tensor,
+    t: torch.Tensor,
+    r: torch.Tensor,
+    delta: float,
+    num_train_timesteps: float,
+    attn_kind: str = "dense",
+    guidance_scale: float = 1.0,
+) -> torch.Tensor:
+    """Estimate ``dF/dt`` for the AnyFlow central-difference target.
+
+    Computes a symmetric finite difference of the velocity prediction in
+    *absolute train-timestep units*:
+
+        dF/dt ≈ [u_θ(x_{t+δ}, t+δ, r) - u_θ(x_{t-δ}, t-δ, r)] / (2 * δ * guidance)
+
+    The sample is also moved along the flow trajectory by the same
+    finite step (``v_pred * (δ / N)``) to match AnyFlow's reference
+    formulation in ``trainer_wan_anyflow_pretrain.py::compute_central_difference``.
+    Wrapped in ``torch.no_grad`` so the two extra forwards never enter
+    the backward graph.
+    """
+    if delta <= 0.0:
+        raise ValueError(f"delta must be positive, got {delta}")
+    if guidance_scale <= 0.0:
+        raise ValueError(
+            f"guidance_scale must be positive, got {guidance_scale}")
+
+    v_pred = noise - latents  # ground-truth flow velocity
+    delta_x = delta / float(num_train_timesteps)
+
+    t_plus = t + delta
+    noisy_plus = noisy + v_pred * delta_x
+    f_plus = student.predict_velocity_with_r(
+        noisy_plus, t_plus, r, batch,
+        conditional=True, attn_kind=attn_kind)
+
+    t_minus = t - delta
+    noisy_minus = noisy - v_pred * delta_x
+    f_minus = student.predict_velocity_with_r(
+        noisy_minus, t_minus, r, batch,
+        conditional=True, attn_kind=attn_kind)
+
+    return (f_plus - f_minus) / (2.0 * delta * guidance_scale)
+
+
 class AnyFlowPretrainMethod(TrainingMethod):
     """AnyFlow flow-map pretrain method.
 
@@ -206,7 +258,155 @@ class AnyFlowPretrainMethod(TrainingMethod):
             dict[str, LogScalar],
     ]:
         del iteration  # AnyFlow pretrain has no iteration-dependent dispatch.
-        raise NotImplementedError("filled in Task 7")
+
+        training_batch = self.student.prepare_batch(
+            batch,
+            generator=self.cuda_generator,
+            latents_source="data",
+        )
+        latents = training_batch.latents  # [B, T, C, H, W] (post-permute in prepare_batch).
+        if latents is None or latents.ndim != 5:
+            raise RuntimeError(
+                "AnyFlow pretrain expects TrainingBatch.latents of shape "
+                "[B, T, C, H, W] after prepare_batch; got "
+                f"{None if latents is None else tuple(latents.shape)}")
+        device = latents.device
+        dtype = latents.dtype
+        batch_size = int(latents.shape[0])
+
+        # AnyFlow (t, r) sampling — overrides the timestep drawn by
+        # WanModel._sample_timesteps inside prepare_batch.
+        t_norm, r_norm, is_diffusion, is_consistency = _sample_pair_timesteps(
+            batch_size=batch_size,
+            diffusion_ratio=self._diffusion_ratio,
+            consistency_ratio=self._consistency_ratio,
+            device=device,
+            generator=self.cuda_generator,
+        )
+
+        sched = self._flow_map_scheduler
+        n_train = float(self.student.num_train_timesteps)
+        t = (sched.apply_shift(t_norm) * n_train).to(device=device, dtype=dtype)
+        r = (sched.apply_shift(r_norm) * n_train).to(device=device, dtype=dtype)
+
+        # Fresh noise drawn from the method's RNG; ignore the noise that
+        # prepare_batch attached (it pairs with the discarded timestep).
+        noise = torch.randn(
+            latents.shape,
+            device=device,
+            dtype=dtype,
+            generator=self.cuda_generator,
+        )
+        noisy = sched.add_noise(latents, noise, t)
+
+        # Keep training_batch coherent with the new (t, noisy): downstream
+        # forward_context uses these fields.
+        training_batch.timesteps = t
+        training_batch.noise = noise
+        training_batch.noisy_model_input = noisy.permute(0, 2, 1, 3, 4)
+
+        # Student velocity prediction at (t, r).
+        noise_pred = self.student.predict_velocity_with_r(
+            noisy, t, r, training_batch,
+            conditional=True,
+            attn_kind="dense",
+        )
+
+        # Optional guidance distillation — fuse CFG into the training target so
+        # the resulting checkpoint can be sampled at guidance_scale=1.0.
+        if self._fuse_guidance_scale != 1.0:
+            with torch.no_grad():
+                noise_pred_uncond = self.student.predict_velocity_with_r(
+                    noisy, t, r, training_batch,
+                    conditional=False,
+                    attn_kind="dense",
+                )
+            g = float(self._fuse_guidance_scale)
+            noise_pred = (noise_pred - (1.0 - g) * noise_pred_uncond) / g
+
+        dF_dt = _central_difference_dF_dt(
+            student=self.student,
+            batch=training_batch,
+            noisy=noisy,
+            latents=latents,
+            noise=noise,
+            t=t,
+            r=r,
+            delta=self._fd_epsilon,
+            num_train_timesteps=n_train,
+            attn_kind="dense",
+            guidance_scale=self._fuse_guidance_scale,
+        )
+
+        # AnyFlow target: target = (eps - x_0) - (t - r) * dF/dt
+        # dF/dt is in (velocity per absolute t-unit); (t - r) is in absolute units;
+        # the product cancels back to velocity units, matching noise_pred.
+        view = [batch_size] + [1] * (latents.ndim - 1)
+        target = (noise - latents) - (t - r).view(*view) * dF_dt
+
+        # Per-sample squared error, then per-timestep weight, then scale-balance
+        # so the non-diffusion branches stay on the same magnitude as the
+        # diffusion branch (matches AnyFlow's stop-grad rescaling).
+        per_sample = torch.mean(
+            ((noise_pred.float() - target.float()) ** 2).reshape(
+                batch_size, -1),
+            dim=-1,
+        )
+        weight = sched.get_train_weight(t, weight_type=self._weight_type)
+        per_sample = per_sample * weight
+
+        with torch.no_grad():
+            diff_mask = is_diffusion
+            if diff_mask.any():
+                diff_mean = per_sample[diff_mask].mean()
+            else:
+                diff_mean = per_sample.mean()
+            non_diff_mask = ~diff_mask
+            if non_diff_mask.any():
+                scale = diff_mean / (per_sample[non_diff_mask] + 1e-5)
+            else:
+                scale = torch.tensor(1.0, device=device, dtype=per_sample.dtype)
+        non_diff_idx = torch.nonzero(non_diff_mask, as_tuple=False).flatten()
+        if non_diff_idx.numel() > 0:
+            per_sample = per_sample.clone()
+            per_sample[non_diff_idx] = per_sample[non_diff_idx] * scale
+
+        total_loss = per_sample.mean()
+
+        loss_map = {"total_loss": total_loss}
+        metrics: dict[str, LogScalar] = {
+            "diffusion_fraction": float(is_diffusion.float().mean()),
+            "consistency_fraction": float(is_consistency.float().mean()),
+            "scale_weight_mean": float(scale.mean()) if isinstance(
+                scale, torch.Tensor) else float(scale),
+        }
+        outputs = {
+            "student_ctx": (
+                training_batch.timesteps,
+                training_batch.attn_metadata,
+            ),
+        }
+        return loss_map, outputs, metrics
+
+    def backward(
+        self,
+        loss_map: dict[str, torch.Tensor],
+        outputs: dict[str, Any],
+        *,
+        grad_accum_rounds: int = 1,
+    ) -> None:
+        """Route the loss backward through the student's forward_context
+        so attn metadata stays attached during gradient computation."""
+        student_ctx = outputs.get("student_ctx")
+        if student_ctx is None:
+            super().backward(
+                loss_map, outputs, grad_accum_rounds=grad_accum_rounds)
+            return
+        self.student.backward(
+            loss_map["total_loss"],
+            student_ctx,
+            grad_accum_rounds=grad_accum_rounds,
+        )
 
     def _init_optimizer_and_scheduler(self) -> None:
         tc = self.training_config

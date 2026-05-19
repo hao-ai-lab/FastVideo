@@ -433,3 +433,107 @@ def test_sample_pair_timesteps_rejects_negative_ratios() -> None:
             device=torch.device("cpu"),
             generator=None,
         )
+
+
+# ---------------------------------------------------------------------------
+# Task 7: central-difference target.
+# ---------------------------------------------------------------------------
+
+
+class _StubStudent:
+    """Stand-in student for unit-testing the central-difference helper.
+
+    The "velocity prediction" is a closed-form function of x and t
+    (no actual neural network) so we can compare against the analytical
+    derivative.
+    """
+
+    def __init__(self, alpha: float = 0.3) -> None:
+        self.alpha = float(alpha)
+
+    def predict_velocity_with_r(
+        self,
+        noisy: torch.Tensor,
+        t: torch.Tensor,
+        r: torch.Tensor,
+        batch,
+        *,
+        conditional: bool = True,
+        attn_kind: str = "dense",
+        cfg_uncond=None,
+    ) -> torch.Tensor:
+        del batch, conditional, attn_kind, cfg_uncond, r
+        # f(x, t) = x + alpha * (t / 1000) → dF/dt = alpha / 1000.
+        view = [-1] + [1] * (noisy.ndim - 1)
+        return noisy + self.alpha * (t.view(*view).float() / 1000.0)
+
+
+def test_central_difference_dF_dt_linear_function() -> None:
+    """For f(x, t) = x + alpha * (t / N), the central-difference estimate
+    of dF/dt must be alpha / N (in absolute t-units that's alpha / N
+    velocity per t-unit, and our helper divides the difference by
+    2*delta -> exactly alpha / N)."""
+    from fastvideo.train.methods.distribution_matching.anyflow_pretrain import (
+        _central_difference_dF_dt, )
+
+    student = _StubStudent(alpha=0.3)
+    x = torch.randn(2, 1, 4, 4, 4)
+    latents = torch.zeros_like(x)
+    noise = torch.zeros_like(x)  # v_pred = noise - latents = 0
+    t = torch.tensor([500.0, 250.0])
+    r = torch.tensor([100.0, 0.0])
+
+    dF = _central_difference_dF_dt(
+        student=student,
+        batch=None,
+        noisy=x,
+        latents=latents,
+        noise=noise,
+        t=t,
+        r=r,
+        delta=5.0,
+        num_train_timesteps=1000.0,
+    )
+
+    expected = torch.full_like(x, 0.3 / 1000.0)
+    torch.testing.assert_close(dF, expected, rtol=1e-5, atol=1e-5)
+
+
+def test_central_difference_dF_dt_guidance_scaling() -> None:
+    """With guidance_scale != 1, the result must be divided by guidance."""
+    from fastvideo.train.methods.distribution_matching.anyflow_pretrain import (
+        _central_difference_dF_dt, )
+
+    student = _StubStudent(alpha=0.6)
+    x = torch.zeros(1, 1, 4, 4, 4)
+    latents = torch.zeros_like(x)
+    noise = torch.zeros_like(x)
+    t = torch.tensor([500.0])
+    r = torch.tensor([100.0])
+
+    dF_g1 = _central_difference_dF_dt(
+        student=student, batch=None, noisy=x, latents=latents, noise=noise,
+        t=t, r=r, delta=5.0, num_train_timesteps=1000.0, guidance_scale=1.0)
+    dF_g3 = _central_difference_dF_dt(
+        student=student, batch=None, noisy=x, latents=latents, noise=noise,
+        t=t, r=r, delta=5.0, num_train_timesteps=1000.0, guidance_scale=3.0)
+
+    torch.testing.assert_close(dF_g1 / 3.0, dF_g3, rtol=1e-5, atol=1e-5)
+
+
+def test_central_difference_dF_dt_rejects_zero_delta() -> None:
+    from fastvideo.train.methods.distribution_matching.anyflow_pretrain import (
+        _central_difference_dF_dt, )
+
+    with pytest.raises(ValueError, match="delta must be positive"):
+        _central_difference_dF_dt(
+            student=_StubStudent(),
+            batch=None,
+            noisy=torch.zeros(1, 1, 4, 4, 4),
+            latents=torch.zeros(1, 1, 4, 4, 4),
+            noise=torch.zeros(1, 1, 4, 4, 4),
+            t=torch.tensor([500.0]),
+            r=torch.tensor([100.0]),
+            delta=0.0,
+            num_train_timesteps=1000.0,
+        )
