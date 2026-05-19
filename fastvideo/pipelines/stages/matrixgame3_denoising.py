@@ -146,11 +146,11 @@ class MatrixGame3DenoisingStage(DenoisingStage):
             clip_mouse = batch.mouse_cond[:, current_start_frame_idx:current_end_frame_idx]
 
             cond_frames = min(cond_frames, img_cond.shape[2])
+            clip_generator = batch.generator[0] if isinstance(batch.generator, list) else batch.generator
             current_latents = torch.randn(
                 (latents.shape[0], latents.shape[1], latent_end_idx - latent_start_idx, latent_h, latent_w),
-                generator=batch.generator if isinstance(batch.generator, torch.Generator) else None,
-                device=device,
-                dtype=target_dtype)
+                generator=clip_generator if isinstance(clip_generator, torch.Generator) else None,
+                dtype=target_dtype).to(device)
             current_latents[:, :, :cond_frames] = img_cond[:, :, :cond_frames]
 
             c2ws_chunk = extrinsics_all[current_start_frame_idx:current_end_frame_idx]

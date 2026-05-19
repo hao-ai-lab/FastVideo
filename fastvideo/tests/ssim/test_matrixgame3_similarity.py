@@ -94,7 +94,7 @@ def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id):
         model_id,
         ATTENTION_BACKEND,
     )
-    output_video_name = "output.mp4"
+    output_video_name = f"{prompt[:100].strip()}.mp4"
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -146,9 +146,10 @@ def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id):
         logger.error("Reference folder missing")
         raise FileNotFoundError(f"Reference video folder does not exist: {reference_folder}")
 
+    prompt_prefix = prompt[:100].strip()
     reference_video_name = None
     for filename in os.listdir(reference_folder):
-        if filename.endswith(".mp4"):
+        if filename.endswith(".mp4") and prompt_prefix in filename:
             reference_video_name = filename
             break
 
