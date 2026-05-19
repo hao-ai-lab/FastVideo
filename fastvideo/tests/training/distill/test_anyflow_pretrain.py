@@ -219,3 +219,129 @@ def test_wan_transformer_forward_threads_r_timestep_to_embedder() -> None:
     assert "r_timestep=r_timestep" in src, (
         "WanTransformer3DModel.forward must forward r_timestep into "
         "self.condition_embedder")
+
+
+# ---------------------------------------------------------------------------
+# Task 4: FlowMapEulerDiscreteScheduler numerics.
+# ---------------------------------------------------------------------------
+
+
+def _scheduler(*, shift: float = 1.0, n_train: int = 1000):
+    from fastvideo.models.schedulers.scheduling_flow_map_euler_discrete import (
+        FlowMapEulerDiscreteScheduler, )
+    return FlowMapEulerDiscreteScheduler(
+        num_train_timesteps=n_train, shift=shift)
+
+
+def test_flow_map_scheduler_set_timesteps_descending() -> None:
+    sched = _scheduler(shift=5.0)
+    sched.set_timesteps(num_inference_steps=4, device=torch.device("cpu"))
+    ts = sched.timesteps
+    # N inference steps → N + 1 boundary entries.
+    assert ts.numel() == 5
+    assert torch.all(ts[:-1] >= ts[1:])  # descending
+    assert ts[-1].item() == 0.0
+    assert ts[0].item() == pytest.approx(1000.0, abs=1e-3)
+
+
+def test_flow_map_scheduler_set_timesteps_custom_overrides_schedule() -> None:
+    sched = _scheduler(shift=5.0)
+    custom = [999.0, 937.0, 833.0, 624.0, 0.0]
+    sched.set_timesteps(
+        num_inference_steps=4,
+        device=torch.device("cpu"),
+        custom_timesteps=custom,
+    )
+    torch.testing.assert_close(
+        sched.timesteps, torch.tensor(custom, dtype=torch.float32))
+
+
+def test_flow_map_scheduler_custom_timesteps_must_be_descending() -> None:
+    sched = _scheduler(shift=5.0)
+    with pytest.raises(ValueError, match="descending"):
+        sched.set_timesteps(
+            num_inference_steps=4,
+            device=torch.device("cpu"),
+            custom_timesteps=[100.0, 500.0, 900.0],
+        )
+
+
+def test_flow_map_scheduler_apply_shift_endpoints_invariant() -> None:
+    """apply_shift fixes the endpoints {0, 1} and produces non-trivial
+    motion in the interior for shift != 1."""
+    sched = _scheduler(shift=5.0)
+    t = torch.tensor([0.0, 0.5, 1.0])
+    shifted = sched.apply_shift(t)
+    torch.testing.assert_close(
+        shifted, torch.tensor([0.0, 5.0 / 6.0, 1.0]), rtol=1e-6, atol=1e-6)
+
+
+def test_flow_map_scheduler_apply_shift_shift_one_is_identity() -> None:
+    sched = _scheduler(shift=1.0)
+    t = torch.linspace(0.0, 1.0, 100)
+    torch.testing.assert_close(sched.apply_shift(t), t)
+
+
+def test_flow_map_scheduler_step_one_euler_iteration_matches_formula() -> None:
+    """One step: x_r = x_t - ((t - r) / N) * model_output."""
+    sched = _scheduler(shift=1.0)
+    sched.set_timesteps(num_inference_steps=4, device=torch.device("cpu"))
+
+    torch.manual_seed(0)
+    x_t = torch.randn(2, 4, 1, 8, 8)
+    v = torch.randn_like(x_t)
+    t = torch.tensor([750.0, 500.0])
+    r = torch.tensor([500.0, 250.0])
+
+    out = sched.step(v, sample=x_t, timestep=t, r_timestep=r)
+    expected = x_t - ((t - r) / 1000.0).view(-1, 1, 1, 1, 1) * v
+    torch.testing.assert_close(out, expected, rtol=1e-6, atol=1e-6)
+
+
+def test_flow_map_scheduler_get_train_weight_beta08_shape_and_renorm() -> None:
+    """beta08: t * sqrt(1-t), renormalized so sum equals num_train_timesteps.
+    The interior of the schedule must dominate the endpoints (monotone up
+    then monotone down)."""
+    sched = _scheduler()
+    t = torch.linspace(0.001, 0.999, 1000)
+    w = sched.get_train_weight(t, weight_type="beta08")
+    assert torch.allclose(w.sum(), torch.tensor(1000.0), rtol=1e-3)
+    assert torch.all(w >= 0.0)
+    # Endpoints smaller than the middle bump.
+    mid = len(w) // 2
+    assert w[0] < w[mid]
+    assert w[-1] < w[mid]
+
+
+def test_flow_map_scheduler_get_train_weight_uniform_is_constant_norm() -> None:
+    sched = _scheduler()
+    t = torch.linspace(0.0, 1.0, 1000)
+    w = sched.get_train_weight(t, weight_type="uniform")
+    assert torch.allclose(w.sum(), torch.tensor(1000.0), rtol=1e-3)
+    # All entries equal to 1.0 after renormalization.
+    torch.testing.assert_close(w, torch.ones_like(w), rtol=1e-6, atol=1e-6)
+
+
+def test_flow_map_scheduler_get_train_weight_accepts_absolute_units() -> None:
+    """When t is provided in [0, num_train_timesteps] the helper auto-
+    normalizes; result must match the [0, 1] call."""
+    sched = _scheduler()
+    t_norm = torch.linspace(0.001, 0.999, 1000)
+    t_abs = t_norm * 1000
+    w_norm = sched.get_train_weight(t_norm, weight_type="beta08")
+    w_abs = sched.get_train_weight(t_abs, weight_type="beta08")
+    torch.testing.assert_close(w_norm, w_abs, rtol=1e-5, atol=1e-5)
+
+
+def test_flow_map_scheduler_add_noise_matches_flow_matching_formula() -> None:
+    """Linear flow-matching: x_t = (1 - sigma) * x_0 + sigma * eps, where
+    sigma = t / num_train_timesteps."""
+    sched = _scheduler()
+    torch.manual_seed(0)
+    x0 = torch.randn(2, 4, 1, 4, 4)
+    eps = torch.randn_like(x0)
+    t = torch.tensor([250.0, 750.0])
+    out = sched.add_noise(x0, eps, t)
+    sigma = (t / 1000.0).view(-1, 1, 1, 1, 1)
+    expected = (1.0 - sigma) * x0 + sigma * eps
+    torch.testing.assert_close(out, expected, rtol=1e-6, atol=1e-6)
