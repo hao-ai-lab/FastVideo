@@ -500,7 +500,7 @@ def _register_configs() -> None:
         pipeline_config_cls=MatrixGame3I2V720PConfig,
         workload_types=(WorkloadType.I2V, ),
         hf_model_paths=[
-            "FastVideo/Matrix-Game-3.0-Diffusers",
+            "FastVideo/Matrix-Game-3.0-Base-Distilled-Diffusers",
         ],
         model_detectors=[
             lambda path: any(token in path.lower() for token in (
