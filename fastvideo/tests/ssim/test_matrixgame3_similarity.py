@@ -94,7 +94,6 @@ def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id):
         model_id,
         ATTENTION_BACKEND,
     )
-    output_video_name = f"{prompt[:100].strip()}.mp4"
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -146,19 +145,26 @@ def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id):
         logger.error("Reference folder missing")
         raise FileNotFoundError(f"Reference video folder does not exist: {reference_folder}")
 
-    prompt_prefix = prompt[:100].strip()
-    reference_video_name = None
-    for filename in os.listdir(reference_folder):
-        if filename.endswith(".mp4") and prompt_prefix in filename:
-            reference_video_name = filename
-            break
+    prompt_prefix = prompt[:100].strip().rstrip(".")
 
+    def _find_mp4(folder: str) -> str | None:
+        for filename in sorted(os.listdir(folder)):
+            if filename.endswith(".mp4") and prompt_prefix in filename:
+                return filename
+        return None
+
+    reference_video_name = _find_mp4(reference_folder)
     if not reference_video_name:
         logger.error(f"Reference video not found for model: {model_id} with backend: {ATTENTION_BACKEND}")
         raise FileNotFoundError("Reference video missing")
 
+    generated_video_name = _find_mp4(output_dir)
+    if not generated_video_name:
+        logger.error(f"Generated video not found for model: {model_id} with backend: {ATTENTION_BACKEND}")
+        raise FileNotFoundError(f"Generated video missing in {output_dir}")
+
     reference_video_path = os.path.join(reference_folder, reference_video_name)
-    generated_video_path = os.path.join(output_dir, output_video_name)
+    generated_video_path = os.path.join(output_dir, generated_video_name)
 
     logger.info(f"Computing SSIM between {reference_video_path} and {generated_video_path}")
     ssim_values = compute_video_ssim_torchvision(reference_video_path, generated_video_path, use_ms_ssim=True)
