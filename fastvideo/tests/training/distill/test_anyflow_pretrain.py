@@ -537,3 +537,48 @@ def test_central_difference_dF_dt_rejects_zero_delta() -> None:
             delta=0.0,
             num_train_timesteps=1000.0,
         )
+
+
+# ---------------------------------------------------------------------------
+# Task 9: param_names_mapping handles AnyFlow checkpoints + is a no-op on plain
+# Wan checkpoints. We don't ship a separate remap_anyflow_keys helper because
+# the existing param_names_mapping regex mechanism does the job (delta_embedder
+# rename is a no-op when the source state dict doesn't contain those keys).
+# ---------------------------------------------------------------------------
+
+
+def test_param_names_mapping_includes_delta_embedder_rename() -> None:
+    """The Wan arch config's param_names_mapping must rename HF AnyFlow
+    delta_embedder weights into FastVideo's internal mlp.fc_in/fc_out layout."""
+    arch = WanVideoConfig().arch_config
+    mapping_keys = list(arch.param_names_mapping.keys())
+    assert any("delta_embedder" in k for k in mapping_keys), (
+        "WanVideoArchConfig.param_names_mapping must include delta_embedder "
+        "rename so HF AnyFlow checkpoints load without a separate adapter")
+
+
+def test_param_names_mapping_default_doesnt_break_plain_wan_keys() -> None:
+    """The new delta_embedder regex must not match any key in a plain
+    pretrained Wan2.1 checkpoint (those don't have delta_embedder)."""
+    import re
+
+    plain_wan_keys = [
+        "patch_embedding.weight",
+        "condition_embedder.time_embedder.linear_1.weight",
+        "condition_embedder.time_embedder.linear_2.weight",
+        "condition_embedder.time_proj.weight",
+        "condition_embedder.text_embedder.linear_1.weight",
+        "blocks.0.attn1.to_q.weight",
+        "blocks.0.ffn.net.0.proj.weight",
+    ]
+    arch = WanVideoConfig().arch_config
+    delta_regexes = [
+        k for k in arch.param_names_mapping if "delta_embedder" in k
+    ]
+    assert delta_regexes, "expected at least one delta_embedder regex"
+
+    for plain in plain_wan_keys:
+        for rx in delta_regexes:
+            assert re.match(rx, plain) is None, (
+                f"delta_embedder regex {rx!r} unexpectedly matched plain "
+                f"Wan key {plain!r}")
