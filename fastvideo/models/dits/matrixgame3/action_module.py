@@ -459,8 +459,9 @@ class MatrixGame3ActionModule(nn.Module):
         else:
             N_feats = N_frames // self.vae_time_compression_ratio
 
-        # Lazy initialization of freqs on first forward pass
-        if self._freqs_cos is None or self._freqs_sin is None:
+        # Lazy initialization of freqs
+        if (self._freqs_cos is None or self._freqs_sin is None
+                or self._freqs_cos.device != x.device):
             fc, fs = self.get_rotary_pos_embed(
                 7500,
                 self.patch_size[1],
