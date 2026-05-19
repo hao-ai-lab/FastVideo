@@ -12,6 +12,6 @@ class MatrixGame3SamplingParam(SamplingParam):
     fps: int = 25
     guidance_scale: float = 1.0
     num_inference_steps: int = 3
-    negative_prompt: str | None = None
-    num_iterations: int = 1
+    negative_prompt: str = ""
+    num_iterations: int | None = None
     use_base_model: bool = False

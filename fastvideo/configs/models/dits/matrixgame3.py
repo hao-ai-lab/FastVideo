@@ -55,10 +55,10 @@ class MatrixGame3WanVideoArchConfig(WanVideoArchConfig):
     patch_size: tuple[int, int, int] = (1, 2, 2)
     in_channels: int = 48
     out_channels: int = 48
-    num_attention_heads: int = 40
+    num_attention_heads: int = 24
     attention_head_dim: int = 128
-    ffn_dim: int = 13824
-    num_layers: int = 40
+    ffn_dim: int = 14336
+    num_layers: int = 30
     text_len: int = 512
     image_dim: int = 0
     use_text_crossattn: bool = True
@@ -67,13 +67,13 @@ class MatrixGame3WanVideoArchConfig(WanVideoArchConfig):
     camera_embed_in_channels: int = 1536
     action_config: dict = field(
         default_factory=lambda: {
-            "blocks": list(range(40)),
+            "blocks": list(range(15)),
             "enable_mouse": True,
             "enable_keyboard": True,
             "heads_num": 16,
             "hidden_size": 128,
-            "img_hidden_size": 5120,
-            "keyboard_dim_in": 4,
+            "img_hidden_size": 3072,
+            "keyboard_dim_in": 6,
             "keyboard_hidden_dim": 1024,
             "mouse_dim_in": 2,
             "mouse_hidden_dim": 1024,
