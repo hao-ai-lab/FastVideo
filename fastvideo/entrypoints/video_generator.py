@@ -165,6 +165,10 @@ class VideoGenerator:
         move to VideoGenerator.from_config(...).
         """
         log_queue = kwargs.pop("log_queue", None)
+        if kwargs.pop("nvfp4_fa4", False):
+            import os
+            os.environ["FASTVIDEO_NVFP4_FA4"] = "1"
+            os.environ.setdefault("CUTE_DSL_ENABLE_TVM_FFI", "1")
         typed_config = kwargs.pop("config", None)
         if typed_config is not None:
             if model_path is not None:
