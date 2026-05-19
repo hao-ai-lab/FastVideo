@@ -345,3 +345,91 @@ def test_flow_map_scheduler_add_noise_matches_flow_matching_formula() -> None:
     sigma = (t / 1000.0).view(-1, 1, 1, 1, 1)
     expected = (1.0 - sigma) * x0 + sigma * eps
     torch.testing.assert_close(out, expected, rtol=1e-6, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Task 6: (t, r) per-batch sampling.
+# ---------------------------------------------------------------------------
+
+
+def test_sample_pair_timesteps_partitions_batch_correctly() -> None:
+    """For batch=8 with diffusion=0.5/consistency=0.25: 4 r=t, 2 r=0,
+    2 free entries."""
+    from fastvideo.train.methods.distribution_matching.anyflow_pretrain import (
+        _sample_pair_timesteps, )
+
+    torch.manual_seed(42)
+    t, r, is_diffusion, is_consistency = _sample_pair_timesteps(
+        batch_size=8,
+        diffusion_ratio=0.5,
+        consistency_ratio=0.25,
+        device=torch.device("cpu"),
+        generator=None,
+    )
+    assert t.shape == (8,)
+    assert r.shape == (8,)
+    assert int(is_diffusion.sum()) == 4
+    assert int(is_consistency.sum()) == 2
+    # The masks must be disjoint.
+    assert not torch.any(is_diffusion & is_consistency)
+
+    diff_idx = torch.nonzero(is_diffusion).flatten()
+    torch.testing.assert_close(r[diff_idx], t[diff_idx])
+
+    cons_idx = torch.nonzero(is_consistency).flatten()
+    torch.testing.assert_close(r[cons_idx], torch.zeros(2))
+
+    free_idx = torch.nonzero(~(is_diffusion | is_consistency)).flatten()
+    assert torch.all(r[free_idx] <= t[free_idx])
+    assert torch.all(r[free_idx] >= 0.0)
+    assert torch.all(t[free_idx] <= 1.0)
+
+
+def test_sample_pair_timesteps_t_max_r_min_ordering() -> None:
+    """For the free fraction (ratios=0), t and r come from max/min of two
+    uniform draws so r <= t holds."""
+    torch.manual_seed(0)
+    from fastvideo.train.methods.distribution_matching.anyflow_pretrain import (
+        _sample_pair_timesteps, )
+
+    for _ in range(50):
+        t, r, is_diff, is_cons = _sample_pair_timesteps(
+            batch_size=4,
+            diffusion_ratio=0.0,
+            consistency_ratio=0.0,
+            device=torch.device("cpu"),
+            generator=None,
+        )
+        assert torch.all(t >= r)
+        assert torch.all(r >= 0.0)
+        assert torch.all(t <= 1.0)
+        assert int(is_diff.sum()) == 0
+        assert int(is_cons.sum()) == 0
+
+
+def test_sample_pair_timesteps_rejects_ratios_summing_above_one() -> None:
+    from fastvideo.train.methods.distribution_matching.anyflow_pretrain import (
+        _sample_pair_timesteps, )
+
+    with pytest.raises(ValueError, match="must be <= 1"):
+        _sample_pair_timesteps(
+            batch_size=8,
+            diffusion_ratio=0.7,
+            consistency_ratio=0.4,
+            device=torch.device("cpu"),
+            generator=None,
+        )
+
+
+def test_sample_pair_timesteps_rejects_negative_ratios() -> None:
+    from fastvideo.train.methods.distribution_matching.anyflow_pretrain import (
+        _sample_pair_timesteps, )
+
+    with pytest.raises(ValueError, match="non-negative"):
+        _sample_pair_timesteps(
+            batch_size=8,
+            diffusion_ratio=-0.1,
+            consistency_ratio=0.25,
+            device=torch.device("cpu"),
+            generator=None,
+        )
