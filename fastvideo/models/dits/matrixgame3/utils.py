@@ -58,10 +58,7 @@ def compute_next_pose_from_action(current_pose, keyboard_action, mouse_action):
     new_pitch = pitch + delta_pitch
     new_yaw = yaw + delta_yaw
 
-    while new_yaw > 180:
-        new_yaw -= 360
-    while new_yaw < -180:
-        new_yaw += 360
+    new_yaw = (new_yaw + 180) % 360 - 180
 
     local_forward = 0.0
     if w > 0.5 and s < 0.5:

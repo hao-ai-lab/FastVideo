@@ -957,5 +957,6 @@ class MatrixGame3ImageVAEEncodingStage(ImageVAEEncodingStage):
         if hasattr(self, 'maybe_free_model_hooks'):
             self.maybe_free_model_hooks()
 
-        self.vae.to("cpu")
+        if fastvideo_args.vae_cpu_offload:
+            self.vae.to("cpu")
         return batch
