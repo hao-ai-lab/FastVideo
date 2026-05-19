@@ -251,7 +251,7 @@ class MatrixGame3DenoisingStage(DenoisingStage):
                     timestep_tokens[:cond_frames].zero_()
                     timestep_tokens = timestep_tokens.flatten().unsqueeze(0)
                     with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled), \
-                        set_forward_context(current_timestep=int(timestep.item()) if torch.is_tensor(timestep) else int(timestep),
+                        set_forward_context(current_timestep=timestep,
                                             attn_metadata=None,
                                             forward_batch=batch):
                         noise_pred = self.transformer(

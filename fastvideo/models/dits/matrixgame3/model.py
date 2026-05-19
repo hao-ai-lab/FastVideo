@@ -337,7 +337,7 @@ class MatrixGame3TransformerBlock(nn.Module):
         temb: torch.Tensor,
         freqs: torch.Tensor,
         # Action Module specific args
-        grid_sizes: torch.Tensor,
+        grid_sizes: tuple[int, int, int],
         mouse_cond: torch.Tensor | None = None,
         keyboard_cond: torch.Tensor | None = None,
         mouse_cond_memory: torch.Tensor | None = None,
@@ -401,9 +401,7 @@ class MatrixGame3TransformerBlock(nn.Module):
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
 
         # Apply rotary embeddings
-        grid_frames = int(grid_sizes[0].item())
-        grid_height = int(grid_sizes[1].item())
-        grid_width = int(grid_sizes[2].item())
+        grid_frames, grid_height, grid_width = grid_sizes
 
         if memory_length > 0:
             hw = grid_height * grid_width
@@ -489,14 +487,14 @@ class MatrixGame3TransformerBlock(nn.Module):
             # grid_sizes is expected to be [F, H, W]
             hidden_states = self.action_model(
                 hidden_states.to(action_dtype),
-                int(grid_sizes[0]),
-                int(grid_sizes[1]),
-                int(grid_sizes[2]),
+                grid_sizes[0],
+                grid_sizes[1],
+                grid_sizes[2],
                 mouse_cond,
                 keyboard_cond,
                 mouse_cond_memory=mouse_cond_memory,
                 keyboard_cond_memory=keyboard_cond_memory,
-                num_frame_per_block=int(grid_sizes[0]),
+                num_frame_per_block=grid_sizes[0],
             )
 
             norm_hidden_states = self.cross_attn_residual_norm.norm(
@@ -780,11 +778,8 @@ class MatrixGame3WanModel(BaseDiT):
             else:
                 encoder_hidden_states = encoder_hidden_states_image
 
-        # This is [F, H, W] for the ActionModule
-        grid_sizes = torch.tensor(
-            [post_patch_num_frames, post_patch_height, post_patch_width],
-            device=hidden_states.device,
-        )
+        # [F, H, W] for the ActionModule
+        grid_sizes = (post_patch_num_frames, post_patch_height, post_patch_width)
 
         # Blocks
         for block in self.blocks:
