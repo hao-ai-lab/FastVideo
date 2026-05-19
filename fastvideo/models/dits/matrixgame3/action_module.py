@@ -67,10 +67,6 @@ def _apply_rotary_emb_qk(
     cos = freqs_cos[start_offset : start_offset + seq_len]  # [S, D]
     sin = freqs_sin[start_offset : start_offset + seq_len]  # [S, D]
 
-    # Move to device
-    cos = cos.to(xq.device)
-    sin = sin.to(xq.device)
-
     # Convert from [S, D] (interleaved) back to [S, D/2]
     cos_half = cos[:, ::2]  # [S, D/2]
     sin_half = sin[:, ::2]  # [S, D/2]
@@ -798,7 +794,7 @@ class MatrixGame3ActionModule(nn.Module):
 
         # Lazy initialization of freqs on first forward pass
         if self._freqs_cos is None or self._freqs_sin is None:
-            self._freqs_cos, self._freqs_sin = self.get_rotary_pos_embed(
+            fc, fs = self.get_rotary_pos_embed(
                 7500,
                 self.patch_size[1],
                 self.patch_size[2],
@@ -806,6 +802,8 @@ class MatrixGame3ActionModule(nn.Module):
                 self.mouse_qk_dim_list,
                 start_offset=0,
             )
+            self._freqs_cos = fc.to(x.device)
+            self._freqs_sin = fs.to(x.device)
 
         # Defined freqs_cis early so it's available for both mouse and keyboard
         freqs_cis = (self._freqs_cos, self._freqs_sin)

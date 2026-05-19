@@ -410,15 +410,13 @@ class MatrixGame3TransformerBlock(nn.Module):
             query_pred = query[:, memory_length * hw:]
             key_pred = key[:, memory_length * hw:]
 
+            # Indices are pre-built device tensors by MatrixGame3WanModel.forward.
             mem_indices = memory_latent_idx
             if mem_indices is None:
-                mem_indices = list(range(memory_length))
-
+                mem_indices = torch.arange(memory_length, device=query.device, dtype=torch.long)
             pred_indices = predict_latent_idx
-            if isinstance(pred_indices, tuple) and len(pred_indices) == 2:
-                pred_indices = list(range(pred_indices[0], pred_indices[1]))
-            elif pred_indices is None:
-                pred_indices = list(range(grid_frames - memory_length))
+            if pred_indices is None:
+                pred_indices = torch.arange(grid_frames - memory_length, device=query.device, dtype=torch.long)
 
             query_memory = _apply_rope_with_frame_indices(
                 query_memory, freqs, height=grid_height, width=grid_width, frame_indices=mem_indices
@@ -436,11 +434,8 @@ class MatrixGame3TransformerBlock(nn.Module):
             key = torch.cat([key_memory, key_pred], dim=1)
         else:
             pred_indices = predict_latent_idx
-            if isinstance(pred_indices, tuple) and len(pred_indices) == 2:
-                pred_indices = list(range(pred_indices[0], pred_indices[1]))
-
             if pred_indices is None:
-                pred_indices = list(range(grid_frames))
+                pred_indices = torch.arange(grid_frames, device=query.device, dtype=torch.long)
             query = _apply_rope_with_frame_indices(
                 query, freqs, height=grid_height, width=grid_width, frame_indices=pred_indices
             )
@@ -670,6 +665,34 @@ class MatrixGame3WanModel(BaseDiT):
             max_frame_index = max(max_frame_index, int(max(predict_latent_idx)) + 1)
         if memory_latent_idx is not None and len(memory_latent_idx) > 0:
             max_frame_index = max(max_frame_index, int(max(memory_latent_idx)) + 1)
+
+        # Pre-build RoPE frame index tensors once per forward so blocks don't
+        # do `torch.tensor(list, device=cuda)` per call (host sync).
+        device_idx = hidden_states.device
+        if predict_latent_idx is None:
+            predict_latent_idx = None
+        elif torch.is_tensor(predict_latent_idx):
+            predict_latent_idx = predict_latent_idx.to(device=device_idx, dtype=torch.long)
+        elif isinstance(predict_latent_idx, tuple) and len(predict_latent_idx) == 2:
+            predict_latent_idx = torch.arange(
+                predict_latent_idx[0], predict_latent_idx[1],
+                device=device_idx, dtype=torch.long,
+            )
+        else:
+            predict_latent_idx = torch.tensor(
+                list(predict_latent_idx), device=device_idx, dtype=torch.long,
+            )
+
+        if memory_latent_idx is None or (
+            not torch.is_tensor(memory_latent_idx) and len(memory_latent_idx) == 0
+        ):
+            memory_latent_idx = None
+        elif torch.is_tensor(memory_latent_idx):
+            memory_latent_idx = memory_latent_idx.to(device=device_idx, dtype=torch.long)
+        else:
+            memory_latent_idx = torch.tensor(
+                list(memory_latent_idx), device=device_idx, dtype=torch.long,
+            )
 
         head_dim = self.hidden_size // self.num_attention_heads
         freqs = _build_rope_freqs(
