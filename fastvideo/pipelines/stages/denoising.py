@@ -244,10 +244,15 @@ class DenoisingStage(PipelineStage):
         _cfg_gate_active = _cfg_gate_fraction < 1.0 and batch.do_classifier_free_guidance
         _is_rank0 = get_world_group().local_rank == 0
         if _cfg_gate_active:
-            _cfg_gate_step_idx = int(num_inference_steps * _cfg_gate_fraction)
+            # Use len(timesteps), not num_inference_steps: the loop iterates
+            # over timesteps directly, and for schedulers with order > 1
+            # (e.g. DPM-Solver++ 2M, Heun) len(timesteps) is a multiple of
+            # num_inference_steps. Using num_inference_steps would cause the
+            # gate to fire at fraction/order of the loop instead of fraction.
+            _cfg_gate_step_idx = int(len(timesteps) * _cfg_gate_fraction)
             if _is_rank0:
                 logger.info("CFG gating enabled: fraction=%.3f, gate_step=%d/%d", _cfg_gate_fraction,
-                            _cfg_gate_step_idx, num_inference_steps)
+                            _cfg_gate_step_idx, len(timesteps))
             if batch.guidance_rescale > 0.0 and _is_rank0:
                 # guidance_rescale rescales CFG output stats to match cond
                 # stats (Lin et al. §3.4).  When `delta_cached` goes stale,
@@ -260,7 +265,7 @@ class DenoisingStage(PipelineStage):
                     "quality may degrade beyond CFG-gating-alone expectations.", _cfg_gate_fraction,
                     batch.guidance_rescale)
         else:
-            _cfg_gate_step_idx = num_inference_steps + 1  # never gates
+            _cfg_gate_step_idx = len(timesteps) + 1  # never gates
         delta_cached: torch.Tensor | None = None
         delta_cached_model_id: int | None = None
         # Telemetry — logged at end of denoising loop on rank 0.
@@ -444,9 +449,9 @@ class DenoisingStage(PipelineStage):
 
                             # Refresh cache only when gating is active; under the
                             # default (FASTVIDEO_CFG_GATE_STEP=1.0, _cfg_gate_step_idx
-                            # > num_inference_steps) we never reuse, so skip the
+                            # > len(timesteps)) we never reuse, so skip the
                             # tensor allocation.
-                            if _cfg_gate_step_idx <= num_inference_steps:
+                            if _cfg_gate_step_idx <= len(timesteps):
                                 delta_cached = noise_pred_text - noise_pred_uncond
                                 delta_cached_model_id = id(current_model)
                                 noise_pred = noise_pred_uncond + current_guidance_scale * delta_cached
@@ -489,7 +494,7 @@ class DenoisingStage(PipelineStage):
                 "fresh_uncond=%d reused=%d invalidations=%d",
                 _cfg_gate_fraction,
                 _cfg_gate_step_idx if _cfg_gate_active else -1,
-                num_inference_steps,
+                len(timesteps),
                 _cfg_gate_fresh_uncond,
                 _cfg_gate_reused_delta,
                 _cfg_gate_invalidations,
