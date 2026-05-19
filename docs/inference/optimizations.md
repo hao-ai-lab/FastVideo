@@ -94,7 +94,7 @@ The `--no-deps` flag prevents upgrading torch/torchvision. The kernel requires t
 
 #### Usage
 
-Enable FP4 attention via the `--nvfp4_fa4` flag:
+Enable FP4 attention in the example script with `--nvfp4_fa4`; the script sets the required environment variables before loading the model:
 
 ```bash
 python examples/inference/optimizations/fp4_attn_wan2_1_1_3b.py --nvfp4_fa4
