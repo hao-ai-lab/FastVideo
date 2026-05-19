@@ -42,12 +42,31 @@ def test_wan_arch_defaults_preserve_bit_identity() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _init_uninitialized_weights(module: torch.nn.Module, seed: int = 0) -> None:
+    """FastVideo's ``ReplicatedLinear`` allocates weights with
+    ``torch.empty`` and relies on a downstream ``load_weights`` pass to
+    populate them. Unit tests bypass that pass, so weights start as
+    uninitialized garbage (typically NaN/Inf). Manually init every
+    Linear / RMSNorm / LayerNorm parameter so the forward produces
+    deterministic finite outputs.
+    """
+    torch.manual_seed(seed)
+    with torch.no_grad():
+        for p in module.parameters():
+            if p.ndim >= 2:
+                # Xavier-uniform scaled by inverse fan-in for stable forwards.
+                torch.nn.init.xavier_uniform_(p)
+            else:
+                p.zero_()
+
+
 def _make_embedder(
     *,
     r_embedder: bool,
     fusion: str = "additive",
     gate: float = 0.25,
     deltatime_type: str = "r",
+    init_seed: int = 0,
 ):
     from fastvideo.models.dits.wanvideo import WanTimeTextImageEmbedding
 
@@ -61,6 +80,7 @@ def _make_embedder(
         r_embedder_gate_value=gate,
         r_embedder_deltatime_type=deltatime_type,
     )
+    _init_uninitialized_weights(emb, seed=init_seed)
     emb.eval()
     return emb
 
