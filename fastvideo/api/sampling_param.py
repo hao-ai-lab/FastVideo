@@ -98,19 +98,36 @@ class SamplingParam:
     camera_rotation: str | None = None
 
     # LTX-2 multi-modal CFG and STG.
-    # cfg_scale defaults are 1.0 (CFG off) so ``ForwardBatch.__post_init__``
-    # doesn't force ``do_classifier_free_guidance`` on non-LTX-2 models that
-    # never override these fields. LTX-2 presets that need text-CFG on set
-    # them in their ``defaults`` dict (e.g. ``ltx2_base``).
+    # Class-level defaults match the *distilled* LTX-2 schedule
+    # (mirrors ``FastVideo-internal/.../LTX2DistilledSamplingParam``):
+    # the distilled model expects neutral guidance scales — modality 1,
+    # rescale 0, STG 0 — and explicit-CFG callers (full LTX-2) opt back
+    # in by selecting the ``LTX2_BASE`` preset, which overrides these
+    # to mod=3.0 / rescale=0.7 / stg=1.0 in its ``defaults`` dict.
+    # cfg_scale defaults stay at 1.0 (CFG off) so
+    # ``ForwardBatch.__post_init__`` doesn't force CFG on non-LTX-2
+    # models that never override these fields.
     ltx2_cfg_scale_video: float = 1.0
     ltx2_cfg_scale_audio: float = 1.0
-    ltx2_modality_scale_video: float = 3.0
-    ltx2_modality_scale_audio: float = 3.0
-    ltx2_rescale_scale: float = 0.7
-    ltx2_stg_scale_video: float = 1.0
-    ltx2_stg_scale_audio: float = 1.0
+    ltx2_modality_scale_video: float = 1.0
+    ltx2_modality_scale_audio: float = 1.0
+    ltx2_rescale_scale: float = 0.0
+    ltx2_stg_scale_video: float = 0.0
+    ltx2_stg_scale_audio: float = 0.0
     ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
     ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
+
+    # LTX-2 image / video / continuation conditioning. These flow from
+    # generate_video(...) kwargs through ``sampling_param.update(kwargs)``
+    # onto the ForwardBatch fields of the same name. ``ltx2_image_crf``
+    # gates the conditioning-image H.264 re-encode; the streaming
+    # session controller passes ``ltx2_image_crf=0.0`` because it
+    # conditions on already-decoded VAE-quality frames.
+    ltx2_images: list[tuple[str, int, float]] | None = None
+    ltx2_image_crf: float = 33.0
+    ltx2_conditioning_latent_stage1: Any | None = None
+    ltx2_conditioning_latent_stage2: Any | None = None
+    ltx2_video_conditions: list[tuple[list[str], int, float]] | None = None
 
     # Stable Audio (T2A): clip start/end in seconds. Honored by
     # `StableAudioConditioningStage` + `StableAudioDecodingStage`. Other
@@ -160,11 +177,15 @@ class SamplingParam:
 
     def update(self, source_dict: dict[str, Any]) -> None:
         valid_fields = {f.name for f in fields(self)}
+        unknown = [key for key in source_dict if key not in valid_fields]
+        if unknown:
+            raise ValueError(f"{type(self).__name__}.update() received unknown field(s): "
+                             f"{sorted(unknown)}. All kwargs must correspond to declared "
+                             f"SamplingParam fields. If a kwarg is meant to flow into "
+                             f"ForwardBatch.extra (e.g. LTX2 audio conditioning), route it "
+                             f"via VideoGenerator._BATCH_EXTRA_PASSTHROUGH_KEYS instead.")
         for key, value in source_dict.items():
-            if key in valid_fields:
-                setattr(self, key, value)
-            else:
-                logger.error("%s has no field %s", type(self).__name__, key)
+            setattr(self, key, value)
 
         self.__post_init__()
 

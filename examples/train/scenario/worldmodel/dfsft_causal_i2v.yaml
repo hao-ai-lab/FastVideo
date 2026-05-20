@@ -1,0 +1,74 @@
+# Diffusion-Forcing SFT: Matrix-Game 2.0 I2V Causal
+#
+# - Student: trainable causal Matrix-Game 2.0 model
+# - Training: inhomogeneous timesteps per chunk (diffusion forcing)
+
+models:
+  student:
+    _target_: fastvideo.train.models.matrixgame2.matrixgame2_causal.MatrixGame2CausalModel
+    init_from: FastVideo/Matrix-Game-2.0-Base-Diffusers
+    trainable: true
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.dfsft.DiffusionForcingSFTMethod
+  chunk_size: 3
+
+training:
+  distributed:
+    num_gpus: 4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+
+  data:
+    data_path: data/matrixgame2
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 21
+    num_height: 352
+    num_width: 640
+    num_frames: 81
+
+  optimizer:
+    learning_rate: 2.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 1.0e-4
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 1500
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/matrixgame2_causal_dfsft
+    training_state_checkpointing_steps: 100
+    checkpoints_total_limit: 3
+
+  tracker:
+    project_name: dfsft-matrixgame2
+    run_name: matrixgame2_causal_dfsft
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    max_grad_norm: 1.0
+  validation:
+    pipeline_target: fastvideo.pipelines.basic.matrixgame2.matrixgame2_causal_dmd_pipeline.MatrixGame2CausalDMDPipeline
+    dataset_file: examples/distill/MatrixGame2.0/validation.json
+    every_steps: 100
+    sampling_steps: [40]
+    sampling_timesteps: [1000, 975, 950, 925, 900, 875, 850, 825, 800, 775,
+                         750, 725, 700, 675, 650, 625, 600, 575, 550, 525,
+                         500, 475, 450, 425, 400, 375, 350, 325, 300, 275,
+                         250, 225, 200, 175, 150, 125, 100, 75, 50, 25]
+    num_frames: 81
+    guidance_scale: 6.0
+
+pipeline:
+  flow_shift: 5

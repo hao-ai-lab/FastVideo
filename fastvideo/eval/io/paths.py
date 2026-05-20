@@ -45,8 +45,10 @@ def build_eval_kwargs(row: dict, video_path: Path, *, fps: float = 24.0) -> dict
     """Build evaluator kwargs from a sample row + a video on disk.
 
     Loads the video as ``(T,C,H,W)`` and adds the leading batch dim.
-    Forwards ``prompt`` (as ``text_prompt=[prompt]``) and
-    ``auxiliary_info`` (as ``[aux]``) when present on the row.
+    Forwards ``prompt`` (as scalar ``text_prompt``) and
+    ``auxiliary_info`` (as scalar dict) when present on the row —
+    matches the one-sample-per-call contract that the evaluator and
+    every metric assume.
     """
     from fastvideo.eval.io.video import load_video
 
@@ -56,8 +58,8 @@ def build_eval_kwargs(row: dict, video_path: Path, *, fps: float = 24.0) -> dict
         "fps": fps,
     }
     if "prompt" in row:
-        kwargs["text_prompt"] = [row["prompt"]]
+        kwargs["text_prompt"] = row["prompt"]
     aux = row.get("auxiliary_info")
     if aux:
-        kwargs["auxiliary_info"] = [aux]
+        kwargs["auxiliary_info"] = aux
     return kwargs

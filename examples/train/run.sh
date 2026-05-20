@@ -17,8 +17,15 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
 CONFIG="${1:?Usage: $0 <config.yaml> [extra flags...]}"
 shift
+
+if [[ "${CONFIG}" != /* ]]; then
+    CONFIG="$(pwd)/${CONFIG}"
+fi
 
 # ── GPU / node settings ──────────────────────────────────────────
 NUM_GPUS="${NUM_GPUS:-$(nvidia-smi -L 2>/dev/null | wc -l)}"
@@ -28,6 +35,9 @@ NODE_RANK="${NODE_RANK:-0}"
 MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
 MASTER_PORT="${MASTER_PORT:-29501}"
 export TOKENIZERS_PARALLELISM=false
+export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+
+cd "${REPO_ROOT}"
 # ── W&B ──────────────────────────────────────────────────────────
 export WANDB_API_KEY="${WANDB_API_KEY:-}"
 export WANDB_MODE="${WANDB_MODE:-online}"
@@ -55,7 +65,7 @@ python -m torch.distributed.run \
     --nproc_per_node "${NUM_GPUS}" \
     --master_addr "${MASTER_ADDR}" \
     --master_port "${MASTER_PORT}" \
-    fastvideo/train/entrypoint/train.py \
+    -m fastvideo.train.entrypoint.train \
     --config "${CONFIG}" \
     "$@" \
     2>&1 | tee "${LOG_FILE}"

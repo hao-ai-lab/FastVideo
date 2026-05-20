@@ -87,3 +87,4 @@ class Qwen2_5_VLConfig(TextEncoderConfig):
     arch_config: TextEncoderArchConfig = field(default_factory=Qwen2_5_VLArchConfig)
     prefix: str = "qwen2_5_vl"
     is_chat_model: bool = True
+    treat_empty_as_dot: bool = True

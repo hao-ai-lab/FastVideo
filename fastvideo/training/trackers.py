@@ -17,9 +17,43 @@ from enum import Enum
 from typing import Any
 from collections.abc import Iterable, Iterator
 
+import torch
+
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+
+
+def _sanitize_wandb_config(value: Any) -> Any:
+    """Best-effort conversion of nested config objects to W&B-safe values."""
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, pathlib.Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(k): _sanitize_wandb_config(v) for k, v in value.items()}
+    if isinstance(value, list | tuple | set):
+        return [_sanitize_wandb_config(v) for v in value]
+    if isinstance(value, torch.dtype):
+        return str(value)
+    if isinstance(value, torch.Tensor):
+        tensor = value.detach().cpu()
+        if tensor.dtype == torch.bfloat16:
+            tensor = tensor.to(dtype=torch.float32)
+        if tensor.ndim == 0 or tensor.numel() == 1:
+            return tensor.item()
+        if tensor.numel() <= 256:
+            return tensor.tolist()
+        return {
+            "_type": "tensor_summary",
+            "shape": list(tensor.shape),
+            "dtype": str(tensor.dtype),
+        }
+    if callable(value):
+        return getattr(value, "__name__", repr(value))
+    return repr(value)
 
 
 @dataclass
@@ -143,7 +177,7 @@ class WandbTracker(BaseTracker):
         self._run = wandb.init(
             project=experiment_name,
             dir=log_dir,
-            config=config,
+            config=(_sanitize_wandb_config(config) if config is not None else None),
             name=run_name,
         )
         logger.info("Initialized Weights & Biases tracker")
@@ -153,6 +187,16 @@ class WandbTracker(BaseTracker):
         if metrics:
             self._run.log(metrics, step=step)
         self._timed_metrics = {}
+
+    def log_artifacts(self, artifacts: dict[str, Any], step: int) -> None:
+        if not artifacts:
+            return
+
+        normalized_artifacts = dict(artifacts)
+        if "validation_ref_videos" in normalized_artifacts:
+            normalized_artifacts["reference_video/videos"] = (normalized_artifacts.pop("validation_ref_videos"))
+
+        self.log(normalized_artifacts, step)
 
     def log_file(
         self,

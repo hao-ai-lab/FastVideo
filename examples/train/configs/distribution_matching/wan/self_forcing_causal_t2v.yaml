@@ -26,17 +26,22 @@ method:
   _target_: fastvideo.train.methods.distribution_matching.self_forcing.SelfForcingMethod
   rollout_mode: simulate
   generator_update_interval: 5
-  real_score_guidance_scale: 4.5
+  # Clean uses standard CFG for DMD real score:
+  # uncond + scale * (cond - uncond). Self-Forcing training uses
+  # cond + 3.0 * (cond - uncond), so 4.0 matches its guidance_scale=3.0.
+  real_score_guidance_scale: 4.0
   dmd_denoising_steps: [1000, 750, 500, 250]
+  warp_denoising_step: true
 
   chunk_size: 3
   student_sample_type: sde
   context_noise: 0.0
+  same_step_across_blocks: true
   enable_gradient_in_rollout: true
   start_gradient_frame: 0
 
   # Critic optimizer
-  fake_score_learning_rate: 8.0e-6
+  fake_score_learning_rate: 4.0e-7
   fake_score_betas: [0.0, 0.999]
   fake_score_lr_scheduler: constant
 
@@ -49,18 +54,18 @@ training:
     hsdp_shard_dim: 8
 
   data:
-    data_path: data/Wan-Syn_77x448x832_600k
+    data_path: data/vidprom_16k_umt5_text_embed
     dataloader_num_workers: 4
     train_batch_size: 1
     training_cfg_rate: 0.0
     seed: 1000
-    num_latent_t: 20
-    num_height: 448
+    num_latent_t: 21
+    num_height: 480
     num_width: 832
-    num_frames: 77
+    num_frames: 81
 
   optimizer:
-    learning_rate: 1e-5
+    learning_rate: 2.0e-6
     betas: [0.0, 0.999]
     weight_decay: 0.01
     lr_scheduler: constant
@@ -83,6 +88,9 @@ training:
     enable_gradient_checkpointing_type: full
 
 callbacks:
+  ema:
+    decay: 0.99
+    start_iter: 200
   grad_clip:
     max_grad_norm: 1.0
   validation:
@@ -91,8 +99,16 @@ callbacks:
     every_steps: 50
     sampling_steps: [4]
     sampling_timesteps: [1000, 750, 500, 250]
-    num_frames: 69
-    guidance_scale: 6.0
+    num_frames: 81
+    # Validation/inference uses standard CFG in both clean and Self-Forcing,
+    # so this directly matches Self-Forcing guidance_scale=3.0.
+    guidance_scale: 3.0
 
 pipeline:
   flow_shift: 5
+  dit_config:
+    # Use a positive local_attn_size for validation videos longer than
+    # 81 frames, otherwise the full-cache path can exceed the allocated KV cache.
+    # local_attn_size includes sink latents, e.g. 12 = 3 sink + 9 rolling window.
+    local_attn_size: -1
+    sink_size: 0

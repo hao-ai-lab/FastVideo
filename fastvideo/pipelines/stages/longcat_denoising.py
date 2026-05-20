@@ -70,13 +70,14 @@ class LongCatDenoisingStage(DenoisingStage):
                 pipeline.add_module("transformer", self.transformer)
             fastvideo_args.model_loaded["transformer"] = True
 
-        # Get transformer dtype
-        if hasattr(self.transformer, 'module'):
-            transformer_dtype = next(self.transformer.module.parameters()).dtype
-        else:
-            transformer_dtype = next(self.transformer.parameters()).dtype
-
-        target_dtype = transformer_dtype
+        # Inference dtype. We hardcode bf16 (matching the WanDenoisingStage
+        # pattern) rather than reading transformer.parameters().dtype: when
+        # a model is loaded with default_dtype=fp32 but its FSDP-wrapped
+        # submodules compute in bf16, the parameter-dtype heuristic
+        # mismatches the Conv3d weight/bias dtype and the patch_embed
+        # forward fails with "Input type (float) and bias type
+        # (c10::BFloat16) should be the same".
+        target_dtype = torch.bfloat16
         autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         # Extract batch parameters

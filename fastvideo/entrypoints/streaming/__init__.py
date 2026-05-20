@@ -17,6 +17,10 @@ from fastvideo.entrypoints.streaming.gpu_pool import (
     PoolAcquireTimeout,
     SubprocessGpuPool,
 )
+from fastvideo.entrypoints.streaming.health import (
+    build_health_router,
+    get_pool_status,
+)
 from fastvideo.entrypoints.streaming.mock_server import (
     MockGenerator,
     build_mock_app,
@@ -52,6 +56,8 @@ __all__ = [
     "PromptEnhancer",
     "PromptSafetyFilter",
     "SafetyDecision",
+    "build_health_router",
+    "get_pool_status",
     "SessionLogEvent",
     "SessionLogger",
     "build_mock_app",

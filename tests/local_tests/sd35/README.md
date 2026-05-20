@@ -43,7 +43,7 @@ blocked_on: <TODO>
 ## Weight Setup
 
 ```bash
-python "$HOME/.config/opencode/skill/add-model-prep/scripts/download_hf_weights.py" \
+python ".agents/skills/add-model-01-prep/scripts/download_hf_weights.py" \
     "stabilityai/stable-diffusion-3.5-medium" \
     "official_weights/stabilityai__stable-diffusion-3.5-medium"
 ```
