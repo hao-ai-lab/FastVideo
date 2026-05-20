@@ -16,7 +16,7 @@ import torch.distributed as dist
 from safetensors.torch import safe_open
 from tqdm.auto import tqdm
 
-from fastvideo.distributed.parallel_state import get_node_group
+import fastvideo.distributed.parallel_state as parallel_state
 from fastvideo.logger import init_logger
 
 SAFETENSORS_TO_TORCH_DTYPE = {
@@ -152,6 +152,14 @@ def filter_files_not_needed_for_inference(
 _BAR_FORMAT = "{desc}: {percentage:3.0f}% Completed | {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]\n"  # noqa: E501
 
 
+def _get_initialized_node_group():
+    # Single-rank / pytest paths may not have initialized the node group.
+    # Fall through to the old get_local_torch_device() behavior when uninitialized.
+    if torch.distributed.is_initialized() and parallel_state._NODE is not None:
+        return parallel_state.get_node_group()
+    return None
+
+
 def safetensors_weights_iterator(
     hf_weights_files: list[str],
     to_cpu: bool = False,
@@ -164,12 +172,13 @@ def safetensors_weights_iterator(
         async_broadcast: Whether to overlap loading from disk and broadcasting to other ranks. If True,
             must iterate over all the weights before use. Only use if to_cpu is False.
     """
-    node_group = get_node_group()
-    local_rank = node_group.local_rank
-    device = f"cuda:{local_rank}" if not to_cpu else "cpu"
+    node_group = _get_initialized_node_group()
+    local_rank = node_group.local_rank if node_group is not None else int(
+        os.environ.get("LOCAL_RANK", 0))
+    device = str(parallel_state.get_local_torch_device()) if not to_cpu else "cpu"
     enable_tqdm = not torch.distributed.is_initialized() or local_rank == 0
-    assert not (async_broadcast
-                and to_cpu), "Cannot broadcast weights when loading to CPU"
+    if to_cpu:
+        async_broadcast = False
 
     handles = []
     for st_file in tqdm(
@@ -182,7 +191,7 @@ def safetensors_weights_iterator(
             for name in f.keys():  # noqa: SIM118
                 if to_cpu:
                     param = f.get_tensor(name)
-                else:
+                elif node_group is not None:
                     if local_rank == 0:
                         param = f.get_tensor(name)
                     else:
@@ -205,6 +214,8 @@ def safetensors_weights_iterator(
                             dist.broadcast(param,
                                            src=dist.get_global_rank(group, 0),
                                            group=group)
+                else:
+                    param = f.get_tensor(name)
                 yield name, param
 
         if async_broadcast:
@@ -218,9 +229,10 @@ def pt_weights_iterator(
     to_cpu: bool = True  # default to CPU for text encoder
 ) -> Generator[tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model bin/pt files."""
-    node_group = get_node_group()
-    local_rank = node_group.local_rank
-    device = f"cuda:{local_rank}" if not to_cpu else "cpu"
+    node_group = _get_initialized_node_group()
+    local_rank = node_group.local_rank if node_group is not None else int(
+        os.environ.get("LOCAL_RANK", 0))
+    device = str(parallel_state.get_local_torch_device()) if not to_cpu else "cpu"
     enable_tqdm = not torch.distributed.is_initialized() or local_rank == 0
     for bin_file in tqdm(
             hf_weights_files,
