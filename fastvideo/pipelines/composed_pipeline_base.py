@@ -482,6 +482,17 @@ class ComposedPipelineBase(ABC):
             if self.local_rank == 0:
                 print(self.profiler.key_averages().table(sort_by="self_cuda_time_total"))
 
+    def _find_denoise_stage_index(self) -> int | None:
+        """Index of the canonical ``"denoising_stage"`` in
+        ``self.stages``, or ``None`` if no stage by that name is
+        registered (rare — some preprocess pipelines override
+        ``forward`` entirely and never call ``add_stage``).
+        """
+        for i, stage in enumerate(self.stages):
+            if getattr(stage, "_pipeline_stage_name", "") == "denoising_stage":
+                return i
+        return None
+
     # TODO(will): don't hardcode no_grad
     @torch.no_grad()
     def forward(
@@ -504,22 +515,21 @@ class ComposedPipelineBase(ABC):
         # Execute each stage
         logger.info("Running pipeline stages: %s", self._stage_name_mapping.keys())
         # logger.info("Batch: %s", batch)
-        # Bracket the loop with the three documented inference regions so
-        # `FASTVIDEO_TORCH_PROFILE_REGIONS=profiler_region_inference_*`
+        # Bracket the loop with the three documented inference regions
+        # so `FASTVIDEO_TORCH_PROFILE_REGIONS=profiler_region_inference_*`
         # actually traces inference. The denoise stage is identified by
-        # the project-wide convention `add_stage(stage_name="denoising_
-        # stage", ...)`; everything before it counts as pre-denoising and
-        # everything after as post-denoising. If a pipeline does not
-        # register a "denoising_stage" (rare; some preprocess pipelines
-        # override forward entirely), fall back to wrapping the whole
-        # loop under `denoising` so the env-var still produces a trace
-        # rather than silently doing nothing.
-        # The regions are no-ops at zero overhead when not enabled (see
-        # `TorchProfilerController.region`'s early `yield`).
-        denoise_idx = next(
-            (i for i, s in enumerate(self.stages) if getattr(s, "_pipeline_stage_name", "") == "denoising_stage"),
-            None,
-        )
+        # the project-wide convention: a stage registered as
+        # ``"denoising_stage"`` via ``add_stage(stage_name=...)`` (see
+        # the ``fastvideo/pipelines/`` tree). Stages registered before
+        # it count as pre-denoising, stages after as post-denoising.
+        # If a pipeline does not register a ``"denoising_stage"`` (rare
+        # — some preprocess pipelines override ``forward`` entirely),
+        # fall back to wrapping the whole loop under ``denoising`` so
+        # the env var still produces a trace rather than silently doing
+        # nothing. Each region is a no-op at zero overhead when not
+        # enabled (see ``TorchProfilerController.region``'s early
+        # ``yield``).
+        denoise_idx = self._find_denoise_stage_index()
         if denoise_idx is None:
             with self.profiler_controller.region("profiler_region_inference_denoising"):
                 for stage in self.stages:
