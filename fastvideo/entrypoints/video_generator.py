@@ -750,14 +750,20 @@ class VideoGenerator:
         latent_batch_size = _infer_latent_batch_size(batch)
         is_latent_output = fastvideo_args.output_type == "latent"
         needs_frame_output = batch.return_frames or (batch.save_video and not is_latent_output)
-        needs_samples_buffer = batch.return_frames or needs_frame_output
-        # When ``output_type == "latent"`` the forward output has latent
-        # shape (e.g. ``[B, C_latent, T_latent, H_latent, W_latent]``)
-        # rather than the pre-allocation's pixel shape. Skip the pinned
-        # ~50 MB buffer entirely. Also skip it for metadata-only calls;
-        # neither the result nor save path will consume the decoded tensor.
+        # ``samples`` is consumed in exactly one place — the result dict
+        # (``"samples": samples if batch.return_frames else None``).
+        # Post-decode frame building reads ``output_batch.output``
+        # directly (the GPU ``vid_u8`` path), not ``samples``. So when
+        # ``return_frames=False`` the pinned ~50 MB fp32 alloc + D->H
+        # copy are dead weight — the typical generate flow
+        # (``save_video=True``, ``return_frames=False``) hits this on
+        # every call.
+        # ``output_type == "latent"`` keeps its existing branch (shape
+        # mismatch falls through to ``.cpu()`` below) for callers that
+        # *do* ask for the latent samples via ``return_frames=True``.
         # ``skip_pixel_prealloc`` also gates the slow-path warning.
-        skip_pixel_prealloc = is_latent_output or not needs_samples_buffer
+        needs_samples_out = batch.return_frames
+        skip_pixel_prealloc = is_latent_output or not needs_samples_out
         if skip_pixel_prealloc:
             samples = torch.empty(0, device='cpu')
         else:
@@ -777,9 +783,11 @@ class VideoGenerator:
                                "This usually means the executor/pipeline failed earlier.")
 
         audio_only = bool(output_batch.extra.get("audio_only"))
-        if not needs_samples_buffer or (audio_only and not batch.return_frames):
-            # Metadata-only/audio-only request: keep the empty placeholder and
-            # avoid the decoded tensor D->H copy.
+        if not needs_samples_out:
+            # Nothing downstream reads ``samples`` (the result dict
+            # returns None when ``return_frames=False``); keep the empty
+            # placeholder allocated above and skip the fp32 D->H copy
+            # entirely.
             pass
         elif audio_only:
             # Audio-only return-frames requests expose the small placeholder
@@ -834,9 +842,7 @@ class VideoGenerator:
             vid_u8 = (src * 255).clamp_(0, 255).to(torch.uint8)
             vid_u8 = rearrange(vid_u8, "b c t h w -> t b c h w").cpu()
             frames = [
-                torchvision.utils.make_grid(x, nrow=6).permute(
-                    1, 2, 0).squeeze(-1).contiguous().numpy()
-                for x in vid_u8
+                torchvision.utils.make_grid(x, nrow=6).permute(1, 2, 0).squeeze(-1).contiguous().numpy() for x in vid_u8
             ]
         postprocess_time = time.perf_counter() - postprocess_start
         logger.info("PostDecodeFrameProcessStage completed in %.3f s", postprocess_time)
