@@ -254,17 +254,24 @@ def run_lora_extraction_tests():
               ],
               volumes={"/root/data": model_vol})
 def run_performance_tests():
-    # Dashboard runs after compare_baseline regardless of regression result so
-    # the trend view is always available when investigating a failed gate.
+    # compare_baseline.py runs only after pytest passes, so normalized_perf_*.json
+    # artifacts are emitted for rolling-baseline failures, not fixed-threshold
+    # pytest failures. dashboard.py still runs on red CI for observability.
     run_test(
         "export HF_HOME='/root/data/.cache' && "
         "export PERFORMANCE_TRACKING_ROOT='/tmp/perf-tracking' && "
         "hf auth login --token $HF_API_KEY && "
-        "pytest ./fastvideo/tests/performance -vs && "
-        "{ python ./fastvideo/tests/performance/compare_baseline.py; "
+        "pytest ./fastvideo/tests/performance -vs; "
+        "PYTEST_RC=$?; "
+        "PERF_RC=0; "
+        "if [ $PYTEST_RC -eq 0 ]; then "
+        "python ./fastvideo/tests/performance/compare_baseline.py; "
         "PERF_RC=$?; "
+        "fi; "
         "python ./fastvideo/tests/performance/dashboard.py || true; "
-        "exit $PERF_RC; }")
+        "FINAL_RC=$PYTEST_RC; "
+        "if [ $FINAL_RC -eq 0 ]; then FINAL_RC=$PERF_RC; fi; "
+        "exit $FINAL_RC")
 
 
 @app.function(gpu="L40S:1",
