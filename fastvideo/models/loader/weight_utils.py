@@ -162,22 +162,25 @@ def _get_initialized_node_group():
 
 def safetensors_weights_iterator(
     hf_weights_files: list[str],
-    to_cpu: bool = False,
+    to_cpu: bool = True,
+    broadcast: bool = False,
     async_broadcast: bool = False
 ) -> Generator[tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model safetensor files.
     Args:
         hf_weights_files: List of safetensor files to load.
-        to_cpu: Whether to load the weights to CPU. If False, will load to the GPU device bound to the current process.
+        to_cpu: Whether to load the weights to CPU. If False, will load to the GPU device bound to the current
+            process.
+        broadcast: Whether local rank 0 should read GPU weights and broadcast them to the other local ranks.
         async_broadcast: Whether to overlap loading from disk and broadcasting to other ranks. If True,
-            must iterate over all the weights before use. Only use if to_cpu is False.
+            must iterate over all the weights before use. Only used when broadcast is True and to_cpu is False.
     """
     node_group = _get_initialized_node_group()
     local_rank = node_group.local_rank if node_group is not None else int(
         os.environ.get("LOCAL_RANK", 0))
     device = str(parallel_state.get_local_torch_device()) if not to_cpu else "cpu"
     enable_tqdm = not torch.distributed.is_initialized() or local_rank == 0
-    if to_cpu:
+    if to_cpu or not broadcast or node_group is None:
         async_broadcast = False
 
     handles = []
@@ -191,7 +194,7 @@ def safetensors_weights_iterator(
             for name in f.keys():  # noqa: SIM118
                 if to_cpu:
                     param = f.get_tensor(name)
-                elif node_group is not None:
+                elif broadcast and node_group is not None:
                     if local_rank == 0:
                         param = f.get_tensor(name)
                     else:
@@ -226,9 +229,17 @@ def safetensors_weights_iterator(
 
 def pt_weights_iterator(
     hf_weights_files: list[str],
-    to_cpu: bool = True  # default to CPU for text encoder
+    to_cpu: bool = True,  # default to CPU for text encoder
+    broadcast: bool = False
 ) -> Generator[tuple[str, torch.Tensor], None, None]:
-    """Iterate over the weights in the model bin/pt files."""
+    """Iterate over the weights in the model bin/pt files.
+
+    Args:
+        hf_weights_files: List of bin/pt files to load.
+        to_cpu: Whether to load the weights to CPU.
+        broadcast: Accepted for API symmetry. PT weights are loaded through
+            torch.load and do not use the safetensors broadcast path.
+    """
     node_group = _get_initialized_node_group()
     local_rank = node_group.local_rank if node_group is not None else int(
         os.environ.get("LOCAL_RANK", 0))

@@ -7,8 +7,8 @@ Benchmarks for measuring model weight loading speed from safetensors files.
 ### `benchmark_weight_loading.py`
 
 Measures loading throughput for two modes:
-- **`to_cpu=True`**: load weights to CPU (memory-mapped, no broadcast)
-- **`to_cpu=False`**: load weights to GPU (rank 0 reads from disk, broadcasts to other ranks)
+- **`to_cpu=True, broadcast=False`**: load weights to CPU (memory-mapped, no broadcast)
+- **`to_cpu=False, broadcast=True`**: load weights to GPU (rank 0 reads from disk, broadcasts to other ranks)
 
 ```bash
 # Single GPU (no torchrun needed)

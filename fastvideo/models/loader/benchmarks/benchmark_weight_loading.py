@@ -38,6 +38,7 @@ logger = init_logger(__name__)
 def benchmark_loading(
     files: list[str],
     to_cpu: bool,
+    broadcast: bool,
     warmup: int,
     repeats: int,
     label: str,
@@ -49,7 +50,8 @@ def benchmark_loading(
     # Count total params and bytes on first pass
     total_params = 0
     total_bytes = 0
-    for name, tensor in safetensors_weights_iterator(files, to_cpu=to_cpu):
+    for name, tensor in safetensors_weights_iterator(
+            files, to_cpu=to_cpu, broadcast=broadcast):
         total_params += 1
         total_bytes += tensor.nelement() * tensor.element_size()
 
@@ -59,7 +61,8 @@ def benchmark_loading(
 
     # Warmup
     for _ in range(warmup):
-        for _ in safetensors_weights_iterator(files, to_cpu=to_cpu):
+        for _ in safetensors_weights_iterator(
+                files, to_cpu=to_cpu, broadcast=broadcast):
             pass
         if dist.is_initialized():
             dist.barrier()
@@ -72,7 +75,8 @@ def benchmark_loading(
         torch.cuda.synchronize() if torch.cuda.is_available() else None
 
         t0 = time.perf_counter()
-        for _ in safetensors_weights_iterator(files, to_cpu=to_cpu):
+        for _ in safetensors_weights_iterator(
+                files, to_cpu=to_cpu, broadcast=broadcast):
             pass
         torch.cuda.synchronize() if torch.cuda.is_available() else None
 
@@ -137,12 +141,12 @@ def main() -> None:
         logger.info("World size: %d", world_size)
 
     # Benchmark: load to CPU (no broadcast, each rank reads independently)
-    benchmark_loading(files, to_cpu=True, warmup=args.warmup,
+    benchmark_loading(files, to_cpu=True, broadcast=False, warmup=args.warmup,
                       repeats=args.repeats, label="to_cpu=True")
 
     # Benchmark: load to GPU (rank 0 reads, broadcasts to others)
     if torch.cuda.is_available():
-        benchmark_loading(files, to_cpu=False, warmup=args.warmup,
+        benchmark_loading(files, to_cpu=False, broadcast=True, warmup=args.warmup,
                           repeats=args.repeats, label="to_cpu=False (broadcast)")
 
     cleanup_dist_env_and_memory()
