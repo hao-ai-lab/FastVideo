@@ -672,7 +672,7 @@ def get_node_group() -> GroupCoordinator:
 
 def init_node_group(local_rank: int, backend: str):
     cpu_group = get_world_group().cpu_group
-    node_ranks = is_the_same_node_as(cpu_group)
+    node_ranks = get_same_node_ranks(cpu_group)
     node_size = len(node_ranks)
     # NOTE: assumes all nodes have the same number of GPUs.
     # Heterogeneous clusters are not supported.
@@ -1008,20 +1008,25 @@ def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
         ray.shutdown()
 
 
-def is_the_same_node_as(pg: ProcessGroup | StatelessProcessGroup, source_rank: int = 0) -> list[int]:
-    """
-    This is a collective operation that returns ranks that are in the same node
-    as the source rank. It tests if processes are attached to the same
-    memory system (shared access to shared memory).
+def get_same_node_ranks(pg: ProcessGroup | StatelessProcessGroup, source_rank: int = 0) -> list[int]:
+    """Return the global ranks that share ``source_rank``'s node.
+
+    This is a collective operation that tests if processes are attached to the
+    same memory system (shared access to shared memory).
+
+    Replaces the boolean-returning ``is_the_same_node_as`` for callers that
+    want a rank list, not a per-rank boolean mask.
+
     Args:
         pg: the global process group to test
         source_rank: the rank to test against
+
     Returns:
         A list of ranks that are in the same node as the source rank.
     """
     if isinstance(pg, ProcessGroup):
         assert torch.distributed.get_backend(pg) != torch.distributed.Backend.NCCL, (
-            "in_the_same_node_as should be tested with a non-NCCL group.")
+            "get_same_node_ranks should be tested with a non-NCCL group.")
         # local rank inside the group
         rank = torch.distributed.get_rank(group=pg)
         world_size = torch.distributed.get_world_size(group=pg)
@@ -1066,7 +1071,7 @@ def is_the_same_node_as(pg: ProcessGroup | StatelessProcessGroup, source_rank: i
                 if shm.buf[:len(magic_message)] == magic_message:
                     is_in_the_same_node[rank] = 1
     except Exception as e:
-        logger.error("Error ignored in is_in_the_same_node: %s", e)
+        logger.error("Error ignored in get_same_node_ranks: %s", e)
     finally:
         if shm:
             shm.close()
@@ -1090,7 +1095,18 @@ def is_the_same_node_as(pg: ProcessGroup | StatelessProcessGroup, source_rank: i
             rank_data = pg.broadcast_obj(is_in_the_same_node, src=i)
             aggregated_data += rank_data
 
-    return [i for i, x in enumerate(aggregated_data.tolist()) if x == 1]
+    return [ranks[i] for i, x in enumerate(aggregated_data.tolist()) if x == 1]
+
+
+def is_the_same_node_as(pg: ProcessGroup | StatelessProcessGroup, source_rank: int = 0) -> list[int]:
+    """Deprecated alias for ``get_same_node_ranks``.
+
+    NOTE: PR #572 changed the return value from ``list[bool]`` (a per-rank
+    boolean mask) to ``list[int]`` (global rank IDs that share the same node as
+    ``source_rank``). Callers that treated the result as a boolean mask must
+    update.
+    """
+    return get_same_node_ranks(pg, source_rank)
 
 
 def initialize_tensor_parallel_group(tensor_model_parallel_size: int = 1,
