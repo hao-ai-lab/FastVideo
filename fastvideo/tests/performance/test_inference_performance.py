@@ -17,6 +17,10 @@ import pytest
 
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
+from fastvideo.tests.performance.env_capture import (
+    PERF_RECORD_SCHEMA_VERSION,
+    capture_env,
+)
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
@@ -170,6 +174,7 @@ def test_inference_performance(cfg):
         throughput_fps = num_frames / avg_time
 
     results = {
+        "schema_version": PERF_RECORD_SCHEMA_VERSION,
         "benchmark_id": cfg["benchmark_id"],
         "model_short_name": model_info.get("model_short_name", ""),
         "device": device_name,
@@ -186,6 +191,7 @@ def test_inference_performance(cfg):
         "commit": os.environ.get("BUILDKITE_COMMIT", ""),
         "pr_number": os.environ.get("BUILDKITE_PULL_REQUEST", ""),
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "env": capture_env(),
     }
 
     logger.info(

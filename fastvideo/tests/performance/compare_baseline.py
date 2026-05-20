@@ -20,6 +20,13 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
+from env_capture import (
+    PERF_RECORD_SCHEMA_VERSION,
+    describe_compare_tuple,
+    extract_compare_tuple,
+    get_compare_keys,
+    strict_env_mode,
+)
 from hf_store import (
     load_records_for_model,
     safe_float,
@@ -68,6 +75,7 @@ def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
     memory = safe_float(result.get("max_peak_memory_mb"))
 
     return {
+        "schema_version": result.get("schema_version", PERF_RECORD_SCHEMA_VERSION),
         "model_id": model_id,
         "timestamp": timestamp,
         "commit_sha": commit_sha,
@@ -75,6 +83,7 @@ def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
         "latency": latency,
         "throughput": throughput,
         "memory": memory,
+        "env": result.get("env"),
         "success": True,
     }
 
@@ -173,9 +182,14 @@ def _build_summary_row(
     regressions = [v for v in (latency_reg, throughput_reg, memory_reg) if v is not None]
     worst_regression_pct = max(regressions) if regressions else None
 
+    compare_keys = get_compare_keys()
+    env_tuple = extract_compare_tuple(record, compare_keys)
+    env_summary = describe_compare_tuple(env_tuple, compare_keys)
+
     return {
         "model_id": record["model_id"],
         "gpu_type": record["gpu_type"],
+        "env_summary": env_summary,
         "baseline_n": len(baseline_records),
         "latency_curr": safe_float(record.get("latency")),
         "latency_base": latency_base,
@@ -192,15 +206,21 @@ def _build_markdown_summary(
     summary_rows: list[dict[str, Any]],
     max_regression: float,
 ) -> str:
+    compare_keys = get_compare_keys()
+    strict = strict_env_mode()
+
     lines = [
         "## Performance Baseline Comparison",
         "",
         f"Threshold: regressions greater than {max_regression * 100:.1f}% fail",
+        f"Env compare keys: {', '.join(compare_keys)}",
+        f"Strict env mode: {'ON' if strict else 'OFF'} "
+        "(set `PERF_STRICT_ENV=1` to require env-tuple match for baseline records)",
         "",
-        ("| Model | GPU | Baseline N | Latency (curr/base) | "
+        ("| Model | GPU | Env | Baseline N | Latency (curr/base) | "
          "Throughput (curr/base) | Memory (curr/base) | "
          "Worst Regression | Status |"),
-        "|---|---|---:|---|---|---|---:|---|",
+        "|---|---|---|---:|---|---|---|---:|---|",
     ]
 
     for row in summary_rows:
@@ -213,8 +233,10 @@ def _build_markdown_summary(
 
         worst_reg = ("n/a" if row["worst_regression_pct"] is None else f"{row['worst_regression_pct']:.1f}%")
         status = "FAIL" if row["failed"] else "PASS"
+        env_summary = row.get("env_summary") or "n/a"
 
         lines.append(f"| {row['model_id']} | {row['gpu_type']} | "
+                     f"{env_summary} | "
                      f"{row['baseline_n']} | "
                      f"{latency} | {throughput} | {memory} | "
                      f"{worst_reg} | {status} |")
@@ -265,8 +287,20 @@ def main() -> int:
         print("Tracking persistence disabled: "
               "only full-suite runs on main branch are persisted")
 
+    strict = strict_env_mode()
+    compare_keys = get_compare_keys()
+    if strict:
+        print(f"PERF_STRICT_ENV=1 — baselines filtered to records matching "
+              f"current env on keys: {', '.join(compare_keys)}")
+
     for raw in current_results:
         record = _normalize_record(raw)
+
+        env_filter = None
+        if strict:
+            current_tuple = extract_compare_tuple(record, compare_keys)
+            env_filter = (lambda r, t=current_tuple:
+                          extract_compare_tuple(r, compare_keys) == t)
 
         baseline_records = load_records_for_model(
             TRACKING_ROOT,
@@ -274,10 +308,13 @@ def main() -> int:
             record["gpu_type"],
             last_n=5,
             successful_only=True,
+            extra_filter=env_filter,
         )
 
         if not baseline_records:
-            print(f"No baseline for {record['model_id']} on "
+            reason = ("no env-comparable records on "
+                      if strict else "no baseline for ")
+            print(f"{reason}{record['model_id']} on "
                   f"{record['gpu_type']}. Initializing...")
             failures: list[str] = []
             record["success"] = True
