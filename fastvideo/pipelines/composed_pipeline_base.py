@@ -504,8 +504,35 @@ class ComposedPipelineBase(ABC):
         # Execute each stage
         logger.info("Running pipeline stages: %s", self._stage_name_mapping.keys())
         # logger.info("Batch: %s", batch)
-        for stage in self.stages:
-            batch = stage(batch, fastvideo_args)
+        # Bracket the loop with the three documented inference regions so
+        # `FASTVIDEO_TORCH_PROFILE_REGIONS=profiler_region_inference_*`
+        # actually traces inference. The denoise stage is identified by
+        # the project-wide convention `add_stage(stage_name="denoising_
+        # stage", ...)`; everything before it counts as pre-denoising and
+        # everything after as post-denoising. If a pipeline does not
+        # register a "denoising_stage" (rare; some preprocess pipelines
+        # override forward entirely), fall back to wrapping the whole
+        # loop under `denoising` so the env-var still produces a trace
+        # rather than silently doing nothing.
+        # The regions are no-ops at zero overhead when not enabled (see
+        # `TorchProfilerController.region`'s early `yield`).
+        denoise_idx = next(
+            (i for i, s in enumerate(self.stages) if getattr(s, "_pipeline_stage_name", "") == "denoising_stage"),
+            None,
+        )
+        if denoise_idx is None:
+            with self.profiler_controller.region("profiler_region_inference_denoising"):
+                for stage in self.stages:
+                    batch = stage(batch, fastvideo_args)
+        else:
+            with self.profiler_controller.region("profiler_region_inference_pre_denoising"):
+                for stage in self.stages[:denoise_idx]:
+                    batch = stage(batch, fastvideo_args)
+            with self.profiler_controller.region("profiler_region_inference_denoising"):
+                batch = self.stages[denoise_idx](batch, fastvideo_args)
+            with self.profiler_controller.region("profiler_region_inference_post_denoising"):
+                for stage in self.stages[denoise_idx + 1:]:
+                    batch = stage(batch, fastvideo_args)
 
         # Return the output
         return batch

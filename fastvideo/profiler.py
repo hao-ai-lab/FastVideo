@@ -124,19 +124,18 @@ register_profiler_region(
     description="Module/model loading during pipeline initialization.",
     default_enabled=False,
 )
-# register_profiler_region(
-#     name="profiler_region_inference_pre_denoising",
-#     description="Pre-denoising inference steps (conditioning, preprocessing).",
-# )
-# register_profiler_region(
-#     name="profiler_region_inference_denoising",
-#     description="The main inference denoising loop.",
-# )
-# register_profiler_region(
-#     name="profiler_region_inference_post_denoising",
-#     description=
-#     "Post-processing after denoising (decoder, conditioning restores).",
-# )
+register_profiler_region(
+    name="profiler_region_inference_pre_denoising",
+    description="Pre-denoising inference steps (conditioning, preprocessing).",
+)
+register_profiler_region(
+    name="profiler_region_inference_denoising",
+    description="The main inference denoising loop.",
+)
+register_profiler_region(
+    name="profiler_region_inference_post_denoising",
+    description="Post-processing after denoising (decoder, conditioning restores).",
+)
 register_profiler_region(
     name="profiler_region_training_save_checkpoint",
     description="Training save checkpoint operations.",
