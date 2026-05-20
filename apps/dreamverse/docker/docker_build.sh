@@ -25,7 +25,13 @@ build_args=()
 [[ -n "${BUILD_FASTVIDEO_KERNEL_FROM_SOURCE:-}" ]] && \
   build_args+=(--build-arg "BUILD_FASTVIDEO_KERNEL_FROM_SOURCE=${BUILD_FASTVIDEO_KERNEL_FROM_SOURCE}")
 
-if [[ -e "${ROOT_DOCKERIGNORE}" || -L "${ROOT_DOCKERIGNORE}" ]]; then
+if [[ "${DOCKER_BUILDKIT:-}" == "1" ]]; then
+  if [[ -L "${ROOT_DOCKERIGNORE}" ]] && \
+    [[ "$(readlink "${ROOT_DOCKERIGNORE}")" == "${DOCKERFILE_DOCKERIGNORE}" ]]; then
+    rm -- "${ROOT_DOCKERIGNORE}"
+    printf 'Removed stale temporary root .dockerignore symlink: %s\n' "${ROOT_DOCKERIGNORE}"
+  fi
+elif [[ -e "${ROOT_DOCKERIGNORE}" || -L "${ROOT_DOCKERIGNORE}" ]]; then
   printf 'Using existing root .dockerignore: %s\n' "${ROOT_DOCKERIGNORE}"
 else
   ln -s -- "${DOCKERFILE_DOCKERIGNORE}" "${ROOT_DOCKERIGNORE}"
