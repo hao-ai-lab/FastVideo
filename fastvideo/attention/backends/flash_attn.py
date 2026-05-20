@@ -22,7 +22,6 @@ except ImportError:
         flash_attn_func = flash_attn_2_func
         fa_version = "2"
 
-
 # torch.compile traceability: the FA4/cute path (fa_version=="4") is
 # already a registered torch.library custom op, so dynamo treats it as a
 # graph node. The external FA2/FA3 `flash_attn_func` is NOT — dynamo
@@ -36,6 +35,16 @@ except ImportError:
 if fa_version in ("2", "3"):
     _fa_default = flash_attn_func
 
+    # Scope: this op covers exactly the q/k/v + softmax_scale + causal
+    # call shape used by FlashAttentionImpl.forward's default branch
+    # (see `flash_attn_func_compilable(...)` call site below). The
+    # masked/no-pad and varlen / cross-attn paths use different
+    # entry points (`flash_attn_no_pad`, `flash_attn_varlen_*`) which
+    # are intentionally out of scope for this PR — wrapping them is a
+    # natural follow-up. The wrapper's signature is the contract: any
+    # extra kwarg (dropout_p, window_size, alibi_slopes, deterministic,
+    # return_attn_probs, ...) raises TypeError at the call site, so
+    # silent loss of kwargs is not a failure mode.
     @torch.library.custom_op(
         "fastvideo::_flash_attn_default_forward",
         mutates_args=(),
@@ -64,12 +73,19 @@ if fa_version in ("2", "3"):
         return q.new_empty(q.shape[0], q.shape[1], q.shape[2], v.shape[-1])
 
     def flash_attn_func_compilable(q, k, v, softmax_scale=None, causal=False):
-        return torch.ops.fastvideo._flash_attn_default_forward(
-            q, k, v, softmax_scale, causal)
-else:
-    # fa_version == "4": flash_attn_func is already a custom op.
+        return torch.ops.fastvideo._flash_attn_default_forward(q, k, v, softmax_scale, causal)
+elif fa_version == "4":
+    # FA4 path: `flash_attn_func` is already a torch.library custom op
+    # (registered in `fastvideo.attention.utils.flash_attn_cute`), so a
+    # passthrough is enough — no extra registration needed.
     def flash_attn_func_compilable(q, k, v, softmax_scale=None, causal=False):
         return flash_attn_func(q, k, v, softmax_scale=softmax_scale, causal=causal)
+else:
+    # Defensive: the probe above only ever sets fa_version to "2", "3",
+    # or "4"; an unexpected value means an import/probe regression and
+    # we want a loud error at import, not a silent NameError later.
+    raise RuntimeError(f"Unsupported FlashAttention version: {fa_version!r} — expected "
+                       f"'2', '3', or '4' from the import probe above.")
 
 from fastvideo.attention.backends.abstract import (
     AttentionBackend,
