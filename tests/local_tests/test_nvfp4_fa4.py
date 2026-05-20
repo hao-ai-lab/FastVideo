@@ -21,14 +21,11 @@ del _warmup
 
 
 def _make_impl(nheads, headdim, nvfp4=False):
-    if nvfp4:
-        os.environ["FASTVIDEO_NVFP4_FA4"] = "1"
-    else:
-        os.environ.pop("FASTVIDEO_NVFP4_FA4", None)
     from fastvideo.attention.backends.flash_attn import FlashAttentionImpl
     return FlashAttentionImpl(
         num_heads=nheads, head_size=headdim, causal=False,
         softmax_scale=headdim ** -0.5,
+        nvfp4_fa4=nvfp4,
     )
 
 
