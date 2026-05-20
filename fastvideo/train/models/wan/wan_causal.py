@@ -16,6 +16,7 @@ from fastvideo.train.models.wan.wan import WanModel
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
+    from fastvideo.train.utils.lora import LoraConfig
 
 
 @dataclass(slots=True)
@@ -47,6 +48,7 @@ class WanCausalModel(WanModel, CausalModelBase):
         | None = None,
         transformer_override_safetensor: str
         | None = None,
+        lora: LoraConfig | dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             init_from=init_from,
@@ -56,6 +58,7 @@ class WanCausalModel(WanModel, CausalModelBase):
             flow_shift=flow_shift,
             enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
             transformer_override_safetensor=(transformer_override_safetensor),
+            lora=lora,
         )
         self._streaming_caches: (dict[tuple[int, str], _StreamingCaches]) = {}
 
@@ -349,9 +352,15 @@ class WanCausalModel(WanModel, CausalModelBase):
 
         if checkpoint_safe:
             tc = getattr(self, "training_config", None)
-            total_frames = int(tc.data.num_frames if tc is not None else 0)
+            total_frames = int(getattr(tc.data, "num_latent_t", 0) if tc is not None else 0)
+            if total_frames <= 0 and tc is not None:
+                raw_num_frames = int(getattr(tc.data, "num_frames", 0))
+                if raw_num_frames > 0:
+                    temporal_compression_ratio = int(
+                        tc.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
+                    total_frames = (raw_num_frames - 1) // temporal_compression_ratio + 1
             if total_frames <= 0:
-                raise ValueError("training.num_frames must be set "
+                raise ValueError("training.data.num_latent_t must be set "
                                  "to enable checkpoint-safe "
                                  "streaming KV cache; got "
                                  f"{total_frames}")

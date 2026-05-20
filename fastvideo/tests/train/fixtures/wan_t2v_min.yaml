@@ -1,0 +1,21 @@
+# Minimum config to instantiate WanModel for the loading + forward smoke
+# test. Real Wan2.1 1.3B checkpoint loaded via load_module_from_path.
+# Defaults cover everything else (see fastvideo/train/utils/config.py).
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: false
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  dit_precision: bf16
+
+# Empty dict (not omitted) so _parse_pipeline_config resolves the
+# Wan-specific dit_config from the model checkpoint instead of falling
+# back to a bare DiTConfig (which lacks Wan-specific fields like
+# added_kv_proj_dim and breaks the loader).
+pipeline: {}

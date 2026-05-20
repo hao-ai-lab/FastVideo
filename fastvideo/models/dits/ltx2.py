@@ -28,11 +28,57 @@ from fastvideo.distributed.communication_op import (
 )
 from fastvideo.distributed.parallel_state import get_sp_parallel_rank, get_sp_world_size
 from fastvideo.forward_context import ForwardContext, get_forward_context, set_forward_context
+from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.layers.quantization.base_config import QuantizationConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 
 logger = init_logger(__name__)
+
+
+def _supports_prequantized_input(linear: ReplicatedLinear) -> bool:
+    """Whether ``linear``'s quant method is willing to accept a
+    pre-quantized ``(x_fp4, x_scale, x_global_sf)`` input tuple.
+
+    Used by the LTX-2 attention forward path so that a single input
+    tensor can be quantized once and reused across q/k/v projections
+    when they share the same source (self-attention).
+    """
+    quant_method = getattr(linear, "quant_method", None)
+    if not callable(getattr(quant_method, "quantize_input", None)):
+        return False
+    wants_prequant = getattr(quant_method, "wants_prequantized_input", None)
+    if callable(wants_prequant):
+        try:
+            return bool(wants_prequant())
+        except Exception:
+            return False
+    return True
+
+
+def _linear_project_with_optional_prequant(
+    linear: ReplicatedLinear,
+    x: torch.Tensor,
+    pre_quantized: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None,
+) -> torch.Tensor:
+    """Project ``x`` through ``linear``, optionally bypassing the
+    in-method quantize step when ``pre_quantized`` is supplied.
+
+    When the linear's quant method does not support pre-quantized
+    inputs (e.g. ``UnquantizedLinearMethod``), falls back to the
+    standard ``linear(x)`` call and discards the bias-pass-through
+    tuple element.
+    """
+    if pre_quantized is None or not _supports_prequantized_input(linear):
+        return linear(x)[0]
+    bias = linear.bias if not linear.skip_bias_add else None
+    return linear.quant_method.apply(  # type: ignore[union-attr]
+        linear,
+        x,
+        bias=bias,
+        pre_quantized=pre_quantized,
+    )
 
 
 def get_timestep_embedding(
@@ -172,25 +218,57 @@ class PixArtAlphaTextProjection(torch.nn.Module):
 
 class GELUApprox(nn.Module):
     """Linear + tanh-approximate GELU used by LTX-2 FFN."""
-    def __init__(self, in_features: int, out_features: int):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
+    ):
         super().__init__()
-        self.proj = nn.Linear(in_features, out_features)
+        self.proj = ReplicatedLinear(
+            in_features,
+            out_features,
+            quant_config=quant_config,
+            prefix=f"{prefix}.fc_in",
+        )
         self.act = nn.GELU(approximate="tanh")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.act(self.proj(x))
+        return self.act(self.proj(x)[0])
 
 
 class FeedForward(nn.Module):
     """LTX-2 FFN: GELUApprox -> Identity -> Linear."""
-    def __init__(self, dim: int, dim_out: int, mult: int = 4) -> None:
+    def __init__(
+        self,
+        dim: int,
+        dim_out: int,
+        mult: int = 4,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
+    ) -> None:
         super().__init__()
         inner_dim = int(dim * mult)
-        project_in = GELUApprox(dim, inner_dim)
-        self.net = nn.Sequential(project_in, nn.Identity(), nn.Linear(inner_dim, dim_out))
+        project_in = GELUApprox(
+            dim,
+            inner_dim,
+            quant_config=quant_config,
+            prefix=f"{prefix}.ffn",
+        )
+        project_out = ReplicatedLinear(
+            inner_dim,
+            dim_out,
+            quant_config=quant_config,
+            prefix=f"{prefix}.ffn.fc_out",
+        )
+        self.net = nn.ModuleList([project_in, nn.Identity(), project_out])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
+        x = self.net[0](x)
+        x = self.net[1](x)
+        x = self.net[2](x)[0]
+        return x
 
 
 class VideoLatentShape(tuple):
@@ -1246,6 +1324,8 @@ class LTXSelfAttention(nn.Module):
         norm_eps: float,
         rope_type: LTXRopeType,
         supported_attention_backends: tuple[AttentionBackendEnum, ...],
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
     ) -> None:
         super().__init__()
         inner_dim = dim_head * heads
@@ -1257,10 +1337,37 @@ class LTXSelfAttention(nn.Module):
 
         self.q_norm = torch.nn.RMSNorm(inner_dim, eps=norm_eps)
         self.k_norm = torch.nn.RMSNorm(inner_dim, eps=norm_eps)
-        self.to_q = nn.Linear(query_dim, inner_dim, bias=True)
-        self.to_k = nn.Linear(context_dim, inner_dim, bias=True)
-        self.to_v = nn.Linear(context_dim, inner_dim, bias=True)
-        self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim, bias=True), nn.Identity())
+        self.to_q = ReplicatedLinear(
+            query_dim,
+            inner_dim,
+            bias=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.to_q",
+        )
+        self.to_k = ReplicatedLinear(
+            context_dim,
+            inner_dim,
+            bias=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.to_k",
+        )
+        self.to_v = ReplicatedLinear(
+            context_dim,
+            inner_dim,
+            bias=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.to_v",
+        )
+        self.to_out = nn.ModuleList([
+            ReplicatedLinear(
+                inner_dim,
+                query_dim,
+                bias=True,
+                quant_config=quant_config,
+                prefix=f"{prefix}.to_out",
+            ),
+            nn.Identity(),
+        ])
 
         self.attn = LTXLocalAttention(
             num_heads=heads,
@@ -1271,9 +1378,15 @@ class LTXSelfAttention(nn.Module):
             causal=False,
             supported_attention_backends=supported_attention_backends,
         )
-        self.to_gate_compress: nn.Linear | None = None
+        self.to_gate_compress: ReplicatedLinear | None = None
         if self.attn.backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
-            self.to_gate_compress = nn.Linear(context_dim, inner_dim, bias=True)
+            self.to_gate_compress = ReplicatedLinear(
+                context_dim,
+                inner_dim,
+                bias=True,
+                quant_config=quant_config,
+                prefix=f"{prefix}.to_gate_compress",
+            )
         self.attn_masked = LTXLocalAttention(
             num_heads=heads,
             head_size=dim_head,
@@ -1292,11 +1405,24 @@ class LTXSelfAttention(nn.Module):
         pe: tuple[torch.Tensor, torch.Tensor] | None = None,
         k_pe: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> torch.Tensor:
-        q = self.to_q(x)
         context = x if context is None else context
-        k = self.to_k(context)
-        v = self.to_v(context)
-        gate_compress = (self.to_gate_compress(context)
+
+        q_pre_quantized = (
+            self.to_q.quant_method.quantize_input(x)  # type: ignore[union-attr]
+            if _supports_prequantized_input(self.to_q) else None)
+        kv_pre_quantized = None
+        if (_supports_prequantized_input(self.to_k)
+                and _supports_prequantized_input(self.to_v)):
+            if context is x and q_pre_quantized is not None:
+                kv_pre_quantized = q_pre_quantized
+            else:
+                kv_pre_quantized = self.to_k.quant_method.quantize_input(  # type: ignore[union-attr]
+                    context)
+
+        q = _linear_project_with_optional_prequant(self.to_q, x, q_pre_quantized)
+        k = _linear_project_with_optional_prequant(self.to_k, context, kv_pre_quantized)
+        v = _linear_project_with_optional_prequant(self.to_v, context, kv_pre_quantized)
+        gate_compress = (self.to_gate_compress(context)[0]
                          if self.to_gate_compress is not None else None)
 
         q = self.q_norm(q)
@@ -1346,7 +1472,8 @@ class LTXSelfAttention(nn.Module):
                             ltx_freqs_cis=pe,
                             ltx_k_freqs_cis=k_pe)
         out = out.reshape(b, q_len, -1)
-        return self.to_out(out)
+        out = self.to_out[0](out)[0]
+        return self.to_out[1](out)
 
 
 class LTXDistributedSelfAttention(nn.Module):
@@ -1361,6 +1488,7 @@ class LTXDistributedSelfAttention(nn.Module):
         norm_eps: float,
         rope_type: LTXRopeType,
         supported_attention_backends: tuple[AttentionBackendEnum, ...],
+        quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ) -> None:
         super().__init__()
@@ -1373,10 +1501,37 @@ class LTXDistributedSelfAttention(nn.Module):
 
         self.q_norm = torch.nn.RMSNorm(inner_dim, eps=norm_eps)
         self.k_norm = torch.nn.RMSNorm(inner_dim, eps=norm_eps)
-        self.to_q = nn.Linear(query_dim, inner_dim, bias=True)
-        self.to_k = nn.Linear(context_dim, inner_dim, bias=True)
-        self.to_v = nn.Linear(context_dim, inner_dim, bias=True)
-        self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim, bias=True), nn.Identity())
+        self.to_q = ReplicatedLinear(
+            query_dim,
+            inner_dim,
+            bias=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.to_q",
+        )
+        self.to_k = ReplicatedLinear(
+            context_dim,
+            inner_dim,
+            bias=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.to_k",
+        )
+        self.to_v = ReplicatedLinear(
+            context_dim,
+            inner_dim,
+            bias=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.to_v",
+        )
+        self.to_out = nn.ModuleList([
+            ReplicatedLinear(
+                inner_dim,
+                query_dim,
+                bias=True,
+                quant_config=quant_config,
+                prefix=f"{prefix}.to_out",
+            ),
+            nn.Identity(),
+        ])
 
         self.attn = LTXDistributedAttention(
             num_heads=heads,
@@ -1386,9 +1541,15 @@ class LTXDistributedSelfAttention(nn.Module):
             supported_attention_backends=supported_attention_backends,
             prefix=f"{prefix}.attn",
         )
-        self.to_gate_compress: nn.Linear | None = None
+        self.to_gate_compress: ReplicatedLinear | None = None
         if self.attn.backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
-            self.to_gate_compress = nn.Linear(context_dim, inner_dim, bias=True)
+            self.to_gate_compress = ReplicatedLinear(
+                context_dim,
+                inner_dim,
+                bias=True,
+                quant_config=quant_config,
+                prefix=f"{prefix}.to_gate_compress",
+            )
 
     def forward(
         self,
@@ -1408,11 +1569,24 @@ class LTXDistributedSelfAttention(nn.Module):
             k_pe: Rotary position embeddings for K (cos, sin), or None to use pe
             original_seq_len: Original (unpadded) full sequence length
         """
-        q = self.to_q(x)
         context = x if context is None else context
-        k = self.to_k(context)
-        v = self.to_v(context)
-        gate_compress = (self.to_gate_compress(context)
+
+        q_pre_quantized = (
+            self.to_q.quant_method.quantize_input(x)  # type: ignore[union-attr]
+            if _supports_prequantized_input(self.to_q) else None)
+        kv_pre_quantized = None
+        if (_supports_prequantized_input(self.to_k)
+                and _supports_prequantized_input(self.to_v)):
+            if context is x and q_pre_quantized is not None:
+                kv_pre_quantized = q_pre_quantized
+            else:
+                kv_pre_quantized = self.to_k.quant_method.quantize_input(  # type: ignore[union-attr]
+                    context)
+
+        q = _linear_project_with_optional_prequant(self.to_q, x, q_pre_quantized)
+        k = _linear_project_with_optional_prequant(self.to_k, context, kv_pre_quantized)
+        v = _linear_project_with_optional_prequant(self.to_v, context, kv_pre_quantized)
+        gate_compress = (self.to_gate_compress(context)[0]
                          if self.to_gate_compress is not None else None)
 
         q = self.q_norm(q)
@@ -1443,7 +1617,8 @@ class LTXDistributedSelfAttention(nn.Module):
         )
 
         out = out.reshape(b, q_len, -1)
-        return self.to_out(out)
+        out = self.to_out[0](out)[0]
+        return self.to_out[1](out)
 
 
 class BasicAVTransformerBlock(torch.nn.Module):
@@ -1457,6 +1632,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
         rope_type: LTXRopeType = LTXRopeType.INTERLEAVED,
         norm_eps: float = 1e-6,
         use_distributed_attention: bool = False,
+        quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -1488,15 +1664,8 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 norm_eps=norm_eps,
                 rope_type=rope_type,
                 supported_attention_backends=video_self_attn_backends,
-                prefix=f"{prefix}.blocks.{idx}.attn1" if use_distributed_attention else "",
-            ) if use_distributed_attention else LTXSelfAttention(
-                query_dim=video.dim,
-                context_dim=None,
-                heads=video.heads,
-                dim_head=video.d_head,
-                norm_eps=norm_eps,
-                rope_type=rope_type,
-                supported_attention_backends=video_self_attn_backends,
+                quant_config=quant_config,
+                prefix=f"{prefix}.blocks.{idx}.attn1",
             )
             # Text cross-attention - always local (text is replicated)
             self.attn2 = CrossAttnCls(
@@ -1507,8 +1676,15 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 norm_eps=norm_eps,
                 rope_type=rope_type,
                 supported_attention_backends=dense_attn_backends,
+                quant_config=quant_config,
+                prefix=f"{prefix}.blocks.{idx}.attn2",
             )
-            self.ff = FeedForward(video.dim, dim_out=video.dim)
+            self.ff = FeedForward(
+                video.dim,
+                dim_out=video.dim,
+                quant_config=quant_config,
+                prefix=f"{prefix}.blocks.{idx}",
+            )
             self.scale_shift_table = torch.nn.Parameter(torch.empty(6, video.dim))
 
         if audio is not None:
@@ -1521,15 +1697,8 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 norm_eps=norm_eps,
                 rope_type=rope_type,
                 supported_attention_backends=dense_attn_backends,
-                prefix=f"{prefix}.blocks.{idx}.audio_attn1" if use_distributed_attention else "",
-            ) if use_distributed_attention else LTXSelfAttention(
-                query_dim=audio.dim,
-                context_dim=None,
-                heads=audio.heads,
-                dim_head=audio.d_head,
-                norm_eps=norm_eps,
-                rope_type=rope_type,
-                supported_attention_backends=dense_attn_backends,
+                quant_config=quant_config,
+                prefix=f"{prefix}.blocks.{idx}.audio_attn1",
             )
             # Text cross-attention - always local (text is replicated)
             self.audio_attn2 = CrossAttnCls(
@@ -1540,8 +1709,15 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 norm_eps=norm_eps,
                 rope_type=rope_type,
                 supported_attention_backends=dense_attn_backends,
+                quant_config=quant_config,
+                prefix=f"{prefix}.blocks.{idx}.audio_attn2",
             )
-            self.audio_ff = FeedForward(audio.dim, dim_out=audio.dim)
+            self.audio_ff = FeedForward(
+                audio.dim,
+                dim_out=audio.dim,
+                quant_config=quant_config,
+                prefix=f"{prefix}.blocks.{idx}.audio",
+            )
             self.audio_scale_shift_table = torch.nn.Parameter(torch.empty(6, audio.dim))
 
         if audio is not None and video is not None:
@@ -1555,6 +1731,8 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 norm_eps=norm_eps,
                 rope_type=rope_type,
                 supported_attention_backends=dense_attn_backends,
+                quant_config=quant_config,
+                prefix=f"{prefix}.blocks.{idx}.audio_to_video_attn",
             )
             # Video-to-audio cross-attention
             # Uses local attention - context is gathered from all SP ranks in forward()
@@ -1566,6 +1744,8 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 norm_eps=norm_eps,
                 rope_type=rope_type,
                 supported_attention_backends=dense_attn_backends,
+                quant_config=quant_config,
+                prefix=f"{prefix}.blocks.{idx}.video_to_audio_attn",
             )
             self.scale_shift_table_a2v_ca_audio = torch.nn.Parameter(torch.empty(5, audio.dim))
             self.scale_shift_table_a2v_ca_video = torch.nn.Parameter(torch.empty(5, video.dim))
@@ -1889,6 +2069,7 @@ class LTXModel(torch.nn.Module):
         rope_type: LTXRopeType = LTXRopeType.INTERLEAVED,
         double_precision_rope: bool = False,
         use_distributed_attention: bool = False,
+        quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -1942,6 +2123,7 @@ class LTXModel(torch.nn.Module):
             audio_cross_attention_dim=audio_cross_attention_dim,
             norm_eps=norm_eps,
             use_distributed_attention=use_distributed_attention,
+            quant_config=quant_config,
             prefix=prefix,
         )
 
@@ -2073,6 +2255,7 @@ class LTXModel(torch.nn.Module):
         audio_cross_attention_dim: int,
         norm_eps: float,
         use_distributed_attention: bool = False,
+        quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ) -> None:
         video_config = (
@@ -2105,6 +2288,7 @@ class LTXModel(torch.nn.Module):
                     rope_type=self.rope_type,
                     norm_eps=norm_eps,
                     use_distributed_attention=use_distributed_attention,
+                    quant_config=quant_config,
                     prefix=prefix,
                 )
                 for idx in range(num_layers)
@@ -2293,6 +2477,7 @@ class LTX2Transformer3DModel(BaseDiT):
             audio_positional_embedding_max_pos=arch.audio_positional_embedding_max_pos,
             av_ca_timestep_scale_multiplier=arch.av_ca_timestep_scale_multiplier,
             use_distributed_attention=use_distributed_attention,
+            quant_config=config.quant_config,
             prefix=config.prefix,
         )
 

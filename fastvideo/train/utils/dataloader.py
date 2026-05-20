@@ -33,12 +33,12 @@ def build_parquet_t2v_train_dataloader(
     return dataloader
 
 
-def build_parquet_matrixgame_train_dataloader(
+def build_parquet_matrixgame2_train_dataloader(
     data_config: DataConfig,
     *,
     parquet_schema: Any,
 ) -> Any:
-    """Build a parquet dataloader for MatrixGame datasets."""
+    """Build a parquet dataloader for Matrix-Game 2.0 datasets."""
 
     from fastvideo.dataset import (
         build_parquet_map_style_dataloader, )

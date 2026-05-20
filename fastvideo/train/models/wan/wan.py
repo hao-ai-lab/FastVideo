@@ -41,6 +41,7 @@ from fastvideo.train.utils.negative_prompt import encode_negative_prompt
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
+    from fastvideo.train.utils.lora import LoraConfig
 
 try:
     from fastvideo.attention.backends.video_sparse_attn import (
@@ -69,9 +70,13 @@ class WanModel(ModelBase):
         | None = None,
         transformer_override_safetensor: str
         | None = None,
+        lora: LoraConfig | dict[str, Any] | None = None,
     ) -> None:
+        super().__init__(
+            trainable=trainable,
+            lora=lora,
+        )
         self._init_from = str(init_from)
-        self._trainable = bool(trainable)
 
         self.transformer = self._load_transformer(
             init_from=self._init_from,
@@ -121,7 +126,6 @@ class WanModel(ModelBase):
             override_transformer_cls_name=(self._transformer_cls_name),
             transformer_override_safetensor=(transformer_override_safetensor),
         )
-        transformer = apply_trainable(transformer, trainable=trainable)
         # Fall back to training_config.model if not set on the
         # model YAML section directly.
         ckpt_type = (enable_gradient_checkpointing_type or getattr(
@@ -134,6 +138,9 @@ class WanModel(ModelBase):
                 transformer,
                 checkpointing_type=ckpt_type,
             )
+        if self._enable_lora_if_configured(transformer):
+            return transformer
+        transformer = apply_trainable(transformer, trainable=trainable)
         return transformer
 
     # ------------------------------------------------------------------
@@ -243,7 +250,11 @@ class WanModel(ModelBase):
         training_batch = self._prepare_dit_inputs(training_batch, generator)
         training_batch = self._build_attention_metadata(training_batch)
 
-        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
+        # Shallow copy keeps the lru_cache'd LongTensor index fields shared
+        # with the original metadata; only the float ``VSA_sparsity`` differs
+        # between the two views. deepcopy here would materialize a fresh copy
+        # of all four cached index tensors on every training step.
+        training_batch.attn_metadata_vsa = copy.copy(training_batch.attn_metadata)
         if training_batch.attn_metadata is not None:
             training_batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore[attr-defined]
 

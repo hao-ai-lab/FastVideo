@@ -2,3 +2,4 @@
 {"name": "evaluation-registry", "description": "Catalog of all evaluation metrics with detailed explanations, implementation status, and usage guides", "path": "evaluation-registry/README.md", "status": "draft", "trust": "medium"}
 {"name": "experiment-journal", "description": "Living log of all experiments with hypotheses, configs, metrics, and insights", "path": "experiment-journal/README.md", "status": "draft", "trust": "medium"}
 {"name": "related-work", "description": "Index of related papers, repos, and blog posts with structured comparisons to FastVideo", "path": "related-work/README.md", "status": "draft", "trust": "low"}
+{"name": "dreamverse-integration", "description": "Consolidated knowledge base for the FastVideo public API refactor (PRs 0-17), LTX-2 streaming server upstream, Dreamverse migration from FastVideo-internal, and NVFP4 quantization landing", "path": "dreamverse-integration/README.md", "status": "ready", "trust": "high"}

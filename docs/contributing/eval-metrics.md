@@ -11,14 +11,14 @@ Use this guide when you are:
 - Adding a new metric (native or wrapping a third-party library).
 - Porting a benchmark (e.g. VBench, MIND, EvalCrafter) whose Python
   code needs to be importable from a pinned upstream.
-- Adding a new metric group (audio, vlm, etc.).
+- Adding a new metric group (audio, videoscore2, etc.).
 
 ## TL;DR
 
 Metrics are auto-discovered from
 `fastvideo/eval/metrics/<group>/<name>/metric.py`. Each declares itself
-with `@register("<group>.<name>")` and subclasses `BaseMetric`. Three
-recipes:
+with `@register("<group>.<name>")` and subclasses `BaseMetric`. Five
+recipes, depending on how the metric ships and what its licence allows:
 
 1. **Native metric** (pure-PyTorch, no submodule). Drop a file,
    declare deps, implement `compute(sample)`.
@@ -26,11 +26,18 @@ recipes:
    Same as above, plus route the library's cache through
    `get_cache_dir()` if it has a `download_root=` / `cache_dir=`
    kwarg.
-3. **Upstream-submodule-wrapped metric** (vbench-style). Pin upstream
-   as a git submodule under `fastvideo/third_party/eval/<bench>/`. The
-   adapter `__init__.py` does the `sys.path` insert and any runtime
-   compat shims for modern dep versions. Patches live as Python in
-   that file rather than as on-disk patches to the submodule.
+3. **Submodule-wrapped metric** (vbench-style). Pin upstream as a git
+   submodule under `fastvideo/third_party/eval/<bench>/`. The adapter
+   `__init__.py` does the `sys.path` insert and any runtime compat
+   shims. Best for large research packages with stable layouts.
+4. **Vendored upstream** (synchformer / glmasr-style). Copy a small,
+   surgical piece of upstream into `fastvideo/third_party/eval/<name>/`
+   with its `LICENSE` alongside. Best for permissive-licensed
+   (MIT / Apache-2.0) source you need a few files from.
+5. **Git-source dep via `[tool.uv.sources]`** (ImageBind-style). For
+   license-restricted upstream (e.g. CC BY-NC-SA) that cannot be
+   redistributed in the FastVideo tree. uv pulls the source at install
+   time pinned to a SHA in `pyproject.toml`.
 
 The full recipes are below.
 
@@ -43,7 +50,8 @@ fastvideo/eval/metrics/
 ├── base.py                  # BaseMetric + lifecycle contract
 ├── common/                  # group: SSIM, PSNR, LPIPS
 ├── optical_flow/            # group: gt_optical_flow, synthetic_optical_flow
-├── vlm/                     # group: VideoScore-2
+├── audio/                   # group: CLAP, AudioBox, KL, FAD, WER, DeSync, ImageBind
+├── videoscore2/             # VideoScore-2 (single metric at group level)
 ├── physics_iq/              # group + sub-metrics
 └── vbench/                  # group: 16 sub-metrics
     ├── __init__.py          # sys.path bootstrap + runtime compat shims
