@@ -115,16 +115,22 @@ def sde_step_with_logprob(
         if deterministic:
             prev_sample = sample + dt * model_output
 
-        log_prob = (
-            -(
-                (prev_sample.detach() - prev_sample_mean) ** 2
+        std_scale = std_dev_t * torch.sqrt(-1 * dt)
+        if torch.all(std_scale == 0):
+            log_prob = torch.zeros_like(prev_sample)
+        else:
+            std_scale = torch.clamp(
+                std_scale,
+                min=torch.finfo(std_scale.dtype).tiny,
             )
-            / (2 * ((std_dev_t * torch.sqrt(-1 * dt)) ** 2))
-            - torch.log(std_dev_t * torch.sqrt(-1 * dt))
-            - torch.log(
-                torch.sqrt(2 * torch.as_tensor(math.pi))
+            log_prob = (
+                -((prev_sample.detach() - prev_sample_mean) ** 2)
+                / (2 * (std_scale**2))
+                - torch.log(std_scale)
+                - torch.log(
+                    torch.sqrt(2 * torch.as_tensor(math.pi))
+                )
             )
-        )
 
     elif sde_type == "flow_cps":
         std_dev_t = sigma_prev * math.sin(

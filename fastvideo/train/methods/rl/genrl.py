@@ -1048,6 +1048,7 @@ class GenRLMethod(TrainingMethod):
                     self._max_grad_norm,
                 )
                 self._optimizer.step()
+                self._lr_scheduler.step()
                 self._optimizer.zero_grad()
                 torch.cuda.synchronize()
                 _ppo_batch_times.append(

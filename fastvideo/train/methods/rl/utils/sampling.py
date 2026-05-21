@@ -4,6 +4,7 @@ compute rewards."""
 
 from __future__ import annotations
 
+import hashlib
 import time
 from collections.abc import Callable
 from typing import Any
@@ -31,8 +32,15 @@ def create_generator(
     """Create deterministic generators seeded by prompt."""
     generators = []
     for prompt in prompts:
+        prompt_seed = int.from_bytes(
+            hashlib.blake2b(
+                prompt.encode("utf-8"),
+                digest_size=8,
+            ).digest(),
+            "big",
+        )
         g = torch.Generator(device=device)
-        g.manual_seed(base_seed + hash(prompt) % (2**31))
+        g.manual_seed(base_seed + prompt_seed % (2**31))
         generators.append(g)
     return generators
 
@@ -131,7 +139,7 @@ def sample_epoch(
         if same_latent:
             gen = create_generator(
                 prompts,
-                base_seed=epoch * SEED_EPOCH_STRIDE + i,
+                base_seed=seed + epoch * SEED_EPOCH_STRIDE + i,
                 device=device,
             )
         else:
@@ -244,4 +252,5 @@ def sample_epoch(
         _t_reward_done - _t_reward_wait,
     )
 
+    all_videos = [video.detach().cpu() for video in all_videos]
     return samples, all_videos, all_prompts

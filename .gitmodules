@@ -4,3 +4,12 @@
 [submodule "fastvideo-kernel/include/cutlass"]
 	path = fastvideo-kernel/include/cutlass
 	url = https://github.com/NVIDIA/cutlass.git
+[submodule "GenRL"]
+	path = GenRL
+	url = https://github.com/ModelTC/GenRL.git
+[submodule "fastvideo/train/methods/rl/reward/HPSv3"]
+	path = fastvideo/train/methods/rl/reward/HPSv3
+	url = https://github.com/ModelTC/HPSv3.git
+[submodule "fastvideo/train/methods/rl/reward/VideoAlign"]
+	path = fastvideo/train/methods/rl/reward/VideoAlign
+	url = https://github.com/ModelTC/VideoAlign.git
