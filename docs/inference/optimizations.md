@@ -188,8 +188,6 @@ end-to-end speedup. It is **off by default** and enabled per-run.
 
 ### Enabling
 
-Python:
-
 ```python
 generator = VideoGenerator.from_pretrained(
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
@@ -197,12 +195,13 @@ generator = VideoGenerator.from_pretrained(
 )
 ```
 
-CLI:
+A complete A/B example (eager vs compiled, warmup excluded) is in
+[`examples/inference/optimizations/torch_compile_example.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/optimizations/torch_compile_example.py).
 
-```bash
-fastvideo generate --model-path "Wan-AI/Wan2.1-T2V-1.3B-Diffusers" \
-    --prompt "..." --enable-torch-compile
-```
+`fastvideo generate` is config-file driven; to enable `torch.compile`
+from the CLI, set the relevant field in your run config and pass it via
+`fastvideo generate --config run.yaml`. There is no top-level
+`--enable-torch-compile` flag on the subcommand.
 
 Only DiT submodules that declare `_compile_conditions` are compiled
 (most shipped models). The text encoder and VAE are not compiled by this
@@ -224,9 +223,15 @@ generations with the same input shapes. Always exclude the first
 (warmup) generation when measuring steady-state latency — measuring the
 warmup is the most common way to wrongly conclude "compile is slower".
 
-Compiled output is numerically equivalent to eager for the shipped
-models (MS-SSIM ≈ 1.0 vs eager on Wan2.1-T2V-1.3B); still SSIM-gate when
-combining with quantized attention backends.
+**Numerics.** Inductor's lowering is designed to preserve eager
+semantics within floating-point tolerance, but per-model equivalence is
+not asserted by any standing SSIM regression here — the SSIM tests in
+[`fastvideo/tests/ssim/`](https://github.com/hao-ai-lab/FastVideo/tree/main/fastvideo/tests/ssim)
+run with `enable_torch_compile` disabled. If you depend on compile
+output staying close to eager (or your previous compiled run), run an
+MS-SSIM gate on *your* config, especially when combining
+`enable_torch_compile=True` with other numerics-affecting flags
+(quantized attention backends, FP4, layerwise offload edge cases).
 
 ### Known interactions
 
