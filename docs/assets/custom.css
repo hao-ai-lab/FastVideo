@@ -87,8 +87,7 @@ img {
 
 .quick-start-guide-frame {
   width: 100%;
-  height: 1205px;
-  min-height: 1205px;
+  height: 1205px; /* fallback before postMessage adjusts to actual content height */
   border: 0;
   display: block;
   background: #fff;

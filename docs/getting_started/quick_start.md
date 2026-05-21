@@ -14,6 +14,15 @@ Select your task and hardware to get a ready-to-run command:
   ></iframe>
 </div>
 
+<script>
+window.addEventListener("message", (e) => {
+  if (e.data && e.data.type === "quick-start-guide-height") {
+    const frame = document.querySelector(".quick-start-guide-frame");
+    if (frame) frame.style.height = e.data.height + "px";
+  }
+});
+</script>
+
 !!! tip "Need more control?"
     Use the [Advanced Tuning Guide](advanced_tuning_guide.md) to tune all parameters — resolution, attention backend, memory offloading, and more.
 
