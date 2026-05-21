@@ -162,8 +162,8 @@ def _get_initialized_node_group():
 
 def safetensors_weights_iterator(
     hf_weights_files: list[str],
-    to_cpu: bool = True,
-    broadcast: bool = False,
+    to_cpu: bool = False,
+    broadcast: bool = True,
     async_broadcast: bool = False
 ) -> Generator[tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model safetensor files.
@@ -229,8 +229,8 @@ def safetensors_weights_iterator(
 
 def pt_weights_iterator(
     hf_weights_files: list[str],
-    to_cpu: bool = True,  # default to CPU for text encoder
-    broadcast: bool = False
+    to_cpu: bool = False,
+    broadcast: bool = True
 ) -> Generator[tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model bin/pt files.
 
