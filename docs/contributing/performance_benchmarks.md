@@ -22,12 +22,24 @@ It serves three audiences:
 pytest fastvideo/tests/performance/ -vs
 
 # Optional: compare against the rolling HF baseline (read-only outside CI).
+# PERF_REPORTS_DIR defaults to /root/data/perf_reports for Modal/CI, so
+# override it when running outside the container.
+PERF_REPORTS_DIR=/tmp/fastvideo_perf_reports \
 python fastvideo/tests/performance/compare_baseline.py
+
+# Optional: build the Plotly dashboard locally.
+PERF_REPORTS_DIR=/tmp/fastvideo_perf_reports \
+python fastvideo/tests/performance/dashboard.py
 ```
 
 The pytest run never uploads anything. `compare_baseline.py` only writes to
 the HF dataset when `TEST_SCOPE=full` *and* `BUILDKITE_BRANCH=main`, so local
-runs are always read-only.
+runs are always read-only. The report directory default is container-oriented;
+set `PERF_REPORTS_DIR` to a writable local path when generating dashboards or
+when you want local Markdown/normalized-result artifacts from the comparator.
+`compare_baseline.py` reads every `perf_*.json` currently present in
+`fastvideo/tests/performance/results/`; remove stale result files if you only
+want to compare the latest local run.
 
 ## Architecture
 
@@ -127,7 +139,8 @@ higher values are regressions. For throughput, lower values are regressions.
 
 This is the **drift detector** — it catches sub-threshold regressions that
 slowly add up. It only persists new records when running the full suite on
-`main`.
+`main`. Local and pull-request runs can compare against the HF baseline, but
+they do not update it.
 
 When the baseline shifts for a legitimate reason (torch upgrade, kernel
 change, etc.) and CI starts failing, use the
@@ -201,7 +214,7 @@ dashboard lists skipped plots for metric series that have no non-null values.
 | Variable | Default | Used by | Purpose |
 |---|---|---|---|
 | `PERF_MAX_REGRESSION` | `0.05` | `compare_baseline.py` | Per-metric regression fraction that fails the build. |
-| `PERFORMANCE_TRACKING_ROOT` | `/tmp/perf-tracking` | `compare_baseline.py` | Local directory the HF dataset is synced to. |
+| `PERFORMANCE_TRACKING_ROOT` | `/tmp/perf-tracking` | `compare_baseline.py`, `dashboard.py` | Local directory the HF dataset is synced to. |
 | `PERF_REPORTS_DIR` | `/root/data/perf_reports` | `compare_baseline.py`, `dashboard.py` | Where the Markdown summary and Plotly HTML get written for Buildkite to pick up. |
 | `HF_REPO_ID` | `FastVideo/performance-tracking` | `hf_store.py` | HF dataset repo holding rolling-baseline records. |
 | `HF_API_KEY` | unset | `hf_store.py` | Required for upload (main-branch full-suite only); reads work without it. |
@@ -213,17 +226,21 @@ dashboard lists skipped plots for metric series that have no non-null values.
 
 ## CI integration
 
-The performance step runs in the Full Suite (see
-[CI Architecture](ci_architecture.md)). The Modal entry point is
-`fastvideo/tests/modal/pr_test.py:run_performance_tests` and the Buildkite
-artifact upload is in `.buildkite/scripts/pr_test.sh:upload_performance_artifacts`.
+The performance step can run on demand with `/test performance` and as part of
+the Full Suite (see [CI Architecture](ci_architecture.md)). The Modal entry
+point is `fastvideo/tests/modal/pr_test.py:run_performance_tests` and the
+Buildkite artifact upload is in
+`.buildkite/scripts/pr_test.sh:upload_performance_artifacts`.
 
-Each performance build produces:
+Each performance build runs pytest first. If that fixed-threshold phase fails,
+`compare_baseline.py` is skipped, so Markdown summaries and normalized JSON
+artifacts are not emitted. The dashboard still runs best-effort for
+observability. When pytest passes, the rolling-baseline phase emits:
 
-* **Markdown summary** — appended to `$GITHUB_STEP_SUMMARY` and uploaded as
-  `perf_<sha>_<ts>.md`. Contains a per-benchmark row with current vs. baseline
-  values for latency, throughput, memory, text encoder time, DiT time, and VAE
-  decode time.
+* **Markdown summary** — appended to `$GITHUB_STEP_SUMMARY` when that variable
+  is set, and written as `perf_<sha>_<ts>.md` for Buildkite upload. Contains a
+  per-benchmark row with current vs. baseline values for latency, throughput,
+  memory, text encoder time, DiT time, and VAE decode time.
 * **Plotly dashboard** — `dashboard_<sha>_<ts>.html` showing time-series for
   each metric grouped by `(model_id, gpu_type)`.
 * **Normalized records** — `normalized_perf_*.json`, one per benchmark.
@@ -261,8 +278,10 @@ Each performance build produces:
 2. The pytest test auto-discovers all configs — no test code needed. CI
    picks it up on the next `/test performance` run.
 
-3. The first run with no HF history initializes the baseline (passes
-   automatically). Subsequent runs compare against it.
+3. The first persisted main-branch run with no HF history initializes the
+   baseline (passes automatically). Subsequent runs compare against it. Local
+   and pull-request runs with no HF history also pass, but they do not seed the
+   shared baseline.
 
 4. If the benchmark targets a GPU not currently in `thresholds`, either add
    that GPU as a key or rely on the `default` block. Note that `default` is
