@@ -14,7 +14,7 @@ based on **Wan2.1** (SkyReels-V2) DiT models with causal attention for
 auto-regressive streaming generation.
 
 **Key techniques you will work with:**
-- Full finetuning and LoRA on Wan / LTX-2 / MatrixGame models
+- Full finetuning and LoRA on Wan / LTX-2 / Matrix-Game 2.0 models
 - DMD-based distillation (few-step generation)
 - Self-Forcing distillation (causal streaming)
 - Diffusion-Forcing SFT (DFSFT) for causal models
@@ -225,7 +225,10 @@ callbacks:
 |----------|-----------|----------|
 | Wan T2V finetune | `fastvideo/training/wan_training_pipeline.py` | Standard text-to-video finetune / LoRA |
 | Wan I2V finetune | `fastvideo/training/wan_i2v_training_pipeline.py` | Image-to-video (first frame conditioned) |
-| MatrixGame finetune | `fastvideo/training/matrixgame_training_pipeline.py` | Action-conditioned world model |
+| Matrix-Game 2.0 finetune | `fastvideo/training/matrixgame2_training_pipeline.py` | Action-conditioned world model |
+| Matrix-Game 2.0 AR diffusion | `fastvideo/training/matrixgame2_ar_diffusion_pipeline.py` | AR diffusion-forcing training |
+| Matrix-Game 2.0 ODE-init | `fastvideo/training/matrixgame2_ode_causal_pipeline.py` | ODE-trajectory init |
+| Matrix-Game 2.0 self-forcing distill | `fastvideo/training/matrixgame2_self_forcing_distillation_pipeline.py` | Self-forcing distillation |
 | LTX-2 finetune | `fastvideo/training/ltx2_training_pipeline.py` | LTX-2 architecture finetuning |
 | Wan DMD distillation | `fastvideo/training/wan_distillation_pipeline.py` | Few-step distillation via DMD |
 | Self-Forcing distill | `fastvideo/training/wan_self_forcing_distillation_pipeline.py` | Causal streaming distillation |
@@ -275,8 +278,8 @@ Read `.agents/memory/evaluation-registry/README.md` for the full metric catalog.
 
 ## World Model–Specific Concepts
 
-### Action Injection (MatrixGame)
-The MatrixGame pipeline adds **action modules** to each DiT block, enabling
+### Action Injection (Matrix-Game 2.0)
+The Matrix-Game 2.0 pipeline adds **action modules** to each DiT block, enabling
 frame-level mouse/keyboard input conditioning. The action sequence is injected
 per-frame alongside the latent video tokens.
 

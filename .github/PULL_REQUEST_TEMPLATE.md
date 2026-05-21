@@ -2,7 +2,8 @@
 PR TITLE: Must start with a type tag, e.g.:
   [feat] Add new model       [bugfix] Fix VAE tiling      [refactor] Restructure pipeline
   [perf] Optimize kernel     [ci] Update tests             [docs] Add guide
-  [misc] Cleanup configs     [new-model] Port Flux2
+  [misc] Cleanup configs     [new-model] Port Flux2        [infra] Add trace hooks
+  [skill] Add agent skill
 
 MERGE WORKFLOW:
   1. Ensure pre-commit passes and you have at least 1 approval

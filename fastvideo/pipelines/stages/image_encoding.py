@@ -283,7 +283,7 @@ class HYWorldImageEncodingStage(ImageEncodingStage):
         return batch
 
 
-class MatrixGameImageEncodingStage(ImageEncodingStage):
+class MatrixGame2ImageEncodingStage(ImageEncodingStage):
     CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073]
     CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
 
@@ -721,7 +721,7 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
         return result
 
 
-class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
+class MatrixGame2ImageVAEEncodingStage(ImageVAEEncodingStage):
 
     def forward(
         self,
@@ -815,7 +815,7 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
                 video_condition = video_condition.to(vae_dtype)
             encoder_output = self.vae.encode(video_condition)
 
-        # MatrixGame uses deterministic VAE encode for the first-frame conditioning.
+        # Matrix-Game 2.0 uses deterministic VAE encode for the first-frame conditioning.
         # Sampling would inject random noise into the cond_concat tensor and destroy the action guidance.
         img_cond = encoder_output.mode()
 

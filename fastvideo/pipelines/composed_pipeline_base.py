@@ -16,6 +16,7 @@ from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.distributed import (maybe_init_distributed_environment_and_model_parallel, get_world_group)
 from fastvideo.distributed.communication_op import (warmup_sequence_parallel_communication)
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.hooks.activation_trace import attach_activation_trace, detach_activation_trace
 from fastvideo.logger import init_logger
 from fastvideo.profiler import get_or_create_profiler
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
@@ -62,6 +63,7 @@ class ComposedPipelineBase(ABC):
         self.model_path: str = model_path
         self._stages: list[PipelineStage] = []
         self._stage_name_mapping: dict[str, PipelineStage] = {}
+        self._trace_mgr = None
 
         if required_config_modules is not None:
             self._required_config_modules = required_config_modules
@@ -131,6 +133,11 @@ class ComposedPipelineBase(ABC):
             )
             return
 
+        prepare_for_compile = getattr(module, "prepare_for_compile", None)
+        if callable(prepare_for_compile):
+            logger.info("Running prepare_for_compile for %s", module_name)
+            prepare_for_compile()
+
         compiled_count = self._compile_with_conditions(module, compile_kwargs)
         if compiled_count > 0:
             logger.info(
@@ -159,7 +166,11 @@ class ComposedPipelineBase(ABC):
                 self.initialize_validation_pipeline(self.training_args)
 
         self.initialize_pipeline(self.fastvideo_args)
-        if self.fastvideo_args.enable_torch_compile:
+        compile_transformer = self.fastvideo_args.enable_torch_compile
+        compile_text_encoder = (self.fastvideo_args.enable_torch_compile_text_encoder)
+        compile_vae = self.fastvideo_args.enable_torch_compile_vae
+        compile_audio_vae = self.fastvideo_args.enable_torch_compile_audio_vae
+        if (compile_transformer or compile_text_encoder or compile_vae or compile_audio_vae):
             if self.fastvideo_args.training_mode:
                 logger.info("Torch Compile enabled via FSDP loader for training; skipping additional pipeline compile")
             else:
@@ -170,18 +181,60 @@ class ComposedPipelineBase(ABC):
                 except Exception:  # pragma: no cover - FSDP not always available
                     fsdp_module_cls = None
 
-                compile_kwargs = self.fastvideo_args.torch_compile_kwargs or {}
-                self._maybe_compile_pipeline_module(
-                    module_name="transformer",
-                    fsdp_module_cls=fsdp_module_cls,
-                    compile_kwargs=compile_kwargs,
-                )
-                self._maybe_compile_pipeline_module(
-                    module_name="transformer_2",
-                    fsdp_module_cls=fsdp_module_cls,
-                    compile_kwargs=compile_kwargs,
-                )
-                logger.info("Torch Compile enabled for DiT")
+                global_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs or {})
+                dit_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_dit or global_compile_kwargs)
+                text_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_text_encoder or global_compile_kwargs)
+                vae_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_vae or global_compile_kwargs)
+                audio_vae_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_audio_vae or global_compile_kwargs)
+
+                if compile_transformer:
+                    self._maybe_compile_pipeline_module(
+                        module_name="transformer",
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=dit_compile_kwargs,
+                    )
+                    self._maybe_compile_pipeline_module(
+                        module_name="transformer_refine",
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=dit_compile_kwargs,
+                    )
+                    self._maybe_compile_pipeline_module(
+                        module_name="transformer_2",
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=dit_compile_kwargs,
+                    )
+                    logger.info("Torch Compile enabled for DiT")
+
+                if compile_text_encoder:
+                    self._maybe_compile_pipeline_module(
+                        module_name="text_encoder",
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=text_compile_kwargs,
+                    )
+                    self._maybe_compile_pipeline_module(
+                        module_name="text_encoder_2",
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=text_compile_kwargs,
+                    )
+                    logger.info("Torch Compile enabled for text encoder")
+
+                if compile_vae:
+                    self._maybe_compile_pipeline_module(
+                        module_name="vae",
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=vae_compile_kwargs,
+                    )
+                    logger.info("Torch Compile enabled for VAE")
+
+                if compile_audio_vae:
+                    self._maybe_compile_pipeline_module(
+                        module_name="audio_vae",
+                        fsdp_module_cls=fsdp_module_cls,
+                        compile_kwargs=audio_vae_compile_kwargs,
+                    )
+                    logger.info("Torch Compile enabled for audio VAE")
+
+        self._trace_mgr = attach_activation_trace(self.modules.get("transformer"))
 
         if not self.fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")
@@ -410,6 +463,10 @@ class ComposedPipelineBase(ABC):
 
     def add_stage(self, stage_name: str, stage: PipelineStage):
         assert self.modules is not None, "No modules are registered"
+        # Preserve the pipeline-unique stage key for structured metrics.
+        # Multiple stages can share the same class (for example LTX2 main
+        # denoise and refine denoise), so class-name keys would collide.
+        stage._pipeline_stage_name = stage_name
         self._stages.append(stage)
         self._stage_name_mapping[stage_name] = stage
         setattr(self, stage_name, stage)
@@ -455,3 +512,10 @@ class ComposedPipelineBase(ABC):
 
     def train(self) -> None:
         raise NotImplementedError("if training_mode is True, the pipeline must implement this method")
+
+    def close(self) -> None:
+        detach_activation_trace(getattr(self, "_trace_mgr", None))
+        self._trace_mgr = None
+
+    def __del__(self):
+        self.close()

@@ -307,9 +307,12 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         # Sparse attention
         o_s = _attention.apply(q, k, v, sparse_map, lut, real_topk, self.BLKQ, self.BLKK)
 
-        # Linear attention with feature maps
-        q_linear = self.feature_map_q(q).contiguous().to(self.dtype)
-        k_linear = self.feature_map_k(k).contiguous().to(self.dtype)
+        # Linear attention with feature maps. Note: softmax / elu / relu
+        # are elementwise and preserve layout, so the inputs are already
+        # contiguous from the transpose-contiguous above — no need to
+        # call .contiguous() again here.
+        q_linear = self.feature_map_q(q).to(self.dtype)
+        k_linear = self.feature_map_k(k).to(self.dtype)
         o_l = self._calc_linear_attention(q_linear, k_linear, v)
 
         # Project linear attention output and combine
@@ -539,9 +542,10 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
                     False, 1, scale, 0)
         # ========== END SPARGE ==========
 
-        # Linear attention with feature maps
-        q_linear = self.feature_map_q(q).contiguous().to(self.dtype)
-        k_linear = self.feature_map_k(k).contiguous().to(self.dtype)
+        # Linear attention with feature maps (see SLAAttentionImpl.forward
+        # for why .contiguous() is unnecessary here).
+        q_linear = self.feature_map_q(q).to(self.dtype)
+        k_linear = self.feature_map_k(k).to(self.dtype)
         o_l = self._calc_linear_attention(q_linear, k_linear, v)
 
         # Project linear attention output and combine

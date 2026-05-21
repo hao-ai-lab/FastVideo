@@ -10,6 +10,7 @@ exclude: |
     scripts/.*|
     fastvideo/dataset/.*|
     fastvideo/models/.*|
+    ^apps/dreamverse/web/.*|
     examples/.*|
     \.agents/.*|
     .github/workflows/publish-fastvideo.yml|

@@ -27,6 +27,7 @@ from fastvideo.train.models.wan.wan import WanModel
 if TYPE_CHECKING:
     from fastvideo.train.utils.training_config import (
         TrainingConfig, )
+    from fastvideo.train.utils.lora import LoraConfig
 
 
 class HunyuanModel(WanModel):
@@ -51,6 +52,7 @@ class HunyuanModel(WanModel):
         | None = None,
         transformer_override_safetensor: str
         | None = None,
+        lora: LoraConfig | dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             init_from=init_from,
@@ -60,6 +62,7 @@ class HunyuanModel(WanModel):
             flow_shift=flow_shift,
             enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
             transformer_override_safetensor=(transformer_override_safetensor),
+            lora=lora,
         )
 
     # ------------------------------------------------------------------
@@ -133,7 +136,11 @@ class HunyuanModel(WanModel):
         training_batch = self._prepare_dit_inputs(training_batch, generator)
         training_batch = self._build_attention_metadata(training_batch)
 
-        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
+        # Shallow copy keeps the lru_cache'd LongTensor index fields shared
+        # with the original metadata; only the float ``VSA_sparsity`` differs
+        # between the two views. deepcopy here would materialize a fresh copy
+        # of all four cached index tensors on every training step.
+        training_batch.attn_metadata_vsa = copy.copy(training_batch.attn_metadata)
         if training_batch.attn_metadata is not None:
             training_batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore[attr-defined]
 

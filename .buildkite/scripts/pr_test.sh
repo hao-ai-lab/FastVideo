@@ -121,6 +121,19 @@ upload_performance_artifacts() {
         fi
     }
 
+    _upload_normalized_perf_results() {
+        local found=0
+        while IFS= read -r -d '' target; do
+            found=1
+            log "Found normalized performance result: $target. Uploading to Buildkite..."
+            buildkite-agent artifact upload "$target"
+        done < <(find "$LOCAL_DIR" -path "*/results/normalized_perf_*.json" -print0)
+
+        if [ "$found" -eq 0 ]; then
+            log "No normalized performance result artifacts found. This is expected when the rolling performance comparison did not run."
+        fi
+    }
+
     _cleanup_modal_volume() {
         log "Cleaning up perf_reports/ from Modal Volume..."
         if modal volume rm hf-model-weights "perf_reports/" --recursive; then
@@ -139,6 +152,7 @@ upload_performance_artifacts() {
     _download_reports || { _cleanup_local; return 1; }
     _upload_dashboard
     _upload_perf_summary
+    _upload_normalized_perf_results
     _cleanup_modal_volume
     _cleanup_local
 }
@@ -196,6 +210,10 @@ case "$TEST_TYPE" in
     "unit_test")
         log "Running unit tests..."
         MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_unit_test"
+        ;;
+    "train_framework")
+        log "Running fastvideo.train framework tests..."
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_train_framework_tests"
         ;;
     "lora_extraction")
         log "Running LoRA extraction tests..."
