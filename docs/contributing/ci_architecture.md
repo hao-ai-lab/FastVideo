@@ -73,6 +73,7 @@ replicate CI results before pushing.
 | Transformer Tests | `transformer` | `fastvideo/models/dits/**`, `fastvideo/models/loader/**`, `fastvideo/tests/transformers/**`, `fastvideo/layers/**`, `fastvideo/attention/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
 | Kernel Tests | `kernel_tests` | `fastvideo-kernel/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
 | Unit Tests | `unit_test` | `fastvideo/**`, `.buildkite/**`, `.github/**`, `pyproject.toml`, `docker/Dockerfile.python3.12` |
+| DreamVerse App Tests | `dreamverse_app` | `apps/dreamverse/**`, `pyproject.toml` |
 
 A Fastcheck failure means a component-level regression. Check the Buildkite build log for the
 failing test's output.
@@ -268,6 +269,7 @@ Triggers a specific Buildkite test or suite on the current PR branch.
 | `/test transformer` | Transformer Tests (Fastcheck) | `transformer` |
 | `/test kernel` | Kernel Tests (Fastcheck) | `kernel_tests` |
 | `/test unit` | Unit Tests (Fastcheck) | `unit_test` |
+| `/test dreamverse` | DreamVerse App Tests (Fastcheck) | `dreamverse_app` |
 | `/test ssim` | SSIM regression tests | `ssim` |
 | `/test training` | Training pipeline tests | `training` |
 | `/test lora-inference` | LoRA inference tests | `inference_lora` |

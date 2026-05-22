@@ -11,7 +11,7 @@ test.describe('backend health', () => {
     expect(response.ok()).toBeTruthy();
     const body = await response.json();
     expect(body.status).toBe('ok');
-    expect(body.service).toBe('ltx2-streaming-backend');
+    expect(['ltx2-streaming-backend', 'ltx2-streaming-mock-server']).toContain(body.service);
   });
 
   test('readyz reports gpu pool state', async ({ request }) => {
