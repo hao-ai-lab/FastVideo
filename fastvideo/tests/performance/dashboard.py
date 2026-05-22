@@ -8,6 +8,12 @@ import pandas as pd
 
 from hf_store import sync_from_hf, load_as_dataframe
 
+TRACKING_ROOT = os.environ.get(
+    "PERFORMANCE_TRACKING_ROOT",
+    "/tmp/perf-tracking",
+)
+PERF_REPORTS_DIR = os.environ.get("PERF_REPORTS_DIR", "/root/data/perf_reports")
+
 METRICS = (
     "latency",
     "throughput",
@@ -135,7 +141,7 @@ def render_html(figs: list, skipped_metrics: list[dict[str, object]],
 def main() -> None:
     days = int(os.environ.get("DASHBOARD_DAYS", "30"))
 
-    local_dir = sync_from_hf("/tmp/perf-tracking", reuse_existing=True)
+    local_dir = sync_from_hf(TRACKING_ROOT, reuse_existing=True)
     df = load_as_dataframe(local_dir, days=days)
 
     if df.empty:
@@ -160,7 +166,7 @@ def main() -> None:
     commit_sha = os.environ.get("BUILDKITE_COMMIT", "unknown")[:7]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    report_dir = "/root/data/perf_reports"
+    report_dir = PERF_REPORTS_DIR
     os.makedirs(report_dir, exist_ok=True)
 
     filename = f"dashboard_{commit_sha}_{timestamp}.html"
