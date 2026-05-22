@@ -98,6 +98,19 @@ def _patch_hpsv3_state_dict_loader() -> None:
     _HPSV3_LOAD_PATCHED = True
 
 
+def _patch_hpsv3_runtime_model(model: Any) -> None:
+    """Add aliases expected by HPSv3's older Qwen2-VL forward."""
+    inner = getattr(model, "model", None)
+    language_model = getattr(inner, "language_model", None)
+    if (
+        inner is not None
+        and language_model is not None
+        and not hasattr(inner, "embed_tokens")
+        and hasattr(language_model, "embed_tokens")
+    ):
+        inner.embed_tokens = language_model.embed_tokens
+
+
 def _normalize_device(device) -> str:
     if isinstance(device, torch.device):
         return str(device)
@@ -134,6 +147,7 @@ def _get_hpsv3_inferencer(device):
             )
             raise ImportError(msg) from exc
         inf = HPSv3RewardInferencer(device=device)
+        _patch_hpsv3_runtime_model(inf.model)
         _HPSV3_INFERENCERS[key] = inf
     return _HPSV3_INFERENCERS[key]
 
