@@ -44,6 +44,7 @@ from fastvideo.train.methods.rl.utils.embeddings import (
     compute_text_embeddings,
 )
 from fastvideo.train.methods.rl.utils.rewards import (
+    clear_reward_models,
     move_reward_models,
     multi_score,
     reward_models_on_device,
@@ -510,6 +511,14 @@ class GenRLMethod(TrainingMethod):
             )
         torch.cuda.synchronize()
         t_sample_end = time.perf_counter()
+        if self._reward_on_gpu:
+            t_reward_clear = time.perf_counter()
+            clear_reward_models(self._reward_cfg)
+            torch.cuda.synchronize()
+            logger.info(
+                "[rewards] clear_after_sample=%.1fs",
+                time.perf_counter() - t_reward_clear,
+            )
 
         # 2. Prepare samples (advantages).
         t_adv_start = time.perf_counter()

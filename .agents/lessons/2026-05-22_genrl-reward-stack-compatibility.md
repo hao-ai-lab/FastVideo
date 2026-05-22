@@ -15,7 +15,9 @@ FlashAttention being forced when unavailable, Qwen2-VL checkpoint key drift,
 PEFT/LoRA-prefixed VideoAlign checkpoint key drift, and old Qwen2-VL forward
 code expecting `model.embed_tokens`. VideoAlign also assumed that if decord was
 unavailable, `torchvision.io.read_video` would exist; the Modal torchvision
-build did not expose that API.
+build did not expose that API. Once rewards finally scored successfully,
+PPO then OOMed because HPSv3 and VideoAlign stayed resident on the same GPUs
+as the Wan training forward.
 
 ## Root Cause
 The reward models are vendored research repositories with their own dependency
@@ -30,6 +32,8 @@ assumptions:
   forced `flash_attention_2` unless explicitly disabled.
 - VideoAlign's video-reader fallback relies on optional torchvision video I/O
   that is not present in every binary build.
+- Reward models are large enough that keeping them on the training GPUs after
+  reward scoring leaves too little memory for PPO log-prob recomputation.
 
 The initial preflight checked only shallow setup. It did not instantiate every
 reward, load each checkpoint, run a dummy scoring call, and then move/clear the
@@ -48,6 +52,8 @@ compatibility:
 - Install FlashAttention in the Modal image, while retaining an SDPA fallback.
 - Register and force an OpenCV VideoAlign reader from the FastVideo wrapper
   when `torchvision.io.read_video` is unavailable.
+- Clear cached HPSv3 and VideoAlign inferencers after sample reward futures
+  complete and before PPO starts.
 - Modal preflight now exercises HPSv3 general, HPSv3 percentile, VideoAlign MQ,
   and VideoAlign TA with dummy videos before Wan sampling starts.
 
@@ -63,6 +69,8 @@ Before launching a costly RL run, require a reward-stack preflight that:
 - loads each checkpoint strictly enough to catch missing/unexpected keys,
 - runs one dummy reward call for each reward head,
 - moves reward models back to CPU and clears caches.
+- verifies reward models are released before any training/PPO forward that
+  needs the same GPU memory.
 
 Do not treat first visible checkpoint-key errors as isolated. For vendored
 Qwen2-VL reward repos, inspect raw and PEFT-prefixed state dict paths together.
