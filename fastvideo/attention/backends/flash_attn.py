@@ -73,6 +73,19 @@ if fa_version in ("2", "3"):
         return q.new_empty(q.shape[0], q.shape[1], q.shape[2], v.shape[-1])
 
     def flash_attn_func_compilable(q, k, v, softmax_scale=None, causal=False):
+        # Autograd carve-out. The custom op above registers a forward + fake
+        # kernel but NO backward (register_autograd), so it is opaque to
+        # autograd. Inference runs under no_grad / inference_mode and routes
+        # through the traceable custom op — that is the torch.compile win, and
+        # the only path this PR claims. Training backprops through attention,
+        # so route grad-enabled calls to the original FA2/FA3 `flash_attn_func`
+        # (itself an autograd.Function, so backward is correct) at the cost of a
+        # dynamo graph break on the training path — i.e. pre-PR behavior, no
+        # regression. Full autograd parity for the custom op (mirroring the FP4
+        # cute template) is a tracked follow-up.
+        if torch.is_grad_enabled() and (q.requires_grad or k.requires_grad
+                                        or v.requires_grad):
+            return _fa_default(q, k, v, softmax_scale=softmax_scale, causal=causal)
         return torch.ops.fastvideo._flash_attn_default_forward(q, k, v, softmax_scale, causal)
 elif fa_version == "4":
     # FA4 path: `flash_attn_func` is already a torch.library custom op
