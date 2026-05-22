@@ -1,9 +1,9 @@
 # Dreamverse Docker Image
 
-This folder contains the backend-only Docker image for Dreamverse inside the
-FastVideo monorepo. Build commands use the FastVideo repository root as the
-Docker context, so run the helper scripts from this folder or from any path in
-the checkout.
+This folder contains the Docker image for Dreamverse inside the FastVideo
+monorepo. Build commands use the FastVideo repository root as the Docker
+context, so run the helper scripts from this folder or from any path in the
+checkout.
 
 ## Build
 
@@ -16,6 +16,16 @@ The image defaults to `dreamverse:dev`. Override it with:
 ```bash
 DREAMVERSE_IMAGE=dreamverse:local apps/dreamverse/docker/docker_build.sh
 ```
+
+Backend-only remains the default image. To include the static Dreamverse UI
+served by the backend, set `BUILD_DREAMVERSE_UI=1` and choose a specific image
+tag:
+
+```bash
+BUILD_DREAMVERSE_UI=1 DREAMVERSE_IMAGE=<image-tag> apps/dreamverse/docker/docker_build.sh
+```
+
+Prefer SHA-specific tags for deployable images; avoid `latest`.
 
 The Dockerfile builds a CUDA 12.9.1 image, installs FastVideo from this
 checkout with the `dreamverse` extra, installs the FA4

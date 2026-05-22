@@ -43,6 +43,9 @@ DREAMVERSE_IMAGE=ghcr.io/<org>/<repo>/dreamverse:<tag> \
   modal deploy apps/dreamverse/scripts/modal/modal_app.py
 ```
 
+Use a SHA-specific tag, not `latest`. To deploy an image that includes the
+static UI served by the backend, set `DREAMVERSE_IMAGE=<ui-image-tag>`.
+
 For local image build details, see
 `apps/dreamverse/docker/README.md` and `apps/dreamverse/docker/docker_build.sh`.
 
