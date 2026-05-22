@@ -20,6 +20,7 @@ from fastvideo.configs.pipelines.cosmos2_5 import (
     Cosmos25Config,
     Cosmos25_14BConfig,
 )
+from fastvideo.configs.pipelines.cosmos3 import Cosmos3Config
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
 from fastvideo.configs.pipelines.gen3c import Gen3CConfig
@@ -553,6 +554,22 @@ def _register_configs() -> None:
         ],
         model_family="gen3c",
         default_preset="gen3c_cosmos_7b",
+    )
+
+    # Cosmos 3 (must register before Cosmos 2.5 and generic Cosmos detectors
+    # so the cosmos3 path-detection takes precedence)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Cosmos3Config,
+        workload_types=(WorkloadType.T2V, ),
+        hf_model_paths=[
+            "nvidia/Cosmos3-Nano",
+        ],
+        model_detectors=[
+            lambda path: "cosmos3" in path.lower() or "cosmos-3" in path.lower(),
+        ],
+        model_family="cosmos3",
+        default_preset="cosmos3_nano",
     )
 
     # Cosmos 2.5 (2B)
