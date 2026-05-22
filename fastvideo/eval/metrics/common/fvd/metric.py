@@ -1,40 +1,51 @@
 """common.fvd — Fréchet Video Distance.
 
 Measures distributional similarity between generated and reference videos
-using I3D features (trained on Kinetics-400). Lower score → generated
-videos are closer to the real video distribution.
+using a pluggable feature backbone (I3D / CLIP / VideoMAE). Lower score →
+generated videos are closer to the real video distribution.
 
-FVD is a dataset-level metric — it compares the
-distribution of a collection of videos rather than scoring each video
-individually. For statistically reliable results at least 256 videos are
-recommended; the standard protocol uses 2048.
+FVD is a dataset-level metric — it compares the distribution of a collection
+of videos rather than scoring each video individually. For statistically
+reliable results at least 256 videos are recommended; the standard protocol
+uses 2048.
 
-This metric follows the set-vs-set protocol (is_set_metric=True):
-  - :meth:`accumulate` is called once per video to buffer I3D features.
+This metric follows the set-vs-set protocol (``is_set_metric=True``):
+
+  - :meth:`accumulate` is called once per video to buffer features.
   - :meth:`finalize`   is called once after all videos to compute FVD.
   - :meth:`reset`      clears buffers between evaluation runs.
 
+Extractors
+----------
+
+* ``i3d`` (default) — Kinetics-400 I3D, the standard FVD feature space used
+  in the literature.
+* ``clip`` — CLIP ViT-B/32 per-frame embeds, mean-pooled over time. Captures
+  semantic / content quality.
+* ``videomae`` — VideoMAE-base last-hidden-state, mean-pooled over patches.
+  Captures structural / motion quality.
+
+CLIP and VideoMAE are research-grade and not directly comparable to FVD
+scores from the literature; use ``i3d`` for paper comparisons.
+
 Reference features
 ------------------
-On the first call to :meth:`accumulate` that includes
-``sample["reference"]``, I3D features are extracted from those reference
-videos and saved to *cache_path*. Every subsequent run loads that cache
-automatically — no need to pass ``sample["reference"]`` again.
+
+On the first call to :meth:`accumulate` that includes ``sample["reference"]``,
+features are extracted from those reference videos and saved to *cache_path*.
+Every subsequent run loads that cache automatically — no need to pass
+``sample["reference"]`` again.
+
+Each extractor caches to a separate file (``real_features_{extractor}.pt``)
+because feature dimensions differ — mixing them silently would yield garbage.
 
 Cache resolution order (first match wins):
   1. ``cache_path=`` constructor kwarg, if set.
   2. ``$FASTVIDEO_FVD_REF_FEATURES``, if set.
-  3. ``${FASTVIDEO_EVAL_CACHE}/fvd/real_features.pt`` (default).
+  3. ``${FASTVIDEO_EVAL_CACHE}/fvd/real_features_{extractor}.pt`` (default).
 
 The env-var override mirrors ``audio.frechet_distance``'s
 ``FASTVIDEO_FAD_REF_FEATURES`` pattern.
-
-I3D model
----------
-Downloaded automatically from HuggingFace on first use via
-:func:`fastvideo.eval.models.ensure_checkpoint` (filelock-safe):
-    flateon/FVD-I3D-torchscript  (i3d_torchscript.pt)
-Requires ``huggingface_hub`` (included in fastvideo deps).
 """
 
 from __future__ import annotations
@@ -45,96 +56,21 @@ import warnings
 import numpy as np
 import scipy.linalg
 import torch
-import torch.nn.functional as F
 
 from fastvideo.eval.metrics.base import BaseMetric
+from fastvideo.eval.metrics.common.fvd.extractors import (_BaseExtractor, available_extractors, load_extractor)
 from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-_I3D_REPO_ID = "flateon/FVD-I3D-torchscript"
-_I3D_FILENAME = "i3d_torchscript.pt"
-_I3D_MIN_FRAMES = 10  # I3D hard minimum
 _MIN_VIDEOS_WARN = 256  # below this FVD is unreliable
-_REAL_FEAT_RELPATH = "fvd/real_features.pt"  # relative to get_cache_dir()
 _REF_FEATURES_ENV = "FASTVIDEO_FVD_REF_FEATURES"
-
-# ---------------------------------------------------------------------------
-# I3D helpers  (adapted from FastVideo benchmarks/fvd/i3d_model.py)
-# ---------------------------------------------------------------------------
-
-
-def _load_i3d(device: torch.device) -> torch.nn.Module:
-    """Download I3D TorchScript from HuggingFace Hub and load it.
-
-    Uses :func:`fastvideo.eval.models.ensure_checkpoint` so the download
-    is filelock-safe across threads, processes, and SLURM ranks.
-    """
-    from fastvideo.eval.models import ensure_checkpoint
-    path = ensure_checkpoint(_I3D_FILENAME, source=_I3D_REPO_ID, filename=_I3D_FILENAME)
-    model = torch.jit.load(path, map_location=device)
-    model.eval()
-    return model
-
-
-def _preprocess(video: torch.Tensor) -> torch.Tensor:
-    """(B, T, C, H, W) float [0, 1] → (B, C, T, 224, 224) float [-1, 1].
-
-    Matches I3D preprocessing from FastVideo benchmarks/fvd/feature_extractors.py.
-    """
-    B, T, C, H, W = video.shape
-    if T < _I3D_MIN_FRAMES:
-        raise ValueError(f"I3D requires at least {_I3D_MIN_FRAMES} frames, got {T}. "
-                         "Increase num_frames or use a longer video.")
-    if H != 224 or W != 224:
-        video = video.reshape(B * T, C, H, W)
-        video = F.interpolate(video, size=(224, 224), mode="bilinear", align_corners=False)
-        video = video.reshape(B, T, C, 224, 224)
-    # Scale [0, 1] → [-1, 1] and permute to (B, C, T, H, W)
-    video = video * 2.0 - 1.0
-    return video.permute(0, 2, 1, 3, 4).contiguous()
-
-
-@torch.no_grad()
-def _extract_features(
-    model: torch.nn.Module,
-    video: torch.Tensor,  # (B, T, C, H, W) float [0, 1]
-    chunk: int,
-    device: torch.device,
-) -> np.ndarray:
-    """Extract I3D features → (B, 400) numpy array, chunked to fit VRAM.
-
-    ``torch.jit.fuser("none")`` disables NVRTC kernel fusion for the I3D
-    TorchScript forward pass.  Without it, PyTorch tries to JIT-compile fused
-    kernels via ``libnvrtc-builtins``, which is only available on the exact
-    CUDA version the binary was built against (e.g. fails on Colab CUDA 12
-    when the lib expects CUDA 13).  Disabling fusion has no effect on
-    numerical correctness — the I3D model still runs in full precision on GPU.
-    """
-    parts = []
-    with torch.jit.fuser("none"):
-        for i in range(0, video.shape[0], chunk):
-            batch = _preprocess(video[i:i + chunk].to(device))
-            feats = model(batch, rescale=False, resize=False, return_features=True)
-            if feats.dim() == 1:
-                feats = feats.unsqueeze(0)  # (D,) → (1, D) when I3D squeezes B=1
-            parts.append(feats.cpu().numpy())
-    return np.concatenate(parts, axis=0)
-
-
-# ---------------------------------------------------------------------------
-# Fréchet distance  (adapted from FastVideo benchmarks/fvd/fvd.py)
-# ---------------------------------------------------------------------------
 
 
 def _gaussian_params(features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Compute mean and covariance of a feature matrix (N, D).
+    """Compute mean and covariance of a feature matrix ``(N, D)``.
 
     ``np.atleast_2d`` guards against a 1-D array (e.g. a single feature
-    vector squeezed by I3D or loaded from a stale cache), which would
+    vector squeezed by a model or loaded from a stale cache), which would
     cause ``np.cov`` to return a 0-d scalar and break ``sigma.shape[0]``.
     """
     features = np.atleast_2d(features)
@@ -171,14 +107,26 @@ def _frechet_distance(
     return float(np.sum(diff**2) + np.trace(sigma1 + sigma2 - 2.0 * covmean))
 
 
-# ---------------------------------------------------------------------------
-# Metric
-# ---------------------------------------------------------------------------
+def _extract_chunked(
+    extractor: _BaseExtractor,
+    video: torch.Tensor,  # (B, T, C, H, W)
+    chunk: int,
+) -> np.ndarray:
+    """Run *extractor* over *video* in chunks of *chunk* to bound VRAM."""
+    if video.shape[0] <= chunk:
+        return extractor.forward(video)
+    parts = [extractor.forward(video[i:i + chunk]) for i in range(0, video.shape[0], chunk)]
+    return np.concatenate(parts, axis=0)
+
+
+def _default_cache_path(extractor_name: str) -> str:
+    from fastvideo.eval.models import get_cache_dir
+    return str(get_cache_dir() / "fvd" / f"real_features_{extractor_name}.pt")
 
 
 @register("common.fvd")
 class FVDMetric(BaseMetric):
-    """Fréchet Video Distance (FVD) using I3D features.
+    """Fréchet Video Distance (FVD) over a pluggable feature backbone.
 
     Set-vs-set metric (``is_set_metric=True``). The Evaluator calls
     :meth:`accumulate` once per video and :meth:`finalize` once after
@@ -189,16 +137,19 @@ class FVDMetric(BaseMetric):
 
     Parameters
     ----------
+    extractor : str
+        Feature backbone name. One of ``"i3d"`` (default), ``"clip"``,
+        ``"videomae"``. See module docstring for guidance.
     cache_path : str, optional
-        Where extracted reference (real video) features are cached.
-        Built from ``sample["reference"]`` on the first run, reused
-        automatically on every subsequent run.  Resolution order:
-        constructor kwarg → ``$FASTVIDEO_FVD_REF_FEATURES`` env-var →
-        ``${FASTVIDEO_EVAL_CACHE}/fvd/real_features.pt`` (default,
-        resolved at ``setup()`` time so the env-var can be set after
-        import).
+        Where extracted reference features are cached. Built from
+        ``sample["reference"]`` on the first run, reused automatically on
+        every subsequent run.  Resolution order: constructor kwarg →
+        ``$FASTVIDEO_FVD_REF_FEATURES`` env-var →
+        ``${FASTVIDEO_EVAL_CACHE}/fvd/real_features_{extractor}.pt``
+        (default, resolved at :meth:`setup` time so the env-var can be set
+        after import).
     chunk_size : int
-        Videos per I3D forward pass. Reduce if GPU runs OOM.
+        Videos per forward pass. Reduce if GPU runs OOM.
     """
 
     name = "common.fvd"
@@ -210,15 +161,18 @@ class FVDMetric(BaseMetric):
 
     def __init__(
         self,
+        extractor: str = "i3d",
         cache_path: str | None = None,
         chunk_size: int = 32,
     ) -> None:
         super().__init__()
-        # None → resolved lazily from get_cache_dir() in setup() so that
-        # FASTVIDEO_EVAL_CACHE is honoured even if set after import time.
+        if extractor not in available_extractors():
+            raise ValueError(f"Unknown FVD extractor '{extractor}'. "
+                             f"Available: {available_extractors()}")
+        self._extractor_name = extractor
         self._cache_path_arg = cache_path
         self._chunk = chunk_size
-        self._i3d: torch.nn.Module | None = None
+        self._extractor: _BaseExtractor | None = None
 
         # Accumulated feature buffers — cleared by reset()
         self._gen_features: list[np.ndarray] = []
@@ -226,24 +180,23 @@ class FVDMetric(BaseMetric):
 
     def to(self, device):
         super().to(device)
-        if self._i3d is not None:
-            self._i3d = self._i3d.to(self.device)
+        if self._extractor is not None:
+            self._extractor.to(self.device)
         return self
 
     def setup(self) -> None:
-        if self._i3d is not None:
+        if self._extractor is not None:
             return
-        from fastvideo.eval.models import get_cache_dir
-        # Resolve cache_path now so FASTVIDEO_EVAL_CACHE / FASTVIDEO_FVD_REF_FEATURES
-        # are both read at run-time. Precedence: kwarg > env-var > default.
+        # Resolve cache_path at runtime so $FASTVIDEO_EVAL_CACHE /
+        # $FASTVIDEO_FVD_REF_FEATURES are both honoured even when set after
+        # import. Precedence: kwarg > env-var > default.
         if self._cache_path_arg is not None:
             self.cache_path = os.path.expanduser(self._cache_path_arg)
         elif env_path := os.environ.get(_REF_FEATURES_ENV):
             self.cache_path = os.path.expanduser(env_path)
         else:
-            self.cache_path = str(get_cache_dir() / _REAL_FEAT_RELPATH)
-        self._i3d = _load_i3d(self.device)
-        # Pre-load cached real features if available
+            self.cache_path = _default_cache_path(self._extractor_name)
+        self._extractor = load_extractor(self._extractor_name, self.device)
         self._real_features = self._load_cache()
 
     # ------------------------------------------------------------------
@@ -255,21 +208,20 @@ class FVDMetric(BaseMetric):
         self._gen_features = []
 
     def accumulate(self, sample: dict) -> None:
-        """Extract I3D features from one generated video and buffer them.
+        """Extract features from one generated video and buffer them.
 
         If ``sample["reference"]`` is provided and no cache exists yet,
         reference features are extracted and saved to *cache_path*.
         """
-        if self._i3d is None:
+        if self._extractor is None:
             self.setup()
+        assert self._extractor is not None  # for type narrowing
 
         video = sample["video"]  # (T, C, H, W) from evaluator
         if video.dim() == 4:
             video = video.unsqueeze(0)  # → (1, T, C, H, W)
 
-        # Buffer generated features
-        feats = _extract_features(self._i3d, video, self._chunk, self.device)
-        self._gen_features.append(feats)
+        self._gen_features.append(_extract_chunked(self._extractor, video, self._chunk))
 
         # Build real feature cache on first encounter
         if self._real_features is None:
@@ -280,7 +232,7 @@ class FVDMetric(BaseMetric):
             if ref is not None:
                 if ref.dim() == 4:
                     ref = ref.unsqueeze(0)
-                self._real_features = _extract_features(self._i3d, ref, self._chunk, self.device)
+                self._real_features = _extract_chunked(self._extractor, ref, self._chunk)
                 self._save_cache(self._real_features)
 
     def finalize(self) -> MetricResult:
@@ -323,6 +275,7 @@ class FVDMetric(BaseMetric):
             name=self.name,
             score=fvd,
             details={
+                "extractor": self._extractor_name,
                 "n_generated": n_gen,
                 "n_reference": n_real,
             },
@@ -331,6 +284,8 @@ class FVDMetric(BaseMetric):
     def merge_from(self, other: BaseMetric) -> None:
         """Fold another worker's accumulated features into this one (multi-GPU)."""
         assert isinstance(other, FVDMetric)
+        assert other._extractor_name == self._extractor_name, (
+            f"merge_from extractor mismatch: {other._extractor_name!r} vs {self._extractor_name!r}")
         self._gen_features.extend(other._gen_features)
         # Real features are identical across workers (same cache); keep ours.
         if self._real_features is None and other._real_features is not None:
@@ -343,8 +298,7 @@ class FVDMetric(BaseMetric):
     def _load_cache(self) -> np.ndarray | None:
         if os.path.exists(self.cache_path):
             data = torch.load(self.cache_path, map_location="cpu", weights_only=True)
-            arr = np.atleast_2d(data.numpy())  # guard against stale 1-D cache
-            return arr
+            return np.atleast_2d(data.numpy())  # guard against stale 1-D cache
         return None
 
     def _save_cache(self, features: np.ndarray) -> None:
