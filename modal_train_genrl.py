@@ -200,18 +200,23 @@ def train():
         from fastvideo.train.methods.rl.reward.hpsv3 import (
             _HPSV3_INFERENCERS,
             hpsv3_general_score,
+            hpsv3_percentile_score,
             set_hpsv3_device,
         )
 
-        hps_reward = hpsv3_general_score(device)
         dummy_video = np.zeros((1, 1, 224, 224, 3), dtype=np.uint8)
-        scores, _ = hps_reward(
-            dummy_video,
-            ["preflight prompt"],
-            {},
-        )
-        hps_value = float(scores["avg"].detach().cpu()[0])
-        print(f"HPSv3 preflight score: {hps_value:.4f}", flush=True)
+        for name, factory in (
+            ("HPSv3-general", hpsv3_general_score),
+            ("HPSv3-percentile", hpsv3_percentile_score),
+        ):
+            reward = factory(device)
+            scores, _ = reward(
+                dummy_video,
+                ["preflight prompt"],
+                {},
+            )
+            value = float(scores["avg"].detach().cpu()[0])
+            print(f"{name} preflight score: {value:.4f}", flush=True)
         set_hpsv3_device("cpu")
         _HPSV3_INFERENCERS.clear()
         gc.collect()

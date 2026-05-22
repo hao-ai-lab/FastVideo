@@ -117,6 +117,19 @@ def _normalize_device(device) -> str:
     return str(torch.device(device))
 
 
+def _move_hpsv3_inferencer(inferencer: Any, device) -> None:
+    """Move an HPSv3 inferencer across devices.
+
+    HPSv3RewardInferencer does not expose ``.to()``, but it stores its torch
+    module on ``.model`` and reads ``.device`` when preparing batches.
+    """
+    device_str = _normalize_device(device)
+    model = getattr(inferencer, "model", None)
+    if model is not None and hasattr(model, "to"):
+        model.to(device)
+    inferencer.device = device_str
+
+
 def set_hpsv3_device(device) -> None:
     """Move cached HPSv3 inferencer to given device."""
     key = _normalize_device(device)
@@ -125,7 +138,7 @@ def set_hpsv3_device(device) -> None:
     # Move from any existing device.
     for old_key, inf in list(_HPSV3_INFERENCERS.items()):
         if old_key != key:
-            inf.to(device)
+            _move_hpsv3_inferencer(inf, device)
             _HPSV3_INFERENCERS[key] = inf
             del _HPSV3_INFERENCERS[old_key]
             return

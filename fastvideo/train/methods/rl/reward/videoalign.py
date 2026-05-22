@@ -37,6 +37,15 @@ def _normalize_device_str(device) -> str:
     return str(torch.device(device))
 
 
+def _move_videoalign_inferencer(inferencer: Any, device) -> None:
+    """Move a VideoAlign inferencer across devices."""
+    device_str = _normalize_device_str(device)
+    model = getattr(inferencer, "model", None)
+    if model is not None and hasattr(model, "to"):
+        model.to(device)
+    inferencer.device = device_str
+
+
 def set_videoalign_device(device) -> None:
     """Move cached VideoAlign inferencers to device."""
     key = _normalize_device_str(device)
@@ -45,7 +54,7 @@ def set_videoalign_device(device) -> None:
     ):
         if old_key != key and old_key.split(":")[0] != key:
             new_key = inf._key_prefix + ":" + key
-            inf.to(device)
+            _move_videoalign_inferencer(inf, device)
             _VIDEOALIGN_INFERENCERS[new_key] = inf
             del _VIDEOALIGN_INFERENCERS[old_key]
 
