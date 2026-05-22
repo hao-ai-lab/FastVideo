@@ -82,12 +82,18 @@ class _I3DExtractor(_BaseExtractor):
         if T < _I3D_MIN_FRAMES:
             raise ValueError(f"I3D requires at least {_I3D_MIN_FRAMES} frames, got {T}. "
                              "Increase num_frames or use a longer video.")
+        # Scale [0, 1] → [-1, 1] BEFORE resize so output is bit-identical to the
+        # original benchmarks/fvd/feature_extractors.I3DFeatureExtractor.  Bilinear
+        # interpolation is linear so the math is equivalent either order, but the
+        # FP rounding of `interp(2x-1)` vs `2*interp(x)-1` is not — and that small
+        # delta propagates through dozens of I3D Conv3D layers into ~1e-2 feature
+        # differences.  Scaling first matches OLD verbatim.
+        video = (video.to(self.device) * 2.0 - 1.0)
         if H != 224 or W != 224:
             video = video.reshape(B * T, C, H, W)
             video = F.interpolate(video, size=(224, 224), mode="bilinear", align_corners=False)
             video = video.reshape(B, T, C, 224, 224)
-        # [0, 1] → [-1, 1] then (B, T, C, H, W) → (B, C, T, H, W)
-        batch = (video * 2.0 - 1.0).permute(0, 2, 1, 3, 4).contiguous().to(self.device)
+        batch = video.permute(0, 2, 1, 3, 4).contiguous()
         with torch.jit.fuser("none"):
             feats = self._model(batch, rescale=False, resize=False, return_features=True)
         if feats.dim() == 1:

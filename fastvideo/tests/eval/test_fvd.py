@@ -158,16 +158,24 @@ def test_frechet_distance_of_identical_gaussians_is_zero():
     assert d == pytest.approx(0.0, abs=1e-6)
 
 
-def test_gaussian_params_handles_single_sample():
-    feats = np.array([[1.0, 2.0, 3.0]])  # n=1 → variance is scalar
+def test_gaussian_params_handles_single_sample_multi_dim():
+    feats = np.array([[1.0, 2.0, 3.0]])
     mu, sigma = _gaussian_params(feats)
     assert mu.shape == (3,)
-    assert sigma.shape == (1, 1)  # the n=1 reshape kicks in
+    assert sigma.shape == (3, 3)
+
+
+def test_gaussian_params_scalar_variance_reshape():
+    """1-D, single-element feature → np.cov returns 0-d scalar; reshape to (1,1)."""
+    feats = np.array([1.0])
+    mu, sigma = _gaussian_params(feats)
+    assert mu.shape == (1,)
+    assert sigma.shape == (1, 1)
 
 
 def test_gaussian_params_atleast_2d_guard():
     """1-D feature vector (e.g. from a stale cache) shouldn't blow up cov."""
-    feats = np.array([1.0, 2.0, 3.0])  # 1-D, atleast_2d → (1, 3)
+    feats = np.array([1.0, 2.0, 3.0])
     mu, sigma = _gaussian_params(feats)
     assert mu.shape == (3,)
 
