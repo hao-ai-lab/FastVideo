@@ -1,83 +1,16 @@
-# Repository Guidelines
+You are debugging a Modal training repo.
 
-## Project Structure & Module Organization
-- Core Python package: `fastvideo/` (models, pipelines, training, distributed runtime, CLI entrypoints).
-- CUDA/custom kernels: `fastvideo-kernel/` (separate build/test flow).
-- Tests:
-  - `fastvideo/tests/` for package-level tests (dataset, encoders, inference, training, SSIM, workflow).
-  - `tests/local_tests/` for additional local/component checks.
-- Docs and guides: `docs/` (MkDocs source), with contributor docs in `docs/contributing/`.
-- Runnable examples and scripts: `examples/` and `scripts/`.
-- Static assets: `assets/` (including `assets/images/`, `assets/videos/`, and `assets/prompts/`) and `comfyui/assets/`.
+Primary command:
+MODAL_PROFILE=hao-ai-lab modal run modal_train_genrl.py
 
-## Build, Test, and Development Commands
-- `uv pip install -e .[dev]`: editable install with lint/test extras.
-- `pre-commit install --hook-type pre-commit --hook-type commit-msg`: enable local hooks.
-- `pre-commit run --all-files`: run formatter/lint/type/spelling checks.
-- `pytest tests/`: run top-level test suite.
-- `pytest fastvideo/tests/ -v`: run package tests.
-- `pytest fastvideo/tests/ssim/ -vs`: run SSIM regression tests (GPU-heavy).
-- `cd fastvideo-kernel && ./build.sh`: build kernel extensions.
-
-## Coding Style & Naming Conventions
-- Python 3.10+; 4-space indentation; keep code and imports readable and explicit.
-- Style tools are configured in `pyproject.toml` and `.pre-commit-config.yaml`:
-  - `yapf` (format), `ruff` (lint, auto-fix), `mypy` (typing), `codespell`.
-- Target line length is 80.
-- Naming: `snake_case` for functions/files, `PascalCase` for classes, `UPPER_SNAKE_CASE` for constants.
-
-## Testing Guidelines
-- Use `pytest` and place tests near relevant domains (e.g., `fastvideo/tests/encoders/`).
-- Prefer descriptive names like `test_<feature>_<expected_behavior>.py`.
-- For new pipelines/backends, include at least one regression-oriented test; add SSIM coverage when output quality must be preserved.
-- Document GPU assumptions in tests that require specific hardware.
-
-## Commit & Pull Request Guidelines
-- Follow existing commit style: short subject with optional tag prefix, e.g. `[bugfix]: ...`, `[feat]: ...`, `[misc]: ...`, and include PR reference like `(#1234)` when applicable.
-- Keep commits focused by concern (feature, refactor, fix).
-- PRs should include:
-  - clear problem/solution summary,
-  - test evidence (`pytest`/SSIM outputs or rationale if skipped),
-  - linked issue/PR context,
-  - screenshots or sample outputs for UI/demo/docs changes.
-
-## Agent Infrastructure
-
-This repository is agent-friendly. Before doing any work, read:
-
-1. `.agents/onboarding/README.md` — full onboarding guide with step-by-step instructions.
-2. `.agents/memory/codebase-map/README.md` — structural index of the entire repository.
-3. `.agents/skills/` — available agent skills (check if one exists before writing code).
-4. `.agents/workflows/` — SOPs for common procedures (experiment lifecycle, evaluation, etc.).
-5. `.agents/lessons/` — known pitfalls and their documented fixes.
-
-If you are exploring a new procedure that has no existing SOP, document your
-progress in `.agents/exploration/` and flag it for review at the end of your
-session.
-
-## Context Efficiency
-
-### Subagent Discipline
-
-**Context-aware delegation:**
- - Under ~50k context: prefer inline work for tasks under ~5 tool calls.
- - Over ~50k context: prefer subagents for self-contained tasks, even simple ones — the per-call token tax on large contexts adds up fast.
-
-When using subagents, include output rules: "Final response under 2000 characters. List outcomes, not process."
-Never call TaskOutput twice for the same subagent. If it times out, increase the timeout — don't re-read.
-
-### File Reading
-Read files with purpose. Before reading a file, know what you're looking for.
-Use Grep to locate relevant sections before reading entire large files.
-Never re-read a file you've already read in this session.
-For files over 500 lines, use offset/limit to read only the relevant section.
-
-### Responses
-Don't echo back file contents you just read — the user can see them.
-Don't narrate tool calls ("Let me read the file..." / "Now I'll edit..."). Just do it.
-Keep explanations proportional to complexity. Simple changes need one sentence, not three paragraphs.
-
-**Tables — STRICT RULES (apply everywhere, always):**
-- Markdown tables: use minimum separator (`|-|-|`). Never pad with repeated hyphens (`|---|---|`).
-- NEVER use box-drawing / ASCII-art tables with characters like `┌`, `┬`, `─`, `│`, `└`, `┘`, `├`, `┤`, `┼`. These are completely banned.
-- No exceptions. Not for "clarity", not for alignment, not for terminal output.
+Rules:
+- When given crash logs, identify the root cause and make the minimal code/config fix.
+- Do not blindly rewrite large files.
+- Do not delete checkpoints, datasets, secrets, .env files, or Modal credentials.
+- Prefer cheap validation after edits:
+  - python -m py_compile modal_train_genrl.py
+  - python -m compileall .
+  - targeted import checks
+  - tiny local smoke tests if available
+- Do not launch expensive full training unless explicitly asked.
+- Summarize exactly what changed and why.
