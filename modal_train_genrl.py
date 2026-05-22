@@ -5,7 +5,7 @@ Expected Modal resources in the hao-ai-lab workspace:
   `/filtered_prompts/test.json` with the real LongCat prompt JSON files.
 - Volume `fastvideo-runs` for checkpoints/logs.
 - Volume `fastvideo-cache` for Hugging Face and reward-model caches.
-- Secrets `wandb-secret` and `hf-secret`.
+- Secrets `wandb-adamlee00` and `hf-adamlee00`.
 """
 
 import modal
@@ -16,6 +16,9 @@ DATASET_DIR = "/data/filtered_prompts"
 OUTPUT_DIR = "/outputs/genrl_longcat_probe_001"
 RUN_NAME = "genrl_longcat_probe_001"
 VIDEOALIGN_DIR = "/cache/VideoReward"
+WANDB_ENTITY = "adamlee00"
+WANDB_SECRET_NAME = "wandb-adamlee00"
+HF_SECRET_NAME = "hf-adamlee00"
 
 data_vol = modal.Volume.from_name("fastvideo-data")
 runs_vol = modal.Volume.from_name("fastvideo-runs")
@@ -40,7 +43,14 @@ image = (
     .pip_install("uv")
     .pip_install(
         "fire>=0.7.0",
-        "trl>=0.7.0",
+        "datasets==3.6.0",
+        "matplotlib==3.10.3",
+        "peft==0.10.0",
+        "prettytable==3.8.0",
+        "qwen-vl-utils==0.0.11",
+        "safetensors==0.5.3",
+        "timm==1.0.15",
+        "trl==0.8.6",
     )
     .add_local_dir(".", "/root/FastVideo", copy=True)
     .run_commands(
@@ -51,10 +61,14 @@ image = (
         "uv pip install --system numpy==1.26.4 scipy==1.15.2",
         "python -c 'from torchvision.transforms import InterpolationMode; "
         "print(InterpolationMode.BICUBIC)'",
+        "python -c 'import datasets, matplotlib, peft, "
+        "qwen_vl_utils, safetensors, timm, trl; "
+        "from transformers import Qwen2VLForConditionalGeneration'",
     )
     .env(
         {
             "WANDB_MODE": "online",
+            "WANDB_ENTITY": WANDB_ENTITY,
             "TOKENIZERS_PARALLELISM": "false",
             "NUM_GPUS": "4",
             "HF_HOME": "/cache/huggingface",
@@ -75,12 +89,14 @@ image = (
         "/cache": cache_vol,
     },
     secrets=[
-        modal.Secret.from_name("wandb-secret"),
-        modal.Secret.from_name("hf-secret"),
+        modal.Secret.from_name(WANDB_SECRET_NAME),
+        modal.Secret.from_name(HF_SECRET_NAME),
     ],
 )
 def train():
+    import gc
     import json
+    import os
     import subprocess
     import sys
     from pathlib import Path
@@ -149,8 +165,90 @@ def train():
             local_dir_use_symlinks=False,
         )
 
+    def preflight_runtime() -> None:
+        import numpy as np
+        import torch
+
+        print("=== GenRL Modal Preflight ===", flush=True)
+
+        from huggingface_hub import HfApi
+
+        try:
+            whoami = HfApi().whoami()
+            print(
+                f"HF auth user: {whoami.get('name', '<unknown>')}",
+                flush=True,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "Hugging Face token check failed. Verify the "
+                f"`{HF_SECRET_NAME}` Modal secret."
+            ) from exc
+
+        print(
+            "W&B target: "
+            f"entity={os.environ.get('WANDB_ENTITY')} "
+            f"project=VideoRL",
+            flush=True,
+        )
+
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is not available in Modal preflight.")
+        device = torch.device("cuda:0")
+
+        # HPSv3 catches checkpoint/key-layout drift before Wan sampling.
+        from fastvideo.train.methods.rl.reward.hpsv3 import (
+            _HPSV3_INFERENCERS,
+            hpsv3_general_score,
+            set_hpsv3_device,
+        )
+
+        hps_reward = hpsv3_general_score(device)
+        dummy_video = np.zeros((1, 1, 224, 224, 3), dtype=np.uint8)
+        scores, _ = hps_reward(
+            dummy_video,
+            ["preflight prompt"],
+            {},
+        )
+        hps_value = float(scores["avg"].detach().cpu()[0])
+        print(f"HPSv3 preflight score: {hps_value:.4f}", flush=True)
+        set_hpsv3_device("cpu")
+        _HPSV3_INFERENCERS.clear()
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        # VideoAlign catches checkpoint/dependency issues before training.
+        from fastvideo.train.methods.rl.reward.videoalign import (
+            _VIDEOALIGN_INFERENCERS,
+            videoalign_mq_score,
+            videoalign_ta_score,
+        )
+
+        dummy_video = np.zeros((1, 8, 224, 224, 3), dtype=np.uint8)
+        for name, factory in (
+            ("VideoAlign-MQ", videoalign_mq_score),
+            ("VideoAlign-TA", videoalign_ta_score),
+        ):
+            reward = factory(device)
+            scores, _ = reward(
+                dummy_video,
+                ["preflight prompt"],
+                {},
+            )
+            value = float(scores["avg"].detach().cpu()[0])
+            print(f"{name} preflight score: {value:.4f}", flush=True)
+
+        for inferencer in list(_VIDEOALIGN_INFERENCERS.values()):
+            if hasattr(inferencer, "to"):
+                inferencer.to("cpu")
+        _VIDEOALIGN_INFERENCERS.clear()
+        gc.collect()
+        torch.cuda.empty_cache()
+        print("=== GenRL Modal Preflight OK ===", flush=True)
+
     require_prompt_dataset(DATASET_DIR)
     ensure_videoalign_checkpoint()
+    preflight_runtime()
     cmd = [
         "bash",
         "examples/train/run.sh",

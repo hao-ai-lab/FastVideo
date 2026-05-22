@@ -28,6 +28,7 @@ if _HPSV3_ROOT.exists():
 
 # Global cache of HPSv3 inferencers keyed by device.
 _HPSV3_INFERENCERS: dict[str, Any] = {}
+_HPSV3_LOAD_PATCHED = False
 
 
 def _patch_transformers_video_input_alias() -> None:
@@ -42,6 +43,59 @@ def _patch_transformers_video_input_alias() -> None:
 
     if not hasattr(image_utils, "VideoInput"):
         image_utils.VideoInput = image_utils.ImageInput
+
+
+def _remap_hpsv3_state_dict(state_dict: dict[str, Any]) -> dict[str, Any]:
+    """Adapt HPSv3 checkpoints saved with older Qwen2-VL key names."""
+    if (
+        any(k.startswith("model.visual.") for k in state_dict)
+        or not any(k.startswith("visual.") for k in state_dict)
+    ):
+        return state_dict
+
+    remapped = {}
+    for key, value in state_dict.items():
+        if key.startswith("visual."):
+            remapped[f"model.{key}"] = value
+        elif key.startswith("model.layers."):
+            remapped[f"model.language_model.{key[len('model.'):]}"] = value
+        elif key.startswith("model.embed_tokens."):
+            remapped[
+                f"model.language_model.{key[len('model.'):]}"
+            ] = value
+        elif key.startswith("model.norm."):
+            remapped[f"model.language_model.{key[len('model.'):]}"] = value
+        else:
+            remapped[key] = value
+    return remapped
+
+
+def _patch_hpsv3_state_dict_loader() -> None:
+    """Patch HPSv3 reward model loading for transformers key drift."""
+    global _HPSV3_LOAD_PATCHED
+    if _HPSV3_LOAD_PATCHED:
+        return
+
+    from hpsv3.model.qwen2vl_trainer import Qwen2VLRewardModelBT
+
+    original_load_state_dict = Qwen2VLRewardModelBT.load_state_dict
+
+    def load_state_dict_with_key_remap(
+        self,
+        state_dict,
+        strict=True,
+        assign=False,
+    ):
+        state_dict = _remap_hpsv3_state_dict(state_dict)
+        return original_load_state_dict(
+            self,
+            state_dict,
+            strict=strict,
+            assign=assign,
+        )
+
+    Qwen2VLRewardModelBT.load_state_dict = load_state_dict_with_key_remap
+    _HPSV3_LOAD_PATCHED = True
 
 
 def _normalize_device(device) -> str:
@@ -71,6 +125,7 @@ def _get_hpsv3_inferencer(device):
         try:
             _patch_transformers_video_input_alias()
             from hpsv3 import HPSv3RewardInferencer
+            _patch_hpsv3_state_dict_loader()
         except ImportError as exc:
             msg = (
                 "Failed to import HPSv3. Ensure the HPSv3 submodule is "
