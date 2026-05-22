@@ -15,14 +15,17 @@ Two checks, both on a single H200:
       same loaded weights, confirm the final latent is finite and
       well-scaled.
 
+Configure local checkout paths via env vars (defaults assume a sibling
+layout next to this repo):
+
+  ANYFLOW_LOCAL  — path to ``nvidia/AnyFlow-Wan2.1-T2V-1.3B-Diffusers``
+                   (default ``./anyflow-1.3b``)
+  ANYFLOW_REF    — path to the NVlabs/AnyFlow reference repo, used to
+                   import its loader (default ``./anyflow-ref``)
+
 Run via::
 
-    srun --jobid=304 bash -c '
-      source ~/.venvs/anyflow/bin/activate
-      export CPATH=/home/guian/.local/share/uv/python/cpython-3.10.20-linux-x86_64-gnu/include/python3.10
-      cd ~/projects/anyflow/FastVideo
-      PYTHONPATH=$PWD python scripts/verify_anyflow_fastvideo_parity.py
-    '
+    PYTHONPATH=$PWD python scripts/verify_anyflow_fastvideo_parity.py
 """
 
 from __future__ import annotations
@@ -37,8 +40,8 @@ import torch
 from safetensors.torch import load_file
 
 
-ANYFLOW_LOCAL = Path("/home/guian/projects/anyflow/anyflow-1.3b")
-ANYFLOW_REF = Path("/home/guian/projects/anyflow/anyflow-ref")
+ANYFLOW_LOCAL = Path(os.environ.get("ANYFLOW_LOCAL", "./anyflow-1.3b")).expanduser()
+ANYFLOW_REF = Path(os.environ.get("ANYFLOW_REF", "./anyflow-ref")).expanduser()
 sys.path.insert(0, str(ANYFLOW_REF))
 
 SEED = 1234
