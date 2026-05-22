@@ -52,27 +52,64 @@ def _remap_qwen2vl_state_dict_keys(
     state_dict: dict[str, Any],
 ) -> dict[str, Any]:
     """Adapt checkpoints saved with older Qwen2-VL key names."""
-    if (
-        any(k.startswith("model.visual.") for k in state_dict)
-        or not any(k.startswith("visual.") for k in state_dict)
-    ):
-        return state_dict
-
     remapped = {}
     for key, value in state_dict.items():
         if key.startswith("visual."):
-            remapped[f"model.{key}"] = value
+            key = f"model.{key}"
         elif key.startswith("model.layers."):
-            remapped[f"model.language_model.{key[len('model.'):]}"] = value
+            key = f"model.language_model.{key[len('model.'):]}"
         elif key.startswith("model.embed_tokens."):
-            remapped[
-                f"model.language_model.{key[len('model.'):]}"
-            ] = value
+            key = f"model.language_model.{key[len('model.'):]}"
         elif key.startswith("model.norm."):
-            remapped[f"model.language_model.{key[len('model.'):]}"] = value
-        else:
-            remapped[key] = value
+            key = f"model.language_model.{key[len('model.'):]}"
+
+        key = key.replace(
+            "base_model.model.visual.",
+            "base_model.model.model.visual.",
+            1,
+        )
+        key = key.replace(
+            "base_model.model.model.layers.",
+            "base_model.model.model.language_model.layers.",
+            1,
+        )
+        key = key.replace(
+            "base_model.model.model.embed_tokens.",
+            "base_model.model.model.language_model.embed_tokens.",
+            1,
+        )
+        key = key.replace(
+            "base_model.model.model.norm.",
+            "base_model.model.model.language_model.norm.",
+            1,
+        )
+        remapped[key] = value
     return remapped
+
+
+def _patch_load_state_dict(cls: Any) -> None:
+    """Patch a model class to accept old VideoAlign checkpoint keys."""
+    if getattr(cls, "_fastvideo_qwen2vl_key_remap", False):
+        return
+
+    original_load_state_dict = cls.load_state_dict
+
+    def load_state_dict_with_key_remap(
+        self,
+        state_dict,
+        strict=True,
+        assign=False,
+    ):
+        state_dict = _remap_qwen2vl_state_dict_keys(state_dict)
+        return original_load_state_dict(
+            self,
+            state_dict,
+            strict=strict,
+            assign=assign,
+        )
+
+    cls.load_state_dict = load_state_dict_with_key_remap
+    cls._fastvideo_qwen2vl_key_remap = True
 
 
 def _patch_videoalign_modules() -> Any:
@@ -102,24 +139,14 @@ def _patch_videoalign_modules() -> Any:
 
             mod.create_model_and_processor = create_model_and_processor_sdpa
 
-    cls = trainer_mod.Qwen2VLRewardModelBT
-    original_load_state_dict = cls.load_state_dict
+    _patch_load_state_dict(trainer_mod.Qwen2VLRewardModelBT)
+    try:
+        peft_mod = import_module("peft")
+    except ImportError:
+        peft_mod = None
+    if peft_mod is not None:
+        _patch_load_state_dict(peft_mod.PeftModel)
 
-    def load_state_dict_with_key_remap(
-        self,
-        state_dict,
-        strict=True,
-        assign=False,
-    ):
-        state_dict = _remap_qwen2vl_state_dict_keys(state_dict)
-        return original_load_state_dict(
-            self,
-            state_dict,
-            strict=strict,
-            assign=assign,
-        )
-
-    cls.load_state_dict = load_state_dict_with_key_remap
     _VIDEOALIGN_PATCHED = True
     return inference_mod
 
