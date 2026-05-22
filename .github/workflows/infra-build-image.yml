@@ -24,7 +24,7 @@ on:
         default: false
         type: boolean
       dreamverse_cuda_12_9:
-        description: 'Build Dreamverse CUDA 12.9 image'
+        description: 'Build Dreamverse CUDA 12.9 backend-only and UI images'
         required: false
         default: false
         type: boolean
@@ -71,12 +71,26 @@ jobs:
       tag_suffix: py3.12-cuda12.9.1
     secrets: inherit
 
-  build-dreamverse-cuda-12-9:
+  build-dreamverse-backend-cuda-12-9:
     if: ${{ github.event.inputs.dreamverse_cuda_12_9 == 'true' }}
     uses: ./.github/workflows/_template-build-image.yml
     with:
       python_version: '3.12'
       dockerfile_path: apps/dreamverse/docker/Dockerfile
-      tag_suffix: dreamverse-cuda12.9.1
+      tag_suffix: dreamverse-backend-cuda12.9.1
       image_name: dreamverse
+      build_args: BUILD_DREAMVERSE_UI=0
+      include_latest_tags: false
+    secrets: inherit
+
+  build-dreamverse-ui-cuda-12-9:
+    if: ${{ github.event.inputs.dreamverse_cuda_12_9 == 'true' }}
+    uses: ./.github/workflows/_template-build-image.yml
+    with:
+      python_version: '3.12'
+      dockerfile_path: apps/dreamverse/docker/Dockerfile
+      tag_suffix: dreamverse-ui-cuda12.9.1
+      image_name: dreamverse
+      build_args: BUILD_DREAMVERSE_UI=1
+      include_latest_tags: false
     secrets: inherit
