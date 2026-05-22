@@ -58,7 +58,12 @@ image = (
         "uv pip install --system --prerelease=allow "
         "--index-url https://download.pytorch.org/whl/cu128 "
         "--upgrade torch torchvision torchaudio",
+        "uv pip install --system --no-cache-dir "
+        "https://github.com/mjun0812/flash-attention-prebuild-wheels/"
+        "releases/download/v0.7.16/"
+        "flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl",
         "uv pip install --system numpy==1.26.4 scipy==1.15.2",
+        "python -c 'import flash_attn; print(\"flash_attn ok\")'",
         "python -c 'from torchvision.transforms import InterpolationMode; "
         "print(InterpolationMode.BICUBIC)'",
         "python -c 'import datasets, matplotlib, peft, "
