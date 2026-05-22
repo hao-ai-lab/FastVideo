@@ -5,7 +5,7 @@ import { defineConfig, devices } from '@playwright/test';
  *
  * Tests assume the Dreamverse Python server is reachable at
  * BACKEND_HOST:BACKEND_PORT (default 127.0.0.1:8009) and the Next.js frontend
- * runs on port 5299. The webServer block boots `pnpm run dev` if no
+ * runs on port 5299. The webServer block boots `npm run dev` if no
  * server is already listening so tests work both locally and in CI.
  */
 export default defineConfig({
@@ -36,7 +36,7 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_SKIP_WEBSERVER
     ? undefined
     : {
-        command: 'pnpm run dev',
+        command: 'npm run dev',
         url: 'http://127.0.0.1:5299',
         reuseExistingServer: true,
         timeout: 120_000,
