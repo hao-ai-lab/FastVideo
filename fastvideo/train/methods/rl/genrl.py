@@ -746,6 +746,23 @@ class GenRLMethod(TrainingMethod):
                 )[:need]
                 mask[false_idx[perm]] = True
 
+        global_count = (
+            _gather_tensor(
+                mask.sum().view(1), self._world_size
+            )
+            .sum()
+            .item()
+        )
+        actual_batch_size = (
+            global_count
+            / (num_batches * self._world_size)
+        )
+        if self._is_main and self.tracker:
+            self.tracker.log(
+                {"actual_batch_size": actual_batch_size},
+                global_step,
+            )
+
         samples_t = {
             k: v[mask] for k, v in samples_t.items()
         }
@@ -1025,6 +1042,26 @@ class GenRLMethod(TrainingMethod):
                         torch.mean(
                             (
                                 torch.abs(ratio - 1.0)
+                                > self._clip_range
+                            ).float()
+                        )
+                        .detach()
+                        .item()
+                    )
+                    info["clip_frac_gt_one"].append(
+                        torch.mean(
+                            (
+                                ratio - 1.0
+                                > self._clip_range
+                            ).float()
+                        )
+                        .detach()
+                        .item()
+                    )
+                    info["clip_frac_lt_one"].append(
+                        torch.mean(
+                            (
+                                1.0 - ratio
                                 > self._clip_range
                             ).float()
                         )
