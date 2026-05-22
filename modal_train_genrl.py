@@ -82,6 +82,7 @@ image = (
             "HF_HUB_CACHE": "/cache/huggingface",
             "TRANSFORMERS_CACHE": "/cache/huggingface",
             "VIDEOALIGN_CHECKPOINT_PATH": VIDEOALIGN_DIR,
+            "FORCE_QWENVL_VIDEO_READER": "opencv",
         }
     )
 )

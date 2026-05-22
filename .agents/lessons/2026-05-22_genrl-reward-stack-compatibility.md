@@ -13,7 +13,9 @@ step while initializing HPSv3 and VideoAlign rewards. Failures included missing
 submodule dependencies, HPSv3 importing a removed Transformers alias,
 FlashAttention being forced when unavailable, Qwen2-VL checkpoint key drift,
 PEFT/LoRA-prefixed VideoAlign checkpoint key drift, and old Qwen2-VL forward
-code expecting `model.embed_tokens`.
+code expecting `model.embed_tokens`. VideoAlign also assumed that if decord was
+unavailable, `torchvision.io.read_video` would exist; the Modal torchvision
+build did not expose that API.
 
 ## Root Cause
 The reward models are vendored research repositories with their own dependency
@@ -26,6 +28,8 @@ assumptions:
   `base_model.model.*` prefixes, not only raw model keys.
 - FastVideo treats FlashAttention as recommended/optional, while VideoAlign
   forced `flash_attention_2` unless explicitly disabled.
+- VideoAlign's video-reader fallback relies on optional torchvision video I/O
+  that is not present in every binary build.
 
 The initial preflight checked only shallow setup. It did not instantiate every
 reward, load each checkpoint, run a dummy scoring call, and then move/clear the
@@ -42,6 +46,8 @@ compatibility:
   `base_model.model.model.*`.
 - Add runtime `embed_tokens` aliases through wrapper/base-model graphs.
 - Install FlashAttention in the Modal image, while retaining an SDPA fallback.
+- Register and force an OpenCV VideoAlign reader from the FastVideo wrapper
+  when `torchvision.io.read_video` is unavailable.
 - Modal preflight now exercises HPSv3 general, HPSv3 percentile, VideoAlign MQ,
   and VideoAlign TA with dummy videos before Wan sampling starts.
 

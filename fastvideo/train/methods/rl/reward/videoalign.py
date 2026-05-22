@@ -128,6 +128,134 @@ def _patch_load_state_dict(cls: Any) -> None:
     cls._fastvideo_qwen2vl_key_remap = True
 
 
+def _select_videoalign_frame_indices(
+    vision_mod: Any,
+    ele: dict[str, Any],
+    total_frames: int,
+    video_fps: float,
+) -> list[int]:
+    sample_type = ele.get("sample_type", "uniform")
+    if sample_type == "uniform":
+        nframes = vision_mod.smart_nframes(
+            ele,
+            total_frames=total_frames,
+            video_fps=video_fps,
+        )
+        return torch.linspace(
+            0,
+            total_frames - 1,
+            nframes,
+        ).round().long().tolist()
+    if sample_type == "multi_pts":
+        frames_each_pts = 6
+        num_pts = 4
+        fps = 8
+        nframes = max(
+            frames_each_pts,
+            int(total_frames * fps // video_fps),
+        )
+        frame_idx = torch.linspace(
+            0,
+            total_frames - 1,
+            nframes,
+        ).round().long().tolist()
+        start_pt = int(frames_each_pts // 2)
+        end_pt = int(nframes - frames_each_pts // 2 - 1)
+        pts = torch.linspace(
+            start_pt,
+            end_pt,
+            num_pts,
+        ).round().long().tolist()
+        idx = []
+        for pt in pts:
+            idx.extend(
+                frame_idx[
+                    pt - frames_each_pts // 2:
+                    pt + frames_each_pts // 2
+                ]
+            )
+        return idx
+    raise ValueError(f"Unsupported VideoAlign sample_type: {sample_type}")
+
+
+def _read_video_opencv(
+    vision_mod: Any,
+    ele: dict[str, Any],
+) -> torch.Tensor:
+    """Read local MP4s without relying on torchvision.io.read_video."""
+    import cv2
+
+    video_path = ele["video"]
+    if video_path.startswith("file://"):
+        video_path = video_path[7:]
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video: {video_path}")
+
+    video_fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+    total_file_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    start_frame = max(
+        0,
+        int(round(float(ele.get("video_start", 0.0) or 0.0) * video_fps)),
+    )
+    end_sec = ele.get("video_end")
+    if end_sec is None:
+        end_frame = total_file_frames if total_file_frames > 0 else None
+    else:
+        end_frame = int(round(float(end_sec) * video_fps))
+        if total_file_frames > 0:
+            end_frame = min(end_frame, total_file_frames)
+
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    frames = []
+    current_frame = start_frame
+    while end_frame is None or current_frame < end_frame:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        current_frame += 1
+    cap.release()
+
+    if not frames:
+        raise ValueError(f"No frames were read from video: {video_path}.")
+
+    idx = _select_videoalign_frame_indices(
+        vision_mod,
+        ele,
+        total_frames=len(frames),
+        video_fps=video_fps,
+    )
+    video = np.stack([frames[i] for i in idx], axis=0)
+    return torch.from_numpy(video).permute(0, 3, 1, 2)
+
+
+def _torchvision_read_video_available() -> bool:
+    try:
+        torchvision_io = import_module("torchvision.io")
+    except Exception:
+        return False
+    return hasattr(torchvision_io, "read_video")
+
+
+def _patch_videoalign_video_reader() -> None:
+    """Register an OpenCV reader for torchvision builds without read_video."""
+    vision_mod = import_module("vision_process")
+    if "opencv" not in vision_mod.VIDEO_READER_BACKENDS:
+
+        def read_video_opencv(ele):
+            return _read_video_opencv(vision_mod, ele)
+
+        vision_mod.VIDEO_READER_BACKENDS["opencv"] = read_video_opencv
+
+    if _torchvision_read_video_available():
+        return
+
+    vision_mod.FORCE_QWENVL_VIDEO_READER = "opencv"
+    if hasattr(vision_mod.get_video_reader_backend, "cache_clear"):
+        vision_mod.get_video_reader_backend.cache_clear()
+
+
 def _patch_videoalign_modules() -> Any:
     """Patch VideoAlign for the FastVideo dependency set."""
     global _VIDEOALIGN_PATCHED
@@ -138,6 +266,7 @@ def _patch_videoalign_modules() -> Any:
 
     train_reward_mod = import_module("train_reward")
     trainer_mod = import_module("trainer")
+    _patch_videoalign_video_reader()
 
     if util.find_spec("flash_attn") is None:
         for mod in (train_reward_mod, inference_mod):
