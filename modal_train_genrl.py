@@ -44,7 +44,12 @@ image = (
     )
     .add_local_dir(".", "/root/FastVideo", copy=True)
     .run_commands(
-        "cd /root/FastVideo && uv pip install --system --prerelease=allow -e ."
+        "cd /root/FastVideo && uv pip install --system --prerelease=allow -e .",
+        "uv pip install --system --prerelease=allow "
+        "--index-url https://download.pytorch.org/whl/cu128 "
+        "--upgrade torch torchvision torchaudio",
+        "python -c 'from torchvision.transforms import InterpolationMode; "
+        "print(InterpolationMode.BICUBIC)'",
     )
     .env(
         {
