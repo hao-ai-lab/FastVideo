@@ -19,6 +19,7 @@ VIDEOALIGN_DIR = "/cache/VideoReward"
 WANDB_ENTITY = "adamlee00"
 WANDB_SECRET_NAME = "wandb-adamlee00"
 HF_SECRET_NAME = "hf-adamlee00"
+MIN_TRAIN_PROMPTS = 4
 
 data_vol = modal.Volume.from_name("fastvideo-data")
 runs_vol = modal.Volume.from_name("fastvideo-runs")
@@ -64,6 +65,7 @@ image = (
         "flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl",
         "uv pip install --system numpy==1.26.4 scipy==1.15.2",
         "python -c 'import flash_attn; print(\"flash_attn ok\")'",
+        "python -c 'import cv2, imageio; print(\"video io ok\")'",
         "python -c 'from torchvision.transforms import InterpolationMode; "
         "print(InterpolationMode.BICUBIC)'",
         "python -c 'import datasets, matplotlib, peft, "
@@ -108,6 +110,18 @@ def train():
     from pathlib import Path
 
     def require_prompt_dataset(dataset_dir: str) -> None:
+        def count_json_prompts(path: Path) -> int:
+            count = 0
+            with path.open(encoding="utf-8") as f:
+                for raw_line in f:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    item = json.loads(line)
+                    if item.get("prompt"):
+                        count += 1
+            return count
+
         train_path = Path(dataset_dir) / "train.json"
         test_path = Path(dataset_dir) / "test.json"
         if not train_path.exists() or not test_path.exists():
@@ -157,9 +171,31 @@ def train():
                 )
             json.loads(first)
 
+        prompt_count = count_json_prompts(train_path)
+        if prompt_count < MIN_TRAIN_PROMPTS:
+            raise RuntimeError(
+                f"{train_path} has only {prompt_count} usable prompts; "
+                f"this launch needs at least {MIN_TRAIN_PROMPTS} so all "
+                "distributed ranks receive a non-empty prompt batch."
+            )
+
     def ensure_videoalign_checkpoint() -> None:
+        def has_complete_checkpoint(root: Path) -> bool:
+            for ckpt in root.glob("checkpoint-*"):
+                if (ckpt / "model.pth").exists():
+                    return True
+                if (
+                    (ckpt / "adapter_model.safetensors").exists()
+                    and (ckpt / "non_lora_state_dict.pth").exists()
+                ):
+                    return True
+            return False
+
         model_config = Path(VIDEOALIGN_DIR) / "model_config.json"
-        if model_config.exists():
+        if (
+            model_config.exists()
+            and has_complete_checkpoint(Path(VIDEOALIGN_DIR))
+        ):
             return
 
         from huggingface_hub import snapshot_download
@@ -176,6 +212,18 @@ def train():
         import torch
 
         print("=== GenRL Modal Preflight ===", flush=True)
+        import peft
+        import transformers
+        import torchvision
+
+        print(
+            "Versions: "
+            f"torch={torch.__version__} "
+            f"torchvision={torchvision.__version__} "
+            f"transformers={transformers.__version__} "
+            f"peft={peft.__version__}",
+            flush=True,
+        )
 
         from huggingface_hub import HfApi
         from huggingface_hub.errors import HfHubHTTPError
@@ -261,6 +309,7 @@ def train():
         # VideoAlign catches checkpoint/dependency issues before training.
         from fastvideo.train.methods.rl.reward.videoalign import (
             _VIDEOALIGN_INFERENCERS,
+            set_videoalign_device,
             videoalign_mq_score,
             videoalign_ta_score,
         )
@@ -279,9 +328,7 @@ def train():
             value = float(scores["avg"].detach().cpu()[0])
             print(f"{name} preflight score: {value:.4f}", flush=True)
 
-        for inferencer in list(_VIDEOALIGN_INFERENCERS.values()):
-            if hasattr(inferencer, "to"):
-                inferencer.to("cpu")
+        set_videoalign_device("cpu")
         _VIDEOALIGN_INFERENCERS.clear()
         gc.collect()
         torch.cuda.empty_cache()

@@ -87,6 +87,22 @@ def _remap_qwen2vl_state_dict_keys(
     return remapped
 
 
+def _walk_model_graph(model: Any):
+    """Yield common wrapper/base model objects without importing PEFT."""
+    stack = [model]
+    seen = set()
+    while stack:
+        current = stack.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        for attr in ("base_model", "model"):
+            child = getattr(current, attr, None)
+            if child is not None:
+                stack.append(child)
+
+
 def _patch_load_state_dict(cls: Any) -> None:
     """Patch a model class to accept old VideoAlign checkpoint keys."""
     if getattr(cls, "_fastvideo_qwen2vl_key_remap", False):
@@ -153,15 +169,14 @@ def _patch_videoalign_modules() -> Any:
 
 def _patch_videoalign_runtime_model(model: Any) -> None:
     """Add aliases expected by VideoAlign's older Qwen2-VL forward."""
-    inner = getattr(model, "model", None)
-    language_model = getattr(inner, "language_model", None)
-    if (
-        inner is not None
-        and language_model is not None
-        and not hasattr(inner, "embed_tokens")
-        and hasattr(language_model, "embed_tokens")
-    ):
-        inner.embed_tokens = language_model.embed_tokens
+    for candidate in _walk_model_graph(model):
+        language_model = getattr(candidate, "language_model", None)
+        if (
+            language_model is not None
+            and not hasattr(candidate, "embed_tokens")
+            and hasattr(language_model, "embed_tokens")
+        ):
+            candidate.embed_tokens = language_model.embed_tokens
 
 
 def set_videoalign_device(device) -> None:

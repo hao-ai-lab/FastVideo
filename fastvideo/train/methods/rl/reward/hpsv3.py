@@ -47,38 +47,63 @@ def _patch_transformers_video_input_alias() -> None:
 
 def _remap_hpsv3_state_dict(state_dict: dict[str, Any]) -> dict[str, Any]:
     """Adapt HPSv3 checkpoints saved with older Qwen2-VL key names."""
-    if (
-        any(k.startswith("model.visual.") for k in state_dict)
-        or not any(k.startswith("visual.") for k in state_dict)
-    ):
-        return state_dict
-
     remapped = {}
     for key, value in state_dict.items():
         if key.startswith("visual."):
-            remapped[f"model.{key}"] = value
+            key = f"model.{key}"
         elif key.startswith("model.layers."):
-            remapped[f"model.language_model.{key[len('model.'):]}"] = value
+            key = f"model.language_model.{key[len('model.'):]}"
         elif key.startswith("model.embed_tokens."):
-            remapped[
-                f"model.language_model.{key[len('model.'):]}"
-            ] = value
+            key = f"model.language_model.{key[len('model.'):]}"
         elif key.startswith("model.norm."):
-            remapped[f"model.language_model.{key[len('model.'):]}"] = value
-        else:
-            remapped[key] = value
+            key = f"model.language_model.{key[len('model.'):]}"
+
+        key = key.replace(
+            "base_model.model.visual.",
+            "base_model.model.model.visual.",
+            1,
+        )
+        key = key.replace(
+            "base_model.model.model.layers.",
+            "base_model.model.model.language_model.layers.",
+            1,
+        )
+        key = key.replace(
+            "base_model.model.model.embed_tokens.",
+            "base_model.model.model.language_model.embed_tokens.",
+            1,
+        )
+        key = key.replace(
+            "base_model.model.model.norm.",
+            "base_model.model.model.language_model.norm.",
+            1,
+        )
+        remapped[key] = value
     return remapped
 
 
-def _patch_hpsv3_state_dict_loader() -> None:
-    """Patch HPSv3 reward model loading for transformers key drift."""
-    global _HPSV3_LOAD_PATCHED
-    if _HPSV3_LOAD_PATCHED:
+def _walk_model_graph(model: Any):
+    """Yield common wrapper/base model objects without importing PEFT."""
+    stack = [model]
+    seen = set()
+    while stack:
+        current = stack.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        for attr in ("base_model", "model"):
+            child = getattr(current, attr, None)
+            if child is not None:
+                stack.append(child)
+
+
+def _patch_load_state_dict(cls: Any) -> None:
+    """Patch a model class to accept old Qwen2-VL checkpoint keys."""
+    if getattr(cls, "_fastvideo_qwen2vl_key_remap", False):
         return
 
-    from hpsv3.model.qwen2vl_trainer import Qwen2VLRewardModelBT
-
-    original_load_state_dict = Qwen2VLRewardModelBT.load_state_dict
+    original_load_state_dict = cls.load_state_dict
 
     def load_state_dict_with_key_remap(
         self,
@@ -94,21 +119,38 @@ def _patch_hpsv3_state_dict_loader() -> None:
             assign=assign,
         )
 
-    Qwen2VLRewardModelBT.load_state_dict = load_state_dict_with_key_remap
+    cls.load_state_dict = load_state_dict_with_key_remap
+    cls._fastvideo_qwen2vl_key_remap = True
+
+
+def _patch_hpsv3_state_dict_loader() -> None:
+    """Patch HPSv3 reward model loading for transformers key drift."""
+    global _HPSV3_LOAD_PATCHED
+    if _HPSV3_LOAD_PATCHED:
+        return
+
+    from hpsv3.model.qwen2vl_trainer import Qwen2VLRewardModelBT
+
+    _patch_load_state_dict(Qwen2VLRewardModelBT)
+    try:
+        from peft import PeftModel
+    except ImportError:
+        PeftModel = None
+    if PeftModel is not None:
+        _patch_load_state_dict(PeftModel)
     _HPSV3_LOAD_PATCHED = True
 
 
 def _patch_hpsv3_runtime_model(model: Any) -> None:
     """Add aliases expected by HPSv3's older Qwen2-VL forward."""
-    inner = getattr(model, "model", None)
-    language_model = getattr(inner, "language_model", None)
-    if (
-        inner is not None
-        and language_model is not None
-        and not hasattr(inner, "embed_tokens")
-        and hasattr(language_model, "embed_tokens")
-    ):
-        inner.embed_tokens = language_model.embed_tokens
+    for candidate in _walk_model_graph(model):
+        language_model = getattr(candidate, "language_model", None)
+        if (
+            language_model is not None
+            and not hasattr(candidate, "embed_tokens")
+            and hasattr(language_model, "embed_tokens")
+        ):
+            candidate.embed_tokens = language_model.embed_tokens
 
 
 def _normalize_device(device) -> str:

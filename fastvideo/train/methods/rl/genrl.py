@@ -101,6 +101,7 @@ class GenRLMethod(TrainingMethod):
 
         # Parse RL config.
         self._parse_config(mc)
+        self._validate_config()
 
         # Init student preprocessors (VAE, text encoder).
         self.student.init_preprocessors(tc)
@@ -135,6 +136,14 @@ class GenRLMethod(TrainingMethod):
         self._world_size = wg.world_size
         self._rank = wg.rank
         self._is_main = wg.rank == 0
+        total_samples = self._world_size * self._sample_batch_size
+        if total_samples % self._num_video_per_prompt != 0:
+            raise ValueError(
+                "world_size * sample_batch_size must be divisible by "
+                "num_video_per_prompt for DistributedKRepeatSampler. Got "
+                f"{self._world_size} * {self._sample_batch_size} and "
+                f"{self._num_video_per_prompt}."
+            )
 
         train_dl, test_dl, train_sampler = (
             build_prompt_dataloaders(
@@ -266,6 +275,43 @@ class GenRLMethod(TrainingMethod):
 
         # Reward config.
         self._reward_cfg = dict(mc.get("reward_fn", {}))
+
+    def _validate_config(self) -> None:
+        """Fail early on unsupported RL config combinations."""
+        if not self._reward_cfg:
+            raise ValueError(
+                "method.reward_fn must contain at least one reward."
+            )
+
+        if self._beta > 0 and self._reference is None:
+            raise ValueError(
+                "method.beta > 0 requires a configured reference model. "
+                "LoRA disable_adapter KL is not wired in this FastVideo "
+                "GenRL port yet."
+            )
+
+        if self._kl_reward > 0 and self._reference is None:
+            raise ValueError(
+                "method.kl_reward > 0 requires a configured reference model. "
+                "LoRA disable_adapter KL is not wired in this FastVideo "
+                "GenRL port yet."
+            )
+
+        if self._sde_window_range is not None:
+            if len(self._sde_window_range) != 2:
+                raise ValueError(
+                    "method.sde_window_range must contain exactly two values."
+                )
+            start, end = self._sde_window_range
+            if start < 0 or end <= start:
+                raise ValueError(
+                    "method.sde_window_range must satisfy 0 <= start < end."
+                )
+            if end > self._num_inference_steps:
+                raise ValueError(
+                    "method.sde_window_range end cannot exceed "
+                    "method.num_inference_steps."
+                )
 
     # ------------------------------------------------------------------
     # Setup helpers
