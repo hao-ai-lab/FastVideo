@@ -2,7 +2,7 @@
 set -u
 set -o pipefail
 
-MAX_ATTEMPTS=${MAX_ATTEMPTS:-5}
+MAX_ATTEMPTS=${MAX_ATTEMPTS:-10}
 TRAIN_CMD="MODAL_PROFILE=hao-ai-lab modal run modal_train_genrl.py"
 
 mkdir -p logs
@@ -22,42 +22,46 @@ for i in $(seq 1 "$MAX_ATTEMPTS"); do
   fi
 
   echo "Training crashed with exit code $status."
-
-  tail -n 500 "logs/train_attempt_${i}.log" > logs/last_crash.log
+  tail -n 800 "logs/train_attempt_${i}.log" > logs/last_crash.log
 
   echo "Asking Codex to inspect logs and patch..."
+
   codex exec \
-    --cd . \
-    --sandbox workspace-write \
-    --ask-for-approval never \
-    --output-last-message "logs/codex_attempt_${i}.md" \
+    -C . \
+    -c 'sandbox_mode="workspace-write"' \
+    -c 'approval_policy="never"' \
+    -o "logs/codex_attempt_${i}.md" \
     "
 The Modal training command crashed.
 
 Command:
 MODAL_PROFILE=hao-ai-lab modal run modal_train_genrl.py
 
-Read:
+Crash log:
 logs/last_crash.log
 
 Task:
-1. Diagnose the root cause from the crash log.
-2. Make the minimal necessary code/config fix.
-3. Run only cheap validation commands, such as:
-   python -m py_compile modal_train_genrl.py
-   python -m compileall .
-   targeted import checks
+1. Read logs/last_crash.log.
+2. Diagnose the actual root cause.
+3. Patch the minimal code/config needed.
 4. Do NOT run the full Modal training command yourself.
-5. Write a concise summary of the fix.
+5. Run only cheap local validation:
+   - python -m py_compile modal_train_genrl.py
+   - python -m compileall fastvideo modal_train_genrl.py
+   - any targeted import/config checks that do not launch full training.
+6. Write a concise summary of what you changed.
 "
 
   codex_status=$?
+
   if [ "$codex_status" -ne 0 ]; then
     echo "Codex failed with exit code $codex_status."
+    echo "Run this to inspect your installed Codex flags:"
+    echo "  codex exec --help"
     exit "$codex_status"
   fi
 
-  echo "Codex patch done. Retrying training..."
+  echo "Codex patch finished. Retrying training..."
 done
 
 echo "Failed after $MAX_ATTEMPTS attempts."
