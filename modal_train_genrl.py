@@ -99,6 +99,7 @@ def train():
     import os
     import subprocess
     import sys
+    import time
     from pathlib import Path
 
     def require_prompt_dataset(dataset_dir: str) -> None:
@@ -172,18 +173,48 @@ def train():
         print("=== GenRL Modal Preflight ===", flush=True)
 
         from huggingface_hub import HfApi
+        from huggingface_hub.errors import HfHubHTTPError
 
-        try:
-            whoami = HfApi().whoami()
-            print(
-                f"HF auth user: {whoami.get('name', '<unknown>')}",
-                flush=True,
-            )
-        except Exception as exc:
-            raise RuntimeError(
-                "Hugging Face token check failed. Verify the "
-                f"`{HF_SECRET_NAME}` Modal secret."
-            ) from exc
+        hf_token_present = bool(
+            os.environ.get("HF_TOKEN")
+            or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+        )
+        for attempt in range(3):
+            try:
+                whoami = HfApi().whoami()
+                print(
+                    f"HF auth user: {whoami.get('name', '<unknown>')}",
+                    flush=True,
+                )
+                break
+            except HfHubHTTPError as exc:
+                status = getattr(exc.response, "status_code", None)
+                if status in (401, 403):
+                    raise RuntimeError(
+                        "Hugging Face token was rejected. Verify the "
+                        f"`{HF_SECRET_NAME}` Modal secret."
+                    ) from exc
+                if attempt == 2 and hf_token_present:
+                    print(
+                        "HF whoami check failed after retries; continuing "
+                        "because HF token env is present.",
+                        flush=True,
+                    )
+                elif attempt == 2:
+                    raise
+                else:
+                    time.sleep(2**attempt)
+            except Exception:
+                if attempt == 2 and hf_token_present:
+                    print(
+                        "HF whoami check hit a transient network error; "
+                        "continuing because HF token env is present.",
+                        flush=True,
+                    )
+                elif attempt == 2:
+                    raise
+                else:
+                    time.sleep(2**attempt)
 
         print(
             "W&B target: "
