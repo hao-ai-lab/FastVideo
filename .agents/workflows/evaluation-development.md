@@ -89,5 +89,4 @@ The following land in follow-up PRs:
 
 - **MIND** metrics (depends on a separate `vipe` submodule).
 - **VBench-2.0** sibling package.
-- Native conversion of **FVD** under `fastvideo/eval/metrics/fvd/`.
 - The training-time `EvalCallback`.
