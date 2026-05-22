@@ -3,6 +3,7 @@ ARG CUDA_TAG=12.9.1-cudnn-devel-ubuntu22.04
 FROM nvidia/cuda:${CUDA_TAG}
 
 ARG BUILD_FASTVIDEO_KERNEL_FROM_SOURCE=0
+ARG BUILD_DREAMVERSE_UI=0
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -48,6 +49,19 @@ RUN if [[ "${BUILD_FASTVIDEO_KERNEL_FROM_SOURCE}" == "1" ]]; then \
         && ./build.sh; \
     else \
         echo "Skipping source fastvideo-kernel build; using installed fastvideo-kernel package."; \
+    fi
+
+RUN if [[ "${BUILD_DREAMVERSE_UI}" == "1" ]]; then \
+        curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+        && apt-get install -y --no-install-recommends nodejs \
+        && rm -rf /var/lib/apt/lists/* \
+        && corepack enable \
+        && cd /opt/FastVideo/apps/dreamverse/web \
+        && pnpm install --frozen-lockfile --ignore-scripts \
+        && NEXT_OUTPUT_EXPORT=1 pnpm build \
+        && rm -rf node_modules .next; \
+    else \
+        echo "Skipping Dreamverse UI build; Building backend-only image."; \
     fi
 
 # The monorepo ffmpeg installer force-selects conda compiler triplets for

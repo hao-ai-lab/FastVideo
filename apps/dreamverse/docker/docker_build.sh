@@ -24,6 +24,7 @@ build_args=()
 [[ -n "${CUDA_TAG:-}"        ]] && build_args+=(--build-arg "CUDA_TAG=${CUDA_TAG}")
 [[ -n "${BUILD_FASTVIDEO_KERNEL_FROM_SOURCE:-}" ]] && \
   build_args+=(--build-arg "BUILD_FASTVIDEO_KERNEL_FROM_SOURCE=${BUILD_FASTVIDEO_KERNEL_FROM_SOURCE}")
+build_args+=(--build-arg "BUILD_DREAMVERSE_UI=${BUILD_DREAMVERSE_UI:-0}")
 
 if [[ "${DOCKER_BUILDKIT:-}" == "1" ]]; then
   if [[ -L "${ROOT_DOCKERIGNORE}" ]] && \
