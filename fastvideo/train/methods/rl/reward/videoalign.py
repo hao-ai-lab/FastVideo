@@ -56,10 +56,13 @@ def _get_inferencer(
 ):
     """Get or create VideoAlign inferencer."""
     if checkpoint_path is None:
-        checkpoint_path = os.path.join(
-            os.path.dirname(__file__),
-            "..", "..", "..", "..", "..",
-            "data", "VideoReward",
+        checkpoint_path = os.environ.get(
+            "VIDEOALIGN_CHECKPOINT_PATH",
+            os.path.join(
+                os.path.dirname(__file__),
+                "VideoAlign",
+                "checkpoints",
+            ),
         )
     checkpoint_path = os.path.abspath(checkpoint_path)
 

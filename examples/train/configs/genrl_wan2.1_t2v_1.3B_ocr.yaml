@@ -21,7 +21,7 @@ method:
   reward_module: null
 
   # ---- Data ----
-  prompt_dataset_path: data/ocr
+  prompt_dataset_path: GenRL/datasets/ocr
   prompt_fn: general_ocr
 
   # ---- Sampling ----

@@ -30,7 +30,7 @@ method:
   reward_on_gpu: true
 
   # ---- Data ----
-  prompt_dataset_path: data/filtered_prompts
+  prompt_dataset_path: GenRL/datasets/filtered_prompts
   prompt_fn: filtered_prompts
 
   # ---- Sampling ----
