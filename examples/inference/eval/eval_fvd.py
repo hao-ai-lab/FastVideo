@@ -1,8 +1,5 @@
 """Compute Fréchet Video Distance (FVD) over a folder of generated videos.
 
-Replaces the standalone ``benchmarks/fvd/run_fvd.py`` + ``benchmarks/scripts/run.sh``
-that lived in the repo before ``common.fvd`` became a registered eval metric.
-
 Run::
 
     pip install -e .[eval]

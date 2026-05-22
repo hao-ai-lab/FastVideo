@@ -14,8 +14,6 @@ The contract is intentionally narrow: each extractor takes a
 features.  Preprocessing (resize, normalize, layout) is the extractor's job;
 its callers should not care.
 
-Adapted from the standalone code at ``benchmarks/fvd/feature_extractors.py``
-that this module replaces.
 """
 
 from __future__ import annotations

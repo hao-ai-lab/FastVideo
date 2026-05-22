@@ -258,7 +258,7 @@ Read `.agents/memory/evaluation-registry/README.md` for the full metric catalog.
 |--------|-------------|-------|
 | **Loss trajectory** | Every run, real-time from W&B | Medium |
 | **SSIM** | When comparing against reference outputs | High |
-| **FVD** | For benchmarking model quality (`benchmarks/fvd/`) | High |
+| **FVD** | For benchmarking model quality (`common.fvd` eval metric; example: `examples/inference/eval/eval_fvd.py`) | High |
 | **LPIPS** | LoRA merge validation | Medium |
 | **Human preference** | Major checkpoints | Highest |
 
