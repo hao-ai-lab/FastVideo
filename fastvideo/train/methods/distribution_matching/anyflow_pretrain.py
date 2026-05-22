@@ -357,10 +357,7 @@ class AnyFlowPretrainMethod(TrainingMethod):
 
         with torch.no_grad():
             diff_mask = is_diffusion
-            if diff_mask.any():
-                diff_mean = per_sample[diff_mask].mean()
-            else:
-                diff_mean = per_sample.mean()
+            diff_mean = per_sample[diff_mask].mean() if diff_mask.any() else per_sample.mean()
             non_diff_mask = ~diff_mask
             if non_diff_mask.any():
                 scale = diff_mean / (per_sample[non_diff_mask] + 1e-5)

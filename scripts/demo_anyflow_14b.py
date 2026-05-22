@@ -17,14 +17,17 @@ Memory tactics (single H200, 141 GB HBM):
 - Sample at both NFEs without re-loading the transformer.
 - Free the transformer, then load the Wan VAE with tiling for decode.
 
+Configure local checkout paths via env vars (defaults assume a sibling
+layout next to this repo):
+
+  ANYFLOW_LOCAL     — path to ``nvidia/AnyFlow-Wan2.1-T2V-14B-Diffusers``
+                      (default ``./anyflow-14b``)
+  ANYFLOW_DEMO_OUT  — output directory for the rendered MP4s
+                      (default ``./demo_videos``)
+
 Run via::
 
-    srun --jobid=304 bash -c '
-      source ~/.venvs/anyflow/bin/activate
-      export CPATH=/home/guian/.local/share/uv/python/cpython-3.10.20-linux-x86_64-gnu/include/python3.10
-      cd ~/projects/anyflow/FastVideo
-      PYTHONPATH=$PWD python scripts/demo_anyflow_14b.py
-    '
+    PYTHONPATH=$PWD python scripts/demo_anyflow_14b.py
 """
 
 from __future__ import annotations
@@ -40,9 +43,9 @@ import torch
 from safetensors.torch import load_file
 
 
-ANYFLOW_LOCAL = Path("/home/guian/projects/anyflow/anyflow-14b")
-OUT_DIR = Path("/home/guian/projects/anyflow/demo_videos")
-OUT_DIR.mkdir(exist_ok=True)
+ANYFLOW_LOCAL = Path(os.environ.get("ANYFLOW_LOCAL", "./anyflow-14b")).expanduser()
+OUT_DIR = Path(os.environ.get("ANYFLOW_DEMO_OUT", "./demo_videos")).expanduser()
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 SEED = 0
 DEVICE = torch.device("cuda")
