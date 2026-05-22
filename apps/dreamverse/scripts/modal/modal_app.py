@@ -6,10 +6,13 @@ import subprocess
 
 import modal
 
-IMAGE = os.environ.get(
-    "DREAMVERSE_IMAGE",
-    "ghcr.io/hao-ai-lab/fastvideo/dreamverse:dreamverse-cuda12.9.1-sha-af2ee9c",
-)
+IMAGE = os.environ.get("DREAMVERSE_IMAGE")
+if not IMAGE:
+    raise RuntimeError(
+        "DREAMVERSE_IMAGE is required. Set it to a published SHA-specific Dreamverse image, "
+        "for example a dreamverse-backend-cuda12.9.1-sha-* tag or a "
+        "dreamverse-ui-cuda12.9.1-sha-* tag if serving the static UI."
+    )
 
 image = modal.Image.from_registry(IMAGE)
 image = image.env({

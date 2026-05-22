@@ -29,22 +29,16 @@ modal secret create dreamverse-api-keys \
 
 ## 3. Deploy with Docker image
 
-The default image URL is defined in `modal_app.py` as `IMAGE`. It currently
-points at:
-
-```text
-ghcr.io/hao-ai-lab/fastvideo/dreamverse:dreamverse-cuda12.9.1-sha-af2ee9c
-```
-
-Override the image at deploy time with `DREAMVERSE_IMAGE`:
+`DREAMVERSE_IMAGE` is required at deploy time:
 
 ```bash
 DREAMVERSE_IMAGE=ghcr.io/<org>/<repo>/dreamverse:<tag> \
   modal deploy apps/dreamverse/scripts/modal/modal_app.py
 ```
 
-Use a SHA-specific tag, not `latest`. To deploy an image that includes the
-static UI served by the backend, set `DREAMVERSE_IMAGE=<ui-image-tag>`.
+Use a SHA-specific tag, not `latest`. Use a `dreamverse-backend-cuda12.9.1-sha-*`
+tag for backend-only deploys, or a `dreamverse-ui-cuda12.9.1-sha-*` tag for an
+image that includes the static UI served by the backend.
 
 For local image build details, see
 `apps/dreamverse/docker/README.md` and `apps/dreamverse/docker/docker_build.sh`.
@@ -95,11 +89,11 @@ the locations expected by the image:
 
 ### Useful dev env vars
 
-Most deploys only need the Modal secret and optional `DREAMVERSE_IMAGE`.
+Most deploys only need the Modal secret and required `DREAMVERSE_IMAGE`.
 `DREAMVERSE_IMAGE` is read from your local shell at deploy time; the runtime
 knobs below live in the image or `modal_app.py` unless you intentionally change them:
 
-- `DREAMVERSE_IMAGE`: deploy a different prebuilt image tag without editing `modal_app.py`.
+- `DREAMVERSE_IMAGE`: deploy a prebuilt SHA-specific image tag without editing `modal_app.py`.
 - `FASTVIDEO_ENABLE_DEVTOOLS`: enable Dreamverse devtools behavior.
 - `FASTVIDEO_PROMPT_PROVIDER` / `FASTVIDEO_PROMPT_*_MODEL`: try prompt-rewriter provider or model choices.
 - `FASTVIDEO_ENABLE_STARTUP_WARMUP`: trade slower startup for a warmer first request.
