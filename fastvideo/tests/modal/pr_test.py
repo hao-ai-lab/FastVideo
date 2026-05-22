@@ -237,7 +237,7 @@ def run_dreamverse_app_tests():
     run_test_command(
         """
         uv pip install -e ".[test]" &&
-        uv pip install -e "apps/dreamverse[test]" &&
+        uv pip install -e ".[test,dreamverse]" &&
         export PYTHONPATH=/FastVideo/apps/dreamverse:$PYTHONPATH &&
         pytest apps/dreamverse/dreamverse/tests -q &&
         cd apps/dreamverse/web &&
