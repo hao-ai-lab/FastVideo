@@ -36,14 +36,29 @@ TRACKING_ROOT = os.environ.get(
     "PERFORMANCE_TRACKING_ROOT",
     "/tmp/perf-tracking",
 )
+PERF_REPORTS_DIR = os.environ.get("PERF_REPORTS_DIR", "/root/data/perf_reports")
 MAX_REGRESSION = float(os.environ.get("PERF_MAX_REGRESSION", "0.05"))
+METRICS = (
+    ("latency", "Latency", 3),
+    ("throughput", "Throughput", 3),
+    ("memory", "Memory", 1),
+    ("text_encoder_time_s", "Text Enc", 3),
+    ("dit_time_s", "DiT", 3),
+    ("vae_decode_time_s", "VAE Decode", 3),
+)
+LOWER_IS_BETTER_METRICS = {
+    "latency",
+    "memory",
+    "text_encoder_time_s",
+    "dit_time_s",
+    "vae_decode_time_s",
+}
 
 
 def _should_persist_tracking() -> bool:
     test_scope = os.environ.get("TEST_SCOPE", "")
     branch = os.environ.get("BUILDKITE_BRANCH", "")
     return test_scope == "full" and branch == "main"
-
 
 def _load_current_results() -> list[dict[str, Any]]:
     pattern = os.path.join(RESULTS_DIR, "perf_*.json")
@@ -54,7 +69,14 @@ def _load_current_results() -> list[dict[str, Any]]:
     return records
 
 
-def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
+def normalize_performance_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a raw perf_*.json result into the HF tracking schema.
+
+    The Buildkite artifact intentionally keeps the raw benchmark output from
+    test_inference_performance.py. Baseline comparison, main-branch persistence,
+    and manual baseline reseeds should all use this mapping so the stored HF
+    records do not drift from the artifact schema.
+    """
     benchmark_id = result.get("benchmark_id", "unknown")
     model_id = benchmark_id
 
@@ -66,6 +88,9 @@ def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
     latency = safe_float(result.get("avg_generation_time_s"))
     throughput = safe_float(result.get("throughput_fps"))
     memory = safe_float(result.get("max_peak_memory_mb"))
+    text_encoder_time = safe_float(result.get("text_encoder_time_s"))
+    dit_time = safe_float(result.get("dit_time_s"))
+    vae_decode_time = safe_float(result.get("vae_decode_time_s"))
 
     return {
         "model_id": model_id,
@@ -75,8 +100,15 @@ def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
         "latency": latency,
         "throughput": throughput,
         "memory": memory,
+        "text_encoder_time_s": text_encoder_time,
+        "dit_time_s": dit_time,
+        "vae_decode_time_s": vae_decode_time,
         "success": True,
     }
+
+
+def _normalize_record(result: dict[str, Any]) -> dict[str, Any]:
+    return normalize_performance_result(result)
 
 
 def _write_tracking_record(record: dict[str, Any]) -> str:
@@ -91,6 +123,24 @@ def _write_tracking_record(record: dict[str, Any]) -> str:
         json.dump(record, f, indent=2)
 
     return out_path
+
+
+def _write_normalized_artifact(record: dict[str, Any]) -> None:
+    try:
+        results_dir = os.path.join(PERF_REPORTS_DIR, "results")
+        os.makedirs(results_dir, exist_ok=True)
+        timestamp = sanitize(record["timestamp"])
+        model_id = sanitize(record["model_id"])
+        commit = sanitize(record["commit_sha"] or "unknown")
+        path = os.path.join(
+            results_dir,
+            f"normalized_perf_{model_id}_{timestamp}_{commit}.json",
+        )
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(record, f, indent=2)
+        print(f"Normalized performance result written to {path}")
+    except Exception as e:
+        print(f"Failed to write normalized performance result artifact: {e}")
 
 
 def _baseline_metric(records: list[dict[str, Any]], key: str) -> float | None:
@@ -108,7 +158,9 @@ def _check_regressions(
 ) -> list[str]:
     failures: list[str] = []
 
-    for metric in ("latency", "memory"):
+    for metric, _label, _precision in METRICS:
+        if metric not in LOWER_IS_BETTER_METRICS:
+            continue
         baseline = _baseline_metric(baseline_records, metric)
         curr = safe_float(current.get(metric))
         if baseline is None or curr is None or baseline <= 0:
@@ -141,7 +193,7 @@ def _metric_delta_percent(
     if curr is None or baseline is None or baseline <= 0:
         return None
 
-    if metric in ("latency", "memory"):
+    if metric in LOWER_IS_BETTER_METRICS:
         return (curr - baseline) / baseline * 100.0
     if metric == "throughput":
         return (baseline - curr) / baseline * 100.0
@@ -161,28 +213,27 @@ def _build_summary_row(
 ) -> dict[str, Any]:
     """Format a single benchmark result as a row for the Markdown table."""
 
-    latency_base = _baseline_metric(baseline_records, "latency")
-    throughput_base = _baseline_metric(baseline_records, "throughput")
-    memory_base = _baseline_metric(baseline_records, "memory")
+    metric_values: dict[str, dict[str, float | None]] = {}
+    regressions: list[float] = []
+    for metric, _label, _precision in METRICS:
+        curr = safe_float(record.get(metric))
+        baseline = _baseline_metric(baseline_records, metric)
+        regression = _metric_delta_percent(metric, record, baseline_records)
+        metric_values[metric] = {
+            "curr": curr,
+            "base": baseline,
+            "regression_pct": regression,
+        }
+        if regression is not None:
+            regressions.append(regression)
 
-    # Calculate percentages for the 'Worst Regression' column
-    latency_reg = _metric_delta_percent("latency", record, baseline_records)
-    throughput_reg = _metric_delta_percent("throughput", record, baseline_records)
-    memory_reg = _metric_delta_percent("memory", record, baseline_records)
-
-    regressions = [v for v in (latency_reg, throughput_reg, memory_reg) if v is not None]
     worst_regression_pct = max(regressions) if regressions else None
 
     return {
         "model_id": record["model_id"],
         "gpu_type": record["gpu_type"],
         "baseline_n": len(baseline_records),
-        "latency_curr": safe_float(record.get("latency")),
-        "latency_base": latency_base,
-        "throughput_curr": safe_float(record.get("throughput")),
-        "throughput_base": throughput_base,
-        "memory_curr": safe_float(record.get("memory")),
-        "memory_base": memory_base,
+        "metrics": metric_values,
         "worst_regression_pct": worst_regression_pct,
         "failed": has_failed,
     }
@@ -199,24 +250,24 @@ def _build_markdown_summary(
         "",
         ("| Model | GPU | Baseline N | Latency (curr/base) | "
          "Throughput (curr/base) | Memory (curr/base) | "
-         "Worst Regression | Status |"),
-        "|---|---|---:|---|---|---|---:|---|",
+         "Text Enc (curr/base) | DiT (curr/base) | "
+         "VAE Decode (curr/base) | Worst Regression | Status |"),
+        "|---|---|---:|---|---|---|---|---|---|---:|---|",
     ]
 
     for row in summary_rows:
-        latency = (f"{_compact_value(row['latency_curr'])} / "
-                   f"{_compact_value(row['latency_base'])}")
-        throughput = (f"{_compact_value(row['throughput_curr'])} / "
-                      f"{_compact_value(row['throughput_base'])}")
-        memory = (f"{_compact_value(row['memory_curr'], 1)} / "
-                  f"{_compact_value(row['memory_base'], 1)}")
+        metric_cells = []
+        for metric, _label, precision in METRICS:
+            values = row["metrics"][metric]
+            metric_cells.append(f"{_compact_value(values['curr'], precision)} / "
+                                f"{_compact_value(values['base'], precision)}")
 
         worst_reg = ("n/a" if row["worst_regression_pct"] is None else f"{row['worst_regression_pct']:.1f}%")
         status = "FAIL" if row["failed"] else "PASS"
 
         lines.append(f"| {row['model_id']} | {row['gpu_type']} | "
                      f"{row['baseline_n']} | "
-                     f"{latency} | {throughput} | {memory} | "
+                     f"{' | '.join(metric_cells)} | "
                      f"{worst_reg} | {status} |")
 
     return "\n".join(lines) + "\n"
@@ -233,11 +284,10 @@ def _emit_markdown_summary(markdown: str, commit_sha: str) -> None:
 
     # 2. Write to Modal volume for Buildkite to pick up in post-run hook
     try:
-        perf_reports_dir = "/root/data/perf_reports"
-        os.makedirs(perf_reports_dir, exist_ok=True)
+        os.makedirs(PERF_REPORTS_DIR, exist_ok=True)
         short_sha = commit_sha[:7] if commit_sha else "unknown"
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        report_path = os.path.join(perf_reports_dir, f"perf_{short_sha}_{timestamp}.md")
+        report_path = os.path.join(PERF_REPORTS_DIR, f"perf_{short_sha}_{timestamp}.md")
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(markdown + "\n")
         print(f"Performance report written to {report_path}")
@@ -285,6 +335,8 @@ def main() -> int:
             failures = _check_regressions(record, baseline_records, MAX_REGRESSION)
             record["success"] = not failures
             all_failures.extend(failures)
+
+        _write_normalized_artifact(record)
 
         # Strict upload: a silent failure would freeze the rolling baseline.
         if persist_tracking:
