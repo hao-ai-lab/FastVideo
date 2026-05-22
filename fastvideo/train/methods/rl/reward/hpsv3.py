@@ -30,6 +30,20 @@ if _HPSV3_ROOT.exists():
 _HPSV3_INFERENCERS: dict[str, Any] = {}
 
 
+def _patch_transformers_video_input_alias() -> None:
+    """Keep HPSv3 compatible with newer transformers releases.
+
+    HPSv3 imports ``VideoInput`` from ``transformers.image_utils`` for type
+    annotations. Some transformers versions used by FastVideo no longer
+    export that alias, even though the runtime image utilities HPSv3 needs are
+    still present.
+    """
+    from transformers import image_utils
+
+    if not hasattr(image_utils, "VideoInput"):
+        image_utils.VideoInput = image_utils.ImageInput
+
+
 def _normalize_device(device) -> str:
     if isinstance(device, torch.device):
         return str(device)
@@ -55,12 +69,13 @@ def _get_hpsv3_inferencer(device):
     key = _normalize_device(device)
     if key not in _HPSV3_INFERENCERS:
         try:
+            _patch_transformers_video_input_alias()
             from hpsv3 import HPSv3RewardInferencer
         except ImportError as exc:
             msg = (
-                "hpsv3 package not found. Ensure the "
-                "HPSv3 submodule is checked out under "
-                "fastvideo/train/methods/rl/reward/HPSv3"
+                "Failed to import HPSv3. Ensure the HPSv3 submodule is "
+                "checked out under fastvideo/train/methods/rl/reward/HPSv3 "
+                "and that its transformers dependencies are compatible."
             )
             raise ImportError(msg) from exc
         inf = HPSv3RewardInferencer(device=device)

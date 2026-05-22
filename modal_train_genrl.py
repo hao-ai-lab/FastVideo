@@ -48,6 +48,7 @@ image = (
         "uv pip install --system --prerelease=allow "
         "--index-url https://download.pytorch.org/whl/cu128 "
         "--upgrade torch torchvision torchaudio",
+        "uv pip install --system numpy==1.26.4 scipy==1.15.2",
         "python -c 'from torchvision.transforms import InterpolationMode; "
         "print(InterpolationMode.BICUBIC)'",
     )
