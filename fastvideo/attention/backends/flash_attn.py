@@ -32,19 +32,129 @@ except ImportError:
 # opaque-but-traceable node. The kernel still runs eager inside the op
 # (correct — flash-attn must run eager); only dynamo's treatment of the
 # boundary changes, so numerics are unchanged (SSIM-gate to confirm).
-if fa_version in ("2", "3"):
-    _fa_default = flash_attn_func
-
+#
+# Autograd: FA2 has full register_autograd parity — the custom op's
+# backward calls flash_attn's `_flash_attn_backward` directly, so
+# training backprops *through* the op (no graph break on the training
+# path either). FA3 currently keeps the no-backward + carve-out pattern
+# from PR #1373 because FA3's private backward signature wants
+# validation on a real Hopper box (gated on Kuan-Hao's Modal FA3 setup
+# PR). Once that lands the FA3 path can mirror FA2.
+if fa_version == "2":
     # Scope: this op covers exactly the q/k/v + softmax_scale + causal
     # call shape used by FlashAttentionImpl.forward's default branch
     # (see `flash_attn_func_compilable(...)` call site below). The
-    # masked/no-pad and varlen / cross-attn paths use different
-    # entry points (`flash_attn_no_pad`, `flash_attn_varlen_*`) which
-    # are intentionally out of scope for this PR — wrapping them is a
+    # masked/no-pad and varlen / cross-attn paths use different entry
+    # points (`flash_attn_no_pad`, `flash_attn_varlen_*`) which are
+    # intentionally out of scope for this PR — wrapping them is a
     # natural follow-up. The wrapper's signature is the contract: any
     # extra kwarg (dropout_p, window_size, alibi_slopes, deterministic,
     # return_attn_probs, ...) raises TypeError at the call site, so
     # silent loss of kwargs is not a failure mode.
+    from flash_attn.flash_attn_interface import _flash_attn_backward as _fa2_backward
+    _fa_default = flash_attn_func
+
+    @torch.library.custom_op(
+        "fastvideo::_flash_attn_default_forward",
+        mutates_args=(),
+        device_types="cuda",
+    )
+    def _flash_attn_default_forward(
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        softmax_scale: float | None,
+        causal: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # `return_attn_probs=True` asks FA2 to also return softmax_lse +
+        # S_dmask. We need softmax_lse to feed the backward; S_dmask is the
+        # dropout mask (always None here since dropout_p is fixed at 0).
+        out, softmax_lse, _ = _fa_default(q, k, v, softmax_scale=softmax_scale,
+                                          causal=causal, return_attn_probs=True)
+        return out, softmax_lse
+
+    @torch.library.register_fake("fastvideo::_flash_attn_default_forward")
+    def _flash_attn_default_forward_fake(
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        softmax_scale: float | None,
+        causal: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del softmax_scale, causal
+        # FA2 default path: out = [batch, seqlen_q, nheads, head_dim_v],
+        # softmax_lse = [batch, nheads, seqlen_q], fp32 regardless of q dtype.
+        b, sq, hq = q.shape[0], q.shape[1], q.shape[2]
+        out = q.new_empty(b, sq, hq, v.shape[-1])
+        lse = q.new_empty(b, hq, sq, dtype=torch.float32)
+        return out, lse
+
+    def _flash_attn_default_setup_context(ctx, inputs, output):
+        q, k, v, softmax_scale, causal = inputs
+        out, lse = output
+        ctx.save_for_backward(q, k, v, out, lse)
+        # FA2's *forward* substitutes `1 / sqrt(head_dim)` for `softmax_scale=None`
+        # internally; FA2's *backward* (`_flash_attn_backward`) demands a concrete
+        # float in its C++ schema and rejects None at the binding boundary. Resolve
+        # the default here so the value saved on ctx (and passed to backward) is
+        # always a real float — matches what FA2's own autograd.Function does.
+        if softmax_scale is None:
+            softmax_scale = q.shape[-1] ** -0.5
+        ctx.softmax_scale = softmax_scale
+        ctx.causal = causal
+
+    def _flash_attn_default_backward(ctx, grad_out, grad_lse):
+        # We only differentiate `out`; softmax_lse is saved-for-backward, not
+        # a real differentiable output. (Mirrors the FP4 cute template.)
+        del grad_lse
+        q, k, v, out, lse = ctx.saved_tensors
+        dq = torch.empty_like(q)
+        dk = torch.empty_like(k)
+        dv = torch.empty_like(v)
+        # FA2's `_flash_attn_backward` writes into dq/dk/dv in place. The
+        # extra kwargs (window_size_*, softcap, alibi_slopes, deterministic,
+        # rng_state) are pinned to the same defaults the forward wrapper
+        # uses — flash-attn==2.8.1 (the version FastVideo pins) requires
+        # all of them explicitly. `rng_state=None` is correct for our
+        # `dropout_p=0` configuration.
+        _fa2_backward(
+            grad_out, q, k, v, out, lse,
+            dq, dk, dv,
+            dropout_p=0.0,
+            softmax_scale=ctx.softmax_scale,
+            causal=ctx.causal,
+            window_size_left=-1,
+            window_size_right=-1,
+            softcap=0.0,
+            alibi_slopes=None,
+            deterministic=False,
+            rng_state=None,
+        )
+        return dq, dk, dv, None, None
+
+    torch.library.register_autograd(
+        "fastvideo::_flash_attn_default_forward",
+        _flash_attn_default_backward,
+        setup_context=_flash_attn_default_setup_context,
+    )
+
+    def flash_attn_func_compilable(q, k, v, softmax_scale=None, causal=False):
+        # Backward is registered: autograd flows through the op (training
+        # path is also traceable; no carve-out needed). Public API matches
+        # `flash_attn_func` — returns just `out`; we drop the saved-for-
+        # backward `lse` here so callers see the original single-tensor
+        # contract.
+        out, _ = torch.ops.fastvideo._flash_attn_default_forward(q, k, v, softmax_scale, causal)
+        return out
+elif fa_version == "3":
+    # FA3 path: same forward+fake custom op as the original PR #1373, with
+    # the autograd carve-out kept. The full backward (mirroring the FA2
+    # leg above) wants a Hopper box for grad-check validation, which we
+    # don't have until Kuan-Hao's Modal FA3 setup PR lands. Until then
+    # this keeps inference traceable + training correct (via the original
+    # autograd.Function path + a pre-PR-style graph break on training).
+    _fa_default = flash_attn_func
+
     @torch.library.custom_op(
         "fastvideo::_flash_attn_default_forward",
         mutates_args=(),
@@ -68,8 +178,6 @@ if fa_version in ("2", "3"):
         causal: bool,
     ) -> torch.Tensor:
         del softmax_scale, causal
-        # FA2/FA3 default path: [batch, seqlen_q, nheads, head_dim_v],
-        # same dtype/device as q (head dim taken from v).
         return q.new_empty(q.shape[0], q.shape[1], q.shape[2], v.shape[-1])
 
     def flash_attn_func_compilable(q, k, v, softmax_scale=None, causal=False):
