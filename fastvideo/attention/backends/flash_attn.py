@@ -373,9 +373,17 @@ class FlashAttentionImpl(AttentionImpl):
         attn_metadata: FlashAttnMetadata,
     ):
         if (attn_metadata is not None and hasattr(attn_metadata, "attn_mask") and attn_metadata.attn_mask is not None):
+            # Route through the *_compilable wrappers so dynamo sees one
+            # traceable node for each masked entry point (the unpad/pad
+            # bookkeeping runs eager inside the custom op). On FA2 these
+            # wrappers go through ops with full register_autograd, so
+            # training also backprops through the op (no graph break on
+            # the training path); on FA3/FA4 they carve out to the
+            # autograd.Function for grad-enabled calls — see
+            # fastvideo/attention/utils/flash_attn_no_pad.py.
             from fastvideo.attention.utils.flash_attn_no_pad import (
-                flash_attn_no_pad,
-                flash_attn_varlen_qk_no_pad,
+                flash_attn_no_pad_compilable as flash_attn_no_pad,
+                flash_attn_varlen_qk_no_pad_compilable as flash_attn_varlen_qk_no_pad,
             )
 
             attn_mask = attn_metadata.attn_mask
