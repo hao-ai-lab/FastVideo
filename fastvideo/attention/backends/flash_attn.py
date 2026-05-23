@@ -93,6 +93,12 @@ if fa_version == "2":
         q, k, v, softmax_scale, causal = inputs
         out, lse = output
         ctx.save_for_backward(q, k, v, out, lse)
+        # `lse` is an auxiliary output we save to feed FA2's backward; nobody
+        # should differentiate through it. Mark it non-differentiable so
+        # autograd errors loudly if a caller wires it into a loss, rather
+        # than silently producing zero/None grads through the `del grad_lse`
+        # in our backward.
+        ctx.mark_non_differentiable(lse)
         # FA2's *forward* substitutes `1 / sqrt(head_dim)` for `softmax_scale=None`
         # internally; FA2's *backward* (`_flash_attn_backward`) demands a concrete
         # float in its C++ schema and rejects None at the binding boundary. Resolve

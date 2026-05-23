@@ -270,6 +270,8 @@ if _FA_VARLEN_VERSION == "2":
         qkv, key_padding_mask, causal, dropout_p, softmax_scale, deterministic = inputs
         out, lse = output
         ctx.save_for_backward(qkv, out, lse, key_padding_mask)
+        # Auxiliary output, not differentiable — see default-path note.
+        ctx.mark_non_differentiable(lse)
         # FA2's varlen backward requires a concrete float for softmax_scale.
         if softmax_scale is None:
             softmax_scale = qkv.shape[-1] ** -0.5  # head_dim from qkv's last dim
@@ -284,23 +286,20 @@ if _FA_VARLEN_VERSION == "2":
         qkv, out_padded, lse_padded, key_padding_mask = ctx.saved_tensors
         b, s, _three, h, d = qkv.shape
 
-        # Re-unpad qkv -> q, k, v unpadded ([nnz, h, d] each).
+        # One `unpad_input` call (on qkv) gives us indices + cu_seqlens + max_s;
+        # reuse those for out / dout / lse below via direct indexing instead
+        # of redundant `unpad_input` calls (each of which would re-run
+        # `nonzero` + `cumsum` + a `.max().item()` GPU→CPU sync).
         x = rearrange(qkv, "b s three h d -> b s (three h d)")
         x_unpad, indices, cu_seqlens, max_s, _ = unpad_input(x, key_padding_mask)
         x_unpad = rearrange(x_unpad, "nnz (three h d) -> nnz three h d", three=3, h=h)
         q_unpad, k_unpad, v_unpad = (t.contiguous() for t in x_unpad.unbind(dim=1))
 
-        # Re-unpad out and dout using the same mask.
-        out_unpad = rearrange(
-            unpad_input(rearrange(out_padded, "b s h d -> b s (h d)"), key_padding_mask)[0],
-            "nnz (h d) -> nnz h d", h=h).contiguous()
-        dout_unpad = rearrange(
-            unpad_input(rearrange(grad_out, "b s h d -> b s (h d)"), key_padding_mask)[0],
-            "nnz (h d) -> nnz h d", h=h).contiguous()
-
-        # Re-unpad lse: [b, h, s] -> [b, s, h] -> [nnz, h] -> [h, nnz].
-        lse_unpad = unpad_input(lse_padded.permute(0, 2, 1).contiguous(),
-                                key_padding_mask)[0].t().contiguous()
+        # Direct-index variants reuse `indices` (computed above).
+        out_unpad = out_padded.flatten(0, 1)[indices].view(-1, h, d).contiguous()
+        dout_unpad = grad_out.flatten(0, 1)[indices].view(-1, h, d).contiguous()
+        # lse_padded [b, h, s] -> [b, s, h] -> [nnz, h] -> [h, nnz].
+        lse_unpad = lse_padded.permute(0, 2, 1).contiguous().flatten(0, 1)[indices].t().contiguous()
 
         dq_unpad = torch.empty_like(q_unpad)
         dk_unpad = torch.empty_like(k_unpad)
@@ -402,6 +401,8 @@ if _FA_VARLEN_VERSION == "2":
         out, lse = output
         ctx.save_for_backward(query, key, value, out, lse,
                               query_padding_mask, key_padding_mask)
+        # Auxiliary output, not differentiable — see default-path note.
+        ctx.mark_non_differentiable(lse)
         if softmax_scale is None:
             softmax_scale = query.shape[-1] ** -0.5
         ctx.softmax_scale = softmax_scale
@@ -416,26 +417,24 @@ if _FA_VARLEN_VERSION == "2":
         b, sq, h, d = query.shape
         sk = key.shape[1]
 
-        # Re-unpad q with q_mask; k, v with k_mask.
+        # One `unpad_input` call per distinct mask; reuse the returned
+        # indices via direct indexing for everything else that shares
+        # the same mask (v with k_mask; out/dout/lse with q_mask; the
+        # final repad of dk/dv also reuses k_indices). Avoids ~4
+        # redundant `unpad_input` calls + their GPU→CPU `.max().item()`
+        # syncs.
         q_unpad, q_indices, cu_seqlens_q, max_seqlen_q, _ = unpad_input(
             rearrange(query, "b s h d -> b s (h d)"), query_padding_mask)
         k_unpad, k_indices, cu_seqlens_k, max_seqlen_k, _ = unpad_input(
             rearrange(key, "b s h d -> b s (h d)"), key_padding_mask)
-        v_unpad, _, _, _, _ = unpad_input(
-            rearrange(value, "b s h d -> b s (h d)"), key_padding_mask)
         q_unpad = rearrange(q_unpad, "nnz (h d) -> nnz h d", h=h).contiguous()
         k_unpad = rearrange(k_unpad, "nnz (h d) -> nnz h d", h=h).contiguous()
-        v_unpad = rearrange(v_unpad, "nnz (h d) -> nnz h d", h=h).contiguous()
+        v_unpad = value.flatten(0, 1)[k_indices].view(-1, h, d).contiguous()
 
-        # out and lse follow q's shape, so re-unpad with q_mask.
-        out_unpad = rearrange(
-            unpad_input(rearrange(out_padded, "b s h d -> b s (h d)"), query_padding_mask)[0],
-            "nnz (h d) -> nnz h d", h=h).contiguous()
-        dout_unpad = rearrange(
-            unpad_input(rearrange(grad_out, "b s h d -> b s (h d)"), query_padding_mask)[0],
-            "nnz (h d) -> nnz h d", h=h).contiguous()
-        lse_unpad = unpad_input(lse_padded.permute(0, 2, 1).contiguous(),
-                                query_padding_mask)[0].t().contiguous()
+        # out / dout / lse follow q's shape, so index with q_indices.
+        out_unpad = out_padded.flatten(0, 1)[q_indices].view(-1, h, d).contiguous()
+        dout_unpad = grad_out.flatten(0, 1)[q_indices].view(-1, h, d).contiguous()
+        lse_unpad = lse_padded.permute(0, 2, 1).contiguous().flatten(0, 1)[q_indices].t().contiguous()
 
         dq_unpad = torch.empty_like(q_unpad)
         dk_unpad = torch.empty_like(k_unpad)
@@ -454,6 +453,8 @@ if _FA_VARLEN_VERSION == "2":
             rng_state=None,
         )
 
+        # k_indices is already available from the unpad_input above —
+        # no need to recompute it for the dk/dv repad.
         def _repad(dt_unpad, indices, batch, seqlen):
             padded = pad_input(rearrange(dt_unpad, "nnz h d -> nnz (h d)"), indices, batch, seqlen)
             return rearrange(padded, "b s (h d) -> b s h d", h=h)
