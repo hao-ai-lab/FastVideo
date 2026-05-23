@@ -22,7 +22,7 @@ for i in $(seq 1 "$MAX_ATTEMPTS"); do
   fi
 
   echo "Training crashed with exit code $status."
-  tail -n 800 "logs/train_attempt_${i}.log" > logs/last_crash.log
+  tail -n 1000 "logs/train_attempt_${i}.log" > logs/last_crash.log
 
   echo "Asking Codex to inspect logs and patch..."
 
@@ -40,16 +40,22 @@ MODAL_PROFILE=hao-ai-lab modal run modal_train_genrl.py
 Crash log:
 logs/last_crash.log
 
+Full log:
+logs/train_attempt_${i}.log
+
 Task:
 1. Read logs/last_crash.log.
-2. Diagnose the actual root cause.
-3. Patch the minimal code/config needed.
-4. Do NOT run the full Modal training command yourself.
-5. Run only cheap local validation:
+2. If the tail only shows shutdown/wrapper noise, inspect the full log and
+   find the first real Python exception, CUDA OOM, RuntimeError, ImportError,
+   AttributeError, or rank traceback.
+3. Diagnose the actual root cause.
+4. Patch the minimal code/config needed.
+5. Do NOT run the full Modal training command yourself.
+6. Run only cheap local validation:
    - python -m py_compile modal_train_genrl.py
    - python -m compileall fastvideo modal_train_genrl.py
    - any targeted import/config checks that do not launch full training.
-6. Write a concise summary of what you changed.
+7. Write a concise summary of what you changed.
 "
 
   codex_status=$?
