@@ -83,8 +83,7 @@ if fa_version in ("2", "3"):
         # dynamo graph break on the training path — i.e. pre-PR behavior, no
         # regression. Full autograd parity for the custom op (mirroring the FP4
         # cute template) is a tracked follow-up.
-        if torch.is_grad_enabled() and (q.requires_grad or k.requires_grad
-                                        or v.requires_grad):
+        if torch.is_grad_enabled() and (q.requires_grad or k.requires_grad or v.requires_grad):
             return _fa_default(q, k, v, softmax_scale=softmax_scale, causal=causal)
         return torch.ops.fastvideo._flash_attn_default_forward(q, k, v, softmax_scale, causal)
 elif fa_version == "4":
