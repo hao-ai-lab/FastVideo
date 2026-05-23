@@ -51,7 +51,14 @@ method:
   # ---- Sampling ----
   sample_batch_size: 4
   eval_batch_size: 2
-  num_batches_per_epoch: 1
+  # Sample multiple rollout microbatches, average their PPO losses, then
+  # apply one optimizer update. This reduces reward/advantage variance.
+  num_batches_per_epoch: 4
+  accumulate_ppo_microbatches: true
+  eval_every_steps: 20
+  eval_num_batches: 1
+  eval_num_steps: 16
+  eval_guidance_scale: 4.5
   num_inference_steps: 16
   guidance_scale: 4.5
   num_video_per_prompt: 4
@@ -72,7 +79,7 @@ method:
   # ---- PPO training ----
   train_batch_size: 4
   num_inner_epochs: 1
-  clip_range: 1.0e-3
+  clip_range: 1.0e-4
   adv_clip_max: 5.0
   # Official LoRA LongCat uses beta: 3.0e-4 with disable_adapter().
   # For full fine-tuning on 4 H100s, avoid a second frozen Wan copy.
