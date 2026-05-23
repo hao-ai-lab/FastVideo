@@ -2,8 +2,10 @@
 #
 # Ported from GenRL/config/longcat.yaml.
 #
-# - Student:   trainable (LoRA or full finetune)
-# - Reference: frozen copy for KL penalty (optional, only for full finetune with beta > 0)
+# - Student: trainable full-parameter model by default.
+# - LoRA is still available via models.student.use_lora=true.
+# - Full fine-tuning with beta > 0 requires models.reference and much
+#   more memory; keep beta at 0.0 for the 4xH100 probe run.
 #
 # Usage:
 #   torchrun --nnodes=1 --nproc_per_node=4 \
@@ -15,6 +17,19 @@ models:
     _target_: fastvideo.train.models.wan.wan_genrl.GenRLWanModel
     init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: true
+    # Set true for LoRA. LoRA can use method.beta with disable_adapter().
+    use_lora: false
+    lora_r: 128
+    lora_alpha: 64
+    lora_init_weights: gaussian
+    lora_path: null
+    lora_target_modules:
+      - to_k
+      - to_out
+      - to_q
+      - to_v
+      - ffn.fc_in
+      - ffn.fc_out
     enable_gradient_checkpointing_type: full
 
 method:
@@ -59,11 +74,15 @@ method:
   num_inner_epochs: 1
   clip_range: 1.0e-3
   adv_clip_max: 5.0
-  # No frozen reference model is configured in this launch.
+  # Official LoRA LongCat uses beta: 3.0e-4 with disable_adapter().
+  # For full fine-tuning on 4 H100s, avoid a second frozen Wan copy.
   beta: 0.0
   use_cfg: true
   loss_reweighting: longcat
   weight_advantages: true
+  # Match official GenRL PPO cadence. With sde_window_size: 1 this is
+  # equivalent to one optimizer step per sampled trajectory timestep.
+  optimizer_step_per_timestep: true
   max_grad_norm: 1.0
   seed: 42
 
@@ -78,8 +97,9 @@ training:
     num_gpus: 4
     sp_size: 1
     tp_size: 1
-    hsdp_replicate_dim: 4
-    hsdp_shard_dim: 1
+    # Full fine-tuning needs FSDP/HSDP sharding across all 4 GPUs.
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
 
   data:
     # Not used by GenRL (prompt dataloaders are in method config)
@@ -120,6 +140,7 @@ callbacks:
   ema:
     decay: 0.9
     start_iter: 0
+    update_interval: 8
   log_rl_samples:
     every_steps: 1
     max_videos: 4

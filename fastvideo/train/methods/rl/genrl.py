@@ -257,6 +257,9 @@ class GenRLMethod(TrainingMethod):
         self._max_grad_norm = float(
             mc.get("max_grad_norm", 1.0)
         )
+        self._optimizer_step_per_timestep = bool(
+            mc.get("optimizer_step_per_timestep", True)
+        )
         self._train_batch_size = int(
             mc.get("train_batch_size", 8)
         )
@@ -284,18 +287,16 @@ class GenRLMethod(TrainingMethod):
                 "method.reward_fn must contain at least one reward."
             )
 
-        if self._beta > 0 and self._reference is None:
+        if self._beta > 0 and not self._has_reference_policy():
             raise ValueError(
-                "method.beta > 0 requires a configured reference model. "
-                "LoRA disable_adapter KL is not wired in this FastVideo "
-                "GenRL port yet."
+                "method.beta > 0 requires either a configured reference "
+                "model or a LoRA student with disable_adapter()."
             )
 
-        if self._kl_reward > 0 and self._reference is None:
+        if self._kl_reward > 0 and not self._has_reference_policy():
             raise ValueError(
-                "method.kl_reward > 0 requires a configured reference model. "
-                "LoRA disable_adapter KL is not wired in this FastVideo "
-                "GenRL port yet."
+                "method.kl_reward > 0 requires either a configured reference "
+                "model or a LoRA student with disable_adapter()."
             )
 
         if self._sde_window_range is not None:
@@ -395,6 +396,18 @@ class GenRLMethod(TrainingMethod):
             for p in self.student.transformer.parameters()
             if p.requires_grad
         ]
+        if not params:
+            raise ValueError(
+                "GenRL student transformer has no trainable parameters. "
+                "For LoRA, check models.student.use_lora and "
+                "lora_target_modules. For full tuning, check "
+                "models.student.trainable."
+            )
+        trainable_count = sum(p.numel() for p in params)
+        logger.info(
+            "GenRL trainable transformer parameters: %.2fM",
+            trainable_count / 1e6,
+        )
         self._transformer_params = params
         (
             self._optimizer,
@@ -506,6 +519,7 @@ class GenRLMethod(TrainingMethod):
                         if self._reference
                         else None
                     ),
+                    lora_model=self._get_lora_ref_transformer(),
                     tracker=self.tracker,
                 )
             )
@@ -919,13 +933,18 @@ class GenRLMethod(TrainingMethod):
                 self._optimizer.zero_grad()
 
                 for j in self._train_timesteps:
+                    if self._optimizer_step_per_timestep:
+                        self._optimizer.zero_grad()
+
                     # Reference model output (for KL).
                     prev_mean_ref = None
                     dt_sqrt_ref = None
                     if self._beta > 0:
-                        ref_model = self._get_ref_model()
+                        ref_model, ref_ctx = (
+                            self._get_reference_logprob_context()
+                        )
                         if ref_model is not None:
-                            with torch.no_grad():
+                            with torch.no_grad(), ref_ctx:
                                 (
                                     _,
                                     _,
@@ -1076,7 +1095,10 @@ class GenRLMethod(TrainingMethod):
                         current_timestep=timestep_j,
                         attn_metadata=None,
                     ):
-                        (loss / num_ts).backward()
+                        if self._optimizer_step_per_timestep:
+                            loss.backward()
+                        else:
+                            (loss / num_ts).backward()
 
                     # Track.
                     info["approx_kl"].append(
@@ -1134,14 +1156,24 @@ class GenRLMethod(TrainingMethod):
                         loss.detach().item()
                     )
 
-                # Clip + step after all timesteps.
-                clip_grad_norm_if_needed(
-                    self.student.transformer,
-                    self._max_grad_norm,
-                )
-                self._optimizer.step()
-                self._lr_scheduler.step()
-                self._optimizer.zero_grad()
+                    if self._optimizer_step_per_timestep:
+                        clip_grad_norm_if_needed(
+                            self.student.transformer,
+                            self._max_grad_norm,
+                        )
+                        self._optimizer.step()
+                        self._lr_scheduler.step()
+                        self._optimizer.zero_grad()
+
+                if not self._optimizer_step_per_timestep:
+                    # Clip + step after accumulating all train timesteps.
+                    clip_grad_norm_if_needed(
+                        self.student.transformer,
+                        self._max_grad_norm,
+                    )
+                    self._optimizer.step()
+                    self._lr_scheduler.step()
+                    self._optimizer.zero_grad()
                 torch.cuda.synchronize()
                 _ppo_batch_times.append(
                     time.perf_counter() - _ppo_batch_t0
@@ -1179,3 +1211,29 @@ class GenRLMethod(TrainingMethod):
             return self._reference
         # LoRA case: caller should use disable_adapter.
         return None
+
+    def _get_lora_ref_transformer(self):
+        """Get LoRA transformer that can disable adapters for sampling KL."""
+        transformer = getattr(self.student, "transformer", None)
+        if transformer is None:
+            return None
+        if hasattr(transformer, "disable_adapter"):
+            return transformer
+        return None
+
+    def _has_reference_policy(self) -> bool:
+        return (
+            self._reference is not None
+            or self._get_lora_ref_transformer() is not None
+        )
+
+    def _get_reference_logprob_context(self):
+        """Return model/context for reference log-prob computation."""
+        if self._reference is not None:
+            return self._reference, contextlib.nullcontext()
+
+        lora_ref = self._get_lora_ref_transformer()
+        if lora_ref is not None:
+            return self.student, lora_ref.disable_adapter()
+
+        return None, contextlib.nullcontext()
