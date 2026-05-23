@@ -27,7 +27,9 @@ for i in $(seq 1 "$MAX_ATTEMPTS"); do
   echo "Asking Codex to inspect logs and patch..."
 
   codex exec \
+    -m gpt-5.5 \
     -C . \
+    -c 'model_reasoning_effort="high"' \
     -c 'sandbox_mode="workspace-write"' \
     -c 'approval_policy="never"' \
     -o "logs/codex_attempt_${i}.md" \
