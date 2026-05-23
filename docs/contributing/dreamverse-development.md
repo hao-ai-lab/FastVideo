@@ -34,9 +34,9 @@ Run frontend commands from the standalone web app:
 
 ```bash
 cd apps/dreamverse/web
-pnpm install --frozen-lockfile
-pnpm run build
-pnpm run test
+npm ci
+npm run build
+npm test
 ```
 
 Playwright is intentionally run against a live backend as part of the GPU4

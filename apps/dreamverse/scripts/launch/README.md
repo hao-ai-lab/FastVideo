@@ -28,7 +28,7 @@ NO_BROWSER=1 apps/dreamverse/scripts/launch/launch_demo.sh
 `launch_backend_dreamverse.sh` starts the full Dreamverse backend path used by
 the web app.
 
-`launch_frontend.sh` starts the Next.js frontend and installs `pnpm`
+`launch_frontend.sh` starts the Next.js frontend and installs npm
 dependencies when `node_modules/` is missing.
 
 `launch_backend_fastvideo.sh` starts the typed `fastvideo serve --config` path

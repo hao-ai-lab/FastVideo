@@ -55,10 +55,9 @@ RUN if [[ "${BUILD_DREAMVERSE_UI}" == "1" ]]; then \
         curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
         && apt-get install -y --no-install-recommends nodejs \
         && rm -rf /var/lib/apt/lists/* \
-        && corepack enable \
         && cd /opt/FastVideo/apps/dreamverse/web \
-        && pnpm install --frozen-lockfile --ignore-scripts \
-        && NEXT_OUTPUT_EXPORT=1 pnpm build \
+        && npm ci --ignore-scripts \
+        && NEXT_OUTPUT_EXPORT=1 npm run build \
         && rm -rf node_modules .next; \
     else \
         echo "Skipping Dreamverse UI build; Building backend-only image."; \
