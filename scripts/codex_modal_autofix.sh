@@ -2,6 +2,8 @@
 set -u
 set -o pipefail
 
+trap 'echo ""; echo "Interrupted by user. Exiting autofix loop."; exit 130' INT TERM
+
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-10}
 TRAIN_CMD="MODAL_PROFILE=hao-ai-lab modal run modal_train_genrl.py"
 
@@ -19,6 +21,11 @@ for i in $(seq 1 "$MAX_ATTEMPTS"); do
   if [ "$status" -eq 0 ]; then
     echo "Training succeeded on attempt $i."
     exit 0
+  fi
+
+  if [ "$status" -eq 130 ] || [ "$status" -eq 143 ]; then
+    echo "Training was interrupted by user/signal. Not retrying."
+    exit "$status"
   fi
 
   echo "Training crashed with exit code $status."
@@ -47,9 +54,7 @@ logs/train_attempt_${i}.log
 
 Task:
 1. Read logs/last_crash.log.
-2. If the tail only shows shutdown/wrapper noise, inspect the full log and
-   find the first real Python exception, CUDA OOM, RuntimeError, ImportError,
-   AttributeError, or rank traceback.
+2. If the tail only shows shutdown/wrapper noise, inspect the full log and find the first real Python exception, CUDA OOM, RuntimeError, ImportError, AttributeError, or rank traceback.
 3. Diagnose the actual root cause.
 4. Patch the minimal code/config needed.
 5. Do NOT run the full Modal training command yourself.
@@ -61,6 +66,11 @@ Task:
 "
 
   codex_status=$?
+
+  if [ "$codex_status" -eq 130 ] || [ "$codex_status" -eq 143 ]; then
+    echo "Codex was interrupted by user/signal. Not retrying."
+    exit "$codex_status"
+  fi
 
   if [ "$codex_status" -ne 0 ]; then
     echo "Codex failed with exit code $codex_status."
