@@ -232,7 +232,8 @@ def run_unit_test():
     )
 
 
-@app.function(image=image, timeout=1800)
+# TODO: David: GPU only used to resolve import time requirement (not needed for this test). Maybe make those imports lazy?
+@app.function(gpu="L40S:1", image=image, timeout=1800)
 def run_dreamverse_app_tests():
     run_test_command(
         """
