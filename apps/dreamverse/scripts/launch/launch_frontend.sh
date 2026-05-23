@@ -7,8 +7,8 @@
 #   FRONTEND_MODE=dev bash launch_frontend.sh        # plain dev (5299, no devtools)
 #   FRONTEND_MODE=single5s bash launch_frontend.sh   # single-5s product mode
 #
-# The script ``cd``'s into ``web`` and shells out to pnpm. It runs
-# ``pnpm install --frozen-lockfile`` only when ``node_modules/`` is missing so repeat
+# The script ``cd``'s into ``web`` and shells out to npm. It runs
+# ``npm ci`` only when ``node_modules/`` is missing so repeat
 # launches are fast.
 
 set -euo pipefail
@@ -34,21 +34,21 @@ fi
 cd "${WEB_ROOT}"
 
 if [[ ! -d node_modules ]]; then
-  echo "[launch-demo] node_modules missing — running pnpm install --frozen-lockfile"
-  pnpm install --frozen-lockfile
+  echo "[launch-demo] node_modules missing — running npm ci"
+  npm ci
 fi
 
 case "${FRONTEND_MODE}" in
   devtools)
     echo "[launch-demo] starting Next.js dev:devtools (port 5274)"
-    exec pnpm run dev:devtools -- "$@"
+    exec npm run dev:devtools -- "$@"
     ;;
   dev)
     echo "[launch-demo] starting Next.js dev (port 5299)"
-    exec pnpm run dev -- "$@"
+    exec npm run dev -- "$@"
     ;;
   single5s)
     echo "[launch-demo] starting Next.js dev:single5s (port 5274)"
-    exec pnpm run dev:single5s -- "$@"
+    exec npm run dev:single5s -- "$@"
     ;;
 esac

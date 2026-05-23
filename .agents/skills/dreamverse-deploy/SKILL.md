@@ -22,7 +22,7 @@ both `/readyz` and the FE root to return 200.
   `cerebras-cloud-sdk`, `openai` installed (override the default path with
   `DREAMVERSE_PYTHON=/path/to/python`)
 - `~/.env` exporting `CEREBRAS_API_KEY`, `GROQ_API_KEY`, etc.
-- pnpm installed at `/home/william5lin/.local/share/pnpm/pnpm` (or in `$PATH`)
+- npm available in `$PATH` (or set `NPM=/path/to/npm`)
 - `gcc-13` + `g++-13` at `/usr/bin/` (workaround for nvcc gcc-15 rejection)
 - **Recommended:** native ffmpeg env file at `apps/dreamverse/scripts/ffmpeg-env.sh`
   (built once via `bash apps/dreamverse/scripts/install_native_ffmpeg.sh`).
@@ -110,7 +110,7 @@ Flags can appear in any position relative to the positional args. Explicit flag 
 5. Launches the backend via `apps/dreamverse/scripts/dreamverse-server` in a
    detached `setsid` session, captures PID.
 6. Polls `/readyz` until 200 (max 5 min).
-7. Launches the frontend via `pnpm run dev:devtools` in a detached session,
+7. Launches the frontend via `npm run dev:devtools` in a detached session,
    captures PID.
 8. Polls FE `/` until 200 (max 60s).
 9. Prints URLs, PIDs, and log paths.
@@ -125,7 +125,7 @@ Flags can appear in any position relative to the positional args. Explicit flag 
   PLAYWRIGHT_SKIP_WEBSERVER=1 BACKEND_URL=http://127.0.0.1:8009 \
     PLAYWRIGHT_BASE_URL=http://127.0.0.1:5274 \
     NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 \
-    pnpm exec playwright test
+    npm exec -- playwright test
   ```
   The fast suite (8 specs, ~5s) runs by default; the long-running
   two-segment audio-continuation spec is gated behind
@@ -151,7 +151,7 @@ PLAYWRIGHT_SKIP_WEBSERVER=1 \
   PLAYWRIGHT_BASE_URL=http://127.0.0.1:5274 \
   NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 \
   PLAYWRIGHT_LONG_RUNNING=1 \
-  pnpm exec playwright test e2e/long-running-segments.spec.ts
+  npm exec -- playwright test e2e/long-running-segments.spec.ts
 ```
 
 Expected runtime: ~7-9 minutes on a B200 (torch.compile max-autotune

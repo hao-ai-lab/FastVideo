@@ -99,11 +99,10 @@ Install the web dependencies once from the FastVideo checkout:
 
 ```bash
 cd apps/dreamverse/web
-pnpm install --frozen-lockfile
+npm ci
 ```
 
-The frontend package also has an npm lockfile, but the bundled launch scripts
-use `pnpm`.
+The frontend package uses `package-lock.json`; use npm for installs and scripts.
 
 ## Quick Start: Local GPU
 
@@ -159,7 +158,7 @@ Start the frontend:
 
 ```bash
 cd apps/dreamverse/web
-BACKEND_HOST=localhost BACKEND_PORT=8009 pnpm run dev
+BACKEND_HOST=localhost BACKEND_PORT=8009 npm run dev
 ```
 
 Open `http://localhost:5299`.
@@ -195,14 +194,14 @@ Run the frontend tests:
 
 ```bash
 cd apps/dreamverse/web
-pnpm test
+npm test
 ```
 
 Run the frontend e2e tests:
 
 ```bash
 cd apps/dreamverse/web
-pnpm run e2e
+npm run e2e
 ```
 
 ## Troubleshooting
@@ -238,7 +237,7 @@ Only one GPU is used
 Frontend cannot connect to backend
 
 - confirm the backend is running on `8009`; if not, point the frontend at it
-  with `BACKEND_HOST=<host> BACKEND_PORT=<port> pnpm run dev`
+  with `BACKEND_HOST=<host> BACKEND_PORT=<port> npm run dev`
 - confirm `http://localhost:8009/healthz` responds before starting the frontend
 - confirm `http://localhost:8009/readyz` returns `200` before clicking Generate
 - use `apps/dreamverse/scripts/smoke_local.sh` for a repeatable local startup

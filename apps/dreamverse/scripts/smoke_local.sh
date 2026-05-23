@@ -87,9 +87,9 @@ if [[ "${started_backend}" == "1" ]]; then
   echo "Backend log: ${BACKEND_LOG_PATH}"
   echo "Backend is still running so you can launch the frontend:"
   echo "  cd ${ROOT_DIR}/web"
-  echo "  BACKEND_HOST=${HOST} BACKEND_PORT=${PORT} pnpm run dev"
+  echo "  BACKEND_HOST=${HOST} BACKEND_PORT=${PORT} npm run dev"
 else
   echo "You can now launch the frontend:"
   echo "  cd ${ROOT_DIR}/web"
-  echo "  BACKEND_HOST=${HOST} BACKEND_PORT=${PORT} pnpm run dev"
+  echo "  BACKEND_HOST=${HOST} BACKEND_PORT=${PORT} npm run dev"
 fi

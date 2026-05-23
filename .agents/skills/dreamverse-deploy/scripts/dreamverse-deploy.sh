@@ -185,17 +185,10 @@ CONDA_ENV_PYTHON="${DREAMVERSE_PYTHON:-${HOME}/miniconda3/envs/fv-main/bin/pytho
 "${CONDA_ENV_PYTHON}" -c 'import flashinfer' 2>/dev/null \
   || bail "flashinfer-python not installed in ${CONDA_ENV_PYTHON} (run: ${CONDA_ENV_PYTHON} -m pip install flashinfer-python --no-build-isolation)"
 
-PNPM="${PNPM:-}"
-if [[ -n "${PNPM}" ]]; then
-  PNPM_REQUESTED="${PNPM}"
-  PNPM="$(command -v "${PNPM}" 2>/dev/null || true)"
-  [[ -n "${PNPM}" ]] || bail "pnpm not executable or not in PATH: ${PNPM_REQUESTED} (set PNPM to override)"
-elif [[ -x "${HOME}/.local/share/pnpm/pnpm" ]]; then
-  PNPM="${HOME}/.local/share/pnpm/pnpm"
-else
-  PNPM="$(command -v pnpm 2>/dev/null || true)"
-fi
-[[ -n "${PNPM}" ]] && [[ -x "${PNPM}" ]] || bail "pnpm not found. Set PNPM, install at ${HOME}/.local/share/pnpm/pnpm, or add pnpm to PATH"
+NPM="${NPM:-npm}"
+NPM_REQUESTED="${NPM}"
+NPM="$(command -v "${NPM}" 2>/dev/null || true)"
+[[ -n "${NPM}" ]] && [[ -x "${NPM}" ]] || bail "npm not executable or not in PATH: ${NPM_REQUESTED} (set NPM to override)"
 
 GCC13="$(command -v "${GCC13:-gcc-13}" 2>/dev/null || true)"
 GPP13="$(command -v "${GPP13:-g++-13}" 2>/dev/null || true)"
@@ -386,7 +379,7 @@ frontend_log="${LOG_DIR}/frontend-port${FRONTEND_PORT}.log"
 # requested port differs, run `next dev --port` directly with devtools env.
 fe_cmd="run dev:devtools"
 if [[ "${FRONTEND_PORT}" != "5274" ]]; then
-  fe_cmd="exec next dev --port ${FRONTEND_PORT}"
+  fe_cmd="exec -- next dev --port ${FRONTEND_PORT}"
 fi
 
 setsid bash -c "
@@ -395,7 +388,7 @@ setsid bash -c "
   export BACKEND_URL=http://127.0.0.1:${BACKEND_PORT}
   export BACKEND_HOST=127.0.0.1
   export BACKEND_PORT=${BACKEND_PORT}
-  exec '${PNPM}' ${fe_cmd}
+  exec '${NPM}' ${fe_cmd}
 " > "${frontend_log}" 2>&1 < /dev/null &
 disown
 
@@ -462,5 +455,5 @@ cat <<SUMMARY
                 BACKEND_URL=http://127.0.0.1:${BACKEND_PORT} \\
                 PLAYWRIGHT_BASE_URL=http://127.0.0.1:${FRONTEND_PORT} \\
                 NEXT_PUBLIC_INCLUDE_DEVTOOLS=1 \\
-                pnpm exec playwright test
+                npm exec -- playwright test
 SUMMARY
