@@ -117,6 +117,14 @@ def _patch_load_state_dict(cls: Any) -> None:
         assign=False,
     ):
         state_dict = _remap_qwen2vl_state_dict_keys(state_dict)
+        if not assign:
+            try:
+                assign = any(
+                    getattr(param, "is_meta", False)
+                    for param in self.parameters()
+                )
+            except Exception:
+                assign = False
         return original_load_state_dict(
             self,
             state_dict,

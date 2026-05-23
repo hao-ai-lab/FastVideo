@@ -560,6 +560,9 @@ class GenRLMethod(TrainingMethod):
                     ),
                     lora_model=self._get_lora_ref_transformer(),
                     tracker=self.tracker,
+                    async_reward_scoring=(
+                        not self._reward_on_gpu
+                    ),
                 )
             )
         torch.cuda.synchronize()
