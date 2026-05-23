@@ -208,6 +208,23 @@ class WanModel(ModelBase):
         if self._requires_negative_conditioning:
             self.ensure_negative_conditioning()
 
+    @torch.no_grad()
+    def decode_latents(
+        self,
+        latents_b_t_c_h_w: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.vae is None:
+            raise RuntimeError("Wan VAE is not initialized")
+        latents = latents_b_t_c_h_w.permute(0, 2, 1, 3, 4).float()
+        if bool(getattr(self.vae, "handles_latent_denorm", False)):
+            denorm = latents
+        else:
+            mean = torch.tensor(self.vae.latents_mean, device=latents.device, dtype=latents.dtype).view(1, -1, 1, 1, 1)
+            std = torch.tensor(self.vae.latents_std, device=latents.device, dtype=latents.dtype).view(1, -1, 1, 1, 1)
+            denorm = latents * std + mean
+        media = self.vae.to(latents.device).decode(denorm)
+        return (media / 2 + 0.5).clamp(0, 1)
+
     # ------------------------------------------------------------------
     # Runtime primitives
     # ------------------------------------------------------------------
@@ -305,7 +322,7 @@ class WanModel(ModelBase):
         attn_kind: Literal["dense", "vsa"] = "dense",
     ) -> torch.Tensor:
         device_type = self.device.type
-        dtype = noisy_latents.dtype
+        dtype = self._get_training_dtype()
         if conditional:
             text_dict = batch.conditional_dict
             if text_dict is None:
@@ -321,6 +338,11 @@ class WanModel(ModelBase):
         else:
             raise ValueError(f"Unknown attn_kind: {attn_kind!r}")
 
+        if noisy_latents.is_floating_point():
+            noisy_latents = noisy_latents.to(dtype=dtype)
+
+        # Keep Wan training autocast tied to the model's training dtype, not
+        # to caller-created intermediates that may accidentally be fp32.
         with torch.autocast(device_type, dtype=dtype), set_forward_context(
                 current_timestep=batch.timesteps,
                 attn_metadata=attn_metadata,
