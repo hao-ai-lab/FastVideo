@@ -42,12 +42,14 @@ def fa_default_impls():
             f"got {fa_backend.fa_version!r}"
         )
 
-    # compilable dispatcher, the original FA wrapper it falls back to, and
-    # the raw custom op for opcheck.
+    # compilable dispatcher, the original FA wrapper it falls back to, the
+    # raw custom op for opcheck, and the fa_version (FA2 has full register_
+    # autograd; FA3 keeps the carve-out so some tests gate on this).
     return (
         fa_backend.flash_attn_func_compilable,
         fa_backend._fa_default,
         torch.ops.fastvideo._flash_attn_default_forward,
+        fa_backend.fa_version,
     )
 
 
@@ -71,7 +73,7 @@ def test_default_compilable_inference_matches_original(fa_default_impls, dtype, 
     """No-grad path routes through the custom op and is numerically identical."""
     if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
         pytest.skip("bfloat16 is not supported on this GPU")
-    compilable, original, _ = fa_default_impls
+    compilable, original, _, _ = fa_default_impls
 
     torch.manual_seed(0)
     q, k, v = _qkv(dtype, requires_grad=False)
@@ -91,7 +93,7 @@ def test_default_compilable_training_backward_flows(fa_default_impls, dtype, cau
     """
     if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
         pytest.skip("bfloat16 is not supported on this GPU")
-    compilable, original, _ = fa_default_impls
+    compilable, original, _, _ = fa_default_impls
 
     torch.manual_seed(0)
     q_ref, k_ref, v_ref = _qkv(dtype, requires_grad=True)
@@ -115,7 +117,65 @@ def test_default_compilable_training_backward_flows(fa_default_impls, dtype, cau
 @pytest.mark.parametrize("causal", [False, True])
 def test_default_forward_opcheck(fa_default_impls, causal):
     """Schema / fake-kernel consistency for the custom op (forward only)."""
-    _, _, op = fa_default_impls
+    _, _, op, _ = fa_default_impls
     torch.manual_seed(0)
     q, k, v = _qkv(torch.float16, requires_grad=False)
+    torch.library.opcheck(op, (q, k, v, None, causal))
+
+
+# --------------------------------------------------------------------------- #
+# FA2-only: backward is registered on the custom op itself. Exercises the     #
+# `register_autograd` wiring directly (not via the dispatcher's carve-out).   #
+# Skipped on FA3 until Kuan-Hao's Modal FA3 setup PR lands and we mirror the  #
+# pattern there.                                                              #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("causal", [False, True])
+def test_default_op_backward_through_registered_autograd(fa_default_impls, dtype, causal):
+    """FA2: gradients flow through ``torch.ops.fastvideo._flash_attn_default_forward``
+    itself (no dispatcher carve-out involved) and match the original
+    ``flash_attn_func``'s gradients."""
+    if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
+        pytest.skip("bfloat16 is not supported on this GPU")
+    _, original, op, fa_version = fa_default_impls
+    if fa_version != "2":
+        pytest.skip(f"register_autograd is only wired for FA2 right now; got {fa_version!r}")
+
+    torch.manual_seed(0)
+    q_ref, k_ref, v_ref = _qkv(dtype, requires_grad=True)
+    q_test, k_test, v_test = _clone(q_ref, k_ref, v_ref)
+
+    # Reference grads via the original autograd.Function.
+    out_ref = original(q_ref, k_ref, v_ref, softmax_scale=None, causal=causal)
+    # Custom-op grads via the registered backward — unpack (out, lse), discard lse.
+    out_test, _ = op(q_test, k_test, v_test, None, causal)
+
+    torch.testing.assert_close(out_test, out_ref,
+                               atol=0 if dtype == torch.float16 else 1e-3,
+                               rtol=0 if dtype == torch.float16 else 1e-3)
+
+    dout = torch.randn_like(out_ref)
+    dq_ref, dk_ref, dv_ref = torch.autograd.grad(
+        (out_ref * dout).sum(), (q_ref, k_ref, v_ref))
+    dq_test, dk_test, dv_test = torch.autograd.grad(
+        (out_test * dout).sum(), (q_test, k_test, v_test))
+
+    atol = rtol = 6e-3 if dtype == torch.float16 else 2e-2
+    torch.testing.assert_close(dq_test, dq_ref, atol=atol, rtol=rtol)
+    torch.testing.assert_close(dk_test, dk_ref, atol=atol, rtol=rtol)
+    torch.testing.assert_close(dv_test, dv_ref, atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize("causal", [False, True])
+def test_default_op_opcheck_with_grad_inputs(fa_default_impls, causal):
+    """FA2: full ``opcheck`` including ``test_autograd_registration`` —
+    catches a missing/inconsistent backward at unit-test time, which was
+    exactly the gap that #1373's first revision shipped."""
+    _, _, op, fa_version = fa_default_impls
+    if fa_version != "2":
+        pytest.skip(f"autograd registration only wired for FA2; got {fa_version!r}")
+    torch.manual_seed(0)
+    q, k, v = _qkv(torch.float16, requires_grad=True)
     torch.library.opcheck(op, (q, k, v, None, causal))
