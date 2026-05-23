@@ -136,7 +136,8 @@ training:
 
   tracker:
     project_name: VideoRL
-    run_name: wan_2_1_t2v_1_3b_longcat
+    # Leave blank so W&B auto-generates a unique display name per run.
+    run_name: ""
 
   model:
     enable_gradient_checkpointing_type: full

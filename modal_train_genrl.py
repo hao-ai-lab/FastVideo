@@ -13,8 +13,7 @@ import modal
 app = modal.App("fastvideo-genrl-longcat")
 
 DATASET_DIR = "/data/filtered_prompts"
-OUTPUT_DIR = "/outputs/genrl_longcat_probe_001"
-RUN_NAME = "genrl_longcat_probe_001"
+OUTPUT_DIR_BASE = "/outputs/genrl_longcat"
 VIDEOALIGN_DIR = "/cache/VideoReward"
 WANDB_ENTITY = "adamlee00"
 WANDB_SECRET_NAME = "wandb-adamlee00"
@@ -103,6 +102,7 @@ image = (
     ],
 )
 def train():
+    from datetime import datetime, timezone
     import gc
     import json
     import os
@@ -339,6 +339,11 @@ def train():
     require_prompt_dataset(DATASET_DIR)
     ensure_videoalign_checkpoint()
     preflight_runtime()
+    output_dir = (
+        f"{OUTPUT_DIR_BASE}_"
+        f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    )
+    print(f"Output dir: {output_dir}", flush=True)
     cmd = [
         "bash",
         "examples/train/run.sh",
@@ -346,9 +351,7 @@ def train():
         "--method.prompt_dataset_path",
         DATASET_DIR,
         "--training.checkpoint.output_dir",
-        OUTPUT_DIR,
-        "--training.tracker.run_name",
-        RUN_NAME,
+        output_dir,
     ]
 
     subprocess.run(["nvidia-smi"], check=True)
