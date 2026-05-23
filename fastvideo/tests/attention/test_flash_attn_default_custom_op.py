@@ -31,25 +31,29 @@ def fa_default_impls():
     if not torch.cuda.is_available():
         pytest.skip("CUDA is required for the FA2/FA3 default custom-op tests")
 
+    # The registration + dispatcher live in `attention/utils/`, alongside the
+    # FP4 cute template and the masked/varlen wrappers. The backend
+    # (`attention/backends/flash_attn.py`) just imports `flash_attn_func_compilable`
+    # from there, so test references the utils module directly.
     try:
-        from fastvideo.attention.backends import flash_attn as fa_backend
+        from fastvideo.attention.utils import flash_attn_default as fa_module
     except ImportError as exc:
-        pytest.skip(f"flash_attn backend not importable: {exc}")
+        pytest.skip(f"flash_attn_default not importable: {exc}")
 
-    if fa_backend.fa_version not in ("2", "3"):
+    if fa_module.fa_version not in ("2", "3"):
         pytest.skip(
             f"FA2/FA3 default custom op only exists for fa_version in (2, 3); "
-            f"got {fa_backend.fa_version!r}"
+            f"got {fa_module.fa_version!r}"
         )
 
     # compilable dispatcher, the original FA wrapper it falls back to, the
     # raw custom op for opcheck, and the fa_version (FA2 has full register_
     # autograd; FA3 keeps the carve-out so some tests gate on this).
     return (
-        fa_backend.flash_attn_func_compilable,
-        fa_backend._fa_default,
+        fa_module.flash_attn_func_compilable,
+        fa_module._fa_default,
         torch.ops.fastvideo._flash_attn_default_forward,
-        fa_backend.fa_version,
+        fa_module.fa_version,
     )
 
 
