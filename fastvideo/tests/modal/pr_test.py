@@ -34,6 +34,10 @@ image = (modal.Image.from_registry(
     "FastVideo/performance-tracking",
 }))
 
+dreamverse_image = (image.run_commands(
+    "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -"
+).apt_install("nodejs").run_commands("node --version && npm --version"))
+
 
 def run_test(pytest_command: str):
     """Helper function to run a test suite with custom pytest command"""
@@ -233,7 +237,7 @@ def run_unit_test():
 
 
 # TODO: David: GPU only used to resolve import time requirement (not needed for this test). Maybe make those imports lazy?
-@app.function(gpu="L40S:1", image=image, timeout=1800)
+@app.function(gpu="L40S:1", image=dreamverse_image, timeout=1800)
 def run_dreamverse_app_tests():
     run_test_command(
         """
