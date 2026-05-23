@@ -211,6 +211,10 @@ case "$TEST_TYPE" in
         log "Running unit tests..."
         MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_unit_test"
         ;;
+    "dreamverse_app")
+        log "Running DreamVerse app tests..."
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_dreamverse_app_tests"
+        ;;
     "train_framework")
         log "Running fastvideo.train framework tests..."
         MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_train_framework_tests"

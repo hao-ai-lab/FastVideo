@@ -11,6 +11,7 @@ This guide explains how to add and run tests in FastVideo. The testing suite is 
 * **Training Tests**: Located in `fastvideo/tests/training`. These validate training loops, loss calculations, and specific training techniques like LoRA, Distillation, and VSA.
 * **Inference Tests**: Located in `fastvideo/tests/inference`. These test specialized inference pipelines and optimizations (e.g., VSA, V-MoBA).
 * **Performance Tests**: Located in `fastvideo/tests/performance`. End-to-end latency, throughput, and peak-memory benchmarks gated against per-GPU static thresholds and a rolling Hugging Face baseline. See [Performance Benchmarks](performance_benchmarks.md) for the full workflow, schema and future environment-specific considerations.
+* **DreamVerse App Tests**: Located in `apps/dreamverse`. These validate the DreamVerse app frontend and related app code.
 
 For now, we will focus on **SSIM Tests**.
 
@@ -213,6 +214,7 @@ from a PR comment. The workflow reacts with a 🚀 emoji to confirm the command 
 /test transformer       # Transformer / DiT tests (Fastcheck)
 /test kernel            # CUDA kernel tests (Fastcheck)
 /test unit              # Unit tests (Fastcheck)
+/test dreamverse        # DreamVerse app tests (Fastcheck)
 /test full              # Entire Full Suite
 /test fastcheck         # Entire Fastcheck suite
 ```

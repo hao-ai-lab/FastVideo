@@ -1,12 +1,16 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const backendHost = process.env.BACKEND_HOST || '127.0.0.1';
+const backendPort = process.env.BACKEND_PORT || '8009';
+
 /**
  * Playwright config for Dreamverse end-to-end tests.
  *
  * Tests assume the Dreamverse Python server is reachable at
  * BACKEND_HOST:BACKEND_PORT (default 127.0.0.1:8009) and the Next.js frontend
- * runs on port 5299. The webServer block boots `npm run dev` if no
- * server is already listening so tests work both locally and in CI.
+ * runs on port 5299. The webServer block boots the mock backend and
+ * `npm run dev` if no server is already listening so tests work both
+ * locally and in CI.
  */
 export default defineConfig({
   testDir: './e2e',
@@ -35,14 +39,22 @@ export default defineConfig({
   ],
   webServer: process.env.PLAYWRIGHT_SKIP_WEBSERVER
     ? undefined
-    : {
-        command: 'npm run dev',
-        url: 'http://127.0.0.1:5299',
-        reuseExistingServer: true,
-        timeout: 120_000,
-        env: {
-          BACKEND_HOST: process.env.BACKEND_HOST || '127.0.0.1',
-          BACKEND_PORT: process.env.BACKEND_PORT || '8009',
+    : [
+        {
+          command: `PYTHONPATH=.. python3 -m uvicorn dreamverse.mock_server:app --host ${backendHost} --port ${backendPort}`,
+          url: `http://${backendHost}:${backendPort}/healthz`,
+          reuseExistingServer: true,
+          timeout: 120_000,
         },
-      },
+        {
+          command: 'npm run dev',
+          url: 'http://127.0.0.1:5299',
+          reuseExistingServer: true,
+          timeout: 120_000,
+          env: {
+            BACKEND_HOST: backendHost,
+            BACKEND_PORT: backendPort,
+          },
+        },
+      ],
 });
