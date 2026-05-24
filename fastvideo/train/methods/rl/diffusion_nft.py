@@ -111,6 +111,12 @@ class DiffusionNFTMethod(TrainingMethod):
             raise ValueError(
                 "method.num_samples_per_prompt must be > 0"
             )
+        self._collection_batch_size = require_positive_int(
+            self.method_config,
+            "collection_batch_size",
+            default=self._num_samples_per_prompt,
+            where="method.collection_batch_size",
+        )
         self._inner_epochs = require_positive_int(
             self.method_config,
             "inner_epochs",
@@ -443,36 +449,68 @@ class DiffusionNFTMethod(TrainingMethod):
         repeated_batch, prompts, metadata = self._repeat_raw_batch(
             raw_batch
         )
-        sample_batch = self.student.prepare_batch(
-            repeated_batch,
-            generator=self.cuda_generator,
-            latents_source="zeros",
-        )
         self._sync_cuda()
         timings["time/collection_prepare_batch_sec"] = (
             time.perf_counter() - t0
         )
 
-        t0 = time.perf_counter()
-        clean_latents = self._sample_clean_latents(sample_batch)
-        self._sync_cuda()
-        timings["time/collection_sample_sec"] = (
-            time.perf_counter() - t0
+        sample_batches: list[TrainingBatch] = []
+        clean_chunks: list[torch.Tensor] = []
+        reward_chunks: dict[str, list[torch.Tensor]] = {}
+        timings["time/collection_sample_sec"] = 0.0
+        timings["time/collection_decode_sec"] = 0.0
+        timings["time/collection_reward_sec"] = 0.0
+        collection_batch_size = min(
+            self._collection_batch_size, len(prompts)
         )
+        for start in range(0, len(prompts), collection_batch_size):
+            end = min(start + collection_batch_size, len(prompts))
+            chunk_batch = self._slice_raw_batch(
+                repeated_batch, start, end
+            )
+            sample_batch = self.student.prepare_batch(
+                chunk_batch,
+                generator=self.cuda_generator,
+                latents_source="zeros",
+            )
+            sample_batches.append(sample_batch)
 
-        t0 = time.perf_counter()
-        media = self._decode_media(clean_latents)
-        self._sync_cuda()
-        timings["time/collection_decode_sec"] = (
-            time.perf_counter() - t0
-        )
+            t0 = time.perf_counter()
+            clean = self._sample_clean_latents(sample_batch)
+            self._sync_cuda()
+            timings["time/collection_sample_sec"] += (
+                time.perf_counter() - t0
+            )
+            clean_chunks.append(clean)
 
-        t0 = time.perf_counter()
-        reward_details = self._reward_fn(media, prompts, metadata)
-        self._sync_cuda()
-        timings["time/collection_reward_sec"] = (
-            time.perf_counter() - t0
-        )
+            t0 = time.perf_counter()
+            media = self._decode_media(clean)
+            self._sync_cuda()
+            timings["time/collection_decode_sec"] += (
+                time.perf_counter() - t0
+            )
+
+            t0 = time.perf_counter()
+            chunk_rewards = self._reward_fn(
+                media,
+                prompts[start:end],
+                metadata[start:end],
+            )
+            self._sync_cuda()
+            timings["time/collection_reward_sec"] += (
+                time.perf_counter() - t0
+            )
+            for key, value in chunk_rewards.items():
+                reward_chunks.setdefault(key, []).append(
+                    value.detach().to(device=self.student.device)
+                )
+
+        sample_batch = self._concat_sample_batches(sample_batches)
+        clean_latents = torch.cat(clean_chunks, dim=0)
+        reward_details = {
+            key: torch.cat(values, dim=0)
+            for key, values in reward_chunks.items()
+        }
 
         t0 = time.perf_counter()
         advantages, reward_metrics = self._compute_advantages(
@@ -499,6 +537,7 @@ class DiffusionNFTMethod(TrainingMethod):
         self._pending_collection_metrics = {
             "collection/round": float(self._collection_round),
             "collection/queued_batches": float(len(self._queue)),
+            "collection/sample_batches": float(len(sample_batches)),
             **reward_metrics,
             **timings,
         }
@@ -516,6 +555,48 @@ class DiffusionNFTMethod(TrainingMethod):
             timings["time/collection_reward_sec"],
             timings["time/collection_queue_build_sec"],
         )
+
+    def _slice_raw_batch(
+        self,
+        raw_batch: dict[str, Any],
+        start: int,
+        end: int,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in raw_batch.items():
+            if torch.is_tensor(value) and value.shape[:1]:
+                result[key] = value[start:end]
+            elif isinstance(value, list) and len(value) >= end:
+                result[key] = value[start:end]
+            else:
+                result[key] = value
+        return result
+
+    def _concat_sample_batches(
+        self, batches: list[TrainingBatch]
+    ) -> TrainingBatch:
+        if not batches:
+            raise RuntimeError("No sample batches were collected")
+        raw_shape = batches[0].raw_latent_shape
+        embeds = [batch.encoder_hidden_states for batch in batches]
+        masks = [batch.encoder_attention_mask for batch in batches]
+        if raw_shape is None or any(
+            batch.raw_latent_shape != raw_shape for batch in batches
+        ):
+            raise RuntimeError("Collected sample batches changed latent shape")
+        if any(embed is None for embed in embeds) or any(
+            mask is None for mask in masks
+        ):
+            raise RuntimeError("Collected sample batch missing text embeds")
+        batch = TrainingBatch()
+        batch.raw_latent_shape = raw_shape
+        batch.encoder_hidden_states = torch.cat(
+            [embed for embed in embeds if embed is not None], dim=0
+        )
+        batch.encoder_attention_mask = torch.cat(
+            [mask for mask in masks if mask is not None], dim=0
+        )
+        return batch
 
     @torch.no_grad()
     def _sample_clean_latents(

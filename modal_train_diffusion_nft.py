@@ -1,13 +1,14 @@
-"""Run a tiny DiffusionNFT Wan RL training job on Modal.
+"""Run DiffusionNFT Wan RL training on Modal.
 
-This is the DiffusionNFT smoke/debug companion to ``modal_train_genrl.py``.
-Wan is used as an image generator by setting ``num_frames=1``; an image is a
-one-frame video.
+By default this uses the real NVlabs/DiffusionNFT prompt datasets and
+Flow-GRPO reward implementations. ``num_frames`` is exposed as a Modal
+argument so the same video-policy path can run cheap one-frame debug jobs or
+multi-frame video generation.
 
 Expected Modal resources in the hao-ai-lab workspace:
-- Volume `fastvideo-data` for generated text-only parquet prompts.
-- Volume `fastvideo-runs` for checkpoints/logs.
-- Volume `fastvideo-cache` for Hugging Face caches.
+- Volume `fastvideo-data` mounted under the repo for text-only parquet prompts.
+- Volume `fastvideo-runs` mounted under the repo for checkpoints/logs.
+- Volume `fastvideo-cache` mounted under the repo for Hugging Face/DiffusionNFT caches.
 - Secrets `wandb-adamlee00` and `hf-adamlee00`.
 """
 
@@ -15,31 +16,35 @@ from __future__ import annotations
 
 import modal
 
-app = modal.App("fastvideo-diffusion-nft-wan-debug")
+app = modal.App("fastvideo-diffusion-nft-wan")
 
 MODEL_ID = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 CONFIG_PATH = (
     "examples/train/configs/diffusion_nft_wan2.1_t2v_text_only.yaml"
 )
-DATASET_ROOT = "/data/diffusion_nft_text_only_debug"
-PROMPT_FILE = "/tmp/diffusion_nft_prompts_debug.txt"
-OUTPUT_DIR_BASE = "/outputs/diffusion_nft_wan_debug"
+PROJECT_ROOT = "/root/FastVideo"
+MODAL_DATA_ROOT = f"{PROJECT_ROOT}/.modal_data"
+MODAL_CACHE_ROOT = f"{PROJECT_ROOT}/.modal_cache"
+DIFFUSION_NFT_REPO = "https://github.com/NVlabs/DiffusionNFT.git"
+DIFFUSION_NFT_ROOT = f"{MODAL_CACHE_ROOT}/DiffusionNFT"
+OUTPUT_DIR_BASE = f"{PROJECT_ROOT}/outputs/diffusion_nft_wan"
 WANDB_ENTITY = "adamlee00"
 WANDB_SECRET_NAME = "wandb-adamlee00"
 HF_SECRET_NAME = "hf-adamlee00"
-DEBUG_PROMPT_COUNT = 4
+DEFAULT_GPU_TYPE = "A100-80GB"
+DEFAULT_NUM_GPUS = 4
 DEFAULT_MAX_TRAIN_STEPS = 100
-DEFAULT_NUM_SAMPLES_PER_PROMPT = 2
+DEFAULT_NUM_SAMPLES_PER_PROMPT = 24
+DEFAULT_COLLECTION_BATCH_SIZE = 6
 DEFAULT_INNER_EPOCHS = 1
-DEFAULT_TRAIN_BATCH_SIZE = 1
+DEFAULT_TRAIN_BATCH_SIZE = 6
+DEFAULT_GRADIENT_ACCUMULATION_STEPS = 48
 DEFAULT_NUM_FRAMES = 1
-DEFAULT_NUM_LATENT_T = 1
-DEBUG_PROMPTS = [
-    "a cinematic photo of a red sports car parked on a wet city street",
-    "a watercolor painting of a cozy cabin under northern lights",
-    "a close-up studio photo of a glass teapot filled with flowers",
-    "a small robot reading a book in a sunny library",
-]
+DEFAULT_NUM_LATENT_T = 0
+DEFAULT_DATASET = "pickscore"
+DEFAULT_REWARD = "pickscore"
+DEFAULT_MAX_PROMPTS = 0
+MULTI_REWARD_NAMES = ("pickscore", "hpsv2", "clipscore")
 
 data_vol = modal.Volume.from_name("fastvideo-data")
 runs_vol = modal.Volume.from_name("fastvideo-runs")
@@ -62,7 +67,7 @@ image = (
         "cmake",
     )
     .pip_install("uv")
-    .add_local_dir(".", "/root/FastVideo", copy=True)
+    .add_local_dir(".", PROJECT_ROOT, copy=True)
     .run_commands(
         "cd /root/FastVideo && uv pip install --system --prerelease=allow -e .",
         "uv pip install --system --prerelease=allow "
@@ -83,10 +88,11 @@ image = (
             "WANDB_MODE": "online",
             "WANDB_ENTITY": WANDB_ENTITY,
             "TOKENIZERS_PARALLELISM": "false",
-            "NUM_GPUS": "1",
-            "HF_HOME": "/cache/huggingface",
-            "HF_HUB_CACHE": "/cache/huggingface",
-            "TRANSFORMERS_CACHE": "/cache/huggingface",
+            "NUM_GPUS": str(DEFAULT_NUM_GPUS),
+            "HF_HOME": f"{MODAL_CACHE_ROOT}/huggingface",
+            "HF_HUB_CACHE": f"{MODAL_CACHE_ROOT}/huggingface",
+            "TRANSFORMERS_CACHE": f"{MODAL_CACHE_ROOT}/huggingface",
+            "DIFFUSION_NFT_ROOT": DIFFUSION_NFT_ROOT,
             "FASTVIDEO_ATTENTION_BACKEND": "FLASH_ATTN",
             "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
         }
@@ -96,12 +102,12 @@ image = (
 
 @app.function(
     image=image,
-    gpu="H100:1",  # use "A100-80GB:1" if H100 queue is annoying
+    gpu=f"{DEFAULT_GPU_TYPE}:{DEFAULT_NUM_GPUS}",
     timeout=12 * 60 * 60,
     volumes={
-        "/data": data_vol,
-        "/outputs": runs_vol,
-        "/cache": cache_vol,
+        MODAL_DATA_ROOT: data_vol,
+        f"{PROJECT_ROOT}/outputs": runs_vol,
+        MODAL_CACHE_ROOT: cache_vol,
     },
     secrets=[
         modal.Secret.from_name(WANDB_SECRET_NAME),
@@ -111,10 +117,15 @@ image = (
 def train(
     max_train_steps: int = DEFAULT_MAX_TRAIN_STEPS,
     num_samples_per_prompt: int = DEFAULT_NUM_SAMPLES_PER_PROMPT,
+    collection_batch_size: int = DEFAULT_COLLECTION_BATCH_SIZE,
     inner_epochs: int = DEFAULT_INNER_EPOCHS,
     train_batch_size: int = DEFAULT_TRAIN_BATCH_SIZE,
+    gradient_accumulation_steps: int = DEFAULT_GRADIENT_ACCUMULATION_STEPS,
     num_frames: int = DEFAULT_NUM_FRAMES,
     num_latent_t: int = DEFAULT_NUM_LATENT_T,
+    dataset: str = DEFAULT_DATASET,
+    reward: str = DEFAULT_REWARD,
+    max_prompts: int = DEFAULT_MAX_PROMPTS,
 ):
     from datetime import datetime, timezone
     import os
@@ -122,14 +133,52 @@ def train(
     import sys
     from pathlib import Path
 
-    repo = Path("/root/FastVideo")
-    dataset_root = Path(DATASET_ROOT)
+    def derive_wan_num_latent_t(frame_count: int) -> int:
+        if frame_count <= 0:
+            raise ValueError("--num-frames must be positive")
+        if (frame_count - 1) % 4 != 0:
+            raise ValueError(
+                "Wan frame counts must satisfy "
+                "num_frames = (num_latent_t - 1) * 4 + 1. "
+                f"Got num_frames={frame_count}; try 1, 5, 9, 13, 17, ..."
+            )
+        return ((frame_count - 1) // 4) + 1
+
+    num_frames = int(num_frames)
+    requested_num_latent_t = int(num_latent_t)
+    derived_num_latent_t = derive_wan_num_latent_t(num_frames)
+    if requested_num_latent_t <= 0:
+        num_latent_t = derived_num_latent_t
+    elif requested_num_latent_t != derived_num_latent_t:
+        raise ValueError(
+            f"For Wan num_frames={num_frames} implies "
+            f"num_latent_t={derived_num_latent_t}, but got "
+            f"num_latent_t={requested_num_latent_t}. Leave "
+            "--num-latent-t unset/0 to derive it automatically."
+        )
+    else:
+        num_latent_t = requested_num_latent_t
+
+    repo = Path(PROJECT_ROOT)
+    diffusion_nft_root = Path(DIFFUSION_NFT_ROOT)
+    dataset = dataset.strip().lower()
+    reward = reward.strip().lower()
+    prompt_suffix = "full" if max_prompts <= 0 else f"first{max_prompts}"
+    dataset_root = (
+        Path(MODAL_DATA_ROOT)
+        / f"diffusion_nft_{dataset}_text_only_f{num_frames}_{prompt_suffix}"
+    )
     parquet_dir = dataset_root / "combined_parquet_dataset"
+    prompt_file = (
+        Path(MODAL_DATA_ROOT)
+        / "prompts"
+        / f"diffusion_nft_{dataset}_{prompt_suffix}_train.txt"
+    )
 
     def has_parquet(path: Path) -> bool:
         return path.exists() and any(path.rglob("*.parquet"))
 
-    def verify_text_only_dataset() -> None:
+    def verify_text_only_dataset(expected_rows: int) -> None:
         import pyarrow.parquet as pq
 
         parquet_files = sorted(parquet_dir.rglob("*.parquet"))
@@ -141,9 +190,9 @@ def train(
             pq.ParquetFile(path).metadata.num_rows
             for path in parquet_files
         )
-        if row_count < DEBUG_PROMPT_COUNT:
+        if row_count < expected_rows:
             raise RuntimeError(
-                f"Expected at least {DEBUG_PROMPT_COUNT} prompt rows in "
+                f"Expected at least {expected_rows} prompt rows in "
                 f"{parquet_dir}, found {row_count}."
             )
         print(
@@ -168,27 +217,98 @@ def train(
             raise RuntimeError("CUDA is not available in Modal preflight.")
         print("=== DiffusionNFT Modal Preflight OK ===", flush=True)
 
-    def write_debug_prompt_file() -> None:
-        if len(DEBUG_PROMPTS) < DEBUG_PROMPT_COUNT:
-            raise RuntimeError(
-                "DEBUG_PROMPTS must contain at least "
-                f"{DEBUG_PROMPT_COUNT} prompts."
+    def ensure_diffusion_nft_repo() -> None:
+        if (diffusion_nft_root / "flow_grpo").is_dir():
+            print(
+                f"Using cached DiffusionNFT repo at {diffusion_nft_root}",
+                flush=True,
             )
-        Path(PROMPT_FILE).write_text(
-            "\n".join(DEBUG_PROMPTS[:DEBUG_PROMPT_COUNT]) + "\n",
+        else:
+            diffusion_nft_root.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "--depth",
+                    "1",
+                    DIFFUSION_NFT_REPO,
+                    str(diffusion_nft_root),
+                ],
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                check=True,
+            )
+            cache_vol.commit()
+
+        existing_pythonpath = os.environ.get("PYTHONPATH", "")
+        paths = [str(diffusion_nft_root)]
+        if existing_pythonpath:
+            paths.append(existing_pythonpath)
+        os.environ["PYTHONPATH"] = os.pathsep.join(paths)
+        os.environ["DIFFUSION_NFT_ROOT"] = str(diffusion_nft_root)
+
+    def prepare_prompt_file() -> int:
+        source = diffusion_nft_root / "dataset" / dataset / "train.txt"
+        if not source.is_file():
+            raise RuntimeError(
+                f"DiffusionNFT dataset {dataset!r} does not provide "
+                f"{source}. The launcher expects a train.txt prompt file."
+            )
+        prompts = [
+            line.strip()
+            for line in source.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        if max_prompts > 0:
+            prompts = prompts[:max_prompts]
+        if not prompts:
+            raise RuntimeError(f"No prompts found in {source}")
+        prompt_file.parent.mkdir(parents=True, exist_ok=True)
+        prompt_file.write_text(
+            "\n".join(prompts) + "\n", encoding="utf-8"
+        )
+        print(
+            f"Prepared {len(prompts)} prompt(s) from {source}",
+            flush=True,
+        )
+        return len(prompts)
+
+    def prepare_run_config() -> Path:
+        import yaml
+
+        if reward == "multi_reward":
+            reward_map = {name: 1.0 for name in MULTI_REWARD_NAMES}
+        else:
+            reward_map = {reward: 1.0}
+
+        config_path = repo / CONFIG_PATH
+        run_config_dir = repo / "outputs" / "diffusion_nft_run_configs"
+        run_config_dir.mkdir(parents=True, exist_ok=True)
+        run_config_path = run_config_dir / "diffusion_nft_wan_run.yaml"
+        raw_config = yaml.safe_load(
+            config_path.read_text(encoding="utf-8")
+        )
+        method_config = raw_config.setdefault("method", {})
+        method_config["reward_backend"] = "diffusion_nft"
+        method_config["reward_fn"] = {"rewards": reward_map}
+        if reward == "multi_reward":
+            method_config["nft_beta"] = 0.1
+            method_config["sample_timesteps"] = list(range(1000, 0, -40))
+        run_config_path.write_text(
+            yaml.safe_dump(raw_config, sort_keys=False),
             encoding="utf-8",
         )
+        return run_config_path
 
-    def ensure_text_only_dataset() -> None:
+    def ensure_text_only_dataset(expected_rows: int) -> None:
         if has_parquet(parquet_dir):
             print(
                 f"Using cached text-only parquet at {parquet_dir}",
                 flush=True,
             )
-            verify_text_only_dataset()
+            verify_text_only_dataset(expected_rows)
             return
 
-        write_debug_prompt_file()
         dataset_root.mkdir(parents=True, exist_ok=True)
         cmd = [
             "torchrun",
@@ -199,7 +319,7 @@ def train(
             "--model_path",
             MODEL_ID,
             "--data_merge_path",
-            PROMPT_FILE,
+            str(prompt_file),
             "--preprocess_video_batch_size",
             "2",
             "--seed",
@@ -209,17 +329,17 @@ def train(
             "--max_width",
             "832",
             "--num_frames",
-            "1",
+            str(int(num_frames)),
             "--num_latent_t",
-            "1",
+            str(int(num_latent_t)),
             "--dataloader_num_workers",
             "0",
             "--output_dir",
-            DATASET_ROOT,
+            str(dataset_root),
             "--samples_per_file",
-            str(DEBUG_PROMPT_COUNT),
+            "1024",
             "--flush_frequency",
-            str(DEBUG_PROMPT_COUNT),
+            "1024",
             "--preprocess_task",
             "text_only",
         ]
@@ -230,11 +350,14 @@ def train(
             stderr=sys.stderr,
             check=True,
         )
-        verify_text_only_dataset()
+        verify_text_only_dataset(expected_rows)
         data_vol.commit()
 
     preflight_runtime()
-    ensure_text_only_dataset()
+    ensure_diffusion_nft_repo()
+    expected_prompt_rows = prepare_prompt_file()
+    ensure_text_only_dataset(expected_prompt_rows)
+    run_config_path = prepare_run_config()
 
     output_dir = (
         f"{OUTPUT_DIR_BASE}_"
@@ -245,17 +368,22 @@ def train(
         "DiffusionNFT probe settings: "
         f"max_train_steps={max_train_steps} "
         f"num_samples_per_prompt={num_samples_per_prompt} "
+        f"collection_batch_size={collection_batch_size} "
         f"inner_epochs={inner_epochs} "
         f"train_batch_size={train_batch_size} "
+        f"gradient_accumulation_steps={gradient_accumulation_steps} "
         f"num_frames={num_frames} "
-        f"num_latent_t={num_latent_t}",
+        f"num_latent_t={num_latent_t} "
+        f"dataset={dataset} "
+        f"reward={reward} "
+        f"max_prompts={max_prompts or 'full'}",
         flush=True,
     )
 
     cmd = [
         "bash",
         "examples/train/run.sh",
-        CONFIG_PATH,
+        str(run_config_path),
         "--training.data.data_path",
         str(parquet_dir),
         "--training.checkpoint.output_dir",
@@ -264,12 +392,18 @@ def train(
         Path(output_dir).name,
         "--training.loop.max_train_steps",
         str(int(max_train_steps)),
+        "--training.distributed.num_gpus",
+        str(DEFAULT_NUM_GPUS),
+        "--training.loop.gradient_accumulation_steps",
+        str(int(gradient_accumulation_steps)),
         "--training.data.num_frames",
         str(int(num_frames)),
         "--training.data.num_latent_t",
         str(int(num_latent_t)),
         "--method.num_samples_per_prompt",
         str(int(num_samples_per_prompt)),
+        "--method.collection_batch_size",
+        str(int(collection_batch_size)),
         "--method.inner_epochs",
         str(int(inner_epochs)),
         "--method.train_batch_size",
@@ -293,16 +427,26 @@ def train(
 def main(
     max_train_steps: int = DEFAULT_MAX_TRAIN_STEPS,
     num_samples_per_prompt: int = DEFAULT_NUM_SAMPLES_PER_PROMPT,
+    collection_batch_size: int = DEFAULT_COLLECTION_BATCH_SIZE,
     inner_epochs: int = DEFAULT_INNER_EPOCHS,
     train_batch_size: int = DEFAULT_TRAIN_BATCH_SIZE,
+    gradient_accumulation_steps: int = DEFAULT_GRADIENT_ACCUMULATION_STEPS,
     num_frames: int = DEFAULT_NUM_FRAMES,
     num_latent_t: int = DEFAULT_NUM_LATENT_T,
+    dataset: str = DEFAULT_DATASET,
+    reward: str = DEFAULT_REWARD,
+    max_prompts: int = DEFAULT_MAX_PROMPTS,
 ):
     train.remote(
         max_train_steps=max_train_steps,
         num_samples_per_prompt=num_samples_per_prompt,
+        collection_batch_size=collection_batch_size,
         inner_epochs=inner_epochs,
         train_batch_size=train_batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
         num_frames=num_frames,
         num_latent_t=num_latent_t,
+        dataset=dataset,
+        reward=reward,
+        max_prompts=max_prompts,
     )

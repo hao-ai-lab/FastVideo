@@ -14,26 +14,26 @@ method:
   _target_: fastvideo.train.methods.rl.diffusion_nft.DiffusionNFTMethod
   media_type: video
 
-  sample_timesteps: [1000, 750, 500, 250]
+  sample_timesteps: [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100]
   sample_guidance_scale: 1.0
-  num_samples_per_prompt: 2
+  num_samples_per_prompt: 24
+  collection_batch_size: 9
   inner_epochs: 1
 
-  train_batch_size: 1
-  train_timestep_fraction: 1.0
+  train_batch_size: 9
+  train_timestep_fraction: 0.99
   nft_beta: 1.0
   adv_clip_max: 5.0
   adv_mode: all
   global_std: true
   kl_weight: 0.0
 
-  # Built-in JPEG reward averages over video frames. Swap this for
-  # GenRL video rewards, e.g. videoalign_mq/videoalign_ta, once the
-  # reward checkpoints are available in the runtime.
-  reward_backend: auto
+  # Mirrors the default DiffusionNFT preference run: real Flow-GRPO
+  # reward package, PickScore prompts/reward, CFG-free guidance=1.0.
+  reward_backend: diffusion_nft
   reward_fn:
     rewards:
-      jpeg_incompressibility: 1.0
+      pickscore: 1.0
 
 training:
   distributed:
@@ -58,17 +58,17 @@ training:
   optimizer:
     learning_rate: 2.0e-6
     betas: [0.9, 0.999]
-    weight_decay: 0.01
+    weight_decay: 1.0e-4
     lr_scheduler: constant
     lr_warmup_steps: 0
 
   loop:
-    max_train_steps: 20
-    gradient_accumulation_steps: 1
+    max_train_steps: 100
+    gradient_accumulation_steps: 16
 
   checkpoint:
     output_dir: outputs/wan2.1_diffusion_nft_video_text_only
-    training_state_checkpointing_steps: 10
+    training_state_checkpointing_steps: 30
     checkpoints_total_limit: 2
 
   tracker:

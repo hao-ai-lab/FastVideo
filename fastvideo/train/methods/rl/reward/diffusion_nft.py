@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Callable
 from io import BytesIO
@@ -86,14 +87,68 @@ def _build_genrl_reward_fn(
 
 
 def _ensure_local_diffusion_nft_on_path() -> None:
-    """Let configs use a sibling ``DiffusionNFT`` checkout if present."""
+    """Let configs use a local or cached ``DiffusionNFT`` checkout."""
+    explicit_root = os.environ.get("DIFFUSION_NFT_ROOT")
+    candidates: list[Path] = []
+    if explicit_root:
+        candidates.append(Path(explicit_root))
+    candidates.append(Path("/cache/DiffusionNFT"))
     for parent in Path(__file__).resolve().parents:
-        candidate = parent / "DiffusionNFT" / "flow_grpo"
+        candidates.append(parent / "DiffusionNFT")
+
+    for root_path in candidates:
+        candidate = root_path / "flow_grpo"
         if candidate.is_dir():
-            root = str(candidate.parent)
+            root = str(root_path)
             if root not in sys.path:
                 sys.path.insert(0, root)
             return
+
+
+def _frames_for_image_reward(
+    media: torch.Tensor,
+    prompts: list[str],
+    metadata: list[dict[str, Any]],
+) -> tuple[torch.Tensor, list[str], list[dict[str, Any]], int | None]:
+    if media.ndim != 5:
+        return media, prompts, metadata, None
+
+    # FastVideo decodes videos as (B, C, F, H, W). Original
+    # DiffusionNFT rewards are image rewards, so score every frame and
+    # average back to one scalar per video.
+    batch, channels, frames, height, width = media.shape
+    flat = media.permute(0, 2, 1, 3, 4).reshape(
+        batch * frames, channels, height, width
+    )
+    flat_prompts = [
+        prompt for prompt in prompts for _ in range(frames)
+    ]
+    flat_metadata = [
+        dict(item) for item in metadata for _ in range(frames)
+    ]
+    return flat, flat_prompts, flat_metadata, frames
+
+
+def _average_frame_scores(
+    scores: dict[str, Any],
+    *,
+    device: torch.device,
+    frames: int | None,
+) -> dict[str, torch.Tensor]:
+    averaged: dict[str, torch.Tensor] = {}
+    for key, value in scores.items():
+        tensor = torch.as_tensor(
+            value, device=device, dtype=torch.float32
+        )
+        if frames is not None:
+            if tensor.numel() % frames != 0:
+                raise RuntimeError(
+                    f"Reward {key!r} returned {tensor.numel()} scores, "
+                    f"which is not divisible by num_frames={frames}."
+                )
+            tensor = tensor.reshape(-1, frames).mean(dim=1)
+        averaged[key] = tensor
+    return averaged
 
 
 def _external_diffusion_nft_reward(
@@ -122,15 +177,18 @@ def _external_diffusion_nft_reward(
         prompts: list[str],
         metadata: list[dict[str, Any]],
     ) -> dict[str, torch.Tensor]:
-        score_details, _ = score_fn(
-            images, prompts, metadata, only_strict=True
+        reward_images, reward_prompts, reward_metadata, frames = (
+            _frames_for_image_reward(images, prompts, metadata)
         )
-        return {
-            key: torch.as_tensor(
-                value, device=device, dtype=torch.float32
-            )
-            for key, value in score_details.items()
-        }
+        score_details, _ = score_fn(
+            reward_images,
+            reward_prompts,
+            reward_metadata,
+            only_strict=True,
+        )
+        return _average_frame_scores(
+            score_details, device=device, frames=frames
+        )
 
     return _fn
 
