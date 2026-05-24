@@ -554,10 +554,6 @@ scores ± tolerance, and add a calibration test under
 
 ## 10) When not to add a metric
 
-- **Set-vs-set distribution metrics** (FVD, FID-style) do not fit
-  `BaseMetric.compute(sample)` cleanly; they need a population.
-  Adding them requires a stateful accumulator interface that does
-  not exist yet. Open an issue first.
 - **Metrics requiring a single-GPU model larger than available
   memory.** Eval is not the place for tensor-parallel sharding;
   metrics are expected to fit on one GPU.

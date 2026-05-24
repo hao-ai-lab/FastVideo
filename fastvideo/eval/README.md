@@ -1,9 +1,9 @@
 # `fastvideo.eval`
 
 In-process evaluation suite for video generations. Includes pixel
-metrics (SSIM, PSNR, LPIPS), optical-flow comparisons, the full VBench
-suite, Physics-IQ, audio metrics, and a VLM scorer behind a single
-registry-driven API.
+metrics (SSIM, PSNR, LPIPS), Fréchet Video Distance (FVD), optical-flow
+comparisons, the full VBench suite, Physics-IQ, audio metrics, and a
+VLM scorer behind a single registry-driven API.
 
 ## Install
 
@@ -127,7 +127,7 @@ fastvideo/
 │   ├── datasets/                  # prompt corpora (vbench, physics_iq)
 │   └── metrics/
 │       ├── base.py                # BaseMetric + @register contract
-│       ├── common/                # SSIM, PSNR, LPIPS
+│       ├── common/                # SSIM, PSNR, LPIPS, FVD
 │       ├── optical_flow/          # gt_optical_flow, synthetic_optical_flow
 │       ├── audio/                 # clap_score, audiobox_aesthetics, kl_divergence,
 │       │                          # frechet_distance, wer, desync, imagebind_score
@@ -253,13 +253,34 @@ For libraries that do not honour any env var or kwarg (pyiqa, funasr),
 their cache lands in the library's own dir. Document the exception in
 the metric's docstring if it matters.
 
+## `common.fvd` — Fréchet Video Distance
+
+Set-vs-set metric. Computes the Fréchet distance between Gaussian
+moments of I3D features (Kinetics-400) over the generated set and a
+reference set. Lower is better; standard protocol uses 2048 videos
+and a warning fires below 256.
+
+```python
+from fastvideo.eval import create_evaluator
+
+ev = create_evaluator(metrics=["common.fvd"], device="cuda")
+ev.evaluate(samples=[
+    {"video": gen_tensor_0, "reference": ref_tensor},   # builds the cache
+    {"video": gen_tensor_1},                            # cache reused
+    {"video": gen_tensor_2},
+    ...
+])
+# corpus result is in the returned EvalResults.corpus["common.fvd"]
+```
+
+Reference features are cached to ``${FASTVIDEO_EVAL_CACHE}/fvd/real_features_{extractor}.pt``
+the first time ``sample["reference"]`` is passed; subsequent runs load
+the cache automatically. Override with ``$FASTVIDEO_FVD_REF_FEATURES``
+or the ``cache_path=`` constructor kwarg.
+
 ## Out of scope (follow-up PRs)
 
 - **MIND** metrics. Depend on a separate `vipe` upstream submodule.
 - **VBench-2.0**. Sibling vbench2 package; needs its own port.
-- **FVD as a registered metric**. Currently still at `benchmarks/fvd/`.
-  FVD is a set-vs-set distribution distance and does not fit the
-  per-sample `BaseMetric.compute` API without a stateful accumulator;
-  conversion is a designed follow-up.
 - **Training-time eval callback** (`EvalCallback`) and the
   `RolloutEvaluator` helper.
