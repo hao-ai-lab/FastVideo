@@ -308,6 +308,16 @@ def _build_training_config(
             if init_from is not None:
                 model_path = str(init_from)
 
+    preprocessed_data_type = str(
+        da.get("preprocessed_data_type", "t2v") or "t2v"
+    ).strip().lower()
+    if preprocessed_data_type not in {"t2v", "text_only"}:
+        raise ValueError(
+            "training.data.preprocessed_data_type must be one of "
+            "{'t2v', 'text_only'}, got "
+            f"{preprocessed_data_type!r}"
+        )
+
     return TrainingConfig(
         distributed=DistributedConfig(
             num_gpus=num_gpus,
@@ -319,6 +329,7 @@ def _build_training_config(
         ),
         data=DataConfig(
             data_path=str(da.get("data_path", "") or ""),
+            preprocessed_data_type=preprocessed_data_type,
             train_batch_size=int(da.get("train_batch_size", 1) or 1),
             dataloader_num_workers=int(da.get("dataloader_num_workers", 0) or 0),
             training_cfg_rate=float(da.get("training_cfg_rate", 0.0) or 0.0),
