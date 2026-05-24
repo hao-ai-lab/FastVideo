@@ -22,25 +22,67 @@ RewardFn = Callable[
 def _to_uint8_nhwc(images: torch.Tensor) -> np.ndarray:
     images = images.detach().float().clamp(0, 1).cpu()
     images = (images * 255.0).round().to(torch.uint8).numpy()
-    return np.transpose(images, (0, 2, 3, 1))
+    if images.ndim == 4:
+        return np.transpose(images, (0, 2, 3, 1))
+    if images.ndim == 5:
+        # (N, C, F, H, W) -> (N, F, H, W, C)
+        return np.transpose(images, (0, 2, 3, 4, 1))
+    raise ValueError(
+        "Expected image/video tensor with 4 or 5 dims, got "
+        f"shape={images.shape}"
+    )
 
 
 def _jpeg_incompressibility(images: torch.Tensor) -> torch.Tensor:
     arr = _to_uint8_nhwc(images)
     sizes: list[float] = []
-    for image in arr:
-        buffer = BytesIO()
-        Image.fromarray(image).save(
-            buffer, format="JPEG", quality=95
-        )
-        sizes.append(buffer.tell() / 1000.0)
+    for sample in arr:
+        frames = sample[np.newaxis] if sample.ndim == 3 else sample
+        frame_sizes: list[float] = []
+        for frame in frames:
+            buffer = BytesIO()
+            Image.fromarray(frame).save(
+                buffer, format="JPEG", quality=95
+            )
+            frame_sizes.append(buffer.tell() / 1000.0)
+        sizes.append(float(np.mean(frame_sizes)))
     return torch.tensor(
         sizes, device=images.device, dtype=torch.float32
     )
 
 
 def _mean_luminance(images: torch.Tensor) -> torch.Tensor:
-    return images.detach().float().mean(dim=(1, 2, 3))
+    reduce_dims = tuple(range(1, images.ndim))
+    return images.detach().float().mean(dim=reduce_dims)
+
+
+def _build_genrl_reward_fn(
+    reward_config: dict[str, Any],
+    *,
+    device: torch.device,
+) -> RewardFn:
+    from fastvideo.train.methods.rl.utils.rewards import multi_score
+
+    score_fn = multi_score(
+        device,
+        {str(k): float(v) for k, v in reward_config.items()},
+        return_raw_scores=True,
+    )
+
+    def _fn(
+        images: torch.Tensor,
+        prompts: list[str],
+        metadata: list[dict[str, Any]],
+    ) -> dict[str, torch.Tensor]:
+        scores, _ = score_fn(images, prompts, metadata, True)
+        return {
+            key: torch.as_tensor(
+                value, device=device, dtype=torch.float32
+            )
+            for key, value in scores.items()
+        }
+
+    return _fn
 
 
 def _ensure_local_diffusion_nft_on_path() -> None:
@@ -97,6 +139,7 @@ def build_diffusion_nft_reward_fn(
     reward_config: dict[str, Any] | None,
     *,
     device: torch.device,
+    backend: str = "auto",
 ) -> RewardFn:
     """Build a weighted image reward callable.
 
@@ -109,10 +152,30 @@ def build_diffusion_nft_reward_fn(
     raw_rewards: Any = reward_config or {
         "jpeg_incompressibility": 1.0
     }
+    if isinstance(raw_rewards, dict) and "backend" in raw_rewards:
+        backend = str(raw_rewards["backend"]).strip().lower()
     if isinstance(raw_rewards, dict) and "rewards" in raw_rewards:
         raw_rewards = raw_rewards["rewards"]
     if not isinstance(raw_rewards, dict) or not raw_rewards:
         raise ValueError("method.reward_fn must be a non-empty mapping")
+
+    genrl_reward_names = {
+        "video_ocr",
+        "hpsv3_general",
+        "hpsv3_percentile",
+        "videoalign_mq",
+        "videoalign_ta",
+    }
+    if backend not in {"auto", "diffusion_nft", "genrl"}:
+        raise ValueError(
+            "method.reward_backend must be one of auto, diffusion_nft, "
+            f"or genrl, got {backend!r}"
+        )
+    if backend == "genrl" or (
+        backend == "auto"
+        and any(str(name) in genrl_reward_names for name in raw_rewards)
+    ):
+        return _build_genrl_reward_fn(raw_rewards, device=device)
 
     reward_fns: list[tuple[str, float, RewardFn]] = []
     for name, weight_raw in raw_rewards.items():

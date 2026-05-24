@@ -2,13 +2,14 @@
 """DiffusionNFT RL method for FastVideo train.
 
 This ports the DiffusionNFT forward-process optimization pattern while
-keeping the standard FastVideo ``TrainingMethod`` contract. Wan is used
-as a text-to-image policy by setting ``num_frames`` and
-``num_latent_t`` to 1.
+keeping the standard FastVideo ``TrainingMethod`` contract. It supports
+normal video rollouts; setting ``num_frames=1``/``num_latent_t=1`` is
+just the cheap image/debug case.
 """
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -84,7 +85,8 @@ class DiffusionNFTMethod(TrainingMethod):
             )
 
         self._attn_kind: Literal["dense", "vsa"] = self._infer_attn_kind()
-        self._validate_image_setup()
+        self._media_type = self._parse_media_type()
+        self._validate_rollout_setup()
 
         self.student.init_preprocessors(self.training_config)
 
@@ -100,12 +102,15 @@ class DiffusionNFTMethod(TrainingMethod):
         )
         self._configure_student_negative_conditioning()
 
-        self._num_images_per_prompt = require_positive_int(
-            self.method_config,
-            "num_images_per_prompt",
-            default=2,
-            where="method.num_images_per_prompt",
+        samples_per_prompt = self.method_config.get(
+            "num_samples_per_prompt",
+            self.method_config.get("num_images_per_prompt", 2),
         )
+        self._num_samples_per_prompt = int(samples_per_prompt)
+        if self._num_samples_per_prompt <= 0:
+            raise ValueError(
+                "method.num_samples_per_prompt must be > 0"
+            )
         self._inner_epochs = require_positive_int(
             self.method_config,
             "inner_epochs",
@@ -190,6 +195,7 @@ class DiffusionNFTMethod(TrainingMethod):
         self._reward_fn = build_diffusion_nft_reward_fn(
             self.method_config.get("reward_fn"),
             device=self.student.device,
+            backend=str(self.method_config.get("reward_backend", "auto")),
         )
 
     def single_train_step(
@@ -202,15 +208,26 @@ class DiffusionNFTMethod(TrainingMethod):
         dict[str, LogScalar],
     ]:
         del iteration
+        step_t0 = time.perf_counter()
         if not self._queue:
             self._collect_round(batch)
+        collect_done = time.perf_counter()
 
         queued = self._queue.pop(0)
         training_batch = self._make_training_batch(queued)
         self.student.transformer.train()
+        self._sync_cuda()
+        loss_t0 = time.perf_counter()
         loss_map, step_metrics = self._compute_nft_loss(
             queued, training_batch
         )
+        self._sync_cuda()
+        loss_t1 = time.perf_counter()
+        step_metrics["time/nft_loss_sec"] = loss_t1 - loss_t0
+        step_metrics["time/queue_wait_or_collect_sec"] = (
+            collect_done - step_t0
+        )
+        step_metrics["queue/remaining_batches"] = float(len(self._queue))
         if self._pending_collection_metrics:
             step_metrics.update(self._pending_collection_metrics)
             self._pending_collection_metrics = {}
@@ -283,6 +300,10 @@ class DiffusionNFTMethod(TrainingMethod):
             scheduler_name=str(tc.optimizer.lr_scheduler),
         )
 
+    def _sync_cuda(self) -> None:
+        if torch.cuda.is_available():
+            torch.cuda.synchronize(self.student.device)
+
     def _configure_student_negative_conditioning(self) -> None:
         setter = getattr(
             self.student, "set_requires_negative_conditioning", None
@@ -290,7 +311,18 @@ class DiffusionNFTMethod(TrainingMethod):
         if setter is not None:
             setter(self._sample_guidance_scale != 1.0)
 
-    def _validate_image_setup(self) -> None:
+    def _parse_media_type(self) -> Literal["image", "video"]:
+        raw = str(
+            self.method_config.get("media_type", "video")
+        ).strip().lower()
+        if raw not in {"image", "video"}:
+            raise ValueError(
+                "method.media_type must be one of image or video, got "
+                f"{raw!r}"
+            )
+        return raw  # type: ignore[return-value]
+
+    def _validate_rollout_setup(self) -> None:
         data_type = str(getattr(
             self.training_config.data,
             "preprocessed_data_type",
@@ -301,15 +333,24 @@ class DiffusionNFTMethod(TrainingMethod):
                 "DiffusionNFTMethod expects "
                 "training.data.preprocessed_data_type='text_only'"
             )
-        if int(self.training_config.data.num_latent_t or 0) != 1:
+        num_latent_t = int(self.training_config.data.num_latent_t or 0)
+        num_frames = int(self.training_config.data.num_frames or 0)
+        if num_latent_t <= 0:
             raise ValueError(
-                "DiffusionNFTMethod uses Wan as an image generator; "
-                "set training.data.num_latent_t=1"
+                "DiffusionNFTMethod expects training.data.num_latent_t > 0"
             )
-        if int(self.training_config.data.num_frames or 0) != 1:
+        if num_frames <= 0:
             raise ValueError(
-                "DiffusionNFTMethod uses Wan as an image generator; "
-                "set training.data.num_frames=1"
+                "DiffusionNFTMethod expects training.data.num_frames > 0"
+            )
+        if self._media_type == "image" and (
+            num_latent_t != 1 or num_frames != 1
+        ):
+            raise ValueError(
+                "method.media_type='image' requires "
+                "training.data.num_latent_t=1 and "
+                "training.data.num_frames=1. Use media_type='video' "
+                "for multi-frame DiffusionNFT."
             )
 
     def _parse_timestep_list(
@@ -358,7 +399,7 @@ class DiffusionNFTMethod(TrainingMethod):
         self,
         raw_batch: dict[str, Any],
     ) -> tuple[dict[str, Any], list[str], list[dict[str, Any]]]:
-        repeat = self._num_images_per_prompt
+        repeat = self._num_samples_per_prompt
         result: dict[str, Any] = {}
         for key, value in raw_batch.items():
             if torch.is_tensor(value) and value.shape[:1]:
@@ -394,6 +435,11 @@ class DiffusionNFTMethod(TrainingMethod):
     @torch.no_grad()
     def _collect_round(self, raw_batch: dict[str, Any]) -> None:
         self._collection_round += 1
+        timings: dict[str, float] = {}
+        self._sync_cuda()
+        round_t0 = time.perf_counter()
+
+        t0 = time.perf_counter()
         repeated_batch, prompts, metadata = self._repeat_raw_batch(
             raw_batch
         )
@@ -402,31 +448,73 @@ class DiffusionNFTMethod(TrainingMethod):
             generator=self.cuda_generator,
             latents_source="zeros",
         )
+        self._sync_cuda()
+        timings["time/collection_prepare_batch_sec"] = (
+            time.perf_counter() - t0
+        )
 
+        t0 = time.perf_counter()
         clean_latents = self._sample_clean_latents(sample_batch)
-        images = self._decode_first_frame(clean_latents)
-        reward_details = self._reward_fn(images, prompts, metadata)
+        self._sync_cuda()
+        timings["time/collection_sample_sec"] = (
+            time.perf_counter() - t0
+        )
+
+        t0 = time.perf_counter()
+        media = self._decode_media(clean_latents)
+        self._sync_cuda()
+        timings["time/collection_decode_sec"] = (
+            time.perf_counter() - t0
+        )
+
+        t0 = time.perf_counter()
+        reward_details = self._reward_fn(media, prompts, metadata)
+        self._sync_cuda()
+        timings["time/collection_reward_sec"] = (
+            time.perf_counter() - t0
+        )
+
+        t0 = time.perf_counter()
         advantages, reward_metrics = self._compute_advantages(
             prompts, reward_details
         )
+        self._sync_cuda()
+        timings["time/collection_advantages_sec"] = (
+            time.perf_counter() - t0
+        )
 
+        t0 = time.perf_counter()
         self._queue = self._build_training_queue(
             sample_batch,
             clean_latents,
             advantages,
         )
+        self._sync_cuda()
+        timings["time/collection_queue_build_sec"] = (
+            time.perf_counter() - t0
+        )
+        timings["time/collection_total_sec"] = (
+            time.perf_counter() - round_t0
+        )
         self._pending_collection_metrics = {
             "collection/round": float(self._collection_round),
             "collection/queued_batches": float(len(self._queue)),
             **reward_metrics,
+            **timings,
         }
         logger.info(
             "DiffusionNFT collection %d queued %d batches: "
-            "reward/avg=%.6f reward/avg_std=%.6f",
+            "reward/avg=%.6f reward/avg_std=%.6f total=%.1fs "
+            "sample=%.1fs decode=%.1fs reward=%.1fs queue=%.1fs",
             self._collection_round,
             len(self._queue),
             float(reward_metrics.get("reward/avg", 0.0)),
             float(reward_metrics.get("reward/avg_std", 0.0)),
+            timings["time/collection_total_sec"],
+            timings["time/collection_sample_sec"],
+            timings["time/collection_decode_sec"],
+            timings["time/collection_reward_sec"],
+            timings["time/collection_queue_build_sec"],
         )
 
     @torch.no_grad()
@@ -517,9 +605,15 @@ class DiffusionNFTMethod(TrainingMethod):
         return uncond + guidance_scale * (cond - uncond)
 
     @torch.no_grad()
-    def _decode_first_frame(
+    def _decode_media(
         self, clean_latents: torch.Tensor
     ) -> torch.Tensor:
+        """Decode clean latents to image or video reward inputs.
+
+        Returns:
+            ``media_type=image``: ``(B, C, H, W)`` first-frame tensor.
+            ``media_type=video``: ``(B, C, F, H, W)`` video tensor.
+        """
         vae = self.student.vae
         latents = clean_latents.permute(0, 2, 1, 3, 4).to(
             self.student.device
@@ -567,7 +661,9 @@ class DiffusionNFTMethod(TrainingMethod):
         if isinstance(decoded, tuple):
             decoded = decoded[0]
         decoded = (decoded / 2 + 0.5).clamp(0, 1)
-        return decoded[:, :, 0].contiguous()
+        if self._media_type == "image":
+            return decoded[:, :, 0].contiguous()
+        return decoded.contiguous()
 
     def _compute_advantages(
         self,

@@ -1,8 +1,8 @@
-# DiffusionNFT: Wan 2.1 T2V 1.3B used as a text-to-image policy.
+# DiffusionNFT: Wan 2.1 T2V 1.3B video-policy debug config.
 #
-# Wan can generate images by treating an image as a one-frame video:
-# num_frames=1 and num_latent_t=1. The dataset is text-only parquet
-# produced by the existing FastVideo text preprocessing pipeline.
+# This uses text-only prompts and samples videos from the current policy.
+# Set num_frames/num_latent_t to 1 for the cheap image-as-one-frame-video
+# debug path; keep them multi-frame to exercise video generation.
 
 models:
   student:
@@ -12,19 +12,13 @@ models:
 
 method:
   _target_: fastvideo.train.methods.rl.diffusion_nft.DiffusionNFTMethod
-
-  # Use "video" even for num_frames=1 so the same method path covers
-  # normal multi-frame video runs; one frame is just the cheap debug case.
   media_type: video
 
-  # Collection: sample clean latents from the current policy, decode
-  # media for rewards, then train on the forward process.
   sample_timesteps: [1000, 750, 500, 250]
   sample_guidance_scale: 1.0
   num_samples_per_prompt: 2
   inner_epochs: 1
 
-  # Training: trainer max_train_steps still means optimizer updates.
   train_batch_size: 1
   train_timestep_fraction: 1.0
   nft_beta: 1.0
@@ -33,8 +27,9 @@ method:
   global_std: true
   kl_weight: 0.0
 
-  # Dependency-light default reward for smoke runs. Heavier rewards
-  # from ./DiffusionNFT/flow_grpo can be configured by name here.
+  # Built-in JPEG reward averages over video frames. Swap this for
+  # GenRL video rewards, e.g. videoalign_mq/videoalign_ta, once the
+  # reward checkpoints are available in the runtime.
   reward_backend: auto
   reward_fn:
     rewards:
@@ -55,10 +50,10 @@ training:
     train_batch_size: 1
     training_cfg_rate: 0.0
     seed: 1000
-    num_latent_t: 1
+    num_latent_t: 20
     num_height: 448
     num_width: 832
-    num_frames: 1
+    num_frames: 77
 
   optimizer:
     learning_rate: 2.0e-6
@@ -72,13 +67,13 @@ training:
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: outputs/wan2.1_diffusion_nft_text_only
+    output_dir: outputs/wan2.1_diffusion_nft_video_text_only
     training_state_checkpointing_steps: 10
     checkpoints_total_limit: 2
 
   tracker:
-    project_name: diffusion_nft_wan_text_only
-    run_name: wan2.1_diffusion_nft_text_only
+    project_name: diffusion_nft_wan_video_text_only
+    run_name: wan2.1_diffusion_nft_video_text_only
 
   model:
     enable_gradient_checkpointing_type: full

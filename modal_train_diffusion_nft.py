@@ -19,7 +19,7 @@ app = modal.App("fastvideo-diffusion-nft-wan-debug")
 
 MODEL_ID = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 CONFIG_PATH = (
-    "examples/train/configs/diffusion_nft_wan2.1_t2i_text_only.yaml"
+    "examples/train/configs/diffusion_nft_wan2.1_t2v_text_only.yaml"
 )
 DATASET_ROOT = "/data/diffusion_nft_text_only_debug"
 PROMPT_FILE = "/tmp/diffusion_nft_prompts_debug.txt"
@@ -28,6 +28,12 @@ WANDB_ENTITY = "adamlee00"
 WANDB_SECRET_NAME = "wandb-adamlee00"
 HF_SECRET_NAME = "hf-adamlee00"
 DEBUG_PROMPT_COUNT = 4
+DEFAULT_MAX_TRAIN_STEPS = 100
+DEFAULT_NUM_SAMPLES_PER_PROMPT = 2
+DEFAULT_INNER_EPOCHS = 1
+DEFAULT_TRAIN_BATCH_SIZE = 1
+DEFAULT_NUM_FRAMES = 1
+DEFAULT_NUM_LATENT_T = 1
 DEBUG_PROMPTS = [
     "a cinematic photo of a red sports car parked on a wet city street",
     "a watercolor painting of a cozy cabin under northern lights",
@@ -102,7 +108,14 @@ image = (
         modal.Secret.from_name(HF_SECRET_NAME),
     ],
 )
-def train():
+def train(
+    max_train_steps: int = DEFAULT_MAX_TRAIN_STEPS,
+    num_samples_per_prompt: int = DEFAULT_NUM_SAMPLES_PER_PROMPT,
+    inner_epochs: int = DEFAULT_INNER_EPOCHS,
+    train_batch_size: int = DEFAULT_TRAIN_BATCH_SIZE,
+    num_frames: int = DEFAULT_NUM_FRAMES,
+    num_latent_t: int = DEFAULT_NUM_LATENT_T,
+):
     from datetime import datetime, timezone
     import os
     import subprocess
@@ -112,6 +125,33 @@ def train():
     repo = Path("/root/FastVideo")
     dataset_root = Path(DATASET_ROOT)
     parquet_dir = dataset_root / "combined_parquet_dataset"
+
+    def has_parquet(path: Path) -> bool:
+        return path.exists() and any(path.rglob("*.parquet"))
+
+    def verify_text_only_dataset() -> None:
+        import pyarrow.parquet as pq
+
+        parquet_files = sorted(parquet_dir.rglob("*.parquet"))
+        if not parquet_files:
+            raise RuntimeError(
+                f"Text-only preprocessing produced no parquet under {parquet_dir}"
+            )
+        row_count = sum(
+            pq.ParquetFile(path).metadata.num_rows
+            for path in parquet_files
+        )
+        if row_count < DEBUG_PROMPT_COUNT:
+            raise RuntimeError(
+                f"Expected at least {DEBUG_PROMPT_COUNT} prompt rows in "
+                f"{parquet_dir}, found {row_count}."
+            )
+        print(
+            "Text-only dataset ready: "
+            f"{len(parquet_files)} parquet file(s), {row_count} row(s), "
+            f"root={parquet_dir}",
+            flush=True,
+        )
 
     def preflight_runtime() -> None:
         import torch
@@ -140,11 +180,12 @@ def train():
         )
 
     def ensure_text_only_dataset() -> None:
-        if parquet_dir.exists() and list(parquet_dir.glob("*.parquet")):
+        if has_parquet(parquet_dir):
             print(
                 f"Using cached text-only parquet at {parquet_dir}",
                 flush=True,
             )
+            verify_text_only_dataset()
             return
 
         write_debug_prompt_file()
@@ -189,10 +230,7 @@ def train():
             stderr=sys.stderr,
             check=True,
         )
-        if not parquet_dir.exists() or not list(parquet_dir.glob("*.parquet")):
-            raise RuntimeError(
-                f"Text-only preprocessing produced no parquet under {parquet_dir}"
-            )
+        verify_text_only_dataset()
         data_vol.commit()
 
     preflight_runtime()
@@ -203,6 +241,16 @@ def train():
         f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     )
     print(f"Output dir: {output_dir}", flush=True)
+    print(
+        "DiffusionNFT probe settings: "
+        f"max_train_steps={max_train_steps} "
+        f"num_samples_per_prompt={num_samples_per_prompt} "
+        f"inner_epochs={inner_epochs} "
+        f"train_batch_size={train_batch_size} "
+        f"num_frames={num_frames} "
+        f"num_latent_t={num_latent_t}",
+        flush=True,
+    )
 
     cmd = [
         "bash",
@@ -215,13 +263,17 @@ def train():
         "--training.tracker.run_name",
         Path(output_dir).name,
         "--training.loop.max_train_steps",
-        "2",
-        "--method.num_images_per_prompt",
-        "2",
+        str(int(max_train_steps)),
+        "--training.data.num_frames",
+        str(int(num_frames)),
+        "--training.data.num_latent_t",
+        str(int(num_latent_t)),
+        "--method.num_samples_per_prompt",
+        str(int(num_samples_per_prompt)),
         "--method.inner_epochs",
-        "1",
+        str(int(inner_epochs)),
         "--method.train_batch_size",
-        "1",
+        str(int(train_batch_size)),
     ]
 
     subprocess.run(["nvidia-smi"], check=True)
@@ -238,5 +290,19 @@ def train():
 
 
 @app.local_entrypoint()
-def main():
-    train.remote()
+def main(
+    max_train_steps: int = DEFAULT_MAX_TRAIN_STEPS,
+    num_samples_per_prompt: int = DEFAULT_NUM_SAMPLES_PER_PROMPT,
+    inner_epochs: int = DEFAULT_INNER_EPOCHS,
+    train_batch_size: int = DEFAULT_TRAIN_BATCH_SIZE,
+    num_frames: int = DEFAULT_NUM_FRAMES,
+    num_latent_t: int = DEFAULT_NUM_LATENT_T,
+):
+    train.remote(
+        max_train_steps=max_train_steps,
+        num_samples_per_prompt=num_samples_per_prompt,
+        inner_epochs=inner_epochs,
+        train_batch_size=train_batch_size,
+        num_frames=num_frames,
+        num_latent_t=num_latent_t,
+    )
