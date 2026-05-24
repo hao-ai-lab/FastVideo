@@ -157,7 +157,7 @@ class FVDMetric(BaseMetric):
     requires_reference = False  # uses cached real features, not per-sample ref
     higher_is_better = False  # lower FVD = better
     needs_gpu = True
-    dependencies = ["huggingface_hub", "scipy"]
+    dependencies = ["huggingface_hub", "scipy", "transformers"]
 
     def __init__(
         self,
@@ -234,6 +234,18 @@ class FVDMetric(BaseMetric):
                     ref = ref.unsqueeze(0)
                 self._real_features = _extract_chunked(self._extractor, ref, self._chunk)
                 self._save_cache(self._real_features)
+        elif sample.get("reference") is not None:
+            # Reference features already exist (from cache or an earlier
+            # accumulate call). Silently dropping ``sample["reference"]``
+            # would be a foot-gun for callers expecting per-sample-reference
+            # semantics — warn so the mismatch surfaces.
+            warnings.warn(
+                "common.fvd: sample['reference'] ignored because reference features "
+                "are already loaded (from cache or a prior accumulate call). Pass the "
+                "entire reference set on a single accumulate() call, or pre-build the "
+                f"cache at {self.cache_path}.",
+                stacklevel=2,
+            )
 
     def finalize(self) -> MetricResult:
         """Compute FVD from all accumulated generated features vs. real features."""

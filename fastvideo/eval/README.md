@@ -273,7 +273,7 @@ ev.evaluate(samples=[
 # corpus result is in the returned EvalResults.corpus["common.fvd"]
 ```
 
-Reference features are cached to ``${FASTVIDEO_EVAL_CACHE}/fvd/real_features.pt``
+Reference features are cached to ``${FASTVIDEO_EVAL_CACHE}/fvd/real_features_{extractor}.pt``
 the first time ``sample["reference"]`` is passed; subsequent runs load
 the cache automatically. Override with ``$FASTVIDEO_FVD_REF_FEATURES``
 or the ``cache_path=`` constructor kwarg.
