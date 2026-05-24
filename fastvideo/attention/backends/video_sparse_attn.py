@@ -7,7 +7,7 @@ import torch
 
 try:
     from fastvideo_kernel import video_sparse_attn
-except ImportError:
+except (ImportError, RuntimeError):
     video_sparse_attn = None
 try:
     from fastvideo_kernel import video_sparse_attn_bshd

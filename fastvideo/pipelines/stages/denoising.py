@@ -31,14 +31,16 @@ try:
     from fastvideo.attention.backends.vmoba import VMOBAAttentionBackend
     from fastvideo.utils import is_vmoba_available
     vmoba_attn_available = is_vmoba_available()
-except ImportError:
+except (ImportError, RuntimeError):
     vmoba_attn_available = False
+    VMOBAAttentionBackend = None  # type: ignore
 
 try:
     from fastvideo.attention.backends.video_sparse_attn import (VideoSparseAttentionBackend)
     vsa_available = True
-except ImportError:
+except (ImportError, RuntimeError):
     vsa_available = False
+    VideoSparseAttentionBackend = None  # type: ignore
 
 logger = init_logger(__name__)
 
@@ -103,7 +105,11 @@ class DenoisingStage(PipelineStage):
         # TODO(will): make the precision configurable for inference
         # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        # Flux2 matches Diffusers only when the bf16 transformer runs without a
+        # surrounding autocast context; autocast changes long-sequence attention
+        # numerics enough to break latent parity over four Euler steps.
+        _is_flux = (getattr(fastvideo_args.pipeline_config.dit_config, "prefix", "") == "Flux")
+        autocast_enabled = ((target_dtype != torch.float32) and not fastvideo_args.disable_autocast and not _is_flux)
 
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
@@ -218,8 +224,6 @@ class DenoisingStage(PipelineStage):
         use_meanflow = getattr(self.transformer.config, "use_meanflow", False)
         # Flux2's transformer multiplies guidance by 1000 internally, so we
         # skip the external *1000 pre-scaling for Flux models.
-        _is_flux = (getattr(fastvideo_args.pipeline_config.dit_config,
-                            "prefix", "") == "Flux")
         embedded_cfg_scale = fastvideo_args.pipeline_config.embedded_cfg_scale
         if embedded_cfg_scale is not None:
             guidance_expand = (torch.tensor(
@@ -328,12 +332,19 @@ class DenoisingStage(PipelineStage):
                     t_expand = timestep.repeat(latent_model_input.shape[0], 1)
                 else:
                     t_expand = t.repeat(latent_model_input.shape[0])
-                t_expand = t_expand.to(get_local_torch_device())
-
                 # Flux2 transformer multiplies timestep by 1000 internally, so
                 # the pipeline must pass timestep/1000 (matching Diffusers).
+                # Diffusers casts to the latent dtype before the division; doing
+                # the division in fp32 first changes BF16 rounding for the final
+                # Klein timestep and breaks latent parity.
                 if _is_flux:
+                    t_expand = t_expand.to(
+                        device=get_local_torch_device(),
+                        dtype=latent_model_input.dtype,
+                    )
                     t_expand = t_expand / 1000.0
+                else:
+                    t_expand = t_expand.to(get_local_torch_device())
 
                 if use_meanflow:
                     if i == len(timesteps) - 1:
@@ -476,12 +487,14 @@ class DenoisingStage(PipelineStage):
                                 noise_pred_text,
                                 guidance_rescale=batch.guidance_rescale,
                             )
-                    # Compute the previous noisy sample
-                    latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
-                    if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
-                        latents = latents.squeeze(0)
-                        latents = (1. - mask2[0]) * z + mask2[0] * latents
-                        # latents = latents.unsqueeze(0)
+                # Keep the scheduler math out of autocast. Diffusers runs the
+                # Euler update in fp32 before casting back to model dtype; doing
+                # this under autocast introduces BF16 drift over several steps.
+                latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
+                if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
+                    latents = latents.squeeze(0)
+                    latents = (1. - mask2[0]) * z + mask2[0] * latents
+                    # latents = latents.unsqueeze(0)
 
                 # save trajectory latents if needed
                 if batch.return_trajectory_latents:

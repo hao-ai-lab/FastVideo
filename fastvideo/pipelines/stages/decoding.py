@@ -98,13 +98,9 @@ class DecodingStage(PipelineStage):
     def _unpatchify_latents(latents: torch.Tensor) -> torch.Tensor:
         """Inverse of 2x2 patch packing: ``(B, C*4, H', W') -> (B, C, 2*H', 2*W')``."""
         batch_size, num_channels, height, width = latents.shape
-        latents = latents.reshape(
-            batch_size, num_channels // (2 * 2), 2, 2, height, width
-        )
+        latents = latents.reshape(batch_size, num_channels // (2 * 2), 2, 2, height, width)
         latents = latents.permute(0, 1, 4, 2, 5, 3)
-        latents = latents.reshape(
-            batch_size, num_channels // (2 * 2), height * 2, width * 2
-        )
+        latents = latents.reshape(batch_size, num_channels // (2 * 2), height * 2, width * 2)
         return latents
 
     def _flux2_bn_denorm_and_unpatchify(self, latents: torch.Tensor) -> torch.Tensor:
@@ -112,17 +108,11 @@ class DecodingStage(PipelineStage):
 
         Handles any channel count (e.g. 64->16, 128->32) via 2x2 spatial unpack.
         """
-        running_mean = self.vae.bn.running_mean.view(1, -1, 1, 1).to(
-            latents.device, latents.dtype
-        )
-        running_var = self.vae.bn.running_var.view(1, -1, 1, 1).to(
-            latents.device, latents.dtype
-        )
+        running_mean = self.vae.bn.running_mean.view(1, -1, 1, 1).to(latents.device, latents.dtype)
+        running_var = self.vae.bn.running_var.view(1, -1, 1, 1).to(latents.device, latents.dtype)
         cfg = getattr(self.vae, "config", None)
         arch = getattr(cfg, "arch_config", None) if cfg else None
-        eps = getattr(arch, "batch_norm_eps", None) or getattr(
-            cfg, "batch_norm_eps", 1e-5
-        )
+        eps = getattr(arch, "batch_norm_eps", None) or getattr(cfg, "batch_norm_eps", 1e-5)
         bn_std = torch.sqrt(torch.clamp(running_var + eps, min=1e-6))
         latents = latents * bn_std + running_mean
         return self._unpatchify_latents(latents)
@@ -173,6 +163,10 @@ class DecodingStage(PipelineStage):
             if latents.ndim == 4 and self._is_flux2_packed(latents):
                 latents = self._flux2_bn_denorm_and_unpatchify(latents)
             image = self.vae.decode(latents)
+            if hasattr(image, "sample"):
+                image = image.sample
+            elif isinstance(image, tuple | list):
+                image = image[0]
             if squeezed_for_vae:
                 image = image.unsqueeze(2)
 
@@ -265,7 +259,13 @@ class DecodingStage(PipelineStage):
                 pipeline.add_module("vae", self.vae)
             fastvideo_args.model_loaded["vae"] = True
 
-        frames = batch.latents if fastvideo_args.output_type == "latent" else self.decode(batch.latents, fastvideo_args)
+        if fastvideo_args.output_type == "latent":
+            frames = batch.latents
+            if frames.ndim == 5 and frames.shape[2] == 1 and self._is_flux2_packed(frames):
+                frames = self._flux2_bn_denorm_and_unpatchify(frames.squeeze(2))
+                frames = frames.unsqueeze(2)
+        else:
+            frames = self.decode(batch.latents, fastvideo_args)
 
         # decode trajectory latents if needed
         if batch.return_trajectory_decoded:

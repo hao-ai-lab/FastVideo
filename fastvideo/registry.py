@@ -338,11 +338,8 @@ def _register_configs() -> None:
             "black-forest-labs/FLUX.2-klein-9B",
         ],
         model_detectors=[
-            lambda path: (
-                "flux.2-klein" in path.lower()
-                or "flux2-klein" in path.lower()
-                or "flux2klein" in path.lower()
-            ),
+            lambda path:
+            ("flux.2-klein" in path.lower() or "flux2-klein" in path.lower() or "flux2klein" in path.lower()),
         ],
         model_family="flux2",
         default_preset="flux2_klein_4b",
@@ -354,12 +351,8 @@ def _register_configs() -> None:
         workload_types=(WorkloadType.T2I, ),
         hf_model_paths=[],
         model_detectors=[
-            lambda path: (
-                "flux2" in path.lower()
-                or "flux_2" in path.lower()
-                or "flux-2" in path.lower()
-            )
-            and "klein" not in path.lower(),
+            lambda path: ("flux2" in path.lower() or "flux_2" in path.lower() or "flux-2" in path.lower()) and "klein"
+            not in path.lower(),
         ],
         model_family="flux2",
     )
@@ -880,15 +873,19 @@ def get_model_info(
     if workload_type is None:
         workload_type = WorkloadType.T2V
 
-    if os.path.exists(model_path):
-        config = verify_model_config_and_directory(model_path)
-    else:
-        config = maybe_download_model_index(model_path)
+    config_info = _get_config_info(model_path, raise_on_missing=True)
+    assert config_info is not None, "config_info must be resolved"
 
-    pipeline_name = config.get("_class_name")
     if override_pipeline_cls_name:
-        logger.info("Overriding pipeline class name from %s to %s", pipeline_name, override_pipeline_cls_name)
         pipeline_name = override_pipeline_cls_name
+        logger.info("Using override pipeline class name %s", pipeline_name)
+    else:
+        if os.path.exists(model_path):
+            config = verify_model_config_and_directory(model_path)
+        else:
+            config = maybe_download_model_index(model_path)
+
+        pipeline_name = config.get("_class_name")
 
     if pipeline_name is None:
         raise ValueError("Model config does not contain a _class_name attribute. "
@@ -896,9 +893,6 @@ def get_model_info(
 
     pipeline_registry = get_pipeline_registry(pipeline_type)
     pipeline_cls = pipeline_registry.resolve_pipeline_cls(pipeline_name, pipeline_type, workload_type)
-
-    config_info = _get_config_info(model_path, raise_on_missing=True)
-    assert config_info is not None, "config_info must be resolved"
 
     sampling_param_cls = config_info.sampling_param_cls or SamplingParam
 
