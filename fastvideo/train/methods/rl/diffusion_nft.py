@@ -117,6 +117,17 @@ class DiffusionNFTMethod(TrainingMethod):
             default=self._num_samples_per_prompt,
             where="method.collection_batch_size",
         )
+        if self._collection_batch_size > self._num_samples_per_prompt:
+            raise ValueError(
+                "method.collection_batch_size must be <= "
+                "method.num_samples_per_prompt"
+            )
+        if self._num_samples_per_prompt % self._collection_batch_size != 0:
+            raise ValueError(
+                "method.num_samples_per_prompt must be divisible by "
+                "method.collection_batch_size so collected chunks have "
+                "a stable latent shape"
+            )
         self._inner_epochs = require_positive_int(
             self.method_config,
             "inner_epochs",
@@ -181,6 +192,11 @@ class DiffusionNFTMethod(TrainingMethod):
         )
         if self._train_batch_size <= 0:
             raise ValueError("method.train_batch_size must be > 0")
+        if self._train_batch_size > self._num_samples_per_prompt:
+            raise ValueError(
+                "method.train_batch_size must be <= "
+                "method.num_samples_per_prompt"
+            )
 
         self._queue: list[_NFTQueuedBatch] = []
         self._collection_round = 0

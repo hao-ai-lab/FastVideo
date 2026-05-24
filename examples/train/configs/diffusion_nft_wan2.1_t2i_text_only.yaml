@@ -22,11 +22,11 @@ method:
   sample_timesteps: [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100]
   sample_guidance_scale: 1.0
   num_samples_per_prompt: 24
-  collection_batch_size: 9
+  collection_batch_size: 6
   inner_epochs: 1
 
   # Training: trainer max_train_steps still means optimizer updates.
-  train_batch_size: 9
+  train_batch_size: 6
   train_timestep_fraction: 0.99
   nft_beta: 1.0
   adv_clip_max: 5.0
@@ -46,7 +46,7 @@ training:
     sp_size: 1
     tp_size: 1
     hsdp_replicate_dim: 1
-    hsdp_shard_dim: 4
+    hsdp_shard_dim: 1
 
   data:
     data_path: data/train_text_only_diffusion_nft_preprocessed

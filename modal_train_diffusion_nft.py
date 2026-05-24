@@ -179,6 +179,21 @@ def train(
             "FastVideo text preprocessing currently supports "
             "--preprocess-num-gpus 1 only."
         )
+    if DEFAULT_HSDP_REPLICATE_DIM * DEFAULT_HSDP_SHARD_DIM != DEFAULT_NUM_GPUS:
+        raise ValueError(
+            "Invalid HSDP mesh: replicate_dim * shard_dim must equal "
+            f"num_gpus ({DEFAULT_HSDP_REPLICATE_DIM} * "
+            f"{DEFAULT_HSDP_SHARD_DIM} != {DEFAULT_NUM_GPUS})."
+        )
+    if num_samples_per_prompt % collection_batch_size != 0:
+        raise ValueError(
+            "--num-samples-per-prompt must be divisible by "
+            "--collection-batch-size"
+        )
+    if train_batch_size > num_samples_per_prompt:
+        raise ValueError(
+            "--train-batch-size must be <= --num-samples-per-prompt"
+        )
 
     def resolve_max_prompts(total_prompts: int) -> int:
         if max_prompts_mode in {"", "0", "all", "full", "none"}:
@@ -313,6 +328,13 @@ def train(
             prompts = prompts[:prompt_limit]
         if not prompts:
             raise RuntimeError(f"No prompts found in {source}")
+        if len(prompts) < DEFAULT_NUM_GPUS:
+            raise RuntimeError(
+                f"Need at least {DEFAULT_NUM_GPUS} prompts for "
+                f"{DEFAULT_NUM_GPUS} data-parallel ranks with "
+                "drop_last=True; resolved only "
+                f"{len(prompts)} prompt(s). Increase --max-prompts."
+            )
         prompt_file.parent.mkdir(parents=True, exist_ok=True)
         prompt_file.write_text(
             "\n".join(prompts) + "\n", encoding="utf-8"
@@ -324,7 +346,7 @@ def train(
         )
         return len(prompts)
 
-    def prepare_run_config() -> Path:
+    def prepare_run_config(output_dir: str) -> Path:
         import yaml
 
         if reward == "multi_reward":
@@ -340,11 +362,46 @@ def train(
             config_path.read_text(encoding="utf-8")
         )
         method_config = raw_config.setdefault("method", {})
+        training_config = raw_config.setdefault("training", {})
+        distributed_config = training_config.setdefault("distributed", {})
+        data_config = training_config.setdefault("data", {})
+        loop_config = training_config.setdefault("loop", {})
+        checkpoint_config = training_config.setdefault("checkpoint", {})
+        tracker_config = training_config.setdefault("tracker", {})
+
         method_config["reward_backend"] = "diffusion_nft"
         method_config["reward_fn"] = {"rewards": reward_map}
+        method_config["num_samples_per_prompt"] = int(
+            num_samples_per_prompt
+        )
+        method_config["collection_batch_size"] = int(
+            collection_batch_size
+        )
+        method_config["inner_epochs"] = int(inner_epochs)
+        method_config["train_batch_size"] = int(train_batch_size)
         if reward == "multi_reward":
             method_config["nft_beta"] = 0.1
             method_config["sample_timesteps"] = list(range(1000, 0, -40))
+
+        distributed_config["num_gpus"] = DEFAULT_NUM_GPUS
+        distributed_config["tp_size"] = 1
+        distributed_config["sp_size"] = 1
+        distributed_config["hsdp_replicate_dim"] = (
+            DEFAULT_HSDP_REPLICATE_DIM
+        )
+        distributed_config["hsdp_shard_dim"] = DEFAULT_HSDP_SHARD_DIM
+
+        data_config["data_path"] = str(parquet_dir)
+        data_config["preprocessed_data_type"] = "text_only"
+        data_config["num_frames"] = int(num_frames)
+        data_config["num_latent_t"] = int(num_latent_t)
+        loop_config["max_train_steps"] = int(max_train_steps)
+        loop_config["gradient_accumulation_steps"] = int(
+            gradient_accumulation_steps
+        )
+        checkpoint_config["output_dir"] = output_dir
+        tracker_config["run_name"] = Path(output_dir).name
+
         run_config_path.write_text(
             yaml.safe_dump(raw_config, sort_keys=False),
             encoding="utf-8",
@@ -409,12 +466,12 @@ def train(
     ensure_diffusion_nft_repo()
     expected_prompt_rows = prepare_prompt_file()
     ensure_text_only_dataset(expected_prompt_rows)
-    run_config_path = prepare_run_config()
 
     output_dir = (
         f"{OUTPUT_DIR_BASE}_"
         f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     )
+    run_config_path = prepare_run_config(output_dir)
     print(f"Output dir: {output_dir}", flush=True)
     print(
         "DiffusionNFT probe settings: "
